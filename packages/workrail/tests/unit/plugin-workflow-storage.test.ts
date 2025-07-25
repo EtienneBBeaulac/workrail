@@ -293,7 +293,7 @@ describe('PluginWorkflowStorage', () => {
       };
 
       mockFs.stat.mockResolvedValue({ size: 1000 } as any);
-      mockFs.readFile.mockImplementation((filePath: fs.PathLike | fs.FileHandle) => {
+      mockFs.readFile.mockImplementation((filePath: any) => {
         const pathStr = filePath.toString();
         if (pathStr.includes('workrail-workflows-coding') && pathStr.endsWith('package.json')) {
           return Promise.resolve(JSON.stringify(mockPackageJson));

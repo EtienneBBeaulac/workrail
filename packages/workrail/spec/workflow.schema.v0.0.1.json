@@ -1,0 +1,393 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://workflowlookup.io/schemas/workflow/v0.0.1",
+  "title": "Workflow Schema",
+  "description": "Schema for defining workflows in the Workflow Orchestration System",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique identifier for the workflow",
+      "pattern": "^[a-z0-9-]+$",
+      "minLength": 3,
+      "maxLength": 64
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-friendly title of the workflow",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "description": {
+      "type": "string",
+      "description": "What this workflow accomplishes",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "version": {
+      "type": "string",
+      "description": "Semantic version of the workflow (e.g., 0.0.1, 0.1.0)",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$",
+      "examples": ["0.0.1", "0.1.0", "0.0.1-alpha.1"]
+    },
+    "preconditions": {
+      "type": "array",
+      "description": "Prerequisites that must be met before starting the workflow",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      },
+      "uniqueItems": true
+    },
+    "clarificationPrompts": {
+      "type": "array",
+      "description": "Questions to ask upfront to resolve ambiguities",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      },
+      "uniqueItems": true
+    },
+    "steps": {
+      "type": "array",
+      "description": "The sequence of steps in the workflow",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique identifier for the step",
+            "pattern": "^[a-z0-9-]+$",
+            "minLength": 3,
+            "maxLength": 64
+          },
+          "title": {
+            "type": "string",
+            "description": "Human-friendly title of the step",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "prompt": {
+            "type": "string",
+            "description": "The detailed instructions or prompt for this step.",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "agentRole": {
+            "type": "string",
+            "description": "Optional behavioral instructions for AI agents defining how they should approach and execute this step. This content is not shown to users.",
+            "minLength": 10,
+            "maxLength": 1024
+          },
+          "guidance": {
+            "type": "array",
+            "description": "Optional array of strings providing tactical advice for this step.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "askForFiles": {
+            "type": "boolean",
+            "description": "Whether the agent should ask for relevant files before executing the step.",
+            "default": false
+          },
+          "hasValidation": {
+            "type": "boolean",
+            "description": "Whether this step has validation logic that should be called. Set to true for steps with validationCriteria to optimize execution performance.",
+            "default": false
+          },
+          "requireConfirmation": {
+            "oneOf": [
+              {
+                "type": "boolean",
+                "description": "Whether to require user confirmation before proceeding"
+              },
+              {
+                "type": "object",
+                "description": "Conditional logic that determines if confirmation is required based on context variables. Uses same expression format as runCondition.",
+                "properties": {
+                  "var": {
+                    "type": "string",
+                    "description": "Variable name from execution context"
+                  },
+                  "equals": {
+                    "description": "Check if variable equals this value"
+                  },
+                  "not_equals": {
+                    "description": "Check if variable does not equal this value"
+                  },
+                  "gt": {
+                    "type": "number",
+                    "description": "Check if variable is greater than this number"
+                  },
+                  "gte": {
+                    "type": "number",
+                    "description": "Check if variable is greater than or equal to this number"
+                  },
+                  "lt": {
+                    "type": "number",
+                    "description": "Check if variable is less than this number"
+                  },
+                  "lte": {
+                    "type": "number",
+                    "description": "Check if variable is less than or equal to this number"
+                  },
+                  "and": {
+                    "type": "array",
+                    "description": "Logical AND of multiple conditions",
+                    "items": {
+                      "type": "object"
+                    }
+                  },
+                  "or": {
+                    "type": "array",
+                    "description": "Logical OR of multiple conditions",
+                    "items": {
+                      "type": "object"
+                    }
+                  },
+                  "not": {
+                    "type": "object",
+                    "description": "Logical NOT of a condition"
+                  }
+                },
+                "additionalProperties": false
+              }
+            ],
+            "default": false
+          },
+          "runCondition": {
+            "type": "object",
+            "description": "Optional condition that determines if this step should be executed. Uses simple expression format with operators like 'equals', 'and', 'or', etc.",
+            "properties": {
+              "var": {
+                "type": "string",
+                "description": "Variable name from execution context"
+              },
+              "equals": {
+                "description": "Check if variable equals this value"
+              },
+              "not_equals": {
+                "description": "Check if variable does not equal this value"
+              },
+              "gt": {
+                "type": "number",
+                "description": "Check if variable is greater than this number"
+              },
+              "gte": {
+                "type": "number",
+                "description": "Check if variable is greater than or equal to this number"
+              },
+              "lt": {
+                "type": "number",
+                "description": "Check if variable is less than this number"
+              },
+              "lte": {
+                "type": "number",
+                "description": "Check if variable is less than or equal to this number"
+              },
+              "and": {
+                "type": "array",
+                "description": "Logical AND of multiple conditions",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "or": {
+                "type": "array",
+                "description": "Logical OR of multiple conditions",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "not": {
+                "type": "object",
+                "description": "Logical NOT of a condition"
+              }
+            },
+            "additionalProperties": false
+          },
+          "validationCriteria": {
+            "description": "Optional validation rules to check step output quality. Can be an array of rules (all must pass) or a composition object with logical operators.",
+            "oneOf": [
+              {
+                "type": "array",
+                "description": "Array of validation rules (all must pass)",
+                "items": {
+                  "$ref": "#/$defs/validationRule"
+                }
+              },
+              {
+                "$ref": "#/$defs/validationComposition"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 1
+    },
+    "metaGuidance": {
+      "type": "array",
+      "description": "Persistent best practices that apply throughout the workflow",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      },
+      "uniqueItems": true
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "description",
+    "version",
+    "steps"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "validationRule": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["contains", "regex", "length", "schema"],
+          "description": "Type of validation rule"
+        },
+        "value": {
+          "type": "string",
+          "description": "Expected value for 'contains' type"
+        },
+        "pattern": {
+          "type": "string",
+          "description": "Regex pattern for 'regex' type"
+        },
+        "flags": {
+          "type": "string",
+          "description": "Regex flags for 'regex' type"
+        },
+        "min": {
+          "type": "number",
+          "description": "Minimum length for 'length' type"
+        },
+        "max": {
+          "type": "number",
+          "description": "Maximum length for 'length' type"
+        },
+        "message": {
+          "type": "string",
+          "description": "Error message when validation fails"
+        },
+        "schema": {
+          "type": "object",
+          "description": "JSON Schema object for 'schema' type validation",
+          "additionalProperties": true
+        },
+        "condition": {
+          "type": "object",
+          "description": "Optional condition that determines if this validation rule should be applied. Uses same format as step runCondition.",
+          "properties": {
+            "var": {
+              "type": "string",
+              "description": "Variable name from execution context"
+            },
+            "equals": {
+              "description": "Check if variable equals this value"
+            },
+            "not_equals": {
+              "description": "Check if variable does not equal this value"
+            },
+            "gt": {
+              "type": "number",
+              "description": "Check if variable is greater than this number"
+            },
+            "gte": {
+              "type": "number",
+              "description": "Check if variable is greater than or equal to this number"
+            },
+            "lt": {
+              "type": "number",
+              "description": "Check if variable is less than this number"
+            },
+            "lte": {
+              "type": "number",
+              "description": "Check if variable is less than or equal to this number"
+            },
+            "and": {
+              "type": "array",
+              "description": "Logical AND of multiple conditions",
+              "items": {
+                "type": "object"
+              }
+            },
+            "or": {
+              "type": "array",
+              "description": "Logical OR of multiple conditions",
+              "items": {
+                "type": "object"
+              }
+            },
+            "not": {
+              "type": "object",
+              "description": "Logical NOT of a condition"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": ["type", "message"],
+      "additionalProperties": false
+    },
+    "validationComposition": {
+      "type": "object",
+      "description": "Logical composition of validation rules using boolean operators",
+      "properties": {
+        "and": {
+          "type": "array",
+          "description": "Logical AND - all criteria must pass",
+          "items": {
+            "$ref": "#/$defs/validationCriteria"
+          },
+          "minItems": 1
+        },
+        "or": {
+          "type": "array", 
+          "description": "Logical OR - at least one criteria must pass",
+          "items": {
+            "$ref": "#/$defs/validationCriteria"
+          },
+          "minItems": 1
+        },
+        "not": {
+          "$ref": "#/$defs/validationCriteria",
+          "description": "Logical NOT - criteria must not pass"
+        }
+      },
+      "additionalProperties": false,
+      "oneOf": [
+        {"required": ["and"]},
+        {"required": ["or"]},
+        {"required": ["not"]}
+      ]
+    },
+    "validationCriteria": {
+      "description": "A validation rule or composition of rules",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/validationRule"
+        },
+        {
+          "$ref": "#/$defs/validationComposition"
+        }
+      ]
+    }
+  }
+}

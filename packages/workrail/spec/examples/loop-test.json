@@ -1,0 +1,31 @@
+{
+  "id": "loop-test-workflow",
+  "name": "Loop Test Workflow",
+  "description": "Test workflow to validate loop schema",
+  "version": "0.1.0",
+  "steps": [
+    {
+      "id": "init-step",
+      "title": "Initialize",
+      "prompt": "Set up initial variables"
+    },
+    {
+      "id": "process-items-loop",
+      "type": "loop",
+      "title": "Process Items",
+      "loop": {
+        "type": "forEach",
+        "items": "itemsToProcess",
+        "maxIterations": 10,
+        "itemVar": "currentItem",
+        "indexVar": "currentIndex"
+      },
+      "body": "process-single-item"
+    },
+    {
+      "id": "process-single-item",
+      "title": "Process Item",
+      "prompt": "Process the current item: {{currentItem}}"
+    }
+  ]
+} 

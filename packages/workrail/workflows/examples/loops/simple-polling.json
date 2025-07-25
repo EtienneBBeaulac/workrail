@@ -1,0 +1,47 @@
+{
+  "id": "simple-polling-example",
+  "name": "Simple API Polling",
+  "description": "A simple example of polling an API using a while loop",
+  "version": "0.1.0",
+  "steps": [
+    {
+      "id": "setup",
+      "title": "Setup Polling",
+      "prompt": "Initialize polling variables: status='pending', attempts=0",
+      "agentRole": "You are helping to monitor an asynchronous operation."
+    },
+    {
+      "id": "polling-loop",
+      "type": "loop",
+      "title": "Poll Until Complete",
+      "loop": {
+        "type": "while",
+        "condition": {
+          "and": [
+            { "var": "status", "not_equals": "completed" },
+            { "var": "attempts", "lte": 10 }
+          ]
+        },
+        "maxIterations": 10,
+        "iterationVar": "currentAttempt"
+      },
+      "body": "check-status"
+    },
+    {
+      "id": "check-status",
+      "title": "Check Status",
+      "prompt": "Check the API status. Update 'status' variable and increment 'attempts'.",
+      "guidance": [
+        "Make API call to check status",
+        "Update status variable with response",
+        "Increment attempts counter"
+      ]
+    },
+    {
+      "id": "handle-result",
+      "title": "Handle Result",
+      "prompt": "Process the final result based on the status",
+      "runCondition": { "var": "status", "equals": "completed" }
+    }
+  ]
+} 

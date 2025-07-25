@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://workflowlookup.io/schemas/workflow/v0.0.1",
+  "$id": "https://workflowlookup.io/schemas/workflow/v0.1.0",
   "title": "Workflow Schema",
   "description": "Schema for defining workflows in the Workflow Orchestration System",
   "type": "object",
@@ -54,183 +54,14 @@
       "type": "array",
       "description": "The sequence of steps in the workflow",
       "items": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "description": "Unique identifier for the step",
-            "pattern": "^[a-z0-9-]+$",
-            "minLength": 3,
-            "maxLength": 64
+        "oneOf": [
+          {
+            "$ref": "#/$defs/standardStep"
           },
-          "title": {
-            "type": "string",
-            "description": "Human-friendly title of the step",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "prompt": {
-            "type": "string",
-            "description": "The detailed instructions or prompt for this step.",
-            "minLength": 1,
-            "maxLength": 2048
-          },
-          "agentRole": {
-            "type": "string",
-            "description": "Optional behavioral instructions for AI agents defining how they should approach and execute this step. This content is not shown to users.",
-            "minLength": 10,
-            "maxLength": 1024
-          },
-          "guidance": {
-            "type": "array",
-            "description": "Optional array of strings providing tactical advice for this step.",
-            "items": {
-              "type": "string"
-            }
-          },
-          "askForFiles": {
-            "type": "boolean",
-            "description": "Whether the agent should ask for relevant files before executing the step.",
-            "default": false
-          },
-          "hasValidation": {
-            "type": "boolean",
-            "description": "Whether this step has validation logic that should be called. Set to true for steps with validationCriteria to optimize execution performance.",
-            "default": false
-          },
-          "requireConfirmation": {
-            "oneOf": [
-              {
-                "type": "boolean",
-                "description": "Whether to require user confirmation before proceeding"
-              },
-              {
-                "type": "object",
-                "description": "Conditional logic that determines if confirmation is required based on context variables. Uses same expression format as runCondition.",
-                "properties": {
-                  "var": {
-                    "type": "string",
-                    "description": "Variable name from execution context"
-                  },
-                  "equals": {
-                    "description": "Check if variable equals this value"
-                  },
-                  "not_equals": {
-                    "description": "Check if variable does not equal this value"
-                  },
-                  "gt": {
-                    "type": "number",
-                    "description": "Check if variable is greater than this number"
-                  },
-                  "gte": {
-                    "type": "number",
-                    "description": "Check if variable is greater than or equal to this number"
-                  },
-                  "lt": {
-                    "type": "number",
-                    "description": "Check if variable is less than this number"
-                  },
-                  "lte": {
-                    "type": "number",
-                    "description": "Check if variable is less than or equal to this number"
-                  },
-                  "and": {
-                    "type": "array",
-                    "description": "Logical AND of multiple conditions",
-                    "items": {
-                      "type": "object"
-                    }
-                  },
-                  "or": {
-                    "type": "array",
-                    "description": "Logical OR of multiple conditions",
-                    "items": {
-                      "type": "object"
-                    }
-                  },
-                  "not": {
-                    "type": "object",
-                    "description": "Logical NOT of a condition"
-                  }
-                },
-                "additionalProperties": false
-              }
-            ],
-            "default": false
-          },
-          "runCondition": {
-            "type": "object",
-            "description": "Optional condition that determines if this step should be executed. Uses simple expression format with operators like 'equals', 'and', 'or', etc.",
-            "properties": {
-              "var": {
-                "type": "string",
-                "description": "Variable name from execution context"
-              },
-              "equals": {
-                "description": "Check if variable equals this value"
-              },
-              "not_equals": {
-                "description": "Check if variable does not equal this value"
-              },
-              "gt": {
-                "type": "number",
-                "description": "Check if variable is greater than this number"
-              },
-              "gte": {
-                "type": "number",
-                "description": "Check if variable is greater than or equal to this number"
-              },
-              "lt": {
-                "type": "number",
-                "description": "Check if variable is less than this number"
-              },
-              "lte": {
-                "type": "number",
-                "description": "Check if variable is less than or equal to this number"
-              },
-              "and": {
-                "type": "array",
-                "description": "Logical AND of multiple conditions",
-                "items": {
-                  "type": "object"
-                }
-              },
-              "or": {
-                "type": "array",
-                "description": "Logical OR of multiple conditions",
-                "items": {
-                  "type": "object"
-                }
-              },
-              "not": {
-                "type": "object",
-                "description": "Logical NOT of a condition"
-              }
-            },
-            "additionalProperties": false
-          },
-          "validationCriteria": {
-            "description": "Optional validation rules to check step output quality. Can be an array of rules (all must pass) or a composition object with logical operators.",
-            "oneOf": [
-              {
-                "type": "array",
-                "description": "Array of validation rules (all must pass)",
-                "items": {
-                  "$ref": "#/$defs/validationRule"
-                }
-              },
-              {
-                "$ref": "#/$defs/validationComposition"
-              }
-            ]
+          {
+            "$ref": "#/$defs/loopStep"
           }
-        },
-        "required": [
-          "id",
-          "title",
-          "prompt"
-        ],
-        "additionalProperties": false
+        ]
       },
       "minItems": 1
     },
@@ -254,6 +85,281 @@
   ],
   "additionalProperties": false,
   "$defs": {
+    "stepId": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+$",
+      "minLength": 3,
+      "maxLength": 64
+    },
+    "standardStep": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/stepId",
+          "description": "Unique identifier for the step"
+        },
+        "title": {
+          "type": "string",
+          "description": "Human-friendly title of the step",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "prompt": {
+          "type": "string",
+          "description": "The detailed instructions or prompt for this step.",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "agentRole": {
+          "type": "string",
+          "description": "Optional behavioral instructions for AI agents defining how they should approach and execute this step. This content is not shown to users.",
+          "minLength": 10,
+          "maxLength": 1024
+        },
+        "guidance": {
+          "type": "array",
+          "description": "Optional array of strings providing tactical advice for this step.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "askForFiles": {
+          "type": "boolean",
+          "description": "Whether the agent should ask for relevant files before executing the step.",
+          "default": false
+        },
+        "hasValidation": {
+          "type": "boolean",
+          "description": "Whether this step has validation logic that should be called. Set to true for steps with validationCriteria to optimize execution performance.",
+          "default": false
+        },
+        "requireConfirmation": {
+          "$ref": "#/$defs/confirmationRule"
+        },
+        "runCondition": {
+          "$ref": "#/$defs/condition"
+        },
+        "validationCriteria": {
+          "description": "Optional validation rules to check step output quality. Can be an array of rules (all must pass) or a composition object with logical operators.",
+          "oneOf": [
+            {
+              "type": "array",
+              "description": "Array of validation rules (all must pass)",
+              "items": {
+                "$ref": "#/$defs/validationRule"
+              }
+            },
+            {
+              "$ref": "#/$defs/validationComposition"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "prompt"
+      ],
+      "additionalProperties": false
+    },
+    "loopStep": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/stepId",
+          "description": "Unique identifier for the loop step"
+        },
+        "type": {
+          "const": "loop",
+          "description": "Identifies this as a loop step"
+        },
+        "title": {
+          "type": "string",
+          "description": "Human-friendly title of the loop step",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "loop": {
+          "$ref": "#/$defs/loopConfig"
+        },
+        "body": {
+          "oneOf": [
+            {
+              "type": "string",
+              "description": "Reference to an existing step ID to execute in the loop"
+            },
+            {
+              "type": "array",
+              "description": "Array of inline step definitions to execute in the loop",
+              "items": {
+                "$ref": "#/$defs/standardStep"
+              },
+              "minItems": 1
+            }
+          ]
+        },
+        "requireConfirmation": {
+          "$ref": "#/$defs/confirmationRule"
+        },
+        "runCondition": {
+          "$ref": "#/$defs/condition"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "title",
+        "loop",
+        "body"
+      ],
+      "additionalProperties": false
+    },
+    "loopConfig": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["while", "until", "for", "forEach"],
+          "description": "The type of loop to execute"
+        },
+        "condition": {
+          "$ref": "#/$defs/condition",
+          "description": "Condition for while/until loops"
+        },
+        "items": {
+          "type": "string",
+          "description": "Context variable name containing array for forEach loops"
+        },
+        "count": {
+          "oneOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000
+            },
+            {
+              "type": "string",
+              "description": "Context variable name containing count"
+            }
+          ],
+          "description": "Number of iterations for 'for' loops"
+        },
+        "maxIterations": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 100,
+          "description": "Maximum number of iterations allowed (safety limit)"
+        },
+        "iterationVar": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+          "description": "Custom variable name for iteration counter"
+        },
+        "itemVar": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+          "description": "Custom variable name for current item (forEach loops)"
+        },
+        "indexVar": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+          "description": "Custom variable name for current index (forEach loops)"
+        }
+      },
+      "required": ["type", "maxIterations"],
+      "allOf": [
+        {
+          "if": {
+            "properties": { "type": { "enum": ["while", "until"] } }
+          },
+          "then": {
+            "required": ["condition"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "for" } }
+          },
+          "then": {
+            "required": ["count"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "forEach" } }
+          },
+          "then": {
+            "required": ["items"]
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "condition": {
+      "type": "object",
+      "description": "Condition expression for evaluating boolean logic",
+      "properties": {
+        "var": {
+          "type": "string",
+          "description": "Variable name from execution context"
+        },
+        "equals": {
+          "description": "Check if variable equals this value"
+        },
+        "not_equals": {
+          "description": "Check if variable does not equal this value"
+        },
+        "gt": {
+          "type": "number",
+          "description": "Check if variable is greater than this number"
+        },
+        "gte": {
+          "type": "number",
+          "description": "Check if variable is greater than or equal to this number"
+        },
+        "lt": {
+          "type": "number",
+          "description": "Check if variable is less than this number"
+        },
+        "lte": {
+          "type": "number",
+          "description": "Check if variable is less than or equal to this number"
+        },
+        "and": {
+          "type": "array",
+          "description": "Logical AND of multiple conditions",
+          "items": {
+            "$ref": "#/$defs/condition"
+          }
+        },
+        "or": {
+          "type": "array",
+          "description": "Logical OR of multiple conditions",
+          "items": {
+            "$ref": "#/$defs/condition"
+          }
+        },
+        "not": {
+          "$ref": "#/$defs/condition",
+          "description": "Logical NOT of a condition"
+        }
+      },
+      "additionalProperties": false
+    },
+    "confirmationRule": {
+      "oneOf": [
+        {
+          "type": "boolean",
+          "description": "Whether to require user confirmation before proceeding"
+        },
+        {
+          "$ref": "#/$defs/condition",
+          "description": "Conditional logic that determines if confirmation is required based on context variables"
+        }
+      ],
+      "default": false
+    },
     "validationRule": {
       "type": "object",
       "properties": {

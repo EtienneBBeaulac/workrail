@@ -16,6 +16,15 @@ It follows [Model Context Protocol (MCP)](https://modelcontextprotocol.org) conv
 
 The codebase now implements the full MVP described in the original specification, refactored with Clean Architecture for long-term maintainability.
 
+### ✨ New in v0.1.0: Loop Support
+WorkRail now supports powerful iteration patterns with four loop types:
+- **while**: Continue while a condition is true
+- **until**: Continue until a condition is met  
+- **for**: Execute a fixed number of times
+- **forEach**: Process items in an array
+
+See the [Loop Documentation](docs/features/loops.md) for details.
+
 ---
 
 ## 🚀 Quick Start
@@ -58,11 +67,18 @@ workrail start
   - `workflow_next` - Get the next step in a workflow
   - `workflow_validate` - Advanced validation of step outputs with schema, context-aware, and composition rules
   - `workflow_validate_json` - Direct JSON workflow validation with comprehensive error reporting and actionable suggestions
+* **Loop Support (v0.1.0)** – Four loop types for powerful iteration patterns:
+  - `while` loops - Continue while a condition is true
+  - `until` loops - Continue until a condition is met
+  - `for` loops - Execute a fixed number of times
+  - `forEach` loops - Process items in an array
 * **Dependency Injection** – pluggable components are wired by `src/container.ts` (Inversify-style, no runtime reflection).
 * **Async, Secure Storage** – interchangeable back-ends: in-memory (default for tests) and file-based storage with path-traversal safeguards.
 * **Advanced ValidationEngine** – Three-tier validation system with JSON Schema validation (AJV), Context-Aware Validation (conditional rules), and Logical Composition (and/or/not operators) for comprehensive step output quality assurance.
 * **Typed Error Mapping** – domain errors (`WorkflowNotFoundError`, `ValidationError`, …) automatically translate to proper JSON-RPC codes.
-* **CLI Validation** – `validate` command for testing workflow files locally with comprehensive error reporting.
+* **CLI Tools** – 
+  - `validate` - Test workflow files locally with comprehensive error reporting
+  - `migrate` - Automatically migrate workflows from v0.0.1 to v0.1.0
 * **Comprehensive Test Coverage** – 81 tests passing, 7 failing (performance optimizations in progress), 88 total tests covering storage, validation, error mapping, CLI, and server logic.
 
 ---

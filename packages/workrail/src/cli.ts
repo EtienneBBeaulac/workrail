@@ -10,6 +10,7 @@ import { DefaultWorkflowService } from './application/services/workflow-service'
 // import { createDefaultWorkflowStorage } from './infrastructure/storage';
 import { validateWorkflow } from './application/validation';
 import { initializeUserWorkflowDirectory } from './infrastructure/storage/multi-directory-workflow-storage';
+import { handleMigrationCommand } from './cli/migrate-workflow';
 
 const program = new Command();
 
@@ -221,6 +222,15 @@ program
   .command('validate <file>')
   .description('Validate a workflow file against the schema')
   .action(validateWorkflowFile);
+
+program
+  .command('migrate <file>')
+  .description('Migrate a workflow from v0.0.1 to v0.1.0')
+  .option('-o, --output <path>', 'Output file path (defaults to input file)')
+  .option('-d, --dry-run', 'Show what would be changed without modifying files')
+  .option('-b, --backup', 'Create a backup when overwriting the input file')
+  .option('-q, --quiet', 'Suppress output except errors')
+  .action(handleMigrationCommand);
 
 program
   .command('start')

@@ -1,0 +1,50 @@
+{
+  "id": "simple-search-example",
+  "name": "Simple Search Pattern",
+  "description": "A simple example of searching until a condition is met using an until loop",
+  "version": "0.1.0",
+  "steps": [
+    {
+      "id": "init-search",
+      "title": "Initialize Search",
+      "prompt": "Set up search parameters: found=false, searchIndex=0, sources=['db1', 'db2', 'api1']",
+      "agentRole": "You are searching for specific data across multiple sources."
+    },
+    {
+      "id": "search-loop",
+      "type": "loop",
+      "title": "Search Until Found",
+      "loop": {
+        "type": "until",
+        "condition": {
+          "or": [
+            { "var": "found", "equals": true },
+            { "var": "searchIndex", "gte": 3 }
+          ]
+        },
+        "maxIterations": 10
+      },
+      "body": "search-source"
+    },
+    {
+      "id": "search-source",
+      "title": "Search Current Source",
+      "prompt": "Search in sources[{{searchIndex}}] for the target data",
+      "guidance": [
+        "Execute search query on current source",
+        "If found: Set found=true and store result",
+        "If not found: Increment searchIndex",
+        "Log search attempt and results"
+      ]
+    },
+    {
+      "id": "process-result",
+      "title": "Process Search Result",
+      "prompt": "Handle the search outcome",
+      "guidance": [
+        "If found: Process and return the found data",
+        "If not found: Report that data wasn't found in any source"
+      ]
+    }
+  ]
+} 
