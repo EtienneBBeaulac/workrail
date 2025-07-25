@@ -107,17 +107,17 @@ export class LoopExecutionContext {
    * Injects loop-specific variables into the execution context
    */
   injectVariables(context: ConditionContext): EnhancedContext {
-    const enhanced: EnhancedContext = { ...context };
+    // Build enhancements object efficiently
+    const enhancements: Partial<EnhancedContext> = {
+      _loopState: {
+        ...(context as EnhancedContext)._loopState,
+        [this.loopId]: this.getCurrentState()
+      }
+    };
     
-    // Add loop state to context
-    if (!enhanced._loopState) {
-      enhanced._loopState = {};
-    }
-    enhanced._loopState[this.loopId] = this.getCurrentState();
-
     // Inject iteration counter
     const iterationVar = this.loopConfig.iterationVar || 'currentIteration';
-    enhanced[iterationVar] = this.state.iteration + 1;
+    enhancements[iterationVar] = this.state.iteration + 1;
 
     // Inject forEach-specific variables
     if (this.loopConfig.type === 'forEach' && this.state.items) {
@@ -125,25 +125,29 @@ export class LoopExecutionContext {
       
       // Current item
       const itemVar = this.loopConfig.itemVar || 'currentItem';
-      enhanced[itemVar] = this.state.items[index];
+      enhancements[itemVar] = this.state.items[index];
       
       // Current index
       const indexVar = this.loopConfig.indexVar || 'currentIndex';
-      enhanced[indexVar] = index;
+      enhancements[indexVar] = index;
     }
 
     // Add any warnings
     if (this.state.warnings && this.state.warnings.length > 0) {
-      if (!enhanced._warnings) {
-        enhanced._warnings = {};
-      }
-      if (!enhanced._warnings.loops) {
-        enhanced._warnings.loops = {};
-      }
-      enhanced._warnings.loops[this.loopId] = [...this.state.warnings];
+      const existingWarnings = (context as EnhancedContext)._warnings || {};
+      const existingLoopWarnings = existingWarnings.loops || {};
+      
+      enhancements._warnings = {
+        ...existingWarnings,
+        loops: {
+          ...existingLoopWarnings,
+          [this.loopId]: [...this.state.warnings]
+        }
+      };
     }
 
-    return enhanced;
+    // Create enhanced context by merging efficiently
+    return { ...context, ...enhancements } as EnhancedContext;
   }
 
   /**

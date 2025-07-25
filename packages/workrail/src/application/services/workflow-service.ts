@@ -31,15 +31,15 @@ export interface WorkflowService {
   }>;
 }
 
-import {
+import { 
   Workflow,
   WorkflowSummary,
-  WorkflowStep,
+  WorkflowStep, 
   WorkflowGuidance
 } from '../../types/mcp-types';
 import { createDefaultWorkflowStorage } from '../../infrastructure/storage';
 import { IWorkflowStorage } from '../../types/storage';
-import {
+import { 
   WorkflowNotFoundError,
   StepNotFoundError
 } from '../../core/error-handler';
@@ -49,6 +49,7 @@ import { LoopStep, isLoopStep, EnhancedContext } from '../../types/workflow-type
 import { LoopExecutionContext } from './loop-execution-context';
 import { LoopStepResolver } from './loop-step-resolver';
 import { checkContextSize } from '../../utils/context-size';
+import { ContextOptimizer } from './context-optimizer';
 
 /**
  * Default implementation of {@link WorkflowService} that relies on
@@ -270,41 +271,40 @@ export class DefaultWorkflowService implements WorkflowService {
         completed.push(nextStep.id);
         
         // Preserve loop state including any warnings
-        const skipContext: EnhancedContext = { ...context };
-        if (!skipContext._loopState) {
-          skipContext._loopState = {};
-        }
-        skipContext._loopState[nextStep.id] = loopContext.getCurrentState();
+        const loopStateData = loopContext.getCurrentState();
+        let skipContext = ContextOptimizer.mergeLoopState(
+          context as EnhancedContext,
+          nextStep.id,
+          loopStateData
+        );
         
         // Inject any warnings from the skipped loop
-        const loopState = loopContext.getCurrentState();
-        if (loopState.warnings && loopState.warnings.length > 0) {
-          if (!skipContext._warnings) {
-            skipContext._warnings = {};
-          }
-          if (!skipContext._warnings.loops) {
-            skipContext._warnings.loops = {};
-          }
-          skipContext._warnings.loops[nextStep.id] = [...loopState.warnings];
+        if (loopStateData.warnings && loopStateData.warnings.length > 0) {
+          skipContext = ContextOptimizer.addWarnings(
+            skipContext,
+            'loops',
+            nextStep.id,
+            loopStateData.warnings
+          );
         }
         
         return this.getNextStep(workflowId, completed, skipContext);
       }
       
       // Set current loop in context
-      const newContext: EnhancedContext = {
-        ...context,
+      let newContext = ContextOptimizer.createEnhancedContext(context, {
         _currentLoop: {
           loopId: nextStep.id,
           loopStep: loopStep
         }
-      };
+      });
       
       // Save loop state after initialization
-      if (!newContext._loopState) {
-        newContext._loopState = {};
-      }
-      newContext._loopState[nextStep.id] = loopContext.getCurrentState();
+      newContext = ContextOptimizer.mergeLoopState(
+        newContext,
+        nextStep.id,
+        loopContext.getCurrentState()
+      );
       
       // Check context size when starting loop
       const loopStartSizeCheck = checkContextSize(newContext);
@@ -409,7 +409,7 @@ export class DefaultWorkflowService implements WorkflowService {
     stepId: string,
     context: ConditionContext
   ): Promise<EnhancedContext> {
-    const enhancedContext = { ...context } as EnhancedContext;
+    let enhancedContext = context as EnhancedContext;
     
     // Check if we're in a loop and this is a loop body step
     if (enhancedContext._currentLoop) {
@@ -434,10 +434,11 @@ export class DefaultWorkflowService implements WorkflowService {
           loopContext.incrementIteration();
           
           // Update loop state in context
-          if (!enhancedContext._loopState) {
-            enhancedContext._loopState = {};
-          }
-          enhancedContext._loopState[loopId] = loopContext.getCurrentState();
+          enhancedContext = ContextOptimizer.mergeLoopState(
+            enhancedContext,
+            loopId,
+            loopContext.getCurrentState()
+          );
         }
       }
     }
