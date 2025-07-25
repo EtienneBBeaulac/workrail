@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, jest } from '@jest/globals';
 import { DefaultWorkflowService } from '../../src/application/services/workflow-service';
 import { IWorkflowStorage } from '../../src/types/storage';
 import { Workflow, WorkflowSummary } from '../../src/types/mcp-types';
+import { LoopStep } from '../../src/types/workflow-types';
 
 const mockWorkflow: Workflow = {
   id: 'test-workflow',
@@ -55,28 +56,31 @@ const mockWorkflowWithAgentRole: Workflow = {
   ],
 };
 
-const mockStorage: IWorkflowStorage = {
-  getWorkflowById: async (id: string): Promise<Workflow | null> => {
-    if (id === mockWorkflow.id) {
-      return Promise.resolve(mockWorkflow);
-    }
-    if (id === mockWorkflowWithAgentRole.id) {
-      return Promise.resolve(mockWorkflowWithAgentRole);
-    }
-    return Promise.resolve(null);
-  },
-  listWorkflowSummaries: async (): Promise<WorkflowSummary[]> => {
-    return Promise.resolve([]);
-  },
-  loadAllWorkflows: async (): Promise<Workflow[]> => {
-    return Promise.resolve([mockWorkflow, mockWorkflowWithAgentRole]);
-  },
-};
-
 describe('DefaultWorkflowService', () => {
   let service: DefaultWorkflowService;
+  let mockStorage: jest.Mocked<IWorkflowStorage>;
 
   beforeEach(() => {
+    mockStorage = {
+      getWorkflowById: jest.fn(),
+      listWorkflowSummaries: jest.fn(),
+      loadAllWorkflows: jest.fn()
+    };
+    
+    // Default mock implementations
+    mockStorage.getWorkflowById.mockImplementation(async (id: string) => {
+      if (id === mockWorkflow.id) {
+        return mockWorkflow;
+      }
+      if (id === mockWorkflowWithAgentRole.id) {
+        return mockWorkflowWithAgentRole;
+      }
+      return null;
+    });
+    
+    mockStorage.listWorkflowSummaries.mockResolvedValue([]);
+    mockStorage.loadAllWorkflows.mockResolvedValue([mockWorkflow, mockWorkflowWithAgentRole]);
+    
     service = new DefaultWorkflowService(mockStorage);
     jest.clearAllMocks();
   });
@@ -173,6 +177,224 @@ describe('DefaultWorkflowService', () => {
       expect(result.step?.agentRole).toBeUndefined();
       expect(result.guidance.prompt).toBe('Prompt for step 1');
       expect(result.guidance.prompt).not.toContain('Agent Role Instructions');
+    });
+  });
+
+  describe('getNextStep with loop steps', () => {
+    it('should recognize loop steps and initialize loop context', async () => {
+      const workflowWithLoop: Workflow = {
+        id: 'loop-workflow',
+        name: 'Loop Workflow',
+        description: 'Workflow with loops',
+        version: '0.1.0',
+        steps: [
+          { id: 'start', title: 'Start', prompt: 'Starting workflow' },
+          {
+            id: 'while-loop',
+            type: 'loop',
+            title: 'While Loop',
+            prompt: 'Loop prompt',
+            loop: {
+              type: 'while',
+              condition: { var: 'continueLoop', equals: true },
+              maxIterations: 10,
+              iterationVar: 'currentIteration'
+            },
+            body: 'loop-body'
+          } as LoopStep,
+          { id: 'loop-body', title: 'Loop Body', prompt: 'Process item' },
+          { id: 'end', title: 'End', prompt: 'Workflow complete' }
+        ]
+      };
+
+      mockStorage.getWorkflowById.mockResolvedValue(workflowWithLoop);
+
+      // First call should return start step
+      const result1 = await service.getNextStep('loop-workflow', []);
+      expect(result1.step?.id).toBe('start');
+
+      // Second call should start the loop
+      const result2 = await service.getNextStep('loop-workflow', ['start'], { continueLoop: true });
+      expect(result2.step?.id).toBe('loop-body');
+      expect(result2.guidance.prompt).toContain('Process item');
+      expect(result2.guidance.prompt).toContain('Loop Context');
+      expect(result2.guidance.prompt).toContain('Iteration: 1');
+    });
+
+    it('should handle while loop iterations correctly', async () => {
+      const workflowWithWhile: Workflow = {
+        id: 'while-workflow',
+        name: 'While Workflow',
+        description: 'Workflow with while loop',
+        version: '0.1.0',
+        steps: [
+          {
+            id: 'while-loop',
+            type: 'loop',
+            title: 'While Loop',
+            prompt: 'Loop prompt',
+            loop: {
+              type: 'while',
+              condition: { var: 'counter', lt: 3 },
+              maxIterations: 10,
+              iterationVar: 'iteration'
+            },
+            body: 'increment'
+          } as LoopStep,
+          { 
+            id: 'increment', 
+            title: 'Increment', 
+            prompt: 'Increment counter'
+          }
+        ]
+      };
+
+      mockStorage.getWorkflowById.mockResolvedValue(workflowWithWhile);
+
+      // First iteration
+      let context: any = { counter: 0 };
+      const result1 = await service.getNextStep('while-workflow', [], context);
+      expect(result1.step?.id).toBe('increment');
+
+      // Simulate completing the step and update context
+      context = await service.updateContextForStepCompletion('while-workflow', 'increment', result1.context || context);
+
+      // Second iteration
+      context.counter = 1;
+      const result2 = await service.getNextStep('while-workflow', [], context);
+      expect(result2.step?.id).toBe('increment');
+      expect(result2.guidance.prompt).toContain('Iteration: 2');
+
+      // Third iteration
+      context = await service.updateContextForStepCompletion('while-workflow', 'increment', result2.context || context);
+      context.counter = 2;
+      const result3 = await service.getNextStep('while-workflow', [], context);
+      expect(result3.step?.id).toBe('increment');
+      expect(result3.guidance.prompt).toContain('Iteration: 3');
+
+      // Loop should exit when condition is false
+      context = await service.updateContextForStepCompletion('while-workflow', 'increment', result3.context || context);
+      context.counter = 3;
+      const result4 = await service.getNextStep('while-workflow', [], context);
+      expect(result4.isComplete).toBe(true);
+    });
+
+    it('should inject loop variables into context', async () => {
+      const workflowWithVars: Workflow = {
+        id: 'vars-workflow',
+        name: 'Variables Workflow',
+        description: 'Workflow with loop variables',
+        version: '0.1.0',
+        steps: [
+          {
+            id: 'var-loop',
+            type: 'loop',
+            title: 'Variable Loop',
+            prompt: 'Loop with variables',
+            loop: {
+              type: 'while',
+              condition: { var: 'shouldContinue', equals: true },
+              maxIterations: 5,
+              iterationVar: 'loopCount'
+            },
+            body: 'check-var'
+          } as LoopStep,
+          { 
+            id: 'check-var', 
+            title: 'Check Variable', 
+            prompt: 'Check loop variable',
+            runCondition: { var: 'loopCount', gt: 0 }
+          }
+        ]
+      };
+
+      mockStorage.getWorkflowById.mockResolvedValue(workflowWithVars);
+
+      // First iteration should have loopCount = 0
+      const result1 = await service.getNextStep('vars-workflow', [], { shouldContinue: true });
+      // Since runCondition checks loopCount > 0, first iteration should skip
+      // This will increment and try again
+      expect(result1.step?.id).toBe('check-var');
+    });
+
+    it('should respect max iterations limit', async () => {
+      const workflowWithLimit: Workflow = {
+        id: 'limit-workflow',
+        name: 'Limit Workflow',
+        description: 'Workflow with iteration limit',
+        version: '0.1.0',
+        steps: [
+          {
+            id: 'limited-loop',
+            type: 'loop',
+            title: 'Limited Loop',
+            prompt: 'Loop with limit',
+            loop: {
+              type: 'while',
+              condition: { var: 'alwaysTrue', equals: true },
+              maxIterations: 2
+            },
+            body: 'simple-step'
+          } as LoopStep,
+          { 
+            id: 'simple-step', 
+            title: 'Simple Step', 
+            prompt: 'Do something'
+          }
+        ]
+      };
+
+      mockStorage.getWorkflowById.mockResolvedValue(workflowWithLimit);
+
+      // First iteration
+      let context: any = { alwaysTrue: true };
+      const result1 = await service.getNextStep('limit-workflow', [], context);
+      expect(result1.step?.id).toBe('simple-step');
+
+      // Second iteration
+      context = await service.updateContextForStepCompletion('limit-workflow', 'simple-step', result1.context || context);
+      const result2 = await service.getNextStep('limit-workflow', [], context);
+      expect(result2.step?.id).toBe('simple-step');
+
+      // Should exit after max iterations even though condition is true
+      context = await service.updateContextForStepCompletion('limit-workflow', 'simple-step', result2.context || context);
+      const result3 = await service.getNextStep('limit-workflow', [], context);
+      expect(result3.isComplete).toBe(true);
+    });
+
+    it('should skip loop if initial condition is false', async () => {
+      const workflowWithFalseCondition: Workflow = {
+        id: 'false-workflow',
+        name: 'False Condition Workflow',
+        description: 'Workflow where loop never executes',
+        version: '0.1.0',
+        steps: [
+          {
+            id: 'never-loop',
+            type: 'loop',
+            title: 'Never Loop',
+            prompt: 'This loop should not execute',
+            loop: {
+              type: 'while',
+              condition: { var: 'shouldRun', equals: true },
+              maxIterations: 10
+            },
+            body: 'never-reached'
+          } as LoopStep,
+          { 
+            id: 'never-reached', 
+            title: 'Never Reached', 
+            prompt: 'Should not see this'
+          },
+          { id: 'after-loop', title: 'After Loop', prompt: 'Continue after skipped loop' }
+        ]
+      };
+
+      mockStorage.getWorkflowById.mockResolvedValue(workflowWithFalseCondition);
+
+      // Should skip the loop entirely and go to after-loop
+      const result = await service.getNextStep('false-workflow', [], { shouldRun: false });
+      expect(result.step?.id).toBe('after-loop');
     });
   });
 }); 

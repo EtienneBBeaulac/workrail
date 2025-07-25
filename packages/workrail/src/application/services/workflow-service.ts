@@ -16,6 +16,7 @@ export interface WorkflowService {
     step: import('../../types/mcp-types').WorkflowStep | null;
     guidance: import('../../types/mcp-types').WorkflowGuidance;
     isComplete: boolean;
+    context?: ConditionContext;
   }>;
 
   /** Validate an output for a given step. */
@@ -46,18 +47,21 @@ import { evaluateCondition, ConditionContext } from '../../utils/condition-evalu
 import { ValidationEngine } from './validation-engine';
 import { LoopStep, isLoopStep, EnhancedContext } from '../../types/workflow-types';
 import { LoopExecutionContext } from './loop-execution-context';
+import { LoopStepResolver } from './loop-step-resolver';
 
 /**
  * Default implementation of {@link WorkflowService} that relies on
  * the existing {@link FileWorkflowStorage} backend.
  */
 export class DefaultWorkflowService implements WorkflowService {
-  private loopContexts: Map<string, LoopExecutionContext> = new Map();
+  private loopStepResolver: LoopStepResolver;
 
   constructor(
     private readonly storage: IWorkflowStorage = createDefaultWorkflowStorage(),
     private readonly validationEngine: ValidationEngine = new ValidationEngine()
-  ) {}
+  ) {
+    this.loopStepResolver = new LoopStepResolver();
+  }
 
   async listWorkflowSummaries(): Promise<WorkflowSummary[]> {
     return this.storage.listWorkflowSummaries();
@@ -71,28 +75,75 @@ export class DefaultWorkflowService implements WorkflowService {
     workflowId: string,
     completedSteps: string[],
     context: ConditionContext = {}
-  ): Promise<{ step: WorkflowStep | null; guidance: WorkflowGuidance; isComplete: boolean }> {
+  ): Promise<{ step: WorkflowStep | null; guidance: WorkflowGuidance; isComplete: boolean; context?: ConditionContext }> {
     const workflow = await this.storage.getWorkflowById(workflowId);
     if (!workflow) {
       throw new WorkflowNotFoundError(workflowId);
     }
 
-    const completed = completedSteps || [];
+    // Create a mutable copy of completed steps
+    const completed = [...(completedSteps || [])];
+    const enhancedContext = context as EnhancedContext;
     
-    // Check if we're currently in a loop
-    const activeLoopContext = this.findActiveLoopContext(workflowId, context);
-    if (activeLoopContext) {
-      const loopStep = this.findLoopStepById(workflow, activeLoopContext.getLoopId());
-      if (loopStep && activeLoopContext.shouldContinue(context)) {
-        // We're still in a loop, return the loop body step
-        // For now, just stub this out - full implementation in Phase 2
-        console.log('Loop step detected:', loopStep.id);
+    // Build a set of step IDs that are loop bodies
+    const loopBodySteps = new Set<string>();
+    for (const step of workflow.steps) {
+      if (isLoopStep(step)) {
+        const loopStep = step as LoopStep;
+        if (typeof loopStep.body === 'string') {
+          loopBodySteps.add(loopStep.body);
+        }
+      }
+    }
+    
+    // Check if we're currently executing a loop body
+    if (enhancedContext._currentLoop) {
+      const { loopId, loopStep } = enhancedContext._currentLoop;
+      const loopContext = new LoopExecutionContext(
+        loopId,
+        loopStep.loop,
+        enhancedContext._loopState?.[loopId]
+      );
+      
+      // Check if loop should continue
+      if (loopContext.shouldContinue(context)) {
+        // Resolve the loop body step
+        const bodyStep = this.loopStepResolver.resolveLoopBody(workflow, loopStep.body, loopStep.id);
+        
+        // Handle single step body
+        if (!Array.isArray(bodyStep)) {
+          // Always inject loop variables first
+          const loopEnhancedContext = loopContext.injectVariables(context);
+          
+          // Return the body step for execution
+          return {
+            step: bodyStep,
+            guidance: {
+              prompt: this.buildStepPrompt(bodyStep, loopContext)
+            },
+            isComplete: false,
+            context: loopEnhancedContext
+          };
+        } else {
+          // Multi-step body support will be implemented in Phase 3
+          throw new Error('Multi-step loop bodies not yet supported');
+        }
+      } else {
+        // Loop has completed, mark it as completed
+        completed.push(loopId);
+        // Remove current loop from context
+        delete enhancedContext._currentLoop;
       }
     }
     
     const nextStep = workflow.steps.find((step) => {
       // Skip if step is already completed
       if (completed.includes(step.id)) {
+        return false;
+      }
+      
+      // Skip if step is a loop body (unless we're executing that loop)
+      if (loopBodySteps.has(step.id) && (!enhancedContext._currentLoop || enhancedContext._currentLoop.loopStep.body !== step.id)) {
         return false;
       }
       
@@ -107,50 +158,44 @@ export class DefaultWorkflowService implements WorkflowService {
     
     // Check if the next step is a loop
     if (nextStep && isLoopStep(nextStep)) {
-      // Initialize loop context for the new loop
+      const loopStep = nextStep as LoopStep;
+      // Initialize loop context
       const loopContext = new LoopExecutionContext(
         nextStep.id,
-        (nextStep as LoopStep).loop,
-        (context as EnhancedContext)._loopState?.[nextStep.id]
+        loopStep.loop,
+        enhancedContext._loopState?.[nextStep.id]
       );
       
-      this.loopContexts.set(`${workflowId}:${nextStep.id}`, loopContext);
-      
       // Initialize forEach loops
-      if ((nextStep as LoopStep).loop.type === 'forEach') {
+      if (loopStep.loop.type === 'forEach') {
         loopContext.initializeForEach(context);
       }
       
-      // For now, return the loop step itself
-      // Full loop body resolution will be implemented in Phase 2
+      // Check if loop should execute at all
+      if (!loopContext.shouldContinue(context)) {
+        // Loop condition is false from the start, skip it
+        completed.push(nextStep.id);
+        return this.getNextStep(workflowId, completed, context);
+      }
+      
+      // Set current loop in context
+      const newContext: EnhancedContext = {
+        ...context,
+        _currentLoop: {
+          loopId: nextStep.id,
+          loopStep: loopStep
+        }
+      };
+      
+      // Return to get loop body
+      return this.getNextStep(workflowId, completedSteps, newContext);
     }
     
     const isComplete = !nextStep;
 
     let finalPrompt = 'Workflow complete.';
     if (nextStep) {
-      let stepGuidance = '';
-      if (nextStep.guidance && nextStep.guidance.length > 0) {
-        const guidanceHeader = '## Step Guidance';
-        const guidanceList = nextStep.guidance.map((g: string) => `- ${g}`).join('\n');
-        stepGuidance = `${guidanceHeader}\n${guidanceList}\n\n`;
-      }
-      
-      // Build user-facing prompt (unchanged for backward compatibility)
-      finalPrompt = `${stepGuidance}${nextStep.prompt}`;
-      
-      // If agentRole exists, include it in the guidance for agent processing
-      if (nextStep.agentRole) {
-        // Add agentRole instructions to the guidance prompt for agent consumption
-        // This maintains the existing API while providing agent-specific instructions
-        finalPrompt = `## Agent Role Instructions\n${nextStep.agentRole}\n\n${finalPrompt}`;
-      }
-      
-      // Add loop-specific information to the prompt if it's a loop step
-      if (isLoopStep(nextStep)) {
-        const loopStep = nextStep as LoopStep;
-        finalPrompt += `\n\n## Loop Information\n- Type: ${loopStep.loop.type}\n- Max Iterations: ${loopStep.loop.maxIterations}`;
-      }
+      finalPrompt = this.buildStepPrompt(nextStep);
     }
 
     return {
@@ -158,26 +203,45 @@ export class DefaultWorkflowService implements WorkflowService {
       guidance: {
         prompt: finalPrompt
       },
-      isComplete
+      isComplete,
+      context: enhancedContext
     };
   }
 
   /**
-   * Find an active loop context for the current workflow
+   * Build the prompt for a step, including agent role and guidance
    * @private
    */
-  private findActiveLoopContext(workflowId: string, context: ConditionContext): LoopExecutionContext | null {
-    // This will be fully implemented in Phase 2
-    // For now, just check if we have any loop contexts
-    for (const [key, loopContext] of this.loopContexts) {
-      if (key.startsWith(`${workflowId}:`)) {
-        if (loopContext.shouldContinue(context)) {
-          return loopContext;
-        }
+  private buildStepPrompt(step: WorkflowStep, loopContext?: LoopExecutionContext): string {
+    let stepGuidance = '';
+    if (step.guidance && step.guidance.length > 0) {
+      const guidanceHeader = '## Step Guidance';
+      const guidanceList = step.guidance.map((g: string) => `- ${g}`).join('\n');
+      stepGuidance = `${guidanceHeader}\n${guidanceList}\n\n`;
+    }
+    
+    // Build user-facing prompt
+    let finalPrompt = `${stepGuidance}${step.prompt}`;
+    
+    // If agentRole exists, include it in the guidance for agent processing
+    if (step.agentRole) {
+      finalPrompt = `## Agent Role Instructions\n${step.agentRole}\n\n${finalPrompt}`;
+    }
+    
+    // Add loop context information if in a loop
+    if (loopContext) {
+      const state = loopContext.getCurrentState();
+      finalPrompt += `\n\n## Loop Context\n- Iteration: ${state.iteration + 1}`;
+      if (state.items) {
+        finalPrompt += `\n- Total Items: ${state.items.length}`;
+        finalPrompt += `\n- Current Index: ${state.index}`;
       }
     }
-    return null;
+    
+    return finalPrompt;
   }
+
+
 
   /**
    * Find a loop step by ID in the workflow
@@ -206,6 +270,51 @@ export class DefaultWorkflowService implements WorkflowService {
     // Use ValidationEngine to handle validation logic
     const criteria = (step as any).validationCriteria as any[] || [];
     return this.validationEngine.validate(output, criteria);
+  }
+
+  /**
+   * Updates the context when a step is completed, handling loop iteration tracking
+   * @param workflowId The workflow ID
+   * @param stepId The step ID that was completed
+   * @param context The current execution context
+   * @returns Updated context with loop state changes
+   */
+  async updateContextForStepCompletion(
+    workflowId: string,
+    stepId: string,
+    context: ConditionContext
+  ): Promise<EnhancedContext> {
+    const enhancedContext = { ...context } as EnhancedContext;
+    
+    // Check if we're in a loop and this is a loop body step
+    if (enhancedContext._currentLoop) {
+      const { loopId, loopStep } = enhancedContext._currentLoop;
+      const workflow = await this.storage.getWorkflowById(workflowId);
+      
+      if (workflow) {
+        // Check if the completed step is the loop body
+        const bodyStep = this.loopStepResolver.resolveLoopBody(workflow, loopStep.body, loopStep.id);
+        if (!Array.isArray(bodyStep) && bodyStep.id === stepId) {
+          // Create loop context to increment iteration
+          const loopContext = new LoopExecutionContext(
+            loopId,
+            loopStep.loop,
+            enhancedContext._loopState?.[loopId]
+          );
+          
+          // Increment the loop iteration
+          loopContext.incrementIteration();
+          
+          // Update loop state in context
+          if (!enhancedContext._loopState) {
+            enhancedContext._loopState = {};
+          }
+          enhancedContext._loopState[loopId] = loopContext.getCurrentState();
+        }
+      }
+    }
+    
+    return enhancedContext;
   }
 }
 

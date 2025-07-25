@@ -268,48 +268,84 @@
 - After Phase 3: Full functionality
 - During Phase 4: Documentation needs
 
-## 11. IMPLEMENTATION PROGRESS
+## 10. IMPLEMENTATION PROGRESS
 
-### Completed Steps (3/16) ✅
-1. **Step 1.1: Schema Evolution** (Commit: 4ab6170)
+### Completed Phases
+
+#### Phase 1: Foundation ✅ (Commits: 4ab6170, 8c14973, 7701e56, 2711f09)
+
+1. **Step 1.1: Schema Evolution** ✅
    - Updated schema to v0.1.0 with loop support
    - Created backup of v0.0.1 schema
    - Added loopStep and loopConfig definitions
    - Tested with sample loop workflow
 
-2. **Step 1.2: Type Definitions** (Commit: 8c14973)
+2. **Step 1.2: Type Definitions** ✅
    - Added LoopStep, LoopConfig, LoopState interfaces
    - Imported Condition type from condition-evaluator
    - Created isLoopStep type guard
    - Added unit tests for type guard
 
-3. **Step 1.3: Loop Execution Context** (Commit: 7701e56)
+3. **Step 1.3: Loop Execution Context** ✅
    - Implemented LoopExecutionContext class
    - Added state management for all loop types
    - Implemented safety limits (iterations, time)
+   - Fixed forEach index increment bug
    - 92% test coverage achieved
 
+4. **Step 1.4: Basic Loop Recognition** ✅
+   - Updated WorkflowService to detect loop steps
+   - Initialize loop contexts
+   - Add loop information to guidance
+   - All tests passing, backward compatibility maintained
+
+#### Phase 2: Core Implementation (In Progress)
+
+5. **Step 2.1: Loop Step Resolver** ✅ (Commit: ae46f75)
+   - Implemented LoopStepResolver class
+   - Handle step reference resolution for loop bodies
+   - Support both string references and inline steps
+   - Caching for performance
+   - Validation for circular references
+
 ### Current Status
-- **Phase**: 1 (Foundation)
-- **Progress**: 75% of Phase 1 complete
-- **Next Step**: 1.4 - Basic Loop Recognition
+- **Phase**: 2 (Core Implementation) 
+- **Progress**: 6/16 steps complete (37.5%)
+- **Current Step**: 2.3 - Context Size Monitoring
 - **Branch**: feature/loop-implementation
 - **All Tests**: ✅ Passing
+
+### Implementation Notes for Step 2.2 (COMPLETED) ✅
+- Implemented stateless while loop execution logic in WorkflowService
+- Removed persistent state (loopContexts, completedLoops) in favor of passing state through context
+- Added _currentLoop to EnhancedContext to track active loop execution
+- Loop body steps are automatically excluded from normal workflow unless executing within their loop
+- Added updateContextForStepCompletion method to handle loop iteration tracking
+- Fixed test conditions to use supported operators (lt, gt, not lessThan, greaterThan)
+- All loop tests passing with proper iteration tracking and completion
+
+### Key Design Decisions
+- **Stateless Design**: Loop state is passed through context rather than stored in service
+- **Loop Body Isolation**: Steps referenced as loop bodies are automatically skipped unless their loop is executing
+- **Context Enhancement**: getNextStep returns enhanced context for proper state propagation
+- **No Recursive Overload**: Simplified recursive calls to prevent infinite loops
 
 ### Files Modified
 - `spec/workflow.schema.json` (v0.1.0)
 - `spec/workflow.schema.v0.0.1.json` (backup)
 - `src/types/workflow-types.ts`
 - `src/application/services/loop-execution-context.ts`
+- `src/application/services/workflow-service.ts` (major changes for loop execution)
+- `src/application/services/loop-step-resolver.ts`
+- `tests/unit/workflow-service.test.ts` (added loop tests, fixed conditions)
 - Test files for each component
 
 ### Remaining Work
-- Step 1.4: Basic loop recognition in WorkflowService
-- Phase 2: Core implementation (4 steps)
+- Phase 2: Core implementation (4 steps) - IN PROGRESS
 - Phase 3: Full loop support (4 steps)
 - Phase 4: Polish & tools (4 steps)
 
-## 10. HANDOFF INSTRUCTIONS
+## 11. HANDOFF INSTRUCTIONS
 
 ### Files to Attach When Resuming
 1. **Specification**: `packages/workrail/docs/specs/loop-implementation-spec.md`
@@ -317,6 +353,63 @@
 3. **Plan**: `packages/workrail/docs/plans/loop-implementation-plan.md`
 4. **This Context**: `packages/workrail/CONTEXT.md`
 5. **Original Guidance**: Phase 5 implementation recommendations
+
+### Resuming the Workflow
+Use `workflow_get` to get the `coding_task_workflow`, then use `workflow_next` and pass in this:
+```
+{
+  "workflowId": "coding-task-workflow",
+  "completedSteps": [
+    "phase-0-intelligent-triage",
+    "phase-1-deep-analysis-mandatory",
+    "phase-2-informed-clarification",
+    "phase-2b-dynamic-retriage",
+    "phase-3-specification",
+    "phase-3b-create-context-doc",
+    "phase-4-architectural-design",
+    "phase-5-planning",
+    "phase-5b-devil-advocate-review",
+    "phase-5c-finalize-plan",
+    "phase-5d-plan-sanity-check",
+    "phase-5e-update-context-doc"
+  ],
+  "context": {
+    "taskDescription": "Process and implement the Phase 5 Final Recommendation & Implementation Guidance for adding loop support to the Workrail workflow system. This includes implementing a unified loop model that can handle both simple and complex cases, with a phased implementation roadmap spanning 8 weeks.",
+    "inputDocument": "Phase 5 Final Recommendation & Implementation Guidance for Loop Implementation",
+    "taskComplexity": "Large",
+    "automationLevel": "Medium",
+    "requestDeepAnalysis": true,
+    "codebaseAnalysisComplete": true,
+    "requirementsClarified": true,
+    "architecturalDecisions": {
+      "stepReference": "loop-specific",
+      "stateManagement": "stateless-with-validation",
+      "compatibility": "schema-versioning",
+      "loopExit": "graceful-with-warnings",
+      "nestedLoops": "postponed",
+      "performance": "current-architecture-with-limits",
+      "testing": "full-integration-with-benchmarks"
+    },
+    "complexityConfirmed": true,
+    "specificationComplete": true,
+    "specFile": "packages/workrail/docs/specs/loop-implementation-spec.md",
+    "contextDocCreated": true,
+    "contextFile": "packages/workrail/CONTEXT.md",
+    "designComplete": true,
+    "designFile": "packages/workrail/docs/design/loop-implementation-design.md",
+    "planComplete": true,
+    "planFile": "packages/workrail/docs/plans/loop-implementation-plan.md",
+    "confidenceScore": 8,
+    "devilsAdvocateComplete": true,
+    "proceedWithoutAmendments": true,
+    "finalPlanReady": true,
+    "sanityCheckPassed": true,
+    "contextUpdated": true,
+    "branchCreated": "feature/loop-implementation",
+    "planningCommitted": true
+  }
+}
+```
 
 ### Key Context for New Session
 - "Implementing loop support in Workrail, ready for Phase 6 implementation"

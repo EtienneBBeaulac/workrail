@@ -58,7 +58,7 @@ export interface LoopState {
 }
 
 // Enhanced context for loops
-export interface EnhancedContext extends Record<string, any> {
+export interface EnhancedContext extends ConditionContext {
   _loopState?: LoopState;
   _warnings?: {
     loops?: {
@@ -66,6 +66,10 @@ export interface EnhancedContext extends Record<string, any> {
     };
   };
   _contextSize?: number; // tracked for validation
+  _currentLoop?: {
+    loopId: string;
+    loopStep: LoopStep;
+  };
 }
 
 // Type guard for loop steps
