@@ -1,6 +1,8 @@
 // Workflow Schema Type Definitions
 // Based on JSON Schema Draft 7 specification
 
+import { Condition, ConditionContext } from '../utils/condition-evaluator';
+
 // =============================================================================
 // CORE WORKFLOW TYPES
 // =============================================================================
@@ -12,7 +14,7 @@ export interface Workflow {
   version: string;
   preconditions?: string[];
   clarificationPrompts?: string[];
-  steps: WorkflowStep[];
+  steps: (WorkflowStep | LoopStep)[];
   metaGuidance?: string[];
 }
 
@@ -25,6 +27,50 @@ export interface WorkflowStep {
   askForFiles?: boolean;
   requireConfirmation?: boolean;
   runCondition?: object;
+}
+
+// Loop-related types
+export interface LoopStep extends WorkflowStep {
+  type: 'loop';
+  loop: LoopConfig;
+  body: string | WorkflowStep[];
+}
+
+export interface LoopConfig {
+  type: 'while' | 'until' | 'for' | 'forEach';
+  condition?: Condition; // For while/until loops
+  items?: string; // Context variable name for forEach
+  count?: number | string; // Number or context variable for 'for' loops
+  maxIterations: number; // Safety limit
+  iterationVar?: string; // Custom iteration counter name
+  itemVar?: string; // Custom item variable name (forEach)
+  indexVar?: string; // Custom index variable name (forEach)
+}
+
+export interface LoopState {
+  [loopId: string]: {
+    iteration: number;
+    started: number; // timestamp
+    items?: any[]; // for forEach loops
+    index?: number; // current array index
+    warnings?: string[]; // accumulated warnings
+  };
+}
+
+// Enhanced context for loops
+export interface EnhancedContext extends Record<string, any> {
+  _loopState?: LoopState;
+  _warnings?: {
+    loops?: {
+      [loopId: string]: string[];
+    };
+  };
+  _contextSize?: number; // tracked for validation
+}
+
+// Type guard for loop steps
+export function isLoopStep(step: WorkflowStep | LoopStep): step is LoopStep {
+  return 'type' in step && step.type === 'loop';
 }
 
 // =============================================================================
