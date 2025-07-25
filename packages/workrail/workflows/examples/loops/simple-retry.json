@@ -1,0 +1,45 @@
+{
+  "id": "simple-retry-example",
+  "name": "Simple Retry Pattern",
+  "description": "A simple example of retry logic using a for loop",
+  "version": "0.1.0",
+  "steps": [
+    {
+      "id": "prepare",
+      "title": "Prepare Operation",
+      "prompt": "Set up the operation to retry: maxRetries=3, succeeded=false",
+      "agentRole": "You are implementing a retry mechanism for fault tolerance."
+    },
+    {
+      "id": "retry-loop",
+      "type": "loop",
+      "title": "Retry Operation",
+      "loop": {
+        "type": "for",
+        "count": "maxRetries",
+        "maxIterations": 5,
+        "iterationVar": "attemptNumber"
+      },
+      "body": "attempt-operation"
+    },
+    {
+      "id": "attempt-operation",
+      "title": "Attempt Operation",
+      "prompt": "Try the operation. On success, set succeeded=true.",
+      "guidance": [
+        "Attempt {{attemptNumber}} of {{maxRetries}}",
+        "Execute the operation with error handling",
+        "Update succeeded variable based on result"
+      ]
+    },
+    {
+      "id": "handle-result",
+      "title": "Handle Final Result",
+      "prompt": "Process the final result based on success/failure",
+      "guidance": [
+        "If succeeded: Process successful result",
+        "If failed: Handle all retries exhausted"
+      ]
+    }
+  ]
+} 

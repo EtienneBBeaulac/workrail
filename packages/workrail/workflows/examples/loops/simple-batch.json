@@ -1,0 +1,54 @@
+{
+  "id": "simple-batch-example",
+  "name": "Simple Batch Processing",
+  "description": "A simple example of processing items in batches using forEach",
+  "version": "0.1.0",
+  "steps": [
+    {
+      "id": "load-data",
+      "title": "Load Data",
+      "prompt": "Load items to process into 'items' array",
+      "agentRole": "You are processing data in batches for efficiency.",
+      "guidance": [
+        "Load data from source",
+        "Store in context variable 'items'",
+        "Initialize counters: processed=0, errors=0"
+      ]
+    },
+    {
+      "id": "process-items",
+      "type": "loop",
+      "title": "Process Each Item",
+      "loop": {
+        "type": "forEach",
+        "items": "items",
+        "itemVar": "currentItem",
+        "indexVar": "itemIndex",
+        "maxIterations": 100
+      },
+      "body": "process-single-item"
+    },
+    {
+      "id": "process-single-item",
+      "title": "Process Item",
+      "prompt": "Process {{currentItem}} (item {{itemIndex + 1}} of {{items.length}})",
+      "guidance": [
+        "Validate the item",
+        "Apply transformations",
+        "Save or send the result",
+        "Update processed or errors counter"
+      ]
+    },
+    {
+      "id": "summarize",
+      "title": "Summarize Results",
+      "prompt": "Generate summary of batch processing",
+      "guidance": [
+        "Total items: {{items.length}}",
+        "Successfully processed: {{processed}}",
+        "Errors: {{errors}}",
+        "Success rate: {{(processed / items.length * 100).toFixed(1)}}%"
+      ]
+    }
+  ]
+} 

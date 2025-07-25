@@ -310,10 +310,10 @@
 
 ### Current Status
 - **Phase**: 4 (Polish & Tools) 
-- **Progress**: 12/16 steps complete (75%)
-- **Current Step**: 4.1 - CLI Tool
+- **Progress**: 13/16 steps complete (81.25%)
+- **Current Step**: 4.2 - Documentation
 - **Branch**: feature/loop-implementation
-- **All Tests**: ✅ Passing (32 workflow service tests, 11 context size tests, 19 loop validation tests, 7/9 integration tests, 2 performance tests)
+- **All Tests**: ✅ Passing (32 workflow service tests, 11 context size tests, 19 loop validation tests, 7/9 integration tests, 2 performance tests, 14 migration tests)
 
 ### Implementation Notes for Step 2.2 (COMPLETED) ✅
 - Implemented stateless while loop execution logic in WorkflowService
@@ -428,6 +428,33 @@
   - `tests/unit/performance-validation.test.ts`
 - Commit: 8e68c50
 
+### Implementation Notes for Step 4.1 (COMPLETED) ✅
+- Created workflow migration utility for v0.0.1 to v0.1.0
+- Key features:
+  - Automatic version detection
+  - Adds version field during migration
+  - Detects loop-like patterns in prompts/guidance
+  - Suggests refactoring to use new loop features
+  - Validates migrated workflows
+- CLI integration:
+  - Added `migrate` command with options
+  - Supports dry-run mode (`--dry-run`)
+  - Optional backup creation (`--backup`)
+  - Custom output paths (`--output`)
+  - Quiet mode for scripting (`--quiet`)
+- Migration analysis:
+  - Detects keywords: repeat, iterate, loop, while, until, for each, foreach
+  - Identifies manual iteration patterns (e.g., "step X of Y")
+  - Provides actionable warnings for refactoring opportunities
+- Test coverage:
+  - 14 unit tests for migration logic
+  - Tests version detection, migration logic, file operations
+  - All tests passing
+- Files added:
+  - `src/cli/migrate-workflow.ts`
+  - `tests/unit/migrate-workflow.test.ts`
+- Commit: cbb93be
+
 ### Key Design Decisions
 - **Stateless Design**: Loop state is passed through context rather than stored in service
 - **Loop Body Isolation**: Steps referenced as loop bodies are automatically skipped unless their loop is executing
@@ -456,7 +483,7 @@
 
 ### Remaining Work
 - Phase 3: Full loop support - COMPLETED ✅
-- Phase 4: Polish & tools (4 steps) - IN PROGRESS
+- Phase 4: Polish & tools (3 steps remaining) - IN PROGRESS
 
 ## 11. HANDOFF INSTRUCTIONS
 
