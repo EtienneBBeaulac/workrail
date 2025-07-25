@@ -15,7 +15,8 @@
         "User has identified a specific bug or failing test to investigate",
         "Agent has access to codebase analysis tools (grep, file readers, etc.)",
         "Agent has access to build/test execution tools for the project type",
-        "User can provide error messages, stack traces, or test failure output"
+        "User can provide error messages, stack traces, or test failure output",
+        "Bug is reproducible with specific steps or a minimal test case"
     ],
     "metaGuidance": [
         "INVESTIGATION DISCIPLINE: Never propose fixes or solutions until Phase 6 (Comprehensive Diagnostic Writeup). Focus entirely on systematic evidence gathering and analysis.",
@@ -35,18 +36,21 @@
         "CONTEXT DOCUMENTATION: Maintain INVESTIGATION_CONTEXT.md throughout. Update after major milestones, failures, or user interventions to enable seamless handoffs between sessions.",
         "GIT FALLBACK STRATEGY: If git unavailable, gracefully skip commits/branches, log changes manually in CONTEXT.md with timestamps, warn user, document modifications for manual control.",
         "GIT ERROR HANDLING: Use run_terminal_cmd for git operations; if fails, output exact command for user manual execution. Never halt investigation due to git unavailability.",
-        "TOOL AVAILABILITY AWARENESS: Check debugging tool availability before investigation design. Have fallbacks for when primary tools unavailable (grep\u2192file_search, etc).",
+        "TOOL AVAILABILITY AWARENESS: Check debugging tool availability before investigation design. Have fallbacks for when primary tools unavailable (grep→file_search, etc).",
         "SECURITY PROTOCOLS: Sanitize sensitive data in logs/reproduction steps. Be mindful of exposing credentials, PII, or system internals during evidence collection phases.",
         "DYNAMIC RE-TRIAGE: Allow complexity upgrades during investigation if evidence reveals deeper issues. Safe downgrades only with explicit user confirmation after evidence review.",
         "DEVIL'S ADVOCATE REVIEW: Actively challenge primary hypothesis with available evidence. Seek alternative explanations and rate alternative likelihood before final confidence assessment.",
         "COLLABORATIVE HANDOFFS: Structure documentation for peer review and team coordination. Include methodology, reasoning, and complete evidence chain for knowledge transfer.",
-        "FAILURE BOUNDS: Track investigation progress. If >20 steps or >4 hours without breakthrough, pause for user guidance. Document dead ends to prevent redundant work in future sessions."
+        "FAILURE BOUNDS: Track investigation progress. If >20 steps or >4 hours without breakthrough, pause for user guidance. Document dead ends to prevent redundant work in future sessions.",
+        "COGNITIVE BREAKS: After 10 investigation steps, pause and summarize progress to reset perspective.",
+        "RUBBER DUCK: Verbalize hypotheses in sub-prompts to externalize reasoning and catch logical gaps.",
+        "COLLABORATION READY: Document clearly for handoffs when stuck beyond iteration limits."
     ],
     "steps": [
         {
             "id": "phase-0-triage",
             "title": "Phase 0: Initial Triage & Context Gathering",
-            "prompt": "**SYSTEMATIC INVESTIGATION BEGINS** - Your mission is to achieve near 100% certainty about this bug's root cause through systematic evidence gathering. NO FIXES will be proposed until Phase 6.\n\n**STEP 1: Bug Report Analysis**\nPlease provide the complete bug context:\n- **Bug Description**: What is the observed behavior vs expected behavior?\n- **Error Messages/Stack Traces**: Paste the complete error output\n- **Reproduction Steps**: How can this bug be consistently reproduced?\n- **Environment Details**: OS, language version, framework version, etc.\n- **Recent Changes**: Any recent commits, deployments, or configuration changes?\n\n**STEP 2: Project Type Classification**\nBased on the information provided, I will classify the project type and set debugging strategies:\n- **Languages/Frameworks**: Primary tech stack\n- **Build System**: Maven, Gradle, npm, etc.\n- **Testing Framework**: JUnit, Jest, pytest, etc.\n- **Logging System**: Available logging mechanisms\n\n**STEP 3: Complexity Assessment**\nI will analyze the bug complexity using these criteria:\n- **Simple**: Single function/method, clear error path, minimal dependencies\n- **Standard**: Multiple components, moderate investigation required\n- **Complex**: Cross-system issues, race conditions, complex state management\n\n**OUTPUTS**: Set `projectType`, `bugComplexity`, and `debuggingMechanism` context variables.",
+            "prompt": "**SYSTEMATIC INVESTIGATION BEGINS** - Your mission is to achieve near 100% certainty about this bug's root cause through systematic evidence gathering. NO FIXES will be proposed until Phase 6.\n\n**STEP 1: Bug Report Analysis**\nPlease provide the complete bug context:\n- **Bug Description**: What is the observed behavior vs expected behavior?\n- **Error Messages/Stack Traces**: Paste the complete error output\n- **Reproduction Steps**: How can this bug be consistently reproduced?\n- **Environment Details**: OS, language version, framework version, etc.\n- **Recent Changes**: Any recent commits, deployments, or configuration changes?\n\n**STEP 2: Project Type Classification**\nBased on the information provided, I will classify the project type and set debugging strategies:\n- **Languages/Frameworks**: Primary tech stack\n- **Build System**: Maven, Gradle, npm, etc.\n- **Testing Framework**: JUnit, Jest, pytest, etc.\n- **Logging System**: Available logging mechanisms\n- **Architecture**: Monolithic, microservices, distributed, serverless, etc.\n\n**STEP 3: Complexity Assessment**\nI will analyze the bug complexity using these criteria:\n- **Simple**: Single function/method, clear error path, minimal dependencies\n- **Standard**: Multiple components, moderate investigation required\n- **Complex**: Cross-system issues, race conditions, complex state management\n\n**OUTPUTS**: Set `projectType`, `bugComplexity`, `debuggingMechanism`, and `isDistributed` (true if architecture involves microservices/distributed systems) context variables.",
             "agentRole": "You are a senior debugging specialist and bug triage expert with 15+ years of experience across multiple technology stacks. Your expertise lies in quickly classifying bugs, understanding project architectures, and determining appropriate investigation strategies. You excel at extracting critical information from bug reports and setting up systematic investigation approaches.",
             "guidance": [
                 "CLASSIFICATION ACCURACY: Proper complexity assessment determines investigation depth - be thorough but decisive",
@@ -54,6 +58,41 @@
                 "DEBUGGING STRATEGY: Choose debugging mechanisms appropriate for the project type and bug complexity",
                 "NO ASSUMPTIONS: If critical information is missing, explicitly request it before proceeding"
             ]
+        },
+        {
+            "id": "phase-0a-assumption-check",
+            "title": "Phase 0a: Assumption Verification Checkpoint",
+            "prompt": "**ASSUMPTION CHECK** - Before proceeding, verify key assumptions to prevent bias.\n\n**VERIFY**:\n1. **Data State**: Confirm variable types and null handling\n2. **API/Library**: Check documentation for actual vs assumed behavior\n3. **Environment**: Verify bug exists in clean environment\n4. **Recent Changes**: Review last 5 commits for relevance\n\n**OUTPUT**: List verified assumptions with evidence sources.",
+            "agentRole": "You are a skeptical analyst who challenges every assumption. Question everything that hasn't been explicitly verified.",
+            "guidance": [
+                "Use analysis tools to verify, don't assume",
+                "Document each assumption with its verification method",
+                "Flag any unverifiable assumptions for tracking",
+                "CHECK API DOCS: Never assume function behavior from names - verify actual documentation",
+                "VERIFY DATA TYPES: Use debugger or logs to confirm actual runtime types and values",
+                "TEST ENVIRONMENT: Reproduce in minimal environment to rule out configuration issues"
+            ]
+        },
+        {
+            "id": "phase-0b-reproducibility-lock",
+            "title": "Phase 0b: Reproducibility Verification",
+            "prompt": "**REPRODUCIBILITY** - Confirm reliable reproduction:\n\n1. Execute provided steps 3 times\n2. Document success rate\n3. If intermittent, apply stress techniques\n4. Create minimal reproduction script/test\n\n**GATE**: Only proceed with 100% reproduction.",
+            "agentRole": "You are a quality gatekeeper who ensures solid foundation before investigation.",
+            "guidance": [
+                "MINIMAL EXAMPLE: Strip away all non-essential code to isolate the issue",
+                "CONTAINERIZE: Use Docker or similar to ensure consistent environment",
+                "INTERMITTENT BUGS: Apply fuzzing, stress testing, or timing variations to force reproduction",
+                "DOCUMENT PRECISELY: Record exact steps, inputs, and environment for future reference",
+                "FAIL FAST: If not reproducible after reasonable effort, request more information from user"
+            ],
+            "validationCriteria": [
+                {
+                    "type": "contains",
+                    "value": "100%",
+                    "message": "Must confirm 100% reproducibility before proceeding"
+                }
+            ],
+            "hasValidation": true
         },
         {
             "id": "phase-1-streamlined-analysis",
@@ -93,6 +132,42 @@
                 "EXECUTION FLOW FOCUS: Trace the actual code execution path that leads to the bug",
                 "STATE ANALYSIS: Pay special attention to state management and mutation patterns",
                 "DEPENDENCY MAPPING: Understand how external dependencies could contribute to the issue"
+            ]
+        },
+        {
+            "id": "phase-1a-binary-search",
+            "title": "Phase 1a: Binary Search Isolation",
+            "runCondition": {
+                "or": [
+                    {"var": "bugType", "equals": "regression"},
+                    {"var": "searchSpace", "equals": "large"}
+                ]
+            },
+            "prompt": "**BINARY SEARCH** - Apply divide-and-conquer:\n\n1. Identify GOOD state (working) and BAD state (broken)\n2. Find midpoint in history/code/data\n3. Test midpoint state\n4. Narrow to relevant half\n5. Document reduced search space\n\n**OUTPUT**: Narrowed location with evidence.",
+            "agentRole": "You are a systematic investigator using algorithmic search to efficiently isolate issues.",
+            "guidance": [
+                "VERSION CONTROL: Use 'git bisect' or equivalent for commit history searches",
+                "DATA PIPELINE: Test data at pipeline midpoints to isolate transformation issues",
+                "TIME WINDOWS: For time-based issues, binary search through timestamps",
+                "DOCUMENT BOUNDARIES: Clearly record each tested boundary and result",
+                "EFFICIENCY: Each test should eliminate ~50% of remaining search space"
+            ]
+        },
+        {
+            "id": "phase-1b-test-reduction",
+            "title": "Phase 1b: Test Case Minimization",
+            "runCondition": {
+                "var": "bugSource",
+                "equals": "failing_test"
+            },
+            "prompt": "**TEST REDUCTION** - Simplify failing test:\n\n1. Inline called methods into test\n2. Add earlier assertion to fail sooner\n3. Remove code after new failure point\n4. Repeat until minimal\n\n**OUTPUT**: Minimal failing test case.",
+            "agentRole": "You are a surgical debugger who strips away layers to reveal core issues.",
+            "guidance": [
+                "PRESERVE FAILURE: Each reduction must maintain the original failure mode",
+                "INLINE AGGRESSIVELY: Replace method calls with their actual implementation",
+                "FAIL EARLY: Move assertions up to find earliest deviation from expected state",
+                "REMOVE RUTHLESSLY: Delete all code that doesn't contribute to the failure",
+                "CLARITY GOAL: Final test should make the bug obvious to any reader"
             ]
         },
         {
@@ -144,9 +219,30 @@
             "hasValidation": true
         },
         {
+            "id": "phase-2c-hypothesis-assumptions",
+            "title": "Phase 2c: Hypothesis Assumption Audit",
+            "prompt": "**AUDIT** each hypothesis for hidden assumptions:\n\n**FOR EACH HYPOTHESIS**:\n- List implicit assumptions\n- Rate assumption confidence (1-10)\n- Identify verification approach\n\n**REJECT** hypotheses built on unverified assumptions.",
+            "agentRole": "You are a rigorous scientist who rejects any hypothesis not grounded in verified facts.",
+            "guidance": [
+                "EXPLICIT LISTING: Write out every assumption, no matter how obvious it seems",
+                "CONFIDENCE SCORING: Rate 1-10 based on evidence quality, not intuition",
+                "VERIFICATION PLAN: For each assumption, specify how it can be tested",
+                "REJECTION CRITERIA: Any assumption with confidence <7 requires verification",
+                "DOCUMENT RATIONALE: Explain why each assumption is accepted or needs testing"
+            ],
+            "validationCriteria": [
+                {
+                    "type": "contains",
+                    "value": "Assumption confidence",
+                    "message": "Must rate assumption confidence for each hypothesis"
+                }
+            ],
+            "hasValidation": true
+        },
+        {
             "id": "phase-3-debugging-instrumentation",
             "title": "Phase 3: Debugging Instrumentation Setup",
-            "prompt": "**DEBUGGING INSTRUMENTATION** - Implement mechanisms to gather evidence for hypothesis validation.\n\n**STEP 1: Strategy Selection**\nChoose approach based on `projectType`:\n- **Logging**: Strategic state/flow capture\n- **Print Debug**: Console output\n- **Test Mods**: Enhanced test assertions\n- **Debug Tests**: New validation tests\n- **Profiling**: Performance monitoring\n\n**STEP 2: Implementation**\nFor top hypotheses:\n- **Entry/Exit**: Function calls with params/returns\n- **State**: Variable values at decision points\n- **Flow**: Execution path tracking\n- **Error Context**: Enhanced error messages\n- **Timing**: Timestamps for race conditions\n\n**LOG DEDUPLICATION**:\n- **Pattern Groups**: Similar logs (validateUser)\n- **Count Track**: Indicators ('x10 - last: user123')\n- **Grouping**: Sequential ('auth\u2192token\u2192db')\n- **Windows**: 50-100ms for related ops\n- **Summaries**: Total counts ('x47 total')\n\n**SUB-ANALYSIS META**:\n- **H-Tags**: Prefix with hypothesis IDs ('H1_DEBUG:')\n- **Format**: Consistent patterns (timestamp, component)\n- **Context**: Standalone analysis info\n- **Searchable**: Clear terms and regex patterns\n\n**STEP 3: Validation**\n- All hypotheses covered\n- Code safety maintained\n- Clear evidence provided\n- Edge cases handled\n\n**STEP 4: Execution**\n- Running commands\n- Expected patterns\n- Result capture\n\n**OUTPUTS**: Instrumented code ready.",
+            "prompt": "**DEBUGGING INSTRUMENTATION** - Implement mechanisms to gather evidence for hypothesis validation.\n\n**STEP 1: Strategy Selection**\nChoose approach based on `projectType`:\n- **Logging**: Strategic state/flow capture\n- **Print Debug**: Console output\n- **Test Mods**: Enhanced test assertions\n- **Debug Tests**: New validation tests\n- **Profiling**: Performance monitoring\n\n**STEP 2: Implementation**\nFor top hypotheses:\n- **Entry/Exit**: Function calls with params/returns\n- **State**: Variable values at decision points\n- **Flow**: Execution path tracking\n- **Error Context**: Enhanced error messages\n- **Timing**: Timestamps for race conditions\n\n**LOG DEDUPLICATION**:\n- **Pattern Groups**: Similar logs (validateUser)\n- **Count Track**: Indicators ('x10 - last: user123')\n- **Grouping**: Sequential ('auth→token→db')\n- **Windows**: 50-100ms for related ops\n- **Summaries**: Total counts ('x47 total')\n\n**SUB-ANALYSIS META**:\n- **H-Tags**: Prefix with hypothesis IDs ('H1_DEBUG:')\n- **Format**: Consistent patterns (timestamp, component)\n- **Context**: Standalone analysis info\n- **Searchable**: Clear terms and regex patterns\n\n**STEP 3: Validation**\n- All hypotheses covered\n- Code safety maintained\n- Clear evidence provided\n- Edge cases handled\n\n**STEP 4: Execution**\n- Running commands\n- Expected patterns\n- Result capture\n\n**OUTPUTS**: Instrumented code ready.",
             "agentRole": "You are a debugging instrumentation specialist and diagnostic expert with extensive experience in systematic evidence collection. Your expertise lies in implementing non-intrusive debugging mechanisms that provide clear evidence for hypothesis validation. You excel at strategic instrumentation that maximizes diagnostic value.",
             "guidance": [
                 "STRATEGIC PLACEMENT: Place instrumentation at points that will provide maximum diagnostic value",
@@ -154,6 +250,23 @@
                 "COMPREHENSIVE COVERAGE: Instrument all critical paths related to the hypotheses",
                 "CLEAR OUTPUT: Design instrumentation to provide unambiguous evidence",
                 "LOG DEDUPLICATION FOCUS: Implement pattern-based log deduplication for high-frequency scenarios to reduce noise while preserving diagnostic value. Use counting, grouping, and time-window strategies as detailed in metaGuidance LOG ENHANCEMENTS."
+            ]
+        },
+        {
+            "id": "phase-3a-observability-setup",
+            "title": "Phase 3a: Distributed System Observability",
+            "runCondition": {
+                "var": "isDistributed",
+                "equals": true
+            },
+            "prompt": "**OBSERVABILITY** - Set up three-pillar strategy:\n\n**METRICS**: Identify key indicators (latency, errors)\n**TRACES**: Enable request path tracking\n**LOGS**: Ensure correlation IDs present\n\n**OUTPUT**: Observability checklist completed.",
+            "agentRole": "You are a distributed systems expert who thinks in terms of emergent behaviors and system-wide patterns.",
+            "guidance": [
+                "METRICS SELECTION: Focus on RED metrics (Rate, Errors, Duration) for each service",
+                "TRACE COVERAGE: Ensure spans cover all service boundaries and key operations",
+                "CORRELATION IDS: Verify IDs propagate through entire request lifecycle",
+                "AGGREGATION READY: Set up centralized collection for cross-service analysis",
+                "BASELINE ESTABLISHMENT: Capture normal behavior metrics for comparison"
             ]
         },
         {
@@ -165,6 +278,40 @@
                 "SYSTEMATIC ANALYSIS: Analyze evidence methodically against each hypothesis",
                 "OFFLOAD INTEGRATION: For sub-analysis summaries, verify workflow standards (min 3 evidence sources).",
                 "SUB-ANALYSIS: For Step 1.5, assess log volume >500 lines and generate sub-analysis prompts."
+            ]
+        },
+        {
+            "id": "phase-4a-distributed-evidence",
+            "title": "Phase 4a: Multi-Service Evidence Collection",
+            "runCondition": {
+                "var": "isDistributed",
+                "equals": true
+            },
+            "prompt": "**DISTRIBUTED ANALYSIS**:\n\n1. Check METRICS for anomalies\n2. Follow TRACES for request path\n3. Correlate LOGS across services\n4. Identify cascade points\n\n**OUTPUT**: Service interaction map with failure points.",
+            "agentRole": "You are a systems detective who can trace failures across service boundaries.",
+            "guidance": [
+                "ANOMALY DETECTION: Look for deviations in latency, error rates, or traffic patterns",
+                "TRACE ANALYSIS: Follow request ID through all services to find failure point",
+                "LOG CORRELATION: Use timestamp windows and correlation IDs to link events",
+                "CASCADE IDENTIFICATION: Look for timeout chains or error propagation patterns",
+                "VISUAL MAPPING: Create service dependency diagram with failure annotations"
+            ]
+        },
+        {
+            "id": "phase-4b-cognitive-reset",
+            "title": "Phase 4b: Cognitive Reset & Progress Review",
+            "runCondition": {
+                "var": "iterationCount",
+                "gt": 10
+            },
+            "prompt": "**COGNITIVE RESET** - Step back and review:\n\n1. Summarize findings so far\n2. List eliminated possibilities\n3. Identify investigation blind spots\n4. Reformulate approach if needed\n\n**DECIDE**: Continue current path or pivot strategy?",
+            "agentRole": "You are a strategic advisor who helps maintain perspective during complex investigations.",
+            "guidance": [
+                "PROGRESS SUMMARY: Write concise bullet points of key findings and eliminations",
+                "BLIND SPOT CHECK: What areas haven't been investigated? What assumptions remain?",
+                "PATTERN RECOGNITION: Look for investigation loops or repeated dead ends",
+                "STRATEGY EVALUATION: Is current approach yielding diminishing returns?",
+                "PIVOT CRITERIA: Consider new approach if last 3 iterations provided no new insights"
             ]
         },
         {
@@ -181,7 +328,7 @@
         {
             "id": "phase-5b-confidence-assessment",
             "title": "Phase 5b: Adversarial Challenge & Confidence Assessment",
-            "prompt": "**CONFIDENCE ASSESSMENT** - Challenge the root cause conclusion and quantify confidence.\n\n**STEP 1: Adversarial Challenge Protocol**\n- **Devil's Advocate Analysis**: Argue against primary hypothesis\n- **Alternative Explanations**: Identify 2+ alternative explanations for evidence\n- **Confidence Calibration**: Rate certainty on calibrated scale with reasoning\n- **Uncertainty Documentation**: List remaining unknowns and impact\n\n**STEP 2: Confidence Assessment Matrix**\n- **Evidence Quality Score** (1-10): Reliability and completeness of supporting evidence\n- **Explanation Completeness** (1-10): How well root cause explains all symptoms\n- **Alternative Likelihood** (1-10): Probability alternatives are correct (inverted)\n- **Final Confidence** = (Evidence Quality \u00d7 0.4) + (Completeness \u00d7 0.4) + (Alternative \u00d7 0.2)\n\n**CONFIDENCE THRESHOLD**: Proceed only if Final Confidence \u2265 9.0/10. If below, recommend additional investigation with specific evidence gaps.\n\n**OUTPUTS**: High-confidence root cause with quantified assessment and adversarial validation.",
+            "prompt": "**CONFIDENCE ASSESSMENT** - Challenge the root cause conclusion and quantify confidence.\n\n**STEP 1: Adversarial Challenge Protocol**\n- **Devil's Advocate Analysis**: Argue against primary hypothesis\n- **Alternative Explanations**: Identify 2+ alternative explanations for evidence\n- **Confidence Calibration**: Rate certainty on calibrated scale with reasoning\n- **Uncertainty Documentation**: List remaining unknowns and impact\n\n**STEP 2: Confidence Assessment Matrix**\n- **Evidence Quality Score** (1-10): Reliability and completeness of supporting evidence\n- **Explanation Completeness** (1-10): How well root cause explains all symptoms\n- **Alternative Likelihood** (1-10): Probability alternatives are correct (inverted)\n- **Final Confidence** = (Evidence Quality × 0.4) + (Completeness × 0.4) + (Alternative × 0.2)\n\n**CONFIDENCE THRESHOLD**: Proceed only if Final Confidence ≥ 9.0/10. If below, recommend additional investigation with specific evidence gaps.\n\n**OUTPUTS**: High-confidence root cause with quantified assessment and adversarial validation.",
             "agentRole": "You are a senior root cause analysis expert and forensic investigator with deep expertise in systematic evidence evaluation and definitive conclusion formation. Your strength lies in synthesizing complex evidence into clear, confident determinations. You excel at maintaining rigorous standards for certainty while providing actionable insights. You must actively challenge your own conclusions and maintain objective, quantified confidence assessments.",
             "guidance": [
                 "ADVERSARIAL MINDSET: Actively challenge your own conclusions with available evidence",
@@ -208,6 +355,27 @@
                     "type": "regex",
                     "pattern": "Final Confidence = [0-9\\.]+",
                     "message": "Must calculate and report final confidence score using the specified formula"
+                }
+            ],
+            "hasValidation": true
+        },
+        {
+            "id": "phase-5c-prevention-scan",
+            "title": "Phase 5c: Anti-Pattern & Prevention Analysis",
+            "prompt": "**PREVENTION SCAN** - Identify systemic issues:\n\n**ANTI-PATTERNS**:\n- Tight coupling indicators\n- State management issues\n- Missing error handling\n\n**RECOMMENDATIONS**:\n- Modularization opportunities\n- Immutability improvements\n- Test coverage gaps\n\n**OUTPUT**: Prevention checklist for writeup.",
+            "agentRole": "You are a software architect who identifies systemic improvements beyond the immediate bug.",
+            "guidance": [
+                "COUPLING ANALYSIS: Look for God Objects, circular dependencies, or tangled interfaces",
+                "STATE AUDIT: Identify mutable shared state, unclear ownership, or race conditions",
+                "ERROR HANDLING: Check for silent failures, generic catches, or missing validation",
+                "ARCHITECTURAL DEBT: Note violations of SOLID principles or design patterns",
+                "ACTIONABLE RECOMMENDATIONS: Provide specific refactoring suggestions with examples"
+            ],
+            "validationCriteria": [
+                {
+                    "type": "contains",
+                    "value": "Anti-pattern",
+                    "message": "Must identify at least one anti-pattern or improvement area"
                 }
             ],
             "hasValidation": true
