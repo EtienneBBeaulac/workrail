@@ -427,22 +427,52 @@ export class ValidationEngine {
       issues.push(`Loop step must have a body`);
       suggestions.push('Set body to a step ID or array of step IDs');
     } else {
-      // Validate body references exist
-      const bodySteps = Array.isArray(step.body) ? step.body : [step.body];
-      for (const bodyStepId of bodySteps) {
-        const bodyStep = workflow.steps.find(s => s.id === bodyStepId);
+      // Handle both string references and inline step arrays
+      if (typeof step.body === 'string') {
+        // Validate single step reference
+        const bodyStep = workflow.steps.find(s => s.id === step.body);
         if (!bodyStep) {
-          issues.push(`Loop body references non-existent step '${bodyStepId}'`);
-          suggestions.push(`Create a step with ID '${bodyStepId}' or update the body reference`);
-        }
-      }
-
-      // Check for nested loops (prevent for now)
-      for (const bodyStepId of bodySteps) {
-        const bodyStep = workflow.steps.find(s => s.id === bodyStepId);
-        if (bodyStep && isLoopStep(bodyStep)) {
-          issues.push(`Nested loops are not currently supported. Step '${bodyStepId}' is a loop`);
+          issues.push(`Loop body references non-existent step '${step.body}'`);
+          suggestions.push(`Create a step with ID '${step.body}' or update the body reference`);
+        } else if (isLoopStep(bodyStep)) {
+          issues.push(`Nested loops are not currently supported. Step '${step.body}' is a loop`);
           suggestions.push('Refactor to avoid nested loops or use sequential loops');
+        }
+      } else if (Array.isArray(step.body)) {
+        // Validate inline step array
+        if (step.body.length === 0) {
+          issues.push(`Loop body array cannot be empty`);
+          suggestions.push('Add at least one step to the loop body');
+        }
+        
+        // Validate each inline step
+        const stepIds = new Set<string>();
+        for (const inlineStep of step.body) {
+          if (!inlineStep.id) {
+            issues.push(`Inline step in loop body must have an ID`);
+            suggestions.push('Add an ID to all inline steps');
+          } else if (stepIds.has(inlineStep.id)) {
+            issues.push(`Duplicate step ID '${inlineStep.id}' in loop body`);
+            suggestions.push('Use unique IDs for each inline step');
+          } else {
+            stepIds.add(inlineStep.id);
+          }
+          
+          if (!inlineStep.title) {
+            issues.push(`Inline step '${inlineStep.id || 'unknown'}' must have a title`);
+            suggestions.push('Add a title to all inline steps');
+          }
+          
+          if (!inlineStep.prompt) {
+            issues.push(`Inline step '${inlineStep.id || 'unknown'}' must have a prompt`);
+            suggestions.push('Add a prompt to all inline steps');
+          }
+          
+          // Check for nested loops
+          if (isLoopStep(inlineStep)) {
+            issues.push(`Nested loops are not currently supported. Inline step '${inlineStep.id}' is a loop`);
+            suggestions.push('Refactor to avoid nested loops');
+          }
         }
       }
     }

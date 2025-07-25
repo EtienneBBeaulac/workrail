@@ -107,6 +107,9 @@ export class DefaultWorkflowService implements WorkflowService {
         const loopStep = step as LoopStep;
         if (typeof loopStep.body === 'string') {
           loopBodySteps.add(loopStep.body);
+        } else if (Array.isArray(loopStep.body)) {
+          // Add all step IDs from multi-step body
+          loopStep.body.forEach(bodyStep => loopBodySteps.add(bodyStep.id));
         }
       }
     }
@@ -146,8 +149,62 @@ export class DefaultWorkflowService implements WorkflowService {
             context: loopSizeCheck.context
           };
         } else {
-          // Multi-step body support will be implemented in Phase 3
-          throw new Error('Multi-step loop bodies not yet supported');
+          // Handle multi-step body
+          // Find the first uncompleted step in the body that meets its condition
+          const uncompletedBodyStep = bodyStep.find(step => {
+            // Skip if already completed
+            if (completed.includes(step.id)) {
+              return false;
+            }
+            
+            // Check runCondition if present
+            if (step.runCondition) {
+              return evaluateCondition(step.runCondition, context);
+            }
+            
+            return true;
+          });
+          
+          if (uncompletedBodyStep) {
+            // Always inject loop variables first
+            const loopEnhancedContext = loopContext.injectVariables(context);
+            
+            // Check context size after injection
+            const loopSizeCheck = checkContextSize(loopEnhancedContext);
+            if (loopSizeCheck.isError) {
+              throw new Error(`Context size (${Math.round(loopSizeCheck.sizeBytes / 1024)}KB) exceeds maximum allowed size (256KB) during loop execution`);
+            }
+            
+            // Return the next uncompleted step in the body
+            return {
+              step: uncompletedBodyStep,
+              guidance: {
+                prompt: this.buildStepPrompt(uncompletedBodyStep, loopContext)
+              },
+              isComplete: false,
+              context: loopSizeCheck.context
+            };
+          } else {
+            // All body steps completed for this iteration, increment and check if we should continue
+            loopContext.incrementIteration();
+            
+            // Update loop state in context
+            if (!enhancedContext._loopState) {
+              enhancedContext._loopState = {};
+            }
+            enhancedContext._loopState[loopId] = loopContext.getCurrentState();
+            
+            // Clear completed body steps for next iteration
+            bodyStep.forEach(step => {
+              const index = completed.indexOf(step.id);
+              if (index > -1) {
+                completed.splice(index, 1);
+              }
+            });
+            
+            // Continue to check if loop should execute again
+            return this.getNextStep(workflowId, completed, enhancedContext);
+          }
         }
       } else {
         // Loop has completed, mark it as completed
@@ -164,7 +221,22 @@ export class DefaultWorkflowService implements WorkflowService {
       }
       
       // Skip if step is a loop body (unless we're executing that loop)
-      if (loopBodySteps.has(step.id) && (!enhancedContext._currentLoop || enhancedContext._currentLoop.loopStep.body !== step.id)) {
+      if (loopBodySteps.has(step.id)) {
+        // If we're not in a loop, skip all loop body steps
+        if (!enhancedContext._currentLoop) {
+          return false;
+        }
+        
+        // If we're in a loop, check if this step is part of the current loop's body
+        const currentLoopBody = enhancedContext._currentLoop.loopStep.body;
+        if (typeof currentLoopBody === 'string') {
+          // Single-step body
+          return currentLoopBody === step.id;
+        } else if (Array.isArray(currentLoopBody)) {
+          // Multi-step body - check if this step is in the array
+          return currentLoopBody.some(bodyStep => bodyStep.id === step.id);
+        }
+        
         return false;
       }
       
@@ -345,8 +417,11 @@ export class DefaultWorkflowService implements WorkflowService {
       const workflow = await this.storage.getWorkflowById(workflowId);
       
       if (workflow) {
-        // Check if the completed step is the loop body
+        // Check if the completed step is part of the loop body
         const bodyStep = this.loopStepResolver.resolveLoopBody(workflow, loopStep.body, loopStep.id);
+        
+        // Only increment iteration for single-step bodies
+        // Multi-step bodies are incremented in getNextStep when all steps complete
         if (!Array.isArray(bodyStep) && bodyStep.id === stepId) {
           // Create loop context to increment iteration
           const loopContext = new LoopExecutionContext(

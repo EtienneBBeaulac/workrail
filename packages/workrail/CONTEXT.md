@@ -309,11 +309,11 @@
    - Validation for circular references
 
 ### Current Status
-- **Phase**: 2 (Core Implementation) 
-- **Progress**: 8/16 steps complete (50%)
-- **Current Step**: 3.1 - Until/For/ForEach Support
+- **Phase**: 3 (Full Loop Support) 
+- **Progress**: 9/16 steps complete (56.25%)
+- **Current Step**: 3.2 - Multi-Step Body Support
 - **Branch**: feature/loop-implementation
-- **All Tests**: ✅ Passing (22 workflow service tests, 11 context size tests, 19 loop validation tests)
+- **All Tests**: ✅ Passing (28 workflow service tests, 11 context size tests, 19 loop validation tests)
 
 ### Implementation Notes for Step 2.2 (COMPLETED) ✅
 - Implemented stateless while loop execution logic in WorkflowService
@@ -353,6 +353,22 @@
 - All 19 loop validation tests passing
 - All workflow service tests updated and passing
 
+### Implementation Notes for Step 3.1 (COMPLETED) ✅
+- Implemented comprehensive tests for all loop types (until, for, forEach)
+- Fixed iteration counter to be 1-based for user-friendliness
+- Fixed critical forEach index initialization bug:
+  - Index was being reset to 0 when reconstructing LoopExecutionContext
+  - Now only initializes index if not already present in state
+- Enhanced loop state preservation:
+  - Loop state saved after initialization (including forEach items)
+  - Warnings propagated even when loops are skipped
+- Test coverage complete for all loop types:
+  - Until loops with condition-based termination
+  - For loops with fixed and variable counts
+  - ForEach loops with arrays, empty arrays, and non-array handling
+- All 28 workflow service tests passing with no regressions
+- Commit: fcb30ac
+
 ### Key Design Decisions
 - **Stateless Design**: Loop state is passed through context rather than stored in service
 - **Loop Body Isolation**: Steps referenced as loop bodies are automatically skipped unless their loop is executing
@@ -380,8 +396,7 @@
 - `tests/unit/workflow-service.test.ts` (added validation tests, fixed conflicts)
 
 ### Remaining Work
-- Phase 2: Core implementation (4 steps) - IN PROGRESS
-- Phase 3: Full loop support (4 steps)
+- Phase 3: Full loop support (3 steps remaining) - IN PROGRESS
 - Phase 4: Polish & tools (4 steps)
 
 ## 11. HANDOFF INSTRUCTIONS
