@@ -90,6 +90,12 @@ export class DefaultWorkflowService implements WorkflowService {
       throw new WorkflowNotFoundError(workflowId);
     }
 
+    // Validate workflow structure including loops
+    const validationResult = this.validationEngine.validateWorkflow(workflow);
+    if (!validationResult.valid) {
+      throw new Error(`Invalid workflow structure: ${validationResult.issues.join('; ')}`);
+    }
+
     // Create a mutable copy of completed steps
     const completed = [...(completedSteps || [])];
     const enhancedContext = checkedContext as EnhancedContext;

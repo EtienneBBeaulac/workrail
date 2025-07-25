@@ -1,6 +1,7 @@
 import { ValidationError } from '../../core/error-handler';
 import { evaluateCondition, Condition, ConditionContext } from '../../utils/condition-evaluator';
 import Ajv from 'ajv';
+import { WorkflowStep, LoopStep, Workflow, isLoopStep } from '../../types/workflow-types';
 
 export interface ValidationRule {
   type: 'contains' | 'regex' | 'length' | 'schema';
@@ -363,5 +364,188 @@ export class ValidationEngine {
 
     // Unknown rule format
     throw new ValidationError('Invalid validationCriteria format.');
+  }
+
+  /**
+   * Validates a loop step configuration
+   * @param step - The loop step to validate
+   * @param workflow - The workflow containing the step
+   * @returns ValidationResult with validation status and issues
+   */
+  validateLoopStep(step: LoopStep, workflow: Workflow): ValidationResult {
+    const issues: string[] = [];
+    const suggestions: string[] = [];
+
+    // Validate loop type
+    const validTypes = ['while', 'until', 'for', 'forEach'];
+    if (!validTypes.includes(step.loop.type)) {
+      issues.push(`Invalid loop type '${step.loop.type}'. Must be one of: ${validTypes.join(', ')}`);
+    }
+
+    // Validate maxIterations
+    if (typeof step.loop.maxIterations !== 'number' || step.loop.maxIterations <= 0) {
+      issues.push(`maxIterations must be a positive number`);
+      suggestions.push('Set maxIterations to a reasonable limit (e.g., 100) to prevent infinite loops');
+    } else if (step.loop.maxIterations > 1000) {
+      issues.push(`maxIterations (${step.loop.maxIterations}) exceeds safety limit of 1000`);
+      suggestions.push('Consider reducing maxIterations or breaking the loop into smaller chunks');
+    }
+
+    // Type-specific validation
+    switch (step.loop.type) {
+      case 'while':
+      case 'until':
+        if (!step.loop.condition) {
+          issues.push(`${step.loop.type} loop requires a condition`);
+          suggestions.push(`Add a condition that evaluates to false (for while) or true (for until) to exit the loop`);
+        }
+        break;
+
+      case 'for':
+        if (step.loop.count === undefined) {
+          issues.push(`for loop requires a count`);
+          suggestions.push('Set count to a number or context variable name');
+        } else if (typeof step.loop.count === 'string') {
+          // It's a context variable reference - valid
+        } else if (typeof step.loop.count !== 'number' || step.loop.count <= 0) {
+          issues.push(`for loop count must be a positive number or context variable name`);
+        }
+        break;
+
+      case 'forEach':
+        if (!step.loop.items) {
+          issues.push(`forEach loop requires items`);
+          suggestions.push('Set items to a context variable name containing an array');
+        } else if (typeof step.loop.items !== 'string') {
+          issues.push(`forEach loop items must be a context variable name`);
+        }
+        break;
+    }
+
+    // Validate body reference
+    if (!step.body) {
+      issues.push(`Loop step must have a body`);
+      suggestions.push('Set body to a step ID or array of step IDs');
+    } else {
+      // Validate body references exist
+      const bodySteps = Array.isArray(step.body) ? step.body : [step.body];
+      for (const bodyStepId of bodySteps) {
+        const bodyStep = workflow.steps.find(s => s.id === bodyStepId);
+        if (!bodyStep) {
+          issues.push(`Loop body references non-existent step '${bodyStepId}'`);
+          suggestions.push(`Create a step with ID '${bodyStepId}' or update the body reference`);
+        }
+      }
+
+      // Check for nested loops (prevent for now)
+      for (const bodyStepId of bodySteps) {
+        const bodyStep = workflow.steps.find(s => s.id === bodyStepId);
+        if (bodyStep && isLoopStep(bodyStep)) {
+          issues.push(`Nested loops are not currently supported. Step '${bodyStepId}' is a loop`);
+          suggestions.push('Refactor to avoid nested loops or use sequential loops');
+        }
+      }
+    }
+
+    // Validate variable names
+    if (step.loop.iterationVar && !this.isValidVariableName(step.loop.iterationVar)) {
+      issues.push(`Invalid iteration variable name '${step.loop.iterationVar}'`);
+      suggestions.push('Use a valid JavaScript variable name (alphanumeric, _, $)');
+    }
+
+    if (step.loop.itemVar && !this.isValidVariableName(step.loop.itemVar)) {
+      issues.push(`Invalid item variable name '${step.loop.itemVar}'`);
+      suggestions.push('Use a valid JavaScript variable name');
+    }
+
+    if (step.loop.indexVar && !this.isValidVariableName(step.loop.indexVar)) {
+      issues.push(`Invalid index variable name '${step.loop.indexVar}'`);
+      suggestions.push('Use a valid JavaScript variable name');
+    }
+
+    return {
+      valid: issues.length === 0,
+      issues,
+      suggestions
+    };
+  }
+
+  /**
+   * Validates a complete workflow including loop steps
+   * @param workflow - The workflow to validate
+   * @returns ValidationResult with validation status and issues
+   */
+  validateWorkflow(workflow: Workflow): ValidationResult {
+    const issues: string[] = [];
+    const suggestions: string[] = [];
+
+    // Check for duplicate step IDs
+    const stepIds = new Set<string>();
+    for (const step of workflow.steps) {
+      if (stepIds.has(step.id)) {
+        issues.push(`Duplicate step ID '${step.id}'`);
+        suggestions.push('Ensure all step IDs are unique');
+      }
+      stepIds.add(step.id);
+    }
+
+    // Validate each step
+    for (const step of workflow.steps) {
+      if (isLoopStep(step)) {
+        const loopResult = this.validateLoopStep(step, workflow);
+        issues.push(...loopResult.issues.map(issue => `Step '${step.id}': ${issue}`));
+        suggestions.push(...loopResult.suggestions);
+      } else {
+        // Basic step validation
+        if (!step.id) {
+          issues.push('Step missing required ID');
+        }
+        if (!step.title) {
+          issues.push(`Step '${step.id}' missing required title`);
+        }
+        if (!step.prompt) {
+          issues.push(`Step '${step.id}' missing required prompt`);
+        }
+      }
+    }
+
+    // Check for orphaned loop body steps
+    const loopBodySteps = new Set<string>();
+    for (const step of workflow.steps) {
+      if (isLoopStep(step)) {
+        if (typeof step.body === 'string') {
+          loopBodySteps.add(step.body);
+        } else if (Array.isArray(step.body)) {
+          step.body.forEach(id => {
+            if (typeof id === 'string') {
+              loopBodySteps.add(id);
+            }
+          });
+        }
+      }
+    }
+
+    // Warn about steps that are only reachable through loops
+    for (const step of workflow.steps) {
+      if (loopBodySteps.has(step.id) && step.runCondition) {
+        issues.push(`Step '${step.id}' is a loop body but has runCondition - this may cause conflicts`);
+        suggestions.push('Remove runCondition from loop body steps as they are controlled by the loop');
+      }
+    }
+
+    return {
+      valid: issues.length === 0,
+      issues,
+      suggestions
+    };
+  }
+
+  /**
+   * Checks if a string is a valid JavaScript variable name
+   * @param name - The variable name to check
+   * @returns true if valid
+   */
+  private isValidVariableName(name: string): boolean {
+    return /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(name);
   }
 } 

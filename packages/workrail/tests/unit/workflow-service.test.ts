@@ -302,8 +302,7 @@ describe('DefaultWorkflowService', () => {
           { 
             id: 'check-var', 
             title: 'Check Variable', 
-            prompt: 'Check loop variable',
-            runCondition: { var: 'loopCount', gt: 0 }
+            prompt: 'Check loop variable'
           }
         ]
       };
@@ -312,9 +311,9 @@ describe('DefaultWorkflowService', () => {
 
       // First iteration should have loopCount = 0
       const result1 = await service.getNextStep('vars-workflow', [], { shouldContinue: true });
-      // Since runCondition checks loopCount > 0, first iteration should skip
-      // This will increment and try again
       expect(result1.step?.id).toBe('check-var');
+      // Context should have loop variables injected
+      expect(result1.context).toHaveProperty('loopCount', 0);
     });
 
     it('should respect max iterations limit', async () => {
@@ -513,6 +512,97 @@ describe('DefaultWorkflowService', () => {
       expect(result2.step?.id).toBe('accumulate');
       expect(result2.context?._contextSize).toBeGreaterThan(204 * 1024); // Should be over 204KB
       expect(result2.context?._warnings?.contextSize).toBeDefined(); // Should warn now
+    });
+  });
+
+  describe('getNextStep with loop validation', () => {
+    it('should validate workflow structure and reject invalid loops', async () => {
+      const invalidLoopWorkflow: Workflow = {
+        id: 'invalid-loop-workflow',
+        name: 'Invalid Loop Workflow',
+        description: 'Workflow with invalid loop',
+        version: '0.1.0',
+        steps: [
+          {
+            id: 'bad-loop',
+            type: 'loop',
+            title: 'Bad Loop',
+            prompt: 'Invalid loop',
+            loop: {
+              type: 'while',
+              // Missing required condition for while loop
+              maxIterations: 10
+            } as any,
+            body: 'step1'
+          } as LoopStep,
+          { id: 'step1', title: 'Step 1', prompt: 'Body step' }
+        ]
+      };
+
+      mockStorage.getWorkflowById.mockResolvedValue(invalidLoopWorkflow);
+
+      await expect(
+        service.getNextStep('invalid-loop-workflow', [], {})
+      ).rejects.toThrow('Invalid workflow structure');
+    });
+
+    it('should validate and reject workflow with non-existent loop body', async () => {
+      const invalidBodyWorkflow: Workflow = {
+        id: 'invalid-body-workflow',
+        name: 'Invalid Body Workflow',
+        description: 'Workflow with non-existent loop body',
+        version: '0.1.0',
+        steps: [
+          {
+            id: 'loop',
+            type: 'loop',
+            title: 'Loop',
+            prompt: 'Loop with bad body',
+            loop: {
+              type: 'while',
+              condition: { var: 'active' },
+              maxIterations: 10
+            },
+            body: 'non-existent-step'
+          } as LoopStep
+        ]
+      };
+
+      mockStorage.getWorkflowById.mockResolvedValue(invalidBodyWorkflow);
+
+      await expect(
+        service.getNextStep('invalid-body-workflow', [], {})
+      ).rejects.toThrow('non-existent step');
+    });
+
+    it('should accept valid loop workflows', async () => {
+      const validLoopWorkflow: Workflow = {
+        id: 'valid-loop-workflow',
+        name: 'Valid Loop Workflow',
+        description: 'Workflow with valid loop',
+        version: '0.1.0',
+        steps: [
+          {
+            id: 'good-loop',
+            type: 'loop',
+            title: 'Good Loop',
+            prompt: 'Valid loop',
+            loop: {
+              type: 'for',
+              count: 3,
+              maxIterations: 5
+            },
+            body: 'process'
+          } as LoopStep,
+          { id: 'process', title: 'Process', prompt: 'Do something' },
+          { id: 'done', title: 'Done', prompt: 'Complete' }
+        ]
+      };
+
+      mockStorage.getWorkflowById.mockResolvedValue(validLoopWorkflow);
+
+      const result = await service.getNextStep('valid-loop-workflow', [], {});
+      expect(result.step?.id).toBe('process'); // Should start loop body
     });
   });
 }); 

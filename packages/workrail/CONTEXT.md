@@ -310,10 +310,10 @@
 
 ### Current Status
 - **Phase**: 2 (Core Implementation) 
-- **Progress**: 7/16 steps complete (43.75%)
-- **Current Step**: 2.4 - Loop Validation Rules
+- **Progress**: 8/16 steps complete (50%)
+- **Current Step**: 3.1 - Until/For/ForEach Support
 - **Branch**: feature/loop-implementation
-- **All Tests**: ✅ Passing (19 workflow service tests, 11 context size tests)
+- **All Tests**: ✅ Passing (22 workflow service tests, 11 context size tests, 19 loop validation tests)
 
 ### Implementation Notes for Step 2.2 (COMPLETED) ✅
 - Implemented stateless while loop execution logic in WorkflowService
@@ -337,11 +337,29 @@
 - Handles circular references properly
 - All tests passing with proper size validation
 
+### Implementation Notes for Step 2.4 (COMPLETED) ✅
+- Extended ValidationEngine with comprehensive loop validation
+- Added validateLoopStep method to validate individual loop configurations
+- Added validateWorkflow method to validate entire workflows including loops
+- Validation checks include:
+  - Valid loop types (while, until, for, forEach)
+  - Required properties for each loop type
+  - Max iterations limit (1-1000)
+  - Valid body step references
+  - Prevention of nested loops (for now)
+  - Valid JavaScript variable names
+  - Warning about runCondition on loop body steps
+- Integrated validation into WorkflowService.getNextStep
+- All 19 loop validation tests passing
+- All workflow service tests updated and passing
+
 ### Key Design Decisions
 - **Stateless Design**: Loop state is passed through context rather than stored in service
 - **Loop Body Isolation**: Steps referenced as loop bodies are automatically skipped unless their loop is executing
 - **Context Enhancement**: getNextStep returns enhanced context for proper state propagation
 - **No Recursive Overload**: Simplified recursive calls to prevent infinite loops
+- **Strict Validation**: Workflows are validated on every getNextStep call to ensure correctness
+- **No Nested Loops**: Currently prevented to simplify implementation and avoid complexity
 
 ### Files Modified
 - `spec/workflow.schema.json` (v0.1.0)
@@ -357,6 +375,9 @@
 - `src/types/workflow-types.ts` (added _currentLoop)
 - `tests/unit/context-size.test.ts` (new test file)
 - `tests/unit/workflow-service.test.ts` (added context size tests)
+- `src/application/services/validation-engine.ts` (added loop validation)
+- `tests/unit/loop-validation.test.ts` (new test file)
+- `tests/unit/workflow-service.test.ts` (added validation tests, fixed conflicts)
 
 ### Remaining Work
 - Phase 2: Core implementation (4 steps) - IN PROGRESS
