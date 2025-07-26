@@ -1,7 +1,7 @@
 {
   "id": "mr-review-workflow",
   "name": "Adaptive MR Review Workflow",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "An adaptive workflow to guide an AI agent in performing a comprehensive code review. It adjusts its rigor based on MR complexity and includes checkpoints for architectural and self-critique to provide deep, actionable feedback.",
   "preconditions": [
     "User has the full code diff accessible (e.g., as text in a file).",
@@ -9,17 +9,21 @@
     "The agent has access to file-reading tools."
   ],
   "metaGuidance": [
-    "The ultimate goal is to assist, not replace, a human reviewer.",
-    "All feedback should be constructive and actionable.",
+    "The ultimate goal is to assist, not replace, a human reviewer. The human owns the final merge decision.",
+    "All feedback should be constructive and actionable. Explain the 'why' behind suggestions.",
+    "The goal is continuous improvement, not perfection. Approve changes that are 'better' to maintain velocity.",
+    "Foster a blameless culture of collective ownership. The code is a shared asset.",
+    "Use prefixes like 'Nit:' for non-blocking, minor suggestions to keep focus on important issues.",
+    "Embrace small, single-purpose pull requests for faster, more thorough reviews.",
     "When citing issues, always try to provide specific file paths and line numbers from the diff.",
     "Maintain the persona of a helpful, collaborative senior engineer.",
-    "If at any point you determine that a crucial piece of information is missing to complete your analysis, you must pause. State what information you need, why it is necessary, and ask the user to provide it."
+    "If at any point you determine that a crucial piece of information is missing, you must pause and ask the user to provide it."
   ],
   "steps": [
     {
       "id": "phase-0-triage",
       "title": "Phase 0: Triage & Review Focus",
-      "prompt": "To begin the Merge Request review, please provide the full context below and classify the MR's complexity. This will tailor the depth of the review.\n\n**1. MR Context:**\n* **MR Title/Purpose:** [User provides the title and a brief description of its purpose.]\n* **Related Ticket(s):** [User provides ticket numbers or links.]\n* **Key Requirements/Acceptance Criteria:** [User lists key requirements from the ticket(s).]\n\n**2. Code Diff:**\n[User pastes the full `git diff` output or provides a path to a file containing the diff.]\n\n**3. Complexity Classification & Focus:**\n* **Classification:** Please choose one: **[Trivial]**, **[Standard]**, or **[High-Risk]**.\n* **Areas of Focus (Optional):** Are there specific areas you want me to pay close attention to? (e.g., 'performance implications', 'API design', 'data integrity').",
+      "prompt": "To begin the Merge Request review, please provide the full context below and classify the MR's complexity. This will tailor the depth of the review.\n\n**1. MR Context:**\n* **MR Title/Purpose:** [User provides the title and a brief description of its purpose.]\n* **Related Ticket(s):** [User provides ticket numbers or links.]\n* **Key Requirements/Acceptance Criteria:** [User lists key requirements from the ticket(s).]\n\n**2. Code Diff:**\n[User pastes the full `git diff` output or provides a path to a file containing the diff.]\n\n**3. Complexity Classification & Focus:**\n* **Classification:** Please choose one: **[Trivial]**, **[Standard]**, or **[High-Risk]**.\n* **PR Size:** Is this a small, focused change (<400 lines)? If not, does it have a single, clear purpose?\n* **Areas of Focus (Optional):** Are there specific areas you want me to pay close attention to? (e.g., 'performance implications', 'API design', 'data integrity').",
       "agentRole": "You are a code review coordinator and triage specialist with expertise in assessing merge request complexity and risk. Your role is to efficiently classify reviews and establish appropriate focus areas to ensure the right level of scrutiny for each change.",
       "guidance": [
         "**[Trivial]:** For minor fixes (typos, docs). This will run a condensed, single-phase review.",
@@ -35,24 +39,55 @@
       "guidance": [
         "This is a critical sanity check. If the agent's summary is incorrect, correct it now to prevent a flawed review. This step is skipped for 'Trivial' reviews."
       ],
+      "runCondition": { "var": "complexity", "not_equals": "Trivial" },
       "requireConfirmation": true
     },
     {
-      "id": "phase-2-detailed-analysis",
-      "title": "Phase 2: In-Depth Line-by-Line Analysis",
-      "prompt": "My goal is to perform a detailed, line-by-line analysis of the code diff, guided by the checklist below and focusing on any specific areas you requested. I will provide specific examples and line numbers for my findings.\n\n**Detailed Analysis Checklist:**\n1.  **Functionality & Correctness:** Does the code implement the requirements? Are there logical flaws or unhandled edge cases?\n2.  **Readability & Maintainability:** How is the clarity, naming, and complexity? Are comments sufficient and accurate?\n3.  **Design & Architecture:** Does the code align with existing patterns? Does it introduce risky dependencies or side effects?\n4.  **Best Practices & Conventions:** Does the code follow language-specific best practices and avoid anti-patterns?\n5.  **Error Handling:** Is error handling robust and appropriate?\n6.  **Performance:** Are there any obvious performance bottlenecks?\n7.  **Code Duplication:** Is there significant duplicated code?\n8.  **Security:** Are there any potential security vulnerabilities introduced (e.g., injection, improper handling of sensitive data)?\n9.  **Debug Statements:** Are there leftover debugging statements (`print`, `console.log`)?",
-      "agentRole": "You are a meticulous senior engineer specializing in detailed code quality analysis. Your expertise lies in systematically examining code for correctness, maintainability, security, and performance issues. You excel at providing specific, actionable feedback with clear examples and line references.",
-      "guidance": [
-        "The agent will now perform the most time-consuming part of the review. The thoroughness of this checklist helps catch a wide variety of issues."
-      ]
+      "id": "phase-1-context-setup",
+      "title": "Phase 1: Initializing Analysis State",
+      "prompt": "Initializing state for progressive depth analysis. Setting analysisDepth = 1, analysisComplete = false, and majorIssuesFound = false.",
+      "agentRole": "You are a state manager preparing the workflow for an iterative review process.",
+      "guidance": ["This is an automated step to prepare for the analysis loop."],
+      "runCondition": { "var": "complexity", "not_equals": "Trivial" }
     },
     {
-      "id": "phase-2b-holistic-review",
-      "title": "Phase 2b: Holistic Architectural Review",
-      "prompt": "Now, I will step back from the line-by-line details to assess the bigger picture.\n\nMy goal is to answer the following high-level questions:\n1.  **Simplicity & Approach:** Is this the simplest and most effective approach to solving the problem? Could the same outcome have been achieved more cleanly or with less new code?\n2.  **Precedent:** Does this change set a good or bad precedent for future development in this codebase?\n3.  **Strategic Alignment:** Does this change feel aligned with the overall architecture, or does it feel like a temporary 'hack' or a one-off solution?",
-      "agentRole": "You are a principal software architect with expertise in system design and long-term codebase evolution. Your role is to evaluate changes from a strategic perspective, considering architectural alignment, precedent setting, and the broader impact on system maintainability and scalability.",
-      "guidance": [
-        "This step prevents 'checklist tunnel vision' and encourages the agent to provide strategic, architectural feedback, which is often the most valuable."
+      "id": "phase-1a-llm-context-gathering",
+      "title": "Phase 1a: Comprehensive Context Gathering",
+      "prompt": "To perform a thorough review, I need more than just the code diff. Please provide the following:\n\n1. **Business Context:** Paste the full text of the associated Jira/GitHub ticket, including the requirements and acceptance criteria. This helps me validate the 'why' behind the change.\n2. **Technical Context:** If this change relies on other parts of the codebase, please provide the relevant code snippets or file contents. Also, include any relevant architectural diagrams or coding standards documents.\n\nI will synthesize this information to build a comprehensive context for my review.",
+      "agentRole": "You are a context-aware analyst ensuring you have all necessary information before starting a deep review.",
+      "guidance": ["A high-quality review depends on high-quality context. The more information provided here, the more accurate the review will be."],
+      "runCondition": { "var": "complexity", "not_equals": "Trivial" },
+      "requireConfirmation": true
+    },
+    {
+      "id": "phase-2-depth-analysis-loop",
+      "type": "loop",
+      "title": "Phase 2: Progressive Depth Analysis",
+      "runCondition": { "var": "complexity", "not_equals": "Trivial" },
+      "loop": {
+        "type": "until",
+        "condition": { "var": "analysisComplete", "equals": true },
+        "maxIterations": 3,
+        "iterationVar": "analysisDepth"
+      },
+      "body": [
+        {
+          "id": "perform-analysis-pass",
+          "title": "Analysis Pass {{analysisDepth}} of 3",
+          "prompt": "Act as a Senior Staff Engineer. Your task is to review the code based on the checklist for the current analysis depth. Think step-by-step.\n\n**Current Depth: {{analysisDepth}}**\n\n**Checklist:**\n* **Depth 1 (Basic Scan):** Check for style guide violations, simple bugs (e.g., typos, unused variables), and common security vulnerabilities (OWASP Top 10).\n* **Depth 2 (Standard Review):** Check for logical errors, edge cases, adherence to SOLID principles, and maintainability issues.\n* **Depth 3 (Deep Architectural Review):** Check for alignment with system architecture, long-term impact, performance bottlenecks, and dependency risks.\n\n**Instructions:**\n1.  **Summarize Focus:** State which depth level you are on and what you will focus on.\n2.  **Analyze:** Perform the review based on the checklist for depth {{analysisDepth}}.\n3.  **List Findings:** Document your findings, categorizing them as 'Critical', 'Major', or 'Minor'.\n4.  **Set Flag:** If you find any 'Critical' or 'Major' issues, set the context variable `majorIssuesFound = true`.",
+          "agentRole": "You are a Senior Staff Engineer performing a structured, multi-pass code review with increasing levels of scrutiny.",
+          "guidance": [
+            "At each depth, focus only on the items in that checklist.",
+            "Use Chain-of-Thought reasoning to explain your findings."
+          ]
+        },
+        {
+          "id": "check-analysis-completion",
+          "title": "Check Analysis Completion",
+          "prompt": "Checking if the analysis is complete. If no 'Major' or 'Critical' issues were found in the last pass, or if we have reached the maximum depth (3), I will set `analysisComplete = true` to exit the loop. Otherwise, I will increment the `analysisDepth` and continue to the next level of review.",
+          "agentRole": "You are an automated process controller determining whether to deepen the analysis or conclude this phase.",
+          "guidance": ["This step determines the exit condition for the progressive depth loop."]
+        }
       ]
     },
     {
@@ -62,15 +97,28 @@
       "agentRole": "You are a software quality engineer specializing in testing strategy and impact analysis. Your expertise includes identifying testing gaps, documentation requirements, and potential breaking changes that could affect system stability or user experience.",
       "guidance": [
         "Assessing test coverage is critical. A lack of tests for new logic is often a 'Major' or 'Critical' concern."
-      ]
+      ],
+      "runCondition": { "var": "complexity", "not_equals": "Trivial" }
     },
     {
-      "id": "phase-4-summary",
-      "title": "Phase 4: Final Summary & Structured Feedback",
-      "prompt": "My goal is to consolidate all findings into a final, actionable report.\n\nFirst, I will perform a **Devil's Advocate Self-Critique:** I will briefly review my own findings. Are any of my 'Major' concerns actually minor preferences? Conversely, is there a pattern among my 'Minor' suggestions that points to a larger, unstated problem? I will state if this check changed my perspective.\n\nNext, I will provide the final report in this structure:\n1.  **Overall MR Assessment:** A 2-3 sentence qualitative summary of the MR.\n2.  **Key Positive Aspects:** 2-3 highlights of what was done well.\n3.  **Main Areas of Concern (Categorized):**\n    * **Critical (Blocking issues, potential bugs):**\n    * **Major (Important design flaws, missing core tests):**\n    * **Minor/Suggestions (Readability, best practices):**\n4.  **Questions for the Author:** A list of specific, clarifying questions.\n5.  **Actionable Recommendations:** Concrete suggestions for the most important issues.",
-      "agentRole": "You are an experienced code review facilitator and technical communicator specializing in synthesizing complex technical analysis into clear, actionable feedback. Your strength is balancing critical assessment with constructive guidance, ensuring feedback is both thorough and helpful to developers.",
-      "guidance": [
-        "The final, categorized summary is designed to be copied directly into a GitHub, GitLab, or other code review tool to provide clear and structured feedback to the MR author."
+      "id": "phase-4-refinement-loop",
+      "type": "loop",
+      "title": "Phase 4: Iterative Summary & Refinement",
+      "runCondition": { "var": "complexity", "not_equals": "Trivial" },
+      "loop": {
+        "type": "until",
+        "condition": { "var": "critiqueComplete", "equals": true },
+        "maxIterations": 2,
+        "iterationVar": "critiquePass"
+      },
+      "body": [
+        {
+          "id": "generate-summary-and-critique",
+          "title": "Generate Summary & Self-Critique (Pass {{critiquePass}})",
+          "prompt": "Consolidate all findings into a final, actionable report.\n\n**1. Devil's Advocate Self-Critique:**\nReview your own findings. Are any of your 'Major' concerns actually minor preferences? Is there a pattern among 'Minor' suggestions that points to a larger problem? Does this critique reveal a fundamental flaw in your analysis that requires another pass?\n\n**2. Final Report:**\n* **Overall Assessment:** A 2-3 sentence summary.\n* **Key Positive Aspects:** Highlights of what was done well.\n* **Concerns (Categorized):** Critical, Major, and Minor/Nit.\n* **Questions for Author:** Clarifying questions.\n* **Actionable Recommendations:** Concrete suggestions.\n\n**3. Set Flag:** Based on your self-critique, set `critiqueComplete = true` if the summary is robust, or `critiqueComplete = false` if you need one more pass to refine it.",
+          "agentRole": "You are a facilitator synthesizing feedback and performing a self-critique to ensure the final report is balanced and high-quality.",
+          "guidance": ["Use 'Nit:' for minor issues. Balance criticism with praise. The goal is a collaborative and constructive report."]
+        }
       ]
     },
     {
@@ -80,7 +128,8 @@
       "agentRole": "You are an efficient code reviewer specializing in rapid assessment of low-risk changes. Your role is to quickly validate that trivial changes are safe and appropriate while avoiding over-analysis of simple modifications.",
       "guidance": [
         "This is the condensed summary for 'Trivial' reviews. The agent skips all other analytical steps and provides a simple confirmation for straightforward changes."
-      ]
+      ],
+      "runCondition": { "var": "complexity", "equals": "Trivial" }
     }
   ]
 } 
