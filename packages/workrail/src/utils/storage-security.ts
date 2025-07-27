@@ -97,11 +97,11 @@ export function validateSecureUrl(url: string): void {
     
     // Prevent localhost and private IP access
     const hostname = parsed.hostname.toLowerCase();
-    if (hostname === 'localhost' || 
-        hostname === '127.0.0.1' || 
+    if (hostname === 'localhost' ||
+        hostname === '127.0.0.1' ||
         hostname.startsWith('192.168.') ||
         hostname.startsWith('10.') ||
-        hostname.startsWith('172.')) {
+        /^172\.(1[6-9]|2[0-9]|3[01])\./.test(hostname)) {
       throw new SecurityError(
         'Access to local/private networks not allowed',
         'url-validation'
