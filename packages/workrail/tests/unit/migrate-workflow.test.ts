@@ -137,10 +137,49 @@ describe('Workflow Migration', () => {
         name: 'Test',
         steps: []
       };
-      
+
       const result = migrateWorkflow(workflow);
       expect(result.success).toBe(false);
       expect(result.errors).toContain('Workflow must have an id');
+    });
+
+    it('performs upgrade from older version', () => {
+      const workflow = {
+        id: 'test',
+        name: 'Test',
+        description: 'Old workflow',
+        steps: [{ id: 'step1', title: 'Step 1', prompt: 'Do something' }]
+      };
+
+      const result = migrateWorkflow(workflow);
+      expect(result.success).toBe(true);
+      expect(result.migratedWorkflow?.version).toBe('0.1.0');
+    });
+
+    it('is no-op when workflow already at target version', () => {
+      const workflow = {
+        version: '0.1.0',
+        id: 'test',
+        name: 'Test',
+        steps: []
+      };
+
+      const result = migrateWorkflow(workflow);
+      expect(result.success).toBe(true);
+      expect(result.migratedWorkflow).toEqual(workflow);
+    });
+
+    it('detects downgrade from newer version', () => {
+      const workflow = {
+        version: '0.10.0',
+        id: 'test',
+        name: 'Test',
+        steps: []
+      };
+
+      const result = migrateWorkflow(workflow);
+      expect(result.success).toBe(false);
+      expect(result.errors).toContain('Cannot downgrade from version 0.10.0 to 0.1.0');
     });
   });
 

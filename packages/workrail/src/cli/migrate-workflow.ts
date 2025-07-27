@@ -3,6 +3,7 @@ import path from 'path';
 import { Workflow } from '../types/mcp-types';
 import { validateWorkflow } from '../application/validation';
 import chalk from 'chalk';
+import semver from 'semver';
 
 export interface MigrationResult {
   success: boolean;
@@ -46,14 +47,14 @@ export function migrateWorkflow(workflow: any): MigrationResult {
   };
 
   // Check if migration is needed
-  if (result.originalVersion === result.targetVersion) {
+  if (semver.eq(result.originalVersion, result.targetVersion)) {
     result.success = true;
     result.warnings.push(`Workflow is already at version ${result.targetVersion}`);
     result.migratedWorkflow = workflow;
     return result;
   }
 
-  if (result.originalVersion > result.targetVersion) {
+  if (semver.gt(result.originalVersion, result.targetVersion)) {
     result.errors.push(`Cannot downgrade from version ${result.originalVersion} to ${result.targetVersion}`);
     return result;
   }
