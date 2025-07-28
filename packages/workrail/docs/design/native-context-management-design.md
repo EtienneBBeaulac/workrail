@@ -206,6 +206,9 @@ workrail/
 └── config.json               # User configuration
 ```
 
+#### Configuration Overrides
+Storage paths are fixed with sensible defaults (e.g., `~/.workrail/`) for zero-config, but configurable via environment variables like `WORKRAIL_DATA_DIR` or CLI args. Paths are automatically determined per platform for immediate usability.
+
 ### Storage Management and Quotas
 
 To prevent uncontrolled storage growth, the system will enforce configurable limits.
@@ -230,18 +233,12 @@ TODO: need to check if these are truly the numbers we want.
 ### Session Management
 
 #### Session Correlation
-- Chat ID from the platform
-- Agent ID for multi-agent systems
-- Workflow ID being executed
-- Unique session ID
-- Optional user ID
+We use a hybrid approach: Primarily derive sessions from workflow execution patterns (e.g., `workflowId` + generated context fingerprint). Use platform-provided IDs if available, with user-provided `sessionId` as fallback.
 
-#### Discovery Mechanisms
-1. Exact chat/session match
-2. Recent workflow runs by same user
-3. Semantic search on context
-4. Time-based queries
-5. Tag-based retrieval
+Pseudocode for ID generation:
+```
+sessionId = hash(workflowId + initialContextHash)
+```
 
 #### Multi-Agent Session Sharing
 
@@ -314,6 +311,9 @@ The new native context management system is designed to **complement, not replac
       restoreFromPersistence(compressed: CompressedContext): EnhancedContext;
     }
     ```
+
+#### Handoff Protocol
+The ContextOptimizer prepares a copy of the live context via a new `prepareForPersistence` method and passes it to the PersistenceService for saving. On load, the PersistenceService restores to a raw format, which the ContextOptimizer rehydrates via `restoreFromPersistence`.
 
 ## User Experience
 
@@ -482,6 +482,8 @@ The system will be benchmarked to meet the following Service Level Agreements fo
 | Classification            | 1ms   | 5ms    | 10ms   | 50ms |
 | Metadata Query (indexed)  | 5ms   | 10ms   | 20ms   | 100ms|
 
+These are optimization goals; features may be deferred if they impact targets. Deferral process: Prioritize performance over non-essential features in MVP.
+
 ### Expected Metrics
 - **Compression Ratio**: 10-20x for typical workflows
 - **Checkpoint Save Time**: <100ms for average context
@@ -517,6 +519,8 @@ The system will be benchmarked to meet the following Service Level Agreements fo
 ### Legacy Manual Context Migration
 
 We have decided not to prioritize automated tools or features for migrating legacy manual context (e.g., from CONTEXT.md files) into the new checkpoint system at this time. Current manual context files are very limited in scope and functionality, and there are no known users with active, long-running legacy contexts that require porting. This decision keeps the MVP focused and avoids unnecessary complexity. If user needs evolve, we can revisit adding import capabilities in a future iteration.
+
+Post-MVP, optional import tools could be added if demand arises.
 
 ### Feature Detection
 An agent or workflow can detect if the native context management features are available and adjust its strategy accordingly. This ensures robust behavior in environments with different server versions.
@@ -566,6 +570,13 @@ A comprehensive testing strategy is critical for ensuring the reliability and da
 - **Storage Cleanup**: Verify that automatic and manual cleanup policies correctly identify and delete old or excessive checkpoints without affecting active workflows.
 - **Cross-Platform Compatibility**: Run key E2E tests on all three target operating systems (Windows, macOS, Linux) to ensure consistent behavior.
 - **Resilience and Chaos Testing**: Incorporate fault injection to simulate real-world failures, such as disk full mid-save, process interruptions, concurrent overloads, or low-resource conditions, and verify that recovery mechanisms (e.g., atomic writes, graceful degradation) function correctly while meeting SLAs.
+
+For database components:
+- Use in-memory SQLite for unit tests
+- Real SQLite with temp files for integration tests
+- Per-test database instances for isolation
+- Integrate benchmarks into regular test suite
+- Separate chaos/resilience tests
 
 ## Implementation Timeline
 
@@ -667,7 +678,8 @@ This section tracks key decisions made during the design process, including rati
 
 **Rationale**: This is a proven, scalable pattern for local applications. It leverages SQLite's powerful querying for metadata while avoiding database bloat by offloading large blobs, directly mitigating concerns from the analysis. This combination of performance, flexibility, and scalability makes it the most robust choice. 
 
-### Decision 4: Encryption Approach
+#### SQLite Optionality and Fallbacks
+Make SQLite optional with fallback to filesystem-only metadata storage. Detect at startup and log the mode.
 
 **Chosen Option**: Opt-in Encryption via Config (Rank 1).
 
