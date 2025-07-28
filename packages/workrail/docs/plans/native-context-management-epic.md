@@ -34,8 +34,56 @@ This project will be broken down into four main phases, moving from core infrast
     - [ ] Implement the `workflow_checkpoint_list` tool to list available checkpoints for a given session.
 
 - [ ] **Integration**
-    - [ ] Integrate the new tools into `mcp-server.ts`, exposing them to the agent.
-    - [ ] Implement the basic session correlation logic (e.g., using a `sessionId` passed in the context).
+    - [ ] Add new Tool definitions (e.g., `WORKFLOW_CHECKPOINT_SAVE_TOOL`) following the existing pattern in `src/mcp-server.ts` lines 28-306.
+        - [ ] **Code Sketch: Tool Definition Example**
+            ```typescript
+            const WORKFLOW_CHECKPOINT_SAVE_TOOL: Tool = {
+              name: "workflow_checkpoint_save",
+              description: "Saves the current workflow state and context as a new checkpoint.",
+              inputSchema: { /* schema from API doc */ }
+            };
+            ```
+    - [ ] Add the new tools to the tools array in the `ListToolsRequestSchema` handler (around line 357).
+        - [ ] **Code Sketch: Adding to List Handler**
+            ```typescript
+            server.setRequestHandler(ListToolsRequestSchema, async (): Promise<ListToolsResult> => ({
+              tools: [
+                // ... existing tools ...
+                WORKFLOW_CHECKPOINT_SAVE_TOOL,
+                WORKFLOW_CHECKPOINT_LOAD_TOOL,
+                WORKFLOW_CHECKPOINT_LIST_TOOL,
+                WORKFLOW_MARK_CRITICAL_TOOL
+              ],
+            }));
+            ```
+    - [ ] Add new case statements in the `CallToolRequestSchema` handler (around line 358-400) for each new tool, calling into ContextManagementService methods.
+        - [ ] **Code Sketch: Call Handler Case Example**
+            ```typescript
+            case "workflow_checkpoint_save":
+              if (!args?.['sessionId'] || !args?.['context']) {
+                return { content: [{ type: "text", text: "Error: required params missing" }], isError: true };
+              }
+              return await workflowServer.saveCheckpoint(args as SaveCheckpointParams);
+            ```
+    - [ ] Implement the tool handler methods in the `WorkflowOrchestrationServer` class, injecting and using ContextManagementService.
+        - [ ] **Code Sketch: Handler Method Example**
+            ```typescript
+            class WorkflowOrchestrationServer {
+              // ...
+              async saveCheckpoint(params: SaveCheckpointParams): Promise<CallToolResult> {
+                try {
+                  const result = await this.contextMgmtService.saveCheckpoint(params);
+                  return { content: [{ type: "tool_result", result }] };
+                } catch (error) {
+                  return { content: [{ type: "text", text: error.message }], isError: true };
+                }
+              }
+            }
+            ```
+    - [ ] Create the `ContextManagementService` class in `src/application/services/context-management-service.ts`.
+    - [ ] Add the service to the dependency injection container in `src/container.ts` and inject into WorkflowOrchestrationServer if needed.
+    - [ ] Implement basic session correlation logic (e.g., using sessionId from tool params).
+    - [ ] Test integration with mock calls to verify tool availability and basic functionality.
 
 - [ ] **Testing**
     - [ ] Write unit tests for `SqliteStorage` operations.
@@ -115,7 +163,13 @@ This project will be broken down into four main phases, moving from core infrast
 
 - [ ] **Performance & Integration**
     - [ ] Benchmark the system against the defined Performance SLAs and perform optimizations.
-    - [ ] Implement the detailed integration with `ContextOptimizer` (`prepareForPersistence`, `restoreFromPersistence`).
+    - [ ] Implement the detailed integration with `ContextOptimizer`:
+        - [ ] Add `prepareForPersistence(context: EnhancedContext): CompressibleContext` method to `src/application/services/context-optimizer.ts`, which optimizes and serializes the live context for storage.
+        - [ ] Add `restoreFromPersistence(compressed: CompressedContext): EnhancedContext` method to rehydrate stored context back into the optimizer's format.
+        - [ ] Update `ContextManagementService` saveCheckpoint and loadCheckpoint methods to call these new functions during persistence flows.
+        - [ ] Add unit tests for the new methods and integration tests for the full save-optimize-load cycle.
+    - [ ] **Note**: Current `ContextOptimizer` is minimal (only has `createEnhancedContext`, `mergeLoopState`, `getProperty` methods), so the integration may require expanding its interface significantly.
+    - [ ] Ensure compatibility with existing features like loop handling in ContextOptimizer.
 
 - [ ] **Documentation**
     - [ ] Finalize all public API documentation (TSDoc).
