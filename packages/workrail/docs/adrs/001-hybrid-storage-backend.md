@@ -1,7 +1,7 @@
 # ADR 001: Hybrid Storage Backend for Context Management
 
 **Status:** Accepted
-**Date:** 2024-07-26
+**Date:** 2025-07-27
 
 ## Context
 
