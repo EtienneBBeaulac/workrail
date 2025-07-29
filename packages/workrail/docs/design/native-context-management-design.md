@@ -821,3 +821,51 @@ Make SQLite optional with fallback to filesystem-only metadata storage. Detect a
 - Most complex to implement due to managing the precedence chain.
 
 **Rationale**: This is the industry standard for flexible developer tools. It provides a clean separation of concerns: a config file for persistent settings, environment variables for automation, and CLI arguments for immediate changes. This layered approach supports every use case, from the default zero-config user to the advanced developer. 
+
+### Decision 13: Storage Architecture - Snapshots vs Event Sourcing
+
+**Chosen Option**: Snapshot-Based Storage for MVP (with Event Sourcing as Future Enhancement).
+
+**Date**: 2024-01-09  
+**Context**: During implementation planning, we evaluated whether to use event sourcing for superior concurrency handling and audit trails versus simpler snapshot-based storage.
+
+**Description**: Implement snapshot-based context storage for the MVP, with event sourcing identified as a valuable post-MVP enhancement (Ticket 4 in out-of-scope items).
+
+**Pros of Snapshots (MVP)**:
+- **Performance Alignment**: Achieves <100ms save, <500ms load targets more reliably
+- **Implementation Simplicity**: Reduces complexity for an already Large-complexity task
+- **Proven Patterns**: Aligns with existing storage patterns in the codebase
+- **Faster Validation**: Enables quicker validation of core value proposition
+- **Query Efficiency**: Simple, efficient queries for metadata (tags, dates, etc.)
+
+**Cons of Snapshots**:
+- **Concurrency Limitations**: Requires additional locking mechanisms for multi-agent access
+- **Limited Audit Trail**: No built-in history of context changes
+- **Recovery Constraints**: Point-in-time recovery limited to explicit checkpoints
+
+**Event Sourcing Evaluation**:
+- **Pros**: Superior concurrency, perfect audit trail, robust recovery, multi-agent friendly
+- **Cons**: Performance impact (event replay on load), storage overhead, implementation complexity, event schema design challenges
+
+**Mitigation for Snapshot Limitations**:
+Enhanced concurrency safety measures implemented in final plan v1.1:
+- Lock timeout mechanisms (5-second default, configurable)
+- Interrupted operation detection and cleanup
+- Heartbeat system for long-running operations
+- Graceful recovery from process termination
+
+**Future Evolution Path**:
+Event sourcing remains a high-priority post-MVP enhancement:
+```typescript
+// Future event-sourced architecture concept
+interface ContextEvent {
+  id: string;
+  sessionId: string;
+  timestamp: string;
+  type: 'ContextAdded' | 'ContextModified' | 'ContextClassified';
+  data: any;
+  metadata: EventMetadata;
+}
+```
+
+**Rationale**: Snapshot-based storage provides the right balance of simplicity and functionality for MVP validation. The enhanced concurrency safety measures address the main limitations while keeping implementation complexity manageable. Event sourcing can be evaluated as a natural evolution once the core concept proves valuable, allowing us to focus on delivering working context management rather than over-engineering the architecture upfront. 
