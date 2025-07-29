@@ -60,6 +60,9 @@ export interface CheckpointMetadata {
   contextHash: string;           // SHA-256 of uncompressed context for dedup
   blobPath: string;              // Relative path to context blob file
   status: 'active' | 'archived' | 'corrupt'; // Checkpoint status
+  created_by_operation?: string; // Operation ID that created this checkpoint
+  compression_ratio?: number;    // Compression ratio achieved (originalSize/compressedSize)
+  classification_info?: any;     // JSON with classification layer counts
 }
 
 /**
