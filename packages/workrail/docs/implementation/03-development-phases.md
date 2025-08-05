@@ -130,7 +130,7 @@ The roadmap is designed to deliver value incrementally, with clear milestones an
 
 ## References
 
-- [System Overview](../workrail-mcp-overview.md)
+- [System Overview](../../README.md)
 - [Architecture Guide](02-architecture.md)
 - [Testing Strategy](04-testing-strategy.md)
 - [Security Guide](05-security-guide.md)

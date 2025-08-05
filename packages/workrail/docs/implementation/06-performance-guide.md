@@ -1135,7 +1135,7 @@ export class AutoScaler {
 This performance guide provides comprehensive optimization strategies. To continue:
 
 1. **Understand Deployment**: Read [07-deployment-guide.md](07-deployment-guide.md)
-2. **Explore Contributing**: Read [08-contributing.md](08-contributing.md)
+2. **Explore the Codebase**: Review the [Architecture Guide](02-architecture.md)
 3. **Advanced Performance**: Read [Advanced Performance](../advanced/performance.md)
 4. **Reference Materials**: Read [Performance Reference](../reference/performance.md)
 

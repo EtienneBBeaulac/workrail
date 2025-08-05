@@ -309,7 +309,7 @@ if (rule.condition && !evaluateCondition(rule.condition, context)) {
 
 ## References
 
-* [Getting Started Guide](01-getting-started.md)
+* [Main README](../../README.md)
 * [Development Phases](03-development-phases.md)
 * [Advanced Validation Guide](13-advanced-validation-guide.md)
 * [Simple Workflow Guide](09-simple-workflow-guide.md)

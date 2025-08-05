@@ -444,7 +444,7 @@
 
 ## References
 
-- [System Overview](../workrail-mcp-overview.md)
+- [System Overview](../../README.md)
 - [API Specification](../spec/mcp-api-v1.0.md)
 - [Workflow Schema](../spec/workflow.schema.json)
 - [Architecture Guide](02-architecture.md)

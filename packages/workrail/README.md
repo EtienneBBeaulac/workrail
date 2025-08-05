@@ -9,20 +9,35 @@
 
 ## 🤔 The Problem
 
-AI agents are incredibly powerful but often:
-- **Hallucinate** solutions without proper analysis
-- **Lose context** in complex, multi-step tasks  
-- **Skip critical steps** like testing or validation
-- **Make unsafe changes** without proper review processes
+Large Language Models are incredibly powerful but suffer from well-documented limitations:
+
+- **Hallucination** - They confidently generate plausible-sounding but incorrect information
+- **Scope Creep** - Given a complex task, they often try to do too much at once, leading to half-baked solutions  
+- **Context Loss** - They struggle to maintain focus across long conversations
+- **Inconsistency** - The same prompt can yield wildly different results based on minor variations
+- **Missing Prerequisites** - They often start implementing before gathering necessary context
+
+Traditional approaches try to solve these through better prompting or more powerful models. WorkRail takes a different approach.
 
 ## 💡 The Solution
 
-WorkRail provides **structured, step-by-step workflows** that guide AI agents through complex tasks safely and reliably. Instead of letting AI "wing it," workflows ensure:
+WorkRail guides LLMs through **proven software engineering best practices** via structured workflows, making it much more difficult for the LLM to go off track.
 
-- ✅ **Systematic approach** - Every critical step is covered
-- ✅ **Quality gates** - Built-in validation and review points  
-- ✅ **Repeatable processes** - Consistent results across tasks
-- ✅ **Safety guardrails** - Prevent dangerous or incomplete work
+Instead of hoping an LLM will follow best practices, this system **guides them toward** best practices through structured, machine-readable workflows.
+
+**Traditional Approach:**
+```
+User: "Help me implement this feature"
+AI: [May or may not ask for context, may or may not plan, may or may not test]
+```
+
+**WorkRail Approach:**
+```
+Workflow guides: Context → Clarification → Planning → Implementation → Verification  
+AI: [Cannot skip steps, must follow proven patterns]
+```
+
+This creates an enhanced experience where developers are guided through optimal workflows, missing fewer critical steps, while LLMs work within their strengths following proven patterns.
 
 ---
 
@@ -126,12 +141,21 @@ The agent receives structured guidance on **what to do**, **how to do it**, and 
 
 ## 🌟 Why Choose WorkRail?
 
+### Consistency & Reproducibility  
+One of the biggest challenges with AI-assisted development is inconsistency. The same request can yield wildly different approaches depending on how the prompt is phrased, the LLM's randomness, or the developer's prompting expertise.
+
+WorkRail reduces these variables:
+- **Same Process** - Every developer follows the same workflow
+- **Same Quality** - Helps junior developers produce work closer to senior-level quality  
+- **Same Standards** - Code style and patterns are guided by workflows
+- **Audit Trail** - Every decision is logged and reviewable
+
 | Without WorkRail | With WorkRail |
 |------------------|---------------|
 | "Just fix this bug" → agent makes random changes | Systematic investigation → evidence-based diagnosis → targeted fix |
 | "Add a feature" → incomplete implementation | Analysis → planning → implementation → testing → review |
 | Inconsistent quality across tasks | Repeatable, high-quality processes |
-| Context lost in long conversations | Structured progression with validation gates |
+| Outcome depends on prompting skills | Guided best practices regardless of experience |
 
 ---
 
@@ -142,6 +166,15 @@ The agent receives structured guidance on **what to do**, **how to do it**, and 
 3. **Start a workflow** - Use `workflow_get` to load a workflow for your task  
 4. **Follow the steps** - Use `workflow_next` to get guided, step-by-step instructions
 5. **Validate progress** - Use `workflow_validate` to ensure quality at each step
+
+---
+
+## 📚 Learn More
+
+- **[Complete Overview](workrail-mcp-overview.md)** - Deep dive into architecture, philosophy, and detailed examples
+- **[Loop Documentation](docs/features/loops.md)** - Advanced iteration patterns  
+- **[API Specification](spec/mcp-api-v1.0.md)** - Complete MCP API reference
+- **[Internal Documentation](docs/README.md)** - Development and architecture guides
 
 ---
 
