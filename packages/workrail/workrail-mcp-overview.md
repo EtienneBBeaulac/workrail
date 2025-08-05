@@ -80,16 +80,16 @@ LLM agents and auxiliary servers.)
 │                                           │
 │  • Executes workflow steps                │
 │  • Maintains conversation context         │
-│  • Calls workflowlookup for guidance      │
+│  • Calls WorkRail for step instructions   │
 └───────────┬───────────────────────────────┘
             │            
      ┌──────▼──────────┐ 
-     │ workflowlookup  │ 
-     │     Server      │ 
+     │   WorkRail      │ 
+     │    Server       │ 
      │                 │ 
      │ • Store         │ 
      │ • Retrieve      │ 
-     │ • Guide next    │ 
+     │ • Next step     │ 
      │ • Validate      │
      └─────────────────┘ 
 ```
@@ -99,10 +99,10 @@ Code, and others.*
 
 ### Component Breakdown
 
-#### workflowlookup Server
-**Single Responsibility**: Workflow storage, retrieval, and orchestration guidance
+#### WorkRail Server
+**Single Responsibility**: Workflow storage, retrieval, and step guidance
 
-This MCP server is the heart of the system, providing intelligent workflow guidance:
+This MCP server is the heart of the system, providing structured workflow guidance:
 - **What it does**:
     - Stores and retrieves workflow definitions
     - Provides step-by-step guidance to agents
@@ -117,41 +117,43 @@ This MCP server is the heart of the system, providing intelligent workflow guida
     - No agent framework modifications required
     - Simple to deploy and maintain
 
-#### The Orchestration Pattern (Not a Component)
-**The Innovation**: Orchestration through guided workflow execution
+#### The Workflow Guidance Pattern (Not a Component)
+**The Innovation**: Structured guidance through reactive workflow responses
 
-Instead of building a separate orchestration engine (which would require modifying every agent framework), we achieve orchestration through:
-- **Smart Workflow Structures**: JSON definitions that embed orchestration logic
-- **Agent Guidance**: The workflowlookup server provides next-step guidance
-- **Natural Language Control Flow**: Prompts that guide agents through the workflow
+Instead of building a separate orchestration engine (which would require modifying every agent framework), we provide structured guidance through:
+- **Smart Workflow Structures**: JSON definitions that embed step-by-step logic
+- **Reactive Responses**: The WorkRail server provides next-step instructions when requested
+- **Natural Language Instructions**: Detailed prompts that direct agents through workflow steps
 - **Why not a separate component**:
     - Maintains compatibility with ALL MCP-enabled agents
     - No agent framework modifications required
     - Leverages agents' existing instruction-following capabilities
     - Simpler to deploy and maintain
 
-### How Orchestration Actually Works
+### How Workflow Guidance Actually Works
 
-The hybrid approach achieves orchestration without a central engine:
+The reactive approach provides structured guidance without a central engine:
 
 ```typescript
-// Agent calls workflowlookup for guidance
+// Agent calls WorkRail for next step
 Agent: "I've completed the planning step"
-workflowlookup.getNextGuidance({
+workrail.workflow_next({
   workflowId: "ai-task-implementation",
   completedSteps: ["preconditions", "plan"],
-  lastStepOutput: "1. Create User model\n2. Add JWT..."
+  context: { lastStepOutput: "1. Create User model\n2. Add JWT..." }
 })
 
-// Server responds with workflow guidance
+// WorkRail responds with step instructions
 Response: {
-  nextStep: "implement-phase-1",
+  stepId: "implement-phase-1",
+  name: "Implementation Phase 1",
   prompt: "Now implement phase 1 using the PREP/IMPLEMENT/VERIFY pattern...",
-  guidance: {
-    requiresApproval: true,
-    validationCriteria: "Code compiles and follows plan",
-    agentRole: "You are a senior developer implementing a carefully planned feature. Follow the implementation plan exactly."
-  }
+  agentRole: "You are a senior developer implementing a carefully planned feature. Follow the implementation plan exactly.",
+  validation: {
+    required: true,
+    criteria: "Code compiles and follows plan"
+  },
+  requiresApproval: true
 }
 ```
 
@@ -163,29 +165,29 @@ Response: {
 - **Ownership**: Teams can own and evolve individual components
 - **Testing**: Each component can be tested in isolation
 
-**Why Not a Central Orchestration Engine?**
+**Why Not a Central Control Engine?**
 - **Agent Modification**: Would require changing every agent framework
 - **Compatibility**: Would break MCP's agent-agnostic philosophy
 - **Complexity**: Adds unnecessary middleware layer
-- **Flexibility**: Agents can interpret guidance based on their capabilities
+- **Flexibility**: Agents can interpret instructions based on their capabilities
 
-**Why This Hybrid Architecture Works Well**
+**Why This Reactive Architecture Works Well**
 1. **Universal Compatibility**: Works with any MCP-enabled agent out of the box
-2. **Progressive Enhancement**: Simple agents follow basic flows, advanced agents leverage rich guidance
+2. **Progressive Enhancement**: Simple agents follow basic flows, advanced agents leverage rich instructions
 3. **Modularity**: Each service has exactly one job and does it well
-4. **Flexibility**: Orchestration through guidance, not rigid control
-5. **Future-Proof**: Can evolve toward stricter orchestration (Option 3) if needed without breaking changes
+4. **Flexibility**: Structured guidance through reactive responses, not rigid control
+5. **Future-Proof**: Can enhance response richness without breaking existing integrations
 
-### Future Evolution Path
+### Future Enhancement Path
 
-While the hybrid approach provides excellent balance, the architecture supports evolution toward stricter orchestration if needed:
+While the reactive approach provides excellent balance, the architecture supports evolution toward richer guidance if needed:
 
 ```
-Current (Option 2): workflowlookup provides guidance → Agent interprets
-Future (Option 3):  workflowlookup enforces state → Agent must comply
+Current: WorkRail provides step instructions → Agent interprets and executes
+Future:  WorkRail provides richer context and validation → Agent gets more detailed guidance
 ```
 
-This transition would only require enhancing the workflowlookup server's state management capabilities without changing the fundamental architecture or breaking existing integrations.
+This evolution would only require enhancing WorkRail's response capabilities without changing the fundamental MCP architecture or breaking existing integrations.
 
 ## 3. Key Features & Core Concepts
 
@@ -230,7 +232,7 @@ Each field serves a critical purpose in preventing LLM failure modes:
 
 ### Feature: The Curated Workflow Library
 
-The `workflowlookup` server hosts a growing collection of battle-tested workflows. Initial high-value workflows include:
+The WorkRail server hosts a growing collection of battle-tested workflows. Initial high-value workflows include:
 
 1. **AI Task Prompt Workflow**
     - Guides through task understanding → planning → implementation → verification
@@ -431,7 +433,7 @@ Most importantly, the developer is guided to avoid common pitfalls:
 - Edge cases being addressed through workflow steps
 - Maintaining organized, committable changes
 
-The workflow guides both the human and the AI through a proven process, helping to produce code
+The workflow provides step-by-step instructions that guide both the human and the AI through a proven process, helping to produce code
 that's more ready for review and integration.
 
 ## 5. Strengths & Strategic Advantages
@@ -458,7 +460,7 @@ AI: [Cannot skip steps, must follow proven patterns]
 
 This moves beyond simple suggestions to provide enforceable, structured guidance.
 
-The orchestration engine guides the process so that each required step is addressed. This means
+When agents request workflow steps, WorkRail provides detailed instructions so that each required step is addressed. This means
 best practices are embedded at every stage, helping to ensure more reliable results regardless of
 who is using the system.
 
@@ -948,7 +950,7 @@ consistent, high-quality results across all users.
 
 ### How MCP Servers Work
 
-The workflowlookup server follows the MCP (Model Context Protocol) standard:
+The WorkRail server follows the MCP (Model Context Protocol) standard:
 - Runs locally on the user's machine
 - Communicates via stdio (standard input/output)
 - No network ports or hosting required
@@ -980,7 +982,7 @@ workflows/
 
 ### Tool Specifications
 
-The workflowlookup server exposes tools via MCP's JSON-RPC protocol:
+The WorkRail server exposes tools via MCP's JSON-RPC protocol:
 
 ```typescript
 // List all available workflows
@@ -1037,24 +1039,35 @@ returns: {
 
 ### Installation & Configuration
 
-Users install the server via npm and configure their agent:
-
-**Installation:**
+**Docker Installation (Recommended):**
 ```bash
-# Global installation
-npm install -g @exaudeus/workrail
+# Build and use via Docker
+cd packages/workrail
+docker build -f Dockerfile.simple -t workrail-mcp .
+# Then configure your MCP client to use: docker run --rm -i workrail-mcp
+```
 
-# Or use npx (no installation needed)
-npx @exaudeus/workrail
+**Local Development:**
+```bash
+# For local development and testing
+cd packages/workrail
+npm run build
+node dist/mcp-server.js
+```
+
+**Future Installation (Once Published):**
+```bash
+# Will be available via npx once published to npm
+npx -y @exaudeus/workrail
 ```
 
 **Adding Custom Workflows:**
 ```bash
-# Create custom workflows directory
-mkdir -p ~/.exaudeus/workflows/custom
+# Add workflow to project workflows directory
+cp my-workflow.json packages/workrail/workflows/
 
-# Add your workflow
-cp my-workflow.json ~/.exaudeus/workflows/custom/
+# Or specify custom workflow directory via environment variable
+export WORKFLOW_STORAGE_PATH=/path/to/your/workflows
 ```
 
 ### Security Model
@@ -1137,10 +1150,11 @@ consider these additional security aspects:
 **Workflow Updates:**
 ```bash
 # Update bundled workflows
-npm update @exaudeus/workrail
+# Updates will be available once package is published
+# npm update @exaudeus/workrail
 
-# Or pull latest community workflows
-workflow-lookup update community
+# Community workflow updates (not implemented)
+# Future: workrail update community
 ```
 
 ### Development & Testing
@@ -1217,13 +1231,13 @@ Add this to your `firebender.json`:
         "mcp/sequentialthinking"
       ]
     },
-    "workflowlookup": {
+    "workrail": {
       "command": "docker",
       "args": [
         "run",
         "--rm",
         "-i",
-        "mcp/workflowlookup"
+        "workrail-mcp"
       ]
     }
   }
@@ -2237,7 +2251,9 @@ Adapted Workflow:
 This enhancement would transform the workflow system from a static guide to an intelligent assistant
 that truly understands and responds to the unique needs of each user and situation.
 
-## Appendix: Future Enhancement - Workflow Marketplace
+## Appendix: Speculative Future - Workflow Marketplace
+
+*Note: This section describes a speculative future enhancement that does not currently exist and may never be implemented.*
 
 ### Overview
 
@@ -2325,17 +2341,13 @@ workflowlookup  workflowlookup  workflowlookup
 
 ### Technical Integration
 
-**Installation via CLI:**
+**Speculative CLI (Not Implemented):**
 
 ```bash
-# Install free workflow
-workflow-lookup install @author/workflow-name
-
-# Install premium workflow (requires authentication)
-workflow-lookup install @expert/premium-workflow --license-key=xxx
-
-# Update all marketplace workflows
-workflow-lookup update --marketplace
+# These commands do not exist - this is conceptual only
+workrail install @author/workflow-name
+workrail install @expert/premium-workflow --license-key=xxx
+workrail update --marketplace
 
 # Search marketplace
 workflow-lookup search "authentication" --tags=jwt,nodejs

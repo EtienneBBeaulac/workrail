@@ -1,0 +1,33 @@
+# WorkRail MCP Server - Simple Dockerfile
+# Uses pre-built dist directory
+
+FROM node:20-alpine
+
+# Create app user for security
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodejs -u 1001
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install only production dependencies (skip all scripts)
+RUN npm install --omit=dev --ignore-scripts && npm cache clean --force
+
+# Copy pre-built application
+COPY dist ./dist
+
+# Copy workflow files and specs
+COPY workflows ./workflows
+COPY spec ./spec
+
+# Set ownership to nodejs user
+RUN chown -R nodejs:nodejs /app
+
+# Switch to nodejs user
+USER nodejs
+
+# MCP servers communicate via stdin/stdout
+ENTRYPOINT ["node", "dist/mcp-server.js"]

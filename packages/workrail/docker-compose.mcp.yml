@@ -1,0 +1,39 @@
+# WorkRail MCP Docker Compose
+# For testing MCP server functionality
+
+version: '3.8'
+
+services:
+  # Build the MCP server image
+  workrail-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp
+      target: production
+    container_name: workrail-mcp-build
+    # MCP servers don't run as services - they're invoked by agents
+    # This is just for building the image
+    command: ["echo", "MCP image built successfully"]
+    volumes:
+      # Mount local workflows for development
+      - ./workflows:/app/workflows
+    environment:
+      - NODE_ENV=production
+
+  # Test runner to verify MCP server works
+  test-mcp:
+    depends_on:
+      - workrail-mcp
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp
+      target: production
+    container_name: workrail-mcp-test
+    # Test MCP tools functionality
+    command: |
+      sh -c "
+        echo 'Testing MCP server...' &&
+        echo '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"params\":{}}' | node dist/mcp-server.js
+      "
+    volumes:
+      - ./workflows:/app/workflows

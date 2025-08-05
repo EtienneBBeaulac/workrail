@@ -1,0 +1,60 @@
+# WorkRail MCP Docker ignore file
+
+# Dependencies
+node_modules/
+npm-debug.log*
+
+# Build outputs (include for simple Docker builds)
+# dist/
+
+# Development files
+src/
+tests/
+coverage/
+*.test.ts
+*.spec.ts
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Development configs
+.env
+.env.local
+.env.development
+.env.test
+# Note: tsconfig files are needed for Docker build
+jest.config.cjs
+jest.performance.config.cjs
+eslint.config.js
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile
+docker-compose.yml
+Dockerfile.mcp
+docker-compose.mcp.yml
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Temporary files
+temp/
+tmp/
+
+# Analysis files
+analysis/
+baseline-performance-summary.md

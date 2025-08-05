@@ -1,0 +1,53 @@
+# WorkRail MCP Server Dockerfile
+# Optimized for MCP usage (stdin/stdout communication)
+
+FROM node:20-alpine AS builder
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files and build configs
+COPY package*.json ./
+COPY tsconfig*.json ./
+
+# Install dependencies (npm install to fix lock file issues)
+RUN npm install --ignore-scripts
+
+# Copy source code
+COPY . .
+
+# Build the application
+RUN npm run build
+
+# Production stage
+FROM node:20-alpine AS production
+
+# Create app user for security
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodejs -u 1001
+
+# Set working directory
+WORKDIR /app
+
+# Copy built application first (before npm install to avoid prepare script)
+COPY --from=builder /app/dist ./dist
+
+# Copy package files
+COPY package*.json ./
+
+# Install only production dependencies (skip scripts to avoid build)
+RUN npm install --omit=dev --ignore-scripts && npm cache clean --force
+
+# Copy workflow files and specs
+COPY workflows ./workflows
+COPY spec ./spec
+
+# Set ownership to nodejs user
+RUN chown -R nodejs:nodejs /app
+
+# Switch to nodejs user
+USER nodejs
+
+# MCP servers communicate via stdin/stdout, no ports needed
+# Entry point is the MCP server
+ENTRYPOINT ["node", "dist/mcp-server.js"]
