@@ -169,6 +169,44 @@ WorkRail reduces these variables:
 
 ---
 
+## 🚀 Planned Features
+
+WorkRail is actively evolving. Here are key enhancements on the roadmap:
+
+### **Workflow State Management**
+- **Save & Resume** - Generate workflow state summaries for resuming complex workflows in new chat sessions
+- **Context Preservation** - Maintain workflow progress across conversation boundaries
+- **Checkpoint System** - Save progress at key milestones for easy recovery
+
+### **Model Switching Guidance**
+Workflows could recommend optimal models for specific steps:
+- **Analysis steps** → Tool-use heavy models (Claude) for codebase exploration
+- **Planning/design** → Smartest available models for strategic thinking  
+- **Implementation** → Cost-effective models once requirements are clear
+
+*Note: WorkRail provides text recommendations to users, not automatic model switching*
+
+### **Enhanced Workflow Management**
+- **Dynamic Workflow Loading** - Add/edit workflows without republishing the server
+- **Workflow Categories** - Organize workflows by domain (debugging, planning, review, etc.)
+- **Reusable Components** - Plugin system for common workflow patterns (codebase analysis, document creation, etc.)
+- **Schema Versioning** - Backwards-compatible workflow schema evolution
+
+### **Advanced Validation & Quality**
+- **Custom Validation Functions** - Domain-specific output validation beyond basic schema checks
+- **Integration Hooks** - Connect with external quality tools and linters
+- **Performance Validation** - Ensure workflow outputs meet performance criteria
+- **Length Validation Optimization** - Faster validation using terminal commands vs. full content rewrite
+
+### **Workflow Discovery & Intelligence**
+- **Smart Workflow Suggestions** - Recommend workflows based on task context
+- **Pattern Recognition** - Identify when existing codebase patterns should inform workflow steps
+
+---
+*Have ideas for WorkRail? The planned features list helps guide development priorities.*
+
+---
+
 ## 📚 Learn More
 
 - **[Complete Overview](workrail-mcp-overview.md)** - Deep dive into architecture, philosophy, and detailed examples

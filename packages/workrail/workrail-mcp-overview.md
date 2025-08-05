@@ -143,14 +143,14 @@ workflowlookup.getNextGuidance({
   lastStepOutput: "1. Create User model\n2. Add JWT..."
 })
 
-// Server responds with orchestration guidance
+// Server responds with workflow guidance
 Response: {
   nextStep: "implement-phase-1",
   prompt: "Now implement phase 1 using the PREP/IMPLEMENT/VERIFY pattern...",
-  orchestrationHints: {
+  guidance: {
     requiresApproval: true,
-    suggestedModel: "model-with-strong-tool-use",
-    validationCriteria: "Code compiles and follows plan"
+    validationCriteria: "Code compiles and follows plan",
+    agentRole: "You are a senior developer implementing a carefully planned feature. Follow the implementation plan exactly."
   }
 }
 ```
