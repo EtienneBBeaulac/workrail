@@ -30,6 +30,7 @@
         "fun aggregateDebugLogs(pattern, timeWindow=100) = 'Deduplicate logs matching {pattern}. Output: {pattern} x{count} in {timeWindow}ms, variations: {unique_values}'",
         "fun createInvestigationBranch() = 'git checkout -b investigate/{bug-id}-{timestamp}. If git unavailable, create Investigation/{timestamp}/ directory for artifacts.'",
         "fun trackInvestigation(phase, status) = 'Update INVESTIGATION_CONTEXT.md progress: ✅ {completed}, 🔄 {phase}, ⏳ Remaining: {list}, 📊 Confidence: {score}/10'",
+        "fun updateInvestigationContext(section, content) = 'Update INVESTIGATION_CONTEXT.md {section} with {content}. Include timestamp. If section doesn\\'t exist, create it. Preserve all other sections.'",
         "",
         "**USAGE:** When you see function calls like instrumentCode() or analyzeTests(), execute the full instructions defined above.",
         "",
@@ -142,6 +143,24 @@
             }
         },
         {
+            "id": "phase-0d-create-context",
+            "title": "Phase 0d: Initialize Investigation Context",
+            "runCondition": {
+                "var": "isReproducible",
+                "equals": true
+            },
+            "prompt": "**CREATE INVESTIGATION CONTEXT** - Initialize comprehensive tracking document.\n\nUse createInvestigationBranch() to set up version control, then create INVESTIGATION_CONTEXT.md:\n\n```markdown\n# Investigation Context\n\n## 1. Bug Summary\n- **ID**: {{bugId || 'investigation-' + Date.now()}}\n- **Description**: [from bug report]\n- **Complexity**: {{bugComplexity}}\n- **Reproducibility**: {{isReproducible ? 'Consistent' : 'Intermittent'}}\n- **Started**: {{new Date().toISOString()}}\n- **Status**: Phase 0d - Context Initialization\n\n## 2. Progress Tracking\n✅ Completed: Phase 0 (Triage), Phase 0a (Assumptions), Phase 0b (Reproducibility)\n🔄 Current: Phase 0d (Context Creation)\n⏳ Remaining: Phase 1 (Analysis), Phase 2 (Hypotheses), Phase 3-5 (Validation), Phase 6 (Writeup)\n📊 Confidence: 0/10\n\n## 3. Environment & Setup\n- **Project Type**: {{projectType}}\n- **Debugging Mechanism**: {{debuggingMechanism}}\n- **Architecture**: {{isDistributed ? 'Distributed' : 'Monolithic'}}\n- **Reproduction Results**: {{reproductionResults}}\n\n## 4. Analysis Findings\n*To be populated during Phase 1*\n\n## 5. Hypothesis Registry\n*To be populated during Phase 2*\n\n## 6. Evidence Log\n*To be populated during validation*\n\n## 7. Experiment Results\n*To be populated if experiments conducted*\n\n## 8. Dead Ends & Lessons\n*Track approaches that didn't work*\n\n## 9. Function Definitions\n[Include all function definitions from metaGuidance for reference]\n\n## 10. Resumption JSON\n```json\n{\n  \"workflowId\": \"systematic-bug-investigation-with-loops\",\n  \"completedSteps\": [\"phase-0-triage\", \"phase-0a-assumption-check\", \"phase-0b-reproducibility-loop\", \"phase-0c-reproducibility-assessment\", \"phase-0d-create-context\"],\n  \"context\": {\n    \"bugComplexity\": \"{{bugComplexity}}\",\n    \"projectType\": \"{{projectType}}\",\n    \"isReproducible\": {{isReproducible}},\n    \"debuggingMechanism\": \"{{debuggingMechanism}}\",\n    \"isDistributed\": {{isDistributed || false}}\n  }\n}\n```\n```\n\n**Set `contextInitialized` = true**",
+            "agentRole": "You are creating the central documentation hub for this investigation. This document will track all progress, findings, and enable seamless handoffs.",
+            "guidance": [
+                "Create a comprehensive but scannable document",
+                "Include all context variables discovered so far",
+                "Set up structure for future updates",
+                "Include function definitions for reference",
+                "Update the resumption JSON after each major phase"
+            ],
+            "requireConfirmation": false
+        },
+        {
             "id": "phase-1-iterative-analysis",
             "type": "loop",
             "title": "Phase 1: Multi-Dimensional Codebase Analysis",
@@ -167,7 +186,8 @@
                         "Create a structured markdown file for each phase output",
                         "Use the function definitions for standardized operations",
                         "If you discover the bug's root cause with high confidence, note it but complete all analysis phases for thoroughness",
-                        "Update INVESTIGATION_CONTEXT.md after each phase with key findings"
+                        "Update INVESTIGATION_CONTEXT.md after each phase: use updateInvestigationContext('Analysis Findings', phase-specific findings)",
+                        "After all 4 phases complete, use trackInvestigation('Phase 1 Complete', 'Moving to Hypothesis Development')"
                     ],
                     "requireConfirmation": false
                 }
@@ -237,7 +257,7 @@
         {
             "id": "phase-2b-hypothesis-validation-strategy",
             "title": "Phase 2b: Hypothesis Validation Strategy & Documentation",
-            "prompt": "**HYPOTHESIS VALIDATION PLANNING** - For the top 3 hypotheses, create validation strategies and documentation.\n\n**STEP 1: Hypothesis Validation Strategy**\nFor top 3 hypotheses, define:\n- **Required Evidence**: Specific evidence to confirm/refute hypothesis\n- **Debugging Approach**: Instrumentation/tests providing evidence\n- **Success Criteria**: Results proving hypothesis correct\n- **Confidence Threshold**: Minimum evidence quality needed\n\n**STEP 2: Hypothesis Documentation**\nCreate structured registry:\n- **Hypothesis ID**: H1, H2, H3 for tracking\n- **Status**: Active, Refuted, Confirmed\n- **Evidence Log**: Supporting and contradicting evidence\n- **Validation Plan**: Specific testing approach\n\n**STEP 3: Coverage Check**\nEnsure hypotheses cover diverse categories (logic, state, dependencies) with deep analysis.\n\n**OUTPUTS**: Top 3 hypotheses selected for validation with structured documentation and validation plans.",
+            "prompt": "**HYPOTHESIS VALIDATION PLANNING** - For the top 3 hypotheses, create validation strategies and documentation.\n\n**STEP 1: Hypothesis Validation Strategy**\nFor top 3 hypotheses, define:\n- **Required Evidence**: Specific evidence to confirm/refute hypothesis\n- **Debugging Approach**: Instrumentation/tests providing evidence\n- **Success Criteria**: Results proving hypothesis correct\n- **Confidence Threshold**: Minimum evidence quality needed\n\n**STEP 2: Hypothesis Documentation**\nCreate structured registry:\n- **Hypothesis ID**: H1, H2, H3 for tracking\n- **Status**: Active, Refuted, Confirmed\n- **Evidence Log**: Supporting and contradicting evidence\n- **Validation Plan**: Specific testing approach\n\n**STEP 3: Coverage Check**\nEnsure hypotheses cover diverse categories (logic, state, dependencies) with deep analysis.\n\n**STEP 4: Update Investigation Context**\nUse updateInvestigationContext('Hypothesis Registry', formatted hypothesis table with all details)\n\n**OUTPUTS**: Top 3 hypotheses selected for validation with structured documentation and validation plans.",
             "agentRole": "You are a systematic testing strategist and documentation expert. Your strength lies in creating clear validation plans and maintaining rigorous documentation standards for hypothesis tracking and evidence collection.",
             "guidance": [
                 "STRUCTURED DOCUMENTATION: Create formal hypothesis registry with tracking IDs and status",
@@ -288,6 +308,60 @@
             "requireConfirmation": false
         },
         {
+            "id": "phase-2e-hypothesis-verification",
+            "type": "loop",
+            "title": "Phase 2e: Hypothesis Verification & Refinement",
+            "runCondition": {
+                "var": "hypothesesToValidate",
+                "exists": true
+            },
+            "loop": {
+                "type": "forEach",
+                "items": "hypothesesToValidate",
+                "itemVar": "hypothesis",
+                "indexVar": "hypothesisIndex"
+            },
+            "body": [
+                {
+                    "id": "verify-against-code",
+                    "title": "Deep Code Verification for {{hypothesis.id}}",
+                    "prompt": "**DEEP VERIFICATION for {{hypothesis.id}}**\n\n**Goal**: Verify hypothesis assumptions through deep code analysis.\n\nUse recursiveAnalysis() on key components:\n\n1. **Component Analysis (3 levels deep)**:\n   - Level 1: Direct implementation of suspected component\n   - Level 2: All direct dependencies and callers\n   - Level 3: Transitive dependencies and integration points\n\n2. **State & Data Flow Verification**:\n   - How does data actually flow through this component?\n   - What state transformations occur?\n   - Are there hidden side effects?\n\n3. **Error Path Analysis**:\n   - Trace all error handling paths\n   - Find where errors could originate\n   - Check error propagation matches hypothesis\n\n4. **Concurrency Check** (if applicable):\n   - Race conditions possible?\n   - Shared state issues?\n   - Timing dependencies?\n\n**Output**: Deep verification findings for {{hypothesis.id}}",
+                    "agentRole": "You are performing deep verification of hypothesis {{hypothesis.id}}, diving 3+ levels deep to ensure thorough understanding.",
+                    "guidance": [
+                        "This is verification step 1 of 3 for {{hypothesis.id}}",
+                        "Go deeper than the initial analysis - follow every lead",
+                        "Document any new discoveries that affect the hypothesis"
+                    ],
+                    "requireConfirmation": false
+                },
+                {
+                    "id": "check-contradictions", 
+                    "title": "Search for Contradicting Evidence",
+                    "prompt": "**CONTRADICTION SEARCH for {{hypothesis.id}}**\n\n**Goal**: Actively search for evidence that contradicts this hypothesis.\n\n1. **Code Pattern Contradictions**:\n   - Search for code that assumes opposite behavior\n   - Find defensive checks that prevent this scenario\n   - Look for comments indicating different understanding\n\n2. **Test Contradictions**:\n   - Tests that would fail if hypothesis were true\n   - Tests that explicitly verify opposite behavior\n   - Integration tests showing different flow\n\n3. **Historical Contradictions**:\n   - Git history showing intentional design decisions\n   - PRs or issues discussing this behavior\n   - Documentation stating different intent\n\n4. **Runtime Contradictions**:\n   - Logs showing successful execution through suspected path\n   - Metrics indicating normal behavior\n   - Other systems depending on current behavior\n\n**Be a skeptic** - try to disprove {{hypothesis.id}}",
+                    "agentRole": "You are a skeptical investigator trying to find flaws in hypothesis {{hypothesis.id}}.",
+                    "guidance": [
+                        "Actively search for contradicting evidence",
+                        "Check assumptions against reality",
+                        "Consider alternative explanations"
+                    ],
+                    "requireConfirmation": false
+                },
+                {
+                    "id": "refine-or-replace",
+                    "title": "Refine Hypothesis {{hypothesis.id}}",
+                    "prompt": "**REFINEMENT DECISION for {{hypothesis.id}}**\n\nBased on deep verification and contradiction search:\n\n1. **Assessment**:\n   - New evidence supporting: [list]\n   - New evidence contradicting: [list]\n   - Unverified assumptions: [list]\n   - Confidence change: [+/- points]\n\n2. **Refinement Options**:\n   - **Keep as-is**: Evidence strongly supports current formulation\n   - **Refine**: Adjust hypothesis based on new understanding\n   - **Replace**: Fundamentally flawed, create new hypothesis\n   - **Merge**: Combine with another hypothesis\n\n3. **If Refining/Replacing**:\n   - Update hypothesis description\n   - Adjust evidence strength score\n   - Revise validation plan\n   - Document why changed\n\n4. **Update Context**:\n   - Use updateInvestigationContext('Hypothesis Registry', updated hypothesis)\n   - Note verification findings\n\n**Output**: Updated hypothesis with refined understanding",
+                    "agentRole": "You are making the final decision on hypothesis {{hypothesis.id}} based on verification findings.",
+                    "guidance": [
+                        "Be willing to change hypotheses based on evidence",
+                        "Document all changes and reasoning",
+                        "Update confidence scores appropriately"
+                    ],
+                    "requireConfirmation": false
+                }
+            ],
+            "requireConfirmation": false
+        },
+        {
             "id": "phase-3-4-5-validation-loop",
             "type": "loop",
             "title": "Hypothesis Validation Loop (Phases 3-4-5)",
@@ -326,7 +400,7 @@
                 {
                     "id": "loop-phase-5-synthesis",
                     "title": "Phase 5: Evidence Synthesis for {{currentHypothesis.id}}",
-                    "prompt": "**EVIDENCE SYNTHESIS for {{currentHypothesis.id}}**\n\n**Synthesize findings:**\n1. **Evidence Summary**: What did we learn about {{currentHypothesis.id}}?\n2. **Confidence Update**: Based on evidence, rate confidence this is the root cause (0-10)\n3. **Status Update**: Mark hypothesis as Confirmed/Refuted/Needs-More-Evidence\n\n**If {{currentHypothesis.id}} is confirmed with high confidence (>8.0):**\n- Set `rootCauseFound` = true\n- Set `rootCauseHypothesis` = {{currentHypothesis.id}}\n- Update `currentConfidence` with confidence score\n\n**If all hypotheses validated but confidence <9.0:**\n- Consider additional investigation needs\n- Document what evidence is still missing",
+                    "prompt": "**EVIDENCE SYNTHESIS for {{currentHypothesis.id}}**\n\n**Synthesize findings:**\n1. **Evidence Summary**: What did we learn about {{currentHypothesis.id}}?\n2. **Confidence Update**: Based on evidence, rate confidence this is the root cause (0-10)\n3. **Status Update**: Mark hypothesis as Confirmed/Refuted/Needs-More-Evidence\n\n**If {{currentHypothesis.id}} is confirmed with high confidence (>8.0):**\n- Set `rootCauseFound` = true\n- Set `rootCauseHypothesis` = {{currentHypothesis.id}}\n- Update `currentConfidence` with confidence score\n\n**If all hypotheses validated but confidence <9.0:**\n- Consider additional investigation needs\n- Document what evidence is still missing\n\n**Context Update**:\n- Use updateInvestigationContext('Evidence Log', evidence summary for {{currentHypothesis.id}})\n- Every 3 iterations: Use trackInvestigation('Validation Progress', '{{hypothesisIndex + 1}}/{{hypothesesToValidate.length}} hypotheses validated')",
                     "agentRole": "You are synthesizing evidence to determine if {{currentHypothesis.id}} is the root cause.",
                     "guidance": [
                         "Update hypothesis status based on evidence",
@@ -351,7 +425,7 @@
                 "var": "currentConfidence",
                 "lt": 8.0
             },
-            "prompt": "**CONTROLLED EXPERIMENTATION** - When observation isn't enough, experiment!\n\n**Current Top Hypothesis**: {{hypothesesToValidate[0].id}} (Confidence: {{currentConfidence}}/10)\n\n**EXPERIMENT TYPES** (use controlledModification()):\n\n1. **Guard Additions (Non-Breaking)**:\n   ```javascript\n   // Add defensive check that logs but doesn't change behavior\n   if (unexpectedCondition) {\n     console.error('[H1_GUARD] Unexpected state detected:', state);\n     // Continue normal execution\n   }\n   ```\n\n2. **Assertion Injections**:\n   ```javascript\n   // Add assertion that would fail if hypothesis is correct\n   console.assert(expectedCondition, '[H1_ASSERT] Hypothesis H1 violated!');\n   ```\n\n3. **Minimal Fix Test**:\n   ```javascript\n   // Apply minimal fix for hypothesis, see if bug disappears\n   if (process.env.DEBUG_FIX_H1 === 'true') {\n     // Apply hypothesized fix\n     return fixedBehavior();\n   }\n   ```\n\n4. **Controlled Breaking**:\n   ```javascript\n   // Temporarily break suspected component to verify involvement\n   if (process.env.DEBUG_BREAK_H1 === 'true') {\n     throw new Error('[H1_BREAK] Intentionally breaking to test hypothesis');\n   }\n   ```\n\n**PROTOCOL**:\n1. Choose experiment type based on confidence and risk\n2. Implement modification with clear DEBUG markers\n3. Use createInvestigationBranch() if not already on investigation branch\n4. Commit: `git commit -m \"DEBUG: {{experiment_type}} for {{currentHypothesis.id}}\"`\n5. Run reproduction steps\n6. Use collectEvidence() to gather results\n7. Revert changes: `git revert HEAD`\n8. Document results in ExperimentResults/{{currentHypothesis.id}}.md\n\n**SAFETY LIMITS**:\n- Max 3 experiments per hypothesis\n- Each experiment in separate commit\n- Always revert after evidence collection\n- Document everything in INVESTIGATION_CONTEXT.md\n\n**UPDATE** hypothesis confidence based on experimental results.",
+            "prompt": "**CONTROLLED EXPERIMENTATION** - When observation isn't enough, experiment!\n\n**Current Top Hypothesis**: {{hypothesesToValidate[0].id}} (Confidence: {{currentConfidence}}/10)\n\n**EXPERIMENT TYPES** (use controlledModification()):\n\n1. **Guard Additions (Non-Breaking)**:\n   ```javascript\n   // Add defensive check that logs but doesn't change behavior\n   if (unexpectedCondition) {\n     console.error('[H1_GUARD] Unexpected state detected:', state);\n     // Continue normal execution\n   }\n   ```\n\n2. **Assertion Injections**:\n   ```javascript\n   // Add assertion that would fail if hypothesis is correct\n   console.assert(expectedCondition, '[H1_ASSERT] Hypothesis H1 violated!');\n   ```\n\n3. **Minimal Fix Test**:\n   ```javascript\n   // Apply minimal fix for hypothesis, see if bug disappears\n   if (process.env.DEBUG_FIX_H1 === 'true') {\n     // Apply hypothesized fix\n     return fixedBehavior();\n   }\n   ```\n\n4. **Controlled Breaking**:\n   ```javascript\n   // Temporarily break suspected component to verify involvement\n   if (process.env.DEBUG_BREAK_H1 === 'true') {\n     throw new Error('[H1_BREAK] Intentionally breaking to test hypothesis');\n   }\n   ```\n\n**PROTOCOL**:\n1. Choose experiment type based on confidence and risk\n2. Implement modification with clear DEBUG markers\n3. Use createInvestigationBranch() if not already on investigation branch\n4. Commit: `git commit -m \"DEBUG: {{experiment_type}} for {{currentHypothesis.id}}\"`\n5. Run reproduction steps\n6. Use collectEvidence() to gather results\n7. Revert changes: `git revert HEAD`\n8. Document results in ExperimentResults/{{currentHypothesis.id}}.md\n\n**SAFETY LIMITS**:\n- Max 3 experiments per hypothesis\n- Each experiment in separate commit\n- Always revert after evidence collection\n- Document everything in INVESTIGATION_CONTEXT.md\n\n**UPDATE**:\n- Hypothesis confidence based on experimental results\n- Use updateInvestigationContext('Experiment Results', experiment details and outcomes)\n- Track failed experiments in 'Dead Ends & Lessons' section",
             "agentRole": "You are a careful experimenter using controlled code modifications to validate hypotheses. Safety and reversibility are paramount.",
             "guidance": [
                 "Start with non-breaking experiments (guards, logs)",
@@ -423,7 +497,7 @@
         {
             "id": "phase-5a-final-confidence",
             "title": "Phase 5a: Final Confidence Assessment",
-            "prompt": "**FINAL CONFIDENCE ASSESSMENT** - Evaluate the investigation results.\n\n**If root cause found (rootCauseFound = true):**\n- Review all evidence for {{rootCauseHypothesis}}\n- Perform adversarial challenge\n- Calculate final confidence score\n\n**If no high-confidence root cause:**\n- Document what was learned\n- Identify remaining unknowns\n- Recommend next investigation steps\n\n**CONFIDENCE CALCULATION:**\n- Evidence Quality (1-10)\n- Explanation Completeness (1-10)\n- Alternative Likelihood (1-10, inverted)\n- Final = (Quality × 0.4) + (Completeness × 0.4) + (Alternative × 0.2)\n\n**OUTPUT**: Final confidence assessment with recommendations",
+            "prompt": "**FINAL CONFIDENCE ASSESSMENT** - Evaluate the investigation results.\n\n**If root cause found (rootCauseFound = true):**\n- Review all evidence for {{rootCauseHypothesis}}\n- Perform adversarial challenge\n- Calculate final confidence score\n\n**If no high-confidence root cause:**\n- Document what was learned\n- Identify remaining unknowns\n- Recommend next investigation steps\n\n**CONFIDENCE CALCULATION:**\n- Evidence Quality (1-10)\n- Explanation Completeness (1-10)\n- Alternative Likelihood (1-10, inverted)\n- Final = (Quality × 0.4) + (Completeness × 0.4) + (Alternative × 0.2)\n\n**CONTEXT UPDATE**:\n- Use trackInvestigation('Investigation Complete', 'Confidence: {{finalConfidence}}/10')\n- Update resumption JSON with all completed steps\n- Document lessons learned in 'Dead Ends & Lessons' section\n\n**OUTPUT**: Final confidence assessment with recommendations",
             "agentRole": "You are making the final determination about the root cause with rigorous confidence assessment.",
             "guidance": [
                 "Be honest about confidence levels",
@@ -463,7 +537,7 @@
         {
             "id": "phase-6-diagnostic-writeup",
             "title": "Phase 6: Comprehensive Diagnostic Writeup",
-            "prompt": "**FINAL DIAGNOSTIC DOCUMENTATION** - I will create comprehensive writeup enabling effective bug fixing and knowledge transfer.\n\n**STEP 1: Executive Summary**\n- **Bug Summary**: Concise description of issue and impact\n- **Root Cause**: Clear, non-technical explanation of what is happening\n- **Confidence Level**: Final confidence assessment with calculation methodology\n- **Scope**: What systems, users, or scenarios are affected\n\n**STEP 2: Technical Deep Dive**\n- **Root Cause Analysis**: Detailed technical explanation of failure mechanism\n- **Code Component Analysis**: Specific files, functions, and lines with exact locations\n- **Execution Flow**: Step-by-step sequence of events leading to bug\n- **State Analysis**: How system state contributes to failure\n\n**STEP 3: Investigation Methodology**\n- **Investigation Timeline**: Chronological summary with phase time investments\n- **Hypothesis Evolution**: Complete record of hypotheses (H1-H5) with status changes\n- **Evidence Assessment**: Rating and reliability of evidence sources with key citations\n\n**STEP 4: Knowledge Transfer & Action Plan**\n- **Skill Requirements**: Technical expertise needed for understanding and fixing\n- **Prevention & Review**: Specific measures and code review checklist items\n- **Action Items**: Immediate mitigation steps and permanent fix areas with timelines\n- **Testing Strategy**: Comprehensive verification approach for fixes\n\n**DELIVERABLE**: Enterprise-grade diagnostic report enabling confident bug fixing, knowledge transfer, and organizational learning.",
+            "prompt": "**FINAL DIAGNOSTIC DOCUMENTATION** - I will create comprehensive writeup enabling effective bug fixing and knowledge transfer.\n\n**STEP 1: Executive Summary**\n- **Bug Summary**: Concise description of issue and impact\n- **Root Cause**: Clear, non-technical explanation of what is happening\n- **Confidence Level**: Final confidence assessment with calculation methodology\n- **Scope**: What systems, users, or scenarios are affected\n\n**STEP 2: Technical Deep Dive**\n- **Root Cause Analysis**: Detailed technical explanation of failure mechanism\n- **Code Component Analysis**: Specific files, functions, and lines with exact locations\n- **Execution Flow**: Step-by-step sequence of events leading to bug\n- **State Analysis**: How system state contributes to failure\n\n**STEP 3: Investigation Methodology**\n- **Investigation Timeline**: Chronological summary with phase time investments\n- **Hypothesis Evolution**: Complete record of hypotheses (H1-H5) with status changes\n- **Evidence Assessment**: Rating and reliability of evidence sources with key citations\n\n**STEP 4: Knowledge Transfer & Action Plan**\n- **Skill Requirements**: Technical expertise needed for understanding and fixing\n- **Prevention & Review**: Specific measures and code review checklist items\n- **Action Items**: Immediate mitigation steps and permanent fix areas with timelines\n- **Testing Strategy**: Comprehensive verification approach for fixes\n\n**STEP 5: Context Finalization**\n- **Final Update**: Use updateInvestigationContext('Final Report', link to diagnostic report)\n- **Archive Context**: Ensure INVESTIGATION_CONTEXT.md is complete for future reference\n- **Knowledge Base**: Consider key findings for team knowledge base\n\n**DELIVERABLE**: Enterprise-grade diagnostic report enabling confident bug fixing, knowledge transfer, and organizational learning.",
             "agentRole": "You are a senior technical writer and diagnostic documentation specialist with expertise in creating comprehensive, actionable bug reports for enterprise environments. Your strength lies in translating complex technical investigations into clear, structured documentation that enables effective problem resolution, knowledge transfer, and organizational learning. You excel at creating reports that serve immediate fixing needs, long-term system improvement, and team collaboration.",
             "guidance": [
                 "ENTERPRISE FOCUS: Write for multiple stakeholders including developers, managers, and future team members",
