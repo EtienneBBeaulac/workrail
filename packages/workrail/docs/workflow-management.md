@@ -232,6 +232,12 @@ This means you can override any bundled workflow by creating a custom one with t
 - Test workflows in a development environment first
 - Use the `workrail sources` command to debug loading issues
 
+### Advanced Patterns
+
+- **Function References**: For complex workflows with repeated instructions, use the function reference pattern to reduce duplication and improve maintainability (see [Function Reference Pattern guide](implementation/09-simple-workflow-guide.md#function-reference-pattern-advanced))
+- **Conditional Logic**: Use `runCondition` for adaptive workflows that branch based on context
+- **Loop Patterns**: Leverage loop steps for iterative tasks like multi-step implementation
+
 ## Troubleshooting
 
 ### Workflow Not Found

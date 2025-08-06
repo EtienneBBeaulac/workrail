@@ -11,6 +11,7 @@
 1. [Getting Started with Workflows](#getting-started-with-workflows)
 2. [Creating Your First Workflow](#creating-your-first-workflow)
 3. [Workflow Design Basics](#workflow-design-basics)
+   - [Function Reference Pattern (Advanced)](#function-reference-pattern-advanced)
 4. [Testing Your Workflow](#testing-your-workflow)
 5. [Common Mistakes to Avoid](#common-mistakes-to-avoid)
 6. [Examples](#examples)
@@ -265,6 +266,78 @@ Use `agentRole` when:
 - Specific instructions
 - Includes validation criteria
 - Follows the pattern consistently
+
+### Function Reference Pattern (Advanced)
+
+For complex workflows with repeated instructions, you can use a **function reference pattern** to reduce duplication and improve maintainability. This creates a pseudo-DSL (Domain Specific Language) within your workflow.
+
+#### How It Works
+
+Define reusable "functions" in your `metaGuidance` section, then reference them throughout your workflow:
+
+**Example Function Definitions:**
+```json
+{
+  "metaGuidance": [
+    "fun updateDecisionLog() = 'Update Decision Log in CONTEXT.md: file paths/ranges, excerpts, why important, outcome impact. Limit 3-5 files/decision.'",
+    "fun useTools() = 'Use tools to verify—never guess. Expand file reads to imports/models/interfaces/classes/deps. Trace all dependencies.'",
+    "fun createFile(filename) = 'Use edit_file to create/update {filename}. NEVER output full content in chat—only summarize. If fails, request user help & log command.'",
+    "fun applyUserRules() = 'Apply & reference user-defined rules, patterns & preferences. Document alignment in Decision Log. Explain rule influence in decisions.'",
+    "fun matchPatterns() = 'Use codebase_search/grep to find similar patterns. Reference Decision Log patterns. Match target area unless user rules override.'",
+    "fun gitCommit(type, msg) = 'If git available: commit with {type}: {msg}. If unavailable: log in CONTEXT.md with timestamp.'",
+    "When you see function calls like updateDecisionLog() or createFile(spec.md), refer to the function definitions above for full instructions."
+  ]
+}
+```
+
+**Example Usage in Steps:**
+```json
+{
+  "id": "create-specification",
+  "title": "Create Technical Specification",
+  "prompt": "Create a detailed technical specification from the analysis.\n\n**Requirements:**\n- Include existing patterns/conventions from analysis\n- System integration approach\n- applyUserRules() throughout\n- matchPatterns() from codebase\n\n**Actions:**\n- createFile(spec.md)\n- updateDecisionLog()\n- Sanity check complexity level"
+}
+```
+
+#### Benefits of Function References
+
+1. **Significant deduplication**: Each instruction appears only once
+2. **Improved consistency**: Same wording used everywhere  
+3. **Better readability**: Prompts become more scannable
+4. **Easier maintenance**: Update function definition once, applies everywhere
+5. **Context savings**: Reduces file size by 15-20% while maintaining detail
+
+#### Implementation Tips
+
+- **Function Naming**: Use clear, descriptive names like `updateDecisionLog()` or `createFile(filename)`
+- **Parameter Support**: Simple parameter substitution works: `createFile(spec.md)` becomes instructions for "spec.md"
+- **Resumption Support**: Include function definitions in CONTEXT.md for workflow resumption
+- **Documentation**: Always include the interpretation instruction in metaGuidance
+
+#### When to Use This Pattern
+
+✅ **Good for:**
+- Complex workflows with repeated instructions
+- Workflows with >10 steps that share common patterns
+- Team workflows where consistency is crucial
+- Workflows that need detailed instructions but have character limits
+
+❌ **Avoid for:**
+- Simple workflows with few steps
+- One-off workflows that won't be maintained
+- Workflows where explicit instructions are clearer
+
+#### Character Limits and Validation
+
+Remember that metaGuidance items have a 256-character limit in the schema. Keep function definitions concise:
+
+```json
+// ✅ Good - under 256 characters
+"fun updateDecisionLog() = 'Update Decision Log: file paths, why important, outcome impact. Limit 3-5 files.'"
+
+// ❌ Too long - over 256 characters
+"fun updateDecisionLog() = 'Update the Decision Log section in CONTEXT.md with detailed file paths and line ranges, excerpts showing why each file was important, and how they influenced the outcome and decision-making process throughout the workflow execution. Always limit to the top 3-5 most impactful files per decision for scannability and conciseness.'"
+```
 
 ---
 

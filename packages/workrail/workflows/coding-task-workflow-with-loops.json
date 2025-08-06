@@ -11,6 +11,16 @@
         "Git repository is recommended for version control and commits (workflow degrades gracefully if unavailable)."
     ],
     "metaGuidance": [
+        "**FUNCTION DEFINITIONS:** fun updateDecisionLog() = 'Update Decision Log in CONTEXT.md: file paths/ranges, excerpts, why important, outcome impact. Limit 3-5 files/decision.'",
+        "fun useTools() = 'Use tools to verify—never guess. Expand file reads to imports/models/interfaces/classes/deps. Trace all dependencies.'",
+        "fun createFile(filename) = 'Use edit_file to create/update {filename}. NEVER output full content in chat—only summarize. If fails, request user help & log command.'",
+        "fun applyUserRules() = 'Apply & reference user-defined rules, patterns & preferences. Document alignment in Decision Log. Explain rule influence in decisions.'",
+        "fun matchPatterns() = 'Use codebase_search/grep to find similar patterns. Reference Decision Log patterns. Match target area unless user rules override.'",
+        "fun addResumptionJson(phase) = 'Add workflow_next JSON: workflowId, completedSteps up to {phase}, context object with all current variables.'",
+        "fun gitCommit(type, msg) = 'If git available: commit with {type}: {msg}. If unavailable: log in CONTEXT.md with timestamp.'",
+        "fun verifyImplementation() = '1) Test coverage >80%, 2) Run full test suite, 3) Self-review. Max 2 attempts before failure protocol.'",
+        "fun checkAutomation(action) = 'High: auto-{action} if confidence >8. Medium: request confirmation. Low: extra confirmations.'",
+        "fun trackProgress(completed, current) = '✅ Completed: {completed}, 🔄 Current: {current}, ⏳ Remaining phases, 📁 Files created.'",
         "This workflow follows the ANALYZE -> CLARIFY -> PREP -> IMPLEMENT -> VERIFY pattern with bidirectional dynamic re-triage capabilities.",
         "Deep codebase analysis occurs early to inform intelligent requirements clarification and all subsequent planning phases.",
         "Dynamic re-triage allows complexity upgrades and safe downgrades based on new insights from analysis and clarifications.",
@@ -26,13 +36,14 @@
         "The agent should never guess or assume. Always ask for clarification or use tools to find missing information.",
         "If you fail to get test results or other tool outputs on the first attempt, ask the user to run it manually.",
         "Document all user interventions, change requests, and feedback immediately in context documentation to ensure continuity.",
-        "**Git Fallback Strategy:** If git not initialized or tools fail, gracefully skip commits/branches, log changes manually in CONTEXT.md with timestamps, and warn user at phase-6 start. Document all file modifications for manual version control.",
+        "**Git Fallback:** If git unavailable/fails, skip commits/branches, log changes in CONTEXT.md with timestamps. Warn at phase-6. Document file mods for manual VC.",
         "**Git Error Handling:** Use run_terminal_cmd for git operations; if fails, output exact command for user manual execution. Never halt workflow due to git unavailability.",
-        "Persist all variables across steps using conversation context, external state, or by including them in every response metadata; reset flags like proposedDowngrade after confirmation.",
-        "Use safe git practices: Create feature branches for isolation, commit on successful verification, generate clear commit messages, revert on failures. Log commit hashes in CONTEXT.md for traceability.",
+        "Persist variables across steps via context/external state/response metadata. Reset flags (e.g., proposedDowngrade) after confirmation.",
+        "Use safe git: feature branches, commit on success, clear messages, revert on fail. Log hashes in CONTEXT.md for traceability.",
         "Maintain existing coding conventions and architectural patterns found in the codebase.",
         "COMMIT STRATEGY: Auto-commit after successful steps for High automation; suggest for Medium/Low. Use conventional format: type(scope): description. Commit at milestones and after verification passes.",
-        "**USER RULES:** Always incorporate user-defined rules, patterns & preferences (architecture, coding style, libraries, etc). These override generic practices when specified."
+        "When you see function calls like updateDecisionLog() or createFile(spec.md), refer to the function definitions above for full instructions.",
+        "For resumption: Include function definitions in CONTEXT.md so new sessions understand these references."
     ],
     "steps": [
         {
@@ -65,6 +76,31 @@
             "requireConfirmation": false
         },
         {
+            "id": "phase-0c-overview-gathering",
+            "runCondition": {
+                "or": [
+                    {"var": "taskComplexity", "equals": "Large"},
+                    {
+                        "and": [
+                            {"var": "taskComplexity", "equals": "Medium"},
+                            {"var": "requestDeepAnalysis", "equals": true}
+                        ]
+                    }
+                ]
+            },
+            "title": "Phase 0c: High-Level Architecture Overview",
+            "prompt": "Before deep analysis, gather a high-level overview of the codebase architecture to guide subsequent focused explorations.\n\n**OVERVIEW TASKS:**\n1. **Project Structure:** Use `list_dir` to map the directory structure and identify key areas\n2. **Entry Points:** Use `grep_search` and `read_file` to locate and understand main entry points (e.g., main.ts, index.js, app.js)\n3. **Configuration:** Read package.json, tsconfig.json, or similar files to understand dependencies and setup\n4. **Key Patterns:** Use `grep_search` to identify architectural patterns (e.g., dependency injection, MVC, microservices)\n5. **Task Relevance:** Note which modules/areas seem most relevant to the current task\n\n**OUTPUT REQUIREMENTS:**\n- Summarize the overall architecture in 500 words or less\n- Identify 3-5 key areas that warrant deeper investigation for this task\n- Note any discovered patterns that align with or conflict with user rules\n- Set `architectureOverview` context variable with your findings\n\n**Start the Decision Log:** createFile(CONTEXT.md) and updateDecisionLog() with top 3-5 files, why important, how they'll guide analysis.\n\n**Remember:** useTools() for every architectural insight.",
+            "agentRole": "You are an architectural scout mapping the codebase landscape. Your role is to quickly identify the project's structure, key patterns, and areas relevant to the task at hand. You excel at using tools efficiently to build a mental map that will guide deeper exploration.",
+            "guidance": [
+                "This step provides context for more focused deep dives",
+                "Use tools liberally but efficiently - broad strokes first",
+                "The overview should inform where to focus in subsequent analysis",
+                "Start the Decision Log that will be maintained throughout the workflow",
+                "Note alignment/conflicts with user rules from the start"
+            ],
+            "requireConfirmation": false
+        },
+        {
             "id": "phase-small-prep",
             "runCondition": {"var": "taskComplexity", "equals": "Small"},
             "title": "Phase Small: Preparation and Simplified Execution",
@@ -83,7 +119,7 @@
             "id": "phase-small-implement",
             "runCondition": {"var": "taskComplexity", "equals": "Small"},
             "title": "Phase Small: Simple Implementation",
-            "prompt": "Execute the simple plan you created in the preparation phase.\n\n**IMPLEMENTATION:**\n1. Review the user rules identified in Phase 0b\n2. Work through your 2-5 step plan sequentially\n3. Make the necessary code changes following user rules\n4. Write basic tests as needed\n5. Verify each change works correctly\n\n**GUIDELINES:**\n- Apply all relevant user rules and patterns\n- Keep changes focused and minimal\n- If complexity emerges, pause and recommend upgrading to Medium/Large\n- Commit after successful completion (or log changes if git unavailable)\n\n**VERIFICATION:**\n- Run relevant tests\n- Do a quick self-review\n- Ensure the task objectives are met\n- Confirm user rules were followed\n\nThis is a streamlined process for genuinely simple tasks.",
+            "prompt": "Execute the simple plan you created in the preparation phase.\n\n**IMPLEMENTATION:**\n1. Review user rules from Phase 0b\n2. Work through your 2-5 step plan\n3. applyUserRules() in all changes\n4. Write basic tests as needed\n5. Verify each change works\n\n**GUIDELINES:**\n- matchPatterns() from codebase\n- Keep changes focused and minimal\n- If complexity emerges, recommend upgrade to Medium/Large\n- gitCommit(type, message) after success\n\n**VERIFICATION:**\n- Run relevant tests\n- Quick self-review\n- Ensure objectives met\n- Confirm applyUserRules()\n\nThis is streamlined for genuinely simple tasks.",
             "agentRole": "You are implementing a simple, low-risk task. Execute efficiently while maintaining quality. If unexpected complexity arises, escalate rather than proceeding with inadequate rigor.",
             "guidance": [
                 "Execute the plan from phase-small-prep",
@@ -94,43 +130,42 @@
             "requireConfirmation": false
         },
         {
-            "id": "phase-1-deep-analysis-mandatory",
-            "runCondition": {"var": "taskComplexity", "equals": "Large"},
-            "title": "Phase 1: Mandatory Deep Codebase Analysis",
-            "prompt": "Your goal is to become an expert on the attached codebase before any planning begins. This deep analysis is mandatory for Large tasks due to their complexity and risk.\n\n**ANALYSIS BOUNDS: Limit output to 1500 words; prioritize task-relevant sections.**\n\n**IMPORTANT: First check for any user-defined rules or preferences that should guide your analysis. These may include architectural patterns, coding standards, or specific approaches the user prefers.**\n\nYour analysis must include:\n1.  **Architecture:** Main modules, layers, and patterns.\n2.  **Key Concepts:** Core models, conventions, and important components.\n3.  **Execution Flow:** Trace major features or entry points.\n4.  **Code Quality Assessment:** Note maintainability, readability, or coupling issues.\n5.  **Testing Strategy:** Describe how the code is tested.\n6.  **Opportunities:** Suggest refactorings or improvements.\n7.  **Task Relevance:** Identify which parts of the codebase are most relevant to the current task.\n8.  **Potential Ambiguities:** Note areas where the initial task description might be unclear given the codebase structure.\n9.  **Complexity Indicators:** Note any discoveries that might affect the initial complexity assessment.\n10. **User Rules Alignment:** Note how the codebase aligns or conflicts with any user-defined rules, preferences, or patterns.\n\nProvide summaries and code examples to illustrate your findings. Be exhaustive within the word limit, as if preparing onboarding documentation for a senior engineer. This analysis will inform all subsequent requirements clarification, specification, and design work.",
-            "agentRole": "You are an expert codebase analyst with 10+ years of experience in software architecture and legacy system analysis. Your specialty is quickly understanding complex codebases and identifying architectural patterns, risks, and opportunities. Approach this with the thoroughness of a senior engineer conducting a technical due diligence review.",
-            "askForFiles": true,
-            "guidance": [
-                "This step is mandatory for Large tasks due to their complexity and risk",
-                "Ensure all relevant source files are attached or accessible to the agent before running this step",
-                "Be thorough but respect the 1500-word limit - focus on task-relevant insights",
-                "This analysis will inform requirements clarification, specification, design, and implementation strategy",
-                "Pay special attention to areas of the codebase relevant to the current task",
-                "Note potential ambiguities in the task description that become apparent after understanding the codebase",
-                "Flag any complexity indicators that might warrant re-triaging the task complexity"
-            ],
-            "requireConfirmation": false
-        },
-        {
-            "id": "phase-1-deep-analysis-optional",
+            "id": "phase-1-multi-analysis",
+            "type": "loop",
+            "title": "Phase 1: Multi-Step Focused Codebase Analysis",
             "runCondition": {
-                "and": [
-                    {"var": "taskComplexity", "equals": "Medium"},
-                    {"var": "requestDeepAnalysis", "equals": true}
+                "or": [
+                    {"var": "taskComplexity", "equals": "Large"},
+                    {
+                        "and": [
+                            {"var": "taskComplexity", "equals": "Medium"},
+                            {"var": "requestDeepAnalysis", "equals": true}
+                        ]
+                    }
                 ]
             },
-            "title": "Phase 1: Optional Deep Codebase Analysis",
-            "prompt": "You requested optional deep analysis for this Medium task. Your goal is to become an expert on the attached codebase before planning begins.\n\n**ANALYSIS BOUNDS: Limit output to 1500 words; prioritize task-relevant sections.**\n\nYour analysis must include:\n1.  **Architecture:** Main modules, layers, and patterns.\n2.  **Key Concepts:** Core models, conventions, and important components.\n3.  **Execution Flow:** Trace major features or entry points.\n4.  **Code Quality Assessment:** Note maintainability, readability, or coupling issues.\n5.  **Testing Strategy:** Describe how the code is tested.\n6.  **Opportunities:** Suggest refactorings or improvements.\n7.  **Task Relevance:** Identify which parts of the codebase are most relevant to the current task.\n8.  **Potential Ambiguities:** Note areas where the initial task description might be unclear given the codebase structure.\n9.  **Complexity Indicators:** Note any discoveries that might affect the initial complexity assessment.\n\nProvide summaries and code examples to illustrate your findings. Focus on areas most relevant to the current task while maintaining architectural awareness. This analysis will inform all subsequent requirements clarification, specification, and design work.",
-            "agentRole": "You are a focused codebase analyst specializing in targeted technical analysis for medium-complexity projects. Your approach balances thoroughness with efficiency, focusing on areas most relevant to the current task while maintaining architectural awareness.",
-            "askForFiles": true,
-            "guidance": [
-                "This optional analysis was requested for a Medium task",
-                "Ensure all relevant source files are attached or accessible to the agent before running this step",
-                "Focus on areas most relevant to the current task while maintaining broader architectural context",
-                "Respect the 1500-word limit - prioritize task-relevant insights",
-                "This analysis will inform requirements clarification, specification, and design phases",
-                "Note potential ambiguities in the task description that become apparent after understanding the codebase",
-                "Flag any complexity indicators that might warrant re-triaging the task complexity"
+            "loop": {
+                "type": "for",
+                "count": 3,
+                "maxIterations": 4,
+                "iterationVar": "analysisStep"
+            },
+            "body": [
+                {
+                    "id": "phase-1-sub-analysis",
+                    "title": "Analysis #{{analysisStep}}: {{analysisStep === 1 ? 'Structure' : analysisStep === 2 ? 'Modules' : 'Dependencies'}}",
+                    "prompt": "{{analysisStep === 1 ? '**STEP 1: STRUCTURAL MAPPING**\\n\\nBuild on phase-0c overview, dive deeper into structure:\\n\\n1. Module organization (packages/services)\\n2. Core components (controllers/services/models)\\n3. Architectural patterns from overview\\n4. File naming conventions\\n5. Code organization\\n\\n**Actions:** useTools() with list_dir, grep_search (class/interface/export), read 2-3 files\\n\\n**Output (400 words):**\\n- Structure summary\\n- User rules alignment\\n- Areas for next steps\\n\\nupdateDecisionLog() with 3-5 key files' : analysisStep === 2 ? '**STEP 2: TASK-RELEVANT MODULES**\\n\\nFocus on task-specific modules:\\n\\n1. Target areas from mapping\\n2. Core business logic\\n3. Data models (interfaces/types/schemas)\\n4. API contracts\\n5. Pattern implementation\\n\\n**Actions:** useTools() and matchPatterns() with codebase_search, read complete files (with imports), trace flows\\n\\n**Output (400 words):**\\n- Module responsibilities\\n- Patterns to match\\n- Integration points\\n\\nupdateDecisionLog() with core logic files' : '**STEP 3: DEPENDENCIES & FLOWS**\\n\\nTrace dependencies and execution:\\n\\n1. Import mapping\\n2. Data flow tracing\\n3. Integration points\\n4. Side effects\\n5. Testing patterns\\n\\n**Actions:** useTools() to follow imports, find test files, trace error handling\\n\\n**Output (400 words):**\\n- Dependency map\\n- Integration challenges\\n- Testing strategies\\n- Risk indicators\\n\\nupdateDecisionLog() with dependencies and test approaches'}}",
+                    "agentRole": "You are conducting focused analysis step {{analysisStep}} of 3. Your expertise lies in {{analysisStep === 1 ? 'understanding code structure and organization' : analysisStep === 2 ? 'identifying and analyzing task-specific components' : 'tracing dependencies and system flows'}}. Use tools extensively and never make assumptions.",
+                    "guidance": [
+                        "This is step {{analysisStep}} of a 3-step analysis process",
+                        "Each step builds on the previous findings",
+                        "Use tools liberally - verify everything",
+                        "Update the Decision Log with key discoveries",
+                        "Respect word limits to prevent context bloat",
+                        "Note alignment/conflicts with user rules"
+                    ],
+                    "requireConfirmation": false
+                }
             ],
             "requireConfirmation": false
         },
@@ -182,7 +217,7 @@
             "id": "phase-3-specification",
             "runCondition": {"var": "taskComplexity", "not_equals": "Small"},
             "title": "Phase 3: Create Specification",
-            "prompt": "Using your codebase analysis from Phase 1, the clarified requirements from Phase 2, and any complexity re-assessment from Phase 2b, create a specification document that aligns with the existing system and addresses all identified ambiguities. Your specification should be precise, unambiguous, and fully implementable.\n\n**Task Description:**\n[Updated based on clarifications from Phase 2]\n\n**Key Objectives & Success Criteria:**\n[Refined based on codebase understanding and clarifications]\n\n**Scope and Constraints:**\n[Updated to reflect codebase realities and clarified boundaries]\n\n**IMPORTANT**: Your specification must consider:\n- Existing architectural patterns and conventions identified in your codebase analysis\n- How the proposed changes fit within the current system design\n- Potential impacts on existing components and workflows\n- Alignment with current testing strategies and code quality standards\n- All clarifications and decisions made in Phase 2\n- Any complexity insights from the re-triage assessment\n\nOutput markdown content in response; use edit_file tool to create actual spec.md file if available, else request user upload.\n\nFinally, perform a sanity check on the current complexity classification. If you believe further adjustment is needed given your comprehensive understanding, state your reasoning and ask for confirmation before proceeding.",
+            "prompt": "Create a precise specification from Phase 1 analysis, Phase 2 clarifications, and any re-triage insights.\n\n**Spec Sections:**\n- Task Description [from clarifications]\n- Key Objectives & Success Criteria\n- Scope and Constraints\n\n**Must Include:**\n- Existing patterns/conventions from analysis\n- System integration approach\n- Impact on components/workflows\n- Testing/quality alignment\n- Phase 2 decisions\n- Complexity insights\n- applyUserRules()\n- matchPatterns()\n\n**Actions:**\n- createFile(spec.md)\n- updateDecisionLog()\n- Sanity check complexity level",
             "agentRole": "You are a senior business analyst and technical lead specializing in requirement gathering and scope definition. Your goal is to produce a clear, comprehensive `spec.md` file that leverages your deep understanding of the existing codebase and incorporates all clarified requirements to serve as an unambiguous foundation for design and implementation.",
             "guidance": [
                 "Provide a complete task description based on all previous analysis and clarifications",
@@ -198,7 +233,7 @@
             "id": "phase-3b-create-context-doc",
             "runCondition": {"var": "taskComplexity", "not_equals": "Small"},
             "title": "Phase 3b: Create Context Documentation",
-            "prompt": "Create a comprehensive context documentation file (`CONTEXT.md`) that captures all critical information from the workflow so far. This document is essential for enabling seamless handoffs between chat sessions when context limits are reached.\n\n**For automationLevel=High, generate a summary-only version (limit 1000 words); otherwise, full update (limit 2000 words).**\n\n**Your `CONTEXT.md` must include:**\n\n## 1. ORIGINAL TASK CONTEXT\n- Original task description and requirements\n- Complexity classification (Small/Medium/Large) and reasoning\n- Any re-triage decisions made and why\n- Automation level selected and its implications\n\n## 2. USER RULES AND PREFERENCES\n- Complete list of identified user rules from Phase 0b\n- How each rule impacts this specific task\n- Any rules discovered during analysis\n\n## 3. CODEBASE ANALYSIS SUMMARY\n- Key architectural patterns and conventions found\n- Relevant components, modules, and their locations\n- Testing strategies and patterns in use\n- Critical dependencies and integration points\n- Any complexity indicators discovered\n\n## 4. CLARIFICATIONS AND DECISIONS\n- Questions asked and answers received\n- Ambiguities resolved and how\n- Scope boundaries clearly defined\n- Technical approach decisions made\n\n## 5. SPECIFICATION SUMMARY\n- Core objectives and success criteria\n- Key constraints and requirements\n- Design principles to follow\n- Integration requirements\n\n## 6. WORKFLOW PROGRESS TRACKING\n- ✅ Completed phases (0, 0b, 1, 2, 2b, 3, 3b)\n- 🔄 Current phase: Architecture Design (Phase 4)\n- ⏳ Remaining phases: 4, 5, 5b, 5c, 5d, 5e, 6, 7\n- 📋 Context variables set (taskComplexity, automationLevel, userRules, etc.)\n\n## 7. HANDOFF INSTRUCTIONS\n- Files to attach when resuming (e.g., spec.md via tool or user upload)\n- Key context to provide to new chat session\n- Critical decisions that must not be forgotten\n\n**Format this as a clear, scannable document using bullet points that a new agent could quickly read to understand the full project context.**",
+            "prompt": "Create CONTEXT.md capturing workflow progress. High automation: 1000 words; else 2000.\n\n**Include Sections:**\n\n1. ORIGINAL TASK CONTEXT\n- Task description, complexity level, re-triage decisions, automation level\n\n2. USER RULES AND PREFERENCES\n- Rules from Phase 0b, task impact, new discoveries\n\n3. CODEBASE ANALYSIS SUMMARY\n- Patterns, components, testing, dependencies, complexity indicators\n\n4. DECISION LOG\n- Phase 0c: Files/patterns/impact\n- Phase 1: Key files per sub-step\n- Phase 2: Clarification decisions\n- Phase 3: Spec influences\n\n5. CLARIFICATIONS AND DECISIONS\n- Q&A, resolved ambiguities, scope, technical approach\n\n6. SPECIFICATION SUMMARY\n- Objectives, constraints, design principles, integration\n\n7. WORKFLOW PROGRESS\n- trackProgress(0-3b, Phase 4)\n- ⏳ Remaining: 4-7\n- 📋 Context vars set\n\n8. RESUMPTION INSTRUCTIONS\n- addResumptionJson(phase-3b)\n- Include function definitions from metaGuidance\n\n9. HANDOFF INSTRUCTIONS\n- Files to attach: spec.md, CONTEXT.md\n- Key files from Decision Log\n- Critical decisions\n\ncreateFile(CONTEXT.md)",
             "agentRole": "You are a meticulous technical documentation specialist with expertise in creating comprehensive project handoff documents. Your role is to capture all critical context in a way that enables seamless continuity across different team members or chat sessions. You excel at synthesizing complex technical information into clear, actionable documentation.",
             "guidance": [
                 "This step is automatically skipped for Small tasks",
@@ -215,7 +250,7 @@
             "id": "phase-4-architectural-design",
             "runCondition": {"var": "taskComplexity", "not_equals": "Small"},
             "title": "Phase 4: Architectural Design",
-            "prompt": "Using the `spec.md` from the previous step, your deep codebase analysis, and all clarified requirements, create a high-level architectural design that seamlessly integrates with the existing system. Your output should be a `design.md` document that includes:\n1. **High-Level Approach:** A summary of the proposed solution that builds on existing patterns.\n2. **Component Breakdown:** Identify new or modified components, classes, or modules, showing how they fit within the current architecture.\n3. **Data Models:** Describe any changes to data structures or database schemas, considering existing data patterns.\n4. **API Contracts:** Define any new or changed API endpoints, following existing API conventions and patterns.\n5. **Key Interactions:** A diagram or description of how the major components will interact, both new and existing.\n6. **Integration Points:** Clearly identify how new components will integrate with existing systems and workflows.\n7. **Clarification Decisions:** Reference how the clarified requirements from Phase 2 influenced design decisions.\n8. **Complexity Considerations:** Address any complexity factors identified during re-triage.\n\nOutput markdown content in response; use edit_file tool to create actual design.md file if available, else request user upload.",
+            "prompt": "Create architectural design from spec.md, analysis, and requirements.\n\n**Design Sections:**\n1. High-Level Approach (builds on patterns)\n2. Component Breakdown (new/modified)\n3. Data Models (schemas/structures)\n4. API Contracts (follow conventions)\n5. Key Interactions (components diagram)\n6. Integration Points\n7. Phase 2 Decisions Impact\n8. Complexity Factors\n9. Pattern Alignment (cite files)\n10. applyUserRules()\n\n**Actions:**\n- matchPatterns()\n- useTools()\n- createFile(design.md)\n- updateDecisionLog()",
             "agentRole": "You are a software architect specializing in translating business requirements into robust and scalable technical designs that seamlessly integrate with existing systems. Your task is to create a clear and comprehensive `design.md` that leverages existing architectural patterns while introducing necessary changes and incorporating all clarified requirements.",
             "guidance": [
                 "The `design.md` should be detailed enough for an engineer to write an implementation plan from it.",
@@ -230,7 +265,7 @@
             "id": "phase-5-planning",
             "runCondition": {"var": "taskComplexity", "not_equals": "Small"},
             "title": "Phase 5: Create Detailed Implementation Plan",
-            "prompt": "Your goal is to produce a thorough and actionable `implementation_plan.md` based on the `spec.md`, `design.md`, your deep codebase analysis, and all clarified requirements. Do not write any code. Your plan must be detailed, broken into committable phases, and justified.\n\n**CRITICAL: Review and incorporate any user-defined rules, preferences, or patterns. These take precedence over generic best practices.**\n\nYour plan must include these sections:\n1.  **Goal Clarification:** Your understanding of the goal, assumptions, and success criteria from the spec and clarifications.\n2.  **User Rules Compliance:** Explicitly list how the plan adheres to user-defined rules, patterns, and preferences.\n3.  **Impact Assessment:** Affected codebase parts, dependencies, and risks based on the design, codebase analysis, and clarified requirements.\n4.  **Implementation Strategy:** A list of discrete, actionable steps. Each step must detail the task, its rationale, inputs, and outputs.\n5.  **Testing Strategy:** Describe how the changes will be tested, building on existing testing patterns identified in your codebase analysis. Mandate achieving >80% test coverage where applicable.\n6.  **Failure Handling:** Define what to do if tests fail, tools don't work, or unexpected issues arise.\n7.  **Final Review Checklist:** A specific checklist of items that must be verified to consider this entire task complete. This will be used in the final review phase.\n\nOutput markdown content in response; use edit_file tool to create actual implementation_plan.md file if available, else request user upload.\n\nPresent this as a formal proposal that demonstrates deep understanding of the requirements, clarifications, and the existing codebase.",
+            "prompt": "Create detailed implementation_plan.md from spec.md, design.md, analysis.\n\n**Plan Sections:**\n1. Goal Clarification - understanding from spec/clarifications\n2. applyUserRules() - how plan follows user patterns\n3. Pattern Matching Strategy - existing code templates per step\n4. Impact Assessment - affected parts, deps, risks\n5. Implementation Strategy - discrete steps with rationale/I/O\n6. Testing Strategy - follow existing patterns (cite files)\n7. Failure Handling - test fails, tool issues\n8. Final Review Checklist - completion criteria\n\n**Actions:**\n- matchPatterns() for each step\n- useTools() to find examples\n- createFile(implementation_plan.md)\n- updateDecisionLog()",
             "agentRole": "You are an experienced technical architect and project planner with expertise in breaking down complex development tasks into manageable, logical phases. Your strength is creating detailed, actionable plans that minimize risk while maximizing development efficiency and code quality, all while working within existing system constraints and incorporating all clarified requirements.",
             "guidance": [
                 "The agent will now proceed to critique its own plan in the next step. Withhold your final approval until after that critique.",
@@ -270,7 +305,7 @@
             "id": "phase-5c-finalize-plan",
             "runCondition": {"var": "taskComplexity", "not_equals": "Small"},
             "title": "Phase 5c: Finalize Implementation Plan",
-            "prompt": "Review the initial `implementation_plan.md` from Phase 5 and the Devil's Advocate critique from Phase 5b. Your task is to create a final, consolidated implementation plan that incorporates the valid feedback from the review.\n\nYour output must be the final `implementation_plan.md`.\n\nAdditionally, explicitly list any suggestions from the review that you believe are valuable but out-of-scope for the current task. These should be formatted as potential tickets for future work.\n\nOutput updated markdown content in response; use edit_file tool to update actual implementation_plan.md file if available, else request user upload.",
+            "prompt": "Review initial `implementation_plan.md` from Phase 5 and Devil's Advocate critique from Phase 5b. Create final, consolidated plan incorporating valid feedback.\n\n**Output:**\n- Final implementation_plan.md\n- List valuable but out-of-scope suggestions as future tickets\n\ncreateFile(implementation_plan.md) with final version.",
             "agentRole": "You are a pragmatic technical project manager. Your goal is to synthesize feedback, make decisive trade-offs, and produce a final, actionable plan that is ready for execution.",
             "guidance": [
                 "This is the final plan that will be executed. Ensure it is clear, actionable, and reflects the best path forward.",
@@ -301,7 +336,7 @@
             "id": "phase-5e-update-context-doc",
             "runCondition": {"var": "taskComplexity", "not_equals": "Small"},
             "title": "Phase 5e: Update Context Documentation with Final Plans",
-            "prompt": "Update the `CONTEXT.md` file with all the planning work completed in Phases 4-5. This ensures the context document remains current and comprehensive for potential handoffs.\n\n**For automationLevel=High, generate a summary-only version (limit 500 words); otherwise, full update.**\n\n**Add/Update these sections in `CONTEXT.md`:**\n\n## 4. ARCHITECTURAL DESIGN SUMMARY\n- High-level approach and rationale\n- Key components being added/modified\n- Integration points with existing systems\n- Design decisions and alternatives considered\n\n## 5. IMPLEMENTATION PLAN OVERVIEW\n- Goal clarification and success criteria\n- Implementation strategy overview\n- Key risks identified and mitigation strategies\n- Testing approach and patterns to follow\n- Failure handling protocols\n\n## 6. DEVILS ADVOCATE REVIEW INSIGHTS\n- Key concerns raised and how they were addressed\n- Plan improvements made based on the review\n- Confidence score and reasoning\n- Out-of-scope items identified for future work\n\n## 7. UPDATED WORKFLOW PROGRESS\n- ✅ Completed phases (0, 1, 2, 2b, 3, 3b, 4, 5, 5b, 5c, 5d, 5e)\n- 🔄 Current phase: Implementation (Phase 6)\n- ⏳ Remaining phases: 6, 7\n- 📁 Key files created: spec.md, design.md, implementation_plan.md, CONTEXT.md\n\n## 8. IMPLEMENTATION READINESS\n- Plan sanity check results\n- Files and dependencies verified\n- Ready-to-execute implementation steps\n- Potential handoff points during implementation\n\n**Use bullet points for scannability and maintain all previous sections while adding the new planning context.**",
+            "prompt": "Update CONTEXT.md with Phases 4-5 work. checkAutomation(summary): 500 words for High, else full.\n\n**Add/Update Sections:**\n\n4. DECISION LOG (EXPANDED)\n- Phase 4 Design: Files/patterns shaping architecture\n- Phase 5 Planning: Code examples for implementation\n- Pattern Matches: Template files\n\n5. ARCHITECTURAL DESIGN SUMMARY\n- Approach & rationale\n- Components added/modified\n- Integration points\n- Design decisions\n- Pattern alignment\n\n6. IMPLEMENTATION PLAN OVERVIEW\n- Goals & success criteria\n- Strategy overview\n- Risks & mitigation\n- Testing approach\n- Failure handling\n\n7. DEVILS ADVOCATE INSIGHTS\n- Concerns addressed\n- Plan improvements\n- Confidence score\n- Out-of-scope items\n\n8. WORKFLOW PROGRESS\n- trackProgress(0-5e, Implementation)\n- ⏳ Remaining: 6, 7\n- 📁 Files: spec/design/plan/CONTEXT.md\n\n9. RESUMPTION INSTRUCTIONS\n- addResumptionJson(phase-5e)\n- Include function definitions\n\n10. IMPLEMENTATION READINESS\n- Sanity check results\n- Verified files/deps\n- Key files to re-read\n\ncreateFile(CONTEXT.md) with bullets for scannability.",
             "agentRole": "You are a meticulous technical documentation specialist focused on maintaining comprehensive project context. Your expertise lies in synthesizing complex planning work into clear, actionable documentation that enables seamless workflow continuation.",
             "guidance": [
                 "This step is automatically skipped for Small tasks",
@@ -358,7 +393,7 @@
                 {
                     "id": "phase-6-implement",
                     "title": "IMPLEMENT: Execute {{currentStep.title}}",
-                    "prompt": "**IMPLEMENTATION PHASE for {{currentStep.title}}**\n\nNow implement this specific step:\n\n**Step Details:**\n- Title: {{currentStep.title}}\n- Description: {{currentStep.description}}\n- Expected Outputs: {{currentStep.outputs}}\n\n**USER RULES REMINDER:** Apply all user-defined patterns, conventions, and preferences including:\n- Architectural patterns specified by the user\n- Naming conventions and code style preferences\n- Library/framework preferences\n- Any other project-specific guidelines\n\n**Instructions:**\n1. Focus only on this single step\n2. Use your tools to make the necessary code changes\n3. Adhere to all quality standards and conventions\n4. Follow the plan precisely while adapting to unexpected discoveries\n5. Ensure all code follows user-defined rules and patterns\n\n**Progress Tracking:**\n- This is step {{stepIndex + 1}} of {{implementationSteps.length}}\n- Total steps executed so far: {{stepIteration}}\n- If total steps > 20 without completion, pause for user intervention\n\n**CONTEXT UPDATES:** If this is every 3rd step ({{stepIteration}} % 3 === 0), update CONTEXT.md with:\n- Progress summary\n- Current status\n- Files modified\n- Remaining work",
+                    "prompt": "**IMPLEMENTATION PHASE for {{currentStep.title}}**\n\nNow implement this specific step:\n\n**Step Details:**\n- Title: {{currentStep.title}}\n- Description: {{currentStep.description}}\n- Expected Outputs: {{currentStep.outputs}}\n\n**Remember:** applyUserRules() and matchPatterns() throughout.\n\n**Instructions:**\n1. Focus only on this single step\n2. useTools() to make code changes\n3. Follow quality standards\n4. Adapt to unexpected discoveries\n5. createFile() for ALL code changes\n\n**Progress Tracking:**\n- This is step {{stepIndex + 1}} of {{implementationSteps.length}}\n- Total steps executed so far: {{stepIteration}}\n- If total steps > 20, pause for user intervention\n\n**CONTEXT UPDATES:** If this is every 3rd step ({{stepIteration}} % 3 === 0):\n- Update CONTEXT.md\n- addResumptionJson(phase-6-implement)\n- updateDecisionLog()\n- List files modified with line ranges",
                     "agentRole": "You are implementing a specific step from the approved plan. Focus on precise execution while maintaining code quality.",
                     "guidance": [
                         "Implement only what this step requires",
@@ -370,7 +405,7 @@
                 {
                     "id": "phase-6-verify",
                     "title": "VERIFY: Validate {{currentStep.title}}",
-                    "prompt": "**VERIFICATION PHASE for {{currentStep.title}}**\n\nVerify the implementation of this step is complete and correct:\n\n**Required Verification Steps:**\n1. **Test Coverage**: Write necessary unit/integration tests for the new logic\n   - Target: >80% coverage for new code\n   - Report metrics after test creation\n\n2. **Run Tests**: Execute the full test suite\n   - Use --quiet flags and output to files\n   - Ensure 0 regressions introduced\n   - If failures occur, follow failure protocol\n\n3. **Self-Review**: Critical review of changes\n   - Check against the plan\n   - Verify code quality\n   - Assess side effects\n   - Confirm architectural alignment\n\n**COMMIT Decision (if all verification passes):**\n- For automationLevel=High: Auto-commit with message\n- For automationLevel=Medium/Low: Suggest commit and confirm\n- Use conventional format: type(scope): description\n- If git unavailable: Log in CONTEXT.md\n\n**FAILURE PROTOCOL:** If verification fails after 2 attempts:\n1. Do not try a third time\n2. Fall back to alternative tools if needed\n3. Update CONTEXT.md with failure details\n4. Present summary and recommendations\n5. Set 'verificationFailed' context variable to true",
+                    "prompt": "**VERIFICATION PHASE for {{currentStep.title}}**\n\nVerify the implementation is complete and correct:\n\n**Required:** verifyImplementation()\n\n**COMMIT Decision (if all passes):**\n- checkAutomation(commit)\n- gitCommit(type, scope: description)\n- If git unavailable: Log in CONTEXT.md\n\n**FAILURE PROTOCOL:** If verification fails after 2 attempts:\n1. Do not try a third time\n2. Fall back to alternative tools\n3. updateDecisionLog() with failure details\n4. Present summary and recommendations\n5. Set 'verificationFailed' context variable to true",
                     "agentRole": "You are verifying the implementation meets all quality standards. Be thorough but respect failure bounds.",
                     "guidance": [
                         "All three verification steps must pass",
@@ -419,7 +454,7 @@
         {
             "id": "phase-7-final-review",
             "title": "Phase 7: Final Review & Completion",
-            "prompt": "Perform final review by validating work against the **'Final Review Checklist'** from `implementation_plan.md`.\n\n**USER RULES CHECK:** Verify all code follows user-defined rules, patterns, and preferences.\n\nFor each checklist item, provide confirmation and evidence. Validate metrics (coverage %, test results).\n\n**Additional validation:**\n- User rules/preferences compliance\n- Architectural patterns match specifications\n- Naming conventions and code style\n- Library/framework usage alignment\n\n**Final commit:**\n- Format: 'feat|fix|refactor(scope): final implementation - <summary>'\n- Include metrics in body\n- Auto-commit for High automation; confirm for Medium/Low\n\n**Branch cleanup (if git):**\n1. Merge: 'git checkout main && git merge --squash [featureBranch]'\n2. Delete: 'git branch -d [featureBranch]'\n3. Auto-execute if High automation & confidence >8\n4. Pause for conflicts\n5. Log in CONTEXT.md if no git\n\n**Update `CONTEXT.md` final sections:**\n\n## 9. FINAL STATUS\n- ✅ Steps completed\n- ✅ Tests passing (metrics)\n- ✅ Checklist validated\n- ✅ User rules verified\n- 📁 Files modified\n- 📋 Known issues\n- 🔄 Next steps\n- 📜 Git history\n\n## 10. HANDOFF\n- Accomplishments\n- Architecture decisions\n- Implementation details\n- Follow-up work\n\nConclude with follow-ups or dependencies.",
+            "prompt": "Perform final review against **'Final Review Checklist'** from `implementation_plan.md`.\n\n**Validate:** applyUserRules() compliance throughout. For each checklist item, provide confirmation and evidence.\n\n**Additional validation:**\n- User rules/preferences compliance\n- Architectural patterns match specs\n- Naming conventions and code style\n- Library/framework usage\n- matchPatterns() verification\n\n**Final commit:**\n- gitCommit(feat|fix|refactor, final implementation - summary)\n- Include metrics in body\n- checkAutomation(commit)\n\n**Branch cleanup (if git):**\n1. Merge: git checkout main && git merge --squash [featureBranch]\n2. Delete: git branch -d [featureBranch]\n3. checkAutomation(merge) with confidence >8\n4. Pause for conflicts\n5. Log in CONTEXT.md if no git\n\n**Update CONTEXT.md final sections:**\n\n## 9. COMPLETE DECISION LOG\nFull updateDecisionLog() with all files, patterns, user rules, design decisions\n\n## 10. FINAL STATUS\n- trackProgress(ALL, Complete)\n- ✅ Tests passing (metrics)\n- ✅ Checklist validated\n- ✅ applyUserRules() verified\n- 📁 Files modified (line ranges)\n- 📋 Known issues\n- 📜 Git history\n\n## 11. FINAL RESUMPTION\naddResumptionJson(phase-7-final-review)\n**Note:** Task complete. JSON for future extensions.\n\n## 12. HANDOFF\n- Accomplishments with file refs\n- Architecture decisions\n- Patterns established/followed\n- Follow-up recommendations\n\ncreateFile(CONTEXT.md) with final content.",
             "agentRole": "You are a quality assurance specialist and technical lead responsible for final project validation and comprehensive handoff documentation. Your expertise lies in comprehensive system testing, requirement verification, and ensuring deliverables meet all specified criteria while creating documentation that enables seamless future maintenance.",
             "guidance": [
                 "This is the final quality check. Ensure the agent's summary and checklist validation align with your understanding of the completed work.",
