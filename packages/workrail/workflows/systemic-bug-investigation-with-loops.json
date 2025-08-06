@@ -209,21 +209,67 @@
             },
             "body": [
                 {
-                    "id": "analysis-iteration",
-                    "title": "Analysis {{analysisPhase}}/4",
-                    "prompt": "{{analysisPhase === 1 ? '**BREADTH SCAN**\\n\\n1. **Error Mapping**: grep_search errors, trace logs, map stack traces\\n2. **Component Discovery**: Find all interacting components using codebase_search\\n3. **Data Flow**: Trace data through bug area, transformations, persistence\\n4. **Recent Changes**: Git history last 10 commits\\n\\n**Output**: BreadthAnalysis.md with interaction map' : analysisPhase === 2 ? '**COMPONENT DEEP DIVE**\\n\\nUse recursiveAnalysis(component, 3) on top 5 suspicious components:\\n\\n1. **L1 Direct**: Read complete file, state management, error handling\\n2. **L2 Dependencies**: Follow imports, contracts, version compatibility\\n3. **L3 Integration**: System fit, side effects, concurrency, resources\\n\\n**Output**: ComponentAnalysis.md with deep insights' : analysisPhase === 3 ? '**DEPENDENCY & FLOW ANALYSIS**\\n\\n1. **Static Graph**: Import tree, circular deps, hidden dependencies\\n2. **Runtime Flow**: Execution paths, async flows, state changes\\n3. **Data Pipeline**: Track transformations, validation, corruption points\\n4. **Integration**: External services, DB, queues, filesystem\\n\\n**Output**: FlowAnalysis.md with diagrams' : '**TEST COVERAGE ANALYSIS**\\n\\nUse analyzeTests(component) for each suspicious component:\\n\\n1. **Direct Coverage**: Find tests, analyze coverage gaps, quality\\n2. **Integration Tests**: Bug area tests, assumptions, flaky tests\\n3. **History**: When added/modified, correlation with bug\\n4. **Debug Execution**: Run with debug flags, instrument, compare\\n\\n**Output**: TestAnalysis.md with coverage gaps matrix'}}",
-                    "agentRole": "You are performing systematic analysis phase {{analysisPhase}} of 4. Your focus is {{analysisPhase === 1 ? 'casting a wide net to find all potentially related components' : analysisPhase === 2 ? 'deep diving into the most suspicious components to understand their internals' : analysisPhase === 3 ? 'tracing how components connect and data flows between them' : 'leveraging existing tests to understand expected behavior and find coverage gaps'}}.",
+                    "id": "analysis-breadth-scan",
+                    "title": "Analysis 1/4: Breadth Scan",
+                    "prompt": "**BREADTH SCAN**\n\n1. **Error Mapping**: grep_search errors, trace logs, map stack traces\n2. **Component Discovery**: Find all interacting components using codebase_search\n3. **Data Flow**: Trace data through bug area, transformations, persistence\n4. **Recent Changes**: Git history last 10 commits\n\n**Output**: BreadthAnalysis.md with interaction map",
+                    "agentRole": "You are performing systematic analysis phase 1 of 4. Your focus is casting a wide net to find all potentially related components.",
                     "guidance": [
-                        "This is analysis phase {{analysisPhase}} of 4 total phases",
-                        "Phase 1 = Breadth Scan, Phase 2 = Deep Dive, Phase 3 = Dependencies, Phase 4 = Tests",
-                        "Each phase builds on previous findings",
-                        "Create a structured markdown file for each phase output",
+                        "This is analysis phase 1 of 4 total phases",
+                        "Phase 1 = Breadth Scan - Cast wide net for all related components",
+                        "Create BreadthAnalysis.md with structured findings",
+                        "Use findSimilarBugs() to search for historical patterns",
                         "Use the function definitions for standardized operations",
-                        "If you discover the bug's root cause with high confidence, note it but complete all analysis phases for thoroughness",
-                        "Update INVESTIGATION_CONTEXT.md after each phase: use updateInvestigationContext('Analysis Findings', phase-specific findings)",
-                        "In Phase 1 (Breadth Scan): Use findSimilarBugs() to search for historical patterns",
-                        "After all 4 phases complete, use trackInvestigation('Phase 1 Complete', 'Moving to Hypothesis Development')"
+                        "Update INVESTIGATION_CONTEXT.md after completion"
                     ],
+                    "runCondition": {"var": "analysisPhase", "equals": 1},
+                    "requireConfirmation": false
+                },
+                {
+                    "id": "analysis-deep-dive",
+                    "title": "Analysis 2/4: Component Deep Dive",
+                    "prompt": "**COMPONENT DEEP DIVE**\n\nUse recursiveAnalysis(component, 3) on top 5 suspicious components:\n\n1. **L1 Direct**: Read complete file, state management, error handling\n2. **L2 Dependencies**: Follow imports, contracts, version compatibility\n3. **L3 Integration**: System fit, side effects, concurrency, resources\n\n**Output**: ComponentAnalysis.md with deep insights",
+                    "agentRole": "You are performing systematic analysis phase 2 of 4. Your focus is deep diving into the most suspicious components to understand their internals.",
+                    "guidance": [
+                        "This is analysis phase 2 of 4 total phases",
+                        "Phase 2 = Deep Dive - Analyze suspicious components 3 levels deep",
+                        "Build on findings from Phase 1 Breadth Scan",
+                        "Create ComponentAnalysis.md with structured findings",
+                        "Use recursiveAnalysis() for systematic exploration",
+                        "Update INVESTIGATION_CONTEXT.md after completion"
+                    ],
+                    "runCondition": {"var": "analysisPhase", "equals": 2},
+                    "requireConfirmation": false
+                },
+                {
+                    "id": "analysis-dependencies",
+                    "title": "Analysis 3/4: Dependencies & Flow",
+                    "prompt": "**DEPENDENCY & FLOW ANALYSIS**\n\n1. **Static Graph**: Import tree, circular deps, hidden dependencies\n2. **Runtime Flow**: Execution paths, async flows, state changes\n3. **Data Pipeline**: Track transformations, validation, corruption points\n4. **Integration**: External services, DB, queues, filesystem\n\n**Output**: FlowAnalysis.md with diagrams",
+                    "agentRole": "You are performing systematic analysis phase 3 of 4. Your focus is tracing how components connect and data flows between them.",
+                    "guidance": [
+                        "This is analysis phase 3 of 4 total phases",
+                        "Phase 3 = Dependencies - Trace connections and data flows",
+                        "Build on component understanding from Phase 2",
+                        "Create FlowAnalysis.md with diagrams and flow charts",
+                        "Focus on runtime behavior and integration points",
+                        "Update INVESTIGATION_CONTEXT.md after completion"
+                    ],
+                    "runCondition": {"var": "analysisPhase", "equals": 3},
+                    "requireConfirmation": false
+                },
+                {
+                    "id": "analysis-test-coverage",
+                    "title": "Analysis 4/4: Test Coverage",
+                    "prompt": "**TEST COVERAGE ANALYSIS**\n\nUse analyzeTests(component) for each suspicious component:\n\n1. **Direct Coverage**: Find tests, analyze coverage gaps, quality\n2. **Integration Tests**: Bug area tests, assumptions, flaky tests\n3. **History**: When added/modified, correlation with bug\n4. **Debug Execution**: Run with debug flags, instrument, compare\n\n**Output**: TestAnalysis.md with coverage gaps matrix",
+                    "agentRole": "You are performing systematic analysis phase 4 of 4. Your focus is leveraging existing tests to understand expected behavior and find coverage gaps.",
+                    "guidance": [
+                        "This is analysis phase 4 of 4 total phases",
+                        "Phase 4 = Tests - Analyze test coverage and quality",
+                        "Build on all previous analysis phases",
+                        "Create TestAnalysis.md with coverage gap matrix",
+                        "Run tests with debug flags for additional insights",
+                        "After completion, use trackInvestigation('Phase 1 Complete', 'Moving to Hypothesis Development')"
+                    ],
+                    "runCondition": {"var": "analysisPhase", "equals": 4},
                     "requireConfirmation": false
                 }
             ],
@@ -415,7 +461,7 @@
                     "prompt": "**DEBUGGING INSTRUMENTATION for {{currentHypothesis.id}}**\n\n**Hypothesis**: {{currentHypothesis.description}}\n\n**IMPLEMENT SMART LOGGING**:\n\n1. **Standard Format**: Use instrumentCode(location, '{{currentHypothesis.id}}')\n   ```\n   className.methodName [{{currentHypothesis.id}}] {timestamp}: Specific message\n   ```\n\n2. **Deduplication Implementation**:\n   ```javascript\n   // Add to each instrumentation point\n   const debugState = { lastMsg: '', count: 0 };\n   function smartLog(msg) {\n     if (debugState.lastMsg === msg) {\n       debugState.count++;\n       if (debugState.count % 10 === 0) {\n         console.log(`[{{currentHypothesis.id}}] ${msg} x${debugState.count}`);\n       }\n     } else {\n       if (debugState.count > 1) {\n         console.log(`[{{currentHypothesis.id}}] Previous message x${debugState.count}`);\n       }\n       console.log(`[{{currentHypothesis.id}}] ${msg}`);\n       debugState.lastMsg = msg;\n       debugState.count = 1;\n     }\n   }\n   ```\n\n3. **Operation Grouping**:\n   ```javascript\n   console.log(`=== {{currentHypothesis.id}}: Operation ${opName} Start ===`);\n   const startTime = Date.now();\n   // ... operation code with smartLog() calls ...\n   console.log(`=== {{currentHypothesis.id}}: Operation ${opName} End (${Date.now() - startTime}ms) ===`);\n   ```\n\n4. **Test Instrumentation**:\n   - Add debugging to relevant test files\n   - Instrument test setup/teardown\n   - Log test assumptions vs actual behavior\n\n5. **High-Frequency Aggregation**:\n   - For loops/iterations, log summary every 100 iterations\n   - For events, create time-window summaries\n   - Track unique values and their counts\n\n**OUTPUT**: Instrumented code ready to produce clean, manageable logs for {{currentHypothesis.id}}",
                     "agentRole": "You are instrumenting code specifically to validate hypothesis {{currentHypothesis.id}}. Focus on targeted evidence collection.",
                     "guidance": [
-                        "This is hypothesis {{hypothesisIndex + 1}} of {{hypothesesToValidate.length}}",
+                        "This is hypothesis {{hypothesisIndex + 1}} of 3",
                         "Tailor instrumentation to the specific hypothesis",
                         "Ensure non-intrusive implementation"
                     ],
@@ -436,7 +482,7 @@
                 {
                     "id": "loop-phase-5-synthesis",
                     "title": "Phase 5: Evidence Synthesis for {{currentHypothesis.id}}",
-                    "prompt": "**EVIDENCE SYNTHESIS for {{currentHypothesis.id}}**\n\n**Synthesize findings:**\n1. **Evidence Summary**: What did we learn about {{currentHypothesis.id}}?\n2. **Confidence Update**: Based on evidence, rate confidence this is the root cause (0-10)\n3. **Status Update**: Mark hypothesis as Confirmed/Refuted/Needs-More-Evidence\n\n**If {{currentHypothesis.id}} is confirmed with high confidence (>8.0):**\n- Set `rootCauseFound` = true\n- Set `rootCauseHypothesis` = {{currentHypothesis.id}}\n- Update `currentConfidence` with confidence score\n\n**If all hypotheses validated but confidence <9.0:**\n- Consider additional investigation needs\n- Document what evidence is still missing\n\n**Context Update**:\n- Use updateInvestigationContext('Evidence Log', evidence summary for {{currentHypothesis.id}})\n- Every 3 iterations: Use trackInvestigation('Validation Progress', '{{hypothesisIndex + 1}}/{{hypothesesToValidate.length}} hypotheses validated')",
+                    "prompt": "**EVIDENCE SYNTHESIS for {{currentHypothesis.id}}**\n\n**Synthesize findings:**\n1. **Evidence Summary**: What did we learn about {{currentHypothesis.id}}?\n2. **Confidence Update**: Based on evidence, rate confidence this is the root cause (0-10)\n3. **Status Update**: Mark hypothesis as Confirmed/Refuted/Needs-More-Evidence\n\n**If {{currentHypothesis.id}} is confirmed with high confidence (>8.0):**\n- Set `rootCauseFound` = true\n- Set `rootCauseHypothesis` = {{currentHypothesis.id}}\n- Update `currentConfidence` with confidence score\n\n**If all hypotheses validated but confidence <9.0:**\n- Consider additional investigation needs\n- Document what evidence is still missing\n\n**Context Update**:\n- Use updateInvestigationContext('Evidence Log', evidence summary for {{currentHypothesis.id}})\n- Every 3 iterations: Use trackInvestigation('Validation Progress', '{{hypothesisIndex + 1}}/3 hypotheses validated')",
                     "agentRole": "You are synthesizing evidence to determine if {{currentHypothesis.id}} is the root cause.",
                     "guidance": [
                         "Update hypothesis status based on evidence",
@@ -461,7 +507,7 @@
                 "var": "currentConfidence",
                 "lt": 8.0
             },
-            "prompt": "**CONTROLLED EXPERIMENTATION** - When observation isn't enough, experiment!\n\n**Current Top Hypothesis**: {{hypothesesToValidate[0].id}} (Confidence: {{currentConfidence}}/10)\n\n**EXPERIMENT TYPES** (use controlledModification()):\n\n1. **Guard Additions (Non-Breaking)**:\n   ```javascript\n   // Add defensive check that logs but doesn't change behavior\n   if (unexpectedCondition) {\n     console.error('[H1_GUARD] Unexpected state detected:', state);\n     // Continue normal execution\n   }\n   ```\n\n2. **Assertion Injections**:\n   ```javascript\n   // Add assertion that would fail if hypothesis is correct\n   console.assert(expectedCondition, '[H1_ASSERT] Hypothesis H1 violated!');\n   ```\n\n3. **Minimal Fix Test**:\n   ```javascript\n   // Apply minimal fix for hypothesis, see if bug disappears\n   if (process.env.DEBUG_FIX_H1 === 'true') {\n     // Apply hypothesized fix\n     return fixedBehavior();\n   }\n   ```\n\n4. **Controlled Breaking**:\n   ```javascript\n   // Temporarily break suspected component to verify involvement\n   if (process.env.DEBUG_BREAK_H1 === 'true') {\n     throw new Error('[H1_BREAK] Intentionally breaking to test hypothesis');\n   }\n   ```\n\n**PROTOCOL**:\n1. Choose experiment type based on confidence and risk\n2. Implement modification with clear DEBUG markers\n3. Use createInvestigationBranch() if not already on investigation branch\n4. Commit: `git commit -m \"DEBUG: {{experiment_type}} for {{currentHypothesis.id}}\"`\n5. Run reproduction steps\n6. Use collectEvidence() to gather results\n7. Revert changes: `git revert HEAD`\n8. Document results in ExperimentResults/{{currentHypothesis.id}}.md\n\n**SAFETY LIMITS**:\n- Max 3 experiments per hypothesis\n- Each experiment in separate commit\n- Always revert after evidence collection\n- Document everything in INVESTIGATION_CONTEXT.md\n\n**UPDATE**:\n- Hypothesis confidence based on experimental results\n- Use updateInvestigationContext('Experiment Results', experiment details and outcomes)\n- Track failed experiments in 'Dead Ends & Lessons' section",
+            "prompt": "**CONTROLLED EXPERIMENTATION** - When observation isn't enough, experiment!\n\n**Current Investigation Status**: Leading hypothesis (Confidence: {{currentConfidence}}/10)\n\n**EXPERIMENT TYPES** (use controlledModification()):\n\n1. **Guard Additions (Non-Breaking)**:\n   ```javascript\n   // Add defensive check that logs but doesn't change behavior\n   if (unexpectedCondition) {\n     console.error('[H1_GUARD] Unexpected state detected:', state);\n     // Continue normal execution\n   }\n   ```\n\n2. **Assertion Injections**:\n   ```javascript\n   // Add assertion that would fail if hypothesis is correct\n   console.assert(expectedCondition, '[H1_ASSERT] Hypothesis H1 violated!');\n   ```\n\n3. **Minimal Fix Test**:\n   ```javascript\n   // Apply minimal fix for hypothesis, see if bug disappears\n   if (process.env.DEBUG_FIX_H1 === 'true') {\n     // Apply hypothesized fix\n     return fixedBehavior();\n   }\n   ```\n\n4. **Controlled Breaking**:\n   ```javascript\n   // Temporarily break suspected component to verify involvement\n   if (process.env.DEBUG_BREAK_H1 === 'true') {\n     throw new Error('[H1_BREAK] Intentionally breaking to test hypothesis');\n   }\n   ```\n\n**PROTOCOL**:\n1. Choose experiment type based on confidence and risk\n2. Implement modification with clear DEBUG markers\n3. Use createInvestigationBranch() if not already on investigation branch\n4. Commit: `git commit -m \"DEBUG: {{experiment_type}} for hypothesis investigation\"`\n5. Run reproduction steps\n6. Use collectEvidence() to gather results\n7. Revert changes: `git revert HEAD`\n8. Document results in ExperimentResults/hypothesis-experiment.md\n\n**SAFETY LIMITS**:\n- Max 3 experiments per hypothesis\n- Each experiment in separate commit\n- Always revert after evidence collection\n- Document everything in INVESTIGATION_CONTEXT.md\n\n**UPDATE**:\n- Hypothesis confidence based on experimental results\n- Use updateInvestigationContext('Experiment Results', experiment details and outcomes)\n- Track failed experiments in 'Dead Ends & Lessons' section",
             "agentRole": "You are a careful experimenter using controlled code modifications to validate hypotheses. Safety and reversibility are paramount.",
             "guidance": [
                 "Start with non-breaking experiments (guards, logs)",
