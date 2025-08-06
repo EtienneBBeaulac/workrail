@@ -31,6 +31,9 @@
         "fun createInvestigationBranch() = 'git checkout -b investigate/{bug-id}-{timestamp}. If git unavailable, create Investigation/{timestamp}/ directory for artifacts.'",
         "fun trackInvestigation(phase, status) = 'Update INVESTIGATION_CONTEXT.md progress: ✅ {completed}, 🔄 {phase}, ⏳ Remaining: {list}, 📊 Confidence: {score}/10'",
         "fun updateInvestigationContext(section, content) = 'Update INVESTIGATION_CONTEXT.md {section} with {content}. Include timestamp. If section doesn\\'t exist, create it. Preserve all other sections.'",
+        "fun findSimilarBugs() = 'Search for: 1) Similar error patterns in codebase, 2) Previous fixes in git history, 3) Related test cases. Document in SimilarPatterns.md'",
+        "fun visualProgress() = 'Show: ✅ Phase 0 | ✅ Phase 1 | 🔄 Phase 2 | ⏳ Phase 3-5 | ⏳ Phase 6 | 📊 35% Complete. Include time spent per phase.'",
+        "fun applyDebugPreferences() = 'Apply user debugging preferences from userDebugPreferences context variable. Adapt logging verbosity, tool selection, output format.'",
         "",
         "**USAGE:** When you see function calls like instrumentCode() or analyzeTests(), execute the full instructions defined above.",
         "",
@@ -70,7 +73,7 @@
         {
             "id": "phase-0-triage",
             "title": "Phase 0: Initial Triage & Context Gathering",
-            "prompt": "**SYSTEMATIC INVESTIGATION BEGINS** - Your mission is to achieve near 100% certainty about this bug's root cause through systematic evidence gathering. NO FIXES will be proposed until Phase 6.\n\n**STEP 1: Bug Report Analysis**\nPlease provide the complete bug context:\n- **Bug Description**: What is the observed behavior vs expected behavior?\n- **Error Messages/Stack Traces**: Paste the complete error output\n- **Reproduction Steps**: How can this bug be consistently reproduced?\n- **Environment Details**: OS, language version, framework version, etc.\n- **Recent Changes**: Any recent commits, deployments, or configuration changes?\n\n**STEP 2: Project Type Classification**\nBased on the information provided, I will classify the project type and set debugging strategies:\n- **Languages/Frameworks**: Primary tech stack\n- **Build System**: Maven, Gradle, npm, etc.\n- **Testing Framework**: JUnit, Jest, pytest, etc.\n- **Logging System**: Available logging mechanisms\n- **Architecture**: Monolithic, microservices, distributed, serverless, etc.\n\n**STEP 3: Complexity Assessment**\nI will analyze the bug complexity using these criteria:\n- **Simple**: Single function/method, clear error path, minimal dependencies\n- **Standard**: Multiple components, moderate investigation required\n- **Complex**: Cross-system issues, race conditions, complex state management\n\n**OUTPUTS**: Set `projectType`, `bugComplexity`, `debuggingMechanism`, and `isDistributed` (true if architecture involves microservices/distributed systems) context variables.",
+            "prompt": "**SYSTEMATIC INVESTIGATION BEGINS** - Your mission is to achieve near 100% certainty about this bug's root cause through systematic evidence gathering. NO FIXES will be proposed until Phase 6.\n\n**STEP 1: Bug Report Analysis**\nPlease provide the complete bug context:\n- **Bug Description**: What is the observed behavior vs expected behavior?\n- **Error Messages/Stack Traces**: Paste the complete error output\n- **Reproduction Steps**: How can this bug be consistently reproduced?\n- **Environment Details**: OS, language version, framework version, etc.\n- **Recent Changes**: Any recent commits, deployments, or configuration changes?\n\n**STEP 2: Project Type Classification**\nBased on the information provided, I will classify the project type and set debugging strategies:\n- **Languages/Frameworks**: Primary tech stack\n- **Build System**: Maven, Gradle, npm, etc.\n- **Testing Framework**: JUnit, Jest, pytest, etc.\n- **Logging System**: Available logging mechanisms\n- **Architecture**: Monolithic, microservices, distributed, serverless, etc.\n\n**STEP 3: Complexity Assessment**\nI will analyze the bug complexity using these criteria:\n- **Simple**: Single function/method, clear error path, minimal dependencies\n- **Standard**: Multiple components, moderate investigation required\n- **Complex**: Cross-system issues, race conditions, complex state management\n\n**STEP 4: Automation Level Selection**\nAsk the user: \"What automation level would you prefer for this investigation?\"\n- **High**: Auto-approve decisions with confidence >8.0, minimal confirmations\n- **Medium**: Standard confirmations for key decisions\n- **Low**: Extra confirmations for safety, manual approval for all changes\n\n**OUTPUTS**: Set context variables:\n- `projectType`, `bugComplexity`, `debuggingMechanism`\n- `isDistributed` (true if architecture involves microservices/distributed systems)\n- `automationLevel` (High/Medium/Low based on user preference)",
             "agentRole": "You are a senior debugging specialist and bug triage expert with 15+ years of experience across multiple technology stacks. Your expertise lies in quickly classifying bugs, understanding project architectures, and determining appropriate investigation strategies. You excel at extracting critical information from bug reports and setting up systematic investigation approaches.",
             "guidance": [
                 "CLASSIFICATION ACCURACY: Proper complexity assessment determines investigation depth - be thorough but decisive",
@@ -94,9 +97,22 @@
             ]
         },
         {
-            "id": "phase-0b-reproducibility-loop",
+            "id": "phase-0b-user-preferences",
+            "title": "Phase 0b: Identify User Debugging Preferences",
+            "prompt": "**USER DEBUGGING PREFERENCES** - Identify and document user-specific debugging preferences.\n\n**CHECK FOR PREFERENCES IN:**\n1. **User Settings/Memory**: Any stored debugging preferences\n2. **Project Documentation**: Team debugging standards\n3. **Previous Instructions**: Past user guidance on debugging approach\n\n**CATEGORIZE PREFERENCES:**\n- **Debugging Tools**: Preference for debugger vs logs vs traces\n- **Log Verbosity**: Detailed vs concise output\n- **Output Format**: Structured logs vs human-readable\n- **Testing Approach**: Unit tests vs integration tests focus\n- **Commit Style**: Conventional commits vs descriptive\n- **Documentation**: Inline comments vs separate docs\n- **Error Handling**: Fail fast vs defensive programming\n\n**IF NO EXPLICIT PREFERENCES:**\nAsk user:\n- \"Do you prefer verbose logging or concise summaries?\"\n- \"Should I use interactive debuggers or rely on log analysis?\"\n- \"Any specific tools or approaches your team prefers?\"\n\n**OUTPUT**: Set `userDebugPreferences` context variable with categorized preferences.\n\n**APPLY**: Use applyDebugPreferences() throughout investigation to adapt approach.",
+            "agentRole": "You are a debugging preferences specialist who understands how different teams and developers approach problem-solving. You excel at identifying and applying user-specific debugging styles.",
+            "guidance": [
+                "This step ensures the investigation aligns with user/team practices",
+                "Capture both explicit and implicit preferences",
+                "Default to standard practices if no preferences found",
+                "These preferences will be applied throughout the workflow"
+            ],
+            "requireConfirmation": false
+        },
+        {
+            "id": "phase-0c-reproducibility-loop",
             "type": "loop",
-            "title": "Phase 0b: Reproducibility Verification Loop",
+            "title": "Phase 0c: Reproducibility Verification Loop",
             "loop": {
                 "type": "for",
                 "count": 3,
@@ -120,8 +136,8 @@
             "requireConfirmation": false
         },
         {
-            "id": "phase-0c-reproducibility-assessment",
-            "title": "Phase 0c: Reproducibility Assessment",
+            "id": "phase-0d-reproducibility-assessment",
+            "title": "Phase 0d: Reproducibility Assessment",
             "prompt": "**ASSESS REPRODUCIBILITY**\n\nBased on 3 reproduction attempts:\n- **Success Rate**: Calculate percentage\n- **Pattern Analysis**: Identify any intermittent patterns\n- **Minimal Reproduction**: Create simplified test case if needed\n\n**DECISION:**\n- If 100% reproducible: Proceed to Phase 1\n- If intermittent: Apply stress techniques and document patterns\n- If 0% reproducible: Request more information from user\n\n**Set `isReproducible` = true/false based on assessment**",
             "agentRole": "You are assessing reproduction results to determine investigation viability.",
             "guidance": [
@@ -143,13 +159,30 @@
             }
         },
         {
-            "id": "phase-0d-create-context",
-            "title": "Phase 0d: Initialize Investigation Context",
+            "id": "phase-0e-tool-check",
+            "title": "Phase 0e: Tool Availability Verification",
             "runCondition": {
                 "var": "isReproducible",
                 "equals": true
             },
-            "prompt": "**CREATE INVESTIGATION CONTEXT** - Initialize comprehensive tracking document.\n\nUse createInvestigationBranch() to set up version control, then create INVESTIGATION_CONTEXT.md:\n\n```markdown\n# Investigation Context\n\n## 1. Bug Summary\n- **ID**: {{bugId || 'investigation-' + Date.now()}}\n- **Description**: [from bug report]\n- **Complexity**: {{bugComplexity}}\n- **Reproducibility**: {{isReproducible ? 'Consistent' : 'Intermittent'}}\n- **Started**: {{new Date().toISOString()}}\n- **Status**: Phase 0d - Context Initialization\n\n## 2. Progress Tracking\n✅ Completed: Phase 0 (Triage), Phase 0a (Assumptions), Phase 0b (Reproducibility)\n🔄 Current: Phase 0d (Context Creation)\n⏳ Remaining: Phase 1 (Analysis), Phase 2 (Hypotheses), Phase 3-5 (Validation), Phase 6 (Writeup)\n📊 Confidence: 0/10\n\n## 3. Environment & Setup\n- **Project Type**: {{projectType}}\n- **Debugging Mechanism**: {{debuggingMechanism}}\n- **Architecture**: {{isDistributed ? 'Distributed' : 'Monolithic'}}\n- **Reproduction Results**: {{reproductionResults}}\n\n## 4. Analysis Findings\n*To be populated during Phase 1*\n\n## 5. Hypothesis Registry\n*To be populated during Phase 2*\n\n## 6. Evidence Log\n*To be populated during validation*\n\n## 7. Experiment Results\n*To be populated if experiments conducted*\n\n## 8. Dead Ends & Lessons\n*Track approaches that didn't work*\n\n## 9. Function Definitions\n[Include all function definitions from metaGuidance for reference]\n\n## 10. Resumption JSON\n```json\n{\n  \"workflowId\": \"systematic-bug-investigation-with-loops\",\n  \"completedSteps\": [\"phase-0-triage\", \"phase-0a-assumption-check\", \"phase-0b-reproducibility-loop\", \"phase-0c-reproducibility-assessment\", \"phase-0d-create-context\"],\n  \"context\": {\n    \"bugComplexity\": \"{{bugComplexity}}\",\n    \"projectType\": \"{{projectType}}\",\n    \"isReproducible\": {{isReproducible}},\n    \"debuggingMechanism\": \"{{debuggingMechanism}}\",\n    \"isDistributed\": {{isDistributed || false}}\n  }\n}\n```\n```\n\n**Set `contextInitialized` = true**",
+            "prompt": "**TOOL AVAILABILITY CHECK** - Verify required debugging tools before investigation.\n\n**CORE TOOLS CHECK:**\n1. **Analysis Tools**:\n   - grep_search: Text pattern searching\n   - read_file: File content reading\n   - codebase_search: Semantic code search\n   - Test availability, note any failures\n\n2. **Git Operations**:\n   - Check git availability: `git --version`\n   - If unavailable, set `gitAvailable = false`\n   - Plan fallback: manual change tracking\n\n3. **Build/Test Tools** (based on projectType):\n   - npm/yarn for JavaScript\n   - Maven/Gradle for Java\n   - pytest/unittest for Python\n   - Document which are available\n\n4. **Debugging Tools**:\n   - Language-specific debuggers\n   - Profilers if needed\n   - Log aggregation tools\n\n**FALLBACK STRATEGIES:**\n- grep_search fails → use file_search\n- codebase_search fails → use grep_search with context\n- Git unavailable → track changes in INVESTIGATION_CONTEXT.md\n- Build tools missing → focus on static analysis\n\n**OUTPUT**:\n- Set `availableTools` context variable\n- Set `toolLimitations` with any restrictions\n- Document fallback strategies in context\n\n**ADAPTATION**: Adjust investigation approach based on available tools.",
+            "agentRole": "You are a tool availability specialist ensuring the investigation can proceed smoothly with available resources. You excel at creating fallback strategies.",
+            "guidance": [
+                "Test each tool category systematically",
+                "Don't fail if some tools are unavailable - adapt",
+                "Document limitations clearly for user awareness",
+                "Prefer degraded functionality over investigation failure"
+            ],
+            "requireConfirmation": false
+        },
+        {
+            "id": "phase-0f-create-context",
+            "title": "Phase 0f: Initialize Investigation Context",
+            "runCondition": {
+                "var": "isReproducible",
+                "equals": true
+            },
+            "prompt": "**CREATE INVESTIGATION CONTEXT** - Initialize comprehensive tracking document.\n\nUse createInvestigationBranch() to set up version control, then create INVESTIGATION_CONTEXT.md:\n\n```markdown\n# Investigation Context\n\n## 1. Bug Summary\n- **ID**: {{bugId || 'investigation-' + Date.now()}}\n- **Description**: [from bug report]\n- **Complexity**: {{bugComplexity}}\n- **Reproducibility**: {{isReproducible ? 'Consistent' : 'Intermittent'}}\n- **Started**: {{new Date().toISOString()}}\n- **Status**: Phase 0f - Context Initialization\n- **Automation Level**: {{automationLevel}}\n\n## 2. Progress Tracking\n{{visualProgress()}}\n✅ Completed: Phase 0 (Triage), Phase 0a (Assumptions), Phase 0b (User Preferences), Phase 0c (Reproducibility), Phase 0d (Assessment), Phase 0e (Tools)\n🔄 Current: Phase 0f (Context Creation)\n⏳ Remaining: Phase 1 (Analysis), Phase 2 (Hypotheses), Phase 3-5 (Validation), Phase 6 (Writeup)\n📊 Confidence: 0/10\n\n## 3. Environment & Setup\n- **Project Type**: {{projectType}}\n- **Debugging Mechanism**: {{debuggingMechanism}}\n- **Architecture**: {{isDistributed ? 'Distributed' : 'Monolithic'}}\n- **Reproduction Results**: {{reproductionResults}}\n- **User Preferences**: {{userDebugPreferences}}\n- **Available Tools**: {{availableTools}}\n- **Tool Limitations**: {{toolLimitations || 'None'}}\n\n## 4. Analysis Findings\n*To be populated during Phase 1*\n\n## 5. Hypothesis Registry\n*To be populated during Phase 2*\n\n## 6. Evidence Log\n*To be populated during validation*\n\n## 7. Experiment Results\n*To be populated if experiments conducted*\n\n## 8. Dead Ends & Lessons\n*Track approaches that didn't work*\n\n## 9. Function Definitions\n[Include all function definitions from metaGuidance for reference]\n\n## 10. Resumption JSON\n```json\n{\n  \"workflowId\": \"systematic-bug-investigation-with-loops\",\n  \"completedSteps\": [\"phase-0-triage\", \"phase-0a-assumption-check\", \"phase-0b-user-preferences\", \"phase-0c-reproducibility-loop\", \"phase-0d-reproducibility-assessment\", \"phase-0e-tool-check\", \"phase-0f-create-context\"],\n  \"context\": {\n    \"bugComplexity\": \"{{bugComplexity}}\",\n    \"projectType\": \"{{projectType}}\",\n    \"isReproducible\": {{isReproducible}},\n    \"debuggingMechanism\": \"{{debuggingMechanism}}\",\n    \"isDistributed\": {{isDistributed || false}},\n    \"automationLevel\": \"{{automationLevel}}\",\n    \"userDebugPreferences\": {{JSON.stringify(userDebugPreferences)}},\n    \"availableTools\": {{JSON.stringify(availableTools)}},\n    \"toolLimitations\": {{JSON.stringify(toolLimitations)}}\n  }\n}\n```\n```\n\n**Set `contextInitialized` = true**",
             "agentRole": "You are creating the central documentation hub for this investigation. This document will track all progress, findings, and enable seamless handoffs.",
             "guidance": [
                 "Create a comprehensive but scannable document",
@@ -187,6 +220,7 @@
                         "Use the function definitions for standardized operations",
                         "If you discover the bug's root cause with high confidence, note it but complete all analysis phases for thoroughness",
                         "Update INVESTIGATION_CONTEXT.md after each phase: use updateInvestigationContext('Analysis Findings', phase-specific findings)",
+                        "In Phase 1 (Breadth Scan): Use findSimilarBugs() to search for historical patterns",
                         "After all 4 phases complete, use trackInvestigation('Phase 1 Complete', 'Moving to Hypothesis Development')"
                     ],
                     "requireConfirmation": false
@@ -233,7 +267,7 @@
         {
             "id": "phase-2a-hypothesis-development",
             "title": "Phase 2a: Hypothesis Development & Prioritization",
-            "prompt": "**HYPOTHESIS GENERATION** - Based on codebase analysis, formulate testable hypotheses about the bug's root cause.\n\n**STEP 1: Evidence-Based Hypothesis Development**\nCreate maximum 5 prioritized hypotheses. Each includes:\n- **Root Cause Theory**: Specific technical explanation\n- **Supporting Evidence**: Code patterns/logic flows supporting this theory\n- **Failure Mechanism**: Exact sequence leading to observed bug\n- **Testability Score**: Quantified assessment (1-10) of validation ease\n- **Evidence Strength Score**: Quantified assessment (1-10) based on code findings\n\n**STEP 2: Hypothesis Prioritization Matrix**\nRank hypotheses using weighted scoring:\n- **Evidence Strength** (40%): Code analysis support for theory\n- **Testability** (35%): Validation ease with debugging instruments\n- **Impact Scope** (25%): How well this explains all symptoms\n\n**CRITICAL RULE**: All hypotheses must be based on concrete evidence from code analysis.\n\n**OUTPUTS**: Maximum 5 hypotheses with quantified scoring, ranked by priority.",
+            "prompt": "**HYPOTHESIS GENERATION** - Based on codebase analysis, formulate testable hypotheses about the bug's root cause.\n\n**STEP 1: Evidence-Based Hypothesis Development**\nCreate maximum 5 prioritized hypotheses. Each includes:\n- **Root Cause Theory**: Specific technical explanation\n- **Supporting Evidence**: Code patterns/logic flows supporting this theory\n- **Failure Mechanism**: Exact sequence leading to observed bug\n- **Testability Score**: Quantified assessment (1-10) of validation ease\n- **Evidence Strength Score**: Quantified assessment (1-10) based on code findings\n\n**STEP 2: Hypothesis Prioritization Matrix**\nRank hypotheses using weighted scoring:\n- **Evidence Strength** (40%): Code analysis support for theory\n- **Testability** (35%): Validation ease with debugging instruments\n- **Impact Scope** (25%): How well this explains all symptoms\n\n**STEP 3: Pattern Integration**\nIncorporate findings from findSimilarBugs():\n- **Historical Patterns**: Similar bugs fixed previously\n- **Known Issues**: Related problems in the codebase\n- **Test Failures**: Similar test failure patterns\n- Adjust hypothesis confidence based on pattern matches\n\n**CRITICAL RULE**: All hypotheses must be based on concrete evidence from code analysis.\n\n**OUTPUTS**: Maximum 5 hypotheses with quantified scoring, ranked by priority.",
             "agentRole": "You are a senior software detective and root cause analysis expert with deep expertise in systematic hypothesis formation. Your strength lies in connecting code evidence to potential failure mechanisms and creating testable theories. You excel at logical reasoning and evidence-based deduction. You must maintain rigorous quantitative standards and reject any hypothesis not grounded in concrete code evidence.",
             "guidance": [
                 "EVIDENCE-BASED ONLY: Every hypothesis must be grounded in concrete code analysis findings with quantified evidence scores",
@@ -434,7 +468,16 @@
                 "Document rationale for each experiment type",
                 "Consider test environment experiments first"
             ],
-            "requireConfirmation": true,
+            "requireConfirmation": {
+                "or": [
+                    {"var": "automationLevel", "equals": "Low"},
+                    {"var": "automationLevel", "equals": "Medium"},
+                    {"and": [
+                        {"var": "automationLevel", "equals": "High"},
+                        {"var": "currentConfidence", "lt": 6.0}
+                    ]}
+                ]
+            },
             "validationCriteria": [
                 {
                     "type": "contains",
@@ -537,7 +580,7 @@
         {
             "id": "phase-6-diagnostic-writeup",
             "title": "Phase 6: Comprehensive Diagnostic Writeup",
-            "prompt": "**FINAL DIAGNOSTIC DOCUMENTATION** - I will create comprehensive writeup enabling effective bug fixing and knowledge transfer.\n\n**STEP 1: Executive Summary**\n- **Bug Summary**: Concise description of issue and impact\n- **Root Cause**: Clear, non-technical explanation of what is happening\n- **Confidence Level**: Final confidence assessment with calculation methodology\n- **Scope**: What systems, users, or scenarios are affected\n\n**STEP 2: Technical Deep Dive**\n- **Root Cause Analysis**: Detailed technical explanation of failure mechanism\n- **Code Component Analysis**: Specific files, functions, and lines with exact locations\n- **Execution Flow**: Step-by-step sequence of events leading to bug\n- **State Analysis**: How system state contributes to failure\n\n**STEP 3: Investigation Methodology**\n- **Investigation Timeline**: Chronological summary with phase time investments\n- **Hypothesis Evolution**: Complete record of hypotheses (H1-H5) with status changes\n- **Evidence Assessment**: Rating and reliability of evidence sources with key citations\n\n**STEP 4: Knowledge Transfer & Action Plan**\n- **Skill Requirements**: Technical expertise needed for understanding and fixing\n- **Prevention & Review**: Specific measures and code review checklist items\n- **Action Items**: Immediate mitigation steps and permanent fix areas with timelines\n- **Testing Strategy**: Comprehensive verification approach for fixes\n\n**STEP 5: Context Finalization**\n- **Final Update**: Use updateInvestigationContext('Final Report', link to diagnostic report)\n- **Archive Context**: Ensure INVESTIGATION_CONTEXT.md is complete for future reference\n- **Knowledge Base**: Consider key findings for team knowledge base\n\n**DELIVERABLE**: Enterprise-grade diagnostic report enabling confident bug fixing, knowledge transfer, and organizational learning.",
+            "prompt": "**FINAL DIAGNOSTIC DOCUMENTATION** - I will create comprehensive writeup enabling effective bug fixing and knowledge transfer.\n\n**STEP 1: Executive Summary**\n- **Bug Summary**: Concise description of issue and impact\n- **Root Cause**: Clear, non-technical explanation of what is happening\n- **Confidence Level**: Final confidence assessment with calculation methodology\n- **Scope**: What systems, users, or scenarios are affected\n\n**STEP 2: Technical Deep Dive**\n- **Root Cause Analysis**: Detailed technical explanation of failure mechanism\n- **Code Component Analysis**: Specific files, functions, and lines with exact locations\n- **Execution Flow**: Step-by-step sequence of events leading to bug\n- **State Analysis**: How system state contributes to failure\n\n**STEP 3: Investigation Methodology**\n- **Investigation Timeline**: Chronological summary with phase time investments\n- **Hypothesis Evolution**: Complete record of hypotheses (H1-H5) with status changes\n- **Evidence Assessment**: Rating and reliability of evidence sources with key citations\n\n**STEP 4: Historical Context & Patterns**\n- **Similar Bugs**: Reference findings from findSimilarBugs() and SimilarPatterns.md\n- **Previous Fixes**: How similar issues were resolved\n- **Recurring Patterns**: Identify if this is part of a larger pattern\n- **Lessons Learned**: What can be applied from past experiences\n\n**STEP 5: Knowledge Transfer & Action Plan**\n- **Skill Requirements**: Technical expertise needed for understanding and fixing\n- **Prevention & Review**: Specific measures and code review checklist items\n- **Action Items**: Immediate mitigation steps and permanent fix areas with timelines\n- **Testing Strategy**: Comprehensive verification approach for fixes\n\n**STEP 6: Context Finalization**\n- **Final Update**: Use updateInvestigationContext('Final Report', link to diagnostic report)\n- **Archive Context**: Ensure INVESTIGATION_CONTEXT.md is complete for future reference\n- **Knowledge Base**: Consider key findings for team knowledge base\n\n**DELIVERABLE**: Enterprise-grade diagnostic report enabling confident bug fixing, knowledge transfer, and organizational learning.",
             "agentRole": "You are a senior technical writer and diagnostic documentation specialist with expertise in creating comprehensive, actionable bug reports for enterprise environments. Your strength lies in translating complex technical investigations into clear, structured documentation that enables effective problem resolution, knowledge transfer, and organizational learning. You excel at creating reports that serve immediate fixing needs, long-term system improvement, and team collaboration.",
             "guidance": [
                 "ENTERPRISE FOCUS: Write for multiple stakeholders including developers, managers, and future team members",
