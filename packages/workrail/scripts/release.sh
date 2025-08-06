@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 # Colors for output
 RED='\033[0;31m'
@@ -19,6 +20,54 @@ get_current_version() {
     grep '"version"' package.json | sed -E 's/.*"version": "(.*)".*/\1/'
 }
 
+# Function to show help
+show_help() {
+    echo "Usage: $0 [OPTIONS]"
+    echo
+    echo "Options:"
+    echo "  --type <patch|minor|major|custom>  Specify version bump type"
+    echo "  --version <x.y.z>                  Custom version (required if type=custom)"
+    echo "  --desc <description>               Release description"
+    echo "  --features <features>              Key features (newline-separated)"
+    echo "  --push                             Automatically push to origin (non-interactive)"
+    echo "  --no-push                          Skip pushing to origin"
+    echo "  --publish                          Automatically publish to npm (non-interactive)"
+    echo "  --no-publish                       Skip publishing to npm"
+    echo "  --access <public|restricted>       NPM access level (default: public)"
+    echo "  --force                            Continue even with uncommitted changes"
+    echo "  --help                             Show this help message"
+    echo
+    echo "If no options are provided, the script runs in interactive mode."
+    exit 0
+}
+
+# Parse arguments
+TYPE=""
+CUSTOM_VERSION=""
+DESC=""
+FEATURES=""
+PUSH=""
+PUBLISH=""
+ACCESS="public"
+FORCE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --type) TYPE="$2"; shift 2 ;;
+        --version) CUSTOM_VERSION="$2"; shift 2 ;;
+        --desc) DESC="$2"; shift 2 ;;
+        --features) FEATURES="$2"; shift 2 ;;
+        --push) PUSH=true; shift ;;
+        --no-push) PUSH=false; shift ;;
+        --publish) PUBLISH=true; shift ;;
+        --no-publish) PUBLISH=false; shift ;;
+        --access) ACCESS="$2"; shift 2 ;;
+        --force) FORCE=true; shift ;;
+        --help) show_help ;;
+        *) print_color "$RED" "Unknown option: $1"; show_help ;;
+    esac
+done
+
 # Main script
 print_color "$BLUE" "🚀 Workrail Release Script"
 print_color "$BLUE" "========================="
@@ -30,8 +79,11 @@ if [ ! -f "package.json" ]; then
     exit 1
 fi
 
+# Check if in git repo
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { print_color "$RED" "❌ Not a git repository. Initialize git first."; exit 1; }
+
 # Check for uncommitted changes
-if ! git diff-index --quiet HEAD --; then
+if ! $FORCE && ! git diff-index --quiet HEAD --; then
     print_color "$YELLOW" "⚠️  Warning: You have uncommitted changes."
     read -p "Do you want to continue anyway? (y/N) " -n 1 -r
     echo
@@ -46,44 +98,49 @@ CURRENT_VERSION=$(get_current_version)
 print_color "$GREEN" "Current version: $CURRENT_VERSION"
 echo
 
-# Ask for version bump type
-print_color "$BLUE" "What type of version bump?"
-echo "1) patch (x.x.X) - Bug fixes"
-echo "2) minor (x.X.0) - New features (backward compatible)"
-echo "3) major (X.0.0) - Breaking changes"
-echo "4) custom - Specify version manually"
-echo "5) cancel"
-echo
+# Determine version bump type
+if [ -z "$TYPE" ]; then
+    print_color "$BLUE" "What type of version bump?"
+    echo "1) patch (x.x.X) - Bug fixes"
+    echo "2) minor (x.X.0) - New features (backward compatible)"
+    echo "3) major (X.0.0) - Breaking changes"
+    echo "4) custom - Specify version manually"
+    echo "5) cancel"
+    echo
+    read -p "Select option (1-5): " VERSION_CHOICE
+    case $VERSION_CHOICE in
+        1) TYPE="patch" ;;
+        2) TYPE="minor" ;;
+        3) TYPE="major" ;;
+        4) TYPE="custom" ;;
+        5) print_color "$YELLOW" "Release cancelled."; exit 0 ;;
+        *) print_color "$RED" "Invalid option. Release cancelled."; exit 1 ;;
+    esac
+else
+    case $TYPE in
+        patch|minor|major|custom) ;;
+        *) print_color "$RED" "Invalid type: $TYPE"; exit 1 ;;
+    esac
+fi
 
-read -p "Select option (1-5): " VERSION_CHOICE
+# Handle custom version
+if [ "$TYPE" = "custom" ]; then
+    if [ -z "$CUSTOM_VERSION" ]; then
+        if [ -t 0 ]; then  # Interactive
+            read -p "Enter new version (e.g., 1.2.3): " CUSTOM_VERSION
+        else
+            print_color "$RED" "❌ --version required for custom type in non-interactive mode."
+            exit 1
+        fi
+    fi
+fi
 
-case $VERSION_CHOICE in
-    1)
-        VERSION_TYPE="patch"
-        NEW_VERSION=$(npm version patch --no-git-tag-version)
-        ;;
-    2)
-        VERSION_TYPE="minor"
-        NEW_VERSION=$(npm version minor --no-git-tag-version)
-        ;;
-    3)
-        VERSION_TYPE="major"
-        NEW_VERSION=$(npm version major --no-git-tag-version)
-        ;;
-    4)
-        read -p "Enter new version (e.g., 1.2.3): " CUSTOM_VERSION
-        VERSION_TYPE="custom"
-        NEW_VERSION=$(npm version $CUSTOM_VERSION --no-git-tag-version)
-        ;;
-    5)
-        print_color "$YELLOW" "Release cancelled."
-        exit 0
-        ;;
-    *)
-        print_color "$RED" "Invalid option. Release cancelled."
-        exit 1
-        ;;
-esac
+# Bump version
+if [ "$TYPE" = "custom" ]; then
+    NEW_VERSION=$(npm version "$CUSTOM_VERSION" --no-git-tag-version 2>&1) || { print_color "$RED" "❌ Failed to bump version."; exit 1; }
+else
+    NEW_VERSION=$(npm version "$TYPE" --no-git-tag-version 2>&1) || { print_color "$RED" "❌ Failed to bump version."; exit 1; }
+fi
 
 # Strip the 'v' prefix if present
 NEW_VERSION=${NEW_VERSION#v}
@@ -91,33 +148,37 @@ NEW_VERSION=${NEW_VERSION#v}
 print_color "$GREEN" "✅ Version bumped to: $NEW_VERSION"
 echo
 
-# Ask for release description
-print_color "$BLUE" "Enter a brief description of this release (or press Enter to skip):"
-read -r RELEASE_DESC
+# Get release description
+if [ -z "$DESC" ]; then
+    print_color "$BLUE" "Enter a brief description of this release (or press Enter to skip):"
+    read -r DESC
+fi
+
+# Get features
+if [ -z "$FEATURES" ]; then
+    print_color "$BLUE" "List key features/changes (one per line, empty line to finish):"
+    FEATURES=""
+    while IFS= read -r line; do
+        [ -z "$line" ] && break
+        FEATURES="${FEATURES}- ${line}\n"
+    done
+fi
 
 # Build release notes
 RELEASE_NOTES="Release v$NEW_VERSION"
-if [ -n "$RELEASE_DESC" ]; then
-    RELEASE_NOTES="$RELEASE_NOTES - $RELEASE_DESC"
+if [ -n "$DESC" ]; then
+    RELEASE_NOTES="$RELEASE_NOTES - $DESC"
 fi
-
-# Ask for key features (optional)
-print_color "$BLUE" "List key features/changes (one per line, empty line to finish):"
-FEATURES=""
-while IFS= read -r line; do
-    [ -z "$line" ] && break
-    FEATURES="${FEATURES}- ${line}\n"
-done
 
 # Commit version bump
 print_color "$BLUE" "📝 Creating commit..."
 git add package.json package-lock.json
 
 COMMIT_MSG="chore: release v$NEW_VERSION"
-if [ -n "$RELEASE_DESC" ]; then
+if [ -n "$DESC" ]; then
     COMMIT_MSG="$COMMIT_MSG
 
-$RELEASE_DESC"
+$DESC"
 fi
 if [ -n "$FEATURES" ]; then
     COMMIT_MSG="$COMMIT_MSG
@@ -152,11 +213,19 @@ else
     exit 1
 fi
 
-# Ask if user wants to push to remote
-echo
-read -p "Push commits and tags to origin? (y/N) " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
+# Handle push
+if [ -z "$PUSH" ]; then
+    echo
+    read -p "Push commits and tags to origin? (y/N) " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        PUSH=true
+    else
+        PUSH=false
+    fi
+fi
+
+if $PUSH; then
     print_color "$BLUE" "📤 Pushing to origin..."
     git push origin main --tags
     if [ $? -eq 0 ]; then
@@ -166,22 +235,35 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
     fi
 fi
 
-# Ask if user wants to publish to npm
-echo
-read -p "Publish to npm? (y/N) " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    # Ask for npm access level
-    print_color "$BLUE" "Select npm access level:"
-    echo "1) public (default)"
-    echo "2) restricted"
-    read -p "Select option (1-2) [1]: " NPM_ACCESS
-    
-    ACCESS_FLAG="--access public"
-    if [ "$NPM_ACCESS" = "2" ]; then
-        ACCESS_FLAG="--access restricted"
+# Handle publish
+if [ -z "$PUBLISH" ]; then
+    echo
+    read -p "Publish to npm? (y/N) " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        PUBLISH=true
+    else
+        PUBLISH=false
     fi
-    
+fi
+
+if $PUBLISH; then
+    # Check npm login
+    npm whoami >/dev/null 2>&1 || { print_color "$RED" "❌ Not logged into npm. Run 'npm login' first."; exit 1; }
+
+    # If access not specified in args, ask
+    if [ -z "$ACCESS" ]; then
+        print_color "$BLUE" "Select npm access level:"
+        echo "1) public (default)"
+        echo "2) restricted"
+        read -p "Select option (1-2) [1]: " NPM_ACCESS
+        ACCESS="public"
+        if [ "$NPM_ACCESS" = "2" ]; then
+            ACCESS="restricted"
+        fi
+    fi
+
+    ACCESS_FLAG="--access $ACCESS"
     print_color "$BLUE" "📦 Publishing to npm..."
     npm publish $ACCESS_FLAG
     
@@ -207,9 +289,12 @@ print_color "$BLUE" "📋 Summary:"
 print_color "$GREEN" "  - Version: $CURRENT_VERSION → $NEW_VERSION"
 print_color "$GREEN" "  - Commit: ✅"
 print_color "$GREEN" "  - Tag: ✅"
-if [[ $REPLY =~ ^[Yy]$ ]] && [ $? -eq 0 ]; then
+if $PUSH; then
+    print_color "$GREEN" "  - Pushed: ✅"
+fi
+if $PUBLISH; then
     print_color "$GREEN" "  - Published: ✅"
 fi
 
 echo
-print_color "$BLUE" "Done! 🚀" 
+print_color "$BLUE" "Done! 🚀"
