@@ -24,6 +24,10 @@
         "fun gatherDiscovery(focus) = 'Ask 2-3 focused questions about {focus}. Store responses in context.discoveryData. Be conversational and build on previous answers.'",
         "fun analyzeGaps() = 'Review discoveryData for missing critical information. Identify next area to explore. Set context.questionFocus for next iteration.'",
         "fun checkConvergence() = 'Evaluate if discovery is sufficient: clear problem, user needs, success criteria defined. Set context.discoveryComplete=true if ready.'",
+        "fun analyzeComplexity(data) = 'Score workflow complexity 1-10 based on {data}. Consider: number of steps, decision branches, integrations, error handling needs.'",
+        "fun suggestSteps(outline) = 'Expand {outline} into full step with prompt, agentRole, guidance using AI pattern recognition from similar workflows.'",
+        "fun visualizeWorkflow() = 'Generate Mermaid diagram showing complete workflow flow, decision points, loops, and context variable usage.'",
+        "fun getSchema() = 'Use workflow_get_schema to retrieve current schema. Reference when building workflow structure to ensure compliance.'",
         "PROGRESSIVE LEARNING: adaptToPath() throughout - detailed for basic, balanced for intermediate, expert for advanced.",
         "QUALITY FOCUS: All paths produce sophisticated workflows. Difference is in teaching approach, not final capability.",
         "The goal is to create a *reusable template*, not a single-use script. Use placeholders like [User provides X] where appropriate.",
@@ -35,7 +39,8 @@
         "When validation fails, use detailed error messages to guide improvements rather than guessing at fixes.",
         "teachFeature() progressively within each path based on use case needs.",
         "When you see function calls like adaptToPath() or createWorkflowFile(), refer to the function definitions above for full instructions.",
-        "Phase 6 DSL Optimization: For intermediate/advanced users with complex workflows, consider Function Reference Pattern to reduce duplication."
+        "Phase 6 DSL Optimization: For intermediate/advanced users with complex workflows, consider Function Reference Pattern to reduce duplication.",
+        "SCHEMA FIRST: Always getSchema() at start of Phase 2 to ensure compliance with current workflow schema version and structure."
     ],
     "steps": [
         {
@@ -70,7 +75,7 @@
                 {
                     "id": "discovery-analysis",
                     "title": "Analyzing Discovery Progress",
-                    "prompt": "analyzeGaps() to identify what's still needed.\n\nReview the discovery data collected so far and determine:\n1. What critical information is still missing?\n2. Which area should we explore next?\n3. Are we ready to proceed to synthesis?\n\ncheckConvergence() to determine if we have enough information.\n\nAgent: Set context.questionFocus for next iteration OR set context.discoveryComplete=true if ready. Increment context.discoveryIteration.",
+                    "prompt": "analyzeGaps() to identify what's still needed.\n\n**AI-Powered Analysis:**\n- Pattern recognition: Based on similar workflows, what requirements are commonly missed?\n- Implicit needs: What hasn't been stated but is likely needed?\n- Optimization opportunities: Where could this workflow benefit from advanced features?\n\nReview the discovery data collected so far and determine:\n1. What critical information is still missing?\n2. Which area should we explore next?\n3. Are we ready to proceed to synthesis?\n\ncheckConvergence() to determine if we have enough information.\n\nAgent: Use pattern recognition to suggest unexplored areas. Set context.questionFocus for next iteration OR set context.discoveryComplete=true if ready. Increment context.discoveryIteration.",
                     "agentRole": "You are a discovery analyst. Review all collected data, identify critical gaps, and determine the next area to explore. Common follow-up areas: integration points, error handling, decision branches, constraints, scale/frequency, evolution needs.",
                     "guidance": [
                         "CHECK COMPLETENESS: Problem clarity, user needs, success criteria, basic constraints",
@@ -86,7 +91,7 @@
         {
             "id": "discovery-synthesis",
             "title": "Discovery Synthesis & Template Matching",
-            "prompt": "Excellent! I now have a comprehensive understanding of your workflow needs.\n\n**Discovery Summary:**\nAgent: Summarize the key findings from context.discoveryData in a structured format.\n\n**Next Steps:**\n1. I'll synthesize this into a refined problem statement\n2. Use workflow_list and workflow_get to find suitable templates\n3. Present recommendations based on structural patterns\n\nAgent: Create a concise problem statement. Search for workflows with similar patterns (not necessarily same domain). A 'bug investigation' workflow might be perfect for a 'customer complaint' workflow if they share similar structures.",
+            "prompt": "Excellent! I now have a comprehensive understanding of your workflow needs.\n\n**Discovery Summary:**\nAgent: Summarize the key findings from context.discoveryData in a structured format.\n\n**Next Steps:**\n1. I'll synthesize this into a refined problem statement\n2. Use workflow_list and workflow_get to find suitable templates\n3. getSchema() to ensure we build on the latest workflow structure\n4. Present recommendations based on structural patterns\n\nAgent: Create a concise problem statement. Search for workflows with similar patterns (not necessarily same domain). A 'bug investigation' workflow might be perfect for a 'customer complaint' workflow if they share similar structures.",
             "agentRole": "You are a workflow synthesis expert. Compile all discovery data into a clear, actionable problem statement. Use workflow_list and workflow_get to find templates based on structural similarity. Present 2-3 best matches with explanations.",
             "guidance": [
                 "SYNTHESIZE: Create clear, one-paragraph problem statement",
@@ -96,6 +101,20 @@
             ],
             "askForFiles": true,
             "requireConfirmation": true
+        },
+        {
+            "id": "phase-1-25-complexity-analysis",
+            "title": "Phase 1.25: Workflow Complexity Analysis",
+            "prompt": "Based on the discovery data, I'll analyze the workflow complexity to recommend the best learning path.\n\nanalyzeComplexity(discoveryData)\n\n**Complexity Factors Being Evaluated:**\n- Problem domain complexity (technical depth required)\n- Number of potential decision points\n- Integration requirements (tools, systems, APIs)\n- Error handling and recovery needs\n- Data transformation requirements\n- User expertise vs. task complexity gap\n\n**Scoring Guide:**\n- 1-3: Simple, linear workflows (Basic path ideal)\n- 4-7: Moderate complexity with some branching (Intermediate path recommended)\n- 8-10: Complex with multiple integrations/decisions (Advanced path beneficial)\n\nAgent: Calculate complexity score and set context.complexityScore. Determine context.recommendedPath based on score AND user experience. Explain reasoning.",
+            "agentRole": "You are a workflow complexity analyst. Evaluate the discovered requirements objectively. Consider technical complexity, decision density, integration needs, and error handling requirements. Balance complexity score with user's stated experience level.",
+            "guidance": [
+                "OBJECTIVE SCORING: Don't over-complicate simple workflows",
+                "FACTOR WEIGHTS: Integrations and branching logic add more complexity than step count",
+                "PATH MATCHING: Score 1-3→basic, 4-7→intermediate, 8-10→advanced, but adjust for user experience",
+                "EXPLAIN REASONING: Always explain why you scored as you did",
+                "SET CONTEXT: Store complexityScore, recommendedPath, and complexityFactors in context"
+            ],
+            "requireConfirmation": false
         },
         {
             "id": "phase-0-5-research",
@@ -119,7 +138,7 @@
         {
             "id": "phase-1-assessment",
             "title": "Phase 1: Personalized Learning Path Selection",
-            "prompt": "Excellent! With a clear understanding of your goals, let's choose the best way to build your workflow.\n\nPlease select your experience level with workflow creation to get a personalized-path:\n\n\ud83c\udf31 **Basic Path - \"Learn by Doing with Explanation\"**\n   - New to workflows or want thorough understanding\n   - Step-by-step guidance with detailed explanations\n   - Progressive introduction of advanced features with context\n   - Focus: Understanding concepts and building confidence\n\n\ud83d\ude80 **Intermediate Path - \"Balanced Guidance with Examples\"**\n   - Some experience with automation or process design\n   - Structured approach with practical examples\n   - Feature recommendations based on your use case\n   - Focus: Efficient workflow creation with best practices\n\n\ud83c\udfc6 **Advanced Path - \"Full Features with Expert Context\"**\n   - Experienced with workflow/automation tools\n   - Comprehensive feature access from the start\n   - Architectural guidance and performance considerations\n   - Focus: Sophisticated workflow engineering\n\nagentInstruct(set learningPath context variable to user's selection)",
+            "prompt": "Excellent! With a clear understanding of your goals, let's choose the best way to build your workflow.\n\n**Complexity Analysis Results:**\nAgent: Display the complexity score, recommended path, and key factors from context.\n\nPlease select your experience level with workflow creation:\n\n\ud83c\udf31 **Basic Path - \"Learn by Doing with Explanation\"**\n   - New to workflows or want thorough understanding\n   - Step-by-step guidance with detailed explanations\n   - Progressive introduction of advanced features with context\n   - Focus: Understanding concepts and building confidence\n\n\ud83d\ude80 **Intermediate Path - \"Balanced Guidance with Examples\"**\n   - Some experience with automation or process design\n   - Structured approach with practical examples\n   - Feature recommendations based on your use case\n   - Focus: Efficient workflow creation with best practices\n\n\ud83c\udfc6 **Advanced Path - \"Full Features with Expert Context\"**\n   - Experienced with workflow/automation tools\n   - Comprehensive feature access from the start\n   - Architectural guidance and performance considerations\n   - Focus: Sophisticated workflow engineering\n\nagentInstruct(set learningPath context variable to user's selection. Highlight which path matches the complexity analysis recommendation.)",
             "agentRole": "You are a workflow education specialist and learning path advisor with expertise in adapting technical instruction to different experience levels. Your role is to help users choose the most appropriate learning approach based on their background and goals.",
             "guidance": [
                 "PATH EXPLANATION: Clearly explain what each learning path offers so users can make an informed choice based on the discovery from Phase 0.",
@@ -147,14 +166,15 @@
                 "equals": "basic"
             },
             "title": "Phase 2: Guided Workflow Creation (Basic Path)",
-            "prompt": "Let's create your workflow step-by-step with detailed explanations! \ud83c\udf31\n\n**STEP 1: Create Your Workflow File**\nFirst, what would you like to name your new workflow file? (e.g., `my-workflow.json`)\n\ncreateWorkflowFile(template from Phase 1)\n\n**STEP 2: Build the Structure Together**\nNow, let's go through each part of your workflow one by one:\n\n1.  **Basic Info** (`id`, `name`, `version`, `description`)\n    - (Agent: For each field, explain why it matters and help the user craft clear, descriptive content.)\n2.  **Setup Requirements** (`preconditions`)\n    - (Agent: Explain what preconditions are, why they prevent problems, and ask the user what's needed.)\n3.  **Global Rules** (`metaGuidance`)\n    - (Agent: Explain the difference between global rules and step-specific instructions, and ask for input.)\n4.  **The Action Steps** (`steps`)\n    - (Agent: Guide the user in creating simple, linear steps first. Analyze goal/research for needed features (e.g., conditions for branching, loops for repetition) and teachFeature() if appropriate. Then, explain that workflows can also have more advanced features. If their workflow seems to need them, introduce concepts like conditional steps, context variables, and validation with clear examples and ask if they'd like to add them.)\n5.  **Quality Integration**\n    - (Agent: useTools() to read docs like naming-conventions.md and suggest pattern integrations based on ideationNotes if available.)\n\n**LEARNING FOCUS:** We'll focus on understanding what each piece does and why it's useful.",
+            "prompt": "Let's create your workflow step-by-step with detailed explanations! \ud83c\udf31\n\n**STEP 0: Schema Foundation**\nFirst, I'll getSchema() to ensure we build on the current workflow structure.\n\n**STEP 1: Create Your Workflow File**\nWhat would you like to name your new workflow file? (e.g., `my-workflow.json`)\n\ncreateWorkflowFile(template from Phase 1)\n\n**STEP 2: Build the Structure Together**\nNow, let's go through each part of your workflow one by one:\n\n1.  **Basic Info** (`id`, `name`, `version`, `description`)\n    - (Agent: For each field, explain why it matters and help the user craft clear, descriptive content.)\n2.  **Setup Requirements** (`preconditions`)\n    - (Agent: Explain what preconditions are, why they prevent problems, and ask the user what's needed.)\n3.  **Global Rules** (`metaGuidance`)\n    - (Agent: Explain the difference between global rules and step-specific instructions, and ask for input.)\n4.  **The Action Steps** (`steps`)\n    - (Agent: Guide the user in creating simple, linear steps first. When user provides step outline, suggestSteps() to expand into full format. Analyze goal/research for needed features (e.g., conditions for branching, loops for repetition) and teachFeature() if appropriate.)\n5.  **Quality Integration**\n    - (Agent: useTools() to read docs like naming-conventions.md and suggest pattern integrations based on ideationNotes if available.)\n\n**AI ASSISTANCE:** When you describe a step briefly, I'll help expand it into a complete step with prompt, agentRole, and guidance!\n\n**LEARNING FOCUS:** We'll focus on understanding what each piece does and why it's useful.",
             "agentRole": "You are a patient and thorough workflow education instructor specializing in teaching beginners. Your goal is to guide the user collaboratively. Ask for one piece of information at a time, explain the concepts, and wait for their input before proceeding. Your expertise lies in breaking down complex concepts into understandable steps, providing clear explanations for why each element matters, and building user confidence through hands-on learning.",
             "guidance": [
                 "EXPLAIN EVERYTHING: This user is learning. Explain the purpose of each JSON field and workflow concept.",
                 "PROGRESSIVE FEATURES: Start with basics, introduce advanced features (conditional steps, context variables) when the use case needs them - with full explanations.",
                 "USE ANALOGIES: Compare workflow concepts to familiar things (recipes, instruction manuals, etc.).",
                 "ENCOURAGE QUESTIONS: Invite the user to ask about anything that's unclear.",
-                "QUALITY TEACHING: Even though this is the basic path, don't compromise on workflow quality - just explain more."
+                "QUALITY TEACHING: Even though this is the basic path, don't compromise on workflow quality - just explain more.",
+                "AI ASSIST: When user provides step outline, use suggestSteps() to expand into full format with all required fields"
             ],
             "validationCriteria": [
                 {
@@ -187,14 +207,16 @@
                 "equals": "intermediate"
             },
             "title": "Phase 2: Structured Workflow Development (Intermediate Path)",
-            "prompt": "Let's build your workflow with a structured approach and best practices! \ud83d\ude80\n\n**STEP 1: Initialize Workflow File**\nFirst, what would you like to name your new workflow file?\n\ncreateWorkflowFile(template from Phase 1)\n\n**STEP 2: Core Structure Development**\nWe'll build your workflow systematically. For each section, I will explain its purpose and best practices, then ask for your input:\n\n1.  **Metadata & Identity** (`id`, `name`, `version`, `description`)\n    - Focus on discoverability and clear communication.\n2.  **Operational Requirements** (`preconditions`, `metaGuidance`)\n    - Define what's needed before starting and establish global rules.\n3.  **Step Architecture**\n    - Design clear, actionable steps.\n    - Analyze goal/research for needed features (e.g., loops for multi-item processing) and teachFeature() proactively.\n4.  **Quality Patterns**\n    - useTools() to examine existing workflows and docs to suggest proven patterns from ideationNotes.\n\n**STEP 3: Enhanced Feature Recommendations**\nBased on your workflow's purpose, I may recommend specific features like:\n- **Clarification Prompts**: To gather better input upfront.\n- **Validation Criteria**: For automatic quality checks.\n- **Context Variables**: When you need information to flow between steps.\n- **Conditional Logic**: For workflows with decision points.\n\n(Agent: As you build the steps, proactively recommend these features where they seem appropriate, explaining the benefits. Integrate researchInsights and ideationNotes into recommendations.)\n\n**EFFICIENCY FOCUS:** We'll focus on building a professionally structured workflow with the right features for the job.",
+            "prompt": "Let's build your workflow with a structured approach and best practices! \ud83d\ude80\n\n**STEP 0: Schema & Foundation**\ngetSchema() to ensure compliance with current workflow structure.\n\n**STEP 1: Initialize Workflow File**\nWhat would you like to name your new workflow file?\n\ncreateWorkflowFile(template from Phase 1)\n\n**STEP 2: Core Structure Development**\nWe'll build your workflow systematically:\n\n1.  **Metadata & Identity** (`id`, `name`, `version`, `description`)\n    - Focus on discoverability and clear communication.\n2.  **Operational Requirements** (`preconditions`, `metaGuidance`)\n    - Define what's needed before starting and establish global rules.\n3.  **Step Architecture with AI Assistance**\n    - Design clear, actionable steps.\n    - When you outline a step, I'll suggestSteps() to expand it professionally.\n    - Analyze goal/research for needed features (e.g., loops for multi-item processing) and teachFeature() proactively.\n4.  **Context Variable Intelligence**\n    - I'll analyze your steps and suggest which context variables you'll need for data flow.\n5.  **Quality Patterns**\n    - useTools() to examine existing workflows and docs to suggest proven patterns from ideationNotes.\n\n**STEP 3: Enhanced Feature Recommendations**\nBased on your workflow's purpose, I may recommend specific features like:\n- **Clarification Prompts**: To gather better input upfront.\n- **Validation Criteria**: For automatic quality checks.\n- **Context Variables**: When you need information to flow between steps.\n- **Conditional Logic**: For workflows with decision points.\n\n(Agent: As you build the steps, proactively recommend these features where they seem appropriate, explaining the benefits. Integrate researchInsights and ideationNotes into recommendations.)\n\n**EFFICIENCY FOCUS:** We'll focus on building a professionally structured workflow with the right features for the job.",
             "agentRole": "You are an experienced workflow development consultant with expertise in efficient workflow creation and best practices. You will act as a collaborator, guiding the user through the creation process efficiently. Your role is to guide users through structured development while recommending appropriate features and maintaining professional standards.",
             "guidance": [
                 "STRUCTURED APPROACH: Follow a logical sequence with clear reasoning for each decision.",
                 "FEATURE RECOMMENDATIONS: Suggest appropriate features based on workflow type and use case.",
                 "BEST PRACTICES: Share proven patterns and explain why they work.",
                 "PRACTICAL EXAMPLES: Use real-world scenarios to illustrate concepts.",
-                "BALANCED DEPTH: Provide enough detail to understand without overwhelming with basics."
+                "BALANCED DEPTH: Provide enough detail to understand without overwhelming with basics.",
+                "AI OPTIMIZATION: Use suggestSteps() to expand outlines; analyze steps to suggest context variables",
+                "PATTERN MATCHING: Leverage AI to identify similar workflow patterns and suggest optimizations"
             ],
             "validationCriteria": [
                 {
@@ -227,14 +249,16 @@
                 "equals": "advanced"
             },
             "title": "Phase 2: Comprehensive Workflow Architecture (Advanced Path)",
-            "prompt": "Let's architect a sophisticated workflow with full feature utilization. \ud83c\udfc6\n\n**STEP 1: Rapid File Initialization**\nTo begin, what filename shall we use for the new workflow?\n\ncreateWorkflowFile(template foundation) and shift to architectural decisions\n\n**STEP 2: Architectural Design Discussion**\nLet's discuss the high-level architecture. For each area, I will present advanced considerations and ask for your design choices:\n\n1.  **Core Architecture** (`id`, `name`, `version`, `description`)\n    - (Agent: Discuss semantic versioning strategy, namespace considerations, and treating the description as API documentation.)\n2.  **Operational Design** (`preconditions`, `metaGuidance`, `contextVariables`)\n    - (Agent: Discuss comprehensive precondition modeling, sophisticated metaGuidance for complex scenarios, and context variable architecture for data flow.)\n3.  **Advanced Feature Implementation & Step Design**\n    - (Agent: Discuss trade-offs and design patterns for conditional logic, validation strategy, user experience, performance, and enterprise-grade features like error handling and scalability. Leverage researchInsights for cutting-edge patterns.)\n4.  **Innovation Integration**\n    - (Agent: useTools() to analyze existing enterprise workflows, then propose innovative adaptations from ideationNotes. Focus on non-obvious optimizations.)\n\n**MASTERY FOCUS:** Our goal is to collaborate on creating an enterprise-grade workflow with a sophisticated and intentional architecture.",
+            "prompt": "Let's architect a sophisticated workflow with full feature utilization. \ud83c\udfc6\n\n**STEP 0: Schema & Architecture Foundation**\ngetSchema() to ensure we leverage all available features properly.\n\n**STEP 1: Rapid File Initialization**\nWhat filename shall we use for the new workflow?\n\ncreateWorkflowFile(template foundation) and shift to architectural decisions\n\n**STEP 2: Architectural Design with AI Enhancement**\nLet's discuss the high-level architecture:\n\n1.  **Core Architecture** (`id`, `name`, `version`, `description`)\n    - Semantic versioning strategy, namespace considerations, API documentation approach.\n2.  **Operational Design** (`preconditions`, `metaGuidance`, `contextVariables`)\n    - Comprehensive precondition modeling, sophisticated metaGuidance patterns.\n    - AI-powered context variable architecture based on data flow analysis.\n3.  **Advanced Step Design with Optimization**\n    - Trade-offs for conditional logic, validation strategy, performance.\n    - suggestSteps() with enterprise patterns when you provide high-level design.\n    - AI-suggested step ordering for optimal execution flow.\n4.  **Innovation Integration**\n    - useTools() to analyze existing enterprise workflows.\n    - AI-powered pattern recognition for non-obvious optimizations.\n    - Leverage researchInsights for cutting-edge approaches.\n\n**AI ARCHITECTURE ASSISTANT:** I'll analyze your design decisions and suggest:\n- Optimal step sequencing\n- Advanced validation criteria\n- Performance optimizations\n- Scalability considerations\n\n**MASTERY FOCUS:** Creating an enterprise-grade workflow with sophisticated, AI-enhanced architecture.",
             "agentRole": "You are a senior workflow architect and systems design expert with deep expertise in enterprise-grade workflow engineering. Your role is to act as an architectural consultant. You will propose design patterns and discuss trade-offs with the user. Your role is to engage in sophisticated technical discussions, propose advanced design patterns, and help users create workflows that meet enterprise standards for scalability, maintainability, and performance.",
             "guidance": [
                 "ARCHITECTURAL THINKING: Focus on design patterns, scalability, and maintainability.",
                 "FULL FEATURE ACCESS: Leverage the complete feature set appropriately for the use case.",
                 "PERFORMANCE AWARENESS: Consider efficiency and resource implications.",
                 "ENTERPRISE PATTERNS: Apply proven enterprise workflow patterns.",
-                "EXPERT CONTEXT: Assume understanding of complex concepts, focus on sophisticated applications."
+                "EXPERT CONTEXT: Assume understanding of complex concepts, focus on sophisticated applications.",
+                "AI ARCHITECTURE: Use AI to suggest optimal patterns, step ordering, and performance optimizations",
+                "INNOVATION ENGINE: Leverage AI pattern recognition for non-obvious workflow enhancements"
             ],
             "validationCriteria": [
                 {
@@ -414,6 +438,20 @@
                 }
             ],
             "hasValidation": true
+        },
+        {
+            "id": "phase-5-5-visual-preview",
+            "title": "Phase 5.5: Visual Workflow Preview",
+            "prompt": "Let's visualize your workflow to see the complete flow! 🎨\n\nvisualizeWorkflow() to generate a comprehensive diagram.\n\n**Creating Mermaid Diagram:**\nI'll generate a flowchart showing:\n- Complete step sequence\n- Decision branches (conditional steps)\n- Loop structures\n- Context variable flow\n- Learning path variations\n\nAgent: Use create_diagram to generate a Mermaid flowchart. Include:\n1. All workflow steps as nodes\n2. Conditional branches with decision labels\n3. Loop indicators with iteration info\n4. Context variables as data flow annotations\n5. Different colors for different phases or complexity levels\n\n**Example Structure:**\n```mermaid\nflowchart TD\n    Start([\"🚀 Workflow Start\"])\n    Discovery[\"Phase 0: Discovery Loop<br/>Gather Requirements\"]\n    Complexity[\"Phase 1.25: Complexity Analysis<br/>Score: context.complexityScore\"]\n    PathSelect{{\"Learning Path Selection<br/>Basic/Intermediate/Advanced\"}}\n    ...\n    End([\"✅ Workflow Complete\"])\n```\n\n**Benefits of Visualization:**\n- See the complete workflow structure at a glance\n- Verify logical flow and dependencies\n- Identify optimization opportunities\n- Great for documentation and team sharing",
+            "agentRole": "You are a workflow visualization expert. Create clear, comprehensive Mermaid diagrams that accurately represent the workflow structure, including all paths, conditions, and data flows.",
+            "guidance": [
+                "COMPLETE COVERAGE: Include every step, even conditional ones",
+                "CLEAR LABELING: Use descriptive labels for all nodes and edges",
+                "VISUAL HIERARCHY: Use subgraphs for loops and phases",
+                "DATA FLOW: Show context variable usage with annotations",
+                "ACCESSIBILITY: Ensure diagram is readable and well-organized"
+            ],
+            "requireConfirmation": false
         },
         {
             "id": "phase-6-dsl-optimization",
