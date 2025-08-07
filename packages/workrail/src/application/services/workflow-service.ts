@@ -45,11 +45,12 @@ import {
 } from '../../core/error-handler';
 import { evaluateCondition, ConditionContext } from '../../utils/condition-evaluator';
 import { ValidationEngine } from './validation-engine';
-import { LoopStep, isLoopStep, EnhancedContext } from '../../types/workflow-types';
+import { LoopStep, isLoopStep, EnhancedContext, isFirstLoopIteration } from '../../types/workflow-types';
 import { LoopExecutionContext } from './loop-execution-context';
 import { LoopStepResolver } from './loop-step-resolver';
 import { checkContextSize } from '../../utils/context-size';
 import { ContextOptimizer } from './context-optimizer';
+import { ILoopContextOptimizer } from '../../types/loop-context-optimizer';
 
 /**
  * Default implementation of {@link WorkflowService} that relies on
@@ -60,7 +61,8 @@ export class DefaultWorkflowService implements WorkflowService {
 
   constructor(
     private readonly storage: IWorkflowStorage = createDefaultWorkflowStorage(),
-    private readonly validationEngine: ValidationEngine = new ValidationEngine()
+    private readonly validationEngine: ValidationEngine = new ValidationEngine(),
+    private readonly loopContextOptimizer?: ILoopContextOptimizer
   ) {
     this.loopStepResolver = new LoopStepResolver();
   }
@@ -131,11 +133,29 @@ export class DefaultWorkflowService implements WorkflowService {
         
         // Handle single step body
         if (!Array.isArray(bodyStep)) {
-          // Always inject loop variables first
-          const loopEnhancedContext = loopContext.injectVariables(context);
+          // Check if this is the first iteration
+          const isFirst = loopContext.isFirstIteration();
+          
+          // Check if loop is empty to avoid phase overview
+          if (isFirst && loopContext.isEmpty(context)) {
+            // Skip this loop entirely
+            const skipContext = ContextOptimizer.createEnhancedContext(context, completed);
+            delete skipContext._currentLoop; // Remove loop context
+            const nextStep = await this.getNextStep(workflow.id, completed, skipContext);
+            return nextStep;
+          }
+          
+          // Use optimizer if available for subsequent iterations
+          const useMinimal = !isFirst && !!this.loopContextOptimizer;
+          const loopEnhancedContext = loopContext.injectVariables(context, useMinimal);
+          
+          // Apply additional optimization if available
+          const optimizedContext = useMinimal && this.loopContextOptimizer
+            ? this.loopContextOptimizer.stripLoopMetadata(loopEnhancedContext as EnhancedContext)
+            : loopEnhancedContext;
           
           // Check context size after injection
-          const loopSizeCheck = checkContextSize(loopEnhancedContext);
+          const loopSizeCheck = checkContextSize(optimizedContext as any);
           if (loopSizeCheck.isError) {
             throw new Error(`Context size (${Math.round(loopSizeCheck.sizeBytes / 1024)}KB) exceeds maximum allowed size (256KB) during loop execution`);
           }
@@ -144,7 +164,7 @@ export class DefaultWorkflowService implements WorkflowService {
           return {
             step: bodyStep,
             guidance: {
-              prompt: this.buildStepPrompt(bodyStep, loopContext)
+              prompt: this.buildStepPrompt(bodyStep, loopContext, useMinimal)
             },
             isComplete: false,
             context: loopSizeCheck.context
@@ -167,11 +187,29 @@ export class DefaultWorkflowService implements WorkflowService {
           });
           
           if (uncompletedBodyStep) {
-            // Always inject loop variables first
-            const loopEnhancedContext = loopContext.injectVariables(context);
+            // Check if this is the first iteration
+            const isFirst = loopContext.isFirstIteration();
+            
+            // Check if loop is empty to avoid phase overview
+            if (isFirst && loopContext.isEmpty(context)) {
+              // Skip this loop entirely
+              const skipContext = ContextOptimizer.createEnhancedContext(context, completed);
+              delete skipContext._currentLoop; // Remove loop context
+              const nextStep = await this.getNextStep(workflow.id, completed, skipContext);
+              return nextStep;
+            }
+            
+            // Use optimizer if available for subsequent iterations
+            const useMinimal = !isFirst && !!this.loopContextOptimizer;
+            const loopEnhancedContext = loopContext.injectVariables(context, useMinimal);
+            
+            // Apply additional optimization if available
+            const optimizedContext = useMinimal && this.loopContextOptimizer
+              ? this.loopContextOptimizer.stripLoopMetadata(loopEnhancedContext as EnhancedContext)
+              : loopEnhancedContext;
             
             // Check context size after injection
-            const loopSizeCheck = checkContextSize(loopEnhancedContext);
+            const loopSizeCheck = checkContextSize(optimizedContext as any);
             if (loopSizeCheck.isError) {
               throw new Error(`Context size (${Math.round(loopSizeCheck.sizeBytes / 1024)}KB) exceeds maximum allowed size (256KB) during loop execution`);
             }
@@ -180,7 +218,7 @@ export class DefaultWorkflowService implements WorkflowService {
             return {
               step: uncompletedBodyStep,
               guidance: {
-                prompt: this.buildStepPrompt(uncompletedBodyStep, loopContext)
+                prompt: this.buildStepPrompt(uncompletedBodyStep, loopContext, useMinimal)
               },
               isComplete: false,
               context: loopSizeCheck.context
@@ -337,7 +375,7 @@ export class DefaultWorkflowService implements WorkflowService {
    * Build the prompt for a step, including agent role and guidance
    * @private
    */
-  private buildStepPrompt(step: WorkflowStep, loopContext?: LoopExecutionContext): string {
+  private buildStepPrompt(step: WorkflowStep, loopContext?: LoopExecutionContext, useMinimal: boolean = false): string {
     let stepGuidance = '';
     if (step.guidance && step.guidance.length > 0) {
       const guidanceHeader = '## Step Guidance';
@@ -356,10 +394,22 @@ export class DefaultWorkflowService implements WorkflowService {
     // Add loop context information if in a loop
     if (loopContext) {
       const state = loopContext.getCurrentState();
-      finalPrompt += `\n\n## Loop Context\n- Iteration: ${state.iteration + 1}`;
-      if (state.items) {
-        finalPrompt += `\n- Total Items: ${state.items.length}`;
-        finalPrompt += `\n- Current Index: ${state.index}`;
+      
+      if (useMinimal && this.loopContextOptimizer) {
+        // Minimal context for subsequent iterations
+        finalPrompt += `\n\n## Loop Context\n- Iteration: ${state.iteration + 1}`;
+        
+        // Add phase reference if not first iteration
+        if (!loopContext.isFirstIteration()) {
+          finalPrompt += '\n\n_Note: Refer to the phase overview provided in the first iteration for overall context._';
+        }
+      } else {
+        // Full context for first iteration or when optimizer not available
+        finalPrompt += `\n\n## Loop Context\n- Iteration: ${state.iteration + 1}`;
+        if (state.items) {
+          finalPrompt += `\n- Total Items: ${state.items.length}`;
+          finalPrompt += `\n- Current Index: ${state.index}`;
+        }
       }
     }
     
