@@ -1,4 +1,11 @@
-import { LoopConfig, LoopState, EnhancedContext } from '../../types/workflow-types';
+import { 
+  LoopConfig, 
+  LoopState, 
+  EnhancedContext, 
+  OptimizedLoopContext,
+  LoopPhaseReference,
+  LoopStep 
+} from '../../types/workflow-types';
 import { ConditionContext, evaluateCondition } from '../../utils/condition-evaluator';
 
 /**
@@ -103,52 +110,7 @@ export class LoopExecutionContext {
     }
   }
 
-  /**
-   * Injects loop-specific variables into the execution context
-   */
-  injectVariables(context: ConditionContext): EnhancedContext {
-    // Build enhancements object efficiently
-    const enhancements: Partial<EnhancedContext> = {
-      _loopState: {
-        ...(context as EnhancedContext)._loopState,
-        [this.loopId]: this.getCurrentState()
-      }
-    };
-    
-    // Inject iteration counter
-    const iterationVar = this.loopConfig.iterationVar || 'currentIteration';
-    enhancements[iterationVar] = this.state.iteration + 1;
 
-    // Inject forEach-specific variables
-    if (this.loopConfig.type === 'forEach' && this.state.items) {
-      const index = this.state.index || 0;
-      
-      // Current item
-      const itemVar = this.loopConfig.itemVar || 'currentItem';
-      enhancements[itemVar] = this.state.items[index];
-      
-      // Current index
-      const indexVar = this.loopConfig.indexVar || 'currentIndex';
-      enhancements[indexVar] = index;
-    }
-
-    // Add any warnings
-    if (this.state.warnings && this.state.warnings.length > 0) {
-      const existingWarnings = (context as EnhancedContext)._warnings || {};
-      const existingLoopWarnings = existingWarnings.loops || {};
-      
-      enhancements._warnings = {
-        ...existingWarnings,
-        loops: {
-          ...existingLoopWarnings,
-          [this.loopId]: [...this.state.warnings]
-        }
-      };
-    }
-
-    // Create enhanced context by merging efficiently
-    return { ...context, ...enhancements } as EnhancedContext;
-  }
 
   /**
    * Resolves the count for 'for' loops from number or context variable
@@ -194,5 +156,152 @@ export class LoopExecutionContext {
    */
   getLoopConfig(): LoopConfig {
     return { ...this.loopConfig };
+  }
+
+  /**
+   * Generates minimal context for subsequent loop iterations
+   * Used for progressive disclosure pattern
+   */
+  getMinimalContext(context: ConditionContext): OptimizedLoopContext {
+    const optimizedContext: OptimizedLoopContext = {
+      ...context,
+      _loopState: {
+        ...(context as EnhancedContext)._loopState,
+        [this.loopId]: this.getCurrentState()
+      },
+      _currentLoop: {
+        loopId: this.loopId,
+        loopType: this.loopConfig.type,
+        iteration: this.state.iteration,
+        isFirstIteration: false
+      }
+    };
+
+    // Only inject current item for forEach loops, not entire array
+    if (this.loopConfig.type === 'forEach' && this.state.items) {
+      const index = this.state.index || 0;
+      const itemVar = this.loopConfig.itemVar || 'currentItem';
+      const indexVar = this.loopConfig.indexVar || 'currentIndex';
+      
+      optimizedContext[itemVar] = this.state.items[index];
+      optimizedContext[indexVar] = index;
+    }
+
+    // Add iteration counter
+    const iterationVar = this.loopConfig.iterationVar || 'currentIteration';
+    optimizedContext[iterationVar] = this.state.iteration + 1;
+
+    return optimizedContext;
+  }
+
+  /**
+   * Creates a phase reference for this loop
+   * Contains minimal information about the loop structure
+   */
+  getPhaseReference(loopStep: LoopStep): LoopPhaseReference {
+    return {
+      loopId: this.loopId,
+      phaseTitle: loopStep.title,
+      totalSteps: Array.isArray(loopStep.body) ? loopStep.body.length : 1,
+      functionDefinitions: loopStep.functionDefinitions
+    };
+  }
+
+  /**
+   * Modified injectVariables to support minimal mode
+   * @param context The context to enhance
+   * @param minimal If true, only inject essential variables
+   */
+  injectVariables(context: ConditionContext, minimal: boolean = false): EnhancedContext | OptimizedLoopContext {
+    if (minimal) {
+      return this.getMinimalContext(context);
+    }
+
+    // Original implementation for full context
+    return this.injectVariablesFull(context);
+  }
+
+  /**
+   * Original full variable injection (renamed from injectVariables)
+   */
+  private injectVariablesFull(context: ConditionContext): EnhancedContext {
+    // Build enhancements object efficiently
+    const enhancements: Partial<EnhancedContext> = {
+      _loopState: {
+        ...(context as EnhancedContext)._loopState,
+        [this.loopId]: this.getCurrentState()
+      }
+    };
+    
+    // Inject iteration counter
+    const iterationVar = this.loopConfig.iterationVar || 'currentIteration';
+    enhancements[iterationVar] = this.state.iteration + 1;
+
+    // Inject forEach-specific variables
+    if (this.loopConfig.type === 'forEach' && this.state.items) {
+      const index = this.state.index || 0;
+      
+      // Current item
+      const itemVar = this.loopConfig.itemVar || 'currentItem';
+      enhancements[itemVar] = this.state.items[index];
+      
+      // Current index
+      const indexVar = this.loopConfig.indexVar || 'currentIndex';
+      enhancements[indexVar] = index;
+    }
+
+    // Add any warnings
+    if (this.state.warnings && this.state.warnings.length > 0) {
+      const existingWarnings = (context as EnhancedContext)._warnings || {};
+      const existingLoopWarnings = existingWarnings.loops || {};
+      
+      enhancements._warnings = {
+        ...existingWarnings,
+        loops: {
+          ...existingLoopWarnings,
+          [this.loopId]: [...this.state.warnings]
+        }
+      };
+    }
+
+    // Create enhanced context by merging efficiently
+    return { ...context, ...enhancements } as EnhancedContext;
+  }
+
+  /**
+   * Checks if this is the first iteration
+   */
+  isFirstIteration(): boolean {
+    return this.state.iteration === 0;
+  }
+
+  /**
+   * Checks if the loop is empty (has no items to process)
+   * Used to avoid sending phase overview for empty loops
+   */
+  isEmpty(context: ConditionContext): boolean {
+    switch (this.loopConfig.type) {
+      case 'forEach':
+        return !this.state.items || this.state.items.length === 0;
+      
+      case 'for':
+        const count = this.resolveCount(context);
+        return count <= 0;
+      
+      case 'while':
+        // Check condition immediately
+        return this.loopConfig.condition 
+          ? !evaluateCondition(this.loopConfig.condition, context)
+          : true;
+      
+      case 'until':
+        // Check condition immediately (inverted)
+        return this.loopConfig.condition
+          ? evaluateCondition(this.loopConfig.condition, context)
+          : true;
+      
+      default:
+        return false;
+    }
   }
 } 
