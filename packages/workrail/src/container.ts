@@ -4,6 +4,8 @@ import { ValidationEngine } from './application/services/validation-engine.js';
 import { IWorkflowStorage } from './types/storage.js';
 import { createWorkflowLookupServer } from './infrastructure/rpc/server.js';
 import { WorkflowLookupServer } from './types/server.js';
+import { ILoopContextOptimizer } from './types/loop-context-optimizer.js';
+import { LoopContextOptimizer } from './application/services/loop-context-optimizer.js';
 
 /**
  * Centralized composition root / dependency-injection helper.
@@ -13,6 +15,7 @@ import { WorkflowLookupServer } from './types/server.js';
 export interface AppContainer {
   storage: IWorkflowStorage;
   validationEngine: ValidationEngine;
+  loopContextOptimizer: ILoopContextOptimizer;
   workflowService: WorkflowService;
   server: WorkflowLookupServer;
 }
@@ -25,13 +28,15 @@ export interface AppContainer {
 export function createAppContainer(overrides: Partial<AppContainer> = {}): AppContainer {
   const storage = overrides.storage ?? createDefaultWorkflowStorage();
   const validationEngine = overrides.validationEngine ?? new ValidationEngine();
+  const loopContextOptimizer = overrides.loopContextOptimizer ?? new LoopContextOptimizer();
   const workflowService =
-    overrides.workflowService ?? new DefaultWorkflowService(storage, validationEngine);
+    overrides.workflowService ?? new DefaultWorkflowService(storage, validationEngine, loopContextOptimizer);
   const server = overrides.server ?? createWorkflowLookupServer(workflowService);
 
   return {
     storage,
     validationEngine,
+    loopContextOptimizer,
     workflowService,
     server
   };
