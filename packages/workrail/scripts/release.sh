@@ -85,7 +85,7 @@ git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { print_color "$RED" "❌
 # Check for uncommitted changes
 if ! $FORCE && ! git diff-index --quiet HEAD --; then
     print_color "$YELLOW" "⚠️  Warning: You have uncommitted changes."
-    read -p "Do you want to continue anyway? (y/N) " -n 1 -r
+    read -p "Do you want to continue anyway? (y/N) " -n 1 -r < /dev/tty
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
         print_color "$RED" "Release cancelled."
@@ -107,7 +107,7 @@ if [ -z "$TYPE" ]; then
     echo "4) custom - Specify version manually"
     echo "5) cancel"
     echo
-    read -p "Select option (1-5): " VERSION_CHOICE
+    read -p "Select option (1-5): " VERSION_CHOICE < /dev/tty
     case $VERSION_CHOICE in
         1) TYPE="patch" ;;
         2) TYPE="minor" ;;
@@ -127,7 +127,7 @@ fi
 if [ "$TYPE" = "custom" ]; then
     if [ -z "$CUSTOM_VERSION" ]; then
         if [ -t 0 ]; then  # Interactive
-            read -p "Enter new version (e.g., 1.2.3): " CUSTOM_VERSION
+            read -p "Enter new version (e.g., 1.2.3): " CUSTOM_VERSION < /dev/tty
         else
             print_color "$RED" "❌ --version required for custom type in non-interactive mode."
             exit 1
@@ -151,14 +151,14 @@ echo
 # Get release description
 if [ -z "$DESC" ]; then
     print_color "$BLUE" "Enter a brief description of this release (or press Enter to skip):"
-    read -r DESC
+    read -r DESC < /dev/tty
 fi
 
 # Get features
 if [ -z "$FEATURES" ]; then
     print_color "$BLUE" "List key features/changes (one per line, empty line to finish):"
     FEATURES=""
-    while IFS= read -r line; do
+    while IFS= read -r line < /dev/tty; do
         [ -z "$line" ] && break
         FEATURES="${FEATURES}- ${line}\n"
     done
@@ -216,7 +216,7 @@ fi
 # Handle push
 if [ -z "$PUSH" ]; then
     echo
-    read -p "Push commits and tags to origin? (y/N) " -n 1 -r
+    read -p "Push commits and tags to origin? (y/N) " -n 1 -r < /dev/tty
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         PUSH=true
@@ -238,7 +238,9 @@ fi
 # Handle publish
 if [ -z "$PUBLISH" ]; then
     echo
-    read -p "Publish to npm? (y/N) " -n 1 -r
+    # Clear any leftover input and read from terminal
+    while read -t 0.1 -n 1000 2>/dev/null; do :; done
+    read -p "Publish to npm? (y/N) " -n 1 -r < /dev/tty
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         PUBLISH=true
@@ -256,7 +258,7 @@ if $PUBLISH; then
         print_color "$BLUE" "Select npm access level:"
         echo "1) public (default)"
         echo "2) restricted"
-        read -p "Select option (1-2) [1]: " NPM_ACCESS
+        read -p "Select option (1-2) [1]: " NPM_ACCESS < /dev/tty
         ACCESS="public"
         if [ "$NPM_ACCESS" = "2" ]; then
             ACCESS="restricted"

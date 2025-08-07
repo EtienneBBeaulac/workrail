@@ -13,7 +13,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "release": "./scripts/release.sh",
+    "release": "bash -c './scripts/release.sh'",
     "dev": "npm run build && node dist/mcp-server.js",
     "prepare": "npm run build",
     "watch": "tsc --watch"
