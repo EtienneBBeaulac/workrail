@@ -86,6 +86,41 @@ Add to your agent's `config.json`:
 
 ---
 
+## 💾 Using Local Workflows (when configuring MCP via JSON)
+
+WorkRail will auto-discover workflows even when added to your agent via JSON config. It searches, in priority order:
+
+- User: `~/.workrail/workflows` (recommended)
+- Project: `./workflows` relative to the MCP process `cwd`
+- Custom: directories listed in `WORKFLOW_STORAGE_PATH` (colon-separated on macOS/Linux)
+
+Example agent config passing env and `cwd` so your local workflows are picked up:
+
+```json
+{
+  "mcpServers": {
+    "workrail": {
+      "command": "npx",
+      "args": ["-y", "@exaudeus/workrail"],
+      "env": {
+        "WORKFLOW_STORAGE_PATH": "/absolute/path/my-workflows:/absolute/path/shared-workflows"
+      },
+      "cwd": "/absolute/path/my-project"
+    }
+  }
+}
+```
+
+Quick tips:
+
+- Initialize your user dir once: `workrail init`
+- Validate a file: `workrail validate /abs/path/my-workflows/my-workflow.json`
+- List all discovered workflows: `workrail list`
+
+See also: `docs/workflow-management.md` for more details.
+
+---
+
 ## 📋 Available Workflows
 
 WorkRail comes with battle-tested workflows for common development tasks:
