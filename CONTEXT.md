@@ -368,3 +368,25 @@ All 8 implementation steps have been successfully completed:
 - `71c62b3`: feat(container): wire up LoopContextOptimizer in DI container
 - `ee068c2`: test: add comprehensive test suite for loop optimization
 - `f9a1928`: docs: add comprehensive loop optimization documentation
+- `92e5b0e`: feat(workflows): add explicit agent instructions to reduce context size
+- `79941f3`: docs: add context cleaner snippet for agents  
+- `894036e`: Revert input context POC (focused on agent-side optimization instead)
+
+## Final Solution Summary
+
+### Two-Part Optimization Strategy
+
+1. **Server Output Optimization** (Implemented)
+   - Progressive disclosure: Full context on first iteration, minimal on subsequent
+   - Function DSL: Native support in MCP schema to reduce duplication
+   - Empty loop detection: Skip loops with no items
+   - Result: 60-80% reduction in server → agent response size
+
+2. **Agent Input Optimization** (Via Instructions)
+   - Clear workflow instructions on what to send/not send  
+   - Documentation with concrete examples
+   - Helper functions for agents to clean context
+   - Result: Expected 85-90% reduction in agent → server request size
+
+### Key Insight
+The MCP server doesn't need to enforce input size limits - that's an agent-side concern for token usage. The solution is better agent behavior through clearer instructions, not server-side complexity.
