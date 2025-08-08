@@ -33,7 +33,7 @@ The MCP server is STATELESS. You MUST send required data with each request:
 **EXAMPLE - Loop Context:**
 \`\`\`json
 {
-  "workflowId": "coding-task-workflow",
+  "workflowId": "coding-task-workflow-with-loops",
   "completedSteps": ["phase-1", "phase-2", "loop-step-1"],
   "context": {
     // Required: condition/template variables

@@ -175,7 +175,7 @@ Retrieves workflow information with configurable detail level. Supports progress
   "jsonrpc": "2.0",
   "id": 2,
   "result": {
-    "id": "coding-task-workflow",
+    "id": "coding-task-workflow-with-loops",
     "name": "Excellent Adaptive Coding Workflow",
     "description": "A comprehensive workflow for AI-assisted coding",
     "version": "0.1.0",
@@ -201,7 +201,7 @@ Retrieves workflow information with configurable detail level. Supports progress
   "jsonrpc": "2.0",
   "id": 2,
   "result": {
-    "id": "coding-task-workflow",
+    "id": "coding-task-workflow-with-loops",
     "name": "Excellent Adaptive Coding Workflow",
     "description": "A comprehensive workflow for AI-assisted coding",
     "version": "0.1.0",

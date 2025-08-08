@@ -70,7 +70,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | docker run -
 echo '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"workflow_list","arguments":{}}}' | docker run --rm -i workrail-mcp
 
 # Test getting a specific workflow
-echo '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"workflow_get","arguments":{"id":"coding-task-workflow","mode":"metadata"}}}' | docker run --rm -i workrail-mcp
+echo '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"workflow_get","arguments":{"id":"coding-task-workflow-with-loops","mode":"metadata"}}}' | docker run --rm -i workrail-mcp
 ```
 
 ## Custom Workflows

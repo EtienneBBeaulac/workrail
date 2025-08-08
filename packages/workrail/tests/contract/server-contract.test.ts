@@ -7,7 +7,7 @@ jest.setTimeout(10000);
 
 describe('MCP Server JSON-RPC contract', () => {
   const SERVER_PATH = path.resolve(__dirname, '../../src/index.ts');
-  const SAMPLE_ID = 'coding-task-workflow';
+  const SAMPLE_ID = 'coding-task-workflow-with-loops';
 
   let client: RpcClient;
 

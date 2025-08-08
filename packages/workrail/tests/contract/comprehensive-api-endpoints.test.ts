@@ -46,7 +46,7 @@ describe('Comprehensive API Endpoint Tests', () => {
       const res = await client.send('workflow_list'); // Remove parameters
       const workflowIds = res.result.workflows.map((w: any) => w.id);
       
-      expect(workflowIds).toContain('coding-task-workflow');
+      expect(workflowIds).toContain('coding-task-workflow-with-loops');
       expect(workflowIds).toContain('adaptive-ticket-creation');
     });
   });
@@ -55,12 +55,12 @@ describe('Comprehensive API Endpoint Tests', () => {
     describe('metadata mode', () => {
       it('should return workflow metadata without steps', async () => {
         const res = await client.send('workflow_get', {
-          id: 'coding-task-workflow',
+          id: 'coding-task-workflow-with-loops',
           mode: 'metadata'
         });
         
         expect(res.result).toBeDefined();
-        expect(res.result.id).toBe('coding-task-workflow');
+        expect(res.result.id).toBe('coding-task-workflow-with-loops');
         expect(res.result).toHaveProperty('name');
         expect(res.result).toHaveProperty('description');
         expect(res.result).toHaveProperty('version');
@@ -77,12 +77,12 @@ describe('Comprehensive API Endpoint Tests', () => {
     describe('preview mode (default)', () => {
       it('should return workflow preview with first step', async () => {
         const res = await client.send('workflow_get', {
-          id: 'coding-task-workflow',
+          id: 'coding-task-workflow-with-loops',
           mode: 'preview'
         });
         
         expect(res.result).toBeDefined();
-        expect(res.result.id).toBe('coding-task-workflow');
+        expect(res.result.id).toBe('coding-task-workflow-with-loops');
         expect(res.result).toHaveProperty('name');
         expect(res.result).toHaveProperty('description');
         expect(res.result).toHaveProperty('version');
@@ -106,7 +106,7 @@ describe('Comprehensive API Endpoint Tests', () => {
         });
         
         expect(res.result).toBeDefined();
-        expect(res.result.id).toBe('coding-task-workflow');
+        expect(res.result.id).toBe('coding-task-workflow-with-loops');
         expect(res.result).toHaveProperty('name');
         expect(res.result).toHaveProperty('description');
         expect(res.result).toHaveProperty('version');
@@ -131,7 +131,7 @@ describe('Comprehensive API Endpoint Tests', () => {
 
     it('should handle invalid mode parameter', async () => {
       const res = await client.send('workflow_get', {
-        id: 'coding-task-workflow',
+        id: 'coding-task-workflow-with-loops',
         mode: 'invalid-mode'
       });
       
@@ -144,7 +144,7 @@ describe('Comprehensive API Endpoint Tests', () => {
   describe('workflow_next endpoint', () => {
     it('should return first step when no completed steps', async () => {
       const res = await client.send('workflow_next', {
-        workflowId: 'coding-task-workflow',
+        workflowId: 'coding-task-workflow-with-loops',
         completedSteps: []
       });
       
@@ -163,7 +163,7 @@ describe('Comprehensive API Endpoint Tests', () => {
     it('should progress through workflow steps', async () => {
       // Get first step
       const firstRes = await client.send('workflow_next', {
-        workflowId: 'coding-task-workflow',
+        workflowId: 'coding-task-workflow-with-loops',
         completedSteps: []
       });
       
@@ -171,7 +171,7 @@ describe('Comprehensive API Endpoint Tests', () => {
       
       // Get second step
       const secondRes = await client.send('workflow_next', {
-        workflowId: 'coding-task-workflow',
+        workflowId: 'coding-task-workflow-with-loops',
         completedSteps: ['phase-0-intelligent-triage']
       });
       
@@ -181,7 +181,7 @@ describe('Comprehensive API Endpoint Tests', () => {
 
     it('should handle conditional steps with context', async () => {
       const res = await client.send('workflow_next', {
-        workflowId: 'coding-task-workflow',
+        workflowId: 'coding-task-workflow-with-loops',
         completedSteps: ['phase-0-intelligent-triage'],
         context: {
           taskComplexity: 'Large'
@@ -206,7 +206,7 @@ describe('Comprehensive API Endpoint Tests', () => {
 
     it('should handle invalid completed steps', async () => {
       const res = await client.send('workflow_next', {
-        workflowId: 'coding-task-workflow',
+        workflowId: 'coding-task-workflow-with-loops',
         completedSteps: ['invalid-step-id']
       });
       
@@ -218,7 +218,7 @@ describe('Comprehensive API Endpoint Tests', () => {
   describe('workflow_validate endpoint', () => {
     it('should validate step output successfully', async () => {
       const res = await client.send('workflow_validate', {
-        workflowId: 'coding-task-workflow',
+        workflowId: 'coding-task-workflow-with-loops',
         stepId: 'phase-0-intelligent-triage',
         output: 'Task has been analyzed as Medium complexity with clear scope and boundaries.'
       });
@@ -231,7 +231,7 @@ describe('Comprehensive API Endpoint Tests', () => {
 
     it('should handle invalid step output', async () => {
       const res = await client.send('workflow_validate', {
-        workflowId: 'coding-task-workflow',
+        workflowId: 'coding-task-workflow-with-loops',
         stepId: 'phase-0-intelligent-triage',
         output: 'Invalid or incomplete output'
       });
@@ -256,7 +256,7 @@ describe('Comprehensive API Endpoint Tests', () => {
 
     it('should handle non-existent step', async () => {
       const res = await client.send('workflow_validate', {
-        workflowId: 'coding-task-workflow',
+        workflowId: 'coding-task-workflow-with-loops',
         stepId: 'non-existent-step',
         output: 'Some output'
       });
@@ -268,7 +268,7 @@ describe('Comprehensive API Endpoint Tests', () => {
 
     it('should handle empty output', async () => {
       const res = await client.send('workflow_validate', {
-        workflowId: 'coding-task-workflow',
+        workflowId: 'coding-task-workflow-with-loops',
         stepId: 'phase-0-intelligent-triage',
         output: ''
       });
@@ -284,11 +284,11 @@ describe('Comprehensive API Endpoint Tests', () => {
     it('should have consistent workflow data across endpoints', async () => {
       // Get workflow from list
       const listRes = await client.send('workflow_list');
-      const workflowFromList = listRes.result.workflows.find((w: any) => w.id === 'coding-task-workflow');
+      const workflowFromList = listRes.result.workflows.find((w: any) => w.id === 'coding-task-workflow-with-loops');
       
       // Get same workflow with metadata mode
       const metadataRes = await client.send('workflow_get', {
-        id: 'coding-task-workflow',
+        id: 'coding-task-workflow-with-loops',
         mode: 'metadata'
       });
       
@@ -302,13 +302,13 @@ describe('Comprehensive API Endpoint Tests', () => {
     it('should handle workflow execution flow', async () => {
       // Start workflow
       const nextRes = await client.send('workflow_next', {
-        workflowId: 'coding-task-workflow',
+        workflowId: 'coding-task-workflow-with-loops',
         completedSteps: []
       });
       
       // Validate step output
       const validateRes = await client.send('workflow_validate', {
-        workflowId: 'coding-task-workflow',
+        workflowId: 'coding-task-workflow-with-loops',
         stepId: nextRes.result.step.id,
         output: 'Task analyzed as Medium complexity'
       });
@@ -333,7 +333,7 @@ describe('Comprehensive API Endpoint Tests', () => {
       const largeOutput = 'x'.repeat(10000);
       
       const res = await client.send('workflow_validate', {
-        workflowId: 'coding-task-workflow',
+        workflowId: 'coding-task-workflow-with-loops',
         stepId: 'phase-0-intelligent-triage',
         output: largeOutput
       });
@@ -348,7 +348,7 @@ describe('Comprehensive API Endpoint Tests', () => {
       const specialOutput = 'Output with special chars: \\n\\t\\r"\'<>&';
       
       const res = await client.send('workflow_validate', {
-        workflowId: 'coding-task-workflow',
+        workflowId: 'coding-task-workflow-with-loops',
         stepId: 'phase-0-intelligent-triage',
         output: specialOutput
       });
@@ -379,7 +379,7 @@ describe('Comprehensive API Endpoint Tests', () => {
       const startTime = Date.now();
       
       await client.send('workflow_get', {
-        id: 'coding-task-workflow',
+        id: 'coding-task-workflow-with-loops',
         mode: 'metadata'
       });
       
