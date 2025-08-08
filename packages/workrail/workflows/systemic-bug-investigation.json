@@ -1,8 +1,8 @@
 {
     "id": "systematic-bug-investigation",
-    "name": "Systematic Bug Investigation Workflow",
+    "name": "[DEPRECATED] Systematic Bug Investigation Workflow",
     "version": "1.0.0",
-    "description": "A comprehensive workflow for systematic bug and failing test investigation that prevents LLMs from jumping to conclusions. Enforces thorough evidence gathering, hypothesis formation, debugging instrumentation, and validation to achieve near 100% certainty about root causes. This workflow does NOT fix bugs - it produces detailed diagnostic writeups that enable effective fixing by providing complete understanding of what is happening, why it's happening, and supporting evidence.",
+    "description": "[DEPRECATED] This workflow has been superseded by 'systematic-bug-investigation-with-loops' which includes enhanced loop capabilities for iterative debugging and investigation. Use 'systematic-bug-investigation-with-loops' for new bug investigations. A comprehensive workflow for systematic bug and failing test investigation that prevents LLMs from jumping to conclusions. Enforces thorough evidence gathering, hypothesis formation, debugging instrumentation, and validation to achieve near 100% certainty about root causes. This workflow does NOT fix bugs - it produces detailed diagnostic writeups that enable effective fixing by providing complete understanding of what is happening, why it's happening, and supporting evidence.",
     "clarificationPrompts": [
         "What type of system is this? (web app, mobile app, backend service, desktop app, etc.)",
         "How consistently can you reproduce this bug? (always reproducible, sometimes reproducible, rarely reproducible)",
@@ -19,6 +19,7 @@
         "Bug is reproducible with specific steps or a minimal test case"
     ],
     "metaGuidance": [
+        "⚠️ DEPRECATION NOTICE: This workflow is deprecated. Use 'systematic-bug-investigation-with-loops' instead for enhanced iterative debugging capabilities with loop support.",
         "INVESTIGATION DISCIPLINE: Never propose fixes or solutions until Phase 6 (Comprehensive Diagnostic Writeup). Focus entirely on systematic evidence gathering and analysis.",
         "HYPOTHESIS RIGOR: All hypotheses must be based on concrete evidence from code analysis with quantified scoring (1-10 scales). Maximum 5 hypotheses per investigation.",
         "DEBUGGING INSTRUMENTATION: Always implement debugging mechanisms before running tests - logs, print statements, or test modifications that will provide evidence.",

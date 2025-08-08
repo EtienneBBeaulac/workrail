@@ -1,8 +1,8 @@
 {
     "id": "coding-task-workflow",
-    "name": "Excellent Adaptive Coding Workflow with Devil's Advocate Review",
+    "name": "[DEPRECATED] Excellent Adaptive Coding Workflow with Devil's Advocate Review",
     "version": "0.8.0",
-    "description": "Comprehensive AI coding workflow with bidirectional re-triage, deep analysis, intelligent clarification, devil's advocate review, automation levels, failure bounds, tool fallbacks, and context documentation for production-ready development.",
+    "description": "[DEPRECATED] This workflow has been superseded by 'coding-task-workflow-with-loops' which includes enhanced loop capabilities for better iterative development. Use 'coding-task-workflow-with-loops' for new projects. Comprehensive AI coding workflow with bidirectional re-triage, deep analysis, intelligent clarification, devil's advocate review, automation levels, failure bounds, tool fallbacks, and context documentation for production-ready development.",
 
     "preconditions": [
         "User has a clear task description (e.g., from Jira, a dev doc, or a BRD).",
@@ -11,6 +11,7 @@
         "Git repository is recommended for version control and commits (workflow degrades gracefully if unavailable)."
     ],
     "metaGuidance": [
+        "⚠️ DEPRECATION NOTICE: This workflow is deprecated. Use 'coding-task-workflow-with-loops' instead for enhanced iterative development capabilities with loop support.",
         "This workflow follows the ANALYZE -> CLARIFY -> PREP -> IMPLEMENT -> VERIFY pattern with bidirectional dynamic re-triage capabilities.",
         "Deep codebase analysis occurs early to inform intelligent requirements clarification and all subsequent planning phases.",
         "Dynamic re-triage allows complexity upgrades and safe downgrades based on new insights from analysis and clarifications.",

@@ -126,10 +126,12 @@ See also: `docs/workflow-management.md` for more details.
 WorkRail comes with battle-tested workflows for common development tasks:
 
 ### 🔧 **Development Workflows**
-- **`coding-task-workflow`** - Comprehensive coding workflow with analysis, planning, implementation, and review
-- **`coding-task-workflow-with-loops`** - Enhanced version with iterative refinement loops
-- **`systematic-bug-investigation`** - Systematic debugging methodology that prevents jumping to conclusions
-- **`systemic-bug-investigation-with-loops`** - Enhanced debugging with iterative analysis loops
+- **`coding-task-workflow-with-loops`** - Enhanced coding workflow with iterative refinement loops, analysis, planning, implementation, and review *(Recommended)*
+- **`systematic-bug-investigation-with-loops`** - Enhanced debugging with iterative analysis loops and systematic methodology *(Recommended)*
+
+#### Deprecated Workflows
+- ~~**`coding-task-workflow`** - [DEPRECATED] Use `coding-task-workflow-with-loops` instead~~
+- ~~**`systematic-bug-investigation`** - [DEPRECATED] Use `systematic-bug-investigation-with-loops` instead~~
 
 ### 🚀 **Project Management**  
 - **`adaptive-ticket-creation`** - Create well-structured tickets with proper requirements
