@@ -1,0 +1,205 @@
+{
+  "id": "intelligent-test-case-generation",
+  "name": "Intelligent Test Case Generation from Tickets",
+  "version": "0.0.1",
+  "description": "Transforms ticket requirements into systematic test cases using evidence-driven analysis, dual-brain processing (NLP + LLM), document discovery, and progressive scenario expansion. Produces integration and end-to-end tests optimized for developer readability and LLM consumption with confidence scoring and validation loops.",
+  "preconditions": [
+    "Agent has access to codebase analysis tools (grep, file readers, semantic search)",
+    "User can provide ticket information in any standard format (JIRA, GitHub Issues, etc.)",
+    "Agent has access to document analysis capabilities for BRDs, architecture docs, specs",
+    "Workflow execution environment supports confidence scoring and validation loops"
+  ],
+  "clarificationPrompts": [
+    "What ticket system are you using? (JIRA, GitHub Issues, Azure DevOps, etc.)",
+    "What's your team's experience level with test case creation? (Mixed junior/senior, mostly senior, mostly junior)",
+    "Do you have existing test patterns or frameworks we should align with?",
+    "What automation level do you prefer? (High: auto-approve >8.0 confidence, Medium: standard confirmations, Low: extra validation)",
+    "Are there specific document repositories we should search? (Confluence, SharePoint, Git repos, etc.)"
+  ],
+  "metaGuidance": [
+    "PAUSE POLICY: If required variables are missing and no assumptions accepted, pause and ask targeted questions before proceeding.",
+    "EVIDENCE POLICY: If evidenceScore < threshold, request more sources and do not proceed until satisfied or assumptions are accepted.",
+    "ASSUMPTION POLICY: Proceed with documented assumptions only after explicit confirmation; record risks and mitigation.",
+    "DUAL-BRAIN PROCESSING: Always use both structured NLP extraction AND creative LLM expansion for comprehensive coverage.",
+    "CONFIDENCE CALIBRATION: Use mathematical confidence framework with adjustable thresholds based on automation level.",
+    "LIVING DOCUMENTATION: Maintain TEST_CONTEXT.md throughout workflow. Update after major milestones for session continuity.",
+    "HYPOTHESIS-DRIVEN TESTING: Generate test hypotheses first, then validate with evidence.",
+    "**FUNCTION DEFINITIONS:** fun analyzeTicket(depth=1|2|3) = 'Analyze ticket at specified depth levels: L1=requirements, L2=dependencies, L3=system impact. Extract entities, actions, data flows, acceptance criteria.'",
+    "fun evaluateReadiness() = 'Compute requiredVarsFound, missingVars[], completenessScore (0-1) from context. Set proceed/question/assumption flags.'",
+    "fun collectEvidence(minimumSources=3) = 'Gather supporting evidence for hypotheses. Score evidence quality 1-10. Document sources and confidence levels.'",
+    "fun discoverDocuments(types) = 'Search for missing documentation via semantic search. Types may include BRDs, ArchitectureDocs, ApiSpecs, ExistingTests. Score relevance and completeness.'",
+    "fun scoreAndValidate(autoApproveThreshold=8.0) = 'Score item using criteria (1-10). Apply gates: >8.0 auto-approve; 6.0–7.9 review; <6.0 require additional evidence.'",
+    "fun updateTestContext(sections) = 'Maintain TEST_CONTEXT.md: ticket analysis, evidence, hypotheses, confidence scores, validation results.'",
+    "fun dualBrainProcess(enableNlp=true, enableCreative=true) = 'Stage 1: NLP extraction of structured data (entities, dependencies, flows). Stage 2: LLM creative expansion (edge cases, negative paths, integration scenarios).'",
+    "fun generateTestHypotheses(count=5) = 'Create 3–5 test hypotheses focused on integration/E2E scenarios. Include risk assessment.'",
+    "fun progressiveExpansion(levels) = 'Expand scenarios in layers: Core→Edge→System→Chaos. Adapt complexity to user experience.'",
+    "fun adaptToUserLevel(level=Junior|Mixed|Senior) = 'Deliver content adapted to the selected user level.'",
+    "fun scoreConfidence(weights) = 'Calculate confidence (1-10) using: requirements clarity, system context, evidence quality, coverage completeness.'",
+    "fun validateCoverage(minScore=7) = 'Assess coverage completeness; identify gaps; score coverage 1-10; suggest additional scenarios if needed.'",
+    "fun formatDualOutput(human=true, machine=true) = 'Generate both human-readable (Gherkin/Markdown) and machine-readable (JSON/structured) formats simultaneously.'"
+  ],
+  "steps": [
+    {
+      "id": "phase-0-intelligent-triage",
+      "title": "Phase 0: Intelligent Ticket Triage & Context Setup",
+      "prompt": "**SYSTEMATIC TEST GENERATION BEGINS** - Transform ticket requirements into comprehensive test cases through evidence-driven analysis.\n\nanalyzeTicket(depth=3) to establish foundation:\n\n**STEP 1: Ticket Analysis & Classification**\n- **Ticket Information**: Please provide the complete ticket details (title, description, acceptance criteria, labels, etc.)\n- **System Context**: What system/component does this ticket affect?\n- **Change Type**: Is this a new feature, bug fix, enhancement, or refactoring?\n- **Risk Assessment**: What's the business impact if this functionality fails?\n\n**STEP 2: Complexity & Scope Assessment**\nBased on the ticket analysis, I'll classify the testing complexity:\n- **Simple**: Single component, clear requirements, minimal integration\n- **Standard**: Multiple components, moderate integration, some unknowns\n- **Complex**: Cross-system changes, high integration, significant risk\n\n**STEP 3: User Experience Level**\nWhat's your experience level with test case creation?\n- **Junior**: Need detailed guidance and explanations\n- **Mixed**: Team has varying skill levels\n- **Senior**: Prefer efficient, advanced patterns\n\n**STEP 4: Automation Preferences**\nWhat automation level do you prefer?\n- **High**: Auto-approve confidence >8.0, minimal confirmations\n- **Medium**: Standard confirmations for key decisions\n- **Low**: Extra validation for comprehensive coverage\n\n**OUTPUTS**: Set context variables for adaptive workflow execution.",
+      "agentRole": "You are a senior test strategy specialist with expertise in analyzing software requirements and determining optimal testing approaches. Your role is to quickly assess ticket complexity, understand system context, and set up the workflow for systematic test case generation.",
+      "guidance": [
+        "THOROUGH ANALYSIS: Extract all relevant information from ticket details",
+        "CONTEXT AWARENESS: Understand the ticket's place in the larger system",
+        "ADAPTIVE SETUP: Configure workflow based on user experience and preferences",
+        "EVIDENCE FOUNDATION: Establish the evidence base for systematic test generation"
+      ],
+      "requireConfirmation": true
+    },
+    {
+      "id": "phase-0b-readiness",
+      "title": "Phase 0b: Readiness Evaluation (Soft Gate)",
+      "prompt": "Evaluate readiness: compute requiredVarsFound, missingVars[], completenessScore (0-1), gather evidence, set evidenceScore (1-10). Outcome flags: proceedNeeded, questioningNeeded, assumptionNeeded.",
+      "askForFiles": true,
+      "hasValidation": true,
+      "validationCriteria": [
+        { "type": "length", "min": 200, "message": "Summarize readiness and evidence (≥200 chars)" }
+      ],
+      "requireConfirmation": true
+    },
+    {
+      "id": "phase-0c-questioning-loop",
+      "type": "loop",
+      "title": "Resolve Missing Inputs",
+      "loop": { "type": "forEach", "items": "missingVars", "itemVar": "missing", "maxIterations": 5 },
+      "body": [
+        {
+          "id": "ask-missing",
+          "title": "Provide: {{missing}}",
+          "prompt": "Please provide '{{missing}}'. If unknown, choose an option or confirm an assumption. Attach links/files if applicable.",
+          "askForFiles": true,
+          "requireConfirmation": true
+        }
+      ]
+    },
+    {
+      "id": "phase-0d-assumptions",
+      "title": "Assumption Proposal & Risks",
+      "prompt": "Propose explicit assumptions for remaining gaps with risks and mitigation. Confirm to proceed and record assumptions[].",
+      "requireConfirmation": true
+    },
+    {
+      "id": "phase-1-evidence-gathering",
+      "runCondition": {
+        "and": [
+          { "or": [ { "var": "completenessScore", "gte": 0.7 }, { "var": "assumptionAccepted", "equals": true } ] },
+          { "var": "evidenceScore", "gte": 7.5 }
+        ]
+      },
+      "title": "Phase 1: Evidence Gathering & Document Discovery",
+      "prompt": "collectEvidence(ticket requirements) and discoverDocuments(system context)\n\n**SYSTEMATIC EVIDENCE COLLECTION**\nGather requirements evidence, system context, and discover missing documentation through semantic search.\n\nscoreAndValidate(evidence completeness, 7/10 threshold)\n\nupdateTestContext(evidence-analysis, comprehensive evidence base)\n\n**QUALITY GATE**: Minimum 7/10 evidence score required before proceeding to hypothesis formation.",
+      "agentRole": "You are a systematic evidence analyst specializing in gathering comprehensive context for test case generation. Your expertise lies in identifying information gaps, discovering relevant documentation, and building complete evidence bases for reliable test design.",
+      "guidance": [
+        "SYSTEMATIC COLLECTION: Use structured approach to gather all relevant evidence",
+        "GAP IDENTIFICATION: Actively identify and address missing information",
+        "DOCUMENT DISCOVERY: Use semantic search and intelligent questioning to find context",
+        "QUALITY THRESHOLD: Don't proceed without sufficient evidence foundation"
+      ],
+      "validationCriteria": [
+        { "type": "length", "min": 200, "message": "Evidence collection must be comprehensive (minimum 200 characters of analysis)" }
+      ],
+      "hasValidation": true
+    },
+    {
+      "id": "phase-2-gap-check",
+      "title": "Phase 2 Gap Check",
+      "prompt": "Quick gap check before hypotheses. If new gaps detected, append to openQuestions and run questioning loop once.",
+      "runCondition": { "or": [ { "var": "newGapsDetected", "equals": true }, { "var": "newGapsDetected", "equals": false } ] }
+    },
+    {
+      "id": "phase-2-dual-brain-analysis",
+      "runCondition": {
+        "and": [
+          { "or": [ { "var": "completenessScore", "gte": 0.7 }, { "var": "assumptionAccepted", "equals": true } ] },
+          { "var": "evidenceScore", "gte": 7.5 }
+        ]
+      },
+      "title": "Phase 2: Dual-Brain Processing & Hypothesis Formation",
+      "prompt": "dualBrainProcess(collected evidence) and generateTestHypotheses(ticket, context)\n\n**DUAL-BRAIN PROCESSING ARCHITECTURE**\nCombine structured NLP analysis with creative LLM expansion to generate comprehensive test hypotheses.\n\nscoreAndValidate(each hypothesis, testability criteria)\n\nupdateTestContext(hypothesis-analysis, ranked test hypotheses with risk assessment)\n\n**QUALITY GATE**: Maximum 5 hypotheses, each scored for testability and business impact.",
+      "agentRole": "You are a dual-brain test analysis expert combining systematic NLP processing with creative scenario generation. Your role is to extract structured information while also discovering creative test scenarios that human analysts might miss.",
+      "guidance": [
+        "STRUCTURED EXTRACTION: Use NLP techniques for systematic information parsing",
+        "CREATIVE EXPANSION: Generate innovative test scenarios beyond obvious cases",
+        "HYPOTHESIS RIGOR: Base all hypotheses on concrete evidence from analysis",
+        "RISK PRIORITIZATION: Focus on high-impact, high-probability test scenarios"
+      ],
+      "validationCriteria": [
+        { "type": "regex", "pattern": "hypothesis|test case|scenario", "flags": "i", "message": "Output must contain test hypotheses or scenarios" }
+      ],
+      "hasValidation": true
+    },
+    {
+      "id": "phase-3-gap-check",
+      "title": "Phase 3 Gap Check",
+      "prompt": "Quick gap check before scenario generation. If new gaps detected, append to openQuestions and run questioning loop once.",
+      "runCondition": { "or": [ { "var": "newGapsDetected", "equals": true }, { "var": "newGapsDetected", "equals": false } ] }
+    },
+    {
+      "id": "phase-3-progressive-test-generation",
+      "runCondition": {
+        "and": [
+          { "or": [ { "var": "completenessScore", "gte": 0.7 }, { "var": "assumptionAccepted", "equals": true } ] },
+          { "var": "evidenceScore", "gte": 7.5 }
+        ]
+      },
+      "title": "Phase 3: Progressive Test Scenario Generation",
+      "prompt": "progressiveExpansion(validated hypotheses, user experience level)\n\n**PROGRESSIVE TEST EXPANSION ARCHITECTURE**\nGenerate layered test scenarios: Core→Edge→System→Chaos, adapted to user experience level.\n\nadaptToUserLevel(test scenario complexity, user experience level)\n\nupdateTestContext(test-scenarios, layered test scenarios with traceability)\n\n**OUTPUT**: Comprehensive test scenarios adapted to user capabilities.",
+      "agentRole": "You are a progressive test design architect specializing in creating layered test scenarios that scale with team expertise. Your role is to generate comprehensive test coverage while adapting complexity to user capabilities.",
+      "guidance": [
+        "LAYERED APPROACH: Build test scenarios in progressive complexity layers",
+        "ADAPTIVE COMPLEXITY: Match scenario depth to user experience level",
+        "COMPREHENSIVE COVERAGE: Ensure all critical paths are tested",
+        "PRACTICAL IMPLEMENTATION: Include setup, execution, and cleanup details"
+      ]
+    },
+    {
+      "id": "phase-4-confidence-scoring",
+      "runCondition": {
+        "and": [
+          { "or": [ { "var": "completenessScore", "gte": 0.7 }, { "var": "assumptionAccepted", "equals": true } ] },
+          { "var": "evidenceScore", "gte": 7.5 }
+        ]
+      },
+      "title": "Phase 4: Confidence Scoring & Quality Validation",
+      "prompt": "scoreConfidence(generated test cases, evidence base) and validateCoverage(scenarios, requirements)\n\n**CONFIDENCE SCORING FRAMEWORK**\nApply mathematical confidence framework using 4-factor scoring: Requirements Clarity, System Context, Evidence Quality, Coverage Completeness.\n\nscoreAndValidate(test scenarios, confidence criteria)\n\nupdateTestContext(confidence-analysis, scored scenarios with coverage gaps)\n\n**OUTPUT**: Confidence-scored test scenarios with coverage analysis and gap recommendations.",
+      "agentRole": "You are a test quality assurance specialist with expertise in confidence scoring and coverage analysis. Your role is to objectively assess test scenario quality and ensure comprehensive coverage of requirements.",
+      "guidance": [
+        "OBJECTIVE SCORING: Use mathematical framework for consistent confidence assessment",
+        "COVERAGE ANALYSIS: Systematically map test scenarios to requirements",
+        "GAP IDENTIFICATION: Actively identify and address coverage gaps",
+        "QUALITY GATES: Apply appropriate thresholds based on automation preferences"
+      ],
+      "validationCriteria": [
+        { "type": "regex", "pattern": "confidence|score|coverage", "flags": "i", "message": "Output must include confidence scoring and coverage analysis" }
+      ],
+      "hasValidation": true
+    },
+    {
+      "id": "phase-5-dual-format-output",
+      "runCondition": {
+        "and": [
+          { "or": [ { "var": "completenessScore", "gte": 0.7 }, { "var": "assumptionAccepted", "equals": true } ] },
+          { "var": "evidenceScore", "gte": 7.5 }
+        ]
+      },
+      "title": "Phase 5: Dual-Format Output Generation",
+      "prompt": "formatDualOutput(validated test scenarios) - Generate both human-readable and LLM-consumable formats\n\n**DUAL-FORMAT GENERATION STRATEGY**\n\n**FORMAT 1: Human-Readable (Developer-Optimized)**\nClear, scannable format for manual review and JIRA integration:\n- Test scenarios with objectives, preconditions, steps, expected results\n- Priority levels and confidence scores\n- Proper markdown formatting for JIRA copy-paste\n- Traceability links to requirements\n\n**FORMAT 2: LLM-Readable (Machine-Optimized)**\nJSON format optimized for programmatic consumption:\n- Structured metadata with generation info and confidence thresholds\n- Test scenarios with IDs, types, priorities, and confidence scores\n- Requirements mapping and test data specifications\n- Tags for categorization and tool integration\n\n**SIMULTANEOUS GENERATION**\n- Generate both formats from the same source data\n- Ensure consistency between formats\n- Validate format integrity and completeness\n- Optimize for different consumption patterns\n\n**OUTPUT**: Complete test scenarios in both human-readable and machine-readable formats, ready for JIRA integration and future automation",
+      "agentRole": "You are a dual-format output specialist with expertise in creating documentation optimized for both human consumption and machine processing. Your role is to generate test scenarios that serve both immediate manual use and future automation needs.",
+      "guidance": [
+        "DUAL OPTIMIZATION: Create formats optimized for different consumption patterns",
+        "CONSISTENCY MAINTENANCE: Ensure both formats contain identical information",
+        "JIRA INTEGRATION: Format human-readable output for easy ticket integration",
+        "AUTOMATION READY: Structure machine-readable output for future tool consumption"
+      ],
+      "requireConfirmation": true
+    }
+  ]
+}
+
+
