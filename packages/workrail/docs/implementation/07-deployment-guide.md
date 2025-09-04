@@ -68,7 +68,7 @@ The WorkRail System supports multiple deployment strategies:
 
 ```bash
 # System requirements
-Node.js 18+
+Node.js 20+
 Docker 20.10+
 Kubernetes 1.24+ (for K8s deployment)
 ```
@@ -116,7 +116,7 @@ HEALTH_CHECK_INTERVAL=30000
 
 ```dockerfile
 # Dockerfile
-FROM node:18-alpine
+FROM node:20-alpine
 
 WORKDIR /app
 
@@ -320,7 +320,7 @@ service: workrail
 
 provider:
   name: aws
-  runtime: nodejs18.x
+  runtime: nodejs20.x
   region: us-east-1
   environment:
     NODE_ENV: production

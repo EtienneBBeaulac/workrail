@@ -110,7 +110,7 @@
 ### Infrastructure Requirements
 
 **Development Environment:**
-- Node.js 18+ runtime
+- Node.js 20+ runtime
 - TypeScript 5.0+ compiler
 - Git version control
 - Code quality tools (ESLint, Prettier)

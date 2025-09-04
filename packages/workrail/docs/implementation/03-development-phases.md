@@ -120,7 +120,7 @@ The roadmap is designed to deliver value incrementally, with clear milestones an
 
 ## Major Dependencies
 
-- Node.js 18+ and TypeScript 5.0+
+- Node.js 20+ and TypeScript 5.0+
 - JSON-RPC 2.0 implementation
 - JSON Schema validation library
 - Logging and monitoring tools
