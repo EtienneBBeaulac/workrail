@@ -336,7 +336,7 @@ async function runServer() {
 
   const { Server } = sdkServer as any;
   const { StdioServerTransport } = sdkStdio as any;
-  const { CallToolRequestSchema, ListToolsRequestSchema } = sdkTypes as any;
+  const { CallToolRequestSchema, ListToolsRequestSchema, ListRootsRequestSchema } = sdkTypes as any;
 
   // Create and configure the MCP server
   const server = new Server(
@@ -364,6 +364,28 @@ async function runServer() {
       WORKFLOW_GET_SCHEMA_TOOL
     ],
   }));
+
+  // Advertise project roots so IDEs can scope the server to the current project
+  server.setRequestHandler(ListRootsRequestSchema, async (): Promise<any> => {
+    const path = await import('path');
+    const os = await import('os');
+
+    const toFileUri = (p: string): string => {
+      const abs = path.resolve(p);
+      return `file://${abs}`;
+    };
+
+    const roots: Array<{ uri: string; name?: string }> = [];
+
+    // Current project directory
+    roots.push({ uri: toFileUri(process.cwd()), name: 'Current Project' });
+
+    // Standard workflow directories used by WorkRail
+    roots.push({ uri: toFileUri(path.resolve(__dirname, '../workflows')), name: 'Bundled Workflows' });
+    roots.push({ uri: toFileUri(path.join(os.homedir(), '.workrail', 'workflows')), name: 'User Workflows' });
+
+    return { roots };
+  });
 
   server.setRequestHandler(CallToolRequestSchema, async (request: any): Promise<CallToolResult> => {
     const { name, arguments: args } = request.params;
