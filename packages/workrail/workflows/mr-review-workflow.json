@@ -239,6 +239,9 @@
         "Decision Criteria checklist: Scope fit; Tests adequate; Pattern adherence; Performance risk; Backwards compatibility; Security basics. Render as 'Criteria: [✓/✗] label — 1 phrase note' in fixed order.",
         "Risk Heatmap table: rows 'Risk | Area | Likelihood(L/M/H) | Impact(L/M/H) | Mitigation(≤1 line)'; sort by Impact desc then Likelihood desc; cap ≤6 rows; add 'omitted due to caps' line if needed.",
         "Dedupe patches and MR comments; ensure every Critical/Major has either a patch or a copy-ready MR comment.",
+        "If any Critical/Major lacks an MR comment, generate a minimal ready-to-copy comment (file:line, short title, 1–2 line rationale, optional tiny diff snippet).",
+        "Group MR comments by file and dedupe similar entries; add a 'Missing Comments Summary' note if any comments were auto-added.",
+        "Cross-link each MR comment to its related Proposed Patch when applicable ('See Proposed Patch: <title>').",
         "Keep all caps deterministic; if any list exceeds its cap, add a single trailing 'More items omitted due to caps.' line."
       ],
       "functionReferences": ["finalizeReviewDocument()", "upsertSection()", "discoverHygieneSignals()", "consolidateHygieneFindings()", "appendHygieneFinding()", "logRevision()"],
