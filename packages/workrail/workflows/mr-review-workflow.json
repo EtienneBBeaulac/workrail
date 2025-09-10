@@ -221,7 +221,13 @@
       "agentRole": "You are a meticulous note-taker consolidating non-blocking suggestions for clarity and follow-through.",
       "guidance": [
         "This step is non-blocking and purely for documentation quality.",
-        "Keep items concise; avoid repeating Major concerns."
+        "Deterministic ordering: sort by file path ASC → line ASC → category ASC; group by file.",
+        "Categories: Naming; Readability; Style; Comments; Imports/Order; Tests (naming/structure); Minor Perf.",
+        "Row format: 'path:line — Nit: short text (≤2 lines); suggested fix: <one-liner> [category]'; optional tiny diff snippet ≤6 lines only if helpful.",
+        "Dedupe: identical path:line + similar text → keep one; if overlap with Hygiene/Patterns, keep in the most specific section and cross-reference in the other.",
+        "Caps: ≤15 total; ≤3 per category; if exceeded, append a single 'More items omitted due to caps.' line.",
+        "Cross-link any existing MR comments to their nit rows (e.g., 'MR: MR-##').",
+        "Chat: minimal recap with doc path and counts; full details live in the doc."
       ],
       "runCondition": { "and": [ { "var": "complexity", "not_equals": "Trivial" }, { "or": [ { "var": "contextGatheringComplete", "equals": true }, { "var": "skipContextGathering", "equals": true } ] } ] },
       "functionReferences": ["upsertSection()", "logRevision()"],
