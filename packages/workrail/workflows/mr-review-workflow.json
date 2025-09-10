@@ -37,10 +37,10 @@
     "appendNit(): Append Nit grouped by file: 'path:line — nit text'.",
     "appendMRComment(): Append copy-ready MR comment: file:line, short title, rationale, optional tiny diff.",
     "logRevision(): Append timestamped message to the Revision Log describing the update.",
-    "discoverHygieneSignals(): In moduleRoot, scan changed files + neighbors for: disabled/skipped/focused tests; no-assert tests; commented-out code; stale/misleading comments; TODO/FIXME/HACK/BUG w/o ticket or stale; pattern inconsistencies; ad-hoc debug prints; obvious unused/unreachable.",
+    "discoverHygieneSignals(): In moduleRoot, scan changed files + neighbors for: focused/disabled/skipped tests; no‑assert tests; commented‑out code; stale/misleading comments; TODO/FIXME/HACK/BUG w/o tickets or stale; pattern inconsistencies; ad‑hoc debug prints; unused/unreachable code.",
     "consolidateHygieneFindings(): Cap total ≤10 and ≤3 per category; dedupe; group by file; elevate Major only for clearly risky cases; produce category counts and capped items.",
     "appendHygieneFinding(): Append hygiene bullet grouped by file: 'path:line — short note (≤2 lines)'; if duplicated in Nits, reference '(linked in Nits)'.",
-    "finalizeReviewDocument(): Trivial: brief summary approve, light hygiene (≤2), quick nits, status=Final, log. Non-trivial: exec summary (3 positives, 3 risks, recommendation), dedupe/sort findings, ensure sections + curated comments for Critical/Major, status=Final, log."
+    "finalizeReviewDocument(): Trivial—brief approve summary; ≤2 hygiene; quick nits; set status=Final; log. Non‑trivial—exec summary (3 positives, 3 risks, recommendation); dedupe/sort findings; ensure sections + curated comments for Critical/Major; set status=Final; log."
   ],
   "steps": [
     {
