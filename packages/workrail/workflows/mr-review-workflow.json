@@ -8,6 +8,11 @@
     "User has the MR title, purpose, and any relevant ticket numbers.",
     "The agent has access to file-reading tools."
   ],
+  "clarificationPrompts": [
+    "Provide the associated ticket ID(s)/link(s) and paste full text if possible.",
+    "Provide links (or attach) any dev plan, design/architecture doc, or BRD relevant to this MR.",
+    "Provide the code diff (paste content or give a file path)."
+  ],
   "metaGuidance": [
     "The ultimate goal is to assist, not replace, a human reviewer. The human owns the final merge decision.",
     "All feedback should be constructive and actionable. Explain the 'why' behind suggestions.",
@@ -58,7 +63,8 @@
         "**[Standard]:** For typical features or bug fixes. This uses the full, multi-phase review process.",
         "**[High-Risk]:** For major architectural changes or features touching sensitive code. This follows the full process with maximum diligence."
       ],
-      "functionReferences": ["initReviewDoc()", "logRevision()"]
+      "functionReferences": ["initReviewDoc()", "logRevision()"],
+      "requireConfirmation": true
     },
     {
       "id": "phase-1-context",
@@ -79,7 +85,7 @@
     {
       "id": "phase-1a-llm-context-gathering",
       "title": "Phase 1a: Comprehensive Context Gathering",
-      "prompt": "To perform a thorough review, I need more than just the code diff. Please provide the following:\n\n1. **Business Context:** Paste the full text of the associated Jira/GitHub ticket, including the requirements and acceptance criteria. This helps me validate the 'why' behind the change.\n2. **Technical Context:** If this change relies on other parts of the codebase, please provide the relevant code snippets or file contents. Also, include any relevant architectural diagrams or coding standards documents.\n\nI will synthesize this information to build a comprehensive context for my review.\n\n**Confirmation & Gating:**\n- After you confirm that I have the right context (or explicitly instruct me to skip), I will set `contextGatheringComplete = true` or `skipContextGathering = true` accordingly.\n- I will not proceed to deeper analysis until one of these is set.",
+      "prompt": "To perform a thorough review, I need more than just the code diff. Please provide the following:\n\n1. **Ticket(s):** Link(s) and, if possible, paste the full text (requirements, acceptance criteria).\n2. **Dev/Design Docs:** Dev plan; design/architecture docs; and any BRD or decision records relevant to this MR.\n3. **Technical Context:** If this change relies on other parts of the codebase, provide relevant code snippets or file contents; include coding standards or module conventions if available.\n\nI will synthesize this information to build a comprehensive context for my review.\n\n**Confirmation & Gating:**\n- After you confirm that I have the right context (or explicitly instruct me to skip), I will set `contextGatheringComplete = true` or `skipContextGathering = true` accordingly.\n- I will not proceed to deeper analysis until one of these is set.",
       "agentRole": "You are a context-aware analyst ensuring you have all necessary information before starting a deep review.",
       "guidance": ["A high-quality review depends on high-quality context. The more information provided here, the more accurate the review will be."],
       "runCondition": { "var": "complexity", "not_equals": "Trivial" },
