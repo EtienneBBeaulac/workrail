@@ -101,9 +101,10 @@
         "Scope strictly to moduleRoot and changed files plus immediate neighbors.",
         "Cap per-file neighbors and graph size to avoid noise; prefer edges directly related to the diff.",
         "Write full details to the live doc; in chat, keep output minimal.",
-        "Render 'ASCII Call Graphs' under 'Bounded Call Graph': edges 'A -> B', width ≤100, highlight changed as [*name*], include tiny legend.",
-        "Paths: for each changed symbol show top 2–3 inbound and outbound paths, depth ≤2, dedupe, shortest-first then alphabetical.",
-        "Caps: ≤12 nodes, ≤20 edges across graphs; if exceeded, fall back to an adjacency list with per-edge counts.",
+        "Small Multiples: for each changed symbol, render mini path lines (≤6 nodes) for top 1–2 inbound and 1–2 outbound paths; width ≤100; highlight changed as [*name*]; tag HOT where applicable.",
+        "Path Lists with Aliasing: collapse repeated subpaths using deterministic aliases (A1, A2, ...); reuse aliases across paths; append an 'Alias Legend' listing alias → full subpath.",
+        "Ordering: HOT-first, then shortest path, then alphabetical; depth ≤2; dedupe identical paths.",
+        "Caps: ≤5 anchors; ≤8 total paths; ≤12 nodes across all small multiples; if exceeded, render 'Adjacency Summary' with per-edge counts instead.",
         "Flow Anchors: map entrypoints to changed symbols; table 'Anchor | Type | Target Symbol | Notes'; cap ≤5 anchors.",
         "Hot-Path ranking: score edges (diff touch, anchor, ticket keyword, test ref); tag HOT if score ≥ threshold; prefer HOT paths in ASCII output.",
         "Legend in doc: [*name*]=changed; HOT=high-impact; 'A -> B'=calls; 'Route -> Handler'; 'Job -> Worker'.",
@@ -170,7 +171,7 @@
           "guidance": [
             "Targets: naming clarity; small readability/style inconsistencies; redundant comments; commented/dead code; import/order polish; safe micro-perf; test naming/structure.",
             "Quotas: if majorIssuesFound==true aim 5–8 (cap 12); else aim 8–12 (cap 15); ≤3 per category; 1–2 lines each; dedupe; group by file; prefix 'Nit:'.",
-            "Add ready-to-copy MR comments for the top 3 nits; log the revision.",
+            "MUST add ready-to-copy MR comments for the top 3 nits (file:line, short title, 1–2 line rationale, optional tiny diff); log the revision.",
             "Append Nit grouped by file: 'path:line — nit text'."
           ],
           "runCondition": { "var": "analysisDepth", "equals": 4 },
@@ -238,10 +239,11 @@
         "Dedupe: identical path:line + similar text → keep one; if overlap with Hygiene/Patterns, keep in the most specific section and cross-reference in the other.",
         "Caps: ≤15 total; ≤3 per category; if exceeded, append a single 'More items omitted due to caps.' line.",
         "Cross-link any existing MR comments to their nit rows (e.g., 'MR: MR-##').",
+        "If fewer than 3 Nit MR comments exist overall, create minimal ready-to-copy MR comments for the highest-signal remaining nits to reach 3 (file:line, short title, 1–2 line rationale, optional tiny diff).",
         "Chat: minimal recap with doc path and counts; full details live in the doc."
       ],
       "runCondition": { "and": [ { "var": "complexity", "not_equals": "Trivial" }, { "or": [ { "var": "contextGatheringComplete", "equals": true }, { "var": "skipContextGathering", "equals": true } ] } ] },
-      "functionReferences": ["upsertSection()", "logRevision()"],
+      "functionReferences": ["appendMRComment()", "upsertSection()", "logRevision()"],
       "requireConfirmation": false
     },
     {
@@ -257,6 +259,7 @@
         "Risk Heatmap table: rows 'Risk | Area | Likelihood(L/M/H) | Impact(L/M/H) | Mitigation(≤1 line)'; sort by Impact desc then Likelihood desc; cap ≤6 rows; add 'omitted due to caps' line if needed.",
         "Dedupe patches and MR comments; ensure every Critical/Major has either a patch or a copy-ready MR comment.",
         "If any Critical/Major lacks an MR comment, generate a minimal ready-to-copy comment (file:line, short title, 1–2 line rationale, optional tiny diff snippet).",
+        "Ensure at least 3 Nit MR comments exist overall; if fewer, create minimal Nit MR comments for the top remaining nits to reach 3.",
         "Group MR comments by file and dedupe similar entries; add a 'Missing Comments Summary' note if any comments were auto-added.",
         "Cross-link each MR comment to its related Proposed Patch when applicable ('See Proposed Patch: <title>').",
         "Keep all caps deterministic; if any list exceeds its cap, add a single trailing 'More items omitted due to caps.' line."
