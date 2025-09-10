@@ -57,7 +57,8 @@
         "**[Trivial]:** For minor fixes (typos, docs). This will run a condensed, single-phase review.",
         "**[Standard]:** For typical features or bug fixes. This uses the full, multi-phase review process.",
         "**[High-Risk]:** For major architectural changes or features touching sensitive code. This follows the full process with maximum diligence."
-      ]
+      ],
+      "functionReferences": ["initReviewDoc()", "logRevision()"]
     },
     {
       "id": "phase-1-context",
@@ -65,10 +66,14 @@
       "prompt": "My goal is to ensure I fully understand the MR before the deep analysis. Based on the context you provided, I will perform the following tasks:\n\n1.  **Summarize Goal:** Briefly summarize what I understand to be the primary goal and scope of this MR.\n2.  **File Overview:** List all changed files (added, modified, deleted) and provide a one-sentence summary of the changes for each.\n3.  **Initial Questions:** Formulate any immediate questions I have about the MR's purpose or requirements.\n4.  **Confirmation Gate:** Does my summary accurately reflect the MR's goal? Please confirm before I proceed.\n\nI will also update the live review document with the Changed Files table and the Context summary.",
       "agentRole": "You are a thorough code review analyst specializing in requirement comprehension and change impact assessment. Your strength is quickly understanding the intent and scope of code changes while identifying potential gaps in understanding early in the review process.",
       "guidance": [
-        "This is a critical sanity check. If the agent's summary is incorrect, correct it now to prevent a flawed review. This step is skipped for 'Trivial' reviews."
+        "This is a critical sanity check. If the agent's summary is incorrect, correct it now to prevent a flawed review. This step is skipped for 'Trivial' reviews.",
+        "Doc writes: update only 'Context Summary' and 'Changed Files' sections; do not add 'Questions' or extra headings.",
+        "Ask any clarifying questions in chat only; do not write them into the doc.",
+        "Do not create placeholders for issues (Critical/Major/Minor) in this step."
       ],
       "runCondition": { "var": "complexity", "not_equals": "Trivial" },
-      "requireConfirmation": true
+      "requireConfirmation": true,
+      "functionReferences": ["upsertSection()", "appendChangedFileRow()", "logRevision()"]
     },
     
     {
