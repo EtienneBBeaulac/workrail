@@ -17,7 +17,13 @@
     "Embrace small, single-purpose pull requests for faster, more thorough reviews.",
     "When citing issues, always try to provide specific file paths and line numbers from the diff.",
     "Maintain the persona of a helpful, collaborative senior engineer.",
-    "If at any point you determine that a crucial piece of information is missing, you must pause and ask the user to provide it."
+    "If at any point you determine that a crucial piece of information is missing, you must pause and ask the user to provide it.",
+    "Auto-advance: after completing each step, immediately get the next step; only pause for explicit requireConfirmation or missing critical inputs.",
+    "FunctionReferences are mandatory. When a step lists functionReferences, execute each in the listed order before producing chat output.",
+    "Use each function's definition as the authoritative checklist for how to perform the step and what to produce (doc updates, context vars).",
+    "Document I/O: create/update the file at reviewDocPath using file-writing tools. If the agent cannot write files, output the exact doc content with the intended path so the user can save it.",
+    "If a function requires inputs that are missing, state exactly what is missing and pause. Otherwise, do not ask for confirmation.",
+    "If prompt text and a function definition conflict, prefer the function definition for the how, and the step prompt for the what."
   ],
   "functionDefinitions": [
     {
@@ -132,7 +138,8 @@
       "prompt": "Initializing state for progressive depth analysis. Setting analysisDepth = 1, analysisComplete = false, and majorIssuesFound = false.",
       "agentRole": "You are a state manager preparing the workflow for an iterative review process.",
       "guidance": ["This is an automated step to prepare for the analysis loop."],
-      "runCondition": { "and": [ { "var": "complexity", "not_equals": "Trivial" }, { "or": [ { "var": "contextGatheringComplete", "equals": true }, { "var": "skipContextGathering", "equals": true } ] } ] }
+      "runCondition": { "and": [ { "var": "complexity", "not_equals": "Trivial" }, { "or": [ { "var": "contextGatheringComplete", "equals": true }, { "var": "skipContextGathering", "equals": true } ] } ] },
+      "requireConfirmation": false
     },
     {
       "id": "phase-1a-llm-context-gathering",
@@ -165,7 +172,8 @@
             "Cap exemplars (e.g., 3–5 per concern) for speed."
           ],
           "runCondition": { "var": "analysisDepth", "equals": 1 },
-          "functionReferences": ["discoverModulePatterns()"]
+          "functionReferences": ["discoverModulePatterns()"],
+          "requireConfirmation": false
         },
         {
           "id": "perform-analysis-pass",
@@ -176,14 +184,16 @@
             "At each depth, focus only on the items in that checklist.",
             "Use Chain-of-Thought reasoning to explain your findings."
           ],
-          "functionReferences": ["collectNits()", "appendFinding()", "appendMRComment()", "logRevision()"]
+          "functionReferences": ["collectNits()", "appendFinding()", "appendMRComment()", "logRevision()"],
+          "requireConfirmation": false
         },
         {
           "id": "check-analysis-completion",
           "title": "Check Analysis Completion",
           "prompt": "Checking if the analysis is complete. If no 'Major' or 'Critical' issues were found in the last pass, or if we have reached the maximum depth (3), I will set `analysisComplete = true` to exit the loop. Otherwise, I will increment the `analysisDepth` and continue to the next level of review.",
           "agentRole": "You are an automated process controller determining whether to deepen the analysis or conclude this phase.",
-          "guidance": ["This step determines the exit condition for the progressive depth loop."]
+          "guidance": ["This step determines the exit condition for the progressive depth loop."],
+          "requireConfirmation": false
         }
       ]
     },
@@ -197,7 +207,8 @@
         "Avoid re-scanning if `patternCatalog` already exists; reuse it."
       ],
       "runCondition": { "var": "complexity", "not_equals": "Trivial" },
-      "functionReferences": ["consolidatePatternFindings()", "appendPatternResult()", "upsertSection()", "logRevision()"]
+      "functionReferences": ["consolidatePatternFindings()", "appendPatternResult()", "upsertSection()", "logRevision()"],
+      "requireConfirmation": false
     },
     {
       "id": "phase-3-impact-analysis",
@@ -207,7 +218,8 @@
       "guidance": [
         "Assessing test coverage is critical. A lack of tests for new logic is often a 'Major' or 'Critical' concern."
       ],
-      "runCondition": { "and": [ { "var": "complexity", "not_equals": "Trivial" }, { "or": [ { "var": "contextGatheringComplete", "equals": true }, { "var": "skipContextGathering", "equals": true } ] } ] }
+      "runCondition": { "and": [ { "var": "complexity", "not_equals": "Trivial" }, { "or": [ { "var": "contextGatheringComplete", "equals": true }, { "var": "skipContextGathering", "equals": true } ] } ] },
+      "requireConfirmation": false
     },
     {
       "id": "hygiene-and-inconsistencies",
@@ -219,7 +231,8 @@
         "Write full details to the live doc; in chat, report counts and the doc path."
       ],
       "runCondition": { "var": "complexity", "not_equals": "Trivial" },
-      "functionReferences": ["discoverHygieneSignals()", "consolidateHygieneFindings()", "appendHygieneFinding()", "appendMRComment()", "upsertSection()", "logRevision()"]
+      "functionReferences": ["discoverHygieneSignals()", "consolidateHygieneFindings()", "appendHygieneFinding()", "appendMRComment()", "upsertSection()", "logRevision()"],
+      "requireConfirmation": false
     },
     {
       "id": "prepare-nit-appendix",
@@ -231,7 +244,8 @@
         "Keep items concise; avoid repeating Major concerns."
       ],
       "runCondition": { "and": [ { "var": "complexity", "not_equals": "Trivial" }, { "or": [ { "var": "contextGatheringComplete", "equals": true }, { "var": "skipContextGathering", "equals": true } ] } ] },
-      "functionReferences": ["prepareNitAppendix()", "appendNit()", "upsertSection()", "logRevision()"]
+      "functionReferences": ["prepareNitAppendix()", "appendNit()", "upsertSection()", "logRevision()"],
+      "requireConfirmation": false
     },
     {
       "id": "finalize-review-document",
@@ -241,7 +255,8 @@
       "guidance": [
         "Write full details to the live doc; keep chat to a concise recap with the doc path."
       ],
-      "functionReferences": ["finalizeReviewDocument()", "ensureSectionMarkers()", "upsertSection()", "curateMRComments()", "discoverHygieneSignals()", "consolidateHygieneFindings()", "appendHygieneFinding()", "logRevision()"]
+      "functionReferences": ["finalizeReviewDocument()", "ensureSectionMarkers()", "upsertSection()", "curateMRComments()", "discoverHygieneSignals()", "consolidateHygieneFindings()", "appendHygieneFinding()", "logRevision()"],
+      "requireConfirmation": false
     }
   ]
 } 
