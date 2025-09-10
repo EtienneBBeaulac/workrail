@@ -20,6 +20,11 @@ get_current_version() {
     grep '"version"' package.json | sed -E 's/.*"version": "(.*)".*/\1/'
 }
 
+# Function to get package name
+get_package_name() {
+    grep '"name"' package.json | sed -E 's/.*"name": "([^"]+)".*/\1/'
+}
+
 # Function to show help
 show_help() {
     echo "Usage: $0 [OPTIONS]"
@@ -294,6 +299,7 @@ fi
 
 # Get the new version from package.json
 NEW_VERSION=$(get_current_version)
+PKG_NAME=$(get_package_name)
 
 print_color "$GREEN" "✅ Version bumped to: $NEW_VERSION"
 echo
@@ -450,6 +456,11 @@ if [ "$PUBLISH" = true ]; then
     if [ $? -eq 0 ]; then
         print_color "$GREEN" "✅ Successfully published to npm!"
         print_color "$GREEN" "🎉 Release v$NEW_VERSION complete!"
+        # Ensure beta is always ahead or equal to latest: tag beta to this stable release as well
+        if [ "$TYPE" != "prerelease" ]; then
+            print_color "$BLUE" "🏷️  Tagging dist-tag 'beta' → $NEW_VERSION..."
+            npm dist-tag add "$PKG_NAME@$NEW_VERSION" beta || print_color "$YELLOW" "⚠️  Failed to set beta tag; you can run: npm dist-tag add $PKG_NAME@$NEW_VERSION beta"
+        fi
         echo
         print_color "$BLUE" "Users can now install with:"
         if [ -n "$DIST_TAG" ]; then
