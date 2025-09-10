@@ -175,12 +175,17 @@
     {
       "id": "phase-3-impact-analysis",
       "title": "Phase 3: Testing, Documentation & Impact Analysis",
-      "prompt": "My goal is to assess the secondary impacts of this change.\n\n1.  **Testing:** Based on the code changes, what tests would be expected (unit, integration, etc.)? Are new tests included? Are existing tests updated? Are there obvious gaps in test coverage for the new logic?\n2.  **Documentation:** Is new or complex logic adequately commented? Could any external documentation (e.g., READMEs) be affected by this change?\n3.  **Breaking Changes:** Are there any changes that could break backward compatibility for APIs or other parts of the codebase?",
+      "prompt": "My goal is to assess the secondary impacts of this change.\n\n1.  **Testing:** Based on the code changes, what tests would be expected (unit, integration, etc.)? Are new tests included? Are existing tests updated? Are there obvious gaps in test coverage for the new logic?\n2.  **Documentation:** Is new or complex logic adequately commented? Could any external documentation (e.g., READMEs) be affected by this change?\n3.  **Breaking Changes:** Are there any changes that could break backward compatibility for APIs or other parts of the codebase?\n\nDoc-first subsections to add/update:\n- Impacted User Flows: table 'Flow/Anchor | Type | Path/ID | Handler Chain (short) | Impact | Risk(L/M/H)'.\n- Affected Consumers: table 'Consumer | Type | Breakage Risk | Migration Note'.\n- Test Gaps & Proposals: table 'Scope | Target | Purpose | Sketch'.",
       "agentRole": "You are a software quality engineer specializing in testing strategy and impact analysis. Your expertise includes identifying testing gaps, documentation requirements, and potential breaking changes that could affect system stability or user experience.",
       "guidance": [
-        "Assessing test coverage is critical. A lack of tests for new logic is often a 'Major' or 'Critical' concern."
+        "Assessing test coverage is critical. A lack of tests for new logic is often a 'Major' or 'Critical' concern.",
+        "Derive Impacted User Flows from Flow Anchors and HOT paths (depth ≤2); cap ≤5 flows; prefer acceptance-criteria keywords.",
+        "List Affected Consumers (importers/API clients/message consumers); cap ≤8; rank by usage frequency and proximity to changed code.",
+        "For data/schema/API changes, add at least one Contract test proposal; total test proposals cap ≤10.",
+        "Add 2 ready-to-copy MR comments for the highest-risk gaps; log the revision."
       ],
       "runCondition": { "and": [ { "var": "complexity", "not_equals": "Trivial" }, { "or": [ { "var": "contextGatheringComplete", "equals": true }, { "var": "skipContextGathering", "equals": true } ] } ] },
+      "functionReferences": ["upsertSection()", "appendMRComment()", "logRevision()"],
       "requireConfirmation": false
     },
     {
