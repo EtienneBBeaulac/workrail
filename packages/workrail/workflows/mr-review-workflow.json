@@ -30,6 +30,8 @@
     "Document I/O: create/update the file at reviewDocPath using file-writing tools. If the agent cannot write files, output the exact doc content with the intended path so the user can save it.",
     "If a function requires inputs that are missing, state exactly what is missing and pause. Otherwise, do not ask for confirmation.",
     "If prompt text and a function definition conflict, prefer the function definition for the how, and the step prompt for the what.",
+    "Phase 1a is user-driven: request ticket/dev/design/BRD; wait for user reply; do not search or analyze code in this step.",
+    "Do not self-confirm. Only proceed after explicit user confirmation or 'skip'; then set contextGatheringComplete=true or skipContextGathering=true.",
     "discoverModulePatterns(): Compute moduleRoot; scan only moduleRoot to build patternCatalog.",
     "discoverModulePatterns() details: moduleRoot = nearest common ancestor, clamped to package/src; catalog = naming, DI, errors, logging, tests, layout.",
     "consolidatePatternFindings(): Compare changes to patternCatalog (scoped to moduleRoot).",
@@ -85,9 +87,13 @@
     {
       "id": "phase-1a-llm-context-gathering",
       "title": "Phase 1a: Comprehensive Context Gathering",
-      "prompt": "To perform a thorough review, I need more than just the code diff. Please provide the following:\n\n1. **Ticket(s):** Link(s) and, if possible, paste the full text (requirements, acceptance criteria).\n2. **Dev/Design Docs:** Dev plan; design/architecture docs; and any BRD or decision records relevant to this MR.\n3. **Technical Context:** If this change relies on other parts of the codebase, provide relevant code snippets or file contents; include coding standards or module conventions if available.\n\nI will synthesize this information to build a comprehensive context for my review.\n\n**Confirmation & Gating:**\n- After you confirm that I have the right context (or explicitly instruct me to skip), I will set `contextGatheringComplete = true` or `skipContextGathering = true` accordingly.\n- I will not proceed to deeper analysis until one of these is set.",
+      "prompt": "To perform a thorough review, I need you to provide source documents. In this step I will not search or analyze code—I'm waiting for your inputs. Please provide:\n\n1. **Ticket(s):** Link(s) and, if possible, paste the full text (requirements, acceptance criteria).\n2. **Dev/Design Docs:** Dev plan; design/architecture docs; any BRD/ADR/decision records relevant to this MR.\n3. **Technical Context:** If this change relies on other parts of the codebase, paste relevant code snippets or file contents; include coding standards or module conventions if available.\n\nI will synthesize this information once received.\n\n**Confirmation & Gating:**\n- After you confirm that I have the right context (or explicitly instruct me to skip), I will set `contextGatheringComplete = true` or `skipContextGathering = true` accordingly.\n- I will not proceed to deeper analysis until one of these is set.",
       "agentRole": "You are a context-aware analyst ensuring you have all necessary information before starting a deep review.",
-      "guidance": ["A high-quality review depends on high-quality context. The more information provided here, the more accurate the review will be."],
+      "guidance": [
+        "User-driven step: ask for ticket, dev plan, design/architecture docs, BRD/ADR, and any coding standards.",
+        "Do not search or analyze code in this step; wait for user inputs.",
+        "Only after explicit confirmation or 'skip' set contextGatheringComplete=true or skipContextGathering=true."
+      ],
       "runCondition": { "var": "complexity", "not_equals": "Trivial" },
       "requireConfirmation": true
     },
