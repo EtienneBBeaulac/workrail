@@ -25,10 +25,6 @@
     "Document I/O: create/update the file at reviewDocPath using file-writing tools. If the agent cannot write files, output the exact doc content with the intended path so the user can save it.",
     "If a function requires inputs that are missing, state exactly what is missing and pause. Otherwise, do not ask for confirmation.",
     "If prompt text and a function definition conflict, prefer the function definition for the how, and the step prompt for the what.",
-    "collectNits(): Extract 'Nit:'/Minor items; update nitFindings, nitsCount.",
-    "collectNits() details: nitFindings entries = {title, details, filePath, line, analysisDepth}.",
-    "prepareNitAppendix(): Group nitFindings by file; format 'filePath:line - short desc'.",
-    "prepareNitAppendix() details: write markdown to nitAppendix; set nitAppendixReady=true.",
     "discoverModulePatterns(): Compute moduleRoot; scan only moduleRoot to build patternCatalog.",
     "discoverModulePatterns() details: moduleRoot = nearest common ancestor, clamped to package/src; catalog = naming, DI, errors, logging, tests, layout.",
     "consolidatePatternFindings(): Compare changes to patternCatalog (scoped to moduleRoot).",
@@ -39,7 +35,6 @@
     "appendChangedFileRow(): Append/update Changed Files table row: File | +/- | Summary | Risk.",
     "appendFinding(): Append finding under severity (Critical/Major/Minor) with path:line, 1–2-line rationale, optional tiny diff.",
     "appendPatternResult(): Append Pattern Adherence row (Check | Result | Note); add brief per-file deviations.",
-    "appendNit(): Append Nit grouped by file: 'path:line — nit text'.",
     "appendMRComment(): Append copy-ready MR comment: file:line, short title, rationale, optional tiny diff.",
     "logRevision(): Append timestamped message to the Revision Log describing the update.",
     "discoverHygieneSignals(): Scan moduleRoot changed files + neighbors for hygiene issues.",
@@ -103,7 +98,7 @@
       "loop": {
         "type": "until",
         "condition": { "var": "analysisComplete", "equals": true },
-        "maxIterations": 3,
+        "maxIterations": 4,
         "iterationVar": "analysisDepth"
       },
       "body": [
@@ -122,20 +117,36 @@
         },
         {
           "id": "perform-analysis-pass",
-          "title": "Analysis Pass {{analysisDepth}} of 3",
+          "title": "Analysis Pass {{analysisDepth}} of 4",
           "prompt": "Act as a Senior Staff Engineer. Your task is to review the code based on the checklist for the current analysis depth. Think step-by-step.\n\n**Current Depth: {{analysisDepth}}**\n\n**Checklist:**\n* **Depth 1 (Basic Scan):** Check for style guide violations, simple bugs (e.g., typos, unused variables), and common security vulnerabilities (OWASP Top 10).\n* **Depth 2 (Standard Review):** Check for logical errors, edge cases, adherence to SOLID principles, and maintainability issues.\n* **Depth 3 (Deep Architectural Review):** Check for alignment with system architecture, long-term impact, performance bottlenecks, and dependency risks.\n\n**Instructions:**\n1.  **Summarize Focus:** State which depth level you are on and what you will focus on.\n2.  **Analyze:** Perform the review based on the checklist for depth {{analysisDepth}}.\n3.  **List Findings:** Document your findings, categorizing them as 'Critical', 'Major', or 'Minor'.\n4.  **Set Flag:** If you find any 'Critical' or 'Major' issues, set the context variable `majorIssuesFound = true`.",
           "agentRole": "You are a Senior Staff Engineer performing a structured, multi-pass code review with increasing levels of scrutiny.",
           "guidance": [
             "At each depth, focus only on the items in that checklist.",
             "Use Chain-of-Thought reasoning to explain your findings."
           ],
-          "functionReferences": ["collectNits()", "appendFinding()", "appendMRComment()", "logRevision()"],
+          "runCondition": { "or": [ { "var": "analysisDepth", "equals": 1 }, { "var": "analysisDepth", "equals": 2 }, { "var": "analysisDepth", "equals": 3 } ] },
+          "functionReferences": ["appendFinding()", "appendMRComment()", "logRevision()"],
+          "requireConfirmation": false
+        },
+        {
+          "id": "perform-nit-hunt",
+          "title": "Nit Hunt (Depth 4)",
+          "prompt": "Perform a focused nit hunt in `moduleRoot` on changed files and immediate neighbors. Be picky but objective. Provide concise, actionable nits with one-line rationale and suggested fix.",
+          "agentRole": "You are a meticulous reviewer surfacing small, high-signal improvements.",
+          "guidance": [
+            "Targets: naming clarity; small readability/style inconsistencies; redundant comments; commented/dead code; import/order polish; safe micro-perf; test naming/structure.",
+            "Quotas: if majorIssuesFound==true aim 5–8 (cap 12); else aim 8–12 (cap 15); ≤3 per category; 1–2 lines each; dedupe; group by file; prefix 'Nit:'.",
+            "Add ready-to-copy MR comments for the top 3 nits; log the revision.",
+            "Append Nit grouped by file: 'path:line — nit text'."
+          ],
+          "runCondition": { "var": "analysisDepth", "equals": 4 },
+          "functionReferences": ["appendNit()", "appendMRComment()", "upsertSection()", "logRevision()"],
           "requireConfirmation": false
         },
         {
           "id": "check-analysis-completion",
           "title": "Check Analysis Completion",
-          "prompt": "Checking if the analysis is complete. If no 'Major' or 'Critical' issues were found in the last pass, or if we have reached the maximum depth (3), I will set `analysisComplete = true` to exit the loop. Otherwise, I will increment the `analysisDepth` and continue to the next level of review.",
+          "prompt": "Checking if the analysis is complete. If we have reached the maximum depth (4), I will set `analysisComplete = true` to exit the loop. Otherwise, I will increment the `analysisDepth` and continue to the next level of review.",
           "agentRole": "You are an automated process controller determining whether to deepen the analysis or conclude this phase.",
           "guidance": ["This step determines the exit condition for the progressive depth loop."],
           "requireConfirmation": false
