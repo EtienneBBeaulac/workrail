@@ -155,11 +155,27 @@
     "phase-2-informed-clarification",
     "phase-2b-dynamic-retriage",
     "phase-3-specification",
-    "phase-3b-create-context-doc"
+    "phase-3b-create-context-doc",
+    "phase-4-architectural-design",
+    "phase-5-planning",
+    "phase-5b-devil-advocate-review",
+    "phase-5c-finalize-plan",
+    "phase-5d-plan-sanity-check",
+    "phase-5e-update-context-doc",
+    "phase-6-count-steps",
+    "phase-6-prep",
+    "phase-6-implement",
+    "phase-6-verify",
+    "phase-6-prep",
+    "phase-6-implement",
+    "phase-6-verify",
+    "phase-6-prep"
   ],
   "context": {
     "taskComplexity": "Large",
-    "automationLevel": "Medium",
+    "automationLevel": "Medium", 
+    "totalImplementationSteps": 14,
+    "featureBranch": "feature/workflow-documentation",
     "userRules": ["18 rules as documented above"],
     "architectureOverview": "Clean layered architecture with extension points identified",
     "clarificationAnswers": {"10 key decisions as documented above"}
@@ -214,6 +230,65 @@
 - ✅ Graceful degradation (backward compatibility)
 
 **Implementation Readiness:** Design provides detailed component specifications for implementation
+
+### Phase 6: Implementation Progress (Steps 1-3/14)
+**Date:** 2024-12-19
+
+**Completed Implementation Steps:**
+1. ✅ **Step 1.1**: Updated workflow schema to v0.3.0 with documentation support
+   - File: `/spec/workflow.schema.json` (lines 3, 111-189, 206-226, 275-291, 345-361)
+   - Added documentation object with required fields: summary, whenToUse, inputs, outputs, risks
+   - Added sensitivity metadata for standardStep and loopStep
+   - Commit: `ba81cf6`
+
+2. ✅ **Step 1.2**: Created comprehensive documentation type definitions  
+   - File: `/src/types/documentation-types.ts` (98 lines)
+   - Defined 6 interfaces: DocumentationInput, DocumentationMetadata, SensitivityMetadata, DocumentationResult, DocumentationOptions, DocumentationAvailability
+   - Commit: `6e2715a`
+
+### Phase 2: MCP Tool Integration Progress (Steps 5-6/14)
+**Date:** 2024-12-19
+
+**Recently Completed:**
+3. ✅ **Step 1.3**: Implemented DocumentationService with comprehensive functionality
+   - File: `/src/application/services/documentation-service.ts` (251 lines)
+   - Added resolution hierarchy: JSON → README → Fallback
+   - Updated type system across 4 files for integration
+   - Commit: `5bdc5a5`
+
+4. ✅ **Step 1.4**: Updated container registration for dependency injection
+   - File: `/src/container.ts` (lines 9, 21, 36-37, 45)
+   - Added DocumentationService to AppContainer interface and creation
+   - Commit: `c314c69`
+
+5. ✅ **Step 2.1**: Created use cases with factory pattern
+   - Files: `/src/application/use-cases/get-workflow-docs.ts`, `/src/application/use-cases/get-workrail-help.ts` (58 lines total)
+   - Factory functions: createGetWorkflowDocs, createGetWorkrailHelp
+   - Commit: `0de904e`
+
+### Phase 3: Storage Extension Progress (Steps 9-12/14)
+**Date:** 2024-12-19
+
+**Recently Completed:**
+6. ✅ **Step 2.2**: Added MCP tool definitions for workflow_docs and workrail_help
+   - File: `/src/mcp-server.ts` (lines 328-407, 446-447)
+   - Added WORKFLOW_DOCS_TOOL and WORKRAIL_HELP_TOOL with comprehensive schemas
+   - Registered tools in ListToolsRequestSchema handler
+   - Commit: `5fd6f52`
+
+7. ✅ **Step 2.3**: Added request handlers for documentation tools
+   - File: `/src/mcp-server.ts` (lines 176-236, 519-529)
+   - Added getWorkflowDocs and getWorkrailHelp methods with use case integration
+   - Added workflow_docs and workrail_help case handlers with validation
+   - Commit: `761a4ec`
+
+8. ✅ **Step 2.4**: Enhanced workflow_list with documentation metadata
+   - Files: `/src/types/mcp-types.ts` (lines 147-148), `/src/mcp-server.ts` (lines 27-45)
+   - Added docsAvailable and helpHint optional fields to WorkflowSummary
+   - Enhanced workflow_list to populate documentation metadata using DocumentationService
+   - Commit: `c572dd1`
+
+**Currently Implementing:** Step 3.1 - Extend Storage Interface (already complete from earlier integration)
 
 ## 4. DECISION LOG (EXPANDED)
 
