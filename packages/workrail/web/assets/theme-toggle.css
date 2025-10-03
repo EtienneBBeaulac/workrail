@@ -1,0 +1,267 @@
+/**
+ * Theme Toggle Component
+ * Beautiful sun/moon toggle for light/dark mode
+ */
+
+.theme-toggle {
+  position: fixed;
+  top: var(--space-md);
+  right: var(--space-md);
+  z-index: 1000;
+  
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.theme-toggle-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-button);
+  border: 1px solid var(--border-medium);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  color: var(--text-primary);
+  
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  
+  cursor: pointer;
+  transition: all 200ms var(--ease-spring);
+  
+  /* Remove button styles */
+  appearance: none;
+  font: inherit;
+  outline: none;
+}
+
+.theme-toggle-btn:hover {
+  background: var(--glass-bg-strong);
+  border-color: var(--border-heavy);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.theme-toggle-btn:active {
+  transform: translateY(0) scale(0.95);
+}
+
+.theme-toggle-btn svg {
+  width: 20px;
+  height: 20px;
+  transition: transform 400ms var(--ease-spring);
+}
+
+/* Icon animations */
+.theme-toggle-btn:hover svg {
+  transform: rotate(180deg) scale(1.1);
+}
+
+.theme-icon {
+  display: none;
+}
+
+/* Show/hide icons based on theme */
+[data-theme="dark"] .theme-icon-sun {
+  display: block;
+}
+
+:root:not([data-theme="dark"]) .theme-icon-moon {
+  display: block;
+}
+
+/* Auto mode indicator (optional badge) */
+.theme-toggle-auto-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent-green);
+  border: 2px solid var(--bg-primary);
+  opacity: 0;
+  transition: opacity 200ms;
+}
+
+.theme-toggle.is-auto .theme-toggle-auto-badge {
+  opacity: 1;
+}
+
+/* Tooltip */
+.theme-toggle-tooltip {
+  position: absolute;
+  bottom: -32px;
+  right: 0;
+  
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition: all 200ms var(--ease-smooth);
+}
+
+.theme-toggle-btn:hover + .theme-toggle-tooltip {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Mobile adjustments */
+@media (max-width: 768px) {
+  .theme-toggle {
+    top: var(--space-sm);
+    right: var(--space-sm);
+  }
+  
+  .theme-toggle-btn {
+    width: 40px;
+    height: 40px;
+  }
+  
+  .theme-toggle-tooltip {
+    display: none; /* Hide tooltips on mobile */
+  }
+}
+
+
+
+ * Theme Toggle Component
+ * Beautiful sun/moon toggle for light/dark mode
+ */
+
+.theme-toggle {
+  position: fixed;
+  top: var(--space-md);
+  right: var(--space-md);
+  z-index: 1000;
+  
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.theme-toggle-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-button);
+  border: 1px solid var(--border-medium);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  color: var(--text-primary);
+  
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  
+  cursor: pointer;
+  transition: all 200ms var(--ease-spring);
+  
+  /* Remove button styles */
+  appearance: none;
+  font: inherit;
+  outline: none;
+}
+
+.theme-toggle-btn:hover {
+  background: var(--glass-bg-strong);
+  border-color: var(--border-heavy);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.theme-toggle-btn:active {
+  transform: translateY(0) scale(0.95);
+}
+
+.theme-toggle-btn svg {
+  width: 20px;
+  height: 20px;
+  transition: transform 400ms var(--ease-spring);
+}
+
+/* Icon animations */
+.theme-toggle-btn:hover svg {
+  transform: rotate(180deg) scale(1.1);
+}
+
+.theme-icon {
+  display: none;
+}
+
+/* Show/hide icons based on theme */
+[data-theme="dark"] .theme-icon-sun {
+  display: block;
+}
+
+:root:not([data-theme="dark"]) .theme-icon-moon {
+  display: block;
+}
+
+/* Auto mode indicator (optional badge) */
+.theme-toggle-auto-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent-green);
+  border: 2px solid var(--bg-primary);
+  opacity: 0;
+  transition: opacity 200ms;
+}
+
+.theme-toggle.is-auto .theme-toggle-auto-badge {
+  opacity: 1;
+}
+
+/* Tooltip */
+.theme-toggle-tooltip {
+  position: absolute;
+  bottom: -32px;
+  right: 0;
+  
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition: all 200ms var(--ease-smooth);
+}
+
+.theme-toggle-btn:hover + .theme-toggle-tooltip {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Mobile adjustments */
+@media (max-width: 768px) {
+  .theme-toggle {
+    top: var(--space-sm);
+    right: var(--space-sm);
+  }
+  
+  .theme-toggle-btn {
+    width: 40px;
+    height: 40px;
+  }
+  
+  .theme-toggle-tooltip {
+    display: none; /* Hide tooltips on mobile */
+  }
+}
+
+
+

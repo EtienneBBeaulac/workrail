@@ -1,0 +1,1140 @@
+/**
+ * Workrail Component Library v1.2
+ * Material Expressive Integration - Enhanced with personality
+ * 
+ * v1.2 Updates:
+ * - Enhanced buttons with spring interactions
+ * - Glassmorphism effects on hover
+ * - Larger border radius for friendlier feel
+ * - Workflow-themed components
+ */
+
+/* ============================================
+   BUTTONS
+   ============================================ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-6);
+  font-size: var(--text-base);
+  font-weight: var(--font-medium);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+  border: none;
+  white-space: nowrap;
+  outline: none; /* Remove default outline */
+}
+
+/* Only show focus outline for keyboard navigation, not mouse clicks */
+.btn:focus-visible {
+  outline: 2px solid var(--primary-500);
+  outline-offset: 2px;
+}
+
+/* Ensure no persistent focus state after click */
+.btn:focus:not(:focus-visible) {
+  outline: none;
+}
+
+.btn-primary {
+  background: var(--primary-500);
+  color: var(--text-inverse);
+  box-shadow: var(--shadow-sm);
+}
+
+.btn-primary:hover {
+  background: var(--primary-600);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.btn-primary:active {
+  transform: translateY(0);
+  box-shadow: var(--shadow-xs);
+}
+
+.btn-secondary {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1.5px solid var(--border-medium);
+}
+
+.btn-secondary:hover {
+  border-color: var(--primary-500);
+  color: var(--primary-500);
+  background: var(--bg-secondary);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.btn-ghost:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.btn-danger {
+  background: var(--status-error);
+  color: var(--text-inverse);
+}
+
+.btn-danger:hover {
+  background: #dc2626;
+}
+
+/* ============================================
+   CARDS
+   ============================================ */
+
+.card {
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+  box-shadow: var(--shadow-sm);
+  /* Only transition properties that change on hover, not color values (prevents flash on theme change) */
+  transition: backdrop-filter var(--duration-base) var(--ease-out),
+              box-shadow var(--duration-base) var(--ease-out);
+}
+
+.card:hover {
+  background: var(--bg-primary);
+  backdrop-filter: blur(15px);
+  -webkit-backdrop-filter: blur(15px);
+  box-shadow: var(--shadow-md);
+}
+
+.card-elevated {
+  box-shadow: var(--shadow-md);
+}
+
+.card-elevated:hover {
+  box-shadow: var(--shadow-lg);
+  transform: translateY(-2px);
+}
+
+.card-interactive {
+  cursor: pointer;
+}
+
+.card-interactive:hover {
+  border-color: var(--primary-500);
+  box-shadow: var(--shadow-lg);
+  transform: translateY(-4px);
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-4);
+}
+
+.card-title {
+  font-size: var(--text-xl);
+  font-weight: var(--font-semibold);
+  margin: 0;
+}
+
+.card-content {
+  color: var(--text-secondary);
+}
+
+.card-footer {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-light);
+}
+
+/* ============================================
+   STATUS BADGES
+   ============================================ */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+}
+
+.badge-success {
+  background: rgba(16, 185, 129, 0.1);
+  color: #059669;
+}
+
+.badge-active {
+  background: rgba(59, 130, 246, 0.1);
+  color: #2563eb;
+}
+
+.badge-pending {
+  background: rgba(245, 158, 11, 0.1);
+  color: #d97706;
+}
+
+.badge-error {
+  background: rgba(239, 68, 68, 0.1);
+  color: #dc2626;
+}
+
+.badge-info {
+  background: rgba(99, 102, 241, 0.1);
+  color: #4f46e5;
+}
+
+/* Pulse dot for live indicators */
+.pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse 2s var(--ease-in-out) infinite;
+}
+
+/* ============================================
+   STAT CARDS
+   ============================================ */
+
+.stat-card {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+  box-shadow: var(--shadow-sm);
+  /* Only transition properties that change on hover/interaction, not theme colors */
+  transition: transform var(--duration-base) var(--ease-out), 
+              box-shadow var(--duration-base) var(--ease-out);
+  text-align: center;
+}
+
+.stat-card:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-4px);
+}
+
+.stat-icon {
+  font-size: var(--text-4xl);
+  margin-bottom: var(--space-3);
+}
+
+.stat-value {
+  font-size: var(--text-3xl);
+  font-weight: var(--font-bold);
+  color: var(--text-primary);
+  margin-bottom: var(--space-2);
+}
+
+.stat-label {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.stat-change {
+  font-size: var(--text-sm);
+  margin-top: var(--space-2);
+}
+
+.stat-change-positive {
+  color: var(--status-success);
+}
+
+.stat-change-negative {
+  color: var(--status-error);
+}
+
+/* ============================================
+   PROGRESS INDICATORS
+   ============================================ */
+
+.progress-bar-container {
+  width: 100%;
+  height: 8px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.progress-bar {
+  height: 100%;
+  background: var(--primary-500);
+  border-radius: var(--radius-full);
+  transition: width var(--duration-base) var(--ease-out);
+}
+
+.progress-bar-success {
+  background: var(--status-success);
+}
+
+/* Progress Ring */
+.progress-ring {
+  transform: rotate(-90deg);
+}
+
+.progress-ring-circle {
+  transition: stroke-dashoffset var(--duration-base) var(--ease-out);
+}
+
+/* ============================================
+   EMPTY STATES
+   ============================================ */
+
+.empty-state {
+  text-align: center;
+  padding: var(--space-16) var(--space-8);
+}
+
+.empty-icon {
+  font-size: var(--text-4xl);
+  margin-bottom: var(--space-4);
+  opacity: 0.5;
+}
+
+.empty-state h3 {
+  font-size: var(--text-2xl);
+  margin-bottom: var(--space-3);
+}
+
+.empty-state p {
+  color: var(--text-secondary);
+  margin: 0 auto var(--space-6);
+  max-width: 50ch;
+}
+
+.empty-hint {
+  background: var(--bg-secondary);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  display: inline-block;
+}
+
+.empty-hint code {
+  background: transparent;
+  color: var(--primary-500);
+}
+
+/* ============================================
+   MODALS
+   ============================================ */
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
+
+.modal-dialog {
+  background: var(--bg-primary);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-2xl);
+  max-width: 500px;
+  width: 90%;
+  padding: var(--space-8);
+  animation: scaleIn var(--duration-base) var(--ease-out);
+}
+
+.modal-icon {
+  font-size: var(--text-4xl);
+  text-align: center;
+  margin-bottom: var(--space-4);
+}
+
+.modal-title {
+  font-size: var(--text-2xl);
+  text-align: center;
+  margin-bottom: var(--space-3);
+}
+
+.modal-message {
+  text-align: center;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-6);
+}
+
+.modal-actions {
+  display: flex;
+  gap: var(--space-3);
+  justify-content: center;
+}
+
+/* ============================================
+   TIMELINE
+   ============================================ */
+
+.timeline {
+  position: relative;
+  padding-left: var(--space-8);
+}
+
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--border-light);
+}
+
+.timeline-item {
+  position: relative;
+  margin-bottom: var(--space-6);
+}
+
+.timeline-marker {
+  position: absolute;
+  left: -23px;
+  top: 4px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--primary-500);
+  border: 2px solid var(--bg-primary);
+}
+
+.timeline-time {
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+  margin-bottom: var(--space-1);
+}
+
+.timeline-text {
+  color: var(--text-primary);
+}
+
+/* ============================================
+   COPYABLE FIELDS
+   ============================================ */
+
+.copyable-field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-light);
+}
+
+.copyable-field label {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  font-weight: var(--font-medium);
+}
+
+.copyable-field code {
+  flex: 1;
+  background: transparent;
+  cursor: pointer;
+  user-select: all;
+}
+
+.copy-btn {
+  padding: var(--space-2);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity var(--duration-fast);
+}
+
+.copy-btn:hover {
+  opacity: 1;
+}
+
+/* ============================================
+   HINT CARDS
+   ============================================ */
+
+.hint-card {
+  display: flex;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  background: rgba(139, 92, 246, 0.05);
+  border-left: 3px solid var(--primary-500);
+  border-radius: var(--radius-md);
+  margin: var(--space-6) 0;
+}
+
+.hint-icon {
+  font-size: var(--text-2xl);
+  flex-shrink: 0;
+}
+
+.hint-content strong {
+  display: block;
+  margin-bottom: var(--space-2);
+  color: var(--text-primary);
+}
+
+.hint-content p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+/* ============================================
+   LOADING STATES
+   ============================================ */
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--neutral-200) 25%,
+    var(--neutral-100) 50%,
+    var(--neutral-200) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: var(--radius-md);
+}
+
+.skeleton-text {
+  height: 1em;
+  margin-bottom: var(--space-2);
+}
+
+.skeleton-title {
+  height: 1.5em;
+  width: 60%;
+  margin-bottom: var(--space-3);
+}
+
+.skeleton-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-full);
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--border-light);
+  border-top-color: var(--primary-500);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* ============================================
+   LIVE INDICATORS
+   ============================================ */
+
+.live-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.time-ago {
+  font-weight: var(--font-medium);
+}
+
+/* ============================================
+   TOAST NOTIFICATIONS
+   ============================================ */
+
+.toast {
+  position: fixed;
+  bottom: var(--space-6);
+  right: var(--space-6);
+  background: var(--bg-primary);
+  padding: var(--space-4) var(--space-6);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  border: 1px solid var(--border-light);
+  z-index: 1000;
+  animation: slideUpFade var(--duration-base) var(--ease-out);
+}
+
+.toast-success {
+  border-left: 3px solid var(--status-success);
+}
+
+.toast-error {
+  border-left: 3px solid var(--status-error);
+}
+
+.toast-info {
+  border-left: 3px solid var(--status-info);
+}
+
+/* ============================================
+   MATERIAL EXPRESSIVE ENHANCEMENTS
+   ============================================ */
+
+/* Glassmorphism Card - Premium feel on hover */
+.card-glass {
+  /* Only transition properties that change on hover, not color values (prevents flash on theme change) */
+  transition: backdrop-filter var(--duration-base) var(--ease-spring),
+              box-shadow var(--duration-base) var(--ease-spring),
+              transform var(--duration-base) var(--ease-spring);
+}
+
+.card-glass:hover {
+  background: var(--glass-bg);
+  backdrop-filter: blur(10px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-xl);
+  transform: translateY(-4px) scale(1.01);
+}
+
+/* Spring Button - Bouncy click feedback */
+.btn-spring {
+  transition: all var(--duration-fast) var(--ease-spring);
+}
+
+.btn-spring:active {
+  animation: bounceScale var(--duration-base) var(--ease-bounce);
+}
+
+/* Floating Card - Gentle floating animation */
+.card-float {
+  animation: float 6s var(--ease-in-out) infinite;
+}
+
+.card-float:nth-child(2) {
+  animation-delay: 0.3s;
+}
+
+.card-float:nth-child(3) {
+  animation-delay: 0.6s;
+}
+
+/* Stat Card with Gradient Background */
+.stat-card-gradient {
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.1), rgba(16, 185, 129, 0.1));
+  border: none !important;
+  position: relative;
+  overflow: hidden;
+  
+  /* Explicitly set default state for smooth reverse transition */
+  transform: translateY(0) scale(1.0) !important;
+  box-shadow: var(--shadow-sm) !important;
+  backdrop-filter: blur(0px) saturate(100%) !important;
+  
+  /* Unified smooth transition - longer duration for visibility, smooth ease-out */
+  transition-property: transform, box-shadow, backdrop-filter;
+  transition-duration: 500ms;
+  transition-timing-function: cubic-bezier(0.4, 0.0, 0.2, 1);
+  will-change: transform, box-shadow, backdrop-filter;
+}
+
+.stat-card-gradient::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(135deg, #06b6d4, #10b981);
+  transition: opacity 500ms cubic-bezier(0.4, 0.0, 0.2, 1);
+}
+
+/* Disable float animation on hover to allow smooth transition */
+.stat-card-gradient:hover {
+  /* Completely disable the float animation so transition can take over */
+  animation: none !important;
+  
+  /* Override all other hover states with a single, smooth transform */
+  transform: translateY(-6px) scale(1.0) !important;
+  box-shadow: var(--shadow-lg) !important;
+  /* Ensure backdrop-filter is also smooth if .card-glass applies it */
+  backdrop-filter: blur(10px) saturate(180%) !important;
+}
+
+/* Workflow-themed cards */
+.card-workflow {
+  position: relative;
+  overflow: hidden;
+  border-left: 4px solid transparent;
+  /* Only transition properties that change on hover */
+  transition: border-left-width var(--duration-base) var(--ease-spring),
+              transform var(--duration-base) var(--ease-spring);
+}
+
+.card-workflow[data-workflow="bug-investigation"] {
+  border-left-color: #ef4444;
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.03), transparent);
+}
+
+.card-workflow[data-workflow="mr-review"] {
+  border-left-color: #3b82f6;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.03), transparent);
+}
+
+.card-workflow[data-workflow="documentation"] {
+  border-left-color: #8b5cf6;
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.03), transparent);
+}
+
+.card-workflow[data-workflow="performance"] {
+  border-left-color: #f97316;
+  background: linear-gradient(135deg, rgba(249, 115, 22, 0.03), transparent);
+}
+
+.card-workflow:hover {
+  border-left-width: 6px;
+  transform: translateX(4px);
+}
+
+/* Interactive Card with 3D tilt effect (optional) */
+.card-3d {
+  transform-style: preserve-3d;
+  transition: transform var(--duration-base) var(--ease-spring);
+}
+
+.card-3d:hover {
+  transform: perspective(1000px) rotateX(2deg) rotateY(-2deg) translateZ(10px);
+}
+
+/* Hero Section with Gradient Mesh Background */
+.hero-gradient-mesh {
+  position: relative;
+  background: var(--gradient-mesh-vibrant);
+  animation: gradientShift var(--duration-ambient) ease-in-out infinite;
+  background-size: 200% 200%;
+}
+
+/* Progress Bar with Gradient */
+.progress-bar-gradient {
+  background: var(--gradient-ocean);
+  background-size: 200% 100%;
+  animation: gradientShift 2s linear infinite;
+}
+
+/* Badge with Glow Effect */
+.badge-glow {
+  position: relative;
+  animation: breathe 3s ease-in-out infinite;
+}
+
+.badge-glow::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  background: currentColor;
+  opacity: 0.3;
+  filter: blur(8px);
+  z-index: -1;
+}
+
+/* Modal with Spring Animation */
+.modal-dialog-spring {
+  animation: springIn var(--duration-slower) var(--ease-spring);
+}
+
+/* Button with Celebration Confetti on Click */
+.btn-celebrate {
+  position: relative;
+  overflow: visible;
+}
+
+.btn-celebrate:active::after {
+  content: '🎉';
+  position: absolute;
+  top: -20px;
+  left: 50%;
+  transform: translateX(-50%);
+  animation: elasticPop 0.6s var(--ease-elastic);
+  pointer-events: none;
+}
+
+/* Code Block with Copy Animation */
+.code-block {
+  position: relative;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.code-block:hover {
+  border-color: var(--primary-500);
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
+  transition: all var(--duration-fast) var(--ease-spring);
+}
+
+/* Tooltip */
+.tooltip {
+  position: relative;
+  display: inline-block;
+}
+
+.tooltip-text {
+  visibility: hidden;
+  background: var(--neutral-900);
+  color: var(--text-inverse);
+  text-align: center;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  position: absolute;
+  z-index: 1;
+  bottom: 125%;
+  left: 50%;
+  transform: translateX(-50%);
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.tooltip:hover .tooltip-text {
+  visibility: visible;
+  opacity: 1;
+  animation: springIn var(--duration-base) var(--ease-spring);
+}
+
+/* Glassmorphism Button */
+.btn-glass {
+  background: var(--glass-bg-subtle);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--glass-border-subtle);
+  color: var(--text-primary);
+}
+
+.btn-glass:hover {
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px);
+  box-shadow: var(--shadow-lg);
+  border-color: var(--glass-border);
+}
+
+/* Stat Card with Colorful Icon */
+.stat-card-icon {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.stat-card-icon .stat-icon {
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.1), rgba(139, 92, 246, 0.1));
+  color: var(--primary-500);
+}
+
+.stat-card-icon:hover .stat-icon {
+  animation: elasticPop var(--duration-slower) var(--ease-elastic);
+}
+
+
+  bottom: var(--space-6);
+  right: var(--space-6);
+  background: var(--bg-primary);
+  padding: var(--space-4) var(--space-6);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  border: 1px solid var(--border-light);
+  z-index: 1000;
+  animation: slideUpFade var(--duration-base) var(--ease-out);
+}
+
+.toast-success {
+  border-left: 3px solid var(--status-success);
+}
+
+.toast-error {
+  border-left: 3px solid var(--status-error);
+}
+
+.toast-info {
+  border-left: 3px solid var(--status-info);
+}
+
+/* ============================================
+   MATERIAL EXPRESSIVE ENHANCEMENTS
+   ============================================ */
+
+/* Glassmorphism Card - Premium feel on hover */
+.card-glass {
+  /* Only transition properties that change on hover, not color values (prevents flash on theme change) */
+  transition: backdrop-filter var(--duration-base) var(--ease-spring),
+              box-shadow var(--duration-base) var(--ease-spring),
+              transform var(--duration-base) var(--ease-spring);
+}
+
+.card-glass:hover {
+  background: var(--glass-bg);
+  backdrop-filter: blur(10px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-xl);
+  transform: translateY(-4px) scale(1.01);
+}
+
+/* Spring Button - Bouncy click feedback */
+.btn-spring {
+  transition: all var(--duration-fast) var(--ease-spring);
+}
+
+.btn-spring:active {
+  animation: bounceScale var(--duration-base) var(--ease-bounce);
+}
+
+/* Floating Card - Gentle floating animation */
+.card-float {
+  animation: float 6s var(--ease-in-out) infinite;
+}
+
+.card-float:nth-child(2) {
+  animation-delay: 0.3s;
+}
+
+.card-float:nth-child(3) {
+  animation-delay: 0.6s;
+}
+
+/* Stat Card with Gradient Background */
+.stat-card-gradient {
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.1), rgba(16, 185, 129, 0.1));
+  border: none !important;
+  position: relative;
+  overflow: hidden;
+  
+  /* Explicitly set default state for smooth reverse transition */
+  transform: translateY(0) scale(1.0) !important;
+  box-shadow: var(--shadow-sm) !important;
+  backdrop-filter: blur(0px) saturate(100%) !important;
+  
+  /* Unified smooth transition - longer duration for visibility, smooth ease-out */
+  transition-property: transform, box-shadow, backdrop-filter;
+  transition-duration: 500ms;
+  transition-timing-function: cubic-bezier(0.4, 0.0, 0.2, 1);
+  will-change: transform, box-shadow, backdrop-filter;
+}
+
+.stat-card-gradient::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(135deg, #06b6d4, #10b981);
+  transition: opacity 500ms cubic-bezier(0.4, 0.0, 0.2, 1);
+}
+
+/* Disable float animation on hover to allow smooth transition */
+.stat-card-gradient:hover {
+  /* Completely disable the float animation so transition can take over */
+  animation: none !important;
+  
+  /* Override all other hover states with a single, smooth transform */
+  transform: translateY(-6px) scale(1.0) !important;
+  box-shadow: var(--shadow-lg) !important;
+  /* Ensure backdrop-filter is also smooth if .card-glass applies it */
+  backdrop-filter: blur(10px) saturate(180%) !important;
+}
+
+/* Workflow-themed cards */
+.card-workflow {
+  position: relative;
+  overflow: hidden;
+  border-left: 4px solid transparent;
+  /* Only transition properties that change on hover */
+  transition: border-left-width var(--duration-base) var(--ease-spring),
+              transform var(--duration-base) var(--ease-spring);
+}
+
+.card-workflow[data-workflow="bug-investigation"] {
+  border-left-color: #ef4444;
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.03), transparent);
+}
+
+.card-workflow[data-workflow="mr-review"] {
+  border-left-color: #3b82f6;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.03), transparent);
+}
+
+.card-workflow[data-workflow="documentation"] {
+  border-left-color: #8b5cf6;
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.03), transparent);
+}
+
+.card-workflow[data-workflow="performance"] {
+  border-left-color: #f97316;
+  background: linear-gradient(135deg, rgba(249, 115, 22, 0.03), transparent);
+}
+
+.card-workflow:hover {
+  border-left-width: 6px;
+  transform: translateX(4px);
+}
+
+/* Interactive Card with 3D tilt effect (optional) */
+.card-3d {
+  transform-style: preserve-3d;
+  transition: transform var(--duration-base) var(--ease-spring);
+}
+
+.card-3d:hover {
+  transform: perspective(1000px) rotateX(2deg) rotateY(-2deg) translateZ(10px);
+}
+
+/* Hero Section with Gradient Mesh Background */
+.hero-gradient-mesh {
+  position: relative;
+  background: var(--gradient-mesh-vibrant);
+  animation: gradientShift var(--duration-ambient) ease-in-out infinite;
+  background-size: 200% 200%;
+}
+
+/* Progress Bar with Gradient */
+.progress-bar-gradient {
+  background: var(--gradient-ocean);
+  background-size: 200% 100%;
+  animation: gradientShift 2s linear infinite;
+}
+
+/* Badge with Glow Effect */
+.badge-glow {
+  position: relative;
+  animation: breathe 3s ease-in-out infinite;
+}
+
+.badge-glow::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  background: currentColor;
+  opacity: 0.3;
+  filter: blur(8px);
+  z-index: -1;
+}
+
+/* Modal with Spring Animation */
+.modal-dialog-spring {
+  animation: springIn var(--duration-slower) var(--ease-spring);
+}
+
+/* Button with Celebration Confetti on Click */
+.btn-celebrate {
+  position: relative;
+  overflow: visible;
+}
+
+.btn-celebrate:active::after {
+  content: '🎉';
+  position: absolute;
+  top: -20px;
+  left: 50%;
+  transform: translateX(-50%);
+  animation: elasticPop 0.6s var(--ease-elastic);
+  pointer-events: none;
+}
+
+/* Code Block with Copy Animation */
+.code-block {
+  position: relative;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.code-block:hover {
+  border-color: var(--primary-500);
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
+  transition: all var(--duration-fast) var(--ease-spring);
+}
+
+/* Tooltip */
+.tooltip {
+  position: relative;
+  display: inline-block;
+}
+
+.tooltip-text {
+  visibility: hidden;
+  background: var(--neutral-900);
+  color: var(--text-inverse);
+  text-align: center;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  position: absolute;
+  z-index: 1;
+  bottom: 125%;
+  left: 50%;
+  transform: translateX(-50%);
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.tooltip:hover .tooltip-text {
+  visibility: visible;
+  opacity: 1;
+  animation: springIn var(--duration-base) var(--ease-spring);
+}
+
+/* Glassmorphism Button */
+.btn-glass {
+  background: var(--glass-bg-subtle);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--glass-border-subtle);
+  color: var(--text-primary);
+}
+
+.btn-glass:hover {
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px);
+  box-shadow: var(--shadow-lg);
+  border-color: var(--glass-border);
+}
+
+/* Stat Card with Colorful Icon */
+.stat-card-icon {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.stat-card-icon .stat-icon {
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.1), rgba(139, 92, 246, 0.1));
+  color: var(--primary-500);
+}
+
+.stat-card-icon:hover .stat-icon {
+  animation: elasticPop var(--duration-slower) var(--ease-elastic);
+}
+

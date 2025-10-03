@@ -1,0 +1,350 @@
+/* Workrail Dashboard - Global Styles */
+
+:root {
+    --primary-color: #2196F3;
+    --success-color: #4CAF50;
+    --warning-color: #FF9800;
+    --danger-color: #F44336;
+    --info-color: #00BCD4;
+    --bg-color: #f5f7fa;
+    --card-bg: #ffffff;
+    --text-primary: #2c3e50;
+    --text-secondary: #7f8c8d;
+    --border-color: #e0e6ed;
+    --shadow: 0 2px 8px rgba(0,0,0,0.1);
+    --shadow-hover: 0 4px 16px rgba(0,0,0,0.15);
+    --radius: 8px;
+    --spacing: 16px;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    background: var(--bg-color);
+    color: var(--text-primary);
+    line-height: 1.6;
+}
+
+.dashboard-container {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Header */
+.dashboard-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 24px 32px;
+    box-shadow: var(--shadow);
+}
+
+.header-content {
+    max-width: 1800px;
+    margin: 0 auto;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.dashboard-header h1 {
+    font-size: 28px;
+    font-weight: 600;
+    margin: 0;
+}
+
+.header-info {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+}
+
+.session-badge {
+    background: rgba(255,255,255,0.2);
+    padding: 6px 12px;
+    border-radius: var(--radius);
+    font-weight: 500;
+    font-size: 14px;
+}
+
+.update-time {
+    font-size: 13px;
+    opacity: 0.9;
+}
+
+/* Status Bar */
+.status-bar {
+    background: var(--card-bg);
+    padding: 20px 32px;
+    box-shadow: var(--shadow);
+    display: flex;
+    justify-content: space-around;
+    gap: 24px;
+}
+
+.status-item {
+    text-align: center;
+    flex: 1;
+}
+
+.status-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+}
+
+.status-value {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+/* Badges */
+.badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.badge-in_progress {
+    background: #e3f2fd;
+    color: #1976d2;
+}
+
+.badge-complete {
+    background: #e8f5e9;
+    color: #388e3c;
+}
+
+.badge-pending {
+    background: #fff3e0;
+    color: #f57c00;
+}
+
+.badge-confirmed {
+    background: #e8f5e9;
+    color: #2e7d32;
+}
+
+.badge-rejected {
+    background: #ffebee;
+    color: #c62828;
+}
+
+.badge-partial {
+    background: #fff9c4;
+    color: #f57f17;
+}
+
+.badge-high {
+    background: #ffebee;
+    color: #c62828;
+}
+
+.badge-medium {
+    background: #fff3e0;
+    color: #e65100;
+}
+
+.badge-low {
+    background: #e8f5e9;
+    color: #2e7d32;
+}
+
+/* Confidence Levels */
+.confidence-low {
+    color: var(--danger-color);
+}
+
+.confidence-medium {
+    color: var(--warning-color);
+}
+
+.confidence-high {
+    color: var(--success-color);
+}
+
+/* Evidence Strength */
+.evidence-strength {
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    margin-right: 6px;
+}
+
+.badge-high.evidence-strength {
+    background: #c8e6c9;
+    color: #2e7d32;
+}
+
+.badge-medium.evidence-strength {
+    background: #ffe0b2;
+    color: #e65100;
+}
+
+.badge-low.evidence-strength {
+    background: #ffccbc;
+    color: #d84315;
+}
+
+/* Content Grid */
+.content-grid {
+    max-width: 1800px;
+    margin: 0 auto;
+    padding: 24px 32px;
+    display: grid;
+    grid-template-columns: 320px 1fr 400px;
+    gap: 24px;
+    width: 100%;
+}
+
+.column-left,
+.column-center,
+.column-right {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+/* Cards */
+.card {
+    background: var(--card-bg);
+    border-radius: var(--radius);
+    padding: 24px;
+    box-shadow: var(--shadow);
+    transition: box-shadow 0.3s ease;
+}
+
+.card:hover {
+    box-shadow: var(--shadow-hover);
+}
+
+.card h2 {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Empty State */
+.empty-state {
+    color: var(--text-secondary);
+    font-style: italic;
+    text-align: center;
+    padding: 20px;
+}
+
+/* Scrollable Content */
+.scrollable {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.scrollable::-webkit-scrollbar {
+    width: 6px;
+}
+
+.scrollable::-webkit-scrollbar-track {
+    background: var(--bg-color);
+    border-radius: 3px;
+}
+
+.scrollable::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 3px;
+}
+
+.scrollable::-webkit-scrollbar-thumb:hover {
+    background: var(--text-secondary);
+}
+
+/* Responsive */
+@media (max-width: 1400px) {
+    .content-grid {
+        grid-template-columns: 280px 1fr 360px;
+    }
+}
+
+@media (max-width: 1200px) {
+    .content-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .column-left,
+    .column-center,
+    .column-right {
+        order: 0;
+    }
+}
+
+@media (max-width: 768px) {
+    .dashboard-header {
+        padding: 16px;
+    }
+    
+    .header-content {
+        flex-direction: column;
+        gap: 12px;
+    }
+    
+    .status-bar {
+        flex-direction: column;
+        padding: 16px;
+    }
+    
+    .content-grid {
+        padding: 16px;
+        gap: 16px;
+    }
+    
+    .card {
+        padding: 16px;
+    }
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Note: Removed global .card animation as it was causing unwanted retriggering
+   when card classes changed. Workflow-specific dashboards handle their own
+   entrance animations (e.g. .new-section in bug investigation dashboard) */
+
+/* Loading Spinner */
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.loading {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border: 3px solid rgba(0,0,0,0.1);
+    border-top-color: var(--primary-color);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+

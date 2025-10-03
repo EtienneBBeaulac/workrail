@@ -1,0 +1,2661 @@
+/**
+ * Workrail Background Effects v2.0
+ * Hybrid: Orbs + Workflow-Themed Elements + Interactive Disturbance
+ * 
+ * Layer System:
+ * 1. Base gradient mesh (from design-system.css)
+ * 2. Floating colored orbs (ambient depth)
+ * 3. Workflow rails (animated curved paths)
+ * 4. Pulsing nodes (milestone markers)
+ * 5. Particle trails (guidance)
+ * 6. Optional grid overlay
+ * 7. Optional grain texture
+ * 
+ * Features:
+ * - Organic curved paths (no perfect horizontal/vertical/diagonal lines)
+ * - Mouse-driven disturbance effects (requires background-interaction.js)
+ * - Layered z-index system (always behind content)
+ * - Performance optimizations for mobile and reduced motion
+ * - Customizable intensity modes
+ */
+
+/* ============================================
+   FLOATING ORBS - Base Layer
+   ============================================ */
+
+/* Container for orbs (fixed positioning) */
+.bg-orbs {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: -3;
+}
+
+/* Individual orb styling */
+.bg-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(70px);
+  opacity: 0.25;
+  will-change: transform;
+}
+
+/* Orb 1: Cyan - Top Left */
+.bg-orb-1 {
+  width: 500px;
+  height: 500px;
+  top: 10%;
+  left: 10%;
+  background: radial-gradient(circle, rgba(6, 182, 212, 0.8), rgba(6, 182, 212, 0.4) 40%, transparent 70%);
+  animation: floatOrb1 20s ease-in-out infinite;
+}
+
+/* Orb 2: Purple - Top Right */
+.bg-orb-2 {
+  width: 600px;
+  height: 600px;
+  top: 5%;
+  right: 5%;
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.8), rgba(139, 92, 246, 0.4) 40%, transparent 70%);
+  animation: floatOrb2 25s ease-in-out infinite;
+}
+
+/* Orb 3: Pink - Bottom Left */
+.bg-orb-3 {
+  width: 550px;
+  height: 550px;
+  bottom: 10%;
+  left: 15%;
+  background: radial-gradient(circle, rgba(236, 72, 153, 0.8), rgba(236, 72, 153, 0.4) 40%, transparent 70%);
+  animation: floatOrb3 22s ease-in-out infinite;
+}
+
+/* Orb 4: Orange - Bottom Right */
+.bg-orb-4 {
+  width: 450px;
+  height: 450px;
+  bottom: 15%;
+  right: 10%;
+  background: radial-gradient(circle, rgba(249, 115, 22, 0.8), rgba(249, 115, 22, 0.4) 40%, transparent 70%);
+  animation: floatOrb4 18s ease-in-out infinite;
+}
+
+/* Orb 5: Green - Center (subtle) */
+.bg-orb-5 {
+  width: 400px;
+  height: 400px;
+  top: 45%;
+  left: 45%;
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.7), rgba(16, 185, 129, 0.35) 40%, transparent 70%);
+  animation: floatOrb5 28s ease-in-out infinite;
+}
+
+/* ============================================
+   ORB ANIMATIONS - Organic Movement
+   ============================================ */
+
+@keyframes floatOrb1 {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  25% {
+    transform: translate(50px, -80px) scale(1.1);
+  }
+  50% {
+    transform: translate(-30px, -50px) scale(0.95);
+  }
+  75% {
+    transform: translate(80px, 30px) scale(1.05);
+  }
+}
+
+@keyframes floatOrb2 {
+  0%, 100% {
+    transform: translate(0, 0) scale(1) rotate(0deg);
+  }
+  30% {
+    transform: translate(-60px, 100px) scale(1.15) rotate(45deg);
+  }
+  60% {
+    transform: translate(40px, 50px) scale(0.9) rotate(90deg);
+  }
+  90% {
+    transform: translate(-40px, -30px) scale(1.05) rotate(135deg);
+  }
+}
+
+@keyframes floatOrb3 {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  20% {
+    transform: translate(-50px, 60px) scale(1.1);
+  }
+  40% {
+    transform: translate(70px, -40px) scale(0.9);
+  }
+  60% {
+    transform: translate(-80px, -70px) scale(1.15);
+  }
+  80% {
+    transform: translate(30px, 50px) scale(0.95);
+  }
+}
+
+@keyframes floatOrb4 {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  33% {
+    transform: translate(60px, -90px) scale(1.2);
+  }
+  66% {
+    transform: translate(-70px, 40px) scale(0.85);
+  }
+}
+
+@keyframes floatOrb5 {
+  0%, 100% {
+    transform: translate(0, 0) scale(1) rotate(0deg);
+  }
+  25% {
+    transform: translate(-100px, 80px) scale(1.3) rotate(90deg);
+  }
+  50% {
+    transform: translate(100px, -80px) scale(0.8) rotate(180deg);
+  }
+  75% {
+    transform: translate(-50px, 100px) scale(1.1) rotate(270deg);
+  }
+}
+
+/* ============================================
+   WORKFLOW RAILS - Animated Connection Paths
+   ============================================ */
+
+/* Rails container */
+.bg-rails {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: -2;
+  overflow: hidden;
+}
+
+/* Individual rail paths */
+.rail-path {
+  position: absolute;
+  opacity: 0.15;
+}
+
+/* Curved rail 1 - Gentle wave across top */
+.rail-h1 {
+  top: 25%;
+  left: -20%;
+  width: 140%;
+  height: 100px;
+  animation: railFlowH1 40s ease-in-out infinite;
+  transform: rotate(3deg);
+  transition: filter 1s var(--ease-out), opacity 0.8s var(--ease-out), transform 0.3s var(--ease-out);
+  overflow: visible;
+}
+
+.rail-h1 svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* Curved rail 2 - Gentle wave across bottom */
+.rail-h2 {
+  bottom: 30%;
+  left: -20%;
+  width: 140%;
+  height: 100px;
+  animation: railFlowH2 35s ease-in-out infinite;
+  transform: rotate(-2deg);
+  transition: filter 1s var(--ease-out), opacity 0.8s var(--ease-out), transform 0.3s var(--ease-out);
+  overflow: visible;
+}
+
+.rail-h2 svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* Curved diagonal 1 - Flowing from top-left area */
+.rail-d1 {
+  top: 5%;
+  left: -15%;
+  width: 130%;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(99, 102, 241, 0.5) 20%,
+    rgba(6, 182, 212, 0.5) 80%,
+    transparent 100%
+  );
+  transform: rotate(23deg);
+  transform-origin: top left;
+  animation: railFlowD1 50s ease-in-out infinite;
+  transition: filter 1s var(--ease-out), opacity 0.8s var(--ease-out), transform 0.3s var(--ease-out);
+}
+
+/* Curved diagonal 2 - Flowing from top-right area */
+.rail-d2 {
+  top: 15%;
+  right: -15%;
+  width: 130%;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(168, 85, 247, 0.5) 20%,
+    rgba(249, 115, 22, 0.5) 80%,
+    transparent 100%
+  );
+  transform: rotate(-27deg);
+  transform-origin: top right;
+  animation: railFlowD2 45s ease-in-out infinite reverse;
+  transition: filter 1s var(--ease-out), opacity 0.8s var(--ease-out), transform 0.3s var(--ease-out);
+}
+
+/* Rail flow animations - organic movement */
+@keyframes railFlowH1 {
+  0% {
+    transform: rotate(3deg) translateX(0) translateY(0);
+    opacity: 0.15;
+  }
+  25% {
+    transform: rotate(2deg) translateX(5%) translateY(-2px);
+    opacity: 0.2;
+  }
+  50% {
+    transform: rotate(4deg) translateX(10%) translateY(-4px);
+    opacity: 0.25;
+  }
+  75% {
+    transform: rotate(2.5deg) translateX(5%) translateY(-2px);
+    opacity: 0.2;
+  }
+  100% {
+    transform: rotate(3deg) translateX(0) translateY(0);
+    opacity: 0.15;
+  }
+}
+
+@keyframes railFlowH2 {
+  0% {
+    transform: rotate(-2deg) translateX(0) translateY(0);
+    opacity: 0.15;
+  }
+  25% {
+    transform: rotate(-3deg) translateX(-5%) translateY(3px);
+    opacity: 0.18;
+  }
+  50% {
+    transform: rotate(-1deg) translateX(-10%) translateY(5px);
+    opacity: 0.2;
+  }
+  75% {
+    transform: rotate(-2.5deg) translateX(-5%) translateY(3px);
+    opacity: 0.18;
+  }
+  100% {
+    transform: rotate(-2deg) translateX(0) translateY(0);
+    opacity: 0.15;
+  }
+}
+
+@keyframes railFlowD1 {
+  0% {
+    transform: rotate(23deg);
+    opacity: 0.1;
+  }
+  25% {
+    transform: rotate(24deg);
+    opacity: 0.15;
+  }
+  50% {
+    transform: rotate(22deg);
+    opacity: 0.2;
+  }
+  75% {
+    transform: rotate(24deg);
+    opacity: 0.15;
+  }
+  100% {
+    transform: rotate(23deg);
+    opacity: 0.1;
+  }
+}
+
+@keyframes railFlowD2 {
+  0% {
+    transform: rotate(-27deg);
+    opacity: 0.1;
+  }
+  25% {
+    transform: rotate(-26deg);
+    opacity: 0.15;
+  }
+  50% {
+    transform: rotate(-28deg);
+    opacity: 0.2;
+  }
+  75% {
+    transform: rotate(-26.5deg);
+    opacity: 0.15;
+  }
+  100% {
+    transform: rotate(-27deg);
+    opacity: 0.1;
+  }
+}
+
+/* ============================================
+   PULSING NODES - Milestone Markers
+   ============================================ */
+
+/* Nodes container */
+.bg-nodes {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* Individual node */
+.workflow-node {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(139, 92, 246, 0.6);
+  box-shadow: 0 0 20px rgba(139, 92, 246, 0.4);
+  transition: 
+    transform 1.2s var(--ease-bounce), 
+    opacity 0.8s var(--ease-out),
+    filter 1s var(--ease-out),
+    box-shadow 0.8s var(--ease-out);
+  will-change: transform, opacity, filter;
+}
+
+/* Node 1 - Upper left area */
+.node-1 {
+  top: 22%;
+  left: 18%;
+  animation: nodePulse1 4s ease-in-out infinite;
+}
+
+/* Node 2 - Upper right area */
+.node-2 {
+  top: 28%;
+  right: 23%;
+  background: rgba(59, 130, 246, 0.6);
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.4);
+  animation: nodePulse2 5s ease-in-out infinite;
+}
+
+/* Node 3 - Center area (slightly offset) */
+.node-3 {
+  top: 47%;
+  left: 53%;
+  background: rgba(16, 185, 129, 0.6);
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.4);
+  animation: nodePulse3 6s ease-in-out infinite;
+}
+
+/* Node 4 - Lower left area */
+.node-4 {
+  bottom: 32%;
+  left: 27%;
+  background: rgba(236, 72, 153, 0.6);
+  box-shadow: 0 0 20px rgba(236, 72, 153, 0.4);
+  animation: nodePulse4 4.5s ease-in-out infinite;
+}
+
+/* Node 5 - Lower right area */
+.node-5 {
+  bottom: 27%;
+  right: 22%;
+  background: rgba(249, 115, 22, 0.6);
+  box-shadow: 0 0 20px rgba(249, 115, 22, 0.4);
+  animation: nodePulse5 5.5s ease-in-out infinite;
+}
+
+/* Node pulse animations */
+@keyframes nodePulse1 {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.4;
+  }
+  50% {
+    transform: scale(1.8);
+    opacity: 0.8;
+  }
+}
+
+@keyframes nodePulse2 {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.4;
+  }
+  50% {
+    transform: scale(1.6);
+    opacity: 0.7;
+  }
+}
+
+@keyframes nodePulse3 {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.3;
+  }
+  50% {
+    transform: scale(2);
+    opacity: 0.9;
+  }
+}
+
+@keyframes nodePulse4 {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.4;
+  }
+  50% {
+    transform: scale(1.7);
+    opacity: 0.75;
+  }
+}
+
+@keyframes nodePulse5 {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.4;
+  }
+  50% {
+    transform: scale(1.5);
+    opacity: 0.7;
+  }
+}
+
+/* ============================================
+   PARTICLE TRAILS - Guidance Elements
+   ============================================ */
+
+/* Particles container */
+.bg-particles {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: -2;
+  overflow: hidden;
+}
+
+/* Individual particle */
+.particle {
+  position: absolute;
+  width: var(--particle-size, 3px);
+  height: var(--particle-size, 3px);
+  border-radius: 50%;
+  background: var(--particle-color);
+  box-shadow: 0 0 10px var(--particle-glow);
+  opacity: 0;
+  /* Dynamic positioning and animation will be set inline */
+}
+
+/* Particle 1 - Travels along top rail */
+.particle-1 {
+  top: 25%;
+  left: -5%;
+  animation: particleFlow1 20s linear infinite;
+}
+
+/* Particle 2 - Travels along bottom rail */
+.particle-2 {
+  bottom: 30%;
+  left: -5%;
+  background: rgba(236, 72, 153, 0.6);
+  box-shadow: 0 0 10px rgba(236, 72, 153, 0.4);
+  animation: particleFlow2 18s linear infinite;
+}
+
+/* Particle 3 - Travels diagonally */
+.particle-3 {
+  top: 10%;
+  left: -5%;
+  background: rgba(59, 130, 246, 0.6);
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.4);
+  animation: particleFlow3 25s linear infinite;
+}
+
+/* Particle 4 - Travels bottom to top */
+.particle-4 {
+  bottom: -5%;
+  left: 30%;
+  background: rgba(16, 185, 129, 0.6);
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+  animation: particleFlow4 22s linear infinite;
+}
+
+/* Particle 5 - Travels right to left */
+.particle-5 {
+  top: 60%;
+  right: -5%;
+  background: rgba(249, 115, 22, 0.6);
+  box-shadow: 0 0 10px rgba(249, 115, 22, 0.4);
+  animation: particleFlow5 19s linear infinite;
+}
+
+/* Particle flow animations - curved paths */
+@keyframes particleFlow1 {
+  0% {
+    left: -5%;
+    top: 25%;
+    opacity: 0;
+  }
+  10% {
+    top: 22%;
+    opacity: 0.8;
+  }
+  30% {
+    top: 28%;
+  }
+  60% {
+    top: 24%;
+  }
+  90% {
+    top: 27%;
+    opacity: 0.8;
+  }
+  100% {
+    left: 105%;
+    top: 25%;
+    opacity: 0;
+  }
+}
+
+@keyframes particleFlow2 {
+  0% {
+    left: 105%;
+    bottom: 30%;
+    opacity: 0;
+  }
+  10% {
+    bottom: 33%;
+    opacity: 0.8;
+  }
+  30% {
+    bottom: 28%;
+  }
+  60% {
+    bottom: 32%;
+  }
+  90% {
+    bottom: 29%;
+    opacity: 0.8;
+  }
+  100% {
+    left: -5%;
+    bottom: 30%;
+    opacity: 0;
+  }
+}
+
+@keyframes particleFlow3 {
+  0% {
+    left: -5%;
+    top: 10%;
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.8;
+  }
+  25% {
+    left: 20%;
+    top: 35%;
+  }
+  50% {
+    left: 50%;
+    top: 55%;
+  }
+  75% {
+    left: 80%;
+    top: 70%;
+  }
+  90% {
+    opacity: 0.8;
+  }
+  100% {
+    left: 105%;
+    top: 85%;
+    opacity: 0;
+  }
+}
+
+@keyframes particleFlow4 {
+  0% {
+    left: 30%;
+    bottom: -5%;
+    opacity: 0;
+  }
+  10% {
+    left: 28%;
+    opacity: 0.8;
+  }
+  30% {
+    left: 33%;
+  }
+  60% {
+    left: 29%;
+  }
+  90% {
+    left: 31%;
+    opacity: 0.8;
+  }
+  100% {
+    left: 30%;
+    bottom: 105%;
+    opacity: 0;
+  }
+}
+
+@keyframes particleFlow5 {
+  0% {
+    right: -5%;
+    top: 60%;
+    opacity: 0;
+  }
+  10% {
+    top: 58%;
+    opacity: 0.8;
+  }
+  25% {
+    right: 20%;
+    top: 55%;
+  }
+  50% {
+    right: 50%;
+    top: 63%;
+  }
+  75% {
+    right: 80%;
+    top: 58%;
+  }
+  90% {
+    top: 61%;
+    opacity: 0.8;
+  }
+  100% {
+    right: 105%;
+    top: 60%;
+    opacity: 0;
+  }
+}
+
+/* ============================================
+   GRID OVERLAY - Middle Layer (Optional)
+   ============================================ */
+
+.bg-grid {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: 
+    linear-gradient(rgba(139, 92, 246, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(139, 92, 246, 0.03) 1px, transparent 1px);
+  background-size: 50px 50px;
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0.5;
+}
+
+/* Animated grid that drifts slowly */
+.bg-grid-animated {
+  animation: gridDrift 120s linear infinite;
+}
+
+@keyframes gridDrift {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(50px);
+  }
+}
+
+/* ============================================
+   GRAIN TEXTURE - Top Layer (Optional)
+   ============================================ */
+
+.bg-grain {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: -1;
+  opacity: 1;
+  /* Theme-aware film grain texture (static - no animation to avoid artifacts) */
+  background-image: 
+    repeating-linear-gradient(0deg, 
+      transparent 0px, 
+      var(--grain-color) 1px, 
+      transparent 2px
+    ),
+    repeating-linear-gradient(90deg, 
+      transparent 0px, 
+      var(--grain-color) 1px, 
+      transparent 2px
+    ),
+    repeating-linear-gradient(45deg, 
+      transparent 0px, 
+      var(--grain-color-secondary) 1px, 
+      transparent 2px
+    );
+  background-size: 2px 2px, 2px 2px, 3px 3px;
+  mix-blend-mode: multiply;
+}
+
+@keyframes grainMove {
+  0%, 100% { transform: translate(0, 0); }
+  10% { transform: translate(-1px, -2px); }
+  20% { transform: translate(-3px, 1px); }
+  30% { transform: translate(1px, -3px); }
+  40% { transform: translate(-1px, 3px); }
+  50% { transform: translate(-2px, 1px); }
+  60% { transform: translate(2px, 0px); }
+  70% { transform: translate(0px, 2px); }
+  80% { transform: translate(1px, 3px); }
+  90% { transform: translate(-2px, 1px); }
+}
+
+/* ============================================
+   PERFORMANCE OPTIMIZATIONS
+   ============================================ */
+
+/* Reduce motion for accessibility */
+@media (prefers-reduced-motion: reduce) {
+  .bg-orb,
+  .bg-grid-animated,
+  .bg-grain,
+  .rail-path,
+  .workflow-node,
+  .particle {
+    animation: none !important;
+  }
+  
+  .bg-orb {
+    opacity: 0.05;
+  }
+  
+  .rail-path,
+  .workflow-node,
+  .particle {
+    display: none;
+  }
+}
+
+/* Lower intensity on mobile for performance */
+@media (max-width: 768px) {
+  .bg-orb {
+    filter: blur(60px);
+    opacity: 0.08;
+  }
+  
+  .bg-orb-5 {
+    display: none; /* Hide 5th orb on mobile */
+  }
+  
+  .bg-grain {
+    display: none; /* Hide grain on mobile */
+  }
+  
+  /* Hide workflow elements on mobile for performance */
+  .bg-rails,
+  .bg-nodes,
+  .bg-particles {
+    display: none;
+  }
+}
+
+/* ============================================
+   INTENSITY MODES (Optional)
+   ============================================ */
+
+/* Subtle mode - very minimal */
+.bg-orbs-subtle .bg-orb {
+  opacity: 0.06;
+  filter: blur(100px);
+}
+
+/* Normal mode - default (already set above) */
+
+/* Vibrant mode - more prominent */
+.bg-orbs-vibrant .bg-orb {
+  opacity: 0.18;
+  filter: blur(70px);
+}
+
+/* ============================================
+   CURSOR INTERACTION (Advanced - Optional)
+   ============================================ */
+
+/* Orbs subtly move away from cursor when .bg-orbs-interactive is set */
+/* Requires JavaScript to track cursor position */
+.bg-orbs-interactive .bg-orb {
+  transition: transform 0.6s var(--ease-out);
+}
+
+/* Rails disturbance effect when cursor is nearby */
+.rail-path {
+  will-change: filter, opacity;
+}
+
+/* Different disturbance effects for each rail - glow + shimmer */
+/* Disturbed states removed - proximity detection disabled */
+
+/* Shimmer animations - subtle brightness/opacity/blur pulse for each rail */
+@keyframes railShimmer1 {
+  0%, 100% {
+    filter: brightness(1.6) drop-shadow(0 0 20px rgba(139, 92, 246, 1)) hue-rotate(25deg) blur(2px);
+    opacity: 0.7;
+  }
+  50% {
+    filter: brightness(2) drop-shadow(0 0 35px rgba(139, 92, 246, 1)) hue-rotate(30deg) blur(4px);
+    opacity: 0.85;
+  }
+}
+
+@keyframes railShimmer2 {
+  0%, 100% {
+    filter: brightness(1.6) drop-shadow(0 0 20px rgba(236, 72, 153, 1)) hue-rotate(-25deg) blur(2px);
+    opacity: 0.7;
+  }
+  50% {
+    filter: brightness(2) drop-shadow(0 0 35px rgba(236, 72, 153, 1)) hue-rotate(-30deg) blur(4px);
+    opacity: 0.85;
+  }
+}
+
+@keyframes railShimmer3 {
+  0%, 100% {
+    filter: brightness(1.7) drop-shadow(0 0 25px rgba(99, 102, 241, 1)) blur(3px);
+    opacity: 0.65;
+  }
+  50% {
+    filter: brightness(2.1) drop-shadow(0 0 40px rgba(99, 102, 241, 1)) blur(5px);
+    opacity: 0.8;
+  }
+}
+
+@keyframes railShimmer4 {
+  0%, 100% {
+    filter: brightness(1.7) drop-shadow(0 0 25px rgba(168, 85, 247, 1)) blur(3px);
+    opacity: 0.65;
+  }
+  50% {
+    filter: brightness(2.1) drop-shadow(0 0 40px rgba(168, 85, 247, 1)) blur(5px);
+    opacity: 0.8;
+  }
+}
+
+/* Wiggle animations for rails (kept for reference, not used anymore) */
+@keyframes railWiggle1 {
+  0%, 100% { 
+    transform: rotate(3deg) translateY(0) scaleY(1) scaleX(1);
+  }
+  25% { 
+    transform: rotate(6deg) translateY(-15px) scaleY(1.15) scaleX(0.95);
+  }
+  50% { 
+    transform: rotate(0deg) translateY(-20px) scaleY(0.9) scaleX(1.1);
+  }
+  75% { 
+    transform: rotate(5deg) translateY(-10px) scaleY(1.1) scaleX(0.98);
+  }
+}
+
+@keyframes railWiggle2 {
+  0%, 100% { 
+    transform: rotate(-2deg) translateY(0) scaleY(1) scaleX(1);
+  }
+  25% { 
+    transform: rotate(-5deg) translateY(18px) scaleY(1.12) scaleX(0.92);
+  }
+  50% { 
+    transform: rotate(1deg) translateY(25px) scaleY(0.88) scaleX(1.12);
+  }
+  75% { 
+    transform: rotate(-4deg) translateY(12px) scaleY(1.08) scaleX(0.96);
+  }
+}
+
+@keyframes railWiggle3 {
+  0%, 100% { 
+    transform: rotate(23deg) scale(1);
+  }
+  25% {
+    transform: rotate(28deg) scale(1.15) translateX(-10px);
+  }
+  50% { 
+    transform: rotate(18deg) scale(0.9) translateX(10px);
+  }
+  75% {
+    transform: rotate(26deg) scale(1.1) translateX(-5px);
+  }
+}
+
+@keyframes railWiggle4 {
+  0%, 100% { 
+    transform: rotate(-27deg) scale(1);
+  }
+  25% {
+    transform: rotate(-32deg) scale(1.12) translateX(10px);
+  }
+  50% { 
+    transform: rotate(-22deg) scale(0.92) translateX(-10px);
+  }
+  75% {
+    transform: rotate(-29deg) scale(1.08) translateX(5px);
+  }
+}
+
+/* Nodes react to cursor proximity - override the pulse animation */
+.workflow-node.disturbed {
+  animation: none !important; /* Stop the pulse animation - this can have !important */
+  transform: scale(4); /* NO !important - allows transition to work */
+  opacity: 1;
+  filter: brightness(1.8) drop-shadow(0 0 50px currentColor) saturate(1.5);
+  box-shadow: 0 0 60px currentColor;
+}
+
+/* Particles react when cursor is near */
+.particle {
+  transition: 
+    transform 0.8s var(--ease-bounce), 
+    opacity 0.6s var(--ease-out),
+    filter 0.7s var(--ease-out);
+  will-change: transform, opacity, filter;
+}
+
+.particle.disturbed {
+  transform: scale(2.5);
+  opacity: 1;
+  filter: brightness(1.5) drop-shadow(0 0 20px currentColor);
+}
+
+/* Explosion particles - special styling */
+.particle.explosion-particle {
+  z-index: 1000;
+  filter: brightness(1.2) drop-shadow(0 0 8px var(--particle-color));
+  animation: explode-pulse 0.8s ease-out;
+}
+
+@keyframes explode-pulse {
+  0% {
+    filter: brightness(2) drop-shadow(0 0 20px var(--particle-color));
+  }
+  50% {
+    filter: brightness(1.5) drop-shadow(0 0 12px var(--particle-color));
+  }
+  100% {
+    filter: brightness(0.8) drop-shadow(0 0 4px var(--particle-color));
+  }
+}
+
+/* ============================================
+   ANIMATED GRAIN TEXTURE
+   ============================================ */
+
+/* bg-grain styles moved to top of file (avoiding duplicate) */
+
+/* ============================================
+   TIME-OF-DAY THEMES (Advanced - Optional)
+   ============================================ */
+
+/* Morning theme - warmer tones */
+[data-time-theme="morning"] .bg-orb-1 {
+  background: radial-gradient(circle, rgba(249, 115, 22, 0.4), transparent 70%);
+}
+
+[data-time-theme="morning"] .bg-orb-2 {
+  background: radial-gradient(circle, rgba(234, 179, 8, 0.4), transparent 70%);
+}
+
+/* Evening theme - cooler tones */
+[data-time-theme="evening"] .bg-orb-3 {
+  background: radial-gradient(circle, rgba(99, 102, 241, 0.4), transparent 70%);
+}
+
+[data-time-theme="evening"] .bg-orb-4 {
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.4), transparent 70%);
+}
+
+/* ============================================
+   DARK MODE ORBS - Enhanced Quality
+   ============================================ */
+
+/* 
+ * Dark mode: Use same vibrant colors as light mode, but much more subtle
+ * Heavy blur hides banding, low opacity keeps it refined
+ */
+[data-theme="dark"] .bg-orb-1 {
+  background: radial-gradient(
+    circle,
+    rgba(6, 182, 212, 0.25) 0%,
+    rgba(6, 182, 212, 0.18) 25%,
+    rgba(6, 182, 212, 0.12) 50%,
+    rgba(6, 182, 212, 0.06) 75%,
+    transparent 100%
+  ) !important;
+  filter: blur(100px) !important;
+  opacity: 0.2 !important;
+}
+
+[data-theme="dark"] .bg-orb-2 {
+  background: radial-gradient(
+    circle,
+    rgba(139, 92, 246, 0.28) 0%,
+    rgba(139, 92, 246, 0.2) 25%,
+    rgba(139, 92, 246, 0.13) 50%,
+    rgba(139, 92, 246, 0.07) 75%,
+    transparent 100%
+  ) !important;
+  filter: blur(100px) !important;
+  opacity: 0.2 !important;
+}
+
+[data-theme="dark"] .bg-orb-3 {
+  background: radial-gradient(
+    circle,
+    rgba(236, 72, 153, 0.25) 0%,
+    rgba(236, 72, 153, 0.18) 25%,
+    rgba(236, 72, 153, 0.12) 50%,
+    rgba(236, 72, 153, 0.06) 75%,
+    transparent 100%
+  ) !important;
+  filter: blur(100px) !important;
+  opacity: 0.2 !important;
+}
+
+[data-theme="dark"] .bg-orb-4 {
+  background: radial-gradient(
+    circle,
+    rgba(249, 115, 22, 0.23) 0%,
+    rgba(249, 115, 22, 0.17) 25%,
+    rgba(249, 115, 22, 0.11) 50%,
+    rgba(249, 115, 22, 0.05) 75%,
+    transparent 100%
+  ) !important;
+  filter: blur(100px) !important;
+  opacity: 0.2 !important;
+}
+
+[data-theme="dark"] .bg-orb-5 {
+  background: radial-gradient(
+    circle,
+    rgba(16, 185, 129, 0.22) 0%,
+    rgba(16, 185, 129, 0.16) 25%,
+    rgba(16, 185, 129, 0.1) 50%,
+    rgba(16, 185, 129, 0.05) 75%,
+    transparent 100%
+  ) !important;
+  filter: blur(100px) !important;
+  opacity: 0.2 !important;
+}
+
+/* ============================================
+   SCROLL PARALLAX (Advanced - Optional)
+   ============================================ */
+
+.bg-orbs-parallax .bg-orb-1,
+.bg-orbs-parallax .bg-orb-2 {
+  transform: translateY(calc(var(--scroll-y, 0) * 0.2px));
+}
+
+.bg-orbs-parallax .bg-orb-3,
+.bg-orbs-parallax .bg-orb-4 {
+  transform: translateY(calc(var(--scroll-y, 0) * 0.15px));
+}
+
+.bg-orbs-parallax .bg-orb-5 {
+  transform: translateY(calc(var(--scroll-y, 0) * 0.1px));
+}
+
+/* ============================================
+   USAGE INSTRUCTIONS
+   ============================================ */
+
+/*
+Basic Usage - Orbs Only:
+-------------------------
+<div class="bg-orbs">
+  <div class="bg-orb bg-orb-1"></div>
+  <div class="bg-orb bg-orb-2"></div>
+  <div class="bg-orb bg-orb-3"></div>
+  <div class="bg-orb bg-orb-4"></div>
+  <div class="bg-orb bg-orb-5"></div>
+</div>
+
+Workflow Theme - Rails + Nodes + Particles:
+--------------------------------------------
+<div class="bg-rails">
+  <div class="rail-path rail-h1"></div>
+  <div class="rail-path rail-h2"></div>
+  <div class="rail-path rail-d1"></div>
+  <div class="rail-path rail-d2"></div>
+</div>
+
+<div class="bg-nodes">
+  <div class="workflow-node node-1"></div>
+  <div class="workflow-node node-2"></div>
+  <div class="workflow-node node-3"></div>
+  <div class="workflow-node node-4"></div>
+  <div class="workflow-node node-5"></div>
+</div>
+
+<div class="bg-particles">
+  <div class="particle particle-1"></div>
+  <div class="particle particle-2"></div>
+  <div class="particle particle-3"></div>
+  <div class="particle particle-4"></div>
+  <div class="particle particle-5"></div>
+</div>
+
+With Grid Overlay:
+------------------
+<div class="bg-grid bg-grid-animated"></div>
+
+With Grain:
+-----------
+<div class="bg-grain"></div>
+
+Intensity Control:
+------------------
+<div class="bg-orbs bg-orbs-subtle">...</div>  <!-- Very minimal -->
+<div class="bg-orbs">...</div>                 <!-- Normal (default) -->
+<div class="bg-orbs bg-orbs-vibrant">...</div> <!-- More prominent -->
+
+Complete Hybrid Stack (Recommended):
+-------------------------------------
+<!-- Orbs for ambient depth -->
+<div class="bg-orbs">
+  <div class="bg-orb bg-orb-1"></div>
+  <div class="bg-orb bg-orb-2"></div>
+  <div class="bg-orb bg-orb-3"></div>
+  <div class="bg-orb bg-orb-4"></div>
+  <div class="bg-orb bg-orb-5"></div>
+</div>
+
+<!-- Workflow rails for structure -->
+<div class="bg-rails">
+  <div class="rail-path rail-h1"></div>
+  <div class="rail-path rail-h2"></div>
+  <div class="rail-path rail-d1"></div>
+  <div class="rail-path rail-d2"></div>
+</div>
+
+<!-- Pulsing nodes for milestones -->
+<div class="bg-nodes">
+  <div class="workflow-node node-1"></div>
+  <div class="workflow-node node-2"></div>
+  <div class="workflow-node node-3"></div>
+  <div class="workflow-node node-4"></div>
+  <div class="workflow-node node-5"></div>
+</div>
+
+<!-- Particles for guidance -->
+<div class="bg-particles">
+  <div class="particle particle-1"></div>
+  <div class="particle particle-2"></div>
+  <div class="particle particle-3"></div>
+  <div class="particle particle-4"></div>
+  <div class="particle particle-5"></div>
+</div>
+
+<!-- Optional: Grid and grain -->
+<div class="bg-grain"></div>
+
+Enabling Interactive Disturbance:
+----------------------------------
+1. Include the script:
+   <script src="/assets/background-interaction.js"></script>
+
+2. Enable on page load:
+   <script>
+     document.addEventListener('DOMContentLoaded', () => {
+       WorkrailBackground.enableInteraction();
+     });
+   </script>
+
+3. Or use auto-enable with data attribute:
+   <html data-workrail-interactive>
+
+Effects:
+- Rails shift and fade when cursor passes over them
+- Nodes pulse larger when cursor is nearby
+- Particles brighten and grow near cursor
+- 150px detection radius (configurable)
+*/
+
+/* ============================================
+   ADAPTIVE INTENSITY MODES
+   ============================================ */
+
+/**
+ * Subtle Mode - For dashboards and focus-heavy pages
+ * 
+ * Goals:
+ * - Maintain brand identity
+ * - Avoid distracting from data visualization
+ * - Reduce animation intensity
+ * - Lower opacity for ambient presence
+ * 
+ * Usage:
+ *   <html data-bg-intensity="subtle">
+ */
+[data-bg-intensity="subtle"] .bg-orbs circle,
+[data-bg-intensity="subtle"] .bg-orb {
+  opacity: 0.25 !important; /* Visible but gentle orbs */
+  filter: blur(90px); /* More diffuse */
+}
+
+[data-bg-intensity="subtle"] .rail-path {
+  opacity: 0.12 !important; /* Subtle but visible rails */
+}
+
+[data-bg-intensity="subtle"] .rail-path path {
+  opacity: 0.35 !important;
+  stroke-width: 0.5; /* Thinner for subtlety */
+}
+
+[data-bg-intensity="subtle"] .workflow-node {
+  opacity: 0.3 !important; /* Visible nodes */
+  animation: pulse-subtle 4s ease-in-out infinite; /* Slower pulse */
+}
+
+[data-bg-intensity="subtle"] .particle {
+  opacity: 0.4 !important; /* Visible particles */
+  animation-duration: 25s; /* Slower movement */
+}
+
+[data-bg-intensity="subtle"] .bg-grain {
+  opacity: 0.015 !important; /* Very subtle grain */
+}
+
+/* Subtle pulse animation (slower, gentler) */
+@keyframes pulse-subtle {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.3;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 0.45;
+  }
+}
+
+/**
+ * Minimal Mode - For ultra-clean pages (optional)
+ * 
+ * Usage:
+ *   <html data-bg-intensity="minimal">
+ */
+[data-bg-intensity="minimal"] .bg-orbs,
+[data-bg-intensity="minimal"] .bg-rails,
+[data-bg-intensity="minimal"] .workflow-node,
+[data-bg-intensity="minimal"] #particle-container,
+[data-bg-intensity="minimal"] .bg-grain {
+  display: none !important; /* No background effects at all */
+}
+
+
+ * Hybrid: Orbs + Workflow-Themed Elements + Interactive Disturbance
+ * 
+ * Layer System:
+ * 1. Base gradient mesh (from design-system.css)
+ * 2. Floating colored orbs (ambient depth)
+ * 3. Workflow rails (animated curved paths)
+ * 4. Pulsing nodes (milestone markers)
+ * 5. Particle trails (guidance)
+ * 6. Optional grid overlay
+ * 7. Optional grain texture
+ * 
+ * Features:
+ * - Organic curved paths (no perfect horizontal/vertical/diagonal lines)
+ * - Mouse-driven disturbance effects (requires background-interaction.js)
+ * - Layered z-index system (always behind content)
+ * - Performance optimizations for mobile and reduced motion
+ * - Customizable intensity modes
+ */
+
+/* ============================================
+   FLOATING ORBS - Base Layer
+   ============================================ */
+
+/* Container for orbs (fixed positioning) */
+.bg-orbs {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: -3;
+}
+
+/* Individual orb styling */
+.bg-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(70px);
+  opacity: 0.25;
+  will-change: transform;
+}
+
+/* Orb 1: Cyan - Top Left */
+.bg-orb-1 {
+  width: 500px;
+  height: 500px;
+  top: 10%;
+  left: 10%;
+  background: radial-gradient(circle, rgba(6, 182, 212, 0.8), rgba(6, 182, 212, 0.4) 40%, transparent 70%);
+  animation: floatOrb1 20s ease-in-out infinite;
+}
+
+/* Orb 2: Purple - Top Right */
+.bg-orb-2 {
+  width: 600px;
+  height: 600px;
+  top: 5%;
+  right: 5%;
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.8), rgba(139, 92, 246, 0.4) 40%, transparent 70%);
+  animation: floatOrb2 25s ease-in-out infinite;
+}
+
+/* Orb 3: Pink - Bottom Left */
+.bg-orb-3 {
+  width: 550px;
+  height: 550px;
+  bottom: 10%;
+  left: 15%;
+  background: radial-gradient(circle, rgba(236, 72, 153, 0.8), rgba(236, 72, 153, 0.4) 40%, transparent 70%);
+  animation: floatOrb3 22s ease-in-out infinite;
+}
+
+/* Orb 4: Orange - Bottom Right */
+.bg-orb-4 {
+  width: 450px;
+  height: 450px;
+  bottom: 15%;
+  right: 10%;
+  background: radial-gradient(circle, rgba(249, 115, 22, 0.8), rgba(249, 115, 22, 0.4) 40%, transparent 70%);
+  animation: floatOrb4 18s ease-in-out infinite;
+}
+
+/* Orb 5: Green - Center (subtle) */
+.bg-orb-5 {
+  width: 400px;
+  height: 400px;
+  top: 45%;
+  left: 45%;
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.7), rgba(16, 185, 129, 0.35) 40%, transparent 70%);
+  animation: floatOrb5 28s ease-in-out infinite;
+}
+
+/* ============================================
+   ORB ANIMATIONS - Organic Movement
+   ============================================ */
+
+@keyframes floatOrb1 {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  25% {
+    transform: translate(50px, -80px) scale(1.1);
+  }
+  50% {
+    transform: translate(-30px, -50px) scale(0.95);
+  }
+  75% {
+    transform: translate(80px, 30px) scale(1.05);
+  }
+}
+
+@keyframes floatOrb2 {
+  0%, 100% {
+    transform: translate(0, 0) scale(1) rotate(0deg);
+  }
+  30% {
+    transform: translate(-60px, 100px) scale(1.15) rotate(45deg);
+  }
+  60% {
+    transform: translate(40px, 50px) scale(0.9) rotate(90deg);
+  }
+  90% {
+    transform: translate(-40px, -30px) scale(1.05) rotate(135deg);
+  }
+}
+
+@keyframes floatOrb3 {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  20% {
+    transform: translate(-50px, 60px) scale(1.1);
+  }
+  40% {
+    transform: translate(70px, -40px) scale(0.9);
+  }
+  60% {
+    transform: translate(-80px, -70px) scale(1.15);
+  }
+  80% {
+    transform: translate(30px, 50px) scale(0.95);
+  }
+}
+
+@keyframes floatOrb4 {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  33% {
+    transform: translate(60px, -90px) scale(1.2);
+  }
+  66% {
+    transform: translate(-70px, 40px) scale(0.85);
+  }
+}
+
+@keyframes floatOrb5 {
+  0%, 100% {
+    transform: translate(0, 0) scale(1) rotate(0deg);
+  }
+  25% {
+    transform: translate(-100px, 80px) scale(1.3) rotate(90deg);
+  }
+  50% {
+    transform: translate(100px, -80px) scale(0.8) rotate(180deg);
+  }
+  75% {
+    transform: translate(-50px, 100px) scale(1.1) rotate(270deg);
+  }
+}
+
+/* ============================================
+   WORKFLOW RAILS - Animated Connection Paths
+   ============================================ */
+
+/* Rails container */
+.bg-rails {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: -2;
+  overflow: hidden;
+}
+
+/* Individual rail paths */
+.rail-path {
+  position: absolute;
+  opacity: 0.15;
+}
+
+/* Curved rail 1 - Gentle wave across top */
+.rail-h1 {
+  top: 25%;
+  left: -20%;
+  width: 140%;
+  height: 100px;
+  animation: railFlowH1 40s ease-in-out infinite;
+  transform: rotate(3deg);
+  transition: filter 1s var(--ease-out), opacity 0.8s var(--ease-out), transform 0.3s var(--ease-out);
+  overflow: visible;
+}
+
+.rail-h1 svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* Curved rail 2 - Gentle wave across bottom */
+.rail-h2 {
+  bottom: 30%;
+  left: -20%;
+  width: 140%;
+  height: 100px;
+  animation: railFlowH2 35s ease-in-out infinite;
+  transform: rotate(-2deg);
+  transition: filter 1s var(--ease-out), opacity 0.8s var(--ease-out), transform 0.3s var(--ease-out);
+  overflow: visible;
+}
+
+.rail-h2 svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* Curved diagonal 1 - Flowing from top-left area */
+.rail-d1 {
+  top: 5%;
+  left: -15%;
+  width: 130%;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(99, 102, 241, 0.5) 20%,
+    rgba(6, 182, 212, 0.5) 80%,
+    transparent 100%
+  );
+  transform: rotate(23deg);
+  transform-origin: top left;
+  animation: railFlowD1 50s ease-in-out infinite;
+  transition: filter 1s var(--ease-out), opacity 0.8s var(--ease-out), transform 0.3s var(--ease-out);
+}
+
+/* Curved diagonal 2 - Flowing from top-right area */
+.rail-d2 {
+  top: 15%;
+  right: -15%;
+  width: 130%;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(168, 85, 247, 0.5) 20%,
+    rgba(249, 115, 22, 0.5) 80%,
+    transparent 100%
+  );
+  transform: rotate(-27deg);
+  transform-origin: top right;
+  animation: railFlowD2 45s ease-in-out infinite reverse;
+  transition: filter 1s var(--ease-out), opacity 0.8s var(--ease-out), transform 0.3s var(--ease-out);
+}
+
+/* Rail flow animations - organic movement */
+@keyframes railFlowH1 {
+  0% {
+    transform: rotate(3deg) translateX(0) translateY(0);
+    opacity: 0.15;
+  }
+  25% {
+    transform: rotate(2deg) translateX(5%) translateY(-2px);
+    opacity: 0.2;
+  }
+  50% {
+    transform: rotate(4deg) translateX(10%) translateY(-4px);
+    opacity: 0.25;
+  }
+  75% {
+    transform: rotate(2.5deg) translateX(5%) translateY(-2px);
+    opacity: 0.2;
+  }
+  100% {
+    transform: rotate(3deg) translateX(0) translateY(0);
+    opacity: 0.15;
+  }
+}
+
+@keyframes railFlowH2 {
+  0% {
+    transform: rotate(-2deg) translateX(0) translateY(0);
+    opacity: 0.15;
+  }
+  25% {
+    transform: rotate(-3deg) translateX(-5%) translateY(3px);
+    opacity: 0.18;
+  }
+  50% {
+    transform: rotate(-1deg) translateX(-10%) translateY(5px);
+    opacity: 0.2;
+  }
+  75% {
+    transform: rotate(-2.5deg) translateX(-5%) translateY(3px);
+    opacity: 0.18;
+  }
+  100% {
+    transform: rotate(-2deg) translateX(0) translateY(0);
+    opacity: 0.15;
+  }
+}
+
+@keyframes railFlowD1 {
+  0% {
+    transform: rotate(23deg);
+    opacity: 0.1;
+  }
+  25% {
+    transform: rotate(24deg);
+    opacity: 0.15;
+  }
+  50% {
+    transform: rotate(22deg);
+    opacity: 0.2;
+  }
+  75% {
+    transform: rotate(24deg);
+    opacity: 0.15;
+  }
+  100% {
+    transform: rotate(23deg);
+    opacity: 0.1;
+  }
+}
+
+@keyframes railFlowD2 {
+  0% {
+    transform: rotate(-27deg);
+    opacity: 0.1;
+  }
+  25% {
+    transform: rotate(-26deg);
+    opacity: 0.15;
+  }
+  50% {
+    transform: rotate(-28deg);
+    opacity: 0.2;
+  }
+  75% {
+    transform: rotate(-26.5deg);
+    opacity: 0.15;
+  }
+  100% {
+    transform: rotate(-27deg);
+    opacity: 0.1;
+  }
+}
+
+/* ============================================
+   PULSING NODES - Milestone Markers
+   ============================================ */
+
+/* Nodes container */
+.bg-nodes {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* Individual node */
+.workflow-node {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(139, 92, 246, 0.6);
+  box-shadow: 0 0 20px rgba(139, 92, 246, 0.4);
+  transition: 
+    transform 1.2s var(--ease-bounce), 
+    opacity 0.8s var(--ease-out),
+    filter 1s var(--ease-out),
+    box-shadow 0.8s var(--ease-out);
+  will-change: transform, opacity, filter;
+}
+
+/* Node 1 - Upper left area */
+.node-1 {
+  top: 22%;
+  left: 18%;
+  animation: nodePulse1 4s ease-in-out infinite;
+}
+
+/* Node 2 - Upper right area */
+.node-2 {
+  top: 28%;
+  right: 23%;
+  background: rgba(59, 130, 246, 0.6);
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.4);
+  animation: nodePulse2 5s ease-in-out infinite;
+}
+
+/* Node 3 - Center area (slightly offset) */
+.node-3 {
+  top: 47%;
+  left: 53%;
+  background: rgba(16, 185, 129, 0.6);
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.4);
+  animation: nodePulse3 6s ease-in-out infinite;
+}
+
+/* Node 4 - Lower left area */
+.node-4 {
+  bottom: 32%;
+  left: 27%;
+  background: rgba(236, 72, 153, 0.6);
+  box-shadow: 0 0 20px rgba(236, 72, 153, 0.4);
+  animation: nodePulse4 4.5s ease-in-out infinite;
+}
+
+/* Node 5 - Lower right area */
+.node-5 {
+  bottom: 27%;
+  right: 22%;
+  background: rgba(249, 115, 22, 0.6);
+  box-shadow: 0 0 20px rgba(249, 115, 22, 0.4);
+  animation: nodePulse5 5.5s ease-in-out infinite;
+}
+
+/* Node pulse animations */
+@keyframes nodePulse1 {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.4;
+  }
+  50% {
+    transform: scale(1.8);
+    opacity: 0.8;
+  }
+}
+
+@keyframes nodePulse2 {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.4;
+  }
+  50% {
+    transform: scale(1.6);
+    opacity: 0.7;
+  }
+}
+
+@keyframes nodePulse3 {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.3;
+  }
+  50% {
+    transform: scale(2);
+    opacity: 0.9;
+  }
+}
+
+@keyframes nodePulse4 {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.4;
+  }
+  50% {
+    transform: scale(1.7);
+    opacity: 0.75;
+  }
+}
+
+@keyframes nodePulse5 {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.4;
+  }
+  50% {
+    transform: scale(1.5);
+    opacity: 0.7;
+  }
+}
+
+/* ============================================
+   PARTICLE TRAILS - Guidance Elements
+   ============================================ */
+
+/* Particles container */
+.bg-particles {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: -2;
+  overflow: hidden;
+}
+
+/* Individual particle */
+.particle {
+  position: absolute;
+  width: var(--particle-size, 3px);
+  height: var(--particle-size, 3px);
+  border-radius: 50%;
+  background: var(--particle-color);
+  box-shadow: 0 0 10px var(--particle-glow);
+  opacity: 0;
+  /* Dynamic positioning and animation will be set inline */
+}
+
+/* Particle 1 - Travels along top rail */
+.particle-1 {
+  top: 25%;
+  left: -5%;
+  animation: particleFlow1 20s linear infinite;
+}
+
+/* Particle 2 - Travels along bottom rail */
+.particle-2 {
+  bottom: 30%;
+  left: -5%;
+  background: rgba(236, 72, 153, 0.6);
+  box-shadow: 0 0 10px rgba(236, 72, 153, 0.4);
+  animation: particleFlow2 18s linear infinite;
+}
+
+/* Particle 3 - Travels diagonally */
+.particle-3 {
+  top: 10%;
+  left: -5%;
+  background: rgba(59, 130, 246, 0.6);
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.4);
+  animation: particleFlow3 25s linear infinite;
+}
+
+/* Particle 4 - Travels bottom to top */
+.particle-4 {
+  bottom: -5%;
+  left: 30%;
+  background: rgba(16, 185, 129, 0.6);
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+  animation: particleFlow4 22s linear infinite;
+}
+
+/* Particle 5 - Travels right to left */
+.particle-5 {
+  top: 60%;
+  right: -5%;
+  background: rgba(249, 115, 22, 0.6);
+  box-shadow: 0 0 10px rgba(249, 115, 22, 0.4);
+  animation: particleFlow5 19s linear infinite;
+}
+
+/* Particle flow animations - curved paths */
+@keyframes particleFlow1 {
+  0% {
+    left: -5%;
+    top: 25%;
+    opacity: 0;
+  }
+  10% {
+    top: 22%;
+    opacity: 0.8;
+  }
+  30% {
+    top: 28%;
+  }
+  60% {
+    top: 24%;
+  }
+  90% {
+    top: 27%;
+    opacity: 0.8;
+  }
+  100% {
+    left: 105%;
+    top: 25%;
+    opacity: 0;
+  }
+}
+
+@keyframes particleFlow2 {
+  0% {
+    left: 105%;
+    bottom: 30%;
+    opacity: 0;
+  }
+  10% {
+    bottom: 33%;
+    opacity: 0.8;
+  }
+  30% {
+    bottom: 28%;
+  }
+  60% {
+    bottom: 32%;
+  }
+  90% {
+    bottom: 29%;
+    opacity: 0.8;
+  }
+  100% {
+    left: -5%;
+    bottom: 30%;
+    opacity: 0;
+  }
+}
+
+@keyframes particleFlow3 {
+  0% {
+    left: -5%;
+    top: 10%;
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.8;
+  }
+  25% {
+    left: 20%;
+    top: 35%;
+  }
+  50% {
+    left: 50%;
+    top: 55%;
+  }
+  75% {
+    left: 80%;
+    top: 70%;
+  }
+  90% {
+    opacity: 0.8;
+  }
+  100% {
+    left: 105%;
+    top: 85%;
+    opacity: 0;
+  }
+}
+
+@keyframes particleFlow4 {
+  0% {
+    left: 30%;
+    bottom: -5%;
+    opacity: 0;
+  }
+  10% {
+    left: 28%;
+    opacity: 0.8;
+  }
+  30% {
+    left: 33%;
+  }
+  60% {
+    left: 29%;
+  }
+  90% {
+    left: 31%;
+    opacity: 0.8;
+  }
+  100% {
+    left: 30%;
+    bottom: 105%;
+    opacity: 0;
+  }
+}
+
+@keyframes particleFlow5 {
+  0% {
+    right: -5%;
+    top: 60%;
+    opacity: 0;
+  }
+  10% {
+    top: 58%;
+    opacity: 0.8;
+  }
+  25% {
+    right: 20%;
+    top: 55%;
+  }
+  50% {
+    right: 50%;
+    top: 63%;
+  }
+  75% {
+    right: 80%;
+    top: 58%;
+  }
+  90% {
+    top: 61%;
+    opacity: 0.8;
+  }
+  100% {
+    right: 105%;
+    top: 60%;
+    opacity: 0;
+  }
+}
+
+/* ============================================
+   GRID OVERLAY - Middle Layer (Optional)
+   ============================================ */
+
+.bg-grid {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: 
+    linear-gradient(rgba(139, 92, 246, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(139, 92, 246, 0.03) 1px, transparent 1px);
+  background-size: 50px 50px;
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0.5;
+}
+
+/* Animated grid that drifts slowly */
+.bg-grid-animated {
+  animation: gridDrift 120s linear infinite;
+}
+
+@keyframes gridDrift {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(50px);
+  }
+}
+
+/* ============================================
+   GRAIN TEXTURE - Top Layer (Optional)
+   ============================================ */
+
+.bg-grain {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: -1;
+  opacity: 1;
+  /* Theme-aware film grain texture (static - no animation to avoid artifacts) */
+  background-image: 
+    repeating-linear-gradient(0deg, 
+      transparent 0px, 
+      var(--grain-color) 1px, 
+      transparent 2px
+    ),
+    repeating-linear-gradient(90deg, 
+      transparent 0px, 
+      var(--grain-color) 1px, 
+      transparent 2px
+    ),
+    repeating-linear-gradient(45deg, 
+      transparent 0px, 
+      var(--grain-color-secondary) 1px, 
+      transparent 2px
+    );
+  background-size: 2px 2px, 2px 2px, 3px 3px;
+  mix-blend-mode: multiply;
+}
+
+@keyframes grainMove {
+  0%, 100% { transform: translate(0, 0); }
+  10% { transform: translate(-1px, -2px); }
+  20% { transform: translate(-3px, 1px); }
+  30% { transform: translate(1px, -3px); }
+  40% { transform: translate(-1px, 3px); }
+  50% { transform: translate(-2px, 1px); }
+  60% { transform: translate(2px, 0px); }
+  70% { transform: translate(0px, 2px); }
+  80% { transform: translate(1px, 3px); }
+  90% { transform: translate(-2px, 1px); }
+}
+
+/* ============================================
+   PERFORMANCE OPTIMIZATIONS
+   ============================================ */
+
+/* Reduce motion for accessibility */
+@media (prefers-reduced-motion: reduce) {
+  .bg-orb,
+  .bg-grid-animated,
+  .bg-grain,
+  .rail-path,
+  .workflow-node,
+  .particle {
+    animation: none !important;
+  }
+  
+  .bg-orb {
+    opacity: 0.05;
+  }
+  
+  .rail-path,
+  .workflow-node,
+  .particle {
+    display: none;
+  }
+}
+
+/* Lower intensity on mobile for performance */
+@media (max-width: 768px) {
+  .bg-orb {
+    filter: blur(60px);
+    opacity: 0.08;
+  }
+  
+  .bg-orb-5 {
+    display: none; /* Hide 5th orb on mobile */
+  }
+  
+  .bg-grain {
+    display: none; /* Hide grain on mobile */
+  }
+  
+  /* Hide workflow elements on mobile for performance */
+  .bg-rails,
+  .bg-nodes,
+  .bg-particles {
+    display: none;
+  }
+}
+
+/* ============================================
+   INTENSITY MODES (Optional)
+   ============================================ */
+
+/* Subtle mode - very minimal */
+.bg-orbs-subtle .bg-orb {
+  opacity: 0.06;
+  filter: blur(100px);
+}
+
+/* Normal mode - default (already set above) */
+
+/* Vibrant mode - more prominent */
+.bg-orbs-vibrant .bg-orb {
+  opacity: 0.18;
+  filter: blur(70px);
+}
+
+/* ============================================
+   CURSOR INTERACTION (Advanced - Optional)
+   ============================================ */
+
+/* Orbs subtly move away from cursor when .bg-orbs-interactive is set */
+/* Requires JavaScript to track cursor position */
+.bg-orbs-interactive .bg-orb {
+  transition: transform 0.6s var(--ease-out);
+}
+
+/* Rails disturbance effect when cursor is nearby */
+.rail-path {
+  will-change: filter, opacity;
+}
+
+/* Different disturbance effects for each rail - glow + shimmer */
+/* Disturbed states removed - proximity detection disabled */
+
+/* Shimmer animations - subtle brightness/opacity/blur pulse for each rail */
+@keyframes railShimmer1 {
+  0%, 100% {
+    filter: brightness(1.6) drop-shadow(0 0 20px rgba(139, 92, 246, 1)) hue-rotate(25deg) blur(2px);
+    opacity: 0.7;
+  }
+  50% {
+    filter: brightness(2) drop-shadow(0 0 35px rgba(139, 92, 246, 1)) hue-rotate(30deg) blur(4px);
+    opacity: 0.85;
+  }
+}
+
+@keyframes railShimmer2 {
+  0%, 100% {
+    filter: brightness(1.6) drop-shadow(0 0 20px rgba(236, 72, 153, 1)) hue-rotate(-25deg) blur(2px);
+    opacity: 0.7;
+  }
+  50% {
+    filter: brightness(2) drop-shadow(0 0 35px rgba(236, 72, 153, 1)) hue-rotate(-30deg) blur(4px);
+    opacity: 0.85;
+  }
+}
+
+@keyframes railShimmer3 {
+  0%, 100% {
+    filter: brightness(1.7) drop-shadow(0 0 25px rgba(99, 102, 241, 1)) blur(3px);
+    opacity: 0.65;
+  }
+  50% {
+    filter: brightness(2.1) drop-shadow(0 0 40px rgba(99, 102, 241, 1)) blur(5px);
+    opacity: 0.8;
+  }
+}
+
+@keyframes railShimmer4 {
+  0%, 100% {
+    filter: brightness(1.7) drop-shadow(0 0 25px rgba(168, 85, 247, 1)) blur(3px);
+    opacity: 0.65;
+  }
+  50% {
+    filter: brightness(2.1) drop-shadow(0 0 40px rgba(168, 85, 247, 1)) blur(5px);
+    opacity: 0.8;
+  }
+}
+
+/* Wiggle animations for rails (kept for reference, not used anymore) */
+@keyframes railWiggle1 {
+  0%, 100% { 
+    transform: rotate(3deg) translateY(0) scaleY(1) scaleX(1);
+  }
+  25% { 
+    transform: rotate(6deg) translateY(-15px) scaleY(1.15) scaleX(0.95);
+  }
+  50% { 
+    transform: rotate(0deg) translateY(-20px) scaleY(0.9) scaleX(1.1);
+  }
+  75% { 
+    transform: rotate(5deg) translateY(-10px) scaleY(1.1) scaleX(0.98);
+  }
+}
+
+@keyframes railWiggle2 {
+  0%, 100% { 
+    transform: rotate(-2deg) translateY(0) scaleY(1) scaleX(1);
+  }
+  25% { 
+    transform: rotate(-5deg) translateY(18px) scaleY(1.12) scaleX(0.92);
+  }
+  50% { 
+    transform: rotate(1deg) translateY(25px) scaleY(0.88) scaleX(1.12);
+  }
+  75% { 
+    transform: rotate(-4deg) translateY(12px) scaleY(1.08) scaleX(0.96);
+  }
+}
+
+@keyframes railWiggle3 {
+  0%, 100% { 
+    transform: rotate(23deg) scale(1);
+  }
+  25% {
+    transform: rotate(28deg) scale(1.15) translateX(-10px);
+  }
+  50% { 
+    transform: rotate(18deg) scale(0.9) translateX(10px);
+  }
+  75% {
+    transform: rotate(26deg) scale(1.1) translateX(-5px);
+  }
+}
+
+@keyframes railWiggle4 {
+  0%, 100% { 
+    transform: rotate(-27deg) scale(1);
+  }
+  25% {
+    transform: rotate(-32deg) scale(1.12) translateX(10px);
+  }
+  50% { 
+    transform: rotate(-22deg) scale(0.92) translateX(-10px);
+  }
+  75% {
+    transform: rotate(-29deg) scale(1.08) translateX(5px);
+  }
+}
+
+/* Nodes react to cursor proximity - override the pulse animation */
+.workflow-node.disturbed {
+  animation: none !important; /* Stop the pulse animation - this can have !important */
+  transform: scale(4); /* NO !important - allows transition to work */
+  opacity: 1;
+  filter: brightness(1.8) drop-shadow(0 0 50px currentColor) saturate(1.5);
+  box-shadow: 0 0 60px currentColor;
+}
+
+/* Particles react when cursor is near */
+.particle {
+  transition: 
+    transform 0.8s var(--ease-bounce), 
+    opacity 0.6s var(--ease-out),
+    filter 0.7s var(--ease-out);
+  will-change: transform, opacity, filter;
+}
+
+.particle.disturbed {
+  transform: scale(2.5);
+  opacity: 1;
+  filter: brightness(1.5) drop-shadow(0 0 20px currentColor);
+}
+
+/* Explosion particles - special styling */
+.particle.explosion-particle {
+  z-index: 1000;
+  filter: brightness(1.2) drop-shadow(0 0 8px var(--particle-color));
+  animation: explode-pulse 0.8s ease-out;
+}
+
+@keyframes explode-pulse {
+  0% {
+    filter: brightness(2) drop-shadow(0 0 20px var(--particle-color));
+  }
+  50% {
+    filter: brightness(1.5) drop-shadow(0 0 12px var(--particle-color));
+  }
+  100% {
+    filter: brightness(0.8) drop-shadow(0 0 4px var(--particle-color));
+  }
+}
+
+/* ============================================
+   ANIMATED GRAIN TEXTURE
+   ============================================ */
+
+/* bg-grain styles moved to top of file (avoiding duplicate) */
+
+/* ============================================
+   TIME-OF-DAY THEMES (Advanced - Optional)
+   ============================================ */
+
+/* Morning theme - warmer tones */
+[data-time-theme="morning"] .bg-orb-1 {
+  background: radial-gradient(circle, rgba(249, 115, 22, 0.4), transparent 70%);
+}
+
+[data-time-theme="morning"] .bg-orb-2 {
+  background: radial-gradient(circle, rgba(234, 179, 8, 0.4), transparent 70%);
+}
+
+/* Evening theme - cooler tones */
+[data-time-theme="evening"] .bg-orb-3 {
+  background: radial-gradient(circle, rgba(99, 102, 241, 0.4), transparent 70%);
+}
+
+[data-time-theme="evening"] .bg-orb-4 {
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.4), transparent 70%);
+}
+
+/* ============================================
+   DARK MODE ORBS - Enhanced Quality
+   ============================================ */
+
+/* 
+ * Dark mode: Use same vibrant colors as light mode, but much more subtle
+ * Heavy blur hides banding, low opacity keeps it refined
+ */
+[data-theme="dark"] .bg-orb-1 {
+  background: radial-gradient(
+    circle,
+    rgba(6, 182, 212, 0.25) 0%,
+    rgba(6, 182, 212, 0.18) 25%,
+    rgba(6, 182, 212, 0.12) 50%,
+    rgba(6, 182, 212, 0.06) 75%,
+    transparent 100%
+  ) !important;
+  filter: blur(100px) !important;
+  opacity: 0.2 !important;
+}
+
+[data-theme="dark"] .bg-orb-2 {
+  background: radial-gradient(
+    circle,
+    rgba(139, 92, 246, 0.28) 0%,
+    rgba(139, 92, 246, 0.2) 25%,
+    rgba(139, 92, 246, 0.13) 50%,
+    rgba(139, 92, 246, 0.07) 75%,
+    transparent 100%
+  ) !important;
+  filter: blur(100px) !important;
+  opacity: 0.2 !important;
+}
+
+[data-theme="dark"] .bg-orb-3 {
+  background: radial-gradient(
+    circle,
+    rgba(236, 72, 153, 0.25) 0%,
+    rgba(236, 72, 153, 0.18) 25%,
+    rgba(236, 72, 153, 0.12) 50%,
+    rgba(236, 72, 153, 0.06) 75%,
+    transparent 100%
+  ) !important;
+  filter: blur(100px) !important;
+  opacity: 0.2 !important;
+}
+
+[data-theme="dark"] .bg-orb-4 {
+  background: radial-gradient(
+    circle,
+    rgba(249, 115, 22, 0.23) 0%,
+    rgba(249, 115, 22, 0.17) 25%,
+    rgba(249, 115, 22, 0.11) 50%,
+    rgba(249, 115, 22, 0.05) 75%,
+    transparent 100%
+  ) !important;
+  filter: blur(100px) !important;
+  opacity: 0.2 !important;
+}
+
+[data-theme="dark"] .bg-orb-5 {
+  background: radial-gradient(
+    circle,
+    rgba(16, 185, 129, 0.22) 0%,
+    rgba(16, 185, 129, 0.16) 25%,
+    rgba(16, 185, 129, 0.1) 50%,
+    rgba(16, 185, 129, 0.05) 75%,
+    transparent 100%
+  ) !important;
+  filter: blur(100px) !important;
+  opacity: 0.2 !important;
+}
+
+/* ============================================
+   SCROLL PARALLAX (Advanced - Optional)
+   ============================================ */
+
+.bg-orbs-parallax .bg-orb-1,
+.bg-orbs-parallax .bg-orb-2 {
+  transform: translateY(calc(var(--scroll-y, 0) * 0.2px));
+}
+
+.bg-orbs-parallax .bg-orb-3,
+.bg-orbs-parallax .bg-orb-4 {
+  transform: translateY(calc(var(--scroll-y, 0) * 0.15px));
+}
+
+.bg-orbs-parallax .bg-orb-5 {
+  transform: translateY(calc(var(--scroll-y, 0) * 0.1px));
+}
+
+/* ============================================
+   USAGE INSTRUCTIONS
+   ============================================ */
+
+/*
+Basic Usage - Orbs Only:
+-------------------------
+<div class="bg-orbs">
+  <div class="bg-orb bg-orb-1"></div>
+  <div class="bg-orb bg-orb-2"></div>
+  <div class="bg-orb bg-orb-3"></div>
+  <div class="bg-orb bg-orb-4"></div>
+  <div class="bg-orb bg-orb-5"></div>
+</div>
+
+Workflow Theme - Rails + Nodes + Particles:
+--------------------------------------------
+<div class="bg-rails">
+  <div class="rail-path rail-h1"></div>
+  <div class="rail-path rail-h2"></div>
+  <div class="rail-path rail-d1"></div>
+  <div class="rail-path rail-d2"></div>
+</div>
+
+<div class="bg-nodes">
+  <div class="workflow-node node-1"></div>
+  <div class="workflow-node node-2"></div>
+  <div class="workflow-node node-3"></div>
+  <div class="workflow-node node-4"></div>
+  <div class="workflow-node node-5"></div>
+</div>
+
+<div class="bg-particles">
+  <div class="particle particle-1"></div>
+  <div class="particle particle-2"></div>
+  <div class="particle particle-3"></div>
+  <div class="particle particle-4"></div>
+  <div class="particle particle-5"></div>
+</div>
+
+With Grid Overlay:
+------------------
+<div class="bg-grid bg-grid-animated"></div>
+
+With Grain:
+-----------
+<div class="bg-grain"></div>
+
+Intensity Control:
+------------------
+<div class="bg-orbs bg-orbs-subtle">...</div>  <!-- Very minimal -->
+<div class="bg-orbs">...</div>                 <!-- Normal (default) -->
+<div class="bg-orbs bg-orbs-vibrant">...</div> <!-- More prominent -->
+
+Complete Hybrid Stack (Recommended):
+-------------------------------------
+<!-- Orbs for ambient depth -->
+<div class="bg-orbs">
+  <div class="bg-orb bg-orb-1"></div>
+  <div class="bg-orb bg-orb-2"></div>
+  <div class="bg-orb bg-orb-3"></div>
+  <div class="bg-orb bg-orb-4"></div>
+  <div class="bg-orb bg-orb-5"></div>
+</div>
+
+<!-- Workflow rails for structure -->
+<div class="bg-rails">
+  <div class="rail-path rail-h1"></div>
+  <div class="rail-path rail-h2"></div>
+  <div class="rail-path rail-d1"></div>
+  <div class="rail-path rail-d2"></div>
+</div>
+
+<!-- Pulsing nodes for milestones -->
+<div class="bg-nodes">
+  <div class="workflow-node node-1"></div>
+  <div class="workflow-node node-2"></div>
+  <div class="workflow-node node-3"></div>
+  <div class="workflow-node node-4"></div>
+  <div class="workflow-node node-5"></div>
+</div>
+
+<!-- Particles for guidance -->
+<div class="bg-particles">
+  <div class="particle particle-1"></div>
+  <div class="particle particle-2"></div>
+  <div class="particle particle-3"></div>
+  <div class="particle particle-4"></div>
+  <div class="particle particle-5"></div>
+</div>
+
+<!-- Optional: Grid and grain -->
+<div class="bg-grain"></div>
+
+Enabling Interactive Disturbance:
+----------------------------------
+1. Include the script:
+   <script src="/assets/background-interaction.js"></script>
+
+2. Enable on page load:
+   <script>
+     document.addEventListener('DOMContentLoaded', () => {
+       WorkrailBackground.enableInteraction();
+     });
+   </script>
+
+3. Or use auto-enable with data attribute:
+   <html data-workrail-interactive>
+
+Effects:
+- Rails shift and fade when cursor passes over them
+- Nodes pulse larger when cursor is nearby
+- Particles brighten and grow near cursor
+- 150px detection radius (configurable)
+*/
+
+/* ============================================
+   ADAPTIVE INTENSITY MODES
+   ============================================ */
+
+/**
+ * Subtle Mode - For dashboards and focus-heavy pages
+ * 
+ * Goals:
+ * - Maintain brand identity
+ * - Avoid distracting from data visualization
+ * - Reduce animation intensity
+ * - Lower opacity for ambient presence
+ * 
+ * Usage:
+ *   <html data-bg-intensity="subtle">
+ */
+[data-bg-intensity="subtle"] .bg-orbs circle,
+[data-bg-intensity="subtle"] .bg-orb {
+  opacity: 0.25 !important; /* Visible but gentle orbs */
+  filter: blur(90px); /* More diffuse */
+}
+
+[data-bg-intensity="subtle"] .rail-path {
+  opacity: 0.12 !important; /* Subtle but visible rails */
+}
+
+[data-bg-intensity="subtle"] .rail-path path {
+  opacity: 0.35 !important;
+  stroke-width: 0.5; /* Thinner for subtlety */
+}
+
+[data-bg-intensity="subtle"] .workflow-node {
+  opacity: 0.3 !important; /* Visible nodes */
+  animation: pulse-subtle 4s ease-in-out infinite; /* Slower pulse */
+}
+
+[data-bg-intensity="subtle"] .particle {
+  opacity: 0.4 !important; /* Visible particles */
+  animation-duration: 25s; /* Slower movement */
+}
+
+[data-bg-intensity="subtle"] .bg-grain {
+  opacity: 0.015 !important; /* Very subtle grain */
+}
+
+/* Subtle pulse animation (slower, gentler) */
+@keyframes pulse-subtle {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.3;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 0.45;
+  }
+}
+
+/**
+ * Minimal Mode - For ultra-clean pages (optional)
+ * 
+ * Usage:
+ *   <html data-bg-intensity="minimal">
+ */
+[data-bg-intensity="minimal"] .bg-orbs,
+[data-bg-intensity="minimal"] .bg-rails,
+[data-bg-intensity="minimal"] .workflow-node,
+[data-bg-intensity="minimal"] #particle-container,
+[data-bg-intensity="minimal"] .bg-grain {
+  display: none !important; /* No background effects at all */
+}
+

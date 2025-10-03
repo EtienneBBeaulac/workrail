@@ -17,7 +17,10 @@
     "release": "bash -c './scripts/release.sh'",
     "dev": "npm run build && node dist/mcp-server.js",
     "prepare": "npm run build",
+    "postinstall": "bash scripts/setup-hooks.sh",
     "watch": "tsc --watch",
+    "validate:workflows": "bash scripts/validate-workflows.sh",
+    "precommit": "npm run validate:workflows",
     "preinstall": "node -e \"const v=parseInt(process.versions.node.split('.') [0],10); if(v<20){console.error('WorkRail requires Node.js >=20. Current: '+process.versions.node+'\\nPlease upgrade: https://nodejs.org/'); process.exit(1);}\""
   },
   "dependencies": {

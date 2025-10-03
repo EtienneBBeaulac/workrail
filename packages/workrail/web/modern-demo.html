@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workrail UI v2.0 - Modern Component System</title>
+    
+    <!-- 🎯 Design Tokens (Shared CSS Variables) -->
+    <link rel="stylesheet" href="/assets/styles/tokens.css">
+    
+    <!-- 🎯 Web Components (ES Modules) -->
+    <script type="module">
+        import '/assets/components/index.js';
+    </script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <style>
+        /* Demo-specific styles only */
+        .demo-header {
+            background: var(--gradient-primary);
+            color: white;
+            padding: var(--space-6) var(--space-8);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .demo-header h1 {
+            margin: 0;
+            font-size: var(--text-3xl);
+            font-weight: var(--font-bold);
+        }
+        
+        .demo-section {
+            margin-bottom: var(--space-xl);
+        }
+        
+        .demo-section h2 {
+            font-size: var(--text-2xl);
+            font-weight: var(--font-semibold);
+            margin-bottom: var(--space-6);
+            color: var(--text-primary);
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: var(--space-6);
+        }
+        
+        .stack {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-4);
+        }
+        
+        .button-group {
+            display: flex;
+            gap: var(--space-4);
+            flex-wrap: wrap;
+        }
+        
+        .success-banner {
+            background: var(--gradient-forest);
+            color: white;
+            padding: var(--space-6);
+            border-radius: var(--radius-lg);
+            text-align: center;
+            margin-bottom: var(--space-8);
+            box-shadow: var(--shadow-lg);
+        }
+        
+        .success-banner h2 {
+            margin: 0 0 var(--space-2) 0;
+            color: white;
+        }
+        
+        .code-block {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-md);
+            padding: var(--space-4);
+            font-family: var(--font-mono);
+            font-size: var(--text-sm);
+            overflow-x: auto;
+            color: var(--text-secondary);
+        }
+    </style>
+</head>
+<body>
+    
+    <!-- 🎯 Using Web Component for Layout -->
+    <wr-dashboard-layout max-width="1400px">
+        
+        <!-- Header Slot -->
+        <div slot="header" class="demo-header">
+            <h1>🚀 Workrail UI v2.0</h1>
+            <div id="theme-toggle-container"></div>
+        </div>
+        
+        <!-- Main Content Slot -->
+        <div slot="main">
+            
+            <!-- Success Banner -->
+            <div class="success-banner">
+                <h2>✅ Modern Component System Active</h2>
+                <p>ES Modules + Web Components + Design Tokens = Zero Bugs</p>
+            </div>
+            
+            <!-- Section 1: Basic Components -->
+            <div class="demo-section">
+                <h2>1. Web Components (Custom Elements)</h2>
+                
+                <div class="grid">
+                    <!-- 🎯 Using <wr-card> Web Component -->
+                    <wr-card title="Card Component" variant="glass">
+                        <p>This is a Web Component with Shadow DOM.</p>
+                        <p>Styles are scoped and can't conflict!</p>
+                    </wr-card>
+                    
+                    <wr-card title="With Border" variant="elevated" border-color="#10b981">
+                        <p>Left border automatically applied.</p>
+                        <p>All design tokens available via CSS variables.</p>
+                    </wr-card>
+                    
+                    <wr-card title="Expandable Card" variant="bordered" expandable>
+                        <p>Click the header to collapse this card.</p>
+                        <p>Smooth animations built-in.</p>
+                        <p>Works in both light and dark mode.</p>
+                    </wr-card>
+                </div>
+            </div>
+            
+            <!-- Section 2: Buttons -->
+            <div class="demo-section">
+                <h2>2. Button Components</h2>
+                
+                <div class="button-group">
+                    <!-- 🎯 Using <wr-button> Web Component -->
+                    <wr-button variant="primary" icon="rocket">
+                        Primary
+                    </wr-button>
+                    
+                    <wr-button variant="secondary" icon="settings">
+                        Secondary
+                    </wr-button>
+                    
+                    <wr-button variant="ghost" icon="x">
+                        Ghost
+                    </wr-button>
+                    
+                    <wr-button variant="danger" icon="trash">
+                        Danger
+                    </wr-button>
+                    
+                    <wr-button variant="success" icon="check">
+                        Success
+                    </wr-button>
+                </div>
+                
+                <div class="button-group" style="margin-top: var(--space-4);">
+                    <wr-button variant="primary" size="sm" icon="zap">
+                        Small
+                    </wr-button>
+                    
+                    <wr-button variant="primary" size="md" icon="zap">
+                        Medium
+                    </wr-button>
+                    
+                    <wr-button variant="primary" size="lg" icon="zap">
+                        Large
+                    </wr-button>
+                    
+                    <wr-button variant="primary" loading>
+                        Loading...
+                    </wr-button>
+                    
+                    <wr-button variant="primary" disabled icon="lock">
+                        Disabled
+                    </wr-button>
+                </div>
+            </div>
+            
+            <!-- Section 3: How It Works -->
+            <div class="demo-section">
+                <h2>3. How It Works</h2>
+                
+                <wr-card title="Component Structure" variant="glass">
+                    <h3 style="margin-top: 0;">File Organization:</h3>
+                    <pre class="code-block">/assets/
+  styles/
+    tokens.css          ← Design tokens only
+  components/
+    index.js            ← Main export
+    base.js             ← Base class & utilities
+    Card.js             ← Card component
+    Button.js           ← Button component
+    DashboardLayout.js  ← Layout component</pre>
+                    
+                    <h3>Usage (Simple HTML):</h3>
+                    <pre class="code-block">&lt;!-- Import components --&gt;
+&lt;script type="module"&gt;
+  import '/assets/components/index.js';
+&lt;/script&gt;
+
+&lt;!-- Use them in HTML --&gt;
+&lt;wr-card title="My Card" variant="glass"&gt;
+  Content here
+&lt;/wr-card&gt;
+
+&lt;wr-button variant="primary" icon="rocket"&gt;
+  Click Me
+&lt;/wr-button&gt;</pre>
+                </wr-card>
+            </div>
+            
+            <!-- Section 4: Benefits -->
+            <div class="demo-section">
+                <h2>4. Benefits</h2>
+                
+                <div class="grid">
+                    <wr-card title="✅ No Build Step" variant="elevated" border-color="#10b981">
+                        <p>ES Modules work natively in browsers.</p>
+                        <p>No Webpack, Vite, or bundler required.</p>
+                    </wr-card>
+                    
+                    <wr-card title="✅ True Isolation" variant="elevated" border-color="#3b82f6">
+                        <p>Shadow DOM scopes styles.</p>
+                        <p>CSS can't conflict between components.</p>
+                    </wr-card>
+                    
+                    <wr-card title="✅ Tree Shaking" variant="elevated" border-color="#8b5cf6">
+                        <p>Browser only loads what you import.</p>
+                        <p>Unused components aren't downloaded.</p>
+                    </wr-card>
+                    
+                    <wr-card title="✅ Framework Agnostic" variant="elevated" border-color="#f59e0b">
+                        <p>Web Components are a standard.</p>
+                        <p>Works with any framework or none.</p>
+                    </wr-card>
+                    
+                    <wr-card title="✅ Easy Debugging" variant="elevated" border-color="#ec4899">
+                        <p>Each component is self-contained.</p>
+                        <p>One file per component.</p>
+                    </wr-card>
+                    
+                    <wr-card title="✅ Future Proof" variant="elevated" border-color="#06b6d4">
+                        <p>Native browser API.</p>
+                        <p>Will work forever.</p>
+                    </wr-card>
+                </div>
+            </div>
+            
+            <!-- Section 5: Layout Components -->
+            <div class="demo-section">
+                <h2>5. Layout Components (Grid & Stack)</h2>
+                
+                <h3 style="margin-bottom: var(--space-4);">Grid Layout:</h3>
+                <wr-grid columns="3" gap="lg">
+                    <wr-card variant="glass">
+                        <p>Grid Item 1</p>
+                    </wr-card>
+                    <wr-card variant="glass">
+                        <p>Grid Item 2</p>
+                    </wr-card>
+                    <wr-card variant="glass">
+                        <p>Grid Item 3</p>
+                    </wr-card>
+                </wr-grid>
+                
+                <h3 style="margin: var(--space-8) 0 var(--space-4) 0;">Stack Layout:</h3>
+                <wr-stack direction="horizontal" gap="md">
+                    <wr-badge variant="success">Success</wr-badge>
+                    <wr-badge variant="warning" pulse>Warning</wr-badge>
+                    <wr-badge variant="error">Error</wr-badge>
+                    <wr-badge variant="info" icon="info">Info</wr-badge>
+                </wr-stack>
+            </div>
+            
+            <!-- Section 6: Data Display Components -->
+            <div class="demo-section">
+                <h2>6. Data Display Components</h2>
+                
+                <h3 style="margin-bottom: var(--space-4);">Stat Cards:</h3>
+                <wr-grid columns="3" gap="lg">
+                    <wr-stat-card 
+                        label="Progress" 
+                        value="75%" 
+                        icon="trending-up" 
+                        trend="+15%"
+                        variant="success">
+                    </wr-stat-card>
+                    
+                    <wr-stat-card 
+                        label="Confidence" 
+                        value="9.5/10" 
+                        icon="target"
+                        variant="default">
+                    </wr-stat-card>
+                    
+                    <wr-stat-card 
+                        label="Phase" 
+                        value="6" 
+                        icon="zap"
+                        trend="Complete"
+                        variant="success">
+                    </wr-stat-card>
+                </wr-grid>
+                
+                <h3 style="margin: var(--space-8) 0 var(--space-4) 0;">Progress Rings:</h3>
+                <wr-stack direction="horizontal" gap="xl" align="center">
+                    <wr-progress-ring value="25" size="sm" show-value variant="warning"></wr-progress-ring>
+                    <wr-progress-ring value="50" size="md" show-value variant="primary"></wr-progress-ring>
+                    <wr-progress-ring value="75" size="lg" show-value variant="success"></wr-progress-ring>
+                    <wr-progress-ring value="100" size="lg" show-value variant="success"></wr-progress-ring>
+                </wr-stack>
+                
+                <h3 style="margin: var(--space-8) 0 var(--space-4) 0;">Badges:</h3>
+                <wr-stack direction="horizontal" gap="md" style="flex-wrap: wrap;">
+                    <wr-badge variant="success" icon="check">Complete</wr-badge>
+                    <wr-badge variant="warning" icon="clock" pulse>In Progress</wr-badge>
+                    <wr-badge variant="error" icon="x">Error</wr-badge>
+                    <wr-badge variant="info" icon="info">Info</wr-badge>
+                    <wr-badge variant="neutral">Neutral</wr-badge>
+                    <wr-badge variant="success" size="sm">Small</wr-badge>
+                    <wr-badge variant="warning" size="lg">Large</wr-badge>
+                </wr-stack>
+            </div>
+            
+            <!-- Section 7: Next Steps -->
+            <div class="demo-section">
+                <h2>7. What's Next</h2>
+                
+                <wr-card title="Roadmap" variant="glass">
+                    <div class="stack">
+                        <div>✅ <strong>Phase 1:</strong> Base components (Card, Button, DashboardLayout)</div>
+                        <div>✅ <strong>Phase 2:</strong> Data display (StatCard, Badge, ProgressRing, Grid, Stack)</div>
+                        <div>⏳ <strong>Phase 3:</strong> Interactive (Modal, Dropdown, Toast, Tabs)</div>
+                        <div>⏳ <strong>Phase 4:</strong> Dashboard scaffold system</div>
+                        <div>⏳ <strong>Phase 5:</strong> Migrate existing dashboards</div>
+                    </div>
+                </wr-card>
+            </div>
+            
+        </div>
+        
+        <!-- Footer Slot -->
+        <div slot="footer">
+            Workrail UI v2.0 - Modern Component System
+        </div>
+        
+    </wr-dashboard-layout>
+    
+    <script>
+        // Initialize Lucide icons
+        if (typeof lucide !== 'undefined') {
+            lucide.createIcons();
+        }
+        
+        // Log info
+        console.log('%c🎯 Modern Component System Demo', 'color: #8b5cf6; font-weight: bold; font-size: 16px;');
+        console.log('Components loaded as ES Modules with Web Components');
+        console.log('Check out the source code to see how simple it is!');
+    </script>
+</body>
+</html>
+

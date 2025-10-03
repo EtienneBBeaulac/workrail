@@ -1,0 +1,247 @@
+<!-- 
+  SVG Orbs - High Quality, No Banding
+  
+  This creates the same orb effect but using SVG filters instead of CSS gradients.
+  Much smoother rendering with no visible banding.
+  
+  Usage: Include this SVG inline in your HTML, positioned fixed with z-index: -3
+-->
+
+<svg class="bg-orbs-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <!-- Define the blur filter -->
+    <filter id="orb-blur" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="8"/>
+    </filter>
+    
+    <!-- Dark mode blur (slightly stronger) -->
+    <filter id="orb-blur-dark" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="10"/>
+    </filter>
+  </defs>
+  
+  <!-- Light mode orbs -->
+  <g class="orbs-light">
+    <!-- Orb 1: Cyan - Top Left -->
+    <circle cx="15" cy="15" r="20" fill="rgba(6, 182, 212, 0.3)" filter="url(#orb-blur)">
+      <animate attributeName="cx" values="15;18;12;15" dur="20s" repeatCount="indefinite"/>
+      <animate attributeName="cy" values="15;18;12;15" dur="20s" repeatCount="indefinite"/>
+    </circle>
+    
+    <!-- Orb 2: Purple - Top Right -->
+    <circle cx="85" cy="10" r="25" fill="rgba(139, 92, 246, 0.3)" filter="url(#orb-blur)">
+      <animate attributeName="cx" values="85;82;88;85" dur="25s" repeatCount="indefinite"/>
+      <animate attributeName="cy" values="10;13;7;10" dur="25s" repeatCount="indefinite"/>
+    </circle>
+    
+    <!-- Orb 3: Pink - Bottom Left -->
+    <circle cx="20" cy="85" r="22" fill="rgba(236, 72, 153, 0.3)" filter="url(#orb-blur)">
+      <animate attributeName="cx" values="20;17;23;20" dur="22s" repeatCount="indefinite"/>
+      <animate attributeName="cy" values="85;82;88;85" dur="22s" repeatCount="indefinite"/>
+    </circle>
+    
+    <!-- Orb 4: Orange - Bottom Right -->
+    <circle cx="85" cy="80" r="18" fill="rgba(249, 115, 22, 0.3)" filter="url(#orb-blur)">
+      <animate attributeName="cx" values="85;88;82;85" dur="18s" repeatCount="indefinite"/>
+      <animate attributeName="cy" values="80;83;77;80" dur="18s" repeatCount="indefinite"/>
+    </circle>
+    
+    <!-- Orb 5: Green - Center -->
+    <circle cx="50" cy="50" r="16" fill="rgba(16, 185, 129, 0.25)" filter="url(#orb-blur)">
+      <animate attributeName="cx" values="50;53;47;50" dur="28s" repeatCount="indefinite"/>
+      <animate attributeName="cy" values="50;47;53;50" dur="28s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+  
+  <!-- Dark mode orbs (hidden by default, shown via CSS) -->
+  <g class="orbs-dark" style="display: none;">
+    <!-- Same positions but lower opacity and stronger blur -->
+    <circle cx="15" cy="15" r="20" fill="rgba(6, 182, 212, 0.15)" filter="url(#orb-blur-dark)">
+      <animate attributeName="cx" values="15;18;12;15" dur="20s" repeatCount="indefinite"/>
+      <animate attributeName="cy" values="15;18;12;15" dur="20s" repeatCount="indefinite"/>
+    </circle>
+    
+    <circle cx="85" cy="10" r="25" fill="rgba(139, 92, 246, 0.18)" filter="url(#orb-blur-dark)">
+      <animate attributeName="cx" values="85;82;88;85" dur="25s" repeatCount="indefinite"/>
+      <animate attributeName="cy" values="10;13;7;10" dur="25s" repeatCount="indefinite"/>
+    </circle>
+    
+    <circle cx="20" cy="85" r="22" fill="rgba(236, 72, 153, 0.15)" filter="url(#orb-blur-dark)">
+      <animate attributeName="cx" values="20;17;23;20" dur="22s" repeatCount="indefinite"/>
+      <animate attributeName="cy" values="85;82;88;85" dur="22s" repeatCount="indefinite"/>
+    </circle>
+    
+    <circle cx="85" cy="80" r="18" fill="rgba(249, 115, 22, 0.14)" filter="url(#orb-blur-dark)">
+      <animate attributeName="cx" values="85;88;82;85" dur="18s" repeatCount="indefinite"/>
+      <animate attributeName="cy" values="80;83;77;80" dur="18s" repeatCount="indefinite"/>
+    </circle>
+    
+    <circle cx="50" cy="50" r="16" fill="rgba(16, 185, 129, 0.13)" filter="url(#orb-blur-dark)">
+      <animate attributeName="cx" values="50;53;47;50" dur="28s" repeatCount="indefinite"/>
+      <animate attributeName="cy" values="50;47;53;50" dur="28s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+</svg>
+
+<style>
+/* SVG Orbs styling */
+.bg-orbs-svg {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -3;
+  pointer-events: none;
+}
+
+/* Show/hide based on theme */
+:root:not([data-theme="dark"]) .orbs-dark {
+  display: none !important;
+}
+
+:root:not([data-theme="dark"]) .orbs-light {
+  display: block !important;
+}
+
+[data-theme="dark"] .orbs-light {
+  display: none !important;
+}
+
+[data-theme="dark"] .orbs-dark {
+  display: block !important;
+}
+
+/* Disable for reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .bg-orbs-svg circle animate {
+    display: none;
+  }
+}
+</style>
+
+
+
+  SVG Orbs - High Quality, No Banding
+  
+  This creates the same orb effect but using SVG filters instead of CSS gradients.
+  Much smoother rendering with no visible banding.
+  
+  Usage: Include this SVG inline in your HTML, positioned fixed with z-index: -3
+-->
+
+<svg class="bg-orbs-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <!-- Define the blur filter -->
+    <filter id="orb-blur" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="8"/>
+    </filter>
+    
+    <!-- Dark mode blur (slightly stronger) -->
+    <filter id="orb-blur-dark" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="10"/>
+    </filter>
+  </defs>
+  
+  <!-- Light mode orbs -->
+  <g class="orbs-light">
+    <!-- Orb 1: Cyan - Top Left -->
+    <circle cx="15" cy="15" r="20" fill="rgba(6, 182, 212, 0.3)" filter="url(#orb-blur)">
+      <animate attributeName="cx" values="15;18;12;15" dur="20s" repeatCount="indefinite"/>
+      <animate attributeName="cy" values="15;18;12;15" dur="20s" repeatCount="indefinite"/>
+    </circle>
+    
+    <!-- Orb 2: Purple - Top Right -->
+    <circle cx="85" cy="10" r="25" fill="rgba(139, 92, 246, 0.3)" filter="url(#orb-blur)">
+      <animate attributeName="cx" values="85;82;88;85" dur="25s" repeatCount="indefinite"/>
+      <animate attributeName="cy" values="10;13;7;10" dur="25s" repeatCount="indefinite"/>
+    </circle>
+    
+    <!-- Orb 3: Pink - Bottom Left -->
+    <circle cx="20" cy="85" r="22" fill="rgba(236, 72, 153, 0.3)" filter="url(#orb-blur)">
+      <animate attributeName="cx" values="20;17;23;20" dur="22s" repeatCount="indefinite"/>
+      <animate attributeName="cy" values="85;82;88;85" dur="22s" repeatCount="indefinite"/>
+    </circle>
+    
+    <!-- Orb 4: Orange - Bottom Right -->
+    <circle cx="85" cy="80" r="18" fill="rgba(249, 115, 22, 0.3)" filter="url(#orb-blur)">
+      <animate attributeName="cx" values="85;88;82;85" dur="18s" repeatCount="indefinite"/>
+      <animate attributeName="cy" values="80;83;77;80" dur="18s" repeatCount="indefinite"/>
+    </circle>
+    
+    <!-- Orb 5: Green - Center -->
+    <circle cx="50" cy="50" r="16" fill="rgba(16, 185, 129, 0.25)" filter="url(#orb-blur)">
+      <animate attributeName="cx" values="50;53;47;50" dur="28s" repeatCount="indefinite"/>
+      <animate attributeName="cy" values="50;47;53;50" dur="28s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+  
+  <!-- Dark mode orbs (hidden by default, shown via CSS) -->
+  <g class="orbs-dark" style="display: none;">
+    <!-- Same positions but lower opacity and stronger blur -->
+    <circle cx="15" cy="15" r="20" fill="rgba(6, 182, 212, 0.15)" filter="url(#orb-blur-dark)">
+      <animate attributeName="cx" values="15;18;12;15" dur="20s" repeatCount="indefinite"/>
+      <animate attributeName="cy" values="15;18;12;15" dur="20s" repeatCount="indefinite"/>
+    </circle>
+    
+    <circle cx="85" cy="10" r="25" fill="rgba(139, 92, 246, 0.18)" filter="url(#orb-blur-dark)">
+      <animate attributeName="cx" values="85;82;88;85" dur="25s" repeatCount="indefinite"/>
+      <animate attributeName="cy" values="10;13;7;10" dur="25s" repeatCount="indefinite"/>
+    </circle>
+    
+    <circle cx="20" cy="85" r="22" fill="rgba(236, 72, 153, 0.15)" filter="url(#orb-blur-dark)">
+      <animate attributeName="cx" values="20;17;23;20" dur="22s" repeatCount="indefinite"/>
+      <animate attributeName="cy" values="85;82;88;85" dur="22s" repeatCount="indefinite"/>
+    </circle>
+    
+    <circle cx="85" cy="80" r="18" fill="rgba(249, 115, 22, 0.14)" filter="url(#orb-blur-dark)">
+      <animate attributeName="cx" values="85;88;82;85" dur="18s" repeatCount="indefinite"/>
+      <animate attributeName="cy" values="80;83;77;80" dur="18s" repeatCount="indefinite"/>
+    </circle>
+    
+    <circle cx="50" cy="50" r="16" fill="rgba(16, 185, 129, 0.13)" filter="url(#orb-blur-dark)">
+      <animate attributeName="cx" values="50;53;47;50" dur="28s" repeatCount="indefinite"/>
+      <animate attributeName="cy" values="50;47;53;50" dur="28s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+</svg>
+
+<style>
+/* SVG Orbs styling */
+.bg-orbs-svg {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -3;
+  pointer-events: none;
+}
+
+/* Show/hide based on theme */
+:root:not([data-theme="dark"]) .orbs-dark {
+  display: none !important;
+}
+
+:root:not([data-theme="dark"]) .orbs-light {
+  display: block !important;
+}
+
+[data-theme="dark"] .orbs-light {
+  display: none !important;
+}
+
+[data-theme="dark"] .orbs-dark {
+  display: block !important;
+}
+
+/* Disable for reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .bg-orbs-svg circle animate {
+    display: none;
+  }
+}
+</style>
+
+
+

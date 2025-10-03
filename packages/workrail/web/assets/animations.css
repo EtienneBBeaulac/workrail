@@ -1,0 +1,701 @@
+/**
+ * Workrail Animation Library v1.2
+ * Material Expressive Integration - Personality + Polish
+ * 
+ * Animation Tiers:
+ * - Tier 1: Essential (use everywhere)
+ * - Tier 2: Standard (use selectively)
+ * - Tier 3: Special (use rarely)
+ * - Tier 4: Advanced (opt-in only)
+ * 
+ * v1.2 Updates:
+ * - Added Material Expressive spring/bounce animations
+ * - Expressive easing curves for personality
+ * - Enhanced micro-interactions
+ */
+
+/* ============================================
+   MATERIAL EXPRESSIVE: SPRING ANIMATIONS
+   ============================================ */
+
+/* Spring In - Bouncy entrance (Material Expressive style) */
+@keyframes springIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-spring-in {
+  animation: springIn var(--duration-slow) var(--ease-spring);
+}
+
+/* Bounce Scale - Playful button press */
+@keyframes bounceScale {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(0.95);
+  }
+}
+
+.animate-bounce-scale {
+  animation: bounceScale var(--duration-base) var(--ease-bounce);
+}
+
+/* Elastic Pop - Attention-grabbing */
+@keyframes elasticPop {
+  0% {
+    transform: scale(1);
+  }
+  30% {
+    transform: scale(1.25);
+  }
+  40% {
+    transform: scale(0.9);
+  }
+  60% {
+    transform: scale(1.1);
+  }
+  80% {
+    transform: scale(0.98);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.animate-elastic-pop {
+  animation: elasticPop var(--duration-slower) var(--ease-elastic);
+}
+
+/* Spring Slide Up - Bouncy entrance from below */
+@keyframes springSlideUp {
+  0% {
+    opacity: 0;
+    transform: translateY(50px) scale(0.9);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(-10px) scale(1.02);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-spring-slide-up {
+  animation: springSlideUp var(--duration-slower) var(--ease-spring);
+}
+
+/* Jello - Playful wobble (Material Expressive) */
+@keyframes jello {
+  0%, 100% {
+    transform: skewX(0deg) skewY(0deg);
+  }
+  30% {
+    transform: skewX(25deg) skewY(25deg);
+  }
+  40% {
+    transform: skewX(-15deg) skewY(-15deg);
+  }
+  50% {
+    transform: skewX(15deg) skewY(15deg);
+  }
+  65% {
+    transform: skewX(-5deg) skewY(-5deg);
+  }
+  75% {
+    transform: skewX(5deg) skewY(5deg);
+  }
+}
+
+.animate-jello {
+  animation: jello var(--duration-slower) var(--ease-elastic);
+}
+
+/* ============================================
+   TIER 1: ESSENTIAL ANIMATIONS
+   ============================================ */
+
+/* 1. Fade In - New content appearing */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-fade-in {
+  animation: fadeIn var(--duration-base) var(--ease-out);
+}
+
+/* 2. Slide Up Fade - Cards, sections entering */
+@keyframes slideUpFade {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-up-fade {
+  animation: slideUpFade var(--duration-slow) var(--ease-out);
+}
+
+/* 3. Pulse - Live indicators */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.1);
+  }
+}
+
+.animate-pulse {
+  animation: pulse 2s var(--ease-in-out) infinite;
+}
+
+/* 4. Diff Highlight - Changed data */
+@keyframes diffHighlight {
+  0% {
+    background-color: #fef3c7;
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.animate-diff-highlight {
+  animation: diffHighlight 2s var(--ease-out);
+}
+
+/* 5. Shimmer - Loading states */
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.6) 50%,
+    transparent 100%
+  );
+  background-size: 1000px 100%;
+  animation: shimmer 2s infinite;
+}
+
+/* ============================================
+   TIER 2: STANDARD ANIMATIONS
+   ============================================ */
+
+/* 6. Bounce In - Success badges, celebratory elements */
+@keyframes bounceIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  70% {
+    transform: scale(0.9);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-bounce-in {
+  animation: bounceIn 0.6s var(--ease-bounce);
+}
+
+/* 7. Scale In - Modals, popovers */
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-scale-in {
+  animation: scaleIn var(--duration-base) var(--ease-out);
+}
+
+/* 8. Float - Decorative cards, ambient motion */
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+.animate-float {
+  animation: float 6s var(--ease-in-out) infinite;
+}
+
+/* 9. Count Up - Numbers (applied via JavaScript) */
+/* See design-system docs for JavaScript implementation */
+
+/* 10. Progress Fill - Progress bars */
+@keyframes progressFill {
+  from {
+    width: 0%;
+  }
+}
+
+.animate-progress-fill {
+  animation: progressFill 1s var(--ease-out) forwards;
+}
+
+/* ============================================
+   TIER 3: SPECIAL ANIMATIONS
+   ============================================ */
+
+/* 11. Confetti Fall - Major achievements */
+@keyframes confettiFall {
+  to {
+    transform: translateY(100vh) rotate(720deg);
+    opacity: 0;
+  }
+}
+
+.confetti {
+  position: fixed;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  top: -10px;
+  z-index: 9999;
+  animation: confettiFall 3s var(--ease-in) forwards;
+}
+
+/* 12. Success Ripple - High confidence results */
+@keyframes successRipple {
+  0% {
+    transform: scale(0);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(4);
+    opacity: 0;
+  }
+}
+
+.animate-success-ripple::after {
+  content: '';
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: rgba(16, 185, 129, 0.5);
+  animation: successRipple 0.6s var(--ease-out);
+}
+
+/* 13. Wiggle - Errors, attention needed */
+@keyframes wiggle {
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-5deg);
+  }
+  75% {
+    transform: rotate(5deg);
+  }
+}
+
+.animate-wiggle {
+  animation: wiggle 0.5s var(--ease-in-out);
+}
+
+/* 14. Glow Pulse - Critical alerts, emphasis */
+@keyframes glowPulse {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(139, 92, 246, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 40px rgba(139, 92, 246, 0.6);
+  }
+}
+
+.animate-glow-pulse {
+  animation: glowPulse 2s var(--ease-in-out) infinite;
+}
+
+/* ============================================
+   TIER 4: ADVANCED ANIMATIONS
+   ============================================ */
+
+/* 15. Gradient Shift - Active states, hero sections */
+@keyframes gradientShift {
+  0%, 100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+.animate-gradient-shift {
+  background-size: 200% 200%;
+  animation: gradientShift 8s var(--ease-in-out) infinite;
+}
+
+/* 16. 3D Transform - Showcase elements only */
+.animate-3d-hover {
+  transform-style: preserve-3d;
+  transition: transform var(--duration-slow) var(--ease-out);
+}
+
+.animate-3d-hover:hover {
+  transform: 
+    perspective(1000px)
+    rotateX(2deg) 
+    rotateY(2deg) 
+    translateZ(10px);
+}
+
+/* ============================================
+   ADDITIONAL USEFUL ANIMATIONS
+   ============================================ */
+
+/* Breathe - Subtle attention, active elements */
+@keyframes breathe {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+.animate-breathe {
+  animation: breathe 3s var(--ease-in-out) infinite;
+}
+
+/* Spin - Loading, refresh */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+/* Card Flash - Attention, navigation target */
+@keyframes cardFlash {
+  0%, 100% { 
+    outline: 0px solid transparent;
+    outline-offset: 0px;
+  }
+  10%, 30% { 
+    outline: 3px solid var(--primary-500);
+    outline-offset: 2px;
+  }
+}
+
+.animate-card-flash {
+  animation: cardFlash 2s var(--ease-out);
+}
+
+/* Success Glow - Subtle celebrations */
+@keyframes successGlow {
+  0%, 100% {
+    box-shadow: 0 0 0 rgba(16, 185, 129, 0);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(16, 185, 129, 0.5);
+  }
+}
+
+.animate-success-glow {
+  animation: successGlow 1s var(--ease-out);
+}
+
+/* Screen Shimmer - Major celebrations */
+@keyframes screenShimmer {
+  0% {
+    background-position: -100% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.celebration-major::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(139, 92, 246, 0.1) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: screenShimmer 1s var(--ease-out);
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* Fade Out Up - Toast notifications */
+@keyframes fadeOutUp {
+  0% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+}
+
+.animate-fade-out-up {
+  animation: fadeOutUp 1s var(--ease-out) forwards;
+}
+
+/* Slide In Stagger - Menu items */
+@keyframes slideInStagger {
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-in-stagger {
+  opacity: 0;
+  transform: translateX(-10px);
+  animation: slideInStagger 0.3s var(--ease-out) forwards;
+}
+
+/* Icon Bounce - Interactive feedback */
+@keyframes iconBounce {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.2);
+  }
+}
+
+.animate-icon-bounce {
+  animation: iconBounce 0.6s var(--ease-bounce);
+}
+
+/* Icon Pulse - Active, live states */
+@keyframes iconPulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.1);
+  }
+}
+
+.animate-icon-pulse {
+  animation: iconPulse 2s var(--ease-in-out) infinite;
+}
+
+/* Icon Wiggle - Error states */
+@keyframes iconWiggle {
+  0%, 100% {
+    transform: rotate(0);
+  }
+  25% {
+    transform: rotate(-10deg);
+  }
+  75% {
+    transform: rotate(10deg);
+  }
+}
+
+.animate-icon-wiggle {
+  animation: iconWiggle 0.5s var(--ease-in-out);
+}
+
+/* ============================================
+   ANIMATION DELAY UTILITIES
+   ============================================ */
+
+.delay-100 { animation-delay: 0.1s; }
+.delay-200 { animation-delay: 0.2s; }
+.delay-300 { animation-delay: 0.3s; }
+.delay-500 { animation-delay: 0.5s; }
+.delay-1000 { animation-delay: 1s; }
+
+/* ============================================
+   ANIMATION DURATION UTILITIES
+   ============================================ */
+
+.duration-fast { animation-duration: var(--duration-fast); }
+.duration-base { animation-duration: var(--duration-base); }
+.duration-slow { animation-duration: var(--duration-slow); }
+.duration-slower { animation-duration: var(--duration-slower); }
+
+/* ============================================
+   SPECIAL: VALUE UPDATED (FOR DATA CHANGES)
+   ============================================ */
+
+.value-updated {
+  animation: diffHighlight 1.5s var(--ease-out);
+}
+
+/* ============================================
+   SPECIAL: NEW SECTION (FOR CARDS ENTERING)
+   ============================================ */
+
+.new-section {
+  animation: slideUpFade 0.5s var(--ease-out);
+}
+
+/* Mark as animated after completion */
+.new-section[data-animated="true"] {
+  animation: none;
+}
+
+
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+}
+
+.animate-fade-out-up {
+  animation: fadeOutUp 1s var(--ease-out) forwards;
+}
+
+/* Slide In Stagger - Menu items */
+@keyframes slideInStagger {
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-in-stagger {
+  opacity: 0;
+  transform: translateX(-10px);
+  animation: slideInStagger 0.3s var(--ease-out) forwards;
+}
+
+/* Icon Bounce - Interactive feedback */
+@keyframes iconBounce {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.2);
+  }
+}
+
+.animate-icon-bounce {
+  animation: iconBounce 0.6s var(--ease-bounce);
+}
+
+/* Icon Pulse - Active, live states */
+@keyframes iconPulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.1);
+  }
+}
+
+.animate-icon-pulse {
+  animation: iconPulse 2s var(--ease-in-out) infinite;
+}
+
+/* Icon Wiggle - Error states */
+@keyframes iconWiggle {
+  0%, 100% {
+    transform: rotate(0);
+  }
+  25% {
+    transform: rotate(-10deg);
+  }
+  75% {
+    transform: rotate(10deg);
+  }
+}
+
+.animate-icon-wiggle {
+  animation: iconWiggle 0.5s var(--ease-in-out);
+}
+
+/* ============================================
+   ANIMATION DELAY UTILITIES
+   ============================================ */
+
+.delay-100 { animation-delay: 0.1s; }
+.delay-200 { animation-delay: 0.2s; }
+.delay-300 { animation-delay: 0.3s; }
+.delay-500 { animation-delay: 0.5s; }
+.delay-1000 { animation-delay: 1s; }
+
+/* ============================================
+   ANIMATION DURATION UTILITIES
+   ============================================ */
+
+.duration-fast { animation-duration: var(--duration-fast); }
+.duration-base { animation-duration: var(--duration-base); }
+.duration-slow { animation-duration: var(--duration-slow); }
+.duration-slower { animation-duration: var(--duration-slower); }
+
+/* ============================================
+   SPECIAL: VALUE UPDATED (FOR DATA CHANGES)
+   ============================================ */
+
+.value-updated {
+  animation: diffHighlight 1.5s var(--ease-out);
+}
+
+/* ============================================
+   SPECIAL: NEW SECTION (FOR CARDS ENTERING)
+   ============================================ */
+
+.new-section {
+  animation: slideUpFade 0.5s var(--ease-out);
+}
+
+/* Mark as animated after completion */
+.new-section[data-animated="true"] {
+  animation: none;
+}
+

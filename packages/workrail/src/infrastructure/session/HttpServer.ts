@@ -76,7 +76,9 @@ export class HttpServer {
   private setupRoutes(): void {
     // Serve static dashboard UI from web directory
     const webDir = path.join(__dirname, '../../../web');
-    this.app.use('/web', express.static(webDir));
+    
+    // Serve all static files from web root
+    this.app.use(express.static(webDir));
     
     // Dashboard home page
     this.app.get('/', async (req: Request, res: Response) => {
@@ -104,7 +106,11 @@ export class HttpServer {
             workflowId: s.workflowId,
             createdAt: s.createdAt,
             updatedAt: s.updatedAt,
-            url: `/api/sessions/${s.workflowId}/${s.id}`
+            url: `/api/sessions/${s.workflowId}/${s.id}`,
+            // Include dashboard summary for preview cards
+            data: {
+              dashboard: s.data?.dashboard || {}
+            }
           }))
         });
       } catch (error: any) {
@@ -175,6 +181,103 @@ export class HttpServer {
           success: false,
           error: 'Failed to list projects',
           message: error.message
+        });
+      }
+    });
+    
+    // SSE: Stream session updates in real-time
+    this.app.get('/api/sessions/:workflow/:id/stream', async (req: Request, res: Response) => {
+      const { workflow, id } = req.params;
+      
+      // Set SSE headers
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+      
+      // Send initial connection message
+      res.write(`data: ${JSON.stringify({ type: 'connected', workflowId: workflow, sessionId: id })}\n\n`);
+      
+      // Send current session state immediately
+      try {
+        const session = await this.sessionManager.getSession(workflow, id);
+        if (session) {
+          res.write(`data: ${JSON.stringify({ type: 'update', session })}\n\n`);
+        }
+      } catch (error) {
+        // Session might not exist yet
+      }
+      
+      // Listen for session updates
+      const onUpdate = (event: { workflowId: string; sessionId: string; session: any }) => {
+        if (event.workflowId === workflow && event.sessionId === id) {
+          // Send update to client
+          res.write(`data: ${JSON.stringify({ type: 'update', session: event.session })}\n\n`);
+        }
+      };
+      
+      this.sessionManager.on('session:updated', onUpdate);
+      
+      // Start watching this session
+      this.sessionManager.watchSession(workflow, id);
+      
+      // Send keepalive every 30 seconds
+      const keepalive = setInterval(() => {
+        res.write(`:keepalive\n\n`);
+      }, 30000);
+      
+      // Cleanup on client disconnect
+      req.on('close', () => {
+        this.sessionManager.off('session:updated', onUpdate);
+        clearInterval(keepalive);
+        res.end();
+      });
+    });
+    
+    // Delete a single session
+    this.app.delete('/api/sessions/:workflow/:id', async (req: Request, res: Response) => {
+      try {
+        const { workflow, id } = req.params;
+        
+        await this.sessionManager.deleteSession(workflow, id);
+        
+        res.json({
+          success: true,
+          message: `Session ${workflow}/${id} deleted successfully`
+        });
+      } catch (error: any) {
+        console.error('[HttpServer] Delete session error:', error);
+        res.status(error.message?.includes('not found') ? 404 : 500).json({
+          success: false,
+          error: error.message || 'Failed to delete session'
+        });
+      }
+    });
+    
+    // Bulk delete sessions
+    this.app.post('/api/sessions/bulk-delete', async (req: Request, res: Response) => {
+      try {
+        const { sessions } = req.body;
+        
+        if (!Array.isArray(sessions)) {
+          return res.status(400).json({
+            success: false,
+            error: 'Body must contain "sessions" array'
+          });
+        }
+        
+        await this.sessionManager.deleteSessions(sessions);
+        
+        res.json({
+          success: true,
+          message: `Deleted ${sessions.length} session(s)`,
+          count: sessions.length
+        });
+      } catch (error: any) {
+        console.error('[HttpServer] Bulk delete error:', error);
+        res.status(500).json({
+          success: false,
+          error: error.message || 'Failed to delete sessions'
         });
       }
     });
@@ -282,6 +385,9 @@ export class HttpServer {
    * Stop the HTTP server
    */
   async stop(): Promise<void> {
+    // Stop all file watchers
+    this.sessionManager.unwatchAll();
+    
     return new Promise((resolve) => {
       if (this.server) {
         this.server.close(() => {

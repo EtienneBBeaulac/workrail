@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Orbs Debug Test</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            background: #f5f5f4;
+            font-family: system-ui;
+        }
+        
+        .bg-orbs {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 0;
+        }
+        
+        .bg-orb {
+            position: absolute;
+            border-radius: 50%;
+        }
+        
+        .test-orb-1 {
+            width: 300px;
+            height: 300px;
+            top: 20%;
+            left: 20%;
+            background: radial-gradient(circle, rgba(6, 182, 212, 0.8), transparent);
+        }
+        
+        .test-orb-2 {
+            width: 400px;
+            height: 400px;
+            top: 40%;
+            right: 20%;
+            background: radial-gradient(circle, rgba(139, 92, 246, 0.8), transparent);
+        }
+        
+        .content {
+            position: relative;
+            z-index: 1;
+            padding: 100px 40px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        
+        .card {
+            background: white;
+            padding: 40px;
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-orbs">
+        <div class="bg-orb test-orb-1"></div>
+        <div class="bg-orb test-orb-2"></div>
+    </div>
+    
+    <div class="content">
+        <div class="card">
+            <h1>🔍 Orbs Debug Test</h1>
+            <p>If you see colored circles behind this card, the orbs are working!</p>
+            <ul>
+                <li>Cyan orb should be visible on the left</li>
+                <li>Purple orb should be visible on the right</li>
+            </ul>
+        </div>
+        
+        <div class="card">
+            <h2>Diagnostics</h2>
+            <p><strong>Background container:</strong> <span id="bg-check"></span></p>
+            <p><strong>Orb 1:</strong> <span id="orb1-check"></span></p>
+            <p><strong>Orb 2:</strong> <span id="orb2-check"></span></p>
+        </div>
+    </div>
+    
+    <script>
+        const bgOrbs = document.querySelector('.bg-orbs');
+        const orb1 = document.querySelector('.test-orb-1');
+        const orb2 = document.querySelector('.test-orb-2');
+        
+        document.getElementById('bg-check').textContent = bgOrbs ? '✅ Found' : '❌ Not found';
+        document.getElementById('orb1-check').textContent = orb1 ? '✅ Found' : '❌ Not found';
+        document.getElementById('orb2-check').textContent = orb2 ? '✅ Found' : '❌ Not found';
+        
+        if (bgOrbs) {
+            const styles = window.getComputedStyle(bgOrbs);
+            console.log('bg-orbs z-index:', styles.zIndex);
+            console.log('bg-orbs position:', styles.position);
+        }
+        
+        if (orb1) {
+            const rect = orb1.getBoundingClientRect();
+            console.log('Orb 1 position:', rect);
+            console.log('Orb 1 computed background:', window.getComputedStyle(orb1).background);
+        }
+    </script>
+</body>
+</html>

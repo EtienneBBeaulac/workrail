@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workrail UI System v2.0 - Test</title>
+    
+    <!-- 🎯 SINGLE IMPORTS (New Unified System) -->
+    <link rel="stylesheet" href="/assets/workrail-ui.css">
+    <script src="/assets/workrail-ui.js"></script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <style>
+        /* Minimal page-specific styles */
+        .test-section {
+            margin-bottom: var(--space-xl);
+        }
+        
+        .test-section h2 {
+            font-size: var(--text-2xl);
+            font-weight: var(--font-bold);
+            margin-bottom: var(--space-6);
+            color: var(--text-primary);
+        }
+        
+        .success-banner {
+            background: linear-gradient(135deg, #10b981 0%, #06b6d4 100%);
+            color: white;
+            padding: var(--space-6);
+            border-radius: var(--radius-lg);
+            text-align: center;
+            margin-bottom: var(--space-8);
+            animation: slideInDown 0.6s var(--ease-spring);
+        }
+        
+        .success-banner h1 {
+            font-size: var(--text-3xl);
+            margin: 0 0 var(--space-2) 0;
+        }
+    </style>
+</head>
+<body>
+    <!-- Background Effects -->
+    <svg class="bg-orbs-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">
+        <defs>
+            <filter id="orb-blur-test" x="-100%" y="-100%" width="300%" height="300%">
+                <feGaussianBlur in="SourceGraphic" stdDeviation="3"/>
+            </filter>
+        </defs>
+        
+        <!-- Light Mode Orbs -->
+        <g class="orbs-light">
+            <circle cx="15" cy="15" r="8" fill="rgba(6, 182, 212, 0.4)" filter="url(#orb-blur-test)">
+                <animate attributeName="cx" values="15;18;12;15" dur="20s" repeatCount="indefinite"/>
+                <animate attributeName="cy" values="15;18;12;15" dur="20s" repeatCount="indefinite"/>
+            </circle>
+            <circle cx="85" cy="10" r="10" fill="rgba(139, 92, 246, 0.4)" filter="url(#orb-blur-test)">
+                <animate attributeName="cx" values="85;82;88;85" dur="25s" repeatCount="indefinite"/>
+                <animate attributeName="cy" values="10;13;7;10" dur="25s" repeatCount="indefinite"/>
+            </circle>
+            <circle cx="20" cy="85" r="9" fill="rgba(236, 72, 153, 0.4)" filter="url(#orb-blur-test)">
+                <animate attributeName="cx" values="20;17;23;20" dur="22s" repeatCount="indefinite"/>
+                <animate attributeName="cy" values="85;82;88;85" dur="22s" repeatCount="indefinite"/>
+            </circle>
+        </g>
+        
+        <!-- Dark Mode Orbs -->
+        <g class="orbs-dark" style="display: none;">
+            <circle cx="15" cy="15" r="8" fill="rgba(6, 182, 212, 0.3)" filter="url(#orb-blur-test)">
+                <animate attributeName="cx" values="15;18;12;15" dur="20s" repeatCount="indefinite"/>
+                <animate attributeName="cy" values="15;18;12;15" dur="20s" repeatCount="indefinite"/>
+            </circle>
+            <circle cx="85" cy="10" r="10" fill="rgba(139, 92, 246, 0.35)" filter="url(#orb-blur-test)">
+                <animate attributeName="cx" values="85;82;88;85" dur="25s" repeatCount="indefinite"/>
+                <animate attributeName="cy" values="10;13;7;10" dur="25s" repeatCount="indefinite"/>
+            </circle>
+            <circle cx="20" cy="85" r="9" fill="rgba(236, 72, 153, 0.3)" filter="url(#orb-blur-test)">
+                <animate attributeName="cx" values="20;17;23;20" dur="22s" repeatCount="indefinite"/>
+                <animate attributeName="cy" values="85;82;88;85" dur="22s" repeatCount="indefinite"/>
+            </circle>
+        </g>
+    </svg>
+    
+    <!-- Page Container (using new layout component class) -->
+    <div class="wr-page-container">
+        
+        <!-- Success Banner -->
+        <div class="success-banner">
+            <h1>✅ Unified System Test</h1>
+            <p>Single CSS + Single JS = Zero Bugs</p>
+        </div>
+        
+        <!-- Test Section 1: Grid Layout -->
+        <div class="test-section">
+            <h2>Grid Layout Component</h2>
+            <div class="wr-grid" style="grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--space-6);">
+                <div class="card card-glass">
+                    <h3>Card 1</h3>
+                    <p>Grid automatically handles responsive layout.</p>
+                </div>
+                <div class="card card-glass">
+                    <h3>Card 2</h3>
+                    <p>Uses design tokens for consistent spacing.</p>
+                </div>
+                <div class="card card-glass">
+                    <h3>Card 3</h3>
+                    <p>No manual CSS needed!</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Test Section 2: Stack Layout -->
+        <div class="test-section">
+            <h2>Stack Layout Component</h2>
+            <div class="wr-stack wr-stack-vertical" style="gap: var(--space-4);">
+                <div class="card">
+                    <p><i data-lucide="check-circle"></i> Stack item 1</p>
+                </div>
+                <div class="card">
+                    <p><i data-lucide="check-circle"></i> Stack item 2</p>
+                </div>
+                <div class="card">
+                    <p><i data-lucide="check-circle"></i> Stack item 3</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Test Section 3: Existing Components -->
+        <div class="test-section">
+            <h2>Existing Components (Working from Unified System)</h2>
+            
+            <!-- Stats Cards -->
+            <div class="wr-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-6); margin-bottom: var(--space-6);">
+                <div class="stat-card stat-card-gradient">
+                    <span class="stat-label">Progress</span>
+                    <span class="stat-value">75%</span>
+                </div>
+                <div class="stat-card stat-card-gradient">
+                    <span class="stat-label">Confidence</span>
+                    <span class="stat-value">9.5/10</span>
+                </div>
+                <div class="stat-card stat-card-gradient">
+                    <span class="stat-label">Phase</span>
+                    <span class="stat-value">6</span>
+                </div>
+            </div>
+            
+            <!-- Buttons -->
+            <div class="wr-stack wr-stack-horizontal" style="gap: var(--space-4); margin-bottom: var(--space-6);">
+                <button class="btn btn-primary btn-spring">
+                    <i data-lucide="rocket"></i> Primary
+                </button>
+                <button class="btn btn-secondary">
+                    <i data-lucide="settings"></i> Secondary
+                </button>
+                <button class="btn btn-ghost">
+                    <i data-lucide="x"></i> Ghost
+                </button>
+            </div>
+            
+            <!-- Status Badges -->
+            <div class="wr-stack wr-stack-horizontal" style="gap: var(--space-3);">
+                <span class="status-badge status-success">Complete</span>
+                <span class="status-badge status-in_progress">In Progress</span>
+                <span class="status-badge status-pending">Pending</span>
+            </div>
+        </div>
+        
+        <!-- Test Section 4: Theme Toggle -->
+        <div class="test-section">
+            <h2>Theme System</h2>
+            <div class="card card-glass">
+                <p>Check the top-right corner for the theme toggle (sun/moon icon).</p>
+                <p>All components automatically adapt to light/dark mode.</p>
+            </div>
+        </div>
+        
+        <!-- Test Section 5: Animations -->
+        <div class="test-section">
+            <h2>Animation System</h2>
+            <div class="wr-grid" style="grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: var(--space-6);">
+                <div class="card" style="animation: fadeInUp 0.6s var(--ease-spring);">
+                    <p><i data-lucide="zap"></i> fadeInUp</p>
+                </div>
+                <div class="card" style="animation: slideInRight 0.6s var(--ease-spring);">
+                    <p><i data-lucide="zap"></i> slideInRight</p>
+                </div>
+                <div class="card card-float">
+                    <p><i data-lucide="zap"></i> card-float (hover me)</p>
+                </div>
+            </div>
+        </div>
+        
+    </div>
+    
+    <script>
+        // Initialize Lucide icons
+        if (typeof lucide !== 'undefined') {
+            lucide.createIcons();
+        }
+        
+        // Log system info
+        console.log('Workrail UI System loaded successfully!');
+        console.log('Version:', WorkrailUI.version);
+        console.log('Components available:', Object.keys(WorkrailUI).filter(k => typeof WorkrailUI[k] === 'function'));
+    </script>
+</body>
+</html>

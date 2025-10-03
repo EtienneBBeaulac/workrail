@@ -1,0 +1,55 @@
+#!/bin/bash
+# Pre-commit hook to validate workflows before committing
+
+# Check if any workflow files are being committed
+WORKFLOW_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep "^workflows/.*\.json$" || true)
+
+if [ -z "$WORKFLOW_FILES" ]; then
+    # No workflow files changed
+    exit 0
+fi
+
+echo "🔍 Validating workflow files before commit..."
+echo ""
+
+# Build if needed (dist/cli.js must exist)
+if [ ! -f "dist/cli.js" ]; then
+    echo "⚙️  Building project first..."
+    npm run build
+fi
+
+FAILED=0
+
+for workflow in $WORKFLOW_FILES; do
+    if [ -f "$workflow" ]; then
+        filename=$(basename "$workflow")
+        
+        if node dist/cli.js validate "$workflow" > /dev/null 2>&1; then
+            echo "✅ $filename"
+        else
+            echo "❌ $filename - FAILED VALIDATION"
+            echo ""
+            node dist/cli.js validate "$workflow"
+            echo ""
+            FAILED=1
+        fi
+    fi
+done
+
+if [ $FAILED -eq 1 ]; then
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "❌ Commit rejected: One or more workflows failed validation"
+    echo ""
+    echo "Fix the validation errors above, then try again."
+    echo "To skip this check (not recommended): git commit --no-verify"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    exit 1
+fi
+
+echo ""
+echo "✅ All workflow files are valid!"
+exit 0
+
+
+

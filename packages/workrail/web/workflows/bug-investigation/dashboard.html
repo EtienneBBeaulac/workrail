@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bug Investigation - Workrail Dashboard</title>
+    <link rel="stylesheet" href="../../assets/styles.css">
+    <link rel="stylesheet" href="./styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Header -->
+        <header class="dashboard-header">
+            <div class="header-content">
+                <h1>🔍 Bug Investigation Dashboard</h1>
+                <div class="header-info">
+                    <span id="sessionId" class="session-badge">Loading...</span>
+                    <span id="lastUpdate" class="update-time">Updated: --</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Status Bar -->
+        <div class="status-bar">
+            <div class="status-item">
+                <div class="status-label">Status</div>
+                <div id="status" class="status-value badge">--</div>
+            </div>
+            <div class="status-item">
+                <div class="status-label">Progress</div>
+                <div id="progress" class="status-value">--</div>
+            </div>
+            <div class="status-item">
+                <div class="status-label">Confidence</div>
+                <div id="confidence" class="status-value">--</div>
+            </div>
+            <div class="status-item">
+                <div class="status-label">Current Phase</div>
+                <div id="currentPhase" class="status-value">--</div>
+            </div>
+            <div class="status-item">
+                <div class="status-label">Duration</div>
+                <div id="duration" class="status-value">--</div>
+            </div>
+        </div>
+
+        <!-- Main Content Grid -->
+        <div class="content-grid">
+            <!-- Left Column: Progress & Phases -->
+            <div class="column-left">
+                <!-- Progress Circle -->
+                <div class="card progress-card">
+                    <h2>Investigation Progress</h2>
+                    <div class="progress-circle-container">
+                        <svg class="progress-ring" width="200" height="200">
+                            <circle class="progress-ring-circle-bg" stroke="#e0e0e0" stroke-width="20" fill="transparent" r="80" cx="100" cy="100"/>
+                            <circle id="progressCircle" class="progress-ring-circle" stroke="#4CAF50" stroke-width="20" fill="transparent" r="80" cx="100" cy="100"/>
+                            <text id="progressText" x="100" y="100" class="progress-text" text-anchor="middle" dominant-baseline="middle">0%</text>
+                        </svg>
+                        <div id="currentStep" class="current-step">Initializing...</div>
+                    </div>
+                </div>
+
+                <!-- Phase Tracker -->
+                <div class="card phases-card">
+                    <h2>Phase Tracker</h2>
+                    <div id="phaseList" class="phase-list">
+                        <!-- Phases dynamically loaded -->
+                    </div>
+                </div>
+
+                <!-- Top Suspects -->
+                <div class="card suspects-card">
+                    <h2>🎯 Top Suspects</h2>
+                    <div id="topSuspects" class="suspects-list">
+                        <p class="empty-state">Analysis in progress...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Center Column: Timeline & Details -->
+            <div class="column-center">
+                <!-- Bug Summary -->
+                <div class="card bug-summary-card">
+                    <h2>🐛 Bug Summary</h2>
+                    <div id="bugSummary" class="bug-summary">
+                        <p class="empty-state">Loading bug details...</p>
+                    </div>
+                </div>
+
+                <!-- Confidence Journey -->
+                <div class="card confidence-card">
+                    <h2>📈 Confidence Journey</h2>
+                    <canvas id="confidenceChart" height="80"></canvas>
+                </div>
+
+                <!-- Timeline -->
+                <div class="card timeline-card">
+                    <h2>⏱️ Investigation Timeline</h2>
+                    <div id="timeline" class="timeline">
+                        <p class="empty-state">Timeline will appear as investigation progresses...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Hypotheses & Results -->
+            <div class="column-right">
+                <!-- Hypotheses Tracker -->
+                <div class="card hypotheses-card">
+                    <h2>💡 Hypotheses</h2>
+                    <div id="hypothesesList" class="hypotheses-list">
+                        <p class="empty-state">Hypotheses will be generated after analysis...</p>
+                    </div>
+                </div>
+
+                <!-- Ruled Out -->
+                <div class="card ruled-out-card">
+                    <h2>❌ Ruled Out</h2>
+                    <div id="ruledOutList" class="ruled-out-list">
+                        <p class="empty-state">No hypotheses ruled out yet...</p>
+                    </div>
+                </div>
+
+                <!-- Root Cause (when found) -->
+                <div id="rootCauseCard" class="card root-cause-card" style="display: none;">
+                    <h2>🎯 Root Cause Identified!</h2>
+                    <div id="rootCause" class="root-cause-content">
+                        <!-- Root cause details -->
+                    </div>
+                </div>
+
+                <!-- Fix Recommendation (when available) -->
+                <div id="fixCard" class="card fix-card" style="display: none;">
+                    <h2>🔧 Recommended Fix</h2>
+                    <div id="fix" class="fix-content">
+                        <!-- Fix details -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="./dashboard.js"></script>
+</body>
+</html>
+

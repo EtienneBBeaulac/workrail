@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Background Effects Debug Page</title>
+    <link rel="stylesheet" href="/assets/design-system.css">
+    <link rel="stylesheet" href="/assets/background-effects.css">
+    <script src="/assets/background-interaction.js"></script>
+    
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: rgba(250, 250, 249, 0.85);
+            backdrop-filter: blur(20px);
+            font-family: monospace;
+        }
+        
+        .debug-panel {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            width: 400px;
+            background: rgba(0, 0, 0, 0.9);
+            color: #0f0;
+            padding: 20px;
+            border-radius: 8px;
+            font-size: 12px;
+            max-height: 90vh;
+            overflow-y: auto;
+            z-index: 9999;
+        }
+        
+        .debug-section {
+            margin-bottom: 15px;
+            border-bottom: 1px solid #333;
+            padding-bottom: 10px;
+        }
+        
+        .debug-title {
+            color: #0ff;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .debug-item {
+            display: flex;
+            justify-content: space-between;
+            margin: 3px 0;
+        }
+        
+        .debug-label {
+            color: #888;
+        }
+        
+        .debug-value {
+            color: #0f0;
+        }
+        
+        .status-active {
+            color: #0f0;
+        }
+        
+        .status-inactive {
+            color: #f00;
+        }
+        
+        .test-area {
+            margin-top: 100px;
+            text-align: center;
+            font-size: 24px;
+            color: #333;
+        }
+        
+        /* Visual highlight when element is disturbed */
+        .rail-path.disturbed {
+            outline: 3px solid red !important;
+            outline-offset: 5px;
+        }
+        
+        .workflow-node.disturbed {
+            outline: 3px solid yellow !important;
+        }
+        
+        .particle.disturbed {
+            outline: 3px solid cyan !important;
+        }
+    </style>
+</head>
+<body>
+    <!-- Background Effects -->
+    <div class="bg-orbs">
+        <div class="bg-orb bg-orb-1"></div>
+        <div class="bg-orb bg-orb-2"></div>
+        <div class="bg-orb bg-orb-3"></div>
+        <div class="bg-orb bg-orb-4"></div>
+        <div class="bg-orb bg-orb-5"></div>
+    </div>
+    
+    <div class="bg-rails">
+        <div class="rail-path rail-h1"></div>
+        <div class="rail-path rail-h2"></div>
+        <div class="rail-path rail-d1"></div>
+        <div class="rail-path rail-d2"></div>
+    </div>
+    
+    <div class="bg-nodes">
+        <div class="workflow-node node-1"></div>
+        <div class="workflow-node node-2"></div>
+        <div class="workflow-node node-3"></div>
+        <div class="workflow-node node-4"></div>
+        <div class="workflow-node node-5"></div>
+    </div>
+    
+    <div class="bg-particles">
+        <div class="particle particle-1"></div>
+        <div class="particle particle-2"></div>
+        <div class="particle particle-3"></div>
+        <div class="particle particle-4"></div>
+        <div class="particle particle-5"></div>
+    </div>
+
+    <!-- Debug Panel -->
+    <div class="debug-panel">
+        <div class="debug-section">
+            <div class="debug-title">🔍 BACKGROUND EFFECTS DEBUG</div>
+        </div>
+        
+        <div class="debug-section">
+            <div class="debug-title">Mouse Position</div>
+            <div class="debug-item">
+                <span class="debug-label">X:</span>
+                <span class="debug-value" id="mouseX">-</span>
+            </div>
+            <div class="debug-item">
+                <span class="debug-label">Y:</span>
+                <span class="debug-value" id="mouseY">-</span>
+            </div>
+        </div>
+        
+        <div class="debug-section">
+            <div class="debug-title">Element Counts</div>
+            <div class="debug-item">
+                <span class="debug-label">Rails:</span>
+                <span class="debug-value" id="railCount">-</span>
+            </div>
+            <div class="debug-item">
+                <span class="debug-label">Nodes:</span>
+                <span class="debug-value" id="nodeCount">-</span>
+            </div>
+            <div class="debug-item">
+                <span class="debug-label">Particles:</span>
+                <span class="debug-value" id="particleCount">-</span>
+            </div>
+        </div>
+        
+        <div class="debug-section">
+            <div class="debug-title">Currently Disturbed</div>
+            <div class="debug-item">
+                <span class="debug-label">Rails:</span>
+                <span class="debug-value" id="disturbedRails">0</span>
+            </div>
+            <div class="debug-item">
+                <span class="debug-label">Nodes:</span>
+                <span class="debug-value" id="disturbedNodes">0</span>
+            </div>
+            <div class="debug-item">
+                <span class="debug-label">Particles:</span>
+                <span class="debug-value" id="disturbedParticles">0</span>
+            </div>
+        </div>
+        
+        <div class="debug-section">
+            <div class="debug-title">Rail #1 (rail-h1) Status</div>
+            <div class="debug-item">
+                <span class="debug-label">Has .disturbed:</span>
+                <span class="debug-value" id="rail1Disturbed">false</span>
+            </div>
+            <div class="debug-item">
+                <span class="debug-label">Computed filter:</span>
+                <span class="debug-value" id="rail1Filter" style="font-size: 10px; word-break: break-all;">-</span>
+            </div>
+            <div class="debug-item">
+                <span class="debug-label">Computed opacity:</span>
+                <span class="debug-value" id="rail1Opacity">-</span>
+            </div>
+            <div class="debug-item">
+                <span class="debug-label">Animation:</span>
+                <span class="debug-value" id="rail1Animation" style="font-size: 10px; word-break: break-all;">-</span>
+            </div>
+        </div>
+        
+        <div class="debug-section">
+            <div class="debug-title">Node #1 Status</div>
+            <div class="debug-item">
+                <span class="debug-label">Has .disturbed:</span>
+                <span class="debug-value" id="node1Disturbed">false</span>
+            </div>
+            <div class="debug-item">
+                <span class="debug-label">Computed transform:</span>
+                <span class="debug-value" id="node1Transform" style="font-size: 10px; word-break: break-all;">-</span>
+            </div>
+            <div class="debug-item">
+                <span class="debug-label">Computed filter:</span>
+                <span class="debug-value" id="node1Filter" style="font-size: 10px; word-break: break-all;">-</span>
+            </div>
+        </div>
+        
+        <div class="debug-section">
+            <div class="debug-title">CSS Test Results</div>
+            <div id="cssTests"></div>
+        </div>
+    </div>
+
+    <div class="test-area">
+        <h1>🧪 Background Effects Debug Mode</h1>
+        <p>Move your mouse around to test disturbance effects</p>
+        <p>Watch the debug panel on the right</p>
+        <p style="font-size: 14px; color: #666;">Disturbed elements will have colored outlines</p>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // Enable background interaction
+            WorkrailBackground.enableInteraction();
+            
+            // Get elements
+            const rails = document.querySelectorAll('.rail-path');
+            const nodes = document.querySelectorAll('.workflow-node');
+            const particles = document.querySelectorAll('.particle');
+            
+            // Update counts
+            document.getElementById('railCount').textContent = rails.length;
+            document.getElementById('nodeCount').textContent = nodes.length;
+            document.getElementById('particleCount').textContent = particles.length;
+            
+            // Track mouse
+            document.addEventListener('mousemove', (e) => {
+                document.getElementById('mouseX').textContent = e.clientX;
+                document.getElementById('mouseY').textContent = e.clientY;
+            });
+            
+            // Update debug info every frame
+            function updateDebugInfo() {
+                // Count disturbed elements
+                const disturbedRails = document.querySelectorAll('.rail-path.disturbed').length;
+                const disturbedNodes = document.querySelectorAll('.workflow-node.disturbed').length;
+                const disturbedParticles = document.querySelectorAll('.particle.disturbed').length;
+                
+                document.getElementById('disturbedRails').textContent = disturbedRails;
+                document.getElementById('disturbedNodes').textContent = disturbedNodes;
+                document.getElementById('disturbedParticles').textContent = disturbedParticles;
+                
+                // Check first rail
+                const rail1 = document.querySelector('.rail-h1');
+                if (rail1) {
+                    const hasDisturbed = rail1.classList.contains('disturbed');
+                    document.getElementById('rail1Disturbed').textContent = hasDisturbed;
+                    document.getElementById('rail1Disturbed').className = hasDisturbed ? 'status-active' : 'status-inactive';
+                    
+                    const computedStyle = window.getComputedStyle(rail1);
+                    document.getElementById('rail1Filter').textContent = computedStyle.filter;
+                    document.getElementById('rail1Opacity').textContent = computedStyle.opacity;
+                    document.getElementById('rail1Animation').textContent = computedStyle.animation;
+                }
+                
+                // Check first node
+                const node1 = document.querySelector('.node-1');
+                if (node1) {
+                    const hasDisturbed = node1.classList.contains('disturbed');
+                    document.getElementById('node1Disturbed').textContent = hasDisturbed;
+                    document.getElementById('node1Disturbed').className = hasDisturbed ? 'status-active' : 'status-inactive';
+                    
+                    const computedStyle = window.getComputedStyle(node1);
+                    document.getElementById('node1Transform').textContent = computedStyle.transform;
+                    document.getElementById('node1Filter').textContent = computedStyle.filter;
+                }
+                
+                requestAnimationFrame(updateDebugInfo);
+            }
+            
+            updateDebugInfo();
+            
+            // CSS Tests
+            const cssTests = document.getElementById('cssTests');
+            const tests = [];
+            
+            // Test 1: Can we manually add .disturbed?
+            const testRail = document.querySelector('.rail-h1');
+            if (testRail) {
+                setTimeout(() => {
+                    testRail.classList.add('disturbed');
+                    const computedStyle = window.getComputedStyle(testRail);
+                    const filterChanged = computedStyle.filter !== 'none';
+                    tests.push(`Manual .disturbed on rail: ${filterChanged ? '✅ PASS' : '❌ FAIL'}`);
+                    setTimeout(() => testRail.classList.remove('disturbed'), 2000);
+                    cssTests.innerHTML = tests.join('<br>');
+                }, 1000);
+            }
+            
+            // Test 2: Check if CSS is loaded
+            const rail = document.querySelector('.rail-h1');
+            if (rail) {
+                const computedStyle = window.getComputedStyle(rail);
+                const hasAnimation = computedStyle.animation !== 'none';
+                tests.push(`Rail has animation: ${hasAnimation ? '✅ PASS' : '❌ FAIL'}`);
+                cssTests.innerHTML = tests.join('<br>');
+            }
+            
+            console.log('🧪 Debug mode initialized');
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Component Library Demo - Workrail</title>
+    
+    <!-- Design System v1.2 -->
+    <link rel="stylesheet" href="/assets/design-system.css">
+    <link rel="stylesheet" href="/assets/components.css">
+    <link rel="stylesheet" href="/assets/animations.css">
+    <link rel="stylesheet" href="/assets/theme-toggle.css">
+    
+    <!-- Theme Management -->
+    <script src="/assets/theme-manager.js"></script>
+    <script src="/assets/theme-toggle.js"></script>
+    
+    <!-- Component Library -->
+    <script src="/assets/components.js"></script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <style>
+        body {
+            background: linear-gradient(135deg, 
+                rgba(249, 250, 251, 1) 0%,
+                rgba(243, 244, 246, 1) 50%,
+                rgba(249, 250, 251, 1) 100%);
+            min-height: 100vh;
+            padding: var(--space-8) 0;
+            margin: 0;
+        }
+        [data-theme="dark"] body {
+            background: linear-gradient(135deg, 
+                #0f1419 0%,
+                #18181b 50%,
+                #0f1419 100%);
+        }
+        .demo-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 var(--space-6);
+        }
+        @media (max-width: 768px) {
+            .demo-container {
+                padding: 0 var(--space-4);
+            }
+        }
+        .demo-section {
+            margin-bottom: var(--space-10);
+        }
+        .demo-section h2 {
+            font-size: var(--text-3xl);
+            font-weight: var(--font-bold);
+            color: var(--text-primary);
+            margin-bottom: var(--space-2);
+        }
+        .demo-section p {
+            color: var(--text-secondary);
+            margin-bottom: var(--space-6);
+        }
+        .demo-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: var(--space-6);
+        }
+        .demo-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: var(--space-3);
+            align-items: center;
+        }
+        .code-example {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-medium);
+            border-radius: var(--radius-lg);
+            padding: var(--space-4);
+            margin-top: var(--space-4);
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: var(--text-sm);
+            color: var(--text-primary);
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="demo-container">
+        <!-- Hero -->
+        <div id="hero-demo" class="demo-section"></div>
+        
+        <!-- Buttons -->
+        <div class="demo-section">
+            <h2>Buttons</h2>
+            <p>All button variants with consistent styling</p>
+            <div id="buttons-demo" class="demo-buttons"></div>
+            <div class="code-example">
+WorkrailComponents.Button({
+  text: "Primary",
+  variant: "primary",
+  icon: "check",
+  onClick: () => console.log('Clicked!')
+});
+            </div>
+        </div>
+        
+        <!-- Cards -->
+        <div class="demo-section">
+            <h2>Cards</h2>
+            <p>Flexible card components with multiple variants</p>
+            <div id="cards-demo" class="demo-grid"></div>
+        </div>
+        
+        <!-- Session Cards -->
+        <div class="demo-section">
+            <h2>Session Cards</h2>
+            <p>Specialized cards for workflow sessions</p>
+            <div id="session-cards-demo" class="demo-grid"></div>
+        </div>
+        
+        <!-- Stat Cards -->
+        <div class="demo-section">
+            <h2>Stat Cards</h2>
+            <p>Display key metrics and statistics</p>
+            <div id="stat-cards-demo" class="demo-grid"></div>
+        </div>
+        
+        <!-- Progress Rings -->
+        <div class="demo-section">
+            <h2>Progress Rings</h2>
+            <p>Circular progress indicators</p>
+            <div id="progress-demo" class="demo-buttons"></div>
+        </div>
+        
+        <!-- Status Badges -->
+        <div class="demo-section">
+            <h2>Status Badges</h2>
+            <p>Status indicators with glow effects</p>
+            <div id="badges-demo" class="demo-buttons"></div>
+        </div>
+        
+        <!-- Modals -->
+        <div class="demo-section">
+            <h2>Modals</h2>
+            <p>Dialog components for user interactions</p>
+            <div id="modal-demo" class="demo-buttons"></div>
+        </div>
+    </div>
+    
+    <script>
+        // Wait for DOM to be ready
+        document.addEventListener('DOMContentLoaded', () => {
+            // Hero Demo
+            const hero = WorkrailComponents.Hero({
+                title: "Component Library Demo",
+                subtitle: "Reusable, design-system-compliant UI components",
+                icon: "layers"
+            });
+            document.getElementById('hero-demo').appendChild(hero);
+            
+            // Buttons Demo
+            const buttonVariants = [
+                { variant: 'primary', text: 'Primary', icon: 'check' },
+                { variant: 'secondary', text: 'Secondary', icon: 'circle' },
+                { variant: 'ghost', text: 'Ghost', icon: 'eye' },
+                { variant: 'danger', text: 'Danger', icon: 'trash-2' },
+                { variant: 'glass', text: 'Glass', icon: 'sparkles' },
+                { variant: 'primary', text: 'Spring', icon: 'zap', spring: true }
+            ];
+            
+            buttonVariants.forEach(config => {
+                const btn = WorkrailComponents.Button({
+                    ...config,
+                    onClick: () => console.log(`${config.text} clicked!`)
+                });
+                document.getElementById('buttons-demo').appendChild(btn);
+            });
+            
+            // Cards Demo
+            const cardVariants = [
+                { variant: 'default', title: 'Default Card', content: 'Standard card with subtle styling' },
+                { variant: 'glass', title: 'Glass Card', content: 'Glassmorphism effect with blur' },
+                { variant: 'float', title: 'Floating Card', content: 'Animated floating effect' },
+                { variant: 'workflow', title: 'Workflow Card', content: 'Themed for workflows', borderColor: 'var(--accent-purple)' }
+            ];
+            
+            cardVariants.forEach(config => {
+                const card = WorkrailComponents.Card({
+                    ...config,
+                    footer: 'Card footer',
+                    animate: true
+                });
+                document.getElementById('cards-demo').appendChild(card);
+            });
+            
+            // Session Cards Demo
+            const sessionData = [
+                { 
+                    sessionId: 'BUG-001', 
+                    title: 'Authentication issue investigation', 
+                    status: 'in_progress', 
+                    progress: 65, 
+                    confidence: 7.5, 
+                    phase: 'Phase 2',
+                    borderColor: 'var(--accent-purple)'
+                },
+                { 
+                    sessionId: 'BUG-002', 
+                    title: 'Performance optimization complete', 
+                    status: 'complete', 
+                    progress: 100, 
+                    confidence: 9.2, 
+                    phase: 'Phase 6',
+                    borderColor: 'var(--accent-green)'
+                }
+            ];
+            
+            sessionData.forEach(data => {
+                const card = WorkrailComponents.SessionCard({
+                    ...data,
+                    updated: '5 minutes ago',
+                    onClick: () => console.log(`Opening ${data.sessionId}`),
+                    onDelete: (id) => console.log(`Deleting ${id}`)
+                });
+                document.getElementById('session-cards-demo').appendChild(card);
+            });
+            
+            // Stat Cards Demo
+            const stats = [
+                { value: 24, label: 'Active Sessions', icon: 'activity', color: '#06b6d4' },
+                { value: 156, label: 'Completed', icon: 'check-circle', color: '#10b981' },
+                { value: '9.2', label: 'Avg Confidence', icon: 'trending-up', color: '#f59e0b' }
+            ];
+            
+            stats.forEach(stat => {
+                const card = WorkrailComponents.StatCard({
+                    ...stat,
+                    gradient: true,
+                    float: true
+                });
+                document.getElementById('stat-cards-demo').appendChild(card);
+            });
+            
+            // Progress Rings Demo
+            [25, 50, 75, 100].forEach(progress => {
+                const ring = WorkrailComponents.ProgressRing({
+                    progress,
+                    size: 100,
+                    strokeWidth: 8,
+                    color: progress === 100 ? 'var(--status-success)' : 'var(--primary-500)'
+                });
+                document.getElementById('progress-demo').appendChild(ring);
+            });
+            
+            // Badges Demo
+            ['success', 'active', 'pending', 'error', 'info'].forEach(status => {
+                const badge = WorkrailComponents.StatusBadge({
+                    status,
+                    text: status.toUpperCase(),
+                    glow: true
+                });
+                document.getElementById('badges-demo').appendChild(badge);
+            });
+            
+            // Modal Demo
+            const showModalBtn = WorkrailComponents.Button({
+                text: 'Show Modal',
+                variant: 'primary',
+                icon: 'message-square',
+                onClick: () => {
+                    const modal = WorkrailComponents.Modal({
+                        title: 'Example Modal',
+                        content: 'This is a modal dialog component with actions.',
+                        actions: [
+                            { 
+                                text: 'Cancel', 
+                                variant: 'secondary', 
+                                onClick: () => modal.hide() 
+                            },
+                            { 
+                                text: 'Confirm', 
+                                variant: 'primary', 
+                                onClick: () => {
+                                    console.log('Confirmed!');
+                                    modal.hide();
+                                }
+                            }
+                        ]
+                    });
+                    modal.show();
+                }
+            });
+            document.getElementById('modal-demo').appendChild(showModalBtn);
+        });
+    </script>
+</body>
+</html>

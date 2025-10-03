@@ -1,0 +1,3685 @@
+/**
+ * ========================================
+ * WORKRAIL UI SYSTEM v2.0
+ * ========================================
+ * 
+ * Single CSS import for all styling
+ * Based on test-design-system.html (battle-tested)
+ * 
+ * Usage:
+ *   <link rel="stylesheet" href="/assets/workrail-ui.css">
+ * 
+ * Contents:
+ *   1. Design Tokens (colors, spacing, typography)
+ *   2. Base Styles & Resets
+ *   3. Layout Components (Grid, Stack, DashboardLayout)
+ *   4. UI Components (Card, Button, etc.)
+ *   5. Animation Library
+ *   6. Background Effects
+ *   7. Theme System
+ * 
+ * Generated: 2025-10-02T17:22:15.376Z
+ */
+
+
+/* ============================================
+   1. DESIGN-SYSTEM
+   ============================================ */
+
+/**
+ * Workrail Design System v1.0
+ * Foundation CSS with all design tokens
+ * 
+ * Table of Contents:
+ * 1. CSS Custom Properties (Design Tokens)
+ * 2. Base Styles & Resets
+ * 3. Utility Classes
+ */
+
+/* ============================================
+   1. CSS CUSTOM PROPERTIES (DESIGN TOKENS)
+   ============================================ */
+
+:root {
+  /* ==================== COLORS ==================== */
+  
+  /* Status Colors (Semantic) */
+  --status-success: #10b981;  /* Green - complete, positive, confirmed */
+  --status-active: #3b82f6;   /* Blue - in progress, active */
+  --status-pending: #f59e0b;  /* Amber - waiting, needs attention */
+  --status-error: #ef4444;    /* Red - error, critical, ruled out */
+  --status-info: #6366f1;     /* Indigo - information, neutral */
+  
+  /* Brand/Primary Colors */
+  --primary-400: #a78bfa;
+  --primary-500: #8b5cf6;   /* Main brand color */
+  --primary-600: #7c3aed;
+  --primary-700: #6d28d9;
+  
+  /* Vibrant Accent Colors */
+  --accent-cyan: #06b6d4;
+  --accent-teal: #14b8a6;
+  --accent-green: #10b981;
+  --accent-lime: #84cc16;
+  --accent-yellow: #eab308;
+  --accent-orange: #f97316;
+  --accent-red: #ef4444;
+  --accent-pink: #ec4899;
+  --accent-purple: #a855f7;
+  --accent-indigo: #6366f1;
+  
+  /* Neutral Palette (Warm Grays) */
+  --neutral-50: #fafaf9;
+  --neutral-100: #f5f5f4;
+  --neutral-200: #e7e5e4;
+  --neutral-300: #d6d3d1;
+  --neutral-400: #a8a29e;
+  --neutral-500: #78716c;
+  --neutral-600: #57534e;
+  --neutral-700: #44403c;
+  --neutral-800: #292524;
+  --neutral-900: #1c1917;
+  
+  /* Semantic Color Usage (Light Mode) */
+  --text-primary: var(--neutral-900);
+  --text-secondary: var(--neutral-600);
+  --text-tertiary: var(--neutral-500);
+  --text-inverse: #ffffff;
+  
+  --bg-primary: #ffffff;
+  --bg-secondary: var(--neutral-50);
+  --bg-tertiary: var(--neutral-100);
+  
+  --border-light: var(--neutral-200);
+  --border-medium: var(--neutral-300);
+  --border-heavy: var(--neutral-400);
+  
+  /* Theme-specific background elements */
+  --grain-color: rgba(0, 0, 0, 0.02);
+  --grain-color-secondary: rgba(0, 0, 0, 0.015);
+  --orb-opacity: 0.3;
+  
+  /* ==================== GRADIENTS ==================== */
+  
+  /* Primary Gradients */
+  --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  --gradient-cosmic: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  
+  /* Accent Gradients */
+  --gradient-sunset: linear-gradient(135deg, #f97316 0%, #ec4899 100%);
+  --gradient-forest: linear-gradient(135deg, #10b981 0%, #06b6d4 100%);
+  --gradient-dawn: linear-gradient(135deg, #eab308 0%, #f97316 100%);
+  --gradient-ocean: linear-gradient(135deg, #06b6d4 0%, #6366f1 100%);
+  --gradient-aurora: linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%);
+  
+  /* Mesh Gradients (for backgrounds) */
+  --gradient-mesh-purple: 
+    radial-gradient(at 20% 30%, rgba(139, 92, 246, 0.08) 0px, transparent 50%),
+    radial-gradient(at 80% 70%, rgba(59, 130, 246, 0.06) 0px, transparent 50%),
+    radial-gradient(at 50% 50%, rgba(16, 185, 129, 0.04) 0px, transparent 50%);
+  
+  --gradient-mesh-vibrant:
+    radial-gradient(at 0% 0%, rgba(102, 126, 234, 0.1) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, rgba(236, 72, 153, 0.08) 0px, transparent 50%),
+    radial-gradient(at 50% 0%, rgba(16, 185, 129, 0.06) 0px, transparent 50%);
+  
+  /* ==================== WORKFLOW COLOR THEMES (Dynamic Theming) ==================== */
+  
+  /* Each workflow type gets its own gradient for visual identification */
+  --workflow-bug-investigation: linear-gradient(135deg, #ef4444 0%, #ec4899 100%);
+  --workflow-bug-investigation-light: rgba(239, 68, 68, 0.1);
+  --workflow-bug-investigation-glow: rgba(239, 68, 68, 0.3);
+  
+  --workflow-mr-review: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+  --workflow-mr-review-light: rgba(59, 130, 246, 0.1);
+  --workflow-mr-review-glow: rgba(59, 130, 246, 0.3);
+  
+  --workflow-documentation: linear-gradient(135deg, #8b5cf6 0%, #a855f7 100%);
+  --workflow-documentation-light: rgba(139, 92, 246, 0.1);
+  --workflow-documentation-glow: rgba(139, 92, 246, 0.3);
+  
+  --workflow-feature-planning: linear-gradient(135deg, #06b6d4 0%, #14b8a6 100%);
+  --workflow-feature-planning-light: rgba(6, 182, 212, 0.1);
+  --workflow-feature-planning-glow: rgba(6, 182, 212, 0.3);
+  
+  --workflow-performance: linear-gradient(135deg, #f97316 0%, #eab308 100%);
+  --workflow-performance-light: rgba(249, 115, 22, 0.1);
+  --workflow-performance-glow: rgba(249, 115, 22, 0.3);
+  
+  --workflow-security: linear-gradient(135deg, #dc2626 0%, #f59e0b 100%);
+  --workflow-security-light: rgba(220, 38, 38, 0.1);
+  --workflow-security-glow: rgba(220, 38, 38, 0.3);
+  
+  --workflow-testing: linear-gradient(135deg, #10b981 0%, #84cc16 100%);
+  --workflow-testing-light: rgba(16, 185, 129, 0.1);
+  --workflow-testing-glow: rgba(16, 185, 129, 0.3);
+  
+  --workflow-deployment: linear-gradient(135deg, #6366f1 0%, #06b6d4 100%);
+  --workflow-deployment-light: rgba(99, 102, 241, 0.1);
+  --workflow-deployment-glow: rgba(99, 102, 241, 0.3);
+  
+  /* Default/Unknown workflow */
+  --workflow-default: var(--gradient-primary);
+  --workflow-default-light: rgba(102, 126, 234, 0.1);
+  --workflow-default-glow: rgba(102, 126, 234, 0.3);
+  
+  /* ==================== TYPOGRAPHY ==================== */
+  
+  /* Font Families */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'SF Mono', 'Monaco', 'Cascadia Code', 'Consolas', 'Liberation Mono', monospace;
+  --font-serif: 'Georgia', 'Cambria', 'Times New Roman', serif;
+  
+  /* Font Sizes (Golden Ratio Scale) */
+  --text-base: 17px;              /* Base readable size (slightly larger than standard 16px) */
+  --text-xs: 10px;                /* base / φ² ≈ 10.29px */
+  --text-sm: 13px;                /* base / φ × 0.8 ≈ 13px (adjusted for readability) */
+  --text-md: var(--text-base);    /* 17px - Base */
+  --text-lg: 20px;                /* base × φ × 0.7 ≈ 20px (adjusted) */
+  --text-xl: 28px;                /* base × φ ≈ 27.5px */
+  --text-2xl: 44px;               /* base × φ² ≈ 44.4px */
+  --text-3xl: 72px;               /* base × φ³ ≈ 71.8px */
+  --text-4xl: 116px;              /* base × φ⁴ ≈ 116.2px */
+  
+  /* Precise calculations (for reference) */
+  --text-xs-precise: calc(var(--text-base) / var(--ratio-golden) / var(--ratio-golden));
+  --text-sm-precise: calc(var(--text-base) / var(--ratio-golden));
+  --text-lg-precise: calc(var(--text-base) * var(--ratio-golden) * 0.7);
+  --text-xl-precise: calc(var(--text-base) * var(--ratio-golden));
+  --text-2xl-precise: calc(var(--text-base) * var(--ratio-golden) * var(--ratio-golden));
+  --text-3xl-precise: calc(var(--text-base) * var(--ratio-golden) * var(--ratio-golden) * var(--ratio-golden));
+  
+  /* Line Heights */
+  --leading-tight: 1.25;
+  --leading-normal: 1.6;
+  --leading-relaxed: 1.75;
+  
+  /* Font Weights */
+  --font-normal: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  --font-bold: 700;
+  
+  /* ==================== SPACING (Golden Ratio) ==================== */
+  
+  /* Mathematical Foundation */
+  --ratio-golden: 1.618;           /* φ (phi) - The golden ratio */
+  --ratio-golden-inverse: 0.618;   /* 1/φ - Inverse golden ratio */
+  --space-base: 16px;              /* Base unit (1rem) */
+  
+  /* Golden Ratio Scale - Each step multiplies by φ or divides by φ */
+  --space-0: 0;
+  --space-xs: 6px;   /* base / φ² ≈ 6.11px  - Extra small */
+  --space-sm: 10px;  /* base / φ ≈ 9.89px   - Small */
+  --space-md: 16px;  /* base = 16px         - Medium (base) */
+  --space-lg: 26px;  /* base × φ ≈ 25.89px  - Large */
+  --space-xl: 42px;  /* base × φ² ≈ 41.89px - Extra large */
+  --space-2xl: 68px; /* base × φ³ ≈ 67.77px - 2X large */
+  --space-3xl: 110px;/* base × φ⁴ ≈ 109.66px - 3X large */
+  
+  /* Precise calculations (for reference, rounded above for practicality) */
+  --space-xs-precise: calc(var(--space-base) / var(--ratio-golden) / var(--ratio-golden));
+  --space-sm-precise: calc(var(--space-base) / var(--ratio-golden));
+  --space-lg-precise: calc(var(--space-base) * var(--ratio-golden));
+  --space-xl-precise: calc(var(--space-base) * var(--ratio-golden) * var(--ratio-golden));
+  --space-2xl-precise: calc(var(--space-base) * var(--ratio-golden) * var(--ratio-golden) * var(--ratio-golden));
+  
+  /* Legacy aliases (for backward compatibility) */
+  --space-1: var(--space-xs);
+  --space-2: var(--space-sm);
+  --space-3: 12px;  /* Between sm and md */
+  --space-4: var(--space-md);
+  --space-6: var(--space-lg);
+  --space-8: 32px;  /* Between lg and xl */
+  --space-10: var(--space-xl);
+  --space-12: 48px; /* Between xl and 2xl */
+  --space-16: var(--space-2xl);
+  --space-20: 80px; /* Between 2xl and 3xl */
+  --space-24: var(--space-3xl);
+  
+  /* ==================== LAYOUT ==================== */
+  
+  /* Container */
+  --container-max-width: 1400px;
+  
+  /* Breakpoints */
+  --breakpoint-sm: 640px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1280px;
+  --breakpoint-2xl: 1536px;
+  
+  /* Grid */
+  --column-count: 12;
+  --gutter: var(--space-6);
+  
+  /* ==================== BORDER RADIUS (Material Expressive Enhanced) ==================== */
+  
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;      /* Buttons - slightly more rounded */
+  --radius-lg: 16px;      /* Cards - softer, friendlier (increased from 12px) */
+  --radius-xl: 20px;      /* Large cards (increased from 16px) */
+  --radius-2xl: 24px;     /* Hero sections - new */
+  --radius-full: 9999px;  /* Pills, avatars */
+  
+  /* Semantic aliases for clarity */
+  --radius-button: var(--radius-md);
+  --radius-card: var(--radius-lg);
+  
+  /* ==================== SHADOWS (Golden Ratio Scaling) ==================== */
+  
+  /* Base shadow unit */
+  --shadow-base-blur: 8px;
+  --shadow-base-offset: 4px;
+  
+  /* Golden ratio scaled shadows */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.05);                    /* Minimal elevation */
+  --shadow-sm: 0 2px 5px rgba(0, 0, 0, 0.06);                    /* base / φ ≈ 5px blur */
+  --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.08);                    /* base = 8px blur */
+  --shadow-lg: 0 6px 13px rgba(0, 0, 0, 0.1);                    /* base × φ ≈ 13px blur */
+  --shadow-xl: 0 10px 21px rgba(0, 0, 0, 0.12);                  /* base × φ² ≈ 21px blur */
+  --shadow-2xl: 0 16px 34px rgba(0, 0, 0, 0.15);                 /* base × φ³ ≈ 34px blur */
+  
+  /* Precise calculations */
+  --shadow-sm-blur: calc(var(--shadow-base-blur) / var(--ratio-golden));
+  --shadow-lg-blur: calc(var(--shadow-base-blur) * var(--ratio-golden));
+  --shadow-xl-blur: calc(var(--shadow-base-blur) * var(--ratio-golden) * var(--ratio-golden));
+  --shadow-2xl-blur: calc(var(--shadow-base-blur) * var(--ratio-golden) * var(--ratio-golden) * var(--ratio-golden));
+  
+  /* Colored Shadows */
+  --shadow-primary: 0 8px 16px rgba(139, 92, 246, 0.25);
+  --shadow-success: 0 8px 16px rgba(16, 185, 129, 0.25);
+  --shadow-error: 0 8px 16px rgba(239, 68, 68, 0.25);
+  
+  /* ==================== ANIMATION (Material Expressive Enhanced) ==================== */
+  
+  /* Duration Scale */
+  --duration-instant: 100ms;
+  --duration-fast: 150ms;
+  --duration-base: 250ms;
+  --duration-medium: 350ms;
+  --duration-slow: 400ms;
+  --duration-slower: 600ms;
+  --duration-ambient: 15s;      /* For background animations */
+  
+  /* Standard Easing (Functional) */
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  
+  /* Expressive Easing (Material Expressive - Personality!) */
+  --ease-spring: cubic-bezier(0.68, -0.55, 0.265, 1.55);   /* Spring overshoot */
+  --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);        /* Playful bounce */
+  --ease-elastic: cubic-bezier(0.68, -0.6, 0.32, 1.6);     /* Elastic snap */
+  --ease-smooth: cubic-bezier(0.4, 0.0, 0.2, 1);           /* Smooth polish */
+  
+  /* ==================== GLASSMORPHISM ==================== */
+  
+  --glass-bg-subtle: rgba(255, 255, 255, 0.5);
+  --glass-bg: rgba(255, 255, 255, 0.7);
+  --glass-bg-strong: rgba(255, 255, 255, 0.85);
+  
+  --glass-border-subtle: rgba(255, 255, 255, 0.2);
+  --glass-border: rgba(255, 255, 255, 0.3);
+  --glass-border-strong: rgba(255, 255, 255, 0.5);
+  
+  --glass-blur-subtle: blur(8px);
+  --glass-blur: blur(10px) saturate(180%);
+  --glass-blur-strong: blur(15px) saturate(200%);
+  
+  /* ==================== LAYOUT CONSTANTS ==================== */
+  
+  --header-height: 60px;
+  --scroll-padding: 100px;
+}
+
+/* ============================================
+   THEME TRANSITION CONTROL
+   ============================================ */
+
+/* Smooth color transitions for theme changes */
+:root {
+  /* Define the transition duration for theme changes */
+  --theme-transition-duration: 600ms;
+  --theme-transition-easing: cubic-bezier(0.4, 0.0, 0.2, 1);
+}
+
+/* Apply color transitions to most elements, but not those with specific transitions */
+*:not(.btn):not(.card):not(.stat-card):not(.card-glass):not(.stat-card-gradient):not([class*="animate-"]) {
+  transition-property: background-color, border-color, box-shadow, color, fill, stroke;
+  transition-duration: var(--theme-transition-duration);
+  transition-timing-function: var(--theme-transition-easing);
+}
+
+/* SVG orbs and background elements need smooth transitions too */
+.bg-orb,
+.rail-path,
+.workflow-node,
+svg circle {
+  transition: fill var(--theme-transition-duration) var(--theme-transition-easing),
+              stroke var(--theme-transition-duration) var(--theme-transition-easing),
+              opacity var(--theme-transition-duration) var(--theme-transition-easing);
+}
+
+/* ============================================
+   DARK MODE THEME
+   ============================================ */
+
+[data-theme="dark"] {
+  /* Semantic Color Usage (Dark Mode) */
+  --text-primary: var(--neutral-50);
+  --text-secondary: var(--neutral-300);
+  --text-tertiary: var(--neutral-400);
+  --text-inverse: var(--neutral-900);
+  
+  --bg-primary: #18181b;       /* Warm dark (zinc-900) */
+  --bg-secondary: #27272a;     /* Slightly lighter (zinc-800) */
+  --bg-tertiary: #3f3f46;      /* Card backgrounds (zinc-700) */
+  
+  --border-light: #3f3f46;     /* Subtle borders */
+  --border-medium: #52525b;    /* Medium borders */
+  --border-heavy: #71717a;     /* Strong borders */
+  
+  /* Theme-specific background elements (inverted for dark mode) */
+  --grain-color: rgba(255, 255, 255, 0.015);
+  --grain-color-secondary: rgba(255, 255, 255, 0.01);
+  --orb-opacity: 0.25;
+  
+  /* Glassmorphism (adjusted for dark backgrounds) */
+  --glass-bg-subtle: rgba(39, 39, 42, 0.5);
+  --glass-bg: rgba(39, 39, 42, 0.7);
+  --glass-bg-strong: rgba(39, 39, 42, 0.85);
+  
+  --glass-border-subtle: rgba(255, 255, 255, 0.1);
+  --glass-border: rgba(255, 255, 255, 0.15);
+  --glass-border-strong: rgba(255, 255, 255, 0.25);
+  
+  /* Shadows remain dark, but stronger for visibility on dark backgrounds */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.25);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.6), 0 10px 10px -5px rgba(0, 0, 0, 0.3);
+  --shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+}
+
+/* Smooth color transitions for theme switching */
+*,
+*::before,
+*::after {
+  transition: background-color 300ms var(--ease-smooth),
+              color 300ms var(--ease-smooth),
+              border-color 300ms var(--ease-smooth),
+              box-shadow 300ms var(--ease-smooth);
+}
+
+/* Disable transitions for reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+  }
+}
+
+/* ============================================
+   2. BASE STYLES & RESETS
+   ============================================ */
+
+/* Modern CSS Reset */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  min-height: 100vh;
+}
+
+/* Typography Base */
+h1, h2, h3, h4, h5, h6 {
+  font-weight: var(--font-semibold);
+  line-height: var(--leading-tight);
+  color: var(--text-primary);
+  margin-bottom: var(--space-4);
+}
+
+h1 { font-size: var(--text-3xl); }
+h2 { font-size: var(--text-2xl); }
+h3 { font-size: var(--text-xl); }
+h4 { font-size: var(--text-lg); }
+h5 { font-size: var(--text-base); }
+h6 { font-size: var(--text-sm); }
+
+p {
+  margin-bottom: var(--space-4);
+  max-width: 65ch;
+}
+
+/* Links */
+a {
+  color: var(--primary-500);
+  text-decoration: none;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+a:hover {
+  color: var(--primary-600);
+}
+
+a:focus {
+  outline: 2px solid var(--primary-500);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Code */
+code, pre {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+code {
+  background: var(--bg-secondary);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+}
+
+pre {
+  background: var(--bg-secondary);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+}
+
+/* Lists */
+ul, ol {
+  margin-left: var(--space-6);
+  margin-bottom: var(--space-4);
+}
+
+/* Buttons Base */
+button {
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+}
+
+button:focus {
+  outline: 2px solid var(--primary-500);
+  outline-offset: 2px;
+}
+
+/* Images */
+img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* ============================================
+   3. UTILITY CLASSES
+   ============================================ */
+
+/* Container */
+.container {
+  width: 100%;
+  max-width: var(--container-max-width);
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: var(--space-6);
+  padding-right: var(--space-6);
+}
+
+/* Gradient Backgrounds */
+.bg-gradient-primary {
+  background: var(--gradient-primary);
+}
+
+.bg-gradient-mesh-purple {
+  background: var(--gradient-mesh-purple), var(--bg-secondary);
+}
+
+.bg-gradient-mesh-vibrant {
+  background: var(--gradient-mesh-vibrant), var(--bg-secondary);
+}
+
+/* Glassmorphism */
+.glass-subtle {
+  background: var(--glass-bg-subtle);
+  backdrop-filter: var(--glass-blur-subtle);
+  border: 1px solid var(--glass-border-subtle);
+}
+
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+}
+
+.glass-strong {
+  background: var(--glass-bg-strong);
+  backdrop-filter: var(--glass-blur-strong);
+  border: 1px solid var(--glass-border-strong);
+}
+
+/* Text Colors */
+.text-primary { color: var(--text-primary); }
+.text-secondary { color: var(--text-secondary); }
+.text-tertiary { color: var(--text-tertiary); }
+.text-inverse { color: var(--text-inverse); }
+
+/* Text Sizes */
+.text-xs { font-size: var(--text-xs); }
+.text-sm { font-size: var(--text-sm); }
+.text-base { font-size: var(--text-base); }
+.text-lg { font-size: var(--text-lg); }
+.text-xl { font-size: var(--text-xl); }
+.text-2xl { font-size: var(--text-2xl); }
+.text-3xl { font-size: var(--text-3xl); }
+.text-4xl { font-size: var(--text-4xl); }
+
+/* Font Weights */
+.font-normal { font-weight: var(--font-normal); }
+.font-medium { font-weight: var(--font-medium); }
+.font-semibold { font-weight: var(--font-semibold); }
+.font-bold { font-weight: var(--font-bold); }
+
+/* Shadows */
+.shadow-xs { box-shadow: var(--shadow-xs); }
+.shadow-sm { box-shadow: var(--shadow-sm); }
+.shadow-md { box-shadow: var(--shadow-md); }
+.shadow-lg { box-shadow: var(--shadow-lg); }
+.shadow-xl { box-shadow: var(--shadow-xl); }
+.shadow-2xl { box-shadow: var(--shadow-2xl); }
+
+/* Border Radius */
+.rounded-sm { border-radius: var(--radius-sm); }
+.rounded-md { border-radius: var(--radius-md); }
+.rounded-lg { border-radius: var(--radius-lg); }
+.rounded-xl { border-radius: var(--radius-xl); }
+.rounded-full { border-radius: var(--radius-full); }
+
+/* Flexbox Utilities */
+.flex { display: flex; }
+.flex-col { flex-direction: column; }
+.flex-row { flex-direction: row; }
+.items-center { align-items: center; }
+.items-start { align-items: flex-start; }
+.items-end { align-items: flex-end; }
+.justify-center { justify-content: center; }
+.justify-between { justify-content: space-between; }
+.justify-start { justify-content: flex-start; }
+.justify-end { justify-content: flex-end; }
+.gap-1 { gap: var(--space-1); }
+.gap-2 { gap: var(--space-2); }
+.gap-3 { gap: var(--space-3); }
+.gap-4 { gap: var(--space-4); }
+.gap-6 { gap: var(--space-6); }
+.gap-8 { gap: var(--space-8); }
+
+/* Grid Utilities */
+.grid { display: grid; }
+.grid-cols-1 { grid-template-columns: repeat(1, 1fr); }
+.grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
+.grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
+.grid-cols-4 { grid-template-columns: repeat(4, 1fr); }
+
+/* Spacing Utilities */
+.m-0 { margin: 0; }
+.m-auto { margin: auto; }
+.mt-4 { margin-top: var(--space-4); }
+.mt-6 { margin-top: var(--space-6); }
+.mt-8 { margin-top: var(--space-8); }
+.mb-4 { margin-bottom: var(--space-4); }
+.mb-6 { margin-bottom: var(--space-6); }
+.mb-8 { margin-bottom: var(--space-8); }
+
+.p-4 { padding: var(--space-4); }
+.p-6 { padding: var(--space-6); }
+.p-8 { padding: var(--space-8); }
+
+/* Transitions */
+.transition-all {
+  transition: all var(--duration-base) var(--ease-out);
+}
+
+.transition-fast {
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.transition-slow {
+  transition: all var(--duration-slow) var(--ease-out);
+}
+
+/* Accessibility */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ============================================
+   RESPONSIVE UTILITIES
+   ============================================ */
+
+@media (min-width: 768px) {
+  .md\:grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
+  .md\:grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
+}
+
+@media (min-width: 1024px) {
+  .lg\:grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
+  .lg\:grid-cols-4 { grid-template-columns: repeat(4, 1fr); }
+}
+
+
+
+
+/* ============================================
+   2. ANIMATIONS
+   ============================================ */
+
+/**
+ * Workrail Animation Library v1.2
+ * Material Expressive Integration - Personality + Polish
+ * 
+ * Animation Tiers:
+ * - Tier 1: Essential (use everywhere)
+ * - Tier 2: Standard (use selectively)
+ * - Tier 3: Special (use rarely)
+ * - Tier 4: Advanced (opt-in only)
+ * 
+ * v1.2 Updates:
+ * - Added Material Expressive spring/bounce animations
+ * - Expressive easing curves for personality
+ * - Enhanced micro-interactions
+ */
+
+/* ============================================
+   MATERIAL EXPRESSIVE: SPRING ANIMATIONS
+   ============================================ */
+
+/* Spring In - Bouncy entrance (Material Expressive style) */
+@keyframes springIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-spring-in {
+  animation: springIn var(--duration-slow) var(--ease-spring);
+}
+
+/* Bounce Scale - Playful button press */
+@keyframes bounceScale {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(0.95);
+  }
+}
+
+.animate-bounce-scale {
+  animation: bounceScale var(--duration-base) var(--ease-bounce);
+}
+
+/* Elastic Pop - Attention-grabbing */
+@keyframes elasticPop {
+  0% {
+    transform: scale(1);
+  }
+  30% {
+    transform: scale(1.25);
+  }
+  40% {
+    transform: scale(0.9);
+  }
+  60% {
+    transform: scale(1.1);
+  }
+  80% {
+    transform: scale(0.98);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.animate-elastic-pop {
+  animation: elasticPop var(--duration-slower) var(--ease-elastic);
+}
+
+/* Spring Slide Up - Bouncy entrance from below */
+@keyframes springSlideUp {
+  0% {
+    opacity: 0;
+    transform: translateY(50px) scale(0.9);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(-10px) scale(1.02);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-spring-slide-up {
+  animation: springSlideUp var(--duration-slower) var(--ease-spring);
+}
+
+/* Jello - Playful wobble (Material Expressive) */
+@keyframes jello {
+  0%, 100% {
+    transform: skewX(0deg) skewY(0deg);
+  }
+  30% {
+    transform: skewX(25deg) skewY(25deg);
+  }
+  40% {
+    transform: skewX(-15deg) skewY(-15deg);
+  }
+  50% {
+    transform: skewX(15deg) skewY(15deg);
+  }
+  65% {
+    transform: skewX(-5deg) skewY(-5deg);
+  }
+  75% {
+    transform: skewX(5deg) skewY(5deg);
+  }
+}
+
+.animate-jello {
+  animation: jello var(--duration-slower) var(--ease-elastic);
+}
+
+/* ============================================
+   TIER 1: ESSENTIAL ANIMATIONS
+   ============================================ */
+
+/* 1. Fade In - New content appearing */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-fade-in {
+  animation: fadeIn var(--duration-base) var(--ease-out);
+}
+
+/* 2. Slide Up Fade - Cards, sections entering */
+@keyframes slideUpFade {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-up-fade {
+  animation: slideUpFade var(--duration-slow) var(--ease-out);
+}
+
+/* 3. Pulse - Live indicators */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.1);
+  }
+}
+
+.animate-pulse {
+  animation: pulse 2s var(--ease-in-out) infinite;
+}
+
+/* 4. Diff Highlight - Changed data */
+@keyframes diffHighlight {
+  0% {
+    background-color: #fef3c7;
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.animate-diff-highlight {
+  animation: diffHighlight 2s var(--ease-out);
+}
+
+/* 5. Shimmer - Loading states */
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.6) 50%,
+    transparent 100%
+  );
+  background-size: 1000px 100%;
+  animation: shimmer 2s infinite;
+}
+
+/* ============================================
+   TIER 2: STANDARD ANIMATIONS
+   ============================================ */
+
+/* 6. Bounce In - Success badges, celebratory elements */
+@keyframes bounceIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  70% {
+    transform: scale(0.9);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-bounce-in {
+  animation: bounceIn 0.6s var(--ease-bounce);
+}
+
+/* 7. Scale In - Modals, popovers */
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-scale-in {
+  animation: scaleIn var(--duration-base) var(--ease-out);
+}
+
+/* 8. Float - Decorative cards, ambient motion */
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+.animate-float {
+  animation: float 6s var(--ease-in-out) infinite;
+}
+
+/* 9. Count Up - Numbers (applied via JavaScript) */
+/* See design-system docs for JavaScript implementation */
+
+/* 10. Progress Fill - Progress bars */
+@keyframes progressFill {
+  from {
+    width: 0%;
+  }
+}
+
+.animate-progress-fill {
+  animation: progressFill 1s var(--ease-out) forwards;
+}
+
+/* ============================================
+   TIER 3: SPECIAL ANIMATIONS
+   ============================================ */
+
+/* 11. Confetti Fall - Major achievements */
+@keyframes confettiFall {
+  to {
+    transform: translateY(100vh) rotate(720deg);
+    opacity: 0;
+  }
+}
+
+.confetti {
+  position: fixed;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  top: -10px;
+  z-index: 9999;
+  animation: confettiFall 3s var(--ease-in) forwards;
+}
+
+/* 12. Success Ripple - High confidence results */
+@keyframes successRipple {
+  0% {
+    transform: scale(0);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(4);
+    opacity: 0;
+  }
+}
+
+.animate-success-ripple::after {
+  content: '';
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: rgba(16, 185, 129, 0.5);
+  animation: successRipple 0.6s var(--ease-out);
+}
+
+/* 13. Wiggle - Errors, attention needed */
+@keyframes wiggle {
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-5deg);
+  }
+  75% {
+    transform: rotate(5deg);
+  }
+}
+
+.animate-wiggle {
+  animation: wiggle 0.5s var(--ease-in-out);
+}
+
+/* 14. Glow Pulse - Critical alerts, emphasis */
+@keyframes glowPulse {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(139, 92, 246, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 40px rgba(139, 92, 246, 0.6);
+  }
+}
+
+.animate-glow-pulse {
+  animation: glowPulse 2s var(--ease-in-out) infinite;
+}
+
+/* ============================================
+   TIER 4: ADVANCED ANIMATIONS
+   ============================================ */
+
+/* 15. Gradient Shift - Active states, hero sections */
+@keyframes gradientShift {
+  0%, 100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+.animate-gradient-shift {
+  background-size: 200% 200%;
+  animation: gradientShift 8s var(--ease-in-out) infinite;
+}
+
+/* 16. 3D Transform - Showcase elements only */
+.animate-3d-hover {
+  transform-style: preserve-3d;
+  transition: transform var(--duration-slow) var(--ease-out);
+}
+
+.animate-3d-hover:hover {
+  transform: 
+    perspective(1000px)
+    rotateX(2deg) 
+    rotateY(2deg) 
+    translateZ(10px);
+}
+
+/* ============================================
+   ADDITIONAL USEFUL ANIMATIONS
+   ============================================ */
+
+/* Breathe - Subtle attention, active elements */
+@keyframes breathe {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+.animate-breathe {
+  animation: breathe 3s var(--ease-in-out) infinite;
+}
+
+/* Spin - Loading, refresh */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+/* Card Flash - Attention, navigation target */
+@keyframes cardFlash {
+  0%, 100% { 
+    outline: 0px solid transparent;
+    outline-offset: 0px;
+  }
+  10%, 30% { 
+    outline: 3px solid var(--primary-500);
+    outline-offset: 2px;
+  }
+}
+
+.animate-card-flash {
+  animation: cardFlash 2s var(--ease-out);
+}
+
+/* Success Glow - Subtle celebrations */
+@keyframes successGlow {
+  0%, 100% {
+    box-shadow: 0 0 0 rgba(16, 185, 129, 0);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(16, 185, 129, 0.5);
+  }
+}
+
+.animate-success-glow {
+  animation: successGlow 1s var(--ease-out);
+}
+
+/* Screen Shimmer - Major celebrations */
+@keyframes screenShimmer {
+  0% {
+    background-position: -100% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.celebration-major::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(139, 92, 246, 0.1) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: screenShimmer 1s var(--ease-out);
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* Fade Out Up - Toast notifications */
+@keyframes fadeOutUp {
+  0% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+}
+
+.animate-fade-out-up {
+  animation: fadeOutUp 1s var(--ease-out) forwards;
+}
+
+/* Slide In Stagger - Menu items */
+@keyframes slideInStagger {
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-in-stagger {
+  opacity: 0;
+  transform: translateX(-10px);
+  animation: slideInStagger 0.3s var(--ease-out) forwards;
+}
+
+/* Icon Bounce - Interactive feedback */
+@keyframes iconBounce {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.2);
+  }
+}
+
+.animate-icon-bounce {
+  animation: iconBounce 0.6s var(--ease-bounce);
+}
+
+/* Icon Pulse - Active, live states */
+@keyframes iconPulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.1);
+  }
+}
+
+.animate-icon-pulse {
+  animation: iconPulse 2s var(--ease-in-out) infinite;
+}
+
+/* Icon Wiggle - Error states */
+@keyframes iconWiggle {
+  0%, 100% {
+    transform: rotate(0);
+  }
+  25% {
+    transform: rotate(-10deg);
+  }
+  75% {
+    transform: rotate(10deg);
+  }
+}
+
+.animate-icon-wiggle {
+  animation: iconWiggle 0.5s var(--ease-in-out);
+}
+
+/* ============================================
+   ANIMATION DELAY UTILITIES
+   ============================================ */
+
+.delay-100 { animation-delay: 0.1s; }
+.delay-200 { animation-delay: 0.2s; }
+.delay-300 { animation-delay: 0.3s; }
+.delay-500 { animation-delay: 0.5s; }
+.delay-1000 { animation-delay: 1s; }
+
+/* ============================================
+   ANIMATION DURATION UTILITIES
+   ============================================ */
+
+.duration-fast { animation-duration: var(--duration-fast); }
+.duration-base { animation-duration: var(--duration-base); }
+.duration-slow { animation-duration: var(--duration-slow); }
+.duration-slower { animation-duration: var(--duration-slower); }
+
+/* ============================================
+   SPECIAL: VALUE UPDATED (FOR DATA CHANGES)
+   ============================================ */
+
+.value-updated {
+  animation: diffHighlight 1.5s var(--ease-out);
+}
+
+/* ============================================
+   SPECIAL: NEW SECTION (FOR CARDS ENTERING)
+   ============================================ */
+
+.new-section {
+  animation: slideUpFade 0.5s var(--ease-out);
+}
+
+/* Mark as animated after completion */
+.new-section[data-animated="true"] {
+  animation: none;
+}
+
+
+
+
+/* ============================================
+   3. COMPONENTS
+   ============================================ */
+
+/**
+ * Workrail Component Library v1.2
+ * Material Expressive Integration - Enhanced with personality
+ * 
+ * v1.2 Updates:
+ * - Enhanced buttons with spring interactions
+ * - Glassmorphism effects on hover
+ * - Larger border radius for friendlier feel
+ * - Workflow-themed components
+ */
+
+/* ============================================
+   BUTTONS
+   ============================================ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-6);
+  font-size: var(--text-base);
+  font-weight: var(--font-medium);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+  border: none;
+  white-space: nowrap;
+  outline: none; /* Remove default outline */
+}
+
+/* Only show focus outline for keyboard navigation, not mouse clicks */
+.btn:focus-visible {
+  outline: 2px solid var(--primary-500);
+  outline-offset: 2px;
+}
+
+/* Ensure no persistent focus state after click */
+.btn:focus:not(:focus-visible) {
+  outline: none;
+}
+
+.btn-primary {
+  background: var(--primary-500);
+  color: var(--text-inverse);
+  box-shadow: var(--shadow-sm);
+}
+
+.btn-primary:hover {
+  background: var(--primary-600);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.btn-primary:active {
+  transform: translateY(0);
+  box-shadow: var(--shadow-xs);
+}
+
+.btn-secondary {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1.5px solid var(--border-medium);
+}
+
+.btn-secondary:hover {
+  border-color: var(--primary-500);
+  color: var(--primary-500);
+  background: var(--bg-secondary);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.btn-ghost:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.btn-danger {
+  background: var(--status-error);
+  color: var(--text-inverse);
+}
+
+.btn-danger:hover {
+  background: #dc2626;
+}
+
+/* ============================================
+   CARDS
+   ============================================ */
+
+.card {
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+  box-shadow: var(--shadow-sm);
+  /* Only transition properties that change on hover, not color values (prevents flash on theme change) */
+  transition: backdrop-filter var(--duration-base) var(--ease-out),
+              box-shadow var(--duration-base) var(--ease-out);
+}
+
+.card:hover {
+  background: var(--bg-primary);
+  backdrop-filter: blur(15px);
+  -webkit-backdrop-filter: blur(15px);
+  box-shadow: var(--shadow-md);
+}
+
+.card-elevated {
+  box-shadow: var(--shadow-md);
+}
+
+.card-elevated:hover {
+  box-shadow: var(--shadow-lg);
+  transform: translateY(-2px);
+}
+
+.card-interactive {
+  cursor: pointer;
+}
+
+.card-interactive:hover {
+  border-color: var(--primary-500);
+  box-shadow: var(--shadow-lg);
+  transform: translateY(-4px);
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-4);
+}
+
+.card-title {
+  font-size: var(--text-xl);
+  font-weight: var(--font-semibold);
+  margin: 0;
+}
+
+.card-content {
+  color: var(--text-secondary);
+}
+
+.card-footer {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-light);
+}
+
+/* ============================================
+   STATUS BADGES
+   ============================================ */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+}
+
+.badge-success {
+  background: rgba(16, 185, 129, 0.1);
+  color: #059669;
+}
+
+.badge-active {
+  background: rgba(59, 130, 246, 0.1);
+  color: #2563eb;
+}
+
+.badge-pending {
+  background: rgba(245, 158, 11, 0.1);
+  color: #d97706;
+}
+
+.badge-error {
+  background: rgba(239, 68, 68, 0.1);
+  color: #dc2626;
+}
+
+.badge-info {
+  background: rgba(99, 102, 241, 0.1);
+  color: #4f46e5;
+}
+
+/* Pulse dot for live indicators */
+.pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse 2s var(--ease-in-out) infinite;
+}
+
+/* ============================================
+   STAT CARDS
+   ============================================ */
+
+.stat-card {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+  box-shadow: var(--shadow-sm);
+  /* Only transition properties that change on hover/interaction, not theme colors */
+  transition: transform var(--duration-base) var(--ease-out), 
+              box-shadow var(--duration-base) var(--ease-out);
+  text-align: center;
+}
+
+.stat-card:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-4px);
+}
+
+.stat-icon {
+  font-size: var(--text-4xl);
+  margin-bottom: var(--space-3);
+}
+
+.stat-value {
+  font-size: var(--text-3xl);
+  font-weight: var(--font-bold);
+  color: var(--text-primary);
+  margin-bottom: var(--space-2);
+}
+
+.stat-label {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.stat-change {
+  font-size: var(--text-sm);
+  margin-top: var(--space-2);
+}
+
+.stat-change-positive {
+  color: var(--status-success);
+}
+
+.stat-change-negative {
+  color: var(--status-error);
+}
+
+/* ============================================
+   PROGRESS INDICATORS
+   ============================================ */
+
+.progress-bar-container {
+  width: 100%;
+  height: 8px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.progress-bar {
+  height: 100%;
+  background: var(--primary-500);
+  border-radius: var(--radius-full);
+  transition: width var(--duration-base) var(--ease-out);
+}
+
+.progress-bar-success {
+  background: var(--status-success);
+}
+
+/* Progress Ring */
+.progress-ring {
+  transform: rotate(-90deg);
+}
+
+.progress-ring-circle {
+  transition: stroke-dashoffset var(--duration-base) var(--ease-out);
+}
+
+/* ============================================
+   EMPTY STATES
+   ============================================ */
+
+.empty-state {
+  text-align: center;
+  padding: var(--space-16) var(--space-8);
+}
+
+.empty-icon {
+  font-size: var(--text-4xl);
+  margin-bottom: var(--space-4);
+  opacity: 0.5;
+}
+
+.empty-state h3 {
+  font-size: var(--text-2xl);
+  margin-bottom: var(--space-3);
+}
+
+.empty-state p {
+  color: var(--text-secondary);
+  margin: 0 auto var(--space-6);
+  max-width: 50ch;
+}
+
+.empty-hint {
+  background: var(--bg-secondary);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  display: inline-block;
+}
+
+.empty-hint code {
+  background: transparent;
+  color: var(--primary-500);
+}
+
+/* ============================================
+   MODALS
+   ============================================ */
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
+
+.modal-dialog {
+  background: var(--bg-primary);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-2xl);
+  max-width: 500px;
+  width: 90%;
+  padding: var(--space-8);
+  animation: scaleIn var(--duration-base) var(--ease-out);
+}
+
+.modal-icon {
+  font-size: var(--text-4xl);
+  text-align: center;
+  margin-bottom: var(--space-4);
+}
+
+.modal-title {
+  font-size: var(--text-2xl);
+  text-align: center;
+  margin-bottom: var(--space-3);
+}
+
+.modal-message {
+  text-align: center;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-6);
+}
+
+.modal-actions {
+  display: flex;
+  gap: var(--space-3);
+  justify-content: center;
+}
+
+/* ============================================
+   TIMELINE
+   ============================================ */
+
+.timeline {
+  position: relative;
+  padding-left: var(--space-8);
+}
+
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--border-light);
+}
+
+.timeline-item {
+  position: relative;
+  margin-bottom: var(--space-6);
+}
+
+.timeline-marker {
+  position: absolute;
+  left: -23px;
+  top: 4px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--primary-500);
+  border: 2px solid var(--bg-primary);
+}
+
+.timeline-time {
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+  margin-bottom: var(--space-1);
+}
+
+.timeline-text {
+  color: var(--text-primary);
+}
+
+/* ============================================
+   COPYABLE FIELDS
+   ============================================ */
+
+.copyable-field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-light);
+}
+
+.copyable-field label {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  font-weight: var(--font-medium);
+}
+
+.copyable-field code {
+  flex: 1;
+  background: transparent;
+  cursor: pointer;
+  user-select: all;
+}
+
+.copy-btn {
+  padding: var(--space-2);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity var(--duration-fast);
+}
+
+.copy-btn:hover {
+  opacity: 1;
+}
+
+/* ============================================
+   HINT CARDS
+   ============================================ */
+
+.hint-card {
+  display: flex;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  background: rgba(139, 92, 246, 0.05);
+  border-left: 3px solid var(--primary-500);
+  border-radius: var(--radius-md);
+  margin: var(--space-6) 0;
+}
+
+.hint-icon {
+  font-size: var(--text-2xl);
+  flex-shrink: 0;
+}
+
+.hint-content strong {
+  display: block;
+  margin-bottom: var(--space-2);
+  color: var(--text-primary);
+}
+
+.hint-content p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+/* ============================================
+   LOADING STATES
+   ============================================ */
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--neutral-200) 25%,
+    var(--neutral-100) 50%,
+    var(--neutral-200) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: var(--radius-md);
+}
+
+.skeleton-text {
+  height: 1em;
+  margin-bottom: var(--space-2);
+}
+
+.skeleton-title {
+  height: 1.5em;
+  width: 60%;
+  margin-bottom: var(--space-3);
+}
+
+.skeleton-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-full);
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--border-light);
+  border-top-color: var(--primary-500);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* ============================================
+   LIVE INDICATORS
+   ============================================ */
+
+.live-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.time-ago {
+  font-weight: var(--font-medium);
+}
+
+/* ============================================
+   TOAST NOTIFICATIONS
+   ============================================ */
+
+.toast {
+  position: fixed;
+  bottom: var(--space-6);
+  right: var(--space-6);
+  background: var(--bg-primary);
+  padding: var(--space-4) var(--space-6);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  border: 1px solid var(--border-light);
+  z-index: 1000;
+  animation: slideUpFade var(--duration-base) var(--ease-out);
+}
+
+.toast-success {
+  border-left: 3px solid var(--status-success);
+}
+
+.toast-error {
+  border-left: 3px solid var(--status-error);
+}
+
+.toast-info {
+  border-left: 3px solid var(--status-info);
+}
+
+/* ============================================
+   MATERIAL EXPRESSIVE ENHANCEMENTS
+   ============================================ */
+
+/* Glassmorphism Card - Premium feel on hover */
+.card-glass {
+  /* Only transition properties that change on hover, not color values (prevents flash on theme change) */
+  transition: backdrop-filter var(--duration-base) var(--ease-spring),
+              box-shadow var(--duration-base) var(--ease-spring),
+              transform var(--duration-base) var(--ease-spring);
+}
+
+.card-glass:hover {
+  background: var(--glass-bg);
+  backdrop-filter: blur(10px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-xl);
+  transform: translateY(-4px) scale(1.01);
+}
+
+/* Spring Button - Bouncy click feedback */
+.btn-spring {
+  transition: all var(--duration-fast) var(--ease-spring);
+}
+
+.btn-spring:active {
+  animation: bounceScale var(--duration-base) var(--ease-bounce);
+}
+
+/* Floating Card - Gentle floating animation */
+.card-float {
+  animation: float 6s var(--ease-in-out) infinite;
+}
+
+.card-float:nth-child(2) {
+  animation-delay: 0.3s;
+}
+
+.card-float:nth-child(3) {
+  animation-delay: 0.6s;
+}
+
+/* Stat Card with Gradient Background */
+.stat-card-gradient {
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.1), rgba(16, 185, 129, 0.1));
+  border: none !important;
+  position: relative;
+  overflow: hidden;
+  
+  /* Explicitly set default state for smooth reverse transition */
+  transform: translateY(0) scale(1.0) !important;
+  box-shadow: var(--shadow-sm) !important;
+  backdrop-filter: blur(0px) saturate(100%) !important;
+  
+  /* Unified smooth transition - longer duration for visibility, smooth ease-out */
+  transition-property: transform, box-shadow, backdrop-filter;
+  transition-duration: 500ms;
+  transition-timing-function: cubic-bezier(0.4, 0.0, 0.2, 1);
+  will-change: transform, box-shadow, backdrop-filter;
+}
+
+.stat-card-gradient::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(135deg, #06b6d4, #10b981);
+  transition: opacity 500ms cubic-bezier(0.4, 0.0, 0.2, 1);
+}
+
+/* Disable float animation on hover to allow smooth transition */
+.stat-card-gradient:hover {
+  /* Completely disable the float animation so transition can take over */
+  animation: none !important;
+  
+  /* Override all other hover states with a single, smooth transform */
+  transform: translateY(-6px) scale(1.0) !important;
+  box-shadow: var(--shadow-lg) !important;
+  /* Ensure backdrop-filter is also smooth if .card-glass applies it */
+  backdrop-filter: blur(10px) saturate(180%) !important;
+}
+
+/* Workflow-themed cards */
+.card-workflow {
+  position: relative;
+  overflow: hidden;
+  border-left: 4px solid transparent;
+  /* Only transition properties that change on hover */
+  transition: border-left-width var(--duration-base) var(--ease-spring),
+              transform var(--duration-base) var(--ease-spring);
+}
+
+.card-workflow[data-workflow="bug-investigation"] {
+  border-left-color: #ef4444;
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.03), transparent);
+}
+
+.card-workflow[data-workflow="mr-review"] {
+  border-left-color: #3b82f6;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.03), transparent);
+}
+
+.card-workflow[data-workflow="documentation"] {
+  border-left-color: #8b5cf6;
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.03), transparent);
+}
+
+.card-workflow[data-workflow="performance"] {
+  border-left-color: #f97316;
+  background: linear-gradient(135deg, rgba(249, 115, 22, 0.03), transparent);
+}
+
+.card-workflow:hover {
+  border-left-width: 6px;
+  transform: translateX(4px);
+}
+
+/* Interactive Card with 3D tilt effect (optional) */
+.card-3d {
+  transform-style: preserve-3d;
+  transition: transform var(--duration-base) var(--ease-spring);
+}
+
+.card-3d:hover {
+  transform: perspective(1000px) rotateX(2deg) rotateY(-2deg) translateZ(10px);
+}
+
+/* Hero Section with Gradient Mesh Background */
+.hero-gradient-mesh {
+  position: relative;
+  background: var(--gradient-mesh-vibrant);
+  animation: gradientShift var(--duration-ambient) ease-in-out infinite;
+  background-size: 200% 200%;
+}
+
+/* Progress Bar with Gradient */
+.progress-bar-gradient {
+  background: var(--gradient-ocean);
+  background-size: 200% 100%;
+  animation: gradientShift 2s linear infinite;
+}
+
+/* Badge with Glow Effect */
+.badge-glow {
+  position: relative;
+  animation: breathe 3s ease-in-out infinite;
+}
+
+.badge-glow::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  background: currentColor;
+  opacity: 0.3;
+  filter: blur(8px);
+  z-index: -1;
+}
+
+/* Modal with Spring Animation */
+.modal-dialog-spring {
+  animation: springIn var(--duration-slower) var(--ease-spring);
+}
+
+/* Button with Celebration Confetti on Click */
+.btn-celebrate {
+  position: relative;
+  overflow: visible;
+}
+
+.btn-celebrate:active::after {
+  content: '🎉';
+  position: absolute;
+  top: -20px;
+  left: 50%;
+  transform: translateX(-50%);
+  animation: elasticPop 0.6s var(--ease-elastic);
+  pointer-events: none;
+}
+
+/* Code Block with Copy Animation */
+.code-block {
+  position: relative;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.code-block:hover {
+  border-color: var(--primary-500);
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
+  transition: all var(--duration-fast) var(--ease-spring);
+}
+
+/* Tooltip */
+.tooltip {
+  position: relative;
+  display: inline-block;
+}
+
+.tooltip-text {
+  visibility: hidden;
+  background: var(--neutral-900);
+  color: var(--text-inverse);
+  text-align: center;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  position: absolute;
+  z-index: 1;
+  bottom: 125%;
+  left: 50%;
+  transform: translateX(-50%);
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.tooltip:hover .tooltip-text {
+  visibility: visible;
+  opacity: 1;
+  animation: springIn var(--duration-base) var(--ease-spring);
+}
+
+/* Glassmorphism Button */
+.btn-glass {
+  background: var(--glass-bg-subtle);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--glass-border-subtle);
+  color: var(--text-primary);
+}
+
+.btn-glass:hover {
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px);
+  box-shadow: var(--shadow-lg);
+  border-color: var(--glass-border);
+}
+
+/* Stat Card with Colorful Icon */
+.stat-card-icon {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.stat-card-icon .stat-icon {
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.1), rgba(139, 92, 246, 0.1));
+  color: var(--primary-500);
+}
+
+.stat-card-icon:hover .stat-icon {
+  animation: elasticPop var(--duration-slower) var(--ease-elastic);
+}
+
+
+
+
+/* ============================================
+   4. BACKGROUND-EFFECTS
+   ============================================ */
+
+/**
+ * Workrail Background Effects v2.0
+ * Hybrid: Orbs + Workflow-Themed Elements + Interactive Disturbance
+ * 
+ * Layer System:
+ * 1. Base gradient mesh (from design-system.css)
+ * 2. Floating colored orbs (ambient depth)
+ * 3. Workflow rails (animated curved paths)
+ * 4. Pulsing nodes (milestone markers)
+ * 5. Particle trails (guidance)
+ * 6. Optional grid overlay
+ * 7. Optional grain texture
+ * 
+ * Features:
+ * - Organic curved paths (no perfect horizontal/vertical/diagonal lines)
+ * - Mouse-driven disturbance effects (requires background-interaction.js)
+ * - Layered z-index system (always behind content)
+ * - Performance optimizations for mobile and reduced motion
+ * - Customizable intensity modes
+ */
+
+/* ============================================
+   FLOATING ORBS - Base Layer
+   ============================================ */
+
+/* Container for orbs (fixed positioning) */
+.bg-orbs {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: -3;
+}
+
+/* Individual orb styling */
+.bg-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(70px);
+  opacity: 0.25;
+  will-change: transform;
+}
+
+/* Orb 1: Cyan - Top Left */
+.bg-orb-1 {
+  width: 500px;
+  height: 500px;
+  top: 10%;
+  left: 10%;
+  background: radial-gradient(circle, rgba(6, 182, 212, 0.8), rgba(6, 182, 212, 0.4) 40%, transparent 70%);
+  animation: floatOrb1 20s ease-in-out infinite;
+}
+
+/* Orb 2: Purple - Top Right */
+.bg-orb-2 {
+  width: 600px;
+  height: 600px;
+  top: 5%;
+  right: 5%;
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.8), rgba(139, 92, 246, 0.4) 40%, transparent 70%);
+  animation: floatOrb2 25s ease-in-out infinite;
+}
+
+/* Orb 3: Pink - Bottom Left */
+.bg-orb-3 {
+  width: 550px;
+  height: 550px;
+  bottom: 10%;
+  left: 15%;
+  background: radial-gradient(circle, rgba(236, 72, 153, 0.8), rgba(236, 72, 153, 0.4) 40%, transparent 70%);
+  animation: floatOrb3 22s ease-in-out infinite;
+}
+
+/* Orb 4: Orange - Bottom Right */
+.bg-orb-4 {
+  width: 450px;
+  height: 450px;
+  bottom: 15%;
+  right: 10%;
+  background: radial-gradient(circle, rgba(249, 115, 22, 0.8), rgba(249, 115, 22, 0.4) 40%, transparent 70%);
+  animation: floatOrb4 18s ease-in-out infinite;
+}
+
+/* Orb 5: Green - Center (subtle) */
+.bg-orb-5 {
+  width: 400px;
+  height: 400px;
+  top: 45%;
+  left: 45%;
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.7), rgba(16, 185, 129, 0.35) 40%, transparent 70%);
+  animation: floatOrb5 28s ease-in-out infinite;
+}
+
+/* ============================================
+   ORB ANIMATIONS - Organic Movement
+   ============================================ */
+
+@keyframes floatOrb1 {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  25% {
+    transform: translate(50px, -80px) scale(1.1);
+  }
+  50% {
+    transform: translate(-30px, -50px) scale(0.95);
+  }
+  75% {
+    transform: translate(80px, 30px) scale(1.05);
+  }
+}
+
+@keyframes floatOrb2 {
+  0%, 100% {
+    transform: translate(0, 0) scale(1) rotate(0deg);
+  }
+  30% {
+    transform: translate(-60px, 100px) scale(1.15) rotate(45deg);
+  }
+  60% {
+    transform: translate(40px, 50px) scale(0.9) rotate(90deg);
+  }
+  90% {
+    transform: translate(-40px, -30px) scale(1.05) rotate(135deg);
+  }
+}
+
+@keyframes floatOrb3 {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  20% {
+    transform: translate(-50px, 60px) scale(1.1);
+  }
+  40% {
+    transform: translate(70px, -40px) scale(0.9);
+  }
+  60% {
+    transform: translate(-80px, -70px) scale(1.15);
+  }
+  80% {
+    transform: translate(30px, 50px) scale(0.95);
+  }
+}
+
+@keyframes floatOrb4 {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  33% {
+    transform: translate(60px, -90px) scale(1.2);
+  }
+  66% {
+    transform: translate(-70px, 40px) scale(0.85);
+  }
+}
+
+@keyframes floatOrb5 {
+  0%, 100% {
+    transform: translate(0, 0) scale(1) rotate(0deg);
+  }
+  25% {
+    transform: translate(-100px, 80px) scale(1.3) rotate(90deg);
+  }
+  50% {
+    transform: translate(100px, -80px) scale(0.8) rotate(180deg);
+  }
+  75% {
+    transform: translate(-50px, 100px) scale(1.1) rotate(270deg);
+  }
+}
+
+/* ============================================
+   WORKFLOW RAILS - Animated Connection Paths
+   ============================================ */
+
+/* Rails container */
+.bg-rails {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: -2;
+  overflow: hidden;
+}
+
+/* Individual rail paths */
+.rail-path {
+  position: absolute;
+  opacity: 0.15;
+}
+
+/* Curved rail 1 - Gentle wave across top */
+.rail-h1 {
+  top: 25%;
+  left: -20%;
+  width: 140%;
+  height: 100px;
+  animation: railFlowH1 40s ease-in-out infinite;
+  transform: rotate(3deg);
+  transition: filter 1s var(--ease-out), opacity 0.8s var(--ease-out), transform 0.3s var(--ease-out);
+  overflow: visible;
+}
+
+.rail-h1 svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* Curved rail 2 - Gentle wave across bottom */
+.rail-h2 {
+  bottom: 30%;
+  left: -20%;
+  width: 140%;
+  height: 100px;
+  animation: railFlowH2 35s ease-in-out infinite;
+  transform: rotate(-2deg);
+  transition: filter 1s var(--ease-out), opacity 0.8s var(--ease-out), transform 0.3s var(--ease-out);
+  overflow: visible;
+}
+
+.rail-h2 svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* Curved diagonal 1 - Flowing from top-left area */
+.rail-d1 {
+  top: 5%;
+  left: -15%;
+  width: 130%;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(99, 102, 241, 0.5) 20%,
+    rgba(6, 182, 212, 0.5) 80%,
+    transparent 100%
+  );
+  transform: rotate(23deg);
+  transform-origin: top left;
+  animation: railFlowD1 50s ease-in-out infinite;
+  transition: filter 1s var(--ease-out), opacity 0.8s var(--ease-out), transform 0.3s var(--ease-out);
+}
+
+/* Curved diagonal 2 - Flowing from top-right area */
+.rail-d2 {
+  top: 15%;
+  right: -15%;
+  width: 130%;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(168, 85, 247, 0.5) 20%,
+    rgba(249, 115, 22, 0.5) 80%,
+    transparent 100%
+  );
+  transform: rotate(-27deg);
+  transform-origin: top right;
+  animation: railFlowD2 45s ease-in-out infinite reverse;
+  transition: filter 1s var(--ease-out), opacity 0.8s var(--ease-out), transform 0.3s var(--ease-out);
+}
+
+/* Rail flow animations - organic movement */
+@keyframes railFlowH1 {
+  0% {
+    transform: rotate(3deg) translateX(0) translateY(0);
+    opacity: 0.15;
+  }
+  25% {
+    transform: rotate(2deg) translateX(5%) translateY(-2px);
+    opacity: 0.2;
+  }
+  50% {
+    transform: rotate(4deg) translateX(10%) translateY(-4px);
+    opacity: 0.25;
+  }
+  75% {
+    transform: rotate(2.5deg) translateX(5%) translateY(-2px);
+    opacity: 0.2;
+  }
+  100% {
+    transform: rotate(3deg) translateX(0) translateY(0);
+    opacity: 0.15;
+  }
+}
+
+@keyframes railFlowH2 {
+  0% {
+    transform: rotate(-2deg) translateX(0) translateY(0);
+    opacity: 0.15;
+  }
+  25% {
+    transform: rotate(-3deg) translateX(-5%) translateY(3px);
+    opacity: 0.18;
+  }
+  50% {
+    transform: rotate(-1deg) translateX(-10%) translateY(5px);
+    opacity: 0.2;
+  }
+  75% {
+    transform: rotate(-2.5deg) translateX(-5%) translateY(3px);
+    opacity: 0.18;
+  }
+  100% {
+    transform: rotate(-2deg) translateX(0) translateY(0);
+    opacity: 0.15;
+  }
+}
+
+@keyframes railFlowD1 {
+  0% {
+    transform: rotate(23deg);
+    opacity: 0.1;
+  }
+  25% {
+    transform: rotate(24deg);
+    opacity: 0.15;
+  }
+  50% {
+    transform: rotate(22deg);
+    opacity: 0.2;
+  }
+  75% {
+    transform: rotate(24deg);
+    opacity: 0.15;
+  }
+  100% {
+    transform: rotate(23deg);
+    opacity: 0.1;
+  }
+}
+
+@keyframes railFlowD2 {
+  0% {
+    transform: rotate(-27deg);
+    opacity: 0.1;
+  }
+  25% {
+    transform: rotate(-26deg);
+    opacity: 0.15;
+  }
+  50% {
+    transform: rotate(-28deg);
+    opacity: 0.2;
+  }
+  75% {
+    transform: rotate(-26.5deg);
+    opacity: 0.15;
+  }
+  100% {
+    transform: rotate(-27deg);
+    opacity: 0.1;
+  }
+}
+
+/* ============================================
+   PULSING NODES - Milestone Markers
+   ============================================ */
+
+/* Nodes container */
+.bg-nodes {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* Individual node */
+.workflow-node {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(139, 92, 246, 0.6);
+  box-shadow: 0 0 20px rgba(139, 92, 246, 0.4);
+  transition: 
+    transform 1.2s var(--ease-bounce), 
+    opacity 0.8s var(--ease-out),
+    filter 1s var(--ease-out),
+    box-shadow 0.8s var(--ease-out);
+  will-change: transform, opacity, filter;
+}
+
+/* Node 1 - Upper left area */
+.node-1 {
+  top: 22%;
+  left: 18%;
+  animation: nodePulse1 4s ease-in-out infinite;
+}
+
+/* Node 2 - Upper right area */
+.node-2 {
+  top: 28%;
+  right: 23%;
+  background: rgba(59, 130, 246, 0.6);
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.4);
+  animation: nodePulse2 5s ease-in-out infinite;
+}
+
+/* Node 3 - Center area (slightly offset) */
+.node-3 {
+  top: 47%;
+  left: 53%;
+  background: rgba(16, 185, 129, 0.6);
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.4);
+  animation: nodePulse3 6s ease-in-out infinite;
+}
+
+/* Node 4 - Lower left area */
+.node-4 {
+  bottom: 32%;
+  left: 27%;
+  background: rgba(236, 72, 153, 0.6);
+  box-shadow: 0 0 20px rgba(236, 72, 153, 0.4);
+  animation: nodePulse4 4.5s ease-in-out infinite;
+}
+
+/* Node 5 - Lower right area */
+.node-5 {
+  bottom: 27%;
+  right: 22%;
+  background: rgba(249, 115, 22, 0.6);
+  box-shadow: 0 0 20px rgba(249, 115, 22, 0.4);
+  animation: nodePulse5 5.5s ease-in-out infinite;
+}
+
+/* Node pulse animations */
+@keyframes nodePulse1 {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.4;
+  }
+  50% {
+    transform: scale(1.8);
+    opacity: 0.8;
+  }
+}
+
+@keyframes nodePulse2 {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.4;
+  }
+  50% {
+    transform: scale(1.6);
+    opacity: 0.7;
+  }
+}
+
+@keyframes nodePulse3 {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.3;
+  }
+  50% {
+    transform: scale(2);
+    opacity: 0.9;
+  }
+}
+
+@keyframes nodePulse4 {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.4;
+  }
+  50% {
+    transform: scale(1.7);
+    opacity: 0.75;
+  }
+}
+
+@keyframes nodePulse5 {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.4;
+  }
+  50% {
+    transform: scale(1.5);
+    opacity: 0.7;
+  }
+}
+
+/* ============================================
+   PARTICLE TRAILS - Guidance Elements
+   ============================================ */
+
+/* Particles container */
+.bg-particles {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: -2;
+  overflow: hidden;
+}
+
+/* Individual particle */
+.particle {
+  position: absolute;
+  width: var(--particle-size, 3px);
+  height: var(--particle-size, 3px);
+  border-radius: 50%;
+  background: var(--particle-color);
+  box-shadow: 0 0 10px var(--particle-glow);
+  opacity: 0;
+  /* Dynamic positioning and animation will be set inline */
+}
+
+/* Particle 1 - Travels along top rail */
+.particle-1 {
+  top: 25%;
+  left: -5%;
+  animation: particleFlow1 20s linear infinite;
+}
+
+/* Particle 2 - Travels along bottom rail */
+.particle-2 {
+  bottom: 30%;
+  left: -5%;
+  background: rgba(236, 72, 153, 0.6);
+  box-shadow: 0 0 10px rgba(236, 72, 153, 0.4);
+  animation: particleFlow2 18s linear infinite;
+}
+
+/* Particle 3 - Travels diagonally */
+.particle-3 {
+  top: 10%;
+  left: -5%;
+  background: rgba(59, 130, 246, 0.6);
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.4);
+  animation: particleFlow3 25s linear infinite;
+}
+
+/* Particle 4 - Travels bottom to top */
+.particle-4 {
+  bottom: -5%;
+  left: 30%;
+  background: rgba(16, 185, 129, 0.6);
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+  animation: particleFlow4 22s linear infinite;
+}
+
+/* Particle 5 - Travels right to left */
+.particle-5 {
+  top: 60%;
+  right: -5%;
+  background: rgba(249, 115, 22, 0.6);
+  box-shadow: 0 0 10px rgba(249, 115, 22, 0.4);
+  animation: particleFlow5 19s linear infinite;
+}
+
+/* Particle flow animations - curved paths */
+@keyframes particleFlow1 {
+  0% {
+    left: -5%;
+    top: 25%;
+    opacity: 0;
+  }
+  10% {
+    top: 22%;
+    opacity: 0.8;
+  }
+  30% {
+    top: 28%;
+  }
+  60% {
+    top: 24%;
+  }
+  90% {
+    top: 27%;
+    opacity: 0.8;
+  }
+  100% {
+    left: 105%;
+    top: 25%;
+    opacity: 0;
+  }
+}
+
+@keyframes particleFlow2 {
+  0% {
+    left: 105%;
+    bottom: 30%;
+    opacity: 0;
+  }
+  10% {
+    bottom: 33%;
+    opacity: 0.8;
+  }
+  30% {
+    bottom: 28%;
+  }
+  60% {
+    bottom: 32%;
+  }
+  90% {
+    bottom: 29%;
+    opacity: 0.8;
+  }
+  100% {
+    left: -5%;
+    bottom: 30%;
+    opacity: 0;
+  }
+}
+
+@keyframes particleFlow3 {
+  0% {
+    left: -5%;
+    top: 10%;
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.8;
+  }
+  25% {
+    left: 20%;
+    top: 35%;
+  }
+  50% {
+    left: 50%;
+    top: 55%;
+  }
+  75% {
+    left: 80%;
+    top: 70%;
+  }
+  90% {
+    opacity: 0.8;
+  }
+  100% {
+    left: 105%;
+    top: 85%;
+    opacity: 0;
+  }
+}
+
+@keyframes particleFlow4 {
+  0% {
+    left: 30%;
+    bottom: -5%;
+    opacity: 0;
+  }
+  10% {
+    left: 28%;
+    opacity: 0.8;
+  }
+  30% {
+    left: 33%;
+  }
+  60% {
+    left: 29%;
+  }
+  90% {
+    left: 31%;
+    opacity: 0.8;
+  }
+  100% {
+    left: 30%;
+    bottom: 105%;
+    opacity: 0;
+  }
+}
+
+@keyframes particleFlow5 {
+  0% {
+    right: -5%;
+    top: 60%;
+    opacity: 0;
+  }
+  10% {
+    top: 58%;
+    opacity: 0.8;
+  }
+  25% {
+    right: 20%;
+    top: 55%;
+  }
+  50% {
+    right: 50%;
+    top: 63%;
+  }
+  75% {
+    right: 80%;
+    top: 58%;
+  }
+  90% {
+    top: 61%;
+    opacity: 0.8;
+  }
+  100% {
+    right: 105%;
+    top: 60%;
+    opacity: 0;
+  }
+}
+
+/* ============================================
+   GRID OVERLAY - Middle Layer (Optional)
+   ============================================ */
+
+.bg-grid {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: 
+    linear-gradient(rgba(139, 92, 246, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(139, 92, 246, 0.03) 1px, transparent 1px);
+  background-size: 50px 50px;
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0.5;
+}
+
+/* Animated grid that drifts slowly */
+.bg-grid-animated {
+  animation: gridDrift 120s linear infinite;
+}
+
+@keyframes gridDrift {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(50px);
+  }
+}
+
+/* ============================================
+   GRAIN TEXTURE - Top Layer (Optional)
+   ============================================ */
+
+.bg-grain {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: -1;
+  opacity: 1;
+  /* Theme-aware film grain texture (static - no animation to avoid artifacts) */
+  background-image: 
+    repeating-linear-gradient(0deg, 
+      transparent 0px, 
+      var(--grain-color) 1px, 
+      transparent 2px
+    ),
+    repeating-linear-gradient(90deg, 
+      transparent 0px, 
+      var(--grain-color) 1px, 
+      transparent 2px
+    ),
+    repeating-linear-gradient(45deg, 
+      transparent 0px, 
+      var(--grain-color-secondary) 1px, 
+      transparent 2px
+    );
+  background-size: 2px 2px, 2px 2px, 3px 3px;
+  mix-blend-mode: multiply;
+}
+
+@keyframes grainMove {
+  0%, 100% { transform: translate(0, 0); }
+  10% { transform: translate(-1px, -2px); }
+  20% { transform: translate(-3px, 1px); }
+  30% { transform: translate(1px, -3px); }
+  40% { transform: translate(-1px, 3px); }
+  50% { transform: translate(-2px, 1px); }
+  60% { transform: translate(2px, 0px); }
+  70% { transform: translate(0px, 2px); }
+  80% { transform: translate(1px, 3px); }
+  90% { transform: translate(-2px, 1px); }
+}
+
+/* ============================================
+   PERFORMANCE OPTIMIZATIONS
+   ============================================ */
+
+/* Reduce motion for accessibility */
+@media (prefers-reduced-motion: reduce) {
+  .bg-orb,
+  .bg-grid-animated,
+  .bg-grain,
+  .rail-path,
+  .workflow-node,
+  .particle {
+    animation: none !important;
+  }
+  
+  .bg-orb {
+    opacity: 0.05;
+  }
+  
+  .rail-path,
+  .workflow-node,
+  .particle {
+    display: none;
+  }
+}
+
+/* Lower intensity on mobile for performance */
+@media (max-width: 768px) {
+  .bg-orb {
+    filter: blur(60px);
+    opacity: 0.08;
+  }
+  
+  .bg-orb-5 {
+    display: none; /* Hide 5th orb on mobile */
+  }
+  
+  .bg-grain {
+    display: none; /* Hide grain on mobile */
+  }
+  
+  /* Hide workflow elements on mobile for performance */
+  .bg-rails,
+  .bg-nodes,
+  .bg-particles {
+    display: none;
+  }
+}
+
+/* ============================================
+   INTENSITY MODES (Optional)
+   ============================================ */
+
+/* Subtle mode - very minimal */
+.bg-orbs-subtle .bg-orb {
+  opacity: 0.06;
+  filter: blur(100px);
+}
+
+/* Normal mode - default (already set above) */
+
+/* Vibrant mode - more prominent */
+.bg-orbs-vibrant .bg-orb {
+  opacity: 0.18;
+  filter: blur(70px);
+}
+
+/* ============================================
+   CURSOR INTERACTION (Advanced - Optional)
+   ============================================ */
+
+/* Orbs subtly move away from cursor when .bg-orbs-interactive is set */
+/* Requires JavaScript to track cursor position */
+.bg-orbs-interactive .bg-orb {
+  transition: transform 0.6s var(--ease-out);
+}
+
+/* Rails disturbance effect when cursor is nearby */
+.rail-path {
+  will-change: filter, opacity;
+}
+
+/* Different disturbance effects for each rail - glow + shimmer */
+/* Disturbed states removed - proximity detection disabled */
+
+/* Shimmer animations - subtle brightness/opacity/blur pulse for each rail */
+@keyframes railShimmer1 {
+  0%, 100% {
+    filter: brightness(1.6) drop-shadow(0 0 20px rgba(139, 92, 246, 1)) hue-rotate(25deg) blur(2px);
+    opacity: 0.7;
+  }
+  50% {
+    filter: brightness(2) drop-shadow(0 0 35px rgba(139, 92, 246, 1)) hue-rotate(30deg) blur(4px);
+    opacity: 0.85;
+  }
+}
+
+@keyframes railShimmer2 {
+  0%, 100% {
+    filter: brightness(1.6) drop-shadow(0 0 20px rgba(236, 72, 153, 1)) hue-rotate(-25deg) blur(2px);
+    opacity: 0.7;
+  }
+  50% {
+    filter: brightness(2) drop-shadow(0 0 35px rgba(236, 72, 153, 1)) hue-rotate(-30deg) blur(4px);
+    opacity: 0.85;
+  }
+}
+
+@keyframes railShimmer3 {
+  0%, 100% {
+    filter: brightness(1.7) drop-shadow(0 0 25px rgba(99, 102, 241, 1)) blur(3px);
+    opacity: 0.65;
+  }
+  50% {
+    filter: brightness(2.1) drop-shadow(0 0 40px rgba(99, 102, 241, 1)) blur(5px);
+    opacity: 0.8;
+  }
+}
+
+@keyframes railShimmer4 {
+  0%, 100% {
+    filter: brightness(1.7) drop-shadow(0 0 25px rgba(168, 85, 247, 1)) blur(3px);
+    opacity: 0.65;
+  }
+  50% {
+    filter: brightness(2.1) drop-shadow(0 0 40px rgba(168, 85, 247, 1)) blur(5px);
+    opacity: 0.8;
+  }
+}
+
+/* Wiggle animations for rails (kept for reference, not used anymore) */
+@keyframes railWiggle1 {
+  0%, 100% { 
+    transform: rotate(3deg) translateY(0) scaleY(1) scaleX(1);
+  }
+  25% { 
+    transform: rotate(6deg) translateY(-15px) scaleY(1.15) scaleX(0.95);
+  }
+  50% { 
+    transform: rotate(0deg) translateY(-20px) scaleY(0.9) scaleX(1.1);
+  }
+  75% { 
+    transform: rotate(5deg) translateY(-10px) scaleY(1.1) scaleX(0.98);
+  }
+}
+
+@keyframes railWiggle2 {
+  0%, 100% { 
+    transform: rotate(-2deg) translateY(0) scaleY(1) scaleX(1);
+  }
+  25% { 
+    transform: rotate(-5deg) translateY(18px) scaleY(1.12) scaleX(0.92);
+  }
+  50% { 
+    transform: rotate(1deg) translateY(25px) scaleY(0.88) scaleX(1.12);
+  }
+  75% { 
+    transform: rotate(-4deg) translateY(12px) scaleY(1.08) scaleX(0.96);
+  }
+}
+
+@keyframes railWiggle3 {
+  0%, 100% { 
+    transform: rotate(23deg) scale(1);
+  }
+  25% {
+    transform: rotate(28deg) scale(1.15) translateX(-10px);
+  }
+  50% { 
+    transform: rotate(18deg) scale(0.9) translateX(10px);
+  }
+  75% {
+    transform: rotate(26deg) scale(1.1) translateX(-5px);
+  }
+}
+
+@keyframes railWiggle4 {
+  0%, 100% { 
+    transform: rotate(-27deg) scale(1);
+  }
+  25% {
+    transform: rotate(-32deg) scale(1.12) translateX(10px);
+  }
+  50% { 
+    transform: rotate(-22deg) scale(0.92) translateX(-10px);
+  }
+  75% {
+    transform: rotate(-29deg) scale(1.08) translateX(5px);
+  }
+}
+
+/* Nodes react to cursor proximity - override the pulse animation */
+.workflow-node.disturbed {
+  animation: none !important; /* Stop the pulse animation - this can have !important */
+  transform: scale(4); /* NO !important - allows transition to work */
+  opacity: 1;
+  filter: brightness(1.8) drop-shadow(0 0 50px currentColor) saturate(1.5);
+  box-shadow: 0 0 60px currentColor;
+}
+
+/* Particles react when cursor is near */
+.particle {
+  transition: 
+    transform 0.8s var(--ease-bounce), 
+    opacity 0.6s var(--ease-out),
+    filter 0.7s var(--ease-out);
+  will-change: transform, opacity, filter;
+}
+
+.particle.disturbed {
+  transform: scale(2.5);
+  opacity: 1;
+  filter: brightness(1.5) drop-shadow(0 0 20px currentColor);
+}
+
+/* Explosion particles - special styling */
+.particle.explosion-particle {
+  z-index: 1000;
+  filter: brightness(1.2) drop-shadow(0 0 8px var(--particle-color));
+  animation: explode-pulse 0.8s ease-out;
+}
+
+@keyframes explode-pulse {
+  0% {
+    filter: brightness(2) drop-shadow(0 0 20px var(--particle-color));
+  }
+  50% {
+    filter: brightness(1.5) drop-shadow(0 0 12px var(--particle-color));
+  }
+  100% {
+    filter: brightness(0.8) drop-shadow(0 0 4px var(--particle-color));
+  }
+}
+
+/* ============================================
+   ANIMATED GRAIN TEXTURE
+   ============================================ */
+
+/* bg-grain styles moved to top of file (avoiding duplicate) */
+
+/* ============================================
+   TIME-OF-DAY THEMES (Advanced - Optional)
+   ============================================ */
+
+/* Morning theme - warmer tones */
+[data-time-theme="morning"] .bg-orb-1 {
+  background: radial-gradient(circle, rgba(249, 115, 22, 0.4), transparent 70%);
+}
+
+[data-time-theme="morning"] .bg-orb-2 {
+  background: radial-gradient(circle, rgba(234, 179, 8, 0.4), transparent 70%);
+}
+
+/* Evening theme - cooler tones */
+[data-time-theme="evening"] .bg-orb-3 {
+  background: radial-gradient(circle, rgba(99, 102, 241, 0.4), transparent 70%);
+}
+
+[data-time-theme="evening"] .bg-orb-4 {
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.4), transparent 70%);
+}
+
+/* ============================================
+   DARK MODE ORBS - Enhanced Quality
+   ============================================ */
+
+/* 
+ * Dark mode: Use same vibrant colors as light mode, but much more subtle
+ * Heavy blur hides banding, low opacity keeps it refined
+ */
+[data-theme="dark"] .bg-orb-1 {
+  background: radial-gradient(
+    circle,
+    rgba(6, 182, 212, 0.25) 0%,
+    rgba(6, 182, 212, 0.18) 25%,
+    rgba(6, 182, 212, 0.12) 50%,
+    rgba(6, 182, 212, 0.06) 75%,
+    transparent 100%
+  ) !important;
+  filter: blur(100px) !important;
+  opacity: 0.2 !important;
+}
+
+[data-theme="dark"] .bg-orb-2 {
+  background: radial-gradient(
+    circle,
+    rgba(139, 92, 246, 0.28) 0%,
+    rgba(139, 92, 246, 0.2) 25%,
+    rgba(139, 92, 246, 0.13) 50%,
+    rgba(139, 92, 246, 0.07) 75%,
+    transparent 100%
+  ) !important;
+  filter: blur(100px) !important;
+  opacity: 0.2 !important;
+}
+
+[data-theme="dark"] .bg-orb-3 {
+  background: radial-gradient(
+    circle,
+    rgba(236, 72, 153, 0.25) 0%,
+    rgba(236, 72, 153, 0.18) 25%,
+    rgba(236, 72, 153, 0.12) 50%,
+    rgba(236, 72, 153, 0.06) 75%,
+    transparent 100%
+  ) !important;
+  filter: blur(100px) !important;
+  opacity: 0.2 !important;
+}
+
+[data-theme="dark"] .bg-orb-4 {
+  background: radial-gradient(
+    circle,
+    rgba(249, 115, 22, 0.23) 0%,
+    rgba(249, 115, 22, 0.17) 25%,
+    rgba(249, 115, 22, 0.11) 50%,
+    rgba(249, 115, 22, 0.05) 75%,
+    transparent 100%
+  ) !important;
+  filter: blur(100px) !important;
+  opacity: 0.2 !important;
+}
+
+[data-theme="dark"] .bg-orb-5 {
+  background: radial-gradient(
+    circle,
+    rgba(16, 185, 129, 0.22) 0%,
+    rgba(16, 185, 129, 0.16) 25%,
+    rgba(16, 185, 129, 0.1) 50%,
+    rgba(16, 185, 129, 0.05) 75%,
+    transparent 100%
+  ) !important;
+  filter: blur(100px) !important;
+  opacity: 0.2 !important;
+}
+
+/* ============================================
+   SCROLL PARALLAX (Advanced - Optional)
+   ============================================ */
+
+.bg-orbs-parallax .bg-orb-1,
+.bg-orbs-parallax .bg-orb-2 {
+  transform: translateY(calc(var(--scroll-y, 0) * 0.2px));
+}
+
+.bg-orbs-parallax .bg-orb-3,
+.bg-orbs-parallax .bg-orb-4 {
+  transform: translateY(calc(var(--scroll-y, 0) * 0.15px));
+}
+
+.bg-orbs-parallax .bg-orb-5 {
+  transform: translateY(calc(var(--scroll-y, 0) * 0.1px));
+}
+
+/* ============================================
+   USAGE INSTRUCTIONS
+   ============================================ */
+
+/*
+Basic Usage - Orbs Only:
+-------------------------
+<div class="bg-orbs">
+  <div class="bg-orb bg-orb-1"></div>
+  <div class="bg-orb bg-orb-2"></div>
+  <div class="bg-orb bg-orb-3"></div>
+  <div class="bg-orb bg-orb-4"></div>
+  <div class="bg-orb bg-orb-5"></div>
+</div>
+
+Workflow Theme - Rails + Nodes + Particles:
+--------------------------------------------
+<div class="bg-rails">
+  <div class="rail-path rail-h1"></div>
+  <div class="rail-path rail-h2"></div>
+  <div class="rail-path rail-d1"></div>
+  <div class="rail-path rail-d2"></div>
+</div>
+
+<div class="bg-nodes">
+  <div class="workflow-node node-1"></div>
+  <div class="workflow-node node-2"></div>
+  <div class="workflow-node node-3"></div>
+  <div class="workflow-node node-4"></div>
+  <div class="workflow-node node-5"></div>
+</div>
+
+<div class="bg-particles">
+  <div class="particle particle-1"></div>
+  <div class="particle particle-2"></div>
+  <div class="particle particle-3"></div>
+  <div class="particle particle-4"></div>
+  <div class="particle particle-5"></div>
+</div>
+
+With Grid Overlay:
+------------------
+<div class="bg-grid bg-grid-animated"></div>
+
+With Grain:
+-----------
+<div class="bg-grain"></div>
+
+Intensity Control:
+------------------
+<div class="bg-orbs bg-orbs-subtle">...</div>  <!-- Very minimal -->
+<div class="bg-orbs">...</div>                 <!-- Normal (default) -->
+<div class="bg-orbs bg-orbs-vibrant">...</div> <!-- More prominent -->
+
+Complete Hybrid Stack (Recommended):
+-------------------------------------
+<!-- Orbs for ambient depth -->
+<div class="bg-orbs">
+  <div class="bg-orb bg-orb-1"></div>
+  <div class="bg-orb bg-orb-2"></div>
+  <div class="bg-orb bg-orb-3"></div>
+  <div class="bg-orb bg-orb-4"></div>
+  <div class="bg-orb bg-orb-5"></div>
+</div>
+
+<!-- Workflow rails for structure -->
+<div class="bg-rails">
+  <div class="rail-path rail-h1"></div>
+  <div class="rail-path rail-h2"></div>
+  <div class="rail-path rail-d1"></div>
+  <div class="rail-path rail-d2"></div>
+</div>
+
+<!-- Pulsing nodes for milestones -->
+<div class="bg-nodes">
+  <div class="workflow-node node-1"></div>
+  <div class="workflow-node node-2"></div>
+  <div class="workflow-node node-3"></div>
+  <div class="workflow-node node-4"></div>
+  <div class="workflow-node node-5"></div>
+</div>
+
+<!-- Particles for guidance -->
+<div class="bg-particles">
+  <div class="particle particle-1"></div>
+  <div class="particle particle-2"></div>
+  <div class="particle particle-3"></div>
+  <div class="particle particle-4"></div>
+  <div class="particle particle-5"></div>
+</div>
+
+<!-- Optional: Grid and grain -->
+<div class="bg-grain"></div>
+
+Enabling Interactive Disturbance:
+----------------------------------
+1. Include the script:
+   <script src="/assets/background-interaction.js"></script>
+
+2. Enable on page load:
+   <script>
+     document.addEventListener('DOMContentLoaded', () => {
+       WorkrailBackground.enableInteraction();
+     });
+   </script>
+
+3. Or use auto-enable with data attribute:
+   <html data-workrail-interactive>
+
+Effects:
+- Rails shift and fade when cursor passes over them
+- Nodes pulse larger when cursor is nearby
+- Particles brighten and grow near cursor
+- 150px detection radius (configurable)
+*/
+
+
+
+
+/* ============================================
+   5. THEME-TOGGLE
+   ============================================ */
+
+/**
+ * Theme Toggle Component
+ * Beautiful sun/moon toggle for light/dark mode
+ */
+
+.theme-toggle {
+  position: fixed;
+  top: var(--space-md);
+  right: var(--space-md);
+  z-index: 1000;
+  
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.theme-toggle-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-button);
+  border: 1px solid var(--border-medium);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  color: var(--text-primary);
+  
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  
+  cursor: pointer;
+  transition: all 200ms var(--ease-spring);
+  
+  /* Remove button styles */
+  appearance: none;
+  font: inherit;
+  outline: none;
+}
+
+.theme-toggle-btn:hover {
+  background: var(--glass-bg-strong);
+  border-color: var(--border-heavy);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.theme-toggle-btn:active {
+  transform: translateY(0) scale(0.95);
+}
+
+.theme-toggle-btn svg {
+  width: 20px;
+  height: 20px;
+  transition: transform 400ms var(--ease-spring);
+}
+
+/* Icon animations */
+.theme-toggle-btn:hover svg {
+  transform: rotate(180deg) scale(1.1);
+}
+
+.theme-icon {
+  display: none;
+}
+
+/* Show/hide icons based on theme */
+[data-theme="dark"] .theme-icon-sun {
+  display: block;
+}
+
+:root:not([data-theme="dark"]) .theme-icon-moon {
+  display: block;
+}
+
+/* Auto mode indicator (optional badge) */
+.theme-toggle-auto-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent-green);
+  border: 2px solid var(--bg-primary);
+  opacity: 0;
+  transition: opacity 200ms;
+}
+
+.theme-toggle.is-auto .theme-toggle-auto-badge {
+  opacity: 1;
+}
+
+/* Tooltip */
+.theme-toggle-tooltip {
+  position: absolute;
+  bottom: -32px;
+  right: 0;
+  
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition: all 200ms var(--ease-smooth);
+}
+
+.theme-toggle-btn:hover + .theme-toggle-tooltip {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Mobile adjustments */
+@media (max-width: 768px) {
+  .theme-toggle {
+    top: var(--space-sm);
+    right: var(--space-sm);
+  }
+  
+  .theme-toggle-btn {
+    width: 40px;
+    height: 40px;
+  }
+  
+  .theme-toggle-tooltip {
+    display: none; /* Hide tooltips on mobile */
+  }
+}
+
+
+
+
+/* ============================================
+   8. LAYOUT COMPONENTS (NEW)
+   ============================================ */
+
+/* Dashboard Layout - Handles all layout concerns */
+.wr-dashboard-layout {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.wr-dashboard-header {
+  flex-shrink: 0;
+  z-index: 100;
+}
+
+.wr-dashboard-header.wr-sticky {
+  position: sticky;
+  top: 0;
+  background: var(--bg-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+[data-theme="dark"] .wr-dashboard-header.wr-sticky {
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.wr-dashboard-body {
+  flex: 1;
+  display: flex;
+  position: relative;
+}
+
+.wr-dashboard-sidebar {
+  flex-shrink: 0;
+  width: 280px;
+  padding: var(--space-6);
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-light);
+}
+
+.wr-dashboard-main {
+  flex: 1;
+  width: 100%;
+  margin: 0 auto;
+  padding: var(--space-8) var(--space-6);
+}
+
+.wr-dashboard-footer {
+  flex-shrink: 0;
+  padding: var(--space-6);
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-light);
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+}
+
+/* Page Container - Consistent max-width and padding */
+.wr-page-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--space-8) var(--space-6);
+}
+
+/* Grid - Responsive grid system */
+.wr-grid {
+  display: grid;
+}
+
+/* Stack - Vertical/horizontal layout */
+.wr-stack {
+  display: flex;
+}
+
+.wr-stack-vertical {
+  flex-direction: column;
+}
+
+.wr-stack-horizontal {
+  flex-direction: row;
+}
+
+/* Spacer - Design token spacing */
+.wr-spacer {
+  flex-shrink: 0;
+}
+
+/* Responsive behavior */
+@media (max-width: 1024px) {
+  .wr-dashboard-sidebar {
+    width: 240px;
+  }
+}
+
+@media (max-width: 768px) {
+  .wr-dashboard-sidebar {
+    display: none; /* Hidden on mobile by default */
+  }
+  
+  .wr-dashboard-main,
+  .wr-page-container {
+    padding: var(--space-6) var(--space-4);
+  }
+}
+
+@media (max-width: 480px) {
+  .wr-dashboard-main,
+  .wr-page-container {
+    padding: var(--space-4) var(--space-3);
+  }
+}
+
+/* ============================================
+   END OF WORKRAIL UI SYSTEM CSS
+   ============================================ */

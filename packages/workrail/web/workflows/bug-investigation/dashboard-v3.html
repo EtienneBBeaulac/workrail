@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en" data-bg-intensity="subtle">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔍 Bug Investigation Dashboard</title>
+    
+    <!-- 🎯 Modern System: Design tokens + background -->
+    <link rel="stylesheet" href="/assets/styles/tokens.css">
+    <link rel="stylesheet" href="/assets/background-effects.css">
+    <link rel="stylesheet" href="/assets/theme-toggle.css">
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- Theme management -->
+    <script src="/assets/theme-manager.js"></script>
+    <script src="/assets/theme-toggle.js"></script>
+    <script src="/assets/time-of-day-theme.js"></script>
+    
+    <style>
+        /* Toggle SVG orbs based on theme */
+        [data-theme="dark"] .orbs-light { display: none; }
+        [data-theme="dark"] .orbs-dark { display: block !important; }
+    </style>
+</head>
+<body>
+    
+    <!-- 🎨 Background Effects (Subtle Mode) -->
+    <svg class="bg-orbs" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">
+        <defs>
+            <filter id="orb-blur-dashboard" x="-100%" y="-100%" width="300%" height="300%">
+                <feGaussianBlur in="SourceGraphic" stdDeviation="3"/>
+            </filter>
+        </defs>
+        
+        <!-- Orbs - Light Mode -->
+        <g class="orbs-light">
+            <circle cx="15" cy="15" r="8" fill="rgba(6, 182, 212, 0.4)" filter="url(#orb-blur-dashboard)">
+                <animate attributeName="cx" values="15;18;12;15" dur="20s" repeatCount="indefinite"/>
+                <animate attributeName="cy" values="15;18;12;15" dur="20s" repeatCount="indefinite"/>
+            </circle>
+            <circle cx="85" cy="10" r="10" fill="rgba(139, 92, 246, 0.4)" filter="url(#orb-blur-dashboard)">
+                <animate attributeName="cx" values="85;82;88;85" dur="25s" repeatCount="indefinite"/>
+                <animate attributeName="cy" values="10;13;7;10" dur="25s" repeatCount="indefinite"/>
+            </circle>
+            <circle cx="20" cy="85" r="9" fill="rgba(236, 72, 153, 0.4)" filter="url(#orb-blur-dashboard)">
+                <animate attributeName="cx" values="20;17;23;20" dur="22s" repeatCount="indefinite"/>
+                <animate attributeName="cy" values="85;82;88;85" dur="22s" repeatCount="indefinite"/>
+            </circle>
+            <circle cx="85" cy="80" r="7" fill="rgba(249, 115, 22, 0.4)" filter="url(#orb-blur-dashboard)">
+                <animate attributeName="cx" values="85;88;82;85" dur="18s" repeatCount="indefinite"/>
+                <animate attributeName="cy" values="80;83;77;80" dur="18s" repeatCount="indefinite"/>
+            </circle>
+        </g>
+        
+        <!-- Orbs - Dark Mode -->
+        <g class="orbs-dark" style="display: none;">
+            <circle cx="15" cy="15" r="8" fill="rgba(6, 182, 212, 0.3)" filter="url(#orb-blur-dashboard)">
+                <animate attributeName="cx" values="15;18;12;15" dur="20s" repeatCount="indefinite"/>
+                <animate attributeName="cy" values="15;18;12;15" dur="20s" repeatCount="indefinite"/>
+            </circle>
+            <circle cx="85" cy="10" r="10" fill="rgba(139, 92, 246, 0.35)" filter="url(#orb-blur-dashboard)">
+                <animate attributeName="cx" values="85;82;88;85" dur="25s" repeatCount="indefinite"/>
+                <animate attributeName="cy" values="10;13;7;10" dur="25s" repeatCount="indefinite"/>
+            </circle>
+            <circle cx="20" cy="85" r="9" fill="rgba(236, 72, 153, 0.3)" filter="url(#orb-blur-dashboard)">
+                <animate attributeName="cx" values="20;17;23;20" dur="22s" repeatCount="indefinite"/>
+                <animate attributeName="cy" values="85;82;88;85" dur="22s" repeatCount="indefinite"/>
+            </circle>
+            <circle cx="85" cy="80" r="7" fill="rgba(249, 115, 22, 0.3)" filter="url(#orb-blur-dashboard)">
+                <animate attributeName="cx" values="85;88;82;85" dur="18s" repeatCount="indefinite"/>
+                <animate attributeName="cy" values="80;83;77;80" dur="18s" repeatCount="indefinite"/>
+            </circle>
+        </g>
+    </svg>
+    
+    <!-- Workflow Rails -->
+    <div class="bg-rails">
+        <!-- Horizontal rails with SVG paths -->
+        <svg class="rail-path" id="rail-h1" viewBox="0 0 100 100" preserveAspectRatio="none">
+            <path d="M 0,50 Q 25,45 50,50 T 100,50" fill="none" stroke="currentColor" stroke-width="0.3" opacity="0.4"/>
+        </svg>
+        <svg class="rail-path" id="rail-h2" viewBox="0 0 100 100" preserveAspectRatio="none">
+            <path d="M 0,50 Q 25,55 50,50 T 100,50" fill="none" stroke="currentColor" stroke-width="0.3" opacity="0.4"/>
+        </svg>
+        
+        <!-- Diagonal rails (empty divs styled with pseudo-elements) -->
+        <div class="rail-path" id="rail-d1"></div>
+        <div class="rail-path" id="rail-d2"></div>
+    </div>
+    
+    <!-- Workflow Nodes (pulsing dots) -->
+    <div class="workflow-node" style="left: 15%; top: 25%;"></div>
+    <div class="workflow-node" style="left: 45%; top: 15%;"></div>
+    <div class="workflow-node" style="left: 75%; top: 35%;"></div>
+    <div class="workflow-node" style="left: 30%; top: 65%;"></div>
+    <div class="workflow-node" style="left: 65%; top: 75%;"></div>
+    
+    <!-- Particle Container (will be populated by JS) -->
+    <div class="bg-particles"></div>
+    
+    <!-- Grain Texture -->
+    <div class="bg-grain"></div>
+    
+    <!-- Single root element -->
+    <div id="root"></div>
+    
+    <!-- 🎯 Modern System: ES Module + Scaffold -->
+    <script type="module">
+        import { createDashboard } from '/assets/scaffolds/dashboard.js';
+        
+        // Get session info from URL
+        const params = new URLSearchParams(window.location.search);
+        const workflowId = params.get('workflow') || 'bug-investigation';
+        const sessionId = params.get('id') || params.get('session');
+        
+        if (!sessionId) {
+            // Show error if no session ID
+            document.getElementById('root').innerHTML = `
+                <div style="
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    min-height: 100vh;
+                    padding: var(--space-8);
+                    text-align: center;
+                ">
+                    <div>
+                        <h1 style="color: var(--text-primary); margin-bottom: var(--space-4);">
+                            No Session ID Provided
+                        </h1>
+                        <p style="color: var(--text-secondary); margin-bottom: var(--space-6);">
+                            Please provide a session ID in the URL.
+                        </p>
+                        <a href="/" style="
+                            display: inline-block;
+                            padding: var(--space-3) var(--space-6);
+                            background: var(--primary-500);
+                            color: white;
+                            border-radius: var(--radius-lg);
+                            text-decoration: none;
+                            font-weight: var(--font-medium);
+                        ">
+                            ← Back to Home
+                        </a>
+                    </div>
+                </div>
+            `;
+        } else {
+            // 🎯 Create complete dashboard with scaffold system
+            const dashboard = createDashboard({
+                workflow: workflowId,
+                sessionId: sessionId,
+                
+                // Fetch data from MCP API
+                dataSource: `/api/sessions/${workflowId}/${sessionId}`,
+                
+                // Real-time updates via Server-Sent Events (SSE)
+                realtime: true,
+                
+                // Polling fallback interval (if SSE fails)
+                updateInterval: 5000,
+                
+                // Define sections (in order) - all sections from v2!
+                sections: [
+                    'hero',       // Title, status, badges, timestamp
+                    'stats',      // Progress, confidence, phase
+                    'rootCause',  // Root cause details (if available)
+                    'hypotheses', // Active and confirmed hypotheses
+                    'ruledOut',   // Ruled out hypotheses
+                    'timeline',   // Investigation timeline
+                    'fix'         // Recommended fix (if available)
+                ],
+                
+                // Error handling
+                onError: (error) => {
+                    console.error('Dashboard error:', error);
+                    // Could send to analytics, show notification, etc.
+                }
+            });
+            
+            // Render dashboard
+            document.getElementById('root').appendChild(dashboard);
+            
+            // Initialize Lucide icons
+            if (typeof lucide !== 'undefined') {
+                lucide.createIcons();
+            }
+            
+            console.log('✅ Bug Investigation Dashboard v3.0');
+            console.log(`   Workflow: ${workflowId}`);
+            console.log(`   Session: ${sessionId}`);
+            console.log('   Using modern scaffold system');
+        }
+    </script>
+    
+    <!-- Background particle generation (auto-initializes) -->
+    <script src="/assets/particle-generator.js"></script>
+    
+    <!-- Background interaction (disabled for dashboards - no proximity effects) -->
+    <!-- We keep this commented out to avoid distractions during active work -->
+    <!-- <script src="/assets/background-interaction.js"></script> -->
+    
+    <!-- Scroll parallax (disabled for dashboards to maintain performance) -->
+    <!-- <script src="/assets/scroll-parallax.js"></script> -->
+    
+</body>
+</html>

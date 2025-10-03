@@ -1,0 +1,20 @@
+I need you to test the Workrail bug investigation workflow.
+
+Read the file: /Users/etienneb/git/personal/mcp/packages/workrail/AGENT_TEST_INSTRUCTIONS.md
+
+Follow ALL instructions in that file carefully. This is a complete end-to-end test of:
+1. The systematic bug investigation workflow
+2. Session management with real-time dashboard
+3. Progress tracking through 6 phases
+4. Hypothesis generation and validation
+5. Root cause identification
+
+The test scenario is bug "DASH-001" - a dashboard data staleness issue.
+
+Execute the workflow step-by-step, making ALL required session updates as documented.
+
+Report back on:
+- Whether the dashboard updated in real-time
+- Any issues encountered
+- Final confidence score achieved
+- Overall test results

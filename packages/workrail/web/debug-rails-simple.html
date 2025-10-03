@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rail Debug - Visual</title>
+    <link rel="stylesheet" href="/assets/design-system.css">
+    <link rel="stylesheet" href="/assets/background-effects.css">
+    
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #111;
+            position: relative;
+            height: 100vh;
+            overflow: hidden;
+        }
+        
+        /* Add crosshair at cursor */
+        #crosshair {
+            position: fixed;
+            pointer-events: none;
+            z-index: 10000;
+        }
+        
+        #crosshair::before {
+            content: '';
+            position: absolute;
+            left: -50px;
+            top: 0;
+            width: 100px;
+            height: 1px;
+            background: red;
+        }
+        
+        #crosshair::after {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: -50px;
+            width: 1px;
+            height: 100px;
+            background: red;
+        }
+        
+        /* Labels for each rail */
+        .rail-label {
+            position: fixed;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 5px 10px;
+            font-family: monospace;
+            font-size: 12px;
+            border: 1px solid white;
+            z-index: 9999;
+            pointer-events: none;
+        }
+        
+        .info-panel {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.9);
+            color: #0f0;
+            padding: 15px;
+            font-family: monospace;
+            font-size: 14px;
+            z-index: 9999;
+            max-width: 300px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Background Rails -->
+    <div class="bg-rails">
+        <div class="rail-path rail-h1" id="rail-h1"></div>
+        <div class="rail-path rail-h2" id="rail-h2"></div>
+        <div class="rail-path rail-d1" id="rail-d1"></div>
+        <div class="rail-path rail-d2" id="rail-d2"></div>
+    </div>
+
+    <!-- Crosshair -->
+    <div id="crosshair"></div>
+    
+    <!-- Rail Labels -->
+    <div class="rail-label" id="label-h1" style="display: none;">RAIL-H1</div>
+    <div class="rail-label" id="label-h2" style="display: none;">RAIL-H2</div>
+    <div class="rail-label" id="label-d1" style="display: none;">RAIL-D1</div>
+    <div class="rail-label" id="label-d2" style="display: none;">RAIL-D2</div>
+    
+    <!-- Info Panel -->
+    <div class="info-panel">
+        <div>Cursor: <span id="cursor-pos">-</span></div>
+        <div>Viewport: <span id="viewport-size">-</span></div>
+        <div style="margin-top: 10px;">
+            <strong>Move cursor over the colored rails</strong><br>
+            Labels will show which rail you're touching
+        </div>
+        <div style="margin-top: 10px; font-size: 11px;">
+            <div>Rail H1 (purple): top 25%</div>
+            <div>Rail H2 (pink): bottom 30%</div>
+            <div>Rail D1 (blue): top 5%, diagonal</div>
+            <div>Rail D2 (purple): top 15%, diagonal</div>
+        </div>
+    </div>
+
+    <script>
+        const crosshair = document.getElementById('crosshair');
+        const cursorPos = document.getElementById('cursor-pos');
+        const viewportSize = document.getElementById('viewport-size');
+        
+        // Update viewport size
+        function updateViewportSize() {
+            viewportSize.textContent = `${window.innerWidth}x${window.innerHeight}`;
+        }
+        updateViewportSize();
+        window.addEventListener('resize', updateViewportSize);
+        
+        // Track mouse
+        document.addEventListener('mousemove', (e) => {
+            crosshair.style.left = e.clientX + 'px';
+            crosshair.style.top = e.clientY + 'px';
+            cursorPos.textContent = `${e.clientX}, ${e.clientY} (${((e.clientY / window.innerHeight) * 100).toFixed(1)}%)`;
+            
+            // Check which rail we're over
+            checkRailProximity(e.clientX, e.clientY);
+        });
+        
+        function checkRailProximity(mouseX, mouseY) {
+            const rails = [
+                { id: 'rail-h1', element: document.getElementById('rail-h1'), label: document.getElementById('label-h1') },
+                { id: 'rail-h2', element: document.getElementById('rail-h2'), label: document.getElementById('label-h2') },
+                { id: 'rail-d1', element: document.getElementById('rail-d1'), label: document.getElementById('label-d1') },
+                { id: 'rail-d2', element: document.getElementById('rail-d2'), label: document.getElementById('label-d2') }
+            ];
+            
+            rails.forEach(rail => {
+                const rect = rail.element.getBoundingClientRect();
+                
+                // Simple check: is cursor within the bounding box?
+                const isInside = mouseX >= rect.left && 
+                                mouseX <= rect.right && 
+                                mouseY >= rect.top && 
+                                mouseY <= rect.bottom;
+                
+                if (isInside) {
+                    rail.label.style.display = 'block';
+                    rail.label.style.left = mouseX + 20 + 'px';
+                    rail.label.style.top = mouseY + 20 + 'px';
+                    console.log(`Over ${rail.id}:`, {
+                        rect,
+                        mouseX,
+                        mouseY,
+                        percentY: `${((mouseY / window.innerHeight) * 100).toFixed(1)}%`
+                    });
+                } else {
+                    rail.label.style.display = 'none';
+                }
+            });
+        }
+        
+        console.log('🔍 Rail Debug Mode');
+        console.log('Move your cursor over the colored lines');
+        console.log('Labels will appear showing which rail you\'re touching');
+    </script>
+</body>
+</html>

@@ -35,7 +35,9 @@ export class SchemaValidatingWorkflowStorage implements IWorkflowStorage {
     return raw.filter((wf) => {
       try {
         return this.ensureValid(wf);
-      } catch {
+      } catch (err) {
+        console.error(`[SchemaValidation] Workflow '${wf.id}' failed validation:`, 
+          err instanceof Error ? err.message : err);
         return false; // Skip invalid workflows
       }
     });
@@ -47,7 +49,9 @@ export class SchemaValidatingWorkflowStorage implements IWorkflowStorage {
     try {
       this.ensureValid(wf);
       return wf;
-    } catch {
+    } catch (err) {
+      console.error(`[SchemaValidation] Workflow '${id}' failed validation:`, 
+        err instanceof Error ? err.message : err);
       return null;
     }
   }

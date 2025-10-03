@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug Background Effects</title>
+    
+    <!-- Load the actual background effects -->
+    <link rel="stylesheet" href="/assets/background-effects.css">
+    <link rel="stylesheet" href="/assets/theme-toggle.css">
+    
+    <!-- Theme Manager -->
+    <script src="/assets/theme-manager.js"></script>
+    <script src="/assets/theme-toggle.js"></script>
+    
+    <script src="/assets/time-of-day-theme.js"></script>
+    <script src="/assets/scroll-parallax.js"></script>
+    
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: monospace;
+            background: var(--bg-primary, #111);
+            color: var(--text-primary, #0f0);
+            min-height: 200vh;
+        }
+        
+        .debug-panel {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: var(--bg-tertiary, rgba(0,0,0,0.9));
+            padding: 20px;
+            border: 1px solid var(--border-medium, #0f0);
+            max-width: 400px;
+            z-index: 10000;
+        }
+        
+        .test-grain {
+            width: 200px;
+            height: 200px;
+            background: white;
+            margin: 20px 0;
+            position: relative;
+        }
+        
+        .test-grain::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            opacity: 0.1;
+            background-image: 
+                repeating-linear-gradient(0deg, transparent, transparent 1px, rgba(0,0,0,.08) 2px),
+                repeating-linear-gradient(90deg, transparent, transparent 1px, rgba(0,0,0,.08) 2px);
+            background-size: 3px 3px;
+        }
+        
+        h2 { color: #0ff; margin-top: 30px; }
+        button {
+            background: #0f0;
+            color: #000;
+            border: none;
+            padding: 5px 10px;
+            margin: 5px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <!-- Add the actual grain element -->
+    <div class="bg-grain"></div>
+    
+    <!-- Add orbs for parallax testing -->
+    <div class="bg-orbs">
+        <div class="bg-orb bg-orb-1"></div>
+        <div class="bg-orb bg-orb-2"></div>
+    </div>
+    
+    <div class="debug-panel">
+        <h3>🐛 Debug Console</h3>
+        <div id="debug-output"></div>
+    </div>
+
+    <h1>Background Effects Debug</h1>
+    
+    <h2>1. Grain Test</h2>
+    <p>If grain is working, you should see a subtle texture overlay on the ENTIRE PAGE (not just the white box below).</p>
+    <p>The grain element has z-index: 100, so it should be on top of everything.</p>
+    <p style="background: white; color: black; padding: 20px; margin: 20px 0;">
+        <strong>WHITE BACKGROUND TEST:</strong> Look at this white area - do you see ANY texture/grain overlay?
+        If you see NOTHING, the grain isn't rendering.
+    </p>
+    <div class="test-grain"></div>
+    
+    <h2>2. Scroll Test</h2>
+    <p>Current scroll position: <span id="scroll-pos">0</span>px</p>
+    <p>Orb 1 style.top: <span id="orb-style-top">-</span></p>
+    <p>Orb 1 computed top: <span id="orb-computed-top">-</span></p>
+    <p>Orb 1 original top: <span id="orb-original-top">-</span></p>
+    <p><strong>Scroll down - if parallax works, style.top and computed top should change!</strong></p>
+    
+    <h2>3. Grain Visibility Test</h2>
+    <button onclick="testGrainVisibility()">Make Grain SUPER Visible (Red Tint)</button>
+    <button onclick="resetGrain()">Reset Grain</button>
+    
+    <h2>4. Parallax Test</h2>
+    <button onclick="testParallaxManual()">Manually Move Orb Down 100px</button>
+    <button onclick="testParallaxStatus()">Check Parallax Status</button>
+    <div id="parallax-test" style="width: 200px; height: 200px; background: #0f0; --parallax-offset: 0px; translate: 0 var(--parallax-offset);">
+        This should move when you click the button
+    </div>
+    
+    <div style="height: 100vh;"></div>
+    <p>Keep scrolling...</p>
+    <div style="height: 100vh;"></div>
+    <p>End of page</p>
+    
+    <script>
+        const output = document.getElementById('debug-output');
+        
+        function log(msg, type = 'info') {
+            const color = type === 'error' ? '#f00' : type === 'success' ? '#0f0' : '#fff';
+            output.innerHTML += `<div style="color: ${color}; margin: 5px 0;">${msg}</div>`;
+            console.log(msg);
+        }
+        
+        // Test 1: Check if grain element exists
+        log('Testing grain element...');
+        const grainEl = document.querySelector('.bg-grain');
+        log(grainEl ? '✓ Grain element exists' : '✗ Grain element not found', grainEl ? 'success' : 'error');
+        
+        if (grainEl) {
+            const styles = window.getComputedStyle(grainEl);
+            log(`  - Opacity: ${styles.opacity}`);
+            log(`  - Z-index: ${styles.zIndex}`);
+            log(`  - Position: ${styles.position}`);
+            log(`  - Background: ${styles.backgroundImage.substring(0, 50)}...`);
+        }
+        
+        // Test 2: Scroll tracking
+        window.addEventListener('scroll', () => {
+            document.getElementById('scroll-pos').textContent = Math.round(window.scrollY);
+            
+            // Also update orb info
+            const orb1 = document.querySelector('.bg-orb-1');
+            if (orb1) {
+                document.getElementById('orb-style-top').textContent = orb1.style.top || '(not set)';
+                document.getElementById('orb-original-top').textContent = orb1.dataset.originalTop || '(not set)';
+                const computed = window.getComputedStyle(orb1);
+                document.getElementById('orb-computed-top').textContent = computed.top;
+            }
+        });
+        
+        // Test 3: Grain visibility
+        function testGrainVisibility() {
+            const grain = document.querySelector('.bg-grain');
+            if (grain) {
+                grain.style.background = 'rgba(255, 0, 0, 0.3)'; // Bright red overlay
+                grain.style.mixBlendMode = 'normal';
+                log('🔴 Grain made SUPER visible with red tint');
+            } else {
+                log('✗ Grain element not found!', 'error');
+            }
+        }
+        
+        function resetGrain() {
+            const grain = document.querySelector('.bg-grain');
+            if (grain) {
+                grain.style.background = '';
+                grain.style.mixBlendMode = '';
+                grain.style.backgroundImage = '';
+                // Force reload from CSS
+                grain.className = '';
+                setTimeout(() => grain.className = 'bg-grain', 10);
+                log('Reset grain to original CSS');
+            }
+        }
+        
+        // Test 4: Parallax manual test
+        function testParallaxManual() {
+            const orb1 = document.querySelector('.bg-orb-1');
+            if (orb1) {
+                const computed = window.getComputedStyle(orb1);
+                const currentTop = computed.top;
+                log(`Current orb top: ${currentTop}`);
+                
+                // Manually set top
+                orb1.style.top = 'calc(10% + 100px)';
+                log('Set orb top to: calc(10% + 100px)');
+                
+                setTimeout(() => {
+                    const newComputed = window.getComputedStyle(orb1);
+                    log(`New orb top: ${newComputed.top}`);
+                }, 100);
+            } else {
+                log('✗ Orb 1 not found!', 'error');
+            }
+        }
+        
+        function testParallaxStatus() {
+            log('--- Parallax Status ---');
+            if (typeof WorkrailParallax !== 'undefined') {
+                log(`✓ WorkrailParallax exists`);
+                log(`  isEnabled: ${WorkrailParallax.isEnabled()}`);
+                
+                const orbs = document.querySelectorAll('.bg-orb');
+                log(`  Found ${orbs.length} orbs in DOM`);
+                
+                if (orbs.length > 0) {
+                    const orb1 = orbs[0];
+                    log(`  Orb 1 dataset.originalTop: ${orb1.dataset.originalTop || '(not set)'}`);
+                    log(`  Orb 1 style.top: ${orb1.style.top || '(not set)'}`);
+                    log(`  Orb 1 computed top: ${window.getComputedStyle(orb1).top}`);
+                }
+            } else {
+                log('✗ WorkrailParallax not loaded', 'error');
+            }
+        }
+        
+        // Test 4: Check if external scripts are loaded
+        setTimeout(() => {
+            log('--- Checking loaded scripts ---');
+            log(typeof WorkrailParallax !== 'undefined' ? '✓ Parallax script loaded' : '✗ Parallax script NOT loaded', typeof WorkrailParallax !== 'undefined' ? 'success' : 'error');
+            log(typeof WorkrailTimeTheme !== 'undefined' ? '✓ Time theme script loaded' : '✗ Time theme script NOT loaded', typeof WorkrailTimeTheme !== 'undefined' ? 'success' : 'error');
+            
+            // Test orbs
+            const orbs = document.querySelectorAll('.bg-orb');
+            log(`Found ${orbs.length} orbs`);
+            
+            if (WorkrailParallax && typeof WorkrailParallax.isEnabled === 'function') {
+                log(WorkrailParallax.isEnabled() ? '✓ Parallax is enabled' : '✗ Parallax is disabled', WorkrailParallax.isEnabled() ? 'success' : 'error');
+            }
+            
+            // Test initial margin-top on orb
+            if (orbs.length > 0) {
+                log(`Orb 1 margin-top: ${orbs[0].style.marginTop || '(none)'}`);
+            }
+        }, 1500);
+        
+        log('Debug page loaded. Scroll and click buttons to test.');
+    </script>
+</body>
+</html>

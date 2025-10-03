@@ -70,3 +70,5 @@ yarn.lock
 
 # Husky
 .husky/_ .releaserc
+sessions/
+web/sessions/

@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Scaffold Demo</title>
+    
+    <!-- Design Tokens -->
+    <link rel="stylesheet" href="/assets/styles/tokens.css">
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+    
+    <div id="root"></div>
+    
+    <script type="module">
+        import { createDashboard } from '/assets/scaffolds/dashboard.js';
+        
+        // 🎯 Create a complete dashboard with ~10 lines of code!
+        const dashboard = createDashboard({
+            workflow: 'bug-investigation',
+            sessionId: 'DASH-001',
+            
+            // Fetch data from API
+            dataSource: '/api/sessions/bug-investigation/DASH-001',
+            
+            // Auto-update every 2 seconds
+            updateInterval: 2000,
+            
+            // Define sections (in order)
+            sections: [
+                'hero',      // Title, status, metadata
+                'stats',     // Progress, confidence, phase
+                'rootCause', // Root cause details
+                'fix'        // Recommended fix
+            ],
+            
+            // Error handling
+            onError: (error) => {
+                console.error('Dashboard error:', error);
+            }
+        });
+        
+        // Render
+        document.getElementById('root').appendChild(dashboard);
+        
+        // Initialize icons
+        if (typeof lucide !== 'undefined') {
+            lucide.createIcons();
+        }
+        
+        console.log('✅ Dashboard created with scaffold system!');
+        console.log('   - Automatic data fetching');
+        console.log('   - Real-time updates');
+        console.log('   - Error handling');
+        console.log('   - All components automatic');
+    </script>
+    
+</body>
+</html>

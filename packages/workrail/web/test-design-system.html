@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workrail Design System v2.0 - Test Page (Workflow Theme)</title>
+    
+    <!-- Design System v1.2 -->
+    <link rel="stylesheet" href="/assets/design-system.css">
+    <link rel="stylesheet" href="/assets/animations.css">
+    <link rel="stylesheet" href="/assets/components.css">
+    <link rel="stylesheet" href="/assets/background-effects.css">
+    <link rel="stylesheet" href="/assets/theme-toggle.css">
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- Theme Manager (must load early) -->
+    <script src="/assets/theme-manager.js"></script>
+    <script src="/assets/theme-toggle.js"></script>
+    
+    <!-- Contrast Checker -->
+    <script src="/assets/contrast-checker.js"></script>
+    
+    <!-- Particle Generator -->
+    <script src="/assets/particle-generator.js"></script>
+    
+    <!-- Background Interaction -->
+    <script src="/assets/background-interaction.js"></script>
+    
+    <!-- Time-of-Day Theming -->
+    <script src="/assets/time-of-day-theme.js"></script>
+    
+    <!-- Scroll Parallax -->
+    <script src="/assets/scroll-parallax.js"></script>
+    
+    <style>
+        body {
+            font-family: var(--font-sans);
+            margin: 0;
+            padding: 0;
+            background: var(--bg-secondary);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            position: relative;
+            overflow-x: hidden;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: var(--space-xl) var(--space-6);
+            position: relative;
+            z-index: 1;
+        }
+        
+        /* Hero Section */
+        .hero {
+            text-align: center;
+            padding: var(--space-2xl) var(--space-8);
+            margin-bottom: var(--space-2xl);
+            position: relative;
+        }
+        
+        .hero-title {
+            font-size: var(--text-4xl);
+            font-weight: var(--font-bold);
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: var(--space-4);
+            animation: springIn var(--duration-slower) var(--ease-spring);
+        }
+        
+        .hero-subtitle {
+            font-size: var(--text-xl);
+            color: var(--text-secondary);
+            margin-bottom: var(--space-2);
+        }
+        
+        .hero-version {
+            font-size: var(--text-sm);
+            color: var(--text-tertiary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: var(--space-2);
+        }
+        
+        /* Section Headers */
+        .section {
+            margin-bottom: var(--space-2xl);
+        }
+        
+        .section-header {
+            text-align: center;
+            margin-bottom: var(--space-xl);
+        }
+        
+        .section-title {
+            font-size: var(--text-2xl);
+            font-weight: var(--font-bold);
+            color: var(--text-primary);
+            margin-bottom: var(--space-3);
+        }
+        
+        .section-desc {
+            font-size: var(--text-base);
+            color: var(--text-secondary);
+            max-width: 60ch;
+            margin: 0 auto;
+        }
+        
+        /* Grid Layouts */
+        .grid {
+            display: grid;
+            gap: var(--space-6);
+        }
+        
+        .grid-2 {
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        }
+        
+        .grid-3 {
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        }
+        
+        .grid-4 {
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        }
+        
+        /* Demo Cards */
+        .demo-card {
+            background: var(--bg-primary);
+            border-radius: var(--radius-card);
+            padding: var(--space-6);
+            box-shadow: var(--shadow-md);
+        }
+        
+        .demo-title {
+            font-size: var(--text-lg);
+            font-weight: var(--font-semibold);
+            margin-bottom: var(--space-4);
+            color: var(--text-primary);
+        }
+        
+        /* Button Showcase */
+        .button-row {
+            display: flex;
+            gap: var(--space-3);
+            flex-wrap: wrap;
+        }
+        
+        /* Color Swatches */
+        .color-swatch {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-2);
+        }
+        
+        .swatch {
+            height: 60px;
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: var(--font-medium);
+            font-size: var(--text-sm);
+            box-shadow: var(--shadow-sm);
+        }
+        
+        /* Progress Demo */
+        .progress-demo {
+            width: 100%;
+        }
+        
+        .progress-label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: var(--space-2);
+            font-size: var(--text-sm);
+            color: var(--text-secondary);
+        }
+        
+        /* Background Controls */
+        .bg-controls {
+            position: fixed;
+            top: var(--space-4);
+            right: var(--space-4);
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-lg);
+            padding: var(--space-4);
+            box-shadow: var(--shadow-lg);
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-2);
+        }
+        
+        .bg-controls-title {
+            font-size: var(--text-sm);
+            font-weight: var(--font-semibold);
+            margin-bottom: var(--space-2);
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+            color: var(--text-primary);
+        }
+        
+        .bg-control-btn {
+            padding: var(--space-2) var(--space-3);
+            border: 1px solid var(--border-medium);
+            background: var(--bg-primary);
+            border-radius: var(--radius-md);
+            font-size: var(--text-xs);
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: all var(--duration-fast) var(--ease-spring);
+        }
+        
+        .bg-control-btn:hover {
+            border-color: var(--primary-500);
+            background: var(--bg-secondary);
+        }
+        
+        .bg-control-btn.active {
+            background: var(--primary-500);
+            color: white;
+            border-color: var(--primary-500);
+        }
+        
+        /* SVG Orbs - High Quality Rendering */
+        .bg-orbs-svg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -3;
+            pointer-events: none;
+        }
+        
+        /* Show/hide based on theme */
+        :root:not([data-theme="dark"]) .orbs-dark {
+            display: none !important;
+        }
+        
+        :root:not([data-theme="dark"]) .orbs-light {
+            display: block !important;
+        }
+        
+        [data-theme="dark"] .orbs-light {
+            display: none !important;
+        }
+        
+        [data-theme="dark"] .orbs-dark {
+            display: block !important;
+        }
+        
+        /* Disable animations for reduced motion */
+        @media (prefers-reduced-motion: reduce) {
+            .bg-orbs-svg animate {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Background Effects: Hybrid Stack -->
+    <!-- Layer 0: Animated Grain Texture (base) -->
+    <div class="bg-grain"></div>
+    
+    <!-- Layer 1: Floating Orbs (ambient depth) -->
+    <!-- SVG Orbs - High Quality, No Banding -->
+    <svg class="bg-orbs-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">
+        <defs>
+            <!-- Simple blur filters (removed noise - was causing artifacts) -->
+            <filter id="orb-blur" x="-100%" y="-100%" width="300%" height="300%">
+                <feGaussianBlur in="SourceGraphic" stdDeviation="3"/>
+            </filter>
+            
+            <filter id="orb-blur-dark" x="-100%" y="-100%" width="300%" height="300%">
+                <feGaussianBlur in="SourceGraphic" stdDeviation="3.5"/>
+            </filter>
+        </defs>
+        
+        <!-- Light mode orbs (much smaller radii) -->
+        <g class="orbs-light">
+            <!-- Orb 1: Cyan - Top Left -->
+            <circle cx="15" cy="15" r="8" fill="rgba(6, 182, 212, 0.4)" filter="url(#orb-blur)">
+                <animate attributeName="cx" values="15;18;12;15" dur="20s" repeatCount="indefinite"/>
+                <animate attributeName="cy" values="15;18;12;15" dur="20s" repeatCount="indefinite"/>
+            </circle>
+            
+            <!-- Orb 2: Purple - Top Right -->
+            <circle cx="85" cy="10" r="10" fill="rgba(139, 92, 246, 0.4)" filter="url(#orb-blur)">
+                <animate attributeName="cx" values="85;82;88;85" dur="25s" repeatCount="indefinite"/>
+                <animate attributeName="cy" values="10;13;7;10" dur="25s" repeatCount="indefinite"/>
+            </circle>
+            
+            <!-- Orb 3: Pink - Bottom Left -->
+            <circle cx="20" cy="85" r="9" fill="rgba(236, 72, 153, 0.4)" filter="url(#orb-blur)">
+                <animate attributeName="cx" values="20;17;23;20" dur="22s" repeatCount="indefinite"/>
+                <animate attributeName="cy" values="85;82;88;85" dur="22s" repeatCount="indefinite"/>
+            </circle>
+            
+            <!-- Orb 4: Orange - Bottom Right -->
+            <circle cx="85" cy="80" r="7" fill="rgba(249, 115, 22, 0.4)" filter="url(#orb-blur)">
+                <animate attributeName="cx" values="85;88;82;85" dur="18s" repeatCount="indefinite"/>
+                <animate attributeName="cy" values="80;83;77;80" dur="18s" repeatCount="indefinite"/>
+            </circle>
+            
+            <!-- Orb 5: Green - Center -->
+            <circle cx="50" cy="50" r="6" fill="rgba(16, 185, 129, 0.35)" filter="url(#orb-blur)">
+                <animate attributeName="cx" values="50;53;47;50" dur="28s" repeatCount="indefinite"/>
+                <animate attributeName="cy" values="50;47;53;50" dur="28s" repeatCount="indefinite"/>
+            </circle>
+        </g>
+        
+        <!-- Dark mode orbs (hidden by default) -->
+        <g class="orbs-dark" style="display: none;">
+            <circle cx="15" cy="15" r="8" fill="rgba(6, 182, 212, 0.2)" filter="url(#orb-blur-dark)">
+                <animate attributeName="cx" values="15;18;12;15" dur="20s" repeatCount="indefinite"/>
+                <animate attributeName="cy" values="15;18;12;15" dur="20s" repeatCount="indefinite"/>
+            </circle>
+            
+            <circle cx="85" cy="10" r="10" fill="rgba(139, 92, 246, 0.22)" filter="url(#orb-blur-dark)">
+                <animate attributeName="cx" values="85;82;88;85" dur="25s" repeatCount="indefinite"/>
+                <animate attributeName="cy" values="10;13;7;10" dur="25s" repeatCount="indefinite"/>
+            </circle>
+            
+            <circle cx="20" cy="85" r="9" fill="rgba(236, 72, 153, 0.2)" filter="url(#orb-blur-dark)">
+                <animate attributeName="cx" values="20;17;23;20" dur="22s" repeatCount="indefinite"/>
+                <animate attributeName="cy" values="85;82;88;85" dur="22s" repeatCount="indefinite"/>
+            </circle>
+            
+            <circle cx="85" cy="80" r="7" fill="rgba(249, 115, 22, 0.18)" filter="url(#orb-blur-dark)">
+                <animate attributeName="cx" values="85;88;82;85" dur="18s" repeatCount="indefinite"/>
+                <animate attributeName="cy" values="80;83;77;80" dur="18s" repeatCount="indefinite"/>
+            </circle>
+            
+            <circle cx="50" cy="50" r="6" fill="rgba(16, 185, 129, 0.17)" filter="url(#orb-blur-dark)">
+                <animate attributeName="cx" values="50;53;47;50" dur="28s" repeatCount="indefinite"/>
+                <animate attributeName="cy" values="50;47;53;50" dur="28s" repeatCount="indefinite"/>
+            </circle>
+        </g>
+    </svg>
+    
+    <!-- Layer 2: Workflow Rails (structure) -->
+    <div class="bg-rails">
+        <div class="rail-path rail-h1">
+            <svg viewBox="0 0 1600 100" preserveAspectRatio="none">
+                <defs>
+                    <linearGradient id="gradient-h1" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" style="stop-color:rgba(139, 92, 246, 0);stop-opacity:0" />
+                        <stop offset="10%" style="stop-color:rgba(139, 92, 246, 0.6);stop-opacity:1" />
+                        <stop offset="50%" style="stop-color:rgba(59, 130, 246, 0.6);stop-opacity:1" />
+                        <stop offset="90%" style="stop-color:rgba(16, 185, 129, 0.6);stop-opacity:1" />
+                        <stop offset="100%" style="stop-color:rgba(16, 185, 129, 0);stop-opacity:0" />
+                    </linearGradient>
+                </defs>
+                <path d="M 0 50 Q 200 30, 400 50 T 800 50 T 1200 50 T 1600 50" 
+                      stroke="url(#gradient-h1)" 
+                      stroke-width="3" 
+                      fill="none" 
+                      stroke-linecap="round"/>
+            </svg>
+        </div>
+        <div class="rail-path rail-h2">
+            <svg viewBox="0 0 1600 100" preserveAspectRatio="none">
+                <defs>
+                    <linearGradient id="gradient-h2" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" style="stop-color:rgba(236, 72, 153, 0);stop-opacity:0" />
+                        <stop offset="10%" style="stop-color:rgba(236, 72, 153, 0.6);stop-opacity:1" />
+                        <stop offset="50%" style="stop-color:rgba(249, 115, 22, 0.6);stop-opacity:1" />
+                        <stop offset="90%" style="stop-color:rgba(234, 179, 8, 0.6);stop-opacity:1" />
+                        <stop offset="100%" style="stop-color:rgba(234, 179, 8, 0);stop-opacity:0" />
+                    </linearGradient>
+                </defs>
+                <path d="M 0 50 Q 200 70, 400 50 T 800 50 T 1200 50 T 1600 50" 
+                      stroke="url(#gradient-h2)" 
+                      stroke-width="3" 
+                      fill="none" 
+                      stroke-linecap="round"/>
+            </svg>
+        </div>
+        <div class="rail-path rail-d1"></div>
+        <div class="rail-path rail-d2"></div>
+    </div>
+    
+    <!-- Layer 3: Pulsing Nodes (milestones) -->
+    <div class="bg-nodes">
+        <div class="workflow-node node-1"></div>
+        <div class="workflow-node node-2"></div>
+        <div class="workflow-node node-3"></div>
+        <div class="workflow-node node-4"></div>
+        <div class="workflow-node node-5"></div>
+    </div>
+    
+    <!-- Layer 4: Particle Trails (guidance) -->
+    <div class="bg-particles">
+        <!-- Particles will be generated dynamically by particle-generator.js -->
+    </div>
+    
+    <!-- Optional: Subtle Grid Overlay -->
+    <!-- <div class="bg-grid bg-grid-animated"></div> -->
+    
+    <!-- Optional: Grain Texture -->
+    <!-- <div class="bg-grain"></div> -->
+    
+    <!-- Background Effect Controls -->
+    <div class="bg-controls">
+        <div class="bg-controls-title">
+            <i data-lucide="palette" style="width: 16px; height: 16px;"></i>
+            Background
+        </div>
+        <button class="bg-control-btn active" data-mode="normal">Normal</button>
+        <button class="bg-control-btn" data-mode="subtle">Subtle</button>
+        <button class="bg-control-btn" data-mode="vibrant">Vibrant</button>
+        <hr style="margin: var(--space-2) 0; border: none; border-top: 1px solid var(--border-light);">
+        <button class="bg-control-btn" data-extra="grid">+ Grid</button>
+        <button class="bg-control-btn" data-extra="grain">+ Grain</button>
+    </div>
+    
+    <div class="container">
+        
+        <!-- Hero Section -->
+        <div class="hero">
+            <h1 class="hero-title">
+                Workrail Design System
+            </h1>
+            <p class="hero-subtitle">Golden Ratio Mathematics + Material Expressive Joy</p>
+            <div class="hero-version">
+                <i data-lucide="sparkles" style="width: 16px; height: 16px;"></i>
+                <span>Version 1.2 - The Best of Both Worlds</span>
+            </div>
+        </div>
+
+        <!-- Stats Cards Section -->
+        <div class="section">
+            <div class="section-header">
+                <h2 class="section-title">Floating Stat Cards</h2>
+                <p class="section-desc">Material Expressive style with colorful gradients and gentle floating animation</p>
+            </div>
+            
+            <div class="grid grid-3">
+                <div class="stat-card card-float card-glass stat-card-gradient" style="--delay: 0s; background: linear-gradient(135deg, rgba(6, 182, 212, 0.1), rgba(16, 185, 129, 0.1));">
+                    <div class="stat-icon">
+                        <i data-lucide="bar-chart-3" style="width: 48px; height: 48px; color: #06b6d4;"></i>
+                    </div>
+                    <div class="stat-value">24</div>
+                    <div class="stat-label">Active Sessions</div>
+                </div>
+                
+                <div class="stat-card card-float card-glass stat-card-gradient" style="--delay: 0.3s; background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(132, 204, 22, 0.1));">
+                    <div class="stat-icon">
+                        <i data-lucide="check-circle-2" style="width: 48px; height: 48px; color: #10b981;"></i>
+                    </div>
+                    <div class="stat-value">156</div>
+                    <div class="stat-label">Completed</div>
+                </div>
+                
+                <div class="stat-card card-float card-glass stat-card-gradient" style="--delay: 0.6s; background: linear-gradient(135deg, rgba(249, 115, 22, 0.1), rgba(234, 179, 8, 0.1));">
+                    <div class="stat-icon">
+                        <i data-lucide="zap" style="width: 48px; height: 48px; color: #f97316;"></i>
+                    </div>
+                    <div class="stat-value">9.2</div>
+                    <div class="stat-label">Avg Confidence</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Workflow Cards Section -->
+        <div class="section">
+            <div class="section-header">
+                <h2 class="section-title">Workflow-Themed Cards</h2>
+                <p class="section-desc">Each workflow type gets its own color theme for easy visual identification</p>
+            </div>
+            
+            <div class="grid grid-2">
+                <div class="card card-workflow animate-spring-slide-up" data-workflow="bug-investigation" style="animation-delay: 0s;">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i data-lucide="bug" style="width: 24px; height: 24px; display: inline-block; vertical-align: middle; color: #ef4444;"></i>
+                            Bug Investigation
+                        </h3>
+                        <span class="badge badge-active">Active</span>
+                    </div>
+                    <p class="card-content">Login timeout issue in production environment. Currently investigating race condition hypothesis.</p>
+                    <div class="progress-demo" style="margin-top: var(--space-4);">
+                        <div class="progress-label">
+                            <span>Progress</span>
+                            <span>65%</span>
+                        </div>
+                        <div class="progress-bar-container">
+                            <div class="progress-bar progress-bar-gradient" style="width: 65%;"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card card-workflow animate-spring-slide-up" data-workflow="mr-review" style="animation-delay: 0.1s;">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i data-lucide="git-pull-request" style="width: 24px; height: 24px; display: inline-block; vertical-align: middle; color: #3b82f6;"></i>
+                            MR Review
+                        </h3>
+                        <span class="badge badge-success">Complete</span>
+                    </div>
+                    <p class="card-content">New analytics dashboard feature review. All checks passed with high confidence score.</p>
+                    <div class="progress-demo" style="margin-top: var(--space-4);">
+                        <div class="progress-label">
+                            <span>Progress</span>
+                            <span>100%</span>
+                        </div>
+                        <div class="progress-bar-container">
+                            <div class="progress-bar progress-bar-success" style="width: 100%;"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card card-workflow animate-spring-slide-up" data-workflow="documentation" style="animation-delay: 0.2s;">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i data-lucide="book-open" style="width: 24px; height: 24px; display: inline-block; vertical-align: middle; color: #8b5cf6;"></i>
+                            Documentation
+                        </h3>
+                        <span class="badge badge-pending">Pending</span>
+                    </div>
+                    <p class="card-content">Creating comprehensive API documentation for new endpoints and authentication flow.</p>
+                    <div class="progress-demo" style="margin-top: var(--space-4);">
+                        <div class="progress-label">
+                            <span>Progress</span>
+                            <span>35%</span>
+                        </div>
+                        <div class="progress-bar-container">
+                            <div class="progress-bar" style="width: 35%;"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card card-workflow animate-spring-slide-up" data-workflow="performance" style="animation-delay: 0.3s;">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i data-lucide="gauge" style="width: 24px; height: 24px; display: inline-block; vertical-align: middle; color: #f97316;"></i>
+                            Performance
+                        </h3>
+                        <span class="badge badge-info">In Progress</span>
+                    </div>
+                    <p class="card-content">Optimizing database queries and implementing caching strategy for improved response times.</p>
+                    <div class="progress-demo" style="margin-top: var(--space-4);">
+                        <div class="progress-label">
+                            <span>Progress</span>
+                            <span>80%</span>
+                        </div>
+                        <div class="progress-bar-container">
+                            <div class="progress-bar progress-bar-gradient" style="width: 80%; background: linear-gradient(135deg, #f97316, #eab308);"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Interactive Components Section -->
+        <div class="section">
+            <div class="section-header">
+                <h2 class="section-title">Spring-Animated Buttons</h2>
+                <p class="section-desc">Click to feel the satisfying bounce feedback (Material Expressive style)</p>
+            </div>
+            
+            <div class="demo-card">
+                <div class="button-row">
+                    <button class="btn btn-primary btn-spring">
+                        <i data-lucide="rocket" style="width: 20px; height: 20px;"></i>
+                        Primary Action
+                    </button>
+                    <button class="btn btn-secondary btn-spring">
+                        <i data-lucide="settings" style="width: 20px; height: 20px;"></i>
+                        Secondary
+                    </button>
+                    <button class="btn btn-ghost btn-spring">
+                        <i data-lucide="more-horizontal" style="width: 20px; height: 20px;"></i>
+                        Ghost Button
+                    </button>
+                    <button class="btn btn-danger btn-spring">
+                        <i data-lucide="trash-2" style="width: 20px; height: 20px;"></i>
+                        Danger
+                    </button>
+                    <button class="btn btn-glass btn-spring">
+                        <i data-lucide="sparkles" style="width: 20px; height: 20px;"></i>
+                        Glassmorphism
+                    </button>
+                    <button class="btn btn-primary btn-celebrate">
+                        <i data-lucide="party-popper" style="width: 20px; height: 20px;"></i>
+                        Celebrate!
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Glassmorphism Demo -->
+        <div class="section">
+            <div class="section-header">
+                <h2 class="section-title">Glassmorphism Effects</h2>
+                <p class="section-desc">Hover to see premium frosted glass effect with backdrop blur</p>
+            </div>
+            
+            <div class="grid grid-3">
+                <div class="card card-glass animate-spring-in" style="animation-delay: 0s;">
+                    <div class="stat-icon" style="font-size: var(--text-3xl); margin-bottom: var(--space-3);">
+                        <i data-lucide="layers" style="width: 48px; height: 48px; color: var(--primary-500);"></i>
+                    </div>
+                    <h3 style="margin-bottom: var(--space-2); color: var(--text-primary);">Hover Me!</h3>
+                    <p style="color: var(--text-secondary); margin: 0;">Watch the glass effect</p>
+                </div>
+                
+                <div class="card card-glass animate-spring-in" style="animation-delay: 0.1s;">
+                    <div class="stat-icon" style="font-size: var(--text-3xl); margin-bottom: var(--space-3);">
+                        <i data-lucide="sparkles" style="width: 48px; height: 48px; color: var(--accent-pink);"></i>
+                    </div>
+                    <h3 style="margin-bottom: var(--space-2); color: var(--text-primary);">So Smooth</h3>
+                    <p style="color: var(--text-secondary); margin: 0;">Premium feel</p>
+                </div>
+                
+                <div class="card card-glass animate-spring-in" style="animation-delay: 0.2s;">
+                    <div class="stat-icon" style="font-size: var(--text-3xl); margin-bottom: var(--space-3);">
+                        <i data-lucide="star" style="width: 48px; height: 48px; color: var(--accent-yellow);"></i>
+                    </div>
+                    <h3 style="margin-bottom: var(--space-2); color: var(--text-primary);">Delightful</h3>
+                    <p style="color: var(--text-secondary); margin: 0;">Yet professional</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Animation Showcase -->
+        <div class="section">
+            <div class="section-header">
+                <h2 class="section-title">Material Expressive Animations</h2>
+                <p class="section-desc">Spring, bounce, and elastic animations for personality</p>
+            </div>
+            
+            <div class="grid grid-4">
+                <div class="demo-card" style="text-align: center;">
+                    <div style="width: 80px; height: 80px; margin: 0 auto var(--space-3); background: var(--gradient-ocean); border-radius: var(--radius-lg); display: flex; align-items: center; justify-content: center; animation: springIn 1s var(--ease-spring) infinite;">
+                        <i data-lucide="arrow-up" style="width: 32px; height: 32px; color: white;"></i>
+                    </div>
+                    <p style="margin: 0; font-weight: var(--font-medium);">Spring In</p>
+                    <p style="margin: 0; font-size: var(--text-sm); color: var(--text-secondary);">Bouncy entrance</p>
+                </div>
+                
+                <div class="demo-card" style="text-align: center;">
+                    <div style="width: 80px; height: 80px; margin: 0 auto var(--space-3); background: var(--gradient-sunset); border-radius: var(--radius-lg); display: flex; align-items: center; justify-content: center; animation: elasticPop 2s var(--ease-elastic) infinite;">
+                        <i data-lucide="zap" style="width: 32px; height: 32px; color: white;"></i>
+                    </div>
+                    <p style="margin: 0; font-weight: var(--font-medium);">Elastic Pop</p>
+                    <p style="margin: 0; font-size: var(--text-sm); color: var(--text-secondary);">Attention-grab</p>
+                </div>
+                
+                <div class="demo-card" style="text-align: center;">
+                    <div style="width: 80px; height: 80px; margin: 0 auto var(--space-3); background: var(--gradient-forest); border-radius: var(--radius-lg); display: flex; align-items: center; justify-content: center; animation: jello 3s var(--ease-elastic) infinite;">
+                        <i data-lucide="smile" style="width: 32px; height: 32px; color: white;"></i>
+                    </div>
+                    <p style="margin: 0; font-weight: var(--font-medium);">Jello</p>
+                    <p style="margin: 0; font-size: var(--text-sm); color: var(--text-secondary);">Playful wobble</p>
+                </div>
+                
+                <div class="demo-card" style="text-align: center;">
+                    <div style="width: 80px; height: 80px; margin: 0 auto var(--space-3); background: var(--gradient-aurora); border-radius: var(--radius-lg); display: flex; align-items: center; justify-content: center; animation: float 4s var(--ease-in-out) infinite;">
+                        <i data-lucide="feather" style="width: 32px; height: 32px; color: white;"></i>
+                    </div>
+                    <p style="margin: 0; font-weight: var(--font-medium);">Float</p>
+                    <p style="margin: 0; font-size: var(--text-sm); color: var(--text-secondary);">Gentle hover</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div style="text-align: center; padding: var(--space-xl) 0; color: var(--text-secondary); border-top: 1px solid var(--border-light); margin-top: var(--space-2xl);">
+            <p style="margin: 0 0 var(--space-2);">
+                <strong>Workrail Design System v1.2</strong>
+            </p>
+            <p style="margin: 0; font-size: var(--text-sm);">
+                Golden Ratio Mathematics + Material Expressive Joy = Professional yet Delightful (6.5/10)
+            </p>
+            <p style="margin: var(--space-4) 0 0; font-size: var(--text-sm); opacity: 0.7;">
+                Linear (60%) + Material Expressive (20%) + Framer (10%) + Stripe (10%)
+            </p>
+        </div>
+
+    </div>
+    
+    <script>
+        // Initialize Lucide icons and background interaction
+        document.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+            console.log('🎨 Workrail Design System v2.0 loaded!');
+            console.log('✨ Material Expressive integration active');
+            console.log('📐 Golden Ratio mathematics applied');
+            console.log('🎉 Spring animations enabled');
+            console.log('🌈 Hybrid background: Orbs + Workflow rails + Nodes + Particles');
+            console.log('🚂 Workflow theme activated!');
+            
+            // Enable interactive background disturbance
+            WorkrailBackground.enableInteraction();
+            console.log('🖱️ Interactive disturbance effects enabled!');
+            
+            // Background controls
+            const bgOrbs = document.querySelector('.bg-orbs-svg');
+            const modeButtons = document.querySelectorAll('[data-mode]');
+            const extraButtons = document.querySelectorAll('[data-extra]');
+            
+            // Mode switching (subtle, normal, vibrant)
+            // Note: SVG orbs use fixed opacity, mode switching disabled for now
+            modeButtons.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    modeButtons.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    
+                    const mode = btn.dataset.mode;
+                    console.log(`🎨 Background mode: ${mode} (SVG orbs use fixed opacity)`);
+                });
+            });
+            
+            // Extra effects (grid, grain)
+            extraButtons.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const extra = btn.dataset.extra;
+                    
+                    if (extra === 'grid') {
+                        // Toggle grid overlay
+                        let gridEl = document.querySelector('.bg-grid');
+                        if (gridEl) {
+                            gridEl.remove();
+                            btn.classList.remove('active');
+                            console.log('🔲 Grid removed');
+                        } else {
+                            gridEl = document.createElement('div');
+                            gridEl.className = 'bg-grid bg-grid-animated';
+                            document.body.insertBefore(gridEl, document.body.firstChild);
+                            btn.classList.add('active');
+                            console.log('🔲 Grid added');
+                        }
+                    } else if (extra === 'grain') {
+                        // Toggle grain texture
+                        let grainEl = document.querySelector('.bg-grain');
+                        if (grainEl) {
+                            grainEl.remove();
+                            btn.classList.remove('active');
+                            console.log('📺 Grain removed');
+                        } else {
+                            grainEl = document.createElement('div');
+                            grainEl.className = 'bg-grain';
+                            document.body.insertBefore(grainEl, document.body.firstChild);
+                            btn.classList.add('active');
+                            console.log('📺 Grain added');
+                        }
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html>

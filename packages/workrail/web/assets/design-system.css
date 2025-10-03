@@ -1,0 +1,826 @@
+/**
+ * Workrail Design System v1.0
+ * Foundation CSS with all design tokens
+ * 
+ * Table of Contents:
+ * 1. CSS Custom Properties (Design Tokens)
+ * 2. Base Styles & Resets
+ * 3. Utility Classes
+ */
+
+/* ============================================
+   1. CSS CUSTOM PROPERTIES (DESIGN TOKENS)
+   ============================================ */
+
+:root {
+  /* ==================== COLORS ==================== */
+  
+  /* Status Colors (Semantic) */
+  --status-success: #10b981;  /* Green - complete, positive, confirmed */
+  --status-active: #3b82f6;   /* Blue - in progress, active */
+  --status-pending: #f59e0b;  /* Amber - waiting, needs attention */
+  --status-error: #ef4444;    /* Red - error, critical, ruled out */
+  --status-info: #6366f1;     /* Indigo - information, neutral */
+  
+  /* Brand/Primary Colors */
+  --primary-400: #a78bfa;
+  --primary-500: #8b5cf6;   /* Main brand color */
+  --primary-600: #7c3aed;
+  --primary-700: #6d28d9;
+  
+  /* Vibrant Accent Colors */
+  --accent-cyan: #06b6d4;
+  --accent-teal: #14b8a6;
+  --accent-green: #10b981;
+  --accent-lime: #84cc16;
+  --accent-yellow: #eab308;
+  --accent-orange: #f97316;
+  --accent-red: #ef4444;
+  --accent-pink: #ec4899;
+  --accent-purple: #a855f7;
+  --accent-indigo: #6366f1;
+  
+  /* Neutral Palette (Warm Grays) */
+  --neutral-50: #fafaf9;
+  --neutral-100: #f5f5f4;
+  --neutral-200: #e7e5e4;
+  --neutral-300: #d6d3d1;
+  --neutral-400: #a8a29e;
+  --neutral-500: #78716c;
+  --neutral-600: #57534e;
+  --neutral-700: #44403c;
+  --neutral-800: #292524;
+  --neutral-900: #1c1917;
+  
+  /* Semantic Color Usage (Light Mode) */
+  --text-primary: var(--neutral-900);
+  --text-secondary: var(--neutral-600);
+  --text-tertiary: var(--neutral-500);
+  --text-inverse: #ffffff;
+  
+  --bg-primary: #ffffff;
+  --bg-secondary: var(--neutral-50);
+  --bg-tertiary: var(--neutral-100);
+  
+  --border-light: var(--neutral-200);
+  --border-medium: var(--neutral-300);
+  --border-heavy: var(--neutral-400);
+  
+  /* Theme-specific background elements */
+  --grain-color: rgba(0, 0, 0, 0.02);
+  --grain-color-secondary: rgba(0, 0, 0, 0.015);
+  --orb-opacity: 0.3;
+  
+  /* ==================== GRADIENTS ==================== */
+  
+  /* Primary Gradients */
+  --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  --gradient-cosmic: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  
+  /* Accent Gradients */
+  --gradient-sunset: linear-gradient(135deg, #f97316 0%, #ec4899 100%);
+  --gradient-forest: linear-gradient(135deg, #10b981 0%, #06b6d4 100%);
+  --gradient-dawn: linear-gradient(135deg, #eab308 0%, #f97316 100%);
+  --gradient-ocean: linear-gradient(135deg, #06b6d4 0%, #6366f1 100%);
+  --gradient-aurora: linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%);
+  
+  /* Mesh Gradients (for backgrounds) */
+  --gradient-mesh-purple: 
+    radial-gradient(at 20% 30%, rgba(139, 92, 246, 0.08) 0px, transparent 50%),
+    radial-gradient(at 80% 70%, rgba(59, 130, 246, 0.06) 0px, transparent 50%),
+    radial-gradient(at 50% 50%, rgba(16, 185, 129, 0.04) 0px, transparent 50%);
+  
+  --gradient-mesh-vibrant:
+    radial-gradient(at 0% 0%, rgba(102, 126, 234, 0.1) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, rgba(236, 72, 153, 0.08) 0px, transparent 50%),
+    radial-gradient(at 50% 0%, rgba(16, 185, 129, 0.06) 0px, transparent 50%);
+  
+  /* ==================== WORKFLOW COLOR THEMES (Dynamic Theming) ==================== */
+  
+  /* Each workflow type gets its own gradient for visual identification */
+  --workflow-bug-investigation: linear-gradient(135deg, #ef4444 0%, #ec4899 100%);
+  --workflow-bug-investigation-light: rgba(239, 68, 68, 0.1);
+  --workflow-bug-investigation-glow: rgba(239, 68, 68, 0.3);
+  
+  --workflow-mr-review: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+  --workflow-mr-review-light: rgba(59, 130, 246, 0.1);
+  --workflow-mr-review-glow: rgba(59, 130, 246, 0.3);
+  
+  --workflow-documentation: linear-gradient(135deg, #8b5cf6 0%, #a855f7 100%);
+  --workflow-documentation-light: rgba(139, 92, 246, 0.1);
+  --workflow-documentation-glow: rgba(139, 92, 246, 0.3);
+  
+  --workflow-feature-planning: linear-gradient(135deg, #06b6d4 0%, #14b8a6 100%);
+  --workflow-feature-planning-light: rgba(6, 182, 212, 0.1);
+  --workflow-feature-planning-glow: rgba(6, 182, 212, 0.3);
+  
+  --workflow-performance: linear-gradient(135deg, #f97316 0%, #eab308 100%);
+  --workflow-performance-light: rgba(249, 115, 22, 0.1);
+  --workflow-performance-glow: rgba(249, 115, 22, 0.3);
+  
+  --workflow-security: linear-gradient(135deg, #dc2626 0%, #f59e0b 100%);
+  --workflow-security-light: rgba(220, 38, 38, 0.1);
+  --workflow-security-glow: rgba(220, 38, 38, 0.3);
+  
+  --workflow-testing: linear-gradient(135deg, #10b981 0%, #84cc16 100%);
+  --workflow-testing-light: rgba(16, 185, 129, 0.1);
+  --workflow-testing-glow: rgba(16, 185, 129, 0.3);
+  
+  --workflow-deployment: linear-gradient(135deg, #6366f1 0%, #06b6d4 100%);
+  --workflow-deployment-light: rgba(99, 102, 241, 0.1);
+  --workflow-deployment-glow: rgba(99, 102, 241, 0.3);
+  
+  /* Default/Unknown workflow */
+  --workflow-default: var(--gradient-primary);
+  --workflow-default-light: rgba(102, 126, 234, 0.1);
+  --workflow-default-glow: rgba(102, 126, 234, 0.3);
+  
+  /* ==================== TYPOGRAPHY ==================== */
+  
+  /* Font Families */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'SF Mono', 'Monaco', 'Cascadia Code', 'Consolas', 'Liberation Mono', monospace;
+  --font-serif: 'Georgia', 'Cambria', 'Times New Roman', serif;
+  
+  /* Font Sizes (Golden Ratio Scale) */
+  --text-base: 17px;              /* Base readable size (slightly larger than standard 16px) */
+  --text-xs: 10px;                /* base / φ² ≈ 10.29px */
+  --text-sm: 13px;                /* base / φ × 0.8 ≈ 13px (adjusted for readability) */
+  --text-md: var(--text-base);    /* 17px - Base */
+  --text-lg: 20px;                /* base × φ × 0.7 ≈ 20px (adjusted) */
+  --text-xl: 28px;                /* base × φ ≈ 27.5px */
+  --text-2xl: 44px;               /* base × φ² ≈ 44.4px */
+  --text-3xl: 72px;               /* base × φ³ ≈ 71.8px */
+  --text-4xl: 116px;              /* base × φ⁴ ≈ 116.2px */
+  
+  /* Precise calculations (for reference) */
+  --text-xs-precise: calc(var(--text-base) / var(--ratio-golden) / var(--ratio-golden));
+  --text-sm-precise: calc(var(--text-base) / var(--ratio-golden));
+  --text-lg-precise: calc(var(--text-base) * var(--ratio-golden) * 0.7);
+  --text-xl-precise: calc(var(--text-base) * var(--ratio-golden));
+  --text-2xl-precise: calc(var(--text-base) * var(--ratio-golden) * var(--ratio-golden));
+  --text-3xl-precise: calc(var(--text-base) * var(--ratio-golden) * var(--ratio-golden) * var(--ratio-golden));
+  
+  /* Line Heights */
+  --leading-tight: 1.25;
+  --leading-normal: 1.6;
+  --leading-relaxed: 1.75;
+  
+  /* Font Weights */
+  --font-normal: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  --font-bold: 700;
+  
+  /* ==================== SPACING (Golden Ratio) ==================== */
+  
+  /* Mathematical Foundation */
+  --ratio-golden: 1.618;           /* φ (phi) - The golden ratio */
+  --ratio-golden-inverse: 0.618;   /* 1/φ - Inverse golden ratio */
+  --space-base: 16px;              /* Base unit (1rem) */
+  
+  /* Golden Ratio Scale - Each step multiplies by φ or divides by φ */
+  --space-0: 0;
+  --space-xs: 6px;   /* base / φ² ≈ 6.11px  - Extra small */
+  --space-sm: 10px;  /* base / φ ≈ 9.89px   - Small */
+  --space-md: 16px;  /* base = 16px         - Medium (base) */
+  --space-lg: 26px;  /* base × φ ≈ 25.89px  - Large */
+  --space-xl: 42px;  /* base × φ² ≈ 41.89px - Extra large */
+  --space-2xl: 68px; /* base × φ³ ≈ 67.77px - 2X large */
+  --space-3xl: 110px;/* base × φ⁴ ≈ 109.66px - 3X large */
+  
+  /* Precise calculations (for reference, rounded above for practicality) */
+  --space-xs-precise: calc(var(--space-base) / var(--ratio-golden) / var(--ratio-golden));
+  --space-sm-precise: calc(var(--space-base) / var(--ratio-golden));
+  --space-lg-precise: calc(var(--space-base) * var(--ratio-golden));
+  --space-xl-precise: calc(var(--space-base) * var(--ratio-golden) * var(--ratio-golden));
+  --space-2xl-precise: calc(var(--space-base) * var(--ratio-golden) * var(--ratio-golden) * var(--ratio-golden));
+  
+  /* Legacy aliases (for backward compatibility) */
+  --space-1: var(--space-xs);
+  --space-2: var(--space-sm);
+  --space-3: 12px;  /* Between sm and md */
+  --space-4: var(--space-md);
+  --space-6: var(--space-lg);
+  --space-8: 32px;  /* Between lg and xl */
+  --space-10: var(--space-xl);
+  --space-12: 48px; /* Between xl and 2xl */
+  --space-16: var(--space-2xl);
+  --space-20: 80px; /* Between 2xl and 3xl */
+  --space-24: var(--space-3xl);
+  
+  /* ==================== LAYOUT ==================== */
+  
+  /* Container */
+  --container-max-width: 1400px;
+  
+  /* Breakpoints */
+  --breakpoint-sm: 640px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1280px;
+  --breakpoint-2xl: 1536px;
+  
+  /* Grid */
+  --column-count: 12;
+  --gutter: var(--space-6);
+  
+  /* ==================== BORDER RADIUS (Material Expressive Enhanced) ==================== */
+  
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;      /* Buttons - slightly more rounded */
+  --radius-lg: 16px;      /* Cards - softer, friendlier (increased from 12px) */
+  --radius-xl: 20px;      /* Large cards (increased from 16px) */
+  --radius-2xl: 24px;     /* Hero sections - new */
+  --radius-full: 9999px;  /* Pills, avatars */
+  
+  /* Semantic aliases for clarity */
+  --radius-button: var(--radius-md);
+  --radius-card: var(--radius-lg);
+  
+  /* ==================== SHADOWS (Golden Ratio Scaling) ==================== */
+  
+  /* Base shadow unit */
+  --shadow-base-blur: 8px;
+  --shadow-base-offset: 4px;
+  
+  /* Golden ratio scaled shadows */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.05);                    /* Minimal elevation */
+  --shadow-sm: 0 2px 5px rgba(0, 0, 0, 0.06);                    /* base / φ ≈ 5px blur */
+  --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.08);                    /* base = 8px blur */
+  --shadow-lg: 0 6px 13px rgba(0, 0, 0, 0.1);                    /* base × φ ≈ 13px blur */
+  --shadow-xl: 0 10px 21px rgba(0, 0, 0, 0.12);                  /* base × φ² ≈ 21px blur */
+  --shadow-2xl: 0 16px 34px rgba(0, 0, 0, 0.15);                 /* base × φ³ ≈ 34px blur */
+  
+  /* Precise calculations */
+  --shadow-sm-blur: calc(var(--shadow-base-blur) / var(--ratio-golden));
+  --shadow-lg-blur: calc(var(--shadow-base-blur) * var(--ratio-golden));
+  --shadow-xl-blur: calc(var(--shadow-base-blur) * var(--ratio-golden) * var(--ratio-golden));
+  --shadow-2xl-blur: calc(var(--shadow-base-blur) * var(--ratio-golden) * var(--ratio-golden) * var(--ratio-golden));
+  
+  /* Colored Shadows */
+  --shadow-primary: 0 8px 16px rgba(139, 92, 246, 0.25);
+  --shadow-success: 0 8px 16px rgba(16, 185, 129, 0.25);
+  --shadow-error: 0 8px 16px rgba(239, 68, 68, 0.25);
+  
+  /* ==================== ANIMATION (Material Expressive Enhanced) ==================== */
+  
+  /* Duration Scale */
+  --duration-instant: 100ms;
+  --duration-fast: 150ms;
+  --duration-base: 250ms;
+  --duration-medium: 350ms;
+  --duration-slow: 400ms;
+  --duration-slower: 600ms;
+  --duration-ambient: 15s;      /* For background animations */
+  
+  /* Standard Easing (Functional) */
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  
+  /* Expressive Easing (Material Expressive - Personality!) */
+  --ease-spring: cubic-bezier(0.68, -0.55, 0.265, 1.55);   /* Spring overshoot */
+  --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);        /* Playful bounce */
+  --ease-elastic: cubic-bezier(0.68, -0.6, 0.32, 1.6);     /* Elastic snap */
+  --ease-smooth: cubic-bezier(0.4, 0.0, 0.2, 1);           /* Smooth polish */
+  
+  /* ==================== GLASSMORPHISM ==================== */
+  
+  --glass-bg-subtle: rgba(255, 255, 255, 0.5);
+  --glass-bg: rgba(255, 255, 255, 0.7);
+  --glass-bg-strong: rgba(255, 255, 255, 0.85);
+  
+  --glass-border-subtle: rgba(255, 255, 255, 0.2);
+  --glass-border: rgba(255, 255, 255, 0.3);
+  --glass-border-strong: rgba(255, 255, 255, 0.5);
+  
+  --glass-blur-subtle: blur(8px);
+  --glass-blur: blur(10px) saturate(180%);
+  --glass-blur-strong: blur(15px) saturate(200%);
+  
+  /* ==================== LAYOUT CONSTANTS ==================== */
+  
+  --header-height: 60px;
+  --scroll-padding: 100px;
+}
+
+/* ============================================
+   THEME TRANSITION CONTROL
+   ============================================ */
+
+/* Smooth color transitions for theme changes */
+:root {
+  /* Define the transition duration for theme changes */
+  --theme-transition-duration: 600ms;
+  --theme-transition-easing: cubic-bezier(0.4, 0.0, 0.2, 1);
+}
+
+/* Apply color transitions to most elements, but not those with specific transitions */
+*:not(.btn):not(.card):not(.stat-card):not(.card-glass):not(.stat-card-gradient):not([class*="animate-"]) {
+  transition-property: background-color, border-color, box-shadow, color, fill, stroke;
+  transition-duration: var(--theme-transition-duration);
+  transition-timing-function: var(--theme-transition-easing);
+}
+
+/* SVG orbs and background elements need smooth transitions too */
+.bg-orb,
+.rail-path,
+.workflow-node,
+svg circle {
+  transition: fill var(--theme-transition-duration) var(--theme-transition-easing),
+              stroke var(--theme-transition-duration) var(--theme-transition-easing),
+              opacity var(--theme-transition-duration) var(--theme-transition-easing);
+}
+
+/* ============================================
+   DARK MODE THEME
+   ============================================ */
+
+[data-theme="dark"] {
+  /* Semantic Color Usage (Dark Mode) */
+  --text-primary: var(--neutral-50);
+  --text-secondary: var(--neutral-300);
+  --text-tertiary: var(--neutral-400);
+  --text-inverse: var(--neutral-900);
+  
+  --bg-primary: #18181b;       /* Warm dark (zinc-900) */
+  --bg-secondary: #27272a;     /* Slightly lighter (zinc-800) */
+  --bg-tertiary: #3f3f46;      /* Card backgrounds (zinc-700) */
+  
+  --border-light: #3f3f46;     /* Subtle borders */
+  --border-medium: #52525b;    /* Medium borders */
+  --border-heavy: #71717a;     /* Strong borders */
+  
+  /* Theme-specific background elements (inverted for dark mode) */
+  --grain-color: rgba(255, 255, 255, 0.015);
+  --grain-color-secondary: rgba(255, 255, 255, 0.01);
+  --orb-opacity: 0.25;
+  
+  /* Glassmorphism (adjusted for dark backgrounds) */
+  --glass-bg-subtle: rgba(39, 39, 42, 0.5);
+  --glass-bg: rgba(39, 39, 42, 0.7);
+  --glass-bg-strong: rgba(39, 39, 42, 0.85);
+  
+  --glass-border-subtle: rgba(255, 255, 255, 0.1);
+  --glass-border: rgba(255, 255, 255, 0.15);
+  --glass-border-strong: rgba(255, 255, 255, 0.25);
+  
+  /* Shadows remain dark, but stronger for visibility on dark backgrounds */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.25);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.6), 0 10px 10px -5px rgba(0, 0, 0, 0.3);
+  --shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+}
+
+/* Smooth color transitions for theme switching */
+*,
+*::before,
+*::after {
+  transition: background-color 300ms var(--ease-smooth),
+              color 300ms var(--ease-smooth),
+              border-color 300ms var(--ease-smooth),
+              box-shadow 300ms var(--ease-smooth);
+}
+
+/* Disable transitions for reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+  }
+}
+
+/* ============================================
+   2. BASE STYLES & RESETS
+   ============================================ */
+
+/* Modern CSS Reset */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  min-height: 100vh;
+}
+
+/* Typography Base */
+h1, h2, h3, h4, h5, h6 {
+  font-weight: var(--font-semibold);
+  line-height: var(--leading-tight);
+  color: var(--text-primary);
+  margin-bottom: var(--space-4);
+}
+
+h1 { font-size: var(--text-3xl); }
+h2 { font-size: var(--text-2xl); }
+h3 { font-size: var(--text-xl); }
+h4 { font-size: var(--text-lg); }
+h5 { font-size: var(--text-base); }
+h6 { font-size: var(--text-sm); }
+
+p {
+  margin-bottom: var(--space-4);
+  max-width: 65ch;
+}
+
+/* Links */
+a {
+  color: var(--primary-500);
+  text-decoration: none;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+a:hover {
+  color: var(--primary-600);
+}
+
+a:focus {
+  outline: 2px solid var(--primary-500);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Code */
+code, pre {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+code {
+  background: var(--bg-secondary);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+}
+
+pre {
+  background: var(--bg-secondary);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+}
+
+/* Lists */
+ul, ol {
+  margin-left: var(--space-6);
+  margin-bottom: var(--space-4);
+}
+
+/* Buttons Base */
+button {
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+}
+
+button:focus {
+  outline: 2px solid var(--primary-500);
+  outline-offset: 2px;
+}
+
+/* Images */
+img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* ============================================
+   3. UTILITY CLASSES
+   ============================================ */
+
+/* Container */
+.container {
+  width: 100%;
+  max-width: var(--container-max-width);
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: var(--space-6);
+  padding-right: var(--space-6);
+}
+
+/* Gradient Backgrounds */
+.bg-gradient-primary {
+  background: var(--gradient-primary);
+}
+
+.bg-gradient-mesh-purple {
+  background: var(--gradient-mesh-purple), var(--bg-secondary);
+}
+
+.bg-gradient-mesh-vibrant {
+  background: var(--gradient-mesh-vibrant), var(--bg-secondary);
+}
+
+/* Glassmorphism */
+.glass-subtle {
+  background: var(--glass-bg-subtle);
+  backdrop-filter: var(--glass-blur-subtle);
+  border: 1px solid var(--glass-border-subtle);
+}
+
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+}
+
+.glass-strong {
+  background: var(--glass-bg-strong);
+  backdrop-filter: var(--glass-blur-strong);
+  border: 1px solid var(--glass-border-strong);
+}
+
+/* Text Colors */
+.text-primary { color: var(--text-primary); }
+.text-secondary { color: var(--text-secondary); }
+.text-tertiary { color: var(--text-tertiary); }
+.text-inverse { color: var(--text-inverse); }
+
+/* Text Sizes */
+.text-xs { font-size: var(--text-xs); }
+.text-sm { font-size: var(--text-sm); }
+.text-base { font-size: var(--text-base); }
+.text-lg { font-size: var(--text-lg); }
+.text-xl { font-size: var(--text-xl); }
+.text-2xl { font-size: var(--text-2xl); }
+.text-3xl { font-size: var(--text-3xl); }
+.text-4xl { font-size: var(--text-4xl); }
+
+/* Font Weights */
+.font-normal { font-weight: var(--font-normal); }
+.font-medium { font-weight: var(--font-medium); }
+.font-semibold { font-weight: var(--font-semibold); }
+.font-bold { font-weight: var(--font-bold); }
+
+/* Shadows */
+.shadow-xs { box-shadow: var(--shadow-xs); }
+.shadow-sm { box-shadow: var(--shadow-sm); }
+.shadow-md { box-shadow: var(--shadow-md); }
+.shadow-lg { box-shadow: var(--shadow-lg); }
+.shadow-xl { box-shadow: var(--shadow-xl); }
+.shadow-2xl { box-shadow: var(--shadow-2xl); }
+
+/* Border Radius */
+.rounded-sm { border-radius: var(--radius-sm); }
+.rounded-md { border-radius: var(--radius-md); }
+.rounded-lg { border-radius: var(--radius-lg); }
+.rounded-xl { border-radius: var(--radius-xl); }
+.rounded-full { border-radius: var(--radius-full); }
+
+/* Flexbox Utilities */
+.flex { display: flex; }
+.flex-col { flex-direction: column; }
+.flex-row { flex-direction: row; }
+.items-center { align-items: center; }
+.items-start { align-items: flex-start; }
+.items-end { align-items: flex-end; }
+.justify-center { justify-content: center; }
+.justify-between { justify-content: space-between; }
+.justify-start { justify-content: flex-start; }
+.justify-end { justify-content: flex-end; }
+.gap-1 { gap: var(--space-1); }
+.gap-2 { gap: var(--space-2); }
+.gap-3 { gap: var(--space-3); }
+.gap-4 { gap: var(--space-4); }
+.gap-6 { gap: var(--space-6); }
+.gap-8 { gap: var(--space-8); }
+
+/* Grid Utilities */
+.grid { display: grid; }
+.grid-cols-1 { grid-template-columns: repeat(1, 1fr); }
+.grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
+.grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
+.grid-cols-4 { grid-template-columns: repeat(4, 1fr); }
+
+/* Spacing Utilities */
+.m-0 { margin: 0; }
+.m-auto { margin: auto; }
+.mt-4 { margin-top: var(--space-4); }
+.mt-6 { margin-top: var(--space-6); }
+.mt-8 { margin-top: var(--space-8); }
+.mb-4 { margin-bottom: var(--space-4); }
+.mb-6 { margin-bottom: var(--space-6); }
+.mb-8 { margin-bottom: var(--space-8); }
+
+.p-4 { padding: var(--space-4); }
+.p-6 { padding: var(--space-6); }
+.p-8 { padding: var(--space-8); }
+
+/* Transitions */
+.transition-all {
+  transition: all var(--duration-base) var(--ease-out);
+}
+
+.transition-fast {
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.transition-slow {
+  transition: all var(--duration-slow) var(--ease-out);
+}
+
+/* Accessibility */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ============================================
+   RESPONSIVE UTILITIES
+   ============================================ */
+
+@media (min-width: 768px) {
+  .md\:grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
+  .md\:grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
+}
+
+@media (min-width: 1024px) {
+  .lg\:grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
+  .lg\:grid-cols-4 { grid-template-columns: repeat(4, 1fr); }
+}
+
+
+.glass-subtle {
+  background: var(--glass-bg-subtle);
+  backdrop-filter: var(--glass-blur-subtle);
+  border: 1px solid var(--glass-border-subtle);
+}
+
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+}
+
+.glass-strong {
+  background: var(--glass-bg-strong);
+  backdrop-filter: var(--glass-blur-strong);
+  border: 1px solid var(--glass-border-strong);
+}
+
+/* Text Colors */
+.text-primary { color: var(--text-primary); }
+.text-secondary { color: var(--text-secondary); }
+.text-tertiary { color: var(--text-tertiary); }
+.text-inverse { color: var(--text-inverse); }
+
+/* Text Sizes */
+.text-xs { font-size: var(--text-xs); }
+.text-sm { font-size: var(--text-sm); }
+.text-base { font-size: var(--text-base); }
+.text-lg { font-size: var(--text-lg); }
+.text-xl { font-size: var(--text-xl); }
+.text-2xl { font-size: var(--text-2xl); }
+.text-3xl { font-size: var(--text-3xl); }
+.text-4xl { font-size: var(--text-4xl); }
+
+/* Font Weights */
+.font-normal { font-weight: var(--font-normal); }
+.font-medium { font-weight: var(--font-medium); }
+.font-semibold { font-weight: var(--font-semibold); }
+.font-bold { font-weight: var(--font-bold); }
+
+/* Shadows */
+.shadow-xs { box-shadow: var(--shadow-xs); }
+.shadow-sm { box-shadow: var(--shadow-sm); }
+.shadow-md { box-shadow: var(--shadow-md); }
+.shadow-lg { box-shadow: var(--shadow-lg); }
+.shadow-xl { box-shadow: var(--shadow-xl); }
+.shadow-2xl { box-shadow: var(--shadow-2xl); }
+
+/* Border Radius */
+.rounded-sm { border-radius: var(--radius-sm); }
+.rounded-md { border-radius: var(--radius-md); }
+.rounded-lg { border-radius: var(--radius-lg); }
+.rounded-xl { border-radius: var(--radius-xl); }
+.rounded-full { border-radius: var(--radius-full); }
+
+/* Flexbox Utilities */
+.flex { display: flex; }
+.flex-col { flex-direction: column; }
+.flex-row { flex-direction: row; }
+.items-center { align-items: center; }
+.items-start { align-items: flex-start; }
+.items-end { align-items: flex-end; }
+.justify-center { justify-content: center; }
+.justify-between { justify-content: space-between; }
+.justify-start { justify-content: flex-start; }
+.justify-end { justify-content: flex-end; }
+.gap-1 { gap: var(--space-1); }
+.gap-2 { gap: var(--space-2); }
+.gap-3 { gap: var(--space-3); }
+.gap-4 { gap: var(--space-4); }
+.gap-6 { gap: var(--space-6); }
+.gap-8 { gap: var(--space-8); }
+
+/* Grid Utilities */
+.grid { display: grid; }
+.grid-cols-1 { grid-template-columns: repeat(1, 1fr); }
+.grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
+.grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
+.grid-cols-4 { grid-template-columns: repeat(4, 1fr); }
+
+/* Spacing Utilities */
+.m-0 { margin: 0; }
+.m-auto { margin: auto; }
+.mt-4 { margin-top: var(--space-4); }
+.mt-6 { margin-top: var(--space-6); }
+.mt-8 { margin-top: var(--space-8); }
+.mb-4 { margin-bottom: var(--space-4); }
+.mb-6 { margin-bottom: var(--space-6); }
+.mb-8 { margin-bottom: var(--space-8); }
+
+.p-4 { padding: var(--space-4); }
+.p-6 { padding: var(--space-6); }
+.p-8 { padding: var(--space-8); }
+
+/* Transitions */
+.transition-all {
+  transition: all var(--duration-base) var(--ease-out);
+}
+
+.transition-fast {
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.transition-slow {
+  transition: all var(--duration-slow) var(--ease-out);
+}
+
+/* Accessibility */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ============================================
+   RESPONSIVE UTILITIES
+   ============================================ */
+
+@media (min-width: 768px) {
+  .md\:grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
+  .md\:grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
+}
+
+@media (min-width: 1024px) {
+  .lg\:grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
+  .lg\:grid-cols-4 { grid-template-columns: repeat(4, 1fr); }
+}
+

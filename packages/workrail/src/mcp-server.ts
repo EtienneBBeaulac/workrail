@@ -6,12 +6,35 @@ import type {
   ListToolsResult,
 } from "@modelcontextprotocol/sdk/types.js";
 import { createAppContainer } from "./container.js";
+import { SessionManager, HttpServer } from "./infrastructure/session/index.js";
+import { createSessionTools, handleSessionTool } from "./tools/session-tools.js";
 
 class WorkflowOrchestrationServer {
   private container: any;
+  private sessionManager: SessionManager;
+  private httpServer: HttpServer;
+  private sessionTools: Tool[];
 
   constructor() {
     this.container = createAppContainer();
+    
+    // Initialize session management
+    this.sessionManager = new SessionManager();
+    this.httpServer = new HttpServer(this.sessionManager, { autoOpen: false });
+    this.sessionTools = createSessionTools(this.sessionManager, this.httpServer);
+  }
+  
+  async initialize(): Promise<void> {
+    // Start HTTP server for dashboard
+    await this.httpServer.start();
+  }
+  
+  getSessionTools(): Tool[] {
+    return this.sessionTools;
+  }
+  
+  async handleSessionTool(name: string, args: any): Promise<CallToolResult> {
+    return handleSessionTool(name, args, this.sessionManager, this.httpServer);
   }
 
   private async callWorkflowMethod(method: string, params: any): Promise<CallToolResult> {
@@ -352,6 +375,9 @@ async function runServer() {
   );
 
   const workflowServer = new WorkflowOrchestrationServer();
+  
+  // Initialize session management (starts HTTP server)
+  await workflowServer.initialize();
 
   // Register request handlers
   server.setRequestHandler(ListToolsRequestSchema, async (): Promise<ListToolsResult> => ({
@@ -361,7 +387,8 @@ async function runServer() {
       WORKFLOW_NEXT_TOOL,
       WORKFLOW_VALIDATE_TOOL,
       WORKFLOW_VALIDATE_JSON_TOOL,
-      WORKFLOW_GET_SCHEMA_TOOL
+      WORKFLOW_GET_SCHEMA_TOOL,
+      ...workflowServer.getSessionTools()
     ],
   }));
 
@@ -390,6 +417,12 @@ async function runServer() {
   server.setRequestHandler(CallToolRequestSchema, async (request: any): Promise<CallToolResult> => {
     const { name, arguments: args } = request.params;
 
+    // Handle session tools
+    if (name.startsWith('workrail_')) {
+      return await workflowServer.handleSessionTool(name, args || {});
+    }
+
+    // Handle workflow tools
     switch (name) {
       case "workflow_list":
         return await workflowServer.listWorkflows();
