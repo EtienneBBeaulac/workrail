@@ -201,4 +201,3 @@ export class Logger {
 export function createLogger(component: string): Logger {
   return new Logger(component);
 }
-

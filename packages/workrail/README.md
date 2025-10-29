@@ -402,6 +402,10 @@ WORKRAIL_LOG_LEVEL=INFO
 
 # Log format: 'human' (default) or 'json'
 WORKRAIL_LOG_FORMAT=json
+
+# Persistent file logging (survives process restarts)
+WORKRAIL_LOG_FILE=true                    # Use default: ~/.workrail/logs/workrail.log
+WORKRAIL_LOG_FILE=/path/to/custom.log     # Or specify custom path
 ```
 
 **Log Levels:**
@@ -410,6 +414,14 @@ WORKRAIL_LOG_FORMAT=json
 - `WARN` - Warnings (branch fallbacks, pull failures)
 - `ERROR` - Errors only
 - `SILENT` - No logging (default in production)
+
+**Log Destinations:**
+- **stderr** - Always enabled (appears in MCP client logs like Firebender, Claude Desktop)
+- **File** - Optional persistent logs (survives crashes/restarts)
+  - Default location: `~/.workrail/logs/workrail.log`
+  - Automatic rotation at 10MB
+  - Keeps last 5 log files
+  - Perfect for debugging MCP server issues that cause crashes
 
 **Example MCP Configuration with Logging:**
 ```json
@@ -420,6 +432,7 @@ WORKRAIL_LOG_FORMAT=json
       "args": ["-y", "@exaudeus/workrail@beta"],
       "env": {
         "WORKRAIL_LOG_LEVEL": "INFO",
+        "WORKRAIL_LOG_FILE": "true",
         "WORKFLOW_GIT_REPOS": "https://github.com/org/workflows.git"
       }
     }
@@ -427,7 +440,17 @@ WORKRAIL_LOG_FORMAT=json
 }
 ```
 
-Logs are written to **stderr** (stdout is reserved for MCP protocol), so they appear in your MCP client's logs (e.g., Firebender, Claude Desktop).
+**Viewing Logs:**
+```bash
+# View live logs
+tail -f ~/.workrail/logs/workrail.log
+
+# View recent logs
+tail -100 ~/.workrail/logs/workrail.log
+
+# Search for errors
+grep ERROR ~/.workrail/logs/workrail.log
+```
 
 ### Priority Order
 
