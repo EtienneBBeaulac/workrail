@@ -13,8 +13,10 @@ import {
   validateSecurityOptions
 } from '../../utils/storage-security';
 import { StorageError, InvalidWorkflowError, SecurityError } from '../../core/error-handler';
+import { createLogger } from '../../utils/logger';
 
 const execAsync = promisify(exec);
+const logger = createLogger('GitWorkflowStorage');
 
 export interface GitWorkflowConfig {
   repositoryUrl: string;
@@ -52,6 +54,13 @@ export class GitWorkflowStorage implements IWorkflowStorage {
   constructor(config: GitWorkflowConfig) {
     this.config = this.validateAndNormalizeConfig(config);
     this.localPath = this.config.localPath;
+    
+    logger.info('Git workflow storage initialized', {
+      repositoryUrl: this.config.repositoryUrl,
+      branch: this.config.branch,
+      localPath: this.localPath,
+      syncInterval: this.config.syncInterval
+    });
   }
 
   private validateAndNormalizeConfig(config: GitWorkflowConfig): ValidatedGitWorkflowConfig {
@@ -161,15 +170,19 @@ export class GitWorkflowStorage implements IWorkflowStorage {
 
   async loadAllWorkflows(): Promise<Workflow[]> {
     try {
+      logger.debug('Loading workflows from Git repository');
       await this.ensureRepository();
       
       const workflowsPath = path.join(this.localPath, 'workflows');
       if (!existsSync(workflowsPath)) {
+        logger.warn('Workflows directory not found in repository', { workflowsPath });
         return [];
       }
 
       const files = await fs.readdir(workflowsPath);
       const jsonFiles = files.filter(f => f.endsWith('.json'));
+      
+      logger.debug('Found workflow files', { count: jsonFiles.length });
       
       if (jsonFiles.length > this.config.maxFiles) {
         throw new StorageError(
@@ -203,6 +216,7 @@ export class GitWorkflowStorage implements IWorkflowStorage {
            }
            
            workflows.push(workflow);
+           logger.debug('Loaded workflow', { id: workflow.id, name: workflow.name });
          } catch (error) {
            if (error instanceof SecurityError || error instanceof InvalidWorkflowError) {
              throw error;
@@ -211,8 +225,17 @@ export class GitWorkflowStorage implements IWorkflowStorage {
          }
        }
        
+       logger.info('Successfully loaded workflows from Git repository', {
+         repositoryUrl: this.config.repositoryUrl,
+         count: workflows.length,
+         workflows: workflows.map(w => ({ id: w.id, name: w.name }))
+       });
+       
        return workflows;
      } catch (error) {
+       logger.error('Failed to load workflows from Git repository', error, {
+         repositoryUrl: this.config.repositoryUrl
+       });
        if (error instanceof StorageError || error instanceof SecurityError || error instanceof InvalidWorkflowError) {
          throw error;
        }
@@ -315,6 +338,12 @@ export class GitWorkflowStorage implements IWorkflowStorage {
   }
 
   private async cloneRepository(): Promise<void> {
+    logger.info('Cloning Git repository', {
+      repositoryUrl: this.config.repositoryUrl,
+      branch: this.config.branch,
+      localPath: this.localPath
+    });
+    
     const parentDir = path.dirname(this.localPath);
     await fs.mkdir(parentDir, { recursive: true });
     
@@ -324,11 +353,13 @@ export class GitWorkflowStorage implements IWorkflowStorage {
     // For local paths, convert to file:// URL for proper remote tracking
     if (cloneUrl.startsWith('/')) {
       cloneUrl = `file://${cloneUrl}`;
+      logger.debug('Converted local path to file:// URL', { cloneUrl });
     }
     
     // For HTTPS URLs with token, inject token into URL
     if (!this.isSshUrl(this.config.repositoryUrl) && this.config.authToken && cloneUrl.startsWith('https://')) {
       cloneUrl = cloneUrl.replace('https://', `https://${this.config.authToken}@`);
+      logger.debug('Injected auth token into URL');
     }
     // For SSH URLs, Git will use SSH keys from ~/.ssh/ automatically
     
@@ -340,13 +371,17 @@ export class GitWorkflowStorage implements IWorkflowStorage {
     let command = `git clone --branch ${escapedBranch} ${escapedUrl} ${escapedPath}`;
     
     try {
+      logger.debug('Executing git clone', { branch: this.config.branch });
       await execAsync(command, { timeout: 60000 }); // 1 minute timeout
+      logger.info('Successfully cloned repository', { branch: this.config.branch });
     } catch (error) {
       const errorMsg = (error as Error).message;
       
       // If branch not found, try cloning without branch specification (use repo's default branch)
       if (errorMsg.includes('Remote branch') && errorMsg.includes('not found')) {
-        console.warn(`Branch '${this.config.branch}' not found, cloning default branch...`);
+        logger.warn('Requested branch not found, trying default branch', {
+          requestedBranch: this.config.branch
+        });
         command = `git clone ${escapedUrl} ${escapedPath}`;
         
         try {
@@ -355,20 +390,30 @@ export class GitWorkflowStorage implements IWorkflowStorage {
           // Detect the actual default branch
           const { stdout } = await execAsync('git rev-parse --abbrev-ref HEAD', { cwd: this.localPath });
           const actualBranch = stdout.trim();
-          console.log(`Cloned repository with default branch: ${actualBranch}`);
+          logger.info('Successfully cloned with default branch', {
+            requestedBranch: this.config.branch,
+            actualBranch
+          });
           
           // Update config to use the actual default branch for future operations
           this.config.branch = actualBranch;
         } catch (fallbackError) {
+          logger.error('Failed to clone repository with fallback', fallbackError);
           throw new StorageError(`Failed to clone workflow repository: ${(fallbackError as Error).message}`);
         }
       } else {
+        logger.error('Failed to clone repository', error, { branch: this.config.branch });
         throw new StorageError(`Failed to clone workflow repository: ${errorMsg}`);
       }
     }
   }
 
   private async pullRepository(): Promise<void> {
+    logger.debug('Pulling latest changes from Git repository', {
+      branch: this.config.branch,
+      localPath: this.localPath
+    });
+    
     const escapedPath = this.escapeShellArg(this.localPath);
     const escapedBranch = this.escapeShellArg(this.config.branch);
     
@@ -379,15 +424,20 @@ export class GitWorkflowStorage implements IWorkflowStorage {
       
       await execAsync(fetchCommand, { timeout: 30000 });
       await execAsync(resetCommand, { timeout: 30000 });
+      logger.info('Successfully updated repository', { branch: this.config.branch });
     } catch (error) {
       // If fetch/reset fails, try simple pull
       try {
         const pullCommand = `cd ${escapedPath} && git pull origin ${escapedBranch}`;
         await execAsync(pullCommand, { timeout: 30000 });
+        logger.info('Successfully updated repository via pull', { branch: this.config.branch });
       } catch (pullError) {
         // Don't throw on pull failure - use cached version
         // This is intentional behavior for offline scenarios
-        console.warn(`Git pull failed for ${this.config.repositoryUrl}:`, (pullError as Error).message);
+        logger.warn('Git pull failed, using cached version', pullError, {
+          repositoryUrl: this.config.repositoryUrl,
+          branch: this.config.branch
+        });
       }
     }
   }

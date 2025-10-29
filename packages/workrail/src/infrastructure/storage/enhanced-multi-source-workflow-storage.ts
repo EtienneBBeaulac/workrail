@@ -8,6 +8,9 @@ import { FileWorkflowStorage } from './file-workflow-storage';
 import { GitWorkflowStorage, GitWorkflowConfig } from './git-workflow-storage';
 import { RemoteWorkflowStorage, RemoteWorkflowRegistryConfig } from './remote-workflow-storage';
 import { PluginWorkflowStorage, PluginWorkflowConfig } from './plugin-workflow-storage';
+import { createLogger } from '../../utils/logger';
+
+const logger = createLogger('EnhancedMultiSourceWorkflowStorage');
 
 /**
  * Options for FileWorkflowStorage instances
@@ -392,12 +395,20 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
 export function createEnhancedMultiSourceWorkflowStorage(
   overrides: EnhancedMultiSourceConfig = {}
 ): EnhancedMultiSourceWorkflowStorage {
+  logger.info('Creating enhanced multi-source workflow storage');
+  
   const config: EnhancedMultiSourceConfig = {
     includeBundled: getEnvBool('WORKFLOW_INCLUDE_BUNDLED', true),
     includeUser: getEnvBool('WORKFLOW_INCLUDE_USER', true),
     includeProject: getEnvBool('WORKFLOW_INCLUDE_PROJECT', true),
     ...overrides
   };
+
+  logger.debug('Storage configuration', {
+    includeBundled: config.includeBundled,
+    includeUser: config.includeUser,
+    includeProject: config.includeProject
+  });
 
   // Parse Git repositories from environment (multiple formats supported)
   
@@ -411,8 +422,12 @@ export function createEnhancedMultiSourceWorkflowStorage(
         ...repo,
         authToken: repo.authToken || resolveAuthToken(repo.repositoryUrl)
       }));
+      logger.info('Parsed Git repositories from JSON array', {
+        count: config.gitRepositories.length,
+        repos: config.gitRepositories.map(r => ({ url: r.repositoryUrl, branch: r.branch }))
+      });
     } catch (error) {
-      console.warn('Failed to parse WORKFLOW_GIT_REPOS as JSON:', error);
+      logger.error('Failed to parse WORKFLOW_GIT_REPOS as JSON', error);
     }
   }
   // Format 2: Comma-separated URLs
@@ -420,6 +435,8 @@ export function createEnhancedMultiSourceWorkflowStorage(
     // Use home directory for cache (more predictable than process.cwd() when running via MCP/npx)
     const cacheBaseDir = process.env['WORKRAIL_CACHE_DIR'] || 
                          path.join(os.homedir(), '.workrail', 'cache');
+    
+    logger.debug('Using cache directory', { cacheBaseDir });
     
     config.gitRepositories = gitReposJson.split(',').map((url, index) => {
       const trimmedUrl = url.trim();
@@ -433,6 +450,11 @@ export function createEnhancedMultiSourceWorkflowStorage(
         syncInterval: 60
       };
     });
+    
+    logger.info('Parsed Git repositories from comma-separated list', {
+      count: config.gitRepositories.length,
+      repos: config.gitRepositories.map(r => ({ url: r.repositoryUrl, branch: r.branch, path: r.localPath }))
+    });
   }
 
   // Format 3: Single repository
@@ -444,6 +466,10 @@ export function createEnhancedMultiSourceWorkflowStorage(
       branch: process.env['WORKFLOW_GIT_REPO_BRANCH'] || 'main',
       authToken: resolveAuthToken(gitRepoUrl),
       syncInterval: Number(process.env['WORKFLOW_GIT_SYNC_INTERVAL'] || 60)
+    });
+    logger.info('Added single Git repository from env vars', {
+      url: gitRepoUrl,
+      branch: process.env['WORKFLOW_GIT_REPO_BRANCH'] || 'main'
     });
   }
 

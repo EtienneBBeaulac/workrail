@@ -21,6 +21,10 @@
 - [Quick Example](#-quick-example)
 - [Why Choose WorkRail](#-why-choose-workrail)
 - [Environment Variables](#-environment-variables-reference)
+  - [Workflow Sources](#workflow-sources)
+  - [External Git Repositories](#external-git-repositories)
+  - [Cache & Performance](#cache--performance)
+  - [Debugging & Logging](#debugging--logging)
 - [Getting Started](#-getting-started)
 - [Planned Features](#-planned-features)
 - [Learn More](#-learn-more)
@@ -387,9 +391,43 @@ GIT_TOKEN=xxx                   # Generic fallback
 
 ### Cache & Performance
 ```bash
-WORKRAIL_CACHE_DIR=/path/to/cache  # Cache location (default: .workrail-cache)
+WORKRAIL_CACHE_DIR=/path/to/cache  # Cache location (default: ~/.workrail/cache)
 CACHE_TTL=300000                    # Cache TTL in ms (default: 5 minutes)
 ```
+
+### Debugging & Logging
+```bash
+# Log levels: DEBUG, INFO, WARN, ERROR, SILENT (default: SILENT)
+WORKRAIL_LOG_LEVEL=INFO
+
+# Log format: 'human' (default) or 'json'
+WORKRAIL_LOG_FORMAT=json
+```
+
+**Log Levels:**
+- `DEBUG` - Verbose logging (cloning, pulling, file operations)
+- `INFO` - Key operations (initialization, workflows loaded)
+- `WARN` - Warnings (branch fallbacks, pull failures)
+- `ERROR` - Errors only
+- `SILENT` - No logging (default in production)
+
+**Example MCP Configuration with Logging:**
+```json
+{
+  "mcpServers": {
+    "workrail": {
+      "command": "npx",
+      "args": ["-y", "@exaudeus/workrail@beta"],
+      "env": {
+        "WORKRAIL_LOG_LEVEL": "INFO",
+        "WORKFLOW_GIT_REPOS": "https://github.com/org/workflows.git"
+      }
+    }
+  }
+}
+```
+
+Logs are written to **stderr** (stdout is reserved for MCP protocol), so they appear in your MCP client's logs (e.g., Firebender, Claude Desktop).
 
 ### Priority Order
 
