@@ -336,12 +336,35 @@ export class GitWorkflowStorage implements IWorkflowStorage {
     const escapedBranch = this.escapeShellArg(this.config.branch);
     const escapedPath = this.escapeShellArg(this.localPath);
     
-    const command = `git clone --branch ${escapedBranch} ${escapedUrl} ${escapedPath}`;
+    // Try cloning with the specified branch
+    let command = `git clone --branch ${escapedBranch} ${escapedUrl} ${escapedPath}`;
     
     try {
       await execAsync(command, { timeout: 60000 }); // 1 minute timeout
     } catch (error) {
-      throw new StorageError(`Failed to clone workflow repository: ${(error as Error).message}`);
+      const errorMsg = (error as Error).message;
+      
+      // If branch not found, try cloning without branch specification (use repo's default branch)
+      if (errorMsg.includes('Remote branch') && errorMsg.includes('not found')) {
+        console.warn(`Branch '${this.config.branch}' not found, cloning default branch...`);
+        command = `git clone ${escapedUrl} ${escapedPath}`;
+        
+        try {
+          await execAsync(command, { timeout: 60000 });
+          
+          // Detect the actual default branch
+          const { stdout } = await execAsync('git rev-parse --abbrev-ref HEAD', { cwd: this.localPath });
+          const actualBranch = stdout.trim();
+          console.log(`Cloned repository with default branch: ${actualBranch}`);
+          
+          // Update config to use the actual default branch for future operations
+          this.config.branch = actualBranch;
+        } catch (fallbackError) {
+          throw new StorageError(`Failed to clone workflow repository: ${(fallbackError as Error).message}`);
+        }
+      } else {
+        throw new StorageError(`Failed to clone workflow repository: ${errorMsg}`);
+      }
     }
   }
 
