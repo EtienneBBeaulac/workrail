@@ -1,7 +1,7 @@
 {
   "id": "systematic-bug-investigation-with-loops",
   "name": "Systematic Bug Investigation Workflow",
-  "version": "1.1.0-beta.7",
+  "version": "1.1.0-beta.8",
   "description": "A comprehensive workflow for systematic bug and failing test investigation that prevents LLMs from jumping to conclusions. Enforces thorough evidence gathering, hypothesis formation, debugging instrumentation, and validation to achieve near 100% certainty about root causes. This workflow does NOT fix bugs - it produces detailed diagnostic writeups that enable effective fixing by providing complete understanding of what is happening, why it's happening, and supporting evidence.",
   "clarificationPrompts": [
     "What type of system is this? (web app, mobile app, backend service, desktop app, etc.)",
@@ -174,7 +174,7 @@
       "requireConfirmation": true,
       "runCondition": {
         "var": "automationLevel",
-        "notEquals": "High"
+        "not_equals": "High"
       }
     },
     {
