@@ -1,5 +1,16 @@
 # Changelog - Systematic Bug Investigation Workflow
 
+## [1.1.0-beta.21] - 2025-01-06
+
+### HOTFIX - metaGuidance Schema Violations
+- **Fixed**: metaGuidance entry 35 exceeded 256 character limit (266 chars)
+  - Split "HIGH AUTO MODE DISCIPLINE" into 3 separate entries
+- **Fixed**: Duplicate metaGuidance entries after split
+  - Removed duplicates, cleaned to 89 unique entries
+- **Note**: CLI validator reports loop step errors (false positive - loops have different schema)
+  - Workflow loads successfully in MCP server
+  - Same loop structure as beta.18 which worked fine
+
 ## [1.1.0-beta.20] - 2025-01-06
 
 ### CRITICAL FIX - Dangerous "Autonomy" Language

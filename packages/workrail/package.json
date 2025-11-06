@@ -1,6 +1,6 @@
 {
   "name": "@exaudeus/workrail",
-  "version": "0.7.2-beta.2",
+  "version": "0.7.2-beta.3",
   "description": "MCP server for structured workflow orchestration and step-by-step task guidance",
   "license": "MIT",
   "bin": {
