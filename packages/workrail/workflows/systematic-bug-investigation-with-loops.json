@@ -27,12 +27,10 @@
         "WORKFLOW MECHANICS: Each call to workflow_next returns the next required step. You MUST execute that step, then call workflow_next again. Repeat until isComplete=true.",
         "DO NOT STOP CALLING WORKFLOW_NEXT: Even if you think you know the bug, even if you have high confidence, even if it seems obvious - you MUST continue calling workflow_next.",
         "STEP COUNTER: Every prompt shows \"Step X of 26\" - you are NOT done until you reach Step 28/28 and isComplete=true.",
-        "",
         "**\ud83c\udfaf WHY THIS STRUCTURE EXISTS (Evidence-Based):**",
         "Professional research spanning 20+ years shows agents who skip systematic investigation steps are wrong ~90% of the time, even with 9-10/10 self-reported confidence.",
         "Quick conclusions miss: edge cases, alternative explanations, environment factors, interaction effects, and data corruption paths.",
         "This workflow FORCES thoroughness through: code analysis, hypothesis formation, instrumentation, evidence gathering, adversarial review, and comprehensive documentation.",
-        "",
         "**CRITICAL WORKFLOW DISCIPLINE:**",
         "HIGH CONFIDENCE \u2260 INVESTIGATION COMPLETE: Achieving 8-10/10 confidence in a hypothesis is excellent progress but does NOT mean the workflow is done.",
         "COMPLETE ALL PHASES: You MUST complete ALL phases (0 through 6) regardless of confidence level. Each phase builds critical evidence and documentation.",
@@ -170,8 +168,7 @@
                 "Users must explicitly confirm proceeding with full investigation",
                 "If user chooses early termination, agent must acknowledge 90% error rate and proceed with best-effort quick diagnosis"
             ],
-            "requireConfirmation": true,
-            "confirmationPrompt": "The agent has recommended completing the full systematic investigation.\n\n**Research shows:** Full workflow = ~90% accuracy. Quick diagnosis = ~10% accuracy.\n\nYour choice:\n- Type 'full' to proceed with complete 26-step investigation (recommended)\n- Type 'quick' to attempt quick diagnosis now (agent will do best effort, but accuracy will be low)\n\nWhat is your decision?"
+            "requireConfirmation": true
         },
         {
             "id": "phase-1-iterative-analysis",
