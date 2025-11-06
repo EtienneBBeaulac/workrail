@@ -199,6 +199,21 @@ async function validateWorkflowFile(filePath: string): Promise<void> {
     }
 
     // 4. Validate workflow
+    // First run schema validation (same as MCP server uses)
+    const { validateWorkflow: schemaValidate } = await import('./application/validation');
+    const schemaResult = schemaValidate(workflow);
+    
+    if (!schemaResult.valid) {
+      console.error(chalk.red('❌ Workflow validation failed:'), filePath);
+      console.error(chalk.yellow('\nValidation errors:'));
+      schemaResult.errors.forEach(error => {
+        console.error(chalk.red('  •'), error);
+      });
+      console.error(chalk.yellow('\nPlease fix the errors above and try again.'));
+      process.exit(1);
+    }
+    
+    // Then run structural validation (for warnings/info)
     const validationEngine = new ValidationEngine();
     const result = validationEngine.validateWorkflow(workflow as Workflow);
     
