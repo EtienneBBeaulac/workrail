@@ -1,5 +1,25 @@
 # Changelog - Systematic Bug Investigation Workflow
 
+## [1.1.0-beta.18] - 2025-01-06
+
+### CRITICAL FIX
+- **Addresses persistent early-stopping bug**: Agents were still stopping after Phase 1/2 saying "I found the bug"
+- **Root Cause Identified**: Agents fundamentally misunderstand THE GOAL
+  - WRONG: "The goal is finding the bug" → Stop after analysis with high confidence
+  - RIGHT: "The goal is PROVING the bug with evidence" → Must complete Phases 3-5
+- **New Meta-Guidance Section**: Added explicit "CRITICAL MISUNDERSTANDING TO AVOID" section
+  - "FINDING ≠ DONE. PROVING = DONE."
+  - "\"I found the bug\" = YOU HAVE A GUESS. \"I proved the bug\" = YOU HAVE EVIDENCE."
+  - "NEVER create summary documents until Phase 6"
+- **Step-Level Warnings**: Added "FINDING ≠ PROVING" warnings at all critical stopping points:
+  - **Phase 1f** (after analysis): Full explanation of why analysis ≠ proof
+  - **Phase 2a** (hypothesis development): "You have THEORIES, not EVIDENCE"
+  - **Phase 2h** (midpoint): "You may have 'found' the bug, but haven't 'proved' it"
+- **Step Count Corrections**: Fixed inconsistencies (27 → 23 steps throughout)
+
+### Why This Fix Is Different
+Previous fixes (beta.1-beta.17) added warnings about "high confidence ≠ done" but didn't address the fundamental goal misunderstanding. Agents thought their job was to "identify" the bug, not "prove" it. This fix makes the distinction crystal clear upfront.
+
 ## [1.1.0-beta.17] - 2025-01-06
 
 ### Major Restructuring
