@@ -1,419 +1,157 @@
 # Changelog - Systematic Bug Investigation Workflow
 
-## [1.1.0-beta.7] - 2025-11-06
-
-### 🎯 Fix: Phase 0e Conditional on Automation Level
-
-**Problem**: Phase 0e (Early Termination Checkpoint) required user confirmation even in HIGH automation mode, creating friction and contradicting the "no permission asking" principle.
-
-**Solution**: Made Phase 0e conditional on automation level:
-
-```javascript
-runCondition: {
-  var: "automationLevel",
-  notEquals: "High"
-}
-```
-
-**Behavior:**
-- **HIGH AUTO MODE**: Skips Phase 0e entirely, proceeds automatically with full investigation
-- **MEDIUM/LOW MODE**: Shows Phase 0e checkpoint, requires explicit user confirmation to proceed
-
-**Rationale**: 
-- User choosing HIGH AUTO MODE is already committing to systematic thoroughness
-- Checkpoint still valuable for MEDIUM/LOW modes where user wants more control
-- Aligns with HIGH AUTO MODE principle: "execute phases automatically, no inter-phase asking"
-- User can still interrupt workflow anytime if they change their mind
-
-**Why This Makes Sense**:
-- HIGH AUTO users trust the process and want speed → Skip checkpoint
-- MEDIUM/LOW users want control points → Keep checkpoint
-- Best of both worlds: Respects user's automation preference
-
----
-
-## [1.1.0-beta.6] - 2025-11-06
-
-### 🎯 Major Enhancements: Concrete Instrumentation & Breadth Check
-
-**Problem**: Agents were stopping mid-workflow to ask for permission (even in high auto mode), and instrumentation/evidence collection steps were too vague, causing confusion about what to actually do.
-
-**Solutions Applied**:
-
-#### 1. **New Phase 1f: Final Breadth & Scope Verification**
-Added critical checkpoint AFTER code analysis (Phase 1) but BEFORE hypothesis development (Phase 2):
-- **Catches tunnel vision**: Forces evaluation of 2-3 alternative investigation scopes
-- **Scope sanity check**: Verifies module root, entry points, and component coverage
-- **Wide-angle review**: Ensures sufficient breadth AND depth before committing to hypotheses
-- **Research-backed**: 60% of failed investigations look in wrong place or too narrowly
-- **Decision options**: Continue (scope correct), Expand (add areas), or Shift (wrong place entirely)
-
-#### 2. **Phase 3: Detailed Instrumentation Instructions**
-Completely rewrote with concrete, step-by-step guidance:
-- **STEP 1-2**: Review Phase 2g plan, read files needing instrumentation
-- **STEP 3**: Language-specific logging examples (JS/TS, Python, Java)
-- **STEP 4**: Real `search_replace` example with actual code
-- **STEP 5**: File-by-file workflow (read → locate → instrument → verify)
-- **STEP 6**: Fallback for agents without file editing (provide code to user)
-- **AUTO-EXECUTE reinforced**: "DO NOT ask 'Would you like me to continue?'"
-
-#### 3. **Phase 4: Detailed Evidence Collection Instructions**
-Added concrete decision tree and execution guidance:
-- **Decision tree**: Can agent run code? → Option A (execute) vs Option B (instruct user)
-- **STEP 1-3**: How to run code, capture logs, verify quality
-- **STEP 4-5**: Parse logs by hypothesis, assess evidence quality
-- **STEP 6**: Complete user instructions template if agent can't execute
-- **STEP 7**: Document evidence with quality scores
-- **AUTO-EXECUTE reinforced**: Ask for SPECIFIC input (how to run tests), not permission to continue
-
-#### 4. **metaGuidance: High Auto Mode Clarification**
-Added explicit section:
-> "In HIGH automation mode, agents must execute phases WITHOUT asking for permission between phases. The ONLY confirmations allowed are: (1) Phase 0e early termination, (2) Phase 4a controlled experiments. All other phases execute automatically."
-
-### 📊 Changes Summary
-
-- **Total steps**: 26 → 27 (added Phase 1f)
-- **Step references**: Updated all from "26 steps" to "27 steps"
-- **Phase 3 prompt**: 2,588 chars → detailed 6-step process with examples
-- **Phase 4 prompt**: Vague execution → detailed decision tree with 7 steps
-- **New checkpoint**: Phase 1f catches wrong-place investigations early
-
-### 🎯 Why This Matters
-
-**Before**: Agents would:
-- Jump straight from code analysis to hypotheses (tunnel vision)
-- Get confused at Phase 3 ("add instrumentation" - but HOW?)
-- Ask permission between every phase (even in high auto mode)
-- Not know if they should run code or instruct the user
-
-**After**: Agents:
-- Verify scope at Phase 1f before committing to hypotheses
-- Have concrete steps: read files, use `search_replace`, examples for each language
-- Execute phases automatically without asking permission
-- Clear decision tree for execution vs user instruction
-
----
-
-## [1.1.0-beta.5] - 2025-11-06
-
-### 🎯 Major Enhancement: Moved Early Termination Checkpoint to Phase 0e
-
-**Problem**: Agents were completing Phase 0, then jumping straight to investigation phases without understanding the value of systematic investigation. By the time they reached Phase 5b, they'd already invested significant effort and were less likely to complete the final writeup.
-
-**Solution**: Moved the completion decision checkpoint from Phase 5b (after confidence assessment) to Phase 0e (immediately after triage, before any investigation work begins). This forces the decision upfront with no sunk cost.
-
-### 📊 Changes
-
-#### **Enhanced Phase 0e: Workflow Execution Commitment & Early Termination Checkpoint**
-
-Now serves dual purpose:
-1. **Workflow Commitment** (existing): Agents acknowledge they understand the 26-step structured workflow
-2. **Early Termination Decision** (NEW): Agents must present options and get user buy-in BEFORE starting investigation
-
-**New MANDATORY USER COMMUNICATION requirement:**
-Agents MUST explicitly tell users:
-> "I strongly recommend we complete the full systematic investigation (26 steps through Phase 6). Professional research shows this approach identifies the TRUE root cause ~90% of the time, compared to ~10% for quick conclusions. Even if I develop high confidence early, completing the full workflow—including contracts analysis, pattern discovery, HOT path analysis, instrumentation, and evidence collection—dramatically increases the likelihood of correctly identifying the root cause and preventing wasted time on wrong fixes."
-
-#### **Removed Phase 5b: Workflow Completion Checkpoint**
-- Old Phase 5b checkpoint removed (was too late in the workflow)
-- Decision now happens at Phase 0e before any investigation work
-- Eliminates sunk cost fallacy that made agents reluctant to complete full workflow
-
-### 🎭 Why This Works Better
-
-**Before (Phase 5b checkpoint):**
-- Agent completes Phase 0-5a (~90% of work)
-- Develops high confidence in hypothesis
-- Reaches checkpoint: "Do you want to skip Phase 6?"
-- Sunk cost + high confidence = temptation to skip final writeup
-- Result: Incomplete investigations without actionable deliverables
-
-**After (Phase 0e checkpoint):**
-- Agent completes Phase 0 (~5% of work)
-- No investigation work yet, no hypotheses formed
-- Reaches checkpoint: "Full investigation (90% accuracy) or quick guess (10% accuracy)?"
-- Agent must explicitly communicate research-backed value proposition
-- User makes informed decision with no sunk cost
-- Result: Either full systematic investigation OR acknowledged best-effort quick diagnosis
-
-### 📈 Benefits
-
-1. **Upfront Decision**: No sunk cost when choosing investigation approach
-2. **User Education**: Agents must communicate value of full workflow
-3. **Forced Communication**: MANDATORY USER COMMUNICATION is not optional
-4. **Research-Backed**: Explicit 90% vs 10% accuracy comparison
-5. **Clear Options**: "Full" vs "quick" with explicit tradeoffs
-6. **No Mid-Investigation Bailouts**: Decision made before any investigation work
-
-### 🏗️ Workflow Structure
-
-- Total steps: **28 → 26** (removed Phase 5b)
-- New checkpoint position: **Phase 0e** (after triage, before investigation)
-- Decision point: **Upfront, not late-stage**
-
-## [1.1.0-beta.4] - 2025-11-06
-
-### 🎯 Major Enhancement: Sophisticated Code Analysis (Adapted from MR Review Workflow)
-
-**Problem**: The codebase analysis in Phase 1 was weaker than it should be. It lacked explicit structural mapping, contracts & invariants discovery, and sophisticated call graph visualization that are essential for understanding bugs in complex codebases.
-
-**Solution**: Added new **Phase 1a: Neighborhood, Call Graph & Contracts** analysis step, bringing total Phase 1 sub-phases from 4 to 5, and total workflow steps from 27 to 28.
-
-### 📊 New Phase 1a: Neighborhood, Call Graph & Contracts
-
-This new first analysis step builds the structural foundation before diving into details:
-
-#### **1. Module Root Computation**
-- Find nearest common ancestor of error stack trace files
-- Clamp to package/src boundary to define investigation scope
-- Prevents unbounded analysis across entire codebase
-
-#### **2. Neighborhood Map**
-- Immediate neighbors (same directory, max 8)
-- Imports/exports directly used (max 10)
-- Co-located tests
-- Closest entry points (routes, endpoints, CLI commands, max 5)
-- Provides context for what's near the failing code
-
-#### **3. Bounded Call Graph with Small Multiples**
-- Build call graph ≤2 hops deep per failing symbol
-- Cap total nodes at ≤15 per symbol
-- **HOT Path Ranking** scoring system:
-  * Error location in path: +3
-  * Entry point to path: +2
-  * Test coverage exists: +1
-  * Mentioned in ticket/error: +1
-  * Tag as HOT if score ≥3
-- **Small Multiples ASCII visualization**:
-  * Width ≤100 chars per path
-  * Format: `EntryPoint -> Caller -> [*FailingSymbol*] -> Callee`
-  * ≤8 total paths, prioritize HOT paths
-  * Alias Legend for repeated subpaths (A1, A2...)
-- **Adjacency Summary** fallback if caps exceeded
-
-#### **4. Flow Anchors**
-- Map how users/systems trigger the bug
-- HTTP routes → handlers → failing code
-- CLI commands → execution → failing code
-- Scheduled jobs, event handlers → failing code
-- Cap at ≤5 most relevant anchors
-- **Critical**: Shows HOW the bug is reached for reproduction
-
-#### **5. Contracts & Invariants** (NEW - Most Critical Addition)
-- Public API symbols (exported functions/classes)
-- API endpoints (REST/GraphQL/RPC)
-- Database tables/collections touched
-- Message queue topics/events
-- **Extract stated invariants** from:
-  * JSDoc/docstrings with @invariant
-  * Assertions in code
-  * Validation logic patterns
-  * Comments describing guarantees
-- **Why this matters**: Contracts tell us what guarantees the code MUST maintain - bugs are often broken contracts
-
-### 📈 Benefits
-
-1. **Structural Scaffolding**: Phase 1a provides the map before exploring terrain
-2. **Contract-Driven Analysis**: Understanding what code promises helps identify where it breaks promises
-3. **HOT Path Prioritization**: Focus investigation on high-impact code paths first
-4. **Bounded Analysis**: Strict caps prevent 2-hour rabbit holes
-5. **Entry Point Clarity**: Flow anchors show how to reproduce bugs
-6. **Visual Call Graphs**: ASCII Small Multiples make relationships scannable
-
-### 🏗️ Updated Phase Structure
-
-Phase 1 now has 5 sub-phases (up from 4):
-- **1a**: Neighborhood, Call Graph & Contracts (NEW)
-- **1b**: Breadth Scan & Pattern Discovery (was 1a)
-- **1c**: Component Deep Dive (was 1b)
-- **1d**: Dependencies & Flow (was 1c)
-- **1e**: Test Coverage (was 1d)
-
-### 🎓 Adapted From MR Review Workflow
-
-This enhancement adapts proven patterns from the `mr-review-workflow.json` Phase 1b:
-- Bounded call graph with caps
-- Small Multiples visualization
-- HOT path ranking
-- Alias Legend for repeated paths
-- Adjacency Summary fallback
-- Contracts & Invariants discovery
-
-## [1.1.0-beta.3] - 2025-11-06
-
-### 🚨 CRITICAL FIX: Prevent ALL Phase Skipping (Not Just Documentation)
-
-**Problem Identified**: Agents were skipping not just the final documentation phase, but ALL investigation phases including:
-- Hypothesis generation (Phase 2)
-- Code analysis (Phase 1)
-- Hypothesis verification (Phase 2b-2h)
-- Instrumentation (Phase 3)
-- Evidence gathering (Phase 4)
-
-They were essentially "guessing" the bug and stopping immediately without any systematic investigation.
-
-**Root Cause**: Agents didn't understand they are **executing a workflow** that requires repeatedly calling `workflow_next` until `isComplete=true`. They thought they could freestyle debug and stop whenever they felt confident.
-
-### 🎯 Comprehensive Solution
-
-#### 1. **Mandatory Workflow Execution Instructions (metaGuidance)**
-Added prominent `🚨 MANDATORY WORKFLOW EXECUTION` section that establishes:
-- "YOU ARE EXECUTING A STRUCTURED WORKFLOW, NOT FREESTYLE DEBUGGING"
-- "You CANNOT 'figure out the bug' and stop"
-- "You MUST execute all 26 workflow steps by repeatedly calling workflow_next"
-- "DO NOT STOP CALLING WORKFLOW_NEXT: Even if you think you know the bug"
-- Clear explanation of workflow mechanics and why this structure exists
-
-#### 2. **Early Commitment Checkpoint (Phase 0e)**
-Added **Phase 0e: Workflow Execution Commitment** immediately after triage:
-- Forces agent to explicitly acknowledge they understand workflow execution requirements
-- Lists all remaining phases they MUST complete
-- Requires stating: "I acknowledge I am executing a structured 26-step workflow..."
-- Requires user confirmation before proceeding to investigation phases
-- Acts as psychological commitment device to prevent freestyle debugging
-
-#### 3. **Evidence-Based Persuasion**
-Reinforced the **90% error rate statistic** throughout:
-- metaGuidance: "agents who skip systematic investigation steps are wrong ~90% of the time"
-- Phase 0e: "stopping early leads to incorrect conclusions ~90% of the time"
-- Phase 5b: "agents who skip final documentation are wrong ~90% of the time"
-
-### 📊 Behavioral Impact
-
-- **Before beta.3**: Agents could guess at bugs and stop immediately without executing any investigation phases
-- **After beta.3**: 
-  - Agents see prominent "MANDATORY WORKFLOW EXECUTION" instructions first
-  - Must acknowledge workflow commitment at Phase 0e before starting investigation
-  - User confirms agent's commitment before investigation proceeds
-  - Agent is psychologically committed to completing all phases
+## [1.1.0-beta.8] - 2025-01-06
+
+### Fixed
+- **CRITICAL**: Fixed loop execution bug where body steps with `runCondition` using iteration variables were completely skipped
+  - Root cause: Loop variables (e.g., `analysisPhase`) were being injected AFTER evaluating runConditions, causing all conditions to fail
+  - Impact: Phase 1's 5-iteration analysis loop was being entirely skipped, jumping straight to Phase 1f
+  - Fix: Reordered logic to inject loop variables BEFORE evaluating body step runConditions
+  - Also fixed: Pre-existing bug where single-step loop bodies didn't increment iterations properly
+  - Test coverage: Added comprehensive integration tests (`loop-runCondition-bug.test.ts`) to prevent regression
+
+## [1.1.0-beta.7] - 2025-01-06
+
+### Fixed
+- **HOTFIX**: Corrected Phase 0e `runCondition` to use `not_equals` instead of invalid `notEquals` operator
+  - Phase 0e now properly executes only when `automationLevel != 'High'`
+  - High automation mode now seamlessly proceeds through all phases without early termination checkpoint
+
+## [1.1.0-beta.6] - 2025-01-06
+
+### Added
+- **New Phase 1f**: Final Breadth & Scope Verification checkpoint after codebase analysis
+  - Prevents tunnel vision by forcing scope sanity checks before hypothesis development
+  - Requires evaluation of 2-3 alternative investigation scopes
+  - Catches the #1 cause of wrong conclusions: looking in wrong place or too narrowly
+  - Positioned strategically after Phase 1 analysis and before Phase 2 hypothesis formation
+
+### Enhanced
+- **Phase 3 (Instrumentation)**: Dramatically expanded with concrete, step-by-step instructions
+  - Language-specific code examples (JavaScript/TypeScript, Python, Java)
+  - Detailed `search_replace` usage examples for applying instrumentation
+  - Hypothesis-specific prefixes ([H1], [H2], [H3]) with standard formatting
+  - File-by-file workflow: read → locate → instrument → verify
+  - Fallback strategy if edit tools unavailable
+  - Instrumentation checklist for tracking progress
   
-### 🧪 Testing Scenarios
+- **Phase 4 (Evidence Collection)**: Comprehensive decision tree and 7-step process
+  - **OPTION A**: Agent can execute code → 4-step execution workflow
+  - **OPTION B**: Agent cannot execute → User instruction template
+  - Clear instructions on when to use each approach
+  - Log consolidation and evidence organization by hypothesis
+  - Evidence quality assessment (1-10 scale)
 
-- **Scenario 1: Agent tries to conclude after Phase 0**: Should be blocked by Phase 0e checkpoint requiring workflow commitment
-- **Scenario 2: Agent tries to skip Phase 1-4**: metaGuidance and Phase 0e commitment should prevent this
-- **Scenario 3: Agent tries to skip Phase 6**: Phase 5b checkpoint should catch this
+- **metaGuidance**: Added explicit high auto mode discipline
+  - Clarified that agents should not ask for permission between phases in high auto mode
+  - Exception: Phase 0e early termination and Phase 4a controlled experiments
+  - Reinforced that asking "should I continue?" implies investigation is optional (it is NOT)
 
-### 🎭 Multi-Layered Defense
+### Changed
+- Total workflow steps: 26 steps (added Phase 1f)
+- Phase 1 analysis loop: Now clearly labeled as "Analysis 1/5" through "Analysis 5/5"
 
-This release implements a comprehensive multi-layered defense against premature completion:
+## [1.1.0-beta.5] - 2025-01-06
 
-1. **Layer 1 (Prevention)**: Strong metaGuidance establishing mandatory workflow execution
-2. **Layer 2 (Early Gate)**: Phase 0e commitment checkpoint with user confirmation  
-3. **Layer 3 (Late Gate)**: Phase 5b completion checkpoint before documentation
-4. **Layer 4 (Evidence)**: 90% error rate statistic cited throughout
-5. **Layer 5 (Mechanical)**: Clear explanation of workflow_next mechanics
-
-## [1.1.0-beta.2] - 2025-11-06
-
-### 🎯 Major Enhancements
-- **Mandatory Completion Checkpoint with User Confirmation**: Added Phase 5b checkpoint that requires explicit user confirmation before proceeding to Phase 6 or terminating early.
-  - **Evidence-Based Persuasion**: Introduced research-backed statistic that agents who skip final documentation are wrong ~90% of the time, even with high confidence.
-  - **Forced Decision Point**: Agents must explicitly choose between completing Phase 6 (recommended) or requesting early termination.
-  - **User Gate**: Early termination requires user approval regardless of automation level, making agents less likely to ignore completion requirements.
-  - **Professional Standard Reinforcement**: Checkpoint emphasizes that proceeding to Phase 6 is the professional standard backed by 20+ years of software engineering research.
-
-### 📚 metaGuidance Updates
-- Added **EVIDENCE-BASED WARNING** section citing 20+ years of professional research on premature conclusions.
-- Added **COMPLETION CHECKPOINT** section explaining the Phase 5b mandatory user confirmation requirement.
-- Enhanced workflow discipline with research-backed rationale for completing all phases.
-
-### 🔬 Behavioral Impact
-- **Before**: Agents could silently skip phases based on confidence assessment alone.
-- **After**: Agents must acknowledge the 90% error rate and get explicit user approval to skip Phase 6, creating a strong psychological and procedural barrier to premature completion.
-- **Expected Outcome**: Dramatically reduced premature completions as agents face both research evidence and user accountability at the decision point.
-
-### 🧪 Testing Scenarios
-- **Scenario 1: Agent chooses to proceed**: Should state recommendation to continue, user approves, Phase 6 executes normally.
-- **Scenario 2: Agent requests early termination**: Should acknowledge 90% error rate, request user approval, and only terminate if user explicitly approves with "terminate" response.
-- **Scenario 3: High confidence with low patience**: User can now explicitly override agent's recommendation at the checkpoint, reinforcing their control while seeing the research-based warning.
-
-## [1.1.0-beta.1] - 2025-11-06
-
-### 🎯 Major Improvements
-
-#### Fixed: Premature Workflow Completion Issue
-**Problem**: Agents were jumping to conclusions and marking investigations complete after early phases (Phase 2 or Phase 5), resulting in incomplete investigations that stopped at 35-90% completion without producing the required diagnostic writeup.
-
-**Solution**: Added multi-layered explicit completion guards throughout the workflow to prevent agents from conflating high confidence with workflow completion.
-
-### ✨ Changes
-
-#### Added
-- **Critical Workflow Discipline** section in metaGuidance (6 key guidelines)
-  - Establishes that HIGH CONFIDENCE ≠ INVESTIGATION COMPLETE
-  - Defines `isWorkflowComplete` flag usage
-  - Clarifies phase progression requirements
+### Changed
+- **Phase 0e Relocation**: Moved early termination checkpoint from Phase 5b to Phase 0e (after triage)
+  - Now appears immediately after setup, before any investigation work begins
+  - Eliminates sunk cost fallacy (decision at 5% vs 90% completion)
+  - Forces upfront decision-making about workflow commitment
   
-- **Phase 2a Warning**: Added explicit warning after hypothesis development
-  - States this is only ~35% of investigation
-  - Lists all remaining phases required
-  - Instructs NOT to set `isWorkflowComplete` at this stage
+### Added
+- **Mandatory User Communication**: Phase 0e now requires agents to explicitly tell users about 90% accuracy difference
+  - Template message is NOT optional - agents MUST communicate this
+  - User must explicitly confirm proceeding with full investigation
   
-- **Phase 5a Warning**: Added explicit warning after confidence assessment
-  - States this is ~90% complete but Phase 6 required
-  - Clarifies Phase 6 is the REQUIRED DELIVERABLE
-  - Instructs NOT to set `isWorkflowComplete` yet
+### Removed
+- **Phase 5b**: Removed old completion checkpoint (now Phase 0e)
+  - Total workflow steps reduced from 28 to 26
+
+## [1.1.0-beta.4] - 2025-01-05
+
+### Enhanced
+- **Sophisticated Code Analysis**: Integrated advanced analysis techniques from MR review workflow into Phase 1
   
-- **Phase 6 Completion Instructions**: Added explicit completion checklist
-  - Verification checklist for all writeup sections
-  - Clear instruction to set `isWorkflowComplete = true`
-  - Statement: "This is the ONLY step where isWorkflowComplete should be set to true"
+### Added
+- **New Phase 1a**: Neighborhood, Call Graph & Contracts analysis
+  - Module root computation (nearest common ancestor, clamped to package boundary)
+  - Neighborhood mapping (immediate neighbors, imports, tests, entry points)
+  - Bounded call graph with HOT path ranking (Small Multiples ASCII visualization)
+  - Flow anchors (entry points to bug: HTTP routes, CLI commands, scheduled jobs, event handlers)
+  - Contracts & invariants discovery (API symbols, endpoints, database tables, stated guarantees)
+  
+- **Enhanced Phase 1 Structure**: Now 5 sub-phases (was 4)
+  1. Neighborhood, Call Graph & Contracts (NEW)
+  2. Breadth Scan (pattern discovery)
+  3. Deep Dive (suspicious code analysis)
+  4. Dependencies & Data Flow
+  5. Test Coverage Analysis
+  
+### Changed
+- Total workflow steps increased from 27 to 28 (added Phase 1a)
+- Phase 1 loop now iterates 5 times (was 4)
+- Each analysis phase now produces more structured, evidence-based outputs
 
-### 📊 Expected Impact
+## [1.1.0-beta.3] - 2025-01-05
 
-- **Before**: 35-90% workflow completion rate, missing diagnostic writeups
-- **After**: 100% workflow completion with full diagnostic documentation
-- **User Experience**: Clear distinction between "finding root cause" and "completing investigation"
-- **Deliverables**: Consistent production of comprehensive diagnostic writeups
+### Fixed
+- **Critical**: Prevented ALL phase skipping, not just final documentation phase
+  - Root cause: Agents didn't understand they MUST repeatedly call workflow_next
+  - Added mandatory workflow execution instructions to metaGuidance
+  - Added early commitment checkpoint (Phase 0e) requiring user confirmation
+  - Reinforced evidence-based persuasion: 90% error rate for premature conclusions
 
-### ✅ Testing
+### Added
+- **Phase 0e**: Workflow Execution Commitment checkpoint
+  - Appears immediately after triage (before investigation begins)
+  - Requires agent acknowledgment of workflow structure (26 steps)
+  - Requires user confirmation to proceed with full investigation
+  - Explicit warning: stopping early leads to wrong conclusions ~90% of time
+  
+### Enhanced
+- **metaGuidance**: Added comprehensive workflow execution discipline
+  - Agents MUST call workflow_next until isComplete=true
+  - High confidence (9-10/10) does NOT mean workflow is complete
+  - Professional research shows 90% error rate for jumping to conclusions
+  - Added "WHY THIS STRUCTURE EXISTS (Evidence-Based)" section
 
-#### Validation Completed
-- JSON syntax validation: ✅ PASSED
-- Step sequence integrity: ✅ PASSED (33 unique steps)
-- Context variable usage: ✅ PASSED (correct usage pattern)
-- Prompt quality review: ✅ PASSED
+## [1.1.0-beta.2] - 2025-01-05
 
-#### Recommended Testing Scenarios
-1. **High Confidence Early Test**: Bug with obvious root cause in Phase 1
-   - Verify agent continues through all phases despite 9/10 confidence
-   
-2. **Confirmed Hypothesis Test**: H1 confirmed with strong evidence in Phase 5
-   - Verify agent proceeds to Phase 6 for writeup
-   
-3. **Complete Workflow Test**: Full investigation through Phase 6
-   - Verify `isWorkflowComplete=true` only after complete writeup
+### Added
+- **Phase 5b**: Mandatory completion checkpoint with user confirmation
+  - Prevents agents from skipping comprehensive diagnostic writeup (Phase 6)
+  - Requires explicit acknowledgment that Phase 6 is the required deliverable
+  - User must confirm proceeding to final documentation phase
 
-### 🔄 Backward Compatibility
+### Enhanced
+- **metaGuidance**: Added critical workflow discipline instructions
+  - Emphasized that high confidence does NOT equal completion
+  - Clarified that Phase 6 is a mandatory deliverable, not optional
+  - Added explicit instructions on when to set `isWorkflowComplete=true`
 
-**100% Backward Compatible**
-- All changes are additive (guidance text only)
-- No structural modifications to workflow
-- No breaking changes to step IDs or flow
-- Existing investigations can continue with updated workflow
+## [1.1.0-beta.1] - 2025-01-05
 
-### 📚 Documentation
+### Fixed
+- **Critical**: Prevented premature workflow completion
+  - Agents were jumping to conclusions and skipping phases with high confidence
+  - Root cause: Misinterpreting progress/confidence as final completion
 
-- Created `WORKFLOW_FIX_SUMMARY.md` with comprehensive fix documentation
-- Includes problem analysis, solution details, and future considerations
+### Added
+- **metaGuidance Section**: "CRITICAL WORKFLOW DISCIPLINE"
+  - High confidence (9-10/10) does NOT mean completion
+  - Agent MUST complete all phases (0-6) regardless of confidence
+  - Only set `isWorkflowComplete=true` after Phase 6 comprehensive writeup
+  
+- **Phase-Specific Warnings**:
+  - Phase 2a (Hypothesis Formation): Warning against treating hypothesis as conclusion
+  - Phase 5a (Confidence Assessment): Warning that 10/10 confidence still requires Phase 6
 
-### 🚀 Beta Release Notes
+### Enhanced
+- **Phase 6 Instructions**: Explicit completion marking
+  - Must set `isWorkflowComplete=true` in this phase
+  - Must produce comprehensive diagnostic writeup
+  - This is the ONLY phase that marks workflow as truly complete
 
-This is a beta release to validate the fix addresses premature completion issues in production use. Please report any issues where:
-- Agents still claim completion before Phase 6
-- Workflow progression feels unnatural or confusing  
-- Instructions are unclear or contradictory
-
-**Feedback Welcome**: This pattern may be applied to other multi-phase workflows (coding-task, mr-review) based on beta results.
-
----
-
-## [1.0.0] - Previous
-
-Initial release of systematic bug investigation workflow with:
-- 6-phase comprehensive investigation process
-- Loop-based iterative analysis
-- Hypothesis validation with evidence collection
-- Instrumentation and debugging support
-- Comprehensive diagnostic writeup deliverable
-
+### Changed
+- All phase prompts updated to reference 27 total workflow steps for clarity

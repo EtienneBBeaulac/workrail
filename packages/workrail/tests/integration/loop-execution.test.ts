@@ -519,10 +519,8 @@ describe('Loop Execution Integration Tests', () => {
             context.needsCleanup = false;
           }
           
-          // Add to completed
-          if (!completedSteps.includes(result.step.id)) {
-            completedSteps.push(result.step.id);
-          }
+          // Mark step as completed (replace, don't accumulate)
+          completedSteps = [result.step.id];
         }
         
         stepCount++;

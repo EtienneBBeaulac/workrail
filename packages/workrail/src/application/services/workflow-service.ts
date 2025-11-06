@@ -127,10 +127,50 @@ export class DefaultWorkflowService implements WorkflowService {
       );
       
       // Check if loop should continue
-      if (loopContext.shouldContinue(context)) {
-        // Resolve the loop body step
-        const bodyStep = this.loopStepResolver.resolveLoopBody(workflow, loopStep.body, loopStep.id);
+      // Check if body step(s) are completed - if so, increment iteration
+      const bodyStep = this.loopStepResolver.resolveLoopBody(workflow, loopStep.body, loopStep.id);
+      const bodyIsCompleted = Array.isArray(bodyStep)
+        ? bodyStep.every(step => completed.includes(step.id))
+        : completed.includes(bodyStep.id);
+      
+      if (bodyIsCompleted) {
+        // Body completed, increment iteration and clear body steps from completed
+        loopContext.incrementIteration();
         
+        // Update loop state in context
+        if (!enhancedContext._loopState) {
+          enhancedContext._loopState = {};
+        }
+        enhancedContext._loopState[loopId] = loopContext.getCurrentState();
+        
+        // Clear completed body steps for next iteration
+        if (Array.isArray(bodyStep)) {
+          bodyStep.forEach(step => {
+            const index = completed.indexOf(step.id);
+            if (index > -1) {
+              completed.splice(index, 1);
+            }
+          });
+        } else {
+          const index = completed.indexOf(bodyStep.id);
+          if (index > -1) {
+            completed.splice(index, 1);
+          }
+        }
+        
+        // Check if loop should continue with next iteration
+        if (!loopContext.shouldContinue(context)) {
+          // Loop completed, mark it as done
+          completed.push(loopId);
+          delete enhancedContext._currentLoop;
+          // Continue to next step after loop
+          const nextStep = await this.getNextStep(workflow.id, completed, enhancedContext);
+          return nextStep;
+        }
+        // Loop continues, fall through to return body step for next iteration
+      }
+      
+      if (loopContext.shouldContinue(context)) {
         // Handle single step body
         if (!Array.isArray(bodyStep)) {
           // Check if this is the first iteration
