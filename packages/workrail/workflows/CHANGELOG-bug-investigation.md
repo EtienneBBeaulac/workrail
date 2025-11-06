@@ -1,5 +1,67 @@
 # Changelog - Systematic Bug Investigation Workflow
 
+## [1.1.0-beta.6] - 2025-11-06
+
+### 🎯 Major Enhancements: Concrete Instrumentation & Breadth Check
+
+**Problem**: Agents were stopping mid-workflow to ask for permission (even in high auto mode), and instrumentation/evidence collection steps were too vague, causing confusion about what to actually do.
+
+**Solutions Applied**:
+
+#### 1. **New Phase 1f: Final Breadth & Scope Verification**
+Added critical checkpoint AFTER code analysis (Phase 1) but BEFORE hypothesis development (Phase 2):
+- **Catches tunnel vision**: Forces evaluation of 2-3 alternative investigation scopes
+- **Scope sanity check**: Verifies module root, entry points, and component coverage
+- **Wide-angle review**: Ensures sufficient breadth AND depth before committing to hypotheses
+- **Research-backed**: 60% of failed investigations look in wrong place or too narrowly
+- **Decision options**: Continue (scope correct), Expand (add areas), or Shift (wrong place entirely)
+
+#### 2. **Phase 3: Detailed Instrumentation Instructions**
+Completely rewrote with concrete, step-by-step guidance:
+- **STEP 1-2**: Review Phase 2g plan, read files needing instrumentation
+- **STEP 3**: Language-specific logging examples (JS/TS, Python, Java)
+- **STEP 4**: Real `search_replace` example with actual code
+- **STEP 5**: File-by-file workflow (read → locate → instrument → verify)
+- **STEP 6**: Fallback for agents without file editing (provide code to user)
+- **AUTO-EXECUTE reinforced**: "DO NOT ask 'Would you like me to continue?'"
+
+#### 3. **Phase 4: Detailed Evidence Collection Instructions**
+Added concrete decision tree and execution guidance:
+- **Decision tree**: Can agent run code? → Option A (execute) vs Option B (instruct user)
+- **STEP 1-3**: How to run code, capture logs, verify quality
+- **STEP 4-5**: Parse logs by hypothesis, assess evidence quality
+- **STEP 6**: Complete user instructions template if agent can't execute
+- **STEP 7**: Document evidence with quality scores
+- **AUTO-EXECUTE reinforced**: Ask for SPECIFIC input (how to run tests), not permission to continue
+
+#### 4. **metaGuidance: High Auto Mode Clarification**
+Added explicit section:
+> "In HIGH automation mode, agents must execute phases WITHOUT asking for permission between phases. The ONLY confirmations allowed are: (1) Phase 0e early termination, (2) Phase 4a controlled experiments. All other phases execute automatically."
+
+### 📊 Changes Summary
+
+- **Total steps**: 26 → 27 (added Phase 1f)
+- **Step references**: Updated all from "26 steps" to "27 steps"
+- **Phase 3 prompt**: 2,588 chars → detailed 6-step process with examples
+- **Phase 4 prompt**: Vague execution → detailed decision tree with 7 steps
+- **New checkpoint**: Phase 1f catches wrong-place investigations early
+
+### 🎯 Why This Matters
+
+**Before**: Agents would:
+- Jump straight from code analysis to hypotheses (tunnel vision)
+- Get confused at Phase 3 ("add instrumentation" - but HOW?)
+- Ask permission between every phase (even in high auto mode)
+- Not know if they should run code or instruct the user
+
+**After**: Agents:
+- Verify scope at Phase 1f before committing to hypotheses
+- Have concrete steps: read files, use `search_replace`, examples for each language
+- Execute phases automatically without asking permission
+- Clear decision tree for execution vs user instruction
+
+---
+
 ## [1.1.0-beta.5] - 2025-11-06
 
 ### 🎯 Major Enhancement: Moved Early Termination Checkpoint to Phase 0e
