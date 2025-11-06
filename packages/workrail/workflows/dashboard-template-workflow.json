@@ -3,7 +3,11 @@
   "name": "Dashboard Template Workflow",
   "description": "Template demonstrating how to create dashboard-enabled workflows with best practices",
   "version": "1.0.0",
-  "tags": ["template", "dashboard", "example"],
+  "tags": [
+    "template",
+    "dashboard",
+    "example"
+  ],
   "steps": [
     {
       "id": "initialize-dashboard",
@@ -42,7 +46,8 @@
       "expectedOutput": {
         "sessionCreated": true,
         "dashboardUrl": "string"
-      }
+      },
+      "prompt": "Create a session for this workflow using workrail_create_session.\nInitialize the dashboard with basic information:\n- Set a clear, descriptive title\n- Set status to 'in_progress'\n- Set initial progress to 0\n\nExample structure:\n```json\n{\n  \"dashboard\": {\n    \"title\": \"[Workflow Name]: [Session ID]\",\n    \"subtitle\": \"Brief description of what's happening\",\n    \"status\": \"in_progress\",\n    \"progress\": 0,\n    \"_meta\": {\n      \"order\": [\"summary\", \"details\", \"timeline\"],\n      \"collapsible\": { \"timeline\": true }\n    }\n  }\n}\n```\n\nUse workrail_create_session with these parameters:\n- workflowId: \"dashboard-template-workflow\"\n- sessionId: A unique ID (e.g., timestamp or user-provided)\n- initialData: The dashboard structure above\n\nIMPORTANT: After creating the session, inform the user they can view the dashboard at:\nhttp://localhost:3456/dashboard.html?workflow=dashboard-template-workflow&id=[SESSION-ID]"
     },
     {
       "id": "gather-information",
@@ -81,7 +86,8 @@
         "TIP: Use dot notation for updates:",
         "- \"dashboard.progress\": 25 (updates just progress)",
         "- \"timeline\": [...] (replaces entire timeline)"
-      ]
+      ],
+      "prompt": "Collect information needed for your workflow.\nAs you gather information, update the dashboard to show progress.\n\nUse workrail_update_session to update:\n```json\n{\n  \"dashboard\": {\n    \"progress\": 25,\n    \"currentPhase\": \"Information Gathering\"\n  },\n  \"summary\": {\n    \"description\": \"Summary of information gathered so far\",\n    \"status\": \"in_progress\"\n  }\n}\n```\n\nAdd timeline events to show what you're doing:\n```json\n{\n  \"timeline\": [\n    {\n      \"timestamp\": \"[current ISO timestamp]\",\n      \"event\": \"Started information gathering\",\n      \"details\": \"Collecting data from user and system\"\n    }\n  ]\n}\n```\n\nTIP: Use dot notation for updates:\n- \"dashboard.progress\": 25 (updates just progress)\n- \"timeline\": [...] (replaces entire timeline)"
     },
     {
       "id": "analyze-data",
@@ -135,7 +141,8 @@
         "  ]",
         "}",
         "```"
-      ]
+      ],
+      "prompt": "Analyze the information you've gathered.\nUpdate the dashboard with your findings.\n\nFor findings with severity:\n```json\n{\n  \"dashboard\": {\n    \"progress\": 50,\n    \"currentPhase\": \"Analysis\"\n  },\n  \"findings\": [\n    {\n      \"finding\": \"Description of finding\",\n      \"severity\": \"high\",  // critical, high, medium, low, info\n      \"confidence\": 8.5,\n      \"reasoning\": \"Why this is a finding\"\n    }\n  ]\n}\n```\n\nFor hypotheses:\n```json\n{\n  \"hypotheses\": [\n    {\n      \"hypothesis\": \"Description of hypothesis\",\n      \"status\": \"testing\",  // active, testing, confirmed, partial, rejected, cancelled\n      \"confidence\": 7.0,\n      \"reasoning\": \"Why you believe this\"\n    }\n  ]\n}\n```\n\nAdd timeline events:\n```json\n{\n  \"timeline\": [\n    ...(existing events),\n    {\n      \"timestamp\": \"[current ISO timestamp]\",\n      \"event\": \"Analysis complete\",\n      \"details\": \"Identified 3 potential issues\"\n    }\n  ]\n}\n```"
     },
     {
       "id": "generate-recommendations",
@@ -171,7 +178,8 @@
         "- Sort by priority (highest first)",
         "- Color-code by priority (red=high, yellow=medium, blue=low)",
         "- Display in card format with reasoning"
-      ]
+      ],
+      "prompt": "Based on your analysis, generate actionable recommendations.\n\nUse priority-based recommendations:\n```json\n{\n  \"dashboard\": {\n    \"progress\": 75,\n    \"currentPhase\": \"Recommendations\"\n  },\n  \"recommendations\": [\n    {\n      \"priority\": 9,  // 1-10 scale, higher = more important\n      \"description\": \"Clear, actionable recommendation\",\n      \"reasoning\": \"Why this is important\",\n      \"effort\": \"Estimated effort (e.g., '2 hours', 'medium')\",\n      \"status\": \"proposed\"  // proposed, planned, in_progress, complete\n    },\n    {\n      \"priority\": 5,\n      \"description\": \"Lower priority item\",\n      \"reasoning\": \"Nice to have\"\n    }\n  ]\n}\n```\n\nThe dashboard will automatically:\n- Sort by priority (highest first)\n- Color-code by priority (red=high, yellow=medium, blue=low)\n- Display in card format with reasoning"
     },
     {
       "id": "finalize",
@@ -206,7 +214,8 @@
         "",
         "Remind the user to check the dashboard for full results:",
         "http://localhost:3456/dashboard.html?workflow=dashboard-template-workflow&id=[SESSION-ID]"
-      ]
+      ],
+      "prompt": "Complete the workflow and update the dashboard to reflect completion.\n\nFinal update:\n```json\n{\n  \"dashboard\": {\n    \"status\": \"complete\",  // or \"error\" if failed\n    \"progress\": 100,\n    \"currentPhase\": \"Complete\",\n    \"confidence\": 8.5  // Overall confidence in results (0-10)\n  },\n  \"conclusion\": {\n    \"summary\": \"High-level summary of what was accomplished\",\n    \"keyFindings\": [\"Finding 1\", \"Finding 2\", \"Finding 3\"],\n    \"nextSteps\": [\"Step 1\", \"Step 2\"]\n  },\n  \"timeline\": [\n    ...(existing events),\n    {\n      \"timestamp\": \"[current ISO timestamp]\",\n      \"event\": \"Workflow complete\",\n      \"details\": \"All analysis and recommendations generated\"\n    }\n  ]\n}\n```\n\nRemind the user to check the dashboard for full results:\nhttp://localhost:3456/dashboard.html?workflow=dashboard-template-workflow&id=[SESSION-ID]"
     }
   ],
   "examples": [
@@ -218,7 +227,14 @@
         "status": "in_progress",
         "progress": 65,
         "_meta": {
-          "order": ["bugSummary", "rootCause", "fix", "hypotheses", "timeline", "recommendations"],
+          "order": [
+            "bugSummary",
+            "rootCause",
+            "fix",
+            "hypotheses",
+            "timeline",
+            "recommendations"
+          ],
           "icons": {
             "bugSummary": "bug",
             "rootCause": "alert-circle",
@@ -253,7 +269,11 @@
         "status": "in_progress",
         "progress": 40,
         "_meta": {
-          "order": ["summary", "findings", "recommendations"],
+          "order": [
+            "summary",
+            "findings",
+            "recommendations"
+          ],
           "icons": {
             "summary": "file-text",
             "findings": "alert-circle",
@@ -285,7 +305,11 @@
         "status": "complete",
         "progress": 100,
         "_meta": {
-          "order": ["summary", "results", "failures"],
+          "order": [
+            "summary",
+            "results",
+            "failures"
+          ],
           "collapsible": {
             "failures": true
           }
@@ -329,9 +353,3 @@
     "code": "Strings with code-like patterns (function, class, etc.)"
   }
 }
-
-
-
-
-
-

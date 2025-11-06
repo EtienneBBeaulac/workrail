@@ -6,6 +6,7 @@ import os from 'os';
 import { SessionManager } from './SessionManager.js';
 import cors from 'cors';
 import open from 'open';
+import { execSync } from 'child_process';
 
 export interface ServerConfig {
   port?: number;
@@ -17,6 +18,7 @@ interface DashboardLock {
   pid: number;
   port: number;
   startedAt: string;
+  lastHeartbeat: string; // Track last activity for TTL-based cleanup
   projectId: string;
   projectPath: string;
 }
@@ -48,6 +50,7 @@ export class HttpServer {
   private baseUrl: string = '';
   private isPrimary: boolean = false;
   private lockFile: string;
+  private heartbeatInterval: NodeJS.Timeout | null = null;
   
   constructor(
     private sessionManager: SessionManager,
@@ -336,6 +339,9 @@ export class HttpServer {
    * Uses unified dashboard pattern (primary/secondary) unless disabled
    */
   async start(): Promise<string | null> {
+    // STEP 1: Quick cleanup of orphaned processes
+    await this.quickCleanup();
+    
     // Check if unified dashboard is disabled
     if (this.config.disableUnifiedDashboard || process.env.WORKRAIL_DISABLE_UNIFIED_DASHBOARD === '1') {
       console.error('[Dashboard] Unified dashboard disabled, using legacy mode');
@@ -376,6 +382,7 @@ export class HttpServer {
         pid: process.pid,
         port: 3456,
         startedAt: new Date().toISOString(),
+        lastHeartbeat: new Date().toISOString(),
         projectId: this.sessionManager.getProjectId(),
         projectPath: this.sessionManager.getProjectPath()
       };
@@ -386,6 +393,7 @@ export class HttpServer {
       console.error('[Dashboard] Primary elected');
       this.isPrimary = true;
       this.setupPrimaryCleanup();
+      this.startHeartbeat();
       return true;
       
     } catch (error: any) {
@@ -412,6 +420,16 @@ export class HttpServer {
       // Validate lock structure
       if (!lockData.pid || !lockData.port || !lockData.startedAt) {
         console.error('[Dashboard] Invalid lock file, reclaiming');
+        await fs.unlink(this.lockFile);
+        return await this.tryBecomePrimary();
+      }
+      
+      // Check TTL: if no heartbeat for 2 minutes, consider it stale
+      const lastHeartbeat = new Date(lockData.lastHeartbeat || lockData.startedAt);
+      const ageMinutes = (Date.now() - lastHeartbeat.getTime()) / 60000;
+      
+      if (ageMinutes > 2) {
+        console.error(`[Dashboard] Stale lock detected (${ageMinutes.toFixed(1)}min old), reclaiming`);
         await fs.unlink(this.lockFile);
         return await this.tryBecomePrimary();
       }
@@ -491,6 +509,13 @@ export class HttpServer {
     const cleanup = async () => {
       if (this.isPrimary) {
         console.error('[Dashboard] Primary shutting down, releasing lock');
+        
+        // Stop heartbeat
+        if (this.heartbeatInterval) {
+          clearInterval(this.heartbeatInterval);
+          this.heartbeatInterval = null;
+        }
+        
         await fs.unlink(this.lockFile).catch(() => {});
         this.isPrimary = false;
       }
@@ -631,6 +656,199 @@ export class HttpServer {
    */
   getPort(): number {
     return this.port;
+  }
+  
+  /**
+   * Start heartbeat to keep lock file fresh
+   * Updates lastHeartbeat every 30 seconds
+   */
+  private startHeartbeat(): void {
+    this.heartbeatInterval = setInterval(async () => {
+      if (this.isPrimary) {
+        try {
+          const lockContent = await fs.readFile(this.lockFile, 'utf-8');
+          const lockData: DashboardLock = JSON.parse(lockContent);
+          lockData.lastHeartbeat = new Date().toISOString();
+          await fs.writeFile(this.lockFile, JSON.stringify(lockData, null, 2));
+        } catch (error) {
+          // Lock file might have been removed, that's okay
+        }
+      }
+    }, 30000); // Every 30 seconds
+  }
+  
+  /**
+   * Quick cleanup of orphaned workrail processes
+   * Only removes processes that are unresponsive on ports 3456-3499
+   */
+  private async quickCleanup(): Promise<void> {
+    try {
+      const busyPorts = await this.getWorkrailPorts();
+      
+      if (busyPorts.length === 0) {
+        return; // Nothing to clean up
+      }
+      
+      console.error(`[Cleanup] Found ${busyPorts.length} workrail process(es), checking health...`);
+      
+      let cleanedCount = 0;
+      
+      for (const { port, pid } of busyPorts) {
+        // Don't check ourselves
+        if (pid === process.pid) continue;
+        
+        const isHealthy = await this.checkHealth(port);
+        
+        if (!isHealthy) {
+          console.error(`[Cleanup] Removing unresponsive process ${pid} on port ${port}`);
+          try {
+            // Try graceful shutdown first
+            process.kill(pid, 'SIGTERM');
+            await new Promise(r => setTimeout(r, 1000));
+            
+            // Check if still alive
+            try {
+              process.kill(pid, 0);
+              // Still alive, force kill
+              process.kill(pid, 'SIGKILL');
+            } catch {
+              // Already dead, good
+            }
+            
+            cleanedCount++;
+          } catch (error) {
+            // Process might have already exited
+          }
+        }
+      }
+      
+      if (cleanedCount > 0) {
+        console.error(`[Cleanup] Cleaned up ${cleanedCount} orphaned process(es)`);
+        // Wait a bit for ports to be released
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    } catch (error) {
+      // Cleanup failures shouldn't block startup
+      console.error('[Cleanup] Failed, continuing anyway:', error);
+    }
+  }
+  
+  /**
+   * Get list of workrail processes and their ports in range 3456-3499
+   * Platform-specific implementation
+   */
+  private async getWorkrailPorts(): Promise<Array<{port: number, pid: number}>> {
+    try {
+      const platform = os.platform();
+      
+      if (platform === 'darwin' || platform === 'linux') {
+        // Use lsof on Unix-like systems
+        const output = execSync(
+          'lsof -i :3456-3499 -Pn 2>/dev/null | grep node || true',
+          { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+        ).trim();
+        
+        if (!output) return [];
+        
+        // Parse lsof output format: COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
+        // Example: node    79144 etienneb   14u  IPv6 0xc2ceb87d07ed2009      0t0  TCP *:3456 (LISTEN)
+        return output.split('\n').filter(Boolean).map(line => {
+          const parts = line.trim().split(/\s+/);
+          const pid = parseInt(parts[1]);
+          const nameField = parts[8]; // NAME field contains *:PORT or *:service_name
+          const portMatch = nameField.match(/:(\d+)$/);
+          const port = portMatch ? parseInt(portMatch[1]) : 0;
+          return { port, pid };
+        }).filter(item => item.port >= 3456 && item.port < 3500 && !isNaN(item.pid));
+        
+      } else if (platform === 'win32') {
+        // Use netstat on Windows
+        const output = execSync(
+          'netstat -ano | findstr "3456" || echo',
+          { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+        ).trim();
+        
+        if (!output) return [];
+        
+        return output.split('\n').filter(Boolean).map(line => {
+          const parts = line.trim().split(/\s+/);
+          const address = parts[1] || '';
+          const pid = parseInt(parts[4]);
+          const portMatch = address.match(/:(\d+)$/);
+          const port = portMatch ? parseInt(portMatch[1]) : 0;
+          return { port, pid };
+        }).filter(item => item.port >= 3456 && item.port < 3500 && !isNaN(item.pid));
+      }
+      
+      return [];
+    } catch (error) {
+      // Command failed, return empty array
+      return [];
+    }
+  }
+  
+  /**
+   * Manual cleanup utility - can be called externally
+   * More aggressive than quickCleanup - removes ALL workrail processes on our ports
+   */
+  async fullCleanup(): Promise<number> {
+    try {
+      const busyPorts = await this.getWorkrailPorts();
+      
+      if (busyPorts.length === 0) {
+        console.error('[Cleanup] No workrail processes found');
+        return 0;
+      }
+      
+      console.error(`[Cleanup] Found ${busyPorts.length} workrail process(es), removing all...`);
+      
+      let cleanedCount = 0;
+      
+      for (const { port, pid } of busyPorts) {
+        // Don't kill ourselves
+        if (pid === process.pid) {
+          console.error(`[Cleanup] Skipping current process ${pid}`);
+          continue;
+        }
+        
+        console.error(`[Cleanup] Killing process ${pid} on port ${port}`);
+        try {
+          // Try graceful shutdown first
+          process.kill(pid, 'SIGTERM');
+          await new Promise(r => setTimeout(r, 1000));
+          
+          // Check if still alive
+          try {
+            process.kill(pid, 0);
+            // Still alive, force kill
+            process.kill(pid, 'SIGKILL');
+            console.error(`[Cleanup] Force killed process ${pid}`);
+          } catch {
+            // Already dead
+            console.error(`[Cleanup] Process ${pid} terminated gracefully`);
+          }
+          
+          cleanedCount++;
+        } catch (error) {
+          console.error(`[Cleanup] Failed to kill process ${pid}:`, error);
+        }
+      }
+      
+      console.error(`[Cleanup] Cleaned up ${cleanedCount} process(es)`);
+      
+      // Also remove lock file
+      try {
+        await fs.unlink(this.lockFile);
+        console.error('[Cleanup] Removed lock file');
+      } catch {
+        // Lock file might not exist
+      }
+      
+      return cleanedCount;
+    } catch (error) {
+      console.error('[Cleanup] Full cleanup failed:', error);
+      throw error;
+    }
   }
 }
 

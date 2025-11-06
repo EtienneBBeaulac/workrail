@@ -12,6 +12,7 @@ import { ValidationEngine } from './application/services/validation-engine';
 import { Workflow } from './types/workflow-types';
 import { initializeUserWorkflowDirectory } from './infrastructure/storage/multi-directory-workflow-storage';
 import { handleMigrationCommand } from './cli/migrate-workflow';
+import { SessionManager, HttpServer } from './infrastructure/session/index.js';
 
 const program = new Command();
 
@@ -277,6 +278,36 @@ program
       await server.start();
     } catch (error: any) {
       console.error(chalk.red('❌ Failed to start server:'), error.message);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('cleanup')
+  .description('Clean up orphaned workrail processes and free up ports')
+  .option('-f, --force', 'Force cleanup without confirmation')
+  .action(async (options) => {
+    try {
+      console.log(chalk.blue('🧹 Cleaning up orphaned workrail processes...'));
+      
+      if (!options.force) {
+        console.log(chalk.yellow('⚠️  This will terminate all workrail dashboard processes'));
+        console.log(chalk.yellow('   Press Ctrl+C to cancel, or wait 3 seconds to continue...'));
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
+      
+      const sessionManager = new SessionManager();
+      const httpServer = new HttpServer(sessionManager);
+      
+      const count = await httpServer.fullCleanup();
+      
+      if (count > 0) {
+        console.log(chalk.green(`✅ Cleaned up ${count} orphaned process(es)`));
+      } else {
+        console.log(chalk.green('✅ No orphaned processes found'));
+      }
+    } catch (error: any) {
+      console.error(chalk.red('❌ Cleanup failed:'), error.message);
       process.exit(1);
     }
   });
