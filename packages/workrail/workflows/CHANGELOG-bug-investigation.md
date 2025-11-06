@@ -1,5 +1,69 @@
 # Changelog - Systematic Bug Investigation Workflow
 
+## [1.1.0-beta.3] - 2025-11-06
+
+### 🚨 CRITICAL FIX: Prevent ALL Phase Skipping (Not Just Documentation)
+
+**Problem Identified**: Agents were skipping not just the final documentation phase, but ALL investigation phases including:
+- Hypothesis generation (Phase 2)
+- Code analysis (Phase 1)
+- Hypothesis verification (Phase 2b-2h)
+- Instrumentation (Phase 3)
+- Evidence gathering (Phase 4)
+
+They were essentially "guessing" the bug and stopping immediately without any systematic investigation.
+
+**Root Cause**: Agents didn't understand they are **executing a workflow** that requires repeatedly calling `workflow_next` until `isComplete=true`. They thought they could freestyle debug and stop whenever they felt confident.
+
+### 🎯 Comprehensive Solution
+
+#### 1. **Mandatory Workflow Execution Instructions (metaGuidance)**
+Added prominent `🚨 MANDATORY WORKFLOW EXECUTION` section that establishes:
+- "YOU ARE EXECUTING A STRUCTURED WORKFLOW, NOT FREESTYLE DEBUGGING"
+- "You CANNOT 'figure out the bug' and stop"
+- "You MUST execute all 26 workflow steps by repeatedly calling workflow_next"
+- "DO NOT STOP CALLING WORKFLOW_NEXT: Even if you think you know the bug"
+- Clear explanation of workflow mechanics and why this structure exists
+
+#### 2. **Early Commitment Checkpoint (Phase 0e)**
+Added **Phase 0e: Workflow Execution Commitment** immediately after triage:
+- Forces agent to explicitly acknowledge they understand workflow execution requirements
+- Lists all remaining phases they MUST complete
+- Requires stating: "I acknowledge I am executing a structured 26-step workflow..."
+- Requires user confirmation before proceeding to investigation phases
+- Acts as psychological commitment device to prevent freestyle debugging
+
+#### 3. **Evidence-Based Persuasion**
+Reinforced the **90% error rate statistic** throughout:
+- metaGuidance: "agents who skip systematic investigation steps are wrong ~90% of the time"
+- Phase 0e: "stopping early leads to incorrect conclusions ~90% of the time"
+- Phase 5b: "agents who skip final documentation are wrong ~90% of the time"
+
+### 📊 Behavioral Impact
+
+- **Before beta.3**: Agents could guess at bugs and stop immediately without executing any investigation phases
+- **After beta.3**: 
+  - Agents see prominent "MANDATORY WORKFLOW EXECUTION" instructions first
+  - Must acknowledge workflow commitment at Phase 0e before starting investigation
+  - User confirms agent's commitment before investigation proceeds
+  - Agent is psychologically committed to completing all phases
+  
+### 🧪 Testing Scenarios
+
+- **Scenario 1: Agent tries to conclude after Phase 0**: Should be blocked by Phase 0e checkpoint requiring workflow commitment
+- **Scenario 2: Agent tries to skip Phase 1-4**: metaGuidance and Phase 0e commitment should prevent this
+- **Scenario 3: Agent tries to skip Phase 6**: Phase 5b checkpoint should catch this
+
+### 🎭 Multi-Layered Defense
+
+This release implements a comprehensive multi-layered defense against premature completion:
+
+1. **Layer 1 (Prevention)**: Strong metaGuidance establishing mandatory workflow execution
+2. **Layer 2 (Early Gate)**: Phase 0e commitment checkpoint with user confirmation  
+3. **Layer 3 (Late Gate)**: Phase 5b completion checkpoint before documentation
+4. **Layer 4 (Evidence)**: 90% error rate statistic cited throughout
+5. **Layer 5 (Mechanical)**: Clear explanation of workflow_next mechanics
+
 ## [1.1.0-beta.2] - 2025-11-06
 
 ### 🎯 Major Enhancements

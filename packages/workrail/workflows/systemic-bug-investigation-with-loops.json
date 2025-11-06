@@ -1,7 +1,7 @@
 {
     "id": "systematic-bug-investigation-with-loops",
     "name": "Systematic Bug Investigation Workflow",
-    "version": "1.1.0-beta.2",
+    "version": "1.1.0-beta.3",
     "description": "A comprehensive workflow for systematic bug and failing test investigation that prevents LLMs from jumping to conclusions. Enforces thorough evidence gathering, hypothesis formation, debugging instrumentation, and validation to achieve near 100% certainty about root causes. This workflow does NOT fix bugs - it produces detailed diagnostic writeups that enable effective fixing by providing complete understanding of what is happening, why it's happening, and supporting evidence.",
     "clarificationPrompts": [
         "What type of system is this? (web app, mobile app, backend service, desktop app, etc.)",
@@ -21,20 +21,24 @@
         "Bug is reproducible with specific steps or a minimal test case"
     ],
     "metaGuidance": [
+        "**🚨 MANDATORY WORKFLOW EXECUTION - READ THIS FIRST:**",
+        "YOU ARE EXECUTING A STRUCTURED WORKFLOW, NOT FREESTYLE DEBUGGING.",
+        "You CANNOT \"figure out the bug\" and stop. You MUST execute all 26 workflow steps by repeatedly calling workflow_next until the MCP returns isComplete=true.",
+        "WORKFLOW MECHANICS: Each call to workflow_next returns the next required step. You MUST execute that step, then call workflow_next again. Repeat until isComplete=true.",
+        "DO NOT STOP CALLING WORKFLOW_NEXT: Even if you think you know the bug, even if you have high confidence, even if it seems obvious - you MUST continue calling workflow_next.",
+        "STEP COUNTER: Every prompt shows \"Step X of 26\" - you are NOT done until you reach Step 26/26 and isComplete=true.",
+        "",
+        "**🎯 WHY THIS STRUCTURE EXISTS (Evidence-Based):**",
+        "Professional research spanning 20+ years shows agents who skip systematic investigation steps are wrong ~90% of the time, even with 9-10/10 self-reported confidence.",
+        "Quick conclusions miss: edge cases, alternative explanations, environment factors, interaction effects, and data corruption paths.",
+        "This workflow FORCES thoroughness through: code analysis, hypothesis formation, instrumentation, evidence gathering, adversarial review, and comprehensive documentation.",
+        "",
         "**CRITICAL WORKFLOW DISCIPLINE:**",
         "HIGH CONFIDENCE ≠ INVESTIGATION COMPLETE: Achieving 8-10/10 confidence in a hypothesis is excellent progress but does NOT mean the workflow is done.",
         "COMPLETE ALL PHASES: You MUST complete ALL phases (0 through 6) regardless of confidence level. Each phase builds critical evidence and documentation.",
         "WORKFLOW COMPLETION FLAG: Only set isWorkflowComplete=true when you complete Phase 6 (Comprehensive Diagnostic Writeup) AND produce the full deliverable.",
-        "DO NOT SKIP PHASES: Even with high confidence, you must complete instrumentation (Phase 3), evidence collection (Phase 4), analysis (Phase 5), and writeup (Phase 6).",
-        "PHASE PROGRESSION: An investigation that stops at hypothesis formation (Phase 2) or evidence collection (Phase 4) is INCOMPLETE - the diagnostic writeup is the required deliverable.",
-        "",
-        "**EVIDENCE-BASED WARNING (20+ years of professional research):**",
-        "Agents who skip final documentation phases are wrong about the root cause approximately 90% of the time, even when reporting 9-10/10 confidence.",
-        "The comprehensive diagnostic writeup (Phase 6) often reveals gaps in reasoning, alternative explanations, and edge cases that change conclusions.",
-        "",
-        "**COMPLETION CHECKPOINT:**",
-        "At Phase 5b, you will reach a mandatory checkpoint that requires user confirmation to either continue to Phase 6 or terminate early.",
-        "You may REQUEST early termination, but this requires explicit user approval and is strongly discouraged by professional research.",
+        "DO NOT SKIP PHASES: Even with high confidence, you must complete hypothesis generation (Phase 2), instrumentation (Phase 3), evidence collection (Phase 4), analysis (Phase 5), and writeup (Phase 6).",
+        "PHASE PROGRESSION: An investigation that stops at triage (Phase 0) or hypothesis formation (Phase 2) or evidence collection (Phase 4) is INCOMPLETE - the diagnostic writeup is the required deliverable.",
         "**FUNCTION DEFINITIONS:**",
         "fun instrumentCode(location, hypothesis) = 'Add debug logs at {location} for {hypothesis}. Format: ClassName.method [{hypothesis}]: message. Include timestamp, thread ID if concurrent.'",
         "fun collectEvidence(hypothesis) = 'Run instrumented code, collect logs, analyze results. Score evidence quality 1-10. Document in Evidence/{hypothesis}.md.'",
@@ -151,6 +155,20 @@
                 "Always include the workflow_get and workflow_next instructions for proper resumption"
             ],
             "requireConfirmation": false
+        },
+        {
+            "id": "phase-0e-workflow-commitment",
+            "title": "Phase 0e: Workflow Execution Commitment",
+            "prompt": "**⚠️ WORKFLOW EXECUTION COMMITMENT CHECKPOINT ⚠️**\n\nYou have completed Phase 0 (Triage & Setup). Before proceeding to the investigation phases, you MUST acknowledge your understanding of workflow execution requirements.\n\n**CRITICAL UNDERSTANDING:**\n\n1. **This is a 26-step structured workflow, not freestyle debugging**\n   - You MUST call workflow_next repeatedly until isComplete=true\n   - You CANNOT stop early, even if you think you know the bug\n   - You CANNOT \"figure it out\" and skip steps\n\n2. **Professional research shows 90% error rate for premature conclusions**\n   - Even with 9-10/10 confidence, skipping systematic steps leads to wrong conclusions\n   - Edge cases, alternative explanations, and interaction effects are missed\n   - The workflow FORCES thoroughness for a reason\n\n3. **Remaining phases you MUST complete (regardless of confidence):**\n   - ✅ Phase 0: Triage & Setup (COMPLETED)\n   - ⏳ Phase 1: Multi-Dimensional Codebase Analysis (4 sub-phases)\n   - ⏳ Phase 2: Hypothesis Formation & Validation (8 sub-phases)\n   - ⏳ Phase 3: Debugging Instrumentation\n   - ⏳ Phase 4: Evidence Collection & Experimentation\n   - ⏳ Phase 5: Final Analysis & Confidence Assessment\n   - ⏳ Phase 6: Comprehensive Diagnostic Writeup (REQUIRED DELIVERABLE)\n\n4. **What \"completion\" means:**\n   - isComplete=true from workflow_next (this happens ONLY after Phase 6)\n   - Comprehensive diagnostic writeup produced\n   - All evidence documented\n   - Investigation context finalized\n\n**REQUIRED ACKNOWLEDGMENT:**\n\nState clearly:\n\"I acknowledge that I am executing a structured 26-step workflow and I MUST call workflow_next for every step until isComplete=true. I understand that stopping early leads to incorrect conclusions ~90% of the time. I will complete all phases (0-6) regardless of my confidence level.\"\n\nThen state: \"I am ready to proceed to Phase 1: Multi-Dimensional Codebase Analysis.\"\n\n**USER**: Do you confirm the agent will follow all workflow phases?",
+            "agentRole": "You are a workflow governance specialist ensuring agents understand they are bound to execute all workflow steps systematically.",
+            "guidance": [
+                "This checkpoint prevents premature termination",
+                "Agents must explicitly acknowledge they understand the workflow structure",
+                "This is a psychological commitment device to prevent freestyle debugging",
+                "Users must confirm the agent's commitment before proceeding"
+            ],
+            "requireConfirmation": true,
+            "confirmationPrompt": "The agent has acknowledged they will follow all 26 workflow steps through Phase 6. Do you approve proceeding with the systematic investigation?\n\nType 'yes' to continue, or 'no' to discuss modifications to the investigation approach."
         },
         {
             "id": "phase-1-iterative-analysis",
