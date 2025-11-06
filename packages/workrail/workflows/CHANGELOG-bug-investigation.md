@@ -1,5 +1,19 @@
 # Changelog - Systematic Bug Investigation Workflow
 
+## [1.1.0-beta.22] - 2025-01-06
+
+### CRITICAL FIX - Invalid Loop Step Schema
+- **ROOT CAUSE**: In beta.19, we added `guidance` to the loop step, but loop steps DON'T support guidance in the schema
+  - Schema allows: `id`, `type`, `title`, `loop`, `body`, `functionDefinitions`, `requireConfirmation`, `runCondition`
+  - Does NOT allow: `guidance`, `prompt`, `agentRole`
+- **Fix**: Moved loop enforcement guidance to first body step (`analysis-neighborhood-contracts`)
+  - "USER SAYS: This loop MUST complete ALL 5 iterations..."
+  - Now properly enforced on each iteration
+- **Validation**: ✅ Workflow now passes full schema validation
+
+### Why This Matters
+Without proper validation, the MCP server couldn't load the workflow at all. Beta.19-21 were broken due to schema violations.
+
 ## [1.1.0-beta.21] - 2025-01-06
 
 ### HOTFIX - metaGuidance Schema Violations
