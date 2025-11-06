@@ -1,5 +1,62 @@
 # Changelog - Systematic Bug Investigation Workflow
 
+## [1.1.0-beta.5] - 2025-11-06
+
+### 🎯 Major Enhancement: Moved Early Termination Checkpoint to Phase 0e
+
+**Problem**: Agents were completing Phase 0, then jumping straight to investigation phases without understanding the value of systematic investigation. By the time they reached Phase 5b, they'd already invested significant effort and were less likely to complete the final writeup.
+
+**Solution**: Moved the completion decision checkpoint from Phase 5b (after confidence assessment) to Phase 0e (immediately after triage, before any investigation work begins). This forces the decision upfront with no sunk cost.
+
+### 📊 Changes
+
+#### **Enhanced Phase 0e: Workflow Execution Commitment & Early Termination Checkpoint**
+
+Now serves dual purpose:
+1. **Workflow Commitment** (existing): Agents acknowledge they understand the 26-step structured workflow
+2. **Early Termination Decision** (NEW): Agents must present options and get user buy-in BEFORE starting investigation
+
+**New MANDATORY USER COMMUNICATION requirement:**
+Agents MUST explicitly tell users:
+> "I strongly recommend we complete the full systematic investigation (26 steps through Phase 6). Professional research shows this approach identifies the TRUE root cause ~90% of the time, compared to ~10% for quick conclusions. Even if I develop high confidence early, completing the full workflow—including contracts analysis, pattern discovery, HOT path analysis, instrumentation, and evidence collection—dramatically increases the likelihood of correctly identifying the root cause and preventing wasted time on wrong fixes."
+
+#### **Removed Phase 5b: Workflow Completion Checkpoint**
+- Old Phase 5b checkpoint removed (was too late in the workflow)
+- Decision now happens at Phase 0e before any investigation work
+- Eliminates sunk cost fallacy that made agents reluctant to complete full workflow
+
+### 🎭 Why This Works Better
+
+**Before (Phase 5b checkpoint):**
+- Agent completes Phase 0-5a (~90% of work)
+- Develops high confidence in hypothesis
+- Reaches checkpoint: "Do you want to skip Phase 6?"
+- Sunk cost + high confidence = temptation to skip final writeup
+- Result: Incomplete investigations without actionable deliverables
+
+**After (Phase 0e checkpoint):**
+- Agent completes Phase 0 (~5% of work)
+- No investigation work yet, no hypotheses formed
+- Reaches checkpoint: "Full investigation (90% accuracy) or quick guess (10% accuracy)?"
+- Agent must explicitly communicate research-backed value proposition
+- User makes informed decision with no sunk cost
+- Result: Either full systematic investigation OR acknowledged best-effort quick diagnosis
+
+### 📈 Benefits
+
+1. **Upfront Decision**: No sunk cost when choosing investigation approach
+2. **User Education**: Agents must communicate value of full workflow
+3. **Forced Communication**: MANDATORY USER COMMUNICATION is not optional
+4. **Research-Backed**: Explicit 90% vs 10% accuracy comparison
+5. **Clear Options**: "Full" vs "quick" with explicit tradeoffs
+6. **No Mid-Investigation Bailouts**: Decision made before any investigation work
+
+### 🏗️ Workflow Structure
+
+- Total steps: **28 → 26** (removed Phase 5b)
+- New checkpoint position: **Phase 0e** (after triage, before investigation)
+- Decision point: **Upfront, not late-stage**
+
 ## [1.1.0-beta.4] - 2025-11-06
 
 ### 🎯 Major Enhancement: Sophisticated Code Analysis (Adapted from MR Review Workflow)
