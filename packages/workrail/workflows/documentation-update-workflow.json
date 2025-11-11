@@ -2,7 +2,7 @@
   "id": "documentation-update-workflow",
   "name": "Documentation Update & Maintenance Workflow",
   "version": "1.0.0",
-  "description": "A focused workflow for updating and maintaining existing codebase documentation. Analyzes changes since last update, identifies outdated sections, and systematically refreshes documentation while preserving valuable existing content. Designed to complement the deep-documentation-workflow for ongoing documentation maintenance.",
+  "description": "UPDATE and MAINTAIN existing documentation. Analyzes Git history to detect staleness, identifies outdated sections, and systematically refreshes docs while preserving valuable content. Perfect for: refreshing docs after code changes, scheduled maintenance, addressing feedback. NOT for creating new docs - use scoped-documentation-workflow or document-creation-workflow for new documentation.",
   "clarificationPrompts": [
     "Which existing documentation needs to be updated? (provide file paths or scope description)",
     "When was this documentation last updated? (approximate date or 'unknown')",

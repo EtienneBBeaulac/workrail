@@ -2,7 +2,7 @@
   "id": "document-creation-workflow",
   "name": "Document Creation Workflow",
   "version": "0.0.1",
-  "description": "A comprehensive workflow for creating high-quality documentation with intelligent complexity triage, automation levels, validation criteria, context management, and systematic quality assurance. Supports README, API docs, user guides, technical specs, and custom documentation with adaptive rigor based on complexity and risk.",
+  "description": "Create BROAD or COMPREHENSIVE documentation spanning multiple components/systems. Perfect for: project READMEs, complete API documentation, user guides covering multiple features, technical specifications for systems. Uses complexity triage (Simple/Standard/Complex) to adapt rigor. For SINGLE, BOUNDED subjects (one class, one integration), use scoped-documentation-workflow instead for better scope discipline.",
   "clarificationPrompts": [
     "What type of document do you need? (README, API documentation, user guide, technical specification, or custom)",
     "What's the document's purpose and target audience?",
