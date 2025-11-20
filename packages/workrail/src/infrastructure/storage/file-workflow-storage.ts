@@ -85,19 +85,53 @@ export class FileWorkflowStorage implements IWorkflowStorage {
   }
 
   /**
-   * Build or refresh the workflow index by scanning the directory once
+   * Recursively find all JSON files in a directory
+   */
+  private async findJsonFiles(dir: string): Promise<string[]> {
+    const files: string[] = [];
+    
+    async function scan(currentDir: string) {
+      const entries = await fs.readdir(currentDir, { withFileTypes: true });
+      
+      for (const entry of entries) {
+        const fullPath = path.join(currentDir, entry.name);
+        
+        if (entry.isDirectory()) {
+          await scan(fullPath);
+        } else if (entry.isFile() && entry.name.endsWith('.json')) {
+          files.push(fullPath);
+        }
+      }
+    }
+    
+    await scan(dir);
+    return files;
+  }
+
+  /**
+   * Build or refresh the workflow index by scanning the directory recursively
    */
   private async buildWorkflowIndex(): Promise<Map<string, WorkflowIndexEntry>> {
-    const dirEntries = await fs.readdir(this.baseDirReal);
-    const jsonFiles = dirEntries.filter((f) => f.endsWith('.json'));
+    const allJsonFiles = await this.findJsonFiles(this.baseDirReal);
+    
+    // Filter files relative to baseDir for processing
+    const relativeFiles = allJsonFiles.map(f => path.relative(this.baseDirReal, f));
+    
     const index = new Map<string, WorkflowIndexEntry>();
 
     // First pass: Create map of ID -> Filename to detect overrides
     const idToFiles = new Map<string, string[]>();
 
     // Scan all files first to map IDs
-    for (const file of jsonFiles) {
+    for (const file of relativeFiles) {
       try {
+         // Skip agentic routines if flag is disabled
+         if (!this.featureFlags.isEnabled('agenticRoutines')) {
+           if (file.includes('routines/') || path.basename(file).startsWith('routine-')) {
+             continue;
+           }
+         }
+
          // Skip reading content for mapping if we assume filename convention, 
          // but we can't assume that yet. So we read IDs.
          const filePathRaw = path.resolve(this.baseDirReal, file);
