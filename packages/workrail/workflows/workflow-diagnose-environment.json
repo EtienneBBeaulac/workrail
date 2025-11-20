@@ -1,24 +1,30 @@
 {
   "id": "workflow-diagnose-environment",
   "name": "Diagnostic: Environment & Subagents",
-  "description": "A setup wizard to detect your Agentic IDE capabilities and verify Subagent tool access.",
+  "description": "Automated capability detection for Agentic IDEs. Probes for subagent access and generates a local configuration file.",
   "steps": [
     {
-      "id": "check-subagent-existence",
-      "title": "Check for Subagents",
-      "prompt": "Do you have access to specialized Subagents (e.g., Researcher, Coder)?\n\n- If YES: Please spawn your 'Researcher' subagent now.\n- If NO: You are running in **Tier 1 (Solo Mode)**. No further configuration is needed. You can stop this workflow."
+      "id": "step-0-probe-capabilities",
+      "title": "Step 0: Probe Subagent Capabilities",
+      "prompt": "**INITIATING CAPABILITY PROBE**\n\nI need to determine if this environment supports subagent delegation.\n\n**YOUR MISSION:** Attempt to contact a subagent and verify its tool access.\n\n**EXECUTE:**\n1. Check for existing `.workrail/config.json`. If it exists, read it.\n2. **Active Probe:** Attempt to use the `task` tool (or equivalent) to send a message to a subagent type 'context-researcher' (or 'researcher').\n   - *Prompt:* \"Please run `workflow_list` and tell me what you see.\"\n3. **Analyze Result:**\n   - **Success:** Subagent replied AND saw workflows. (Tier 3)\n   - **Partial:** Subagent replied but saw NO tools. (Tier 2)\n   - **Failure:** Tool call failed or no subagent found. (Tier 1)\n\n**WORKING NOTES:**\n- Probe Result (Success/Partial/Fail)\n- Subagent Name (if discovered)\n- Tool Access Verified?",
+      "agentRole": "You are a system administrator verifying environment capabilities.",
+      "requireConfirmation": false,
+      "guidance": [
+        "AUTO-DISCOVERY: Try standard names like 'context-researcher', 'researcher', 'coder'.",
+        "TOOL CHECK: The specific test is 'Can you see WorkRail tools?'.",
+        "FAIL FAST: If the 'task' tool doesn't exist, you are immediately in Tier 1 (Solo)."
+      ]
     },
     {
-      "id": "probe-tool-access",
-      "title": "Probe Tool Access",
-      "prompt": "We need to verify if your Researcher subagent can access WorkRail tools.\n\nINSTRUCTION:\nAsk your Researcher subagent to execute the tool `workflow_list`.\n\nCompare their output with your own ability to see tools.\n\n- If they SUCCEED: Your environment supports **Tier 3 (Delegation Mode)**.\n- If they FAIL (tool not found): Your environment is in **Tier 2 (Proxy Mode)**.\n\nPlease report which Tier you are in."
-    },
-    {
-      "id": "save-config",
-      "title": "Save Configuration",
-      "prompt": "Based on the previous step, I will save your configuration preference.\n\nWrite a file to `.workrail/config.json` with the following content (adjust based on your Tier):\n\nFor Tier 3 (Delegate):\n```json\n{\n  \"features\": {\n    \"subagents\": true,\n    \"delegation\": true\n  }\n}\n```\n\nFor Tier 2 (Proxy):\n```json\n{\n  \"features\": {\n    \"subagents\": true,\n    \"delegation\": false\n  }\n}\n```\n\nThis will help me optimize future workflows for your environment.",
-      "requireConfirmation": true
+      "id": "step-1-configure-environment",
+      "title": "Step 1: Configure Environment",
+      "prompt": "**CONFIGURE WORKRAIL ENVIRONMENT**\n\nBased on the probe result, configure the local workspace.\n\n**YOUR MISSION:** Create or update `.workrail/config.json` to reflect reality.\n\n**EXECUTE:**\n1. **Tier 3 (Delegation):**\n   - Write config: `{\"mode\": \"delegate\", \"subagents\": {\"researcher\": \"[name]\"}}`\n   - Inform user: \"Delegation enabled. Subagent '[name]' connected.\"\n2. **Tier 2 (Proxy):**\n   - Write config: `{\"mode\": \"proxy\", \"subagents\": {\"researcher\": \"[name]\"}}`\n   - Inform user: \"Proxy mode enabled. Subagent connected but needs tool whitelist fix.\"\n3. **Tier 1 (Solo):**\n   - Write config: `{\"mode\": \"solo\"}`\n   - Inform user: \"Solo mode enabled. No subagents detected.\"\n\n**DELIVERABLE:**\n- `.workrail/config.json` file created/updated.\n- Brief summary of capabilities detected.",
+      "agentRole": "You are a configuration manager ensuring the system is set up correctly.",
+      "requireConfirmation": true,
+      "guidance": [
+        "PERSISTENCE: Use 'write_file' to save the config.",
+        "USER INFO: Be clear about what mode is being set and why."
+      ]
     }
   ]
 }
-
