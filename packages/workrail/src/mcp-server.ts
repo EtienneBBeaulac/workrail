@@ -296,33 +296,6 @@ const WORKFLOW_NEXT_TOOL: Tool = {
   }
 };
 
-const WORKFLOW_VALIDATE_TOOL: Tool = {
-  name: "workflow_validate",
-  description: `(Optional but Recommended) Verifies the output of a step before proceeding. Use this after completing a step to check if your work is valid to prevent errors.`,
-  inputSchema: {
-    type: "object",
-    properties: {
-      workflowId: {
-        type: "string",
-        description: "The unique identifier of the workflow",
-        pattern: "^[A-Za-z0-9_-]+$"
-      },
-      stepId: {
-        type: "string", 
-        description: "The unique identifier of the step to validate",
-        pattern: "^[A-Za-z0-9_-]+$"
-      },
-      output: {
-        type: "string",
-        description: "The output or result produced for this step",
-        maxLength: 10000
-      }
-    },
-    required: ["workflowId", "stepId", "output"],
-    additionalProperties: false
-  }
-};
-
 const WORKFLOW_VALIDATE_JSON_TOOL: Tool = {
   name: "workflow_validate_json",
   description: `Validates workflow JSON content directly without external tools. Use this tool when you need to verify that a workflow JSON file is syntactically correct and follows the proper schema.
@@ -413,7 +386,6 @@ async function runServer() {
       WORKFLOW_LIST_TOOL,
       WORKFLOW_GET_TOOL, 
       WORKFLOW_NEXT_TOOL,
-      WORKFLOW_VALIDATE_TOOL,
       WORKFLOW_VALIDATE_JSON_TOOL,
       WORKFLOW_GET_SCHEMA_TOOL,
       ...workflowServer.getSessionTools()
@@ -472,15 +444,6 @@ async function runServer() {
           };
         }
         return await workflowServer.getNextStep(args['workflowId'] as string, args['completedSteps'] as string[] || [], args['context']);
-        
-      case "workflow_validate":
-        if (!args?.['workflowId'] || !args?.['stepId'] || !args?.['output']) {
-          return {
-            content: [{ type: "text", text: "Error: workflowId, stepId, and output parameters are required" }],
-            isError: true
-          };
-        }
-        return await workflowServer.validateStep(args['workflowId'] as string, args['stepId'] as string, args['output'] as string);
         
       case "workflow_validate_json":
         if (!args?.['workflowJson']) {

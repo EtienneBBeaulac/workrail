@@ -60,14 +60,12 @@ import { responseValidator } from '../validation/response-validator';
 import { createListWorkflows } from './use-cases/list-workflows';
 import { createGetWorkflow } from './use-cases/get-workflow';
 import { createGetNextStep } from './use-cases/get-next-step';
-import { createValidateStepOutput } from './use-cases/validate-step-output';
 import { SimpleOutputDecorator } from './decorators/simple-output-decorator';
 
 export const METHOD_NAMES = {
   WORKFLOW_LIST: 'workflow_list',
   WORKFLOW_GET: 'workflow_get',
   WORKFLOW_NEXT: 'workflow_next',
-  WORKFLOW_VALIDATE: 'workflow_validate',
   INITIALIZE: 'initialize',
   TOOLS_LIST: 'tools/list',
   SHUTDOWN: 'shutdown'
@@ -98,7 +96,6 @@ export function buildWorkflowApplication(
   const listWorkflowsUseCase = createListWorkflows(workflowService);
   const getWorkflowUseCase = createGetWorkflow(workflowService);
   const getNextStepUseCase = createGetNextStep(workflowService);
-  const validateStepOutputUseCase = createValidateStepOutput(workflowService);
 
   // ------------------------------------------------------------------------
   // Workflow tool methods
@@ -117,14 +114,6 @@ export function buildWorkflowApplication(
       params.workflowId,
       params.completedSteps || [],
       params.context
-    );
-  });
-
-  app.register(METHOD_NAMES.WORKFLOW_VALIDATE, async (params: any) => {
-    return validateStepOutputUseCase(
-      params.workflowId,
-      params.stepId,
-      params.output
     );
   });
 
