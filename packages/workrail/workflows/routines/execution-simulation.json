@@ -1,0 +1,86 @@
+{
+  "id": "routine-execution-simulation",
+  "name": "Execution Simulation Routine",
+  "version": "1.1.0",
+  "description": "Simulates code execution step-by-step through mental tracing and state tracking. Uses an Ideate -> Plan -> Execute strategy to identify the best simulation paths before tracing.",
+  "clarificationPrompts": [
+    "What function should I simulate? (function name, file, line)",
+    "What is the goal? (e.g., understand failure, trace happy path)",
+    "What inputs or conditions are relevant?",
+    "How deep should I trace? (shallow, follow all calls, until error)"
+  ],
+  "preconditions": [
+    "Target code is available",
+    "Goal is clear",
+    "Agent has read access to all relevant code files"
+  ],
+  "metaGuidance": [
+    "**ROUTINE PURPOSE:**",
+    "This routine simulates code execution mentally. It deliberately separates deciding WHAT to simulate from the actual simulation.",
+    "",
+    "**PHASES:**",
+    "1. IDEATE: Brainstorm possible execution paths and scenarios",
+    "2. PLAN: Select the best scenario and define inputs/state",
+    "3. EXECUTE: Perform the step-by-step mental trace",
+    "4. ANALYZE: Identify divergence and root cause",
+    "",
+    "**CORE PRINCIPLES:**",
+    "- THINK BEFORE TRACING: Don't start tracing until you have a plan",
+    "- DEFINE INPUTS FIRST: Know exactly what values you're passing in",
+    "- MENTAL EXECUTION: Simulate in your mind, don't run code",
+    "- PRECISION: Cite file:line for every step"
+  ],
+  "steps": [
+    {
+      "id": "step-0-ideate-scenarios",
+      "title": "Step 0: Ideate Simulation Scenarios",
+      "prompt": "**EXPLORE EXECUTION PATHS**\n\nBefore you start tracing, look at the code and brainstorm what scenarios are worth simulating.\n\n**YOUR MISSION:** Identify possible execution paths and scenarios relevant to the goal.\n\n**EXECUTE:**\n1. Read the target function and its dependencies\n2. Identify the control flow (if/else branches, loops, error handling)\n3. Brainstorm 3-5 possible execution scenarios (e.g., Happy Path, Invalid Input, Network Error)\n4. For each scenario, identify:\n   - What inputs/state trigger it?\n   - What makes it interesting/relevant?\n   - How complex is it to trace?\n\n**REFLECT:**\n- Did I miss any edge cases?\n- Which scenario is most likely to reveal the issue?\n- Are there dependencies I need to understand first?\n\n**WORKING NOTES:**\n- Target Function Summary\n- List of Scenarios (Option A, B, C...)\n- Pros/Cons of simulating each\n- Key dependencies identified",
+      "agentRole": "You are an explorer mapping out the territory. You're looking for the most interesting paths to investigate.",
+      "requireConfirmation": false,
+      "guidance": [
+        "BRAINSTORM: Don't settle for the first path you see",
+        "DIVERSITY: Include success, failure, and edge case scenarios",
+        "TRIGGERS: Be specific about what inputs trigger each path",
+        "RELEVANCE: Focus on scenarios that align with the user's goal"
+      ]
+    },
+    {
+      "id": "step-1-plan-simulation",
+      "title": "Step 1: Plan the Simulation Strategy",
+      "prompt": "**DEFINE THE SIMULATION PLAN**\n\nNow select the best scenario and define the exact parameters for your trace.\n\n**YOUR MISSION:** Create a concrete plan for the simulation so you don't get lost while tracing.\n\n**EXECUTE:**\n1. Select the most relevant scenario from Step 0\n2. Define the **Entry Point** (function, file, line)\n3. Define the exact **Inputs** (parameters, arguments)\n4. Define the **Initial State** (global variables, database state, environment)\n5. Define the **Trace Depth** (how deep to go into function calls)\n6. Note specific **Watch Variables** (state to track closely)\n\n**REFLECT:**\n- Do I have all the values I need?\n- Is the scope manageable?\n- Will this path give me the answer I need?\n\n**DELIVERABLE:**\nCreate `simulation-plan.md` with:\n- Selected Scenario\n- Entry Point (file:line)\n- Concrete Inputs (JSON/values)\n- Initial State\n- Trace Strategy (depth, focus)\n- Expected Outcome",
+      "agentRole": "You are a test engineer designing a precise test case. Specificity is key.",
+      "requireConfirmation": false,
+      "guidance": [
+        "CONCRETE VALUES: Don't use abstract inputs, pick specific values (e.g., user_id=123)",
+        "SCOPE: Define clearly when to stop tracing (depth)",
+        "STATE: Don't forget implicit state (config, env vars)",
+        "FOCUS: Identify what variables matter most"
+      ]
+    },
+    {
+      "id": "step-2-trace-execution",
+      "title": "Step 2: Execute the Mental Trace",
+      "prompt": "**EXECUTE THE TRACE**\n\nNow perform the mental execution following your plan exactly.\n\n**YOUR MISSION:** Simulate execution line-by-line, tracking state changes.\n\n**EXECUTE:**\nFollow `simulation-plan.md`:\n1. Start at Entry Point with defined Inputs\n2. For each line:\n   - Cite file:line\n   - Show code\n   - Show state BEFORE\n   - Show state AFTER\n   - Note result (Success/Error)\n3. Track all Watch Variables\n4. Follow function calls according to depth strategy\n5. Stop when completion or error is reached\n\n**WORKING NOTES:**\nCreate detailed execution trace:\n- Step N: Line X\n- State changes\n- Function calls\n- Results",
+      "agentRole": "You are a CPU executing instructions. Be mechanical, precise, and track state without guessing.",
+      "requireConfirmation": false,
+      "guidance": [
+        "FOLLOW PLAN: Stick to the inputs and state defined in Step 1",
+        "NO GUESSING: If state is unknown, mark it as UNKNOWN",
+        "CITATIONS: File:line for every step",
+        "STATE TRACKING: Explicitly show variable values changing"
+      ]
+    },
+    {
+      "id": "step-3-analyze-results",
+      "title": "Step 3: Analyze Divergence & Root Cause",
+      "prompt": "**ANALYZE THE TRACE**\n\nNow look at your trace to understand what happened.\n\n**YOUR MISSION:** Identify where execution went wrong and why.\n\n**EXECUTE:**\n1. Compare Actual Outcome vs Expected Outcome\n2. Identify the **Divergence Point** (exact line where it went off track)\n3. Analyze the **Root Cause** (why did it diverge?)\n4. Check if other scenarios (from Step 0) would have behaved differently\n5. Formulate a fix recommendation\n\n**DELIVERABLE:**\nCreate `simulation-report.md`:\n- Summary\n- Execution Trace (from Step 2)\n- Divergence Analysis\n- Root Cause\n- Recommendations",
+      "agentRole": "You are a forensic analyst connecting the dots. Turn the trace into insights.",
+      "requireConfirmation": false,
+      "guidance": [
+        "ROOT CAUSE: distinguish between the error (symptom) and the cause (bug)",
+        "EVIDENCE: Point to specific steps in the trace",
+        "FIX: Suggest how to correct the logic"
+      ]
+    }
+  ]
+}

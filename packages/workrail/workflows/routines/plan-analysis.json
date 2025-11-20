@@ -1,8 +1,8 @@
 {
   "id": "routine-plan-analysis",
   "name": "Plan Analysis Routine",
-  "version": "1.0.0",
-  "description": "Validates implementation plans for completeness, pattern adherence, and risk. Checks against requirements, constraints, and codebase patterns. Designed for delegation to Plan Analyzer subagent or manual execution by main agent.",
+  "version": "1.1.0",
+  "description": "Validates implementation plans using an Ideate -> Plan -> Execute strategy. Checks for completeness, pattern adherence, and risk. Designed for delegation to Plan Analyzer subagent.",
   "clarificationPrompts": [
     "What plan file should I analyze? (e.g., implementation-plan.md)",
     "What requirements must the plan address?",
@@ -17,120 +17,86 @@
   ],
   "metaGuidance": [
     "**ROUTINE PURPOSE:**",
-    "This routine validates implementation plans against requirements, constraints, and established patterns. It identifies gaps, risks, and deviations before execution begins.",
+    "This routine validates plans. It separates strategy (Ideating analysis vectors) from execution (Checking completeness/patterns/risk).",
+    "",
+    "**PHASES:**",
+    "1. IDEATE: Classify the plan type and potential pitfalls",
+    "2. STRATEGIZE: Define the analysis focus and checklist",
+    "3. EXECUTE: Run the checks (Completeness, Patterns, Risk)",
+    "4. SYNTHESIZE: Deliver the final verdict and recommendations",
     "",
     "**CORE PRINCIPLES:**",
-    "- COMPLETENESS: Verify all requirements are addressed",
-    "- COMPLIANCE: Check adherence to patterns and rules",
-    "- RISK-AWARE: Identify potential issues before they occur",
-    "- CONSTRUCTIVE: Suggest improvements, not just criticize",
-    "",
-    "**EXPECTED INPUT FORMAT:**",
-    "Plan: Must be a file reference (e.g., 'implementation-plan.md'). A plan typically includes: objectives, approach/strategy, steps/phases, dependencies, testing strategy, and success criteria.",
-    "Requirements: List of what must be accomplished",
-    "Constraints: Patterns to follow, rules to obey, standards to meet",
-    "Context: Background information, codebase patterns, user rules",
-    "",
-    "**EXECUTION MODEL:**",
-    "This routine is designed for autonomous execution. You will receive all necessary context upfront. Your role is to validate thoroughly and identify issues."
+    "- CONTEXT-AWARE: Adapt analysis to the plan type (UI vs Backend vs Migration)",
+    "- RISK-FOCUSED: Prioritize high-risk areas",
+    "- CONSTRUCTIVE: Suggest specific improvements"
   ],
   "steps": [
     {
-      "id": "step-0-understand-plan",
-      "title": "Step 0: Understand the Plan",
-      "prompt": "**UNDERSTAND THE PLAN** (5-10 min) - Read and comprehend\n\n**YOUR MISSION:** Thoroughly understand what the plan proposes to do.\n\n**PLAN YOUR APPROACH:**\nBefore analyzing, think:\n- What is the plan trying to accomplish?\n- What are the major components or phases?\n- What's the overall strategy?\n\n**EXECUTE:**\n1. Read the plan file using read_file\n2. Identify the main objectives\n3. Break down into major components or phases\n4. Note the proposed approach/strategy\n5. Identify any dependencies or prerequisites\n\n**REFLECT:**\nAs you read, ask yourself:\n- What is this plan really trying to achieve?\n- What's the high-level strategy?\n- What are the major steps or phases?\n- Are there dependencies between components?\n- Is the plan clear and well-structured?\n\n**WORKING NOTES:**\nCapture your understanding:\n- Main objectives (what's being accomplished)\n- Major components/phases (how it's structured)\n- Proposed strategy (the approach)\n- Dependencies (what depends on what)\n- Initial impressions (clarity, structure, completeness)",
-      "agentRole": "You are a meticulous plan analyst who ensures complete understanding before evaluation.",
+      "id": "step-0-ideate-strategy",
+      "title": "Step 0: Ideate Analysis Strategy",
+      "prompt": "**IDEATE ANALYSIS STRATEGY**\n\nBefore analyzing the details, look at the plan holistically.\n\n**YOUR MISSION:** Determine what *kind* of plan this is and what usually goes wrong with it.\n\n**EXECUTE:**\n1. Read the plan summary\n2. Classify the plan (e.g., \"Database Migration\", \"UI Refactor\", \"New API Endpoint\")\n3. Brainstorm common pitfalls for this category\n4. Identify key patterns that *should* be present\n\n**REFLECT:**\n- What are the \"unknown unknowns\" for this domain?\n- What is the single biggest risk?\n- Are there specific user rules for this type of work?\n\n**WORKING NOTES:**\n- Plan Classification\n- Common Pitfalls to Check\n- Critical Patterns to Verify\n- Key Risk Areas",
+      "agentRole": "You are a seasoned architect deciding how to review a design.",
+      "requireConfirmation": false,
       "guidance": [
-        "READING STRATEGY: Use read_file to load the plan file. Read it completely to understand the full scope",
-        "OBJECTIVE EXTRACTION: What is the plan trying to accomplish? Be specific - not 'fix bug' but 'fix token validation bug in AuthService'",
-        "COMPONENT IDENTIFICATION: Break plan into logical pieces - phases, modules, steps, layers",
-        "STRATEGY ANALYSIS: What's the approach? Incremental? Big bang? Refactor then fix? Fix then refactor?",
-        "DEPENDENCY MAPPING: What must happen before what? Are dependencies explicit or implicit?",
-        "QUALITY INDICATORS - Clear plan: Explicit objectives, logical structure, clear dependencies, well-organized",
-        "QUALITY INDICATORS - Unclear plan: Vague objectives, jumbled structure, hidden dependencies, hard to follow",
-        "CONSTRAINT: Just understand - don't evaluate yet",
-        "OUTPUT LIMIT: Summary of plan understanding (aim for 300-400 words)"
-      ],
-      "requireConfirmation": false
+        "CLASSIFICATION: Be specific (e.g., 'Async Worker Implementation')",
+        "PITFALLS: List 3-5 common errors for this specific domain",
+        "FOCUS: Decide where to spend your limited attention"
+      ]
     },
     {
-      "id": "step-1-completeness-check",
-      "title": "Step 1: Completeness Check",
-      "prompt": "**COMPLETENESS CHECK** (10-15 min) - Verify all requirements addressed\n\n**YOUR MISSION:** Ensure every requirement is addressed by the plan.\n\n**PLAN YOUR APPROACH:**\nBased on your understanding, decide:\n- How will I map requirements to plan elements?\n- What might be missing?\n- What's implied vs explicit?\n\n**EXECUTE:**\n1. List all stated requirements\n2. For each requirement, find where it's addressed in the plan\n3. Identify requirements that are missing or partially addressed\n4. Check for implicit requirements (not stated but necessary)\n5. Verify success criteria are defined\n\n**REFLECT:**\nAs you check, ask yourself:\n- Is every requirement explicitly addressed?\n- Are any requirements only partially covered?\n- What implicit requirements exist? (testing, docs, migration, rollback)\n- How will success be measured?\n- What's missing that should be there?\n\n**WORKING NOTES:**\nCapture your analysis:\n- Requirement coverage matrix (requirement → plan element)\n- Missing requirements (stated but not addressed)\n- Partial coverage (addressed but incompletely)\n- Implicit requirements (testing, docs, migration, monitoring, rollback)\n- Success criteria (how will we know it worked?)\n- Completeness score (X/Y requirements fully addressed)",
-      "agentRole": "You are a thorough requirements analyst who ensures nothing is overlooked.",
+      "id": "step-1-plan-analysis",
+      "title": "Step 1: Plan the Analysis",
+      "prompt": "**DEFINE ANALYSIS PLAN**\n\nNow define your specific checklist for this analysis.\n\n**YOUR MISSION:** Create a concrete plan to validate this document.\n\n**EXECUTE:**\n1. Select the specific **Checks** to run (Completeness, Patterns, Security, Performance)\n2. Define **Key Questions** to answer\n3. Identify **Reference Files** to check against (patterns, existing code)\n\n**DELIVERABLE:**\nCreate `analysis-strategy.md`:\n- Scope of Analysis\n- Key Questions\n- Pattern Reference List\n- Risk Focus Areas",
+      "agentRole": "You are a lead reviewer defining the review criteria.",
+      "requireConfirmation": false,
       "guidance": [
-        "MAPPING STRATEGY: Create explicit mapping - Requirement 1 → Plan Section 2.3, Requirement 2 → Plan Section 1.1 + 3.2",
-        "MISSING DETECTION: Look for requirements with no corresponding plan element. These are gaps.",
-        "PARTIAL COVERAGE: Requirement is mentioned but not fully addressed. Example: 'Add tests' mentioned but no test strategy",
-        "IMPLICIT REQUIREMENTS: Always check for - Testing strategy, Documentation updates, Migration/upgrade path, Rollback plan, Monitoring/observability, Performance impact, Security considerations",
-        "SUCCESS CRITERIA: How will we know the plan succeeded? Metrics? Tests? User validation?",
-        "QUALITY INDICATORS - Complete plan: All requirements mapped, implicit requirements addressed, success criteria defined",
-        "QUALITY INDICATORS - Incomplete plan: Missing requirements, no implicit requirements, no success criteria",
-        "CONSTRAINT: Focus on what's missing, not how it's done (that's next step)",
-        "OUTPUT LIMIT: Completeness analysis with requirement mapping and gaps (aim for 400-500 words)"
-      ],
-      "requireConfirmation": false
+        "CUSTOMIZE: Don't just use a generic checklist. Tailor it to the plan type.",
+        "REFERENCES: List specific files to check for pattern matching"
+      ]
     },
     {
-      "id": "step-2-pattern-compliance",
-      "title": "Step 2: Pattern Compliance Check",
-      "prompt": "**PATTERN COMPLIANCE** (15-20 min) - Verify adherence to patterns and rules\n\n**YOUR MISSION:** Check if the plan follows established patterns, rules, and standards.\n\n**PLAN YOUR APPROACH:**\nBased on constraints provided, decide:\n- What patterns should I verify?\n- Where in the codebase are these patterns?\n- How will I check compliance?\n\n**EXECUTE:**\n1. Review all stated constraints (patterns, rules, standards)\n2. For each constraint, check if plan follows it\n3. Use codebase_search/grep to find existing patterns\n4. Compare plan approach to established patterns\n5. Identify deviations (intentional or accidental)\n6. Check against user rules (if provided)\n\n**REFLECT:**\nAs you check, ask yourself:\n- Does the plan follow established patterns?\n- Are deviations justified or accidental?\n- Does it match how similar things are done?\n- Does it follow user rules and standards?\n- Are there better patterns it should use?\n\n**WORKING NOTES:**\nCapture your analysis:\n- Pattern compliance matrix (constraint → compliance status)\n- Deviations identified (where plan differs from patterns)\n- Justification check (are deviations explained?)\n- Similar implementations (how others did this)\n- User rule compliance (follows stated rules?)\n- Recommended patterns (better approaches available?)",
-      "agentRole": "You are a pattern expert who ensures consistency with established practices.",
+      "id": "step-execute-completeness",
+      "title": "Execution: Completeness Check",
+      "prompt": "**EXECUTE COMPLETENESS CHECK**\n\nVerify all requirements are addressed.\n\n**MISSION:** Ensure no requirement is left behind.\n\n**EXECUTE:**\n1. Follow `analysis-strategy.md`\n2. Map Requirements to Plan Sections\n3. identifying gaps\n4. Check for implicit requirements (Testing, Migration, Rollback)\n\n**WORKING NOTES:**\n- Requirement Matrix\n- Gaps Identified\n- Implicit Requirements Status",
+      "agentRole": "You are a requirements analyst ensuring full coverage.",
+      "requireConfirmation": false,
       "guidance": [
-        "PATTERN DISCOVERY: Use codebase_search to find existing patterns - 'How is authentication implemented?' or grep for similar code",
-        "COMPLIANCE CHECKING: For each constraint, verify plan follows it. Example: Constraint 'use dependency injection' → Check if plan shows DI",
-        "DEVIATION ANALYSIS: Where does plan differ from patterns? Is it justified (with explanation) or accidental (oversight)?",
-        "SIMILARITY SEARCH: Find similar implementations - grep 'class.*Service', codebase_search 'How are services structured?'",
-        "USER RULE VERIFICATION: Check against provided user rules - naming conventions, architectural patterns, testing requirements",
-        "BETTER ALTERNATIVES: Are there superior patterns the plan should use? More modern? More maintainable?",
-        "QUALITY INDICATORS - Compliant plan: Follows patterns, deviations justified, matches similar code, follows user rules",
-        "QUALITY INDICATORS - Non-compliant plan: Ignores patterns, unexplained deviations, inconsistent with codebase, violates user rules",
-        "CONSTRAINT: Focus on pattern adherence, not implementation details",
-        "OUTPUT LIMIT: Pattern compliance analysis with deviations and recommendations (aim for 500-600 words)"
-      ],
-      "requireConfirmation": false
+        "MAPPING: Create explicit mapping (Req 1 -> Section 2)",
+        "IMPLICIT: Don't forget testing, monitoring, docs"
+      ]
     },
     {
-      "id": "step-3-risk-assessment",
-      "title": "Step 3: Risk Assessment",
-      "prompt": "**RISK ASSESSMENT** (10-15 min) - Identify potential issues\n\n**YOUR MISSION:** Identify risks, potential problems, and failure modes in the plan.\n\n**PLAN YOUR APPROACH:**\nBased on your analysis so far, decide:\n- What could go wrong?\n- What's risky about this approach?\n- What failure modes exist?\n\n**EXECUTE:**\n1. Identify technical risks (complexity, dependencies, unknowns)\n2. Identify execution risks (ordering, timing, coordination)\n3. Identify business risks (downtime, data loss, user impact)\n4. Check for single points of failure\n5. Assess rollback/recovery capability\n6. Consider edge cases and error scenarios\n\n**REFLECT:**\nAs you assess, ask yourself:\n- What's the riskiest part of this plan?\n- What could cause this to fail?\n- What happens if something goes wrong?\n- Are there single points of failure?\n- Can we rollback if needed?\n- What edge cases could break this?\n\n**WORKING NOTES:**\nCapture your assessment:\n- Technical risks (complexity, unknowns, dependencies)\n- Execution risks (ordering, timing, coordination)\n- Business risks (downtime, data loss, user impact)\n- Single points of failure (no redundancy or fallback)\n- Rollback capability (can we undo this?)\n- Edge cases (unusual scenarios that could break it)\n- Risk mitigation suggestions (how to reduce risks)",
-      "agentRole": "You are a risk analyst who identifies potential problems before they occur.",
+      "id": "step-execute-patterns",
+      "title": "Execution: Pattern Compliance",
+      "prompt": "**EXECUTE PATTERN CHECK**\n\nVerify adherence to codebase patterns.\n\n**MISSION:** Ensure consistency with existing code.\n\n**EXECUTE:**\n1. Follow `analysis-strategy.md`\n2. Check against Reference Files\n3. Identify deviations\n4. Verify user rule compliance\n\n**WORKING NOTES:**\n- Pattern Compliance Matrix\n- Deviations (Justified/Unjustified)",
+      "agentRole": "You are a pattern expert ensuring consistency.",
+      "requireConfirmation": false,
       "guidance": [
-        "SEVERITY LEVELS: HIGH (blocks execution, causes outages, data loss), MEDIUM (significant impact, workarounds exist), LOW (minor impact, easily mitigated)",
-        "TECHNICAL RISK CATEGORIES: High complexity (too many moving parts), Unknown dependencies (what else does this affect?), Untested approach (never done this before), Performance impact (could slow things down), Security implications (could introduce vulnerabilities)",
-        "EXECUTION RISK CATEGORIES: Ordering dependencies (must do A before B), Timing issues (race conditions, deadlocks), Coordination needs (multiple teams/systems), Data migration risks (could corrupt data), Deployment complexity (hard to deploy safely)",
-        "BUSINESS RISK CATEGORIES: Downtime required (service interruption), Data loss potential (could lose data), User impact (breaks workflows), Backward compatibility (breaks existing code), Production incident risk (could cause outage)",
-        "SINGLE POINT OF FAILURE: Where is there no redundancy? No fallback? No alternative path?",
-        "ROLLBACK ANALYSIS: Can we undo this? How? What if rollback fails? Is there a recovery plan?",
-        "EDGE CASE THINKING: What unusual scenarios could break this? Concurrent access? Partial failures? Network issues? Resource exhaustion?",
-        "QUALITY INDICATORS - Low risk plan: Risks identified and mitigated, rollback possible, no single points of failure, edge cases considered",
-        "QUALITY INDICATORS - High risk plan: Risks not addressed, no rollback plan, single points of failure, edge cases ignored",
-        "CONSTRAINT: Identify risks, don't solve them (that's for recommendations)",
-        "OUTPUT LIMIT: Risk assessment with categories and severity (aim for 400-500 words)"
-      ],
-      "requireConfirmation": false
+        "COMPARE: Explicitly compare plan code snippets to existing files",
+        "DEVIATIONS: Ask 'Why is this different?'"
+      ]
     },
     {
-      "id": "step-4-synthesize-analysis",
-      "title": "Step 4: Synthesize & Deliver Analysis",
-      "prompt": "**SYNTHESIZE YOUR ANALYSIS**\n\nYou've completed your plan analysis. Now synthesize and structure your findings.\n\n**REFLECT ON YOUR ANALYSIS:**\n- What's the overall quality of this plan?\n- What are the biggest gaps or issues?\n- What should be addressed before execution?\n- Is this plan ready to execute?\n- What's your confidence level in this plan?\n\n**CREATE STRUCTURED DELIVERABLE:**\n\nProduce `{deliverableName}` with your structured analysis.\n\n**Key sections to include:**\n- **Executive Summary**: Overall assessment, critical issues, major strengths, next steps\n- **Completeness Analysis**: Requirement coverage, gaps, implicit requirements, success criteria\n- **Pattern Compliance**: Adherence to constraints, deviations, similar implementations, user rule compliance\n- **Risk Assessment**: Technical/execution/business risks with severity, single points of failure, rollback capability\n- **Recommendations**: Prioritized by importance (Critical / Important / Nice to have)\n- **Verdict**: Ready to execute? Confidence level (1-10)? Recommended action?\n\nOrganize these in the way that best communicates your findings. Use the structure that makes your analysis clearest.\n\n**SELF-VALIDATE:**\n- All requirements checked?\n- All constraints verified?\n- All risks identified?\n- Recommendations actionable?\n- Verdict justified?\n\nIf YES to all, deliver. If NO, revise first.",
-      "agentRole": "You are a senior plan analyst who synthesizes findings into clear, actionable recommendations.",
+      "id": "step-execute-risk",
+      "title": "Execution: Risk Assessment",
+      "prompt": "**EXECUTE RISK ASSESSMENT**\n\nIdentify potential failure modes.\n\n**MISSION:** Find what could go wrong.\n\n**EXECUTE:**\n1. Follow `analysis-strategy.md`\n2. Check for Technical, Execution, and Business risks\n3. Identify Single Points of Failure\n4. Assess Rollback capability\n\n**WORKING NOTES:**\n- Risk Register (with Severity)\n- Rollback Assessment",
+      "agentRole": "You are a risk analyst predicting failures.",
+      "requireConfirmation": false,
       "guidance": [
-        "SYNTHESIS APPROACH: Don't just list findings - assess overall quality. Is this a good plan? Ready to execute?",
-        "STRUCTURE REFERENCE: Suggested format - Executive Summary (3-5 bullets), Completeness (requirement matrix, gaps, score), Compliance (constraint checks, deviations, similar code), Risks (categorized by severity), Recommendations (prioritized), Verdict (ready? confidence? action?). Adapt as needed.",
-        "PRIORITIZATION: Order issues by impact - Critical (blocks execution), Important (should fix), Nice to have (consider)",
-        "VERDICT FRAMEWORK: Ready (minor issues only), Needs Revision (significant gaps but salvageable), Not Ready (major redesign needed)",
-        "CONFIDENCE SCORING: 1-3 (many issues), 4-6 (some concerns), 7-8 (mostly good), 9-10 (excellent plan). This adds nuance beyond the categorical verdict.",
-        "ACTIONABLE RECOMMENDATIONS: Be specific - Not 'add tests' but 'Add unit tests for AuthService.validateToken covering edge cases: null token, expired token, malformed token'",
-        "CONSTRUCTIVE TONE: Identify issues to improve the plan, not to criticize. Suggest solutions, not just problems",
-        "EVIDENCE-BASED: Support assessments with specific examples from your analysis",
-        "QUALITY INDICATORS - Strong analysis: Clear verdict, specific recommendations, evidence-based, actionable, constructive",
-        "QUALITY INDICATORS - Weak analysis: Vague verdict, generic recommendations, no evidence, not actionable, just criticism",
-        "SELF-VALIDATION CHECKLIST: All requirements checked? Constraints verified? Risks identified? Recommendations actionable? Verdict justified?",
-        "DELIVERABLE CREATION: Use write tool to create {deliverableName} with your structured analysis. Don't just output in chat - create the actual file"
-      ],
-      "requireConfirmation": false
+        "SEVERITY: High/Med/Low",
+        "ROLLBACK: Can we undo this?"
+      ]
+    },
+    {
+      "id": "step-synthesize",
+      "title": "Step 5: Synthesize Analysis",
+      "prompt": "**SYNTHESIZE ANALYSIS**\n\nSynthesize findings into a final report.\n\n**MISSION:** Deliver clear, actionable feedback.\n\n**EXECUTE:**\n1. Review all Working Notes\n2. Assess overall quality\n3. Prioritize issues\n4. Formulate recommendations\n\n**DELIVERABLE:**\nCreate `{deliverableName}`:\n- Executive Summary\n- Completeness/Pattern/Risk Analysis\n- Recommendations\n- Final Verdict (Ready/Revise/Reject)",
+      "agentRole": "You are a senior reviewer delivering the final sign-off.",
+      "requireConfirmation": false,
+      "guidance": [
+        "VERDICT: Be clear - Ready or Not?",
+        "PRIORITY: Focus on Critical/High issues first"
+      ]
     }
   ]
 }
-

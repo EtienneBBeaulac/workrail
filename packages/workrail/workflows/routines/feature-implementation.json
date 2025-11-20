@@ -1,0 +1,123 @@
+{
+  "id": "routine-feature-implementation",
+  "name": "Feature Implementation Routine",
+  "version": "1.0.0",
+  "description": "Implements code precisely according to detailed plans and specifications. Follows existing patterns, writes tests, and maintains code quality. Designed for delegation to Builder subagent or manual execution by main agent.",
+  "clarificationPrompts": [
+    "What plan file should I implement? (e.g., implementation-plan.md)",
+    "What files should I modify or create?",
+    "What patterns should I follow? (pattern docs, example files)",
+    "What are the acceptance criteria?"
+  ],
+  "preconditions": [
+    "Implementation plan is available as a file",
+    "Target files are identified (modify/create)",
+    "Patterns and examples are available",
+    "Acceptance criteria are clearly defined",
+    "Agent has write access to codebase"
+  ],
+  "metaGuidance": [
+    "**ROUTINE PURPOSE:**",
+    "This routine implements code following a detailed plan. It emphasizes precision, pattern adherence, incremental progress, and thorough testing.",
+    "",
+    "**CORE PRINCIPLES:**",
+    "- FOLLOW THE PLAN: Implement exactly as specified, don't improvise",
+    "- MATCH PATTERNS: Follow existing codebase conventions",
+    "- TEST AS YOU GO: Write tests for each step before moving on",
+    "- FLAG AMBIGUITIES: Don't guess, ask for clarification",
+    "",
+    "**EXPECTED INPUT FORMAT:**",
+    "Plan: Must be a file reference (e.g., 'implementation-plan.md')",
+    "Target: List of files to modify or create",
+    "Context: { background: string, patterns: string[], userRules: string[], constraints: string[], priorWork: string[] }",
+    "Acceptance Criteria: List of requirements that must be met",
+    "",
+    "**IMPLEMENTATION STRATEGY:**",
+    "Read-Implement-Test: For each step, read the plan, implement the code, write tests, verify tests pass, then move to next step",
+    "Incremental Verification: After each step, check compilation, tests, and pattern adherence",
+    "Flag Early: If you encounter ambiguity, missing patterns, or conflicts, stop and flag immediately"
+  ],
+  "steps": [
+    {
+      "id": "step-0-understand-plan",
+      "title": "Step 0: Understand the Plan",
+      "prompt": "**UNDERSTAND WHAT YOU'RE IMPLEMENTING**\n\nBefore writing any code, thoroughly understand the plan.\n\n**YOUR MISSION:** Comprehend the implementation plan, patterns, and constraints.\n\n**PLAN YOUR APPROACH:**\nBefore diving in, think:\n- What is this feature trying to accomplish?\n- What are the major steps in the plan?\n- What patterns should I follow?\n- What constraints must I respect?\n\n**EXECUTE:**\n1. Read the implementation plan file completely\n2. Break down the plan into discrete steps\n3. Identify dependencies between steps\n4. Read pattern documentation and example files\n5. Read user rules (.cursor/rules, .cursorrules)\n6. Note all constraints (backward compatibility, API stability, etc.)\n7. Review acceptance criteria\n8. Identify potential ambiguities or blockers\n\n**REFLECT:**\nAs you read, ask yourself:\n- Is the plan clear and complete?\n- Do I understand the patterns I need to follow?\n- Are there any ambiguities I need to flag?\n- Do I have all the information I need to proceed?\n- Are there any conflicts between constraints?\n\n**WORKING NOTES:**\nCapture your understanding:\n- Feature summary (what's being built)\n- Plan steps (numbered list)\n- Dependencies (what depends on what)\n- Patterns to follow (with file references)\n- User rules and constraints\n- Acceptance criteria checklist\n- Ambiguities or blockers (if any)",
+      "agentRole": "You are a disciplined implementer preparing to follow a plan precisely. Understand the landscape before writing code.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-1-implement-incrementally",
+      "title": "Step 1: Implement Step-by-Step",
+      "prompt": "**IMPLEMENT THE PLAN INCREMENTALLY**\n\nNow implement the plan, one step at a time, with testing and verification.\n\n**YOUR MISSION:** Implement each step of the plan precisely, following patterns and writing tests.\n\n**PLAN YOUR APPROACH:**\nBefore implementing, decide:\n- What order should I implement steps in?\n- How will I verify each step before moving on?\n- What tests do I need for each step?\n- How will I track my progress?\n\n**EXECUTE:**\nFor each step in the plan:\n\n1. **Read the Step**\n   - Understand what this step requires\n   - Identify files to modify/create\n   - Note the expected outcome\n\n2. **Implement the Code**\n   - Follow the plan exactly\n   - Match existing patterns\n   - Add/update inline comments\n   - Follow user rules and constraints\n\n3. **Write/Update Tests**\n   - Write unit tests for new functions\n   - Write integration tests for new features\n   - Update existing tests if needed\n   - Follow testing patterns\n\n4. **Verify**\n   - Run tests (ensure they pass)\n   - Check compilation/build\n   - Check linter\n   - Verify pattern adherence\n\n5. **Track Progress**\n   - Mark step as complete\n   - Note any deviations from plan\n   - Note any issues encountered\n\n6. **Move to Next Step**\n   - Only proceed if current step is verified\n   - If blocked, flag immediately\n\n**REFLECT:**\nAs you implement, ask yourself:\n- Am I following the plan exactly?\n- Am I matching the patterns?\n- Are my tests comprehensive?\n- Did I introduce any breaking changes?\n- Should I flag anything?\n\n**WORKING NOTES:**\nTrack your implementation:\n- Steps completed (with checkmarks)\n- Files modified (with summary of changes)\n- Files created (with purpose)\n- Tests added/updated (with results)\n- Deviations from plan (with reasons)\n- Issues flagged (with details)",
+      "agentRole": "You are implementing code step-by-step with discipline and precision. Follow the plan, match patterns, test thoroughly.",
+      "requireConfirmation": false,
+      "guidance": [
+        "INCREMENTAL: Implement one step at a time, verify before moving on",
+        "PATTERNS: Match existing code style, conventions, and architecture",
+        "TESTING: Write tests for every new function or feature",
+        "VERIFICATION: After each step, check compilation, tests, and linter",
+        "CITATIONS: Reference file:line for all changes",
+        "DEVIATIONS: If you deviate from the plan, note it explicitly with reason",
+        "AMBIGUITIES: If a step is unclear, flag it immediately (don't guess)",
+        "BREAKING CHANGES: Never introduce breaking changes without explicit approval",
+        "USER RULES: Respect all rules from .cursor/rules, .cursorrules",
+        "QUALITY: Maintain code quality (readability, maintainability, testability)",
+        "DOCUMENTATION: Update inline comments and docs as needed",
+        "PROGRESS TRACKING: Keep a running list of completed steps"
+      ]
+    },
+    {
+      "id": "step-2-verify-acceptance-criteria",
+      "title": "Step 2: Verify Acceptance Criteria",
+      "prompt": "**VERIFY ALL ACCEPTANCE CRITERIA ARE MET**\n\nNow verify that your implementation meets all acceptance criteria.\n\n**YOUR MISSION:** Systematically check each acceptance criterion and verify it's met.\n\n**PLAN YOUR APPROACH:**\nBefore verifying, think:\n- How will I test each criterion?\n- What evidence proves each criterion is met?\n- Are there any criteria I might have missed?\n- What manual testing should I do?\n\n**EXECUTE:**\nFor each acceptance criterion:\n\n1. **State the Criterion**\n   - Quote the exact criterion from the plan\n\n2. **Verify It's Met**\n   - Run relevant tests\n   - Perform manual testing if needed\n   - Check code implementation\n   - Gather evidence\n\n3. **Mark Status**\n   - ✅ Met (with evidence)\n   - ❌ Not Met (with reason)\n   - ⚠️ Partially Met (with details)\n\n4. **Provide Evidence**\n   - Test results\n   - Code references (file:line)\n   - Manual test outcomes\n   - Metrics or measurements\n\n**REFLECT:**\nAs you verify, ask yourself:\n- Did I test each criterion thoroughly?\n- Is my evidence convincing?\n- Are there edge cases I should test?\n- Did I miss any criteria?\n\n**WORKING NOTES:**\nCapture your verification:\n- Acceptance criteria checklist (with status)\n- Evidence for each criterion\n- Test results\n- Manual testing performed\n- Edge cases tested\n- Any criteria not met (with reasons)",
+      "agentRole": "You are a quality assurance specialist verifying that all requirements are met. Be thorough and provide evidence.",
+      "requireConfirmation": false,
+      "guidance": [
+        "SYSTEMATIC: Check each criterion one by one",
+        "EVIDENCE: Provide concrete evidence (test results, code refs, measurements)",
+        "THOROUGHNESS: Don't just check happy path, test edge cases",
+        "HONESTY: If a criterion isn't met, flag it clearly",
+        "MANUAL TESTING: Perform manual tests where appropriate",
+        "METRICS: If criteria involve performance, measure it",
+        "COMPLETENESS: Ensure you haven't missed any criteria",
+        "EDGE CASES: Test boundary conditions and error scenarios"
+      ]
+    },
+    {
+      "id": "step-3-run-full-verification",
+      "title": "Step 3: Run Full Verification Suite",
+      "prompt": "**RUN COMPREHENSIVE VERIFICATION**\n\nNow run a full verification suite to ensure everything works.\n\n**YOUR MISSION:** Verify build, tests, linter, and overall code quality.\n\n**PLAN YOUR APPROACH:**\nBefore running verification, think:\n- What verification steps should I run?\n- What order makes sense?\n- What should I do if something fails?\n- How will I document the results?\n\n**EXECUTE:**\n\n1. **Run All Tests**\n   - Run unit tests\n   - Run integration tests\n   - Run end-to-end tests (if applicable)\n   - Capture results\n\n2. **Check Build**\n   - Compile/build the project\n   - Check for type errors\n   - Check for compilation warnings\n   - Capture results\n\n3. **Check Linter**\n   - Run linter (ESLint, etc.)\n   - Check for warnings\n   - Check for errors\n   - Capture results\n\n4. **Manual Verification**\n   - Test critical paths manually\n   - Verify UI changes (if applicable)\n   - Test error scenarios\n   - Capture observations\n\n5. **Check for Breaking Changes**\n   - Review public API changes\n   - Verify backward compatibility\n   - Check for unintended side effects\n\n**REFLECT:**\nAs you verify, ask yourself:\n- Did everything pass?\n- Are there any warnings I should address?\n- Did I introduce any breaking changes?\n- Is the code production-ready?\n\n**WORKING NOTES:**\nCapture verification results:\n- Test results (pass/fail counts, output)\n- Build results (success/failure, warnings)\n- Linter results (errors, warnings)\n- Manual testing observations\n- Breaking changes identified (if any)\n- Overall status (ready/not ready)",
+      "agentRole": "You are running comprehensive verification to ensure production readiness. Be thorough and document everything.",
+      "requireConfirmation": false,
+      "guidance": [
+        "COMPREHENSIVE: Run all verification steps (tests, build, linter)",
+        "DOCUMENTATION: Capture all results (pass/fail, output, warnings)",
+        "MANUAL TESTING: Don't rely solely on automated tests",
+        "BREAKING CHANGES: Explicitly check for backward compatibility issues",
+        "WARNINGS: Address linter warnings, don't ignore them",
+        "ERROR SCENARIOS: Test error handling and edge cases",
+        "PRODUCTION READINESS: Assess if code is ready to deploy"
+      ]
+    },
+    {
+      "id": "step-4-synthesize-deliverable",
+      "title": "Step 4: Synthesize & Deliver Implementation Report",
+      "prompt": "**DELIVER YOUR IMPLEMENTATION REPORT**\n\nNow compile your work into a clear, comprehensive deliverable.\n\n**YOUR MISSION:** Create an implementation report that documents all changes, tests, and verification.\n\n**PLAN YOUR APPROACH:**\nBefore writing, think:\n- Who will read this and what do they need?\n- How can I make it easy to review?\n- What's the most important information?\n- How can I prove I met all criteria?\n\n**EXECUTE:**\nCreate your implementation report with these sections:\n\n1. **Summary** (3-5 bullets)\n   - What was implemented\n   - Key changes made\n   - Test coverage added\n   - Any deviations from plan\n\n2. **Implementation Details**\n   - Files modified (with summary of changes and code snippets)\n   - Files created (with purpose and key code)\n   - Files deleted (if any)\n   - Pattern adherence notes\n\n3. **Tests Added/Updated**\n   - New tests (with descriptions)\n   - Updated tests (with reasons)\n   - Test results (pass/fail counts)\n   - Test coverage metrics (if available)\n\n4. **Verification Steps**\n   - How to run tests\n   - How to check linter\n   - How to manually verify\n   - How to check metrics (if applicable)\n\n5. **Deviations from Plan**\n   - Any deviations (with reasons and impact)\n   - Approval status (needed/not needed)\n\n6. **Acceptance Criteria Status**\n   - Checklist of all criteria (✅/❌/⚠️)\n   - Evidence for each\n   - Overall status\n\n7. **Known Issues / TODOs**\n   - Issues encountered\n   - TODOs for future work\n   - Blockers (if any)\n\n8. **Build & Lint Status**\n   - Build results\n   - Linter results\n   - Overall quality status\n\n**REFLECT:**\nBefore delivering, ask yourself:\n- Is my report complete and accurate?\n- Did I document all changes?\n- Can someone review this easily?\n- Did I provide enough evidence?\n- Are there any issues I should flag?\n\n**DELIVERABLE:**\nA comprehensive implementation report (markdown format) with all sections above.",
+      "agentRole": "You are a technical writer synthesizing your implementation work into a clear, reviewable report. Make it easy to understand and verify.",
+      "requireConfirmation": false,
+      "guidance": [
+        "STRUCTURE: Follow the 8-section format (Summary, Implementation, Tests, Verification, Deviations, Acceptance, Issues, Status)",
+        "CLARITY: Make it easy to review with clear headings and formatting",
+        "EVIDENCE: Include code snippets, test results, and verification output",
+        "COMPLETENESS: Document all changes, don't leave anything out",
+        "CITATIONS: Reference file:line for all changes",
+        "DEVIATIONS: Be transparent about any deviations from the plan",
+        "ISSUES: Flag any issues, blockers, or TODOs clearly",
+        "REVIEWABILITY: Organize information so someone can quickly assess quality",
+        "VERIFICATION: Provide clear steps for others to verify your work",
+        "HONESTY: If something isn't perfect, say so (don't hide issues)"
+      ]
+    }
+  ]
+}
+

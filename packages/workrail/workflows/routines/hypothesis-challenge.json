@@ -1,8 +1,8 @@
 {
   "id": "routine-hypothesis-challenge",
   "name": "Hypothesis Challenge Routine",
-  "version": "1.0.0",
-  "description": "Adversarial testing of hypotheses and assumptions at configurable rigor levels. Identifies counter-examples, edge cases, and logical holes. Rigor levels: 1 (surface), 3 (deep), 5 (maximum) - intermediate levels supported but not optimized. Designed for delegation to Hypothesis Challenger subagent or manual execution by main agent.",
+  "version": "1.1.0",
+  "description": "Adversarial testing of hypotheses using an Ideate -> Plan -> Execute strategy. Configurable rigor levels (1-5) allow for progressively deeper skepticism and stress testing.",
   "clarificationPrompts": [
     "What hypotheses or assumptions should I challenge?",
     "What rigor level do you need? (1=Surface, 3=Deep, 5=Maximum)",
@@ -17,108 +17,90 @@
   ],
   "metaGuidance": [
     "**ROUTINE PURPOSE:**",
-    "This routine performs adversarial testing of hypotheses at configurable rigor levels. Higher rigor means deeper skepticism and more thorough challenge.",
+    "This routine performs adversarial testing. It separates strategy (Ideating attack vectors) from execution (Challenging/Stress Testing).",
+    "",
+    "**PHASES:**",
+    "1. IDEATE: Brainstorm attack vectors and common flaws",
+    "2. STRATEGIZE: Define the challenge plan for the requested rigor",
+    "3. EXECUTE: Run the challenge (Surface/Deep/Max)",
+    "4. SYNTHESIZE: Deliver verdicts and alternative explanations",
     "",
     "**CORE PRINCIPLES:**",
-    "- ADVERSARIAL: Actively try to disprove or find holes in the hypothesis",
-    "- EVIDENCE-BASED: Challenge must be grounded in logic or observable facts",
-    "- CONSTRUCTIVE: Point out weaknesses to strengthen understanding, not to dismiss",
-    "- THOROUGH: At higher rigor, leave no assumption unchallenged",
-    "",
-    "**EXPECTED INPUT FORMAT:**",
-    "Hypotheses should be provided as structured statements:",
-    "H1: [Statement] (Confidence: X/10, Evidence: [references])",
-    "H2: [Statement] (Confidence: X/10, Evidence: [references])",
-    "Example: 'H1: Bug is in AuthService.validateToken line 68 (Confidence: 8/10, Evidence: ExecutionFlow.md shows failure at that line)'",
-    "",
-    "**EVIDENCE HANDLING:**",
-    "Evidence can be provided inline (in hypothesis statement) or as file references. Use read_file to access referenced evidence files.",
-    "",
-    "**EXECUTION MODEL:**",
-    "This routine is designed for autonomous execution. You will receive all necessary context upfront. Your role is to be skeptical and find weaknesses."
+    "- ADVERSARIAL: Actively try to disprove, don't confirm",
+    "- SYSTEMATIC: Challenge assumptions, logic, and evidence",
+    "- CONSTRUCTIVE: Goal is to strengthen truth, not just destroy"
   ],
   "steps": [
     {
-      "id": "step-0-rigor-1-surface",
-      "title": "Step 0 (Rigor 1): Surface-Level Challenges",
+      "id": "step-0-ideate-vectors",
+      "title": "Step 0: Ideate Challenge Strategy",
+      "prompt": "**IDEATE ATTACK VECTORS**\n\nBefore diving into specific hypotheses, step back and look at the whole picture.\n\n**YOUR MISSION:** Brainstorm ways to break these hypotheses.\n\n**EXECUTE:**\n1. Review all hypotheses together\n2. Identify shared assumptions (do they all assume X?)\n3. Brainstorm classes of failure (Concurrency? State? Logic?)\n4. Identify weak points in the evidence provided\n\n**REFLECT:**\n- Are these hypotheses too similar?\n- Are they missing a whole category of explanation?\n- What is the most likely \"unknown unknown\"?\n\n**WORKING NOTES:**\n- Common Assumptions\n- Potential Attack Vectors (e.g., Race Conditions, Edge Cases)\n- Evidence Weaknesses",
+      "agentRole": "You are a red-team strategist planning your attack.",
+      "requireConfirmation": false,
+      "guidance": [
+        "BRAINSTORM: Look for systemic issues first",
+        "CATEGORIES: Think in categories (Logic, Data, Timing, Environment)",
+        "SKEPTICISM: Assume the hypotheses are wrong. Why?"
+      ]
+    },
+    {
+      "id": "step-1-plan-challenge",
+      "title": "Step 1: Plan Challenge Tactics",
+      "prompt": "**DEFINE CHALLENGE PLAN**\n\nNow define your specific tactics for the requested rigor level.\n\n**YOUR MISSION:** Create a concrete plan to test these hypotheses.\n\n**EXECUTE:**\n1. Map attack vectors to specific hypotheses\n2. Define **Key Questions** to answer\n3. Select **Stress Tests** or **Counter-Examples** to search for\n4. Define criteria for \"disproof\"\n\n**DELIVERABLE:**\nCreate `challenge-strategy.md`:\n- Attack Plan for each Hypothesis\n- Key Assumptions to Probe\n- Required Evidence check",
+      "agentRole": "You are a lead auditor defining the scope of the audit.",
+      "requireConfirmation": false,
+      "guidance": [
+        "TACTICS: Be specific (e.g., \"Check for null user in auth flow\")",
+        "CRITERIA: What would convince you the hypothesis is false?"
+      ]
+    },
+    {
+      "id": "step-execute-rigor-1",
+      "title": "Execution: Rigor 1 (Surface)",
       "runCondition": {"var": "rigor", "greaterThanOrEqual": 1},
-      "prompt": "**RIGOR 1: SURFACE CHALLENGES** (5 min) - Obvious counter-examples\n\n**YOUR MISSION:** Identify obvious problems, counter-examples, or alternative explanations.\n\n**PLAN YOUR APPROACH:**\nFor each hypothesis, think:\n- What's the most obvious alternative explanation?\n- Are there any glaring logical holes?\n- What simple counter-example would disprove this?\n\n**EXECUTE:**\n1. Review each hypothesis and its supporting evidence\n2. Identify obvious alternative explanations\n3. Find simple counter-examples\n4. Note any logical inconsistencies\n5. Check if evidence actually supports the conclusion\n\n**REFLECT:**\nAs you challenge, ask yourself:\n- Is there a simpler explanation?\n- Does the evidence really prove this?\n- What's the most obvious thing they might have missed?\n- Are they confusing correlation with causation?\n\n**WORKING NOTES:**\nCapture your challenges:\n- Alternative explanations (simpler or more likely)\n- Counter-examples (cases where hypothesis fails)\n- Logical holes (flawed reasoning)\n- Evidence gaps (missing or weak support)\n- Quick recommendations (what to verify)",
-      "agentRole": "You are a skeptical peer reviewer who spots obvious flaws and alternative explanations quickly.",
+      "prompt": "**EXECUTE RIGOR 1: SURFACE CHALLENGE**\n\nExecute your challenge plan at Rigor 1 (Surface).\n\n**MISSION:** Identify obvious flaws and simple counter-examples.\n\n**EXECUTE:**\n1. Follow `challenge-strategy.md`\n2. Check for obvious logical gaps\n3. Identify simple counter-examples\n4. Check for Occam's Razor alternatives\n\n**WORKING NOTES:**\n- Obvious Flaws\n- Simple Counter-Examples\n- Better Alternatives",
+      "agentRole": "You are a skeptical reviewer looking for quick wins.",
+      "requireConfirmation": false,
       "guidance": [
-        "CHALLENGE STRATEGY: Look for the obvious first - Occam's Razor (simpler explanation?), correlation vs causation, confirmation bias, missing alternatives",
-        "ALTERNATIVE EXPLANATIONS: For each hypothesis, generate 2-3 simpler or more likely alternatives. Don't just say 'maybe not' - provide concrete alternatives",
-        "COUNTER-EXAMPLES: Find specific cases where the hypothesis would fail. Use concrete examples from code, logs, or evidence",
-        "LOGICAL ANALYSIS: Check reasoning - Does A really lead to B? Are they skipping steps? Are assumptions stated or hidden?",
-        "EVIDENCE QUALITY: Does evidence actually support the hypothesis? Is it circumstantial? Could it support alternative explanations equally well?",
-        "QUALITY INDICATORS - Good challenges: Specific counter-examples, concrete alternatives, logical holes identified, evidence gaps noted",
-        "QUALITY INDICATORS - Weak challenges: Vague doubts ('maybe not'), no alternatives provided, no concrete examples, dismissive without reasoning",
-        "CONSTRAINT: Keep it quick - surface-level only. Don't dive deep yet",
-        "OUTPUT LIMIT: Brief challenges for each hypothesis, alternatives, counter-examples, evidence gaps (aim for 300-400 words)"
-      ],
-      "requireConfirmation": false
+        "FOCUS: Obvious errors, simple logic gaps",
+        "SPEED: Don't dig deep yet, look for low-hanging fruit"
+      ]
     },
     {
-      "id": "step-1-rigor-3-deep",
-      "title": "Step 1 (Rigor 3): Deep Adversarial Analysis",
+      "id": "step-execute-rigor-3",
+      "title": "Execution: Rigor 3 (Deep)",
       "runCondition": {"var": "rigor", "greaterThanOrEqual": 3},
-      "prompt": "**RIGOR 3: DEEP ANALYSIS** (20 min) - Thorough adversarial testing\n\n**YOUR MISSION:** Deeply challenge each hypothesis with edge cases, stress tests, and thorough logical analysis.\n\n**PLAN YOUR APPROACH:**\nBased on your rigor 1 challenges, decide:\n- Which hypotheses have the weakest support?\n- What edge cases should I explore?\n- What assumptions are hidden?\n\n**EXECUTE:**\n1. Analyze each hypothesis's logical structure\n2. Identify all hidden assumptions\n3. Generate edge cases that could break it\n4. Look for boundary conditions\n5. Check for timing/concurrency issues\n6. Consider environmental factors\n7. Test against known patterns\n\n**REFLECT:**\nAs you analyze, ask yourself:\n- What assumptions are they making without stating?\n- What edge cases would break this?\n- What happens under stress or unusual conditions?\n- Are there timing or ordering issues?\n- What environmental factors could affect this?\n- Does this match known patterns or is it novel?\n\n**WORKING NOTES:**\nCapture your analysis:\n- Hidden assumptions (unstated but required for hypothesis to hold)\n- Edge cases (boundary conditions, unusual inputs, stress scenarios)\n- Environmental factors (config, timing, concurrency, external dependencies)\n- Pattern deviations (how this differs from known patterns)\n- Stress test results (what breaks under load/edge cases)\n- Recommended experiments (what to test to validate/invalidate)",
-      "agentRole": "You are a rigorous adversarial analyst who systematically stress-tests theories and finds hidden assumptions.",
+      "prompt": "**EXECUTE RIGOR 3: DEEP CHALLENGE**\n\nExecute your challenge plan at Rigor 3 (Deep Analysis).\n\n**MISSION:** Deeply challenge with edge cases and hidden assumptions.\n\n**EXECUTE:**\n1. Follow `challenge-strategy.md`\n2. Expose hidden assumptions\n3. Generate systematic edge cases\n4. Analyze timing and environment factors\n\n**WORKING NOTES:**\n- Hidden Assumptions Exposed\n- Edge Case Analysis\n- Environmental Factors",
+      "agentRole": "You are a rigorous auditor digging for structural flaws.",
+      "requireConfirmation": false,
       "guidance": [
-        "ASSUMPTION HUNTING: Identify every assumption - What must be true for this hypothesis to hold? Are these assumptions stated or hidden? Are they valid?",
-        "EDGE CASE GENERATION: Systematic edge cases - Boundary values (0, null, empty, max), unusual inputs, concurrent access, timing issues, network failures, partial failures",
-        "STRESS TESTING: What breaks under pressure? - High load, rapid changes, resource exhaustion, cascading failures, race conditions",
-        "ENVIRONMENTAL FACTORS: What external factors matter? - Configuration differences, timing/scheduling, external dependencies, system state, user behavior patterns",
-        "PATTERN ANALYSIS: Compare to known patterns - Does this match established patterns? If not, why? Is the deviation justified or suspicious?",
-        "LOGICAL STRUCTURE: Map the argument - Premise → Reasoning → Conclusion. Where are the weak links? What's assumed vs proven?",
-        "QUALITY INDICATORS - Strong analysis: Multiple edge cases identified, hidden assumptions exposed, concrete stress tests proposed, environmental factors considered",
-        "QUALITY INDICATORS - Weak analysis: Only obvious cases, assumptions not identified, no stress tests, environmental factors ignored",
-        "CONSTRAINT: Go deep but stay focused on the hypothesis - don't wander into unrelated areas",
-        "OUTPUT LIMIT: Thorough analysis with edge cases, assumptions, stress tests, environmental factors (aim for 600-800 words)"
-      ],
-      "requireConfirmation": false
+        "FOCUS: Unstated assumptions, boundary conditions",
+        "DEPTH: trace logic chains to find breaks"
+      ]
     },
     {
-      "id": "step-2-rigor-5-maximum",
-      "title": "Step 2 (Rigor 5): Maximum Skepticism",
+      "id": "step-execute-rigor-5",
+      "title": "Execution: Rigor 5 (Maximum)",
       "runCondition": {"var": "rigor", "greaterThanOrEqual": 5},
-      "prompt": "**RIGOR 5: MAXIMUM SKEPTICISM** (45+ min) - Try to break it completely\n\n**YOUR MISSION:** Leave no stone unturned. Find every possible way this hypothesis could be wrong.\n\n**PLAN YOUR APPROACH:**\nBased on your rigor 3 analysis, decide:\n- What are the most vulnerable points?\n- What extreme scenarios should I test?\n- What would completely invalidate this?\n\n**EXECUTE:**\n1. Exhaustively enumerate all assumptions\n2. Generate extreme edge cases and adversarial scenarios\n3. Consider second-order effects and interactions\n4. Look for subtle timing and ordering issues\n5. Check for measurement/observation effects\n6. Consider alternative causal chains\n7. Test logical consistency across all scenarios\n8. Look for contradictions with other evidence\n\n**REFLECT:**\nFor each hypothesis, ask yourself:\n- What extreme scenario would break this?\n- What if multiple things go wrong simultaneously?\n- Are there second-order effects not considered?\n- Could observation itself affect the outcome?\n- What alternative causal chains exist?\n- Does this contradict any other evidence?\n- What would it take to completely disprove this?\n- Am I being skeptical enough?\n\n**WORKING NOTES:**\nCapture exhaustive analysis:\n- Complete assumption enumeration (every single assumption, no matter how obvious)\n- Extreme scenarios (worst case, adversarial inputs, cascading failures)\n- Second-order effects (what happens after the immediate effect?)\n- Timing/ordering permutations (all possible orderings of events)\n- Measurement effects (does observing/testing change the behavior?)\n- Alternative causal chains (other ways to get the same symptoms)\n- Contradictions (conflicts with other evidence or known facts)\n- Disproof scenarios (what would definitively prove this wrong?)",
-      "agentRole": "You are a relentless adversarial researcher who assumes nothing and challenges everything with maximum rigor.",
+      "prompt": "**EXECUTE RIGOR 5: MAX CHALLENGE**\n\nExecute your challenge plan at Rigor 5 (Maximum Skepticism).\n\n**MISSION:** Try to break it completely.\n\n**EXECUTE:**\n1. Follow `challenge-strategy.md`\n2. Exhaustive assumption enumeration\n3. Extreme edge cases and adversarial inputs\n4. Second-order effects and chaos scenarios\n\n**WORKING NOTES:**\n- Exhaustive Challenges\n- Extreme Scenarios\n- Disproof Attempts",
+      "agentRole": "You are a relentless adversary trying to prove it wrong.",
+      "requireConfirmation": false,
       "guidance": [
-        "EXHAUSTIVE ASSUMPTIONS: List every assumption, no matter how obvious - Language behavior, library behavior, OS behavior, hardware behavior, network behavior, user behavior, timing assumptions, ordering assumptions",
-        "EXTREME SCENARIOS: Go beyond normal edge cases - Adversarial inputs (malicious, malformed), cascading failures (multiple things break), resource exhaustion (memory, CPU, network, disk), extreme timing (very fast, very slow, simultaneous)",
-        "SECOND-ORDER EFFECTS: What happens after? - Immediate effect → secondary effect → tertiary effect. Side effects, state changes, cache invalidation, downstream impacts",
-        "TIMING/ORDERING: All permutations matter - Event A before B vs B before A, concurrent execution, race conditions, deadlocks, livelocks, starvation",
-        "MEASUREMENT EFFECTS: Observer effect - Does logging change timing? Does debugging change behavior? Does testing in isolation miss interactions? Heisenbug potential?",
-        "ALTERNATIVE CAUSALITY: Other paths to same symptoms - Multiple root causes, confounding factors, spurious correlations, hidden variables",
-        "CONTRADICTION HUNTING: Check against everything - Other evidence, logs, tests, documentation, known patterns, physical constraints, logical impossibilities",
-        "DISPROOF CRITERIA: What would prove this wrong? - Specific test that would falsify, evidence that would contradict, scenario that would break, logical proof of impossibility",
-        "QUALITY INDICATORS - Maximum rigor: Exhaustive enumeration, extreme scenarios, second-order effects, all timing permutations, measurement effects, alternative causality, contradictions found",
-        "QUALITY INDICATORS - Insufficient rigor: Obvious assumptions missed, only normal edge cases, first-order effects only, timing not considered, no alternatives, no contradictions checked",
-        "CONSTRAINT: Be thorough but not infinite - focus on the most impactful challenges",
-        "OUTPUT LIMIT: Comprehensive adversarial analysis with exhaustive challenges (aim for 1000+ words)"
-      ],
-      "requireConfirmation": false
+        "FOCUS: Breaking the system, extreme edge cases",
+        "MINDSET: Trust nothing, verify everything"
+      ]
     },
     {
-      "id": "step-3-synthesize-challenges",
-      "title": "Step 3: Synthesize & Deliver Challenges",
-      "prompt": "**SYNTHESIZE YOUR ADVERSARIAL ANALYSIS**\n\nYou've completed your challenge at rigor {rigor}. Now synthesize and structure your findings.\n\n**REFLECT ON YOUR ANALYSIS:**\n- What are the most damaging challenges?\n- Which hypotheses are weakest?\n- What patterns emerged across challenges?\n- What should be tested or verified?\n- What alternative explanations are most plausible?\n\n**CREATE STRUCTURED DELIVERABLE:**\n\nProduce `{deliverableName}` with these sections:\n\n### Executive Summary (3-5 bullets)\n- Strongest challenges identified\n- Weakest hypotheses\n- Most plausible alternatives\n- Critical tests needed\n\n### Hypothesis-by-Hypothesis Analysis\n[For each hypothesis]\n\n**H1: [Hypothesis Statement]**\n- **Confidence Assessment**: [Your assessment of how well this holds up]\n- **Alternative Explanations**: [Concrete alternatives]\n- **Counter-Examples**: [Specific cases where this fails]\n- **Hidden Assumptions**: [Unstated assumptions required]\n- **Edge Cases**: [Boundary conditions that break it]\n- **Contradictions**: [Conflicts with other evidence]\n- **Verdict**: [Keep, Revise, Insufficient Evidence, or Reject with reasoning]\n\n### Critical Tests Needed\n[Prioritized by impact]\n- What experiments would validate/invalidate each hypothesis?\n- What evidence is missing?\n- What should be verified first?\n\n### Alternative Hypotheses\n[Ranked by plausibility]\n- Alternative explanations that better fit the evidence\n- Why these might be more likely\n- How to test them\n\n### Recommendations\n[Concrete next steps]\n- Which hypotheses to pursue vs abandon\n- What to test immediately\n- What additional evidence to gather\n- What assumptions to verify\n\n**SELF-VALIDATE:**\n- All challenges are evidence-based or logically sound?\n- Alternatives are concrete and testable?\n- Recommendations are actionable?\n- Analysis matches the requested rigor level?\n\nIf YES to all, deliver. If NO, revise first.",
-      "agentRole": "You are a senior adversarial analyst who synthesizes challenges into actionable insights and recommendations.",
+      "id": "step-synthesize",
+      "title": "Step 5: Synthesize Verdicts",
+      "prompt": "**SYNTHESIZE VERDICTS**\n\nSynthesize all challenges into final verdicts.\n\n**MISSION:** Deliver clear judgments on each hypothesis.\n\n**EXECUTE:**\n1. Review all Working Notes\n2. Assign Verdicts (Keep/Revise/Reject)\n3. Prioritize Alternatives\n4. Define Critical Tests\n\n**DELIVERABLE:**\nCreate `{deliverableName}`:\n- Executive Summary\n- Hypothesis Analysis & Verdicts\n- Critical Tests Needed\n- Recommendations",
+      "agentRole": "You are a judge delivering the final verdict.",
+      "requireConfirmation": false,
       "guidance": [
-        "SYNTHESIS APPROACH: Don't just list challenges - identify patterns. Which types of challenges recur? Which hypotheses have similar weaknesses?",
-        "PRIORITIZATION: Order by impact - Challenges that completely invalidate hypothesis first, then edge cases, then minor issues",
-        "VERDICT FRAMEWORK: Keep (strong evidence, few challenges), Revise (core is sound but needs refinement), Insufficient Evidence (cannot assess without more data), Reject (fatal flaws, better alternatives exist)",
-        "ALTERNATIVE QUALITY: Alternatives must be concrete and testable. Not 'maybe something else' but 'specifically, it could be X because Y'",
-        "TEST DESIGN: Propose specific, actionable tests. Not 'test this' but 'run scenario X and observe Y - if Z happens, hypothesis is invalidated'",
-        "CONSTRUCTIVE CRITICISM: Challenges should strengthen understanding. Point out weaknesses to improve, not to dismiss without offering better options",
-        "EVIDENCE REQUIREMENTS: What evidence would change your assessment? Be explicit about what's needed to validate or invalidate",
-        "QUALITY INDICATORS - Strong synthesis: Clear verdicts with reasoning, concrete alternatives, specific tests, actionable recommendations, patterns identified",
-        "QUALITY INDICATORS - Weak synthesis: Vague assessments, no alternatives, generic recommendations, no test proposals, just lists challenges",
-        "SELF-VALIDATION CHECKLIST: Evidence-based challenges? Concrete alternatives? Actionable tests? Matches rigor level? Constructive tone?",
-        "DELIVERABLE CREATION: Use write tool to create {deliverableName} with your structured analysis. Don't just output in chat - create the actual file"
-      ],
-      "requireConfirmation": false
+        "VERDICTS: Be decisive based on evidence",
+        "ALTERNATIVES: Propose concrete, better explanations",
+        "ACTION: What specifically needs to be tested?"
+      ]
     }
   ]
 }
-

@@ -1,157 +1,136 @@
 {
   "id": "routine-context-gathering",
   "name": "Context Gathering Routine",
-  "version": "2.0.0",
-  "description": "Systematic codebase exploration at configurable depth levels (0-4). Gathers structured context about code structure, execution flows, and implementation details. Designed for delegation to Context Researcher subagent or manual execution by main agent.",
+  "version": "2.1.0",
+  "description": "Systematic codebase exploration using an Ideate -> Plan -> Execute strategy. Configurable depth levels (0-4) allow for progressively deeper understanding.",
   "clarificationPrompts": [
     "What specific area or files should I investigate?",
     "What depth level do you need? (0=Survey, 1=Scan, 2=Explore, 3=Analyze, 4=Dissect)",
     "What are you trying to understand? (bug investigation, feature planning, refactoring, etc.)"
   ],
   "preconditions": [
-    "Target files or directories are specified",
+    "Target areas are broadly identified",
     "Depth level (0-4) is specified",
     "Mission/goal is clear",
     "Agent has read access to codebase"
   ],
   "metaGuidance": [
     "**ROUTINE PURPOSE:**",
-    "This routine performs systematic codebase investigation at configurable depth levels. Each depth builds on the previous, creating progressively deeper understanding.",
+    "This routine performs systematic codebase investigation. It separates strategy (Ideate/Plan) from execution (Survey/Scan/Explore/etc.).",
+    "",
+    "**PHASES:**",
+    "1. IDEATE: Brainstorm relevant areas and potential connections",
+    "2. PLAN: Define specific targets and search strategy",
+    "3. EXECUTE: Run the investigation at the requested depth",
+    "4. SYNTHESIZE: Combine findings into actionable insights",
     "",
     "**CORE PRINCIPLES:**",
-    "- SYSTEMATIC: Follow each step completely before moving to the next",
-    "- HONEST: Explicitly note gaps and limitations in your findings",
-    "- CITED: Support all findings with file:line references",
-    "- ACTIONABLE: Provide clear next steps for the main agent",
-    "",
-    "**EXECUTION MODEL:**",
-    "This routine is designed for autonomous execution. You will receive all necessary context upfront. Do not ask the main agent for clarification - work with what you have and flag any gaps in your deliverable."
+    "- STRATEGY FIRST: Don't start reading files until you know WHY and WHERE",
+    "- SYSTEMATIC: Follow the plan, don't rabbit-hole",
+    "- HONEST: Note gaps and limitations",
+    "- CITED: Support findings with file:line references"
   ],
   "steps": [
     {
-      "id": "step-0-depth-0-survey",
-      "title": "Step 0 (Depth 0): Survey File Structure",
+      "id": "step-0-ideate-targets",
+      "title": "Step 0: Ideate Research Targets",
+      "prompt": "**EXPLORE POTENTIAL TARGETS**\n\nBefore diving in, brainstorm what areas of the codebase might be relevant to your mission.\n\n**YOUR MISSION:** Identify all potential areas of interest and why they might matter.\n\n**EXECUTE:**\n1. Review the Mission/Goal\n2. List all potential subsystems, modules, or directories that could be involved\n3. Consider indirect connections (shared utils, config, infrastructure)\n4. Brainstorm keywords or patterns to look for\n\n**REFLECT:**\n- Am I missing any obvious areas?\n- Are there dependencies I should check?\n- Is my scope too narrow or too broad?\n\n**WORKING NOTES:**\n- Mission Summary\n- Potential Targets (List)\n- Keywords/Patterns to search\n- Why each area matters",
+      "agentRole": "You are a scout surveying the landscape. Look for signals and potential paths.",
+      "requireConfirmation": false,
+      "guidance": [
+        "BRAINSTORM: List widely before narrowing down",
+        "KEYWORDS: Think of specific terms to grep for later",
+        "CONNECTIONS: Think about how components interact"
+      ]
+    },
+    {
+      "id": "step-1-plan-strategy",
+      "title": "Step 1: Plan Research Strategy",
+      "prompt": "**DEFINE RESEARCH PLAN**\n\nNow select the specific targets and define your strategy for the requested depth.\n\n**YOUR MISSION:** Create a concrete plan for your investigation.\n\n**EXECUTE:**\n1. Select the primary targets from Step 0\n2. Define the **Search Scope** (specific directories/files)\n3. Define the **Exclusions** (what to ignore, e.g., tests, legacy)\n4. Define the **Focus** for the requested depth (e.g., \"Map structure\" for D0, \"Trace logic\" for D2)\n\n**DELIVERABLE:**\nCreate `research-plan.md` with:\n- Primary Targets\n- Search Scope\n- Key Questions to Answer\n- Depth Strategy",
+      "agentRole": "You are a research lead defining the scope and method. Be specific.",
+      "requireConfirmation": false,
+      "guidance": [
+        "SCOPE: Be specific about directories (e.g., src/auth, not just 'auth')",
+        "FOCUS: Align the strategy with the requested depth level",
+        "QUESTIONS: List the specific questions you want to answer"
+      ]
+    },
+    {
+      "id": "step-execute-depth-0",
+      "title": "Execution: Depth 0 (Survey)",
       "runCondition": {"var": "depth", "greaterThanOrEqual": 0},
-      "prompt": "**DEPTH 0: SURVEY** (1-2 min) - Map the territory\n\n**YOUR MISSION:** Understand what exists in the target area without reading any file contents.\n\n**PLAN YOUR APPROACH:**\nBefore you start, think:\n- What directories should I explore first?\n- How should I categorize what I find? (by function, layer, feature?)\n- What patterns might reveal the architecture? (naming, grouping, size)\n\n**EXECUTE:**\n1. Use `list_dir` to map the file structure\n2. Categorize files by purpose (source, tests, config, docs, build)\n3. Count files and note naming conventions\n4. Identify architectural clues (layered, feature-based, monolithic)\n\n**REFLECT:**\nAs you gather this data, ask yourself:\n- What does this structure tell me about the system's organization?\n- Does the structure match common patterns for this tech stack?\n- Are there unexpected files or missing expected ones?\n- Which areas seem most relevant to my mission?\n- What surprises me about this organization?\n\n**DELIVERABLE:**\nCapture in working notes:\n- File tree with annotations (purpose of each directory)\n- File counts by category\n- Observed patterns (naming, organization)\n- Suspicious areas (too many files, missing tests, orphaned code)\n- Recommended areas for deeper investigation",
-      "agentRole": "You are a systematic codebase cartographer who excels at quickly mapping unfamiliar territory and identifying key landmarks.",
+      "prompt": "**EXECUTE DEPTH 0: SURVEY**\n\nExecute your research plan at Depth 0 (Map the territory).\n\n**MISSION:** Understand what exists in the target area without reading contents.\n\n**EXECUTE:**\n1. Follow `research-plan.md`\n2. Use `list_dir` on target scopes\n3. Map file structure and purpose\n4. Identify architectural patterns\n\n**WORKING NOTES:**\n- File Tree & Purpose\n- Observed Patterns\n- Suspicious Areas",
+      "agentRole": "You are a systematic cartographer mapping the territory.",
+      "requireConfirmation": false,
       "guidance": [
-        "TOOL STRATEGY: Use list_dir on target and key subdirectories. Start broad, then dive into interesting areas",
-        "CATEGORIZATION: Group by purpose - source code (services/, controllers/, models/), tests (tests/, *.test.*), config (config/, *.config.*), docs (docs/, README*), build (scripts/, dist/)",
-        "PATTERN RECOGNITION: Note naming conventions (kebab-case, camelCase, PascalCase), directory depth (flat vs nested), file grouping (by feature vs by type)",
-        "ARCHITECTURAL ANALYSIS: Identify structure type - Layered (controllers → services → repos), Feature-based (features/auth/), Monolithic vs modular, Microservices",
-        "QUALITY INDICATORS - Good signs: Clear separation of concerns, consistent naming throughout, tests present and organized, logical grouping",
-        "QUALITY INDICATORS - Warning signs: Deeply nested directories (>4 levels), too many files in one directory (>20), mixed naming conventions, unclear organization",
-        "QUALITY INDICATORS - Red flags: Orphaned files (no clear home), missing tests entirely, no discernible structure, everything in root",
-        "CONSTRAINT: Don't read file contents yet - just map what exists and where",
-        "OUTPUT LIMIT: Keep findings concise - file tree with annotations, counts, patterns, suspicious areas, recommendations (aim for 300-400 words)"
-      ],
-      "requireConfirmation": false
+        "TOOL: Use list_dir only",
+        "CONSTRAINT: Do not read file contents yet",
+        "OUTPUT: Structural map and high-level observations"
+      ]
     },
     {
-      "id": "step-1-depth-1-scan",
-      "title": "Step 1 (Depth 1): Scan Components",
+      "id": "step-execute-depth-1",
+      "title": "Execution: Depth 1 (Scan)",
       "runCondition": {"var": "depth", "greaterThanOrEqual": 1},
-      "prompt": "**DEPTH 1: SCAN** (5-10 min) - Identify major components and relationships\n\n**YOUR MISSION:** Understand what components exist and how they relate, without reading full implementations.\n\n**PLAN YOUR APPROACH:**\nBased on your depth 0 survey, decide:\n- Which files are the key components? (start with entry points, core services)\n- What relationships should I map? (dependencies, call chains, data flow)\n- What dependencies matter most for my mission?\n\n**EXECUTE:**\n1. Read file headers (top 30-50 lines) to extract imports, exports, and interfaces\n2. Use grep to find cross-file references and map dependencies\n3. Identify architectural layers (entry points, controllers, services, repositories)\n4. Map component relationships (who calls whom, direction of dependencies)\n\n**REFLECT:**\nAs you scan, ask yourself:\n- What are the major architectural layers? (presentation, business, data)\n- Which components are central hubs vs leaf nodes?\n- Are dependencies flowing in the right direction?\n- Are there unexpected dependencies that cross layers?\n- Which components are most relevant to my mission?\n- What's the \"shape\" of this system? (layered, hexagonal, microservices)\n\n**DELIVERABLE:**\nCapture in working notes:\n- Component map with relationships (A → calls → B → uses → C)\n- Key interfaces and their purposes\n- Dependency graph (which components depend on which)\n- Suspicious patterns (circular deps, tight coupling, missing abstractions)\n- Recommended components for deeper exploration",
-      "agentRole": "You are a software architect who specializes in understanding system structure, component relationships, and dependency flows.",
+      "prompt": "**EXECUTE DEPTH 1: SCAN**\n\nExecute your research plan at Depth 1 (Identify components).\n\n**MISSION:** Understand components and relationships without reading implementations.\n\n**EXECUTE:**\n1. Follow `research-plan.md`\n2. Read file headers (top 50 lines)\n3. Map imports/exports and dependencies\n4. Identify architectural layers\n\n**WORKING NOTES:**\n- Component Map\n- Dependency Graph\n- Key Interfaces",
+      "agentRole": "You are an architect mapping component relationships.",
+      "requireConfirmation": false,
       "guidance": [
-        "TOOL STRATEGY - Headers: Use read_file with --limit 50 to read file headers only. Extract imports (what it depends on), exports (what it provides), class/interface definitions (contracts), docstrings (purpose)",
-        "TOOL STRATEGY - Relationships: Use grep to map who-uses-what: grep 'import.*ComponentName' --type ts. Find all of a type: grep 'class.*Service', grep 'interface.*Repository'",
-        "ARCHITECTURAL LAYERS: Identify common layers - Entry points (main.ts, app.ts, server.ts), Controllers/Handlers (HTTP/API layer), Services/Use Cases (business logic), Repositories/DAOs (data access), Models/Entities (data structures), Utilities (shared helpers)",
-        "DEPENDENCY MAPPING: Map the flow - Entry → Controller → Service → Repository → Database. Note direction (top-down is good, bottom-up or circular is bad). Check for dependency injection vs direct instantiation",
-        "INTERFACE ANALYSIS: Look for contracts - interfaces defining behavior, abstract classes, type definitions. Check if components depend on abstractions (good) or concrete implementations (tight coupling)",
-        "QUALITY INDICATORS - Good signs: Clear dependency direction (acyclic), interface-based contracts (loose coupling), Single Responsibility Principle, dependency injection patterns, clear layer separation",
-        "QUALITY INDICATORS - Warning signs: God objects (importing 8+ services), tight coupling (direct instantiation), missing abstractions (concrete dependencies everywhere), layer violations (repository importing controller)",
-        "QUALITY INDICATORS - Red flags: Circular dependencies (A → B → A), orphaned components (nothing imports them), mega-imports (import * from everything), no clear entry point",
-        "CONSTRAINT: Don't read full implementations yet - just understand component structure and relationships",
-        "OUTPUT LIMIT: Component map with relationships, key interfaces, dependency graph, suspicious patterns, recommendations (aim for 400-500 words)"
-      ],
-      "requireConfirmation": false
+        "TOOL: read_file --limit 50 for headers",
+        "TOOL: grep for cross-references",
+        "CONSTRAINT: Don't read full implementations"
+      ]
     },
     {
-      "id": "step-2-depth-2-explore",
-      "title": "Step 2 (Depth 2): Explore Functionality",
+      "id": "step-execute-depth-2",
+      "title": "Execution: Depth 2 (Explore)",
       "runCondition": {"var": "depth", "greaterThanOrEqual": 2},
-      "prompt": "**DEPTH 2: EXPLORE** (15-30 min) - Understand what the code does\n\n**YOUR MISSION:** Trace execution flows and understand functional behavior at a high level.\n\n**PLAN YOUR APPROACH:**\nBased on your depth 1 scan, decide:\n- Which execution paths are most relevant to my mission?\n- What entry points should I start from?\n- Which functions are critical to understand?\n\n**EXECUTE:**\n1. Read function signatures and docstrings\n2. Trace key execution paths (function → function)\n3. Identify data transformations and state changes\n4. Read test names to infer expected behavior\n5. Map error handling paths\n\n**REFLECT:**\nAs you explore, ask yourself:\n- What is this code trying to accomplish?\n- How does data flow through these functions?\n- What are the critical decision points (branches, conditions)?\n- Where could things go wrong?\n- What edge cases might exist?\n- Does the implementation match my expectations from the component map?\n\n**WORKING NOTES:**\nCapture your findings:\n- Execution flow diagrams for key paths (Entry → Step 1 → Step 2 → Result)\n- Functional summaries of critical functions (purpose, inputs, outputs, side effects)\n- Error handling mechanisms identified\n- Suspicious patterns (missing error handling, unclear logic, potential race conditions)\n- Recommended functions for deeper analysis",
-      "agentRole": "You are a systems analyst who excels at tracing execution flows, understanding functional behavior, and mapping data transformations.",
+      "prompt": "**EXECUTE DEPTH 2: EXPLORE**\n\nExecute your research plan at Depth 2 (Understand functionality).\n\n**MISSION:** Trace execution flows and understand behavior.\n\n**EXECUTE:**\n1. Follow `research-plan.md`\n2. Read function signatures and docstrings\n3. Trace key execution paths\n4. Map data flow and transformations\n\n**WORKING NOTES:**\n- Execution Flow Diagrams\n- Functional Summaries\n- Data Flow Maps",
+      "agentRole": "You are a systems analyst tracing flows and data.",
+      "requireConfirmation": false,
       "guidance": [
-        "TOOL STRATEGY - Functions: Read full function signatures and docstrings but not full implementations. For each key function extract: purpose (what does it do?), inputs (parameters and types), outputs (return type), side effects (state changes, I/O)",
-        "TOOL STRATEGY - Tests: Read test names and descriptions to infer behavior. test('should validate token and return user') tells you validateToken() returns a user object. Don't read full test implementations yet",
-        "EXECUTION TRACING: Start at entry point (HTTP handler, CLI command, event listener). Follow the call chain: Entry → Validation → Processing → Storage → Response. Track how data transforms at each step",
-        "DATA FLOW ANALYSIS: Map transformations - Request DTO → Domain Model → Database Entity → Response DTO. Note where data is validated, enriched, or filtered. Identify state changes",
-        "CONTROL FLOW PATTERNS: Look for decision points - if/else branches (conditional logic), switch statements (multiple paths), loops (iteration), early returns (guard clauses), async/await (asynchronous flow)",
-        "ERROR HANDLING ANALYSIS: Identify error paths - try/catch blocks, error returns (Result types), validation checks (input validation), error propagation (throw vs return). Check if all error cases are handled",
-        "QUALITY INDICATORS - Good signs: Clear function purposes (single responsibility), explicit error handling at each step, predictable data flow, guard clauses for invalid inputs, consistent patterns",
-        "QUALITY INDICATORS - Warning signs: Functions doing multiple unrelated things, unclear data transformations, missing error handling in critical paths, deep nesting (>3 levels)",
-        "QUALITY INDICATORS - Red flags: No error handling at all, unclear logic flow (spaghetti code), potential race conditions (shared state + async), silent failures (catch without re-throw)",
-        "CONSTRAINT: Don't analyze line-by-line yet - focus on understanding the flow and purpose at a high level",
-        "OUTPUT LIMIT: Execution flow diagrams, functional summaries, error handling mechanisms, suspicious patterns, recommendations (aim for 500-600 words)"
-      ],
-      "requireConfirmation": false
+        "TOOL: Read full signatures and docstrings",
+        "TRACE: Follow the call chain",
+        "DATA: Track how data transforms"
+      ]
     },
     {
-      "id": "step-3-depth-3-analyze",
-      "title": "Step 3 (Depth 3): Analyze Implementation",
+      "id": "step-execute-depth-3",
+      "title": "Execution: Depth 3 (Analyze)",
       "runCondition": {"var": "depth", "greaterThanOrEqual": 3},
-      "prompt": "**DEPTH 3: ANALYZE** (30-60 min) - Understand how the code actually works\n\n**YOUR MISSION:** Deep dive into implementation details to understand exact behavior, edge cases, and potential issues.\n\n**PLAN YOUR APPROACH:**\nBased on your depth 2 exploration, decide:\n- Which functions warrant detailed analysis?\n- What edge cases should I look for?\n- What could go wrong in these implementations?\n\n**EXECUTE:**\n1. Read full function implementations\n2. Trace data flow through variables and state\n3. Analyze all conditional branches and loops\n4. Read test implementations to understand expected behavior\n5. Check for race conditions, null handling, type safety\n6. Review git history for context on changes\n\n**REFLECT:**\nAs you analyze, ask yourself:\n- How does this implementation actually work, step by step?\n- What assumptions does this code make?\n- What happens if inputs are unexpected?\n- Are all edge cases handled?\n- Could this fail in subtle ways?\n- Are there performance implications?\n- Does this match the intended design?\n\n**DELIVERABLE SNAPSHOT:**\nCapture your findings:\n- Detailed implementation analysis with line citations\n- State changes and data flow traced through functions\n- Edge cases identified (handled and unhandled)\n- Potential bugs, race conditions, or vulnerabilities\n- Performance concerns\n- Recommendations for fixes or further investigation",
-      "agentRole": "You are a detail-oriented code reviewer who specializes in deep implementation analysis, edge case identification, and bug detection.",
+      "prompt": "**EXECUTE DEPTH 3: ANALYZE**\n\nExecute your research plan at Depth 3 (Deep implementation analysis).\n\n**MISSION:** Understand exact behavior, edge cases, and potential issues.\n\n**EXECUTE:**\n1. Follow `research-plan.md`\n2. Read full implementations\n3. Analyze conditionals and loops\n4. Check for race conditions and edge cases\n\n**WORKING NOTES:**\n- Detailed Implementation Analysis\n- Edge Case Analysis\n- Potential Issues",
+      "agentRole": "You are a code reviewer looking for logic errors and edge cases.",
+      "requireConfirmation": false,
       "guidance": [
-        "TOOL STRATEGY - Implementation: Read full function implementations. Trace data flow through the function - track how variables change, what gets modified, what side effects occur",
-        "TOOL STRATEGY - Tests: Read full test implementations to understand expected behavior, edge cases tested, mocking patterns, assertion strategies",
-        "TOOL STRATEGY - History: Review git history for critical sections: git log -p {file} or git blame {file}. Understand why code changed, what the original intent was, what bugs were fixed",
-        "BRANCH ANALYSIS: Analyze all conditional paths - What happens in each if/else? What about switch cases? Loop iterations? Ternary operators? Short-circuit evaluation (&&, ||)?",
-        "EDGE CASE IDENTIFICATION: Check handling of - null/undefined (explicit checks?), empty collections ([], {}, ''), boundary values (0, -1, MAX_INT), type coercion (== vs ===), truthy/falsy checks",
-        "CONCURRENCY ANALYSIS: Look for race conditions - async/await patterns (are promises awaited?), shared state (global variables, class properties), timing dependencies (setTimeout, setInterval), event ordering",
-        "PERFORMANCE ANALYSIS: Identify bottlenecks - N+1 queries (loop with DB calls), unnecessary loops (nested iterations), inefficient algorithms (O(n²)), blocking operations (synchronous I/O), memory leaks (event listeners not cleaned up)",
-        "QUALITY INDICATORS - Good signs: All edge cases explicitly handled, explicit null/undefined checks (x === null), clear error paths with meaningful messages, input validation, defensive programming",
-        "QUALITY INDICATORS - Warning signs: Assumptions about data (assuming array has items), missing null checks, unclear error handling (generic catch), complex nested logic (hard to follow)",
-        "QUALITY INDICATORS - Red flags: Truthy checks allowing undefined (if (x) instead of if (x === true)), no input validation, unhandled promises, race conditions with shared state, silent failures",
-        "DOCUMENTATION REQUIREMENT: Cite every finding with file:line - Example: 'auth-service.ts:68 - truthy check allows undefined to pass, should be if (user.isActive === true)'",
-        "OUTPUT LIMIT: Detailed implementation analysis, state/data flow traces, edge cases (handled and unhandled), potential bugs/vulnerabilities, performance concerns, recommendations (aim for 700-800 words)"
-      ],
-      "requireConfirmation": false
+        "TOOL: Read full files",
+        "EDGE CASES: Check nulls, boundaries, empty states",
+        "LOGIC: Verify all conditional branches"
+      ]
     },
     {
-      "id": "step-4-depth-4-dissect",
-      "title": "Step 4 (Depth 4): Dissect Line by Line",
+      "id": "step-execute-depth-4",
+      "title": "Execution: Depth 4 (Dissect)",
       "runCondition": {"var": "depth", "greaterThanOrEqual": 4},
-      "prompt": "**DEPTH 4: DISSECT** (60+ min) - Forensic line-by-line analysis\n\n**YOUR MISSION:** Leave no stone unturned. Find every bug, vulnerability, and subtle issue.\n\n**PLAN YOUR APPROACH:**\nBased on your depth 3 analysis, decide:\n- Which code sections are most critical or suspicious?\n- What types of issues am I looking for? (security, correctness, performance)\n- What edge cases need explicit verification?\n\n**EXECUTE:**\n1. Analyze code line by line\n2. Trace all possible execution branches\n3. Check variable states at each step\n4. Look for subtle bugs (off-by-one, null dereference, type coercion)\n5. Identify security vulnerabilities (injection, XSS, auth bypass)\n6. Check performance bottlenecks (N+1 queries, inefficient loops)\n7. Review git history for each critical section\n8. Cross-reference with design docs and coding standards\n\n**REFLECT:**\nFor each line, ask yourself:\n- What does this line do?\n- What are all possible input values?\n- What could go wrong?\n- Is this the right way to do this?\n- Are there hidden assumptions?\n- What happens in edge cases?\n- Could this be exploited?\n- Is there a simpler or safer way?\n\n**DELIVERABLE SNAPSHOT:**\nCapture your findings:\n- Exhaustive line-by-line analysis of critical sections\n- All identified bugs with severity and impact\n- Security vulnerabilities with exploit scenarios\n- Performance bottlenecks with optimization suggestions\n- Architectural deviations from standards\n- Concrete fix recommendations with test cases",
-      "agentRole": "You are a forensic code analyst and security researcher who performs exhaustive line-by-line analysis to uncover subtle bugs, vulnerabilities, and performance issues.",
+      "prompt": "**EXECUTE DEPTH 4: DISSECT**\n\nExecute your research plan at Depth 4 (Forensic line-by-line).\n\n**MISSION:** Find every bug, vulnerability, and subtle issue.\n\n**EXECUTE:**\n1. Follow `research-plan.md`\n2. Analyze critical sections line-by-line\n3. Verify every assumption and state\n4. Check security and performance\n\n**WORKING NOTES:**\n- Line-by-Line Analysis\n- Security Vulnerabilities\n- Performance Bottlenecks",
+      "agentRole": "You are a forensic analyst performing exhaustive checks.",
+      "requireConfirmation": false,
       "guidance": [
-        "TOOL STRATEGY - Line-by-line: Analyze each line - What does it do? What are inputs? What are outputs? What could go wrong? What are all possible states?",
-        "TOOL STRATEGY - History: Review git history for each critical section: git log -p {file} --follow. Understand evolution - Why was this changed? What was the original? What bugs were fixed? What's the intent?",
-        "TOOL STRATEGY - Design: Cross-reference with design docs, ADRs, comments. Does implementation match design? Are there intentional or accidental deviations?",
-        "BRANCH EXHAUSTION: Trace every possible path - Every if/else, switch case, ternary operator, short-circuit evaluation (&&, ||), loop iteration (including 0 iterations), exception paths",
-        "STATE ANALYSIS: For each line, enumerate possible variable states - null, undefined, 0, -1, '', [], {}, false, NaN, Infinity. What happens in each case? Are all handled?",
-        "SUBTLE BUG PATTERNS: Look for - Off-by-one errors (i < length vs i <= length), Type coercion (== vs ===, + operator with mixed types), Truthy checks (if (x) when x could be 0 or ''), Integer overflow, Floating point precision, Regex catastrophic backtracking",
-        "SECURITY ANALYSIS: Check for vulnerabilities - SQL injection (string concatenation in queries), XSS (unescaped user input in HTML), Auth bypass (missing checks, truthy checks on roles), Privilege escalation (insufficient authorization), Data exposure (logging sensitive data, verbose errors), Path traversal, Command injection",
-        "PERFORMANCE ANALYSIS: Identify inefficiencies - Algorithmic complexity (O(n²), O(2^n)), N+1 queries (loop with DB calls), Unnecessary allocations (creating objects in loops), Blocking operations (synchronous I/O), Memory leaks (closures, event listeners), Inefficient data structures",
-        "MENTAL EXECUTION: Walk through with edge cases - null input, undefined input, empty collections, boundary values (0, MAX_INT, MIN_INT), negative numbers, very large inputs, concurrent access, network failures, database failures",
-        "QUALITY INDICATORS - Good signs: Explicit checks for all edge cases, defensive programming throughout, clear intent with comments, input validation, proper error handling",
-        "QUALITY INDICATORS - Warning signs: Complex nested logic (>3 levels), magic numbers (hardcoded values), unclear variable names (x, tmp, data), long functions (>50 lines), duplicate code",
-        "QUALITY INDICATORS - Red flags: No input validation, truthy checks on booleans, direct DB queries without parameterization, unhandled promises, silent failures (empty catch), eval or dynamic code execution",
-        "DOCUMENTATION REQUIREMENT: Document exhaustively for each finding - Line number (file:line), Issue description, Severity (LOW/MED/HIGH/CRITICAL), Impact (what breaks?), Root cause (why is this a problem?), Recommendation (how to fix?), Test case (how to verify fix?)",
-        "OUTPUT LIMIT: Exhaustive line-by-line analysis, all bugs with severity, security vulnerabilities with exploits, performance bottlenecks with metrics, architectural deviations, concrete fixes with test cases (aim for 1000+ words)"
-      ],
-      "requireConfirmation": false
+        "LINE-BY-LINE: Analyze every single line",
+        "SECURITY: Check for injection, auth bypass, data leaks",
+        "PERFORMANCE: Check for N+1, loops, memory leaks"
+      ]
     },
     {
-      "id": "step-5-synthesize-deliverable",
-      "title": "Step 5: Synthesize & Deliver Findings",
-      "prompt": "**SYNTHESIZE YOUR INVESTIGATION**\n\nYou've completed your investigation at depth {depth}. Now synthesize and structure your findings.\n\n**REFLECT ON YOUR JOURNEY:**\n- What are the most important discoveries?\n- What patterns emerged across depth levels?\n- What surprised you?\n- What questions remain unanswered?\n- What should the main agent do next?\n\n**CREATE STRUCTURED DELIVERABLE:**\n\nProduce `{deliverableName}` with these sections:\n\n### Summary (3-5 bullets)\n- Most critical findings\n- Key insights that emerged\n- Recommended next actions\n\n### Detailed Findings\n[Organized by depth level or by theme - your choice based on what's clearest]\n- Include all discoveries with file:line citations\n- Use code snippets where helpful\n- Explain significance, don't just describe\n\n### Suspicious Points\n[Prioritized by severity/impact]\n- Potential bugs, vulnerabilities, performance issues\n- Format: `[SEVERITY] Issue (file:line) - Description - Impact - Recommendation`\n\n### Gaps & Limitations\n[Be explicit about what you couldn't determine]\n- What would require deeper analysis?\n- What needs runtime testing?\n- What needs clarification?\n- What's outside the scope of this investigation?\n\n### Recommendations\n[Concrete, actionable next steps]\n- What should be investigated next?\n- What depth level is needed for follow-up?\n- What should be fixed immediately?\n- What alternative approaches should be considered?\n\n**SELF-VALIDATE:**\n- All findings cited with file:line?\n- Gaps explicitly noted?\n- Recommendations actionable?\n- Deliverable answers the original mission?\n\nIf YES to all, deliver. If NO, revise first.",
-      "agentRole": "You are a senior technical consultant who synthesizes complex findings into clear, actionable insights and recommendations.",
+      "id": "step-synthesize",
+      "title": "Step 5: Synthesize Findings",
+      "prompt": "**SYNTHESIZE FINDINGS**\n\nSynthesize all your findings from the execution steps.\n\n**MISSION:** Create a clear, actionable report.\n\n**EXECUTE:**\n1. Review all Working Notes\n2. Identify key patterns and insights\n3. Structure the final deliverable\n\n**DELIVERABLE:**\nCreate `{deliverableName}`:\n- Summary\n- Detailed Findings (by depth)\n- Suspicious Points\n- Gaps & Limitations\n- Recommendations",
+      "agentRole": "You are a senior consultant synthesizing insights.",
+      "requireConfirmation": false,
       "guidance": [
-        "SYNTHESIS APPROACH: Don't just list findings - synthesize patterns. What themes emerged across depth levels? What's the big picture? How do individual findings connect?",
-        "PRIORITIZATION: Order by impact - CRITICAL bugs (security, data loss) first, then HIGH (functional breaks), then MEDIUM (performance, edge cases), then LOW (style, maintainability)",
-        "CITATION REQUIREMENT: Every finding must have file:line reference. Example: 'auth-service.ts:68' not 'in the auth service'",
-        "SIGNIFICANCE EXPLANATION: Don't just describe - explain why it matters. Not 'truthy check on line 68' but 'truthy check on line 68 allows undefined user.isActive to pass, causing inactive users to authenticate (CRITICAL security issue)'",
-        "ACTIONABLE RECOMMENDATIONS: Be specific and concrete. Not 'Fix the check' but 'Change line 68 from if (user.isActive) to if (user.isActive === true). Add test case: user with isActive=undefined should fail auth'",
-        "HONEST GAP REPORTING: Be explicit about limitations - What couldn't you determine from static analysis? What needs runtime testing? What needs clarification? What's outside investigation scope?",
-        "STRUCTURE FOR SCANNABILITY: Use clear formatting - Bullets for lists, headings for sections, severity labels ([CRITICAL], [HIGH], [MED], [LOW]), code snippets for examples, visual separators",
-        "NEXT STEPS: Provide concrete actions for main agent - What should be investigated next? At what depth level? What should be fixed immediately? What needs user input? What alternative approaches exist?",
-        "SELF-VALIDATION CHECKLIST: Before delivering, verify - All findings cited with file:line? Gaps explicitly noted? Recommendations actionable and specific? Deliverable answers original mission? Organized by priority?",
-        "DELIVERABLE CREATION: Use write tool to create {deliverableName} with your structured findings. Don't just output in chat - create the actual file"
-      ],
-      "requireConfirmation": false
+        "SYNTHESIS: Connect the dots, don't just list facts",
+        "ACTIONABLE: Give clear next steps",
+        "CITED: Support everything with file:line refs"
+      ]
     }
   ]
 }
