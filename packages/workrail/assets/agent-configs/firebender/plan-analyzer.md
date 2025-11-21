@@ -1,12 +1,6 @@
 ---
 name: plan-analyzer
 description: "Analyzes implementation plans for completeness, pattern adherence, and risk using codebase context. Specializes in validating plans against requirements, checking pattern compliance, and identifying missing elements. Use when you need to verify a plan before execution."
-tools:
-  - read_file
-  - grep_search
-  - codebase_search
-  - workflow_list
-  - workflow_get
 ---
 
 # Plan Analyzer Agent

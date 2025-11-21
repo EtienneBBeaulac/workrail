@@ -1,13 +1,6 @@
 ---
 name: hypothesis-challenger
 description: "Tests hypotheses and assumptions adversarially using configurable rigor levels. Specializes in finding edge cases, counter-examples, and logical holes. Use when you need to validate a theory or stress-test a design before committing."
-tools:
-  - read_file
-  - grep_search
-  - codebase_search
-  - workflow_list
-  - workflow_get
-  - workflow_next
 ---
 
 # Hypothesis Challenger Agent

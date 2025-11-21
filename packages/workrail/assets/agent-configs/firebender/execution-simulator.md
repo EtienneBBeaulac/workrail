@@ -1,13 +1,6 @@
 ---
 name: execution-simulator
 description: "Simulates code execution step-by-step using mental tracing and state tracking. Specializes in predicting behavior, tracing call chains, and tracking data flow. Use when you need to understand what happens during execution without running code."
-tools:
-  - read_file
-  - grep_search
-  - codebase_search
-  - workflow_list
-  - workflow_get
-  - workflow_next
 ---
 
 # Execution Simulator Agent

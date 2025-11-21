@@ -1,14 +1,6 @@
 ---
 name: context-researcher
 description: "Gathers and analyzes codebase context using systematic exploration at configurable depths. Specializes in mapping file structures, tracing execution flows, and identifying relevant code sections. Use when you need to understand code before making decisions."
-tools:
-  - read_file
-  - grep_search
-  - list_dir
-  - codebase_search
-  - workflow_list
-  - workflow_get
-  - workflow_next
 ---
 
 # Context Researcher Agent

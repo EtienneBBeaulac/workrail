@@ -1,16 +1,6 @@
 ---
 name: builder
 description: "Implements code precisely according to detailed plans and specifications. Specializes in following established patterns, writing tests, and maintaining code quality. Use when you have a thorough plan and want to reduce main agent context load during implementation."
-tools:
-  - read_file
-  - edit_file
-  - create_file
-  - grep_search
-  - codebase_search
-  - run_terminal_cmd
-  - workflow_list
-  - workflow_get
-  - workflow_next
 ---
 
 # Builder Agent
