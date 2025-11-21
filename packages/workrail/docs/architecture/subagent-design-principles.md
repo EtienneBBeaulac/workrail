@@ -307,7 +307,7 @@ prompt: "
 
 ### **Tier 1: Core Subagents (Phase 1)**
 
-Essential subagents for most workflows. These 5 cover the primary cognitive functions needed across debugging, planning, and implementation workflows.
+Essential subagents for most workflows. These 6 cover the primary cognitive functions needed across debugging, planning, and implementation workflows.
 
 ---
 
@@ -631,6 +631,118 @@ tools:
 **Why This is Core:**
 
 Builder reduces main agent context load during implementation by taking a complete work package (plan + patterns + rules) and executing autonomously. This is especially valuable for well-defined features where the main agent has already done research and planning.
+
+---
+
+#### **6. Ideator**
+
+**Cognitive Function:** Divergent thinking, possibility generation, creative exploration
+
+**Primary Role:** **GENERATOR** - Creates multiple diverse ideas/approaches, not an auditor
+
+**When to Use:**
+- "Generate multiple approaches to solve this problem"
+- "What are different ways to implement this feature?"
+- "Brainstorm alternative architectures"
+- "Generate edge cases we should test"
+
+**Routine:** `routine-ideation`
+
+**Input Parameters:**
+- `problem`: What needs to be solved or question to answer
+- `constraints`: Technical, business, or time constraints
+- `context`: Background info, existing code, requirements, patterns
+- `perspective`: Optional focus (simplicity, performance, maintainability, security, innovation, pragmatic)
+- `quantity`: Target number of ideas to generate (typically 5-10)
+- `deliverable`: Name of the artifact to create
+
+**Output Artifacts:**
+- `ideas-[perspective].md` - Structured list of ideas with pros/cons
+
+**Example Delegation (Single Ideator):**
+```
+"Generate approaches for implementing user authentication:
+ Problem: Need secure, maintainable user auth system
+ Constraints:
+  - Must support OAuth and local auth
+  - Budget: 2 weeks implementation
+  - Must integrate with existing user model
+ Context: Node.js backend, PostgreSQL database
+ Perspective: Maintainability
+ Quantity: 7 ideas
+ Deliverable: ideas-maintainability.md"
+```
+
+**Example Delegation (Parallel Multi-Perspective):**
+```
+Spawn 3 Ideators SIMULTANEOUSLY:
+
+Ideator 1 (Simplicity):
+- Focus: Easiest to implement and understand
+- Generate 5-7 ideas prioritizing simplicity
+
+Ideator 2 (Performance):
+- Focus: Fastest execution, best scalability
+- Generate 5-7 ideas prioritizing performance
+
+Ideator 3 (Security):
+- Focus: Most secure, least vulnerable
+- Generate 5-7 ideas prioritizing security
+
+Main agent synthesizes 15-21 ideas → picks best or combines
+```
+
+**Perspectives:**
+
+The ideator can focus on different lenses:
+- **Simplicity**: Easiest to implement, minimal dependencies
+- **Performance**: Fastest execution, best scalability
+- **Maintainability**: Easiest to modify and extend
+- **Security**: Most secure, defense in depth
+- **Innovation**: Novel, cutting-edge approaches
+- **Pragmatic**: Best balance of all factors
+
+**Parallel Ideation Pattern:**
+
+For complex problems, spawn multiple ideators with different perspectives simultaneously:
+1. **Diverge**: Each ideator explores their solution space (parallel)
+2. **Synthesize**: Main agent combines all ideas, deduplicates, refines
+3. **Evaluate**: Main agent (or other subagents) evaluates options
+
+**Subagent Description (for auto-invocation):**
+> "Generates diverse ideas and approaches for solving problems. Specializes in divergent thinking, exploring solution spaces, and creative problem-solving. Use when you need multiple options to choose from."
+
+**Recommended Tool Restrictions:**
+```yaml
+tools:
+  - read_file
+  - grep_search
+  - codebase_search
+  - workflow_list
+  - workflow_get
+  - workflow_next
+  # NO WRITE OPERATIONS: Generators don't implement, just ideate
+```
+
+**Recommended Model:**
+- Simplicity/Pragmatic perspectives: Haiku (straightforward ideation)
+- Performance/Security/Innovation: Sonnet (requires deeper reasoning)
+
+**Why This is Core:**
+
+Ideator provides **divergent thinking** that complements the main agent's convergent problem-solving. It's especially valuable when:
+- Problem has multiple valid solutions
+- Trade-offs need to be explored
+- Main agent might anchor on first idea
+- Diverse perspectives add value (parallel ideation)
+
+**Key Difference from Auditors:**
+
+Ideators are **generators**, not **auditors**:
+- Auditors review existing work
+- Ideators create new options
+- Parallel ideators explore different solution spaces
+- Main agent synthesizes and chooses
 
 ---
 
