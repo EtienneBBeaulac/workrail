@@ -17,7 +17,10 @@ This directory contains reference configurations for specialized subagents desig
      "subagents": [
        "~/.firebender/agents/context-researcher.md",
        "~/.firebender/agents/hypothesis-challenger.md",
-       "~/.firebender/agents/plan-analyzer.md"
+       "~/.firebender/agents/plan-analyzer.md",
+       "~/.firebender/agents/execution-simulator.md",
+       "~/.firebender/agents/ideator.md",
+       "~/.firebender/agents/builder.md"
      ]
    }
    ```
@@ -32,9 +35,9 @@ Check `docs/integrations/` for IDE-specific setup guides.
 
 ## Available Subagents
 
-### **Core 5 (Tier 1) - Recommended for Phase 1**
+### **Core 6 (Tier 1) - Recommended for Phase 1**
 
-These 5 subagents cover the primary cognitive functions needed across debugging, planning, and implementation workflows.
+These 6 subagents cover the primary cognitive functions needed across debugging, planning, and implementation workflows.
 
 #### **1. Context Researcher** (`context-researcher.md`)
 **Cognitive Function:** Deep reading, systematic exploration, execution tracing
@@ -96,7 +99,25 @@ These 5 subagents cover the primary cognitive functions needed across debugging,
 
 ---
 
-#### **5. Builder** (`builder.md`)
+#### **5. Ideator** (`ideator.md`)
+**Cognitive Function:** Divergent thinking, possibility generation, creative exploration
+
+**Use When:**
+- "Generate multiple approaches to solve this problem"
+- "What are different ways to implement this feature?"
+- "Brainstorm alternative architectures"
+
+**Perspectives:** Simplicity, Performance, Maintainability, Security, Innovation, Pragmatic
+
+**Routine:** `routine-ideation`
+
+**Model:** Haiku (simple perspectives), Sonnet (complex perspectives)
+
+**Parallel Pattern:** Spawn multiple ideators with different perspectives simultaneously for diverse solution spaces.
+
+---
+
+#### **6. Builder** (`builder.md`)
 **Cognitive Function:** Precise implementation, pattern adherence, incremental development
 
 **Use When:**
@@ -208,8 +229,8 @@ export WORKRAIL_ENABLE_AGENTIC_ROUTINES=true
 
 ## Best Practices
 
-### **1. Start with Core 5**
-Don't create more subagents until you've validated these five work well for your use case.
+### **1. Start with Core 6**
+Don't create more subagents until you've validated these six work well for your use case.
 
 ### **2. Use Explicit Delegation**
 Always use `task(subagent_type=...)` rather than relying on auto-invocation. It's more predictable.

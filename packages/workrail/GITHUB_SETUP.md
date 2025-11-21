@@ -128,3 +128,4 @@ The CI workflow (`.github/workflows/ci.yml`) runs automatically on:
 - [GitHub Actions Documentation](https://docs.github.com/en/actions)
 - [Status Checks Documentation](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/about-status-checks)
 
+

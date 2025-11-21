@@ -64,7 +64,7 @@ If you MUST whitelist tools, you must explicitly add the WorkRail suite:
 Copy the subagent markdown files to your Firebender agents directory:
 
 ```bash
-# Copy all Core 5 subagents
+# Copy all Core 6 subagents
 cp packages/workrail/assets/agent-configs/firebender/*.md ~/.firebender/agents/
 
 # Or copy individually
@@ -72,6 +72,7 @@ cp packages/workrail/assets/agent-configs/firebender/context-researcher.md ~/.fi
 cp packages/workrail/assets/agent-configs/firebender/hypothesis-challenger.md ~/.firebender/agents/
 cp packages/workrail/assets/agent-configs/firebender/plan-analyzer.md ~/.firebender/agents/
 cp packages/workrail/assets/agent-configs/firebender/execution-simulator.md ~/.firebender/agents/
+cp packages/workrail/assets/agent-configs/firebender/ideator.md ~/.firebender/agents/
 cp packages/workrail/assets/agent-configs/firebender/builder.md ~/.firebender/agents/
 ```
 
@@ -86,6 +87,7 @@ Edit your `~/.firebender/firebender.json` (or project-specific `firebender.json`
     "~/.firebender/agents/hypothesis-challenger.md",
     "~/.firebender/agents/plan-analyzer.md",
     "~/.firebender/agents/execution-simulator.md",
+    "~/.firebender/agents/ideator.md",
     "~/.firebender/agents/builder.md"
   ]
 }
