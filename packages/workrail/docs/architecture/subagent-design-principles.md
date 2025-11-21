@@ -885,13 +885,11 @@ If a subagent realizes the specified depth/rigor is insufficient:
 
 | Phase | Main Agent | Subagent | Deliverable |
 |-------|------------|----------|-------------|
-| 0: Setup | Reads bug, plans investigation | Context Researcher (depth=1) | component-map.md |
-| 1: Investigate | Plans deep-dive strategy | Context Researcher (depth=3) | execution-flow.md |
-| 2: Hypothesize | Forms hypotheses | Hypothesis Challenger (rigor=3) | hypothesis-challenges.md |
-| 3: Design Instrumentation | Plans instrumentation | *(Main agent)* | None |
-| 4: Collect Evidence | Runs tests, analyzes | *(Main agent)* | None |
-| 5: Validate | Defends conclusion | Hypothesis Challenger (rigor=5) | adversarial-review.md |
-| 6: Document | Writes report | *(Main agent)* | None |
+| 0: Investigate | Plans investigation, gathers context, traces execution | Context Researcher (audit) | investigation.md |
+| 1: Hypothesize | Plans strategy, forms hypotheses | Ideator (parallel) + Hypothesis Challenger | hypotheses.md |
+| 2: Design Instrumentation | Plans instrumentation, adds logging | *(Main agent)* | None |
+| 3: Collect Evidence | Runs tests, analyzes | *(Main agent)* | evidence files |
+| 4: Validate & Handoff | Validates conclusion, creates handoff | Hypothesis Challenger (rigor=5) | validation.md, handoff.md |
 
 **Note:** Main agent still does ~50% of the work. Subagents handle specific cognitive tasks, not entire phases.
 
@@ -951,29 +949,37 @@ WorkRail provides three variants of the bug investigation workflow to demonstrat
 
 **Delegation Strategy:**
 
-**Phase 0: Parallel Context Audit**
+**Phase 0: Investigation (Context + Execution)**
 ```
-Main agent: Context Gathering Routine
+Main agent: Context Gathering Routine + Execution Tracing
 ↓
 2 Parallel Auditors (SIMULTANEOUSLY):
 ├─ Context Researcher (FOCUS: Completeness)
 └─ Context Researcher (FOCUS: Depth)
 ↓
 Main agent synthesizes both perspectives
+Output: investigation.md (contains both structure and execution)
 ```
 
-**Phase 2B: Parallel Hypothesis Challenge**
+**Phase 1B: Parallel Ideation + Challenge**
 ```
-Main agent: Forms hypotheses
+Main agent: Plans hypothesis strategy
+↓
+3 Parallel Ideators (SIMULTANEOUSLY):
+├─ Ideator (PERSPECTIVE: Logic Errors)
+├─ Ideator (PERSPECTIVE: Data/State)
+└─ Ideator (PERSPECTIVE: Integration/Environment)
+↓
+Main agent: Synthesizes 15-21 hypotheses → top 5-7
 ↓
 2 Parallel Challengers (SIMULTANEOUSLY):
 ├─ Hypothesis Challenger (rigor=3: Thorough)
 └─ Hypothesis Challenger (rigor=5: Maximum)
 ↓
-Main agent strengthens hypotheses
+Main agent: Refines hypotheses based on challenges
 ```
 
-**Phase 5: Parallel Multi-Modal Validation**
+**Phase 4A: Parallel Multi-Modal Validation**
 ```
 Main agent: Proposes fix
 ↓
@@ -1012,8 +1018,8 @@ All three variants use the auditor model for Phase 0:
 
 Ultra variant demonstrates parallel delegation value:
 - **Phase 0**: Completeness + Depth auditors catch different gaps
-- **Phase 2B**: Different rigor levels provide diverse challenge
-- **Phase 5**: Three cognitive modes (adversarial, simulation, planning) ensure comprehensive validation
+- **Phase 1B**: Ideation (3 perspectives) + Challenge (2 rigor levels) for comprehensive hypothesis formation
+- **Phase 4A**: Three cognitive modes (adversarial, simulation, planning) ensure comprehensive validation
 
 **3. Focused Audits Maximize Diversity**
 
@@ -1025,9 +1031,9 @@ This ensures non-overlapping perspectives and maximizes value.
 
 **4. Quality Gates for Critical Decisions**
 
-Ultra variant uses "Triple Validation Gate" in Phase 5:
+Ultra variant uses "Triple Validation Gate" in Phase 4A:
 - ALL THREE validators must approve before proceeding
-- If 2+ raise concerns → Return to Phase 2 (re-form hypotheses)
+- If 2+ raise concerns → Return to Phase 1 (re-form hypotheses)
 - High confidence threshold for implementation
 
 **5. File Naming for Parallel Testing**
@@ -1078,7 +1084,7 @@ Subagent execution visibility varies by IDE. WorkRail workflows should assume **
 ```
 Main Agent: "Delegating to Context Researcher..."
 [Subagent works - no streaming]
-Main Agent: "Received execution-flow.md. Analyzing findings..."
+Main Agent: "Received investigation.md. Analyzing findings..."
 ```
 
 **Enhanced (IDE-Specific):**
@@ -1087,7 +1093,7 @@ Main Agent: "Received execution-flow.md. Analyzing findings..."
    ├─ Reading AuthService.ts
    ├─ Tracing validateToken() 
    └─ Analyzing dependencies
-✅ execution-flow.md created (3.2s)
+✅ investigation.md created (3.2s)
 ```
 
 WorkRail workflows should be designed for the baseline, but IDEs may optionally enhance with progress indicators, file-by-file updates, or streaming artifact generation.
