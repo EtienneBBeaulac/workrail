@@ -1,6 +1,6 @@
 ---
 name: workrail-executor
-description: "Internal WorkRail tool. Do not invoke directly."
+description: "Internal WorkRail routine executor."
 ---
 
 # WorkRail Executor
