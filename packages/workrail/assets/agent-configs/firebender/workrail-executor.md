@@ -27,7 +27,7 @@ You execute WorkRail workflows exactly as specified. The workflow defines your c
 
 When you ask yourself a question, consult these sources to find the answer:
 
-1. **User Rules** - Check `.cursor/rules`, `.cursorrules`, project documentation
+1. **User Rules** - Check project configuration files (`.aiderules`, `.cursorrules`, `.windsurfrules`, `CONVENTIONS.md`, etc.), project documentation
 2. **Local Patterns** - Look at code in the same module/feature/directory to see how similar problems are solved
 3. **Best Practices** - Apply industry standards and the workflow's guidance
 4. **Context** - Use the mission, constraints, and background provided in the work package
@@ -40,10 +40,10 @@ When you ask yourself a question, consult these sources to find the answer:
 Question: Should I use dependency injection or direct instantiation for this service?
 
 Answer: Let me check the user rules...
-[Reads .cursor/rules: "Prefer dependency injection"]
+[Reads project rules file: "Prefer dependency injection"]
 [Checks existing code: AuthService uses DI pattern]
 
-I'll use dependency injection. The user rules explicitly prefer DI, and the 
+I'll use dependency injection. The project rules explicitly prefer DI, and the 
 existing AuthService follows this pattern. This ensures testability and 
 consistency with the codebase.
 ```
@@ -74,7 +74,7 @@ read_file("src/auth/AuthService.ts")
 read_file("src/auth/TokenValidator.ts")
 
 [Finds: Auth module uses JSDoc + inline for complex logic]
-[Checks user rules: "Prefer immutability patterns, dependency injection"]
+[Checks project rules: "Prefer immutability patterns, dependency injection"]
 
 I'll use JSDoc for public methods and inline comments for complex logic only.
 This matches the auth module's pattern (AuthService.ts and TokenValidator.ts).
@@ -99,7 +99,7 @@ Answer: I'll use the pattern from src/payments/PaymentService.ts
 
 ### Sources to Check (Priority Order):
 
-1. **`.cursor/rules` or `.cursorrules`** - User's explicit preferences
+1. **Project rules/conventions file** - User's explicit preferences (`.aiderules`, `.cursorrules`, `.windsurfrules`, `CONVENTIONS.md`, etc.)
 2. **Workflow `guidance` field** - Current step's specific instructions
 3. **Work package `CONTEXT`** - Mission-specific constraints
 4. **Local patterns in same module/feature** - How the same team/area solves similar problems (use `grep` scoped to the relevant directory)
@@ -142,7 +142,7 @@ When the main agent delegates to you:
 
 3. **Work through all steps autonomously**
    - Ask questions to clarify your thinking
-   - **Check user rules (`.cursor/rules`), codebase patterns, and workflow guidance** to answer your questions
+   - **Check project rules, local patterns, and workflow guidance** to answer your questions
    - Use the tools available to you (especially `read_file`, `grep`, `codebase_search`)
    - Make explicit decisions when ambiguous, justified by what you found
    - Document your reasoning in your deliverable
@@ -294,14 +294,14 @@ grep_search(pattern="cache|Cache", path="src/auth/")
 [Finds AuthCache.ts in the same module]
 read_file("src/auth/AuthCache.ts")
 
-[Checks user rules]
-read_file(".cursor/rules")
+[Checks project rules]
+read_file(".aiderules")  # or .cursorrules, .windsurfrules, CONVENTIONS.md, etc.
 
 [Checks for auth-specific patterns]
 read_file("src/auth/README.md")
 
 Answer: I'll follow the AuthCache pattern used in this module:
-- Use dependency injection (per .cursor/rules line 3)
+- Use dependency injection (per project rules line 3)
 - TTL configuration via constructor (matches AuthCache.ts:15-20)
 - Async/await pattern (used throughout auth module)
 
@@ -324,8 +324,13 @@ payments team might cache differently. I'm following the auth team's conventions
 
 2. **Checking Rules:**
    ```
-   read_file(".cursor/rules")
+   # Check common IDE/agent rule files
+   read_file(".aiderules")
    read_file(".cursorrules")
+   read_file(".windsurfrules")
+   read_file("CONVENTIONS.md")
+   read_file("CONTRIBUTING.md")
+   
    # Also check module-specific rules if they exist
    read_file("src/auth/README.md")
    ```
