@@ -1,6 +1,6 @@
 {
-  "id": "bug-investigation",
-  "name": "Bug Investigation (Adaptive)",
+  "id": "bug-investigation-agentic",
+  "name": "Bug Investigation (Adaptive - Agentic)",
   "version": "3.0.0",
   "description": "Adaptive bug investigation workflow that adjusts rigor based on complexity assessed after Phase 0. Automatically chooses between QUICK (minimal delegation), STANDARD (sequential delegation), or THOROUGH (parallel delegation) modes.",
   "clarificationPrompts": [

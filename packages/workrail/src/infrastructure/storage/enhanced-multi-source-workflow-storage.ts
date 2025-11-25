@@ -438,23 +438,48 @@ export function createEnhancedMultiSourceWorkflowStorage(
     
     logger.debug('Using cache directory', { cacheBaseDir });
     
-    config.gitRepositories = gitReposJson.split(',').map((url, index) => {
-      const trimmedUrl = url.trim();
-      // Create unique cache path for each repo
-      const repoName = trimmedUrl.split('/').pop()?.replace(/\.git$/, '') || `repo-${index}`;
-      return {
-        repositoryUrl: trimmedUrl,
-        branch: 'main',
-        localPath: path.join(cacheBaseDir, `git-${index}-${repoName}`),
-        authToken: resolveAuthToken(trimmedUrl),
-        syncInterval: 60
-      };
-    });
+    const urls = gitReposJson.split(',').map(url => url.trim());
     
-    logger.info('Parsed Git repositories from comma-separated list', {
-      count: config.gitRepositories.length,
-      repos: config.gitRepositories.map(r => ({ url: r.repositoryUrl, branch: r.branch, path: r.localPath }))
-    });
+    // Separate local file:// URLs from actual Git URLs
+    const localFileUrls: string[] = [];
+    const actualGitUrls: string[] = [];
+    
+    for (const url of urls) {
+      if (url.startsWith('file://') || (!url.includes('://') && url.startsWith('/'))) {
+        localFileUrls.push(url);
+      } else {
+        actualGitUrls.push(url);
+      }
+    }
+    
+    // Add local file:// URLs as custom directory paths (no Git clone needed)
+    if (localFileUrls.length > 0) {
+      config.customPaths = config.customPaths || [];
+      for (const url of localFileUrls) {
+        const localPath = url.startsWith('file://') ? url.substring(7) : url;
+        config.customPaths.push(localPath);
+        logger.info('Using direct file access for local repository', { localPath });
+      }
+    }
+    
+    // Only add actual Git URLs to gitRepositories (these will be cloned)
+    if (actualGitUrls.length > 0) {
+      config.gitRepositories = actualGitUrls.map((url, index) => {
+        const repoName = url.split('/').pop()?.replace(/\.git$/, '') || `repo-${index}`;
+        return {
+          repositoryUrl: url,
+          branch: 'main',
+          localPath: path.join(cacheBaseDir, `git-${index}-${repoName}`),
+          authToken: resolveAuthToken(url),
+          syncInterval: 60
+        };
+      });
+      
+      logger.info('Parsed remote Git repositories from comma-separated list', {
+        count: config.gitRepositories.length,
+        repos: config.gitRepositories.map(r => ({ url: r.repositoryUrl, branch: r.branch, path: r.localPath }))
+      });
+    }
   }
 
   // Format 3: Single repository
