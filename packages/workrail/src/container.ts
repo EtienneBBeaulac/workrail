@@ -1,5 +1,6 @@
 import { createDefaultWorkflowStorage } from './infrastructure/storage/storage.js';
 import { DefaultWorkflowService, WorkflowService } from './application/services/workflow-service.js';
+import { createServiceContainer } from './infrastructure/di/service-container.js';
 import { ValidationEngine } from './application/services/validation-engine.js';
 import { IWorkflowStorage } from './types/storage.js';
 import { createWorkflowLookupServer } from './infrastructure/rpc/server.js';
@@ -35,8 +36,16 @@ export function createAppContainer(overrides: Partial<AppContainer> = {}): AppCo
   const storage = overrides.storage ?? createDefaultWorkflowStorage();
   const validationEngine = overrides.validationEngine ?? new ValidationEngine();
   const loopContextOptimizer = overrides.loopContextOptimizer ?? new LoopContextOptimizer();
+  
+  // Create service container for workflow service dependencies
+  const serviceContainer = createServiceContainer({ storage, validationEngine, loopContextOptimizer });
+  
   const workflowService =
-    overrides.workflowService ?? new DefaultWorkflowService(storage, validationEngine, loopContextOptimizer);
+    overrides.workflowService ?? new DefaultWorkflowService(
+      serviceContainer.storage,
+      serviceContainer.validationEngine,
+      serviceContainer.stepResolutionStrategy
+    );
   const server = overrides.server ?? createWorkflowLookupServer(workflowService);
 
   return {

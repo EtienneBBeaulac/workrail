@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, jest } from '@jest/globals';
-import { DefaultWorkflowService } from '../../src/application/services/workflow-service';
+import { createWorkflowService } from '../../src/application/services/workflow-service';
 import { IWorkflowStorage } from '../../src/types/storage';
 import { Workflow, WorkflowSummary } from '../../src/types/mcp-types';
 import { LoopStep } from '../../src/types/workflow-types';
@@ -57,7 +57,7 @@ const mockWorkflowWithAgentRole: Workflow = {
 };
 
 describe('DefaultWorkflowService', () => {
-  let service: DefaultWorkflowService;
+  let service: ReturnType<typeof createWorkflowService>;
   let mockStorage: jest.Mocked<IWorkflowStorage>;
 
   beforeEach(() => {
@@ -81,7 +81,7 @@ describe('DefaultWorkflowService', () => {
     mockStorage.listWorkflowSummaries.mockResolvedValue([]);
     mockStorage.loadAllWorkflows.mockResolvedValue([mockWorkflow, mockWorkflowWithAgentRole]);
     
-    service = new DefaultWorkflowService(mockStorage);
+    service = createWorkflowService(mockStorage);
     jest.clearAllMocks();
   });
 

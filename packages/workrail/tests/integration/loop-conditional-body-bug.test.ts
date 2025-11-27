@@ -1,15 +1,15 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { DefaultWorkflowService } from '../../src/application/services/workflow-service';
+import { createWorkflowService } from '../../src/application/services/workflow-service';
 import { InMemoryWorkflowStorage } from '../../src/infrastructure/storage/in-memory-storage';
 import { Workflow, LoopStep } from '../../src/types/workflow-types';
 
 describe('Loop with Conditional Body Steps Bug Fix', () => {
-  let service: DefaultWorkflowService;
+  let service: ReturnType<typeof createWorkflowService>;
   let storage: InMemoryWorkflowStorage;
 
   beforeEach(() => {
     storage = new InMemoryWorkflowStorage();
-    service = new DefaultWorkflowService(storage);
+    service = createWorkflowService(storage);
   });
 
   it('should advance loop iteration when only eligible body steps are completed', async () => {

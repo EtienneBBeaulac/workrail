@@ -66,31 +66,49 @@ class WorkflowOrchestrationServer {
   }
 
   private async callWorkflowMethod(method: string, params: any): Promise<CallToolResult> {
+    const startTime = Date.now();
+    const timeoutMs = 30000; // 30 second timeout
+    
     try {
       // Use the workflow service directly
       const { workflowService } = this.container;
       
-      let result;
-      switch (method) {
-        case 'workflow_list':
-          const workflows = await workflowService.listWorkflowSummaries();
-          result = { workflows };
-          break;
-        case 'workflow_get':
-          // Import and use the get workflow use case to handle mode parameter
-          const { createGetWorkflow } = await import('./application/use-cases/get-workflow.js');
-          const getWorkflowUseCase = createGetWorkflow(workflowService);
-          result = await getWorkflowUseCase(params.id, params.mode);
-          break;
-        case 'workflow_next':
-          result = await workflowService.getNextStep(params.workflowId, params.completedSteps || [], params.context);
-          break;
-        case 'workflow_validate':
-          result = await workflowService.validateStepOutput(params.workflowId, params.stepId, params.output);
-          break;
-        default:
-          throw new Error(`Unknown method: ${method}`);
-      }
+      // Create a timeout promise
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => {
+          reject(new Error(`Workflow method '${method}' timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      });
+      
+      // Race the actual operation against the timeout
+      const operationPromise = (async () => {
+        let result;
+        switch (method) {
+          case 'workflow_list':
+            const workflows = await workflowService.listWorkflowSummaries();
+            result = { workflows };
+            break;
+          case 'workflow_get':
+            // Import and use the get workflow use case to handle mode parameter
+            const { createGetWorkflow } = await import('./application/use-cases/get-workflow.js');
+            const getWorkflowUseCase = createGetWorkflow(workflowService);
+            result = await getWorkflowUseCase(params.id, params.mode);
+            break;
+          case 'workflow_next':
+            console.error(`[workflow_next] Starting with workflowId=${params.workflowId}, completedSteps=${JSON.stringify(params.completedSteps)}, contextKeys=${Object.keys(params.context || {})}`);
+            result = await workflowService.getNextStep(params.workflowId, params.completedSteps || [], params.context);
+            console.error(`[workflow_next] Completed in ${Date.now() - startTime}ms, returned step=${result.step?.id || 'null'}`);
+            break;
+          case 'workflow_validate':
+            result = await workflowService.validateStepOutput(params.workflowId, params.stepId, params.output);
+            break;
+          default:
+            throw new Error(`Unknown method: ${method}`);
+        }
+        return result;
+      })();
+      
+      const result = await Promise.race([operationPromise, timeoutPromise]);
       
       return {
         content: [{
@@ -99,7 +117,8 @@ class WorkflowOrchestrationServer {
         }]
       };
     } catch (error) {
-      console.error(`Workflow method ${method} failed:`, error);
+      const elapsed = Date.now() - startTime;
+      console.error(`Workflow method ${method} failed after ${elapsed}ms:`, error);
       
       return {
         content: [{
@@ -107,7 +126,8 @@ class WorkflowOrchestrationServer {
           text: JSON.stringify({
             error: error instanceof Error ? error.message : String(error),
             method,
-            params
+            params,
+            elapsedMs: elapsed
           }, null, 2)
         }],
         isError: true

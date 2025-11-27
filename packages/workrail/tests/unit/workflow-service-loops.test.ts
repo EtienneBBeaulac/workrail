@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach, jest } from '@jest/globals';
-import { DefaultWorkflowService } from '../../src/application/services/workflow-service';
+import { createWorkflowService } from '../../src/application/services/workflow-service';
 import { IWorkflowStorage } from '../../src/types/storage';
 import { Workflow } from '../../src/types/mcp-types';
 import { LoopStep } from '../../src/types/workflow-types';
 
 describe('WorkflowService - Loop Recognition', () => {
   let mockStorage: jest.Mocked<IWorkflowStorage>;
-  let service: DefaultWorkflowService;
+  let service: ReturnType<typeof createWorkflowService>;
 
   const mockWorkflowWithLoop: Workflow = {
     id: 'test-workflow-loop',
@@ -54,7 +54,7 @@ describe('WorkflowService - Loop Recognition', () => {
       getStorageInfo: jest.fn()
     } as unknown as jest.Mocked<IWorkflowStorage>;
 
-    service = new DefaultWorkflowService(mockStorage);
+    service = createWorkflowService(mockStorage);
   });
 
   describe('Loop Step Recognition', () => {

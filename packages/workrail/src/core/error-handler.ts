@@ -97,6 +97,54 @@ export class SecurityError extends MCPError {
 }
 
 // =============================================================================
+// LOOP STACK ERROR CLASSES (NEW - for explicit loop stack implementation)
+// =============================================================================
+
+/**
+ * Thrown when loop stack gets into an invalid state.
+ * Indicates corruption in the loop execution stack.
+ */
+export class LoopStackCorruptionError extends Error {
+  constructor(message: string, public readonly details?: any) {
+    super(message);
+    this.name = 'LoopStackCorruptionError';
+  }
+}
+
+/**
+ * Thrown when a loop has no body steps.
+ * This should be caught during workflow validation but serves as runtime safety.
+ */
+export class EmptyLoopBodyError extends Error {
+  constructor(message: string, public readonly details?: any) {
+    super(message);
+    this.name = 'EmptyLoopBodyError';
+  }
+}
+
+/**
+ * Thrown when loop body step references cannot be resolved.
+ * Indicates the body references a step ID that doesn't exist.
+ */
+export class LoopBodyResolutionError extends Error {
+  constructor(message: string, public readonly details?: any) {
+    super(message);
+    this.name = 'LoopBodyResolutionError';
+  }
+}
+
+/**
+ * Thrown when workflow execution exceeds maximum iteration count.
+ * Indicates an infinite loop or logic error in the workflow.
+ */
+export class MaxIterationsExceededError extends Error {
+  constructor(message: string, public readonly details?: any) {
+    super(message);
+    this.name = 'MaxIterationsExceededError';
+  }
+}
+
+// =============================================================================
 // ERROR HANDLER CLASS
 // =============================================================================
 

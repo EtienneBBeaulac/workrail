@@ -1,15 +1,15 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { DefaultWorkflowService } from '../../src/application/services/workflow-service';
+import { createWorkflowService } from '../../src/application/services/workflow-service';
 import { InMemoryWorkflowStorage } from '../../src/infrastructure/storage/in-memory-storage';
 import { Workflow, LoopStep } from '../../src/types/workflow-types';
 
 describe('Loop runCondition Bug - Body Steps with Iteration Variable', () => {
-  let service: DefaultWorkflowService;
+  let service: ReturnType<typeof createWorkflowService>;
   let storage: InMemoryWorkflowStorage;
 
   beforeEach(() => {
     storage = new InMemoryWorkflowStorage();
-    service = new DefaultWorkflowService(storage);
+    service = createWorkflowService(storage);
   });
 
   it('should inject loop variables BEFORE evaluating body step runConditions', async () => {

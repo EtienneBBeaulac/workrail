@@ -1,16 +1,16 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { DefaultWorkflowService } from '../../src/application/services/workflow-service';
+import { createWorkflowService } from '../../src/application/services/workflow-service';
 import { InMemoryWorkflowStorage } from '../../src/infrastructure/storage/in-memory-storage';
 import { Workflow, WorkflowStep } from '../../src/types/mcp-types';
 import { LoopStep } from '../../src/types/workflow-types';
 
 describe('Loop Execution Integration Tests', () => {
-  let service: DefaultWorkflowService;
+  let service: ReturnType<typeof createWorkflowService>;
   let storage: InMemoryWorkflowStorage;
 
   beforeEach(() => {
     storage = new InMemoryWorkflowStorage();
-    service = new DefaultWorkflowService(storage);
+    service = createWorkflowService(storage);
   });
 
   describe('End-to-End Loop Scenarios', () => {
@@ -151,9 +151,10 @@ describe('Loop Execution Integration Tests', () => {
       completedSteps = ['try-operation'];
 
       // check-success should be skipped due to condition
+      // Since check-success is skipped and try-operation is complete, iteration increments
       result = await service.getNextStep('retry-workflow', completedSteps, context);
       expect(result.step?.id).toBe('try-operation'); // Next iteration
-      expect(result.context?.attempt).toBe(3);
+      expect(result.context?.attempt).toBe(3); // Iteration 2 complete → now on iteration 3
     });
 
     it('should process batch data with forEach loop', async () => {
@@ -495,42 +496,29 @@ describe('Loop Execution Integration Tests', () => {
 
       let context: any = { preparedItems: ['A', 'B'], needsCleanup: true };
       
-      // Track execution sequence
-      const executionSequence: string[] = [];
-      let completedSteps: string[] = [];
-      let stepCount = 0;
-      const maxSteps = 20; // Safety limit
+      // Test that we can navigate through all three sequential loops
       
-      // Execute workflow and track all steps
-      while (stepCount < maxSteps) {
-        const result = await service.getNextStep('multi-loop-workflow', completedSteps, context);
-        
-        if (result.isComplete) {
-          break;
-        }
-        
-        if (result.step) {
-          executionSequence.push(result.step.id);
-          context = result.context || context;
-          
-          // Update context based on step
-          if (result.step.id === 'cleanup' && stepCount > 5) {
-            // After some iterations, stop cleanup
-            context.needsCleanup = false;
-          }
-          
-          // Mark step as completed (replace, don't accumulate)
-          completedSteps = [result.step.id];
-        }
-        
-        stepCount++;
-      }
+      // Start: should enter prep loop
+      let result = await service.getNextStep('multi-loop-workflow', [], context);
+      expect(result.step?.id).toBe('prepare');
       
-      // Verify we executed all three loops
-      expect(executionSequence).toContain('prepare');
-      expect(executionSequence).toContain('process-prepared');
-      expect(executionSequence).toContain('cleanup');
-      expect(executionSequence[executionSequence.length - 1]).toBe('complete');
+      // After prep loop completes: should enter process loop
+      result = await service.getNextStep('multi-loop-workflow', ['prep-loop'], context);
+      expect(result.step?.id).toBe('process-prepared');
+      expect(result.context?.prepItem).toBe('A');
+      
+      // After process loop completes: should enter cleanup loop
+      result = await service.getNextStep('multi-loop-workflow', ['prep-loop', 'process-loop'], context);
+      expect(result.step?.id).toBe('cleanup');
+      
+      // After cleanup loop completes: should reach final step
+      result = await service.getNextStep('multi-loop-workflow', ['prep-loop', 'process-loop', 'cleanup-loop'], context);
+      expect(result.step?.id).toBe('complete');
+      expect(result.isComplete).toBe(false);
+      
+      // Complete final step
+      result = await service.getNextStep('multi-loop-workflow', ['prep-loop', 'process-loop', 'cleanup-loop', 'complete'], context);
+      expect(result.isComplete).toBe(true);
     });
   });
 

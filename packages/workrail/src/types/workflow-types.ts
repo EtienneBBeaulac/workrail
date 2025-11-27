@@ -64,6 +64,7 @@ export interface LoopState {
 // Enhanced context for loops
 export interface EnhancedContext extends ConditionContext {
   _loopState?: LoopState;
+  _loopStack?: LoopStackFrame[]; // ✅ NEW: Explicit loop stack
   _warnings?: {
     loops?: {
       [loopId: string]: string[];
@@ -74,6 +75,83 @@ export interface EnhancedContext extends ConditionContext {
     loopId: string;
     loopStep: LoopStep;
   };
+}
+
+/**
+ * Loop execution states for structured logging and observability.
+ * These states are implicit in the code flow but logged explicitly for debugging.
+ * 
+ * Enable state logging with: WORKRAIL_LOG_LEVEL=DEBUG
+ */
+export enum LoopExecutionState {
+  // Main execution states (in getNextStepIterative)
+  RECOVERING_LOOP_STATE = 'RECOVERING_LOOP_STATE',
+  IN_LOOP = 'IN_LOOP',
+  FINDING_NEXT_STEP = 'FINDING_NEXT_STEP',
+  ENTERING_LOOP = 'ENTERING_LOOP',
+  RETURNING_STEP = 'RETURNING_STEP',
+  WORKFLOW_COMPLETE = 'WORKFLOW_COMPLETE',
+  
+  // Loop handling states (in handleCurrentLoop)
+  CHECKING_LOOP_CONDITION = 'CHECKING_LOOP_CONDITION',
+  SCANNING_BODY = 'SCANNING_BODY',
+  CHECKING_ELIGIBILITY = 'CHECKING_ELIGIBILITY',
+  RETURNING_BODY_STEP = 'RETURNING_BODY_STEP',
+  VALIDATING_ITERATION_COMPLETE = 'VALIDATING_ITERATION_COMPLETE',
+  INCREMENTING_ITERATION = 'INCREMENTING_ITERATION'
+}
+
+/**
+ * Represents a single frame in the loop execution stack.
+ * Each frame tracks the state of an active loop.
+ * 
+ * The loop stack is maintained in EnhancedContext._loopStack to keep
+ * the WorkflowService stateless and concurrency-safe.
+ */
+export interface LoopStackFrame {
+  /** Unique identifier of the loop */
+  readonly loopId: string;
+  
+  /** The loop step definition */
+  readonly loopStep: LoopStep;
+  
+  /** Execution context for this loop (tracks iteration, evaluates conditions) */
+  readonly loopContext: any; // LoopExecutionContext - avoid circular dependency
+  
+  /** Body steps normalized to array (even for single-step bodies) */
+  readonly bodySteps: ReadonlyArray<WorkflowStep>;
+  
+  /** Current position in body steps array (0-based, mutable) */
+  currentBodyIndex: number;
+}
+
+/**
+ * Result type for loop handling operations.
+ * Uses discriminated union for type-safe handling.
+ */
+export type LoopHandlerResult =
+  | { type: 'step'; result: any } // StepResult - avoid circular dependency
+  | { type: 'continue' }
+  | { type: 'complete' };
+
+/**
+ * Type guard to validate LoopStackFrame structure.
+ * Used for runtime invariant checking.
+ */
+export function isValidLoopStackFrame(frame: any): frame is LoopStackFrame {
+  return (
+    frame &&
+    typeof frame.loopId === 'string' &&
+    frame.loopStep &&
+    typeof frame.loopStep === 'object' &&
+    frame.loopContext &&
+    typeof frame.loopContext === 'object' &&
+    Array.isArray(frame.bodySteps) &&
+    frame.bodySteps.length > 0 &&
+    typeof frame.currentBodyIndex === 'number' &&
+    frame.currentBodyIndex >= 0 &&
+    frame.currentBodyIndex <= frame.bodySteps.length
+  );
 }
 
 // Optimized context for loops with progressive disclosure

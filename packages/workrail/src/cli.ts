@@ -7,6 +7,7 @@ import chalk from 'chalk';
 import os from 'os';
 import { createWorkflowLookupServer } from './infrastructure/rpc/server';
 import { DefaultWorkflowService } from './application/services/workflow-service';
+import { createServiceContainer } from './infrastructure/di/service-container';
 // import { createDefaultWorkflowStorage } from './infrastructure/storage';
 import { ValidationEngine } from './application/services/validation-engine';
 import { Workflow } from './types/workflow-types';
@@ -56,7 +57,12 @@ program
       console.log(chalk.blue('📋 Available workflows:'));
       console.log();
       
-      const workflowService = new DefaultWorkflowService();
+      const container = createServiceContainer();
+      const workflowService = new DefaultWorkflowService(
+        container.storage,
+        container.validationEngine,
+        container.stepResolutionStrategy
+      );
       const workflows = await workflowService.listWorkflowSummaries();
       
       if (workflows.length === 0) {
@@ -287,7 +293,12 @@ program
     try {
       console.log(chalk.blue('🚀 Starting WorkRail MCP server...'));
       
-      const workflowService = new DefaultWorkflowService();
+      const container = createServiceContainer();
+      const workflowService = new DefaultWorkflowService(
+        container.storage,
+        container.validationEngine,
+        container.stepResolutionStrategy
+      );
       const server = createWorkflowLookupServer(workflowService);
       
       await server.start();
