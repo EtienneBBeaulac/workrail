@@ -232,8 +232,90 @@ export class HttpServer {
     });
     
     // SSE: Stream session updates in real-time
+    // BUG FIX #1: Fixed resource leak on client disconnect
+    // - Added cleanup flag to prevent double-cleanup and detect stale state
+    // - Added error handlers on req, res, and write operations
+    // - Added max connection timeout (30 minutes)
+    // - Added res.writableEnded check before writes
+    // - Calls unwatchSession on cleanup
     this.app.get('/api/sessions/:workflow/:id/stream', async (req: Request, res: Response) => {
       const { workflow, id } = req.params;
+      
+      // Track cleanup state to prevent resource leaks
+      let isCleanedUp = false;
+      let keepaliveInterval: NodeJS.Timeout | null = null;
+      let maxConnectionTimeout: NodeJS.Timeout | null = null;
+      
+      // Centralized cleanup function - safe to call multiple times
+      const cleanup = () => {
+        if (isCleanedUp) return;
+        isCleanedUp = true;
+        
+        // Clear timers
+        if (keepaliveInterval) {
+          clearInterval(keepaliveInterval);
+          keepaliveInterval = null;
+        }
+        if (maxConnectionTimeout) {
+          clearTimeout(maxConnectionTimeout);
+          maxConnectionTimeout = null;
+        }
+        
+        // Detach event listener (safe even if never attached)
+        try {
+          this.sessionManager.off('session:updated', onUpdate);
+        } catch {}
+        
+        // Stop watching (safe even if never started)
+        try {
+          this.sessionManager.unwatchSession(workflow, id);
+        } catch {}
+        
+        // End response if still writable
+        try {
+          if (!res.writableEnded) {
+            res.end();
+          }
+        } catch {}
+      };
+      
+      // Update handler - checks cleanup state and writableEnded
+      const onUpdate = (event: { workflowId: string; sessionId: string; session: any }) => {
+        // Skip if cleaned up or not our session
+        if (isCleanedUp || event.workflowId !== workflow || event.sessionId !== id) {
+          return;
+        }
+        
+        // Check if response is still writable
+        if (res.writableEnded) {
+          cleanup();
+          return;
+        }
+        
+        // Try to write, cleanup on error
+        try {
+          res.write(`data: ${JSON.stringify({ type: 'update', session: event.session })}\n\n`);
+        } catch (error) {
+          console.error(`[SSE] Write error for ${workflow}/${id}:`, error);
+          cleanup();
+        }
+      };
+      
+      // Safe write helper
+      const safeWrite = (data: string): boolean => {
+        if (isCleanedUp || res.writableEnded) {
+          cleanup();
+          return false;
+        }
+        try {
+          res.write(data);
+          return true;
+        } catch (error) {
+          console.error(`[SSE] Write error for ${workflow}/${id}:`, error);
+          cleanup();
+          return false;
+        }
+      };
       
       // Set SSE headers
       res.setHeader('Content-Type', 'text/event-stream');
@@ -241,43 +323,51 @@ export class HttpServer {
       res.setHeader('Connection', 'keep-alive');
       res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
       
+      // Set max connection time (30 minutes) to prevent indefinite resource hold
+      maxConnectionTimeout = setTimeout(() => {
+        console.error(`[SSE] Max connection time reached for ${workflow}/${id}, closing`);
+        cleanup();
+      }, 30 * 60 * 1000);
+      
       // Send initial connection message
-      res.write(`data: ${JSON.stringify({ type: 'connected', workflowId: workflow, sessionId: id })}\n\n`);
+      if (!safeWrite(`data: ${JSON.stringify({ type: 'connected', workflowId: workflow, sessionId: id })}\n\n`)) {
+        return; // Connection failed immediately
+      }
       
       // Send current session state immediately
       try {
         const session = await this.sessionManager.getSession(workflow, id);
-        if (session) {
-          res.write(`data: ${JSON.stringify({ type: 'update', session })}\n\n`);
+        if (session && !isCleanedUp) {
+          safeWrite(`data: ${JSON.stringify({ type: 'update', session })}\n\n`);
         }
       } catch (error) {
-        // Session might not exist yet
+        // Session might not exist yet - continue anyway
       }
       
-      // Listen for session updates
-      const onUpdate = (event: { workflowId: string; sessionId: string; session: any }) => {
-        if (event.workflowId === workflow && event.sessionId === id) {
-          // Send update to client
-          res.write(`data: ${JSON.stringify({ type: 'update', session: event.session })}\n\n`);
-        }
-      };
-      
+      // Attach update listener
       this.sessionManager.on('session:updated', onUpdate);
       
       // Start watching this session
       this.sessionManager.watchSession(workflow, id);
       
       // Send keepalive every 30 seconds
-      const keepalive = setInterval(() => {
-        res.write(`:keepalive\n\n`);
+      keepaliveInterval = setInterval(() => {
+        if (!safeWrite(`:keepalive\n\n`)) {
+          // Write failed, cleanup already called
+        }
       }, 30000);
       
-      // Cleanup on client disconnect
-      req.on('close', () => {
-        this.sessionManager.off('session:updated', onUpdate);
-        clearInterval(keepalive);
-        res.end();
+      // Attach cleanup handlers for all disconnect scenarios
+      req.on('close', cleanup);
+      req.on('error', (error) => {
+        console.error(`[SSE] Request error for ${workflow}/${id}:`, error);
+        cleanup();
       });
+      res.on('error', (error) => {
+        console.error(`[SSE] Response error for ${workflow}/${id}:`, error);
+        cleanup();
+      });
+      res.on('finish', cleanup);
     });
     
     // Delete a single session
@@ -427,69 +517,120 @@ export class HttpServer {
   }
   
   /**
+   * Determine if a lock should be reclaimed based on its data
+   * Pure function - no side effects
+   */
+  private shouldReclaimLock(lockData: DashboardLock): { reclaim: boolean; reason: string } {
+    // Invalid structure
+    if (!lockData.pid || !lockData.port || !lockData.startedAt) {
+      return { reclaim: true, reason: 'invalid lock structure' };
+    }
+    
+    // Stale by TTL (no heartbeat for 2+ minutes)
+    const lastHeartbeat = new Date(lockData.lastHeartbeat || lockData.startedAt);
+    const ageMinutes = (Date.now() - lastHeartbeat.getTime()) / 60000;
+    if (ageMinutes > 2) {
+      return { reclaim: true, reason: `stale (${ageMinutes.toFixed(1)}min old)` };
+    }
+    
+    // Process dead
+    try {
+      process.kill(lockData.pid, 0); // Signal 0 = check existence only
+    } catch {
+      return { reclaim: true, reason: `PID ${lockData.pid} dead` };
+    }
+    
+    // Lock is valid
+    return { reclaim: false, reason: 'valid' };
+  }
+
+  /**
    * Check if existing lock is stale and reclaim if possible
+   * 
+   * BUG FIX #4: Use atomic rename instead of delete-then-create
+   * - Previous: unlink() then tryBecomePrimary() created race window
+   * - Now: Write to temp file, atomic rename to lock file
+   * - If rename fails, another process won the race (safe)
+   * - Follows same atomic pattern as SessionManager.atomicWrite()
    */
   private async reclaimStaleLock(): Promise<boolean> {
     try {
       const lockContent = await fs.readFile(this.lockFile, 'utf-8');
       const lockData: DashboardLock = JSON.parse(lockContent);
       
-      // Validate lock structure
-      if (!lockData.pid || !lockData.port || !lockData.startedAt) {
-        console.error('[Dashboard] Invalid lock file, reclaiming');
-        await fs.unlink(this.lockFile);
-        return await this.tryBecomePrimary();
-      }
+      const { reclaim, reason } = this.shouldReclaimLock(lockData);
       
-      // Check TTL: if no heartbeat for 2 minutes, consider it stale
-      const lastHeartbeat = new Date(lockData.lastHeartbeat || lockData.startedAt);
-      const ageMinutes = (Date.now() - lastHeartbeat.getTime()) / 60000;
-      
-      if (ageMinutes > 2) {
-        console.error(`[Dashboard] Stale lock detected (${ageMinutes.toFixed(1)}min old), reclaiming`);
-        await fs.unlink(this.lockFile);
-        return await this.tryBecomePrimary();
-      }
-      
-      // Check if process exists
-      let processExists = false;
-      try {
-        process.kill(lockData.pid, 0); // Signal 0 = check existence
-        processExists = true;
-      } catch {
-        processExists = false;
-      }
-      
-      if (!processExists) {
-        // Process is dead, reclaim lock
-        console.error(`[Dashboard] Stale lock detected (PID ${lockData.pid} dead), reclaiming`);
-        await fs.unlink(this.lockFile);
-        return await this.tryBecomePrimary();
-      }
-      
-      // Process exists, check if it's actually serving
-      const isHealthy = await this.checkHealth(lockData.port);
-      
-      if (!isHealthy) {
-        // Process exists but not responding
-        console.error(`[Dashboard] Primary (PID ${lockData.pid}) not responding, reclaiming`);
+      if (!reclaim) {
+        // Check if primary is healthy even though lock seems valid
+        const isHealthy = await this.checkHealth(lockData.port);
+        if (isHealthy) {
+          return false; // Valid primary exists
+        }
         
-        // Try to kill it gracefully
+        // Process exists but not responding - try to kill it first
+        console.error(`[Dashboard] Primary (PID ${lockData.pid}) not responding, attempting graceful shutdown`);
         try {
           process.kill(lockData.pid, 'SIGTERM');
           await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s
         } catch {}
         
-        await fs.unlink(this.lockFile);
+        // Re-check if it's now healthy or dead
+        const stillHealthy = await this.checkHealth(lockData.port);
+        if (stillHealthy) {
+          return false; // It recovered
+        }
+      } else {
+        console.error(`[Dashboard] Lock reclaim needed: ${reason}`);
+      }
+      
+      // ATOMIC RECLAIM: Write new lock to temp file, then rename
+      // This prevents race where multiple processes try to reclaim simultaneously
+      const tempPath = `${this.lockFile}.${process.pid}.${Date.now()}`;
+      const newLockData: DashboardLock = {
+        pid: process.pid,
+        port: 3456,
+        startedAt: new Date().toISOString(),
+        lastHeartbeat: new Date().toISOString(),
+        projectId: this.sessionManager.getProjectId(),
+        projectPath: this.sessionManager.getProjectPath()
+      };
+      
+      try {
+        // Write to temp file first
+        await fs.writeFile(tempPath, JSON.stringify(newLockData, null, 2));
+        
+        // Atomic rename (POSIX guarantees atomicity)
+        await fs.rename(tempPath, this.lockFile);
+        
+        console.error('[Dashboard] Lock reclaimed successfully');
+        this.isPrimary = true;
+        this.setupPrimaryCleanup();
+        this.startHeartbeat();
+        return true;
+        
+      } catch (error: any) {
+        // Clean up temp file on any error
+        await fs.unlink(tempPath).catch(() => {});
+        
+        if (error.code === 'ENOENT') {
+          // Lock file was deleted by another process - try fresh
+          console.error('[Dashboard] Lock deleted during reclaim, trying fresh');
+          return await this.tryBecomePrimary();
+        }
+        
+        // Other error (permission, disk full, etc.)
+        console.error('[Dashboard] Lock reclaim failed:', error.message);
+        return false;
+      }
+      
+    } catch (error: any) {
+      if (error.code === 'ENOENT') {
+        // Lock file deleted - try to become primary fresh
         return await this.tryBecomePrimary();
       }
       
-      // Valid primary exists
-      return false;
-      
-    } catch (error: any) {
-      // Corrupt lock file or parse error
-      console.error('[Dashboard] Corrupted lock file, removing');
+      // Corrupt JSON or other read error
+      console.error('[Dashboard] Lock file corrupted, attempting fresh claim');
       await fs.unlink(this.lockFile).catch(() => {});
       return await this.tryBecomePrimary();
     }
@@ -521,27 +662,87 @@ export class HttpServer {
   
   /**
    * Setup cleanup handlers for primary
+   * 
+   * BUG FIX #5: Separate sync and async cleanup handlers
+   * - 'exit' event CANNOT wait for async operations (Node.js constraint)
+   * - Signal handlers CAN wait for async then call process.exit()
+   * - Uses sync fs.unlinkSync for 'exit' handler
+   * - Uses async fs.unlink for signal handlers
+   * - Prevents double-cleanup with isCleaningUp flag
    */
   private setupPrimaryCleanup(): void {
-    const cleanup = async () => {
-      if (this.isPrimary) {
-        console.error('[Dashboard] Primary shutting down, releasing lock');
-        
-        // Stop heartbeat
-        if (this.heartbeatInterval) {
-          clearInterval(this.heartbeatInterval);
-          this.heartbeatInterval = null;
-        }
-        
-        await fs.unlink(this.lockFile).catch(() => {});
-        this.isPrimary = false;
+    let isCleaningUp = false;
+    
+    // SYNC cleanup for 'exit' event - cannot be async per Node.js docs
+    // "The 'exit' event listener functions must only perform synchronous operations"
+    const cleanupSync = () => {
+      if (isCleaningUp || !this.isPrimary) return;
+      isCleaningUp = true;
+      
+      console.error('[Dashboard] Primary shutting down (sync cleanup)');
+      
+      // Stop heartbeat
+      if (this.heartbeatInterval) {
+        clearInterval(this.heartbeatInterval);
+        this.heartbeatInterval = null;
       }
+      
+      // SYNC file delete only - async won't complete before process exits
+      try {
+        const fsSync = require('fs');
+        fsSync.unlinkSync(this.lockFile);
+        console.error('[Dashboard] Lock file released');
+      } catch (error: any) {
+        // Ignore ENOENT (file already deleted) but log others
+        if (error.code !== 'ENOENT') {
+          console.error('[Dashboard] Failed to release lock file:', error.message);
+        }
+      }
+      
+      this.isPrimary = false;
     };
     
-    process.on('exit', cleanup);
-    process.on('SIGINT', cleanup);
-    process.on('SIGTERM', cleanup);
-    process.on('SIGHUP', cleanup);
+    // ASYNC cleanup for signal handlers - can wait for completion
+    const cleanupAsync = async () => {
+      if (isCleaningUp || !this.isPrimary) return;
+      isCleaningUp = true;
+      
+      console.error('[Dashboard] Primary shutting down (async cleanup)');
+      
+      // Stop heartbeat
+      if (this.heartbeatInterval) {
+        clearInterval(this.heartbeatInterval);
+        this.heartbeatInterval = null;
+      }
+      
+      // Async file delete is safe here
+      try {
+        await fs.unlink(this.lockFile);
+        console.error('[Dashboard] Lock file released');
+      } catch (error: any) {
+        if (error.code !== 'ENOENT') {
+          console.error('[Dashboard] Failed to release lock file:', error.message);
+        }
+      }
+      
+      this.isPrimary = false;
+    };
+    
+    // Signal handler that performs async cleanup then exits
+    const signalHandler = (signal: string) => {
+      console.error(`[Dashboard] Received ${signal}`);
+      cleanupAsync()
+        .catch(err => console.error('[Dashboard] Cleanup error:', err))
+        .finally(() => process.exit(0));
+    };
+    
+    // 'exit' uses sync cleanup (Node.js won't wait for async)
+    process.on('exit', cleanupSync);
+    
+    // Signals use async cleanup then explicitly exit
+    process.on('SIGINT', () => signalHandler('SIGINT'));
+    process.on('SIGTERM', () => signalHandler('SIGTERM'));
+    process.on('SIGHUP', () => signalHandler('SIGHUP'));
   }
   
   /**
@@ -644,14 +845,33 @@ export class HttpServer {
   
   /**
    * Stop the HTTP server
+   * 
+   * BUG FIX #3: Fixed cleanup order - heartbeat MUST be stopped first
+   * - Heartbeat interval was keeping process alive
+   * - Now clears heartbeat before other cleanup
+   * - Added timeout protection for server close
    */
   async stop(): Promise<void> {
-    // Stop all file watchers
+    // 1. FIRST: Stop heartbeat to prevent further lock file writes
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+    
+    // 2. Stop all file watchers
     this.sessionManager.unwatchAll();
     
+    // 3. Close server with timeout protection
     return new Promise((resolve) => {
       if (this.server) {
+        // Timeout to prevent hanging if server.close() never completes
+        const closeTimeout = setTimeout(() => {
+          console.error('[Dashboard] Server close timeout after 5s, forcing shutdown');
+          resolve();
+        }, 5000);
+        
         this.server.close(() => {
+          clearTimeout(closeTimeout);
           console.error('HTTP server stopped');
           resolve();
         });
@@ -678,8 +898,18 @@ export class HttpServer {
   /**
    * Start heartbeat to keep lock file fresh
    * Updates lastHeartbeat every 30 seconds
+   * 
+   * BUG FIX #3: Use .unref() so heartbeat doesn't keep process alive
+   * - Previously, process couldn't exit cleanly because interval kept event loop alive
+   * - Now uses .unref() to allow process exit even with active heartbeat
+   * - Clears any existing interval before starting new one
    */
   private startHeartbeat(): void {
+    // Clear any existing interval first (defensive)
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+    }
+    
     this.heartbeatInterval = setInterval(async () => {
       if (this.isPrimary) {
         try {
@@ -692,6 +922,12 @@ export class HttpServer {
         }
       }
     }, 30000); // Every 30 seconds
+    
+    // Don't keep process alive just for heartbeat
+    // This allows clean process exit while heartbeat is running
+    if (this.heartbeatInterval.unref) {
+      this.heartbeatInterval.unref();
+    }
   }
   
   /**

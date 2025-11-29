@@ -580,6 +580,12 @@ export class SessionManager extends EventEmitter {
   /**
    * Watch a session file for changes
    * Emits 'session:updated' event when the file changes
+   * 
+   * BUG FIX #6: Added proper error handling for file watcher
+   * - Tracks consecutive error count
+   * - Closes watcher after MAX_ERRORS to prevent resource leak
+   * - Logs errors for visibility (except EBUSY which is expected)
+   * - Adds watcher.on('error') handler
    */
   watchSession(workflowId: string, sessionId: string): void {
     const sessionPath = this.getSessionPath(workflowId, sessionId);
@@ -590,11 +596,20 @@ export class SessionManager extends EventEmitter {
       return;
     }
     
+    const MAX_CONSECUTIVE_ERRORS = 5;
+    let consecutiveErrorCount = 0;
+    let debounceTimer: NodeJS.Timeout | null = null;
+    
     try {
       const watcher = fsSync.watch(sessionPath, (eventType) => {
         if (eventType === 'change') {
           // Debounce: file might be written in chunks
-          setTimeout(async () => {
+          if (debounceTimer) {
+            clearTimeout(debounceTimer);
+          }
+          
+          debounceTimer = setTimeout(async () => {
+            debounceTimer = null;
             try {
               const session = await this.getSession(workflowId, sessionId);
               if (session) {
@@ -604,16 +619,42 @@ export class SessionManager extends EventEmitter {
                   session
                 });
               }
-            } catch (error) {
-              // File might be mid-write, ignore errors
+              // Reset error count on success
+              consecutiveErrorCount = 0;
+            } catch (error: any) {
+              // Only ignore EBUSY (file being written) - this is expected
+              if (error.code === 'EBUSY') {
+                return;
+              }
+              
+              consecutiveErrorCount++;
+              console.error(
+                `[SessionManager] Watch error for ${watchKey} (${consecutiveErrorCount}/${MAX_CONSECUTIVE_ERRORS}):`,
+                error.message || error
+              );
+              
+              // Close watcher after too many consecutive errors to prevent resource leak
+              if (consecutiveErrorCount >= MAX_CONSECUTIVE_ERRORS) {
+                console.error(`[SessionManager] Too many errors, closing watcher for ${watchKey}`);
+                this.unwatchSession(workflowId, sessionId);
+              }
             }
           }, 100);
         }
       });
       
+      // Handle watcher-level errors (e.g., file deleted, permissions changed)
+      watcher.on('error', (error) => {
+        console.error(`[SessionManager] Watcher error for ${watchKey}:`, error);
+        this.unwatchSession(workflowId, sessionId);
+      });
+      
       this.watchers.set(watchKey, watcher);
-    } catch (error) {
-      // File might not exist yet, that's okay
+    } catch (error: any) {
+      // Only log if not ENOENT (file doesn't exist yet is expected)
+      if (error.code !== 'ENOENT') {
+        console.error(`[SessionManager] Failed to start watcher for ${watchKey}:`, error.message || error);
+      }
     }
   }
   

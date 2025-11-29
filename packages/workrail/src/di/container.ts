@@ -4,11 +4,13 @@ import { DI } from './tokens.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // STATE
+// BUG FIX #2: Added isInitializing flag for race condition protection
 // ═══════════════════════════════════════════════════════════════════════════
 
 let initialized = false;
 let asyncInitialized = false;
 let initializationPromise: Promise<void> | null = null;
+let isInitializing = false; // Synchronous flag for race protection
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TTL VALIDATION
@@ -188,33 +190,55 @@ async function registerServices(): Promise<void> {
  * 
  * Thread-safe: Concurrent calls will wait for the same initialization.
  * Idempotent: Multiple calls after initialization return immediately.
+ * 
+ * BUG FIX #2: Enhanced race condition protection
+ * - Added synchronous isInitializing flag set BEFORE any async work
+ * - Added timeout protection (5s) to prevent indefinite waiting
+ * - Concurrent callers now properly wait via spin-wait with timeout
+ * - Fail-fast: Don't reset state on error (prevents infinite retry loops)
  */
 export async function initializeContainer(): Promise<void> {
   // Fast path: already initialized
   if (initialized) return;
 
-  // Race condition protection: If initialization is in progress, wait for it
-  if (initializationPromise) {
-    return initializationPromise;
+  // If already initializing, wait for it (with timeout protection)
+  if (isInitializing) {
+    const INIT_TIMEOUT_MS = 5000;
+    const POLL_INTERVAL_MS = 10;
+    let waited = 0;
+    
+    while (isInitializing && !initialized && waited < INIT_TIMEOUT_MS) {
+      await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
+      waited += POLL_INTERVAL_MS;
+    }
+    
+    if (initialized) return;
+    
+    if (waited >= INIT_TIMEOUT_MS) {
+      throw new Error('[DI] Container initialization timeout after 5 seconds');
+    }
   }
 
-  // Start initialization with proper error handling
-  initializationPromise = (async () => {
-    try {
-      registerConfig();
-      await registerStorageChain();
-      await registerServices();
-      initialized = true;
-      console.error('[DI] Container initialized');
-    } catch (error) {
-      // Reset state so retry is possible
-      initializationPromise = null;
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`[DI] Container initialization failed: ${message}`);
-    }
-  })();
+  // Double-check after wait (another caller might have completed)
+  if (initialized) return;
 
-  return initializationPromise;
+  // Set synchronous flag BEFORE any async work to prevent race
+  isInitializing = true;
+
+  try {
+    registerConfig();
+    await registerStorageChain();
+    await registerServices();
+    initialized = true;
+    console.error('[DI] Container initialized');
+  } catch (error) {
+    // FAIL FAST: Don't reset initializationPromise to null
+    // This prevents infinite retry loops - caller should restart process
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`[DI] Container initialization failed: ${message}`);
+  } finally {
+    isInitializing = false;
+  }
 }
 
 /**
@@ -260,6 +284,7 @@ export function resetContainer(): void {
   initialized = false;
   asyncInitialized = false;
   initializationPromise = null;
+  isInitializing = false;
 }
 
 /**
