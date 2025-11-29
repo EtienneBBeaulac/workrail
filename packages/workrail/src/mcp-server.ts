@@ -5,41 +5,37 @@ import type {
   CallToolResult,
   ListToolsResult,
 } from "@modelcontextprotocol/sdk/types.js";
-import { createAppContainer, AppContainer } from "./container.js";
-import { SessionManager, HttpServer } from "./infrastructure/session/index.js";
-import { createSessionTools, handleSessionTool } from "./tools/session-tools.js";
+import { bootstrap, container } from "./di/container.js";
+import { DI } from "./di/tokens.js";
+import { WorkflowService } from "./application/services/workflow-service.js";
 import { IFeatureFlagProvider } from "./config/feature-flags.js";
+import { SessionManager } from "./infrastructure/session/SessionManager.js";
+import { HttpServer } from "./infrastructure/session/HttpServer.js";
+import { createSessionTools, handleSessionTool } from "./tools/session-tools.js";
 
 class WorkflowOrchestrationServer {
-  private container: AppContainer;
-  private featureFlags: IFeatureFlagProvider;
+  private featureFlags!: IFeatureFlagProvider;
   private sessionManager: SessionManager | null = null;
   private httpServer: HttpServer | null = null;
-  private sessionTools: Tool[];
+  private sessionTools: Tool[] = [];
 
-  constructor(container?: AppContainer) {
-    // Dependency Injection: Accept container or create default
-    this.container = container ?? createAppContainer();
-    this.featureFlags = this.container.featureFlags;
+  async initialize(): Promise<void> {
+    // Initialize DI container (including async services like HTTP server)
+    await bootstrap();
+    
+    // Resolve services from container
+    this.featureFlags = container.resolve<IFeatureFlagProvider>(DI.Infra.FeatureFlags);
     
     // Initialize session management based on feature flag
     if (this.featureFlags.isEnabled('sessionTools')) {
-      this.sessionManager = new SessionManager();
-      this.httpServer = new HttpServer(this.sessionManager, { autoOpen: false });
+      this.sessionManager = container.resolve<SessionManager>(DI.Infra.SessionManager);
+      this.httpServer = container.resolve<HttpServer>(DI.Infra.HttpServer);
       this.sessionTools = createSessionTools(this.sessionManager, this.httpServer);
       
       console.error('[FeatureFlags] Session tools enabled');
     } else {
       this.sessionTools = [];
       console.error('[FeatureFlags] Session tools disabled (enable with WORKRAIL_ENABLE_SESSION_TOOLS=true)');
-    }
-  }
-  
-  async initialize(): Promise<void> {
-    // Start HTTP server for dashboard if session tools are enabled
-    if (this.featureFlags.isEnabled('sessionTools') && this.httpServer) {
-      await this.httpServer.start();
-      console.error('[FeatureFlags] Dashboard server started');
     }
   }
   
@@ -70,8 +66,8 @@ class WorkflowOrchestrationServer {
     const timeoutMs = 30000; // 30 second timeout
     
     try {
-      // Use the workflow service directly
-      const { workflowService } = this.container;
+      // Resolve the workflow service from DI container
+      const workflowService = container.resolve<WorkflowService>(DI.Services.Workflow);
       
       // Create a timeout promise
       const timeoutPromise = new Promise<never>((_, reject) => {
@@ -397,7 +393,7 @@ async function runServer() {
 
   const workflowServer = new WorkflowOrchestrationServer();
   
-  // Initialize session management (starts HTTP server)
+  // Initialize DI container and session management
   await workflowServer.initialize();
 
   // Register request handlers

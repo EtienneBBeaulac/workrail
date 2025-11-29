@@ -31,6 +31,8 @@ export interface WorkflowService {
   }>;
 }
 
+import { singleton, inject } from 'tsyringe';
+import { DI } from '../../di/tokens.js';
 import { 
   Workflow,
   WorkflowSummary,
@@ -51,7 +53,12 @@ import { checkContextSize } from '../../utils/context-size';
 import { ContextOptimizer } from './context-optimizer';
 import { IStepResolutionStrategy, StepResolutionResult } from './step-resolution/i-step-resolution-strategy';
 import { createLogger } from '../../utils/logger';
-import { createServiceContainer } from '../../infrastructure/di/service-container';
+import { IterativeStepResolutionStrategy } from './step-resolution/iterative-step-resolution-strategy';
+import { DefaultWorkflowLoader } from './workflow-loader';
+import { DefaultLoopRecoveryService } from './loop-recovery-service';
+import { LoopStackManager } from './loop-stack-manager';
+import { DefaultStepSelector } from './step-selector';
+import { EnhancedLoopValidator } from './enhanced-loop-validator';
 
 /**
  * Default implementation of WorkflowService.
@@ -62,13 +69,14 @@ import { createServiceContainer } from '../../infrastructure/di/service-containe
  * The service delegates step resolution to an injected IStepResolutionStrategy,
  * which allows swapping between iterative and recursive implementations via DI.
  */
+@singleton()
 export class DefaultWorkflowService implements WorkflowService {
   private readonly logger = createLogger('WorkflowService');
 
   constructor(
-    private readonly storage: IWorkflowStorage,
-    private readonly validationEngine: ValidationEngine,
-    private readonly stepResolutionStrategy: IStepResolutionStrategy
+    @inject(DI.Storage.Primary) private readonly storage: IWorkflowStorage,
+    @inject(ValidationEngine) private readonly validationEngine: ValidationEngine,
+    @inject(IterativeStepResolutionStrategy) private readonly stepResolutionStrategy: IterativeStepResolutionStrategy
   ) {
     this.logger.info('WorkflowService initialized', {
       strategy: stepResolutionStrategy.constructor.name
@@ -174,24 +182,31 @@ export class DefaultWorkflowService implements WorkflowService {
 }
 
 /**
- * Creates a DefaultWorkflowService with the given storage.
- * Helper for tests and simple usage.
- * 
- * @param storage - Optional storage (defaults to file storage)
- * @param validationEngine - Optional validation engine
- * @returns Configured DefaultWorkflowService
+ * Legacy helper for backward compatibility.
+ * @deprecated Use DI container: container.resolve(DI.Services.Workflow)
  */
-export function createWorkflowService(
-  storage?: IWorkflowStorage,
-  validationEngine?: ValidationEngine
-): DefaultWorkflowService {
-  const container = createServiceContainer({ storage, validationEngine });
-  return new DefaultWorkflowService(
-    container.storage,
-    container.validationEngine,
-    container.stepResolutionStrategy
+export function createWorkflowService(): DefaultWorkflowService {
+  console.warn(
+    '[DEPRECATION] createWorkflowService() is deprecated. ' +
+    'Use container.resolve(DI.Services.Workflow) from \'./di/container\' instead.'
   );
+  
+  // For backward compatibility, manually create dependencies
+  // This bypasses DI but allows legacy code to continue working
+  const storage = createDefaultWorkflowStorage();
+  const loopValidator = new EnhancedLoopValidator();
+  const validator = new ValidationEngine(loopValidator);
+  const resolver = new LoopStepResolver();
+  const stackManager = new LoopStackManager(resolver);
+  const recoveryService = new DefaultLoopRecoveryService(stackManager);
+  const stepSelector = new DefaultStepSelector();
+  const workflowLoader = new DefaultWorkflowLoader(storage, validator);
+  const strategy = new IterativeStepResolutionStrategy(
+    workflowLoader,
+    recoveryService,
+    stackManager,
+    stepSelector
+  );
+  
+  return new DefaultWorkflowService(storage, validator, strategy);
 }
-
-// Legacy singleton – retained for backwards compatibility.
-export const defaultWorkflowService: WorkflowService = createWorkflowService();

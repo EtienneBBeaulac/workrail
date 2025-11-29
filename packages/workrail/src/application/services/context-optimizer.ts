@@ -3,7 +3,10 @@ import { EnhancedContext } from '../../types/workflow-types';
 type ConditionContext = Record<string, any>;
 
 /**
- * Optimizes context operations to minimize performance overhead
+ * Optimizes context operations to minimize performance overhead.
+ * 
+ * This is a utility class with only static methods - no instance state.
+ * No DI registration needed since it's never instantiated.
  */
 export class ContextOptimizer {
   /**

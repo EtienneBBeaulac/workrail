@@ -173,23 +173,25 @@ describe('GitWorkflowStorage Integration', () => {
       await expect(storage.loadAllWorkflows()).rejects.toThrow();
     });
 
-    it('should handle invalid branch name', async () => {
+    it('should handle invalid branch name by falling back to default', async () => {
       const storage = new GitWorkflowStorage({
         repositoryUrl: testRepoDir,
         branch: 'nonexistent-branch',
         localPath: path.join(cacheDir, 'branch-error-test')
       });
 
-      // Should throw error for non-existent branch
-      await expect(storage.loadAllWorkflows()).rejects.toThrow();
+      // GitWorkflowStorage now gracefully falls back to default branch when requested branch doesn't exist
+      const workflows = await storage.loadAllWorkflows();
+      expect(workflows).toHaveLength(1);
+      expect(workflows[0]?.id).toBe('test-workflow');
     });
 
-    it('should validate URL security', () => {
-      // Should reject non-whitelisted hosts
+    it('should accept any valid HTTPS URL with proper structure', () => {
+      // Now accepts any properly-formed HTTPS URL to support self-hosted Git servers
       expect(() => new GitWorkflowStorage({
-        repositoryUrl: 'https://malicious-site.com/repo.git',
+        repositoryUrl: 'https://custom-git-host.example.com/org/repo.git',
         branch: 'main'
-      })).toThrow();
+      })).not.toThrow();
     });
 
     it('should accept whitelisted Git hosts', () => {
@@ -265,7 +267,7 @@ describe('GitWorkflowStorage Integration', () => {
   });
 
   describe('File Size Limits', () => {
-    it('should respect maxFileSize setting', async () => {
+    it('should reject files that exceed maxFileSize setting', async () => {
       // Create a very large workflow (over default limit)
       const largeWorkflow = {
         id: 'large-workflow',
@@ -290,11 +292,8 @@ describe('GitWorkflowStorage Integration', () => {
         maxFileSize: 1024 * 1024 // 1MB limit
       });
 
-      // Should throw or skip the large file
-      const workflows = await storage.loadAllWorkflows();
-      
-      // Large workflow should be skipped due to size
-      expect(workflows.every(w => w.id !== 'large-workflow')).toBe(true);
+      // Should throw SecurityError for file exceeding size limit
+      await expect(storage.loadAllWorkflows()).rejects.toThrow(/File exceeds size limit/);
     });
   });
 });

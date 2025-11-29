@@ -5,6 +5,8 @@ import { createHash } from 'crypto';
 import { execSync } from 'child_process';
 import os from 'os';
 import { EventEmitter } from 'events';
+import { singleton, inject } from 'tsyringe';
+import { DI } from '../../di/tokens.js';
 import { SessionDataNormalizer } from './SessionDataNormalizer';
 import { SessionDataValidator, ValidationResult } from './SessionDataValidator';
 
@@ -38,15 +40,18 @@ export interface ProjectMetadata {
  * - Project-based organization
  * - Git worktree support (shares sessions across worktrees)
  */
+@singleton()
 export class SessionManager extends EventEmitter {
   private sessionsRoot: string;
   private projectId: string;
   private projectPath: string;
   private watchers: Map<string, fsSync.FSWatcher> = new Map();
-  private normalizer: SessionDataNormalizer;
-  private validator: SessionDataValidator;
   
-  constructor(projectPath: string = process.cwd()) {
+  constructor(
+    @inject(SessionDataNormalizer) private normalizer: SessionDataNormalizer,
+    @inject(SessionDataValidator) private validator: SessionDataValidator,
+    @inject(DI.Config.ProjectPath) projectPath: string
+  ) {
     super();
     this.sessionsRoot = path.join(os.homedir(), '.workrail', 'sessions');
     
@@ -55,9 +60,6 @@ export class SessionManager extends EventEmitter {
     const resolvedPath = this.resolveProjectPath(projectPath);
     this.projectPath = resolvedPath;
     this.projectId = this.hashProjectPath(resolvedPath);
-    
-    this.normalizer = new SessionDataNormalizer();
-    this.validator = new SessionDataValidator();
   }
   
   /**

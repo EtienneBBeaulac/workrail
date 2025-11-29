@@ -3,6 +3,8 @@ import { createServer, Server as HttpServerType } from 'http';
 import path from 'path';
 import fs from 'fs/promises';
 import os from 'os';
+import { singleton, inject } from 'tsyringe';
+import { DI } from '../../di/tokens.js';
 import { SessionManager } from './SessionManager.js';
 import cors from 'cors';
 import open from 'open';
@@ -43,6 +45,7 @@ interface DashboardLock {
  * - ETag support for efficient polling
  * - CORS enabled for local development
  */
+@singleton()
 export class HttpServer {
   private app: Application;
   private server: HttpServerType | null = null;
@@ -53,14 +56,28 @@ export class HttpServer {
   private heartbeatInterval: NodeJS.Timeout | null = null;
   
   constructor(
-    private sessionManager: SessionManager,
-    private config: ServerConfig = {}
+    @inject(SessionManager) private sessionManager: SessionManager
   ) {
-    this.port = config.port || 3456;
+    // Config is set via setConfig() or defaults to empty object
+    this.port = 3456; // Default port
     this.lockFile = path.join(os.homedir(), '.workrail', 'dashboard.lock');
     this.app = express();
     this.setupMiddleware();
     this.setupRoutes();
+  }
+  
+  private config: ServerConfig = {};
+  
+  /**
+   * Set server configuration (for manual construction in tests)
+   * Must be called before start() if config is needed
+   */
+  setConfig(config: ServerConfig): this {
+    this.config = config;
+    if (config.port) {
+      this.port = config.port;
+    }
+    return this;
   }
   
   /**

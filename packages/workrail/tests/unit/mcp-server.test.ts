@@ -1,4 +1,4 @@
-import { describe, it, expect } from '@jest/globals';
+import { describe, it, expect } from 'vitest';
 
 // Simple unit tests for MCP server functionality
 describe('MCP Server Core Functionality', () => {
@@ -10,8 +10,8 @@ describe('MCP Server Core Functionality', () => {
       expect(mcpServerContent).toContain('WORKFLOW_LIST_TOOL');
       expect(mcpServerContent).toContain('WORKFLOW_GET_TOOL'); 
       expect(mcpServerContent).toContain('WORKFLOW_NEXT_TOOL');
-      expect(mcpServerContent).toContain('WORKFLOW_VALIDATE_TOOL');
       expect(mcpServerContent).toContain('WORKFLOW_VALIDATE_JSON_TOOL');
+      expect(mcpServerContent).toContain('WORKFLOW_GET_SCHEMA_TOOL');
     });
 
     it('should configure server with correct name and version', () => {
@@ -31,15 +31,14 @@ describe('MCP Server Core Functionality', () => {
   });
 
   describe('WorkRailServer Class Structure', () => {
-    it('should define WorkRailServer class with required methods', () => {
+    it('should define WorkflowOrchestrationServer class with required methods', () => {
       const mcpServerContent = require('fs').readFileSync(require('path').join(__dirname, '../../src/mcp-server.ts'), 'utf8');
       
-      expect(mcpServerContent).toContain('class WorkRailServer');
+      expect(mcpServerContent).toContain('class WorkflowOrchestrationServer');
       expect(mcpServerContent).toContain('callWorkflowMethod');
       expect(mcpServerContent).toContain('listWorkflows');
       expect(mcpServerContent).toContain('getWorkflow');
       expect(mcpServerContent).toContain('getNextStep');
-      expect(mcpServerContent).toContain('validateStep');
       expect(mcpServerContent).toContain('validateWorkflowJson');
     });
 
@@ -52,10 +51,11 @@ describe('MCP Server Core Functionality', () => {
       expect(mcpServerContent).toContain("case 'workflow_validate':");
     });
 
-    it('should initialize container in constructor', () => {
+    it('should initialize container in initialize method', () => {
       const mcpServerContent = require('fs').readFileSync(require('path').join(__dirname, '../../src/mcp-server.ts'), 'utf8');
       
-      expect(mcpServerContent).toContain('createAppContainer()');
+      expect(mcpServerContent).toContain('await bootstrap()');
+      expect(mcpServerContent).toContain('async initialize()');
     });
   });
 
@@ -88,8 +88,8 @@ describe('MCP Server Core Functionality', () => {
     it('should validate required parameters in CallTool handler', () => {
       const mcpServerContent = require('fs').readFileSync(require('path').join(__dirname, '../../src/mcp-server.ts'), 'utf8');
       
+      expect(mcpServerContent).toContain('id parameter is required');
       expect(mcpServerContent).toContain('workflowId parameter is required');
-      expect(mcpServerContent).toContain('workflowId, stepId, and output parameters are required');
       expect(mcpServerContent).toContain('workflowJson parameter is required');
     });
 
@@ -99,12 +99,12 @@ describe('MCP Server Core Functionality', () => {
       expect(mcpServerContent).toContain('Unknown tool:');
     });
 
-    it('should return ListToolsResult with all 6 tools', () => {
+    it('should return ListToolsResult with all 5 workflow tools', () => {
       const mcpServerContent = require('fs').readFileSync(require('path').join(__dirname, '../../src/mcp-server.ts'), 'utf8');
       
       // Count the tool constant definitions (not references)
       const toolConstMatches = mcpServerContent.match(/const WORKFLOW_\w+_TOOL: Tool =/g) || [];
-      expect(toolConstMatches.length).toBe(6);
+      expect(toolConstMatches.length).toBe(5);
     });
   });
 
@@ -144,11 +144,12 @@ describe('MCP Server Core Functionality', () => {
   });
 
   describe('Container Integration', () => {
-    it('should import and use createAppContainer', () => {
+    it('should import and use TSyringe DI container', () => {
       const mcpServerContent = require('fs').readFileSync(require('path').join(__dirname, '../../src/mcp-server.ts'), 'utf8');
       
-      expect(mcpServerContent).toContain('import { createAppContainer }');
-      expect(mcpServerContent).toContain('this.container = createAppContainer()');
+      expect(mcpServerContent).toContain('import { bootstrap, container }');
+      expect(mcpServerContent).toContain('await bootstrap()');
+      expect(mcpServerContent).toContain('container.resolve');
     });
   });
 });

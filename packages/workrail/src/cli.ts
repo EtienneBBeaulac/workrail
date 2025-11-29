@@ -5,15 +5,15 @@ import fs from 'fs';
 import path from 'path';
 import chalk from 'chalk';
 import os from 'os';
+import { initializeContainer, container } from './di/container.js';
+import { DI } from './di/tokens.js';
 import { createWorkflowLookupServer } from './infrastructure/rpc/server';
-import { DefaultWorkflowService } from './application/services/workflow-service';
-import { createServiceContainer } from './infrastructure/di/service-container';
-// import { createDefaultWorkflowStorage } from './infrastructure/storage';
-import { ValidationEngine } from './application/services/validation-engine';
 import { Workflow } from './types/workflow-types';
+import { WorkflowService } from './application/services/workflow-service.js';
+import { ValidationEngine } from './application/services/validation-engine.js';
+import { HttpServer } from './infrastructure/session/HttpServer.js';
 import { initializeUserWorkflowDirectory } from './infrastructure/storage/multi-directory-workflow-storage';
 import { handleMigrationCommand } from './cli/migrate-workflow';
-import { SessionManager, HttpServer } from './infrastructure/session/index.js';
 
 const program = new Command();
 
@@ -57,12 +57,8 @@ program
       console.log(chalk.blue('📋 Available workflows:'));
       console.log();
       
-      const container = createServiceContainer();
-      const workflowService = new DefaultWorkflowService(
-        container.storage,
-        container.validationEngine,
-        container.stepResolutionStrategy
-      );
+      await initializeContainer();
+      const workflowService = container.resolve<WorkflowService>(DI.Services.Workflow);
       const workflows = await workflowService.listWorkflowSummaries();
       
       if (workflows.length === 0) {
@@ -71,7 +67,7 @@ program
         return;
       }
       
-      workflows.forEach((workflow, index) => {
+      workflows.forEach((workflow: any, index: number) => {
         console.log(chalk.green(`${index + 1}. ${workflow.name}`));
         console.log(chalk.white(`   ID: ${workflow.id}`));
         console.log(chalk.gray(`   ${workflow.description}`));
@@ -220,7 +216,8 @@ async function validateWorkflowFile(filePath: string): Promise<void> {
     }
     
     // Then run structural validation (for warnings/info)
-    const validationEngine = new ValidationEngine();
+    await initializeContainer();
+    const validationEngine = container.resolve<ValidationEngine>(DI.Infra.ValidationEngine);
     const result = validationEngine.validateWorkflow(workflow as Workflow);
     
     if (result.valid && !result.warnings?.length && !result.info?.length) {
@@ -230,35 +227,35 @@ async function validateWorkflowFile(filePath: string): Promise<void> {
       
       if (result.warnings && result.warnings.length > 0) {
         console.log(chalk.yellow('\n⚠️  Warnings:'));
-        result.warnings.forEach(warning => {
+        result.warnings.forEach((warning: any) => {
           console.log(chalk.yellow('  •'), warning);
         });
       }
       
       if (result.info && result.info.length > 0) {
         console.log(chalk.blue('\nℹ️  Information:'));
-        result.info.forEach(info => {
+        result.info.forEach((info: any) => {
           console.log(chalk.blue('  •'), info);
         });
       }
       
       if (result.suggestions && result.suggestions.length > 0) {
         console.log(chalk.gray('\n💡 Suggestions:'));
-        result.suggestions.forEach(suggestion => {
+        result.suggestions.forEach((suggestion: any) => {
           console.log(chalk.gray('  •'), suggestion);
         });
       }
     } else {
       console.error(chalk.red('❌ Workflow validation failed:'), filePath);
       console.error(chalk.yellow('\nValidation errors:'));
-      result.issues.forEach(error => {
+      result.issues.forEach((error: any) => {
         console.error(chalk.red('  •'), error);
       });
       console.error(chalk.yellow(`\nFound ${result.issues.length} validation error${result.issues.length === 1 ? '' : 's'}.`));
       
       if (result.suggestions && result.suggestions.length > 0) {
         console.log(chalk.gray('\n💡 Suggestions:'));
-        result.suggestions.forEach(suggestion => {
+        result.suggestions.forEach((suggestion: any) => {
           console.log(chalk.gray('  •'), suggestion);
         });
       }
@@ -293,12 +290,8 @@ program
     try {
       console.log(chalk.blue('🚀 Starting WorkRail MCP server...'));
       
-      const container = createServiceContainer();
-      const workflowService = new DefaultWorkflowService(
-        container.storage,
-        container.validationEngine,
-        container.stepResolutionStrategy
-      );
+      await initializeContainer();
+      const workflowService = container.resolve<WorkflowService>(DI.Services.Workflow);
       const server = createWorkflowLookupServer(workflowService);
       
       await server.start();
@@ -322,8 +315,8 @@ program
         await new Promise(resolve => setTimeout(resolve, 3000));
       }
       
-      const sessionManager = new SessionManager();
-      const httpServer = new HttpServer(sessionManager);
+      await initializeContainer();
+      const httpServer = container.resolve<HttpServer>(DI.Infra.HttpServer);
       
       const count = await httpServer.fullCleanup();
       

@@ -1,3 +1,5 @@
+import { singleton } from 'tsyringe';
+
 /**
  * Feature Flags System
  * 
@@ -153,18 +155,20 @@ export interface IFeatureFlagProvider {
  * Reads flags from environment variables at initialization.
  * Immutable after construction (follows functional programming principles).
  */
+@singleton()
 export class EnvironmentFeatureFlagProvider implements IFeatureFlagProvider {
   private readonly flags: FeatureFlags;
   
   /**
-   * @param env - Environment variables (defaults to process.env, injectable for testing)
+   * Constructor reads from process.env by default.
+   * No parameters needed - TSyringe will construct with zero args.
    */
-  constructor(env: Record<string, string | undefined> = process.env) {
-    // Build immutable flag object
+  constructor() {
+    // Build immutable flag object from process.env
     const flags: Partial<Record<FeatureFlagKey, boolean>> = {};
     
     for (const definition of FEATURE_FLAG_DEFINITIONS) {
-      const envValue = env[definition.envVar];
+      const envValue = process.env[definition.envVar];
       flags[definition.key as FeatureFlagKey] = parseBoolean(envValue, definition.defaultValue);
     }
     
@@ -243,10 +247,14 @@ export class StaticFeatureFlagProvider implements IFeatureFlagProvider {
  * - Allows different implementations (env, static, remote, etc.)
  * - Makes testing easy
  * - Decouples configuration from usage
+ * 
+ * @deprecated Use container.resolve(DI.Infra.FeatureFlags) instead
  */
 export function createFeatureFlagProvider(
   env?: Record<string, string | undefined>
 ): IFeatureFlagProvider {
-  return new EnvironmentFeatureFlagProvider(env);
+  // For backward compatibility, create instance that ignores env parameter
+  // The @singleton() version always uses process.env
+  console.warn('[DEPRECATION] createFeatureFlagProvider() is deprecated. Use DI container instead.');
+  return new EnvironmentFeatureFlagProvider();
 }
-

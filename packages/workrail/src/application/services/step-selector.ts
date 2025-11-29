@@ -1,3 +1,4 @@
+import { singleton } from 'tsyringe';
 import { Workflow, WorkflowStep, WorkflowGuidance } from '../../types/mcp-types';
 import { IStepSelector } from './i-step-selector';
 import { EnhancedContext } from '../../types/workflow-types';
@@ -11,6 +12,7 @@ import { createLogger } from '../../utils/logger';
  * - Find eligible steps based on conditions and state
  * - Generate guidance when no eligible steps found
  */
+@singleton()
 export class DefaultStepSelector implements IStepSelector {
   private readonly logger = createLogger('StepSelector');
 

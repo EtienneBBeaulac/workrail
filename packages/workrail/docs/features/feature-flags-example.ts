@@ -6,7 +6,8 @@
  */
 
 import { IFeatureFlagProvider } from '../../src/config/feature-flags.js';
-import { createAppContainer } from '../../src/container.js';
+import { initializeContainer, container } from '../../src/di/container.js';
+import { DI } from '../../src/di/tokens.js';
 
 // ============================================================================
 // EXAMPLE 1: Service using feature flags (Dependency Injection)
@@ -255,12 +256,12 @@ class ProgressiveFeatureService {
 /**
  * Example of the complete pattern: container → services → feature flags
  */
-function main() {
-  // 1. Create container (reads environment variables)
-  const container = createAppContainer();
+async function main() {
+  // 1. Initialize DI container (reads environment variables)
+  await initializeContainer();
   
-  // 2. Extract feature flags from container
-  const featureFlags = container.featureFlags;
+  // 2. Resolve feature flags from container
+  const featureFlags = container.resolve<IFeatureFlagProvider>(DI.Infra.FeatureFlags);
   
   // 3. Inject feature flags into services
   const reportingService = new ReportingService(featureFlags);

@@ -1,3 +1,4 @@
+import { singleton } from 'tsyringe';
 import { Workflow, WorkflowStep } from '../../types/mcp-types';
 import { LoopStep, isLoopStep } from '../../types/workflow-types';
 import { StepNotFoundError } from '../../core/error-handler';
@@ -6,8 +7,10 @@ import { StepNotFoundError } from '../../core/error-handler';
  * Resolves step references within loop bodies.
  * Handles both string references and inline step arrays.
  */
+@singleton()
 export class LoopStepResolver {
   private resolvedStepsCache: Map<string, WorkflowStep | WorkflowStep[]> = new Map();
+  private static readonly MAX_CACHE_SIZE = 1000; // Prevent unbounded growth
 
   /**
    * Resolves a loop body reference to actual steps
@@ -44,7 +47,15 @@ export class LoopStepResolver {
       throw new Error(`Circular reference detected: loop step '${body}' references itself`);
     }
 
-    // Cache and return
+    // Cache and return (with eviction policy to prevent memory leak)
+    if (this.resolvedStepsCache.size >= LoopStepResolver.MAX_CACHE_SIZE) {
+      // Simple FIFO eviction: remove oldest entry
+      const firstKey = this.resolvedStepsCache.keys().next().value;
+      if (firstKey) {
+        this.resolvedStepsCache.delete(firstKey);
+      }
+    }
+    
     this.resolvedStepsCache.set(cacheKey, referencedStep);
     return referencedStep;
   }

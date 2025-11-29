@@ -1,3 +1,5 @@
+import { singleton } from 'tsyringe';
+
 /**
  * SessionDataValidator
  * 
@@ -29,6 +31,7 @@ export interface ValidationResult {
   };
 }
 
+@singleton()
 export class SessionDataValidator {
   /**
    * Validate entire session data for a specific workflow

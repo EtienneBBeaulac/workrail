@@ -1,8 +1,9 @@
+import { singleton, inject } from 'tsyringe';
 import { WorkflowStep, WorkflowGuidance } from '../../../types/mcp-types';
 import { IStepResolutionStrategy, StepResolutionResult } from './i-step-resolution-strategy';
-import { IWorkflowLoader } from '../i-workflow-loader';
-import { IStepSelector } from '../i-step-selector';
-import { ILoopRecoveryService } from '../i-loop-recovery-service';
+import { DefaultWorkflowLoader } from '../workflow-loader';
+import { DefaultStepSelector } from '../step-selector';
+import { DefaultLoopRecoveryService } from '../loop-recovery-service';
 import { LoopStackManager } from '../loop-stack-manager';
 import { ConditionContext } from '../../../utils/condition-evaluator';
 import { EnhancedContext, isLoopStep, LoopStep, LoopExecutionState } from '../../../types/workflow-types';
@@ -23,14 +24,15 @@ import { createLogger } from '../../../utils/logger';
  * - Observable (can inspect loop stack at any time)
  * - 26% faster than recursive implementation
  */
+@singleton()
 export class IterativeStepResolutionStrategy implements IStepResolutionStrategy {
   private readonly logger = createLogger('IterativeStrategy');
 
   constructor(
-    private readonly workflowLoader: IWorkflowLoader,
-    private readonly loopRecoveryService: ILoopRecoveryService,
-    private readonly loopStackManager: LoopStackManager,
-    private readonly stepSelector: IStepSelector
+    @inject(DefaultWorkflowLoader) private readonly workflowLoader: DefaultWorkflowLoader,
+    @inject(DefaultLoopRecoveryService) private readonly loopRecoveryService: DefaultLoopRecoveryService,
+    @inject(LoopStackManager) private readonly loopStackManager: LoopStackManager,
+    @inject(DefaultStepSelector) private readonly stepSelector: DefaultStepSelector
   ) {}
 
   async getNextStep(
