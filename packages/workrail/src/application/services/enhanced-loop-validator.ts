@@ -1,3 +1,4 @@
+import { singleton } from 'tsyringe';
 import { WorkflowStep } from '../../types/mcp-types';
 import { LoopStep } from '../../types/workflow-types';
 
@@ -7,6 +8,7 @@ export interface EnhancedValidationResult {
   info: string[];
 }
 
+@singleton()
 export class EnhancedLoopValidator {
   private readonly PROMPT_WARNING_THRESHOLD = 1500;
   private readonly PROMPT_ERROR_THRESHOLD = 2000;

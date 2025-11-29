@@ -1,8 +1,11 @@
+import { singleton, inject, Lifecycle } from 'tsyringe';
 import { ValidationError } from '../../core/error-handler';
 import { evaluateCondition, Condition, ConditionContext } from '../../utils/condition-evaluator';
 import Ajv from 'ajv';
 import { WorkflowStep, LoopStep, Workflow, isLoopStep, FunctionDefinition, FunctionParameter } from '../../types/workflow-types';
 import { EnhancedLoopValidator } from './enhanced-loop-validator';
+import { container } from '../../di/container.js';
+import { DI } from '../../di/tokens.js';
 
 export interface ValidationRule {
   type: 'contains' | 'regex' | 'length' | 'schema';
@@ -37,14 +40,15 @@ export interface ValidationResult {
  * multiple validation rule types. This engine is responsible for
  * evaluating validation criteria against step outputs.
  */
+@singleton()
 export class ValidationEngine {
   private ajv: Ajv;
   private schemaCache = new Map<string, any>();
   private enhancedLoopValidator: EnhancedLoopValidator;
   
-  constructor() {
+  constructor(@inject(EnhancedLoopValidator) enhancedLoopValidator: EnhancedLoopValidator) {
     this.ajv = new Ajv({ allErrors: true });
-    this.enhancedLoopValidator = new EnhancedLoopValidator();
+    this.enhancedLoopValidator = enhancedLoopValidator;
   }
 
   /**

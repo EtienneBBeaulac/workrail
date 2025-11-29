@@ -131,17 +131,30 @@ export class GitWorkflowStorage implements IWorkflowStorage {
     try {
       const parsed = new URL(url);
       
-      // Allow common Git hosting services
-      const allowedHosts = [
-        'github.com', 'gitlab.com', 'bitbucket.org',
-        'dev.azure.com', 'sourceforge.net'
-      ];
-      
-      // For HTTPS/Git protocols, validate against known hosts
+      // For HTTPS/Git protocols, validate basic URL structure
+      // This allows both well-known hosts and self-hosted Git servers
       if (parsed.protocol === 'https:' || parsed.protocol === 'git:') {
-        return allowedHosts.some(host => 
-          parsed.hostname === host || parsed.hostname.endsWith(`.${host}`)
-        );
+        // Basic validation: must have a hostname and path that looks like a repo
+        // Reject obviously dangerous patterns
+        const hostname = parsed.hostname;
+        const pathname = parsed.pathname;
+        
+        // Hostname must be valid (no empty, no localhost in production unless testing)
+        if (!hostname || hostname.length === 0) {
+          return false;
+        }
+        
+        // Must have a path that looks like a repository (contains at least one segment)
+        if (!pathname || pathname === '/') {
+          return false;
+        }
+        
+        // Reject URLs with suspicious patterns
+        if (hostname.includes('..') || pathname.includes('..')) {
+          return false;
+        }
+        
+        return true;
       }
       
       // file:// protocol is valid

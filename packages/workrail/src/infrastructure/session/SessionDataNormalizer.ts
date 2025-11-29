@@ -1,3 +1,5 @@
+import { singleton } from 'tsyringe';
+
 /**
  * SessionDataNormalizer
  * 
@@ -55,6 +57,7 @@ export interface NormalizedDashboard {
   completedAt: string | undefined;
 }
 
+@singleton()
 export class SessionDataNormalizer {
   /**
    * Normalize the entire session data object

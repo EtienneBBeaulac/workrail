@@ -6,7 +6,7 @@
  */
 
 // Main service
-export { WorkflowService, DefaultWorkflowService, createWorkflowService, defaultWorkflowService } from './workflow-service';
+export { WorkflowService, DefaultWorkflowService, createWorkflowService } from './workflow-service';
 
 // Service interfaces (for DI and testing)
 export { IWorkflowLoader, LoadedWorkflow } from './i-workflow-loader';

@@ -1,3 +1,4 @@
+import { singleton } from 'tsyringe';
 import { 
   EnhancedContext, 
   OptimizedLoopContext, 
@@ -12,6 +13,7 @@ import { ContextOptimizer } from './context-optimizer';
  * Service for optimizing loop context to reduce payload size
  * Implements progressive disclosure pattern for loop iterations
  */
+@singleton()
 export class LoopContextOptimizer implements ILoopContextOptimizer {
   /**
    * Optimizes loop context for subsequent iterations

@@ -1,3 +1,4 @@
+import { singleton, inject } from 'tsyringe';
 import { Workflow } from '../../types/mcp-types';
 import { IWorkflowLoader, LoadedWorkflow } from './i-workflow-loader';
 import { IWorkflowStorage } from '../../types/storage';
@@ -5,6 +6,7 @@ import { ValidationEngine } from './validation-engine';
 import { WorkflowNotFoundError } from '../../core/error-handler';
 import { isLoopStep, LoopStep } from '../../types/workflow-types';
 import { createLogger } from '../../utils/logger';
+import { DI } from '../../di/tokens.js';
 
 /**
  * Default implementation of workflow loading and validation.
@@ -14,12 +16,13 @@ import { createLogger } from '../../utils/logger';
  * - Validate workflow structure
  * - Pre-compute loop body step map
  */
+@singleton()
 export class DefaultWorkflowLoader implements IWorkflowLoader {
   private readonly logger = createLogger('WorkflowLoader');
 
   constructor(
-    private readonly storage: IWorkflowStorage,
-    private readonly validationEngine: ValidationEngine
+    @inject(DI.Storage.Primary) private readonly storage: IWorkflowStorage,
+    @inject(ValidationEngine) private readonly validationEngine: ValidationEngine
   ) {}
 
   async loadAndValidate(workflowId: string): Promise<LoadedWorkflow> {

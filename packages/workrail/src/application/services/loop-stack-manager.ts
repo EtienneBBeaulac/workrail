@@ -1,3 +1,4 @@
+import { singleton, inject } from 'tsyringe';
 import { WorkflowStep, Workflow } from '../../types/mcp-types';
 import { 
   LoopStep, 
@@ -19,6 +20,7 @@ import {
 } from '../../core/error-handler';
 import { createLogger } from '../../utils/logger';
 import { LoopExecutionState } from '../../types/workflow-types';
+import { DI } from '../../di/tokens.js';
 
 /**
  * Manages loop stack lifecycle and operations.
@@ -33,12 +35,13 @@ import { LoopExecutionState } from '../../types/workflow-types';
  * Single Responsibility Principle and match the existing pattern
  * where LoopExecutionContext is a separate class.
  */
+@singleton()
 export class LoopStackManager {
   private readonly logger = createLogger('LoopStackManager');
 
   constructor(
-    private readonly loopStepResolver: LoopStepResolver,
-    private readonly contextOptimizer?: ILoopContextOptimizer
+    @inject(LoopStepResolver) private readonly loopStepResolver: LoopStepResolver,
+    @inject(DI.Services.LoopContextOptimizer) private readonly contextOptimizer?: ILoopContextOptimizer
   ) {}
   
   /**

@@ -1,16 +1,17 @@
+import { describe, it, expect, beforeEach, vi, Mock } from 'vitest';
 import { IApplicationMediator } from '../../src/application/app';
 import { SimpleOutputDecorator } from '../../src/application/decorators/simple-output-decorator';
 
 describe('SimpleOutputDecorator', () => {
-  let mockMediator: jest.Mocked<IApplicationMediator>;
+  let mockMediator: { execute: Mock; register: Mock; setResponseValidator: Mock };
   let decorator: SimpleOutputDecorator;
 
   beforeEach(() => {
     // Create a mock IApplicationMediator
     mockMediator = {
-      execute: jest.fn(),
-      register: jest.fn(),
-      setResponseValidator: jest.fn()
+      execute: vi.fn(),
+      register: vi.fn(),
+      setResponseValidator: vi.fn()
     } as any;
 
     decorator = new SimpleOutputDecorator(mockMediator);
@@ -91,7 +92,7 @@ describe('SimpleOutputDecorator', () => {
   describe('register', () => {
     it('should delegate to wrapped mediator', () => {
       // Arrange
-      const handler = jest.fn();
+      const handler = vi.fn();
 
       // Act
       decorator.register('test_method', handler);
@@ -104,7 +105,7 @@ describe('SimpleOutputDecorator', () => {
   describe('setResponseValidator', () => {
     it('should delegate to wrapped mediator', () => {
       // Arrange
-      const validator = jest.fn();
+      const validator = vi.fn();
 
       // Act
       decorator.setResponseValidator(validator);

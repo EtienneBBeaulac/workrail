@@ -1,3 +1,4 @@
+import { singleton, inject } from 'tsyringe';
 import { Workflow } from '../../types/mcp-types';
 import { ILoopRecoveryService } from './i-loop-recovery-service';
 import { LoopStackFrame, LoopStep, EnhancedContext, isLoopStep } from '../../types/workflow-types';
@@ -16,10 +17,11 @@ import { createLogger } from '../../utils/logger';
  * 
  * This service enables stateless MCP agents to recover mid-loop execution state.
  */
+@singleton()
 export class DefaultLoopRecoveryService implements ILoopRecoveryService {
   private readonly logger = createLogger('LoopRecoveryService');
 
-  constructor(private readonly loopStackManager: LoopStackManager) {}
+  constructor(@inject(LoopStackManager) private readonly loopStackManager: LoopStackManager) {}
 
   recoverLoopStack(
     workflow: Workflow,

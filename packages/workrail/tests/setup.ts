@@ -1,6 +1,8 @@
 // Jest setup file
+import 'reflect-metadata';
 import { config } from 'dotenv';
 import { beforeAll, afterAll } from '@jest/globals';
+import { teardownTest } from './di/test-container.js';
 
 // Load environment variables from .env file - suppress console output
 config({ quiet: true });
@@ -15,6 +17,9 @@ beforeAll(() => {
 });
 
 afterAll(async () => {
+  // Cleanup DI container
+  teardownTest();
+  
   // Cleanup any global test resources
   console.log('🧹 Cleaning up global test resources...');
   

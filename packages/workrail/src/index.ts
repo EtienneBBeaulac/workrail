@@ -1,29 +1,14 @@
 #!/usr/bin/env node
 
-import { createAppContainer } from './container';
+// DI Container exports
+export { bootstrap, initializeContainer, container, resetContainer } from './di/container.js';
+export { DI } from './di/tokens.js';
 
-async function main() {
-  try {
-    const { server } = createAppContainer();
-    await server.start();
-    console.log('Workflow Lookup MCP Server started successfully');
+// Public API exports
+export type { WorkflowService } from './application/services/workflow-service.js';
+export type { IWorkflowStorage } from './types/storage.js';
+export type { IWorkflowLoader } from './application/services/i-workflow-loader.js';
+export type { IFeatureFlagProvider } from './config/feature-flags.js';
 
-    // Graceful shutdown on SIGINT/SIGTERM
-    const shutdown = async (signal: string) => {
-      console.log(`Received ${signal}, shutting down...`);
-      await server.stop();
-      process.exit(0);
-    };
-    process.on('SIGINT', () => shutdown('SIGINT'));
-    process.on('SIGTERM', () => shutdown('SIGTERM'));
-  } catch (error) {
-    console.error('Failed to start server:', error);
-    process.exit(1);
-  }
-}
-
-if (require.main === module) {
-  main();
-}
-
-export { createWorkflowLookupServer } from './infrastructure/rpc/server'; 
+// Infrastructure exports
+export { createWorkflowLookupServer } from './infrastructure/rpc/server.js';

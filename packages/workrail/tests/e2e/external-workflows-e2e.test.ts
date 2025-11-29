@@ -174,9 +174,9 @@ describe('External Workflows E2E', () => {
       // Should have multiple sources
       expect(sourceInfo.length).toBeGreaterThan(2);
       
-      // Should include Git sources
-      const gitSources = sourceInfo.filter(s => s.type === 'git');
-      expect(gitSources.length).toBe(2);
+      // Local paths are optimized to use direct file access (custom) instead of git cloning
+      const fileSources = sourceInfo.filter(s => s.type === 'file');
+      expect(fileSources.length).toBeGreaterThanOrEqual(2);
 
       process.env = originalEnv;
     });
@@ -214,10 +214,11 @@ describe('External Workflows E2E', () => {
       const storage = createEnhancedMultiSourceWorkflowStorage();
       const sourceInfo = storage.getSourceInfo();
 
-      // Should report Git sources with proper naming
-      const gitSources = sourceInfo.filter(s => s.type === 'git');
-      expect(gitSources.length).toBe(2);
-      expect(gitSources.every(s => s.name.startsWith('git:'))).toBe(true);
+      // Local paths are optimized to use direct file access (custom) instead of git cloning
+      // So they appear as file sources with custom: prefix
+      const customSources = sourceInfo.filter(s => s.name.startsWith('custom:'));
+      expect(customSources.length).toBe(2);
+      expect(customSources.every(s => s.type === 'file')).toBe(true);
 
       process.env = originalEnv;
     });

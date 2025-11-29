@@ -163,6 +163,7 @@ export class LoopExecutionContext {
    * Used for progressive disclosure pattern
    */
   getMinimalContext(context: ConditionContext): OptimizedLoopContext {
+    // Start with a copy of context, excluding the items array for forEach loops
     const optimizedContext: OptimizedLoopContext = {
       ...context,
       _loopState: {
@@ -185,6 +186,11 @@ export class LoopExecutionContext {
       
       optimizedContext[itemVar] = this.state.items[index];
       optimizedContext[indexVar] = index;
+      
+      // Remove the full items array from minimal context to save space
+      if (this.loopConfig.items && optimizedContext[this.loopConfig.items] !== undefined) {
+        delete optimizedContext[this.loopConfig.items];
+      }
     }
 
     // Add iteration counter
@@ -282,7 +288,16 @@ export class LoopExecutionContext {
   isEmpty(context: ConditionContext): boolean {
     switch (this.loopConfig.type) {
       case 'forEach':
-        return !this.state.items || this.state.items.length === 0;
+        // Check state.items first, but fall back to context if not initialized
+        if (this.state.items) {
+          return this.state.items.length === 0;
+        }
+        // Check the context directly if state.items hasn't been initialized
+        if (this.loopConfig.items) {
+          const items = context[this.loopConfig.items];
+          return !Array.isArray(items) || items.length === 0;
+        }
+        return true;
       
       case 'for':
         const count = this.resolveCount(context);

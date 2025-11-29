@@ -363,10 +363,10 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
 });
 
 describe('createEnhancedMultiSourceWorkflowStorage', () => {
-  it('should create storage from environment variables', () => {
+  it('should create storage from environment variables', async () => {
     // This is tested more thoroughly in integration tests
     // Here we just verify the function exists and can be called
-    const { createEnhancedMultiSourceWorkflowStorage } = require('../../src/infrastructure/storage/enhanced-multi-source-workflow-storage');
+    const { createEnhancedMultiSourceWorkflowStorage } = await import('../../src/infrastructure/storage/enhanced-multi-source-workflow-storage');
     
     const storage = createEnhancedMultiSourceWorkflowStorage({
       includeBundled: false,
