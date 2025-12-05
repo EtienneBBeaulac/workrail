@@ -6,18 +6,26 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 describe('Comprehensive API Endpoint Tests', () => {
-  const SERVER_PATH = path.resolve(__dirname, '../../src/index.ts');
+  // Use RPC server (traditional JSON-RPC) instead of MCP server (tools/call pattern)
+  const SERVER_PATH = path.resolve(__dirname, '../../src/rpc-server.ts');
   let client: RpcClient;
   
   beforeAll(async () => {
-    client = new RpcClient(SERVER_PATH);
-  }, { timeout: 30000 });
+    client = new RpcClient(SERVER_PATH, { disableGlobalTracking: true });
+  }, 30000);
 
   afterAll(async () => {
     if (client) {
-      await client.close();
+      try {
+        await Promise.race([
+          client.close(),
+          new Promise(resolve => setTimeout(resolve, 5000))
+        ]);
+      } catch {
+        // Ignore close errors - server may already be stopped
+      }
     }
-  }, { timeout: 10000 });
+  }, 10000);
 
   describe('workflow_list endpoint', () => {
     it('should return available workflows', async () => {
@@ -100,7 +108,7 @@ describe('Comprehensive API Endpoint Tests', () => {
 
       it('should return preview by default when no mode specified', async () => {
         const res = await client.send('workflow_get', {
-          id: 'coding-task-workflow'
+          id: 'coding-task-workflow-with-loops'
           // No mode parameter - should default to preview
         });
         

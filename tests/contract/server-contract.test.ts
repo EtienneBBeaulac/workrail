@@ -5,7 +5,8 @@ import { RpcClient } from '../helpers/rpc-client';
 import { responseValidator } from '../../src/validation/response-validator';
 
 describe('MCP Server JSON-RPC contract', () => {
-  const SERVER_PATH = path.resolve(__dirname, '../../src/index.ts');
+  // Use RPC server (traditional JSON-RPC) instead of MCP server (tools/call pattern)
+  const SERVER_PATH = path.resolve(__dirname, '../../src/rpc-server.ts');
   const SAMPLE_ID = 'coding-task-workflow-with-loops';
 
   let client: RpcClient;
