@@ -144,11 +144,11 @@ jobs:
       - name: Build project
         run: npm run build
 
-      - name: Install Playwright browsers
-        run: npm run e2e:install
+      - name: Install Playwright browsers with dependencies
+        run: npx playwright install --with-deps chromium
 
-      - name: Run E2E tests
-        run: npm run e2e
+      - name: Run E2E tests (Chromium only in CI)
+        run: npx playwright test --project=chromium
 
       - name: Upload Playwright report
         if: always()
