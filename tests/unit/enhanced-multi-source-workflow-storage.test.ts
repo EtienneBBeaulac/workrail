@@ -169,7 +169,8 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
           {
             repositoryUrl: 'https://github.com/test/workflows.git',
             branch: 'main',
-            localPath: path.join(os.tmpdir(), 'test-workflows')
+            localPath: path.join(os.tmpdir(), 'test-workflows'),
+            skipSandboxCheck: true // Skip security check in unit tests
           }
         ]
       });
@@ -187,11 +188,13 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
         gitRepositories: [
           {
             repositoryUrl: 'https://github.com/test/workflows1.git',
-            branch: 'main'
+            branch: 'main',
+            skipSandboxCheck: true // Skip security check in unit tests
           },
           {
             repositoryUrl: 'https://github.com/test/workflows2.git',
-            branch: 'main'
+            branch: 'main',
+            skipSandboxCheck: true // Skip security check in unit tests
           }
         ]
       });
@@ -247,7 +250,8 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
         gitRepositories: [
           {
             repositoryUrl: 'https://github.com/test/workflows.git',
-            branch: 'main'
+            branch: 'main',
+            skipSandboxCheck: true // Skip security check in unit tests
           }
         ]
       });
@@ -394,7 +398,8 @@ describe('EnhancedMultiSourceWorkflowStorage - Integration Scenarios', () => {
           {
             repositoryUrl: 'https://github.com/test-org/team-workflows.git',
             branch: 'main',
-            syncInterval: 60
+            syncInterval: 60,
+            skipSandboxCheck: true // Skip security check in unit tests
           }
         ]
       });
@@ -412,13 +417,15 @@ describe('EnhancedMultiSourceWorkflowStorage - Integration Scenarios', () => {
           {
             repositoryUrl: 'https://github.com/community/workflows.git',
             branch: 'main',
-            syncInterval: 1440 // Daily
+            syncInterval: 1440, // Daily
+            skipSandboxCheck: true // Skip security check in unit tests
           },
           {
             repositoryUrl: 'https://github.com/team/workflows.git',
             branch: 'main',
             syncInterval: 60, // Hourly
-            authToken: process.env['GITHUB_TOKEN']
+            authToken: process.env['GITHUB_TOKEN'],
+            skipSandboxCheck: true // Skip security check in unit tests
           }
         ]
       });
@@ -438,7 +445,8 @@ describe('EnhancedMultiSourceWorkflowStorage - Integration Scenarios', () => {
         gitRepositories: [
           {
             repositoryUrl: 'https://github.com/test/workflows.git',
-            branch: 'main'
+            branch: 'main',
+            skipSandboxCheck: true // Skip security check in unit tests
           }
         ],
         remoteRegistries: [
