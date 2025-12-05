@@ -2,7 +2,8 @@
 
 ## Overview
 
-The MCP server now includes automatic context optimization instructions that help AI agents reduce the size of context sent with each `workflow_next` call. This guide explains how workflows can leverage this feature effectively.
+The MCP server now includes automatic context optimization instructions that help AI agents reduce the size of context sent with each `workflow_next` call. This guide explains how workflows can
+use this feature effectively.
 
 ## Understanding the Stateless Nature
 

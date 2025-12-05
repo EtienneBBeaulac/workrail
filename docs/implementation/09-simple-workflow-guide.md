@@ -280,8 +280,8 @@ Define reusable "functions" in your `metaGuidance` section, then reference them 
 {
   "metaGuidance": [
     "fun updateDecisionLog() = 'Update Decision Log in CONTEXT.md: file paths/ranges, excerpts, why important, outcome impact. Limit 3-5 files/decision.'",
-    "fun useTools() = 'Use tools to verify—never guess. Expand file reads to imports/models/interfaces/classes/deps. Trace all dependencies.'",
-    "fun createFile(filename) = 'Use edit_file to create/update {filename}. NEVER output full content in chat—only summarize. If fails, request user help & log command.'",
+    "fun useTools() = 'Use tools to verify - never guess. Expand file reads to imports/models/interfaces/classes/deps. Trace all dependencies.'",
+    "fun createFile(filename) = 'Use edit_file to create/update {filename}. NEVER output full content in chat - only summarize. If fails, request user help & log command.'",
     "fun applyUserRules() = 'Apply & reference user-defined rules, patterns & preferences. Document alignment in Decision Log. Explain rule influence in decisions.'",
     "fun matchPatterns() = 'Use codebase_search/grep to find similar patterns. Reference Decision Log patterns. Match target area unless user rules override.'",
     "fun gitCommit(type, msg) = 'If git available: commit with {type}: {msg}. If unavailable: log in CONTEXT.md with timestamp.'",

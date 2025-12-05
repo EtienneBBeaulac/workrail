@@ -62,7 +62,7 @@ giving them a powerful tool *and* teaching them the craft of using it effectivel
 
 The system follows a deliberately modular, microservices-inspired architecture.
 
-This isn't complexity for complexity's sake—each architectural decision directly addresses the
+This isn't complexity for complexity's sake - each architectural decision directly addresses the
 limitations of monolithic AI agent designs while maintaining compatibility with any MCP-enabled
 agent framework.
 
@@ -127,7 +127,7 @@ Instead of building a separate orchestration engine (which would require modifyi
 - **Why not a separate component**:
     - Maintains compatibility with ALL MCP-enabled agents
     - No agent framework modifications required
-    - Leverages agents' existing instruction-following capabilities
+    - Uses agents' existing instruction-following capabilities
     - Simpler to deploy and maintain
 
 ### How Workflow Guidance Actually Works
@@ -173,7 +173,7 @@ Response: {
 
 **Why This Reactive Architecture Works Well**
 1. **Universal Compatibility**: Works with any MCP-enabled agent out of the box
-2. **Progressive Enhancement**: Simple agents follow basic flows, advanced agents leverage rich instructions
+2. **Progressive Enhancement**: Simple agents follow basic flows, advanced agents use rich instructions
 3. **Modularity**: Each service has exactly one job and does it well
 4. **Flexibility**: Structured guidance through reactive responses, not rigid control
 5. **Future-Proof**: Can enhance response richness without breaking existing integrations
@@ -193,7 +193,7 @@ This evolution would only require enhancing WorkRail's response capabilities wit
 
 ### Feature: The Structured Workflow Schema
 
-The workflow schema is the heart of the system—a JSON contract that translates best practices into
+The workflow schema is the heart of the system - a JSON contract that translates best practices into
 executable specifications. Every workflow adheres to this structure:
 
 ```typescript
@@ -277,9 +277,9 @@ This pattern directly addresses the tendency of LLMs to rush into implementation
 
 Different models excel at different tasks. Our workflows acknowledge this reality:
 
-- **Planning Steps**: "Use a model with superior reasoning capabilities" - leverages superior
+- **Planning Steps**: "Use a model with superior reasoning capabilities" - uses superior
   reasoning capabilities
-- **Implementation Steps**: "Use a model with superior tool-use abilities" - leverages superior
+- **Implementation Steps**: "Use a model with superior tool-use abilities" - uses superior
   tool-use abilities
 - **Analysis Steps**: Model choice depends on context needs
 
@@ -499,7 +499,7 @@ The system grows with your needs without architectural changes:
 **Integrating New Tools:**
 ```
 // Add a new MCP server
-securityScanner Server → Integrates seamlessly with existing workflows
+securityScanner Server → Integrates with existing workflows
 ```
 
 **Adapting to New Models:**
@@ -708,7 +708,7 @@ Visual workflow creator with:
 **2. Full IDE Integration**
 ```
 - Native plugins for major IDEs
-- Seamless model switching
+- Automatic model switching
 - Integrated debugging tools
 ```
 
@@ -732,10 +732,11 @@ The system is actively evolving, and we welcome contributions:
 
 Despite current limitations, the Workflow Orchestration System represents a significant step forward
 in AI-assisted development. By acknowledging these constraints and actively working to address them,
-we're building toward a future where AI doesn't just assist with coding—it helps elevate the entire
+we're building toward a future where AI doesn't just assist with coding - it helps improve the entire
 development process.
 
-The journey from "AI that can code" to "AI that codes the right way, every time" is ongoing, but the foundation is solid and the path is clear.
+The path from "AI that can code" to "AI that codes the right way, every time" is ongoing, but the
+foundation is solid and the direction is clear.
 
 ## 7. Workflow Authoring Guide
 
@@ -943,7 +944,7 @@ Here's a starter template for new workflows:
 }
 ```
 
-Remember: Great workflows don't just accomplish tasks—they teach best practices and help ensure
+Remember: Great workflows don't just accomplish tasks - they teach best practices and help ensure
 consistent, high-quality results across all users.
 
 ## 8. Technical Specifications
@@ -1511,7 +1512,7 @@ class WorkflowExecutor {
 #### Error Handling Patterns
 
 ```kotlin
-class RobustWorkflowOrchestrator {
+class ReliableWorkflowOrchestrator {
     suspend fun executeWorkflowWithRecovery(
         workflowId: String,
         context: UserContext
@@ -2017,7 +2018,7 @@ Agent: "I'll merge the relevant parts"
 - **State Management**: The server would maintain a DAG (Directed Acyclic Graph) of execution states
 - **Backward Compatibility**: Linear workflows would work unchanged as a special case
 - **Agent Autonomy**: The system would still provide guidance rather than control
-- **Persistence**: State graphs would need robust storage and recovery mechanisms
+- **Persistence**: State graphs would need reliable storage and recovery mechanisms
 
 This enhancement would maintain the MCP philosophy while enabling the flexibility required for
 complex, real-world development scenarios.

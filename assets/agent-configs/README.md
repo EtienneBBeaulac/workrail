@@ -258,13 +258,13 @@ The WorkRail Executor can execute any of these workflows. Each workflow defines 
 Each invocation is independent with no memory between calls. The main agent must provide all necessary context upfront in a complete "work package."
 
 ### **Autonomous Operation**
-The executor works through the entire workflow from start to finish. It doesn't ask follow-up questions or iterate—it completes the routine autonomously and returns a structured deliverable.
+The executor works through the entire workflow from start to finish. It doesn't ask follow-up questions or iterate - it completes the routine autonomously and returns a structured deliverable.
 
 ### **Structured Deliverables**
 Every execution returns a named artifact (e.g., `context-map.md`, `hypothesis-challenges.md`) with a consistent structure: Summary, Detailed Findings, Gaps, Recommendations.
 
 ### **Dynamic Role**
-The executor's cognitive function changes based on the workflow it's executing. It doesn't have a fixed identity—the workflow defines who it becomes for that task.
+The executor's cognitive function changes based on the workflow it's executing. It doesn't have a fixed identity - the workflow defines who it becomes for that task.
 
 ---
 
@@ -391,9 +391,9 @@ Subagents execute tasks, but the main agent makes all strategic decisions and ow
 - Run the diagnostic workflow: `workflow-diagnose-environment`
 
 ### **"Subagent output is incomplete"**
-- Check the delegation prompt—did you provide all required context?
+- Check the delegation prompt - did you provide all required context?
 - Verify the depth/rigor level is appropriate for the task
-- Review the subagent's "Gaps" section—did it note why it couldn't complete?
+- Review the subagent's "Gaps" section - did it note why it couldn't complete?
 
 ### **"How do I know which depth/rigor level to use?"**
 - Start with middle levels (depth=2, rigor=3)

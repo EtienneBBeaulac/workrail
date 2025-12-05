@@ -124,7 +124,7 @@ ValidationComposition {
 
 #### Integration Patterns
 
-* **WorkflowService Integration**: Seamless step output validation via `validateStepOutput()`
+* **WorkflowService Integration**: Step output validation via `validateStepOutput()`
 * **Workflow JSON Validation**: Direct JSON validation via `validateWorkflowJson()` use case
 * **Backward Compatibility**: Legacy string-based validation rules still supported
 * **Dependency Injection**: Clean separation from storage and transport concerns
@@ -138,7 +138,7 @@ The `validate-workflow-json` use case provides comprehensive workflow JSON valid
 * **Schema Compliance**: Validates against the workflow schema using the same ValidationEngine
 * **Error Enhancement**: Provides actionable suggestions for LLM consumption
 * **Standalone Operation**: No external dependencies or storage requirements
-* **Integration**: Leverages existing validation infrastructure without code duplication
+* **Integration**: Uses existing validation infrastructure without code duplication
 
 ### Storage Adapters (Infrastructure)
 * Folder: `src/infrastructure/storage/`

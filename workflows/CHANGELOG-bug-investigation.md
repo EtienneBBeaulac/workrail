@@ -156,7 +156,7 @@ Previous fixes (beta.1-beta.17) added warnings about "high confidence ≠ done" 
 ### Fixed
 - **HOTFIX**: Corrected Phase 0e `runCondition` to use `not_equals` instead of invalid `notEquals` operator
   - Phase 0e now properly executes only when `automationLevel != 'High'`
-  - High automation mode now seamlessly proceeds through all phases without early termination checkpoint
+  - High automation mode now proceeds through all phases without early termination checkpoint
 
 ## [1.1.0-beta.6] - 2025-01-06
 

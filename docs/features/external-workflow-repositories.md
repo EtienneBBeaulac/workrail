@@ -203,7 +203,7 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
 
 **Pros**:
 -  Already implemented (`PluginWorkflowStorage`)
--  Leverages npm ecosystem
+- Uses npm ecosystem
 -  Semantic versioning
 -  Dependency management
 

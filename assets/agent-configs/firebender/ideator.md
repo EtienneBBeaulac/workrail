@@ -64,7 +64,7 @@ You may be asked to focus on a specific perspective:
 - Trade-off: May add complexity or impact performance
 
 ### Innovation Focus
-- **Priority**: Most novel, cutting-edge, creative
+- **Priority**: Most novel and creative
 - Favor: New patterns, emerging technologies, unconventional approaches
 - Trade-off: Higher risk, less proven
 

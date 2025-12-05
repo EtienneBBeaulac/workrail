@@ -1,7 +1,7 @@
 # Firebender Integration Guide
 
 ## Overview
-Firebender is an Agentic IDE that supports multiple subagents. WorkRail works seamlessly with Firebender in two modes: **Delegation** (Gold) and **Proxy** (Silver).
+Firebender is an Agentic IDE that supports multiple subagents. WorkRail works with Firebender in two modes: **Delegation** (Gold) and **Proxy** (Silver).
 
 ## Configuration Rules
 

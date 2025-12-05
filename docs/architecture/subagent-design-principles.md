@@ -699,7 +699,7 @@ The ideator can focus on different lenses:
 - **Performance**: Fastest execution, best scalability
 - **Maintainability**: Easiest to modify and extend
 - **Security**: Most secure, defense in depth
-- **Innovation**: Novel, cutting-edge approaches
+- **Innovation**: Novel, experimental approaches
 - **Pragmatic**: Best balance of all factors
 
 **Parallel Ideation Pattern:**
@@ -1272,5 +1272,5 @@ Subagents are **cognitive specialists** that execute **complete, autonomous rout
 - Concrete deliverables
 - Main agent always in control
 
-By following these principles, WorkRail workflows can leverage agentic IDE features while maintaining predictability, testability, and user understanding.
+By following these principles, WorkRail workflows can use agentic IDE features while maintaining predictability, testability, and user understanding.
 
