@@ -1,12 +1,12 @@
 # Deployment Guide
 
-> 🚀 **Deployment Strategies and Operations for the WorkRail System**
+>  **Deployment Strategies and Operations for the WorkRail System**
 
 [![Status](https://img.shields.io/badge/status-specification-orange.svg)](https://github.com/EtienneBBeaulac/mcp)
 [![Spec Version](https://img.shields.io/badge/spec-1.0.0-blue.svg)](specs/)
 [![MCP Compatible](https://img.shields.io/badge/MCP-compatible-purple.svg)](https://modelcontextprotocol.org)
 
-## 📋 Table of Contents
+##  Table of Contents
 
 1. [Deployment Overview](#deployment-overview)
 2. [Environment Setup](#environment-setup)
@@ -19,7 +19,7 @@
 
 ---
 
-## ⚠️ Important Note
+##  Important Note
 
 **This is a specification project.** The deployment strategies described below are the planned approach for when implementation begins. Currently, no actual deployment infrastructure exists - only the deployment framework design.
 

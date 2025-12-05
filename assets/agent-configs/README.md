@@ -373,10 +373,10 @@ Use agentic workflows (`.agentic.json`) that include delegation instructions. Th
 
 ### **4. Validate Deliverables**
 Review executor output against the quality gates defined in the workflow. The executor documents gaps and assumptions - check these carefully.
-- ✅ All required sections present?
-- ✅ File:line citations included?
-- ✅ Gaps explicitly noted?
-- ✅ Recommendations actionable?
+-  All required sections present?
+-  File:line citations included?
+-  Gaps explicitly noted?
+-  Recommendations actionable?
 
 ### **5. Main Agent Stays in Control**
 Subagents execute tasks, but the main agent makes all strategic decisions and owns the outcome.
@@ -416,5 +416,5 @@ Subagents execute tasks, but the main agent makes all strategic decisions and ow
 
 Questions or issues? Open an issue on GitHub or check the WorkRail documentation.
 
-Happy delegating! 🚀
+Happy delegating! 
 

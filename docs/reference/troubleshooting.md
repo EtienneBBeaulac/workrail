@@ -1,11 +1,11 @@
 # Troubleshooting Guide
 
-> 🐛 **Common issues and solutions**
+>  **Common issues and solutions**
 
 [![Status](https://img.shields.io/badge/status-troubleshooting_guide-green.svg)](https://github.com/EtienneBBeaulac/mcp)
 [![Spec Version](https://img.shields.io/badge/spec-1.0.0-blue.svg)](specs/)
 
-## 📋 Table of Contents
+##  Table of Contents
 
 1. [Startup Issues](#startup-issues)
 2. [Configuration Problems](#configuration-problems)

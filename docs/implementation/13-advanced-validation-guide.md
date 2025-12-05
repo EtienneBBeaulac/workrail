@@ -7,7 +7,7 @@
 [![ValidationEngine](https://img.shields.io/badge/ValidationEngine-v0.0.1--alpha-orange.svg)](src/application/services/validation-engine.ts)
 [![Tests](https://img.shields.io/badge/tests-72_passing-green.svg)](tests/unit/validation-engine.test.ts)
 
-## 📋 Table of Contents
+##  Table of Contents
 
 1. [Overview](#overview)
 2. [JSON Schema Validation](#json-schema-validation)
@@ -500,7 +500,7 @@ if (this.schemaCache.has(cacheKey)) {
 
 #### Cache-Friendly Schema Design
 ```typescript
-// ✅ Good - reusable schemas
+//  Good - reusable schemas
 const userSchema = {
   type: 'object',
   properties: { id: { type: 'number' }, name: { type: 'string' } }
@@ -512,7 +512,7 @@ const rules = [
   { type: 'schema', schema: userSchema, message: 'Invalid user 2' }
 ];
 
-// ❌ Bad - inline schemas that can't be cached effectively
+//  Bad - inline schemas that can't be cached effectively
 const rules = [
   { type: 'schema', schema: { type: 'object', properties: { id: { type: 'number' } } }, message: '...' },
   { type: 'schema', schema: { type: 'object', properties: { id: { type: 'number' } } }, message: '...' }
@@ -527,7 +527,7 @@ const rules = [
 const context = { environment: 'development' };
 
 const rules = [
-  { type: 'contains', value: 'dev', condition: { var: 'environment', equals: 'development' } },  // ✅ Evaluated
+  { type: 'contains', value: 'dev', condition: { var: 'environment', equals: 'development' } },  //  Evaluated
   { type: 'contains', value: 'prod', condition: { var: 'environment', equals: 'production' } }   // ⏭️ Skipped
 ];
 // 50% performance improvement through filtering
@@ -537,7 +537,7 @@ const rules = [
 
 #### Efficient Nesting
 ```typescript
-// ✅ Good - most selective conditions first
+//  Good - most selective conditions first
 {
   and: [
     { type: 'contains', value: 'rare_string', message: '...' },     // Most likely to fail fast
@@ -546,7 +546,7 @@ const rules = [
   ]
 }
 
-// ❌ Bad - expensive operations first
+//  Bad - expensive operations first
 {
   and: [
     { type: 'regex', pattern: 'complex.*pattern', message: '...' }, // Expensive, evaluated always
@@ -573,14 +573,14 @@ const rules = [
 
 #### 1. Clear and Actionable Messages
 ```typescript
-// ✅ Good - specific and actionable
+//  Good - specific and actionable
 {
   type: 'contains',
   value: 'test results',
   message: 'Testing tasks must include specific test results or test execution details'
 }
 
-// ❌ Bad - vague and unhelpful
+//  Bad - vague and unhelpful
 {
   type: 'contains', 
   value: 'test',
@@ -590,14 +590,14 @@ const rules = [
 
 #### 2. Appropriate Rule Types
 ```typescript
-// ✅ Good - use schema for structured data
+//  Good - use schema for structured data
 {
   type: 'schema',
   schema: { type: 'object', properties: { status: { enum: ['pass', 'fail'] } } },
   message: 'Test result must be valid JSON with status field'
 }
 
-// ❌ Bad - use contains for structured data  
+//  Bad - use contains for structured data  
 {
   type: 'contains',
   value: '"status":',
@@ -607,7 +607,7 @@ const rules = [
 
 #### 3. Progressive Complexity
 ```typescript
-// ✅ Good - start simple, add complexity as needed
+//  Good - start simple, add complexity as needed
 const basicRules = [
   { type: 'length', min: 10, message: 'Provide detailed response' }
 ];
@@ -629,7 +629,7 @@ const advancedRules = {
 
 #### 1. Consistent Context Variables
 ```typescript
-// ✅ Good - standardized context structure
+//  Good - standardized context structure
 interface TaskContext {
   taskType: 'coding' | 'testing' | 'documentation' | 'deployment';
   priority: 'low' | 'medium' | 'high';
@@ -638,7 +638,7 @@ interface TaskContext {
   complexity: number; // 0.0 to 1.0
 }
 
-// ❌ Bad - inconsistent naming and types
+//  Bad - inconsistent naming and types
 {
   type: 'coding', // should be taskType
   pri: 'hi',      // should be priority: 'high'  
@@ -649,7 +649,7 @@ interface TaskContext {
 
 #### 2. Graceful Degradation
 ```typescript
-// ✅ Good - rules work even with missing context
+//  Good - rules work even with missing context
 {
   type: 'contains',
   value: 'completed',
@@ -657,7 +657,7 @@ interface TaskContext {
   message: 'Must confirm task completion'
 }
 
-// ❌ Bad - rules require specific context to work
+//  Bad - rules require specific context to work
 {
   type: 'contains',
   value: 'test results',
@@ -670,7 +670,7 @@ interface TaskContext {
 
 #### 1. Readable Logic
 ```typescript
-// ✅ Good - logic mirrors business requirements
+//  Good - logic mirrors business requirements
 const composition = {
   and: [
     // "Task must be completed"
@@ -686,7 +686,7 @@ const composition = {
   ]
 };
 
-// ❌ Bad - complex nested logic without clear business meaning
+//  Bad - complex nested logic without clear business meaning
 const composition = {
   or: [
     { and: [{ not: { /* ... */ } }, { or: [/* ... */] }] }
@@ -696,7 +696,7 @@ const composition = {
 
 #### 2. Testable Components  
 ```typescript
-// ✅ Good - compose from testable parts
+//  Good - compose from testable parts
 const mustBeCompleted = { type: 'contains', value: 'completed', message: '...' };
 const mustBeTested = { type: 'contains', value: 'tested', message: '...' };
 const mustBeReviewed = { type: 'contains', value: 'reviewed', message: '...' };

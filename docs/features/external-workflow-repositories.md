@@ -1,6 +1,6 @@
 # External Workflow Repositories
 
-> **Status**: ✅ Infrastructure Complete | ⏳ Integration Pending  
+> **Status**:  Infrastructure Complete |  Integration Pending  
 > **Last Updated**: 2025-01-20
 
 ## Table of Contents
@@ -21,20 +21,20 @@
 
 ### Current Status
 
-✅ **Infrastructure: COMPLETE** - All code exists and is production-ready  
-❌ **Integration: NOT ENABLED** - Not wired into default configuration  
-📋 **What's Missing**: < 1 week of integration work
+ **Infrastructure: COMPLETE** - All code exists and is production-ready  
+ **Integration: NOT ENABLED** - Not wired into default configuration  
+ **What's Missing**: < 1 week of integration work
 
 ### Key Finding
 
 **WorkRail already has complete, tested infrastructure for external workflow repositories.** The system supports:
 
-1. ✅ **Git repositories** (GitHub, GitLab, Bitbucket) - `GitWorkflowStorage`
-2. ✅ **HTTP registries** (npm-style) - `RemoteWorkflowStorage`
-3. ✅ **Plugin packages** (npm) - `PluginWorkflowStorage`
-4. ✅ **Security features** (URL validation, path traversal prevention, file size limits)
-5. ✅ **Graceful degradation** (continues if one source fails)
-6. ✅ **Priority-based merging** (later sources override earlier ones)
+1.  **Git repositories** (GitHub, GitLab, Bitbucket) - `GitWorkflowStorage`
+2.  **HTTP registries** (npm-style) - `RemoteWorkflowStorage`
+3.  **Plugin packages** (npm) - `PluginWorkflowStorage`
+4.  **Security features** (URL validation, path traversal prevention, file size limits)
+5.  **Graceful degradation** (continues if one source fails)
+6.  **Priority-based merging** (later sources override earlier ones)
 
 ### Why This Matters
 
@@ -49,14 +49,14 @@ WorkRail supports loading workflows from external sources, enabling teams to:
 
 | Factor | Git | HTTP Registry | Plugins |
 |--------|-----|--------------|---------|
-| Version Control | ✅ Built-in | ❌ Not included | ⚠️ Via npm |
-| Infrastructure | ✅ GitHub/GitLab free | ❌ Need server | ✅ npm exists |
-| Familiarity | ✅ Developers know Git | ❌ Custom API | ✅ npm familiar |
-| Offline Support | ✅ Local cache | ❌ Needs network | ✅ node_modules |
-| Pull Request Workflow | ✅ Native | ⚠️ Custom | ⚠️ npm publish |
-| Already Implemented | ✅ Yes | ✅ Yes | ✅ Yes |
-| Security | ✅ Excellent | ✅ Good | ✅ Good |
-| Setup Complexity | ✅ Low | ❌ High | ⚠️ Medium |
+| Version Control |  Built-in |  Not included |  Via npm |
+| Infrastructure |  GitHub/GitLab free |  Need server |  npm exists |
+| Familiarity |  Developers know Git |  Custom API |  npm familiar |
+| Offline Support |  Local cache |  Needs network |  node_modules |
+| Pull Request Workflow |  Native |  Custom |  npm publish |
+| Already Implemented |  Yes |  Yes |  Yes |
+| Security |  Excellent |  Good |  Good |
+| Setup Complexity |  Low |  High |  Medium |
 
 **Git Workflow Benefits:**
 ```
@@ -156,18 +156,18 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
 **Use Case**: Teams want to share workflows via GitHub/GitLab
 
 **Pros**:
-- ✅ Version control built-in
-- ✅ Pull request workflow for contributions
-- ✅ Already implemented (`GitWorkflowStorage`)
-- ✅ Works offline (local cache)
-- ✅ Familiar to developers
-- ✅ Free hosting (GitHub/GitLab)
-- ✅ Automatic sync with configurable intervals
+-  Version control built-in
+-  Pull request workflow for contributions
+-  Already implemented (`GitWorkflowStorage`)
+-  Works offline (local cache)
+-  Familiar to developers
+-  Free hosting (GitHub/GitLab)
+-  Automatic sync with configurable intervals
 
 **Cons**:
-- ❌ Requires Git installed
-- ❌ Clone/pull operations add latency
-- ❌ Not suitable for high-frequency updates
+-  Requires Git installed
+-  Clone/pull operations add latency
+-  Not suitable for high-frequency updates
 
 **Best For**:
 - Team workflow repositories
@@ -180,16 +180,16 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
 **Use Case**: npm-style workflow registry with REST API
 
 **Pros**:
-- ✅ Fast (no clone/pull)
-- ✅ Already implemented (`RemoteWorkflowStorage`)
-- ✅ Supports authentication (API keys)
-- ✅ Good for high-frequency updates
-- ✅ Retry logic with exponential backoff
+-  Fast (no clone/pull)
+-  Already implemented (`RemoteWorkflowStorage`)
+-  Supports authentication (API keys)
+-  Good for high-frequency updates
+-  Retry logic with exponential backoff
 
 **Cons**:
-- ❌ Requires running a registry server
-- ❌ No built-in version control
-- ❌ Requires network for every access (unless cached)
+-  Requires running a registry server
+-  No built-in version control
+-  Requires network for every access (unless cached)
 
 **Best For**:
 - Large organizations with internal registries
@@ -202,15 +202,15 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
 **Use Case**: Distribute workflows as npm packages
 
 **Pros**:
-- ✅ Already implemented (`PluginWorkflowStorage`)
-- ✅ Leverages npm ecosystem
-- ✅ Semantic versioning
-- ✅ Dependency management
+-  Already implemented (`PluginWorkflowStorage`)
+-  Leverages npm ecosystem
+-  Semantic versioning
+-  Dependency management
 
 **Cons**:
-- ❌ Requires npm/node_modules
-- ❌ More complex workflow publishing
-- ❌ Version lock-in
+-  Requires npm/node_modules
+-  More complex workflow publishing
+-  Version lock-in
 
 **Best For**:
 - Public workflow distributions
@@ -680,7 +680,7 @@ if (gitRepoUrl) {
 **Pros**: Simple, opt-in, no breaking changes  
 **Cons**: Limited discoverability
 
-#### Option C: Full Integration (1 week) ⭐ RECOMMENDED
+#### Option C: Full Integration (1 week)  RECOMMENDED
 
 Create `EnhancedMultiSourceWorkflowStorage` and make it the default:
 
@@ -888,17 +888,17 @@ This provides:
 
 ### Why Git-Based Approach?
 
-1. ✅ No additional infrastructure needed (use GitHub/GitLab)
-2. ✅ Developers already understand Git workflows
-3. ✅ Perfect for collaboration (PRs, reviews, versioning)
-4. ✅ Already fully implemented and tested
-5. ✅ Free hosting with unlimited public repos
+1.  No additional infrastructure needed (use GitHub/GitLab)
+2.  Developers already understand Git workflows
+3.  Perfect for collaboration (PRs, reviews, versioning)
+4.  Already fully implemented and tested
+5.  Free hosting with unlimited public repos
 
 ### Implementation Effort
 
 - **Minimum viable**: 1 day (Option A)
 - **Environment variables**: 3 days (Option B)
-- **Full feature set**: 1 week (Option C) ⭐
+- **Full feature set**: 1 week (Option C) 
 
 ### Total Lines of Code Required
 

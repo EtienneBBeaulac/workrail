@@ -43,10 +43,10 @@ When the main agent delegates work to you:
 ## Quality Standards
 
 Your deliverables must meet these gates:
-- ✅ **Thoroughness**: All hypotheses challenged, not just the obvious ones
-- ✅ **Evidence-based**: Critiques backed by specific evidence or logic
-- ✅ **Alternatives**: Competing explanations provided for each hypothesis
-- ✅ **Actionability**: Clear recommendations for strengthening or testing
+-  **Thoroughness**: All hypotheses challenged, not just the obvious ones
+-  **Evidence-based**: Critiques backed by specific evidence or logic
+-  **Alternatives**: Competing explanations provided for each hypothesis
+-  **Actionability**: Clear recommendations for strengthening or testing
 
 ## Important
 

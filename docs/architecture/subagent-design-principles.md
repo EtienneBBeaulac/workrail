@@ -12,8 +12,8 @@ This document defines WorkRail's approach to subagent design for agentic IDEs. I
 
 ### 1. **Cognitive Specialization, Not Task Ownership**
 
-**✅ Good:** "Context Researcher" - Specializes in deep reading and systematic exploration
-**❌ Bad:** "Debugger" - Too broad, owns entire debugging workflow
+** Good:** "Context Researcher" - Specializes in deep reading and systematic exploration
+** Bad:** "Debugger" - Too broad, owns entire debugging workflow
 
 **Rule:** Subagents should embody a **specific cognitive mode** (exploration, challenge, verification) that can be applied across many workflows, not own a complete workflow themselves.
 
@@ -80,10 +80,10 @@ Every subagent routine produces a **named artifact** with a **consistent structu
 **Deliverable Quality Gates:**
 
 Main agent validates each deliverable against these criteria:
-- ✅ **Completeness**: All required sections present
-- ✅ **Citations**: File:line references for all findings
-- ✅ **Gaps Section**: Explicit about limitations and unknowns
-- ✅ **Actionability**: Clear next steps or recommendations
+-  **Completeness**: All required sections present
+-  **Citations**: File:line references for all findings
+-  **Gaps Section**: Explicit about limitations and unknowns
+-  **Actionability**: Clear next steps or recommendations
 
 **If a deliverable fails quality gates**, the main agent should:
 1. Note the gaps in the workflow context
@@ -110,14 +110,14 @@ Not: "Hey, someone gather context for me" (auto-invoke)
 
 **Key Discovery:** Subagents work better as **auditors** than **executors**.
 
-**❌ Executor Model (Problematic):**
+** Executor Model (Problematic):**
 ```
 Main Agent: "Go gather context about authentication"
 Subagent: *reads files, builds understanding*
 Problem: Main agent doesn't have the context, needs to re-read
 ```
 
-**✅ Auditor Model (Effective):**
+** Auditor Model (Effective):**
 ```
 Main Agent: *reads files, builds understanding*
 Main Agent: "I read these files and learned X. Audit my work."
@@ -150,7 +150,7 @@ Result: Main agent has full context + quality control
 
 **Explicit Parallelism:**
 ```
-⚠️ **CRITICAL: Spawn ALL subagents SIMULTANEOUSLY, not sequentially.**
+ **CRITICAL: Spawn ALL subagents SIMULTANEOUSLY, not sequentially.**
 
 Delegate to THREE subagents AT THE SAME TIME:
 1. [Subagent 1 with specific focus]
@@ -841,16 +841,16 @@ Additional specialized subagents for specific workflow needs.
 ### **When to Create a New Subagent**
 
 **Create a new subagent if:**
-- ✅ It embodies a **distinct cognitive function** (not covered by existing subagents)
-- ✅ It can be **reused across many workflows** (not workflow-specific)
-- ✅ It produces **structured, actionable deliverables** (not vague summaries)
-- ✅ It can execute **autonomously** (no back-and-forth required)
+-  It embodies a **distinct cognitive function** (not covered by existing subagents)
+-  It can be **reused across many workflows** (not workflow-specific)
+-  It produces **structured, actionable deliverables** (not vague summaries)
+-  It can execute **autonomously** (no back-and-forth required)
 
 **Don't create a new subagent if:**
-- ❌ It's too similar to an existing subagent (extend existing instead)
-- ❌ It's workflow-specific (create a routine for the main agent instead)
-- ❌ It requires conversational refinement (main agent should do it)
-- ❌ It's just a single tool call (main agent can do it directly)
+-  It's too similar to an existing subagent (extend existing instead)
+-  It's workflow-specific (create a routine for the main agent instead)
+-  It requires conversational refinement (main agent should do it)
+-  It's just a single tool call (main agent can do it directly)
 
 ### **Subagent Persona Template**
 
@@ -1028,9 +1028,9 @@ After Phase 0 (investigation), the workflow assesses complexity and chooses one 
 - Phase 4: Self-validation (no delegation)
 
 **Characteristics:**
-- ⚡⚡⚡ Fastest execution
+-  Fastest execution
 - 💰 Lowest cost
-- ⭐⭐ Good quality (main agent does all work)
+-  Good quality (main agent does all work)
 
 **Use Case:** Simple bugs with clear symptoms, non-critical
 
@@ -1047,9 +1047,9 @@ After Phase 0 (investigation), the workflow assesses complexity and chooses one 
 - Phase 4: Sequential validation (1 challenger)
 
 **Characteristics:**
-- ⚡⚡ Fast execution
+-  Fast execution
 - 💰💰 Moderate cost
-- ⭐⭐⭐ Very good quality (adversarial review)
+-  Very good quality (adversarial review)
 
 **Use Case:** Typical bugs, balanced approach
 
@@ -1107,9 +1107,9 @@ Main agent proceeds ONLY if ALL THREE validate
 ```
 
 **Characteristics:**
-- ⚡ Slower (more work, but parallel)
+-  Slower (more work, but parallel)
 - 💰💰💰 Highest cost
-- ⭐⭐⭐⭐⭐ Maximum quality (multi-perspective validation)
+-  Maximum quality (multi-perspective validation)
 
 **Use Case:** Critical bugs in production, complex bugs, low confidence
 
@@ -1215,21 +1215,21 @@ Main Agent: "Received investigation.md. Analyzing findings..."
 
 **Enhanced (IDE-Specific):**
 ```
-🔍 Context Researcher exploring at depth=2...
+ Context Researcher exploring at depth=2...
    ├─ Reading AuthService.ts
    ├─ Tracing validateToken() 
    └─ Analyzing dependencies
-✅ investigation.md created (3.2s)
+ investigation.md created (3.2s)
 ```
 
 WorkRail workflows should be designed for the baseline, but IDEs may optionally enhance with progress indicators, file-by-file updates, or streaming artifact generation.
 
 ### **Implemented Features**
 
-✅ **Parallel Delegation**: Invoke multiple subagents simultaneously (see Ultra workflow)
-✅ **Focused Audits**: Give each parallel auditor a specific focus for diversity
-✅ **Auditor Model**: Subagents review main agent's work rather than executing it
-✅ **Quality Gates**: Multi-perspective validation before critical decisions
+ **Parallel Delegation**: Invoke multiple subagents simultaneously (see Ultra workflow)
+ **Focused Audits**: Give each parallel auditor a specific focus for diversity
+ **Auditor Model**: Subagents review main agent's work rather than executing it
+ **Quality Gates**: Multi-perspective validation before critical decisions
 
 ### **Future Features**
 

@@ -22,13 +22,13 @@ main
 
 #### Protect matching branches
 
-- ✅ **Require a pull request before merging**
-  - ✅ Require approvals: `1` (recommended, adjust based on team size)
-  - ✅ Dismiss stale pull request approvals when new commits are pushed
-  - ✅ Require review from Code Owners (optional, if you use CODEOWNERS file)
+-  **Require a pull request before merging**
+  -  Require approvals: `1` (recommended, adjust based on team size)
+  -  Dismiss stale pull request approvals when new commits are pushed
+  -  Require review from Code Owners (optional, if you use CODEOWNERS file)
 
-- ✅ **Require status checks to pass before merging**
-  - ✅ Require branches to be up to date before merging
+-  **Require status checks to pass before merging**
+  -  Require branches to be up to date before merging
   - Add the following status checks as required:
     - `Build & Test (Node 20)`
     - `Build & Test (Node 22)`
@@ -37,20 +37,20 @@ main
     - `Validate Workflows`
     - `CI Success` (overall summary check)
 
-- ✅ **Require conversation resolution before merging** (optional but recommended)
+-  **Require conversation resolution before merging** (optional but recommended)
 
-- ✅ **Do not allow bypassing the above settings**
+-  **Do not allow bypassing the above settings**
   - This ensures even administrators must follow the rules
 
-- ✅ **Restrict who can push to matching branches**
+-  **Restrict who can push to matching branches**
   - Leave empty to prevent all direct pushes (recommended)
   - Or specify specific teams/users who can push directly (for emergency fixes)
 
 #### Additional Settings
 
-- ✅ **Require linear history** (optional, prevents merge commits)
-- ✅ **Require deployments to succeed before merging** (if you have deployments configured)
-- ✅ **Lock branch** - Only enable for production-critical branches if needed
+-  **Require linear history** (optional, prevents merge commits)
+-  **Require deployments to succeed before merging** (if you have deployments configured)
+-  **Lock branch** - Only enable for production-critical branches if needed
 
 ### Testing the Setup
 

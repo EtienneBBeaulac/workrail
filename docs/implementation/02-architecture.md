@@ -6,7 +6,7 @@
 [![Spec Version](https://img.shields.io/badge/spec-1.0.0-blue.svg)](specs/)
 [![MCP Compatible](https://img.shields.io/badge/MCP-compatible-purple.svg)](https://modelcontextprotocol.org)
 
-## 📋 Table of Contents
+##  Table of Contents
 
 1. [System Overview](#system-overview)
 2. [Architecture Layers](#architecture-layers)
@@ -261,10 +261,10 @@ Step Output → ValidationEngine.validate() → {
 
 **TypeScript Code Blocks**: Always include proper typing
 ```typescript
-// ✅ Good - includes types and context
+//  Good - includes types and context
 const result: ValidationResult = await engine.validate(output, rules, context);
 
-// ❌ Bad - no types or context
+//  Bad - no types or context
 const result = engine.validate(output, rules);
 ```
 
@@ -283,8 +283,8 @@ const result = engine.validate(output, rules);
 ### Documentation Structure Standards
 
 **Section Headers**: Use descriptive, action-oriented titles
-* ✅ "Implementing Advanced Validation Rules"
-* ❌ "Validation"
+*  "Implementing Advanced Validation Rules"
+*  "Validation"
 
 **Code Comments**: Explain the why, not just the what
 ```typescript

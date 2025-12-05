@@ -405,10 +405,10 @@ This pattern repeats for each phase, with the agent:
 ```
 Agent: "All phases completed successfully! Here's what we accomplished:
 
-✅ Extended message models to support images
-✅ Implemented UI components for both platforms
-✅ Added proper loading states and error handling
-✅ Created comprehensive tests
+ Extended message models to support images
+ Implemented UI components for both platforms
+ Added proper loading states and error handling
+ Created comprehensive tests
 
 The implementation follows the existing patterns in your codebase and includes 
 all requirements from ACEI-1234. Would you like me to help you prepare the 
@@ -745,8 +745,8 @@ Creating effective workflows is both an art and a science. Follow these principl
 
 #### 1. Start with Clear Outcomes
 
-**❌ Bad**: "Implement feature"
-**✅ Good**: "Implement user authentication with email/password, including signup, login, and password reset flows"
+** Bad**: "Implement feature"
+** Good**: "Implement user authentication with email/password, including signup, login, and password reset flows"
 
 Your workflow should have a specific, measurable outcome. Users should know exactly what they'll have when finished.
 
@@ -759,13 +759,13 @@ Your workflow should have a specific, measurable outcome. Users should know exac
 
 **Example Breakdown**:
 ```json
-// ❌ Too Large
+//  Too Large
 {
   "title": "Build the entire authentication system",
   "prompt": "Implement user auth with all features"
 }
 
-// ✅ Just Right
+//  Just Right
 {
   "title": "Create User model and database schema",
   "prompt": "Create a User model with email, hashed_password, and created_at fields. Include database migrations."
@@ -810,7 +810,7 @@ These questions catch ambiguities before they cause problems:
 
 ### Common Patterns and Anti-Patterns
 
-#### ✅ Effective Patterns
+####  Effective Patterns
 
 **The Investigation Step**
 ```json
@@ -841,7 +841,7 @@ These questions catch ambiguities before they cause problems:
 }
 ```
 
-#### ❌ Anti-Patterns to Avoid
+####  Anti-Patterns to Avoid
 
 **The Kitchen Sink Step**
 ```json

@@ -116,10 +116,10 @@ Each idea you generate should include:
 ## Quality Standards
 
 Your ideas must meet these gates:
-- ✅ **Diversity**: Ideas explore different solution spaces, not just variations
-- ✅ **Concreteness**: Ideas are specific and actionable, not vague
-- ✅ **Completeness**: Each idea has pros, cons, and complexity assessment
-- ✅ **Quantity**: You generated the requested number of ideas (or explained why fewer)
+-  **Diversity**: Ideas explore different solution spaces, not just variations
+-  **Concreteness**: Ideas are specific and actionable, not vague
+-  **Completeness**: Each idea has pros, cons, and complexity assessment
+-  **Quantity**: You generated the requested number of ideas (or explained why fewer)
 
 ## Important
 

@@ -94,10 +94,10 @@ Your audit must assess:
 ## Quality Standards
 
 Your audit must meet these gates:
-- ✅ **Thoroughness**: All aspects of their work reviewed
-- ✅ **Specificity**: Concrete feedback with file/line references
-- ✅ **Actionability**: Clear recommendations for what to do next
-- ✅ **Independence**: Fresh perspective, not just agreeing with them
+-  **Thoroughness**: All aspects of their work reviewed
+-  **Specificity**: Concrete feedback with file/line references
+-  **Actionability**: Clear recommendations for what to do next
+-  **Independence**: Fresh perspective, not just agreeing with them
 
 ## Parallel Audits
 

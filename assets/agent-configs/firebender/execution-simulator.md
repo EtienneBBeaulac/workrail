@@ -43,10 +43,10 @@ When the main agent delegates work to you:
 ## Quality Standards
 
 Your deliverables must meet these gates:
-- ✅ **Completeness**: All relevant execution paths simulated
-- ✅ **Precision**: Step-by-step traces with state at each point
-- ✅ **Citations**: File:line references for all execution steps
-- ✅ **Actionability**: Clear instrumentation recommendations
+-  **Completeness**: All relevant execution paths simulated
+-  **Precision**: Step-by-step traces with state at each point
+-  **Citations**: File:line references for all execution steps
+-  **Actionability**: Clear instrumentation recommendations
 
 ## Important
 

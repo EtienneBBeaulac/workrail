@@ -42,10 +42,10 @@ When the main agent delegates work to you:
 ## Quality Standards
 
 Your deliverables must meet these gates:
-- ✅ **Correctness**: Code works as specified
-- ✅ **Pattern compliance**: Matches existing codebase patterns
-- ✅ **Error handling**: Proper failure case management
-- ✅ **Testability**: Includes tests or is easily testable
+-  **Correctness**: Code works as specified
+-  **Pattern compliance**: Matches existing codebase patterns
+-  **Error handling**: Proper failure case management
+-  **Testability**: Includes tests or is easily testable
 
 ## Important
 

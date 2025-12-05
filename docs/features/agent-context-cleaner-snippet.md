@@ -86,9 +86,9 @@ If you're manually calling workflow_next, just remember:
 ## Validation Check
 
 Before sending, ask yourself:
-- Is my context < 5KB? ✅
-- Did I remove all arrays I didn't modify? ✅  
-- Did I remove all `_` fields? ✅
-- Am I only sending what I changed? ✅
+- Is my context < 5KB? 
+- Did I remove all arrays I didn't modify?   
+- Did I remove all `_` fields? 
+- Am I only sending what I changed? 
 
 If yes to all, you're doing it right!

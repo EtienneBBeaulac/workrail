@@ -1,12 +1,12 @@
 # Performance Guide
 
-> ⚡ **Performance best practices and optimization strategies**
+>  **Performance best practices and optimization strategies**
 
 [![Status](https://img.shields.io/badge/status-specification-orange.svg)](https://github.com/EtienneBBeaulac/mcp)
 [![Spec Version](https://img.shields.io/badge/spec-1.0.0-blue.svg)](specs/)
 [![MCP Compatible](https://img.shields.io/badge/MCP-compatible-purple.svg)](https://modelcontextprotocol.org)
 
-## 📋 Table of Contents
+##  Table of Contents
 
 1. [Performance Philosophy](#performance-philosophy)
 2. [Performance Targets](#performance-targets)
@@ -20,7 +20,7 @@
 
 ---
 
-## ⚠️ Important Note
+##  Important Note
 
 **This is a specification project.** The performance strategies described below are the planned approach for when implementation begins. Currently, no actual performance optimizations are implemented - only the performance framework design.
 

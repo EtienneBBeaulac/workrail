@@ -1,12 +1,12 @@
 # Simple Workflow Creation Guide
 
-> 📝 **A guide to creating simple, single-file workflows**
+>  **A guide to creating simple, single-file workflows**
 
 [![Status](https://img.shields.io/badge/status-specification-orange.svg)](https://github.com/EtienneBBeaulac/mcp)
 [![Spec Version](https://img.shields.io/badge/spec-1.0.0-blue.svg)](specs/)
 [![MCP Compatible](https://img.shields.io/badge/MCP-compatible-purple.svg)](https://modelcontextprotocol.org)
 
-## 📋 Table of Contents
+##  Table of Contents
 
 1. [Getting Started with Workflows](#getting-started-with-workflows)
 2. [Creating Your First Workflow](#creating-your-first-workflow)
@@ -316,13 +316,13 @@ Define reusable "functions" in your `metaGuidance` section, then reference them 
 
 #### When to Use This Pattern
 
-✅ **Good for:**
+ **Good for:**
 - Complex workflows with repeated instructions
 - Workflows with >10 steps that share common patterns
 - Team workflows where consistency is crucial
 - Workflows that need detailed instructions but have character limits
 
-❌ **Avoid for:**
+ **Avoid for:**
 - Simple workflows with few steps
 - One-off workflows that won't be maintained
 - Workflows where explicit instructions are clearer
@@ -332,10 +332,10 @@ Define reusable "functions" in your `metaGuidance` section, then reference them 
 Remember that metaGuidance items have a 256-character limit in the schema. Keep function definitions concise:
 
 ```json
-// ✅ Good - under 256 characters
+//  Good - under 256 characters
 "fun updateDecisionLog() = 'Update Decision Log: file paths, why important, outcome impact. Limit 3-5 files.'"
 
-// ❌ Too long - over 256 characters
+//  Too long - over 256 characters
 "fun updateDecisionLog() = 'Update the Decision Log section in CONTEXT.md with detailed file paths and line ranges, excerpts showing why each file was important, and how they influenced the outcome and decision-making process throughout the workflow execution. Always limit to the top 3-5 most impactful files per decision for scannability and conciseness.'"
 ```
 
@@ -482,7 +482,7 @@ Combine multiple validation rules with logical operators:
 
 **Missing Required Fields:**
 ```json
-// ❌ Missing required fields
+//  Missing required fields
 {
   "name": "My Workflow"
   // Missing id, description, steps
@@ -491,7 +491,7 @@ Combine multiple validation rules with logical operators:
 
 **Invalid Step Structure:**
 ```json
-// ❌ Invalid step
+//  Invalid step
 {
   "id": "step-1",
   "title": "My Step"
@@ -501,7 +501,7 @@ Combine multiple validation rules with logical operators:
 
 **Invalid ID Format:**
 ```json
-// ❌ Invalid ID (contains spaces)
+//  Invalid ID (contains spaces)
 {
   "id": "my workflow",
   // Should be: "my-workflow"
@@ -510,20 +510,20 @@ Combine multiple validation rules with logical operators:
 
 **Invalid Validation Criteria:**
 ```json
-// ❌ Invalid schema format
+//  Invalid schema format
 {
   "type": "schema",
   "schema": "not a valid schema object"
 }
 
-// ❌ Invalid condition syntax
+//  Invalid condition syntax
 {
   "type": "contains",
   "value": "test",
   "condition": "invalid javascript syntax"
 }
 
-// ❌ Missing logical operator
+//  Missing logical operator
 {
   "validationCriteria": {
     "invalidOperator": [
@@ -539,12 +539,12 @@ Combine multiple validation rules with logical operators:
 
 ### 1. **Vague Prompts**
 ```json
-// ❌ Too vague
+//  Too vague
 {
   "prompt": "Fix the bug"
 }
 
-// ✅ Specific and structured
+//  Specific and structured
 {
   "prompt": "**PREP**: Identify the root cause of the authentication bug.\n\n**IMPLEMENT**: Apply the fix with proper error handling.\n\n**VERIFY**: Test the fix with various scenarios."
 }
@@ -552,12 +552,12 @@ Combine multiple validation rules with logical operators:
 
 ### 2. **Missing Preconditions**
 ```json
-// ❌ No preconditions
+//  No preconditions
 {
   "steps": [...]
 }
 
-// ✅ Clear preconditions
+//  Clear preconditions
 {
   "preconditions": [
     "Database is accessible",
@@ -569,7 +569,7 @@ Combine multiple validation rules with logical operators:
 
 ### 3. **Poor Step Organization**
 ```json
-// ❌ Steps not logically ordered
+//  Steps not logically ordered
 {
   "steps": [
     {"id": "test", "title": "Test the feature"},
@@ -578,7 +578,7 @@ Combine multiple validation rules with logical operators:
   ]
 }
 
-// ✅ Logical order
+//  Logical order
 {
   "steps": [
     {"id": "plan", "title": "Plan the implementation"},
@@ -590,7 +590,7 @@ Combine multiple validation rules with logical operators:
 
 ### 4. **Inconsistent Patterns**
 ```json
-// ❌ Inconsistent pattern usage
+//  Inconsistent pattern usage
 {
   "steps": [
     {"id": "step1", "prompt": "PREP: Analyze... IMPLEMENT: Code... VERIFY: Test..."},
@@ -598,7 +598,7 @@ Combine multiple validation rules with logical operators:
   ]
 }
 
-// ✅ Consistent pattern usage
+//  Consistent pattern usage
 {
   "steps": [
     {"id": "step1", "prompt": "PREP: Analyze... IMPLEMENT: Code... VERIFY: Test..."},

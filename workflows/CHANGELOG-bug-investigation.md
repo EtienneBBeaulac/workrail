@@ -9,7 +9,7 @@
 - **Fix**: Moved loop enforcement guidance to first body step (`analysis-neighborhood-contracts`)
   - "USER SAYS: This loop MUST complete ALL 5 iterations..."
   - Now properly enforced on each iteration
-- **Validation**: ✅ Workflow now passes full schema validation
+- **Validation**:  Workflow now passes full schema validation
 
 ### Why This Matters
 Without proper validation, the MCP server couldn't load the workflow at all. Beta.19-21 were broken due to schema violations.
@@ -29,9 +29,9 @@ Without proper validation, the MCP server couldn't load the workflow at all. Bet
 
 ### CRITICAL FIX - Dangerous "Autonomy" Language
 - **ROOT CAUSE IDENTIFIED**: Our automation level descriptions were giving agents permission to skip!
-  - OLD: "High=**auto-approve >8.0 confidence decisions**" ❌
+  - OLD: "High=**auto-approve >8.0 confidence decisions**" 
   - Interpreted as: "I have 9/10 confidence → I can approve my decision to skip phases"
-  - OLD: "Control workflow **autonomy**" ❌
+  - OLD: "Control workflow **autonomy**" 
   - Interpreted as: "High mode gives me autonomy to decide what to skip"
 
 ### Language Fixes

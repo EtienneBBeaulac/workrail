@@ -119,7 +119,7 @@ When inside a loop, specific variables are injected and must be preserved:
 
 ### 1. Avoid Large Array Storage
 
-❌ **Bad: Storing large arrays**
+ **Bad: Storing large arrays**
 ```json
 {
   "id": "prepare-implementation",
@@ -128,7 +128,7 @@ When inside a loop, specific variables are injected and must be preserved:
 }
 ```
 
-✅ **Good: Store count and read on-demand**
+ **Good: Store count and read on-demand**
 ```json
 {
   "id": "count-steps",

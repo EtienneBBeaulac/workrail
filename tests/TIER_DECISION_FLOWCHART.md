@@ -73,10 +73,10 @@ it('can resolve all DI tokens', async () => {
 
 **Characteristics:**
 
-- ✅ No mocks
-- ✅ Tests construction, not behavior
-- ✅ Catches: Missing decorators, bad constructors, circular deps
-- ✅ Fast (< 1s per test)
+-  No mocks
+-  Tests construction, not behavior
+-  Catches: Missing decorators, bad constructors, circular deps
+-  Fast (< 1s per test)
 
 ---
 
@@ -101,23 +101,23 @@ it('validates step output with real ValidationEngine', async () => {
 
 **Characteristics:**
 
-- ✅ Uses real business logic services (ValidationEngine, LoopStackManager)
-- ✅ Only mocks infrastructure (storage, feature flags)
-- ✅ Tests service integration points
-- ✅ Medium speed (10-100ms)
+-  Uses real business logic services (ValidationEngine, LoopStackManager)
+-  Only mocks infrastructure (storage, feature flags)
+-  Tests service integration points
+-  Medium speed (10-100ms)
 
 **What to mock:**
 
-- ✅ Storage (use InMemoryWorkflowStorage)
-- ✅ Feature flags (use StaticFeatureFlagProvider)
-- ✅ HTTP clients, file I/O
+-  Storage (use InMemoryWorkflowStorage)
+-  Feature flags (use StaticFeatureFlagProvider)
+-  HTTP clients, file I/O
 
 **What NOT to mock:**
 
-- ❌ ValidationEngine
-- ❌ LoopStackManager
-- ❌ StepSelector
-- ❌ Any business logic service
+-  ValidationEngine
+-  LoopStackManager
+-  StepSelector
+-  Any business logic service
 
 ---
 
@@ -137,10 +137,10 @@ it('evaluates simple equals condition', () => {
 
 **Characteristics:**
 
-- ✅ Tests single function in isolation
-- ✅ Heavy mocking acceptable
-- ✅ Very fast (< 1ms)
-- ✅ No DI involved
+-  Tests single function in isolation
+-  Heavy mocking acceptable
+-  Very fast (< 1ms)
+-  No DI involved
 
 ---
 
@@ -163,16 +163,16 @@ it('cache stays under limit', async () => {
 
 **Characteristics:**
 
-- ✅ Load simulation
-- ✅ Memory checks
-- ✅ Cache eviction verification
-- ✅ Slower (1-10s)
+-  Load simulation
+-  Memory checks
+-  Cache eviction verification
+-  Slower (1-10s)
 
 ---
 
 ## Common Mistakes
 
-### ❌ Mistake 1: Mocking Business Logic in Integration Tests
+###  Mistake 1: Mocking Business Logic in Integration Tests
 
 ```typescript
 // BAD - This defeats the purpose of integration testing!
@@ -190,7 +190,7 @@ await setupIntegrationTest({
 
 ---
 
-### ❌ Mistake 2: Testing DI in Unit Tests
+###  Mistake 2: Testing DI in Unit Tests
 
 ```typescript
 // BAD - Wrong tier
@@ -211,7 +211,7 @@ describe('[SMOKE] DI Health', () => {
 
 ---
 
-### ❌ Mistake 3: Slow Integration Tests
+###  Mistake 3: Slow Integration Tests
 
 ```typescript
 // BAD - Real file I/O in integration test
@@ -292,12 +292,12 @@ it('can resolve ValidationEngine', async () => {
 ┌─────────────────────────────────────────┐
 │         INTEGRATION TESTS               │
 │                                         │
-│  ✅ DO:                                 │
+│   DO:                                 │
 │    - Mock storage                       │
 │    - Mock feature flags                 │
 │    - Mock HTTP clients                  │
 │                                         │
-│  ❌ DON'T:                              │
+│   DON'T:                              │
 │    - Mock ValidationEngine              │
 │    - Mock LoopStackManager              │
 │    - Mock business logic services       │

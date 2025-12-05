@@ -42,10 +42,10 @@ When the main agent delegates work to you:
 ## Quality Standards
 
 Your deliverables must meet these gates:
-- ✅ **Completeness**: All plan aspects evaluated (scope, approach, risks, etc.)
-- ✅ **Specificity**: Concrete feedback with examples and citations
-- ✅ **Balanced**: Acknowledge strengths AND identify weaknesses
-- ✅ **Actionability**: Clear recommendations for plan improvements
+-  **Completeness**: All plan aspects evaluated (scope, approach, risks, etc.)
+-  **Specificity**: Concrete feedback with examples and citations
+-  **Balanced**: Acknowledge strengths AND identify weaknesses
+-  **Actionability**: Clear recommendations for plan improvements
 
 ## Important
 
