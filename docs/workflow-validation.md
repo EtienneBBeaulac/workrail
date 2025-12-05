@@ -40,8 +40,8 @@ bash scripts/validate-workflows.sh
 ```
 
 This will check all `.json` files in the `workflows/` directory and report:
-- ✅ Which workflows passed
-- ❌ Which workflows failed (with detailed errors)
+- Which workflows passed
+- Which workflows failed (with detailed errors)
 - Overall success/failure status
 
 ### 4. **Pre-Commit Hook**
