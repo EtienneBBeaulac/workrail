@@ -22,6 +22,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "docs:workflows": "node scripts/generate-workflow-docs.js",
     "dev": "npm run build && node dist/mcp-server.js",
     "prepare": "npm run build",
     "watch": "tsc --watch",
