@@ -1,5 +1,5 @@
 {
-  "id": "mr-review-workflow",
+  "id": "mr-review-workflow-agentic",
   "name": "Adaptive MR Review Workflow (Agentic)",
   "version": "0.3.0",
   "description": "An adaptive agentic workflow for comprehensive code review. Adjusts rigor based on MR complexity (QUICK/STANDARD/THOROUGH modes) with parallel subagent delegation for context auditing, multi-perspective analysis, and triple validation gates.",
