@@ -1,46 +1,58 @@
-# Workflow Orchestration System Overview
+# WorkRail System Overview
 
 ## 1. Introduction & Vision
 
-### What This Is All About
+### The Problem
 
-The Workflow Orchestration System is an opinionated framework designed to guide Large Language
-Models (LLMs) through complex software development tasks with improved reliability and consistency.
-Rather than hoping an LLM will follow best practices, this system *guides them toward* best
-practices through structured, machine-readable workflows.
+AI agents are eager to help. Too eager.
 
-At its core, this is about improving the way developers collaborate with AI. Instead of open-ended
-prompting that often leads to hallucinations, scope creep, and inconsistent results, we provide a
-rails-based approach where both the human developer and the AI agent follow a proven, step-by-step
-process.
+Ask one to fix a bug and it starts editing code immediately - before understanding the system,
+before considering alternatives, before verifying assumptions. It's not stupid; it's a predictive
+model doing what predictive models do: fill in gaps and race to an answer.
 
-### The Core Problem It Solves
+You can add system prompts: "plan before coding," "gather context first." But as conversations
+grow, those instructions fade into the background. The agent reverts to its nature: assume,
+predict, jump to conclusions. Modern models have built-in instructions to think things through and
+plan, but they never do as thorough a job as they would with a human actively guiding them.
 
-LLMs are incredibly powerful but suffer from well-documented limitations:
+The result: inconsistent quality that depends on how much you babysit the agent.
 
-- **Hallucination**: They confidently generate plausible-sounding but incorrect information
-- **Scope Creep**: Given a complex task, they often try to do too much at once, leading to half-baked solutions
-- **Context Loss**: They struggle to maintain focus across long conversations
-- **Inconsistency**: The same prompt can yield wildly different results based on minor variations
-- **Missing Prerequisites**: They often start implementing before gathering necessary context
+### How WorkRail Solves This
 
-Traditional approaches try to solve these through better prompting or more powerful models. We take
-a different approach: we guide LLMs through proven software engineering best practices via
-structured workflows, making it much more difficult for the LLM to go off track.
+WorkRail replaces the human effort of guiding an agent step-by-step.
 
-### The Vision
+Instead of one system prompt that fades over time, WorkRail drip-feeds instructions through the
+Model Context Protocol (MCP). The agent calls `workflow_next`, gets ONE step, completes it, calls
+again. Future steps stay hidden until previous ones are done.
 
-Our vision is to create an enhanced agent experience where:
+**The agent can't skip to implementation because it doesn't know those steps exist yet.**
 
-1. **Developers** are guided through optimal workflows, missing fewer critical steps or context
-2. **LLMs** are more likely to work within their strengths, following proven patterns
-3. **Organizations** can achieve more consistent, higher-quality results regardless of individual
-   prompt engineering skills
-4. **Knowledge** from expert practitioners is codified and made more accessible
+This is the key insight: information hiding enforces the process. The agent isn't being told
+"please plan first" - it literally cannot see "edit the code" until it has completed the planning
+steps. The creativity stays; the shortcuts don't.
 
-The end result is not just an AI coding assistant, but a sophisticated development methodology
-guided through technology. It's the difference between giving someone a powerful tool versus
-giving them a powerful tool *and* teaching them the craft of using it effectively.
+### Why This Works
+
+Guardrails don't limit the agent's capabilities - they channel them productively:
+
+- **Agents still reason, explore, and create** - but within a structure that ensures they prepare,
+  plan, and verify
+- **Each step is fresh and immediate** - not a fading instruction from the start of the conversation
+- **Expert knowledge is codified** - workflows embed practitioner wisdom like "verify understanding
+  before implementing" and "form multiple hypotheses before concluding"
+- **The process is consistent** - same workflow, same quality, regardless of prompting skill
+
+It's the difference between giving someone a powerful tool versus giving them a powerful tool
+*and* teaching them the craft of using it effectively.
+
+### The Result
+
+Reliable excellence. Consistently good results.
+
+WorkRail does what a skilled developer would do when supervising AI: guide it through the right
+steps, ask the questions it should be asking, and prevent it from cutting corners. The workflow
+asks "Wait, did you check X?" and "What about edge case Y?" at the moments a senior engineer
+would ask them - automatically.
 
 ## Table of Contents
 
