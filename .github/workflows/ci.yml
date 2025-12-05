@@ -7,8 +7,51 @@ on:
   push:
     branches:
       - main
+  # Allow this workflow to be called by other workflows (e.g., release)
+  workflow_call:
 
 jobs:
+  # ============================================================================
+  # REQUIRED: Workflow Validation (blocks merge if workflows are invalid)
+  # ============================================================================
+  validate-workflows:
+    name: Validate Workflows
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build project
+        run: npm run build
+
+      - name: Validate all workflows
+        run: npm run validate:workflows
+
+      - name: Summary
+        if: success()
+        run: |
+          echo "## Workflow Validation Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All workflow JSON files passed schema validation." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Validated Workflows:" >> $GITHUB_STEP_SUMMARY
+          for f in workflows/*.json; do
+            echo "- $(basename $f)" >> $GITHUB_STEP_SUMMARY
+          done
+
+  # ============================================================================
+  # REQUIRED: Build & Test
+  # ============================================================================
   build-and-test:
     name: Build & Test (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
@@ -45,13 +88,12 @@ jobs:
           fail_ci_if_error: false
         continue-on-error: true
 
+  # ============================================================================
+  # OPTIONAL: Contract Tests (don't block merge, just informational)
+  # ============================================================================
   contract-tests:
-    name: Contract Tests (Node ${{ matrix.node-version }})
+    name: Contract Tests
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node-version: [ 20 ]
-      fail-fast: false
     # Contract tests are currently timing out - run but don't block CI
     continue-on-error: true
     
@@ -59,10 +101,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js ${{ matrix.node-version }}
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 20
           cache: 'npm'
 
       - name: Install dependencies
@@ -75,6 +117,9 @@ jobs:
         run: npx vitest run tests/contract/ --testTimeout=30000
         timeout-minutes: 10
 
+  # ============================================================================
+  # REQUIRED: E2E Tests
+  # ============================================================================
   e2e-tests:
     name: E2E Tests (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
@@ -113,48 +158,44 @@ jobs:
           path: ./playwright-report/
           retention-days: 30
 
-  validate-workflows:
-    name: Validate Workflows
+  # ============================================================================
+  # GATE: All required checks must pass
+  # Configure this job as a required status check in GitHub branch protection
+  # ============================================================================
+  ci-gate:
+    name: CI Gate
     runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js 20
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build project
-        run: npm run build
-
-      - name: Validate workflows
-        run: npm run validate:workflows
-
-  # Summary job to check all required jobs passed
-  ci-success:
-    name: CI Success
-    runs-on: ubuntu-latest
-    needs: [ build-and-test, e2e-tests, validate-workflows ]
+    needs: [ validate-workflows, build-and-test, e2e-tests ]
     if: always()
     steps:
-      - name: Check all jobs
+      - name: Check required jobs
         run: |
+          echo "## CI Gate Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Check validate-workflows
+          if [[ "${{ needs.validate-workflows.result }}" != "success" ]]; then
+            echo "- Validate Workflows: FAILED" >> $GITHUB_STEP_SUMMARY
+            echo "Workflow validation failed"
+            exit 1
+          fi
+          echo "- Validate Workflows: PASSED" >> $GITHUB_STEP_SUMMARY
+          
+          # Check build-and-test
           if [[ "${{ needs.build-and-test.result }}" != "success" ]]; then
+            echo "- Build & Test: FAILED" >> $GITHUB_STEP_SUMMARY
             echo "Build & Test job failed"
             exit 1
           fi
+          echo "- Build & Test: PASSED" >> $GITHUB_STEP_SUMMARY
+          
+          # Check e2e-tests
           if [[ "${{ needs.e2e-tests.result }}" != "success" ]]; then
+            echo "- E2E Tests: FAILED" >> $GITHUB_STEP_SUMMARY
             echo "E2E Tests job failed"
             exit 1
           fi
-          if [[ "${{ needs.validate-workflows.result }}" != "success" ]]; then
-            echo "Validate Workflows job failed"
-            exit 1
-          fi
-          echo "All CI jobs passed successfully!"
+          echo "- E2E Tests: PASSED" >> $GITHUB_STEP_SUMMARY
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All required CI checks passed." >> $GITHUB_STEP_SUMMARY
