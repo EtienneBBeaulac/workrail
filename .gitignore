@@ -13,6 +13,9 @@ build/
 !vite.config.js
 !vitest.config.js
 !playwright.config.js
+!e2e/**/*.js
+!web/**/*.js
+!scripts/**/*.js
 
 # Logs
 *.log
