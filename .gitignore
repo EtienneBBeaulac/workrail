@@ -1,55 +1,24 @@
 # Dependencies
 node_modules/
+**/node_modules/
 
-# Build output
+# Lock files
+package-lock.json
+yarn.lock
+
+# Build outputs
 dist/
 build/
-
-# Compiled JavaScript files (from TypeScript)
-**/*.js
-**/*.js.map
-!jest.config.cjs
-!eslint.config.js
-!vite.config.js
-!vitest.config.js
-!playwright.config.js
-!e2e/**/*.js
-!web/**/*.js
-!scripts/**/*.js
 
 # Logs
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-pnpm-debug.log*
 
-# Runtime data
-pids
-*.pid
-*.seed
-*.pid.lock
-
-# Coverage
-coverage/
-.nyc_output/
-jest-coverage/
-
-# Environment variables
+# Environment files
 .env
 .env.*
-
-# TypeScript
-*.tsbuildinfo
-
-# IDEs and editors
-.idea/
-.vscode/
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
 
 # OS generated files
 .DS_Store
@@ -60,33 +29,24 @@ jest-coverage/
 ehthumbs.db
 Thumbs.db
 
-# Misc
-*.tgz
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
 
-# Optional npm cache directory
-.npm
+# TypeScript
+*.tsbuildinfo
 
-# Optional eslint cache
-.eslintcache
+# Coverage
+coverage/
+.nyc_output/
 
-# Optional REPL history
-.node_repl_history
-
-# Yarn lock (we use npm)
-yarn.lock
-
-# Prettier
-.prettier*
-
-# Husky
-.husky/_
-
-# WorkRail specific
-sessions/
-web/sessions/
-.workrail-cache/
-.workrail-cache-*/
-
-# Test artifacts
+# Test fixtures (generated at runtime)
 .test-repos-*/
-temp/
+
+# Session data (runtime generated)
+sessions/
+
+# Temporary working files
+temp/ 
