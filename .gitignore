@@ -40,4 +40,13 @@ Thumbs.db
 
 # Coverage
 coverage/
-.nyc_output/ 
+.nyc_output/
+
+# Test fixtures (generated at runtime)
+.test-repos-*/
+
+# Session data (runtime generated)
+sessions/
+
+# Temporary working files
+temp/ 
