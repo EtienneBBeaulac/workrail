@@ -1,0 +1,538 @@
+{
+  "id": "mr-review-workflow",
+  "name": "Adaptive MR Review Workflow (Agentic)",
+  "version": "0.3.0",
+  "description": "An adaptive agentic workflow for comprehensive code review. Adjusts rigor based on MR complexity (QUICK/STANDARD/THOROUGH modes) with parallel subagent delegation for context auditing, multi-perspective analysis, and triple validation gates.",
+  "preconditions": [
+    "User has the full code diff accessible (e.g., as text in a file).",
+    "User has the MR title, purpose, and any relevant ticket numbers.",
+    "The agent has access to file-reading tools."
+  ],
+  "clarificationPrompts": [
+    "Provide the associated ticket ID(s)/link(s) and paste full text if possible.",
+    "Provide links (or attach) any dev plan, design/architecture doc, or BRD relevant to this MR.",
+    "Provide the code diff (paste content or give a file path)."
+  ],
+  "metaGuidance": [
+    "The ultimate goal is to assist, not replace, a human reviewer. The human owns the final merge decision.",
+    "All feedback should be constructive and actionable. Explain the 'why' behind suggestions.",
+    "The goal is continuous improvement, not perfection. Approve changes that are 'better' to maintain velocity.",
+    "Foster a blameless culture of collective ownership. The code is a shared asset.",
+    "Use prefixes like 'Nit:' for non-blocking, minor suggestions to keep focus on important issues.",
+    "Embrace small, single-purpose pull requests for faster, more thorough reviews.",
+    "When citing issues, always try to provide specific file paths and line numbers from the diff.",
+    "Maintain the persona of a helpful, collaborative senior engineer.",
+    "DELEGATION: This workflow will explicitly tell you when to delegate to the WorkRail Executor. Do NOT delegate spontaneously - ONLY when the workflow says 'Delegate to the WorkRail Executor'.",
+    "MODE-ADAPTIVE: After triage, you'll assess complexity and choose QUICK, STANDARD, or THOROUGH mode. Each mode has different delegation strategies.",
+    "Auto-advance: after completing each step, immediately get the next step; only pause for explicit requireConfirmation or missing critical inputs.",
+    "FunctionReferences are mandatory. When a step lists functionReferences, execute each in the listed order before producing chat output.",
+    "FunctionReferences are conceptual (not MCP tools). 'Execute' means: read the function's definition and perform those actions using your available tools.",
+    "Document I/O: create/update the file at reviewDocPath using file-writing tools. If the agent cannot write files, output the exact doc content.",
+    "If a function requires inputs that are missing, state exactly what is missing and pause.",
+    "discoverModulePatterns(): Compute moduleRoot; scan only moduleRoot to build patternCatalog.",
+    "consolidatePatternFindings(): Compare changes to patternCatalog (scoped to moduleRoot).",
+    "initReviewDoc(): Create live Markdown at project root; set reviewDocPath.",
+    "upsertSection(): Upsert under a known section marker; never duplicate sections.",
+    "appendChangedFileRow(): Append/update Changed Files table row.",
+    "appendFinding(): Append finding under severity with path:line, rationale, optional diff.",
+    "appendPatternResult(): Append Pattern Adherence row.",
+    "appendMRComment(): Append copy-ready MR comment.",
+    "logRevision(): Append timestamped message to the Revision Log."
+  ],
+  "steps": [
+    {
+      "id": "phase-0-triage",
+      "title": "Phase 0: Triage & Review Focus",
+      "prompt": "To begin the Merge Request review, please provide the full context below and classify the MR's complexity. This will tailor the depth of the review.\n\n**1. MR Context:**\n* **MR Title/Purpose:** [User provides the title and a brief description of its purpose.]\n* **Related Ticket(s):** [User provides ticket numbers or links.]\n* **Key Requirements/Acceptance Criteria:** [User lists key requirements from the ticket(s).]\n\n**2. Code Diff:**\n[User pastes the full `git diff` output or provides a path to a file containing the diff.]\n\n**3. Complexity Classification & Focus:**\n* **Classification:** Please choose one: **[Trivial]**, **[Standard]**, or **[High-Risk]**.\n* **PR Size:** Is this a small, focused change (<400 lines)? If not, does it have a single, clear purpose?\n* **Areas of Focus (Optional):** Are there specific areas you want me to pay close attention to? (e.g., 'performance implications', 'API design', 'data integrity').",
+      "agentRole": "You are a code review coordinator and triage specialist with expertise in assessing merge request complexity and risk.",
+      "guidance": [
+        "**[Trivial]:** For minor fixes (typos, docs). This will run a condensed, single-phase review with minimal delegation.",
+        "**[Standard]:** For typical features or bug fixes. Uses sequential delegation for validation.",
+        "**[High-Risk]:** For major architectural changes or sensitive code. Uses parallel multi-perspective delegation for maximum rigor."
+      ],
+      "functionReferences": [
+        "initReviewDoc()",
+        "logRevision()"
+      ],
+      "requireConfirmation": true
+    },
+    {
+      "id": "phase-0a-assess-mode",
+      "title": "Phase 0A: Assess Complexity & Choose Mode",
+      "prompt": "**ASSESS REVIEW COMPLEXITY & CHOOSE MODE**\n\nBased on the triage information, assess the review complexity and choose the appropriate mode.\n\n**COMPLEXITY ASSESSMENT:**\n\nReview the MR context:\n\n1. **Scope:** Files changed [count], Lines added/removed [count], Components touched [count]\n2. **Risk Factors:** Critical system? User-facing? Data/schema changes? Security implications?\n3. **Pattern Complexity:** New patterns introduced? Deviates from existing conventions?\n4. **Test Coverage:** Adequate tests included? Gap in coverage?\n\n**MODE DECISION CRITERIA:**\n\n**THOROUGH** (High-Risk - use if ANY true):\n- 10+ files OR 500+ lines changed\n- Touches critical systems (auth, payments, data)\n- Introduces new architectural patterns\n- Multiple complex components interacting\n- Security-sensitive changes\n\n**QUICK** (Trivial - use if ALL true):\n- <5 files AND <100 lines changed\n- Documentation, typos, or simple config changes\n- No logic changes\n- Well-understood, isolated change\n\n**STANDARD** (Otherwise): Middle ground between QUICK and THOROUGH\n\n**MAKE YOUR DECISION:**\n\nChoose: **QUICK**, **STANDARD**, or **THOROUGH**\n\nDocument in the review doc:\n```markdown\n## Review Mode: [QUICK/STANDARD/THOROUGH]\n**Rationale:** [Your reasoning based on criteria above]\n```\n\n**What Each Mode Means:**\n\n- **QUICK**: Minimal delegation, fast review, focus on obvious issues\n- **STANDARD**: Sequential context audit, standard analysis depth, single validation\n- **THOROUGH**: Parallel context audits, multi-perspective analysis, triple validation gate\n\n**Remember your choice** for later phases!",
+      "agentRole": "You are assessing review complexity to choose the right level of rigor.",
+      "requireConfirmation": false,
+      "guidance": [
+        "HONEST ASSESSMENT: Don't underestimate complexity for critical systems",
+        "USE CRITERIA: Follow the decision rules based on MR characteristics",
+        "DOCUMENT: Write your decision and rationale clearly",
+        "REMEMBER: You'll adapt your approach in later phases based on this"
+      ],
+      "functionReferences": [
+        "upsertSection()",
+        "logRevision()"
+      ]
+    },
+    {
+      "id": "phase-1-context",
+      "title": "Phase 1: Contextual Understanding & Confirmation",
+      "prompt": "My goal is to ensure I fully understand the MR before the deep analysis. Based on the context you provided, I will perform the following tasks:\n\n1.  **Summarize Goal:** Briefly summarize what I understand to be the primary goal and scope of this MR.\n2.  **File Overview:** List all changed files (added, modified, deleted) and provide a one-sentence summary of the changes for each.\n3.  **Initial Questions:** Formulate any immediate questions I have about the MR's purpose or requirements.\n4.  **Confirmation Gate:** Does my summary accurately reflect the MR's goal? Please confirm before I proceed.\n\nI will also update the live review document with the Changed Files table and the Context summary.",
+      "agentRole": "You are a thorough code review analyst specializing in requirement comprehension and change impact assessment.",
+      "guidance": [
+        "This is a critical sanity check. If the agent's summary is incorrect, correct it now.",
+        "Doc writes: update only 'Context Summary' and 'Changed Files' sections.",
+        "Ask any clarifying questions in chat only; do not write them into the doc.",
+        "Do not create placeholders for issues in this step."
+      ],
+      "runCondition": {
+        "var": "complexity",
+        "not_equals": "Trivial"
+      },
+      "requireConfirmation": true,
+      "functionReferences": [
+        "upsertSection()",
+        "appendChangedFileRow()",
+        "logRevision()"
+      ]
+    },
+    {
+      "id": "phase-1a-llm-context-gathering",
+      "title": "Phase 1a: Comprehensive Context Gathering",
+      "prompt": "To perform a thorough review, I need you to provide source documents. In this step I will not search or analyze code—I'm waiting for your inputs. Please provide:\n\n1. **Ticket(s):** Link(s) and, if possible, paste the full text (requirements, acceptance criteria).\n2. **Dev/Design Docs:** Dev plan; design/architecture docs; any BRD/ADR/decision records relevant to this MR.\n3. **Technical Context:** If this change relies on other parts of the codebase, paste relevant code snippets or file contents.\n\nI will synthesize this information once received.\n\n**Confirmation & Gating:**\n- After you confirm that I have the right context (or explicitly instruct me to skip), I will proceed.\n- I will not proceed to deeper analysis until confirmed.",
+      "agentRole": "You are a context-aware analyst ensuring you have all necessary information before starting a deep review.",
+      "guidance": [
+        "User-driven step: ask for ticket, dev plan, design/architecture docs.",
+        "Do not search or analyze code in this step; wait for user inputs.",
+        "Only after explicit confirmation or 'skip' proceed to next phase."
+      ],
+      "runCondition": {
+        "var": "complexity",
+        "not_equals": "Trivial"
+      },
+      "requireConfirmation": true
+    },
+    {
+      "id": "phase-1b-familiarization",
+      "title": "Phase 1b: Neighborhood, Call Graph, and Contracts Familiarization",
+      "prompt": "Build a lightweight understanding of surrounding code to increase review accuracy.\n\nTasks:\n1) Neighborhood Map: For each changed file, list immediate neighbors in moduleRoot.\n2) Bounded Call Graph: For changed functions/classes, gather callers and callees up to 2 hops.\n3) Contracts & Invariants: List public symbols, API endpoints, DB/tables touched nearby.\n\nDoc-first: Upsert sections 'Neighborhood Map', 'Bounded Call Graph', and 'Contracts & Invariants' with concise tables/bullets.",
+      "agentRole": "You are a codebase navigator building context around the change to improve downstream analysis.",
+      "guidance": [
+        "Initialize majorIssuesFound = false.",
+        "Scope strictly to moduleRoot and changed files plus immediate neighbors.",
+        "Cap per-file neighbors and graph size to avoid noise.",
+        "Write full details to the live doc; in chat, keep output minimal."
+      ],
+      "runCondition": {
+        "and": [
+          {
+            "var": "complexity",
+            "not_equals": "Trivial"
+          },
+          {
+            "or": [
+              {
+                "var": "contextGatheringComplete",
+                "equals": true
+              },
+              {
+                "var": "skipContextGathering",
+                "equals": true
+              }
+            ]
+          }
+        ]
+      },
+      "functionReferences": [
+        "upsertSection()",
+        "logRevision()"
+      ],
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-1c-context-audit",
+      "title": "Phase 1c: Context Audit (Mode-Adaptive)",
+      "prompt": "**AUDIT YOUR CONTEXT UNDERSTANDING BASED ON YOUR MODE**\n\n⚠️ **CHECK YOUR MODE** (from Phase 0A): QUICK, STANDARD, or THOROUGH?\n\n---\n\n**IF YOU CHOSE THOROUGH MODE:**\n\n**PARALLEL CONTEXT AUDIT**\n\n⚠️ **CRITICAL: Delegate to the WorkRail Executor TWICE SIMULTANEOUSLY, not sequentially.**\n\nYou've gathered context about the MR. Now get independent review of your understanding.\n\n**Delegation (Completeness Focus):**\n```\nPlease execute the 'Context Gathering Routine' workflow in audit mode.\n\nAudit Request:\nMISSION: Audit my MR context gathering for COMPLETENESS\n\nMY CONTEXT GATHERING:\n[Paste the Neighborhood Map, Call Graph, and Contracts sections from review doc]\n\nFOCUS: Completeness\n- Did I miss any critical files or components?\n- Are there important callers/callees I didn't trace?\n- Did I capture all relevant contracts and invariants?\n- What else should I have looked at?\n\nDELIVERABLE: Audit findings with specific gaps and recommendations\n```\n\n**Delegation (Depth Focus):**\n```\nPlease execute the 'Context Gathering Routine' workflow in audit mode.\n\nAudit Request:\nMISSION: Audit my MR context gathering for DEPTH\n\nMY CONTEXT GATHERING:\n[Paste the Neighborhood Map, Call Graph, and Contracts sections from review doc]\n\nFOCUS: Depth\n- Did I go deep enough in understanding the changes?\n- Did I understand WHY the code works this way, not just WHAT it does?\n- Should I have read implementations instead of just signatures?\n- What areas need deeper investigation?\n\nDELIVERABLE: Audit findings with areas needing deeper review\n```\n\n**SYNTHESIZE AUDIT FEEDBACK**\n\nReview both audit deliverables:\n1. Completeness audit: What did I miss?\n2. Depth audit: Where should I go deeper?\n\n**Synthesis Strategy:**\n- Common concerns: If both flag same area → High priority\n- Unique insights: Each may catch different gaps\n- Conflicting advice: Investigate to understand why\n\n**ITERATE IF NEEDED**\n\nBased on feedback, investigate further if significant gaps:\n- Run Context Gathering Routine again with different target\n- Trace additional call paths\n- Read implementations you skipped\n\n**UPDATE REVIEW DOC** with:\n- Audit findings synthesized\n- Additional context gathered\n- Final understanding of scope and impact\n\n---\n\n**IF YOU CHOSE STANDARD MODE:**\n\nUse single context audit:\n\n1. **Delegate to ONE Context Auditor:**\n   ```\n   Please execute the 'Context Gathering Routine' workflow in audit mode.\n   \n   Audit Request:\n   MY CONTEXT GATHERING: [Your context sections]\n   FOCUS: General review for both completeness and depth\n   ```\n\n2. **Address gaps** if any significant ones found\n3. **Proceed** when satisfied\n\n---\n\n**IF YOU CHOSE QUICK MODE:**\n\nSkip context audit. Self-check:\n\n1. **Quick review**: Do I understand the change well enough?\n2. **Obvious gaps**: Am I missing anything critical?\n3. **Proceed** - don't over-analyze simple changes\n\n---",
+      "agentRole": "You are getting independent review of your context understanding to ensure thorough analysis.",
+      "requireConfirmation": false,
+      "guidance": [
+        "MODE: Adapt your approach based on your Phase 0A decision",
+        "PARALLEL: In THOROUGH mode, delegate twice to WorkRail Executor SIMULTANEOUSLY",
+        "DIVERSITY: Each auditor has different focus (completeness vs depth)",
+        "SYNTHESIS: Combine both perspectives, address gaps",
+        "ITERATE: Gather more context if significant gaps found"
+      ],
+      "runCondition": {
+        "and": [
+          {
+            "var": "complexity",
+            "not_equals": "Trivial"
+          },
+          {
+            "or": [
+              {
+                "var": "contextGatheringComplete",
+                "equals": true
+              },
+              {
+                "var": "skipContextGathering",
+                "equals": true
+              }
+            ]
+          }
+        ]
+      },
+      "functionReferences": [
+        "upsertSection()",
+        "logRevision()"
+      ]
+    },
+    {
+      "id": "phase-2-depth-analysis-loop",
+      "type": "loop",
+      "title": "Phase 2: Progressive Depth Analysis",
+      "runCondition": {
+        "and": [
+          {
+            "var": "complexity",
+            "not_equals": "Trivial"
+          },
+          {
+            "or": [
+              {
+                "var": "contextGatheringComplete",
+                "equals": true
+              },
+              {
+                "var": "skipContextGathering",
+                "equals": true
+              }
+            ]
+          }
+        ]
+      },
+      "loop": {
+        "type": "for",
+        "count": 4,
+        "maxIterations": 4,
+        "iterationVar": "analysisDepth"
+      },
+      "body": [
+        {
+          "id": "discover-module-patterns",
+          "title": "Discover Module Patterns (Depth 1)",
+          "prompt": "Compute `moduleRoot` as the nearest common ancestor of changed files. Scan only within `moduleRoot` to gather exemplars (naming, DI, error handling, logging, test style, file layout). Exclude changed files from discovery. Produce `patternCatalog` and `patternExamples` in context.",
+          "agentRole": "You are a codebase pattern scout building a concise pattern catalog for the current module.",
+          "guidance": [
+            "Scope strictly to `moduleRoot` discovered from changed files.",
+            "Exclude changed files from discovery; use them only later for comparison.",
+            "Require ≥2 occurrences across distinct files to qualify as a pattern.",
+            "Capture 1–3 exemplars per validated pattern with file:line for the doc."
+          ],
+          "runCondition": {
+            "var": "analysisDepth",
+            "equals": 1
+          },
+          "functionReferences": [
+            "discoverModulePatterns()"
+          ],
+          "requireConfirmation": false
+        },
+        {
+          "id": "perform-analysis-pass",
+          "title": "Analysis Pass {{analysisDepth}} of 4",
+          "prompt": "Act as a Senior Staff Engineer. Your task is to review the code based on the checklist for the current analysis depth.\n\n**Current Depth: {{analysisDepth}}**\n\n**Checklist:**\n* **Depth 1 (Basic Scan):** Check for style guide violations, simple bugs, and common security vulnerabilities.\n* **Depth 2 (Standard Review):** Check for logical errors, edge cases, SOLID principles, and maintainability.\n* **Depth 3 (Deep Architectural Review):** Check for alignment with system architecture, performance, and dependencies.\n\n**Instructions:**\n1.  **Summarize Focus:** State which depth level you are on.\n2.  **Analyze:** Perform the review based on the checklist.\n3.  **List Findings:** Document findings as 'Critical', 'Major', or 'Minor'.\n4.  **Set Flag:** If you find 'Critical' or 'Major' issues, set `majorIssuesFound = true`.",
+          "agentRole": "You are a Senior Staff Engineer performing a structured, multi-pass code review.",
+          "guidance": [
+            "At each depth, focus only on the items in that checklist.",
+            "Use Chain-of-Thought reasoning; keep chat concise, write details to doc.",
+            "Propose tiny diffs for the top 1–2 Major findings.",
+            "Add matching ready-to-copy MR comments.",
+            "Caps per pass: ≤2 patches; ≤3 MR comments."
+          ],
+          "runCondition": {
+            "or": [
+              {
+                "var": "analysisDepth",
+                "equals": 1
+              },
+              {
+                "var": "analysisDepth",
+                "equals": 2
+              },
+              {
+                "var": "analysisDepth",
+                "equals": 3
+              }
+            ]
+          },
+          "functionReferences": [
+            "upsertSection()",
+            "appendFinding()",
+            "appendMRComment()",
+            "logRevision()"
+          ],
+          "requireConfirmation": false
+        },
+        {
+          "id": "perform-nit-hunt",
+          "title": "Nit Hunt (Depth 4)",
+          "prompt": "Perform a focused nit hunt on changed files and immediate neighbors. Be picky but objective.",
+          "agentRole": "You are a meticulous reviewer surfacing small, high-signal improvements.",
+          "guidance": [
+            "Targets: naming clarity; readability; redundant comments; dead code; import order.",
+            "Quotas: if majorIssuesFound==true aim 5–8; else aim 8–12; ≤3 per category.",
+            "Add ready-to-copy MR comments for the top 3 nits."
+          ],
+          "runCondition": {
+            "var": "analysisDepth",
+            "equals": 4
+          },
+          "functionReferences": [
+            "appendMRComment()",
+            "upsertSection()",
+            "logRevision()"
+          ],
+          "requireConfirmation": false
+        }
+      ]
+    },
+    {
+      "id": "phase-2a-analysis-validation",
+      "title": "Phase 2A: Analysis Validation (Mode-Adaptive)",
+      "prompt": "**VALIDATE YOUR ANALYSIS BASED ON YOUR MODE**\n\n⚠️ **CHECK YOUR MODE** (from Phase 0A): QUICK, STANDARD, or THOROUGH?\n\n---\n\n**IF YOU CHOSE THOROUGH MODE:**\n\n**PARALLEL MULTI-PERSPECTIVE ANALYSIS VALIDATION**\n\n⚠️ **CRITICAL: Delegate to the WorkRail Executor THREE TIMES SIMULTANEOUSLY.**\n\nYou've completed your analysis. Now get multi-perspective validation.\n\n**Delegation 1 - Hypothesis Challenger (Challenge Findings):**\n```\nPlease execute the 'Hypothesis Challenge Routine' workflow at rigor=3.\n\nChallenge Request:\nFINDINGS: [Paste your Critical and Major findings from analysis]\n\nEVIDENCE: Read the review document sections on findings\n\nRIGOR: 3 (Thorough adversarial analysis)\n\nChallenge each finding:\n- Is this actually a problem?\n- Could I be misunderstanding the code's intent?\n- Are there false positives?\n- What evidence would contradict this finding?\n\nDELIVERABLE: Challenge results for each finding\n```\n\n**Delegation 2 - Hypothesis Challenger (Challenge Missing Issues):**\n```\nPlease execute the 'Hypothesis Challenge Routine' workflow at rigor=3.\n\nChallenge Request:\nMISSION: What issues might I have MISSED in my analysis?\n\nMY ANALYSIS:\n[Paste summary of what you checked and found]\n\nCONTEXT:\n- Changed files: [list]\n- Analysis depths completed: 1-4\n\nRIGOR: 3\n\nChallenge my coverage:\n- What categories of issues didn't I check?\n- Are there security concerns I might have missed?\n- Performance implications not considered?\n- Edge cases not explored?\n\nDELIVERABLE: Potential blind spots and missed issues\n```\n\n**Delegation 3 - Plan Analyzer (Validate Recommendations):**\n```\nPlease execute the 'Plan Analysis Routine' workflow.\n\nAnalysis Request:\nRECOMMENDATIONS: [Paste your proposed patches and suggestions]\n\nANALYZE:\n- Are the recommendations complete?\n- Do they follow project patterns?\n- Are there risks or unintended consequences?\n- Are they actionable and clear?\n\nDELIVERABLE: Validation of recommendations\n```\n\n**SYNTHESIZE ALL VALIDATION FEEDBACK**\n\nReview all three perspectives:\n1. Findings Challenge: Remove false positives, strengthen valid findings\n2. Coverage Challenge: Investigate missed areas if significant\n3. Recommendations Validation: Improve suggestions based on feedback\n\n**UPDATE REVIEW DOC** with validation results.\n\n---\n\n**IF YOU CHOSE STANDARD MODE:**\n\nSequential validation:\n\n1. **Self-review your findings**: Could any be false positives?\n2. **Delegate to ONE Hypothesis Challenger** (rigor=3):\n   ```\n   Please execute the 'Hypothesis Challenge Routine' workflow at rigor=3.\n   \n   Challenge Request:\n   FINDINGS: [Your Critical/Major findings]\n   RIGOR: 3\n   \n   Challenge each finding - is it valid?\n   ```\n3. **Update findings** based on challenge results\n\n---\n\n**IF YOU CHOSE QUICK MODE:**\n\nSelf-validate:\n\n1. **Quick check**: Are my findings clearly valid?\n2. **Obvious misses**: Did I skip anything important?\n3. **Proceed** - don't over-validate simple reviews\n\n---",
+      "agentRole": "You are validating your analysis findings with appropriate rigor based on review mode.",
+      "requireConfirmation": false,
+      "guidance": [
+        "MODE: Adapt validation rigor based on your Phase 0A decision",
+        "PARALLEL: In THOROUGH mode, delegate three times SIMULTANEOUSLY",
+        "DIVERSITY: Three different validation angles (findings, coverage, recommendations)",
+        "SYNTHESIS: Integrate all feedback, update findings",
+        "FALSE POSITIVES: Remove findings that don't hold up to challenge"
+      ],
+      "runCondition": {
+        "and": [
+          {
+            "var": "complexity",
+            "not_equals": "Trivial"
+          },
+          {
+            "or": [
+              {
+                "var": "contextGatheringComplete",
+                "equals": true
+              },
+              {
+                "var": "skipContextGathering",
+                "equals": true
+              }
+            ]
+          }
+        ]
+      },
+      "functionReferences": [
+        "upsertSection()",
+        "logRevision()"
+      ]
+    },
+    {
+      "id": "consolidate-patterns",
+      "title": "Consolidate Pattern Findings",
+      "prompt": "Using `moduleRoot` and `patternCatalog`, compare the MR changes to validated patterns. Summarize adherence and deviations. Set `patternAppendixReady = true`.",
+      "agentRole": "You are a senior engineer consolidating pattern adherence findings.",
+      "guidance": [
+        "Restrict to the module of the MR (`moduleRoot`).",
+        "Do not treat changed code as patterns; match only against validated patterns.",
+        "Produce 'Patterns' and 'Pattern Deviations' sections."
+      ],
+      "runCondition": {
+        "var": "complexity",
+        "not_equals": "Trivial"
+      },
+      "functionReferences": [
+        "consolidatePatternFindings()",
+        "appendPatternResult()",
+        "upsertSection()",
+        "logRevision()"
+      ],
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-3-impact-analysis",
+      "title": "Phase 3: Testing, Documentation & Impact Analysis",
+      "prompt": "Assess the secondary impacts of this change.\n\n1.  **Testing:** What tests are expected? Are new tests included? Coverage gaps?\n2.  **Documentation:** Is new logic adequately commented? External docs affected?\n3.  **Breaking Changes:** Could this break backward compatibility?\n\nDoc-first subsections:\n- Impacted User Flows\n- Affected Consumers\n- Test Gaps & Proposals",
+      "agentRole": "You are a software quality engineer specializing in testing strategy and impact analysis.",
+      "guidance": [
+        "Assessing test coverage is critical. Lack of tests is often 'Major' or 'Critical'.",
+        "Derive Impacted User Flows from Flow Anchors and HOT paths.",
+        "List Affected Consumers (importers/API clients).",
+        "Add test skeletons for top-risk flows/consumers.",
+        "Add 2 ready-to-copy MR comments for highest-risk gaps."
+      ],
+      "runCondition": {
+        "and": [
+          {
+            "var": "complexity",
+            "not_equals": "Trivial"
+          },
+          {
+            "or": [
+              {
+                "var": "contextGatheringComplete",
+                "equals": true
+              },
+              {
+                "var": "skipContextGathering",
+                "equals": true
+              }
+            ]
+          }
+        ]
+      },
+      "functionReferences": [
+        "upsertSection()",
+        "appendMRComment()",
+        "logRevision()"
+      ],
+      "requireConfirmation": false
+    },
+    {
+      "id": "hygiene-and-inconsistencies",
+      "title": "Hygiene & Inconsistencies Sweep",
+      "prompt": "Perform a platform-agnostic hygiene sweep scoped to the current module and changed files:\n\n- Tests: disabled/skipped/focused tests; tests with no assertions\n- Comments: commented-out code; stale/misleading comments\n- TODO/FIXME/HACK/BUG: missing ticket/reference\n- Inconsistencies: naming/DI/logging divergences from local patterns\n\nConstraints: Total ≤10 items; ≤3 per category; dedupe; group by file.",
+      "agentRole": "You are a pragmatic reviewer catching small but valuable quality issues.",
+      "guidance": [
+        "Scope strictly to moduleRoot and changed files plus neighbors.",
+        "Write full details to the live doc; report counts in chat."
+      ],
+      "runCondition": {
+        "var": "complexity",
+        "not_equals": "Trivial"
+      },
+      "functionReferences": [
+        "discoverHygieneSignals()",
+        "consolidateHygieneFindings()",
+        "appendHygieneFinding()",
+        "appendMRComment()",
+        "upsertSection()",
+        "logRevision()"
+      ],
+      "requireConfirmation": false
+    },
+    {
+      "id": "prepare-nit-appendix",
+      "title": "Prepare Nit Appendix",
+      "prompt": "Consolidate all non-blocking 'Nit:' items into a clean appendix.\n\nTasks:\n1. Aggregate `nitFindings` by file.\n2. Format each entry as: `filePath:line - short description`.\n3. Produce markdown in `nitAppendix`.\n4. Set `nitAppendixReady = true`.",
+      "agentRole": "You are a meticulous note-taker consolidating non-blocking suggestions.",
+      "guidance": [
+        "Deterministic ordering: sort by file path → line → category.",
+        "Caps: ≤15 total; ≤3 per category.",
+        "Ensure at least 3 Nit MR comments exist overall."
+      ],
+      "runCondition": {
+        "and": [
+          {
+            "var": "complexity",
+            "not_equals": "Trivial"
+          },
+          {
+            "or": [
+              {
+                "var": "contextGatheringComplete",
+                "equals": true
+              },
+              {
+                "var": "skipContextGathering",
+                "equals": true
+              }
+            ]
+          }
+        ]
+      },
+      "functionReferences": [
+        "appendMRComment()",
+        "upsertSection()",
+        "logRevision()"
+      ],
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-4-final-validation",
+      "title": "Phase 4: Final Validation (Mode-Adaptive)",
+      "prompt": "**FINAL VALIDATION BASED ON YOUR MODE**\n\n⚠️ **CHECK YOUR MODE** (from Phase 0A): QUICK, STANDARD, or THOROUGH?\n\n---\n\n**IF YOU CHOSE THOROUGH MODE:**\n\n**TRIPLE VALIDATION GATE**\n\n⚠️ **CRITICAL: Spawn ALL THREE validators SIMULTANEOUSLY.**\n\nBefore finalizing your review, get three independent perspectives AT THE SAME TIME:\n\n**Validator 1 - Hypothesis Challenger (Overall Review Challenge):**\n```\nPlease execute the 'Hypothesis Challenge Routine' workflow at rigor=5.\n\nChallenge Request:\nREVIEW CONCLUSION: [Your overall assessment - approve/request changes/reject]\nFINDINGS SUMMARY: [Summary of Critical, Major, Minor issues found]\nRECOMMENDATION: [Your recommendation]\n\nRIGOR: 5 (Maximum adversarial review)\n\nTry to prove this review conclusion is WRONG:\n- Did I miss critical issues?\n- Am I being too harsh or too lenient?\n- Are my recommendations appropriate for the risk level?\n- Would another reviewer come to a different conclusion?\n\nDELIVERABLE: Adversarial challenge of review conclusion\n```\n\n**Validator 2 - Execution Simulator (Simulate Change Impact):**\n```\nPlease execute the 'Execution Simulation Routine' workflow.\n\nSimulation Request:\nMISSION: Simulate the impact of these changes in production\n\nCHANGES: [Summary of key changes in the MR]\nCONTEXT: [Relevant system context]\n\nSCENARIOS:\n1. Does the change work as intended in normal cases?\n2. How does it behave under edge cases?\n3. What could go wrong in production?\n4. Are there performance implications?\n\nDELIVERABLE: Simulation of change impact\n```\n\n**Validator 3 - Plan Analyzer (Validate Review Completeness):**\n```\nPlease execute the 'Plan Analysis Routine' workflow.\n\nAnalysis Request:\nREVIEW DOCUMENT: [Path to review document]\n\nANALYZE:\n- Is the review complete? (All required sections present?)\n- Are findings actionable? (Clear what author should do?)\n- Are MR comments ready to post? (Properly formatted?)\n- Does recommendation match findings? (Consistent?)\n\nDELIVERABLE: Review completeness validation\n```\n\n**FINAL SYNTHESIS - TRIPLE VALIDATION GATE:**\n\nReview all three perspectives:\n1. Review Challenge: Does my conclusion hold up?\n2. Impact Simulation: Did I properly assess risk?\n3. Completeness Check: Is the review document ready?\n\n**Quality Gate:**\n- ✅ ALL THREE give green light → Proceed to finalization\n- ⚠️ ONE raises concerns → Investigate and address\n- 🛑 TWO+ raise concerns → Revisit analysis phases\n\n**ONLY PROCEED if you have triple validation.**\n\n---\n\n**IF YOU CHOSE STANDARD MODE:**\n\nSequential validation:\n\n1. **Delegate to Hypothesis Challenger** (rigor=3):\n   ```\n   Please execute the 'Hypothesis Challenge Routine' workflow at rigor=3.\n   \n   Challenge Request:\n   REVIEW CONCLUSION: [Your conclusion]\n   RIGOR: 3\n   \n   Challenge my review - did I miss anything important?\n   ```\n\n2. **Address concerns** if any raised\n3. **Proceed** if validation passes\n\n---\n\n**IF YOU CHOSE QUICK MODE:**\n\nSelf-validate:\n\n1. **Self-check**: Did I cover the basics?\n2. **Obvious misses**: Anything I should have caught?\n3. **Proceed** to finalization\n\n---",
+      "agentRole": "You are performing final validation of your review with appropriate rigor.",
+      "requireConfirmation": false,
+      "guidance": [
+        "MODE: Adapt validation rigor based on your Phase 0A decision",
+        "PARALLEL: In THOROUGH mode, spawn all 3 validators SIMULTANEOUSLY",
+        "TRIPLE GATE: ALL THREE must validate before proceeding in THOROUGH mode",
+        "ITERATE: If 2+ raise concerns, revisit earlier phases",
+        "COMPLETENESS: Ensure review document is ready for human reviewer"
+      ],
+      "runCondition": {
+        "and": [
+          {
+            "var": "complexity",
+            "not_equals": "Trivial"
+          },
+          {
+            "or": [
+              {
+                "var": "contextGatheringComplete",
+                "equals": true
+              },
+              {
+                "var": "skipContextGathering",
+                "equals": true
+              }
+            ]
+          }
+        ]
+      },
+      "functionReferences": [
+        "upsertSection()",
+        "logRevision()"
+      ]
+    },
+    {
+      "id": "finalize-review-document",
+      "title": "Finalize Review Document",
+      "prompt": "Finalize the live review document (no new analysis).\n\n**Branching by Mode:**\n\n**IF QUICK (Trivial):**\n1) Brief Executive Summary (1–2 lines) with 'Recommendation: Approve'.\n2) Light hygiene (≤2 items) on changed files.\n3) Quick Nit sweep.\n4) Update Header: set status=Final.\n5) Append 'Finalized trivial review' to Revision Log.\n\n**IF STANDARD or THOROUGH (Non-trivial):**\n1) Executive Summary (3 positives, 3 risks, final recommendation).\n2) Dedupe and sort Findings (Severity → File → Line).\n3) Ensure sections exist: Patterns, Pattern Deviations, Tests & Docs, Ideas, Nits, MR Comments.\n4) Ensure every Critical/Major finding has a curated MR comment.\n5) Update Header: set status=Final; include final counts and decision.\n6) Append 'Finalized document' to Revision Log.\n\n**For THOROUGH mode additionally:**\n- Include 'Validation Results' section with triple validation gate outcomes\n- Document confidence level based on validation feedback\n- Note any residual concerns from validators\n\nChat: Provide concise recap with decision and doc path.",
+      "agentRole": "You are a facilitator ensuring the final document is complete, accurate, and consumable.",
+      "guidance": [
+        "Write full details to the live doc; keep chat to concise recap.",
+        "Ensure sections exist: 'Executive Summary', 'Decision Criteria', 'Risk Heatmap', 'Proposed Patches'.",
+        "Executive Summary: 3 positives, 3 risks, decision & rationale.",
+        "Decision Criteria checklist: Scope fit; Tests adequate; Pattern adherence; Performance; Backwards compat; Security.",
+        "Risk Heatmap table: Risk | Area | Likelihood | Impact | Mitigation.",
+        "Dedupe patches and MR comments; ensure every Critical/Major has an MR comment.",
+        "Group MR comments by file; dedupe similar entries."
+      ],
+      "functionReferences": [
+        "finalizeReviewDocument()",
+        "upsertSection()",
+        "discoverHygieneSignals()",
+        "consolidateHygieneFindings()",
+        "appendHygieneFinding()",
+        "logRevision()"
+      ],
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-5-handoff",
+      "title": "Phase 5: Review Complete - Handoff",
+      "prompt": "**REVIEW COMPLETE - HANDOFF TO HUMAN REVIEWER**\n\n⚠️ **CRITICAL BOUNDARY: This workflow is for REVIEW assistance only.**\n\nYour job was to:\n- ✅ Understand the MR context and scope\n- ✅ Analyze code at multiple depth levels\n- ✅ Identify issues (Critical, Major, Minor, Nits)\n- ✅ Validate pattern adherence\n- ✅ Assess test coverage and impact\n- ✅ Prepare actionable MR comments\n\nYour job is NOT to:\n- ❌ Make the final merge decision\n- ❌ Approve or reject the MR\n- ❌ Post comments directly (unless instructed)\n- ❌ Merge the code\n\n**HANDOFF SUMMARY:**\n\nProvide a final handoff to the human reviewer:\n\n```markdown\n# MR Review Handoff\n\n## Executive Summary\n- **MR**: [Title/ID]\n- **AI Recommendation**: [Approve/Request Changes/Reject]\n- **Confidence**: [High/Medium/Low based on mode and validation]\n- **Mode Used**: [QUICK/STANDARD/THOROUGH]\n\n## Key Findings\n- **Critical Issues**: [count] - [brief summary]\n- **Major Issues**: [count] - [brief summary]\n- **Minor Issues**: [count]\n- **Nits**: [count]\n\n## Review Document\n[Path to the full review document]\n\n## Ready-to-Post MR Comments\n[Count of prepared comments, ready to copy-paste]\n\n## Areas Needing Human Judgment\n- [Any areas where AI was uncertain]\n- [Trade-offs that need human decision]\n- [Context-dependent decisions]\n\n## Validation Summary (THOROUGH mode only)\n- Review Challenge: [Pass/Concerns]\n- Impact Simulation: [Pass/Concerns]\n- Completeness Check: [Pass/Concerns]\n\n## Next Steps for Human Reviewer\n1. Review the full document at [path]\n2. Verify Critical/Major findings\n3. Post MR comments (or modify as needed)\n4. Make final merge decision\n```\n\n**Before Finishing**: Is the review document complete and ready for the human reviewer to take action?",
+      "agentRole": "You are completing your review assistance and handing off to the human reviewer with clear documentation.",
+      "requireConfirmation": false,
+      "guidance": [
+        "BOUNDARY: Do NOT make the final merge decision",
+        "HANDOFF: Create clear summary for human reviewer",
+        "COMPLETENESS: Ensure all MR comments are ready to post",
+        "CONFIDENCE: Be honest about areas of uncertainty",
+        "ACTIONABLE: Human should be able to act immediately on your work"
+      ],
+      "functionReferences": [
+        "logRevision()"
+      ]
+    }
+  ]
+}
