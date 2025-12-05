@@ -65,10 +65,10 @@ Copy the universal WorkRail executor to your Firebender agents directory:
 
 ```bash
 # Copy the universal executor
-cp packages/workrail/assets/agent-configs/firebender/workrail-executor.md ~/.firebender/agents/
+cp assets/agent-configs/firebender/workrail-executor.md ~/.firebender/agents/
 
 # Legacy: Individual subagent configs (deprecated in favor of universal executor)
-# cp packages/workrail/assets/agent-configs/firebender/*.md ~/.firebender/agents/
+# cp assets/agent-configs/firebender/*.md ~/.firebender/agents/
 ```
 
 ### 2. Register Subagent in Firebender

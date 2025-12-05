@@ -1042,7 +1042,7 @@ returns: {
 **Docker Installation (Recommended):**
 ```bash
 # Build and use via Docker
-cd packages/workrail
+# (Run from repository root)
 docker build -f Dockerfile.simple -t workrail-mcp .
 # Then configure your MCP client to use: docker run --rm -i workrail-mcp
 ```
@@ -1050,7 +1050,7 @@ docker build -f Dockerfile.simple -t workrail-mcp .
 **Local Development:**
 ```bash
 # For local development and testing
-cd packages/workrail
+# (Run from repository root)
 npm run build
 node dist/mcp-server.js
 ```
