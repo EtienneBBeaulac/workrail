@@ -92,3 +92,6 @@ export {
   createToolContext,
   startServer,
 } from './server.js';
+
+// Utilities
+export { zodToJsonSchema } from './zod-to-json-schema.js';
