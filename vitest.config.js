@@ -31,7 +31,7 @@ export default defineConfig({
     },
     
     // Setup files
-    setupFiles: ['./tests/setup.js'],
+    setupFiles: ['./tests/setup.ts'],
     
     // Globals (like jest)
     globals: true,
