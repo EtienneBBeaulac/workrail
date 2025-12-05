@@ -1,0 +1,324 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+var globals_1 = require("@jest/globals");
+var enhanced_error_service_1 = require("../../src/application/services/enhanced-error-service");
+(0, globals_1.describe)('EnhancedErrorService', function () {
+    (0, globals_1.describe)('enhanceErrors', function () {
+        (0, globals_1.it)('should return empty array for empty input', function () {
+            (0, globals_1.expect)(enhanced_error_service_1.EnhancedErrorService.enhanceErrors([])).toEqual([]);
+        });
+        (0, globals_1.it)('should return empty array for null/undefined input', function () {
+            (0, globals_1.expect)(enhanced_error_service_1.EnhancedErrorService.enhanceErrors(null)).toEqual([]);
+            (0, globals_1.expect)(enhanced_error_service_1.EnhancedErrorService.enhanceErrors(undefined)).toEqual([]);
+        });
+        (0, globals_1.it)('should prioritize critical errors first', function () {
+            var errors = [
+                {
+                    keyword: 'oneOf',
+                    instancePath: '/steps/0',
+                    schemaPath: '#/steps/0/oneOf',
+                    params: {},
+                    message: 'must match exactly one schema in oneOf'
+                },
+                {
+                    keyword: 'additionalProperties',
+                    instancePath: '/steps/0',
+                    schemaPath: '#/steps/0/additionalProperties',
+                    params: { additionalProperty: 'invalidField' },
+                    message: 'must NOT have additional properties'
+                },
+                {
+                    keyword: 'required',
+                    instancePath: '/steps/0',
+                    schemaPath: '#/steps/0/required',
+                    params: { missingProperty: 'name' },
+                    message: 'must have required property \'name\''
+                }
+            ];
+            var result = enhanced_error_service_1.EnhancedErrorService.enhanceErrors(errors);
+            // Critical errors (additionalProperties, required) should come first
+            (0, globals_1.expect)(result[0]).toContain('Unexpected property');
+            (0, globals_1.expect)(result[1]).toContain('Missing required field');
+            (0, globals_1.expect)(result[2]).toContain('must match exactly one');
+        });
+    });
+    (0, globals_1.describe)('additionalProperties error handling', function () {
+        (0, globals_1.it)('should provide exact field name for root level additional properties', function () {
+            var error = {
+                keyword: 'additionalProperties',
+                instancePath: '',
+                schemaPath: '#/additionalProperties',
+                params: { additionalProperty: 'invalidField' },
+                message: 'must NOT have additional properties'
+            };
+            var result = enhanced_error_service_1.EnhancedErrorService.enhanceErrors([error]);
+            (0, globals_1.expect)(result[0]).toBe("Unexpected property 'invalidField' found at root level. This property is not defined in the workflow schema. Please remove it or check for typos.");
+        });
+        (0, globals_1.it)('should provide exact field name for step level additional properties', function () {
+            var error = {
+                keyword: 'additionalProperties',
+                instancePath: '/steps/0',
+                schemaPath: '#/steps/0/additionalProperties',
+                params: { additionalProperty: 'invalidStepProperty' },
+                message: 'must NOT have additional properties'
+            };
+            var result = enhanced_error_service_1.EnhancedErrorService.enhanceErrors([error]);
+            (0, globals_1.expect)(result[0]).toBe("Unexpected property 'invalidStepProperty' found in step 1. This property is not defined in the workflow schema. Please remove it or check for typos.");
+        });
+        (0, globals_1.it)('should provide exact field name for deeply nested additional properties', function () {
+            var error = {
+                keyword: 'additionalProperties',
+                instancePath: '/steps/0/validationCriteria/and/0',
+                schemaPath: '#/steps/0/validationCriteria/and/0/additionalProperties',
+                params: { additionalProperty: 'invalidNestedProperty' },
+                message: 'must NOT have additional properties'
+            };
+            var result = enhanced_error_service_1.EnhancedErrorService.enhanceErrors([error]);
+            (0, globals_1.expect)(result[0]).toBe("Unexpected property 'invalidNestedProperty' found in step 1, validation criteria. This property is not defined in the workflow schema. Please remove it or check for typos.");
+        });
+        (0, globals_1.it)('should handle missing additionalProperty parameter gracefully', function () {
+            var error = {
+                keyword: 'additionalProperties',
+                instancePath: '/steps/0',
+                schemaPath: '#/steps/0/additionalProperties',
+                params: {},
+                message: 'must NOT have additional properties'
+            };
+            var result = enhanced_error_service_1.EnhancedErrorService.enhanceErrors([error]);
+            (0, globals_1.expect)(result[0]).toBe("Unexpected property found in step 1. Please check the workflow schema for allowed properties.");
+        });
+    });
+    (0, globals_1.describe)('required field error handling', function () {
+        (0, globals_1.it)('should provide exact missing field name', function () {
+            var error = {
+                keyword: 'required',
+                instancePath: '/steps/0',
+                schemaPath: '#/steps/0/required',
+                params: { missingProperty: 'name' },
+                message: 'must have required property \'name\''
+            };
+            var result = enhanced_error_service_1.EnhancedErrorService.enhanceErrors([error]);
+            (0, globals_1.expect)(result[0]).toBe("Missing required field 'name' in step 1. This field is mandatory and must be provided.");
+        });
+        (0, globals_1.it)('should handle missing missingProperty parameter gracefully', function () {
+            var error = {
+                keyword: 'required',
+                instancePath: '',
+                schemaPath: '#/required',
+                params: {},
+                message: 'must have required property'
+            };
+            var result = enhanced_error_service_1.EnhancedErrorService.enhanceErrors([error]);
+            (0, globals_1.expect)(result[0]).toBe("Missing required field at root level. Please check the workflow schema for required properties.");
+        });
+    });
+    (0, globals_1.describe)('type mismatch error handling', function () {
+        (0, globals_1.it)('should provide expected type information', function () {
+            var error = {
+                keyword: 'type',
+                instancePath: '/name',
+                schemaPath: '#/properties/name/type',
+                params: { type: 'string' },
+                message: 'must be string'
+            };
+            var result = enhanced_error_service_1.EnhancedErrorService.enhanceErrors([error]);
+            (0, globals_1.expect)(result[0]).toBe("Invalid data type in field 'name'. Expected 'string' but received a different type.");
+        });
+        (0, globals_1.it)('should handle missing type parameter gracefully', function () {
+            var error = {
+                keyword: 'type',
+                instancePath: '/version',
+                schemaPath: '#/properties/version/type',
+                params: {},
+                message: 'must be string'
+            };
+            var result = enhanced_error_service_1.EnhancedErrorService.enhanceErrors([error]);
+            (0, globals_1.expect)(result[0]).toBe("Invalid data type in field 'version'. Please check the expected type in the workflow schema.");
+        });
+    });
+    (0, globals_1.describe)('pattern validation error handling', function () {
+        (0, globals_1.it)('should provide the specific pattern that failed', function () {
+            var error = {
+                keyword: 'pattern',
+                instancePath: '/name',
+                schemaPath: '#/properties/name/pattern',
+                params: { pattern: '^[a-zA-Z][a-zA-Z0-9_-]*$' },
+                message: 'must match pattern "^[a-zA-Z][a-zA-Z0-9_-]*$"'
+            };
+            var result = enhanced_error_service_1.EnhancedErrorService.enhanceErrors([error]);
+            (0, globals_1.expect)(result[0]).toBe("Value in field 'name' does not match the required pattern: ^[a-zA-Z][a-zA-Z0-9_-]*$");
+        });
+    });
+    (0, globals_1.describe)('array constraint error handling', function () {
+        (0, globals_1.it)('should handle minItems errors with specific limits', function () {
+            var error = {
+                keyword: 'minItems',
+                instancePath: '/steps',
+                schemaPath: '#/properties/steps/minItems',
+                params: { limit: 1 },
+                message: 'must NOT have fewer than 1 items'
+            };
+            var result = enhanced_error_service_1.EnhancedErrorService.enhanceErrors([error]);
+            (0, globals_1.expect)(result[0]).toBe("Array in 'steps' array must contain at least 1 item(s).");
+        });
+        (0, globals_1.it)('should handle maxItems errors with specific limits', function () {
+            var error = {
+                keyword: 'maxItems',
+                instancePath: '/steps',
+                schemaPath: '#/properties/steps/maxItems',
+                params: { limit: 10 },
+                message: 'must NOT have more than 10 items'
+            };
+            var result = enhanced_error_service_1.EnhancedErrorService.enhanceErrors([error]);
+            (0, globals_1.expect)(result[0]).toBe("Array in 'steps' array must contain no more than 10 item(s).");
+        });
+    });
+    (0, globals_1.describe)('enum validation error handling', function () {
+        (0, globals_1.it)('should provide allowed values for enum errors', function () {
+            var error = {
+                keyword: 'enum',
+                instancePath: '/steps/0/agentRole',
+                schemaPath: '#/properties/steps/items/properties/agentRole/enum',
+                params: { allowedValues: ['analyst', 'implementer', 'reviewer'] },
+                message: 'must be equal to one of the allowed values'
+            };
+            var result = enhanced_error_service_1.EnhancedErrorService.enhanceErrors([error]);
+            (0, globals_1.expect)(result[0]).toBe("Value in step 1, field 'agentRole' must be one of: 'analyst', 'implementer', 'reviewer'");
+        });
+        (0, globals_1.it)('should handle missing allowedValues parameter gracefully', function () {
+            var error = {
+                keyword: 'enum',
+                instancePath: '/steps/0/agentRole',
+                schemaPath: '#/properties/steps/items/properties/agentRole/enum',
+                params: {},
+                message: 'must be equal to one of the allowed values'
+            };
+            var result = enhanced_error_service_1.EnhancedErrorService.enhanceErrors([error]);
+            (0, globals_1.expect)(result[0]).toBe("Value in step 1, field 'agentRole' is not one of the allowed values.");
+        });
+    });
+    (0, globals_1.describe)('schema composition error handling', function () {
+        (0, globals_1.it)('should handle oneOf errors with clear guidance', function () {
+            var error = {
+                keyword: 'oneOf',
+                instancePath: '/steps/0/validationCriteria',
+                schemaPath: '#/properties/steps/items/properties/validationCriteria/oneOf',
+                params: {},
+                message: 'must match exactly one schema in oneOf'
+            };
+            var result = enhanced_error_service_1.EnhancedErrorService.enhanceErrors([error]);
+            (0, globals_1.expect)(result[0]).toBe("Value in step 1, field 'validationCriteria' must match exactly one of the allowed schema patterns. Please check the workflow schema for valid formats.");
+        });
+        (0, globals_1.it)('should handle anyOf errors with clear guidance', function () {
+            var error = {
+                keyword: 'anyOf',
+                instancePath: '/steps/0/condition',
+                schemaPath: '#/properties/steps/items/properties/condition/anyOf',
+                params: {},
+                message: 'must match a schema in anyOf'
+            };
+            var result = enhanced_error_service_1.EnhancedErrorService.enhanceErrors([error]);
+            (0, globals_1.expect)(result[0]).toBe("Value in step 1, field 'condition' must match at least one of the allowed schema patterns. Please check the workflow schema for valid formats.");
+        });
+    });
+    (0, globals_1.describe)('location description generation', function () {
+        (0, globals_1.it)('should handle common field paths correctly', function () {
+            var testCases = [
+                { path: '', expected: 'at root level' },
+                { path: '/name', expected: "in field 'name'" },
+                { path: '/description', expected: "in field 'description'" },
+                { path: '/version', expected: "in field 'version'" },
+                { path: '/steps', expected: "in 'steps' array" },
+                { path: '/steps/0', expected: 'in step 1' },
+                { path: '/steps/5', expected: 'in step 6' },
+                { path: '/steps/0/name', expected: "in step 1, field 'name'" },
+                { path: '/steps/0/validationCriteria/and/0', expected: 'in step 1, validation criteria' },
+                { path: '/complex/nested/path', expected: "at 'complex.nested.path'" }
+            ];
+            testCases.forEach(function (_a) {
+                var path = _a.path, expected = _a.expected;
+                var error = {
+                    keyword: 'additionalProperties',
+                    instancePath: path,
+                    schemaPath: '#/additionalProperties',
+                    params: { additionalProperty: 'test' },
+                    message: 'must NOT have additional properties'
+                };
+                var result = enhanced_error_service_1.EnhancedErrorService.enhanceErrors([error]);
+                (0, globals_1.expect)(result[0]).toContain(expected);
+            });
+        });
+    });
+    (0, globals_1.describe)('generic error handling', function () {
+        (0, globals_1.it)('should handle unknown error types gracefully', function () {
+            var error = {
+                keyword: 'unknownKeyword',
+                instancePath: '/test',
+                schemaPath: '#/test',
+                params: {},
+                message: 'unknown error occurred'
+            };
+            var result = enhanced_error_service_1.EnhancedErrorService.enhanceErrors([error]);
+            (0, globals_1.expect)(result[0]).toBe("Validation error at 'test': unknown error occurred");
+        });
+        (0, globals_1.it)('should handle missing error message gracefully', function () {
+            var error = {
+                keyword: 'unknownKeyword',
+                instancePath: '/test',
+                schemaPath: '#/test',
+                params: {},
+                message: undefined
+            };
+            var result = enhanced_error_service_1.EnhancedErrorService.enhanceErrors([error]);
+            (0, globals_1.expect)(result[0]).toBe("Validation error at 'test': Unknown validation error");
+        });
+    });
+    (0, globals_1.describe)('integration with real error scenarios', function () {
+        (0, globals_1.it)('should handle complex multi-error scenarios from our analysis', function () {
+            var errors = [
+                // Root level additional property
+                {
+                    keyword: 'additionalProperties',
+                    instancePath: '',
+                    schemaPath: '#/additionalProperties',
+                    params: { additionalProperty: 'invalidField' },
+                    message: 'must NOT have additional properties'
+                },
+                // Missing required field
+                {
+                    keyword: 'required',
+                    instancePath: '/steps/0',
+                    schemaPath: '#/steps/0/required',
+                    params: { missingProperty: 'name' },
+                    message: 'must have required property \'name\''
+                },
+                // Type mismatch
+                {
+                    keyword: 'type',
+                    instancePath: '/version',
+                    schemaPath: '#/properties/version/type',
+                    params: { type: 'string' },
+                    message: 'must be string'
+                },
+                // Array constraint
+                {
+                    keyword: 'minItems',
+                    instancePath: '/steps',
+                    schemaPath: '#/properties/steps/minItems',
+                    params: { limit: 1 },
+                    message: 'must NOT have fewer than 1 items'
+                }
+            ];
+            var result = enhanced_error_service_1.EnhancedErrorService.enhanceErrors(errors);
+            (0, globals_1.expect)(result).toHaveLength(4);
+            // Check that all errors are enhanced with specific details
+            (0, globals_1.expect)(result[0]).toContain('invalidField');
+            (0, globals_1.expect)(result[1]).toContain('name');
+            (0, globals_1.expect)(result[2]).toContain('string');
+            (0, globals_1.expect)(result[3]).toContain('at least 1');
+            // Check that they're prioritized correctly (critical errors first)
+            (0, globals_1.expect)(result[0]).toContain('Unexpected property');
+            (0, globals_1.expect)(result[1]).toContain('Missing required field');
+        });
+    });
+});
