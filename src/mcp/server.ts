@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * MCP Server Composition Root
  *
@@ -277,12 +276,4 @@ export async function startServer(): Promise<void> {
   console.error('WorkRail MCP Server running on stdio');
 }
 
-// -----------------------------------------------------------------------------
-// Entry Point
-// -----------------------------------------------------------------------------
 
-// Run if this is the main module
-startServer().catch((error) => {
-  console.error('Fatal error running server:', error);
-  process.exit(1);
-});
