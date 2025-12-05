@@ -52,7 +52,7 @@ export {
   allTools,
 } from './tools.js';
 
-// Handlers
+// Workflow handlers
 export {
   handleWorkflowList,
   handleWorkflowGet,
@@ -62,6 +62,7 @@ export {
 } from './handlers/workflow.js';
 
 export type {
+  WorkflowSummary,
   WorkflowListOutput,
   WorkflowGetOutput,
   WorkflowNextOutput,
@@ -69,6 +70,7 @@ export type {
   WorkflowGetSchemaOutput,
 } from './handlers/workflow.js';
 
+// Session handlers
 export {
   handleCreateSession,
   handleUpdateSession,
@@ -80,6 +82,8 @@ export type {
   CreateSessionOutput,
   UpdateSessionOutput,
   ReadSessionOutput,
+  ReadSessionSchemaOutput,
+  SchemaOverview,
   OpenDashboardOutput,
 } from './handlers/session.js';
 
