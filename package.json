@@ -3,6 +3,14 @@
   "version": "0.8.6",
   "description": "MCP server for structured workflow orchestration and step-by-step task guidance",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/EtienneBBeaulac/mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/EtienneBBeaulac/mcp/issues"
+  },
+  "homepage": "https://github.com/EtienneBBeaulac/mcp#readme",
   "bin": {
     "workrail": "dist/mcp-server.js"
   },
@@ -14,13 +22,12 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "release": "bash -c './scripts/release.sh'",
     "dev": "npm run build && node dist/mcp-server.js",
     "prepare": "npm run build",
     "watch": "tsc --watch",
     "validate:workflows": "bash scripts/validate-workflows.sh",
     "precommit": "npm run validate:workflows",
-    "preinstall": "node -e \"const v=parseInt(process.versions.node.split('.') [0],10); if(v<20){console.error('WorkRail requires Node.js >=20. Current: '+process.versions.node+'\\nPlease upgrade: https://nodejs.org/'); process.exit(1);}\"",
+    "preinstall": "node -e \"const v=parseInt(process.versions.node.split('.')[0],10); if(v<20){console.error('WorkRail requires Node.js >=20. Current: '+process.versions.node+'\\nPlease upgrade: https://nodejs.org/'); process.exit(1);}\"",
     "web:typecheck": "tsc -p tsconfig.web.json",
     "test": "vitest",
     "test:smoke": "vitest tests/smoke/ --reporter=verbose",
@@ -32,7 +39,8 @@
     "test:run": "vitest run",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
-    "e2e:install": "playwright install"
+    "e2e:install": "playwright install",
+    "semantic-release": "semantic-release"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^0.5.0",
@@ -61,15 +69,20 @@
   ],
   "devDependencies": {
     "@playwright/test": "^1.55.1",
+    "@semantic-release/changelog": "^6.0.3",
+    "@semantic-release/git": "^10.0.1",
+    "@semantic-release/github": "^12.0.2",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.3",
     "@types/node": "^20.19.9",
     "@types/semver": "^7.7.0",
     "@vitest/ui": "^3.2.4",
+    "conventional-changelog-conventionalcommits": "^9.1.0",
     "happy-dom": "^19.0.2",
     "jsdom": "^27.0.0",
     "lit": "^3.3.1",
     "node-fetch": "^2.7.0",
+    "semantic-release": "^24.2.0",
     "typescript": "^5.9.3",
     "vite": "^7.1.9",
     "vitest": "^3.2.4"
