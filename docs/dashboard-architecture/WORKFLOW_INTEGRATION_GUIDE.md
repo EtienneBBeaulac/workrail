@@ -540,7 +540,7 @@ const dashboard = await workrail_read_session(..., "dashboard");
 
 ```bash
 # Start MCP server
-cd packages/workrail
+# (Run from repository root)
 npm run build
 npm run dev
 

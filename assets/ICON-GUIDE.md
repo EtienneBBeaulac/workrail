@@ -180,7 +180,7 @@ Recommended tools for creating icons:
 ## File Structure
 
 ```
-packages/workrail/
+
 ├── assets/
 │   ├── logo.svg              # Primary logo (amber)
 │   ├── logo-dark.svg         # Dark background variant (white)

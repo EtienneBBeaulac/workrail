@@ -49,7 +49,7 @@ A revolutionary approach to workflow state management using:
 
 ```bash
 # Build the project
-cd packages/workrail
+# (Run from repository root)
 npm run build
 
 # Start the MCP server (HTTP dashboard starts automatically)
@@ -218,7 +218,7 @@ Open `http://localhost:3456` → See all sessions, real-time progress, beautiful
 ## 📁 File Structure
 
 ```
-packages/workrail/
+
 ├── src/
 │   ├── infrastructure/
 │   │   └── session/

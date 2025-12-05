@@ -35,13 +35,12 @@ jobs:
 
       - name: Run unit and integration tests
         run: npx vitest run --exclude="tests/contract/**"
-        working-directory: packages/workrail
 
       - name: Upload coverage reports
         if: matrix.node-version == 20
         uses: codecov/codecov-action@v4
         with:
-          directory: packages/workrail/coverage
+          directory: ./coverage
           flags: unittests
           fail_ci_if_error: false
         continue-on-error: true
@@ -74,7 +73,6 @@ jobs:
 
       - name: Run contract tests
         run: npx vitest run tests/contract/ --testTimeout=30000
-        working-directory: packages/workrail
         timeout-minutes: 10
 
   e2e-tests:
@@ -103,18 +101,16 @@ jobs:
 
       - name: Install Playwright browsers
         run: npm run e2e:install
-        working-directory: packages/workrail
 
       - name: Run E2E tests
         run: npm run e2e
-        working-directory: packages/workrail
 
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report-node-${{ matrix.node-version }}
-          path: packages/workrail/playwright-report/
+          path: ./playwright-report/
           retention-days: 30
 
   validate-workflows:
@@ -139,7 +135,6 @@ jobs:
 
       - name: Validate workflows
         run: npm run validate:workflows
-        working-directory: packages/workrail
 
   # Summary job to check all required jobs passed
   ci-success:
