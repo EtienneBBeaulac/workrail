@@ -127,6 +127,7 @@ async function registerServices(): Promise<void> {
   const { DefaultWorkflowService } = await import('../application/services/workflow-service.js');
 
   // Infrastructure
+  const { SessionWatcherService } = await import('../infrastructure/session/SessionWatcherService.js');
   const { SessionManager } = await import('../infrastructure/session/SessionManager.js');
   const { HttpServer } = await import('../infrastructure/session/HttpServer.js');
 
@@ -171,6 +172,9 @@ async function registerServices(): Promise<void> {
   });
   container.register(DI.Services.Workflow, { 
     useFactory: instanceCachingFactory((c) => c.resolve(DefaultWorkflowService)) 
+  });
+  container.register(DI.Infra.SessionWatcher, { 
+    useFactory: instanceCachingFactory((c) => c.resolve(SessionWatcherService)) 
   });
   container.register(DI.Infra.SessionManager, { 
     useFactory: instanceCachingFactory((c) => c.resolve(SessionManager)) 
