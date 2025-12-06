@@ -1,7 +1,7 @@
 import { singleton, inject } from 'tsyringe';
 import { Workflow } from '../../types/mcp-types';
 import { ILoopRecoveryService } from './i-loop-recovery-service';
-import { LoopStackFrame, LoopStep, EnhancedContext, isLoopStep } from '../../types/workflow-types';
+import { LoopStackFrame, LoopStep, EnhancedContext, isLoopStep, setBodyIndex } from '../../types/workflow-types';
 import { LoopStackManager } from './loop-stack-manager';
 import { ContextOptimizer } from './context-optimizer';
 import { createLogger } from '../../utils/logger';
@@ -175,11 +175,12 @@ export class DefaultLoopRecoveryService implements ILoopRecoveryService {
     }
     
     // Fast-forward the loop context to the correct iteration
+    // NOTE: loopContext is intentionally mutable - manages iteration state
     for (let i = 0; i < iterationsCompleted; i++) {
       loopFrame.loopContext.incrementIteration();
     }
     
-    // Set currentBodyIndex to resume from where we left off
+    // Calculate resume index
     // Find the index of the last completed body step + 1
     let resumeIndex = 0;
     for (let i = loopFrame.bodySteps.length - 1; i >= 0; i--) {
@@ -188,7 +189,9 @@ export class DefaultLoopRecoveryService implements ILoopRecoveryService {
         break;
       }
     }
-    loopFrame.currentBodyIndex = resumeIndex;
+    
+    // Create frame with correct index (immutable operation)
+    const frameWithCorrectIndex = setBodyIndex(loopFrame, resumeIndex);
     
     // Clear completed body steps so iteration logic works correctly
     bodyStepIds.forEach(stepId => {
@@ -197,10 +200,11 @@ export class DefaultLoopRecoveryService implements ILoopRecoveryService {
     });
     
     this.logger.debug('Cleared completed body steps for clean iteration tracking', {
-      clearedCount: loopBodyMatches.length
+      clearedCount: loopBodyMatches.length,
+      resumeIndex
     });
     
-    return loopFrame;
+    return frameWithCorrectIndex;
   }
 
   /**
