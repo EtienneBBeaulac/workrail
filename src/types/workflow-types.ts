@@ -105,6 +105,22 @@ export enum LoopExecutionState {
  * Represents a single frame in the loop execution stack.
  * Each frame tracks the state of an active loop.
  * 
+ * IMMUTABILITY INVARIANTS:
+ * 1. All fields are readonly
+ * 2. Frames are frozen via Object.freeze()
+ * 3. bodySteps array is frozen (ReadonlyArray)
+ * 4. loopContext is mutable (manages its own state) - SHALLOW IMMUTABILITY
+ * 
+ * MUTATION STRATEGY:
+ * - Never mutate frames directly
+ * - Create new frames via smart constructors (createLoopStackFrame, etc.)
+ * - Replace in stack array using replaceTopFrame()
+ * 
+ * WHY SHALLOW IMMUTABLE:
+ * - Frame structure (loopId, bodySteps, index) is immutable
+ * - Loop execution state (iteration count, timers) lives in loopContext
+ * - Separates "what the loop is" (immutable) from "where it is" (mutable state)
+ * 
  * The loop stack is maintained in EnhancedContext._loopStack to keep
  * the WorkflowService stateless and concurrency-safe.
  */
@@ -115,15 +131,158 @@ export interface LoopStackFrame {
   /** The loop step definition */
   readonly loopStep: LoopStep;
   
-  /** Execution context for this loop (tracks iteration, evaluates conditions) */
+  /** 
+   * Execution context for this loop (tracks iteration, evaluates conditions).
+   * 
+   * NOTE: This is MUTABLE - loopContext manages its own internal state.
+   * The frame is "shallow immutable" - frame structure is frozen but
+   * loopContext internals can change (incrementIteration, etc.).
+   */
   readonly loopContext: any; // LoopExecutionContext - avoid circular dependency
   
   /** Body steps normalized to array (even for single-step bodies) */
   readonly bodySteps: ReadonlyArray<WorkflowStep>;
   
-  /** Current position in body steps array (0-based, mutable) */
-  currentBodyIndex: number;
+  /** 
+   * Current position in body steps array (0-based).
+   * Now readonly - use advanceBodyIndex/resetBodyIndex/setBodyIndex to update.
+   */
+  readonly currentBodyIndex: number;
 }
+
+// =============================================================================
+// LOOP STACK FRAME SMART CONSTRUCTORS
+// =============================================================================
+
+/**
+ * Create a new loop stack frame.
+ * 
+ * This is the ONLY recommended way to create frames (enforces invariants).
+ * All fields are frozen to prevent accidental mutation.
+ * 
+ * @param loopId - Unique identifier of the loop
+ * @param loopStep - The loop step definition
+ * @param loopContext - Loop execution context (mutable - manages iteration state)
+ * @param bodySteps - Array of body steps (will be frozen if not already)
+ * @param currentBodyIndex - Starting index (default: 0)
+ * @returns Frozen LoopStackFrame
+ */
+export function createLoopStackFrame(
+  loopId: string,
+  loopStep: LoopStep,
+  loopContext: any,
+  bodySteps: WorkflowStep[] | ReadonlyArray<WorkflowStep>,
+  currentBodyIndex: number = 0
+): LoopStackFrame {
+  // Normalize bodySteps to frozen array
+  const frozenBodySteps = Array.isArray(bodySteps) && !Object.isFrozen(bodySteps)
+    ? Object.freeze([...bodySteps])
+    : bodySteps as ReadonlyArray<WorkflowStep>;
+  
+  return Object.freeze({
+    loopId,
+    loopStep,
+    loopContext,
+    bodySteps: frozenBodySteps,
+    currentBodyIndex,
+  });
+}
+
+/**
+ * Create a new frame with currentBodyIndex incremented by 1.
+ * 
+ * Use when skipping steps or advancing through body.
+ * Original frame is unchanged.
+ * 
+ * @param frame - Original frame (unchanged)
+ * @returns New frame with index + 1
+ */
+export function advanceBodyIndex(frame: LoopStackFrame): LoopStackFrame {
+  return createLoopStackFrame(
+    frame.loopId,
+    frame.loopStep,
+    frame.loopContext,
+    frame.bodySteps,
+    frame.currentBodyIndex + 1
+  );
+}
+
+/**
+ * Create a new frame with currentBodyIndex reset to 0.
+ * 
+ * Use at iteration boundaries when restarting body scan.
+ * Original frame is unchanged.
+ * 
+ * @param frame - Original frame (unchanged)
+ * @returns New frame with index = 0
+ */
+export function resetBodyIndex(frame: LoopStackFrame): LoopStackFrame {
+  return createLoopStackFrame(
+    frame.loopId,
+    frame.loopStep,
+    frame.loopContext,
+    frame.bodySteps,
+    0
+  );
+}
+
+/**
+ * Create a new frame with currentBodyIndex set to specific value.
+ * 
+ * Use during loop recovery to resume from correct position.
+ * Original frame is unchanged.
+ * 
+ * @param frame - Original frame (unchanged)
+ * @param index - New index value
+ * @returns New frame with specified index
+ */
+export function setBodyIndex(frame: LoopStackFrame, index: number): LoopStackFrame {
+  return createLoopStackFrame(
+    frame.loopId,
+    frame.loopStep,
+    frame.loopContext,
+    frame.bodySteps,
+    index
+  );
+}
+
+/**
+ * Replace the top frame in a loop stack with a new frame.
+ * Returns the new frame for local variable assignment.
+ * 
+ * MUTABILITY NOTE:
+ * This function mutates the stack array (replaces element at top).
+ * The stack itself is mutable operational state - only frames are immutable.
+ * 
+ * This is intentional:
+ * - Stack = operational state (where we are in execution)
+ * - Frames = data (what we're executing)
+ * - Immutable data in mutable collections is a common pattern
+ * 
+ * USAGE PATTERN:
+ * ```typescript
+ * frame = replaceTopFrame(loopStack, advanceBodyIndex(frame));
+ * ```
+ * 
+ * @param stack - Loop stack (WILL BE MUTATED - top frame replaced)
+ * @param newFrame - New frame to place at top of stack
+ * @returns The new frame (for chaining: frame = replaceTopFrame(stack, newFrame))
+ * @throws {LoopStackCorruptionError} if stack is empty
+ */
+export function replaceTopFrame(
+  stack: LoopStackFrame[], 
+  newFrame: LoopStackFrame
+): LoopStackFrame {
+  if (stack.length === 0) {
+    throw new Error('Cannot replace frame in empty stack (LoopStackCorruptionError)');
+  }
+  stack[stack.length - 1] = newFrame;
+  return newFrame;
+}
+
+// =============================================================================
+// LOOP EXECUTION RESULT TYPES
+// =============================================================================
 
 /**
  * Result type for loop handling operations.
@@ -133,6 +292,36 @@ export type LoopHandlerResult =
   | { type: 'step'; result: any } // StepResult - avoid circular dependency
   | { type: 'continue' }
   | { type: 'complete' };
+
+/**
+ * PHASE 1 RESULT: Should loop continue executing?
+ */
+export type LoopContinuationResult =
+  | { type: 'continue'; iteration: number }
+  | { type: 'stop'; reason: 'condition-false' | 'max-iterations'; warnings?: string[] };
+
+/**
+ * PHASE 2 RESULT: What did body scan find?
+ */
+export type BodyScanResult =
+  | { type: 'found-step'; result: { step: WorkflowStep; isComplete: boolean; guidance: any; context: any } }
+  | { type: 'body-complete'; frame: LoopStackFrame }
+  | { type: 'abort-loop'; reason: 'context-size'; sizeKB: number };
+
+/**
+ * PHASE 3 RESULT: Did iteration complete successfully?
+ */
+export type IterationCompletionResult =
+  | { type: 'complete'; frame: LoopStackFrame; context: EnhancedContext }
+  | { type: 'incomplete'; reason: 'waiting-for-steps'; missingSteps: string[] };
+
+/**
+ * Step eligibility check result.
+ */
+export type StepEligibilityResult =
+  | { type: 'eligible'; context: EnhancedContext; guidance: any }
+  | { type: 'skip'; reason: 'already-completed' | 'condition-false' }
+  | { type: 'abort'; reason: 'context-size'; sizeKB: number };
 
 /**
  * Type guard to validate LoopStackFrame structure.

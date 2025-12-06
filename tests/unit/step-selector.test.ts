@@ -108,7 +108,7 @@ describe('DefaultStepSelector', () => {
           loopContext: {} as any,
           bodySteps: [{ id: 'body-step', title: 'Body', prompt: 'Body' }],
           currentBodyIndex: 0
-        }]
+        } as any]  // Cast for test mock
       };
 
       const result = selector.findEligibleStep(workflow, loopBodySteps, [], context);

@@ -5,7 +5,15 @@ import {
   LoopStackFrame, 
   EnhancedContext, 
   LoopHandlerResult,
-  isValidLoopStackFrame
+  LoopContinuationResult,
+  BodyScanResult,
+  IterationCompletionResult,
+  StepEligibilityResult,
+  isValidLoopStackFrame,
+  createLoopStackFrame,
+  advanceBodyIndex,
+  resetBodyIndex,
+  replaceTopFrame
 } from '../../types/workflow-types';
 import { LoopExecutionContext } from './loop-execution-context';
 import { LoopStepResolver } from './loop-step-resolver';
@@ -122,14 +130,14 @@ export class LoopStackManager {
       );
     }
     
-    // Create frame with immutable properties
-    const frame: LoopStackFrame = {
-      loopId: loopStep.id,
+    // Create frame using smart constructor (enforces immutability)
+    const frame = createLoopStackFrame(
+      loopStep.id,
       loopStep,
       loopContext,
-      bodySteps: Object.freeze([...bodySteps]),  // Immutable array
-      currentBodyIndex: 0
-    };
+      bodySteps,
+      0
+    );
     
     // Validate frame invariants
     this.assertFrameInvariant(frame);
@@ -141,10 +149,10 @@ export class LoopStackManager {
    * Handles execution of the current loop (top of stack).
    * Returns the next step to execute, or signals to continue/complete.
    * 
+   * REFACTORED: Now delegates to lifecycle methods for clarity.
    * CRITICAL: This method contains NO RECURSION.
-   * Uses an inner while loop to handle multiple iterations without recursive calls.
    * 
-   * @param loopStack - The loop execution stack (will be mutated - frames popped)
+   * @param loopStack - The loop execution stack (will be mutated - frames popped/replaced)
    * @param completed - Array of completed step IDs (will be mutated - steps cleared per iteration)
    * @param context - Current execution context
    * @returns Result indicating whether to return a step, continue, or complete
@@ -154,212 +162,423 @@ export class LoopStackManager {
     completed: string[],
     context: EnhancedContext
   ): LoopHandlerResult {
-    // Create child logger for this specific loop
-    const loopLogger = loopStack.length > 0 
-      ? this.logger.child(`Loop:${loopStack[loopStack.length - 1]?.loopId || 'unknown'}`)
-      : this.logger;
-    
-    // State transition logging helper
-    let currentState: LoopExecutionState | undefined;
-    const logTransition = (to: LoopExecutionState, data?: Record<string, unknown>) => {
-      loopLogger.debug('Loop state transition', {
-        from: currentState,
-        to,
-        ...data
-      });
-      currentState = to;
-    };
-    
-    // Inner while loop to handle iterations - NO RECURSION
+    // Main iteration loop - NO RECURSION
     while (true) {
-      // Stack empty check
+      // Guard: Empty stack
       if (loopStack.length === 0) {
         return { type: 'complete' };
       }
       
-      const frame = loopStack[loopStack.length - 1];
+      let frame = loopStack[loopStack.length - 1];
       
-      loopLogger.debug('Handling loop iteration', {
+      this.logger.debug('Handling loop iteration', {
+        loopId: frame.loopId,
         iteration: frame.loopContext.getCurrentState().iteration,
-        bodyIndex: frame.currentBodyIndex,
-        bodyLength: frame.bodySteps.length,
-        completedCount: completed.length
+        bodyIndex: frame.currentBodyIndex
       });
       
-      // Assert frame invariants for corruption detection
+      // Validate frame structure
       this.assertFrameInvariant(frame);
       
-      // Check if loop should continue
-      logTransition(LoopExecutionState.CHECKING_LOOP_CONDITION, {
-        iteration: frame.loopContext.getCurrentState().iteration
-      });
-      
-      if (!frame.loopContext.shouldContinue(context)) {
-        // Loop complete - pop frame and mark as completed
-        loopLogger.debug('Loop condition false, popping frame', {
-          totalIterations: frame.loopContext.getCurrentState().iteration
-        });
-        loopStack.pop();
-        completed.push(frame.loopId);
-        return { type: 'complete' };
+      // PHASE 1: Should loop continue?
+      const continuation = this.checkLoopContinuation(frame, context);
+      if (continuation.type === 'stop') {
+        return this.exitLoop(loopStack, frame, completed, context, continuation);
       }
       
-      // Find next eligible body step in current iteration
-      logTransition(LoopExecutionState.SCANNING_BODY, {
-        bodyIndex: frame.currentBodyIndex,
-        bodyLength: frame.bodySteps.length
-      });
+      // PHASE 2: Find next eligible step in body
+      const scan = this.scanBodyForNextStep(frame, loopStack, completed, context);
       
-      while (frame.currentBodyIndex < frame.bodySteps.length) {
-        const bodyStep = frame.bodySteps[frame.currentBodyIndex];
-        
-        // Check if already completed
-        if (completed.includes(bodyStep.id)) {
-          loopLogger.debug('Step already completed, skipping', { stepId: bodyStep.id });
-          frame.currentBodyIndex++;
-          continue;
-        }
-        
-        // Inject loop variables for condition evaluation
-        const isFirst = frame.loopContext.isFirstIteration();
-        const useMinimal = !isFirst && !!this.contextOptimizer;
-        let loopEnhancedContext = frame.loopContext.injectVariables(context, useMinimal);
-        
-        // Apply context optimization if available
-        if (useMinimal && this.contextOptimizer) {
-          loopEnhancedContext = this.contextOptimizer.stripLoopMetadata(
-            loopEnhancedContext as EnhancedContext
-          );
-        }
-        
-        // Check context size after injection
-        const sizeCheck = checkContextSize(loopEnhancedContext);
-        if (sizeCheck.isError) {
-          // Context too large - abort loop gracefully
-          loopLogger.warn('Context size exceeded, aborting loop', {
-            sizeKB: Math.round(sizeCheck.sizeBytes / 1024),
-            iteration: frame.loopContext.getCurrentState().iteration
-          });
-          loopStack.pop();
-          completed.push(frame.loopId);
-          
-          const warning = `Loop ${frame.loopId} aborted at iteration ${frame.loopContext.getCurrentState().iteration}: context size (${Math.round(sizeCheck.sizeBytes / 1024)}KB) exceeded maximum (256KB)`;
-          // Note: addWarnings returns a new context, copy warnings back
-          const updatedContext = ContextOptimizer.addWarnings(context, 'loops', frame.loopId, [warning]);
-          context._warnings = updatedContext._warnings;
-          
-          return { type: 'complete' };
-        }
-        
-        // Check runCondition for this body step (using loop-enhanced context)
-        logTransition(LoopExecutionState.CHECKING_ELIGIBILITY, {
-          stepId: bodyStep.id,
-          hasCondition: !!bodyStep.runCondition
-        });
-        
-        if (bodyStep.runCondition) {
-          const conditionMet = evaluateCondition(bodyStep.runCondition, loopEnhancedContext);
-          if (!conditionMet) {
-            loopLogger.debug('Step condition false, skipping', { 
-              stepId: bodyStep.id,
-              condition: bodyStep.runCondition
-            });
-            frame.currentBodyIndex++;
-            continue;
-          }
-        }
-        
-        // Found eligible step - return it
-        logTransition(LoopExecutionState.RETURNING_BODY_STEP, {
-          stepId: bodyStep.id,
-          iteration: frame.loopContext.getCurrentState().iteration
-        });
-        
-        return {
-          type: 'step',
-          result: {
-            step: bodyStep,
-            isComplete: false,
-            guidance: this.buildStepPrompt(bodyStep, frame.loopContext, useMinimal),
-            context: sizeCheck.context
-          }
-        };
+      if (scan.type === 'found-step') {
+        return { type: 'step', result: scan.result };
       }
       
-      // All body steps scanned for this iteration
-      logTransition(LoopExecutionState.VALIDATING_ITERATION_COMPLETE);
-      
-      // Clear completed body steps from this iteration FIRST
-      // This ensures we don't double-count steps when checking if iteration is complete
-      const clearedSteps: string[] = [];
-      frame.bodySteps.forEach(step => {
-        const index = completed.indexOf(step.id);
-        if (index > -1) {
-          clearedSteps.push(step.id);
-          completed.splice(index, 1);
-        }
-      });
-      
-      if (clearedSteps.length > 0) {
-        loopLogger.debug('Cleared body steps from iteration', {
-          clearedSteps,
-          remainingCompleted: completed.length
-        });
+      if (scan.type === 'abort-loop') {
+        return this.abortLoop(loopStack, frame, completed, context, scan);
       }
       
-      // Now check if all eligible steps were completed in this iteration
-      // Inject loop variables to evaluate runConditions
-      const isFirst = frame.loopContext.isFirstIteration();
-      const useMinimal = !isFirst && !!this.contextOptimizer;
-      const loopEnhancedContext = frame.loopContext.injectVariables(context, useMinimal);
-      
-      const eligibleSteps = frame.bodySteps.filter(step => {
-        if (!step.runCondition) return true; // No condition = always eligible
-        return evaluateCondition(step.runCondition, loopEnhancedContext);
-      });
-      
-      loopLogger.debug('Checking iteration completion', {
-        eligible: eligibleSteps.map(s => s.id),
-        cleared: clearedSteps
-      });
-      
-      const allEligibleCompleted = eligibleSteps.every(step => clearedSteps.includes(step.id));
-      
-      if (!allEligibleCompleted) {
-        // Not all eligible steps completed - iteration not done
-        // This shouldn't normally happen, but could occur if steps are completed out of order
-        loopLogger.debug('Not all eligible steps completed, waiting', {
-          eligible: eligibleSteps.map(s => s.id),
-          completed: clearedSteps
-        });
-        return { type: 'complete' };
-      }
-      
-      // All eligible body steps completed - increment iteration
-      logTransition(LoopExecutionState.INCREMENTING_ITERATION, {
-        from: frame.loopContext.getCurrentState().iteration,
-        to: frame.loopContext.getCurrentState().iteration + 1
-      });
-      
-      frame.loopContext.incrementIteration();
-      frame.currentBodyIndex = 0;
-      
-      loopLogger.debug('Iteration complete, incremented counter', {
-        newIteration: frame.loopContext.getCurrentState().iteration
-      });
-      
-      // Update loop state in context
-      context = ContextOptimizer.mergeLoopState(
-        context,
-        frame.loopId,
-        frame.loopContext.getCurrentState()
+      // PHASE 3: Complete iteration and advance
+      const iteration = this.completeIteration(
+        scan.frame,  // Use frame from scan (may have advanced index)
+        loopStack, 
+        completed, 
+        context
       );
       
-      // Continue to top of while loop (checks shouldContinue again)
-      // ✅ NO RECURSION - just loops back to check if loop should continue
+      if (iteration.type === 'incomplete') {
+        return { type: 'complete' };  // Waiting for steps
+      }
+      
+      // Update for next iteration
+      frame = iteration.frame;
+      context = iteration.context;
+      
+      // Loop back to check continuation again
     }
   }
   
+  /**
+   * PHASE 1: Determine if loop should continue executing.
+   * 
+   * Checks loop-specific condition and safety limits.
+   * 
+   * @returns 'continue' if loop should keep running, 'stop' with reason if done
+   */
+  private checkLoopContinuation(
+    frame: LoopStackFrame,
+    context: EnhancedContext
+  ): LoopContinuationResult {
+    const shouldContinue = frame.loopContext.shouldContinue(context);
+    
+    if (!shouldContinue) {
+      const state = frame.loopContext.getCurrentState();
+      
+      const reason = state.iteration >= frame.loopStep.loop.maxIterations
+        ? 'max-iterations' as const
+        : 'condition-false' as const;
+      
+      return {
+        type: 'stop',
+        reason,
+        warnings: state.warnings
+      };
+    }
+    
+    return {
+      type: 'continue',
+      iteration: frame.loopContext.getCurrentState().iteration
+    };
+  }
+
+  /**
+   * Exit loop cleanly.
+   * Pops frame, marks loop complete, preserves warnings.
+   */
+  private exitLoop(
+    loopStack: LoopStackFrame[],
+    frame: LoopStackFrame,
+    completed: string[],
+    context: EnhancedContext,
+    continuation: Extract<LoopContinuationResult, { type: 'stop' }>
+  ): LoopHandlerResult {
+    this.logger.debug('Exiting loop', {
+      loopId: frame.loopId,
+      reason: continuation.reason,
+      iterations: frame.loopContext.getCurrentState().iteration
+    });
+    
+    loopStack.pop();
+    completed.push(frame.loopId);
+    
+    if (continuation.warnings && continuation.warnings.length > 0) {
+      const updated = ContextOptimizer.addWarnings(
+        context,
+        'loops',
+        frame.loopId,
+        continuation.warnings
+      );
+      context._warnings = updated._warnings;
+    }
+    
+    return { type: 'complete' };
+  }
+
+  /**
+   * PHASE 2: Scan loop body for next eligible step.
+   * 
+   * Advances frame.currentBodyIndex as it scans (creates new frames).
+   * Stops at first eligible step or when body complete.
+   * 
+   * @param frame - Current frame (will be replaced in stack if advanced)
+   * @param loopStack - Stack (will be mutated - frame replaced at top)
+   * @param completed - Completed steps
+   * @param context - Execution context
+   * @returns What the scan found (step, completion, or abort)
+   */
+  private scanBodyForNextStep(
+    frame: LoopStackFrame,
+    loopStack: LoopStackFrame[],
+    completed: string[],
+    context: EnhancedContext
+  ): BodyScanResult {
+    let currentFrame = frame;
+    
+    this.logger.debug('Scanning loop body', {
+      bodyIndex: currentFrame.currentBodyIndex,
+      bodyLength: currentFrame.bodySteps.length
+    });
+    
+    while (currentFrame.currentBodyIndex < currentFrame.bodySteps.length) {
+      const bodyStep = currentFrame.bodySteps[currentFrame.currentBodyIndex];
+      
+      const eligibility = this.checkStepEligibility(bodyStep, currentFrame, completed, context);
+      
+      switch (eligibility.type) {
+        case 'skip':
+          this.logger.debug('Skipping step', {
+            stepId: bodyStep.id,
+            reason: eligibility.reason
+          });
+          currentFrame = replaceTopFrame(loopStack, advanceBodyIndex(currentFrame));
+          continue;
+        
+        case 'abort':
+          this.logger.warn('Aborting loop', {
+            loopId: currentFrame.loopId,
+            reason: eligibility.reason,
+            sizeKB: eligibility.sizeKB
+          });
+          return {
+            type: 'abort-loop',
+            reason: eligibility.reason,
+            sizeKB: eligibility.sizeKB
+          };
+        
+        case 'eligible':
+          this.logger.debug('Found eligible step', {
+            stepId: bodyStep.id,
+            iteration: currentFrame.loopContext.getCurrentState().iteration
+          });
+          return {
+            type: 'found-step',
+            result: {
+              step: bodyStep,
+              isComplete: false,
+              guidance: eligibility.guidance,
+              context: eligibility.context
+            }
+          };
+      }
+    }
+    
+    this.logger.debug('Body scan complete, no eligible steps');
+    return {
+      type: 'body-complete',
+      frame: currentFrame
+    };
+  }
+
+  /**
+   * Check if a specific step can run.
+   * 
+   * Checks (in order):
+   * 1. Already completed? → skip
+   * 2. Context too large? → abort loop
+   * 3. Condition unmet? → skip
+   * 4. Otherwise → eligible
+   */
+  private checkStepEligibility(
+    step: WorkflowStep,
+    frame: LoopStackFrame,
+    completed: string[],
+    context: EnhancedContext
+  ): StepEligibilityResult {
+    if (completed.includes(step.id)) {
+      return { type: 'skip', reason: 'already-completed' };
+    }
+    
+    const prepared = this.prepareLoopContext(frame, context);
+    
+    const sizeCheck = checkContextSize(prepared);
+    if (sizeCheck.isError) {
+      return {
+        type: 'abort',
+        reason: 'context-size',
+        sizeKB: Math.round(sizeCheck.sizeBytes / 1024)
+      };
+    }
+    
+    if (step.runCondition) {
+      const conditionMet = evaluateCondition(step.runCondition, prepared);
+      if (!conditionMet) {
+        return { type: 'skip', reason: 'condition-false' };
+      }
+    }
+    
+    // Determine if this is first iteration for prompt building
+    const isFirst = frame.loopContext.isFirstIteration();
+    const useMinimal = !isFirst && !!this.contextOptimizer;
+    
+    return {
+      type: 'eligible',
+      context: sizeCheck.context as EnhancedContext,
+      guidance: this.buildStepPrompt(step, frame.loopContext, useMinimal)
+    };
+  }
+
+  /**
+   * Prepare context for step evaluation.
+   * Injects loop variables and optimizes if not first iteration.
+   */
+  private prepareLoopContext(
+    frame: LoopStackFrame,
+    context: EnhancedContext
+  ): EnhancedContext {
+    const isFirst = frame.loopContext.isFirstIteration();
+    const useMinimal = !isFirst && !!this.contextOptimizer;
+    
+    let prepared = frame.loopContext.injectVariables(context, useMinimal);
+    
+    if (useMinimal && this.contextOptimizer) {
+      prepared = this.contextOptimizer.stripLoopMetadata(prepared as EnhancedContext);
+    }
+    
+    return prepared;
+  }
+
+  /**
+   * PHASE 3: Complete current iteration and advance to next.
+   * 
+   * Steps:
+   * 1. Clear completed body steps from this iteration
+   * 2. Validate all eligible steps were completed
+   * 3. Increment iteration counter
+   * 4. Reset body index to 0
+   * 5. Update context with new iteration state
+   * 
+   * @returns 'complete' with updated frame/context, or 'incomplete' if waiting
+   */
+  private completeIteration(
+    frame: LoopStackFrame,
+    loopStack: LoopStackFrame[],
+    completed: string[],
+    context: EnhancedContext
+  ): IterationCompletionResult {
+    this.logger.debug('Completing iteration', {
+      iteration: frame.loopContext.getCurrentState().iteration
+    });
+    
+    const clearedSteps = this.clearCompletedBodySteps(frame, completed);
+    
+    const validation = this.validateIterationComplete(frame, clearedSteps, context);
+    if (validation.type === 'incomplete') {
+      return validation;
+    }
+    
+    frame.loopContext.incrementIteration();
+    
+    const newFrame = replaceTopFrame(loopStack, resetBodyIndex(frame));
+    
+    const newContext = ContextOptimizer.mergeLoopState(
+      context,
+      newFrame.loopId,
+      newFrame.loopContext.getCurrentState()
+    );
+    
+    this.logger.debug('Iteration advanced', {
+      newIteration: newFrame.loopContext.getCurrentState().iteration
+    });
+    
+    return {
+      type: 'complete',
+      frame: newFrame,
+      context: newContext
+    };
+  }
+
+  /**
+   * Clear completed body steps from the completed array.
+   * This prevents double-counting when checking iteration completion.
+   * 
+   * @param frame - Current frame
+   * @param completed - Completed steps array (MUTATED - steps removed)
+   * @returns Array of step IDs that were cleared
+   */
+  private clearCompletedBodySteps(
+    frame: LoopStackFrame,
+    completed: string[]
+  ): string[] {
+    const clearedSteps: string[] = [];
+    
+    frame.bodySteps.forEach(step => {
+      const index = completed.indexOf(step.id);
+      if (index > -1) {
+        clearedSteps.push(step.id);
+        completed.splice(index, 1);
+      }
+    });
+    
+    if (clearedSteps.length > 0) {
+      this.logger.debug('Cleared body steps from iteration', {
+        cleared: clearedSteps,
+        remaining: completed.length
+      });
+    }
+    
+    return clearedSteps;
+  }
+
+  /**
+   * Validate that all eligible steps in this iteration were completed.
+   * 
+   * A step is eligible if:
+   * - It has no runCondition, OR
+   * - Its runCondition evaluates to true
+   * 
+   * @returns 'valid' if ready to advance, 'incomplete' with missing steps if not
+   */
+  private validateIterationComplete(
+    frame: LoopStackFrame,
+    clearedSteps: string[],
+    context: EnhancedContext
+  ): { type: 'valid' } | IterationCompletionResult {
+    const prepared = this.prepareLoopContext(frame, context);
+    
+    const eligibleSteps = frame.bodySteps.filter(step => {
+      if (!step.runCondition) return true;
+      return evaluateCondition(step.runCondition, prepared);
+    });
+    
+    const missingSteps = eligibleSteps
+      .filter(step => !clearedSteps.includes(step.id))
+      .map(step => step.id);
+    
+    if (missingSteps.length > 0) {
+      this.logger.debug('Iteration incomplete', {
+        eligible: eligibleSteps.map(s => s.id),
+        cleared: clearedSteps,
+        missing: missingSteps
+      });
+      
+      return {
+        type: 'incomplete',
+        reason: 'waiting-for-steps',
+        missingSteps
+      };
+    }
+    
+    return { type: 'valid' };
+  }
+
+  /**
+   * Abort loop due to context size exceeded.
+   */
+  private abortLoop(
+    loopStack: LoopStackFrame[],
+    frame: LoopStackFrame,
+    completed: string[],
+    context: EnhancedContext,
+    scan: Extract<BodyScanResult, { type: 'abort-loop' }>
+  ): LoopHandlerResult {
+    this.logger.warn('Context size exceeded, aborting loop', {
+      loopId: frame.loopId,
+      sizeKB: scan.sizeKB,
+      iteration: frame.loopContext.getCurrentState().iteration
+    });
+    
+    loopStack.pop();
+    completed.push(frame.loopId);
+    
+    const warning = 
+      `Loop ${frame.loopId} aborted at iteration ${frame.loopContext.getCurrentState().iteration}: ` +
+      `context size (${scan.sizeKB}KB) exceeded maximum (256KB)`;
+    
+    const updatedContext = ContextOptimizer.addWarnings(context, 'loops', frame.loopId, [warning]);
+    context._warnings = updatedContext._warnings;
+    
+    return { type: 'complete' };
+  }
+
   /**
    * Builds the step prompt with loop context information.
    * 

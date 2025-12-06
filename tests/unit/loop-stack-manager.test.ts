@@ -3,7 +3,16 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { LoopStackManager } from '../../src/application/services/loop-stack-manager';
 import { LoopStepResolver } from '../../src/application/services/loop-step-resolver';
 import { Workflow, WorkflowStep } from '../../src/types/mcp-types';
-import { LoopStep, LoopStackFrame, EnhancedContext } from '../../src/types/workflow-types';
+import { 
+  LoopStep, 
+  LoopStackFrame, 
+  EnhancedContext,
+  createLoopStackFrame,
+  advanceBodyIndex,
+  resetBodyIndex,
+  setBodyIndex,
+  replaceTopFrame
+} from '../../src/types/workflow-types';
 import { 
   LoopStackCorruptionError, 
   EmptyLoopBodyError, 
@@ -366,13 +375,14 @@ describe('LoopStackManager', () => {
         injectVariables: (ctx: any) => ctx
       };
 
-      const frame: LoopStackFrame = {
+      // Cast to bypass readonly for testing invalid frames
+      const frame = {
         loopId: 'loop',
         loopStep: {} as LoopStep,
         loopContext: mockLoopContext as any,
         bodySteps: [{ id: 'step', title: 'Step', prompt: 'Step' }],
-        currentBodyIndex: -1  // Invalid!
-      };
+        currentBodyIndex: -1  // Invalid - for testing only
+      } as LoopStackFrame;
 
       const loopStack = [frame];
 
@@ -392,13 +402,14 @@ describe('LoopStackManager', () => {
         injectVariables: (ctx: any) => ctx
       };
 
-      const frame: LoopStackFrame = {
+      // Cast to bypass readonly for testing invalid frames
+      const frame = {
         loopId: 'loop',
         loopStep: {} as LoopStep,
         loopContext: mockLoopContext as any,
         bodySteps: [{ id: 'step', title: 'Step', prompt: 'Step' }],
-        currentBodyIndex: 5  // > bodySteps.length!
-      };
+        currentBodyIndex: 5  // > bodySteps.length - for testing only
+      } as LoopStackFrame;
 
       const loopStack = [frame];
 
@@ -463,21 +474,27 @@ describe('LoopStackManager', () => {
           injectVariables: (ctx: any) => ctx
         };
 
-        const invalidFrame: LoopStackFrame = {
-          loopId: 'loop',
-          loopStep: {} as LoopStep,
-          loopContext: mockLoopContext as any,
-          bodySteps: [],  // Empty - normally would throw but checks are disabled
-          currentBodyIndex: 0
-        };
+        const invalidFrame = {
+        loopId: 'loop',
+        loopStep: {
+          id: 'loop',
+          type: 'loop',
+          title: 'Loop',
+          prompt: 'Loop',
+          loop: { type: 'while', condition: { var: 'x', equals: true }, maxIterations: 10 }
+        } as LoopStep,
+        loopContext: mockLoopContext as any,
+        bodySteps: [],  // Empty - normally would throw but checks are disabled
+        currentBodyIndex: 0
+      } as LoopStackFrame;
 
-        const loopStack = [invalidFrame];
+      const loopStack = [invalidFrame];
 
-        // Should NOT throw when invariant checks are disabled
-        // The loop will exit because shouldContinue returns false
-        expect(() =>
-          manager.handleCurrentLoop(loopStack, [], {})
-        ).not.toThrow();
+      // Should NOT throw when invariant checks are disabled
+      // The loop will exit because shouldContinue returns false
+      expect(() =>
+        manager.handleCurrentLoop(loopStack, [], {})
+      ).not.toThrow();
       } finally {
         if (originalEnv !== undefined) {
           process.env.SKIP_INVARIANT_CHECKS = originalEnv;
