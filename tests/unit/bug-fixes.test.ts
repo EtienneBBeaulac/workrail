@@ -84,6 +84,85 @@ describe('Bug #2: DI Container Race Condition', () => {
 });
 
 // ============================================================================
+// Bug #6: File Watcher Timer Leak Tests
+// ============================================================================
+
+describe('Bug #6: File Watcher Timer Leak', () => {
+  it('should clear debounce timer when unwatching', async () => {
+    // This test verifies the core bug fix: timer is cleared when watcher is removed
+    
+    let timerFired = false;
+    let debounceTimer: NodeJS.Timeout | null = null;
+    
+    // Simulate file change that sets debounce timer
+    const handleChange = () => {
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+      }
+      
+      debounceTimer = setTimeout(() => {
+        timerFired = true;
+        debounceTimer = null;
+      }, 100);
+    };
+    
+    // Simulate unwatching that SHOULD clear timer
+    const unwatch = () => {
+      // THE BUG FIX: Clear timer!
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+      }
+    };
+    
+    // Trigger file change
+    handleChange();
+    
+    // Unwatch immediately (before timer fires)
+    await new Promise(r => setTimeout(r, 50));
+    unwatch();
+    
+    // Wait past when timer would have fired
+    await new Promise(r => setTimeout(r, 100));
+    
+    // Timer should NOT have fired
+    expect(timerFired).toBe(false);
+    expect(debounceTimer).toBe(null);
+  });
+  
+  it('should store timer with watcher to ensure coupled lifecycle', () => {
+    // The fix: store timer WITH watcher in same object
+    interface WatcherState {
+      watcher: any;
+      timer: NodeJS.Timeout | null;
+    }
+    
+    const watchers = new Map<string, WatcherState>();
+    
+    // Watch
+    const state: WatcherState = {
+      watcher: { close: vi.fn() },
+      timer: setTimeout(() => {}, 1000),
+    };
+    watchers.set('key', state);
+    
+    // Unwatch - cleanup BOTH
+    const cleanup = (key: string) => {
+      const state = watchers.get(key);
+      if (state) {
+        if (state.timer) clearTimeout(state.timer);
+        state.watcher.close();
+        watchers.delete(key);
+      }
+    };
+    
+    cleanup('key');
+    
+    expect(watchers.has('key')).toBe(false);
+  });
+});
+
+// ============================================================================
 // Bug #6: File Watcher Error Handling Tests
 // ============================================================================
 

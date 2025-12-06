@@ -1,5 +1,4 @@
 import fs from 'fs/promises';
-import fsSync from 'fs';
 import path from 'path';
 import { createHash } from 'crypto';
 import { execSync } from 'child_process';
@@ -9,6 +8,8 @@ import { singleton, inject } from 'tsyringe';
 import { DI } from '../../di/tokens.js';
 import { SessionDataNormalizer } from './SessionDataNormalizer';
 import { SessionDataValidator, ValidationResult } from './SessionDataValidator';
+import { SessionWatcherService } from './SessionWatcherService';
+import { WorkflowId, SessionId } from '../../types/session-identifiers';
 
 export interface Session {
   id: string;
@@ -45,12 +46,12 @@ export class SessionManager extends EventEmitter {
   private sessionsRoot: string;
   private projectId: string;
   private projectPath: string;
-  private watchers: Map<string, fsSync.FSWatcher> = new Map();
   
   constructor(
     @inject(SessionDataNormalizer) private normalizer: SessionDataNormalizer,
     @inject(SessionDataValidator) private validator: SessionDataValidator,
-    @inject(DI.Config.ProjectPath) projectPath: string
+    @inject(DI.Config.ProjectPath) projectPath: string,
+    @inject(DI.Infra.SessionWatcher) private watcherService: SessionWatcherService
   ) {
     super();
     this.sessionsRoot = path.join(os.homedir(), '.workrail', 'sessions');
@@ -60,6 +61,18 @@ export class SessionManager extends EventEmitter {
     const resolvedPath = this.resolveProjectPath(projectPath);
     this.projectPath = resolvedPath;
     this.projectId = this.hashProjectPath(resolvedPath);
+    
+    // Forward watcher events to SessionManager events (backward compatibility)
+    this.watcherService.on('session:updated', (data) => {
+      this.emit('session:updated', data);
+    });
+    
+    this.watcherService.on('session:watch-error', (data) => {
+      // Forward error events if anyone is listening
+      if (this.listenerCount('session:watch-error') > 0) {
+        this.emit('session:watch-error', data);
+      }
+    });
   }
   
   /**
@@ -578,107 +591,53 @@ export class SessionManager extends EventEmitter {
   }
   
   /**
-   * Watch a session file for changes
-   * Emits 'session:updated' event when the file changes
+   * Watch a session file for changes.
+   * Delegates to SessionWatcherService.
    * 
-   * BUG FIX #6: Added proper error handling for file watcher
-   * - Tracks consecutive error count
-   * - Closes watcher after MAX_ERRORS to prevent resource leak
-   * - Logs errors for visibility (except EBUSY which is expected)
-   * - Adds watcher.on('error') handler
+   * Emits 'session:updated' event when the file changes (via watcherService forwarding).
+   * 
+   * @param workflowId - Workflow identifier (string - converted to branded type internally)
+   * @param sessionId - Session identifier (string - converted to branded type internally)
    */
   watchSession(workflowId: string, sessionId: string): void {
-    const sessionPath = this.getSessionPath(workflowId, sessionId);
-    const watchKey = `${workflowId}/${sessionId}`;
-    
-    // Don't watch if already watching
-    if (this.watchers.has(watchKey)) {
-      return;
-    }
-    
-    const MAX_CONSECUTIVE_ERRORS = 5;
-    let consecutiveErrorCount = 0;
-    let debounceTimer: NodeJS.Timeout | null = null;
-    
     try {
-      const watcher = fsSync.watch(sessionPath, (eventType) => {
-        if (eventType === 'change') {
-          // Debounce: file might be written in chunks
-          if (debounceTimer) {
-            clearTimeout(debounceTimer);
-          }
-          
-          debounceTimer = setTimeout(async () => {
-            debounceTimer = null;
-            try {
-              const session = await this.getSession(workflowId, sessionId);
-              if (session) {
-                this.emit('session:updated', {
-                  workflowId,
-                  sessionId,
-                  session
-                });
-              }
-              // Reset error count on success
-              consecutiveErrorCount = 0;
-            } catch (error: any) {
-              // Only ignore EBUSY (file being written) - this is expected
-              if (error.code === 'EBUSY') {
-                return;
-              }
-              
-              consecutiveErrorCount++;
-              console.error(
-                `[SessionManager] Watch error for ${watchKey} (${consecutiveErrorCount}/${MAX_CONSECUTIVE_ERRORS}):`,
-                error.message || error
-              );
-              
-              // Close watcher after too many consecutive errors to prevent resource leak
-              if (consecutiveErrorCount >= MAX_CONSECUTIVE_ERRORS) {
-                console.error(`[SessionManager] Too many errors, closing watcher for ${watchKey}`);
-                this.unwatchSession(workflowId, sessionId);
-              }
-            }
-          }, 100);
-        }
-      });
+      // Convert to branded types at boundary (validates input)
+      const wfId = WorkflowId.parse(workflowId);
+      const sId = SessionId.parse(sessionId);
+      const filePath = this.getSessionPath(workflowId, sessionId);
       
-      // Handle watcher-level errors (e.g., file deleted, permissions changed)
-      watcher.on('error', (error) => {
-        console.error(`[SessionManager] Watcher error for ${watchKey}:`, error);
-        this.unwatchSession(workflowId, sessionId);
-      });
-      
-      this.watchers.set(watchKey, watcher);
-    } catch (error: any) {
-      // Only log if not ENOENT (file doesn't exist yet is expected)
-      if (error.code !== 'ENOENT') {
-        console.error(`[SessionManager] Failed to start watcher for ${watchKey}:`, error.message || error);
-      }
+      this.watcherService.watch(wfId, sId, filePath);
+    } catch (error) {
+      console.error('[SessionManager] Failed to watch session:', error);
+      // Don't throw - watching is best-effort
     }
   }
   
   /**
-   * Stop watching a session file
+   * Stop watching a session file.
+   * Delegates to SessionWatcherService.
+   * 
+   * @param workflowId - Workflow identifier
+   * @param sessionId - Session identifier
    */
   unwatchSession(workflowId: string, sessionId: string): void {
-    const watchKey = `${workflowId}/${sessionId}`;
-    const watcher = this.watchers.get(watchKey);
-    
-    if (watcher) {
-      watcher.close();
-      this.watchers.delete(watchKey);
+    try {
+      const wfId = WorkflowId.parse(workflowId);
+      const sId = SessionId.parse(sessionId);
+      
+      this.watcherService.unwatch(wfId, sId);
+    } catch (error) {
+      console.error('[SessionManager] Failed to unwatch session:', error);
+      // Don't throw - cleanup is best-effort
     }
   }
   
   /**
-   * Stop all watchers (cleanup)
+   * Stop all watchers (cleanup).
+   * Delegates to SessionWatcherService.
    */
   unwatchAll(): void {
-    for (const watcher of this.watchers.values()) {
-      watcher.close();
-    }
-    this.watchers.clear();
+    this.watcherService.unwatchAll();
   }
   
   /**

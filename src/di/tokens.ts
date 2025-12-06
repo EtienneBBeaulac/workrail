@@ -47,7 +47,9 @@ export const DI = {
   Infra: {
     /** Feature flag provider */
     FeatureFlags: Symbol('Infra.FeatureFlags'),
-    /** Session manager */
+    /** Session watcher service (file watching) */
+    SessionWatcher: Symbol('Infra.SessionWatcher'),
+    /** Session manager (CRUD operations) */
     SessionManager: Symbol('Infra.SessionManager'),
     /** HTTP server for dashboard */
     HttpServer: Symbol('Infra.HttpServer'),
