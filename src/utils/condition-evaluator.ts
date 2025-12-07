@@ -31,8 +31,16 @@ export interface Condition {
  * - Case-insensitive string comparison (after trimming whitespace)
  * - Type coercion for compatible types (string numbers to numbers)
  * - Treats null and undefined as equivalent
+ * 
+ * This is the comparison logic used by evaluateCondition() for 'equals' and 'not_equals'.
+ * Exported for use in condition diagnosis to ensure behavior matches.
+ * 
+ * @example
+ * lenientEquals("Large", "large") → true (case-insensitive)
+ * lenientEquals("10", 10) → true (type coercion)
+ * lenientEquals("yes", true) → true (boolean coercion)
  */
-function lenientEquals(a: any, b: any): boolean {
+export function lenientEquals(a: any, b: any): boolean {
   // Handle null/undefined equivalence
   if (a == null && b == null) {
     return true;
