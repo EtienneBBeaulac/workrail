@@ -111,8 +111,8 @@ export function evaluateCondition(
   try {
     return evaluateConditionUnsafe(condition, context);
   } catch (error) {
-    // Log error in production, but return false for safety
-    console.warn('Condition evaluation failed:', error);
+    // Return false for safety - caller can log if needed
+    // This is a pure function, shouldn't have side effects
     return false;
   }
 }
@@ -165,7 +165,7 @@ function evaluateConditionUnsafe(condition: Condition, context: ConditionContext
         return regex.test(valueStr);
       } catch (error) {
         // Invalid regex - return false for safety
-        console.warn('Invalid regex pattern in condition:', condition.matches);
+        // Caller should validate patterns before using them
         return false;
       }
     }
