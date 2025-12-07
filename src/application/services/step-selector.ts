@@ -2,8 +2,13 @@ import { singleton } from 'tsyringe';
 import { Workflow, WorkflowStep, WorkflowGuidance } from '../../types/mcp-types';
 import { IStepSelector } from './i-step-selector';
 import { EnhancedContext } from '../../types/workflow-types';
-import { evaluateCondition } from '../../utils/condition-evaluator';
+import { evaluateCondition, Condition, ConditionContext } from '../../utils/condition-evaluator';
 import { createLogger } from '../../utils/logger';
+import { 
+  diagnoseConditionFailure, 
+  buildConditionGuidance, 
+  BlockedStepInfo 
+} from '../../utils/condition-analysis';
 
 /**
  * Default implementation of step selection logic.
@@ -56,60 +61,68 @@ export class DefaultStepSelector implements IStepSelector {
     context: EnhancedContext,
     loopBodySteps: Set<string>
   ): WorkflowGuidance | null {
-    // Check if there are conditional steps with unmet conditions
-    const remainingConditionalSteps = workflow.steps.filter((step) => {
-      if (completed.includes(step.id)) return false;
-      if (loopBodySteps.has(step.id)) return false;
-      return !!(step as any).runCondition;
-    });
-
-    if (remainingConditionalSteps.length > 0) {
-      // Collect variables referenced by remaining step conditions
-      const requiredVars = new Set<string>();
-      const allowedValues: Record<string, Set<string>> = {};
-
-      for (const step of remainingConditionalSteps) {
-        const condition = (step as any).runCondition as any;
-        this.collectConditionVars(condition, requiredVars);
-        this.collectEqualsValues(condition, allowedValues);
-      }
-
-      // Build guidance message
-      const issues: string[] = [];
-      for (const variableName of requiredVars) {
-        const currentValue = (context as any)[variableName];
-        const allowed = allowedValues[variableName]
-          ? Array.from(allowedValues[variableName])
-          : [];
-
-        if (currentValue === undefined || currentValue === null || currentValue === '') {
-          if (allowed.length > 0) {
-            issues.push(`Set '${variableName}' to one of: ${allowed.map(v => `'${v}'`).join(', ')}`);
-          } else {
-            issues.push(`Provide a value for '${variableName}'`);
-          }
-        } else if (allowed.length > 0) {
-          const matchesExactly = allowed.some(v => v === String(currentValue));
-          const matchesCaseInsensitive = allowed.some(v => v.toLowerCase() === String(currentValue).toLowerCase());
-          if (!matchesExactly) {
-            if (matchesCaseInsensitive) {
-              issues.push(`Normalize casing for '${variableName}': use one of ${allowed.map(v => `'${v}'`).join(', ')} (current '${currentValue}')`);
-            } else {
-              issues.push(`Adjust '${variableName}' to one of: ${allowed.map(v => `'${v}'`).join(', ')} (current '${currentValue}')`);
-            }
-          }
-        }
-      }
-
-      if (issues.length > 0) {
-        return {
-          prompt: `No eligible step due to unmet conditions. Please update context:\n- ${issues.join('\n- ')}`
-        };
-      }
+    // Find all conditional steps that are blocked
+    const blockedSteps = this.findBlockedSteps(
+      workflow,
+      completed,
+      loopBodySteps,
+      context
+    );
+    
+    // If no conditional steps, workflow is truly complete
+    if (blockedSteps.length === 0) {
+      return null;
     }
+    
+    // Build guidance using pure utility functions
+    return buildConditionGuidance(blockedSteps);
+  }
 
-    // No conditional steps or all conditions met - workflow is truly complete
-    return null;
+  /**
+   * Find all conditional steps that are blocked.
+   * 
+   * Private method - uses condition-analysis utilities for diagnosis.
+   */
+  private findBlockedSteps(
+    workflow: Workflow,
+    completed: string[],
+    loopBodySteps: Set<string>,
+    context: EnhancedContext
+  ): BlockedStepInfo[] {
+    return workflow.steps
+      .filter(step => !completed.includes(step.id))
+      .filter(step => !loopBodySteps.has(step.id))
+      .filter(step => !!step.runCondition)
+      .map(step => {
+        const diagnosis = diagnoseConditionFailure(step.runCondition as Condition, context);
+        return {
+          stepId: step.id,
+          stepTitle: step.title,
+          condition: step.runCondition as Condition,
+          diagnosis,
+          relevantContext: this.extractRelevantContext(step.runCondition, context)
+        };
+      })
+      .filter(blocked => blocked.diagnosis.type !== 'match');  // Filter out steps that actually pass
+  }
+
+  /**
+   * Extract only the context variables referenced by this condition.
+   * Reduces noise in diagnosis output.
+   */
+  private extractRelevantContext(
+    condition: any,
+    context: ConditionContext
+  ): Record<string, any> {
+    const vars = new Set<string>();
+    this.collectConditionVars(condition, vars);
+    
+    const relevant: Record<string, any> = {};
+    vars.forEach(varName => {
+      relevant[varName] = context[varName];
+    });
+    
+    return relevant;
   }
 
   /**
@@ -131,28 +144,4 @@ export class DefaultStepSelector implements IStepSelector {
     if (condition.not) this.collectConditionVars(condition.not, sink);
   }
 
-  /**
-   * Recursively collect enumerated equals values per variable from conditions.
-   * Only simple { var: 'x', equals: value } pairs are captured.
-   * @param condition - The condition to analyze
-   * @param sink - Map of variable name to set of allowed values
-   */
-  private collectEqualsValues(condition: any, sink: Record<string, Set<string>>): void {
-    if (!condition || typeof condition !== 'object') return;
-    if (typeof condition.var === 'string' && Object.prototype.hasOwnProperty.call(condition, 'equals')) {
-      const variableName = condition.var;
-      const value = condition.equals;
-      if (value !== undefined && value !== null) {
-        if (!sink[variableName]) sink[variableName] = new Set<string>();
-        sink[variableName].add(String(value));
-      }
-    }
-    if (Array.isArray(condition.and)) {
-      for (const sub of condition.and) this.collectEqualsValues(sub, sink);
-    }
-    if (Array.isArray(condition.or)) {
-      for (const sub of condition.or) this.collectEqualsValues(sub, sink);
-    }
-    if (condition.not) this.collectEqualsValues(condition.not, sink);
-  }
 }

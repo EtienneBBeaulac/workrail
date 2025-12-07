@@ -153,7 +153,9 @@ describe('DefaultStepSelector', () => {
       const result = selector.handleNoEligibleStep(workflow, [], {}, new Set());
 
       expect(result).not.toBeNull();
-      expect(result?.prompt).toContain('Set \'mode\' to one of: \'active\'');
+      expect(result?.prompt).toContain('STEP: conditional');
+      expect(result?.prompt).toContain('Missing Required Variable');
+      expect(result?.prompt).toContain('Variable: mode');
     });
 
     it('should provide guidance for wrong value', () => {
@@ -175,10 +177,16 @@ describe('DefaultStepSelector', () => {
       const result = selector.handleNoEligibleStep(workflow, [], { status: 'pending' }, new Set());
 
       expect(result).not.toBeNull();
-      expect(result?.prompt).toContain('Adjust \'status\' to one of: \'ready\'');
+      expect(result?.prompt).toContain('STEP: conditional');
+      expect(result?.prompt).toContain('Incorrect Value');
+      expect(result?.prompt).toContain('Expected: "ready"');
+      expect(result?.prompt).toContain('Current:  "pending"');
     });
 
-    it('should handle case-insensitive mismatch', () => {
+    it('should NOT provide guidance for case-only differences (lenient comparison)', () => {
+      // IMPORTANT: lenientEquals is case-insensitive
+      // So { var: 'mode', equals: 'ACTIVE' } with context { mode: 'active' } PASSES
+      // The step should be ELIGIBLE, not blocked
       const workflow: Workflow = {
         id: 'test',
         name: 'Test',
@@ -194,10 +202,20 @@ describe('DefaultStepSelector', () => {
         ]
       };
 
-      const result = selector.handleNoEligibleStep(workflow, [], { mode: 'active' }, new Set());
-
-      expect(result).not.toBeNull();
-      expect(result?.prompt).toContain('Normalize casing for \'mode\'');
+      // This case-only difference should make the step ELIGIBLE
+      // So findEligibleStep should return the step
+      const step = selector.findEligibleStep(workflow, new Set(), [], { mode: 'active' });
+      
+      // Step IS eligible (lenient comparison passes)
+      expect(step).not.toBeNull();
+      expect(step?.id).toBe('conditional');
+      
+      // Therefore, handleNoEligibleStep should NOT be called in this scenario
+      // But if it is called, it should return null (no blocked steps)
+      const guidance = selector.handleNoEligibleStep(workflow, [], { mode: 'active' }, new Set());
+      
+      // Should return null because the step is actually eligible
+      expect(guidance).toBeNull();
     });
   });
 });
