@@ -1,6 +1,9 @@
 // MCP Server Error Handling System
 // Comprehensive error handling with proper MCP error codes and recovery
 
+import { singleton, inject } from 'tsyringe';
+import { DI } from '../di/tokens.js';
+import type { Logger, ILoggerFactory } from './logging/index.js';
 import { MCPErrorCodes, JSONRPCResponse } from '../types/mcp-types';
 
 // =============================================================================
@@ -148,18 +151,12 @@ export class MaxIterationsExceededError extends Error {
 // ERROR HANDLER CLASS
 // =============================================================================
 
+@singleton()
 export class ErrorHandler {
-  private static instance: ErrorHandler;
+  private readonly logger: Logger;
 
-  private constructor() {
-    // Initialize error handler (placeholder for future logger integration)
-  }
-
-  public static getInstance(): ErrorHandler {
-    if (!ErrorHandler.instance) {
-      ErrorHandler.instance = new ErrorHandler();
-    }
-    return ErrorHandler.instance;
+  constructor(@inject(DI.Logging.Factory) loggerFactory: ILoggerFactory) {
+    this.logger = loggerFactory.create('ErrorHandler');
   }
 
   /**
@@ -209,20 +206,12 @@ export class ErrorHandler {
    * Log error for monitoring and debugging
    */
   private logError(error: MCPError): void {
-    const logEntry = {
-      timestamp: new Date(),
-      level: 'error',
-      error: {
-        name: error.name,
-        code: error.code,
-        message: error.message,
-        data: error.data,
-        stack: error.stack
-      }
-    };
-
-    // TODO: Replace with actual logger
-    console.error('MCP Error:', logEntry);
+    this.logger.error({
+      code: error.code,
+      errorName: error.name,
+      data: error.data,
+      stack: error.stack,
+    }, error.message);
   }
 
   /**
@@ -426,7 +415,29 @@ export class ErrorHandler {
 // ERROR UTILITIES
 // =============================================================================
 
-export const errorHandler = ErrorHandler.getInstance();
+/**
+ * Get ErrorHandler instance from DI container (lazy).
+ * For use in non-DI code paths.
+ * 
+ * @deprecated Use DI injection instead: @inject(ErrorHandler)
+ */
+export function getErrorHandler(): ErrorHandler {
+  // Lazy resolution - only when called, not at module load
+  const { container } = require('../di/container.js');
+  return container.resolve(ErrorHandler);
+}
+
+// Legacy export for backward compatibility - uses lazy getter
+// This prevents module-load-time resolution
+let _errorHandlerCache: ErrorHandler | null = null;
+export const errorHandler = new Proxy({} as ErrorHandler, {
+  get(target, prop) {
+    if (!_errorHandlerCache) {
+      _errorHandlerCache = getErrorHandler();
+    }
+    return (_errorHandlerCache as any)[prop];
+  }
+});
 
 /**
  * Create a standardized error response

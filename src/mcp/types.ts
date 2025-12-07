@@ -4,6 +4,7 @@
  * Defines the core types for tool handlers:
  * - ToolResult<T>: Discriminated union for handler returns
  * - ErrorCode: Categorized error types
+ * - ExecutionEnvironment: Base context for all handlers
  * - ToolContext: Dependencies injected into handlers
  */
 
@@ -11,6 +12,7 @@ import type { WorkflowService } from '../application/services/workflow-service.j
 import type { IFeatureFlagProvider } from '../config/feature-flags.js';
 import type { SessionManager } from '../infrastructure/session/SessionManager.js';
 import type { HttpServer } from '../infrastructure/session/HttpServer.js';
+import type { Logger } from '../core/logging/index.js';
 
 // -----------------------------------------------------------------------------
 // Error Codes
@@ -84,16 +86,33 @@ export const error = (
 });
 
 // -----------------------------------------------------------------------------
+// Execution Environment
+// -----------------------------------------------------------------------------
+
+/**
+ * Base execution environment for all handlers.
+ * 
+ * CTC MCP Pattern: All primitives receive this context.
+ * Logger is a first-class citizen, always available.
+ */
+export interface ExecutionEnvironment {
+  readonly logger: Logger;
+}
+
+// -----------------------------------------------------------------------------
 // Tool Context
 // -----------------------------------------------------------------------------
 
 /**
  * Dependencies injected into tool handlers.
  *
+ * CTC MCP Pattern: Capability composition via interfaces.
+ * Tool context extends ExecutionEnvironment with service dependencies.
+ * 
  * Handlers receive this context instead of accessing globals or DI directly.
  * This makes handlers pure functions that are easy to test.
  */
-export interface ToolContext {
+export interface ToolContext extends ExecutionEnvironment {
   readonly workflowService: WorkflowService;
   readonly featureFlags: IFeatureFlagProvider;
   // Session-related dependencies are null when session tools are disabled

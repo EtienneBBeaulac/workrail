@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { GitWorkflowStorage } from '../../src/infrastructure/storage/git-workflow-storage';
+import { createGitWorkflowStorage } from '../helpers/create-git-storage.js';
 import fs from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
@@ -73,7 +74,7 @@ describe('GitWorkflowStorage - Master Branch Support', () => {
   });
 
   it('should auto-detect and clone master branch when main is not found', async () => {
-    const storage = new GitWorkflowStorage({
+    const storage = createGitWorkflowStorage({
       repositoryUrl: `file://${testRepoDir}`,
       branch: 'main', // Request main, but repo only has master
       localPath: path.join(cacheDir, 'master-test'),
@@ -88,7 +89,7 @@ describe('GitWorkflowStorage - Master Branch Support', () => {
   }, 15000);
 
   it('should work with explicit master branch specification', async () => {
-    const storage = new GitWorkflowStorage({
+    const storage = createGitWorkflowStorage({
       repositoryUrl: `file://${testRepoDir}`,
       branch: 'master', // Explicitly request master
       localPath: path.join(cacheDir, 'master-test-explicit'),

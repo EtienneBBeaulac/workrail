@@ -1,6 +1,15 @@
 import 'reflect-metadata';
 import { container, DependencyContainer, instanceCachingFactory } from 'tsyringe';
 import { DI } from './tokens.js';
+import { createBootstrapLogger } from '../core/logging/index.js';
+import { PinoLoggerFactory } from '../core/logging/index.js';
+import type { ILoggerFactory } from '../core/logging/index.js';
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BOOTSTRAP LOGGING (Pre-DI)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const logger = createBootstrapLogger('DI');
 
 // ═══════════════════════════════════════════════════════════════════════════
 // STATE
@@ -28,21 +37,31 @@ function parseAndValidateTTL(envValue: string | undefined): number {
   const parsed = Number(envValue);
   
   if (Number.isNaN(parsed)) {
-    console.error(`[DI] Invalid CACHE_TTL value "${envValue}", using default ${DEFAULT_CACHE_TTL}ms`);
+    logger.warn({ envValue, default: DEFAULT_CACHE_TTL }, 'Invalid CACHE_TTL value, using default');
     return DEFAULT_CACHE_TTL;
   }
   
   if (parsed < MIN_CACHE_TTL) {
-    console.error(`[DI] CACHE_TTL ${parsed}ms below minimum, using ${MIN_CACHE_TTL}ms`);
+    logger.warn({ parsed, min: MIN_CACHE_TTL }, 'CACHE_TTL below minimum, using minimum');
     return MIN_CACHE_TTL;
   }
   
   if (parsed > MAX_CACHE_TTL) {
-    console.error(`[DI] CACHE_TTL ${parsed}ms exceeds maximum, using ${MAX_CACHE_TTL}ms`);
+    logger.warn({ parsed, max: MAX_CACHE_TTL }, 'CACHE_TTL exceeds maximum, using maximum');
     return MAX_CACHE_TTL;
   }
   
   return parsed;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LOGGING REGISTRATION (MUST BE FIRST!)
+// CTC MCP Pattern: Core infrastructure before everything else
+// ═══════════════════════════════════════════════════════════════════════════
+
+function registerLogging(): void {
+  container.registerSingleton(DI.Logging.Factory, PinoLoggerFactory);
+  logger.info('Logging registered');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -77,8 +96,13 @@ async function registerStorageChain(): Promise<void> {
     '../infrastructure/storage/caching-workflow-storage.js'
   );
 
-  // Layer 1: Base storage (singleton)
-  container.registerSingleton(DI.Storage.Base, EnhancedMultiSourceWorkflowStorage);
+  // Layer 1: Base storage (factory creates with logger)
+  container.register(DI.Storage.Base, {
+    useFactory: instanceCachingFactory((c: DependencyContainer) => {
+      const loggerFactory = c.resolve<ILoggerFactory>(DI.Logging.Factory);
+      return new EnhancedMultiSourceWorkflowStorage(loggerFactory);
+    }),
+  });
 
   // Layer 2: Schema validation decorator (singleton via instanceCachingFactory)
   container.register(DI.Storage.Validated, {
@@ -230,15 +254,23 @@ export async function initializeContainer(): Promise<void> {
   isInitializing = true;
 
   try {
+    logger.info('Initializing container');
+    
+    // Phase 1: Core infrastructure (logging first!)
+    registerLogging();
     registerConfig();
+    
+    // Phase 2: Storage and services (can now use logging)
     await registerStorageChain();
     await registerServices();
+    
     initialized = true;
-    console.error('[DI] Container initialized');
+    logger.info('Container initialized');
   } catch (error) {
     // FAIL FAST: Don't reset initializationPromise to null
     // This prevents infinite retry loops - caller should restart process
     const message = error instanceof Error ? error.message : String(error);
+    logger.error({ err: error }, 'Container initialization failed');
     throw new Error(`[DI] Container initialization failed: ${message}`);
   } finally {
     isInitializing = false;
@@ -261,12 +293,13 @@ export async function startAsyncServices(): Promise<void> {
     if (flags.isEnabled('sessionTools')) {
       const server = container.resolve<any>(DI.Infra.HttpServer);
       await server.start();
-      console.error('[DI] HTTP server started');
+      logger.info('HTTP server started');
     }
 
     asyncInitialized = true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    logger.error({ err: error }, 'Async services initialization failed');
     throw new Error(`[DI] Async services initialization failed: ${message}`);
   }
 }

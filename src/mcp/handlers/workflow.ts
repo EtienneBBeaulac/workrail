@@ -142,13 +142,14 @@ export async function handleWorkflowNext(
   ctx: ToolContext
 ): Promise<ToolResult<WorkflowNextOutput>> {
   const startTime = Date.now();
+  const logger = ctx.logger.child({ tool: 'workflow_next' });
 
   try {
-    console.error(
-      `[workflow_next] Starting with workflowId=${input.workflowId}, ` +
-      `completedSteps=${JSON.stringify(input.completedSteps)}, ` +
-      `contextKeys=${Object.keys(input.context ?? {})}`
-    );
+    logger.debug({
+      workflowId: input.workflowId,
+      completedSteps: input.completedSteps,
+      contextKeys: Object.keys(input.context ?? {}),
+    }, 'Starting workflow_next');
 
     const result = await withTimeout(
       ctx.workflowService.getNextStep(
@@ -160,17 +161,17 @@ export async function handleWorkflowNext(
       'workflow_next'
     );
 
-    console.error(
-      `[workflow_next] Completed in ${Date.now() - startTime}ms, ` +
-      `returned step=${result.step?.id ?? 'null'}`
-    );
+    logger.debug({
+      elapsed: Date.now() - startTime,
+      stepId: result.step?.id ?? null,
+    }, 'Completed workflow_next');
 
     return success(result);
   } catch (err) {
     const elapsed = Date.now() - startTime;
     const message = err instanceof Error ? err.message : String(err);
 
-    console.error(`[workflow_next] Failed after ${elapsed}ms: ${message}`);
+    logger.error({ err, elapsed }, 'Failed workflow_next');
 
     if (message.includes('timed out')) {
       return error('TIMEOUT', message);

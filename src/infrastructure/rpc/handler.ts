@@ -1,5 +1,5 @@
 import { Readable, Writable } from 'stream';
-import { ErrorHandler } from '../../core/error-handler';
+import { ErrorHandler, getErrorHandler } from '../../core/error-handler';
 import { JSONRPCRequest, JSONRPCResponse } from '../../types/mcp-types';
 
 /**
@@ -68,7 +68,7 @@ export class RpcHandler {
   }
 
   private async processLine(raw: string): Promise<void> {
-    const errorHandler = ErrorHandler.getInstance();
+    const errorHandler = getErrorHandler();
 
     let request: JSONRPCRequest;
     try {

@@ -6,8 +6,9 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    // Use jsdom for browser-like environment
-    environment: 'jsdom',
+    // Use node environment (fast) - backend tests don't need browser APIs
+    // Web tests that need DOM should be marked explicitly via environmentMatchGlobs
+    environment: 'node',
     
     // Test file patterns - only TypeScript tests (*.ts), not compiled JS outputs
     // The *.test.js files in tests/ are compiled outputs that use Jest globals

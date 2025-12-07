@@ -29,9 +29,10 @@ export interface PluginWorkflowConfig {
   maxFileSize?: number;
   maxFiles?: number;
   maxPlugins?: number;
+  logger?: any; // Optional logger for warnings
 }
 
-export interface ValidatedPluginWorkflowConfig extends Required<PluginWorkflowConfig> {
+export interface ValidatedPluginWorkflowConfig extends Required<Omit<PluginWorkflowConfig, 'logger'>> {
   pluginPaths: string[];
   scanInterval: number;
   maxFileSize: number;

@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { ErrorHandler } from '../../src/core/error-handler';
+import { ErrorHandler, getErrorHandler } from '../../src/core/error-handler';
 import { WorkflowNotFoundError, ValidationError } from '../../src/core/error-handler';
 import { MCPErrorCodes } from '../../src/types/mcp-types';
+import { FakeLoggerFactory } from '../helpers/FakeLoggerFactory.js';
 
-const handler = ErrorHandler.getInstance();
+const handler = new ErrorHandler(new FakeLoggerFactory());
 
 describe('ErrorHandler mapping', () => {
   it('maps WorkflowNotFoundError to JSON-RPC error with correct code', () => {

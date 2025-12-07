@@ -1,10 +1,11 @@
 import { singleton, inject } from 'tsyringe';
+import { DI } from '../../di/tokens.js';
 import { Workflow } from '../../types/mcp-types';
 import { ILoopRecoveryService } from './i-loop-recovery-service';
 import { LoopStackFrame, LoopStep, EnhancedContext, isLoopStep, setBodyIndex } from '../../types/workflow-types';
 import { LoopStackManager } from './loop-stack-manager';
 import { ContextOptimizer } from './context-optimizer';
-import { createLogger } from '../../utils/logger';
+import type { Logger, ILoggerFactory } from '../../core/logging/index.js';
 
 /**
  * Default implementation of loop state recovery.
@@ -19,9 +20,14 @@ import { createLogger } from '../../utils/logger';
  */
 @singleton()
 export class DefaultLoopRecoveryService implements ILoopRecoveryService {
-  private readonly logger = createLogger('LoopRecoveryService');
+  private readonly logger: Logger;
 
-  constructor(@inject(LoopStackManager) private readonly loopStackManager: LoopStackManager) {}
+  constructor(
+    @inject(LoopStackManager) private readonly loopStackManager: LoopStackManager,
+    @inject(DI.Logging.Factory) loggerFactory: ILoggerFactory,
+  ) {
+    this.logger = loggerFactory.create('LoopRecoveryService');
+  }
 
   recoverLoopStack(
     workflow: Workflow,
@@ -49,10 +55,10 @@ export class DefaultLoopRecoveryService implements ILoopRecoveryService {
       return loopStack;
     }
     
-    this.logger.debug('Attempting loop state recovery', {
+    this.logger.debug({
       completedLoopBodySteps: completedLoopBodySteps.length,
-      totalCompleted: completed.length
-    });
+      totalCompleted: completed.length,
+    }, 'Attempting loop state recovery');
     
     // Find which loop these steps belong to
     for (const step of workflow.steps) {
@@ -66,10 +72,10 @@ export class DefaultLoopRecoveryService implements ILoopRecoveryService {
       
       if (loopBodyMatches.length > 0 && !completed.includes(loopStep.id)) {
         // We're in this loop but lost the stack - reconstruct it
-        this.logger.debug('Recovering loop state', {
+        this.logger.debug({
           loopId: loopStep.id,
-          matchedBodySteps: loopBodyMatches.length
-        });
+          matchedBodySteps: loopBodyMatches.length,
+        }, 'Recovering loop state');
         
         try {
           const loopFrame = this.reconstructLoopFrame(
@@ -83,17 +89,18 @@ export class DefaultLoopRecoveryService implements ILoopRecoveryService {
           
           if (loopFrame) {
             loopStack.push(loopFrame);
-            this.logger.debug('Loop state recovered successfully', {
+            this.logger.debug({
               loopId: loopFrame.loopId,
               iteration: loopFrame.loopContext.getCurrentState().iteration,
-              bodyIndex: loopFrame.currentBodyIndex
-            });
+              bodyIndex: loopFrame.currentBodyIndex,
+            }, 'Loop state recovered successfully');
           }
         } catch (error) {
           // Recovery failed - log and continue without recovery
-          this.logger.warn('Failed to recover loop state', error, {
-            loopId: loopStep.id
-          });
+          this.logger.warn({
+            err: error,
+            loopId: loopStep.id,
+          }, 'Failed to recover loop state');
         }
         
         // Only recover one loop at a time
@@ -149,29 +156,29 @@ export class DefaultLoopRecoveryService implements ILoopRecoveryService {
       // Subtract 1 because iterations are 1-indexed but we increment from 0
       iterationsCompleted = contextIteration - 1;
       
-      this.logger.debug('Using iteration from context', {
+      this.logger.debug({
         iterationVar,
         contextValue: contextIteration,
-        iterationsCompleted
-      });
+        iterationsCompleted,
+      }, 'Using iteration from context');
     } else if (hasConditionalSteps) {
       // For conditional bodies: use conservative estimate
       // (completed steps - 1) to stay in current iteration
       iterationsCompleted = Math.max(0, loopBodyMatches.length - 1);
       
-      this.logger.debug('Estimated iterations for conditional body', {
+      this.logger.debug({
         completedBodySteps: loopBodyMatches.length,
-        iterationsCompleted
-      });
+        iterationsCompleted,
+      }, 'Estimated iterations for conditional body');
     } else {
       // For non-conditional bodies: completed steps / body length = complete iterations
       iterationsCompleted = Math.floor(loopBodyMatches.length / bodySteps.length);
       
-      this.logger.debug('Calculated iterations for non-conditional body', {
+      this.logger.debug({
         completedBodySteps: loopBodyMatches.length,
         bodyStepCount: bodySteps.length,
-        iterationsCompleted
-      });
+        iterationsCompleted,
+      }, 'Calculated iterations for non-conditional body');
     }
     
     // Fast-forward the loop context to the correct iteration
@@ -199,10 +206,10 @@ export class DefaultLoopRecoveryService implements ILoopRecoveryService {
       if (idx > -1) completed.splice(idx, 1);
     });
     
-    this.logger.debug('Cleared completed body steps for clean iteration tracking', {
+    this.logger.debug({
       clearedCount: loopBodyMatches.length,
-      resumeIndex
-    });
+      resumeIndex,
+    }, 'Cleared completed body steps for clean iteration tracking');
     
     return frameWithCorrectIndex;
   }

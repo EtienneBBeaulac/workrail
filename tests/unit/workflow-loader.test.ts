@@ -7,6 +7,7 @@ import { EnhancedLoopValidator } from '../../src/application/services/enhanced-l
 import { Workflow } from '../../src/types/mcp-types';
 import { WorkflowNotFoundError } from '../../src/core/error-handler';
 import { container } from 'tsyringe';
+import { FakeLoggerFactory } from '../helpers/FakeLoggerFactory.js';
 
 describe('DefaultWorkflowLoader', () => {
   let loader: DefaultWorkflowLoader;
@@ -19,10 +20,11 @@ describe('DefaultWorkflowLoader', () => {
     
     // Resolve dependencies from DI container
     const enhancedLoopValidator = container.resolve(EnhancedLoopValidator);
+    const loggerFactory = new FakeLoggerFactory();
     
     storage = new InMemoryWorkflowStorage();
     validationEngine = new ValidationEngine(enhancedLoopValidator);
-    loader = new DefaultWorkflowLoader(storage, validationEngine);
+    loader = new DefaultWorkflowLoader(storage, validationEngine, loggerFactory);
   });
 
   afterEach(() => {

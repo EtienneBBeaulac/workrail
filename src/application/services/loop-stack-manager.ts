@@ -26,7 +26,7 @@ import {
   EmptyLoopBodyError,
   LoopBodyResolutionError
 } from '../../core/error-handler';
-import { createLogger } from '../../utils/logger';
+import type { Logger, ILoggerFactory } from '../../core/logging/index.js';
 import { LoopExecutionState } from '../../types/workflow-types';
 import { DI } from '../../di/tokens.js';
 
@@ -45,12 +45,15 @@ import { DI } from '../../di/tokens.js';
  */
 @singleton()
 export class LoopStackManager {
-  private readonly logger = createLogger('LoopStackManager');
+  private readonly logger: Logger;
 
   constructor(
     @inject(LoopStepResolver) private readonly loopStepResolver: LoopStepResolver,
-    @inject(DI.Services.LoopContextOptimizer) private readonly contextOptimizer?: ILoopContextOptimizer
-  ) {}
+    @inject(DI.Services.LoopContextOptimizer) private readonly contextOptimizer: ILoopContextOptimizer | undefined,
+    @inject(DI.Logging.Factory) loggerFactory: ILoggerFactory,
+  ) {
+    this.logger = loggerFactory.create('LoopStackManager');
+  }
   
   /**
    * Creates a loop frame for the given loop step.
@@ -171,11 +174,11 @@ export class LoopStackManager {
       
       let frame = loopStack[loopStack.length - 1];
       
-      this.logger.debug('Handling loop iteration', {
+      this.logger.debug({
         loopId: frame.loopId,
         iteration: frame.loopContext.getCurrentState().iteration,
-        bodyIndex: frame.currentBodyIndex
-      });
+        bodyIndex: frame.currentBodyIndex,
+      }, 'Handling loop iteration');
       
       // Validate frame structure
       this.assertFrameInvariant(frame);
@@ -261,11 +264,11 @@ export class LoopStackManager {
     context: EnhancedContext,
     continuation: Extract<LoopContinuationResult, { type: 'stop' }>
   ): LoopHandlerResult {
-    this.logger.debug('Exiting loop', {
+    this.logger.debug({
       loopId: frame.loopId,
       reason: continuation.reason,
-      iterations: frame.loopContext.getCurrentState().iteration
-    });
+      iterations: frame.loopContext.getCurrentState().iteration,
+    }, 'Exiting loop');
     
     loopStack.pop();
     completed.push(frame.loopId);
@@ -303,10 +306,10 @@ export class LoopStackManager {
   ): BodyScanResult {
     let currentFrame = frame;
     
-    this.logger.debug('Scanning loop body', {
+    this.logger.debug({
       bodyIndex: currentFrame.currentBodyIndex,
-      bodyLength: currentFrame.bodySteps.length
-    });
+      bodyLength: currentFrame.bodySteps.length,
+    }, 'Scanning loop body');
     
     while (currentFrame.currentBodyIndex < currentFrame.bodySteps.length) {
       const bodyStep = currentFrame.bodySteps[currentFrame.currentBodyIndex];
@@ -315,19 +318,19 @@ export class LoopStackManager {
       
       switch (eligibility.type) {
         case 'skip':
-          this.logger.debug('Skipping step', {
+          this.logger.debug({
             stepId: bodyStep.id,
-            reason: eligibility.reason
-          });
+            reason: eligibility.reason,
+          }, 'Skipping step');
           currentFrame = replaceTopFrame(loopStack, advanceBodyIndex(currentFrame));
           continue;
         
         case 'abort':
-          this.logger.warn('Aborting loop', {
+          this.logger.warn({
             loopId: currentFrame.loopId,
             reason: eligibility.reason,
-            sizeKB: eligibility.sizeKB
-          });
+            sizeKB: eligibility.sizeKB,
+          }, 'Aborting loop');
           return {
             type: 'abort-loop',
             reason: eligibility.reason,
@@ -335,10 +338,10 @@ export class LoopStackManager {
           };
         
         case 'eligible':
-          this.logger.debug('Found eligible step', {
+          this.logger.debug({
             stepId: bodyStep.id,
-            iteration: currentFrame.loopContext.getCurrentState().iteration
-          });
+            iteration: currentFrame.loopContext.getCurrentState().iteration,
+          }, 'Found eligible step');
           return {
             type: 'found-step',
             result: {
@@ -444,9 +447,9 @@ export class LoopStackManager {
     completed: string[],
     context: EnhancedContext
   ): IterationCompletionResult {
-    this.logger.debug('Completing iteration', {
-      iteration: frame.loopContext.getCurrentState().iteration
-    });
+    this.logger.debug({
+      iteration: frame.loopContext.getCurrentState().iteration,
+    }, 'Completing iteration');
     
     const clearedSteps = this.clearCompletedBodySteps(frame, completed);
     
@@ -465,9 +468,9 @@ export class LoopStackManager {
       newFrame.loopContext.getCurrentState()
     );
     
-    this.logger.debug('Iteration advanced', {
-      newIteration: newFrame.loopContext.getCurrentState().iteration
-    });
+    this.logger.debug({
+      newIteration: newFrame.loopContext.getCurrentState().iteration,
+    }, 'Iteration advanced');
     
     return {
       type: 'complete',
@@ -499,10 +502,10 @@ export class LoopStackManager {
     });
     
     if (clearedSteps.length > 0) {
-      this.logger.debug('Cleared body steps from iteration', {
+      this.logger.debug({
         cleared: clearedSteps,
-        remaining: completed.length
-      });
+        remaining: completed.length,
+      }, 'Cleared body steps from iteration');
     }
     
     return clearedSteps;
@@ -534,11 +537,11 @@ export class LoopStackManager {
       .map(step => step.id);
     
     if (missingSteps.length > 0) {
-      this.logger.debug('Iteration incomplete', {
+      this.logger.debug({
         eligible: eligibleSteps.map(s => s.id),
         cleared: clearedSteps,
-        missing: missingSteps
-      });
+        missing: missingSteps,
+      }, 'Iteration incomplete');
       
       return {
         type: 'incomplete',
@@ -560,11 +563,11 @@ export class LoopStackManager {
     context: EnhancedContext,
     scan: Extract<BodyScanResult, { type: 'abort-loop' }>
   ): LoopHandlerResult {
-    this.logger.warn('Context size exceeded, aborting loop', {
+    this.logger.warn({
       loopId: frame.loopId,
       sizeKB: scan.sizeKB,
-      iteration: frame.loopContext.getCurrentState().iteration
-    });
+      iteration: frame.loopContext.getCurrentState().iteration,
+    }, 'Context size exceeded, aborting loop');
     
     loopStack.pop();
     completed.push(frame.loopId);

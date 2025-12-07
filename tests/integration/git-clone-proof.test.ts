@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { GitWorkflowStorage } from '../../src/infrastructure/storage/git-workflow-storage';
+import { createGitWorkflowStorage } from '../helpers/create-git-storage.js';
 import fs from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
@@ -68,7 +69,7 @@ describe('🔥 DIRECT PROOF: Git Cloning Works', () => {
     console.log('Clone target:', path.join(cloneDir, 'test1'));
     
     // Create Git storage pointing to our test repo
-    const storage = new GitWorkflowStorage({
+    const storage = createGitWorkflowStorage({
       repositoryUrl: sourceRepoDir,
       branch: 'main',
       localPath: path.join(cloneDir, 'test1'),
@@ -105,7 +106,7 @@ describe('🔥 DIRECT PROOF: Git Cloning Works', () => {
   });
 
   it('🔥 PROVES getWorkflowById works', async () => {
-    const storage = new GitWorkflowStorage({
+    const storage = createGitWorkflowStorage({
       repositoryUrl: sourceRepoDir,
       branch: 'main',
       localPath: path.join(cloneDir, 'test2'),
@@ -123,7 +124,7 @@ describe('🔥 DIRECT PROOF: Git Cloning Works', () => {
   });
 
   it('🔥 PROVES listWorkflowSummaries works', async () => {
-    const storage = new GitWorkflowStorage({
+    const storage = createGitWorkflowStorage({
       repositoryUrl: sourceRepoDir,
       branch: 'main',
       localPath: path.join(cloneDir, 'test3'),
@@ -145,7 +146,7 @@ describe('🔥 DIRECT PROOF: Git Cloning Works', () => {
     const cachePath = path.join(cloneDir, 'test-cache');
     
     // First load - clones
-    const storage1 = new GitWorkflowStorage({
+    const storage1 = createGitWorkflowStorage({
       repositoryUrl: sourceRepoDir,
       branch: 'main',
       localPath: cachePath,
@@ -158,7 +159,7 @@ describe('🔥 DIRECT PROOF: Git Cloning Works', () => {
     console.log('✅ First load (cloned)');
 
     // Second load - uses cache
-    const storage2 = new GitWorkflowStorage({
+    const storage2 = createGitWorkflowStorage({
       repositoryUrl: sourceRepoDir,
       branch: 'main',
       localPath: cachePath,
@@ -189,7 +190,7 @@ describe('🔥 DIRECT PROOF: Git Cloning Works', () => {
     );
     await execAsync('git add . && git commit -m "Add second"', { cwd: sourceRepoDir });
 
-    const storage = new GitWorkflowStorage({
+    const storage = createGitWorkflowStorage({
       repositoryUrl: sourceRepoDir,
       branch: 'main',
       localPath: path.join(cloneDir, 'test-multi'),

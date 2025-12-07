@@ -20,6 +20,7 @@ import {
 } from '../../src/core/error-handler';
 import { container } from 'tsyringe';
 import { DI } from '../../src/di/tokens';
+import { FakeLoggerFactory } from '../helpers/FakeLoggerFactory.js';
 
 describe('LoopStackManager', () => {
   let manager: LoopStackManager;
@@ -30,11 +31,12 @@ describe('LoopStackManager', () => {
     container.clearInstances();
     
     // Register dependencies
+    const loggerFactory = new FakeLoggerFactory();
     resolver = new LoopStepResolver();
     container.registerInstance(LoopStepResolver, resolver);
     container.registerInstance(DI.Services.LoopContextOptimizer, undefined);
     
-    manager = new LoopStackManager(resolver, undefined);
+    manager = new LoopStackManager(resolver, undefined, loggerFactory);
   });
 
   describe('createLoopFrame', () => {

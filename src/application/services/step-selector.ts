@@ -1,9 +1,10 @@
-import { singleton } from 'tsyringe';
+import { inject, singleton } from 'tsyringe';
+import { DI } from '../../di/tokens.js';
 import { Workflow, WorkflowStep, WorkflowGuidance } from '../../types/mcp-types';
 import { IStepSelector } from './i-step-selector';
 import { EnhancedContext } from '../../types/workflow-types';
 import { evaluateCondition, Condition, ConditionContext } from '../../utils/condition-evaluator';
-import { createLogger } from '../../utils/logger';
+import type { Logger, ILoggerFactory } from '../../core/logging/index.js';
 import { 
   diagnoseConditionFailure, 
   buildConditionGuidance, 
@@ -19,7 +20,11 @@ import {
  */
 @singleton()
 export class DefaultStepSelector implements IStepSelector {
-  private readonly logger = createLogger('StepSelector');
+  private readonly logger: Logger;
+  
+  constructor(@inject(DI.Logging.Factory) loggerFactory: ILoggerFactory) {
+    this.logger = loggerFactory.create('StepSelector');
+  }
 
   findEligibleStep(
     workflow: Workflow,

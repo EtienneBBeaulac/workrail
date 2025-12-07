@@ -12,24 +12,27 @@ import { DefaultLoopRecoveryService } from '../../src/application/services/loop-
 import { LoopStackManager } from '../../src/application/services/loop-stack-manager';
 import { DefaultStepSelector } from '../../src/application/services/step-selector';
 import { LoopStepResolver } from '../../src/application/services/loop-step-resolver';
+import { FakeLoggerFactory } from '../helpers/FakeLoggerFactory.js';
 
 // Helper function to create a workflow service with custom storage
 function createTestWorkflowService(storage: InMemoryWorkflowStorage): DefaultWorkflowService {
+  const loggerFactory = new FakeLoggerFactory();
   const loopValidator = new EnhancedLoopValidator();
   const validator = new ValidationEngine(loopValidator);
   const resolver = new LoopStepResolver();
-  const stackManager = new LoopStackManager(resolver);
-  const recoveryService = new DefaultLoopRecoveryService(stackManager);
-  const stepSelector = new DefaultStepSelector();
-  const workflowLoader = new DefaultWorkflowLoader(storage, validator);
+  const stackManager = new LoopStackManager(resolver, undefined, loggerFactory);
+  const recoveryService = new DefaultLoopRecoveryService(stackManager, loggerFactory);
+  const stepSelector = new DefaultStepSelector(loggerFactory);
+  const workflowLoader = new DefaultWorkflowLoader(storage, validator, loggerFactory);
   const strategy = new IterativeStepResolutionStrategy(
     workflowLoader,
     recoveryService,
     stackManager,
-    stepSelector
+    stepSelector,
+    loggerFactory
   );
   
-  return new DefaultWorkflowService(storage, validator, strategy);
+  return new DefaultWorkflowService(storage, validator, strategy, loggerFactory);
 }
 
 describe('Loop Execution Integration Tests', () => {
