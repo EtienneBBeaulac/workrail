@@ -104,6 +104,8 @@ export class Configuration {
       return config;
     } catch (error) {
       if (error instanceof z.ZodError) {
+        // Fatal startup error - log to stderr and exit
+        // This happens before DI is initialized, so console.error is appropriate
         console.error('Configuration validation failed:');
         error.issues.forEach((err: z.ZodIssue) => {
           console.error(`  ${err.path.join('.')}: ${err.message}`);
@@ -369,9 +371,12 @@ export function validateConfiguration(): { valid: boolean; errors: string[] } {
 
 /**
  * Print configuration summary
+ * @deprecated Use logger.info({ config: getConfigSummary() }, 'Configuration loaded') instead
  */
 export function printConfigSummary(): void {
   const summary = config.getConfigSummary();
+  // Keep console.log for backward compatibility
+  // This is a utility function meant for CLI/debug use
   console.log('Configuration Summary:');
   console.log(JSON.stringify(summary, null, 2));
 } 

@@ -10,8 +10,11 @@ export { startServer } from './mcp/server.js';
 
 // Re-export and run
 import { startServer } from './mcp/server.js';
+import { getBootstrapLogger } from './core/logging/index.js';
+
+const logger = getBootstrapLogger();
 
 startServer().catch((error) => {
-  console.error('Fatal error running server:', error);
+  logger.fatal({ err: error }, 'Fatal error running server');
   process.exit(1);
 });

@@ -10,19 +10,22 @@ import { bootstrap, container } from './di/container.js';
 import { DI } from './di/tokens.js';
 import { WorkflowService } from './application/services/workflow-service.js';
 import { createWorkflowLookupServer } from './infrastructure/rpc/server.js';
+import type { ILoggerFactory } from './core/logging/index.js';
 
 async function main() {
   // Initialize DI container
   await bootstrap();
   
-  // Resolve workflow service
+  // Resolve dependencies
   const workflowService = container.resolve<WorkflowService>(DI.Services.Workflow);
+  const loggerFactory = container.resolve<ILoggerFactory>(DI.Logging.Factory);
+  const logger = loggerFactory.create('RpcServer');
   
   // Create and start the RPC server
   const server = createWorkflowLookupServer(workflowService);
   await server.start();
   
-  console.error('Workflow Orchestration MCP Server running on stdio');
+  logger.info('Workflow Orchestration MCP Server running on stdio');
   
   // Handle graceful shutdown
   process.on('SIGTERM', async () => {
@@ -37,6 +40,9 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error('Failed to start server:', error);
+  // Use bootstrap logger since DI may not be initialized
+  const { getBootstrapLogger } = require('./core/logging/index.js');
+  const logger = getBootstrapLogger();
+  logger.fatal({ err: error }, 'Failed to start server');
   process.exit(1);
 });
