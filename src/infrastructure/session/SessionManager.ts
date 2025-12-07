@@ -10,6 +10,7 @@ import { SessionDataNormalizer } from './SessionDataNormalizer';
 import { SessionDataValidator, ValidationResult } from './SessionDataValidator';
 import { SessionWatcherService } from './SessionWatcherService';
 import { WorkflowId, SessionId } from '../../types/session-identifiers';
+import type { Logger, ILoggerFactory } from '../../core/logging/index.js';
 
 export interface Session {
   id: string;
@@ -43,6 +44,7 @@ export interface ProjectMetadata {
  */
 @singleton()
 export class SessionManager extends EventEmitter {
+  private readonly logger: Logger;
   private sessionsRoot: string;
   private projectId: string;
   private projectPath: string;
@@ -51,9 +53,11 @@ export class SessionManager extends EventEmitter {
     @inject(SessionDataNormalizer) private normalizer: SessionDataNormalizer,
     @inject(SessionDataValidator) private validator: SessionDataValidator,
     @inject(DI.Config.ProjectPath) projectPath: string,
-    @inject(DI.Infra.SessionWatcher) private watcherService: SessionWatcherService
+    @inject(DI.Infra.SessionWatcher) private watcherService: SessionWatcherService,
+    @inject(DI.Logging.Factory) loggerFactory: ILoggerFactory,
   ) {
     super();
+    this.logger = loggerFactory.create('SessionManager');
     this.sessionsRoot = path.join(os.homedir(), '.workrail', 'sessions');
     
     // Resolve to Git repository root if in a Git repo
@@ -95,9 +99,9 @@ export class SessionManager extends EventEmitter {
     const gitRoot = this.findGitRepoRoot(startPath);
     
     if (gitRoot) {
-      console.error(`[SessionManager] Git repository detected: ${gitRoot}`);
+      this.logger.debug({ gitRoot }, 'Git repository detected');
       if (gitRoot !== path.resolve(startPath)) {
-        console.error(`[SessionManager] Resolved worktree ${startPath} to main repo ${gitRoot}`);
+        this.logger.info({ startPath, gitRoot }, 'Resolved worktree to main repo');
       }
       return gitRoot;
     }
@@ -274,7 +278,7 @@ export class SessionManager extends EventEmitter {
         await this.deleteSession(workflowId, sessionId);
       } catch (error) {
         // Continue deleting others even if one fails
-        console.error(`Failed to delete ${workflowId}/${sessionId}:`, error);
+        this.logger.warn({ err: error, workflowId, sessionId }, 'Failed to delete session');
       }
     }
   }
@@ -467,7 +471,7 @@ export class SessionManager extends EventEmitter {
             sessions.push(JSON.parse(content));
           } catch (error) {
             // Skip corrupted session files
-            console.error(`Failed to read session ${sessionPath}:`, error);
+            this.logger.warn({ err: error, sessionPath }, 'Failed to read session file, skipping');
           }
         }
       }
@@ -608,7 +612,7 @@ export class SessionManager extends EventEmitter {
       
       this.watcherService.watch(wfId, sId, filePath);
     } catch (error) {
-      console.error('[SessionManager] Failed to watch session:', error);
+      this.logger.warn({ err: error, workflowId, sessionId }, 'Failed to watch session');
       // Don't throw - watching is best-effort
     }
   }
@@ -627,7 +631,7 @@ export class SessionManager extends EventEmitter {
       
       this.watcherService.unwatch(wfId, sId);
     } catch (error) {
-      console.error('[SessionManager] Failed to unwatch session:', error);
+      this.logger.warn({ err: error, workflowId, sessionId }, 'Failed to unwatch session');
       // Don't throw - cleanup is best-effort
     }
   }
@@ -671,24 +675,25 @@ export class SessionManager extends EventEmitter {
       const logLine = JSON.stringify(logEntry) + '\n';
       await fs.appendFile(logFile, logLine);
       
-      // Also log to console for visibility
+      // Also log for visibility
       if (validation.errors.length > 0) {
-        console.warn(
-          `[SessionManager] ⚠️  Validation errors in ${workflowId}/${sessionId}:`,
-          validation.errors.map(e => e.message).join(', ')
-        );
+        this.logger.warn({
+          workflowId,
+          sessionId,
+          errors: validation.errors.map(e => e.message),
+        }, 'Validation errors in session');
       } else if (validation.warnings.some(w => w.severity === 'warning')) {
-        console.info(
-          `[SessionManager] ℹ️  Validation warnings in ${workflowId}/${sessionId}:`,
-          validation.warnings
+        this.logger.info({
+          workflowId,
+          sessionId,
+          warnings: validation.warnings
             .filter(w => w.severity === 'warning')
-            .map(w => w.message)
-            .join(', ')
-        );
+            .map(w => w.message),
+        }, 'Validation warnings in session');
       }
     } catch (error) {
       // Don't fail the update if logging fails
-      console.error('[SessionManager] Failed to log validation warnings:', error);
+      this.logger.error({ err: error, workflowId, sessionId }, 'Failed to log validation warnings');
     }
   }
 }

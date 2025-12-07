@@ -78,6 +78,14 @@ export const DI = {
     /** Project root path */
     ProjectPath: Symbol('Config.ProjectPath'),
   },
+
+  // ═══════════════════════════════════════════════════════════════════
+  // LOGGING
+  // ═══════════════════════════════════════════════════════════════════
+  Logging: {
+    /** Logger factory - creates component loggers */
+    Factory: Symbol('Logging.Factory'),
+  },
 } as const;
 
 /** Type helper for token values */

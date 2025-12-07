@@ -7,6 +7,7 @@ import {
   StorageSecurityOptions
 } from '../../utils/storage-security';
 import { SecurityError, StorageError, InvalidWorkflowError } from '../../core/error-handler';
+import type { Logger } from '../../core/logging/index.js';
 
 export interface RemoteWorkflowRegistryConfig extends StorageSecurityOptions {
   baseUrl: string;
@@ -14,6 +15,7 @@ export interface RemoteWorkflowRegistryConfig extends StorageSecurityOptions {
   timeout?: number;
   retryAttempts?: number;
   userAgent?: string;
+  logger?: Logger;
 }
 
 interface RegistryResponse<T> {
@@ -30,13 +32,15 @@ interface RegistryResponse<T> {
  * Similar to npm registry but for workflows.
  */
 export class RemoteWorkflowStorage implements IWorkflowStorage {
-  private readonly config: Required<RemoteWorkflowRegistryConfig>;
+  private readonly config: Required<Omit<RemoteWorkflowRegistryConfig, 'logger'>>;
   private readonly securityOptions: Required<StorageSecurityOptions>;
+  private readonly logger?: Logger;
 
   constructor(config: RemoteWorkflowRegistryConfig) {
     // Validate and secure the configuration
     this.validateConfig(config);
     this.securityOptions = validateSecurityOptions(config);
+    this.logger = config.logger;
     
     this.config = {
       ...this.securityOptions,
@@ -321,13 +325,16 @@ export class RemoteWorkflowStorage implements IWorkflowStorage {
 export class CommunityWorkflowStorage implements IWorkflowStorage {
   private readonly sources: IWorkflowStorage[];
   private readonly remoteStorage: RemoteWorkflowStorage;
+  private readonly logger?: Logger;
   
   constructor(
     bundledStorage: IWorkflowStorage,
     localStorage: IWorkflowStorage,
-    remoteConfig: RemoteWorkflowRegistryConfig
+    remoteConfig: RemoteWorkflowRegistryConfig,
+    logger?: Logger,
   ) {
-    this.remoteStorage = new RemoteWorkflowStorage(remoteConfig);
+    this.logger = logger;
+    this.remoteStorage = new RemoteWorkflowStorage({ ...remoteConfig, logger });
     this.sources = [bundledStorage, localStorage, this.remoteStorage];
   }
 
@@ -356,9 +363,9 @@ export class CommunityWorkflowStorage implements IWorkflowStorage {
         // For storage sources, we want to continue even if one fails
         // This is intentional graceful degradation behavior
         if (error instanceof StorageError) {
-          console.warn(`Storage source failed (graceful degradation):`, error.message);
+          this.logger?.warn({ err: error }, 'Storage source failed (graceful degradation)');
         } else {
-          console.warn(`Unexpected error from storage source:`, error);
+          this.logger?.warn({ err: error }, 'Unexpected error from storage source');
         }
       }
     }
@@ -380,9 +387,9 @@ export class CommunityWorkflowStorage implements IWorkflowStorage {
         } catch (error) {
           // Continue searching other sources if one fails
           if (error instanceof StorageError) {
-            console.warn(`Storage source failed for workflow ${sanitizedId}:`, error.message);
+            this.logger?.warn({ err: error, workflowId: sanitizedId }, 'Storage source failed for workflow');
           } else {
-            console.warn(`Unexpected error from storage source for workflow ${sanitizedId}:`, error);
+            this.logger?.warn({ err: error, workflowId: sanitizedId }, 'Unexpected error from storage source');
           }
         }
       }

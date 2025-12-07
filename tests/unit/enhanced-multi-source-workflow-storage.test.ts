@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { EnhancedMultiSourceWorkflowStorage } from '../../src/infrastructure/storage/enhanced-multi-source-workflow-storage';
 import { IWorkflowStorage } from '../../src/types/storage';
 import { Workflow } from '../../src/types/mcp-types';
+import { FakeLoggerFactory } from '../helpers/FakeLoggerFactory.js';
 import os from 'os';
 import path from 'path';
 
@@ -69,9 +70,17 @@ function createWorkflow(id: string, name: string): Workflow {
 }
 
 describe('EnhancedMultiSourceWorkflowStorage', () => {
+  beforeEach(() => {
+    // Clear env vars to avoid interference
+    delete process.env['WORKFLOW_INCLUDE_BUNDLED'];
+    delete process.env['WORKFLOW_INCLUDE_USER'];
+    delete process.env['WORKFLOW_INCLUDE_PROJECT'];
+    delete process.env['WORKFLOW_GIT_REPOS'];
+  });
+  
   describe('Priority and Deduplication', () => {
     it('should load workflows from all sources', async () => {
-      const storage = new EnhancedMultiSourceWorkflowStorage({
+      const storage = new EnhancedMultiSourceWorkflowStorage(new FakeLoggerFactory(), {
         includeBundled: false,
         includeUser: false,
         includeProject: false
@@ -91,7 +100,7 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
 
   describe('Graceful Degradation', () => {
     it('should continue loading from other sources when one fails', async () => {
-      const storage = new EnhancedMultiSourceWorkflowStorage({
+      const storage = new EnhancedMultiSourceWorkflowStorage(new FakeLoggerFactory(), {
         includeBundled: false,
         includeUser: false,
         includeProject: false,
@@ -107,7 +116,7 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
 
   describe('Source Information', () => {
     it('should provide information about configured sources', () => {
-      const storage = new EnhancedMultiSourceWorkflowStorage({
+      const storage = new EnhancedMultiSourceWorkflowStorage(new FakeLoggerFactory(), {
         includeBundled: true,
         includeUser: true,
         includeProject: true
@@ -121,7 +130,7 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
 
   describe('Configuration', () => {
     it('should respect includeBundled flag', () => {
-      const storage = new EnhancedMultiSourceWorkflowStorage({
+      const storage = new EnhancedMultiSourceWorkflowStorage(new FakeLoggerFactory(), {
         includeBundled: false,
         includeUser: false,
         includeProject: false
@@ -133,7 +142,7 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
     });
 
     it('should respect includeUser flag', () => {
-      const storage = new EnhancedMultiSourceWorkflowStorage({
+      const storage = new EnhancedMultiSourceWorkflowStorage(new FakeLoggerFactory(), {
         includeBundled: false,
         includeUser: false,
         includeProject: false
@@ -145,7 +154,7 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
     });
 
     it('should respect includeProject flag', () => {
-      const storage = new EnhancedMultiSourceWorkflowStorage({
+      const storage = new EnhancedMultiSourceWorkflowStorage(new FakeLoggerFactory(), {
         includeBundled: false,
         includeUser: false,
         includeProject: false
@@ -161,7 +170,7 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
     it('should accept Git repository configuration', () => {
       // Note: This creates the storage but doesn't actually clone
       // Real cloning would happen on first loadAllWorkflows() call
-      const storage = new EnhancedMultiSourceWorkflowStorage({
+      const storage = new EnhancedMultiSourceWorkflowStorage(new FakeLoggerFactory(), {
         includeBundled: false,
         includeUser: false,
         includeProject: false,
@@ -181,7 +190,7 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
     });
 
     it('should handle multiple Git repositories', () => {
-      const storage = new EnhancedMultiSourceWorkflowStorage({
+      const storage = new EnhancedMultiSourceWorkflowStorage(new FakeLoggerFactory(), {
         includeBundled: false,
         includeUser: false,
         includeProject: false,
@@ -207,7 +216,7 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
 
   describe('Remote Registry Support', () => {
     it('should accept remote registry configuration', () => {
-      const storage = new EnhancedMultiSourceWorkflowStorage({
+      const storage = new EnhancedMultiSourceWorkflowStorage(new FakeLoggerFactory(), {
         includeBundled: false,
         includeUser: false,
         includeProject: false,
@@ -229,7 +238,7 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
   describe('Custom Paths Support', () => {
     it('should accept custom directory paths', () => {
       const customPath = path.join(os.tmpdir(), 'custom-workflows');
-      const storage = new EnhancedMultiSourceWorkflowStorage({
+      const storage = new EnhancedMultiSourceWorkflowStorage(new FakeLoggerFactory(), {
         includeBundled: false,
         includeUser: false,
         includeProject: false,
@@ -243,7 +252,7 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
 
   describe('Priority Order', () => {
     it('should load sources in correct priority order', () => {
-      const storage = new EnhancedMultiSourceWorkflowStorage({
+      const storage = new EnhancedMultiSourceWorkflowStorage(new FakeLoggerFactory(), {
         includeBundled: true,
         includeUser: true,
         includeProject: true,
@@ -279,7 +288,7 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
 
   describe('Save Operation', () => {
     it('should delegate save to highest priority source that supports it', async () => {
-      const storage = new EnhancedMultiSourceWorkflowStorage({
+      const storage = new EnhancedMultiSourceWorkflowStorage(new FakeLoggerFactory(), {
         includeBundled: false,
         includeUser: false,
         includeProject: false
@@ -295,7 +304,7 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
   describe('Error Handling', () => {
     it('should handle invalid Git repository URLs gracefully', () => {
       // Should not throw during construction
-      const storage = new EnhancedMultiSourceWorkflowStorage({
+      const storage = new EnhancedMultiSourceWorkflowStorage(new FakeLoggerFactory(), {
         includeBundled: false,
         includeUser: false,
         includeProject: false,
@@ -313,7 +322,7 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
     });
 
     it('should handle empty configuration', async () => {
-      const storage = new EnhancedMultiSourceWorkflowStorage({
+      const storage = new EnhancedMultiSourceWorkflowStorage(new FakeLoggerFactory(), {
         includeBundled: false,
         includeUser: false,
         includeProject: false
@@ -326,7 +335,7 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
 
   describe('getWorkflowById', () => {
     it('should search sources in reverse order (highest priority first)', async () => {
-      const storage = new EnhancedMultiSourceWorkflowStorage({
+      const storage = new EnhancedMultiSourceWorkflowStorage(new FakeLoggerFactory(), {
         includeBundled: false,
         includeUser: false,
         includeProject: false
@@ -339,7 +348,7 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
 
   describe('listWorkflowSummaries', () => {
     it('should combine summaries from all sources', async () => {
-      const storage = new EnhancedMultiSourceWorkflowStorage({
+      const storage = new EnhancedMultiSourceWorkflowStorage(new FakeLoggerFactory(), {
         includeBundled: false,
         includeUser: false,
         includeProject: false
@@ -350,7 +359,7 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
     });
 
     it('should deduplicate summaries by ID', async () => {
-      const storage = new EnhancedMultiSourceWorkflowStorage({
+      const storage = new EnhancedMultiSourceWorkflowStorage(new FakeLoggerFactory(), {
         includeBundled: false,
         includeUser: false,
         includeProject: false
@@ -390,7 +399,7 @@ describe('EnhancedMultiSourceWorkflowStorage - Integration Scenarios', () => {
   describe('Team Workflow Repository Scenario', () => {
     it('should load workflows from team Git repository', async () => {
       // In a real scenario, this would use a test Git repository
-      const storage = new EnhancedMultiSourceWorkflowStorage({
+      const storage = new EnhancedMultiSourceWorkflowStorage(new FakeLoggerFactory(), {
         includeBundled: true,
         includeUser: true,
         includeProject: true,
@@ -411,7 +420,7 @@ describe('EnhancedMultiSourceWorkflowStorage - Integration Scenarios', () => {
 
   describe('Multi-Repository Scenario', () => {
     it('should handle multiple repositories with correct priority', async () => {
-      const storage = new EnhancedMultiSourceWorkflowStorage({
+      const storage = new EnhancedMultiSourceWorkflowStorage(new FakeLoggerFactory(), {
         includeBundled: true,
         gitRepositories: [
           {
@@ -438,7 +447,7 @@ describe('EnhancedMultiSourceWorkflowStorage - Integration Scenarios', () => {
 
   describe('Hybrid Scenario', () => {
     it('should combine local, Git, and remote sources', async () => {
-      const storage = new EnhancedMultiSourceWorkflowStorage({
+      const storage = new EnhancedMultiSourceWorkflowStorage(new FakeLoggerFactory(), {
         includeBundled: true,
         includeUser: true,
         includeProject: true,

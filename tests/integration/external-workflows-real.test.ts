@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createEnhancedMultiSourceWorkflowStorage } from '../../src/infrastructure/storage/enhanced-multi-source-workflow-storage';
 import { GitWorkflowStorage } from '../../src/infrastructure/storage/git-workflow-storage';
+import { createGitWorkflowStorage } from '../helpers/create-git-storage.js';
 import fs from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
@@ -78,7 +79,7 @@ describe('External Workflows - REAL Integration Tests', () => {
     it('PROVES git clone actually works with real repository', async () => {
       const localPath = path.join(cacheDir, 'test-clone');
       
-      const storage = new GitWorkflowStorage({
+      const storage = createGitWorkflowStorage({
         repositoryUrl: repo1Dir,
         branch: 'main',
         localPath
@@ -104,7 +105,7 @@ describe('External Workflows - REAL Integration Tests', () => {
     it('PROVES workflows can be retrieved by ID', async () => {
       const localPath = path.join(cacheDir, 'test-get-by-id');
       
-      const storage = new GitWorkflowStorage({
+      const storage = createGitWorkflowStorage({
         repositoryUrl: repo1Dir,
         branch: 'main',
         localPath
@@ -208,7 +209,7 @@ describe('External Workflows - REAL Integration Tests', () => {
       const localPath = path.join(cacheDir, 'test-offline');
       
       // First load - clones the repo
-      const storage1 = new GitWorkflowStorage({
+      const storage1 = createGitWorkflowStorage({
         repositoryUrl: repo1Dir,
         branch: 'main',
         localPath,
@@ -224,7 +225,7 @@ describe('External Workflows - REAL Integration Tests', () => {
       expect(existsSync(localPath)).toBe(true);
 
       // Second load - uses cache (simulate offline by pointing to invalid URL)
-      const storage2 = new GitWorkflowStorage({
+      const storage2 = createGitWorkflowStorage({
         repositoryUrl: 'file:///this/does/not/exist',
         branch: 'main',
         localPath, // Same cache path

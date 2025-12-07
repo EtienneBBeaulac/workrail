@@ -2,15 +2,16 @@ import fs from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import os from 'os';
+import { inject, singleton } from 'tsyringe';
+import { DI } from '../../di/tokens.js';
 import { IWorkflowStorage } from '../../types/storage';
 import { Workflow, WorkflowSummary } from '../../types/mcp-types';
 import { FileWorkflowStorage } from './file-workflow-storage';
 import { GitWorkflowStorage, GitWorkflowConfig } from './git-workflow-storage';
 import { RemoteWorkflowStorage, RemoteWorkflowRegistryConfig } from './remote-workflow-storage';
 import { PluginWorkflowStorage, PluginWorkflowConfig } from './plugin-workflow-storage';
-import { createLogger } from '../../utils/logger';
-
-const logger = createLogger('EnhancedMultiSourceWorkflowStorage');
+import type { Logger, ILoggerFactory } from '../../core/logging/index.js';
+import { getBootstrapLogger } from '../../core/logging/index.js';
 
 /**
  * Options for FileWorkflowStorage instances
@@ -107,21 +108,138 @@ export interface EnhancedMultiSourceConfig {
  * - Support for all storage types
  * - Configurable priority ordering
  * - Comprehensive error handling
+ * 
+ * NOTE: Not a singleton - created via factory in DI container.
+ * Tests can create instances directly with custom config.
  */
 export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
+  private readonly logger: Logger;
+  private readonly loggerFactory: ILoggerFactory;
   private readonly storageInstances: IWorkflowStorage[] = [];
   private readonly config: Required<
     Pick<EnhancedMultiSourceConfig, 'warnOnSourceFailure' | 'gracefulDegradation'>
   >;
   private readonly sourceNames: string[] = []; // For debugging
 
-  constructor(config: EnhancedMultiSourceConfig = {}) {
+  constructor(
+    loggerFactory: ILoggerFactory,
+    config?: EnhancedMultiSourceConfig,
+  ) {
+    this.loggerFactory = loggerFactory;
+    this.logger = loggerFactory.create('EnhancedMultiSourceWorkflowStorage');
+    
+    // Load config from environment if not provided
+    const finalConfig = config ?? this.loadConfigFromEnvironment();
+    
     this.config = {
-      warnOnSourceFailure: config.warnOnSourceFailure ?? true,
-      gracefulDegradation: config.gracefulDegradation ?? true
+      warnOnSourceFailure: finalConfig.warnOnSourceFailure ?? true,
+      gracefulDegradation: finalConfig.gracefulDegradation ?? true
     };
     
-    this.storageInstances = this.initializeStorageSources(config);
+    this.storageInstances = this.initializeStorageSources(finalConfig);
+  }
+  
+  /**
+   * Load configuration from environment variables.
+   * This method enables environment-based config while keeping constructor DI-friendly.
+   */
+  private loadConfigFromEnvironment(): EnhancedMultiSourceConfig {
+    const config: EnhancedMultiSourceConfig = {
+      includeBundled: getEnvBool('WORKFLOW_INCLUDE_BUNDLED', true),
+      includeUser: getEnvBool('WORKFLOW_INCLUDE_USER', true),
+      includeProject: getEnvBool('WORKFLOW_INCLUDE_PROJECT', true),
+    };
+    
+    // Parse Git repositories from environment
+    const gitReposJson = process.env['WORKFLOW_GIT_REPOS'];
+    if (gitReposJson && gitReposJson.startsWith('[')) {
+      try {
+        const repos = JSON.parse(gitReposJson) as GitWorkflowConfig[];
+        config.gitRepositories = repos.map(repo => ({
+          ...repo,
+          authToken: repo.authToken || resolveAuthToken(repo.repositoryUrl)
+        }));
+        this.logger.info({
+          count: config.gitRepositories.length,
+          repos: config.gitRepositories.map(r => ({ url: r.repositoryUrl, branch: r.branch })),
+        }, 'Parsed Git repositories from JSON array');
+      } catch (error) {
+        this.logger.error({ err: error }, 'Failed to parse WORKFLOW_GIT_REPOS as JSON');
+      }
+    } else if (gitReposJson) {
+      const cacheBaseDir = process.env['WORKRAIL_CACHE_DIR'] || 
+                           path.join(os.homedir(), '.workrail', 'cache');
+      
+      this.logger.debug({ cacheBaseDir }, 'Using cache directory');
+      
+      const urls = gitReposJson.split(',').map(url => url.trim());
+      const localFileUrls: string[] = [];
+      const actualGitUrls: string[] = [];
+      
+      for (const url of urls) {
+        if (url.startsWith('file://') || (!url.includes('://') && url.startsWith('/'))) {
+          localFileUrls.push(url);
+        } else {
+          actualGitUrls.push(url);
+        }
+      }
+      
+      if (localFileUrls.length > 0) {
+        config.customPaths = config.customPaths || [];
+        for (const url of localFileUrls) {
+          const localPath = url.startsWith('file://') ? url.substring(7) : url;
+          config.customPaths.push(localPath);
+          this.logger.info({ localPath }, 'Using direct file access for local repository');
+        }
+      }
+      
+      if (actualGitUrls.length > 0) {
+        config.gitRepositories = actualGitUrls.map((url, index) => {
+          const repoName = url.split('/').pop()?.replace(/\.git$/, '') || `repo-${index}`;
+          return {
+            repositoryUrl: url,
+            branch: 'main',
+            localPath: path.join(cacheBaseDir, `git-${index}-${repoName}`),
+            authToken: resolveAuthToken(url),
+            syncInterval: 60
+          };
+        });
+        
+        this.logger.info({
+          count: config.gitRepositories.length,
+          repos: config.gitRepositories.map(r => ({ url: r.repositoryUrl, branch: r.branch, path: r.localPath })),
+        }, 'Parsed remote Git repositories from comma-separated list');
+      }
+    }
+
+    // Single repository
+    const gitRepoUrl = process.env['WORKFLOW_GIT_REPO_URL'];
+    if (gitRepoUrl) {
+      config.gitRepositories = config.gitRepositories || [];
+      config.gitRepositories.push({
+        repositoryUrl: gitRepoUrl,
+        branch: process.env['WORKFLOW_GIT_REPO_BRANCH'] || 'main',
+        authToken: resolveAuthToken(gitRepoUrl),
+        syncInterval: Number(process.env['WORKFLOW_GIT_SYNC_INTERVAL'] || 60)
+      });
+      this.logger.info({
+        url: gitRepoUrl,
+        branch: process.env['WORKFLOW_GIT_REPO_BRANCH'] || 'main',
+      }, 'Added single Git repository from env vars');
+    }
+
+    // Remote registries
+    const remoteRegistryUrl = process.env['WORKFLOW_REGISTRY_URL'];
+    if (remoteRegistryUrl) {
+      config.remoteRegistries = config.remoteRegistries || [];
+      config.remoteRegistries.push({
+        baseUrl: remoteRegistryUrl,
+        apiKey: process.env['WORKFLOW_REGISTRY_API_KEY'],
+        timeout: Number(process.env['WORKFLOW_REGISTRY_TIMEOUT'] || 10000)
+      });
+    }
+    
+    return config;
   }
 
   private initializeStorageSources(config: EnhancedMultiSourceConfig): IWorkflowStorage[] {
@@ -132,7 +250,11 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
       try {
         const bundledPath = this.getBundledWorkflowsPath();
         if (existsSync(bundledPath)) {
-          instances.push(new FileWorkflowStorage(bundledPath, config.fileStorageOptions));
+          const bundledLogger = this.loggerFactory.create('FileWorkflowStorage:bundled');
+          instances.push(new FileWorkflowStorage(bundledPath, {
+            ...config.fileStorageOptions,
+            logger: bundledLogger,
+          }));
           this.sourceNames.push('bundled');
         }
       } catch (error) {
@@ -145,7 +267,8 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
       for (let i = 0; i < config.pluginConfigs.length; i++) {
         try {
           const pluginConfig = config.pluginConfigs[i]!;
-          instances.push(new PluginWorkflowStorage(pluginConfig));
+          const pluginLogger = this.loggerFactory.create('PluginWorkflowStorage');
+          instances.push(new PluginWorkflowStorage({ ...pluginConfig, logger: pluginLogger }));
           this.sourceNames.push(`plugin-${i}`);
         } catch (error) {
           this.handleSourceError(`plugin-${i}`, error as Error);
@@ -158,7 +281,11 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
       try {
         const userPath = config.userPath || this.getUserWorkflowsPath();
         if (existsSync(userPath)) {
-          instances.push(new FileWorkflowStorage(userPath, config.fileStorageOptions));
+          const userLogger = this.loggerFactory.create('FileWorkflowStorage:user');
+          instances.push(new FileWorkflowStorage(userPath, {
+            ...config.fileStorageOptions,
+            logger: userLogger,
+          }));
           this.sourceNames.push('user');
         }
       } catch (error) {
@@ -171,7 +298,11 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
       for (const customPath of config.customPaths) {
         try {
           if (existsSync(customPath)) {
-            instances.push(new FileWorkflowStorage(customPath, config.fileStorageOptions));
+            const customLogger = this.loggerFactory.create(`FileWorkflowStorage:custom`);
+            instances.push(new FileWorkflowStorage(customPath, {
+              ...config.fileStorageOptions,
+              logger: customLogger,
+            }));
             this.sourceNames.push(`custom:${customPath}`);
           }
         } catch (error) {
@@ -185,7 +316,8 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
       for (let i = 0; i < config.gitRepositories.length; i++) {
         try {
           const gitConfig = config.gitRepositories[i]!;
-          instances.push(new GitWorkflowStorage(gitConfig));
+          const gitLogger = this.loggerFactory.create('GitWorkflowStorage');
+          instances.push(new GitWorkflowStorage(gitConfig, gitLogger));
           const repoName = this.extractRepoName(gitConfig.repositoryUrl);
           this.sourceNames.push(`git:${repoName}`);
         } catch (error) {
@@ -199,7 +331,8 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
       for (let i = 0; i < config.remoteRegistries.length; i++) {
         try {
           const remoteConfig = config.remoteRegistries[i]!;
-          instances.push(new RemoteWorkflowStorage(remoteConfig));
+          const remoteLogger = this.loggerFactory.create('RemoteWorkflowStorage');
+          instances.push(new RemoteWorkflowStorage({ ...remoteConfig, logger: remoteLogger }));
           this.sourceNames.push(`remote:${remoteConfig.baseUrl}`);
         } catch (error) {
           this.handleSourceError(`remote-${i}`, error as Error);
@@ -212,7 +345,11 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
       try {
         const projectPath = config.projectPath || this.getProjectWorkflowsPath();
         if (existsSync(projectPath)) {
-          instances.push(new FileWorkflowStorage(projectPath, config.fileStorageOptions));
+          const projectLogger = this.loggerFactory.create('FileWorkflowStorage:project');
+          instances.push(new FileWorkflowStorage(projectPath, {
+            ...config.fileStorageOptions,
+            logger: projectLogger,
+          }));
           this.sourceNames.push('project');
         }
       } catch (error) {
@@ -243,9 +380,10 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
             if (existingIndex >= 0) {
               allWorkflows[existingIndex] = workflow;
               if (this.config.warnOnSourceFailure) {
-                console.debug(
-                  `Workflow '${workflow.id}' from ${sourceName} overrode earlier version`
-                );
+                this.logger.debug({
+                  workflowId: workflow.id,
+                  sourceName,
+                }, 'Workflow overrode earlier version');
               }
             }
           } else {
@@ -349,7 +487,10 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
 
   private handleSourceError(sourceName: string, error: Error): void {
     if (this.config.warnOnSourceFailure) {
-      console.warn(`Failed to load workflows from ${sourceName}:`, error.message);
+      this.logger.warn({
+        err: error,
+        sourceName,
+      }, 'Failed to load workflows from source');
     }
 
     if (!this.config.gracefulDegradation) {
@@ -395,7 +536,10 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
 export function createEnhancedMultiSourceWorkflowStorage(
   overrides: EnhancedMultiSourceConfig = {}
 ): EnhancedMultiSourceWorkflowStorage {
-  logger.info('Creating enhanced multi-source workflow storage');
+  // Use bootstrap logger for factory function (runs before DI)
+  const bootstrapLogger = getBootstrapLogger().child({ component: 'EnhancedMultiSourceWorkflowStorage' });
+  
+  bootstrapLogger.info('Creating enhanced multi-source workflow storage');
   
   const config: EnhancedMultiSourceConfig = {
     includeBundled: getEnvBool('WORKFLOW_INCLUDE_BUNDLED', true),
@@ -404,11 +548,11 @@ export function createEnhancedMultiSourceWorkflowStorage(
     ...overrides
   };
 
-  logger.debug('Storage configuration', {
+  bootstrapLogger.debug({
     includeBundled: config.includeBundled,
     includeUser: config.includeUser,
-    includeProject: config.includeProject
-  });
+    includeProject: config.includeProject,
+  }, 'Storage configuration');
 
   // Parse Git repositories from environment (multiple formats supported)
   
@@ -422,12 +566,12 @@ export function createEnhancedMultiSourceWorkflowStorage(
         ...repo,
         authToken: repo.authToken || resolveAuthToken(repo.repositoryUrl)
       }));
-      logger.info('Parsed Git repositories from JSON array', {
+      bootstrapLogger.info({
         count: config.gitRepositories.length,
-        repos: config.gitRepositories.map(r => ({ url: r.repositoryUrl, branch: r.branch }))
-      });
+        repos: config.gitRepositories.map(r => ({ url: r.repositoryUrl, branch: r.branch })),
+      }, 'Parsed Git repositories from JSON array');
     } catch (error) {
-      logger.error('Failed to parse WORKFLOW_GIT_REPOS as JSON', error);
+      bootstrapLogger.error({ err: error }, 'Failed to parse WORKFLOW_GIT_REPOS as JSON');
     }
   }
   // Format 2: Comma-separated URLs
@@ -436,7 +580,7 @@ export function createEnhancedMultiSourceWorkflowStorage(
     const cacheBaseDir = process.env['WORKRAIL_CACHE_DIR'] || 
                          path.join(os.homedir(), '.workrail', 'cache');
     
-    logger.debug('Using cache directory', { cacheBaseDir });
+    bootstrapLogger.debug({ cacheBaseDir }, 'Using cache directory');
     
     const urls = gitReposJson.split(',').map(url => url.trim());
     
@@ -458,7 +602,7 @@ export function createEnhancedMultiSourceWorkflowStorage(
       for (const url of localFileUrls) {
         const localPath = url.startsWith('file://') ? url.substring(7) : url;
         config.customPaths.push(localPath);
-        logger.info('Using direct file access for local repository', { localPath });
+        bootstrapLogger.info({ localPath }, 'Using direct file access for local repository');
       }
     }
     
@@ -475,10 +619,10 @@ export function createEnhancedMultiSourceWorkflowStorage(
         };
       });
       
-      logger.info('Parsed remote Git repositories from comma-separated list', {
+      bootstrapLogger.info({
         count: config.gitRepositories.length,
-        repos: config.gitRepositories.map(r => ({ url: r.repositoryUrl, branch: r.branch, path: r.localPath }))
-      });
+        repos: config.gitRepositories.map(r => ({ url: r.repositoryUrl, branch: r.branch, path: r.localPath })),
+      }, 'Parsed remote Git repositories from comma-separated list');
     }
   }
 
@@ -492,10 +636,10 @@ export function createEnhancedMultiSourceWorkflowStorage(
       authToken: resolveAuthToken(gitRepoUrl),
       syncInterval: Number(process.env['WORKFLOW_GIT_SYNC_INTERVAL'] || 60)
     });
-    logger.info('Added single Git repository from env vars', {
+    bootstrapLogger.info({
       url: gitRepoUrl,
-      branch: process.env['WORKFLOW_GIT_REPO_BRANCH'] || 'main'
-    });
+      branch: process.env['WORKFLOW_GIT_REPO_BRANCH'] || 'main',
+    }, 'Added single Git repository from env vars');
   }
 
   // Parse remote registries from environment
@@ -509,7 +653,13 @@ export function createEnhancedMultiSourceWorkflowStorage(
     });
   }
 
-  return new EnhancedMultiSourceWorkflowStorage(config);
+  // Create fake factory for factory function (not using DI here)
+  const fakeFactory: ILoggerFactory = {
+    create: (component: string) => bootstrapLogger.child({ component }),
+    root: bootstrapLogger,
+  };
+
+  return new EnhancedMultiSourceWorkflowStorage(fakeFactory, config);
 }
 
 // ========== Helper Functions ==========

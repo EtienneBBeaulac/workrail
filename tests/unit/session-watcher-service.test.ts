@@ -15,13 +15,15 @@ import os from 'os';
 import { SessionWatcherService } from '../../src/infrastructure/session/SessionWatcherService';
 import { WorkflowId, SessionId } from '../../src/types/session-identifiers';
 import { isTransientError } from '../../src/types/session-watcher-state';
+import { FakeLoggerFactory } from '../helpers/FakeLoggerFactory.js';
 
 describe('SessionWatcherService', () => {
   let service: SessionWatcherService;
   let tempDir: string;
   
   beforeEach(async () => {
-    service = new SessionWatcherService();
+    const loggerFactory = new FakeLoggerFactory();
+    service = new SessionWatcherService(loggerFactory);
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'workrail-test-'));
   });
   
@@ -176,7 +178,8 @@ describe('SessionWatcherService', () => {
       const sessionId = SessionId.parse('failing');
       const badPath = '/nonexistent/path.json';
       
-      const testService = new SessionWatcherService({
+      const loggerFactory = new FakeLoggerFactory();
+      const testService = new SessionWatcherService(loggerFactory, {
         maxPermanentErrors: 1,
         circuitBreakerThreshold: 2,
         circuitBreakerResetMs: 5000
@@ -217,7 +220,8 @@ describe('SessionWatcherService', () => {
       const sessionId = SessionId.parse('session');
       const badPath = '/nonexistent/path.json';
       
-      const testService = new SessionWatcherService({
+      const loggerFactory = new FakeLoggerFactory();
+      const testService = new SessionWatcherService(loggerFactory, {
         maxPermanentErrors: 1,
         circuitBreakerThreshold: 1,
         circuitBreakerResetMs: 100  // Short timeout for test

@@ -14,7 +14,8 @@
  * ensuring they're cleaned up atomically in disposeWatcherState().
  */
 
-import { singleton } from 'tsyringe';
+import { inject, singleton } from 'tsyringe';
+import { DI } from '../../di/tokens.js';
 import fsSync from 'fs';
 import fs from 'fs/promises';
 import { EventEmitter } from 'events';
@@ -26,9 +27,7 @@ import {
   disposeWatcherState, 
   isTransientError 
 } from '../../types/session-watcher-state';
-import { createLogger } from '../../utils/logger';
-
-const logger = createLogger('SessionWatcherService');
+import type { Logger, ILoggerFactory } from '../../core/logging/index.js';
 
 /**
  * Configuration for watcher behavior.
@@ -74,19 +73,24 @@ interface CircuitBreakerState {
  */
 @singleton()
 export class SessionWatcherService extends EventEmitter {
+  private readonly logger: Logger;
   private readonly config: SessionWatcherConfig;
   private watchers = new Map<string, WatcherState>();
   private circuitBreakers = new Map<string, CircuitBreakerState>();
   private _isDisposed = false;
   
-  constructor(config: Partial<SessionWatcherConfig> = {}) {
+  constructor(
+    @inject(DI.Logging.Factory) loggerFactory: ILoggerFactory,
+    config: Partial<SessionWatcherConfig> = {},
+  ) {
     super();
+    this.logger = loggerFactory.create('SessionWatcherService');
     this.config = Object.freeze({ ...DEFAULT_CONFIG, ...config });
-    logger.info('SessionWatcherService initialized', {
+    this.logger.info({
       debounceMs: this.config.debounceMs,
       maxTransientErrors: this.config.maxTransientErrors,
-      maxPermanentErrors: this.config.maxPermanentErrors
-    });
+      maxPermanentErrors: this.config.maxPermanentErrors,
+    }, 'SessionWatcherService initialized');
   }
   
   get isDisposed(): boolean {
@@ -116,7 +120,7 @@ export class SessionWatcherService extends EventEmitter {
     
     // Idempotent - already watching
     if (this.watchers.has(keyStr)) {
-      logger.debug('Already watching session, skipping', { workflowId, sessionId });
+      this.logger.debug({ workflowId, sessionId }, 'Already watching session, skipping');
       return;
     }
     
@@ -133,7 +137,7 @@ export class SessionWatcherService extends EventEmitter {
       
       // Handle watcher-level errors
       fsWatcher.on('error', (error) => {
-        logger.error('Watcher error', error, { workflowId, sessionId });
+        this.logger.error({ err: error, workflowId, sessionId }, 'Watcher error');
         this.handleError(keyStr, key, error, false);  // Watcher errors are permanent
       });
       
@@ -141,10 +145,10 @@ export class SessionWatcherService extends EventEmitter {
       const state = createWatcherState(fsWatcher);
       this.watchers.set(keyStr, state);
       
-      logger.debug('Started watching session', { workflowId, sessionId, filePath });
+      this.logger.debug({ workflowId, sessionId, filePath }, 'Started watching session');
       
     } catch (error) {
-      logger.error('Failed to start watching', error, { workflowId, sessionId, filePath });
+      this.logger.error({ err: error, workflowId, sessionId, filePath }, 'Failed to start watching');
       this.handleError(keyStr, key, error as Error, false);
       throw error;  // Re-throw to caller
     }
@@ -163,11 +167,11 @@ export class SessionWatcherService extends EventEmitter {
     
     const state = this.watchers.get(keyStr);
     if (!state) {
-      logger.debug('Session not being watched, nothing to unwatch', { workflowId, sessionId });
+      this.logger.debug({ workflowId, sessionId }, 'Session not being watched, nothing to unwatch');
       return;
     }
     
-    logger.debug('Stopping watch on session', { workflowId, sessionId });
+    this.logger.debug({ workflowId, sessionId }, 'Stopping watch on session');
     
     // ✅ BUG FIX: disposeWatcherState() clears BOTH timer and watcher
     disposeWatcherState(state);
@@ -179,7 +183,7 @@ export class SessionWatcherService extends EventEmitter {
    * Called during service shutdown.
    */
   unwatchAll(): void {
-    logger.info('Unwatching all sessions', { count: this.watchers.size });
+    this.logger.info({ count: this.watchers.size }, 'Unwatching all sessions');
     
     // Dispose in reverse order (LIFO - last registered, first disposed)
     const entries = Array.from(this.watchers.entries()).reverse();
@@ -198,7 +202,7 @@ export class SessionWatcherService extends EventEmitter {
     if (this._isDisposed) return;
     this._isDisposed = true;
     
-    logger.info('Disposing SessionWatcherService');
+    this.logger.info('Disposing SessionWatcherService');
     
     this.unwatchAll();
     this.circuitBreakers.clear();
@@ -276,10 +280,10 @@ export class SessionWatcherService extends EventEmitter {
         // Clear circuit breaker on success
         this.circuitBreakers.delete(keyStr);
         
-        logger.debug('Session updated', { 
+        this.logger.debug({ 
           workflowId: key.workflowId, 
-          sessionId: key.sessionId 
-        });
+          sessionId: key.sessionId,
+        }, 'Session updated');
         
         // Emit event (compatible with SessionManager's EventEmitter)
         this.emit('session:updated', {
@@ -292,12 +296,12 @@ export class SessionWatcherService extends EventEmitter {
         const err = error as Error;
         const transient = isTransientError(err);
         
-        logger.warn('Error reading session file', { 
+        this.logger.warn({ 
           workflowId: key.workflowId,
           sessionId: key.sessionId,
           error: err.message,
-          isTransient: transient
-        });
+          isTransient: transient,
+        }, 'Error reading session file');
         
         this.handleError(keyStr, key, err, transient);
       }
@@ -325,21 +329,21 @@ export class SessionWatcherService extends EventEmitter {
     if (isTransient) {
       state.transientErrorCount++;
       if (state.transientErrorCount >= this.config.maxTransientErrors) {
-        logger.warn('Max transient errors reached, disposing watcher', {
+        this.logger.warn({
           workflowId: key.workflowId,
           sessionId: key.sessionId,
-          errorCount: state.transientErrorCount
-        });
+          errorCount: state.transientErrorCount,
+        }, 'Max transient errors reached, disposing watcher');
         shouldDispose = true;
       }
     } else {
       state.permanentErrorCount++;
       if (state.permanentErrorCount >= this.config.maxPermanentErrors) {
-        logger.warn('Max permanent errors reached, disposing watcher', {
+        this.logger.warn({
           workflowId: key.workflowId,
           sessionId: key.sessionId,
-          errorCount: state.permanentErrorCount
-        });
+          errorCount: state.permanentErrorCount,
+        }, 'Max permanent errors reached, disposing watcher');
         shouldDispose = true;
       }
     }
@@ -368,10 +372,10 @@ export class SessionWatcherService extends EventEmitter {
       consecutiveFailures: (existing?.consecutiveFailures ?? 0) + 1
     });
     
-    logger.debug('Circuit breaker failure recorded', {
+    this.logger.debug({
       key: keyStr,
-      failures: this.circuitBreakers.get(keyStr)!.consecutiveFailures
-    });
+      failures: this.circuitBreakers.get(keyStr)!.consecutiveFailures,
+    }, 'Circuit breaker failure recorded');
   }
   
   /**
@@ -392,20 +396,20 @@ export class SessionWatcherService extends EventEmitter {
           `Circuit breaker open for ${keyStr}: ${breaker.consecutiveFailures} consecutive failures. ` +
           `Retry in ${waitSec}s`;
         
-        logger.warn('Circuit breaker blocking registration', {
+        this.logger.warn({
           key: keyStr,
           failures: breaker.consecutiveFailures,
-          waitSec
-        });
+          waitSec,
+        }, 'Circuit breaker blocking registration');
         
         throw new Error(errorMsg);
       }
       
       // Timeout elapsed - clear breaker
-      logger.info('Circuit breaker reset', {
+      this.logger.info({
         key: keyStr,
-        hadFailures: breaker.consecutiveFailures
-      });
+        hadFailures: breaker.consecutiveFailures,
+      }, 'Circuit breaker reset');
       this.circuitBreakers.delete(keyStr);
     }
   }

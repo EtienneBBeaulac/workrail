@@ -17,6 +17,7 @@ import type { WorkflowService } from '../application/services/workflow-service.j
 import type { IFeatureFlagProvider } from '../config/feature-flags.js';
 import type { SessionManager } from '../infrastructure/session/SessionManager.js';
 import type { HttpServer } from '../infrastructure/session/HttpServer.js';
+import type { ILoggerFactory, Logger } from '../core/logging/index.js';
 
 import type { ToolContext, ToolResult } from './types.js';
 import type { ToolAnnotations } from './tools.js';
@@ -99,11 +100,17 @@ function toMcpResult<T>(result: ToolResult<T>): McpCallToolResult {
 
 /**
  * Create the tool context from DI container.
+ * 
+ * CTC MCP Pattern: Context created with child logger per request.
  * This provides dependencies to all handlers.
  */
 export function createToolContext(): ToolContext {
+  const loggerFactory = container.resolve<ILoggerFactory>(DI.Logging.Factory);
   const workflowService = container.resolve<WorkflowService>(DI.Services.Workflow);
   const featureFlags = container.resolve<IFeatureFlagProvider>(DI.Infra.FeatureFlags);
+
+  // Create MCP-scoped logger
+  const logger = loggerFactory.create('MCP');
 
   let sessionManager: SessionManager | null = null;
   let httpServer: HttpServer | null = null;
@@ -111,12 +118,13 @@ export function createToolContext(): ToolContext {
   if (featureFlags.isEnabled('sessionTools')) {
     sessionManager = container.resolve<SessionManager>(DI.Infra.SessionManager);
     httpServer = container.resolve<HttpServer>(DI.Infra.HttpServer);
-    console.error('[FeatureFlags] Session tools enabled');
+    logger.info('Session tools enabled');
   } else {
-    console.error('[FeatureFlags] Session tools disabled (enable with WORKRAIL_ENABLE_SESSION_TOOLS=true)');
+    logger.debug('Session tools disabled');
   }
 
   return {
+    logger,
     workflowService,
     featureFlags,
     sessionManager,
@@ -273,7 +281,8 @@ export async function startServer(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
-  console.error('WorkRail MCP Server running on stdio');
+  const logger = container.resolve<ILoggerFactory>(DI.Logging.Factory).root;
+  logger.info('WorkRail MCP Server running on stdio');
 }
 
 

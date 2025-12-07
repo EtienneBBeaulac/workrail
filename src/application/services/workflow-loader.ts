@@ -5,7 +5,7 @@ import { IWorkflowStorage } from '../../types/storage';
 import { ValidationEngine } from './validation-engine';
 import { WorkflowNotFoundError } from '../../core/error-handler';
 import { isLoopStep, LoopStep } from '../../types/workflow-types';
-import { createLogger } from '../../utils/logger';
+import type { Logger, ILoggerFactory } from '../../core/logging/index.js';
 import { DI } from '../../di/tokens.js';
 
 /**
@@ -18,15 +18,18 @@ import { DI } from '../../di/tokens.js';
  */
 @singleton()
 export class DefaultWorkflowLoader implements IWorkflowLoader {
-  private readonly logger = createLogger('WorkflowLoader');
+  private readonly logger: Logger;
 
   constructor(
     @inject(DI.Storage.Primary) private readonly storage: IWorkflowStorage,
-    @inject(ValidationEngine) private readonly validationEngine: ValidationEngine
-  ) {}
+    @inject(ValidationEngine) private readonly validationEngine: ValidationEngine,
+    @inject(DI.Logging.Factory) loggerFactory: ILoggerFactory,
+  ) {
+    this.logger = loggerFactory.create('WorkflowLoader');
+  }
 
   async loadAndValidate(workflowId: string): Promise<LoadedWorkflow> {
-    this.logger.debug('Loading workflow', { workflowId });
+    this.logger.debug({ workflowId }, 'Loading workflow');
     
     // Load workflow from storage
     const workflow = await this.storage.getWorkflowById(workflowId);
@@ -43,11 +46,11 @@ export class DefaultWorkflowLoader implements IWorkflowLoader {
     // Build loop body step map for efficient filtering
     const loopBodySteps = this.buildLoopBodyStepSet(workflow);
     
-    this.logger.debug('Workflow loaded and validated', {
+    this.logger.debug({
       workflowId,
       stepCount: workflow.steps.length,
-      loopBodyStepCount: loopBodySteps.size
-    });
+      loopBodyStepCount: loopBodySteps.size,
+    }, 'Workflow loaded and validated');
 
     return { workflow, loopBodySteps };
   }

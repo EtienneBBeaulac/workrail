@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { GitWorkflowStorage } from '../../src/infrastructure/storage/git-workflow-storage';
+import { createGitWorkflowStorage } from '../helpers/create-git-storage.js';
 import fs from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
@@ -69,7 +70,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       const cachePath = path.join(cloneDir, 'sync-test-1');
       
       // Initial clone
-      const storage = new GitWorkflowStorage({
+      const storage = createGitWorkflowStorage({
         repositoryUrl: sourceRepo,
         branch: 'main',
         localPath: cachePath,
@@ -117,7 +118,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
     it('should update existing workflow when changed in repo', async () => {
       const cachePath = path.join(cloneDir, 'sync-test-2');
       
-      const storage = new GitWorkflowStorage({
+      const storage = createGitWorkflowStorage({
         repositoryUrl: sourceRepo,
         branch: 'main',
         localPath: cachePath,
@@ -156,7 +157,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       const cachePath = path.join(cloneDir, 'sync-test-3');
       
       // Long sync interval = won't pull
-      const storage = new GitWorkflowStorage({
+      const storage = createGitWorkflowStorage({
         repositoryUrl: sourceRepo,
         branch: 'main',
         localPath: cachePath,
@@ -229,7 +230,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
 
       const cachePath = path.join(cloneDir, 'branch-test');
       
-      const storage = new GitWorkflowStorage({
+      const storage = createGitWorkflowStorage({
         repositoryUrl: sourceRepo,
         branch: 'feature-branch',
         localPath: cachePath,
@@ -281,7 +282,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       await execAsync('git add . && git commit -m "Malicious"', { cwd: maliciousRepo });
       await execAsync('git branch -M main', { cwd: maliciousRepo });
 
-      const storage = new GitWorkflowStorage({
+      const storage = createGitWorkflowStorage({
         repositoryUrl: maliciousRepo,
         branch: 'main',
         localPath: path.join(cloneDir, 'security-test-1'),
@@ -334,7 +335,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       await execAsync('git add . && git commit -m "Huge workflow"', { cwd: largeRepo });
       await execAsync('git branch -M main', { cwd: largeRepo });
 
-      const storage = new GitWorkflowStorage({
+      const storage = createGitWorkflowStorage({
         repositoryUrl: largeRepo,
         branch: 'main',
         localPath: path.join(cloneDir, 'security-test-2'),
@@ -384,7 +385,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       await execAsync('git add . && git commit -m "Many workflows"', { cwd: manyRepo });
       await execAsync('git branch -M main', { cwd: manyRepo });
 
-      const storage = new GitWorkflowStorage({
+      const storage = createGitWorkflowStorage({
         repositoryUrl: manyRepo,
         branch: 'main',
         localPath: path.join(cloneDir, 'security-test-3'),
@@ -401,7 +402,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
     it('should sanitize Git ref names to prevent command injection', async () => {
       // Should throw during construction due to unsafe branch name
       expect(() => {
-        new GitWorkflowStorage({
+        createGitWorkflowStorage({
           repositoryUrl: sourceRepo,
           branch: 'main; rm -rf /', // Injection attempt
           localPath: path.join(cloneDir, 'security-test-4'),
@@ -428,7 +429,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       let blocked = 0;
       for (const url of dangerousUrls) {
         try {
-          new GitWorkflowStorage({
+          createGitWorkflowStorage({
             repositoryUrl: url,
             branch: 'main',
             localPath: path.join(cloneDir, 'security-test-urls'),
@@ -450,7 +451,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
 
   describe('Error Handling', () => {
     it('should handle non-existent repository gracefully', async () => {
-      const storage = new GitWorkflowStorage({
+      const storage = createGitWorkflowStorage({
         repositoryUrl: '/nonexistent/repo/path',
         branch: 'main',
         localPath: path.join(cloneDir, 'error-test-1'),
@@ -479,7 +480,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       await execAsync('git add . && git commit -m "Bad JSON"', { cwd: badRepo });
       await execAsync('git branch -M main', { cwd: badRepo });
 
-      const storage = new GitWorkflowStorage({
+      const storage = createGitWorkflowStorage({
         repositoryUrl: badRepo,
         branch: 'main',
         localPath: path.join(cloneDir, 'error-test-2'),
@@ -525,7 +526,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       await execAsync('git add . && git commit -m "Mismatch"', { cwd: mismatchRepo });
       await execAsync('git branch -M main', { cwd: mismatchRepo });
 
-      const storage = new GitWorkflowStorage({
+      const storage = createGitWorkflowStorage({
         repositoryUrl: mismatchRepo,
         branch: 'main',
         localPath: path.join(cloneDir, 'error-test-3'),
@@ -542,7 +543,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       const cachePath = path.join(cloneDir, 'corrupt-cache');
       
       // Create initial valid cache
-      const storage1 = new GitWorkflowStorage({
+      const storage1 = createGitWorkflowStorage({
         repositoryUrl: sourceRepo,
         branch: 'main',
         localPath: cachePath,
@@ -560,7 +561,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       await fs.rm(cachePath, { recursive: true, force: true });
 
       // Should re-clone when cache doesn't exist
-      const storage2 = new GitWorkflowStorage({
+      const storage2 = createGitWorkflowStorage({
         repositoryUrl: sourceRepo,
         branch: 'main',
         localPath: cachePath,
@@ -591,7 +592,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       await execAsync('git add . && git commit -m "Empty"', { cwd: emptyRepo });
       await execAsync('git branch -M main', { cwd: emptyRepo });
 
-      const storage = new GitWorkflowStorage({
+      const storage = createGitWorkflowStorage({
         repositoryUrl: emptyRepo,
         branch: 'main',
         localPath: path.join(cloneDir, 'edge-test-1'),
@@ -618,7 +619,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       await execAsync('git add . && git commit -m "No workflows"', { cwd: noWorkflowsRepo });
       await execAsync('git branch -M main', { cwd: noWorkflowsRepo });
 
-      const storage = new GitWorkflowStorage({
+      const storage = createGitWorkflowStorage({
         repositoryUrl: noWorkflowsRepo,
         branch: 'main',
         localPath: path.join(cloneDir, 'edge-test-2'),
@@ -672,7 +673,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       await execAsync('git add . && git commit -m "Mixed files"', { cwd: mixedRepo });
       await execAsync('git branch -M main', { cwd: mixedRepo });
 
-      const storage = new GitWorkflowStorage({
+      const storage = createGitWorkflowStorage({
         repositoryUrl: mixedRepo,
         branch: 'main',
         localPath: path.join(cloneDir, 'edge-test-3'),

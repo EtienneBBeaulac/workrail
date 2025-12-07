@@ -12,6 +12,7 @@ import { DefaultLoopRecoveryService } from '../../src/application/services/loop-
 import { LoopStackManager } from '../../src/application/services/loop-stack-manager';
 import { DefaultStepSelector } from '../../src/application/services/step-selector';
 import { LoopStepResolver } from '../../src/application/services/loop-step-resolver';
+import { FakeLoggerFactory } from '../helpers/FakeLoggerFactory.js';
 
 const mockWorkflow: Workflow = {
   id: 'test-workflow',
@@ -67,21 +68,23 @@ const mockWorkflowWithAgentRole: Workflow = {
 
 // Helper function to create a workflow service with a mock storage
 function createTestWorkflowService(mockStorage: IWorkflowStorage): DefaultWorkflowService {
+  const loggerFactory = new FakeLoggerFactory();
   const loopValidator = new EnhancedLoopValidator();
   const validator = new ValidationEngine(loopValidator);
   const resolver = new LoopStepResolver();
-  const stackManager = new LoopStackManager(resolver);
-  const recoveryService = new DefaultLoopRecoveryService(stackManager);
-  const stepSelector = new DefaultStepSelector();
-  const workflowLoader = new DefaultWorkflowLoader(mockStorage, validator);
+  const stackManager = new LoopStackManager(resolver, undefined, loggerFactory);
+  const recoveryService = new DefaultLoopRecoveryService(stackManager, loggerFactory);
+  const stepSelector = new DefaultStepSelector(loggerFactory);
+  const workflowLoader = new DefaultWorkflowLoader(mockStorage, validator, loggerFactory);
   const strategy = new IterativeStepResolutionStrategy(
     workflowLoader,
     recoveryService,
     stackManager,
-    stepSelector
+    stepSelector,
+    loggerFactory
   );
   
-  return new DefaultWorkflowService(mockStorage, validator, strategy);
+  return new DefaultWorkflowService(mockStorage, validator, strategy, loggerFactory);
 }
 
 describe('DefaultWorkflowService', () => {

@@ -52,7 +52,8 @@ import { LoopStepResolver } from './loop-step-resolver';
 import { checkContextSize } from '../../utils/context-size';
 import { ContextOptimizer } from './context-optimizer';
 import { IStepResolutionStrategy, StepResolutionResult } from './step-resolution/i-step-resolution-strategy';
-import { createLogger } from '../../utils/logger';
+import type { Logger, ILoggerFactory } from '../../core/logging/index.js';
+import { getBootstrapLogger } from '../../core/logging/index.js';
 import { IterativeStepResolutionStrategy } from './step-resolution/iterative-step-resolution-strategy';
 import { DefaultWorkflowLoader } from './workflow-loader';
 import { DefaultLoopRecoveryService } from './loop-recovery-service';
@@ -71,16 +72,16 @@ import { EnhancedLoopValidator } from './enhanced-loop-validator';
  */
 @singleton()
 export class DefaultWorkflowService implements WorkflowService {
-  private readonly logger = createLogger('WorkflowService');
+  private readonly logger: Logger;
 
   constructor(
     @inject(DI.Storage.Primary) private readonly storage: IWorkflowStorage,
     @inject(ValidationEngine) private readonly validationEngine: ValidationEngine,
-    @inject(IterativeStepResolutionStrategy) private readonly stepResolutionStrategy: IterativeStepResolutionStrategy
+    @inject(IterativeStepResolutionStrategy) private readonly stepResolutionStrategy: IterativeStepResolutionStrategy,
+    @inject(DI.Logging.Factory) loggerFactory: ILoggerFactory,
   ) {
-    this.logger.info('WorkflowService initialized', {
-      strategy: stepResolutionStrategy.constructor.name
-    });
+    this.logger = loggerFactory.create('WorkflowService');
+    this.logger.info({ strategy: stepResolutionStrategy.constructor.name }, 'WorkflowService initialized');
   }
 
   async listWorkflowSummaries(): Promise<WorkflowSummary[]> {
@@ -193,20 +194,27 @@ export function createWorkflowService(): DefaultWorkflowService {
   
   // For backward compatibility, manually create dependencies
   // This bypasses DI but allows legacy code to continue working
+  // Use bootstrap logger for legacy code (can't use DI here)
+  const fakeFactory: ILoggerFactory = {
+    create: (component: string) => getBootstrapLogger().child({ component }),
+    root: getBootstrapLogger(),
+  };
+  
   const storage = createDefaultWorkflowStorage();
   const loopValidator = new EnhancedLoopValidator();
   const validator = new ValidationEngine(loopValidator);
   const resolver = new LoopStepResolver();
-  const stackManager = new LoopStackManager(resolver);
-  const recoveryService = new DefaultLoopRecoveryService(stackManager);
-  const stepSelector = new DefaultStepSelector();
-  const workflowLoader = new DefaultWorkflowLoader(storage, validator);
+  const stackManager = new LoopStackManager(resolver, undefined, fakeFactory);
+  const recoveryService = new DefaultLoopRecoveryService(stackManager, fakeFactory);
+  const stepSelector = new DefaultStepSelector(fakeFactory);
+  const workflowLoader = new DefaultWorkflowLoader(storage, validator, fakeFactory);
   const strategy = new IterativeStepResolutionStrategy(
     workflowLoader,
     recoveryService,
     stackManager,
-    stepSelector
+    stepSelector,
+    fakeFactory
   );
   
-  return new DefaultWorkflowService(storage, validator, strategy);
+  return new DefaultWorkflowService(storage, validator, strategy, fakeFactory);
 }

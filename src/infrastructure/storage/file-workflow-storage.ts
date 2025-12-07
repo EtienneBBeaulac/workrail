@@ -8,6 +8,7 @@ import {
   SecurityError
 } from '../../core/error-handler';
 import { IFeatureFlagProvider, createFeatureFlagProvider } from '../../config/feature-flags';
+import type { Logger } from '../../core/logging/index.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -55,6 +56,8 @@ interface FileWorkflowStorageOptions {
   indexCacheTTLms?: number;
   /** Feature flag provider (optional, defaults to environment-based) */
   featureFlagProvider?: IFeatureFlagProvider;
+  /** Logger instance (optional, for logging warnings) */
+  logger?: Logger;
 }
 
 /**
@@ -70,6 +73,7 @@ export class FileWorkflowStorage implements IWorkflowStorage {
   private readonly indexCacheTTL: number;
   private readonly cache = new Map<string, CacheEntry>();
   private readonly featureFlags: IFeatureFlagProvider;
+  private readonly logger?: Logger;
   
   // Index cache to avoid expensive directory scans
   private workflowIndex: Map<string, WorkflowIndexEntry> | null = null;
@@ -82,6 +86,7 @@ export class FileWorkflowStorage implements IWorkflowStorage {
     this.cacheLimit = options.cacheSize ?? 100;
     this.indexCacheTTL = options.indexCacheTTLms ?? 30000; // 30 seconds
     this.featureFlags = options.featureFlagProvider ?? createFeatureFlagProvider();
+    this.logger = options.logger;
   }
 
   /**
@@ -229,7 +234,7 @@ export class FileWorkflowStorage implements IWorkflowStorage {
       const data = JSON.parse(raw) as Workflow;
       return data;
     } catch (err) {
-      console.warn(`[FileWorkflowStorage] Failed to load workflow from ${filename}:`, err);
+      this.logger?.warn({ err, filename }, 'Failed to load workflow from file');
       return null;
     }
   }

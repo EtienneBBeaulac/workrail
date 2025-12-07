@@ -1,4 +1,5 @@
 import { singleton, inject } from 'tsyringe';
+import { DI } from '../../../di/tokens.js';
 import { WorkflowStep, WorkflowGuidance } from '../../../types/mcp-types';
 import { IStepResolutionStrategy, StepResolutionResult } from './i-step-resolution-strategy';
 import { DefaultWorkflowLoader } from '../workflow-loader';
@@ -10,7 +11,7 @@ import { EnhancedContext, isLoopStep, LoopStep, LoopExecutionState } from '../..
 import { checkContextSize } from '../../../utils/context-size';
 import { ContextOptimizer } from '../context-optimizer';
 import { MaxIterationsExceededError } from '../../../core/error-handler';
-import { createLogger } from '../../../utils/logger';
+import type { Logger, ILoggerFactory } from '../../../core/logging/index.js';
 
 /**
  * Iterative step resolution strategy using explicit loop stack.
@@ -26,25 +27,28 @@ import { createLogger } from '../../../utils/logger';
  */
 @singleton()
 export class IterativeStepResolutionStrategy implements IStepResolutionStrategy {
-  private readonly logger = createLogger('IterativeStrategy');
+  private readonly logger: Logger;
 
   constructor(
     @inject(DefaultWorkflowLoader) private readonly workflowLoader: DefaultWorkflowLoader,
     @inject(DefaultLoopRecoveryService) private readonly loopRecoveryService: DefaultLoopRecoveryService,
     @inject(LoopStackManager) private readonly loopStackManager: LoopStackManager,
-    @inject(DefaultStepSelector) private readonly stepSelector: DefaultStepSelector
-  ) {}
+    @inject(DefaultStepSelector) private readonly stepSelector: DefaultStepSelector,
+    @inject(DI.Logging.Factory) loggerFactory: ILoggerFactory,
+  ) {
+    this.logger = loggerFactory.create('IterativeStrategy');
+  }
 
   async getNextStep(
     workflowId: string,
     completedSteps: string[],
     context: ConditionContext
   ): Promise<StepResolutionResult> {
-    this.logger.debug('Starting iterative step resolution', {
+    this.logger.debug({
       workflowId,
       completedStepsCount: completedSteps.length,
-      contextKeys: Object.keys(context)
-    });
+      contextKeys: Object.keys(context),
+    }, 'Starting iterative step resolution');
     
     // Validate context size
     const sizeCheck = checkContextSize(context);
@@ -107,11 +111,11 @@ export class IterativeStepResolutionStrategy implements IStepResolutionStrategy 
     // State transition logging
     let currentState: LoopExecutionState | undefined;
     const logTransition = (to: LoopExecutionState, data?: Record<string, unknown>) => {
-      this.logger.debug('State transition', {
+      this.logger.debug({
         from: currentState,
         to,
-        ...data
-      });
+        ...data,
+      }, 'State transition');
       currentState = to;
     };
     
@@ -163,6 +167,13 @@ export class IterativeStepResolutionStrategy implements IStepResolutionStrategy 
     }
     
     // Safety: MAX_ITERATIONS exceeded
+    this.logger.error({
+      workflowId: workflow.id,
+      iterations: MAX_ITERATIONS,
+      completedSteps: completed.length,
+      loopStackDepth: loopStack.length,
+    }, 'Workflow execution exceeded maximum iterations');
+    
     throw new MaxIterationsExceededError(
       `Workflow execution exceeded ${MAX_ITERATIONS} iterations. This likely indicates an infinite loop or logic error in the workflow.`,
       {
@@ -211,9 +222,9 @@ export class IterativeStepResolutionStrategy implements IStepResolutionStrategy 
       
       case 'complete':
         // Loop complete - clear _currentLoop if stack is now empty
-        this.logger.debug('Loop completed', {
-          stackDepth: loopStack.length
-        });
+        this.logger.debug({
+          stackDepth: loopStack.length,
+        }, 'Loop completed');
         if (loopStack.length === 0) {
           delete enhancedContext._currentLoop;
         }
@@ -296,10 +307,10 @@ export class IterativeStepResolutionStrategy implements IStepResolutionStrategy 
         // Loop should execute - push frame
         loopStack.push(loopFrame);
         
-        this.logger.debug('Pushed loop frame to stack', {
+        this.logger.debug({
           loopId: loopFrame.loopId,
-          stackDepth: loopStack.length
-        });
+          stackDepth: loopStack.length,
+        }, 'Pushed loop frame to stack');
         
         // Update context with loop entry
         enhancedContext._currentLoop = {
@@ -320,17 +331,18 @@ export class IterativeStepResolutionStrategy implements IStepResolutionStrategy 
         return true; // Loop entered, continue main loop
       } else {
         // Loop skipped (condition false from start)
-        this.logger.debug('Loop condition false, skipping loop', {
-          loopId: loopStep.id
-        });
+        this.logger.debug({
+          loopId: loopStep.id,
+        }, 'Loop condition false, skipping loop');
         completed.push(loopStep.id);
         return false; // Loop skipped, continue to find next step
       }
     } catch (error) {
       // Loop creation failed - log and skip
-      this.logger.error('Failed to create loop frame', error, {
-        loopId: loopStep.id
-      });
+      this.logger.error({
+        err: error,
+        loopId: loopStep.id,
+      }, 'Failed to create loop frame');
       completed.push(loopStep.id);
       return false; // Skip loop, continue
     }

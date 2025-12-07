@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest';
 import { GitWorkflowStorage } from '../../src/infrastructure/storage/git-workflow-storage';
+import { createGitWorkflowStorage } from '../helpers/create-git-storage.js';
 import fs from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
@@ -77,7 +78,7 @@ describe('GitWorkflowStorage Integration', () => {
 
   describe('Local Repository Cloning', () => {
     it('should clone a local Git repository', async () => {
-      const storage = new GitWorkflowStorage({
+      const storage = createGitWorkflowStorage({
         repositoryUrl: testRepoDir,
         branch: 'main',
         localPath: path.join(cacheDir, 'local-test')
@@ -91,7 +92,7 @@ describe('GitWorkflowStorage Integration', () => {
     });
 
     it('should load workflows from cloned repository', async () => {
-      const storage = new GitWorkflowStorage({
+      const storage = createGitWorkflowStorage({
         repositoryUrl: testRepoDir,
         branch: 'main',
         localPath: path.join(cacheDir, 'workflow-test')
@@ -105,7 +106,7 @@ describe('GitWorkflowStorage Integration', () => {
     });
 
     it('should get specific workflow by ID', async () => {
-      const storage = new GitWorkflowStorage({
+      const storage = createGitWorkflowStorage({
         repositoryUrl: testRepoDir,
         branch: 'main',
         localPath: path.join(cacheDir, 'get-test')
@@ -119,7 +120,7 @@ describe('GitWorkflowStorage Integration', () => {
     });
 
     it('should return null for non-existent workflow', async () => {
-      const storage = new GitWorkflowStorage({
+      const storage = createGitWorkflowStorage({
         repositoryUrl: testRepoDir,
         branch: 'main',
         localPath: path.join(cacheDir, 'null-test')
@@ -136,7 +137,7 @@ describe('GitWorkflowStorage Integration', () => {
       const localPath = path.join(cacheDir, 'offline-test');
       
       // First load - clones the repo
-      const storage1 = new GitWorkflowStorage({
+      const storage1 = createGitWorkflowStorage({
         repositoryUrl: testRepoDir,
         branch: 'main',
         localPath,
@@ -147,7 +148,7 @@ describe('GitWorkflowStorage Integration', () => {
       expect(workflows1).toHaveLength(1);
 
       // Second load - uses cached clone (even with invalid URL)
-      const storage2 = new GitWorkflowStorage({
+      const storage2 = createGitWorkflowStorage({
         repositoryUrl: 'https://invalid-url-that-does-not-exist.com/repo.git',
         branch: 'main',
         localPath, // Same local path
@@ -162,7 +163,7 @@ describe('GitWorkflowStorage Integration', () => {
 
   describe('Error Handling', () => {
     it('should handle invalid repository URL', async () => {
-      const storage = new GitWorkflowStorage({
+      const storage = createGitWorkflowStorage({
         repositoryUrl: 'https://github.com/nonexistent/repo-that-does-not-exist.git',
         branch: 'main',
         localPath: path.join(cacheDir, 'error-test'),
@@ -174,7 +175,7 @@ describe('GitWorkflowStorage Integration', () => {
     });
 
     it('should handle invalid branch name by falling back to default', async () => {
-      const storage = new GitWorkflowStorage({
+      const storage = createGitWorkflowStorage({
         repositoryUrl: testRepoDir,
         branch: 'nonexistent-branch',
         localPath: path.join(cacheDir, 'branch-error-test')
@@ -188,7 +189,7 @@ describe('GitWorkflowStorage Integration', () => {
 
     it('should accept any valid HTTPS URL with proper structure', () => {
       // Now accepts any properly-formed HTTPS URL to support self-hosted Git servers
-      expect(() => new GitWorkflowStorage({
+      expect(() => createGitWorkflowStorage({
         repositoryUrl: 'https://custom-git-host.example.com/org/repo.git',
         branch: 'main'
       })).not.toThrow();
@@ -203,7 +204,7 @@ describe('GitWorkflowStorage Integration', () => {
       ];
 
       for (const url of validHosts) {
-        expect(() => new GitWorkflowStorage({
+        expect(() => createGitWorkflowStorage({
           repositoryUrl: url,
           branch: 'main'
         })).not.toThrow();
@@ -219,7 +220,7 @@ describe('GitWorkflowStorage Integration', () => {
       ];
 
       for (const url of sshUrls) {
-        expect(() => new GitWorkflowStorage({
+        expect(() => createGitWorkflowStorage({
           repositoryUrl: url,
           branch: 'main'
         })).not.toThrow();
@@ -252,7 +253,7 @@ describe('GitWorkflowStorage Integration', () => {
       await execAsync('git add .', { cwd: testRepoDir });
       await execAsync('git commit -m "Add second workflow"', { cwd: testRepoDir });
 
-      const storage = new GitWorkflowStorage({
+      const storage = createGitWorkflowStorage({
         repositoryUrl: testRepoDir,
         branch: 'main',
         localPath: path.join(cacheDir, 'multi-test')
@@ -285,7 +286,7 @@ describe('GitWorkflowStorage Integration', () => {
       await execAsync('git add .', { cwd: testRepoDir });
       await execAsync('git commit -m "Add large workflow"', { cwd: testRepoDir });
 
-      const storage = new GitWorkflowStorage({
+      const storage = createGitWorkflowStorage({
         repositoryUrl: testRepoDir,
         branch: 'main',
         localPath: path.join(cacheDir, 'size-test'),
@@ -309,7 +310,7 @@ describe('GitWorkflowStorage URL Formats', () => {
 
     // All should be accepted as valid
     for (const url of sshUrls) {
-      expect(() => new GitWorkflowStorage({
+      expect(() => createGitWorkflowStorage({
         repositoryUrl: url,
         branch: 'main'
       })).not.toThrow();
@@ -324,7 +325,7 @@ describe('GitWorkflowStorage URL Formats', () => {
     ];
 
     for (const url of httpsUrls) {
-      expect(() => new GitWorkflowStorage({
+      expect(() => createGitWorkflowStorage({
         repositoryUrl: url,
         branch: 'main'
       })).not.toThrow();

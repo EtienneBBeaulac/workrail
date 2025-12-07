@@ -339,14 +339,15 @@ export class DashboardWriter {
   /**
    * Save to session (requires MCP context)
    * Note: This is a placeholder - actual implementation depends on your MCP setup
+   * 
+   * TODO: Implement via MCP session tools when available:
+   *   workrail_update_session(this.workflowId, this.sessionId, this.toJSON())
    */
   async save(): Promise<void> {
-    // This would be implemented based on your MCP tooling
-    console.log('DashboardWriter.save() - implement based on your MCP setup');
-    console.log('Workflow:', this.workflowId);
-    console.log('Session:', this.sessionId);
-    console.log('Data:', this.toJSON());
-    throw new Error('save() must be implemented with your MCP tool calls');
+    throw new Error(
+      'DashboardWriter.save() not implemented. ' +
+      'Use toUpdates() and call workrail_update_session() directly.'
+    );
   }
   
   /**

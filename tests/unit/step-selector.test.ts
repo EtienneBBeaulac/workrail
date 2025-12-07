@@ -2,12 +2,14 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { DefaultStepSelector } from '../../src/application/services/step-selector';
 import { Workflow } from '../../src/types/mcp-types';
 import { EnhancedContext } from '../../src/types/workflow-types';
+import { FakeLoggerFactory } from '../helpers/FakeLoggerFactory.js';
 
 describe('DefaultStepSelector', () => {
   let selector: DefaultStepSelector;
 
   beforeEach(() => {
-    selector = new DefaultStepSelector();
+    const loggerFactory = new FakeLoggerFactory();
+    selector = new DefaultStepSelector(loggerFactory);
   });
 
   describe('findEligibleStep', () => {
