@@ -4,6 +4,7 @@ import Ajv, { ValidateFunction } from 'ajv';
 import { IWorkflowStorage } from '../../types/storage';
 import { Workflow } from '../../types/mcp-types';
 import { InvalidWorkflowError } from '../../core/error-handler';
+import type { Logger } from '../../core/logging/index.js';
 
 /**
  * Decorator that filters or throws when underlying storage returns workflows
@@ -11,8 +12,10 @@ import { InvalidWorkflowError } from '../../core/error-handler';
  */
 export class SchemaValidatingWorkflowStorage implements IWorkflowStorage {
   private validator: ValidateFunction;
+  private readonly logger?: Logger;
 
-  constructor(private readonly inner: IWorkflowStorage) {
+  constructor(private readonly inner: IWorkflowStorage, logger?: Logger) {
+    this.logger = logger;
     const schemaPath = path.resolve(__dirname, '../../../spec/workflow.schema.json');
     const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf-8'));
     const ajv = new Ajv({ allErrors: true, strict: false });
@@ -36,8 +39,7 @@ export class SchemaValidatingWorkflowStorage implements IWorkflowStorage {
       try {
         return this.ensureValid(wf);
       } catch (err) {
-        console.error(`[SchemaValidation] Workflow '${wf.id}' failed validation:`, 
-          err instanceof Error ? err.message : err);
+        this.logger?.error({ err, workflowId: wf.id }, 'Workflow failed validation');
         return false; // Skip invalid workflows
       }
     });
@@ -50,8 +52,7 @@ export class SchemaValidatingWorkflowStorage implements IWorkflowStorage {
       this.ensureValid(wf);
       return wf;
     } catch (err) {
-      console.error(`[SchemaValidation] Workflow '${id}' failed validation:`, 
-        err instanceof Error ? err.message : err);
+      this.logger?.error({ err, workflowId: id }, 'Workflow failed validation');
       return null;
     }
   }

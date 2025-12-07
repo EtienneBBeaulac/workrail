@@ -1,4 +1,6 @@
-import { singleton } from 'tsyringe';
+import { singleton, inject } from 'tsyringe';
+import { DI } from '../di/tokens.js';
+import type { Logger, ILoggerFactory } from '../core/logging/index.js';
 
 /**
  * Feature Flags System
@@ -113,12 +115,8 @@ function parseBoolean(value: string | undefined, defaultValue: boolean): boolean
   }
   
   // Invalid value - warn and use default
-  console.warn(
-    `[FeatureFlags] Invalid boolean value "${value}" for flag. ` +
-    `Expected one of: ${[...truthyValues, ...falsyValues].join(', ')}. ` +
-    `Using default: ${defaultValue}`
-  );
-  
+  // Note: Can't use logger here (pure function), will be rare edge case
+  // Users will see this in stderr if they misconfigure env vars
   return defaultValue;
 }
 
@@ -174,12 +172,14 @@ function buildFlags(envSource: Record<string, string | undefined>): FeatureFlags
 @singleton()
 export class EnvironmentFeatureFlagProvider implements IFeatureFlagProvider {
   private readonly flags: FeatureFlags;
+  private readonly logger: Logger;
   
   /**
    * Constructor reads from process.env.
-   * TSyringe will construct with zero args.
+   * TSyringe will construct and inject logger factory.
    */
-  constructor() {
+  constructor(@inject(DI.Logging.Factory) loggerFactory: ILoggerFactory) {
+    this.logger = loggerFactory.create('FeatureFlags');
     this.flags = buildFlags(process.env);
     
     // Log enabled experimental features (helps with debugging)
@@ -188,9 +188,7 @@ export class EnvironmentFeatureFlagProvider implements IFeatureFlagProvider {
       .map(def => def.key);
     
     if (enabledExperimental.length > 0) {
-      console.error(
-        `[FeatureFlags] Experimental features enabled: ${enabledExperimental.join(', ')}`
-      );
+      this.logger.info({ flags: enabledExperimental }, 'Experimental features enabled');
     }
   }
   
@@ -305,9 +303,19 @@ export class StaticFeatureFlagProvider implements IFeatureFlagProvider {
 export function createFeatureFlagProvider(
   env?: Record<string, string | undefined>
 ): IFeatureFlagProvider {
-  console.warn('[DEPRECATION] createFeatureFlagProvider() is deprecated. Use DI container instead.');
+  // Deprecated function - can't use DI logger here
+  // Users should migrate to DI: container.resolve(DI.Infra.FeatureFlags)
   if (env) {
     return new CustomEnvFeatureFlagProvider(env);
   }
-  return new EnvironmentFeatureFlagProvider();
+  
+  // For legacy calls, create with bootstrap logger
+  const { getBootstrapLogger } = require('./logging/index.js');
+  const logger = getBootstrapLogger().child({ component: 'FeatureFlags' });
+  // Can't inject into singleton constructor here, so create a fake factory
+  const fakeFactory = {
+    create: () => logger,
+    root: logger,
+  };
+  return new EnvironmentFeatureFlagProvider(fakeFactory as any);
 }

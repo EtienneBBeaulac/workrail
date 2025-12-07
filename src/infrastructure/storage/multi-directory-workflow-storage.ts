@@ -5,6 +5,7 @@ import os from 'os';
 import { IWorkflowStorage } from '../../types/storage';
 import { Workflow, WorkflowSummary } from '../../types/mcp-types';
 import { FileWorkflowStorage } from './file-workflow-storage';
+import type { Logger } from '../../core/logging/index.js';
 
 /**
  * Multi-directory workflow storage that loads workflows from multiple directories
@@ -16,13 +17,15 @@ import { FileWorkflowStorage } from './file-workflow-storage';
  */
 export class MultiDirectoryWorkflowStorage implements IWorkflowStorage {
   private storageInstances: FileWorkflowStorage[] = [];
+  private readonly logger?: Logger;
 
   constructor(options: MultiDirectoryOptions = {}) {
+    this.logger = options.logger;
     const directories = this.resolveDirectories(options);
     
     // Create storage instances for each valid directory
     this.storageInstances = directories.map(dir => 
-      new FileWorkflowStorage(dir, options.fileStorageOptions)
+      new FileWorkflowStorage(dir, { ...options.fileStorageOptions, logger: this.logger })
     );
   }
 
@@ -101,7 +104,7 @@ export class MultiDirectoryWorkflowStorage implements IWorkflowStorage {
           }
         }
       } catch (error) {
-        console.warn(`Failed to load workflows from storage:`, error);
+        this.logger?.warn({ err: error }, 'Failed to load workflows from storage');
       }
     }
     
@@ -120,7 +123,7 @@ export class MultiDirectoryWorkflowStorage implements IWorkflowStorage {
           }
         }
       } catch (error) {
-        console.warn(`Failed to load workflow ${id} from storage:`, error);
+        this.logger?.warn({ err: error, workflowId: id }, 'Failed to load workflow from storage');
       }
     }
     
@@ -146,7 +149,7 @@ export class MultiDirectoryWorkflowStorage implements IWorkflowStorage {
           await storage.save();
           return;
         } catch (error) {
-          console.warn(`Failed to save workflow to storage:`, error);
+          this.logger?.warn({ err: error }, 'Failed to save workflow to storage');
         }
       }
     }
@@ -190,6 +193,7 @@ export interface MultiDirectoryOptions {
     cacheSize?: number;
     indexCacheTTLms?: number;
   };
+  logger?: Logger;
 }
 
 export interface DirectoryInfo {
@@ -247,7 +251,8 @@ export async function initializeUserWorkflowDirectory(): Promise<string> {
     
     return userDir;
   } catch (error) {
-    console.warn('Failed to initialize user workflow directory:', error);
+    // Can't use logger here (utility function, no DI)
+    // Error will be thrown and handled by caller
     throw error;
   }
 } 

@@ -6,6 +6,7 @@ import os from 'os';
 import { singleton, inject } from 'tsyringe';
 import { DI } from '../../di/tokens.js';
 import { SessionManager } from './SessionManager.js';
+import type { Logger, ILoggerFactory } from '../../core/logging/index.js';
 import cors from 'cors';
 import open from 'open';
 import { execSync } from 'child_process';
@@ -47,6 +48,7 @@ interface DashboardLock {
  */
 @singleton()
 export class HttpServer {
+  private readonly logger: Logger;
   private app: Application;
   private server: HttpServerType | null = null;
   private port: number;
@@ -56,8 +58,10 @@ export class HttpServer {
   private heartbeatInterval: NodeJS.Timeout | null = null;
   
   constructor(
-    @inject(SessionManager) private sessionManager: SessionManager
+    @inject(SessionManager) private sessionManager: SessionManager,
+    @inject(DI.Logging.Factory) loggerFactory: ILoggerFactory,
   ) {
+    this.logger = loggerFactory.create('HttpServer');
     // Config is set via setConfig() or defaults to empty object
     this.port = 3456; // Default port
     this.lockFile = path.join(os.homedir(), '.workrail', 'dashboard.lock');
@@ -102,7 +106,7 @@ export class HttpServer {
       const start = Date.now();
       res.on('finish', () => {
         const duration = Date.now() - start;
-        console.error(`[HTTP] ${req.method} ${req.path} ${res.statusCode} (${duration}ms)`);
+        this.logger.debug({ method: req.method, path: req.path, statusCode: res.statusCode, duration }, 'HTTP request');
       });
       next();
     });
@@ -296,7 +300,7 @@ export class HttpServer {
         try {
           res.write(`data: ${JSON.stringify({ type: 'update', session: event.session })}\n\n`);
         } catch (error) {
-          console.error(`[SSE] Write error for ${workflow}/${id}:`, error);
+          this.logger.error({ err: error, workflow, sessionId: id }, 'SSE write error');
           cleanup();
         }
       };
@@ -311,7 +315,7 @@ export class HttpServer {
           res.write(data);
           return true;
         } catch (error) {
-          console.error(`[SSE] Write error for ${workflow}/${id}:`, error);
+          this.logger.error({ err: error, workflow, sessionId: id }, 'SSE write error');
           cleanup();
           return false;
         }
@@ -325,7 +329,7 @@ export class HttpServer {
       
       // Set max connection time (30 minutes) to prevent indefinite resource hold
       maxConnectionTimeout = setTimeout(() => {
-        console.error(`[SSE] Max connection time reached for ${workflow}/${id}, closing`);
+        this.logger.warn({ workflow, sessionId: id }, 'SSE max connection time reached, closing');
         cleanup();
       }, 30 * 60 * 1000);
       
@@ -360,11 +364,11 @@ export class HttpServer {
       // Attach cleanup handlers for all disconnect scenarios
       req.on('close', cleanup);
       req.on('error', (error) => {
-        console.error(`[SSE] Request error for ${workflow}/${id}:`, error);
+        this.logger.error({ err: error, workflow, sessionId: id }, 'SSE request error');
         cleanup();
       });
       res.on('error', (error) => {
-        console.error(`[SSE] Response error for ${workflow}/${id}:`, error);
+        this.logger.error({ err: error, workflow, sessionId: id }, 'SSE response error');
         cleanup();
       });
       res.on('finish', cleanup);
@@ -382,7 +386,7 @@ export class HttpServer {
           message: `Session ${workflow}/${id} deleted successfully`
         });
       } catch (error: any) {
-        console.error('[HttpServer] Delete session error:', error);
+        this.logger.error({ err: error }, 'Delete session error');
         res.status(error.message?.includes('not found') ? 404 : 500).json({
           success: false,
           error: error.message || 'Failed to delete session'
@@ -410,7 +414,7 @@ export class HttpServer {
           count: sessions.length
         });
       } catch (error: any) {
-        console.error('[HttpServer] Bulk delete error:', error);
+        this.logger.error({ err: error }, 'Bulk delete error');
         res.status(500).json({
           success: false,
           error: error.message || 'Failed to delete sessions'
@@ -451,7 +455,7 @@ export class HttpServer {
     
     // Check if unified dashboard is disabled
     if (this.config.disableUnifiedDashboard || process.env.WORKRAIL_DISABLE_UNIFIED_DASHBOARD === '1') {
-      console.error('[Dashboard] Unified dashboard disabled, using legacy mode');
+      this.logger.info('Unified dashboard disabled, using legacy mode');
       return await this.startLegacyMode();
     }
     
@@ -463,7 +467,7 @@ export class HttpServer {
       } catch (error: any) {
         if (error.code === 'EADDRINUSE') {
           // Port busy even though we have lock - cleanup and fall back
-          console.error('[Dashboard] Port 3456 busy despite lock, falling back to legacy mode');
+          this.logger.warn('Port 3456 busy despite lock, falling back to legacy mode');
           await fs.unlink(this.lockFile).catch(() => {});
           return await this.startLegacyMode();
         }
@@ -471,7 +475,7 @@ export class HttpServer {
       }
     } else {
       // Secondary mode - dashboard already running
-      console.error('[Dashboard] ✅ Unified dashboard at http://localhost:3456');
+      this.logger.info('Unified dashboard at http://localhost:3456');
       return null;
     }
   }
@@ -497,7 +501,7 @@ export class HttpServer {
       await fs.writeFile(this.lockFile, JSON.stringify(lockData, null, 2), { flag: 'wx' });
       
       // Success! We are primary
-      console.error('[Dashboard] Primary elected');
+      this.logger.info('Primary elected');
       this.isPrimary = true;
       this.setupPrimaryCleanup();
       this.startHeartbeat();
@@ -509,7 +513,7 @@ export class HttpServer {
         return await this.reclaimStaleLock();
       } else if (error.code === 'EACCES' || error.code === 'EPERM') {
         // Permission denied
-        console.error('[Dashboard] Cannot write lock file (permission denied)');
+        this.logger.error('Cannot write lock file (permission denied)');
         return false;
       }
       throw error;
@@ -568,7 +572,7 @@ export class HttpServer {
         }
         
         // Process exists but not responding - try to kill it first
-        console.error(`[Dashboard] Primary (PID ${lockData.pid}) not responding, attempting graceful shutdown`);
+        this.logger.warn({ pid: lockData.pid }, 'Primary not responding, attempting graceful shutdown');
         try {
           process.kill(lockData.pid, 'SIGTERM');
           await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s
@@ -580,7 +584,7 @@ export class HttpServer {
           return false; // It recovered
         }
       } else {
-        console.error(`[Dashboard] Lock reclaim needed: ${reason}`);
+        this.logger.info({ reason }, 'Lock reclaim needed');
       }
       
       // ATOMIC RECLAIM: Write new lock to temp file, then rename
@@ -602,7 +606,7 @@ export class HttpServer {
         // Atomic rename (POSIX guarantees atomicity)
         await fs.rename(tempPath, this.lockFile);
         
-        console.error('[Dashboard] Lock reclaimed successfully');
+        this.logger.info('Lock reclaimed successfully');
         this.isPrimary = true;
         this.setupPrimaryCleanup();
         this.startHeartbeat();
@@ -614,12 +618,12 @@ export class HttpServer {
         
         if (error.code === 'ENOENT') {
           // Lock file was deleted by another process - try fresh
-          console.error('[Dashboard] Lock deleted during reclaim, trying fresh');
+          this.logger.info('Lock deleted during reclaim, trying fresh');
           return await this.tryBecomePrimary();
         }
         
         // Other error (permission, disk full, etc.)
-        console.error('[Dashboard] Lock reclaim failed:', error.message);
+        this.logger.warn({ err: error }, 'Lock reclaim failed');
         return false;
       }
       
@@ -630,7 +634,7 @@ export class HttpServer {
       }
       
       // Corrupt JSON or other read error
-      console.error('[Dashboard] Lock file corrupted, attempting fresh claim');
+      this.logger.warn('Lock file corrupted, attempting fresh claim');
       await fs.unlink(this.lockFile).catch(() => {});
       return await this.tryBecomePrimary();
     }
@@ -679,7 +683,7 @@ export class HttpServer {
       if (isCleaningUp || !this.isPrimary) return;
       isCleaningUp = true;
       
-      console.error('[Dashboard] Primary shutting down (sync cleanup)');
+      this.logger.info('Primary shutting down (sync cleanup)');
       
       // Stop heartbeat
       if (this.heartbeatInterval) {
@@ -691,11 +695,11 @@ export class HttpServer {
       try {
         const fsSync = require('fs');
         fsSync.unlinkSync(this.lockFile);
-        console.error('[Dashboard] Lock file released');
+        this.logger.debug('Lock file released');
       } catch (error: any) {
         // Ignore ENOENT (file already deleted) but log others
         if (error.code !== 'ENOENT') {
-          console.error('[Dashboard] Failed to release lock file:', error.message);
+          this.logger.warn({ err: error }, 'Failed to release lock file');
         }
       }
       
@@ -707,7 +711,7 @@ export class HttpServer {
       if (isCleaningUp || !this.isPrimary) return;
       isCleaningUp = true;
       
-      console.error('[Dashboard] Primary shutting down (async cleanup)');
+      this.logger.info('Primary shutting down (async cleanup)');
       
       // Stop heartbeat
       if (this.heartbeatInterval) {
@@ -718,10 +722,10 @@ export class HttpServer {
       // Async file delete is safe here
       try {
         await fs.unlink(this.lockFile);
-        console.error('[Dashboard] Lock file released');
+        this.logger.debug('Lock file released');
       } catch (error: any) {
         if (error.code !== 'ENOENT') {
-          console.error('[Dashboard] Failed to release lock file:', error.message);
+          this.logger.warn({ err: error }, 'Failed to release lock file');
         }
       }
       
@@ -730,9 +734,9 @@ export class HttpServer {
     
     // Signal handler that performs async cleanup then exits
     const signalHandler = (signal: string) => {
-      console.error(`[Dashboard] Received ${signal}`);
+      this.logger.info({ signal }, 'Received signal');
       cleanupAsync()
-        .catch(err => console.error('[Dashboard] Cleanup error:', err))
+        .catch(err => this.logger.error({ err }, 'Cleanup error'))
         .finally(() => process.exit(0));
     };
     
@@ -790,7 +794,7 @@ export class HttpServer {
         });
         
         this.baseUrl = `http://localhost:${this.port}`;
-        console.error(`[Dashboard] Started in legacy mode on port ${this.port}`);
+        this.logger.info({ port: this.port }, 'Started in legacy mode');
         this.printBanner();
         return this.baseUrl;
         
@@ -866,13 +870,13 @@ export class HttpServer {
       if (this.server) {
         // Timeout to prevent hanging if server.close() never completes
         const closeTimeout = setTimeout(() => {
-          console.error('[Dashboard] Server close timeout after 5s, forcing shutdown');
+          this.logger.warn('Server close timeout after 5s, forcing shutdown');
           resolve();
         }, 5000);
         
         this.server.close(() => {
           clearTimeout(closeTimeout);
-          console.error('HTTP server stopped');
+          this.logger.info('HTTP server stopped');
           resolve();
         });
       } else {
@@ -942,7 +946,7 @@ export class HttpServer {
         return; // Nothing to clean up
       }
       
-      console.error(`[Cleanup] Found ${busyPorts.length} workrail process(es), checking health...`);
+      this.logger.info({ count: busyPorts.length }, 'Found workrail processes, checking health');
       
       let cleanedCount = 0;
       
@@ -953,7 +957,7 @@ export class HttpServer {
         const isHealthy = await this.checkHealth(port);
         
         if (!isHealthy) {
-          console.error(`[Cleanup] Removing unresponsive process ${pid} on port ${port}`);
+          this.logger.warn({ pid, port }, 'Removing unresponsive process');
           try {
             // Try graceful shutdown first
             process.kill(pid, 'SIGTERM');
@@ -976,13 +980,13 @@ export class HttpServer {
       }
       
       if (cleanedCount > 0) {
-        console.error(`[Cleanup] Cleaned up ${cleanedCount} orphaned process(es)`);
+        this.logger.info({ count: cleanedCount }, 'Cleaned up orphaned processes');
         // Wait a bit for ports to be released
         await new Promise(r => setTimeout(r, 1000));
       }
     } catch (error) {
       // Cleanup failures shouldn't block startup
-      console.error('[Cleanup] Failed, continuing anyway:', error);
+      this.logger.warn({ err: error }, 'Cleanup failed, continuing anyway');
     }
   }
   
@@ -1049,22 +1053,22 @@ export class HttpServer {
       const busyPorts = await this.getWorkrailPorts();
       
       if (busyPorts.length === 0) {
-        console.error('[Cleanup] No workrail processes found');
+        this.logger.info('No workrail processes found');
         return 0;
       }
       
-      console.error(`[Cleanup] Found ${busyPorts.length} workrail process(es), removing all...`);
+      this.logger.info({ count: busyPorts.length }, 'Found workrail processes, removing all');
       
       let cleanedCount = 0;
       
       for (const { port, pid } of busyPorts) {
         // Don't kill ourselves
         if (pid === process.pid) {
-          console.error(`[Cleanup] Skipping current process ${pid}`);
+          this.logger.debug({ pid }, 'Skipping current process');
           continue;
         }
         
-        console.error(`[Cleanup] Killing process ${pid} on port ${port}`);
+        this.logger.info({ pid, port }, 'Killing process');
         try {
           // Try graceful shutdown first
           process.kill(pid, 'SIGTERM');
@@ -1075,31 +1079,31 @@ export class HttpServer {
             process.kill(pid, 0);
             // Still alive, force kill
             process.kill(pid, 'SIGKILL');
-            console.error(`[Cleanup] Force killed process ${pid}`);
+            this.logger.debug({ pid }, 'Force killed process');
           } catch {
             // Already dead
-            console.error(`[Cleanup] Process ${pid} terminated gracefully`);
+            this.logger.debug({ pid }, 'Process terminated gracefully');
           }
           
           cleanedCount++;
         } catch (error) {
-          console.error(`[Cleanup] Failed to kill process ${pid}:`, error);
+          this.logger.error({ err: error, pid }, 'Failed to kill process');
         }
       }
       
-      console.error(`[Cleanup] Cleaned up ${cleanedCount} process(es)`);
+      this.logger.info({ count: cleanedCount }, 'Cleaned up processes');
       
       // Also remove lock file
       try {
         await fs.unlink(this.lockFile);
-        console.error('[Cleanup] Removed lock file');
+        this.logger.debug('Removed lock file');
       } catch {
         // Lock file might not exist
       }
       
       return cleanedCount;
     } catch (error) {
-      console.error('[Cleanup] Full cleanup failed:', error);
+      this.logger.error({ err: error }, 'Full cleanup failed');
       throw error;
     }
   }

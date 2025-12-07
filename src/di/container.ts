@@ -108,7 +108,9 @@ async function registerStorageChain(): Promise<void> {
   container.register(DI.Storage.Validated, {
     useFactory: instanceCachingFactory((c: DependencyContainer) => {
       const base = c.resolve<any>(DI.Storage.Base) as any;
-      return new SchemaValidatingWorkflowStorage(base);
+      const loggerFactory = c.resolve<ILoggerFactory>(DI.Logging.Factory);
+      const logger = loggerFactory.create('SchemaValidatingWorkflowStorage');
+      return new SchemaValidatingWorkflowStorage(base, logger);
     }),
   });
 
