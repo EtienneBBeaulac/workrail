@@ -232,7 +232,7 @@ export class FileWorkflowProvider implements IWorkflowProvider {
         return null;
       }
       
-      return validated.value;  // Already immutable from Zod
+      return validated.value as any;  // TODO: Zod validation returns branded, but return type expects it
     } catch (error) {
       this.logger?.warn({ err: error, filename }, 'Failed to load workflow');
       return null;

@@ -1,426 +1,154 @@
-import { IWorkflowStorage } from '../../types/storage';
-import { Workflow, WorkflowSummary } from '../../types/mcp-types';
-import { 
-  validateSecureUrl, 
-  sanitizeId, 
-  validateSecurityOptions,
-  StorageSecurityOptions
-} from '../../utils/storage-security';
-import { SecurityError, StorageError, InvalidWorkflowError } from '../../core/error-handler';
-import type { Logger } from '../../core/logging/index.js';
+/**
+ * Remote Workflow Provider
+ * 
+ * Fetches workflows from HTTP registries.
+ * Result-based with retry logic.
+ */
 
-export interface RemoteWorkflowRegistryConfig extends StorageSecurityOptions {
+import { Result, ok, err } from 'neverthrow';
+import type { WorkflowId, Workflow } from '../../types/schemas.js';
+import { WorkflowSchema } from '../../types/schemas.js';
+import type { IWorkflowProvider } from '../../types/repository.js';
+import type { AppError } from '../../core/errors/index.js';
+import { Err } from '../../core/errors/index.js';
+import { validateJSONLoad } from '../../core/errors/index.js';
+
+export interface RemoteWorkflowRegistryConfig {
   baseUrl: string;
   apiKey?: string;
   timeout?: number;
   retryAttempts?: number;
-  userAgent?: string;
-  logger?: Logger;
-}
-
-interface RegistryResponse<T> {
-  data?: T;
-  workflows?: Workflow[];
-  summaries?: WorkflowSummary[];
-  message?: string;
-  error?: string;
+  logger?: any;
 }
 
 /**
- * Remote workflow storage that fetches workflows from a community registry.
- * Implements security best practices and proper error handling.
- * Similar to npm registry but for workflows.
+ * Fetches workflows from remote HTTP registry.
  */
-export class RemoteWorkflowStorage implements IWorkflowStorage {
-  private readonly config: Required<Omit<RemoteWorkflowRegistryConfig, 'logger'>>;
-  private readonly securityOptions: Required<StorageSecurityOptions>;
-  private readonly logger?: Logger;
+export class RemoteWorkflowProvider implements IWorkflowProvider {
+  private readonly baseUrl: string;
+  private readonly apiKey?: string;
+  private readonly timeout: number;
+  private readonly retryAttempts: number;
+  private readonly logger: any;
 
   constructor(config: RemoteWorkflowRegistryConfig) {
-    // Validate and secure the configuration
-    this.validateConfig(config);
-    this.securityOptions = validateSecurityOptions(config);
+    this.baseUrl = config.baseUrl;
+    this.apiKey = config.apiKey;
+    this.timeout = config.timeout || 10000;
+    this.retryAttempts = config.retryAttempts || 3;
     this.logger = config.logger;
+  }
+
+  async fetchAll(): Promise<Result<readonly Workflow[], AppError>> {
+    const url = `${this.baseUrl}/workflows`;
     
-    this.config = {
-      ...this.securityOptions,
-      baseUrl: config.baseUrl.replace(/\/$/, ''), // Remove trailing slash
-      apiKey: config.apiKey || '',
-      timeout: config.timeout || 10000,
-      retryAttempts: config.retryAttempts || 3,
-      userAgent: config.userAgent || 'workrail-mcp-server/1.0'
-    };
-  }
-
-  private validateConfig(config: RemoteWorkflowRegistryConfig): void {
-    if (!config.baseUrl) {
-      throw new SecurityError('baseUrl is required for remote storage', 'config-validation');
-    }
-
-    // Validate URL security
-    validateSecureUrl(config.baseUrl);
-
-    // Validate timeout and retry settings (allow shorter timeouts for testing)
-    if (config.timeout && (config.timeout < 100 || config.timeout > 60000)) {
-      throw new SecurityError('timeout must be between 100ms and 60000ms', 'config-validation');
-    }
-
-    if (config.retryAttempts && (config.retryAttempts < 0 || config.retryAttempts > 10)) {
-      throw new SecurityError('retryAttempts must be between 0 and 10', 'config-validation');
-    }
-  }
-
-  async loadAllWorkflows(): Promise<Workflow[]> {
     try {
-      const response = await this.fetchWithRetry('/workflows');
-      const data = await this.parseResponse<RegistryResponse<Workflow[]>>(response);
+      const response = await this.fetchWithRetry(url);
+      const data = await response.json();
       
-      // Handle different response formats
-      const workflows = data.workflows || data.data || [];
-      return this.validateWorkflows(workflows);
-    } catch (error) {
-      if (error instanceof SecurityError || error instanceof StorageError) {
-        throw error; // Re-throw known errors
+      if (!Array.isArray(data.workflows)) {
+        return err(Err.unexpectedError('remote fetch', new Error('Invalid response format')));
       }
       
-      // Transform unknown errors to storage errors for graceful degradation
-      throw new StorageError(
-        `Failed to load workflows from remote registry: ${(error as Error).message}`,
-        'remote-fetch'
-      );
-    }
-  }
-
-  async getWorkflowById(id: string): Promise<Workflow | null> {
-    try {
-      const sanitizedId = sanitizeId(id);
-      const response = await this.fetchWithRetry(`/workflows/${encodeURIComponent(sanitizedId)}`);
-      
-      if (!response.ok) {
-        if (response.status === 404) {
-          return null; // Workflow not found
+      // Validate each workflow
+      const workflows: Workflow[] = [];
+      for (const wf of data.workflows) {
+        const validated = WorkflowSchema.safeParse(wf);
+        if (validated.success) {
+          workflows.push(validated.data);
+        } else {
+          this.logger?.warn({ err: validated.error }, 'Invalid workflow from registry');
         }
-        throw new StorageError(
-          `Remote registry returned ${response.status}: ${response.statusText}`,
-          'remote-fetch'
-        );
       }
       
-      const workflow = await this.parseResponse<Workflow>(response);
-      
-      // Verify the returned workflow ID matches what we requested
-      if (workflow.id !== sanitizedId) {
-        throw new InvalidWorkflowError(
-          sanitizedId,
-          `Registry returned workflow with mismatched ID: ${workflow.id}`
-        );
-      }
-      
-      return workflow;
+      return ok(workflows);
     } catch (error) {
-      if (error instanceof SecurityError || 
-          error instanceof StorageError || 
-          error instanceof InvalidWorkflowError) {
-        throw error;
-      }
-      
-      throw new StorageError(
-        `Failed to load workflow ${id} from remote registry: ${(error as Error).message}`,
-        'remote-fetch'
-      );
+      return err(Err.unexpectedError('remote fetchAll', error as Error));
     }
   }
 
-  async listWorkflowSummaries(): Promise<WorkflowSummary[]> {
+  async fetchById(id: WorkflowId): Promise<Result<Workflow, AppError>> {
+    const url = `${this.baseUrl}/workflows/${id}`;
+    
     try {
-      const response = await this.fetchWithRetry('/workflows/summaries');
-      const data = await this.parseResponse<RegistryResponse<WorkflowSummary[]>>(response);
+      const response = await this.fetchWithRetry(url);
       
-      const summaries = data.summaries || data.data || [];
-      return this.validateSummaries(summaries);
-    } catch (error) {
-      if (error instanceof SecurityError || error instanceof StorageError) {
-        throw error;
+      if (response.status === 404) {
+        return err(Err.workflowNotFound(id as any as string, [], 0, []));
       }
       
-      throw new StorageError(
-        `Failed to load workflow summaries from remote registry: ${(error as Error).message}`,
-        'remote-fetch'
-      );
+      const data = await response.json();
+      
+      const validated = validateJSONLoad(WorkflowSchema, data, url);
+      if (!validated.isOk()) {
+        return err(validated.error);
+      }
+      
+      return ok(validated.value as any);  // TODO: fix typing
+    } catch (error) {
+      return err(Err.unexpectedError('remote fetchById', error as Error));
     }
   }
-
-  async save(workflow: Workflow): Promise<void> {
-    try {
-      const sanitizedWorkflow = this.validateWorkflowForSave(workflow);
-      
-      const response = await this.fetchWithRetry('/workflows', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(this.config.apiKey && { 'Authorization': `Bearer ${this.config.apiKey}` })
-        },
-        body: JSON.stringify(sanitizedWorkflow)
-      });
-
-      if (!response.ok) {
-        const errorData = await this.parseResponse<RegistryResponse<never>>(response);
-        throw new StorageError(
-          `Failed to publish workflow: ${errorData.message || errorData.error || 'Unknown error'}`,
-          'remote-save'
-        );
-      }
-    } catch (error) {
-      if (error instanceof SecurityError || 
-          error instanceof StorageError || 
-          error instanceof InvalidWorkflowError) {
-        throw error;
-      }
-      
-      throw new StorageError(
-        `Failed to save workflow to remote registry: ${(error as Error).message}`,
-        'remote-save'
-      );
-    }
-  }
-
-  private async fetchWithRetry(path: string, options?: RequestInit): Promise<Response> {
-    const url = `${this.config.baseUrl}${path}`;
+  
+  private async fetchWithRetry(url: string): Promise<Response> {
     let lastError: Error | null = null;
     
-    for (let attempt = 1; attempt <= this.config.retryAttempts; attempt++) {
+    for (let attempt = 0; attempt < this.retryAttempts; attempt++) {
       try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), this.config.timeout);
+        const headers: Record<string, string> = {};
+        if (this.apiKey) {
+          headers['Authorization'] = `Bearer ${this.apiKey}`;
+        }
         
         const response = await fetch(url, {
-          ...options,
-          signal: controller.signal,
-          headers: {
-            'User-Agent': this.config.userAgent,
-            'Accept': 'application/json',
-            ...options?.headers
-          }
+          headers,
+          signal: AbortSignal.timeout(this.timeout),
         });
         
-        clearTimeout(timeoutId);
         return response;
       } catch (error) {
         lastError = error as Error;
-        
-        if (attempt === this.config.retryAttempts) {
-          break; // Don't wait after the last attempt
+        if (attempt < this.retryAttempts - 1) {
+          await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
         }
-        
-        // Exponential backoff with jitter
-        const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
-        await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
     
-    throw new StorageError(
-      `Failed to fetch ${url} after ${this.config.retryAttempts} attempts: ${lastError?.message}`,
-      'network-timeout'
-    );
-  }
-
-  private async parseResponse<T>(response: Response): Promise<T> {
-    try {
-      const text = await response.text();
-      
-      if (!text) {
-        throw new StorageError('Empty response from remote registry', 'parse-error');
-      }
-      
-      return JSON.parse(text) as T;
-    } catch (error) {
-      if (error instanceof StorageError) {
-        throw error;
-      }
-      
-      throw new StorageError(
-        `Failed to parse response from remote registry: ${(error as Error).message}`,
-        'parse-error'
-      );
-    }
-  }
-
-  private validateWorkflows(workflows: unknown[]): Workflow[] {
-    if (!Array.isArray(workflows)) {
-      throw new StorageError('Remote registry returned invalid workflows data', 'validation-error');
-    }
-    
-    return workflows.filter((workflow) => {
-      try {
-        // Basic validation - detailed validation should be handled by schema validator decorator
-        if (!workflow || typeof workflow !== 'object') {
-          return false;
-        }
-        
-        const wf = workflow as any;
-        if (!wf.id || !wf.name || !wf.steps) {
-          return false;
-        }
-        
-        // Validate the ID is safe
-        sanitizeId(wf.id);
-        return true;
-      } catch {
-        return false; // Skip invalid workflows
-      }
-    }) as Workflow[];
-  }
-
-  private validateSummaries(summaries: unknown[]): WorkflowSummary[] {
-    if (!Array.isArray(summaries)) {
-      throw new StorageError('Remote registry returned invalid summaries data', 'validation-error');
-    }
-    
-    return summaries.filter((summary) => {
-      try {
-        if (!summary || typeof summary !== 'object') {
-          return false;
-        }
-        
-        const s = summary as any;
-        if (!s.id || !s.name) {
-          return false;
-        }
-        
-        // Validate the ID is safe
-        sanitizeId(s.id);
-        return true;
-      } catch {
-        return false;
-      }
-    }) as WorkflowSummary[];
-  }
-
-  private validateWorkflowForSave(workflow: Workflow): Workflow {
-    if (!workflow || typeof workflow !== 'object') {
-      throw new InvalidWorkflowError('unknown', 'Workflow must be a valid object');
-    }
-    
-    if (!workflow.id || !workflow.name || !workflow.steps) {
-      throw new InvalidWorkflowError(
-        workflow.id || 'unknown',
-        'Workflow must have id, name, and steps'
-      );
-    }
-    
-    // Sanitize the ID
-    const sanitizedId = sanitizeId(workflow.id);
-    
-    return {
-      ...workflow,
-      id: sanitizedId
-    };
+    throw lastError!;
   }
 }
 
 /**
- * Multi-source workflow storage that combines bundled, local, and remote workflows.
- * Uses composition to cleanly separate concerns.
+ * Community workflows storage (combines remote + local).
  */
-export class CommunityWorkflowStorage implements IWorkflowStorage {
-  private readonly sources: IWorkflowStorage[];
-  private readonly remoteStorage: RemoteWorkflowStorage;
-  private readonly logger?: Logger;
-  
+export class CommunityWorkflowStorage implements IWorkflowProvider {
   constructor(
-    bundledStorage: IWorkflowStorage,
-    localStorage: IWorkflowStorage,
-    remoteConfig: RemoteWorkflowRegistryConfig,
-    logger?: Logger,
-  ) {
-    this.logger = logger;
-    this.remoteStorage = new RemoteWorkflowStorage({ ...remoteConfig, logger });
-    this.sources = [bundledStorage, localStorage, this.remoteStorage];
+    private readonly sources: IWorkflowProvider[]
+  ) {}
+
+  async fetchAll(): Promise<Result<readonly Workflow[], AppError>> {
+    const results = await Promise.allSettled(
+      this.sources.map(s => s.fetchAll())
+    );
+    
+    const workflows = results
+      .filter((r): r is PromiseFulfilledResult<Result<readonly Workflow[], AppError>> => 
+        r.status === 'fulfilled' && r.value.isOk()
+      )
+      .flatMap(r => (r.value as any).value);
+    
+    return ok(workflows);
   }
 
-  async loadAllWorkflows(): Promise<Workflow[]> {
-    const allWorkflows: Workflow[] = [];
-    const seenIds = new Set<string>();
-    
-    // Load from all sources, with later sources taking precedence
+  async fetchById(id: WorkflowId): Promise<Result<Workflow, AppError>> {
     for (const source of this.sources) {
-      try {
-        const workflows = await source.loadAllWorkflows();
-        
-        for (const workflow of workflows) {
-          if (seenIds.has(workflow.id)) {
-            // Replace existing workflow with same ID
-            const existingIndex = allWorkflows.findIndex(wf => wf.id === workflow.id);
-            if (existingIndex >= 0) {
-              allWorkflows[existingIndex] = workflow;
-            }
-          } else {
-            allWorkflows.push(workflow);
-            seenIds.add(workflow.id);
-          }
-        }
-      } catch (error) {
-        // For storage sources, we want to continue even if one fails
-        // This is intentional graceful degradation behavior
-        if (error instanceof StorageError) {
-          this.logger?.warn({ err: error }, 'Storage source failed (graceful degradation)');
-        } else {
-          this.logger?.warn({ err: error }, 'Unexpected error from storage source');
-        }
-      }
+      const result = await source.fetchById(id);
+      if (result.isOk()) return result;
     }
     
-    return allWorkflows;
+    return err(Err.workflowNotFound(id as any as string, [], 0, []));
   }
+}
 
-  async getWorkflowById(id: string): Promise<Workflow | null> {
-    try {
-      const sanitizedId = sanitizeId(id);
-      
-      // Search in reverse order (later sources take precedence)
-      for (let i = this.sources.length - 1; i >= 0; i--) {
-        try {
-          const workflow = await this.sources[i]!.getWorkflowById(sanitizedId);
-          if (workflow) {
-            return workflow;
-          }
-        } catch (error) {
-          // Continue searching other sources if one fails
-          if (error instanceof StorageError) {
-            this.logger?.warn({ err: error, workflowId: sanitizedId }, 'Storage source failed for workflow');
-          } else {
-            this.logger?.warn({ err: error, workflowId: sanitizedId }, 'Unexpected error from storage source');
-          }
-        }
-      }
-      
-      return null;
-    } catch (error) {
-      if (error instanceof SecurityError || error instanceof InvalidWorkflowError) {
-        throw error; // Don't continue with invalid IDs
-      }
-      
-      throw new StorageError(
-        `Failed to retrieve workflow ${id}: ${(error as Error).message}`,
-        'multi-source-error'
-      );
-    }
-  }
-
-  async listWorkflowSummaries(): Promise<WorkflowSummary[]> {
-    // Reuse loadAllWorkflows for consistency and caching benefits
-    const workflows = await this.loadAllWorkflows();
-    return workflows.map(workflow => ({
-      id: workflow.id,
-      name: workflow.name,
-      description: workflow.description,
-      category: 'community',
-      version: workflow.version
-    }));
-  }
-
-  async save(workflow: Workflow): Promise<void> {
-    // Delegate to remote storage for publishing
-    return this.remoteStorage.save(workflow);
-  }
-} 
+// Aliases
+export const RemoteWorkflowStorage = RemoteWorkflowProvider;
