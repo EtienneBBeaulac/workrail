@@ -66,17 +66,25 @@ export class RepositoryInitializer implements IRepositoryInitializer {
   ) {}
   
   async initialize(): Promise<Result<IReadyRepository, StartupFailedError>> {
+    console.log('[RepositoryInitializer] initialize() called');
+    
     // 1. Try load persisted snapshot
+    console.log('[RepositoryInitializer] Loading persisted snapshot...');
     const persisted = await this.loadPersistedSnapshot();
+    console.log('[RepositoryInitializer] Persisted snapshot:', persisted ? 'found' : 'not found');
     if (persisted && this.isFresh(persisted)) {
       this.logger.info('Using persisted snapshot (fresh)');
+      console.log('[RepositoryInitializer] Using fresh persisted snapshot');
       return ok(new ReadyRepository(this.deserialize(persisted), this.logger));
     }
     
     // 2. Fetch from provider
     this.logger.info('Fetching from provider');
+    console.log('[RepositoryInitializer] Fetching from provider...');
     const fetchResult = await this.fetchFromProvider();
+    console.log('[RepositoryInitializer] Provider fetch result:', fetchResult.isOk() ? 'OK' : 'ERR');
     if (fetchResult.isOk()) {
+      console.log('[RepositoryInitializer] Saving snapshot and returning ReadyRepository');
       await this.savePersistedSnapshot(fetchResult.value);
       return ok(new ReadyRepository(fetchResult.value, this.logger));
     }

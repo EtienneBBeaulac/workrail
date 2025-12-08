@@ -29,9 +29,14 @@ export class RepositoryStateManager {
    * Initialize repository (call once at startup).
    */
   async initialize(): Promise<Result<IReadyRepository, StartupFailedError>> {
+    console.log('[RepositoryStateManager] initialize() called');
     const result = await this.initializer.initialize();
+    console.log('[RepositoryStateManager] initializer.initialize() returned:', result.isOk() ? 'OK' : 'ERR');
     if (result.isOk()) {
+      console.log('[RepositoryStateManager] Setting state to ready');
       this.state = { _tag: 'ready', repository: result.value };
+    } else {
+      console.error('[RepositoryStateManager] Initialization failed:', result.error);
     }
     return result;
   }
