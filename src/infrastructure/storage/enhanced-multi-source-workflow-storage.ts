@@ -5,11 +5,15 @@ import os from 'os';
 import { inject, singleton } from 'tsyringe';
 import { DI } from '../../di/tokens.js';
 import { IWorkflowStorage } from '../../types/storage';
-import { Workflow, WorkflowSummary } from '../../types/mcp-types';
+import type { Workflow, WorkflowSummary, WorkflowId } from '../../types/schemas.js';
+import type { IWorkflowProvider } from '../../types/repository.js';
+import type { AppError } from '../../core/errors/index.js';
+import { Err } from '../../core/errors/index.js';
+import { Result, ok, err } from 'neverthrow';
 import { FileWorkflowProvider } from './file-workflow-storage.js';
-import { GitWorkflowStorage, GitWorkflowConfig } from './git-workflow-storage';
-import { RemoteWorkflowStorage, RemoteWorkflowRegistryConfig } from './remote-workflow-storage';
-import { PluginWorkflowStorage, PluginWorkflowConfig } from './plugin-workflow-storage';
+import { GitWorkflowProvider, GitWorkflowConfig } from './git-workflow-storage.js';
+import { RemoteWorkflowProvider, RemoteWorkflowRegistryConfig } from './remote-workflow-storage.js';
+import { PluginWorkflowProvider, PluginWorkflowConfig } from './plugin-workflow-storage.js';
 import type { Logger, ILoggerFactory } from '../../core/logging/index.js';
 import { getBootstrapLogger } from '../../core/logging/index.js';
 
@@ -112,10 +116,10 @@ export interface EnhancedMultiSourceConfig {
  * NOTE: Not a singleton - created via factory in DI container.
  * Tests can create instances directly with custom config.
  */
-export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
+export class EnhancedMultiSourceWorkflowStorage implements IWorkflowProvider {
   private readonly logger: Logger;
   private readonly loggerFactory: ILoggerFactory;
-  private readonly storageInstances: IWorkflowStorage[] = [];
+  private readonly storageInstances: IWorkflowProvider[] = [];
   private readonly config: Required<
     Pick<EnhancedMultiSourceConfig, 'warnOnSourceFailure' | 'gracefulDegradation'>
   >;
@@ -242,8 +246,8 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
     return config;
   }
 
-  private initializeStorageSources(config: EnhancedMultiSourceConfig): IWorkflowStorage[] {
-    const instances: IWorkflowStorage[] = [];
+  private initializeStorageSources(config: EnhancedMultiSourceConfig): IWorkflowProvider[] {
+    const instances: IWorkflowProvider[] = [];
 
     // Priority 1: Bundled workflows (lowest priority)
     if (config.includeBundled !== false) {
@@ -268,7 +272,7 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
         try {
           const pluginConfig = config.pluginConfigs[i]!;
           const pluginLogger = this.loggerFactory.create('PluginWorkflowStorage');
-          instances.push(new PluginWorkflowStorage({ ...pluginConfig, logger: pluginLogger }));
+          instances.push(new PluginWorkflowProvider({ ...pluginConfig, logger: pluginLogger }));
           this.sourceNames.push(`plugin-${i}`);
         } catch (error) {
           this.handleSourceError(`plugin-${i}`, error as Error);
@@ -317,7 +321,7 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
         try {
           const gitConfig = config.gitRepositories[i]!;
           const gitLogger = this.loggerFactory.create('GitWorkflowStorage');
-          instances.push(new GitWorkflowStorage(gitConfig, gitLogger));
+          instances.push(new GitWorkflowProvider(gitConfig, gitLogger));
           const repoName = this.extractRepoName(gitConfig.repositoryUrl);
           this.sourceNames.push(`git:${repoName}`);
         } catch (error) {
@@ -332,7 +336,7 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
         try {
           const remoteConfig = config.remoteRegistries[i]!;
           const remoteLogger = this.loggerFactory.create('RemoteWorkflowStorage');
-          instances.push(new RemoteWorkflowStorage({ ...remoteConfig, logger: remoteLogger }));
+          instances.push(new RemoteWorkflowProvider({ ...remoteConfig, logger: remoteLogger }));
           this.sourceNames.push(`remote:${remoteConfig.baseUrl}`);
         } catch (error) {
           this.handleSourceError(`remote-${i}`, error as Error);
@@ -360,7 +364,7 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
     return instances;
   }
 
-  async loadAllWorkflows(): Promise<Workflow[]> {
+  async fetchAll(): Promise<Result<readonly Workflow[], AppError>> {
     const allWorkflows: Workflow[] = [];
     const seenIds = new Set<string>();
 
@@ -370,7 +374,12 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
       const sourceName = this.sourceNames[i] || `source-${i}`;
 
       try {
-        const workflows = await storage.loadAllWorkflows();
+        const result = await storage.fetchAll();
+        if (result.isErr()) {
+          this.handleSourceError(sourceName, result.error as any);
+          continue;
+        }
+        const workflows = result.value;
 
         // Add workflows, with later ones overriding earlier ones with same ID
         for (const workflow of workflows) {
@@ -396,29 +405,30 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
       }
     }
 
-    return allWorkflows;
+    return ok(allWorkflows);
   }
 
-  async getWorkflowById(id: string): Promise<Workflow | null> {
+  async fetchById(id: WorkflowId): Promise<Result<Workflow, AppError>> {
     // Search in reverse order (later sources take precedence)
     for (let i = this.storageInstances.length - 1; i >= 0; i--) {
       const storage = this.storageInstances[i]!;
       const sourceName = this.sourceNames[i] || `source-${i}`;
 
       try {
-        const workflow = await storage.getWorkflowById(id);
+        const result = await storage.fetchById(id);
+        const workflow = result.isOk() ? result.value : null;
         if (workflow) {
-          return workflow;
+          return ok(workflow);
         }
       } catch (error) {
         this.handleSourceError(sourceName, error as Error);
       }
     }
 
-    return null;
+    return err(Err.workflowNotFound(id as any as string, [], 0, []));
   }
 
-  async listWorkflowSummaries(): Promise<WorkflowSummary[]> {
+  async listWorkflowSummaries(): Promise<WorkflowSummary[]> {  // Still old interface for now
     const allSummaries: WorkflowSummary[] = [];
     const seenIds = new Set<string>();
 
@@ -428,7 +438,15 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
       const sourceName = this.sourceNames[i] || `source-${i}`;
 
       try {
-        const summaries = await storage.listWorkflowSummaries();
+        const result = await storage.fetchAll();
+        if (result.isErr()) continue;
+        
+        const summaries = result.value.map(wf => ({
+          id: wf.id as any,
+          name: wf.name,
+          description: wf.description,
+          version: wf.version,
+        }));
 
         for (const summary of summaries) {
           if (seenIds.has(summary.id)) {
@@ -455,12 +473,13 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
    * Typically this would be the project directory.
    */
   async save(workflow: Workflow): Promise<void> {
-    // Try to save to sources in reverse order (highest priority first)
+    // Providers don't support save (read-only)
+    // TODO: Add save support if needed
     for (let i = this.storageInstances.length - 1; i >= 0; i--) {
       const storage = this.storageInstances[i]!;
-      if (storage.save) {
+      if ((storage as any).save) {
         try {
-          await storage.save(workflow);
+          await (storage as any).save(workflow);
           return; // Success
         } catch (error) {
           // Continue to next source
@@ -520,7 +539,7 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
     }
   }
 
-  private getStorageType(storage: IWorkflowStorage): string {
+  private getStorageType(storage: IWorkflowProvider): string {
     const className = storage.constructor.name;
     if (className.includes('Git')) return 'git';
     if (className.includes('Remote')) return 'remote';
