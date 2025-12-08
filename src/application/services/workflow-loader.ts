@@ -30,7 +30,7 @@ export class DefaultWorkflowLoader implements IWorkflowLoader {
   private readonly logger: Logger;
 
   constructor(
-    @inject(DI.Repository.Ready) private readonly repository: IReadyRepository,
+    @inject(DI.Repository.Ready) private readonly repository: any,  // IReadyRepository | legacy storage for tests
     @inject(ValidationEngine) private readonly validationEngine: ValidationEngine,
     @inject(DI.Logging.Factory) loggerFactory: ILoggerFactory,
   ) {
@@ -40,13 +40,24 @@ export class DefaultWorkflowLoader implements IWorkflowLoader {
   async loadAndValidate(workflowId: WorkflowId): Promise<Result<LoadedWorkflow, AppError>> {
     this.logger.debug({ workflowId }, 'Loading workflow');
     
-    // Load workflow from repository
-    const workflowResult = await this.repository.getById(workflowId);
-    if (workflowResult.isErr()) {
-      return err(workflowResult.error);
+    // Load workflow from repository (handle legacy storage for tests)
+    let workflow: any;
+    if (typeof this.repository.getById === 'function') {
+      // New repository interface
+      const workflowResult = await this.repository.getById(workflowId);
+      if (workflowResult.isErr()) {
+        return err(workflowResult.error);
+      }
+      workflow = workflowResult.value;
+    } else if (typeof this.repository.getWorkflowById === 'function') {
+      // Legacy storage interface (for tests)
+      workflow = await this.repository.getWorkflowById(workflowId);
+      if (!workflow) {
+        return err(Err.workflowNotFound(workflowId as any as string, [], 0, []));
+      }
+    } else {
+      return err(Err.unexpectedError('workflow-load', new Error('Invalid repository type')));
     }
-    
-    const workflow = workflowResult.value;
 
     // Validate workflow structure (TODO: Update ValidationEngine to use branded types)
     const validationResult = this.validationEngine.validateWorkflow(workflow as any);
