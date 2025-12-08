@@ -75,7 +75,7 @@ export class DefaultWorkflowService implements WorkflowService {
   private readonly logger: Logger;
 
   constructor(
-    @inject(DI.Storage.Primary) private readonly storage: IWorkflowStorage,
+    @inject(DI.Storage.Primary) private readonly storage: any,  // TODO Phase 3: Change to DI.Repository.Ready
     @inject(ValidationEngine) private readonly validationEngine: ValidationEngine,
     @inject(IterativeStepResolutionStrategy) private readonly stepResolutionStrategy: IterativeStepResolutionStrategy,
     @inject(DI.Logging.Factory) loggerFactory: ILoggerFactory,
@@ -111,7 +111,7 @@ export class DefaultWorkflowService implements WorkflowService {
       throw new WorkflowNotFoundError(workflowId);
     }
 
-    const step = workflow.steps.find((s) => s.id === stepId);
+    const step = workflow.steps.find((s: any) => s.id === stepId);
     if (!step) {
       throw new StepNotFoundError(stepId, workflowId);
     }
@@ -200,14 +200,14 @@ export function createWorkflowService(): DefaultWorkflowService {
     root: getBootstrapLogger(),
   };
   
-  const storage = createDefaultWorkflowStorage();
+  const storage = createDefaultWorkflowStorage() as any;  // Legacy factory - will be removed
   const loopValidator = new EnhancedLoopValidator();
   const validator = new ValidationEngine(loopValidator);
   const resolver = new LoopStepResolver();
   const stackManager = new LoopStackManager(resolver, undefined, fakeFactory);
   const recoveryService = new DefaultLoopRecoveryService(stackManager, fakeFactory);
   const stepSelector = new DefaultStepSelector(fakeFactory);
-  const workflowLoader = new DefaultWorkflowLoader(storage, validator, fakeFactory);
+  const workflowLoader = new DefaultWorkflowLoader(storage as any, validator, fakeFactory);
   const strategy = new IterativeStepResolutionStrategy(
     workflowLoader,
     recoveryService,
@@ -216,5 +216,5 @@ export function createWorkflowService(): DefaultWorkflowService {
     fakeFactory
   );
   
-  return new DefaultWorkflowService(storage, validator, strategy, fakeFactory);
+  return new DefaultWorkflowService(storage as any, validator, strategy, fakeFactory);
 }

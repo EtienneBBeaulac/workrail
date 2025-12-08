@@ -12,15 +12,25 @@
  */
 export const DI = {
   // ═══════════════════════════════════════════════════════════════════
-  // STORAGE LAYER
+  // STORAGE LAYER (Legacy - being replaced by Repository)
   // ═══════════════════════════════════════════════════════════════════
   Storage: {
-    /** The primary storage interface - fully decorated chain */
+    /** Legacy storage (will be removed in Phase 3) */
     Primary: Symbol('Storage.Primary'),
-    /** Base multi-source storage (before decorators) */
     Base: Symbol('Storage.Base'),
-    /** Schema-validated storage (decorator layer 1) */
     Validated: Symbol('Storage.Validated'),
+  },
+
+  // ═══════════════════════════════════════════════════════════════════
+  // REPOSITORY LAYER (New type-state pattern)
+  // ═══════════════════════════════════════════════════════════════════
+  Repository: {
+    /** Repository initializer (before init) */
+    Initializer: Symbol('Repository.Initializer'),
+    /** Ready repository (after init) */
+    Ready: Symbol('Repository.Ready'),
+    /** State manager (lifecycle) */
+    StateManager: Symbol('Repository.StateManager'),
   },
 
   // ═══════════════════════════════════════════════════════════════════

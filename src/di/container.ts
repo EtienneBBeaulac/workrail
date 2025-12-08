@@ -85,14 +85,18 @@ function registerConfig(): void {
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function registerStorageChain(): Promise<void> {
-  // Import storage classes
+  // Import storage and repository classes
   const { EnhancedMultiSourceWorkflowStorage } = await import(
     '../infrastructure/storage/enhanced-multi-source-workflow-storage.js'
   );
+  const { RepositoryInitializer, ReadyRepository } = await import(
+    '../infrastructure/repository/workflow-repository.js'
+  );
+  const { RepositoryStateManager } = await import(
+    '../infrastructure/repository/repository-state-manager.js'
+  );
 
-  // Simplified: No decorators, just enhanced multi-source storage
-  // Validation happens at boundaries via Zod
-  // Caching will be in repository layer
+  // Legacy storage (still used during migration)
   container.register(DI.Storage.Primary, {
     useFactory: instanceCachingFactory((c: DependencyContainer) => {
       const loggerFactory = c.resolve<ILoggerFactory>(DI.Logging.Factory);
@@ -100,12 +104,44 @@ async function registerStorageChain(): Promise<void> {
     }),
   });
   
-  // Keep Base and Validated tokens pointing to Primary for now (backward compat during migration)
   container.register(DI.Storage.Base, {
     useFactory: instanceCachingFactory((c: DependencyContainer) => c.resolve(DI.Storage.Primary)),
   });
   container.register(DI.Storage.Validated, {
     useFactory: instanceCachingFactory((c: DependencyContainer) => c.resolve(DI.Storage.Primary)),
+  });
+  
+  // New repository pattern
+  container.register(DI.Repository.Initializer, {
+    useFactory: instanceCachingFactory((c: DependencyContainer) => {
+      const provider = c.resolve<any>(DI.Storage.Primary);  // Provider interface
+      const loggerFactory = c.resolve<ILoggerFactory>(DI.Logging.Factory);
+      const logger = loggerFactory.create('Repository');
+      
+      const persistenceConfig = {
+        enabled: true,
+        path: process.env['WORKRAIL_SNAPSHOT_PATH'] || 
+          require('path').join(require('os').homedir(), '.workrail', 'snapshot.json'),
+        ttlMs: c.resolve<number>(DI.Config.CacheTTL),
+        version: '1.0',
+      };
+      
+      return new RepositoryInitializer(provider, persistenceConfig, logger);
+    }),
+  });
+  
+  container.register(DI.Repository.StateManager, {
+    useFactory: instanceCachingFactory((c: DependencyContainer) => {
+      const initializer = c.resolve<any>(DI.Repository.Initializer);
+      return new RepositoryStateManager(initializer);
+    }),
+  });
+  
+  container.register(DI.Repository.Ready, {
+    useFactory: (c: DependencyContainer) => {
+      const stateManager = c.resolve<any>(DI.Repository.StateManager);
+      return stateManager.current;
+    },
   });
 }
 
@@ -275,8 +311,17 @@ export async function startAsyncServices(): Promise<void> {
   if (asyncInitialized) return;
 
   try {
+    // Initialize repository first
+    const stateManager = container.resolve<any>(DI.Repository.StateManager);
+    const repoResult = await stateManager.initialize();
+    if (repoResult.isErr()) {
+      logger.error({ err: repoResult.error }, 'Repository initialization failed');
+      throw new Error(`Repository initialization failed: ${repoResult.error.message}`);
+    }
+    logger.info('Repository initialized');
+    
+    // Start HTTP server if enabled
     const flags = container.resolve<any>(DI.Infra.FeatureFlags);
-
     if (flags.isEnabled('sessionTools')) {
       const server = container.resolve<any>(DI.Infra.HttpServer);
       await server.start();
