@@ -7,7 +7,7 @@ import { describe, it, expect } from 'vitest';
 
 describe('Tool error handling', () => {
   it('getWorkflow should throw WorkflowNotFoundError for missing id', async () => {
-    const service = createWorkflowService(createDefaultWorkflowStorage());
+    const service = createWorkflowService();
     await expect(getWorkflow(service, 'non-existent')).rejects.toBeInstanceOf(WorkflowNotFoundError);
   });
 }); 

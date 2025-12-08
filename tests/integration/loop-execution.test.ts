@@ -581,7 +581,7 @@ describe('Loop Execution Integration Tests', () => {
 
       await expect(
         service.getNextStep('invalid-loop-workflow', [], {})
-      ).rejects.toThrow('Invalid workflow structure');
+      ).rejects.toThrow('Invalid workflow');
     });
 
     it('should handle missing forEach items gracefully', async () => {
