@@ -30,10 +30,14 @@ export type WorkflowGetResult = Workflow | WorkflowMetadata | WorkflowPreview;
  */
 export function createGetWorkflow(service: WorkflowService) {
   return async (workflowId: string, mode: WorkflowGetMode = 'preview'): Promise<WorkflowGetResult> => {
+    console.log('[GetWorkflow] Loading workflow:', workflowId, 'mode:', mode);
     const workflow = await service.getWorkflowById(workflowId);
+    console.log('[GetWorkflow] Workflow loaded:', workflow ? 'YES' : 'NO');
     if (!workflow) {
+      console.log('[GetWorkflow] Throwing WorkflowNotFoundError');
       throw new WorkflowNotFoundError(workflowId);
     }
+    console.log('[GetWorkflow] Returning workflow in mode:', mode);
 
     // Handle different modes
     switch (mode) {

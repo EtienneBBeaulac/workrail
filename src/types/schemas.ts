@@ -156,7 +156,7 @@ export const WorkflowStepBaseSchema = z.object({
   agentRole: z.string().optional(),
   guidance: z.array(NonEmptyStringSchema).readonly().optional(),
   askForFiles: z.boolean().optional(),
-  requireConfirmation: z.boolean().optional(),
+  requireConfirmation: z.union([z.boolean(), z.record(z.unknown())]).optional(),  // Can be boolean OR condition object
   runCondition: z.record(z.unknown()).optional(),
   functionDefinitions: z.array(z.record(z.unknown())).optional(),
   functionCalls: z.array(z.record(z.unknown())).optional(),
@@ -184,6 +184,7 @@ export type LoopConfig = z.infer<typeof LoopConfigSchema>;
  */
 export const LoopStepSchema: z.ZodType<any> = WorkflowStepBaseSchema.extend({
   type: z.literal('loop'),
+  prompt: z.union([NonEmptyStringSchema, z.null()]).optional(),  // Loop steps can have null prompt
   loop: LoopConfigSchema,
   body: z.union([
     StepIdSchema,

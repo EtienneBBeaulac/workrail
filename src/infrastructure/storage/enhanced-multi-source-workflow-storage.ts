@@ -131,9 +131,16 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowProvider {
   ) {
     this.loggerFactory = loggerFactory;
     this.logger = loggerFactory.create('EnhancedMultiSourceWorkflowStorage');
+    console.log('[EnhancedMultiSource] Constructor called');
     
     // Load config from environment if not provided
     const finalConfig = config ?? this.loadConfigFromEnvironment();
+    console.log('[EnhancedMultiSource] Config:', {
+      includeBundled: finalConfig.includeBundled,
+      includeUser: finalConfig.includeUser,
+      includeProject: finalConfig.includeProject,
+      gitRepos: finalConfig.gitRepositories?.length || 0,
+    });
     
     this.config = {
       warnOnSourceFailure: finalConfig.warnOnSourceFailure ?? true,
@@ -141,6 +148,7 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowProvider {
     };
     
     this.storageInstances = this.initializeStorageSources(finalConfig);
+    console.log('[EnhancedMultiSource] Created', this.storageInstances.length, 'providers');
   }
   
   /**

@@ -51,6 +51,7 @@ export class FileWorkflowProvider implements IWorkflowProvider {
 
   constructor(directory: string, options: FileWorkflowProviderOptions = {}) {
     this.baseDirReal = path.resolve(directory);
+    console.log('[FileWorkflowProvider] Created with baseDir:', this.baseDirReal);
     this.maxFileSize = options.maxFileSizeBytes ?? 1_000_000;
     this.featureFlags = options.featureFlagProvider ?? createFeatureFlagProvider();
     this.logger = options.logger;
@@ -124,6 +125,8 @@ export class FileWorkflowProvider implements IWorkflowProvider {
   
   private async buildWorkflowIndex(): Promise<Map<any, WorkflowIndexEntry>> {
     const allFiles = await this.findJsonFiles(this.baseDirReal);
+    console.log('[FileWorkflowProvider] Found', allFiles.length, 'JSON files');
+    console.log('[FileWorkflowProvider] Files:', allFiles.slice(0, 5));
     const index = new Map<any, WorkflowIndexEntry>();
     const idToFiles = new Map<string, string[]>();
     
@@ -171,8 +174,12 @@ export class FileWorkflowProvider implements IWorkflowProvider {
       
       // Validate with Zod
       const validated = validateJSONLoad(WorkflowSchema, JSON.parse(raw), filePath);
-      if (!validated.isOk()) continue;  // Skip invalid
+      if (!validated.isOk()) {
+        console.log('[FileWorkflowProvider] SKIPPING invalid workflow:', selectedFile, validated.error._tag);
+        continue;  // Skip invalid
+      }
       
+      console.log('[FileWorkflowProvider] INDEXED:', validated.value.id);
       index.set(validated.value.id as any, {  // TODO: fix typing
         id: validated.value.id as any,  // TODO: fix typing
         filename: selectedFile,
@@ -183,7 +190,7 @@ export class FileWorkflowProvider implements IWorkflowProvider {
     return index;
   }
   
-  private async findJsonFiles(dir: string): Promise<string[]> {
+  private async findJsonFiles(baseDir: string): Promise<string[]> {
     const files: string[] = [];
     
     const scan = async (currentDir: string) => {
@@ -196,12 +203,14 @@ export class FileWorkflowProvider implements IWorkflowProvider {
           if (entry.name === 'examples') continue;  // Skip examples
           await scan(fullPath);
         } else if (entry.isFile() && entry.name.endsWith('.json')) {
-          files.push(fullPath);
+          // Push relative path from baseDir
+          const relativePath = path.relative(baseDir, fullPath);
+          files.push(relativePath);
         }
       }
     };
     
-    await scan(dir);
+    await scan(baseDir);
     return files;
   }
   
