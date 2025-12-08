@@ -65,7 +65,7 @@ describe('FeatureFlags - SOLID Principles', () => {
 
   describe('Single Responsibility Principle', () => {
     it('only handles feature flag configuration - nothing else', () => {
-      const provider = new EnvironmentFeatureFlagProvider({});
+      const provider = new CustomEnvFeatureFlagProvider({});
       
       // Provider only knows about flags - not workflows, storage, etc.
       expect(provider.isEnabled('sessionTools')).toBeDefined();
@@ -86,7 +86,7 @@ describe('FeatureFlags - SOLID Principles', () => {
       expect(flagCount).toBeGreaterThanOrEqual(3);
       
       // All flags are automatically supported
-      const provider = new EnvironmentFeatureFlagProvider({});
+      const provider = new CustomEnvFeatureFlagProvider({});
       for (const definition of FEATURE_FLAG_DEFINITIONS) {
         const result = provider.isEnabled(definition.key as any);
         expect(typeof result).toBe('boolean');
