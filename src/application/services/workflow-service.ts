@@ -145,10 +145,21 @@ export class DefaultWorkflowService implements WorkflowService {
     // Check if we're in a loop and this is a loop body step
     if (enhancedContext._currentLoop) {
       const { loopId, loopStep } = enhancedContext._currentLoop;
-      const result = await this.repository.getById(workflowId as any);
       
-      if (result.isOk()) {
-        const workflow = result.value;
+      // Handle both repository and legacy storage
+      let workflow: any;
+      if (typeof this.repository.getById === 'function') {
+        const result = await this.repository.getById(workflowId as any);
+        if (!result.isOk()) return enhancedContext;
+        workflow = result.value;
+      } else if (typeof this.repository.getWorkflowById === 'function') {
+        workflow = await this.repository.getWorkflowById(workflowId);
+        if (!workflow) return enhancedContext;
+      } else {
+        return enhancedContext;
+      }
+      
+      if (workflow) {
         // Check if the completed step is part of the loop body
         const loopStepResolver = new LoopStepResolver();
         const bodyStep = loopStepResolver.resolveLoopBody(workflow, loopStep.body, loopStep.id);
