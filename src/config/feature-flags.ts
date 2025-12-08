@@ -309,13 +309,19 @@ export function createFeatureFlagProvider(
     return new CustomEnvFeatureFlagProvider(env);
   }
   
-  // For legacy calls, create with bootstrap logger
-  const { getBootstrapLogger } = require('./logging/index.js');
-  const logger = getBootstrapLogger().child({ component: 'FeatureFlags' });
-  // Can't inject into singleton constructor here, so create a fake factory
+  // For legacy calls, create with a no-op logger
+  const noopLogger = {
+    trace: () => {},
+    debug: () => {},
+    info: () => {},
+    warn: () => {},
+    error: () => {},
+    fatal: () => {},
+    child: () => noopLogger,
+  };
   const fakeFactory = {
-    create: () => logger,
-    root: logger,
+    create: () => noopLogger as any,
+    root: noopLogger as any,
   };
   return new EnvironmentFeatureFlagProvider(fakeFactory as any);
 }
