@@ -334,8 +334,11 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
         includeProject: false
       });
 
-      const workflows = await storage.loadAllWorkflows();
-      expect(workflows).toEqual([]);
+      const result = await storage.fetchAll();
+      expect(result.isOk()).toBe(true);
+      if (result.isOk()) {
+        expect(result.value).toEqual([]);
+      }
     });
   });
 
