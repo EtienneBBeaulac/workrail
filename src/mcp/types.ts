@@ -24,6 +24,7 @@ import type { Logger } from '../core/logging/index.js';
  */
 export type ErrorCode =
   | 'VALIDATION_ERROR'     // Bad input from client
+  | 'INVALID_PARAMS'       // Invalid parameters (e.g., context too large)
   | 'NOT_FOUND'            // Requested resource doesn't exist
   | 'PRECONDITION_FAILED'  // Feature disabled, missing dependency, etc.
   | 'TIMEOUT'              // Operation timed out

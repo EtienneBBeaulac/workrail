@@ -128,9 +128,18 @@ export async function handleWorkflowGet(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
 
-    // Check for not found errors
+    // Check for not found errors - provide AI-friendly suggestions
     if (message.toLowerCase().includes('not found')) {
-      return error('NOT_FOUND', message, `Check available workflows with workflow_list`);
+      // Get suggestions from repository if available
+      const suggestions = await ctx.workflowService.listWorkflowSummaries()
+        .then(wfs => wfs.slice(0, 5).map(w => `"${w.id}"`).join(', '))
+        .catch(() => '');
+      
+      const hint = suggestions 
+        ? `Available workflows: ${suggestions}. Use workflow_list to see all.`
+        : 'Check available workflows with workflow_list';
+      
+      return error('NOT_FOUND', message, hint);
     }
 
     return error('INTERNAL_ERROR', message);
@@ -174,11 +183,30 @@ export async function handleWorkflowNext(
     logger.error({ err, elapsed }, 'Failed workflow_next');
 
     if (message.includes('timed out')) {
-      return error('TIMEOUT', message);
+      return error('TIMEOUT', message, 'Try breaking down the workflow into smaller steps or simplifying context data');
     }
 
+    // Provide AI-friendly error with suggestions
     if (message.toLowerCase().includes('not found')) {
-      return error('NOT_FOUND', message, `Check available workflows with workflow_list`);
+      const suggestions = await ctx.workflowService.listWorkflowSummaries()
+        .then(wfs => wfs.slice(0, 5).map(w => `"${w.id}"`).join(', '))
+        .catch(() => '');
+      
+      const hint = suggestions 
+        ? `Workflow "${input.workflowId}" not found. Available: ${suggestions}. Use workflow_list to see all.`
+        : `Workflow "${input.workflowId}" not found. Use workflow_list to see available workflows.`;
+      
+      return error('NOT_FOUND', message, hint);
+    }
+
+    // Context size errors
+    if (message.toLowerCase().includes('context size')) {
+      return error('INVALID_PARAMS', message, 'Reduce context data size or use workflow variables more efficiently');
+    }
+
+    // Max iterations errors  
+    if (message.toLowerCase().includes('max iterations') || message.toLowerCase().includes('infinite loop')) {
+      return error('INTERNAL_ERROR', message, 'Check workflow for infinite loop conditions or excessive step counts');
     }
 
     return error('INTERNAL_ERROR', message);
