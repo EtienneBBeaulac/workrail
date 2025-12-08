@@ -35,34 +35,8 @@ import {
   type FilePath,
   type Url,
 } from './schemas.js';
-
-// Error types (will be defined in core/errors)
-// For now, use a simple error structure
-interface ValidationFailedError {
-  readonly _tag: 'ValidationFailed';
-  readonly field: string;
-  readonly value: string;
-  readonly issues: string;
-  readonly expected?: string;
-  readonly message: string;
-}
-
-// Temporary error factory (will be replaced by core/errors/factories.ts)
-const createValidationError = (
-  field: string,
-  value: unknown,
-  issues: string,
-  expected?: string
-): ValidationFailedError => ({
-  _tag: 'ValidationFailed',
-  field,
-  value: String(value),
-  issues,
-  expected,
-  message: expected
-    ? `Invalid ${field}: ${issues}. Expected: ${expected}`
-    : `Invalid ${field}: ${issues}`,
-});
+import type { ValidationFailedError } from '../core/errors/app-error.js';
+import { Err } from '../core/errors/factories.js';
 
 // ============================================================================
 // Runtime Parsing (User Input, Network Data, File Loads)
@@ -72,9 +46,9 @@ export function parseWorkflowId(input: unknown): Result<WorkflowId, ValidationFa
   const result = WorkflowIdSchema.safeParse(input);
   if (!result.success) {
     const issues = result.error.errors.map(e => e.message).join('; ');
-    return err(createValidationError(
+    return err(Err.validationFailed(
       'workflowId',
-      input,
+      String(input),
       issues,
       'lowercase kebab-case (e.g., "bug-investigation")'
     ));
@@ -86,9 +60,9 @@ export function parseSessionId(input: unknown): Result<SessionId, ValidationFail
   const result = SessionIdSchema.safeParse(input);
   if (!result.success) {
     const issues = result.error.errors.map(e => e.message).join('; ');
-    return err(createValidationError(
+    return err(Err.validationFailed(
       'sessionId',
-      input,
+      String(input),
       issues,
       'UUID v4 (e.g., "550e8400-e29b-41d4-a716-446655440000")'
     ));
@@ -100,9 +74,9 @@ export function parseStepId(input: unknown): Result<StepId, ValidationFailedErro
   const result = StepIdSchema.safeParse(input);
   if (!result.success) {
     const issues = result.error.errors.map(e => e.message).join('; ');
-    return err(createValidationError(
+    return err(Err.validationFailed(
       'stepId',
-      input,
+      String(input),
       issues,
       'lowercase with hyphens/underscores (e.g., "backup-database")'
     ));
@@ -114,9 +88,9 @@ export function parseLoopId(input: unknown): Result<LoopId, ValidationFailedErro
   const result = LoopIdSchema.safeParse(input);
   if (!result.success) {
     const issues = result.error.errors.map(e => e.message).join('; ');
-    return err(createValidationError(
+    return err(Err.validationFailed(
       'loopId',
-      input,
+      String(input),
       issues,
       'lowercase with hyphens/underscores'
     ));
@@ -128,9 +102,9 @@ export function parseProjectId(input: unknown): Result<ProjectId, ValidationFail
   const result = ProjectIdSchema.safeParse(input);
   if (!result.success) {
     const issues = result.error.errors.map(e => e.message).join('; ');
-    return err(createValidationError(
+    return err(Err.validationFailed(
       'projectId',
-      input,
+      String(input),
       issues,
       '12-character hex hash'
     ));
@@ -141,7 +115,7 @@ export function parseProjectId(input: unknown): Result<ProjectId, ValidationFail
 export function parseNonEmptyString(input: unknown): Result<NonEmptyString, ValidationFailedError> {
   const result = NonEmptyStringSchema.safeParse(input);
   if (!result.success) {
-    return err(createValidationError('string', input, 'Cannot be empty'));
+    return err(Err.validationFailed('string', String(input), 'Cannot be empty'));
   }
   return ok(result.data);
 }
@@ -150,7 +124,7 @@ export function parsePositiveInteger(input: unknown): Result<PositiveInteger, Va
   const result = PositiveIntegerSchema.safeParse(input);
   if (!result.success) {
     const issues = result.error.errors.map(e => e.message).join('; ');
-    return err(createValidationError('number', input, issues, 'positive integer'));
+    return err(Err.validationFailed('number', String(input), issues, 'positive integer'));
   }
   return ok(result.data);
 }
@@ -158,9 +132,9 @@ export function parsePositiveInteger(input: unknown): Result<PositiveInteger, Va
 export function parseSemVer(input: unknown): Result<SemVer, ValidationFailedError> {
   const result = SemVerSchema.safeParse(input);
   if (!result.success) {
-    return err(createValidationError(
+    return err(Err.validationFailed(
       'version',
-      input,
+      String(input),
       'Invalid semantic version',
       'MAJOR.MINOR.PATCH (e.g., "1.0.0")'
     ));
@@ -171,7 +145,7 @@ export function parseSemVer(input: unknown): Result<SemVer, ValidationFailedErro
 export function parseFilePath(input: unknown): Result<FilePath, ValidationFailedError> {
   const result = FilePathSchema.safeParse(input);
   if (!result.success) {
-    return err(createValidationError('filePath', input, 'Cannot be empty'));
+    return err(Err.validationFailed('filePath', String(input), 'Cannot be empty'));
   }
   return ok(result.data);
 }
@@ -179,7 +153,7 @@ export function parseFilePath(input: unknown): Result<FilePath, ValidationFailed
 export function parseUrl(input: unknown): Result<Url, ValidationFailedError> {
   const result = UrlSchema.safeParse(input);
   if (!result.success) {
-    return err(createValidationError('url', input, 'Invalid URL format'));
+    return err(Err.validationFailed('url', String(input), 'Invalid URL format'));
   }
   return ok(result.data);
 }
