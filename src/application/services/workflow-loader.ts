@@ -39,29 +39,52 @@ export class DefaultWorkflowLoader implements IWorkflowLoader {
 
   async loadAndValidate(workflowId: WorkflowId): Promise<Result<LoadedWorkflow, AppError>> {
     this.logger.debug({ workflowId }, 'Loading workflow');
+    console.log('[WorkflowLoader] loadAndValidate called with:', workflowId);
     
     // Load workflow from repository (handle legacy storage for tests)
     let workflow: any;
     if (typeof this.repository.getById === 'function') {
       // New repository interface
+      console.log('[WorkflowLoader] Using new repository interface (getById)');
       const workflowResult = await this.repository.getById(workflowId);
+      console.log('[WorkflowLoader] getById result:', workflowResult.isOk() ? 'OK' : 'ERR');
       if (workflowResult.isErr()) {
+        console.log('[WorkflowLoader] Error:', workflowResult.error);
         return err(workflowResult.error);
       }
       workflow = workflowResult.value;
     } else if (typeof this.repository.getWorkflowById === 'function') {
       // Legacy storage interface (for tests)
+      console.log('[WorkflowLoader] Using legacy storage interface (getWorkflowById)');
       workflow = await this.repository.getWorkflowById(workflowId);
+      console.log('[WorkflowLoader] Legacy result:', workflow ? 'found' : 'not found');
       if (!workflow) {
         return err(Err.workflowNotFound(workflowId as any as string, [], 0, []));
       }
+    } else if (typeof this.repository.fetchById === 'function') {
+      // Provider interface (for tests using InMemoryWorkflowProvider)
+      console.log('[WorkflowLoader] Using provider interface (fetchById)');
+      const workflowResult = await this.repository.fetchById(workflowId);
+      console.log('[WorkflowLoader] fetchById result:', workflowResult.isOk() ? 'OK' : 'ERR');
+      if (workflowResult.isErr()) {
+        console.log('[WorkflowLoader] Error:', workflowResult.error);
+        return err(workflowResult.error);
+      }
+      workflow = workflowResult.value;
     } else {
+      console.error('[WorkflowLoader] Invalid repository type - no recognized methods');
+      console.error('[WorkflowLoader] Available methods:', Object.keys(this.repository));
       return err(Err.unexpectedError('workflow-load', new Error('Invalid repository type')));
     }
 
     // Validate workflow structure (TODO: Update ValidationEngine to use branded types)
+    console.log('[WorkflowLoader] Validating workflow structure...');
+    console.log('[WorkflowLoader] Workflow keys:', Object.keys(workflow));
+    console.log('[WorkflowLoader] Steps count:', workflow.steps?.length);
     const validationResult = this.validationEngine.validateWorkflow(workflow as any);
+    console.log('[WorkflowLoader] Validation result:', validationResult.valid ? 'VALID' : 'INVALID');
     if (!validationResult.valid) {
+      console.log('[WorkflowLoader] Validation issues:', validationResult.issues);
       return err(Err.validationFailed(
         'workflow',
         workflowId as any as string,

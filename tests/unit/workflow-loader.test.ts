@@ -47,6 +47,10 @@ describe('DefaultWorkflowLoader', () => {
 
       const result = await loader.loadAndValidate('simple' as any);
 
+      console.log('TEST: result.isOk():', result.isOk());
+      if (result.isErr()) {
+        console.log('TEST: Error:', result.error);
+      }
       expect(result.isOk()).toBe(true);
       if (result.isOk()) {
         expect(result.value.workflow).toBeDefined();
