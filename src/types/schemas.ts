@@ -182,12 +182,12 @@ export type LoopConfig = z.infer<typeof LoopConfigSchema>;
 /**
  * Loop step schema (extends base step).
  */
-export const LoopStepSchema = WorkflowStepBaseSchema.extend({
+export const LoopStepSchema: z.ZodType<any> = WorkflowStepBaseSchema.extend({
   type: z.literal('loop'),
   loop: LoopConfigSchema,
   body: z.union([
     StepIdSchema,
-    z.array(z.lazy(() => WorkflowStepSchema))
+    z.array(z.lazy(() => WorkflowStepSchema as z.ZodType<any>))
   ]),
 });
 
@@ -196,7 +196,7 @@ export type LoopStep = z.infer<typeof LoopStepSchema>;
 /**
  * Workflow step schema (union of base and loop).
  */
-export const WorkflowStepSchema = z.union([
+export const WorkflowStepSchema: z.ZodType<any> = z.union([
   WorkflowStepBaseSchema,
   LoopStepSchema
 ]);
@@ -214,7 +214,7 @@ export const WorkflowSchema = z.object({
   description: z.string(),
   preconditions: z.array(NonEmptyStringSchema).readonly().optional(),
   clarificationPrompts: z.array(NonEmptyStringSchema).readonly().optional(),
-  steps: z.array(WorkflowStepSchema).readonly().min(1, "Workflow must have at least one step"),
+  steps: z.array(WorkflowStepSchema).min(1, "Workflow must have at least one step"),
   metaGuidance: z.array(NonEmptyStringSchema).readonly().optional(),
   functionDefinitions: z.array(z.record(z.unknown())).optional(),
 });
@@ -393,9 +393,9 @@ export function createSnapshot(
   source: DataSource,
   metadata: SnapshotMetadata
 ): RepositorySnapshot {
-  const workflowMap = buildReadonlyMap<WorkflowId, Workflow>(map => {
+  const workflowMap = buildReadonlyMap<any, Workflow>(map => {
     for (const wf of workflows) {
-      map.set(wf.id, wf);
+      map.set(wf.id as any, wf);
     }
   });
   
