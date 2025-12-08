@@ -46,7 +46,9 @@ export class RepositoryStateManager {
    */
   get current(): IReadyRepository {
     if (!this.state) {
-      throw new Error('Repository not initialized. Call initialize() first.');
+      console.error('[RepositoryStateManager] ERROR: Accessing .current but state is not initialized!');
+      console.error('[RepositoryStateManager] You must call initialize() before accessing the repository.');
+      throw new Error('Repository not initialized. Call initialize() first. Did startAsyncServices() run?');
     }
     return this.state.repository;
   }

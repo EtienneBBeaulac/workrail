@@ -137,10 +137,18 @@ async function registerStorageChain(): Promise<void> {
     }),
   });
   
+  // NOTE: This MUST be lazy - don't call stateManager.current until after init
+  // Use a Proxy to defer access until the repository is actually used
   container.register(DI.Repository.Ready, {
     useFactory: (c: DependencyContainer) => {
       const stateManager = c.resolve<any>(DI.Repository.StateManager);
-      return stateManager.current;
+      // Return a proxy that forwards all calls to stateManager.current
+      // This delays accessing .current until methods are actually called
+      return new Proxy({}, {
+        get(_target, prop) {
+          return (stateManager.current as any)[prop];
+        }
+      });
     },
   });
 }
@@ -343,10 +351,13 @@ export async function startAsyncServices(): Promise<void> {
  * Use this in entry points.
  */
 export async function bootstrap(): Promise<void> {
+  process.stderr.write('[DI] 🚀 Starting bootstrap...\n');
   logger.info('🚀 Starting bootstrap...');
   await initializeContainer();
+  process.stderr.write('[DI] ✅ Container initialized\n');
   logger.info('✅ Container initialized');
   await startAsyncServices();
+  process.stderr.write('[DI] ✅ Async services started - bootstrap complete\n');
   logger.info('✅ Async services started - bootstrap complete');
 }
 
