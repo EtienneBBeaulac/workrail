@@ -56,16 +56,20 @@ export class IterativeStepResolutionStrategy implements IStepResolutionStrategy 
       throw new Error(`Context size (${Math.round(sizeCheck.sizeBytes / 1024)}KB) exceeds maximum allowed size (256KB)`);
     }
     
-    // Load and validate workflow
-    const { workflow, loopBodySteps } = await this.workflowLoader.loadAndValidate(workflowId);
+    // Load and validate workflow (TODO Phase 3: Handle Result properly)
+    const loadResult = await this.workflowLoader.loadAndValidate(workflowId as any);
+    if (loadResult.isErr()) {
+      throw new Error(loadResult.error.message);
+    }
+    const { workflow, loopBodySteps } = loadResult.value;
     
     // Initialize execution state
     const completed = [...completedSteps]; // Mutable local copy
     let enhancedContext = sizeCheck.context as EnhancedContext;
     
-    // Recover loop stack if needed
+    // Recover loop stack if needed (TODO: Update recovery service for branded types)
     const loopStack = this.loopRecoveryService.recoverLoopStack(
-      workflow,
+      workflow as any,
       completed,
       enhancedContext,
       loopBodySteps
@@ -90,8 +94,8 @@ export class IterativeStepResolutionStrategy implements IStepResolutionStrategy 
       );
     }
     
-    // Execute main workflow loop
-    return this.executeLoop(workflow, completed, enhancedContext, loopStack, loopBodySteps);
+    // Execute main workflow loop (TODO: Update executeLoop signature for branded types)
+    return this.executeLoop(workflow as any, completed, enhancedContext, loopStack, loopBodySteps);
   }
 
   /**
@@ -298,7 +302,7 @@ export class IterativeStepResolutionStrategy implements IStepResolutionStrategy 
     
     try {
       const loopFrame = this.loopStackManager.createLoopFrame(
-        workflow,
+        workflow as any,  // TODO: Update LoopStackManager for branded types
         loopStep,
         enhancedContext
       );
