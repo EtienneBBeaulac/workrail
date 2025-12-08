@@ -1117,7 +1117,7 @@ describe('DefaultWorkflowService', () => {
 
       await expect(
         service.getNextStep('invalid-loop-workflow', [], {})
-      ).rejects.toThrow('Invalid workflow structure');
+      ).rejects.toThrow('Invalid workflow');
     });
 
     it('should validate and reject workflow with non-existent loop body', async () => {
