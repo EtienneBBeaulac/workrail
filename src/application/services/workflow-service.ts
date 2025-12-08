@@ -75,7 +75,7 @@ export class DefaultWorkflowService implements WorkflowService {
   private readonly logger: Logger;
 
   constructor(
-    @inject(DI.Storage.Primary) private readonly storage: any,  // TODO Phase 3: Change to DI.Repository.Ready
+    @inject(DI.Repository.Ready) private readonly repository: any,  // TODO: Type as IReadyRepository
     @inject(ValidationEngine) private readonly validationEngine: ValidationEngine,
     @inject(IterativeStepResolutionStrategy) private readonly stepResolutionStrategy: IterativeStepResolutionStrategy,
     @inject(DI.Logging.Factory) loggerFactory: ILoggerFactory,
@@ -85,11 +85,13 @@ export class DefaultWorkflowService implements WorkflowService {
   }
 
   async listWorkflowSummaries(): Promise<WorkflowSummary[]> {
-    return this.storage.listWorkflowSummaries();
+    const result = await this.repository.getAllSummaries();
+    return result.isOk() ? (result.value as any) : [];  // TODO: branded types
   }
 
   async getWorkflowById(id: string): Promise<Workflow | null> {
-    return this.storage.getWorkflowById(id);
+    const result = await this.repository.getById(id as any);  // TODO: branded WorkflowId
+    return result.isOk() ? (result.value as any) : null;  // TODO: branded Workflow
   }
 
   async getNextStep(
@@ -106,10 +108,11 @@ export class DefaultWorkflowService implements WorkflowService {
     stepId: string,
     output: string
   ): Promise<{ valid: boolean; issues: string[]; suggestions: string[] }> {
-    const workflow = await this.storage.getWorkflowById(workflowId);
-    if (!workflow) {
+    const result = await this.repository.getById(workflowId as any);
+    if (result.isErr()) {
       throw new WorkflowNotFoundError(workflowId);
     }
+    const workflow = result.value;
 
     const step = workflow.steps.find((s: any) => s.id === stepId);
     if (!step) {
@@ -142,9 +145,10 @@ export class DefaultWorkflowService implements WorkflowService {
     // Check if we're in a loop and this is a loop body step
     if (enhancedContext._currentLoop) {
       const { loopId, loopStep } = enhancedContext._currentLoop;
-      const workflow = await this.storage.getWorkflowById(workflowId);
+      const result = await this.repository.getById(workflowId as any);
       
-      if (workflow) {
+      if (result.isOk()) {
+        const workflow = result.value;
         // Check if the completed step is part of the loop body
         const loopStepResolver = new LoopStepResolver();
         const bodyStep = loopStepResolver.resolveLoopBody(workflow, loopStep.body, loopStep.id);
