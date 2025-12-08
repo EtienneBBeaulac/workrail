@@ -271,6 +271,7 @@ export class ReadyRepository implements IReadyRepository {
       name: wf.name,
       description: wf.description,
       version: wf.version,
+      category: 'general',  // TODO: Add category to workflow schema
     }));
     return ok(summaries);
   }

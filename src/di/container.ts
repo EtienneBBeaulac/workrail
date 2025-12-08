@@ -146,7 +146,12 @@ async function registerStorageChain(): Promise<void> {
       // This delays accessing .current until methods are actually called
       return new Proxy({}, {
         get(_target, prop) {
-          return (stateManager.current as any)[prop];
+          const value = (stateManager.current as any)[prop];
+          // If it's a function, bind it to the real repository
+          if (typeof value === 'function') {
+            return value.bind(stateManager.current);
+          }
+          return value;
         }
       });
     },
