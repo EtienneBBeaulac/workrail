@@ -85,7 +85,7 @@ export class DefaultWorkflowService implements WorkflowService {
   }
 
   async listWorkflowSummaries(): Promise<WorkflowSummary[]> {
-    const result = await this.repository.getAllSummaries();
+    const result = await this.repository.getSummaries();
     return result.isOk() ? (result.value as any) : [];  // TODO: branded types
   }
 
