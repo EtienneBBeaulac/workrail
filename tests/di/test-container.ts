@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { container, DependencyContainer } from 'tsyringe';
 import { DI } from '../../src/di/tokens.js';
-import { InMemoryWorkflowStorage } from '../../src/infrastructure/storage/in-memory-storage.js';
+import { InMemoryWorkflowProvider } from '../../src/infrastructure/storage/in-memory-storage.js';
 import { StaticFeatureFlagProvider, IFeatureFlagProvider } from '../../src/config/feature-flags.js';
 
 /**
@@ -33,30 +33,34 @@ export async function setupTest(config: TestConfig = {}): Promise<DependencyCont
   const { resetContainer, initializeContainer } = await import('../../src/di/container.js');
   resetContainer();
 
-  // Register config values FIRST
-  container.register(DI.Config.CacheTTL, { useValue: 0 }); // No cache in tests
-  container.register(DI.Config.WorkflowDir, { useValue: '/tmp/test-workflows' });
-  container.register(DI.Config.ProjectPath, { useValue: process.cwd() });
-
-  // Initialize container (imports services which self-register)
-  await initializeContainer();
-
-  // NOW override with mocks AFTER services are registered
-  // This ensures test mocks take precedence
-  
-  // Register storage (mock or real)
-  const storage = config.storage ?? new InMemoryWorkflowStorage();
+  // Register storage FIRST (before init - repository factory needs it)
+  const storage = config.storage ?? new InMemoryWorkflowProvider();
   container.register(DI.Storage.Primary, { useValue: storage });
   container.register(DI.Storage.Base, { useValue: storage });
   container.register(DI.Storage.Validated, { useValue: storage });
 
+  // Register config values  
+  container.register(DI.Config.CacheTTL, { useValue: 0 }); // No cache in tests
+  container.register(DI.Config.WorkflowDir, { useValue: '/tmp/test-workflows' });
+  container.register(DI.Config.ProjectPath, { useValue: process.cwd() });
+  
+  // Force repository to skip persisted snapshot in tests
+  process.env['WORKRAIL_SNAPSHOT_PATH'] = '/tmp/nonexistent-' + Date.now() + '.json';
+
+  // Initialize container (imports services which self-register)
+  await initializeContainer();
+
+  // CRITICAL: Tests use in-memory storage, so repository should use that
+  // The repository was already registered in initializeContainer() with EnhancedMultiSource
+  // But we registered InMemoryWorkflowProvider as DI.Storage.Primary above
+  // The repository factory resolves DI.Storage.Primary, so it should pick up our test storage
+  // No need to override - the factory will use our registered storage!
+
   // Register feature flags
   if (config.featureFlags !== undefined) {
-    // If already a provider instance, use it directly; otherwise wrap in StaticFeatureFlagProvider
     const flags = 'isEnabled' in config.featureFlags 
       ? config.featureFlags as IFeatureFlagProvider
       : new StaticFeatureFlagProvider(config.featureFlags);
-    // Override the symbol token (primary registration)
     container.register(DI.Infra.FeatureFlags, { useValue: flags });
   }
 
@@ -66,6 +70,10 @@ export async function setupTest(config: TestConfig = {}): Promise<DependencyCont
       container.register(token as symbol, { useValue: mock });
     }
   }
+
+  // Initialize async services (repository, HTTP server, etc.)
+  const { startAsyncServices } = await import('../../src/di/container.js');
+  await startAsyncServices();
 
   return container;
 }
