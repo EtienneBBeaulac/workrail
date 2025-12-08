@@ -87,8 +87,11 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
       });
 
       // Even with all defaults disabled, it should initialize without errors
-      const workflows = await storage.loadAllWorkflows();
-      expect(Array.isArray(workflows)).toBe(true);
+      const result = await storage.fetchAll();
+      expect(result.isOk()).toBe(true);
+      if (result.isOk()) {
+        expect(Array.isArray(result.value)).toBe(true);
+      }
     });
 
     it('should deduplicate workflows by ID with later sources taking precedence', async () => {
@@ -109,8 +112,11 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
       });
 
       // Should not throw even if some sources fail
-      const workflows = await storage.loadAllWorkflows();
-      expect(Array.isArray(workflows)).toBe(true);
+      const result = await storage.fetchAll();
+      expect(result.isOk()).toBe(true);
+      if (result.isOk()) {
+        expect(Array.isArray(result.value)).toBe(true);
+      }
     });
   });
 
@@ -341,8 +347,8 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
         includeProject: false
       });
 
-      const result = await storage.getWorkflowById('non-existent');
-      expect(result).toBeNull();
+      const result = await storage.fetchById('non-existent' as any);
+      expect(result.isErr()).toBe(true);
     });
   });
 
@@ -388,7 +394,7 @@ describe('createEnhancedMultiSourceWorkflowStorage', () => {
     });
 
     expect(storage).toBeDefined();
-    expect(storage.loadAllWorkflows).toBeDefined();
+    expect(storage.fetchAll).toBeDefined();
   });
 });
 
