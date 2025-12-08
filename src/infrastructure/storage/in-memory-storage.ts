@@ -22,6 +22,11 @@ export class InMemoryWorkflowProvider implements IWorkflowProvider {
     this.workflows = workflows.map(wf => Object.freeze(wf));
   }
 
+  // For backward compatibility with tests that call save()
+  async save(workflow: Workflow): Promise<void> {
+    this.workflows.push(Object.freeze(workflow));
+  }
+
   async fetchAll(): Promise<Result<readonly Workflow[], never>> {
     return ok([...this.workflows]);
   }

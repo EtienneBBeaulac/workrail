@@ -112,8 +112,9 @@ async function registerStorageChain(): Promise<void> {
   });
   
   // New repository pattern
+  // NOTE: NOT using instanceCachingFactory - allows tests to override storage
   container.register(DI.Repository.Initializer, {
-    useFactory: instanceCachingFactory((c: DependencyContainer) => {
+    useFactory: (c: DependencyContainer) => {
       const provider = c.resolve<any>(DI.Storage.Primary);  // Provider interface
       const loggerFactory = c.resolve<ILoggerFactory>(DI.Logging.Factory);
       const logger = loggerFactory.create('Repository');
@@ -121,20 +122,21 @@ async function registerStorageChain(): Promise<void> {
       const persistenceConfig = {
         enabled: true,
         path: process.env['WORKRAIL_SNAPSHOT_PATH'] || 
-          require('path').join(require('os').homedir(), '.workrail', 'snapshot.json'),
+          require('path').join(require('os').homedir(), '.workrail', 'repository-snapshot.json'),
         ttlMs: c.resolve<number>(DI.Config.CacheTTL),
         version: '1.0',
       };
       
       return new RepositoryInitializer(provider, persistenceConfig, logger);
-    }),
+    },
   });
   
+  // NOTE: NOT using instanceCachingFactory - allows fresh creation with new initializer in tests
   container.register(DI.Repository.StateManager, {
-    useFactory: instanceCachingFactory((c: DependencyContainer) => {
+    useFactory: (c: DependencyContainer) => {
       const initializer = c.resolve<any>(DI.Repository.Initializer);
       return new RepositoryStateManager(initializer);
-    }),
+    },
   });
   
   // NOTE: This MUST be lazy - don't call stateManager.current until after init
@@ -318,22 +320,31 @@ export async function initializeContainer(): Promise<void> {
  * Call after initializeContainer().
  */
 export async function startAsyncServices(): Promise<void> {
+  console.log('[startAsyncServices] initialized:', initialized, 'asyncInitialized:', asyncInitialized);
   if (!initialized) {
     await initializeContainer();
   }
-  if (asyncInitialized) return;
+  if (asyncInitialized) {
+    console.log('[startAsyncServices] Already initialized, returning early');
+    return;
+  }
 
   try {
     // Initialize repository first
     logger.info('📦 Resolving RepositoryStateManager...');
+    console.log('[startAsyncServices] Resolving RepositoryStateManager...');
     const stateManager = container.resolve<any>(DI.Repository.StateManager);
     logger.info('📦 Calling initialize()...');
+    console.log('[startAsyncServices] Calling stateManager.initialize()...');
     const repoResult = await stateManager.initialize();
+    console.log('[startAsyncServices] Initialize result:', repoResult.isOk() ? 'OK' : 'ERR');
     if (repoResult.isErr()) {
       logger.error({ err: repoResult.error }, '❌ Repository initialization failed');
+      console.error('[startAsyncServices] Repository initialization failed:', repoResult.error);
       throw new Error(`Repository initialization failed: ${repoResult.error.message}`);
     }
     logger.info('✅ Repository initialized successfully');
+    console.log('[startAsyncServices] Repository initialized successfully');
     
     // Start HTTP server if enabled
     const flags = container.resolve<any>(DI.Infra.FeatureFlags);

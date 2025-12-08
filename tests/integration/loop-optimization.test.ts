@@ -2,13 +2,13 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { setupTest, teardownTest, resolve } from '../di/test-container.js';
 import { DI } from '../../src/di/tokens.js';
 import { Workflow } from '../../src/types/mcp-types.js';
-import { InMemoryWorkflowStorage } from '../../src/infrastructure/storage/in-memory-storage.js';
+import { InMemoryWorkflowProvider } from '../../src/infrastructure/storage/in-memory-storage.js';
 
 describe('Loop Optimization Integration', () => {
-  let storage: InMemoryWorkflowStorage;
+  let storage: InMemoryWorkflowProvider;
 
   beforeEach(async () => {
-    storage = new InMemoryWorkflowStorage();
+    storage = new InMemoryWorkflowProvider();
     await setupTest({ storage });
   });
 
@@ -67,7 +67,7 @@ describe('Loop Optimization Integration', () => {
         ]
       };
 
-      await storage.save(workflow);
+      storage.setWorkflows([workflow]);
 
       // Initial context with data
       const initialContext = {
@@ -171,7 +171,7 @@ describe('Loop Optimization Integration', () => {
         ]
       };
 
-      await storage.save(workflow);
+      storage.setWorkflows([workflow]);
 
       const context = {
         emptyArray: []
@@ -230,7 +230,7 @@ describe('Loop Optimization Integration', () => {
         ]
       };
 
-      await storage.save(workflow);
+      storage.setWorkflows([workflow]);
 
       // Create a small dataset for this test
       const largeDataset = Array(3).fill(null).map((_, i) => ({
@@ -279,7 +279,7 @@ describe('Loop Optimization Integration', () => {
         ]
       };
 
-      await storage.save(workflow);
+      storage.setWorkflows([workflow]);
 
       const workflowService = resolve(DI.Services.Workflow);
       const result = await workflowService.getNextStep(
