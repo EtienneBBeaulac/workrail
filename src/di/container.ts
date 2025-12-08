@@ -89,38 +89,23 @@ async function registerStorageChain(): Promise<void> {
   const { EnhancedMultiSourceWorkflowStorage } = await import(
     '../infrastructure/storage/enhanced-multi-source-workflow-storage.js'
   );
-  const { SchemaValidatingWorkflowStorage } = await import(
-    '../infrastructure/storage/schema-validating-workflow-storage.js'
-  );
-  const { CachingWorkflowStorage } = await import(
-    '../infrastructure/storage/caching-workflow-storage.js'
-  );
 
-  // Layer 1: Base storage (factory creates with logger)
-  container.register(DI.Storage.Base, {
+  // Simplified: No decorators, just enhanced multi-source storage
+  // Validation happens at boundaries via Zod
+  // Caching will be in repository layer
+  container.register(DI.Storage.Primary, {
     useFactory: instanceCachingFactory((c: DependencyContainer) => {
       const loggerFactory = c.resolve<ILoggerFactory>(DI.Logging.Factory);
       return new EnhancedMultiSourceWorkflowStorage(loggerFactory);
     }),
   });
-
-  // Layer 2: Schema validation decorator (singleton via instanceCachingFactory)
-  container.register(DI.Storage.Validated, {
-    useFactory: instanceCachingFactory((c: DependencyContainer) => {
-      const base = c.resolve<any>(DI.Storage.Base) as any;
-      const loggerFactory = c.resolve<ILoggerFactory>(DI.Logging.Factory);
-      const logger = loggerFactory.create('SchemaValidatingWorkflowStorage');
-      return new SchemaValidatingWorkflowStorage(base, logger);
-    }),
+  
+  // Keep Base and Validated tokens pointing to Primary for now (backward compat during migration)
+  container.register(DI.Storage.Base, {
+    useFactory: instanceCachingFactory((c: DependencyContainer) => c.resolve(DI.Storage.Primary)),
   });
-
-  // Layer 3: Caching decorator (singleton via instanceCachingFactory)
-  container.register(DI.Storage.Primary, {
-    useFactory: instanceCachingFactory((c: DependencyContainer) => {
-      const validated = c.resolve<any>(DI.Storage.Validated) as any;
-      const ttl = c.resolve<number>(DI.Config.CacheTTL);
-      return new CachingWorkflowStorage(validated, ttl);
-    }),
+  container.register(DI.Storage.Validated, {
+    useFactory: instanceCachingFactory((c: DependencyContainer) => c.resolve(DI.Storage.Primary)),
   });
 }
 

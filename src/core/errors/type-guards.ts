@@ -9,7 +9,6 @@ import type {
   ConfigurationError,
   InternalError,
   WorkflowNotFoundError,
-  TransientError,
 } from './app-error.js';
 
 export function isAppError(e: unknown): e is AppError {

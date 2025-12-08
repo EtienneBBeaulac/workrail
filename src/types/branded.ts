@@ -96,21 +96,4 @@ export type Url = Brand<string, "Url">;
 // Validated Configurations (Prove validation happened)
 // ============================================================================
 
-/**
- * Persistence configuration that has been validated.
- * Consumer requires this brand - compiler proves validation happened.
- */
-export type ValidatedPersistenceConfig = Brand<PersistenceConfig, "ValidatedPersistenceConfig">;
-
-/**
- * Git workflow configuration that has been validated.
- */
-export type ValidatedGitConfig = Brand<GitWorkflowConfig, "ValidatedGitConfig">;
-
-// ============================================================================
-// Type Imports (for convenience)
-// ============================================================================
-
-// These will be defined in other files but exported here for convenience
-export type { PersistenceConfig } from '../config/persistence-config';
-export type { GitWorkflowConfig } from '../infrastructure/storage/git-workflow-storage';
+// These will be defined later when we create persistence config types
