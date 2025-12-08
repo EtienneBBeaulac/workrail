@@ -312,13 +312,15 @@ export async function startAsyncServices(): Promise<void> {
 
   try {
     // Initialize repository first
+    logger.info('📦 Resolving RepositoryStateManager...');
     const stateManager = container.resolve<any>(DI.Repository.StateManager);
+    logger.info('📦 Calling initialize()...');
     const repoResult = await stateManager.initialize();
     if (repoResult.isErr()) {
-      logger.error({ err: repoResult.error }, 'Repository initialization failed');
+      logger.error({ err: repoResult.error }, '❌ Repository initialization failed');
       throw new Error(`Repository initialization failed: ${repoResult.error.message}`);
     }
-    logger.info('Repository initialized');
+    logger.info('✅ Repository initialized successfully');
     
     // Start HTTP server if enabled
     const flags = container.resolve<any>(DI.Infra.FeatureFlags);
@@ -341,8 +343,11 @@ export async function startAsyncServices(): Promise<void> {
  * Use this in entry points.
  */
 export async function bootstrap(): Promise<void> {
+  logger.info('🚀 Starting bootstrap...');
   await initializeContainer();
+  logger.info('✅ Container initialized');
   await startAsyncServices();
+  logger.info('✅ Async services started - bootstrap complete');
 }
 
 /**
