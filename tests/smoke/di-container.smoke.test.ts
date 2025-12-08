@@ -199,19 +199,20 @@ describe('[SMOKE] DI Container Health', () => {
     expect(projectPath).toBeTruthy();
   });
 
-  it('storage decorator chain is constructed correctly', async () => {
+  it('repository is constructed correctly (decorators removed)', async () => {
     await initializeContainer();
 
+    // Old decorator pattern removed - now using repository pattern
     const primary = container.resolve(DI.Storage.Primary);
-    const base = container.resolve(DI.Storage.Base);
-    const validated = container.resolve(DI.Storage.Validated);
+    const initializer = container.resolve(DI.Repository.Initializer);
+    const stateManager = container.resolve(DI.Repository.StateManager);
 
     // All should be defined
     expect(primary).toBeDefined();
-    expect(base).toBeDefined();
-    expect(validated).toBeDefined();
+    expect(initializer).toBeDefined();
+    expect(stateManager).toBeDefined();
 
-    // Primary and base should be different (decorator wrapping)
-    expect(primary).not.toBe(base);
+    // Note: Repository.Ready can only be accessed after startAsyncServices()
+    // This test only verifies construction, not initialization
   });
 });
