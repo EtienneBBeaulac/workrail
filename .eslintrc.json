@@ -1,0 +1,95 @@
+{
+  "parser": "@typescript-eslint/parser",
+  "parserOptions": {
+    "ecmaVersion": 2022,
+    "sourceType": "module",
+    "project": "./tsconfig.json"
+  },
+  "plugins": [
+    "@typescript-eslint",
+    "simple-import-sort"
+  ],
+  "extends": [
+    "eslint:recommended",
+    "plugin:@typescript-eslint/recommended",
+    "plugin:@typescript-eslint/recommended-requiring-type-checking"
+  ],
+  "rules": {
+    "no-console": [
+      "error",
+      {
+        "allow": []
+      }
+    ],
+    "@typescript-eslint/switch-exhaustiveness-check": "error",
+    "@typescript-eslint/prefer-readonly": "error",
+    "@typescript-eslint/no-unnecessary-condition": "error",
+    "@typescript-eslint/prefer-nullish-coalescing": "error",
+    "@typescript-eslint/prefer-optional-chain": "error",
+    "@typescript-eslint/consistent-type-imports": "error",
+    "@typescript-eslint/no-explicit-any": "error",
+    "no-restricted-imports": [
+      "error",
+      {
+        "patterns": [
+          {
+            "group": [
+              "**/types/testing",
+              "**/types/testing/*"
+            ],
+            "message": "Test utilities (trustAs*) cannot be imported in production code. Use parse*() or literal*() from types/parsers instead."
+          }
+        ]
+      }
+    ],
+    "no-param-reassign": "error",
+    "eqeqeq": [
+      "error",
+      "always"
+    ],
+    "simple-import-sort/imports": "error",
+    "simple-import-sort/exports": "error"
+  },
+  "overrides": [
+    {
+      "files": [
+        "src/cli.ts",
+        "src/cli/**/*.ts"
+      ],
+      "rules": {
+        "no-console": "off"
+      }
+    },
+    {
+      "files": [
+        "tests/**/*.ts",
+        "**/*.test.ts",
+        "tests/**/*.js"
+      ],
+      "rules": {
+        "no-console": "warn",
+        "@typescript-eslint/no-explicit-any": "off"
+      }
+    },
+    {
+      "files": [
+        "web/**/*.js",
+        "*.config.js",
+        "*.config.ts"
+      ],
+      "rules": {
+        "no-console": "off",
+        "@typescript-eslint/no-explicit-any": "off"
+      }
+    },
+    {
+      "files": [
+        "analysis/**/*.ts",
+        "scripts/**/*.ts"
+      ],
+      "rules": {
+        "no-console": "off"
+      }
+    }
+  ]
+}
