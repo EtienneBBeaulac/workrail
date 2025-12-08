@@ -6,7 +6,7 @@ import { inject, singleton } from 'tsyringe';
 import { DI } from '../../di/tokens.js';
 import { IWorkflowStorage } from '../../types/storage';
 import { Workflow, WorkflowSummary } from '../../types/mcp-types';
-import { FileWorkflowStorage } from './file-workflow-storage';
+import { FileWorkflowProvider } from './file-workflow-storage.js';
 import { GitWorkflowStorage, GitWorkflowConfig } from './git-workflow-storage';
 import { RemoteWorkflowStorage, RemoteWorkflowRegistryConfig } from './remote-workflow-storage';
 import { PluginWorkflowStorage, PluginWorkflowConfig } from './plugin-workflow-storage';
@@ -251,7 +251,7 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
         const bundledPath = this.getBundledWorkflowsPath();
         if (existsSync(bundledPath)) {
           const bundledLogger = this.loggerFactory.create('FileWorkflowStorage:bundled');
-          instances.push(new FileWorkflowStorage(bundledPath, {
+          instances.push(new FileWorkflowProvider(bundledPath, {
             ...config.fileStorageOptions,
             logger: bundledLogger,
           }));
@@ -282,7 +282,7 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
         const userPath = config.userPath || this.getUserWorkflowsPath();
         if (existsSync(userPath)) {
           const userLogger = this.loggerFactory.create('FileWorkflowStorage:user');
-          instances.push(new FileWorkflowStorage(userPath, {
+          instances.push(new FileWorkflowProvider(userPath, {
             ...config.fileStorageOptions,
             logger: userLogger,
           }));
@@ -299,7 +299,7 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
         try {
           if (existsSync(customPath)) {
             const customLogger = this.loggerFactory.create(`FileWorkflowStorage:custom`);
-            instances.push(new FileWorkflowStorage(customPath, {
+            instances.push(new FileWorkflowProvider(customPath, {
               ...config.fileStorageOptions,
               logger: customLogger,
             }));
@@ -346,7 +346,7 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
         const projectPath = config.projectPath || this.getProjectWorkflowsPath();
         if (existsSync(projectPath)) {
           const projectLogger = this.loggerFactory.create('FileWorkflowStorage:project');
-          instances.push(new FileWorkflowStorage(projectPath, {
+          instances.push(new FileWorkflowProvider(projectPath, {
             ...config.fileStorageOptions,
             logger: projectLogger,
           }));

@@ -1,333 +1,273 @@
+/**
+ * File-Based Workflow Provider
+ * 
+ * Loads workflows from filesystem with intelligent caching and indexing.
+ * 
+ * Philosophy:
+ * - Result-based (no exceptions in main paths)
+ * - Zod validation at boundaries (file → memory)
+ * - Immutable workflows (Object.freeze)
+ * - Graceful degradation (skip invalid files, warn)
+ */
+
 import fs from 'fs/promises';
 import { existsSync, statSync } from 'fs';
 import path from 'path';
-import { IWorkflowStorage } from '../../types/storage';
-import { Workflow, WorkflowSummary } from '../../types/mcp-types';
-import {
-  InvalidWorkflowError,
-  SecurityError
-} from '../../core/error-handler';
-import { IFeatureFlagProvider, createFeatureFlagProvider } from '../../config/feature-flags';
+import { Result, ok, err } from 'neverthrow';
+import type { WorkflowId, Workflow } from '../../types/schemas.js';
+import { WorkflowSchema } from '../../types/schemas.js';
+import type { IWorkflowProvider } from '../../types/repository.js';
+import type { AppError } from '../../core/errors/index.js';
+import { Err } from '../../core/errors/index.js';
+import { validateJSONLoad } from '../../core/errors/index.js';
+import { IFeatureFlagProvider, createFeatureFlagProvider } from '../../config/feature-flags.js';
 import type { Logger } from '../../core/logging/index.js';
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function sanitizeId(id: string): string {
-  if (id.includes('\u0000')) {
-    throw new SecurityError('Null byte detected in identifier', 'sanitizeId');
-  }
-
-  const normalised = id.normalize('NFC');
-  const valid = /^[a-zA-Z0-9_-]+$/.test(normalised);
-  if (!valid) {
-    throw new InvalidWorkflowError(id, 'Invalid characters in workflow id');
-  }
-  return normalised;
-}
-
-function assertWithinBase(resolvedPath: string, baseDir: string): void {
-  if (!resolvedPath.startsWith(baseDir + path.sep) && resolvedPath !== baseDir) {
-    throw new SecurityError('Path escapes storage sandbox', 'file-access');
-  }
-}
-
-interface CacheEntry {
-  workflow: Workflow;
-  expires: number;
-}
-
-interface WorkflowIndexEntry {
-  id: string;
-  filename: string;
-  summary: WorkflowSummary;
-  lastModified: number;
-}
-
-interface FileWorkflowStorageOptions {
-  /** Reject files larger than this size (bytes). Default 1_000_000 */
+interface FileWorkflowProviderOptions {
   maxFileSizeBytes?: number;
-  /** Cache entry TTL in milliseconds. 0 to disable. Default 5000 */
-  cacheTTLms?: number;
-  /** Maximum cached workflows before evicting LRU. Default 100 */
-  cacheSize?: number;
-  /** Index cache TTL in milliseconds. Default 30000 (30 seconds) */
-  indexCacheTTLms?: number;
-  /** Feature flag provider (optional, defaults to environment-based) */
   featureFlagProvider?: IFeatureFlagProvider;
-  /** Logger instance (optional, for logging warnings) */
   logger?: Logger;
 }
 
+interface WorkflowIndexEntry {
+  id: WorkflowId;
+  filename: string;
+  lastModified: number;
+}
+
 /**
- * Optimized file-system based workflow storage with intelligent caching.
- * Uses an index cache to avoid repeatedly scanning directories and 
- * reading files unnecessarily.
+ * File-based workflow provider with indexing and caching.
  */
-export class FileWorkflowStorage implements IWorkflowStorage {
+export class FileWorkflowProvider implements IWorkflowProvider {
   private readonly baseDirReal: string;
   private readonly maxFileSize: number;
-  private readonly cacheTTL: number;
-  private readonly cacheLimit: number;
-  private readonly indexCacheTTL: number;
-  private readonly cache = new Map<string, CacheEntry>();
   private readonly featureFlags: IFeatureFlagProvider;
   private readonly logger?: Logger;
   
-  // Index cache to avoid expensive directory scans
-  private workflowIndex: Map<string, WorkflowIndexEntry> | null = null;
+  // Index cache (avoid expensive directory scans)
+  private workflowIndex: Map<any, WorkflowIndexEntry> | null = null;  // TODO: WorkflowId key
   private indexExpires: number = 0;
+  private readonly INDEX_CACHE_TTL = 60000; // 1 minute
 
-  constructor(directory: string, options: FileWorkflowStorageOptions = {}) {
+  constructor(directory: string, options: FileWorkflowProviderOptions = {}) {
     this.baseDirReal = path.resolve(directory);
-    this.maxFileSize = options.maxFileSizeBytes ?? 1_000_000; // 1 MB default
-    this.cacheTTL = options.cacheTTLms ?? 5000;
-    this.cacheLimit = options.cacheSize ?? 100;
-    this.indexCacheTTL = options.indexCacheTTLms ?? 30000; // 30 seconds
+    this.maxFileSize = options.maxFileSizeBytes ?? 1_000_000;
     this.featureFlags = options.featureFlagProvider ?? createFeatureFlagProvider();
     this.logger = options.logger;
   }
 
-  /**
-   * Recursively find all JSON files in a directory
-   */
+  async fetchAll(): Promise<Result<readonly Workflow[], AppError>> {
+    try {
+      // Build/refresh index
+      const index = await this.getWorkflowIndex();
+      
+      // Load all workflows (parallel)
+      const results = await Promise.allSettled(
+        Array.from(index.values()).map(entry => this.loadWorkflowFromFile(entry.filename))
+      );
+      
+      // Collect successes (graceful degradation - skip failures)
+      const workflows = results
+        .filter((r): r is PromiseFulfilledResult<Workflow | null> => r.status === 'fulfilled')
+        .map(r => r.value)
+        .filter((wf): wf is Workflow => wf !== null);
+      
+      return ok(workflows);
+    } catch (error) {
+      return err(Err.unexpectedError('fetchAll', error as Error));
+    }
+  }
+
+  async fetchById(id: WorkflowId): Promise<Result<Workflow, AppError>> {
+    // Get index
+    const index = await this.getWorkflowIndex();
+    const entry = index.get(id as any);  // TODO: fix typing
+    
+    if (!entry) {
+      // Not found - find similar for suggestions
+      const allIds = Array.from(index.keys()).map(k => k as any as string);
+      const suggestions = this.findSimilar(id as any as string, allIds);
+      return err(Err.workflowNotFound(id as any as string, suggestions, allIds.length, []));
+    }
+    
+    // Load workflow
+    const workflow = await this.loadWorkflowFromFile(entry.filename);
+    if (!workflow) {
+      return err(Err.unexpectedError('load workflow', new Error('File load returned null')));
+    }
+    
+    // Verify ID matches (security)
+    if (workflow.id !== id) {
+      return err(Err.schemaViolation(entry.filename, `id=${id}`, `id=${workflow.id}`));
+    }
+    
+    return ok(workflow);
+  }
+  
+  // ===========================================================================
+  // Private: Index Management
+  // ===========================================================================
+  
+  private async getWorkflowIndex(): Promise<Map<any, WorkflowIndexEntry>> {
+    const now = Date.now();
+    
+    if (this.workflowIndex && this.indexExpires > now) {
+      return this.workflowIndex;
+    }
+    
+    // Rebuild index
+    this.workflowIndex = await this.buildWorkflowIndex();
+    this.indexExpires = now + this.INDEX_CACHE_TTL;
+    
+    return this.workflowIndex;
+  }
+  
+  private async buildWorkflowIndex(): Promise<Map<any, WorkflowIndexEntry>> {
+    const allFiles = await this.findJsonFiles(this.baseDirReal);
+    const index = new Map<any, WorkflowIndexEntry>();
+    const idToFiles = new Map<string, string[]>();
+    
+    // First pass: Map IDs to files
+    for (const file of allFiles) {
+      try {
+        // Security check
+        const filePath = path.resolve(this.baseDirReal, file);
+        this.assertWithinBase(filePath);
+        
+        // Size check
+        const stats = statSync(filePath);
+        if (stats.size > this.maxFileSize) continue;
+        
+        // Read and parse
+        const raw = await fs.readFile(filePath, 'utf-8');
+        const parsed = JSON.parse(raw);
+        
+        if (!parsed.id) continue;
+        
+        const files = idToFiles.get(parsed.id) || [];
+        files.push(file);
+        idToFiles.set(parsed.id, files);
+      } catch {
+        continue;  // Skip invalid files
+      }
+    }
+    
+    // Second pass: Select file per ID (agentic override logic)
+    for (const [id, files] of idToFiles) {
+      let selectedFile = files[0]!;
+      
+      if (this.featureFlags.isEnabled('agenticRoutines')) {
+        const agenticFile = files.find(f => f.includes('.agentic.'));
+        if (agenticFile) selectedFile = agenticFile;
+      } else {
+        const standardFile = files.find(f => !f.includes('.agentic.'));
+        if (standardFile) selectedFile = standardFile;
+      }
+      
+      // Load and validate for index
+      const filePath = path.resolve(this.baseDirReal, selectedFile);
+      const stats = statSync(filePath);
+      const raw = await fs.readFile(filePath, 'utf-8');
+      
+      // Validate with Zod
+      const validated = validateJSONLoad(WorkflowSchema, JSON.parse(raw), filePath);
+      if (!validated.isOk()) continue;  // Skip invalid
+      
+      index.set(validated.value.id as any, {  // TODO: fix typing
+        id: validated.value.id as any,  // TODO: fix typing
+        filename: selectedFile,
+        lastModified: stats.mtimeMs,
+      });
+    }
+    
+    return index;
+  }
+  
   private async findJsonFiles(dir: string): Promise<string[]> {
     const files: string[] = [];
     
-    async function scan(currentDir: string) {
+    const scan = async (currentDir: string) => {
       const entries = await fs.readdir(currentDir, { withFileTypes: true });
       
       for (const entry of entries) {
         const fullPath = path.join(currentDir, entry.name);
         
         if (entry.isDirectory()) {
-          // Skip examples directory
-          if (entry.name === 'examples') {
-            continue;
-          }
+          if (entry.name === 'examples') continue;  // Skip examples
           await scan(fullPath);
         } else if (entry.isFile() && entry.name.endsWith('.json')) {
           files.push(fullPath);
         }
       }
-    }
+    };
     
     await scan(dir);
     return files;
   }
-
-  /**
-   * Build or refresh the workflow index by scanning the directory recursively
-   */
-  private async buildWorkflowIndex(): Promise<Map<string, WorkflowIndexEntry>> {
-    const allJsonFiles = await this.findJsonFiles(this.baseDirReal);
-    
-    // Filter files relative to baseDir for processing
-    const relativeFiles = allJsonFiles.map(f => path.relative(this.baseDirReal, f));
-    
-    const index = new Map<string, WorkflowIndexEntry>();
-
-    // First pass: Create map of ID -> Filename to detect overrides
-    const idToFiles = new Map<string, string[]>();
-
-    // Scan all files first to map IDs
-    for (const file of relativeFiles) {
-      try {
-         // Skip agentic routines if flag is disabled
-         if (!this.featureFlags.isEnabled('agenticRoutines')) {
-           if (file.includes('routines/') || path.basename(file).startsWith('routine-')) {
-          continue;
-        }
-         }
-
-         // Skip reading content for mapping if we assume filename convention, 
-         // but we can't assume that yet. So we read IDs.
-         const filePathRaw = path.resolve(this.baseDirReal, file);
-         assertWithinBase(filePathRaw, this.baseDirReal);
-
-         const stats = statSync(filePathRaw);
-         if (stats.size > this.maxFileSize) continue;
-
-        const raw = await fs.readFile(filePathRaw, 'utf-8');
-        const data = JSON.parse(raw) as Workflow;
-         if (!data.id) continue;
-
-         const files = idToFiles.get(data.id) || [];
-         files.push(file);
-         idToFiles.set(data.id, files);
-      } catch (e) { continue; }
-    }
-
-    // Second pass: Select correct file for each ID
-    for (const [id, files] of idToFiles) {
-      let selectedFile = files[0];
-
-      // Agentic Override Logic
-      if (this.featureFlags.isEnabled('agenticRoutines')) {
-         const agenticFile = files.find(f => f.includes('.agentic.'));
-         if (agenticFile) {
-           selectedFile = agenticFile;
-         }
-      } else {
-         // Ensure we DON'T pick the agentic file if flag is off
-         const standardFile = files.find(f => !f.includes('.agentic.'));
-         if (standardFile) {
-            selectedFile = standardFile;
-        }
-      }
-
-      // Add to index
-      const filePath = path.resolve(this.baseDirReal, selectedFile);
-      const stats = statSync(filePath);
-      const raw = await fs.readFile(filePath, 'utf-8');
-      const data = JSON.parse(raw) as Workflow;
-      
-      index.set(id, {
-          id: data.id,
-        filename: selectedFile,
-          lastModified: stats.mtimeMs,
-          summary: {
-            id: data.id,
-            name: data.name,
-            description: data.description,
-            category: 'default',
-            version: data.version
-          }
-      });
-    }
-
-    return index;
-  }
-
-  /**
-   * Get the workflow index, building it if necessary
-   */
-  private async getWorkflowIndex(): Promise<Map<string, WorkflowIndexEntry>> {
-    const now = Date.now();
-    
-    if (this.workflowIndex && this.indexExpires > now) {
-      return this.workflowIndex;
-    }
-
-    // Rebuild index
-    this.workflowIndex = await this.buildWorkflowIndex();
-    this.indexExpires = now + this.indexCacheTTL;
-    
-    return this.workflowIndex;
-  }
-
-  /**
-   * Load a specific workflow from file
-   */
+  
+  // ===========================================================================
+  // Private: File Loading
+  // ===========================================================================
+  
   private async loadWorkflowFromFile(filename: string): Promise<Workflow | null> {
-    const filePath = path.resolve(this.baseDirReal, filename);
-    assertWithinBase(filePath, this.baseDirReal);
-
     try {
+      const filePath = path.resolve(this.baseDirReal, filename);
+      this.assertWithinBase(filePath);
+      
+      // Size check
       const stats = statSync(filePath);
       if (stats.size > this.maxFileSize) {
-        throw new SecurityError('Workflow file exceeds size limit', 'file-size');
+        this.logger?.warn({ file: filename }, 'File exceeds size limit');
+        return null;
       }
-
+      
+      // Read
       const raw = await fs.readFile(filePath, 'utf-8');
-      const data = JSON.parse(raw) as Workflow;
-      return data;
-    } catch (err) {
-      this.logger?.warn({ err, filename }, 'Failed to load workflow from file');
+      const parsed = JSON.parse(raw);
+      
+      // Validate with Zod
+      const validated = validateJSONLoad(WorkflowSchema, parsed, filePath);
+      if (!validated.isOk()) {
+        this.logger?.warn({ file: filename, err: validated.error }, 'Invalid workflow schema');
+        return null;
+      }
+      
+      return validated.value;  // Already immutable from Zod
+    } catch (error) {
+      this.logger?.warn({ err: error, filename }, 'Failed to load workflow');
       return null;
     }
   }
-
-  /**
-   * Load *all* JSON files from the configured directory.
-   * NOTE: This method is expensive and should be avoided when possible.
-   * Use getWorkflowIndex() + loadWorkflowFromFile() for better performance.
-   */
-  public async loadAllWorkflows(): Promise<Workflow[]> {
-    const index = await this.getWorkflowIndex();
-    const workflows: Workflow[] = [];
-
-    // Load workflows in parallel for better performance
-    const loadPromises = Array.from(index.values()).map(async (entry) => {
-      const workflow = await this.loadWorkflowFromFile(entry.filename);
-      if (workflow) {
-        workflows.push(workflow);
-      }
-    });
-
-    await Promise.all(loadPromises);
-    return workflows;
+  
+  // ===========================================================================
+  // Private: Security & Fuzzy Matching
+  // ===========================================================================
+  
+  private assertWithinBase(resolvedPath: string): void {
+    if (!resolvedPath.startsWith(this.baseDirReal + path.sep) && resolvedPath !== this.baseDirReal) {
+      throw new Error('Path escapes storage sandbox');
+    }
   }
-
-  public async getWorkflowById(id: string): Promise<Workflow | null> {
-    const safeId = sanitizeId(id);
-
-    // Try cache first
-    const cached = this.cache.get(safeId);
-    if (cached && cached.expires > Date.now()) {
-      return cached.workflow;
-    }
-
-    // Check index for the workflow
-    const index = await this.getWorkflowIndex();
-    const indexEntry = index.get(safeId);
-    
-    if (!indexEntry) {
-      return null; // Workflow doesn't exist
-    }
-
-    // Load the specific workflow file
-    const workflow = await this.loadWorkflowFromFile(indexEntry.filename);
-    
-    if (!workflow) {
-      return null;
-    }
-
-    // Verify ID matches (security check)
-    if (workflow.id !== safeId) {
-      throw new InvalidWorkflowError(safeId, 'ID mismatch between index and workflow.id');
-    }
-
-    // Cache the result
-    if (this.cacheTTL > 0) {
-      if (this.cache.size >= this.cacheLimit) {
-        // Evict oldest (first inserted)
-        const firstKey = this.cache.keys().next().value as string;
-        this.cache.delete(firstKey);
-      }
-      this.cache.set(safeId, { workflow, expires: Date.now() + this.cacheTTL });
-    }
-
-    return workflow;
-  }
-
-  public async listWorkflowSummaries(): Promise<WorkflowSummary[]> {
-    // Use the index to get summaries without loading full workflows
-    const index = await this.getWorkflowIndex();
-    return Array.from(index.values()).map(entry => entry.summary);
-  }
-
-  public async save(): Promise<void> {
-    // No-op for now – file storage is read-only in this phase.
-    return Promise.resolve();
+  
+  private findSimilar(target: string, candidates: string[]): string[] {
+    const targetLower = target.toLowerCase();
+    return candidates
+      .filter(c => {
+        const cLower = c.toLowerCase();
+        return cLower.includes(targetLower) || targetLower.includes(cLower);
+      })
+      .slice(0, 3);
   }
 }
 
-/**
- * Helper factory that resolves the workflow directory according to the
- * previous behaviour (env override → bundled workflows).
- */
-export function createDefaultFileWorkflowStorage(): FileWorkflowStorage {
+// Alias for backward compat
+export const FileWorkflowStorage = FileWorkflowProvider;
+
+export function createDefaultFileWorkflowStorage(): FileWorkflowProvider {
   const DEFAULT_WORKFLOW_DIR = path.resolve(__dirname, '../../../workflows');
   const envPath = process.env['WORKFLOW_STORAGE_PATH'];
   const resolved = envPath ? path.resolve(envPath) : null;
   const directory = resolved && existsSync(resolved) ? resolved : DEFAULT_WORKFLOW_DIR;
   
-  // Use optimized settings for better performance
-  return new FileWorkflowStorage(directory, {
-    cacheTTLms: 10000,    // 10 second cache for individual workflows
-    cacheSize: 200,       // Larger cache
-    indexCacheTTLms: 60000, // 1 minute index cache
-  });
-} 
+  return new FileWorkflowProvider(directory);
+}

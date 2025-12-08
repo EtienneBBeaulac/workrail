@@ -4,7 +4,7 @@ import path from 'path';
 import os from 'os';
 import { IWorkflowStorage } from '../../types/storage';
 import { Workflow, WorkflowSummary } from '../../types/mcp-types';
-import { FileWorkflowStorage } from './file-workflow-storage';
+import { FileWorkflowProvider } from './file-workflow-storage.js';
 import type { Logger } from '../../core/logging/index.js';
 
 /**
@@ -16,7 +16,7 @@ import type { Logger } from '../../core/logging/index.js';
  * - Multiple custom directories (colon-separated paths)
  */
 export class MultiDirectoryWorkflowStorage implements IWorkflowStorage {
-  private storageInstances: FileWorkflowStorage[] = [];
+  private storageInstances: FileWorkflowProvider[] = [];
   private readonly logger?: Logger;
 
   constructor(options: MultiDirectoryOptions = {}) {
@@ -25,7 +25,7 @@ export class MultiDirectoryWorkflowStorage implements IWorkflowStorage {
     
     // Create storage instances for each valid directory
     this.storageInstances = directories.map(dir => 
-      new FileWorkflowStorage(dir, { ...options.fileStorageOptions, logger: this.logger })
+      new FileWorkflowProvider(dir, { ...options.fileStorageOptions, logger: this.logger })
     );
   }
 
