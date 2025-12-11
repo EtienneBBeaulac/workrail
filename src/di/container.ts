@@ -84,7 +84,12 @@ async function registerStorageChain(): Promise<void> {
   );
 
   // Layer 1: Base storage (singleton)
-  container.registerSingleton(DI.Storage.Base, EnhancedMultiSourceWorkflowStorage);
+  container.register(DI.Storage.Base, {
+    useFactory: instanceCachingFactory((c: DependencyContainer) => {
+      const featureFlags = c.resolve<any>(DI.Infra.FeatureFlags);
+      return new EnhancedMultiSourceWorkflowStorage(featureFlags);
+    }),
+  });
 
   // Layer 2: Schema validation decorator (singleton via instanceCachingFactory)
   container.register(DI.Storage.Validated, {

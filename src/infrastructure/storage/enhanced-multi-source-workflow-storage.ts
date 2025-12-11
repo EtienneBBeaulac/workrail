@@ -122,24 +122,79 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
   private readonly featureFlags: IFeatureFlagProvider;
 
   constructor(
-    @inject(DI.Infra.FeatureFlags) featureFlags?: IFeatureFlagProvider,
-    config: EnhancedMultiSourceConfig = {}
+    @inject(DI.Infra.FeatureFlags)
+    featureFlagsOrConfig?: IFeatureFlagProvider | EnhancedMultiSourceConfig,
+    configOrUndefined?: EnhancedMultiSourceConfig
   ) {
-    this.featureFlags = featureFlags ?? new EnvironmentFeatureFlagProvider();
+    const resolvedConfig = this.resolveConfig(featureFlagsOrConfig, configOrUndefined);
+    const resolvedFeatureFlags = this.resolveFeatureFlags(featureFlagsOrConfig, configOrUndefined);
+
+    this.featureFlags = resolvedFeatureFlags;
     this.config = {
-      warnOnSourceFailure: config.warnOnSourceFailure ?? true,
-      gracefulDegradation: config.gracefulDegradation ?? true
+      warnOnSourceFailure: resolvedConfig.warnOnSourceFailure ?? true,
+      gracefulDegradation: resolvedConfig.gracefulDegradation ?? true
     };
-    
+
     // Parse WORKFLOW_STORAGE_PATH environment variable
     const customPathsEnv = process.env['WORKFLOW_STORAGE_PATH'];
     if (customPathsEnv) {
-      const paths = customPathsEnv.split(path.delimiter).map(p => p.trim()).filter(p => p.length > 0);
-      config.customPaths = [...(config.customPaths || []), ...paths];
+      const paths = customPathsEnv
+        .split(path.delimiter)
+        .map(p => p.trim())
+        .filter(p => p.length > 0);
+      resolvedConfig.customPaths = [...(resolvedConfig.customPaths || []), ...paths];
       logger.info('Added custom paths from WORKFLOW_STORAGE_PATH', { paths });
     }
-    
-    this.storageInstances = this.initializeStorageSources(config);
+
+    this.storageInstances = this.initializeStorageSources(resolvedConfig);
+  }
+
+  private resolveFeatureFlags(
+    featureFlagsOrConfig: IFeatureFlagProvider | EnhancedMultiSourceConfig | undefined,
+    configOrUndefined: EnhancedMultiSourceConfig | undefined
+  ): IFeatureFlagProvider {
+    if (configOrUndefined !== undefined) {
+      const injectedFeatureFlags = this.isFeatureFlagProvider(featureFlagsOrConfig)
+        ? featureFlagsOrConfig
+        : undefined;
+      return injectedFeatureFlags ?? new EnvironmentFeatureFlagProvider();
+    }
+
+    const injectedFeatureFlags = this.isFeatureFlagProvider(featureFlagsOrConfig)
+      ? featureFlagsOrConfig
+      : undefined;
+    return injectedFeatureFlags ?? new EnvironmentFeatureFlagProvider();
+  }
+
+  private resolveConfig(
+    featureFlagsOrConfig: IFeatureFlagProvider | EnhancedMultiSourceConfig | undefined,
+    configOrUndefined: EnhancedMultiSourceConfig | undefined
+  ): EnhancedMultiSourceConfig {
+    if (configOrUndefined !== undefined) {
+      return configOrUndefined;
+    }
+
+    if (featureFlagsOrConfig === undefined) {
+      return {};
+    }
+
+    if (this.isFeatureFlagProvider(featureFlagsOrConfig)) {
+      return {};
+    }
+
+    return featureFlagsOrConfig;
+  }
+
+  private isFeatureFlagProvider(value: unknown): value is IFeatureFlagProvider {
+    if (value === null || value === undefined) {
+      return false;
+    }
+
+    if (typeof value !== 'object') {
+      return false;
+    }
+
+    return 'isEnabled' in value && typeof (value as IFeatureFlagProvider).isEnabled === 'function';
   }
 
   private initializeStorageSources(config: EnhancedMultiSourceConfig): IWorkflowStorage[] {
