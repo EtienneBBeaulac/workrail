@@ -70,6 +70,14 @@ export const FEATURE_FLAG_DEFINITIONS: ReadonlyArray<FeatureFlagDefinition> = [
     since: '0.8.3',
     stable: false,
   },
+  {
+    key: 'authoritativeDescriptions',
+    envVar: 'WORKRAIL_AUTHORITATIVE_DESCRIPTIONS',
+    defaultValue: false,
+    description: 'Use imperative/mandatory language in tool descriptions to improve agent workflow compliance',
+    since: '0.9.0',
+    stable: false,
+  },
 ] as const;
 
 /**

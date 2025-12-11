@@ -1,19 +1,22 @@
 /**
- * MCP Tool Definitions
+ * MCP Tool Schemas and Types
  *
- * Declarative definitions for all tools exposed by the WorkRail MCP server.
- * Each tool has:
- * - name: Unique identifier
- * - title: Human-readable name for UIs
- * - description: Detailed description for LLMs
- * - inputSchema: Zod schema for validation and type inference
- * - annotations: Safety hints for clients
+ * Input schemas for tool validation and session tool definitions.
+ * Workflow tool descriptions are provided by IToolDescriptionProvider.
+ *
+ * @module mcp/tools
  */
 
 import { z } from 'zod';
 
 // -----------------------------------------------------------------------------
-// Input Schemas
+// Types (re-exported from tool-factory for convenience)
+// -----------------------------------------------------------------------------
+
+export type { ToolAnnotations, ToolDefinition } from './tool-factory.js';
+
+// -----------------------------------------------------------------------------
+// Workflow Tool Input Schemas
 // -----------------------------------------------------------------------------
 
 export const WorkflowListInput = z.object({});
@@ -58,6 +61,57 @@ export type WorkflowValidateJsonInput = z.infer<typeof WorkflowValidateJsonInput
 export const WorkflowGetSchemaInput = z.object({});
 export type WorkflowGetSchemaInput = z.infer<typeof WorkflowGetSchemaInput>;
 
+// -----------------------------------------------------------------------------
+// Workflow Tool Annotations (static, don't change by mode)
+// -----------------------------------------------------------------------------
+
+import type { ToolAnnotations } from './tool-factory.js';
+import type { WorkflowToolName } from './types/tool-description-types.js';
+
+export const WORKFLOW_TOOL_ANNOTATIONS: Readonly<Record<WorkflowToolName, ToolAnnotations>> = {
+  workflow_list: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+  },
+  workflow_get: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+  },
+  workflow_next: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+  },
+  workflow_validate_json: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+  },
+  workflow_get_schema: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+  },
+} as const;
+
+// -----------------------------------------------------------------------------
+// Workflow Tool Titles (static, don't change by mode)
+// -----------------------------------------------------------------------------
+
+export const WORKFLOW_TOOL_TITLES: Readonly<Record<WorkflowToolName, string>> = {
+  workflow_list: 'List Available Workflows',
+  workflow_get: 'Get Workflow Details',
+  workflow_next: 'Execute Next Workflow Step',
+  workflow_validate_json: 'Validate Workflow JSON',
+  workflow_get_schema: 'Get Workflow Schema',
+} as const;
+
+// -----------------------------------------------------------------------------
+// Session Tool Input Schemas
+// -----------------------------------------------------------------------------
+
 export const CreateSessionInput = z.object({
   workflowId: z
     .string()
@@ -100,108 +154,10 @@ export const OpenDashboardInput = z.object({
 export type OpenDashboardInput = z.infer<typeof OpenDashboardInput>;
 
 // -----------------------------------------------------------------------------
-// Tool Annotations
+// Session Tool Definitions (static, no description modes)
 // -----------------------------------------------------------------------------
 
-export interface ToolAnnotations {
-  readonly readOnlyHint?: boolean;
-  readonly destructiveHint?: boolean;
-  readonly idempotentHint?: boolean;
-}
-
-// -----------------------------------------------------------------------------
-// Tool Definitions
-// -----------------------------------------------------------------------------
-
-export interface ToolDefinition<TInput extends z.ZodType> {
-  readonly name: string;
-  readonly title: string;
-  readonly description: string;
-  readonly inputSchema: TInput;
-  readonly annotations: ToolAnnotations;
-}
-
-// --- Workflow Tools ---
-
-export const workflowListTool: ToolDefinition<typeof WorkflowListInput> = {
-  name: 'workflow_list',
-  title: 'List Available Workflows',
-  description: `Your primary tool for any complex or multi-step request. Call this FIRST to see if a reliable, pre-defined workflow exists, as this is the preferred method over improvisation.
-
-Your process:
-1. Call this tool to get a list of available workflows.
-2. Analyze the returned descriptions to find a match for the user's goal.
-3. If a good match is found, suggest it to the user and use workflow_get to start.
-4. If NO match is found, inform the user and then attempt to solve the task using your general abilities.`,
-  inputSchema: WorkflowListInput,
-  annotations: {
-    readOnlyHint: true,
-    destructiveHint: false,
-    idempotentHint: true,
-  },
-};
-
-export const workflowGetTool: ToolDefinition<typeof WorkflowGetInput> = {
-  name: 'workflow_get',
-  title: 'Get Workflow Details',
-  description: `Retrieves workflow information with configurable detail level. Supports progressive disclosure to prevent "workflow spoiling" while providing necessary context for workflow selection and initiation.`,
-  inputSchema: WorkflowGetInput,
-  annotations: {
-    readOnlyHint: true,
-    destructiveHint: false,
-    idempotentHint: true,
-  },
-};
-
-export const workflowNextTool: ToolDefinition<typeof WorkflowNextInput> = {
-  name: 'workflow_next',
-  title: 'Execute Next Workflow Step',
-  description: `Executes a workflow by getting the next step. Use this tool in a loop to progress through a workflow. You must provide the workflowId and a list of completedSteps. For conditional workflows, provide context with variables that will be used to evaluate step conditions.`,
-  inputSchema: WorkflowNextInput,
-  annotations: {
-    readOnlyHint: false,
-    destructiveHint: false,
-    idempotentHint: false,
-  },
-};
-
-export const workflowValidateJsonTool: ToolDefinition<typeof WorkflowValidateJsonInput> = {
-  name: 'workflow_validate_json',
-  title: 'Validate Workflow JSON',
-  description: `Validates workflow JSON content directly without external tools. Use this tool when you need to verify that a workflow JSON file is syntactically correct and follows the proper schema.
-
-This tool provides comprehensive validation including:
-- JSON syntax validation with detailed error messages
-- Workflow schema compliance checking
-- User-friendly error reporting with actionable suggestions
-- Support for all workflow features (steps, conditions, validation criteria, etc.)`,
-  inputSchema: WorkflowValidateJsonInput,
-  annotations: {
-    readOnlyHint: true,
-    destructiveHint: false,
-    idempotentHint: true,
-  },
-};
-
-export const workflowGetSchemaTool: ToolDefinition<typeof WorkflowGetSchemaInput> = {
-  name: 'workflow_get_schema',
-  title: 'Get Workflow Schema',
-  description: `Retrieves the complete workflow JSON schema for reference and development purposes. Use this tool when you need to understand the structure, required fields, and validation rules for workflows.
-
-This tool provides:
-- Complete JSON schema definition with all properties and constraints
-- Field descriptions and validation rules
-- Examples of valid patterns and formats
-- Schema version and metadata information`,
-  inputSchema: WorkflowGetSchemaInput,
-  annotations: {
-    readOnlyHint: true,
-    destructiveHint: false,
-    idempotentHint: true,
-  },
-};
-
-// --- Session Tools ---
+import type { ToolDefinition } from './tool-factory.js';
 
 export const createSessionTool: ToolDefinition<typeof CreateSessionInput> = {
   name: 'workrail_create_session',
@@ -281,16 +237,8 @@ If sessionId is provided, opens directly to that session. Otherwise opens to the
 };
 
 // -----------------------------------------------------------------------------
-// Tool Collections
+// Session Tool Collection
 // -----------------------------------------------------------------------------
-
-export const workflowTools = [
-  workflowListTool,
-  workflowGetTool,
-  workflowNextTool,
-  workflowValidateJsonTool,
-  workflowGetSchemaTool,
-] as const;
 
 export const sessionTools = [
   createSessionTool,
@@ -298,5 +246,3 @@ export const sessionTools = [
   readSessionTool,
   openDashboardTool,
 ] as const;
-
-export const allTools = [...workflowTools, ...sessionTools] as const;

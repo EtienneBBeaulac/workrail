@@ -123,9 +123,11 @@ async function registerServices(): Promise<void> {
   const { EnhancedLoopValidator } = await import('../application/services/enhanced-loop-validator.js');
   const { DefaultStepSelector } = await import('../application/services/step-selector.js');
   const { LoopContextOptimizer } = await import('../application/services/loop-context-optimizer.js');
-  // FeatureFlags already registered in registerConfig()
   const { SessionDataNormalizer } = await import('../infrastructure/session/SessionDataNormalizer.js');
   const { SessionDataValidator } = await import('../infrastructure/session/SessionDataValidator.js');
+
+  // MCP layer
+  const { ToolDescriptionProvider } = await import('../mcp/tool-description-provider.js');
 
   // Mid-level services
   const { ValidationEngine } = await import('../application/services/validation-engine.js');
@@ -156,7 +158,10 @@ async function registerServices(): Promise<void> {
   container.register(DI.Services.LoopContextOptimizer, { 
     useFactory: instanceCachingFactory((c) => c.resolve(LoopContextOptimizer)) 
   });
-  // DI.Infra.FeatureFlags already registered in registerConfig()
+  // FeatureFlags already registered in registerConfig()
+  container.register(DI.Mcp.DescriptionProvider, { 
+    useFactory: instanceCachingFactory((c) => c.resolve(ToolDescriptionProvider)) 
+  });
   container.register(DI.Infra.SessionDataNormalizer, { 
     useFactory: instanceCachingFactory((c) => c.resolve(SessionDataNormalizer)) 
   });
