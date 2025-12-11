@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import os from 'os';
+import { inject, singleton } from 'tsyringe';
 import { IWorkflowStorage } from '../../types/storage';
 import { Workflow, WorkflowSummary } from '../../types/mcp-types';
 import { FileWorkflowStorage } from './file-workflow-storage';
@@ -9,6 +10,8 @@ import { GitWorkflowStorage, GitWorkflowConfig } from './git-workflow-storage';
 import { RemoteWorkflowStorage, RemoteWorkflowRegistryConfig } from './remote-workflow-storage';
 import { PluginWorkflowStorage, PluginWorkflowConfig } from './plugin-workflow-storage';
 import { createLogger } from '../../utils/logger';
+import { IFeatureFlagProvider, EnvironmentFeatureFlagProvider } from '../../config/feature-flags';
+import { DI } from '../../di/tokens';
 
 const logger = createLogger('EnhancedMultiSourceWorkflowStorage');
 
@@ -20,6 +23,7 @@ interface FileWorkflowStorageOptions {
   cacheTTLms?: number;
   cacheSize?: number;
   indexCacheTTLms?: number;
+  featureFlagProvider?: IFeatureFlagProvider;
 }
 
 /**
@@ -108,39 +112,106 @@ export interface EnhancedMultiSourceConfig {
  * - Configurable priority ordering
  * - Comprehensive error handling
  */
+@singleton()
 export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
   private readonly storageInstances: IWorkflowStorage[] = [];
   private readonly config: Required<
     Pick<EnhancedMultiSourceConfig, 'warnOnSourceFailure' | 'gracefulDegradation'>
   >;
   private readonly sourceNames: string[] = []; // For debugging
+  private readonly featureFlags: IFeatureFlagProvider;
 
-  constructor(config: EnhancedMultiSourceConfig = {}) {
+  constructor(
+    @inject(DI.Infra.FeatureFlags)
+    featureFlagsOrConfig?: IFeatureFlagProvider | EnhancedMultiSourceConfig,
+    configOrUndefined?: EnhancedMultiSourceConfig
+  ) {
+    const resolvedConfig = this.resolveConfig(featureFlagsOrConfig, configOrUndefined);
+    const resolvedFeatureFlags = this.resolveFeatureFlags(featureFlagsOrConfig, configOrUndefined);
+
+    this.featureFlags = resolvedFeatureFlags;
     this.config = {
-      warnOnSourceFailure: config.warnOnSourceFailure ?? true,
-      gracefulDegradation: config.gracefulDegradation ?? true
+      warnOnSourceFailure: resolvedConfig.warnOnSourceFailure ?? true,
+      gracefulDegradation: resolvedConfig.gracefulDegradation ?? true
     };
-    
+
     // Parse WORKFLOW_STORAGE_PATH environment variable
     const customPathsEnv = process.env['WORKFLOW_STORAGE_PATH'];
     if (customPathsEnv) {
-      const paths = customPathsEnv.split(path.delimiter).map(p => p.trim()).filter(p => p.length > 0);
-      config.customPaths = [...(config.customPaths || []), ...paths];
+      const paths = customPathsEnv
+        .split(path.delimiter)
+        .map(p => p.trim())
+        .filter(p => p.length > 0);
+      resolvedConfig.customPaths = [...(resolvedConfig.customPaths || []), ...paths];
       logger.info('Added custom paths from WORKFLOW_STORAGE_PATH', { paths });
     }
-    
-    this.storageInstances = this.initializeStorageSources(config);
+
+    this.storageInstances = this.initializeStorageSources(resolvedConfig);
+  }
+
+  private resolveFeatureFlags(
+    featureFlagsOrConfig: IFeatureFlagProvider | EnhancedMultiSourceConfig | undefined,
+    configOrUndefined: EnhancedMultiSourceConfig | undefined
+  ): IFeatureFlagProvider {
+    if (configOrUndefined !== undefined) {
+      const injectedFeatureFlags = this.isFeatureFlagProvider(featureFlagsOrConfig)
+        ? featureFlagsOrConfig
+        : undefined;
+      return injectedFeatureFlags ?? new EnvironmentFeatureFlagProvider();
+    }
+
+    const injectedFeatureFlags = this.isFeatureFlagProvider(featureFlagsOrConfig)
+      ? featureFlagsOrConfig
+      : undefined;
+    return injectedFeatureFlags ?? new EnvironmentFeatureFlagProvider();
+  }
+
+  private resolveConfig(
+    featureFlagsOrConfig: IFeatureFlagProvider | EnhancedMultiSourceConfig | undefined,
+    configOrUndefined: EnhancedMultiSourceConfig | undefined
+  ): EnhancedMultiSourceConfig {
+    if (configOrUndefined !== undefined) {
+      return configOrUndefined;
+    }
+
+    if (featureFlagsOrConfig === undefined) {
+      return {};
+    }
+
+    if (this.isFeatureFlagProvider(featureFlagsOrConfig)) {
+      return {};
+    }
+
+    return featureFlagsOrConfig;
+  }
+
+  private isFeatureFlagProvider(value: unknown): value is IFeatureFlagProvider {
+    if (value === null || value === undefined) {
+      return false;
+    }
+
+    if (typeof value !== 'object') {
+      return false;
+    }
+
+    return 'isEnabled' in value && typeof (value as IFeatureFlagProvider).isEnabled === 'function';
   }
 
   private initializeStorageSources(config: EnhancedMultiSourceConfig): IWorkflowStorage[] {
     const instances: IWorkflowStorage[] = [];
+    
+    // Merge feature flags into file storage options
+    const fileStorageOptions: FileWorkflowStorageOptions = {
+      ...config.fileStorageOptions,
+      featureFlagProvider: this.featureFlags
+    };
 
     // Priority 1: Bundled workflows (lowest priority)
     if (config.includeBundled !== false) {
       try {
         const bundledPath = this.getBundledWorkflowsPath();
         if (existsSync(bundledPath)) {
-          instances.push(new FileWorkflowStorage(bundledPath, config.fileStorageOptions));
+          instances.push(new FileWorkflowStorage(bundledPath, fileStorageOptions));
           this.sourceNames.push('bundled');
         }
       } catch (error) {
@@ -166,7 +237,7 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
       try {
         const userPath = config.userPath || this.getUserWorkflowsPath();
         if (existsSync(userPath)) {
-          instances.push(new FileWorkflowStorage(userPath, config.fileStorageOptions));
+          instances.push(new FileWorkflowStorage(userPath, fileStorageOptions));
           this.sourceNames.push('user');
         }
       } catch (error) {
@@ -179,7 +250,7 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
       for (const customPath of config.customPaths) {
         try {
           if (existsSync(customPath)) {
-            instances.push(new FileWorkflowStorage(customPath, config.fileStorageOptions));
+            instances.push(new FileWorkflowStorage(customPath, fileStorageOptions));
             this.sourceNames.push(`custom:${customPath}`);
           }
         } catch (error) {
@@ -220,7 +291,7 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
       try {
         const projectPath = config.projectPath || this.getProjectWorkflowsPath();
         if (existsSync(projectPath)) {
-          instances.push(new FileWorkflowStorage(projectPath, config.fileStorageOptions));
+          instances.push(new FileWorkflowStorage(projectPath, fileStorageOptions));
           this.sourceNames.push('project');
         }
       } catch (error) {
@@ -517,7 +588,7 @@ export function createEnhancedMultiSourceWorkflowStorage(
     });
   }
 
-  return new EnhancedMultiSourceWorkflowStorage(config);
+  return new EnhancedMultiSourceWorkflowStorage(undefined, config);
 }
 
 // ========== Helper Functions ==========
