@@ -9,11 +9,11 @@ This document formally specifies the JSON-RPC 2.0 API for the Workflow Orchestra
 
 This server implements the full MCP (Model Context Protocol) specification:
 
-- ✅ **Server Initialization**: Handles `initialize` requests with protocol version validation
-- ✅ **Tool Discovery**: Implements `tools/list` with complete input/output schemas  
-- ✅ **Error Handling**: Uses MCP standard error codes (-32000 to -32099 range)
-- ✅ **Communication**: Stdio transport with newline-delimited JSON-RPC messages
-- ✅ **Server Lifecycle**: Proper startup, shutdown, and error recovery
+-  **Server Initialization**: Handles `initialize` requests with protocol version validation
+-  **Tool Discovery**: Implements `tools/list` with complete input/output schemas  
+-  **Error Handling**: Uses MCP standard error codes (-32000 to -32099 range)
+-  **Communication**: Stdio transport with newline-delimited JSON-RPC messages
+-  **Server Lifecycle**: Proper startup, shutdown, and error recovery
 
 For complete protocol details, see [MCP Protocol Handshake Specification](mcp-protocol-handshake.md).
 

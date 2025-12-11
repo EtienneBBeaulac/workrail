@@ -1,11 +1,11 @@
 # Advanced Security Guide
 
-> 🛡️ **Advanced security practices for the WorkRail System**
+>  **Advanced security practices for the WorkRail System**
 
 [![Status](https://img.shields.io/badge/status-advanced_security-green.svg)](https://github.com/EtienneBBeaulac/mcp)
 [![Spec Version](https://img.shields.io/badge/spec-1.0.0-blue.svg)](specs/)
 
-## 📋 Table of Contents
+##  Table of Contents
 
 1. [Threat Modeling](#threat-modeling)
 2. [Penetration Testing](#penetration-testing)

@@ -1,12 +1,12 @@
 # Security Guide
 
-> 🛡️ **Security best practices for the WorkRail System**
+>  **Security best practices for the WorkRail System**
 
 [![Status](https://img.shields.io/badge/status-specification-orange.svg)](https://github.com/EtienneBBeaulac/mcp)
 [![Spec Version](https://img.shields.io/badge/spec-1.0.0-blue.svg)](specs/)
 [![MCP Compatible](https://img.shields.io/badge/MCP-compatible-purple.svg)](https://modelcontextprotocol.org)
 
-## 📋 Table of Contents
+##  Table of Contents
 
 1. [Security Philosophy](#security-philosophy)
 2. [Threat Model](#threat-model)
@@ -212,7 +212,7 @@
 
 ---
 
-## ⚠️ Important Note
+##  Important Note
 
 **This is a specification project.** The security strategy described above is the planned approach for when implementation begins. Currently, no actual security measures are implemented - only the security framework design.
 
@@ -223,7 +223,7 @@ For implementation details, see:
 
 ---
 
-## 📚 Related Documentation
+##  Related Documentation
 
 - **[Architecture Guide](02-architecture.md)** - System design and security component architecture
 - **[Testing Strategy](04-testing-strategy.md)** - Security testing approaches and requirements

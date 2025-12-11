@@ -1,12 +1,12 @@
 # Testing Strategy Guide
 
-> 🧪 **Comprehensive testing strategy for the WorkRail System**
+>  **Comprehensive testing strategy for the WorkRail System**
 
 [![Build](https://img.shields.io/github/actions/workflow/status/EtienneBBeaulac/mcp/ci.yml?branch=main)]()
 [![Coverage](https://img.shields.io/badge/coverage-90%25-green)]()
 [![MCP Compatible](https://img.shields.io/badge/MCP-compatible-purple.svg)](https://modelcontextprotocol.org)
 
-## 📋 Table of Contents
+##  Table of Contents
 
 1. [Testing Philosophy](#testing-philosophy)
 2. [Testing Pyramid](#testing-pyramid)
@@ -53,10 +53,10 @@ Target distribution: **60% unit / 30% integration / 10% E2E**.
 
 | Suite | Tests | Status | Notes |
 |-------|-------|--------|-------|
-| Unit Tests | 47 | ✅ Passing | covers use-cases, storage adapters, validation, error mapping, CLI |
-| Integration Tests | 22 | ✅ Passing | JSON-RPC requests through stdin/stdout mocked in tests |
-| Contract Tests | 12 | ✅ Passing | server contract validation |
-| Performance Tests | 7 | ⚠️ Failing | optimization in progress |
+| Unit Tests | 47 |  Passing | covers use-cases, storage adapters, validation, error mapping, CLI |
+| Integration Tests | 22 |  Passing | JSON-RPC requests through stdin/stdout mocked in tests |
+| Contract Tests | 12 |  Passing | server contract validation |
+| Performance Tests | 7 |  Failing | optimization in progress |
 | **Total** | **88** | **81 passing, 7 failing** | comprehensive coverage |
 
 ### Test Suite Breakdown

@@ -39,7 +39,7 @@ Provide native context management tools in the MCP server that automatically han
 - Context classification and prioritization
 - Intelligent compression
 - Checkpoint persistence
-- Seamless workflow resumption
+- Automatic workflow resumption
 
 All while maintaining the MCP's stateless architecture by using external storage.
 
@@ -519,7 +519,7 @@ The system will be benchmarked to meet the following Service Level Agreements fo
 We have decided not to prioritize automated tools or features for migrating legacy manual context (e.g., from CONTEXT.md files) into the new checkpoint system at this time. Current manual context files are very limited in scope and functionality, and there are no known users with active, long-running legacy contexts that require porting. This decision keeps the MVP focused and avoids unnecessary complexity. If user needs evolve, we can revisit adding import capabilities in a future iteration.
 
 ### Feature Detection
-An agent or workflow can detect if the native context management features are available and adjust its strategy accordingly. This ensures robust behavior in environments with different server versions.
+An agent or workflow can detect if the native context management features are available and adjust its strategy accordingly. This ensures reliable behavior in environments with different server versions.
 ```typescript
 // Example logic for an agent to check for tool availability
 if (serverCapabilities.tools.some(tool => tool.name === 'workflow_checkpoint_save')) {
@@ -562,7 +562,7 @@ A comprehensive testing strategy is critical for ensuring the reliability and da
 - **Performance Benchmarks**: Run automated tests to ensure the system meets the defined Performance SLAs under typical and high-load conditions.
 
 ### End-to-End (E2E) / Acceptance Tests
-- **Workflow Interruption & Resumption**: Simulate a full user journey where a complex workflow is started, the server is unexpectedly terminated, and the workflow is successfully and accurately resumed from the last checkpoint.
+- **Workflow Interruption & Resumption**: Simulate a full test scenario where a complex workflow is started, the server is unexpectedly terminated, and the workflow is successfully and accurately resumed from the last checkpoint.
 - **Storage Cleanup**: Verify that automatic and manual cleanup policies correctly identify and delete old or excessive checkpoints without affecting active workflows.
 - **Cross-Platform Compatibility**: Run key E2E tests on all three target operating systems (Windows, macOS, Linux) to ensure consistent behavior.
 - **Resilience and Chaos Testing**: Incorporate fault injection to simulate real-world failures, such as disk full mid-save, process interruptions, concurrent overloads, or low-resource conditions, and verify that recovery mechanisms (e.g., atomic writes, graceful degradation) function correctly while meeting SLAs.
@@ -628,7 +628,7 @@ This section tracks key decisions made during the design process, including rati
 - **Post-MVP Deferral with Enhanced Basic Mode**: Defer local LLM entirely to post-MVP, and strengthen the basic mode with additional algorithmic techniques (e.g., multi-level gzip + TF-IDF-based summarization) to achieve 5-10x compression ratios reliably in the MVP.
 
 **Pros**:
-- Eliminates overhead and bloat in the initial release; provides a robust, dependency-free baseline; maintains zero-config purity while improving default performance.
+- Eliminates overhead and bloat in the initial release; provides a reliable, dependency-free baseline; maintains zero-config purity while improving default performance.
 
 **Cons**:
 - Delays access to maximum compression ratios; requires additional implementation effort for enhanced algorithms.
@@ -665,7 +665,10 @@ This section tracks key decisions made during the design process, including rati
 **Cons**:
 - Slightly more complex to implement (managing file links and potential orphans); requires two storage locations to manage.
 
-**Rationale**: This is a proven, scalable pattern for local applications. It leverages SQLite's powerful querying for metadata while avoiding database bloat by offloading large blobs, directly mitigating concerns from the analysis. This combination of performance, flexibility, and scalability makes it the most robust choice. 
+**Rationale**: This is a proven, scalable pattern for local applications. It uses SQLite's powerful
+querying for metadata while avoiding database bloat by offloading large blobs, directly mitigating
+concerns from the analysis. This combination of performance, flexibility, and scalability makes it
+the best choice. 
 
 ### Decision 4: Encryption Approach
 
@@ -696,7 +699,7 @@ This section tracks key decisions made during the design process, including rati
 **Cons**:
 - Slightly more complex to implement both automatic and manual logic and to track activity timestamps.
 
-**Rationale**: This provides a safety net against runaway storage growth while giving power users fine-grained control. Basing cleanup on last activity is a smarter default that protects ongoing work, directly addressing the analysis's concern in a robust and user-friendly way. 
+**Rationale**: This provides a safety net against runaway storage growth while giving power users fine-grained control. Basing cleanup on last activity is a smarter default that protects ongoing work, directly addressing the analysis's concern in a reliable and user-friendly way. 
 
 ### Decision 6: Checkpoint Triggering
 
@@ -786,7 +789,7 @@ This section tracks key decisions made during the design process, including rati
 **Description**: Implement a full testing suite, including:
 - **Unit Tests**: For individual, pure functions (e.g., classification rules, compression helpers).
 - **Integration Tests**: To verify interactions between components (e.g., writing to both SQLite and the filesystem).
-- **End-to-End (E2E) Tests**: To simulate a full user journey (start, kill, and resume from checkpoint).
+- **End-to-End (E2E) Tests**: To simulate a full test scenario (start, kill, and resume from checkpoint).
 
 **Pros**:
 - Maximum reliability; catches bugs at all levels (logic, integration, and UX); provides a safety net for future refactoring; builds high confidence in the feature's stability.

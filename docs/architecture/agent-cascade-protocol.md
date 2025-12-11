@@ -4,11 +4,12 @@
 
 The **Agent Cascade Protocol** is the architectural foundation that allows WorkRail to function universally across different agentic environments—from simple "chat" interfaces to complex, multi-agent IDEs like Firebender and Cursor.
 
-Instead of requiring a specific setup, WorkRail adopts a **Progressive Capability** model. It detects the available agent capabilities and "cascades" down to the most robust execution strategy available.
+Instead of requiring a specific setup, WorkRail adopts a **Progressive Capability** model. It detects the available agent capabilities and "cascades" down to the
+best execution strategy available.
 
 This ensures three critical outcomes:
 1.  **Universal Compatibility:** WorkRail works for users with zero configuration.
-2.  **Power User Scalability:** WorkRail unlocks advanced orchestration for users with configured subagents.
+2.  **Power User Scalability:** WorkRail enables advanced orchestration for users with configured subagents.
 3.  **Zero Hallucination:** The protocol verifies capabilities before attempting to use them.
 
 ---
@@ -29,7 +30,7 @@ WorkRail defines three distinct tiers of execution. The system automatically sel
     *   *Main Agent:* "Researcher, please find all files related to Auth."
     *   *Subagent:* (Uses native grep) "Here they are..."
     *   *Main Agent:* (Reads output, marks WorkRail step as complete).
-*   **Pros:** Leverages Subagent specialization and context isolation without complex tool config.
+*   **Pros:** Uses Subagent specialization and context isolation without complex tool config.
 *   **Cons:** Main Agent's context window gets polluted with the management overhead; serial execution only.
 
 ### Tier 1: Solo Mode (Bronze)
@@ -77,7 +78,7 @@ To support this protocol, WorkRail provides:
 1.  **The Diagnostic Workflow:** A guided utility (`workflow-diagnose-environment.json`) to help users verify and configure their agents.
 2.  **The Asset Pack:** Standardized definitions for common roles (Researcher, Architect, Builder, Reviewer) that users can copy-paste into their IDE configs.
     *   Includes System Prompts (for Tiers 1-3).
-    *   Includes Tool Whitelists (for unlocking Tier 3).
+    *   Includes Tool Whitelists (for enabling Tier 3).
 3.  **The Config Cache:** A local file (`.workrail/config.json`) where the Diagnostic Workflow saves the environment state, so the Main Agent remembers the correct Tier across sessions.
 
 ---

@@ -6,7 +6,8 @@
 
 ## Summary
 
-This epic covers the implementation of a native context management system for the WorkRail MCP server. The goal is to solve context window saturation in long-running workflows by providing automatic context persistence, intelligent compression, and seamless session resumption, all while maintaining the server's stateless architecture.
+This epic covers the implementation of a native context management system for the WorkRail MCP server. The goal is to solve context window saturation in long-running workflows by providing automatic context persistence, intelligent compression, and
+automatic session resumption, all while maintaining the server's stateless architecture.
 
 ## Phases & Tasks
 
@@ -205,7 +206,7 @@ This project will be broken down into four main phases, moving from core infrast
 
 ### Phase 3: Developer & User Experience
 
-**Goal:** Make the system robust, resilient, and configurable for advanced users and developers.
+**Goal:** Make the system reliable, resilient, and configurable for advanced users and developers.
 
 - [ ] **Concurrency & Error Handling**
     - [ ] Implement pessimistic locking for write operations (`workflow_checkpoint_save`) to ensure data consistency with concurrent agents.

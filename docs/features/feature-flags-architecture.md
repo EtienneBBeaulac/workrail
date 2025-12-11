@@ -341,7 +341,7 @@ Is tool name "workrail_*"?
 │    defaultValue: false,                                       │
 │  });                                                           │
 │                                                                │
-│  No changes needed to provider classes! ✅                     │
+│  No changes needed to provider classes!                      │
 │                                                                │
 └────────────────────────────────────────────────────────────────┘
 
@@ -355,9 +355,9 @@ Is tool name "workrail_*"?
 │    return provider.isEnabled('sessionTools');                 │
 │  }                                                             │
 │                                                                │
-│  useProvider(new EnvironmentFeatureFlagProvider()); ✅        │
-│  useProvider(new StaticFeatureFlagProvider());      ✅        │
-│  useProvider(new CustomProvider());                ✅        │
+│  useProvider(new EnvironmentFeatureFlagProvider());         │
+│  useProvider(new StaticFeatureFlagProvider());              │
+│  useProvider(new CustomProvider());                        │
 │                                                                │
 └────────────────────────────────────────────────────────────────┘
 
@@ -373,7 +373,7 @@ Is tool name "workrail_*"?
 │    getSummary(): string;       ← Debugging                   │
 │  }                                                             │
 │                                                                │
-│  No bloat, no unused methods ✅                                │
+│  No bloat, no unused methods                                 │
 │                                                                │
 └────────────────────────────────────────────────────────────────┘
 
@@ -397,8 +397,8 @@ Is tool name "workrail_*"?
 │  │ FlagProvider         │  depends on interface              │
 │  └──────────────────────┘                                     │
 │                                                                │
-│  Easy to swap implementations ✅                               │
-│  Easy to test ✅                                               │
+│  Easy to swap implementations                                │
+│  Easy to test                                                │
 │                                                                │
 └────────────────────────────────────────────────────────────────┘
 ```
@@ -410,9 +410,9 @@ Is tool name "workrail_*"?
 ```typescript
 class WorkflowOrchestrationServer {
   constructor() {
-    // ❌ Manual commenting/uncommenting
-    // ❌ Not testable
-    // ❌ Blocks releases
+    //  Manual commenting/uncommenting
+    //  Not testable
+    //  Blocks releases
     
     // Initialize session management (DISABLED for release)
     // TODO: Re-enable session tools when ready for production
@@ -434,9 +434,9 @@ class WorkflowOrchestrationServer {
 ```typescript
 class WorkflowOrchestrationServer {
   constructor(container?: AppContainer) {
-    // ✅ Clean boolean check
-    // ✅ Fully testable
-    // ✅ Never blocks releases
+    //  Clean boolean check
+    //  Fully testable
+    //  Never blocks releases
     
     this.container = container ?? createAppContainer();
     this.featureFlags = this.container.featureFlags;

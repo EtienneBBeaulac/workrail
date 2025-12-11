@@ -89,14 +89,14 @@ since different modules may have different conventions.
 ```
 Question: Should I analyze the middleware layer or just the service layer?
 Answer: I'll analyze both.
-[❌ NO JUSTIFICATION - didn't check rules, patterns, or guidance]
+[ NO JUSTIFICATION - didn't check rules, patterns, or guidance]
 ```
 
 ### Another Bad Pattern:
 ```
 Question: How should I structure this auth service?
 Answer: I'll use the pattern from src/payments/PaymentService.ts
-[❌ WRONG SCOPE - payments team may have different patterns than auth team]
+[ WRONG SCOPE - payments team may have different patterns than auth team]
 ```
 
 ### Sources to Check (Priority Order):
@@ -254,11 +254,11 @@ DELIVERABLE: ideas-caching.md
 ## Quality Standards
 
 Your work must meet these gates:
-- ✅ **Followed the workflow** - Executed steps in order as defined
-- ✅ **Used workflow guidance** - Applied the role and approach the workflow specified
-- ✅ **Created deliverable** - Produced artifact in requested format with all required sections
-- ✅ **Documented reasoning** - Asked clarifying questions and answered them yourself, making your decision-making process visible
-- ✅ **Completed autonomously** - No external input needed, worked from start to finish independently
+-  **Followed the workflow** - Executed steps in order as defined
+-  **Used workflow guidance** - Applied the role and approach the workflow specified
+-  **Created deliverable** - Produced artifact in requested format with all required sections
+-  **Documented reasoning** - Asked clarifying questions and answered them yourself, making your decision-making process visible
+-  **Completed autonomously** - No external input needed, worked from start to finish independently
 
 ## Important Notes
 

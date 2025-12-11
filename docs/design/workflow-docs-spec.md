@@ -13,12 +13,12 @@ Implement a comprehensive workflow documentation system for WorkRail that provid
 4. **Stateless Discovery**: Documentation accessible via text-only MCP tools without requiring first-run detection or persistence
 
 ### Success Criteria
-- ✅ New MCP tools (`workflow_docs`, `workrail_help`) provide progressive disclosure of documentation
-- ✅ Schema v0.3.0 supports optional `documentation` object with enforced critical fields
-- ✅ Step-level `sensitivity` tags enable automatic risk surfacing
-- ✅ README resolution with fallback algorithm (JSON → README → defaults)
-- ✅ Backward compatibility maintained for existing workflows
-- ✅ Integration with existing ValidationEngine and error handling patterns
+-  New MCP tools (`workflow_docs`, `workrail_help`) provide progressive disclosure of documentation
+-  Schema v0.3.0 supports optional `documentation` object with enforced critical fields
+-  Step-level `sensitivity` tags enable automatic risk surfacing
+-  README resolution with fallback algorithm (JSON → README → defaults)
+-  Backward compatibility maintained for existing workflows
+-  Integration with existing ValidationEngine and error handling patterns
 
 ## Scope and Constraints
 

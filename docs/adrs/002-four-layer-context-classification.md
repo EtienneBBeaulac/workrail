@@ -34,5 +34,5 @@ Classification will be implemented using a hybrid approach: automatic pattern-ba
 
 ### Negative:
 -   **Requires Upfront Definition:** The patterns for automatic classification need to be well-defined and maintained.
--   **Potential for Misclassification:** If patterns are not robust, information could be assigned to the wrong category, although the manual override acts as a safeguard.
+-   **Potential for Misclassification:** If patterns are not reliable, information could be assigned to the wrong category, although the manual override acts as a safeguard.
 -   **Minor Agent Overhead:** While mostly automatic, the agent needs to be aware of the system to use the override tool effectively. 

@@ -178,7 +178,7 @@ Example migration:
 
 1. **Use Function DSL** for repeated patterns within loops
 2. **Set Appropriate maxIterations** to prevent runaway loops
-3. **Leverage Empty Loop Detection** by checking conditions early
+3. **Use Empty Loop Detection** by checking conditions early
 4. **Design for Progressive Disclosure** in your prompts
 
 ## Troubleshooting

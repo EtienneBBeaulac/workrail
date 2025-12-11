@@ -14,7 +14,7 @@
 
 AI agents are eager to help. Too eager.
 
-Ask one to fix a bug and it starts editing code immediately—before understanding the system, before
+Ask one to fix a bug and it starts editing code immediately - before understanding the system, before
 considering alternatives, before verifying assumptions. It's not stupid; it's a predictive model
 doing what predictive models do: fill in gaps and race to an answer.
 
@@ -112,9 +112,9 @@ Same agent. Same model. But it prepared properly because it had no choice.
 
 Each step follows a pattern that prevents common AI failure modes:
 
-- **Prep**: Understand before acting—read the code, clarify requirements, confirm approach
-- **Implement**: One focused change—not five things at once
-- **Verify**: Validate before continuing—catch errors before they compound
+- **Prep**: Understand before acting - read the code, clarify requirements, confirm approach
+- **Implement**: One focused change - not five things at once
+- **Verify**: Validate before continuing - catch errors before they compound
 
 This isn't arbitrary structure. It's how experienced developers actually work.
 
@@ -123,7 +123,7 @@ This isn't arbitrary structure. It's how experienced developers actually work.
 | System Prompt | WorkRail |
 |---------------|----------|
 | "Plan first" fades as context grows | Each step is fresh and immediate |
-| Agent decides what to follow | Agent can't skip—next step is hidden |
+| Agent decides what to follow | Agent can't skip - next step is hidden |
 | One-size-fits-all instructions | Workflows adapt to task complexity |
 | Inconsistent results | Repeatable, consistent quality |
 
@@ -164,7 +164,7 @@ The agent will find the workflow, start at step 1, and proceed systematically.
 | `exploration-workflow` | Understanding an unfamiliar codebase |
 | `document-creation-workflow` | Technical documentation with structure |
 
-Workflows adapt to complexity—simple tasks get fast-tracked, complex tasks get full rigor.
+Workflows adapt to complexity - simple tasks get fast-tracked, complex tasks get full rigor.
 
 [See all workflows →](docs/workflows.md)
 
@@ -174,7 +174,7 @@ Workflows adapt to complexity—simple tasks get fast-tracked, complex tasks get
 
 ### Guardrails Enable Excellence
 
-WorkRail doesn't lobotomize your AI. The agent still reasons, explores, and creates—but within a
+WorkRail doesn't lobotomize your AI. The agent still reasons, explores, and creates - but within a
 structure that ensures it actually prepares, plans, and verifies. Guardrails prevent shortcuts, not
 creativity.
 
@@ -182,7 +182,7 @@ creativity.
 
 Workflows aren't just task checklists. They embed hard-won expertise: "verify understanding before
 implementing," "form multiple hypotheses before concluding," "test assumptions with evidence." This
-is how senior engineers think—now encoded into every workflow.
+is how senior engineers think - now encoded into every workflow.
 
 ### Replacing the Human Guide
 
@@ -221,7 +221,7 @@ Drop a JSON file in `~/.workrail/workflows/`:
 }
 ```
 
-WorkRail discovers it automatically. This is a minimal example—workflows also
+WorkRail discovers it automatically. This is a minimal example - workflows also
 support [conditions, loops, validation criteria](docs/authoring.md), and more.
 
 [Writing workflows →](docs/authoring.md) · [Load from Git →](docs/configuration.md#git-repositories)

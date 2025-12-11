@@ -167,31 +167,31 @@ it('uses real validation engine', async () => {
 
 ## Anti-Patterns (Don't Do This!)
 
-### ❌ Anti-Pattern 1: Business Logic Mocks in Integration
+###  Anti-Pattern 1: Business Logic Mocks in Integration
 
 ```typescript
-// ❌ BAD - ESLint will fail this!
+//  BAD - ESLint will fail this!
 await setupIntegrationTest({
   mocks: { [DI.Infra.ValidationEngine]: mockValidator }
 });
 
-// ✅ GOOD - Move to unit test if you need mocks
+//  GOOD - Move to unit test if you need mocks
 await setupTest({  // Different helper for unit tests
   mocks: { [DI.Infra.ValidationEngine]: mockValidator }
 });
 ```
 
-### ❌ Anti-Pattern 2: DI Tests in Unit Tier
+###  Anti-Pattern 2: DI Tests in Unit Tier
 
 ```typescript
-// ❌ BAD - Wrong tier
+//  BAD - Wrong tier
 describe('[UNIT] MyService Construction', () => {
   it('can be constructed', () => {
     expect(() => new MyService()).not.toThrow();
   });
 });
 
-// ✅ GOOD - Use smoke tests
+//  GOOD - Use smoke tests
 describe('[SMOKE] MyService DI', () => {
   it('can be resolved', async () => {
     await initializeContainer();
@@ -200,15 +200,15 @@ describe('[SMOKE] MyService DI', () => {
 });
 ```
 
-### ❌ Anti-Pattern 3: Real File I/O in Integration
+###  Anti-Pattern 3: Real File I/O in Integration
 
 ```typescript
-// ❌ BAD - Slow and brittle
+//  BAD - Slow and brittle
 await setupIntegrationTest({
   storage: new FileWorkflowStorage('./real-workflows')
 });
 
-// ✅ GOOD - In-memory is fast and reliable
+//  GOOD - In-memory is fast and reliable
 await setupIntegrationTest({
   storage: new InMemoryWorkflowStorage()
 });
@@ -276,7 +276,7 @@ Integration tests cannot have business logic mocks:
 ```javascript
 // .eslintrc-tests.js catches this:
 setupIntegrationTest({
-  mocks: { [DI.Infra.ValidationEngine]: mock } // ❌ Error!
+  mocks: { [DI.Infra.ValidationEngine]: mock } //  Error!
 });
 ```
 

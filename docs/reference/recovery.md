@@ -1,11 +1,11 @@
 # Recovery Reference
 
-> 🔄 **Data recovery and disaster preparedness**
+>  **Data recovery and disaster preparedness**
 
 [![Status](https://img.shields.io/badge/status-recovery_reference-green.svg)](https://github.com/EtienneBBeaulac/mcp)
 [![Spec Version](https://img.shields.io/badge/spec-1.0.0-blue.svg)](specs/)
 
-## 📋 Table of Contents
+##  Table of Contents
 
 1. [Backup Procedures](#backup-procedures)
 2. [Restore Procedures](#restore-procedures)

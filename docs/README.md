@@ -1,6 +1,6 @@
 # Documentation Index
 
-> 📚 **Internal documentation for WorkRail development**
+> **Internal documentation for WorkRail development**
 
 ## Architecture & Design
 
@@ -24,7 +24,7 @@
 
 - **[Loop Documentation](features/loops.md)** - Loop support and patterns
 - **[API Specification](../spec/mcp-api-v1.0.md)** - Complete API documentation
-- **[Configuration Reference](reference/configuration.md)** - Configuration options
+- **[Configuration Reference](configuration.md)** - Environment variables, Git repos, paths
 - **[Troubleshooting Guide](reference/troubleshooting.md)** - Common issues and solutions
 
 ---

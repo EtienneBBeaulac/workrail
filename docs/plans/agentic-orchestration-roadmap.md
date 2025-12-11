@@ -1,7 +1,8 @@
 # Product Plan: The "Agentic Orchestration" Evolution
 
 ## Executive Summary
-This document outlines the roadmap for evolving WorkRail from a monolithic workflow engine into a **Composable, Agent-Aware Orchestration Platform**. This evolution enables WorkRail to leverage modern Agentic IDE features (Subagents, Parallel Execution) while maintaining universal compatibility and backward compatibility.
+This document outlines the roadmap for evolving WorkRail from a monolithic workflow engine into a **Composable, Agent-Aware Orchestration Platform**. This evolution enables WorkRail to
+use modern Agentic IDE features (Subagents, Parallel Execution) while maintaining universal compatibility and backward compatibility.
 
 The rollout is structured in **3 Phased Tiers**, gated by feature flags, ensuring safe and iterative delivery.
 
