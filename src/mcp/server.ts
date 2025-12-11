@@ -7,6 +7,8 @@
  * - Tool definitions with Zod schemas
  * - Handler functions
  * - DI container
+ *
+ * @module mcp/server
  */
 
 import { z } from 'zod';
@@ -19,14 +21,19 @@ import type { SessionManager } from '../infrastructure/session/SessionManager.js
 import type { HttpServer } from '../infrastructure/session/HttpServer.js';
 
 import type { ToolContext, ToolResult } from './types.js';
-import type { ToolAnnotations } from './tools.js';
+import { createToolFactory, type ToolAnnotations, type ToolDefinition } from './tool-factory.js';
+import type { IToolDescriptionProvider } from './tool-description-provider.js';
 import {
-  // Tool definitions
-  workflowListTool,
-  workflowGetTool,
-  workflowNextTool,
-  workflowValidateJsonTool,
-  workflowGetSchemaTool,
+  // Workflow tool input schemas
+  WorkflowListInput,
+  WorkflowGetInput,
+  WorkflowNextInput,
+  WorkflowValidateJsonInput,
+  WorkflowGetSchemaInput,
+  // Workflow tool metadata
+  WORKFLOW_TOOL_ANNOTATIONS,
+  WORKFLOW_TOOL_TITLES,
+  // Session tools (static definitions)
   createSessionTool,
   updateSessionTool,
   readSessionTool,
@@ -131,13 +138,7 @@ export function createToolContext(): ToolContext {
 /**
  * Convert a tool definition to MCP Tool format.
  */
-function toMcpTool<TInput extends z.ZodType>(tool: {
-  name: string;
-  title: string;
-  description: string;
-  inputSchema: TInput;
-  annotations: ToolAnnotations;
-}): Tool {
+function toMcpTool<TInput extends z.ZodType>(tool: ToolDefinition<TInput>): Tool {
   return {
     name: tool.name,
     description: tool.description,
@@ -196,6 +197,50 @@ export async function startServer(): Promise<void> {
   // Create tool context with all dependencies
   const ctx = createToolContext();
 
+  // Resolve description provider from DI
+  const descriptionProvider = container.resolve<IToolDescriptionProvider>(
+    DI.Mcp.DescriptionProvider
+  );
+
+  // Create tool factory with dynamic descriptions
+  const buildTool = createToolFactory(descriptionProvider);
+
+  // Build workflow tools with dynamic descriptions
+  const workflowListTool = buildTool({
+    name: 'workflow_list',
+    title: WORKFLOW_TOOL_TITLES.workflow_list,
+    inputSchema: WorkflowListInput,
+    annotations: WORKFLOW_TOOL_ANNOTATIONS.workflow_list,
+  });
+
+  const workflowGetTool = buildTool({
+    name: 'workflow_get',
+    title: WORKFLOW_TOOL_TITLES.workflow_get,
+    inputSchema: WorkflowGetInput,
+    annotations: WORKFLOW_TOOL_ANNOTATIONS.workflow_get,
+  });
+
+  const workflowNextTool = buildTool({
+    name: 'workflow_next',
+    title: WORKFLOW_TOOL_TITLES.workflow_next,
+    inputSchema: WorkflowNextInput,
+    annotations: WORKFLOW_TOOL_ANNOTATIONS.workflow_next,
+  });
+
+  const workflowValidateJsonTool = buildTool({
+    name: 'workflow_validate_json',
+    title: WORKFLOW_TOOL_TITLES.workflow_validate_json,
+    inputSchema: WorkflowValidateJsonInput,
+    annotations: WORKFLOW_TOOL_ANNOTATIONS.workflow_validate_json,
+  });
+
+  const workflowGetSchemaTool = buildTool({
+    name: 'workflow_get_schema',
+    title: WORKFLOW_TOOL_TITLES.workflow_get_schema,
+    inputSchema: WorkflowGetSchemaInput,
+    annotations: WORKFLOW_TOOL_ANNOTATIONS.workflow_get_schema,
+  });
+
   // Dynamically import SDK modules (ESM-only)
   const { Server } = await import('@modelcontextprotocol/sdk/server/index.js');
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
@@ -236,13 +281,13 @@ export async function startServer(): Promise<void> {
     );
   }
 
-  // Build handler map
+  // Build handler map (uses input schemas directly)
   const handlers: Record<string, ToolHandler> = {
-    workflow_list: createHandler(workflowListTool.inputSchema, handleWorkflowList),
-    workflow_get: createHandler(workflowGetTool.inputSchema, handleWorkflowGet),
-    workflow_next: createHandler(workflowNextTool.inputSchema, handleWorkflowNext),
-    workflow_validate_json: createHandler(workflowValidateJsonTool.inputSchema, handleWorkflowValidateJson),
-    workflow_get_schema: createHandler(workflowGetSchemaTool.inputSchema, handleWorkflowGetSchema),
+    workflow_list: createHandler(WorkflowListInput, handleWorkflowList),
+    workflow_get: createHandler(WorkflowGetInput, handleWorkflowGet),
+    workflow_next: createHandler(WorkflowNextInput, handleWorkflowNext),
+    workflow_validate_json: createHandler(WorkflowValidateJsonInput, handleWorkflowValidateJson),
+    workflow_get_schema: createHandler(WorkflowGetSchemaInput, handleWorkflowGetSchema),
     workrail_create_session: createHandler(createSessionTool.inputSchema, handleCreateSession),
     workrail_update_session: createHandler(updateSessionTool.inputSchema, handleUpdateSession),
     workrail_read_session: createHandler(readSessionTool.inputSchema, handleReadSession),
@@ -275,5 +320,3 @@ export async function startServer(): Promise<void> {
 
   console.error('WorkRail MCP Server running on stdio');
 }
-
-

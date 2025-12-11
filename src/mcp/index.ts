@@ -19,37 +19,65 @@ export {
   error,
 } from './types.js';
 
-// Tool definitions
+// Tool factory and definitions
 export type {
   ToolAnnotations,
   ToolDefinition,
-} from './tools.js';
+  ToolConfig,
+  ToolBuilder,
+} from './tool-factory.js';
+
+export { createToolFactory } from './tool-factory.js';
+
+// Tool description types
+export type {
+  DescriptionMode,
+  WorkflowToolName,
+  ToolDescriptionMap,
+  DescriptionsByMode,
+} from './types/tool-description-types.js';
 
 export {
-  // Input schemas
+  DESCRIPTION_MODES,
+  WORKFLOW_TOOL_NAMES,
+  isDescriptionMode,
+  isWorkflowToolName,
+} from './types/tool-description-types.js';
+
+// Tool description provider
+export type { IToolDescriptionProvider } from './tool-description-provider.js';
+
+export {
+  ToolDescriptionProvider,
+  StaticToolDescriptionProvider,
+} from './tool-description-provider.js';
+
+// Tool descriptions content
+export { DESCRIPTIONS } from './tool-descriptions.js';
+
+// Input schemas and session tools
+export {
+  // Workflow input schemas
   WorkflowListInput,
   WorkflowGetInput,
   WorkflowNextInput,
   WorkflowValidateJsonInput,
   WorkflowGetSchemaInput,
+  // Workflow tool metadata
+  WORKFLOW_TOOL_ANNOTATIONS,
+  WORKFLOW_TOOL_TITLES,
+  // Session input schemas
   CreateSessionInput,
   UpdateSessionInput,
   ReadSessionInput,
   OpenDashboardInput,
-  // Tool definitions
-  workflowListTool,
-  workflowGetTool,
-  workflowNextTool,
-  workflowValidateJsonTool,
-  workflowGetSchemaTool,
+  // Session tool definitions (static)
   createSessionTool,
   updateSessionTool,
   readSessionTool,
   openDashboardTool,
-  // Collections
-  workflowTools,
+  // Session tool collection
   sessionTools,
-  allTools,
 } from './tools.js';
 
 // Workflow handlers

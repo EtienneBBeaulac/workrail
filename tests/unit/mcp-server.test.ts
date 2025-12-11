@@ -29,12 +29,13 @@ describe('MCP Server Core Functionality', () => {
   describe('Tool Definitions (src/mcp/tools.ts)', () => {
     const toolsContent = fs.readFileSync(path.join(mcpDir, 'tools.ts'), 'utf8');
 
-    it('should define all workflow tools', () => {
-      expect(toolsContent).toContain('workflowListTool');
-      expect(toolsContent).toContain('workflowGetTool');
-      expect(toolsContent).toContain('workflowNextTool');
-      expect(toolsContent).toContain('workflowValidateJsonTool');
-      expect(toolsContent).toContain('workflowGetSchemaTool');
+    it('should define workflow tool annotations', () => {
+      expect(toolsContent).toContain('WORKFLOW_TOOL_ANNOTATIONS');
+      expect(toolsContent).toContain('workflow_list');
+      expect(toolsContent).toContain('workflow_get');
+      expect(toolsContent).toContain('workflow_next');
+      expect(toolsContent).toContain('workflow_validate_json');
+      expect(toolsContent).toContain('workflow_get_schema');
     });
 
     it('should define all session tools', () => {
@@ -57,16 +58,59 @@ describe('MCP Server Core Functionality', () => {
       expect(toolsContent).toContain('idempotentHint');
     });
 
-    it('should define tool titles for UI display', () => {
-      expect(toolsContent).toContain("title: 'List Available Workflows'");
-      expect(toolsContent).toContain("title: 'Get Workflow Details'");
-      expect(toolsContent).toContain("title: 'Execute Next Workflow Step'");
+    it('should define workflow tool titles', () => {
+      expect(toolsContent).toContain('WORKFLOW_TOOL_TITLES');
+      expect(toolsContent).toContain("'List Available Workflows'");
+      expect(toolsContent).toContain("'Get Workflow Details'");
+      expect(toolsContent).toContain("'Execute Next Workflow Step'");
     });
 
-    it('should export tool collections', () => {
-      expect(toolsContent).toContain('export const workflowTools');
+    it('should export session tools collection', () => {
       expect(toolsContent).toContain('export const sessionTools');
-      expect(toolsContent).toContain('export const allTools');
+    });
+  });
+
+  describe('Tool Description System', () => {
+    it('should have tool description types', () => {
+      const typesPath = path.join(mcpDir, 'types/tool-description-types.ts');
+      expect(fs.existsSync(typesPath)).toBe(true);
+      
+      const typesContent = fs.readFileSync(typesPath, 'utf8');
+      expect(typesContent).toContain('DESCRIPTION_MODES');
+      expect(typesContent).toContain('WORKFLOW_TOOL_NAMES');
+      expect(typesContent).toContain('DescriptionMode');
+      expect(typesContent).toContain('WorkflowToolName');
+    });
+
+    it('should have tool descriptions for all modes', () => {
+      const descriptionsPath = path.join(mcpDir, 'tool-descriptions.ts');
+      expect(fs.existsSync(descriptionsPath)).toBe(true);
+      
+      const descriptionsContent = fs.readFileSync(descriptionsPath, 'utf8');
+      expect(descriptionsContent).toContain('standard:');
+      expect(descriptionsContent).toContain('authoritative:');
+      expect(descriptionsContent).toContain('workflow_list');
+      expect(descriptionsContent).toContain('workflow_next');
+    });
+
+    it('should have tool description provider', () => {
+      const providerPath = path.join(mcpDir, 'tool-description-provider.ts');
+      expect(fs.existsSync(providerPath)).toBe(true);
+      
+      const providerContent = fs.readFileSync(providerPath, 'utf8');
+      expect(providerContent).toContain('IToolDescriptionProvider');
+      expect(providerContent).toContain('ToolDescriptionProvider');
+      expect(providerContent).toContain('getDescription');
+    });
+
+    it('should have tool factory', () => {
+      const factoryPath = path.join(mcpDir, 'tool-factory.ts');
+      expect(fs.existsSync(factoryPath)).toBe(true);
+      
+      const factoryContent = fs.readFileSync(factoryPath, 'utf8');
+      expect(factoryContent).toContain('createToolFactory');
+      expect(factoryContent).toContain('ToolBuilder');
+      expect(factoryContent).toContain('ToolConfig');
     });
   });
 
