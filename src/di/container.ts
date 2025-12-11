@@ -116,6 +116,9 @@ async function registerServices(): Promise<void> {
   const { SessionDataNormalizer } = await import('../infrastructure/session/SessionDataNormalizer.js');
   const { SessionDataValidator } = await import('../infrastructure/session/SessionDataValidator.js');
 
+  // MCP layer
+  const { ToolDescriptionProvider } = await import('../mcp/tool-description-provider.js');
+
   // Mid-level services
   const { ValidationEngine } = await import('../application/services/validation-engine.js');
   const { LoopStackManager } = await import('../application/services/loop-stack-manager.js');
@@ -147,6 +150,9 @@ async function registerServices(): Promise<void> {
   });
   container.register(DI.Infra.FeatureFlags, { 
     useFactory: instanceCachingFactory((c) => c.resolve(EnvironmentFeatureFlagProvider)) 
+  });
+  container.register(DI.Mcp.DescriptionProvider, { 
+    useFactory: instanceCachingFactory((c) => c.resolve(ToolDescriptionProvider)) 
   });
   container.register(DI.Infra.SessionDataNormalizer, { 
     useFactory: instanceCachingFactory((c) => c.resolve(SessionDataNormalizer)) 
