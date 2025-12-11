@@ -49,7 +49,7 @@ function parseAndValidateTTL(envValue: string | undefined): number {
 // CONFIGURATION REGISTRATION
 // ═══════════════════════════════════════════════════════════════════════════
 
-function registerConfig(): void {
+async function registerConfig(): Promise<void> {
   container.register(DI.Config.CacheTTL, {
     useValue: parseAndValidateTTL(process.env.CACHE_TTL),
   });
@@ -58,6 +58,12 @@ function registerConfig(): void {
   });
   container.register(DI.Config.ProjectPath, {
     useValue: process.cwd(),
+  });
+  
+  // Register FeatureFlags early - needed by storage layer
+  const { EnvironmentFeatureFlagProvider } = await import('../config/feature-flags.js');
+  container.register(DI.Infra.FeatureFlags, { 
+    useFactory: instanceCachingFactory((c) => c.resolve(EnvironmentFeatureFlagProvider)) 
   });
 }
 
@@ -112,7 +118,7 @@ async function registerServices(): Promise<void> {
   const { EnhancedLoopValidator } = await import('../application/services/enhanced-loop-validator.js');
   const { DefaultStepSelector } = await import('../application/services/step-selector.js');
   const { LoopContextOptimizer } = await import('../application/services/loop-context-optimizer.js');
-  const { EnvironmentFeatureFlagProvider } = await import('../config/feature-flags.js');
+  // FeatureFlags already registered in registerConfig()
   const { SessionDataNormalizer } = await import('../infrastructure/session/SessionDataNormalizer.js');
   const { SessionDataValidator } = await import('../infrastructure/session/SessionDataValidator.js');
 
@@ -145,9 +151,7 @@ async function registerServices(): Promise<void> {
   container.register(DI.Services.LoopContextOptimizer, { 
     useFactory: instanceCachingFactory((c) => c.resolve(LoopContextOptimizer)) 
   });
-  container.register(DI.Infra.FeatureFlags, { 
-    useFactory: instanceCachingFactory((c) => c.resolve(EnvironmentFeatureFlagProvider)) 
-  });
+  // DI.Infra.FeatureFlags already registered in registerConfig()
   container.register(DI.Infra.SessionDataNormalizer, { 
     useFactory: instanceCachingFactory((c) => c.resolve(SessionDataNormalizer)) 
   });
@@ -226,7 +230,7 @@ export async function initializeContainer(): Promise<void> {
   isInitializing = true;
 
   try {
-    registerConfig();
+    await registerConfig();
     await registerStorageChain();
     await registerServices();
     initialized = true;
