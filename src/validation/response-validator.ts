@@ -1,17 +1,25 @@
 import { z, ZodTypeAny } from 'zod';
 import { ValidationError } from '../core/error-handler';
+import { WORKFLOW_SOURCE_KINDS } from '../types/workflow-source';
 
 const idRegex = /^[A-Za-z0-9_-]+$/;
 
 // ---------------------------------------------------------------------------
 // Reusable fragments
 // ---------------------------------------------------------------------------
+
+// Source info for public API
+const workflowSourceInfoSchema = z.object({
+  kind: z.enum(WORKFLOW_SOURCE_KINDS as unknown as [string, ...string[]]),
+  displayName: z.string()
+});
+
 const workflowSummarySchema = z.object({
   id: z.string().regex(idRegex),
   name: z.string(),
   description: z.string(),
-  category: z.string(),
-  version: z.string()
+  version: z.string(),
+  source: workflowSourceInfoSchema
 });
 
 const functionParameterSchema = z.object({
@@ -49,7 +57,8 @@ const workflowStepSchema = z.object({
   functionReferences: z.array(z.string()).optional()
 });
 
-const workflowSchema = z.object({
+// Workflow definition schema (what's in the JSON file)
+const workflowDefinitionSchema = z.object({
   id: z.string().regex(idRegex),
   name: z.string(),
   description: z.string(),
@@ -59,6 +68,14 @@ const workflowSchema = z.object({
   steps: z.array(workflowStepSchema),
   metaGuidance: z.array(z.string()).optional(),
   functionDefinitions: z.array(functionDefinitionSchema).optional()
+});
+
+// Full workflow schema (includes source)
+const workflowSchema = z.object({
+  definition: workflowDefinitionSchema,
+  source: z.object({
+    kind: z.string()
+  }).passthrough() // Allow additional source fields
 });
 
 // Mode parameter response schemas
@@ -77,11 +94,12 @@ const workflowPreviewSchema = workflowMetadataSchema.extend({
   firstStep: workflowStepSchema.nullable()
 });
 
-// Union schema for workflow_get that handles all three response types
+// Union schema for workflow_get that handles all response types
 const workflowGetResponseSchema = z.union([
-  workflowSchema,        // Full workflow (for undefined mode or backward compatibility)
-  workflowMetadataSchema, // Metadata mode response
-  workflowPreviewSchema   // Preview mode response
+  workflowSchema,          // Full workflow (new format with definition + source)
+  workflowDefinitionSchema, // Legacy: bare definition
+  workflowMetadataSchema,   // Metadata mode response
+  workflowPreviewSchema     // Preview mode response
 ]);
 
 // ---------------------------------------------------------------------------
@@ -93,7 +111,7 @@ export const methodResultSchemas: Record<string, ZodTypeAny> = {
     workflows: z.array(workflowSummarySchema)
   }),
 
-  // workflow_get → Workflow | WorkflowMetadata | WorkflowPreview (union based on mode parameter)
+  // workflow_get → Workflow | WorkflowDefinition | WorkflowMetadata | WorkflowPreview
   workflow_get: workflowGetResponseSchema,
 
   // workflow_next → { step, guidance, isComplete }
@@ -137,4 +155,4 @@ export class ResponseValidator {
   }
 }
 
-export const responseValidator = new ResponseValidator(methodResultSchemas); 
+export const responseValidator = new ResponseValidator(methodResultSchemas);

@@ -27,7 +27,7 @@ export interface WorkflowSummary {
 }
 
 export interface WorkflowListOutput {
-  workflows: WorkflowSummary[];
+  workflows: readonly WorkflowSummary[];
 }
 
 export interface WorkflowGetOutput {

@@ -1,16 +1,28 @@
 import fs from 'fs';
 import path from 'path';
 import Ajv, { ValidateFunction } from 'ajv';
-import { IWorkflowStorage } from '../../types/storage';
-import { Workflow } from '../../types/mcp-types';
+import { IWorkflowStorage, ICompositeWorkflowStorage, isCompositeStorage } from '../../types/storage';
+import { 
+  Workflow, 
+  WorkflowSummary, 
+  WorkflowDefinition,
+  WorkflowSource,
+  createWorkflow 
+} from '../../types/workflow';
 import { InvalidWorkflowError } from '../../core/error-handler';
 
 /**
- * Decorator that filters or throws when underlying storage returns workflows
- * that do not conform to the JSON schema.
+ * Decorator that validates workflows against the JSON schema.
+ * 
+ * Validates the definition portion of workflows on load.
+ * Invalid workflows are logged and filtered out (graceful degradation).
+ * 
+ * IMPORTANT: This decorator delegates to inner storage for summaries.
+ * Validation happens on loadAllWorkflows() and getWorkflowById().
  */
 export class SchemaValidatingWorkflowStorage implements IWorkflowStorage {
-  private validator: ValidateFunction;
+  public readonly kind = 'single' as const;
+  private readonly validator: ValidateFunction;
 
   constructor(private readonly inner: IWorkflowStorage) {
     const schemaPath = path.resolve(__dirname, '../../../spec/workflow.schema.json');
@@ -19,57 +31,159 @@ export class SchemaValidatingWorkflowStorage implements IWorkflowStorage {
     this.validator = ajv.compile(schema);
   }
 
-  private ensureValid(workflow: Workflow): boolean {
-    const isValid = this.validator(workflow as any);
+  /**
+   * The source from the inner storage.
+   */
+  get source(): WorkflowSource {
+    return this.inner.source;
+  }
+
+  private validateDefinition(definition: WorkflowDefinition): boolean {
+    const isValid = this.validator(definition);
     if (!isValid) {
+      const id = (definition as { id?: string }).id ?? 'unknown';
       throw new InvalidWorkflowError(
-        (workflow as any).id ?? 'unknown',
+        id,
         JSON.stringify(this.validator.errors)
       );
     }
     return true;
   }
 
-  async loadAllWorkflows(): Promise<Workflow[]> {
-    const raw = await this.inner.loadAllWorkflows();
-    return raw.filter((wf) => {
+  async loadAllWorkflows(): Promise<readonly Workflow[]> {
+    const workflows = await this.inner.loadAllWorkflows();
+    
+    // Filter out invalid workflows, logging errors
+    const validWorkflows: Workflow[] = [];
+    
+    for (const workflow of workflows) {
       try {
-        return this.ensureValid(wf);
+        if (this.validateDefinition(workflow.definition)) {
+          validWorkflows.push(workflow);
+        }
       } catch (err) {
-        console.error(`[SchemaValidation] Workflow '${wf.id}' failed validation:`, 
-          err instanceof Error ? err.message : err);
-        return false; // Skip invalid workflows
+        console.error(
+          `[SchemaValidation] Workflow '${workflow.definition.id}' failed validation:`,
+          err instanceof Error ? err.message : err
+        );
+        // Skip invalid workflows (graceful degradation)
       }
-    });
+    }
+    
+    return validWorkflows;
   }
 
   async getWorkflowById(id: string): Promise<Workflow | null> {
-    const wf = await this.inner.getWorkflowById(id);
-    if (!wf) return null;
+    const workflow = await this.inner.getWorkflowById(id);
+    
+    if (!workflow) {
+      return null;
+    }
+    
     try {
-      this.ensureValid(wf);
-      return wf;
+      this.validateDefinition(workflow.definition);
+      return workflow;
     } catch (err) {
-      console.error(`[SchemaValidation] Workflow '${id}' failed validation:`, 
-        err instanceof Error ? err.message : err);
+      console.error(
+        `[SchemaValidation] Workflow '${id}' failed validation:`,
+        err instanceof Error ? err.message : err
+      );
       return null;
     }
   }
 
-  async listWorkflowSummaries() {
-    const workflows = await this.loadAllWorkflows();
-    return workflows.map((wf) => ({
-      id: wf.id,
-      name: wf.name,
-      description: wf.description,
-      category: 'default',
-      version: wf.version
-    }));
+  async listWorkflowSummaries(): Promise<readonly WorkflowSummary[]> {
+    // Delegate to inner storage - summaries are derived from validated workflows
+    // We validate when workflows are actually loaded
+    return this.inner.listWorkflowSummaries();
   }
 
-  async save?(workflow: Workflow): Promise<void> {
+  async save(definition: WorkflowDefinition): Promise<void> {
+    // Validate before saving
+    this.validateDefinition(definition);
+    
     if (typeof this.inner.save === 'function') {
-      return this.inner.save(workflow);
+      return this.inner.save(definition);
     }
   }
-} 
+}
+
+/**
+ * Schema validator for composite storage.
+ */
+export class SchemaValidatingCompositeWorkflowStorage implements ICompositeWorkflowStorage {
+  public readonly kind = 'composite' as const;
+  private readonly validator: ValidateFunction;
+
+  constructor(private readonly inner: ICompositeWorkflowStorage) {
+    const schemaPath = path.resolve(__dirname, '../../../spec/workflow.schema.json');
+    const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf-8'));
+    const ajv = new Ajv({ allErrors: true, strict: false });
+    this.validator = ajv.compile(schema);
+  }
+  
+  private validateDefinition(definition: WorkflowDefinition): boolean {
+    const isValid = this.validator(definition);
+    if (!isValid) {
+      const id = (definition as { id?: string }).id ?? 'unknown';
+      throw new InvalidWorkflowError(
+        id,
+        JSON.stringify(this.validator.errors)
+      );
+    }
+    return true;
+  }
+
+  getSources(): readonly WorkflowSource[] {
+    return this.inner.getSources();
+  }
+
+  async loadAllWorkflows(): Promise<readonly Workflow[]> {
+    const workflows = await this.inner.loadAllWorkflows();
+    
+    const validWorkflows: Workflow[] = [];
+    for (const workflow of workflows) {
+      try {
+        if (this.validateDefinition(workflow.definition)) {
+          validWorkflows.push(workflow);
+        }
+      } catch (err) {
+        console.error(
+          `[SchemaValidation] Workflow '${workflow.definition.id}' failed validation:`,
+          err instanceof Error ? err.message : err
+        );
+      }
+    }
+    
+    return validWorkflows;
+  }
+
+  async getWorkflowById(id: string): Promise<Workflow | null> {
+    const workflow = await this.inner.getWorkflowById(id);
+    
+    if (!workflow) return null;
+    
+    try {
+      this.validateDefinition(workflow.definition);
+      return workflow;
+    } catch (err) {
+      console.error(
+        `[SchemaValidation] Workflow '${id}' failed validation:`,
+        err instanceof Error ? err.message : err
+      );
+      return null;
+    }
+  }
+
+  async listWorkflowSummaries(): Promise<readonly WorkflowSummary[]> {
+    return this.inner.listWorkflowSummaries();
+  }
+
+  async save(definition: WorkflowDefinition): Promise<void> {
+    this.validateDefinition(definition);
+    
+    if (typeof this.inner.save === 'function') {
+      return this.inner.save(definition);
+    }
+  }
+}
