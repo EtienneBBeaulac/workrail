@@ -121,6 +121,14 @@ export class EnhancedMultiSourceWorkflowStorage implements IWorkflowStorage {
       gracefulDegradation: config.gracefulDegradation ?? true
     };
     
+    // Parse WORKFLOW_STORAGE_PATH environment variable
+    const customPathsEnv = process.env['WORKFLOW_STORAGE_PATH'];
+    if (customPathsEnv) {
+      const paths = customPathsEnv.split(path.delimiter).map(p => p.trim()).filter(p => p.length > 0);
+      config.customPaths = [...(config.customPaths || []), ...paths];
+      logger.info('Added custom paths from WORKFLOW_STORAGE_PATH', { paths });
+    }
+    
     this.storageInstances = this.initializeStorageSources(config);
   }
 
