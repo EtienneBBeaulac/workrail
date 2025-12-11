@@ -1,5 +1,13 @@
 import { IWorkflowStorage } from '../../types/storage';
-import { Workflow, WorkflowSummary } from '../../types/mcp-types';
+import { 
+  Workflow, 
+  WorkflowSummary,
+  WorkflowDefinition,
+  WorkflowSource,
+  createWorkflow,
+  toWorkflowSummary,
+  createPluginSource
+} from '../../types/workflow';
 import path from 'path';
 import fs from 'fs/promises';
 import { existsSync } from 'fs';
@@ -25,7 +33,7 @@ export interface WorkflowPlugin {
 
 export interface PluginWorkflowConfig {
   pluginPaths?: string[];
-  scanInterval?: number; // milliseconds
+  scanInterval?: number;
   maxFileSize?: number;
   maxFiles?: number;
   maxPlugins?: number;
@@ -40,49 +48,34 @@ export interface ValidatedPluginWorkflowConfig extends Required<PluginWorkflowCo
 }
 
 /**
- * Plugin-based workflow storage that loads workflows from npm packages
- * Workflows are distributed as npm packages with a specific structure
- * 
- * Security features:
- * - Path traversal prevention
- * - File size limits
- * - Plugin count limits
- * - Safe package.json parsing
- * 
- * Example package structure:
- * ```
- * my-workflow-pack/
- *   ├── package.json
- *   ├── index.js
- *   └── workflows/
- *       ├── my-workflow-1.json
- *       └── my-workflow-2.json
- * ```
+ * Plugin-based workflow storage that loads workflows from npm packages.
  */
 export class PluginWorkflowStorage implements IWorkflowStorage {
+  public readonly kind = 'single' as const;
+  public readonly source: WorkflowSource;
+  
   private readonly config: ValidatedPluginWorkflowConfig;
   private pluginCache: Map<string, WorkflowPlugin> = new Map();
   private lastScan: number = 0;
 
-  constructor(config: PluginWorkflowConfig = {}) {
+  constructor(config: PluginWorkflowConfig = {}, source?: WorkflowSource) {
     this.config = this.validateAndNormalizeConfig(config);
+    this.source = source ?? createPluginSource('plugins', '1.0.0');
   }
 
   private validateAndNormalizeConfig(config: PluginWorkflowConfig): ValidatedPluginWorkflowConfig {
     const securityOptions = validateSecurityOptions({
-      maxFileSizeBytes: config.maxFileSize || 1024 * 1024 // 1MB default
+      maxFileSizeBytes: config.maxFileSize || 1024 * 1024
     });
 
     const pluginPaths = (config.pluginPaths && config.pluginPaths.length > 0) 
       ? config.pluginPaths 
       : this.getDefaultPluginPaths();
 
-    // Validate all plugin paths are safe
     for (const pluginPath of pluginPaths) {
       try {
-        // Ensure plugin paths are within reasonable bounds
         if (path.isAbsolute(pluginPath)) {
-          assertWithinBase(pluginPath, '/'); // Basic sanity check for absolute paths
+          assertWithinBase(pluginPath, '/');
         }
       } catch (error) {
         throw new SecurityError(`Unsafe plugin path: ${pluginPath}: ${(error as Error).message}`);
@@ -91,17 +84,16 @@ export class PluginWorkflowStorage implements IWorkflowStorage {
 
     return {
       pluginPaths,
-      scanInterval: Math.max(30000, config.scanInterval || 300000), // minimum 30 seconds
+      scanInterval: Math.max(30000, config.scanInterval || 300000),
       maxFileSize: securityOptions.maxFileSizeBytes,
-      maxFiles: Math.max(1, config.maxFiles || 50), // minimum 1 file
-      maxPlugins: Math.max(1, config.maxPlugins || 20) // maximum 20 plugins
+      maxFiles: Math.max(1, config.maxFiles || 50),
+      maxPlugins: Math.max(1, config.maxPlugins || 20)
     };
   }
 
   private getDefaultPluginPaths(): string[] {
     const paths: string[] = [];
     
-    // Global npm modules
     try {
       const globalPath = require.resolve('npm').replace(/\/npm\/.*$/, '');
       const globalNodeModules = path.join(globalPath, 'node_modules');
@@ -109,12 +101,7 @@ export class PluginWorkflowStorage implements IWorkflowStorage {
         paths.push(globalNodeModules);
       }
     } catch {
-      // Fallback: try common global paths
-      const commonPaths = [
-        '/usr/local/lib/node_modules',
-        '/usr/lib/node_modules'
-      ];
-      
+      const commonPaths = ['/usr/local/lib/node_modules', '/usr/lib/node_modules'];
       for (const commonPath of commonPaths) {
         if (existsSync(commonPath)) {
           paths.push(commonPath);
@@ -122,7 +109,6 @@ export class PluginWorkflowStorage implements IWorkflowStorage {
       }
     }
     
-    // Local project
     const localNodeModules = path.join(process.cwd(), 'node_modules');
     if (existsSync(localNodeModules)) {
       paths.push(localNodeModules);
@@ -131,12 +117,11 @@ export class PluginWorkflowStorage implements IWorkflowStorage {
     return paths;
   }
 
-  async loadAllWorkflows(): Promise<Workflow[]> {
+  async loadAllWorkflows(): Promise<readonly Workflow[]> {
     try {
       await this.scanPlugins();
       
       const workflows: Workflow[] = [];
-      
       for (const plugin of this.pluginCache.values()) {
         workflows.push(...plugin.workflows);
       }
@@ -153,18 +138,12 @@ export class PluginWorkflowStorage implements IWorkflowStorage {
   async getWorkflowById(id: string): Promise<Workflow | null> {
     const sanitizedId = sanitizeId(id);
     const workflows = await this.loadAllWorkflows();
-    return workflows.find(w => w.id === sanitizedId) || null;
+    return workflows.find(w => w.definition.id === sanitizedId) || null;
   }
 
-  async listWorkflowSummaries(): Promise<WorkflowSummary[]> {
+  async listWorkflowSummaries(): Promise<readonly WorkflowSummary[]> {
     const workflows = await this.loadAllWorkflows();
-    return workflows.map(workflow => ({
-      id: workflow.id,
-      name: workflow.name,
-      description: workflow.description,
-      category: 'plugin',
-      version: workflow.version
-    }));
+    return workflows.map(toWorkflowSummary);
   }
 
   async save(): Promise<void> {
@@ -181,18 +160,13 @@ export class PluginWorkflowStorage implements IWorkflowStorage {
     let pluginCount = 0;
     
     for (const pluginPath of this.config.pluginPaths) {
-      if (!existsSync(pluginPath)) {
-        continue;
-      }
+      if (!existsSync(pluginPath)) continue;
       
       try {
-        // Security: Ensure we're scanning within expected directory
         assertWithinBase(pluginPath, pluginPath);
-        
         const entries = await fs.readdir(pluginPath);
         
         for (const entry of entries) {
-          // Check plugin count limit
           if (pluginCount >= this.config.maxPlugins) {
             throw new StorageError(
               `Too many plugins found (${pluginCount}), maximum allowed: ${this.config.maxPlugins}`
@@ -201,12 +175,9 @@ export class PluginWorkflowStorage implements IWorkflowStorage {
 
           if (this.isWorkflowPlugin(entry)) {
             const fullPath = path.join(pluginPath, entry);
-            
-            // Security: Ensure plugin path is within scan directory
             assertWithinBase(fullPath, pluginPath);
             
             const plugin = await this.loadPlugin(fullPath);
-            
             if (plugin) {
               this.pluginCache.set(plugin.name, plugin);
               pluginCount++;
@@ -230,60 +201,55 @@ export class PluginWorkflowStorage implements IWorkflowStorage {
 
   private async loadPlugin(pluginPath: string): Promise<WorkflowPlugin | null> {
     try {
-      // Security: Ensure plugin path is safe
       assertWithinBase(pluginPath, path.dirname(pluginPath));
       
       const packageJsonPath = path.join(pluginPath, 'package.json');
+      if (!existsSync(packageJsonPath)) return null;
       
-      if (!existsSync(packageJsonPath)) {
-        return null;
-      }
-      
-      // Security: Ensure package.json is within plugin directory
       assertWithinBase(packageJsonPath, pluginPath);
       
-      // Validate package.json size
       const packageStats = await fs.stat(packageJsonPath);
-      validateFileSize(packageStats.size, Math.min(this.config.maxFileSize, 64 * 1024), 'package.json'); // Max 64KB for package.json
+      validateFileSize(packageStats.size, Math.min(this.config.maxFileSize, 64 * 1024), 'package.json');
       
       const packageContent = await fs.readFile(packageJsonPath, 'utf-8');
       
-      let packageJson: any;
+      let packageJson: Record<string, unknown>;
       try {
         packageJson = JSON.parse(packageContent);
       } catch (parseError) {
         throw new InvalidWorkflowError(pluginPath, `Invalid package.json: ${(parseError as Error).message}`);
       }
       
-      // Validate it's a workflow plugin
-      if (!packageJson.workrail || !packageJson.workrail.workflows) {
+      if (!packageJson['workrail'] || !(packageJson['workrail'] as Record<string, unknown>)['workflows']) {
         return null;
       }
       
-      // Validate package name
-      if (!packageJson.name || typeof packageJson.name !== 'string') {
-        throw new InvalidWorkflowError(pluginPath, `Invalid package name`);
+      if (!packageJson['name'] || typeof packageJson['name'] !== 'string') {
+        throw new InvalidWorkflowError(pluginPath, 'Invalid package name');
       }
       
       const workflowsPath = path.join(pluginPath, 'workflows');
-      if (!existsSync(workflowsPath)) {
-        return null;
-      }
+      if (!existsSync(workflowsPath)) return null;
       
-      // Security: Ensure workflows directory is within plugin
       assertWithinBase(workflowsPath, pluginPath);
       
-      const workflows = await this.loadWorkflowsFromDirectory(workflowsPath);
+      // Create source for this specific plugin
+      const pluginSource = createPluginSource(
+        packageJson['name'] as string,
+        (packageJson['version'] as string) || '0.0.0'
+      );
+      
+      const workflows = await this.loadWorkflowsFromDirectory(workflowsPath, pluginSource);
       
       return {
-        name: packageJson.name,
-        version: packageJson.version || '0.0.0',
+        name: packageJson['name'] as string,
+        version: (packageJson['version'] as string) || '0.0.0',
         workflows,
         metadata: {
-          author: packageJson.author,
-          description: packageJson.description,
-          homepage: packageJson.homepage,
-          repository: packageJson.repository?.url || packageJson.repository
+          author: packageJson['author'] as string | undefined,
+          description: packageJson['description'] as string | undefined,
+          homepage: packageJson['homepage'] as string | undefined,
+          repository: (packageJson['repository'] as Record<string, unknown>)?.['url'] as string || packageJson['repository'] as string | undefined
         }
       };
     } catch (error) {
@@ -294,7 +260,7 @@ export class PluginWorkflowStorage implements IWorkflowStorage {
     }
   }
 
-  private async loadWorkflowsFromDirectory(workflowsPath: string): Promise<Workflow[]> {
+  private async loadWorkflowsFromDirectory(workflowsPath: string, pluginSource: WorkflowSource): Promise<Workflow[]> {
     const workflows: Workflow[] = [];
     
     try {
@@ -310,30 +276,26 @@ export class PluginWorkflowStorage implements IWorkflowStorage {
       for (const file of jsonFiles) {
         try {
           const filePath = path.join(workflowsPath, file);
-          
-          // Security: Ensure file is within workflows directory
           assertWithinBase(filePath, workflowsPath);
           
-          // Validate file size
           const stats = await fs.stat(filePath);
           validateFileSize(stats.size, this.config.maxFileSize, file);
           
           const content = await fs.readFile(filePath, 'utf-8');
           
-          let workflow: Workflow;
+          let definition: WorkflowDefinition;
           try {
-            workflow = JSON.parse(content) as Workflow;
+            definition = JSON.parse(content) as WorkflowDefinition;
           } catch (parseError) {
             throw new InvalidWorkflowError(file, `Invalid JSON in workflow file: ${(parseError as Error).message}`);
           }
           
-          // Validate workflow ID
-          const sanitizedId = sanitizeId(workflow.id);
-          if (workflow.id !== sanitizedId) {
-            throw new InvalidWorkflowError(workflow.id, `Invalid workflow ID in file ${file}`);
+          const sanitizedId = sanitizeId(definition.id);
+          if (definition.id !== sanitizedId) {
+            throw new InvalidWorkflowError(definition.id, `Invalid workflow ID in file ${file}`);
           }
           
-          workflows.push(workflow);
+          workflows.push(createWorkflow(definition, pluginSource));
         } catch (error) {
           if (error instanceof SecurityError || error instanceof InvalidWorkflowError) {
             throw error;
@@ -359,44 +321,3 @@ export class PluginWorkflowStorage implements IWorkflowStorage {
     return { ...this.config };
   }
 }
-
-/**
- * Example package.json for a workflow plugin:
- * 
- * ```json
- * {
- *   "name": "workrail-workflows-ai-coding",
- *   "version": "1.0.0",
- *   "description": "AI-powered coding workflows for Workrail",
- *   "main": "index.js",
- *   "workrail": {
- *     "workflows": true,
- *     "category": "coding"
- *   },
- *   "keywords": ["workrail", "workflow", "ai", "coding"],
- *   "author": "Your Name",
- *   "license": "MIT"
- * }
- * ```
- */
-
-/**
- * Example configuration for different environments
- */
-export const PLUGIN_WORKFLOW_CONFIGS = {
-  // Development environment with relaxed limits
-  development: {
-    scanInterval: 60000, // 1 minute
-    maxFileSize: 2 * 1024 * 1024, // 2MB
-    maxFiles: 100,
-    maxPlugins: 50
-  },
-  
-  // Production environment with strict limits
-  production: {
-    scanInterval: 300000, // 5 minutes
-    maxFileSize: 1024 * 1024, // 1MB
-    maxFiles: 50,
-    maxPlugins: 20
-  }
-}; 

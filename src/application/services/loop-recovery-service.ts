@@ -1,7 +1,7 @@
 import { singleton, inject } from 'tsyringe';
-import { Workflow } from '../../types/mcp-types';
+import { Workflow, LoopStepDefinition, isLoopStepDefinition } from '../../types/workflow';
 import { ILoopRecoveryService } from './i-loop-recovery-service';
-import { LoopStackFrame, LoopStep, EnhancedContext, isLoopStep } from '../../types/workflow-types';
+import { LoopStackFrame, EnhancedContext } from '../../types/workflow-types';
 import { LoopStackManager } from './loop-stack-manager';
 import { ContextOptimizer } from './context-optimizer';
 import { createLogger } from '../../utils/logger';
@@ -55,10 +55,10 @@ export class DefaultLoopRecoveryService implements ILoopRecoveryService {
     });
     
     // Find which loop these steps belong to
-    for (const step of workflow.steps) {
-      if (!isLoopStep(step)) continue;
+    for (const step of workflow.definition.steps) {
+      if (!isLoopStepDefinition(step)) continue;
       
-      const loopStep = step as LoopStep;
+      const loopStep = step;
       const bodyStepIds = this.getBodyStepIds(loopStep);
       
       // Check if any completed steps are from this loop's body
@@ -117,7 +117,7 @@ export class DefaultLoopRecoveryService implements ILoopRecoveryService {
    */
   private reconstructLoopFrame(
     workflow: Workflow,
-    loopStep: LoopStep,
+    loopStep: LoopStepDefinition,
     context: EnhancedContext,
     loopBodyMatches: string[],
     bodyStepIds: Set<string>,
@@ -209,7 +209,7 @@ export class DefaultLoopRecoveryService implements ILoopRecoveryService {
    * @param loopStep - The loop step to analyze
    * @returns Set of step IDs in this loop's body
    */
-  private getBodyStepIds(loopStep: LoopStep): Set<string> {
+  private getBodyStepIds(loopStep: LoopStepDefinition): Set<string> {
     const bodyStepIds = new Set<string>();
     
     if (typeof loopStep.body === 'string') {

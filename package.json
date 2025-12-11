@@ -86,6 +86,7 @@
     "lit": "^3.3.1",
     "node-fetch": "^2.7.0",
     "semantic-release": "^24.2.0",
+    "ts-morph": "^27.0.2",
     "typescript": "^5.9.3",
     "vite": "^7.1.9",
     "vitest": "^3.2.4"

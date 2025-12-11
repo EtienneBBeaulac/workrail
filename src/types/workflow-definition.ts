@@ -1,0 +1,158 @@
+/**
+ * Workflow Definition Types
+ * 
+ * Pure workflow definition - exactly what's in the JSON file.
+ * Validated against spec/workflow.schema.json.
+ * Immutable value object.
+ * 
+ * This type represents the SCHEMA of a workflow file.
+ * It does NOT include runtime metadata like source.
+ */
+
+import { ValidationCriteria } from './validation';
+
+// =============================================================================
+// STEP TYPES
+// =============================================================================
+
+export interface WorkflowStepDefinition {
+  readonly id: string;
+  readonly title: string;
+  readonly prompt: string;
+  readonly agentRole?: string;
+  readonly guidance?: readonly string[];
+  readonly askForFiles?: boolean;
+  readonly requireConfirmation?: boolean;
+  readonly runCondition?: Readonly<Record<string, unknown>>;
+  readonly validationCriteria?: ValidationCriteria;
+  readonly functionDefinitions?: readonly FunctionDefinition[];
+  readonly functionCalls?: readonly FunctionCall[];
+  readonly functionReferences?: readonly string[];
+}
+
+export interface LoopStepDefinition extends WorkflowStepDefinition {
+  readonly type: 'loop';
+  readonly loop: LoopConfigDefinition;
+  readonly body: string | readonly WorkflowStepDefinition[];
+}
+
+export interface LoopConfigDefinition {
+  readonly type: 'while' | 'until' | 'for' | 'forEach';
+  readonly condition?: Readonly<Record<string, unknown>>;
+  readonly items?: string;
+  readonly count?: number | string;
+  readonly maxIterations: number;
+  readonly iterationVar?: string;
+  readonly itemVar?: string;
+  readonly indexVar?: string;
+}
+
+// =============================================================================
+// FUNCTION TYPES
+// =============================================================================
+
+export interface FunctionParameter {
+  readonly name: string;
+  readonly type: 'string' | 'number' | 'boolean' | 'array' | 'object';
+  readonly required?: boolean;
+  readonly description?: string;
+  readonly enum?: readonly (string | number | boolean)[];
+  readonly default?: unknown;
+}
+
+export interface FunctionDefinition {
+  readonly name: string;
+  readonly definition: string;
+  readonly parameters?: readonly FunctionParameter[];
+  readonly scope?: 'workflow' | 'loop' | 'step';
+}
+
+export interface FunctionCall {
+  readonly name: string;
+  readonly args: Readonly<Record<string, unknown>>;
+}
+
+// =============================================================================
+// WORKFLOW DEFINITION
+// =============================================================================
+
+/**
+ * Pure workflow definition - exactly what's stored in JSON files.
+ * 
+ * This is a VALUE OBJECT:
+ * - Immutable (all fields readonly)
+ * - No runtime state
+ * - Defined entirely by its fields
+ * - Can be serialized/deserialized without loss
+ */
+export interface WorkflowDefinition {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  readonly version: string;
+  readonly steps: readonly (WorkflowStepDefinition | LoopStepDefinition)[];
+  readonly preconditions?: readonly string[];
+  readonly clarificationPrompts?: readonly string[];
+  readonly metaGuidance?: readonly string[];
+  readonly functionDefinitions?: readonly FunctionDefinition[];
+}
+
+// =============================================================================
+// TYPE GUARDS
+// =============================================================================
+
+export function isLoopStepDefinition(
+  step: WorkflowStepDefinition | LoopStepDefinition
+): step is LoopStepDefinition {
+  return 'type' in step && step.type === 'loop';
+}
+
+export function isWorkflowStepDefinition(
+  step: WorkflowStepDefinition | LoopStepDefinition
+): step is WorkflowStepDefinition {
+  return !isLoopStepDefinition(step);
+}
+
+// =============================================================================
+// VALIDATION HELPERS
+// =============================================================================
+
+/**
+ * Check if an object has the shape of a WorkflowDefinition.
+ * This is a structural check, not schema validation.
+ */
+export function hasWorkflowDefinitionShape(obj: unknown): obj is WorkflowDefinition {
+  if (!obj || typeof obj !== 'object') return false;
+  
+  const candidate = obj as Record<string, unknown>;
+  
+  return (
+    typeof candidate['id'] === 'string' &&
+    typeof candidate['name'] === 'string' &&
+    typeof candidate['description'] === 'string' &&
+    typeof candidate['version'] === 'string' &&
+    Array.isArray(candidate['steps']) &&
+    candidate['steps'].length > 0
+  );
+}
+
+// =============================================================================
+// FACTORY FUNCTIONS
+// =============================================================================
+
+/**
+ * Create an immutable WorkflowDefinition with deep freezing.
+ * Enforces immutability at runtime to match the readonly type.
+ */
+export function createWorkflowDefinition(
+  definition: WorkflowDefinition
+): WorkflowDefinition {
+  return Object.freeze({
+    ...definition,
+    steps: Object.freeze(definition.steps.map(step => Object.freeze({ ...step }))),
+    preconditions: definition.preconditions ? Object.freeze([...definition.preconditions]) : undefined,
+    clarificationPrompts: definition.clarificationPrompts ? Object.freeze([...definition.clarificationPrompts]) : undefined,
+    metaGuidance: definition.metaGuidance ? Object.freeze([...definition.metaGuidance]) : undefined,
+    functionDefinitions: definition.functionDefinitions ? Object.freeze([...definition.functionDefinitions]) : undefined,
+  }) as WorkflowDefinition;
+}

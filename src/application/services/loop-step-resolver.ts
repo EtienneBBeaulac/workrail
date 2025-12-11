@@ -1,6 +1,10 @@
 import { singleton } from 'tsyringe';
-import { Workflow, WorkflowStep } from '../../types/mcp-types';
-import { LoopStep, isLoopStep } from '../../types/workflow-types';
+import { 
+  Workflow, 
+  WorkflowStepDefinition,
+  LoopStepDefinition,
+  isLoopStepDefinition 
+} from '../../types/workflow';
 import { StepNotFoundError } from '../../core/error-handler';
 
 /**
@@ -9,7 +13,7 @@ import { StepNotFoundError } from '../../core/error-handler';
  */
 @singleton()
 export class LoopStepResolver {
-  private resolvedStepsCache: Map<string, WorkflowStep | WorkflowStep[]> = new Map();
+  private resolvedStepsCache: Map<string, WorkflowStepDefinition | readonly WorkflowStepDefinition[]> = new Map();
   private static readonly MAX_CACHE_SIZE = 1000; // Prevent unbounded growth
 
   /**
@@ -22,16 +26,18 @@ export class LoopStepResolver {
    */
   resolveLoopBody(
     workflow: Workflow, 
-    body: string | WorkflowStep[], 
+    body: string | readonly WorkflowStepDefinition[], 
     currentLoopId?: string
-  ): WorkflowStep | WorkflowStep[] {
+  ): WorkflowStepDefinition | readonly WorkflowStepDefinition[] {
     // Handle inline steps directly
-    if (Array.isArray(body)) {
+    if (this.isInlineSteps(body)) {
       return body;
     }
 
+    // At this point, body is definitely a string (type guard worked)
+
     // Check cache first
-    const cacheKey = `${workflow.id}:${body}`;
+    const cacheKey = `${workflow.definition.id}:${body}`;
     if (this.resolvedStepsCache.has(cacheKey)) {
       return this.resolvedStepsCache.get(cacheKey)!;
     }
@@ -39,7 +45,7 @@ export class LoopStepResolver {
     // Find the referenced step
     const referencedStep = this.findStepById(workflow, body);
     if (!referencedStep) {
-      throw new StepNotFoundError(workflow.id, body);
+      throw new StepNotFoundError(workflow.definition.id, body);
     }
 
     // Prevent circular references - a loop step cannot reference itself
@@ -78,11 +84,10 @@ export class LoopStepResolver {
   findAllLoopReferences(workflow: Workflow): string[] {
     const references: string[] = [];
     
-    for (const step of workflow.steps) {
-      if (isLoopStep(step)) {
-        const loopStep = step as LoopStep;
-        if (typeof loopStep.body === 'string') {
-          references.push(loopStep.body);
+    for (const step of workflow.definition.steps) {
+      if (isLoopStepDefinition(step)) {
+        if (typeof step.body === 'string') {
+          references.push(step.body);
         }
       }
     }
@@ -97,20 +102,19 @@ export class LoopStepResolver {
    */
   validateAllReferences(workflow: Workflow): void {
     const references = this.findAllLoopReferences(workflow);
-    const stepIds = new Set(workflow.steps.map(s => s.id));
+    const stepIds = new Set(workflow.definition.steps.map(s => s.id));
     
     for (const ref of references) {
       if (!stepIds.has(ref)) {
-        throw new StepNotFoundError(workflow.id, ref);
+        throw new StepNotFoundError(workflow.definition.id, ref);
       }
     }
 
     // Check for circular references
-    for (const step of workflow.steps) {
-      if (isLoopStep(step)) {
-        const loopStep = step as LoopStep;
-        if (typeof loopStep.body === 'string' && loopStep.body === loopStep.id) {
-          throw new Error(`Circular reference detected: loop step '${loopStep.id}' references itself`);
+    for (const step of workflow.definition.steps) {
+      if (isLoopStepDefinition(step)) {
+        if (typeof step.body === 'string' && step.body === step.id) {
+          throw new Error(`Circular reference detected: loop step '${step.id}' references itself`);
         }
       }
     }
@@ -131,10 +135,20 @@ export class LoopStepResolver {
   }
 
   /**
+   * Type guard to check if body is inline steps.
+   * Enables proper type narrowing.
+   */
+  private isInlineSteps(
+    body: string | readonly WorkflowStepDefinition[]
+  ): body is readonly WorkflowStepDefinition[] {
+    return Array.isArray(body);
+  }
+
+  /**
    * Find a step by ID in the workflow
    * @private
    */
-  private findStepById(workflow: Workflow, stepId: string): WorkflowStep | null {
-    return workflow.steps.find(s => s.id === stepId) || null;
+  private findStepById(workflow: Workflow, stepId: string): WorkflowStepDefinition | null {
+    return workflow.definition.steps.find(s => s.id === stepId) || null;
   }
 } 

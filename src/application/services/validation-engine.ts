@@ -1,39 +1,22 @@
-import { singleton, inject, Lifecycle } from 'tsyringe';
+import { singleton, inject } from 'tsyringe';
 import { ValidationError } from '../../core/error-handler';
-import { evaluateCondition, Condition, ConditionContext } from '../../utils/condition-evaluator';
+import { evaluateCondition, ConditionContext } from '../../utils/condition-evaluator';
 import Ajv from 'ajv';
-import { WorkflowStep, LoopStep, Workflow, isLoopStep, FunctionDefinition, FunctionParameter } from '../../types/workflow-types';
+import { 
+  WorkflowStep, 
+  LoopStep, 
+  Workflow, 
+  isLoopStep, 
+  FunctionDefinition, 
+  FunctionParameter 
+} from '../../types/workflow-types';
+import { 
+  ValidationRule, 
+  ValidationComposition, 
+  ValidationCriteria,
+  ValidationResult 
+} from '../../types/validation';
 import { EnhancedLoopValidator } from './enhanced-loop-validator';
-import { container } from '../../di/container.js';
-import { DI } from '../../di/tokens.js';
-
-export interface ValidationRule {
-  type: 'contains' | 'regex' | 'length' | 'schema';
-  message: string;
-  value?: string;      // for 'contains' type
-  pattern?: string;    // for 'regex' type
-  flags?: string;      // for 'regex' type
-  min?: number;        // for 'length' type
-  max?: number;        // for 'length' type
-  schema?: Record<string, any>; // for 'schema' type
-  condition?: Condition; // for context-aware validation
-}
-
-export interface ValidationComposition {
-  and?: ValidationCriteria[];
-  or?: ValidationCriteria[];
-  not?: ValidationCriteria;
-}
-
-export type ValidationCriteria = ValidationRule | ValidationComposition;
-
-export interface ValidationResult {
-  valid: boolean;
-  issues: string[];
-  suggestions: string[];
-  warnings?: string[];
-  info?: string[];
-}
 
 /**
  * ValidationEngine handles step output validation with support for
@@ -83,7 +66,7 @@ export class ValidationEngine {
    */
   private evaluateCriteria(
     output: string,
-    criteria: ValidationRule[] | ValidationComposition,
+    criteria: ValidationCriteria,
     context: ConditionContext
   ): ValidationResult {
     try {
@@ -122,7 +105,7 @@ export class ValidationEngine {
    */
   private evaluateRuleArray(
     output: string,
-    rules: ValidationRule[],
+    rules: readonly ValidationRule[],
     context: ConditionContext
   ): ValidationResult {
     const issues: string[] = [];
@@ -247,7 +230,7 @@ export class ValidationEngine {
    */
   async validate(
     output: string,
-    criteria: ValidationRule[] | ValidationComposition,
+    criteria: ValidationCriteria,
     context?: ConditionContext
   ): Promise<ValidationResult> {
     const issues: string[] = [];
@@ -441,7 +424,7 @@ export class ValidationEngine {
       // Handle both string references and inline step arrays
       if (typeof step.body === 'string') {
         // Validate single step reference
-        const bodyStep = workflow.steps.find(s => s.id === step.body);
+        const bodyStep = workflow.definition.steps.find(s => s.id === step.body);
         if (!bodyStep) {
           issues.push(`Loop body references non-existent step '${step.body}'`);
           suggestions.push(`Create a step with ID '${step.body}' or update the body reference`);
@@ -488,7 +471,7 @@ export class ValidationEngine {
           // Validate function calls for inline steps using workflow + loop + step scopes
           const callValidation = this.validateStepFunctionCalls(
             inlineStep as WorkflowStep,
-            workflow.functionDefinitions || [],
+            workflow.definition.functionDefinitions || [],
             step.functionDefinitions || []
           );
           if (!callValidation.valid) {
@@ -542,7 +525,7 @@ export class ValidationEngine {
 
     // Check for duplicate step IDs
     const stepIds = new Set<string>();
-    for (const step of workflow.steps) {
+    for (const step of workflow.definition.steps) {
       if (stepIds.has(step.id)) {
         issues.push(`Duplicate step ID '${step.id}'`);
         suggestions.push('Ensure all step IDs are unique');
@@ -551,7 +534,7 @@ export class ValidationEngine {
     }
 
     // Validate each step
-    for (const step of workflow.steps) {
+    for (const step of workflow.definition.steps) {
       if (isLoopStep(step)) {
         const loopResult = this.validateLoopStep(step, workflow);
         issues.push(...loopResult.issues.map(issue => `Step '${step.id}': ${issue}`));
@@ -577,7 +560,7 @@ export class ValidationEngine {
         // Validate function calls for standard steps using workflow + step scopes
         const callValidation = this.validateStepFunctionCalls(
           step as WorkflowStep,
-          workflow.functionDefinitions || []
+          workflow.definition.functionDefinitions || []
         );
         if (!callValidation.valid) {
           issues.push(...callValidation.issues.map(i => `Step '${step.id}': ${i}`));
@@ -588,7 +571,7 @@ export class ValidationEngine {
 
     // Check for orphaned loop body steps
     const loopBodySteps = new Set<string>();
-    for (const step of workflow.steps) {
+    for (const step of workflow.definition.steps) {
       if (isLoopStep(step)) {
         if (typeof step.body === 'string') {
           loopBodySteps.add(step.body);
@@ -603,7 +586,7 @@ export class ValidationEngine {
     }
 
     // Warn about steps that are only reachable through loops
-    for (const step of workflow.steps) {
+    for (const step of workflow.definition.steps) {
       if (loopBodySteps.has(step.id) && step.runCondition) {
         issues.push(`Step '${step.id}' is a loop body but has runCondition - this may cause conflicts`);
         suggestions.push('Remove runCondition from loop body steps as they are controlled by the loop');
@@ -634,11 +617,11 @@ export class ValidationEngine {
    */
   private validateStepFunctionCalls(
     step: WorkflowStep,
-    workflowDefs: FunctionDefinition[],
-    loopDefs: FunctionDefinition[] = []
+    workflowDefs: readonly FunctionDefinition[],
+    loopDefs: readonly FunctionDefinition[] = []
   ): ValidationResult {
     const allDefs: Record<string, FunctionDefinition> = {};
-    const addDefs = (defs?: FunctionDefinition[]) => {
+    const addDefs = (defs?: readonly FunctionDefinition[]) => {
       (defs || []).forEach(d => { allDefs[d.name] = d; });
     };
     addDefs(workflowDefs);

@@ -89,7 +89,7 @@ export class LoopStackManager {
     }
     
     // Resolve and normalize body steps to array
-    let bodySteps: WorkflowStep[];
+    let bodySteps: readonly WorkflowStep[];
     
     try {
       if (Array.isArray(loopStep.body)) {
@@ -122,12 +122,12 @@ export class LoopStackManager {
       );
     }
     
-    // Create frame with immutable properties
+    // Create frame
     const frame: LoopStackFrame = {
       loopId: loopStep.id,
       loopStep,
       loopContext,
-      bodySteps: Object.freeze([...bodySteps]),  // Immutable array
+      bodySteps,  // Already readonly, no need to copy
       currentBodyIndex: 0
     };
     
@@ -369,8 +369,8 @@ export class LoopStackManager {
    * @returns Guidance object with formatted prompt
    */
   private buildStepPrompt(
-    step: WorkflowStep,
-    loopContext: LoopExecutionContext,
+    step: import('../../types/workflow-types').WorkflowStep,
+    loopContext: import('../../types/workflow-types').LoopExecutionContextLike,
     useMinimal: boolean
   ): { prompt: string } {
     let prompt = '';
