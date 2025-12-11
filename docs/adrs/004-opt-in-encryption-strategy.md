@@ -8,7 +8,7 @@
 Workflow context can contain sensitive information. Storing this data in plain text on a user's local machine poses a security risk, especially on multi-user systems or if the machine is compromised. We need a strategy to protect this data at rest.
 
 The primary options considered were:
-1.  **No Encryption:** Simple, but insecure. Not a viable option for a robust tool.
+1.  **No Encryption:** Simple, but insecure. Not a viable option for a production tool.
 2.  **Encryption by Default:** Maximum security, but introduces performance overhead and potential key management complexity for all users, even those who do not handle sensitive data.
 3.  **User-Provided Key:** Require the user to supply an encryption key via an environment variable or config file. This is flexible but places a significant security burden on the user (e.g., key storage, rotation).
 4.  **Opt-In Encryption with Secure Key Management:** Make encryption an optional feature that, when enabled, uses the native, secure credential storage facilities of the host operating system.
@@ -26,7 +26,7 @@ We will implement an **opt-in encryption strategy using the host OS's native key
 
 ### Positive:
 -   **User Choice & Flexibility:** Users who do not need encryption are not impacted by its performance overhead. Those who do can enable it with a single, simple flag.
--   **High Security:** Leverages industry-standard, secure key storage mechanisms provided by the operating system, which is significantly more secure than storing keys in plain text files.
+-   **High Security:** Uses industry-standard, secure key storage mechanisms provided by the operating system, which is significantly more secure than storing keys in plain text files.
 -   **Good User Experience:** Avoids burdening the user with manual key management. The process is non-interactive and transparent after the initial setup.
 -   **Aligns with Professional Tooling:** This approach is standard practice for mature developer tools that handle potentially sensitive local data.
 

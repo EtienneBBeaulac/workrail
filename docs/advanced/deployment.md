@@ -1,11 +1,11 @@
 # Advanced Deployment Guide
 
-> 🚀 **Advanced deployment strategies and automation**
+>  **Advanced deployment strategies and automation**
 
 [![Status](https://img.shields.io/badge/status-advanced_deployment-green.svg)](https://github.com/EtienneBBeaulac/mcp)
 [![Spec Version](https://img.shields.io/badge/spec-1.0.0-blue.svg)](specs/)
 
-## 📋 Table of Contents
+##  Table of Contents
 
 1. [Blue/Green Deployments](#bluegreen-deployments)
 2. [Canary Releases](#canary-releases)

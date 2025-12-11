@@ -158,10 +158,10 @@ workrail validate your-workflow.json
 ```
 
 The validator will show:
-- ❌ **Errors**: Must be fixed for the workflow to run
-- ⚠️ **Warnings**: Should be addressed for better maintainability
+-  **Errors**: Must be fixed for the workflow to run
+-  **Warnings**: Should be addressed for better maintainability
 - ℹ️ **Information**: Detected patterns and insights
-- 💡 **Suggestions**: Recommendations for improvement
+-  **Suggestions**: Recommendations for improvement
 
 ## Summary
 

@@ -28,7 +28,7 @@ We will implement a **hybrid storage backend** using **SQLite for metadata** and
 ### Positive:
 -   **High Performance:** Keeps the SQLite database lean and fast, ensuring metadata queries are highly performant.
 -   **Efficient Blob Storage:** The filesystem is optimized for storing large, opaque files. This also allows for efficient streaming of compression/decompression operations.
--   **Data Integrity:** We can leverage SQLite's ACID-compliant transactions to ensure metadata operations are always atomic. Atomic writes to the filesystem (write to temp file, then rename) will prevent corrupted context blobs.
+-   **Data Integrity:** SQLite's ACID-compliant transactions ensure metadata operations are always atomic. Atomic writes to the filesystem (write to temp file, then rename) will prevent corrupted context blobs.
 -   **Inspectability:** Developers and power users can easily inspect or backup the human-readable (though compressed) context files on the filesystem.
 -   **Scalability:** This is a proven, scalable pattern for local-first applications that handles data growth well.
 

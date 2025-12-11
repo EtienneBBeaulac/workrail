@@ -12,7 +12,7 @@
 
 Developers writing tests in mobile repositories (zillow-android, zillow-ios) need access to test
 case specifications that live in a separate CTC (Centralized Test Cases) repository. Currently,
-there is no seamless way for AI assistants to discover and retrieve these specifications, resulting
+there is no standard way for AI assistants to discover and retrieve these specifications, resulting
 in:
 
 - Context switching between repos to find relevant test cases

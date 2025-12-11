@@ -6,7 +6,7 @@
 [![Spec Version](https://img.shields.io/badge/spec-1.0.0-blue.svg)](specs/)
 [![MCP Compatible](https://img.shields.io/badge/MCP-compatible-purple.svg)](https://modelcontextprotocol.org)
 
-## 📋 Table of Contents
+##  Table of Contents
 
 1. [System Overview](#system-overview)
 2. [Architecture Layers](#architecture-layers)
@@ -124,7 +124,7 @@ ValidationComposition {
 
 #### Integration Patterns
 
-* **WorkflowService Integration**: Seamless step output validation via `validateStepOutput()`
+* **WorkflowService Integration**: Step output validation via `validateStepOutput()`
 * **Workflow JSON Validation**: Direct JSON validation via `validateWorkflowJson()` use case
 * **Backward Compatibility**: Legacy string-based validation rules still supported
 * **Dependency Injection**: Clean separation from storage and transport concerns
@@ -138,7 +138,7 @@ The `validate-workflow-json` use case provides comprehensive workflow JSON valid
 * **Schema Compliance**: Validates against the workflow schema using the same ValidationEngine
 * **Error Enhancement**: Provides actionable suggestions for LLM consumption
 * **Standalone Operation**: No external dependencies or storage requirements
-* **Integration**: Leverages existing validation infrastructure without code duplication
+* **Integration**: Uses existing validation infrastructure without code duplication
 
 ### Storage Adapters (Infrastructure)
 * Folder: `src/infrastructure/storage/`
@@ -261,10 +261,10 @@ Step Output → ValidationEngine.validate() → {
 
 **TypeScript Code Blocks**: Always include proper typing
 ```typescript
-// ✅ Good - includes types and context
+//  Good - includes types and context
 const result: ValidationResult = await engine.validate(output, rules, context);
 
-// ❌ Bad - no types or context
+//  Bad - no types or context
 const result = engine.validate(output, rules);
 ```
 
@@ -283,8 +283,8 @@ const result = engine.validate(output, rules);
 ### Documentation Structure Standards
 
 **Section Headers**: Use descriptive, action-oriented titles
-* ✅ "Implementing Advanced Validation Rules"
-* ❌ "Validation"
+*  "Implementing Advanced Validation Rules"
+*  "Validation"
 
 **Code Comments**: Explain the why, not just the what
 ```typescript

@@ -1,46 +1,58 @@
-# Workflow Orchestration System Overview
+# WorkRail System Overview
 
 ## 1. Introduction & Vision
 
-### What This Is All About
+### The Problem
 
-The Workflow Orchestration System is an opinionated framework designed to guide Large Language
-Models (LLMs) through complex software development tasks with improved reliability and consistency.
-Rather than hoping an LLM will follow best practices, this system *guides them toward* best
-practices through structured, machine-readable workflows.
+AI agents are eager to help. Too eager.
 
-At its core, this is about improving the way developers collaborate with AI. Instead of open-ended
-prompting that often leads to hallucinations, scope creep, and inconsistent results, we provide a
-rails-based approach where both the human developer and the AI agent follow a proven, step-by-step
-process.
+Ask one to fix a bug and it starts editing code immediately - before understanding the system,
+before considering alternatives, before verifying assumptions. It's not stupid; it's a predictive
+model doing what predictive models do: fill in gaps and race to an answer.
 
-### The Core Problem It Solves
+You can add system prompts: "plan before coding," "gather context first." But as conversations
+grow, those instructions fade into the background. The agent reverts to its nature: assume,
+predict, jump to conclusions. Modern models have built-in instructions to think things through and
+plan, but they never do as thorough a job as they would with a human actively guiding them.
 
-LLMs are incredibly powerful but suffer from well-documented limitations:
+The result: inconsistent quality that depends on how much you babysit the agent.
 
-- **Hallucination**: They confidently generate plausible-sounding but incorrect information
-- **Scope Creep**: Given a complex task, they often try to do too much at once, leading to half-baked solutions
-- **Context Loss**: They struggle to maintain focus across long conversations
-- **Inconsistency**: The same prompt can yield wildly different results based on minor variations
-- **Missing Prerequisites**: They often start implementing before gathering necessary context
+### How WorkRail Solves This
 
-Traditional approaches try to solve these through better prompting or more powerful models. We take
-a different approach: we guide LLMs through proven software engineering best practices via
-structured workflows, making it much more difficult for the LLM to go off track.
+WorkRail replaces the human effort of guiding an agent step-by-step.
 
-### The Vision
+Instead of one system prompt that fades over time, WorkRail drip-feeds instructions through the
+Model Context Protocol (MCP). The agent calls `workflow_next`, gets ONE step, completes it, calls
+again. Future steps stay hidden until previous ones are done.
 
-Our vision is to create an enhanced agent experience where:
+**The agent can't skip to implementation because it doesn't know those steps exist yet.**
 
-1. **Developers** are guided through optimal workflows, missing fewer critical steps or context
-2. **LLMs** are more likely to work within their strengths, following proven patterns
-3. **Organizations** can achieve more consistent, higher-quality results regardless of individual
-   prompt engineering skills
-4. **Knowledge** from expert practitioners is codified and made more accessible
+This is the key insight: information hiding enforces the process. The agent isn't being told
+"please plan first" - it literally cannot see "edit the code" until it has completed the planning
+steps. The creativity stays; the shortcuts don't.
 
-The end result is not just an AI coding assistant, but a sophisticated development methodology
-guided through technology. It's the difference between giving someone a powerful tool versus
-giving them a powerful tool *and* teaching them the craft of using it effectively.
+### Why This Works
+
+Guardrails don't limit the agent's capabilities - they channel them productively:
+
+- **Agents still reason, explore, and create** - but within a structure that ensures they prepare,
+  plan, and verify
+- **Each step is fresh and immediate** - not a fading instruction from the start of the conversation
+- **Expert knowledge is codified** - workflows embed practitioner wisdom like "verify understanding
+  before implementing" and "form multiple hypotheses before concluding"
+- **The process is consistent** - same workflow, same quality, regardless of prompting skill
+
+It's the difference between giving someone a powerful tool versus giving them a powerful tool
+*and* teaching them the craft of using it effectively.
+
+### The Result
+
+Reliable excellence. Consistently good results.
+
+WorkRail does what a skilled developer would do when supervising AI: guide it through the right
+steps, ask the questions it should be asking, and prevent it from cutting corners. The workflow
+asks "Wait, did you check X?" and "What about edge case Y?" at the moments a senior engineer
+would ask them - automatically.
 
 ## Table of Contents
 
@@ -62,7 +74,7 @@ giving them a powerful tool *and* teaching them the craft of using it effectivel
 
 The system follows a deliberately modular, microservices-inspired architecture.
 
-This isn't complexity for complexity's sake—each architectural decision directly addresses the
+This isn't complexity for complexity's sake - each architectural decision directly addresses the
 limitations of monolithic AI agent designs while maintaining compatibility with any MCP-enabled
 agent framework.
 
@@ -127,7 +139,7 @@ Instead of building a separate orchestration engine (which would require modifyi
 - **Why not a separate component**:
     - Maintains compatibility with ALL MCP-enabled agents
     - No agent framework modifications required
-    - Leverages agents' existing instruction-following capabilities
+    - Uses agents' existing instruction-following capabilities
     - Simpler to deploy and maintain
 
 ### How Workflow Guidance Actually Works
@@ -173,7 +185,7 @@ Response: {
 
 **Why This Reactive Architecture Works Well**
 1. **Universal Compatibility**: Works with any MCP-enabled agent out of the box
-2. **Progressive Enhancement**: Simple agents follow basic flows, advanced agents leverage rich instructions
+2. **Progressive Enhancement**: Simple agents follow basic flows, advanced agents use rich instructions
 3. **Modularity**: Each service has exactly one job and does it well
 4. **Flexibility**: Structured guidance through reactive responses, not rigid control
 5. **Future-Proof**: Can enhance response richness without breaking existing integrations
@@ -193,7 +205,7 @@ This evolution would only require enhancing WorkRail's response capabilities wit
 
 ### Feature: The Structured Workflow Schema
 
-The workflow schema is the heart of the system—a JSON contract that translates best practices into
+The workflow schema is the heart of the system - a JSON contract that translates best practices into
 executable specifications. Every workflow adheres to this structure:
 
 ```typescript
@@ -277,9 +289,9 @@ This pattern directly addresses the tendency of LLMs to rush into implementation
 
 Different models excel at different tasks. Our workflows acknowledge this reality:
 
-- **Planning Steps**: "Use a model with superior reasoning capabilities" - leverages superior
+- **Planning Steps**: "Use a model with superior reasoning capabilities" - uses superior
   reasoning capabilities
-- **Implementation Steps**: "Use a model with superior tool-use abilities" - leverages superior
+- **Implementation Steps**: "Use a model with superior tool-use abilities" - uses superior
   tool-use abilities
 - **Analysis Steps**: Model choice depends on context needs
 
@@ -405,10 +417,10 @@ This pattern repeats for each phase, with the agent:
 ```
 Agent: "All phases completed successfully! Here's what we accomplished:
 
-✅ Extended message models to support images
-✅ Implemented UI components for both platforms
-✅ Added proper loading states and error handling
-✅ Created comprehensive tests
+ Extended message models to support images
+ Implemented UI components for both platforms
+ Added proper loading states and error handling
+ Created comprehensive tests
 
 The implementation follows the existing patterns in your codebase and includes 
 all requirements from ACEI-1234. Would you like me to help you prepare the 
@@ -499,7 +511,7 @@ The system grows with your needs without architectural changes:
 **Integrating New Tools:**
 ```
 // Add a new MCP server
-securityScanner Server → Integrates seamlessly with existing workflows
+securityScanner Server → Integrates with existing workflows
 ```
 
 **Adapting to New Models:**
@@ -708,7 +720,7 @@ Visual workflow creator with:
 **2. Full IDE Integration**
 ```
 - Native plugins for major IDEs
-- Seamless model switching
+- Automatic model switching
 - Integrated debugging tools
 ```
 
@@ -732,10 +744,11 @@ The system is actively evolving, and we welcome contributions:
 
 Despite current limitations, the Workflow Orchestration System represents a significant step forward
 in AI-assisted development. By acknowledging these constraints and actively working to address them,
-we're building toward a future where AI doesn't just assist with coding—it helps elevate the entire
+we're building toward a future where AI doesn't just assist with coding - it helps improve the entire
 development process.
 
-The journey from "AI that can code" to "AI that codes the right way, every time" is ongoing, but the foundation is solid and the path is clear.
+The path from "AI that can code" to "AI that codes the right way, every time" is ongoing, but the
+foundation is solid and the direction is clear.
 
 ## 7. Workflow Authoring Guide
 
@@ -745,8 +758,8 @@ Creating effective workflows is both an art and a science. Follow these principl
 
 #### 1. Start with Clear Outcomes
 
-**❌ Bad**: "Implement feature"
-**✅ Good**: "Implement user authentication with email/password, including signup, login, and password reset flows"
+** Bad**: "Implement feature"
+** Good**: "Implement user authentication with email/password, including signup, login, and password reset flows"
 
 Your workflow should have a specific, measurable outcome. Users should know exactly what they'll have when finished.
 
@@ -759,13 +772,13 @@ Your workflow should have a specific, measurable outcome. Users should know exac
 
 **Example Breakdown**:
 ```json
-// ❌ Too Large
+//  Too Large
 {
   "title": "Build the entire authentication system",
   "prompt": "Implement user auth with all features"
 }
 
-// ✅ Just Right
+//  Just Right
 {
   "title": "Create User model and database schema",
   "prompt": "Create a User model with email, hashed_password, and created_at fields. Include database migrations."
@@ -810,7 +823,7 @@ These questions catch ambiguities before they cause problems:
 
 ### Common Patterns and Anti-Patterns
 
-#### ✅ Effective Patterns
+####  Effective Patterns
 
 **The Investigation Step**
 ```json
@@ -841,7 +854,7 @@ These questions catch ambiguities before they cause problems:
 }
 ```
 
-#### ❌ Anti-Patterns to Avoid
+####  Anti-Patterns to Avoid
 
 **The Kitchen Sink Step**
 ```json
@@ -943,7 +956,7 @@ Here's a starter template for new workflows:
 }
 ```
 
-Remember: Great workflows don't just accomplish tasks—they teach best practices and help ensure
+Remember: Great workflows don't just accomplish tasks - they teach best practices and help ensure
 consistent, high-quality results across all users.
 
 ## 8. Technical Specifications
@@ -1511,7 +1524,7 @@ class WorkflowExecutor {
 #### Error Handling Patterns
 
 ```kotlin
-class RobustWorkflowOrchestrator {
+class ReliableWorkflowOrchestrator {
     suspend fun executeWorkflowWithRecovery(
         workflowId: String,
         context: UserContext
@@ -2017,7 +2030,7 @@ Agent: "I'll merge the relevant parts"
 - **State Management**: The server would maintain a DAG (Directed Acyclic Graph) of execution states
 - **Backward Compatibility**: Linear workflows would work unchanged as a special case
 - **Agent Autonomy**: The system would still provide guidance rather than control
-- **Persistence**: State graphs would need robust storage and recovery mechanisms
+- **Persistence**: State graphs would need reliable storage and recovery mechanisms
 
 This enhancement would maintain the MCP philosophy while enabling the flexibility required for
 complex, real-world development scenarios.

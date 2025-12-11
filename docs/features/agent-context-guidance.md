@@ -6,7 +6,7 @@ Agents currently send back the ENTIRE context (15-20KB) on every `workflow_next`
 
 ## The Solution: Send Only What Changed
 
-### ❌ DON'T DO THIS (Current Behavior)
+###  DON'T DO THIS (Current Behavior)
 
 ```json
 {
@@ -24,7 +24,7 @@ Agents currently send back the ENTIRE context (15-20KB) on every `workflow_next`
 }
 ```
 
-### ✅ DO THIS INSTEAD (Optimized)
+###  DO THIS INSTEAD (Optimized)
 
 ```json
 {
@@ -50,10 +50,10 @@ Agents currently send back the ENTIRE context (15-20KB) on every `workflow_next`
 ### 1. Never Echo Arrays
 
 ```json
-// ❌ BAD: Sending back unchanged array
+//  BAD: Sending back unchanged array
 "implementationSteps": [/* all 14 items */]
 
-// ✅ GOOD: Only send current item
+//  GOOD: Only send current item
 "currentStep": { /* just this one */ }
 ```
 

@@ -2,7 +2,8 @@
 
 ## Overview
 
-The MCP server now includes automatic context optimization instructions that help AI agents reduce the size of context sent with each `workflow_next` call. This guide explains how workflows can leverage this feature effectively.
+The MCP server now includes automatic context optimization instructions that help AI agents reduce the size of context sent with each `workflow_next` call. This guide explains how workflows can
+use this feature effectively.
 
 ## Understanding the Stateless Nature
 
@@ -119,7 +120,7 @@ When inside a loop, specific variables are injected and must be preserved:
 
 ### 1. Avoid Large Array Storage
 
-❌ **Bad: Storing large arrays**
+ **Bad: Storing large arrays**
 ```json
 {
   "id": "prepare-implementation",
@@ -128,7 +129,7 @@ When inside a loop, specific variables are injected and must be preserved:
 }
 ```
 
-✅ **Good: Store count and read on-demand**
+ **Good: Store count and read on-demand**
 ```json
 {
   "id": "count-steps",

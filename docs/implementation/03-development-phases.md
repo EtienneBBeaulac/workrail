@@ -6,12 +6,12 @@
 [![Spec Version](https://img.shields.io/badge/spec-1.0.0-blue.svg)](specs/)
 [![MCP Compatible](https://img.shields.io/badge/MCP-compatible-purple.svg)](https://modelcontextprotocol.org)
 
-## 📋 Table of Contents
+##  Table of Contents
 
 1. [Vision & Alignment](#vision--alignment)
-2. [Phase 1 – MVP (✅ Complete)](#phase-1--mvp--complete)
-3. [Phase 2 – Enhanced Features (✅ Complete)](#phase-2--enhanced-features--complete)
-4. [Phase 3 – Advanced Capabilities (🔄 In Progress)](#phase-3--advanced-capabilities--in-progress)
+2. [Phase 1 – MVP ( Complete)](#phase-1--mvp--complete)
+3. [Phase 2 – Enhanced Features ( Complete)](#phase-2--enhanced-features--complete)
+4. [Phase 3 – Advanced Capabilities ( In Progress)](#phase-3--advanced-capabilities--in-progress)
 5. [Strategic Risks & Mitigations](#strategic-risks--mitigations)
 6. [Major Dependencies](#major-dependencies)
 7. [References](#references)
@@ -31,7 +31,7 @@ The roadmap is designed to deliver value incrementally, with clear milestones an
 
 ---
 
-## Phase 1 – MVP (✅ Complete)
+## Phase 1 – MVP ( Complete)
 
 > **Status:** Delivered in v0.0.1-alpha, all objectives met and covered by tests.
 
@@ -51,7 +51,7 @@ The roadmap is designed to deliver value incrementally, with clear milestones an
 
 ---
 
-## Phase 2 – Enhanced Features (✅ Complete)
+## Phase 2 – Enhanced Features ( Complete)
 
 > **Status:** Delivered in v0.0.1-alpha, all objectives met with comprehensive test coverage.
 
@@ -65,12 +65,12 @@ The roadmap is designed to deliver value incrementally, with clear milestones an
 ### Deliverables Achieved
 | Milestone | Status |
 |-----------|--------|
-| Persistent state adapter & migration scripts | ✅ Complete |
-| HTTP transport (Express) | ✅ Complete |
-| WebSocket transport | ✅ Complete |
-| OTEL instrumentation | ✅ Complete |
-| Validation Phase 2 rules | ✅ Complete |
-| Workflow library expansion | ✅ Complete |
+| Persistent state adapter & migration scripts |  Complete |
+| HTTP transport (Express) |  Complete |
+| WebSocket transport |  Complete |
+| OTEL instrumentation |  Complete |
+| Validation Phase 2 rules |  Complete |
+| Workflow library expansion |  Complete |
 
 ### Success Metrics Achieved
 * 81 tests passing, 7 failing (performance optimizations in progress)
@@ -79,22 +79,22 @@ The roadmap is designed to deliver value incrementally, with clear milestones an
 
 ---
 
-## Phase 3 – Advanced Capabilities (🔄 In Progress)
+## Phase 3 – Advanced Capabilities ( In Progress)
 
 > **Status:** Currently in progress, focused on version field reconciliation, CLI validation, and documentation updates.
 
 ### Current Progress
-1. **Version Field Reconciliation** – ✅ Complete
+1. **Version Field Reconciliation** –  Complete
    - Fixed schema inconsistencies between workflow.schema.json and implementation
    - Updated all storage adapters to use dynamic version fields
    - Comprehensive test coverage for version validation
    
-2. **CLI Validation Command** – ✅ Complete
+2. **CLI Validation Command** –  Complete
    - Added `validate` command to CLI with comprehensive file handling
    - Proper error reporting with colored output
    - Full test coverage with 20 test cases
 
-3. **Documentation Audit & Updates** – 🔄 In Progress
+3. **Documentation Audit & Updates** –  In Progress
    - Systematic review of all documentation for accuracy
    - Updating status indicators and test counts
    - Correcting phase completion markers

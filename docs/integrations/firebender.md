@@ -1,7 +1,7 @@
 # Firebender Integration Guide
 
 ## Overview
-Firebender is an Agentic IDE that supports multiple subagents. WorkRail works seamlessly with Firebender in two modes: **Delegation** (Gold) and **Proxy** (Silver).
+Firebender is an Agentic IDE that supports multiple subagents. WorkRail works with Firebender in two modes: **Delegation** (Gold) and **Proxy** (Silver).
 
 ## Configuration Rules
 
@@ -10,7 +10,7 @@ Firebender has a specific behavior regarding Tool Access that you must understan
 ### The "Inheritance" Rule (Recommended)
 If you define a subagent **without** a `tools` configuration block, it inherits **ALL** tools from the main agent, including WorkRail.
 
-**✅ Recommended Config (Tier 3 Enabled):**
+** Recommended Config (Tier 3 Enabled):**
 ```json
 {
   "subagents": {
@@ -25,7 +25,7 @@ If you define a subagent **without** a `tools` configuration block, it inherits 
 ### The "Whitelist" Pitfall
 If you define a `tools` block (even if empty), the subagent loses access to everything except what is listed.
 
-**❌ Broken Config (Tier 2 Only):**
+** Broken Config (Tier 2 Only):**
 ```json
 {
   "subagents": {
@@ -37,7 +37,7 @@ If you define a `tools` block (even if empty), the subagent loses access to ever
 }
 ```
 
-**✅ Fixed Whitelist Config:**
+** Fixed Whitelist Config:**
 If you MUST whitelist tools, you must explicitly add the WorkRail suite:
 ```json
 {
@@ -130,7 +130,7 @@ CONTEXT: I need to understand how authentication works
 DELIVERABLE: context-map.md"
 ```
 
-If the WorkRail Executor can execute the routine and return a structured deliverable, you're in **Tier 3 (Delegation Mode)** ✅
+If the WorkRail Executor can execute the routine and return a structured deliverable, you're in **Tier 3 (Delegation Mode)** 
 
 ---
 

@@ -1,11 +1,11 @@
 # Advanced Performance Guide
 
-> ⚡ **Performance tuning and optimization techniques**
+>  **Performance tuning and optimization techniques**
 
 [![Status](https://img.shields.io/badge/status-advanced_performance-green.svg)](https://github.com/EtienneBBeaulac/mcp)
 [![Spec Version](https://img.shields.io/badge/spec-1.0.0-blue.svg)](specs/)
 
-## 📋 Table of Contents
+##  Table of Contents
 
 1. [Distributed Caching](#distributed-caching)
 2. [Horizontal Scaling](#horizontal-scaling)

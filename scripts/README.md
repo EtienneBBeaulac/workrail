@@ -71,7 +71,7 @@ The script will guide you through:
 ### Example Session
 
 ```
-🚀 Workrail Release Script
+ Workrail Release Script
 =========================
 
 Current version: 0.1.0
@@ -84,7 +84,7 @@ What type of version bump?
 5) cancel
 
 Select option (1-5): 2
-✅ Version bumped to: 0.2.0
+ Version bumped to: 0.2.0
 
 Enter a brief description of this release (or press Enter to skip):
 Add new validation features
@@ -94,34 +94,34 @@ Enhanced schema validation
 Performance improvements
 Bug fixes
 
-📝 Creating commit...
-✅ Commit created
+ Creating commit...
+ Commit created
 🏷️  Creating git tag...
-✅ Tag v0.2.0 created
+ Tag v0.2.0 created
 
 Push commits and tags to origin? (y/N) y
 📤 Pushing to origin...
-✅ Pushed to origin
+ Pushed to origin
 
 Publish to npm? (y/N) y
 Select npm access level:
 1) public (default)
 2) restricted
 Select option (1-2) [1]: 1
-📦 Publishing to npm...
-✅ Successfully published to npm!
-🎉 Release v0.2.0 complete!
+ Publishing to npm...
+ Successfully published to npm!
+ Release v0.2.0 complete!
 
 Users can now install with:
 npm install @exaudeus/workrail@0.2.0
 
-📋 Summary:
+ Summary:
   - Version: 0.1.0 → 0.2.0
-  - Commit: ✅
-  - Tag: ✅
-  - Published: ✅
+  - Commit: 
+  - Tag: 
+  - Published: 
 
-Done! 🚀
+Done! 
 ```
 
 ### Safety Features
