@@ -9,7 +9,7 @@ export function createValidateStepOutput(service: WorkflowService) {
     workflowId: string,
     stepId: string,
     output: string
-  ): Promise<{ valid: boolean; issues: string[]; suggestions: string[] }> => {
+  ): Promise<{ valid: boolean; issues: readonly string[]; suggestions: readonly string[] }> => {
     return service.validateStepOutput(workflowId, stepId, output);
   };
 }
@@ -23,6 +23,6 @@ export async function validateStepOutput(
   workflowId: string,
   stepId: string,
   output: string
-): Promise<{ valid: boolean; issues: string[]; suggestions: string[] }> {
+): Promise<{ valid: boolean; issues: readonly string[]; suggestions: readonly string[] }> {
   return createValidateStepOutput(service)(workflowId, stepId, output);
 } 

@@ -6,7 +6,7 @@ import { WorkflowSummary } from '../../types/mcp-types';
  * Dependencies are injected at creation time, returning a pure function.
  */
 export function createListWorkflows(service: WorkflowService) {
-  return async (): Promise<WorkflowSummary[]> => {
+  return async (): Promise<readonly WorkflowSummary[]> => {
     return service.listWorkflowSummaries();
   };
 }
@@ -17,6 +17,6 @@ export function createListWorkflows(service: WorkflowService) {
  */
 export async function listWorkflows(
   service: WorkflowService
-): Promise<WorkflowSummary[]> {
+): Promise<readonly WorkflowSummary[]> {
   return createListWorkflows(service)();
 } 

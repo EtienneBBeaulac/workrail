@@ -1,9 +1,9 @@
 export interface WorkflowService {
   /** Return lightweight summaries of all workflows. */
-  listWorkflowSummaries(): Promise<import('../../types/mcp-types').WorkflowSummary[]>;
+  listWorkflowSummaries(): Promise<readonly import('../../types/workflow').WorkflowSummary[]>;
 
   /** Retrieve a workflow by ID, or null if not found. */
-  getWorkflowById(id: string): Promise<import('../../types/mcp-types').Workflow | null>;
+  getWorkflowById(id: string): Promise<import('../../types/workflow').Workflow | null>;
 
   /**
    * Determine the next step in a workflow given completed step IDs.
@@ -13,7 +13,7 @@ export interface WorkflowService {
     completedSteps: string[],
     context?: ConditionContext
   ): Promise<{
-    step: import('../../types/mcp-types').WorkflowStep | null;
+    step: import('../../types/workflow').WorkflowStepDefinition | null;
     guidance: import('../../types/mcp-types').WorkflowGuidance;
     isComplete: boolean;
     context?: ConditionContext;
@@ -26,8 +26,8 @@ export interface WorkflowService {
     output: string
   ): Promise<{
     valid: boolean;
-    issues: string[];
-    suggestions: string[];
+    issues: readonly string[];
+    suggestions: readonly string[];
   }>;
 }
 
@@ -74,7 +74,7 @@ export class DefaultWorkflowService implements WorkflowService {
   private readonly logger = createLogger('WorkflowService');
 
   constructor(
-    @inject(DI.Storage.Primary) private readonly storage: IWorkflowStorage,
+    @inject(DI.Storage.Primary) private readonly storage: import('../../types/storage').IWorkflowReader,
     @inject(ValidationEngine) private readonly validationEngine: ValidationEngine,
     @inject(IterativeStepResolutionStrategy) private readonly stepResolutionStrategy: IterativeStepResolutionStrategy
   ) {
@@ -83,7 +83,7 @@ export class DefaultWorkflowService implements WorkflowService {
     });
   }
 
-  async listWorkflowSummaries(): Promise<WorkflowSummary[]> {
+  async listWorkflowSummaries(): Promise<readonly WorkflowSummary[]> {
     return this.storage.listWorkflowSummaries();
   }
 
@@ -104,19 +104,22 @@ export class DefaultWorkflowService implements WorkflowService {
     workflowId: string,
     stepId: string,
     output: string
-  ): Promise<{ valid: boolean; issues: string[]; suggestions: string[] }> {
+  ): Promise<{ valid: boolean; issues: readonly string[]; suggestions: readonly string[] }> {
     const workflow = await this.storage.getWorkflowById(workflowId);
     if (!workflow) {
       throw new WorkflowNotFoundError(workflowId);
     }
 
-    const step = workflow.steps.find((s) => s.id === stepId);
+    const step = workflow.definition.steps.find((s) => s.id === stepId);
     if (!step) {
       throw new StepNotFoundError(stepId, workflowId);
     }
 
     // Use ValidationEngine to handle validation logic
-    const criteria = (step as any).validationCriteria as any[] || [];
+    const criteria = step.validationCriteria;
+    if (!criteria) {
+      return { valid: true, issues: [], suggestions: [] };
+    }
     return this.validationEngine.validate(output, criteria);
   }
 
@@ -150,23 +153,29 @@ export class DefaultWorkflowService implements WorkflowService {
         
         // Only increment iteration for single-step bodies
         // Multi-step bodies are incremented when all steps complete
-        if (!Array.isArray(bodyStep) && bodyStep.id === stepId) {
-          // Create loop context to increment iteration
-          const loopContext = new LoopExecutionContext(
-            loopId,
-            loopStep.loop,
-            enhancedContext._loopState?.[loopId]
-          );
+        if (!Array.isArray(bodyStep)) {
+          // TypeScript doesn't narrow readonly arrays properly, need assertion
+          // At runtime, we know bodyStep is WorkflowStepDefinition (not array) because of the check above
+          const singleBodyStep = bodyStep as import('../../types/workflow').WorkflowStepDefinition;
           
-          // Increment the loop iteration
-          loopContext.incrementIteration();
-          
-          // Update loop state in context
-          enhancedContext = ContextOptimizer.mergeLoopState(
-            enhancedContext,
-            loopId,
-            loopContext.getCurrentState()
-          );
+          if (singleBodyStep.id === stepId) {
+            // Create loop context to increment iteration
+            const loopContext = new LoopExecutionContext(
+              loopId,
+              loopStep.loop,
+              enhancedContext._loopState?.[loopId]
+            );
+            
+            // Increment the loop iteration
+            loopContext.incrementIteration();
+            
+            // Update loop state in context
+            enhancedContext = ContextOptimizer.mergeLoopState(
+              enhancedContext,
+              loopId,
+              loopContext.getCurrentState()
+            );
+          }
         }
       }
     }

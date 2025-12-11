@@ -12,7 +12,7 @@ import { Workflow } from './types/workflow-types';
 import { WorkflowService } from './application/services/workflow-service.js';
 import { ValidationEngine } from './application/services/validation-engine.js';
 import { HttpServer } from './infrastructure/session/HttpServer.js';
-import { initializeUserWorkflowDirectory } from './infrastructure/storage/multi-directory-workflow-storage';
+import { initializeUserWorkflowDirectory } from './utils/workflow-init';
 import { handleMigrationCommand } from './cli/migrate-workflow';
 
 const program = new Command();
@@ -68,12 +68,12 @@ program
       }
       
       workflows.forEach((workflow: any, index: number) => {
-        console.log(chalk.green(`${index + 1}. ${workflow.name}`));
-        console.log(chalk.white(`   ID: ${workflow.id}`));
-        console.log(chalk.gray(`   ${workflow.description}`));
+        console.log(chalk.green(`${index + 1}. ${workflow.definition.name}`));
+        console.log(chalk.white(`   ID: ${workflow.definition.id}`));
+        console.log(chalk.gray(`   ${workflow.definition.description}`));
         
         if (options.verbose) {
-          console.log(chalk.cyan(`   Version: ${workflow.version}`));
+          console.log(chalk.cyan(`   Version: ${workflow.definition.version}`));
         }
         
         console.log();

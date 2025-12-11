@@ -1,10 +1,10 @@
-import { IWorkflowStorage } from '../../types/storage';
-import { Workflow, WorkflowSummary } from '../../types/mcp-types';
+import { IWorkflowStorage, ICompositeWorkflowStorage, isCompositeStorage } from '../../types/storage';
+import { Workflow, WorkflowSummary, WorkflowDefinition, WorkflowSource } from '../../types/workflow';
 
 const deepClone = <T>(obj: T): T => {
   // Use structuredClone if available (Node 17+), otherwise fallback to JSON
-  if (typeof (global as any).structuredClone === 'function') {
-    return (global as any).structuredClone(obj);
+  if (typeof (globalThis as unknown as { structuredClone?: typeof structuredClone }).structuredClone === 'function') {
+    return (globalThis as unknown as { structuredClone: typeof structuredClone }).structuredClone(obj);
   }
   return JSON.parse(JSON.stringify(obj));
 };
@@ -16,52 +16,179 @@ interface Cached<T> {
 
 /**
  * Decorator that adds simple in-memory TTL caching to any IWorkflowStorage.
+ * 
+ * IMPORTANT: This decorator now properly delegates to the inner storage
+ * and preserves all workflow metadata including source information.
+ * It caches workflows and summaries separately for efficiency.
  */
 export class CachingWorkflowStorage implements IWorkflowStorage {
-  private cache: Cached<Workflow[]> | null = null;
+  public readonly kind = 'single' as const;
+  
+  private workflowCache: Cached<readonly Workflow[]> | null = null;
+  private summaryCache: Cached<readonly WorkflowSummary[]> | null = null;
   private stats = { hits: 0, misses: 0 };
 
-  constructor(private readonly inner: IWorkflowStorage, private readonly ttlMs: number) {}
+  constructor(
+    private readonly inner: IWorkflowStorage,
+    private readonly ttlMs: number
+  ) {}
+
+  /**
+   * The source from the inner storage.
+   */
+  get source(): WorkflowSource {
+    return this.inner.source;
+  }
 
   public getCacheStats() {
     return { ...this.stats };
   }
 
-  private isFresh(): boolean {
-    return this.cache !== null && Date.now() - this.cache.timestamp < this.ttlMs;
+  public clearCache(): void {
+    this.workflowCache = null;
+    this.summaryCache = null;
   }
 
-  async loadAllWorkflows(): Promise<Workflow[]> {
-    if (this.isFresh()) {
+  private isFresh<T>(cache: Cached<T> | null): cache is Cached<T> {
+    return cache !== null && Date.now() - cache.timestamp < this.ttlMs;
+  }
+
+  async loadAllWorkflows(): Promise<readonly Workflow[]> {
+    if (this.isFresh(this.workflowCache)) {
       this.stats.hits += 1;
-      return deepClone(this.cache!.value);
+      return deepClone(this.workflowCache.value);
     }
+    
     this.stats.misses += 1;
     const workflows = await this.inner.loadAllWorkflows();
-    this.cache = { value: workflows, timestamp: Date.now() };
+    this.workflowCache = { value: workflows, timestamp: Date.now() };
+    
+    // Also invalidate summary cache since workflows changed
+    this.summaryCache = null;
+    
     return deepClone(workflows);
   }
 
   async getWorkflowById(id: string): Promise<Workflow | null> {
-    const workflows = await this.loadAllWorkflows();
-    const wf = workflows.find((wf) => wf.id === id);
-    return wf ? deepClone(wf) : null;
+    // Try to find in cached workflows first
+    if (this.isFresh(this.workflowCache)) {
+      const wf = this.workflowCache.value.find((w) => w.definition.id === id);
+      if (wf) {
+        this.stats.hits += 1;
+        return deepClone(wf);
+      }
+    }
+    
+    // Fall through to inner storage
+    this.stats.misses += 1;
+    const workflow = await this.inner.getWorkflowById(id);
+    return workflow ? deepClone(workflow) : null;
   }
 
-  async listWorkflowSummaries(): Promise<WorkflowSummary[]> {
-    const workflows = await this.loadAllWorkflows();
-    return workflows.map((wf) => ({
-      id: wf.id,
-      name: wf.name,
-      description: wf.description,
-      category: 'default',
-      version: wf.version
-    }));
+  async listWorkflowSummaries(): Promise<readonly WorkflowSummary[]> {
+    // Use separate summary cache for efficiency
+    if (this.isFresh(this.summaryCache)) {
+      this.stats.hits += 1;
+      return deepClone(this.summaryCache.value);
+    }
+    
+    this.stats.misses += 1;
+    
+    // Delegate to inner storage - it handles summary creation with proper source info
+    const summaries = await this.inner.listWorkflowSummaries();
+    this.summaryCache = { value: summaries, timestamp: Date.now() };
+    
+    return deepClone(summaries);
   }
 
-  async save?(workflow: Workflow): Promise<void> {
+  async save(definition: WorkflowDefinition): Promise<void> {
     if (typeof this.inner.save === 'function') {
-      return this.inner.save(workflow);
+      await this.inner.save(definition);
+      // Invalidate caches after save
+      this.clearCache();
     }
   }
-} 
+}
+
+/**
+ * Create a caching wrapper for composite storage.
+ * This version exposes getSources() from the inner storage.
+ */
+export class CachingCompositeWorkflowStorage implements ICompositeWorkflowStorage {
+  public readonly kind = 'composite' as const;
+  
+  private workflowCache: Cached<readonly Workflow[]> | null = null;
+  private summaryCache: Cached<readonly WorkflowSummary[]> | null = null;
+  private stats = { hits: 0, misses: 0 };
+  
+  constructor(
+    private readonly inner: ICompositeWorkflowStorage,
+    private readonly ttlMs: number
+  ) {}
+  
+  private isFresh<T>(cache: Cached<T> | null): cache is Cached<T> {
+    return cache !== null && Date.now() - cache.timestamp < this.ttlMs;
+  }
+
+  getSources(): readonly WorkflowSource[] {
+    return this.inner.getSources();
+  }
+
+  async loadAllWorkflows(): Promise<readonly Workflow[]> {
+    if (this.isFresh(this.workflowCache)) {
+      this.stats.hits += 1;
+      return deepClone(this.workflowCache.value);
+    }
+    
+    this.stats.misses += 1;
+    const workflows = await this.inner.loadAllWorkflows();
+    this.workflowCache = { value: workflows, timestamp: Date.now() };
+    this.summaryCache = null;
+    
+    return deepClone(workflows);
+  }
+
+  async getWorkflowById(id: string): Promise<Workflow | null> {
+    if (this.isFresh(this.workflowCache)) {
+      const wf = this.workflowCache.value.find((w) => w.definition.id === id);
+      if (wf) {
+        this.stats.hits += 1;
+        return deepClone(wf);
+      }
+    }
+    
+    this.stats.misses += 1;
+    const workflow = await this.inner.getWorkflowById(id);
+    return workflow ? deepClone(workflow) : null;
+  }
+
+  async listWorkflowSummaries(): Promise<readonly WorkflowSummary[]> {
+    if (this.isFresh(this.summaryCache)) {
+      this.stats.hits += 1;
+      return deepClone(this.summaryCache.value);
+    }
+    
+    this.stats.misses += 1;
+    const summaries = await this.inner.listWorkflowSummaries();
+    this.summaryCache = { value: summaries, timestamp: Date.now() };
+    
+    return deepClone(summaries);
+  }
+
+  async save(definition: WorkflowDefinition): Promise<void> {
+    if (typeof this.inner.save === 'function') {
+      await this.inner.save(definition);
+      this.workflowCache = null;
+      this.summaryCache = null;
+    }
+  }
+
+  getCacheStats() {
+    return { ...this.stats };
+  }
+
+  clearCache(): void {
+    this.workflowCache = null;
+    this.summaryCache = null;
+  }
+}
