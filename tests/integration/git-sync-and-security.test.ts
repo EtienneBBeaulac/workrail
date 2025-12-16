@@ -22,9 +22,9 @@ describe('Git Sync & Security - No Corners Rounded', () => {
   async function createGitRepo() {
     await fs.mkdir(path.join(sourceRepo, 'workflows'), { recursive: true });
     
-    await execAsync('git init', { cwd: sourceRepo });
-    await execAsync('git config user.email "test@test.com"', { cwd: sourceRepo });
-    await execAsync('git config user.definition.name "Test"', { cwd: sourceRepo });
+    const { initGitRepo } = await import('../helpers/git-test-utils.js');
+    await initGitRepo(sourceRepo);
+    await execAsync('git config user.name "Test"', { cwd: sourceRepo });
     
     const workflow = {
       id: 'sync-test',
@@ -252,7 +252,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       
       await execAsync('git init', { cwd: maliciousRepo });
       await execAsync('git config user.email "test@test.com"', { cwd: maliciousRepo });
-      await execAsync('git config user.definition.name "Test"', { cwd: maliciousRepo });
+      await execAsync('git config user.name "Test"', { cwd: maliciousRepo });
 
       // Create a normal workflow but with malicious ID
       const malicious = {
@@ -307,7 +307,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       
       await execAsync('git init', { cwd: largeRepo });
       await execAsync('git config user.email "test@test.com"', { cwd: largeRepo });
-      await execAsync('git config user.definition.name "Test"', { cwd: largeRepo });
+      await execAsync('git config user.name "Test"', { cwd: largeRepo });
 
       // Create a workflow that's too large (over 1MB default)
       const hugeWorkflow = {
@@ -354,7 +354,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       
       await execAsync('git init', { cwd: manyRepo });
       await execAsync('git config user.email "test@test.com"', { cwd: manyRepo });
-      await execAsync('git config user.definition.name "Test"', { cwd: manyRepo });
+      await execAsync('git config user.name "Test"', { cwd: manyRepo });
 
       // Create 150 workflows (default limit is 100)
       for (let i = 0; i < 150; i++) {
@@ -468,7 +468,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       
       await execAsync('git init', { cwd: badRepo });
       await execAsync('git config user.email "test@test.com"', { cwd: badRepo });
-      await execAsync('git config user.definition.name "Test"', { cwd: badRepo });
+      await execAsync('git config user.name "Test"', { cwd: badRepo });
 
       // Write malformed JSON
       await fs.writeFile(
@@ -497,7 +497,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       
       await execAsync('git init', { cwd: mismatchRepo });
       await execAsync('git config user.email "test@test.com"', { cwd: mismatchRepo });
-      await execAsync('git config user.definition.name "Test"', { cwd: mismatchRepo });
+      await execAsync('git config user.name "Test"', { cwd: mismatchRepo });
 
       const workflow = {
         id: 'actual-id',
@@ -584,7 +584,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       
       await execAsync('git init', { cwd: emptyRepo });
       await execAsync('git config user.email "test@test.com"', { cwd: emptyRepo });
-      await execAsync('git config user.definition.name "Test"', { cwd: emptyRepo });
+      await execAsync('git config user.name "Test"', { cwd: emptyRepo });
       
       // Commit empty workflows directory
       await fs.writeFile(path.join(emptyRepo, 'workflows', '.gitkeep'), '');
@@ -612,7 +612,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       
       await execAsync('git init', { cwd: noWorkflowsRepo });
       await execAsync('git config user.email "test@test.com"', { cwd: noWorkflowsRepo });
-      await execAsync('git config user.definition.name "Test"', { cwd: noWorkflowsRepo });
+      await execAsync('git config user.name "Test"', { cwd: noWorkflowsRepo });
       
       await fs.writeFile(path.join(noWorkflowsRepo, 'README.md'), '# No workflows here');
       await execAsync('git add . && git commit -m "No workflows"', { cwd: noWorkflowsRepo });
@@ -639,7 +639,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       
       await execAsync('git init', { cwd: mixedRepo });
       await execAsync('git config user.email "test@test.com"', { cwd: mixedRepo });
-      await execAsync('git config user.definition.name "Test"', { cwd: mixedRepo });
+      await execAsync('git config user.name "Test"', { cwd: mixedRepo });
 
       // Add a valid workflow
       const valid = {

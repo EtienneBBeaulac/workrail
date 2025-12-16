@@ -32,9 +32,8 @@ describe('🚀 END-TO-END: Complete External Workflows Feature', () => {
   async function createTestRepo(repoDir: string, workflowId: string, workflowName: string, service: string) {
     await fs.mkdir(path.join(repoDir, 'workflows'), { recursive: true });
     
-    await execAsync('git init', { cwd: repoDir });
-    await execAsync('git config user.email "test@test.com"', { cwd: repoDir });
-    await execAsync('git config user.name "Test User"', { cwd: repoDir });
+    const { initGitRepo } = await import('../helpers/git-test-utils.js');
+    await initGitRepo(repoDir);
     await execAsync('git config user.definition.name "Test"', { cwd: repoDir });
     
     const workflow = {

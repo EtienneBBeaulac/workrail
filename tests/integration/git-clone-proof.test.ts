@@ -25,9 +25,8 @@ describe('🔥 DIRECT PROOF: Git Cloning Works', () => {
     // Create a real Git repository
     await fs.mkdir(path.join(sourceRepoDir, 'workflows'), { recursive: true });
     
-    await execAsync('git init', { cwd: sourceRepoDir });
-    await execAsync('git config user.email "test@test.com"', { cwd: sourceRepoDir });
-    await execAsync('git config user.name "Test User"', { cwd: sourceRepoDir });
+    const { initGitRepo } = await import('../helpers/git-test-utils.js');
+    await initGitRepo(sourceRepoDir);
     await execAsync('git config user.definition.name "Test"', { cwd: sourceRepoDir });
     
     // Create a real workflow
