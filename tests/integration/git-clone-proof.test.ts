@@ -27,6 +27,7 @@ describe('🔥 DIRECT PROOF: Git Cloning Works', () => {
     
     await execAsync('git init', { cwd: sourceRepoDir });
     await execAsync('git config user.email "test@test.com"', { cwd: sourceRepoDir });
+    await execAsync('git config user.name "Test User"', { cwd: sourceRepoDir });
     await execAsync('git config user.definition.name "Test"', { cwd: sourceRepoDir });
     
     // Create a real workflow

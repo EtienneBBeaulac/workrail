@@ -34,6 +34,7 @@ describe('🚀 END-TO-END: Complete External Workflows Feature', () => {
     
     await execAsync('git init', { cwd: repoDir });
     await execAsync('git config user.email "test@test.com"', { cwd: repoDir });
+    await execAsync('git config user.name "Test User"', { cwd: repoDir });
     await execAsync('git config user.definition.name "Test"', { cwd: repoDir });
     
     const workflow = {
