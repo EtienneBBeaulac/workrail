@@ -1,7 +1,8 @@
 import { WorkflowService } from '../services/workflow-service';
 import { Workflow, WorkflowStepDefinition } from '../../types/workflow';
 import { WorkflowNotFoundError } from '../../core/error-handler';
-import { evaluateCondition, ConditionContext } from '../../utils/condition-evaluator';
+import { ConditionContext } from '../../utils/condition-evaluator';
+import { initialExecutionState } from '../../domain/execution/state';
 
 // Define the mode type
 export type WorkflowGetMode = 'metadata' | 'preview' | undefined;
@@ -51,8 +52,12 @@ export function createGetWorkflow(service: WorkflowService) {
 
       case 'preview':
       default:
-        // Find the first eligible step (similar to workflow_next logic)
-        const firstStep = findFirstEligibleStep(workflow.definition.steps);
+        // Find the first next step via the interpreter (authoritative)
+        const next = await service.getNextStep(workflowId, initialExecutionState(), undefined, {} as ConditionContext);
+        const firstStep =
+          next.kind === 'ok'
+            ? (next.value.next ? next.value.next.step : null)
+            : null;
         return {
           id: workflow.definition.id,
           name: workflow.definition.name,
@@ -66,22 +71,6 @@ export function createGetWorkflow(service: WorkflowService) {
         };
     }
   };
-}
-
-/**
- * Helper function to find the first eligible step in a workflow.
- * Uses the same logic as workflow_next but with empty completed steps and context.
- */
-function findFirstEligibleStep(steps: readonly WorkflowStepDefinition[], context: ConditionContext = {}): WorkflowStepDefinition | null {
-  return steps.find((step) => {
-    // If step has a runCondition, evaluate it
-    if (step.runCondition) {
-      return evaluateCondition(step.runCondition, context);
-    }
-    
-    // No condition means step is eligible
-    return true;
-  }) || null;
 }
 
 /**

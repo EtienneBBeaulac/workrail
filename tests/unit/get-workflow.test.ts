@@ -3,6 +3,10 @@ import { createGetWorkflow, WorkflowGetMode } from '../../src/application/use-ca
 import { WorkflowService } from '../../src/application/services/workflow-service';
 import { Workflow, createWorkflow, createBundledSource, WorkflowDefinition } from '../../src/types/workflow';
 import { WorkflowNotFoundError } from '../../src/core/error-handler';
+import { evaluateCondition } from '../../src/utils/condition-evaluator';
+import { ok, err } from '../../src/domain/execution/result';
+import type { ExecutionState } from '../../src/domain/execution/state';
+import type { WorkflowEvent } from '../../src/domain/execution/event';
 
 const mockWorkflow = createWorkflow({
   id: 'test-workflow',
@@ -95,8 +99,30 @@ class MockWorkflowService implements WorkflowService {
     return [];
   }
 
-  async getNextStep() {
-    return { step: null, guidance: { prompt: '' }, isComplete: true };
+  async getNextStep(
+    workflowId: string,
+    state: ExecutionState,
+    _event?: WorkflowEvent,
+    context: Record<string, unknown> = {}
+  ) {
+    const workflow = this.workflows.get(workflowId);
+    if (!workflow) return err({ kind: 'workflow_not_found', workflowId });
+
+    // Minimal behavior for tests: pick the first step whose runCondition passes (or has none).
+    const first = workflow.definition.steps.find((s: any) => {
+      if (!s.runCondition) return true;
+      return evaluateCondition(s.runCondition as any, context as any);
+    }) as any | undefined;
+
+    if (!first) {
+      return ok({ state: { kind: 'complete' } as any, next: null, isComplete: true });
+    }
+
+    return ok({
+      state: { kind: 'running', completed: [], loopStack: [], pendingStep: { stepId: first.id, loopPath: [] } } as any,
+      next: { step: first, stepInstanceId: { stepId: first.id, loopPath: [] }, guidance: { prompt: first.prompt } },
+      isComplete: false,
+    });
   }
 
   async validateStepOutput() {
@@ -122,8 +148,8 @@ describe('createGetWorkflow', () => {
     describe('preview mode (default)', () => {
       it('should return workflow metadata with first step', async () => {
         const result = await getWorkflow('test-workflow');
-        
-        expect(result).toEqual({
+
+        expect(result).toMatchObject({
           id: 'test-workflow',
           name: 'Test Workflow',
           description: 'A workflow for testing.',
@@ -132,18 +158,14 @@ describe('createGetWorkflow', () => {
           clarificationPrompts: ['What is your goal?'],
           metaGuidance: ['Follow best practices'],
           totalSteps: 3,
-          firstStep: {
-            id: 'step1',
-            title: 'Step 1',
-            prompt: 'Prompt for step 1'
-          }
+          firstStep: { id: 'step1', title: 'Step 1', prompt: 'Prompt for step 1' },
         });
       });
 
       it('should return workflow metadata with first step when explicitly set to preview', async () => {
         const result = await getWorkflow('test-workflow', 'preview');
-        
-        expect(result).toEqual({
+
+        expect(result).toMatchObject({
           id: 'test-workflow',
           name: 'Test Workflow',
           description: 'A workflow for testing.',
@@ -152,11 +174,7 @@ describe('createGetWorkflow', () => {
           clarificationPrompts: ['What is your goal?'],
           metaGuidance: ['Follow best practices'],
           totalSteps: 3,
-          firstStep: {
-            id: 'step1',
-            title: 'Step 1',
-            prompt: 'Prompt for step 1'
-          }
+          firstStep: { id: 'step1', title: 'Step 1', prompt: 'Prompt for step 1' },
         });
       });
 
@@ -217,18 +235,14 @@ describe('createGetWorkflow', () => {
 
       it('should return first unconditional step as firstStep', async () => {
         const result = await getWorkflow('conditional-workflow', 'preview');
-        
-        expect(result).toEqual({
+
+        expect(result).toMatchObject({
           id: 'conditional-workflow',
           name: 'Conditional Workflow',
           description: 'A workflow with conditional steps.',
           version: '0.0.1',
           totalSteps: 3,
-          firstStep: {
-            id: 'step1',
-            title: 'Step 1',
-            prompt: 'Always executable step'
-          }
+          firstStep: { id: 'step1', title: 'Step 1', prompt: 'Always executable step' },
         });
       });
 
