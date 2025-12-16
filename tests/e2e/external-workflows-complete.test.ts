@@ -34,7 +34,7 @@ describe('🚀 END-TO-END: Complete External Workflows Feature', () => {
     
     await execAsync('git init', { cwd: repoDir });
     await execAsync('git config user.email "test@test.com"', { cwd: repoDir });
-    await execAsync('git config user.name "Test"', { cwd: repoDir });
+    await execAsync('git config user.definition.name "Test"', { cwd: repoDir });
     
     const workflow = {
       id: workflowId,
@@ -138,13 +138,13 @@ describe('🚀 END-TO-END: Complete External Workflows Feature', () => {
       
       // PROOF 1: Multiple sources loaded
       console.log(`✅ Loaded ${allWorkflows.length} workflows from all sources`);
-      console.log('   Workflow IDs:', allWorkflows.map(w => w.id).filter(id => id.startsWith('e2e-')));
+      console.log('   Workflow IDs:', allWorkflows.map(w => w.definition.id).filter(id => id.startsWith('e2e-')));
       expect(allWorkflows.length).toBeGreaterThan(0);
       
       // PROOF 2: Got workflows from external Git repos
-      const hasGithub = allWorkflows.some(w => w.id === 'e2e-github');
-      const hasGitlab = allWorkflows.some(w => w.id === 'e2e-gitlab');
-      const hasSelfHosted = allWorkflows.some(w => w.id === 'e2e-selfhosted');
+      const hasGithub = allWorkflows.some(w => w.definition.id === 'e2e-github');
+      const hasGitlab = allWorkflows.some(w => w.definition.id === 'e2e-gitlab');
+      const hasSelfHosted = allWorkflows.some(w => w.definition.id === 'e2e-selfhosted');
       
       console.log(`   - e2e-github workflow: ${hasGithub ? '✅' : '❌'}`);
       console.log(`   - e2e-gitlab workflow: ${hasGitlab ? '✅' : '❌'}`);
@@ -158,8 +158,8 @@ describe('🚀 END-TO-END: Complete External Workflows Feature', () => {
       console.log('\n🔍 Testing getWorkflowById...');
       const githubWorkflow = await storage.getWorkflowById('e2e-github');
       expect(githubWorkflow).not.toBeNull();
-      expect(githubWorkflow?.name).toBe('GitHub E2E Workflow');
-      console.log(`✅ Retrieved: ${githubWorkflow?.name}`);
+      expect(githubWorkflow?.definition.name).toBe('GitHub E2E Workflow');
+      console.log(`✅ Retrieved: ${githubWorkflow?.definition.name}`);
       
       // PROOF 4: Workflow summaries work
       console.log('\n📋 Testing listWorkflowSummaries...');
@@ -214,8 +214,8 @@ describe('🚀 END-TO-END: Complete External Workflows Feature', () => {
       
       // PROOF: Still got workflows from valid repos
       expect(workflows.length).toBeGreaterThan(0);
-      expect(workflows.some(w => w.id === 'e2e-github')).toBe(true);
-      expect(workflows.some(w => w.id === 'e2e-gitlab')).toBe(true);
+      expect(workflows.some(w => w.definition.id === 'e2e-github')).toBe(true);
+      expect(workflows.some(w => w.definition.id === 'e2e-gitlab')).toBe(true);
       
       console.log(`✅ Graceful degradation: ${workflows.length} workflows loaded despite invalid repo`);
       console.log('✅✅ Error handling verified! ✅✅\n');
@@ -273,11 +273,11 @@ describe('🚀 END-TO-END: Complete External Workflows Feature', () => {
       const workflow = await storage.getWorkflowById(conflictId);
 
       // PROOF: Later repo (gitlab) overrides earlier (github)
-      expect(workflow?.name).toBe('Priority 2 (Should win)');
-      expect(workflow?.version).toBe('2.0.0');
+      expect(workflow?.definition.name).toBe('Priority 2 (Should win)');
+      expect(workflow?.definition.version).toBe('2.0.0');
       
       console.log('✅ Priority verified: Later repos override earlier ones');
-      console.log(`   Winner: ${workflow?.name}`);
+      console.log(`   Winner: ${workflow?.definition.name}`);
       console.log('✅✅ Priority system works! ✅✅\n');
       
     } finally {
@@ -313,16 +313,16 @@ describe('🚀 END-TO-END: Complete External Workflows Feature', () => {
       const summaries = await storage.listWorkflowSummaries();
       
       // PROOF: Multiple sources working together
-      const hasExternal = workflows.some(w => w.id === 'e2e-github' || w.id === 'e2e-gitlab');
+      const hasExternal = workflows.some(w => w.definition.id === 'e2e-github' || w.definition.id === 'e2e-gitlab');
       expect(hasExternal).toBe(true);
       
       console.log(`\n📊 Results:`);
       console.log(`   - Total workflows: ${workflows.length}`);
       console.log(`   - Summaries: ${summaries.length}`);
-      console.log(`   - External workflows: ${workflows.filter(w => w.id.startsWith('e2e-')).length}`);
+      console.log(`   - External workflows: ${workflows.filter(w => w.definition.id.startsWith('e2e-')).length}`);
       
       // PROOF: Can search and retrieve
-      const externalWorkflows = workflows.filter(w => w.id.startsWith('e2e-'));
+      const externalWorkflows = workflows.filter(w => w.definition.id.startsWith('e2e-'));
       expect(externalWorkflows.length).toBeGreaterThan(0);
       
       console.log('\n✅✅✅ Real-world scenario PROVEN! ✅✅✅');

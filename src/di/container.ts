@@ -1,6 +1,20 @@
 import 'reflect-metadata';
 import { container, DependencyContainer, instanceCachingFactory } from 'tsyringe';
 import { DI } from './tokens.js';
+import { assertNever } from '../runtime/assert-never.js';
+import type { RuntimeMode } from '../runtime/runtime-mode.js';
+import type { ProcessLifecyclePolicy } from '../runtime/process-lifecycle-policy.js';
+import type { ProcessSignals } from '../runtime/ports/process-signals.js';
+import { NodeProcessSignals } from '../runtime/adapters/node-process-signals.js';
+import { NoopProcessSignals } from '../runtime/adapters/noop-process-signals.js';
+import type { ShutdownEvents } from '../runtime/ports/shutdown-events.js';
+import { InMemoryShutdownEvents } from '../runtime/adapters/in-memory-shutdown-events.js';
+import type { ProcessTerminator } from '../runtime/ports/process-terminator.js';
+import { NodeProcessTerminator } from '../runtime/adapters/node-process-terminator.js';
+import { ThrowingProcessTerminator } from '../runtime/adapters/throwing-process-terminator.js';
+import type { ValidatedConfig } from '../config/app-config.js';
+import { loadConfig } from '../config/app-config.js';
+import { formatAppError } from '../errors/formatter.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // STATE
@@ -13,52 +27,82 @@ let initializationPromise: Promise<void> | null = null;
 let isInitializing = false; // Synchronous flag for race protection
 
 // ═══════════════════════════════════════════════════════════════════════════
-// TTL VALIDATION
-// ═══════════════════════════════════════════════════════════════════════════
-
-const DEFAULT_CACHE_TTL = 300_000; // 5 minutes
-const MIN_CACHE_TTL = 0;
-const MAX_CACHE_TTL = 86_400_000; // 24 hours
-
-function parseAndValidateTTL(envValue: string | undefined): number {
-  if (envValue === undefined) {
-    return DEFAULT_CACHE_TTL;
-  }
-  
-  const parsed = Number(envValue);
-  
-  if (Number.isNaN(parsed)) {
-    console.error(`[DI] Invalid CACHE_TTL value "${envValue}", using default ${DEFAULT_CACHE_TTL}ms`);
-    return DEFAULT_CACHE_TTL;
-  }
-  
-  if (parsed < MIN_CACHE_TTL) {
-    console.error(`[DI] CACHE_TTL ${parsed}ms below minimum, using ${MIN_CACHE_TTL}ms`);
-    return MIN_CACHE_TTL;
-  }
-  
-  if (parsed > MAX_CACHE_TTL) {
-    console.error(`[DI] CACHE_TTL ${parsed}ms exceeds maximum, using ${MAX_CACHE_TTL}ms`);
-    return MAX_CACHE_TTL;
-  }
-  
-  return parsed;
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // CONFIGURATION REGISTRATION
 // ═══════════════════════════════════════════════════════════════════════════
 
 function registerConfig(): void {
-  container.register(DI.Config.CacheTTL, {
-    useValue: parseAndValidateTTL(process.env.CACHE_TTL),
-  });
-  container.register(DI.Config.WorkflowDir, {
-    useValue: process.env.WORKRAIL_WORKFLOWS_DIR ?? process.cwd(),
-  });
-  container.register(DI.Config.ProjectPath, {
-    useValue: process.cwd(),
-  });
+  // Allow tests to inject config explicitly before container initialization.
+  // This prevents the composition root from overwriting test-provided values.
+  if (container.isRegistered(DI.Config.App)) {
+    return;
+  }
+
+  const configResult = loadConfig({ env: process.env, projectPath: process.cwd() });
+
+  if (configResult.kind === 'err') {
+    console.error(formatAppError(configResult.error));
+    process.exit(1);
+  }
+
+  const config = configResult.value;
+  container.register<ValidatedConfig>(DI.Config.App, { useValue: config });
+
+  // Backward compatibility: keep individual tokens during migration.
+  container.register(DI.Config.CacheTTL, { useValue: config.cache.ttlMs });
+  container.register(DI.Config.WorkflowDir, { useValue: config.paths.workflowDir });
+  container.register(DI.Config.ProjectPath, { useValue: config.paths.projectPath });
+  container.register(DI.Config.DashboardMode, { useValue: config.dashboard.mode });
+  container.register(DI.Config.BrowserBehavior, { useValue: config.dashboard.browserBehavior });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RUNTIME REGISTRATION
+// ═══════════════════════════════════════════════════════════════════════════
+
+function detectRuntimeMode(): RuntimeMode {
+  // Single source of truth for runtime inference.
+  // Env access is allowed here (composition root), but should not leak into services.
+  if (process.env.VITEST || process.env.NODE_ENV === 'test') {
+    return { kind: 'test' };
+  }
+  return { kind: 'production' };
+}
+
+function toProcessLifecyclePolicy(mode: RuntimeMode): ProcessLifecyclePolicy {
+  switch (mode.kind) {
+    case 'test':
+      return { kind: 'no_signal_handlers' };
+    case 'cli':
+    case 'rpc':
+    case 'production':
+      return { kind: 'install_signal_handlers' };
+    default:
+      return assertNever(mode);
+  }
+}
+
+export interface ContainerInitOptions {
+  readonly runtimeMode?: RuntimeMode;
+}
+
+function registerRuntime(options: ContainerInitOptions = {}): void {
+  const mode = options.runtimeMode ?? detectRuntimeMode();
+  const policy = toProcessLifecyclePolicy(mode);
+
+  container.register<RuntimeMode>(DI.Runtime.Mode, { useValue: mode });
+  container.register<ProcessLifecyclePolicy>(DI.Runtime.ProcessLifecyclePolicy, { useValue: policy });
+
+  const signals: ProcessSignals =
+    policy.kind === 'no_signal_handlers' ? new NoopProcessSignals() : new NodeProcessSignals();
+  container.register<ProcessSignals>(DI.Runtime.ProcessSignals, { useValue: signals });
+
+  // Shutdown event bus is always available (even in tests) but only used when something emits.
+  container.register<ShutdownEvents>(DI.Runtime.ShutdownEvents, { useValue: new InMemoryShutdownEvents() });
+
+  const terminator: ProcessTerminator =
+    mode.kind === 'test' ? new ThrowingProcessTerminator() : new NodeProcessTerminator();
+  container.register<ProcessTerminator>(DI.Runtime.ProcessTerminator, { useValue: terminator });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -77,8 +121,13 @@ async function registerStorageChain(): Promise<void> {
     '../infrastructure/storage/caching-workflow-storage.js'
   );
 
-  // Layer 1: Base storage (singleton)
-  container.registerSingleton(DI.Storage.Base, EnhancedMultiSourceWorkflowStorage);
+  // Layer 1: Base storage (singleton with feature flags injection)
+  container.register(DI.Storage.Base, {
+    useFactory: instanceCachingFactory((c: DependencyContainer) => {
+      const featureFlags = c.resolve<any>(DI.Infra.FeatureFlags);
+      return new EnhancedMultiSourceWorkflowStorage({}, featureFlags);
+    }),
+  });
 
   // Layer 2: Schema validation decorator (singleton via instanceCachingFactory)
   container.register(DI.Storage.Validated, {
@@ -197,7 +246,7 @@ async function registerServices(): Promise<void> {
  * - Concurrent callers now properly wait via spin-wait with timeout
  * - Fail-fast: Don't reset state on error (prevents infinite retry loops)
  */
-export async function initializeContainer(): Promise<void> {
+export async function initializeContainer(options: ContainerInitOptions = {}): Promise<void> {
   // Fast path: already initialized
   if (initialized) return;
 
@@ -226,6 +275,7 @@ export async function initializeContainer(): Promise<void> {
   isInitializing = true;
 
   try {
+    registerRuntime(options);
     registerConfig();
     await registerStorageChain();
     await registerServices();
@@ -271,8 +321,8 @@ export async function startAsyncServices(): Promise<void> {
  * Full initialization: container + async services.
  * Use this in entry points.
  */
-export async function bootstrap(): Promise<void> {
-  await initializeContainer();
+export async function bootstrap(options: ContainerInitOptions = {}): Promise<void> {
+  await initializeContainer(options);
   await startAsyncServices();
 }
 

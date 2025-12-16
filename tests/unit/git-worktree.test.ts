@@ -62,7 +62,7 @@ describe('Git Worktree Detection Logic', () => {
     // Initialize main repository
     await fs.mkdir(mainRepo);
     execSync('git init', { cwd: mainRepo, stdio: 'ignore' });
-    execSync('git config user.name "Test"', { cwd: mainRepo, stdio: 'ignore' });
+    execSync('git config user.definition.name "Test"', { cwd: mainRepo, stdio: 'ignore' });
     execSync('git config user.email "test@test.com"', { cwd: mainRepo, stdio: 'ignore' });
     
     // Create initial commit

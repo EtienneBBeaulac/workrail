@@ -6,14 +6,22 @@ import os from 'os';
 import { singleton, inject } from 'tsyringe';
 import { DI } from '../../di/tokens.js';
 import { SessionManager } from './SessionManager.js';
+import type { ProcessLifecyclePolicy } from '../../runtime/process-lifecycle-policy.js';
+import type { ProcessSignal, ProcessSignals } from '../../runtime/ports/process-signals.js';
+import type { ShutdownEvents } from '../../runtime/ports/shutdown-events.js';
+import { DashboardHeartbeat } from './DashboardHeartbeat.js';
+import { releaseLockFile, releaseLockFileSync } from './DashboardLockRelease.js';
 import cors from 'cors';
 import open from 'open';
 import { execSync } from 'child_process';
 
+export type DashboardMode = { kind: 'unified' } | { kind: 'legacy' };
+export type BrowserBehavior = { kind: 'auto_open' } | { kind: 'manual' };
+
 export interface ServerConfig {
   port?: number;
-  autoOpen?: boolean;
-  disableUnifiedDashboard?: boolean; // Opt-out of unified dashboard
+  browserBehavior?: BrowserBehavior;
+  dashboardMode?: DashboardMode;
 }
 
 interface DashboardLock {
@@ -53,14 +61,25 @@ export class HttpServer {
   private baseUrl: string = '';
   private isPrimary: boolean = false;
   private lockFile: string;
-  private heartbeatInterval: NodeJS.Timeout | null = null;
+  private readonly heartbeat: DashboardHeartbeat;
   
   constructor(
-    @inject(SessionManager) private sessionManager: SessionManager
+    @inject(SessionManager) private sessionManager: SessionManager,
+    @inject(DI.Runtime.ProcessLifecyclePolicy)
+    private readonly processLifecyclePolicy: ProcessLifecyclePolicy,
+    @inject(DI.Runtime.ProcessSignals)
+    private readonly processSignals: ProcessSignals,
+    @inject(DI.Runtime.ShutdownEvents)
+    private readonly shutdownEvents: ShutdownEvents,
+    @inject(DI.Config.DashboardMode)
+    private readonly dashboardMode: DashboardMode,
+    @inject(DI.Config.BrowserBehavior)
+    private readonly browserBehavior: BrowserBehavior
   ) {
     // Config is set via setConfig() or defaults to empty object
     this.port = 3456; // Default port
     this.lockFile = path.join(os.homedir(), '.workrail', 'dashboard.lock');
+    this.heartbeat = new DashboardHeartbeat(this.lockFile, () => this.isPrimary);
     this.app = express();
     this.setupMiddleware();
     this.setupRoutes();
@@ -449,8 +468,9 @@ export class HttpServer {
     // STEP 1: Quick cleanup of orphaned processes
     await this.quickCleanup();
     
-    // Check if unified dashboard is disabled
-    if (this.config.disableUnifiedDashboard || process.env.WORKRAIL_DISABLE_UNIFIED_DASHBOARD === '1') {
+    // Check dashboard mode (DI-provided, not env check)
+    const mode = this.config.dashboardMode ?? this.dashboardMode;
+    if (mode.kind === 'legacy') {
       console.error('[Dashboard] Unified dashboard disabled, using legacy mode');
       return await this.startLegacyMode();
     }
@@ -500,7 +520,7 @@ export class HttpServer {
       console.error('[Dashboard] Primary elected');
       this.isPrimary = true;
       this.setupPrimaryCleanup();
-      this.startHeartbeat();
+      this.heartbeat.start();
       return true;
       
     } catch (error: any) {
@@ -605,7 +625,7 @@ export class HttpServer {
         console.error('[Dashboard] Lock reclaimed successfully');
         this.isPrimary = true;
         this.setupPrimaryCleanup();
-        this.startHeartbeat();
+        this.heartbeat.start();
         return true;
         
       } catch (error: any) {
@@ -665,12 +685,17 @@ export class HttpServer {
    * 
    * BUG FIX #5: Separate sync and async cleanup handlers
    * - 'exit' event CANNOT wait for async operations (Node.js constraint)
-   * - Signal handlers CAN wait for async then call process.exit()
+   * - Signal handlers can run async cleanup; process termination is handled by the composition root
    * - Uses sync fs.unlinkSync for 'exit' handler
-   * - Uses async fs.unlink for signal handlers
    * - Prevents double-cleanup with isCleaningUp flag
    */
   private setupPrimaryCleanup(): void {
+    // Signal handlers are a process-level concern.
+    // Whether we install them is an injected policy decision, not a hidden env-branch.
+    if (this.processLifecyclePolicy.kind === 'no_signal_handlers') {
+      return;
+    }
+
     let isCleaningUp = false;
     
     // SYNC cleanup for 'exit' event - cannot be async per Node.js docs
@@ -682,15 +707,11 @@ export class HttpServer {
       console.error('[Dashboard] Primary shutting down (sync cleanup)');
       
       // Stop heartbeat
-      if (this.heartbeatInterval) {
-        clearInterval(this.heartbeatInterval);
-        this.heartbeatInterval = null;
-      }
+      this.heartbeat.stop();
       
       // SYNC file delete only - async won't complete before process exits
       try {
-        const fsSync = require('fs');
-        fsSync.unlinkSync(this.lockFile);
+        releaseLockFileSync(this.lockFile);
         console.error('[Dashboard] Lock file released');
       } catch (error: any) {
         // Ignore ENOENT (file already deleted) but log others
@@ -702,47 +723,29 @@ export class HttpServer {
       this.isPrimary = false;
     };
     
-    // ASYNC cleanup for signal handlers - can wait for completion
-    const cleanupAsync = async () => {
-      if (isCleaningUp || !this.isPrimary) return;
+    // Signal handler: stop the server and emit a typed shutdown request.
+    // IMPORTANT: HttpServer does NOT terminate the process. The composition root decides.
+    const signalHandler = (signal: ProcessSignal) => {
+      if (isCleaningUp) return;
       isCleaningUp = true;
-      
-      console.error('[Dashboard] Primary shutting down (async cleanup)');
-      
-      // Stop heartbeat
-      if (this.heartbeatInterval) {
-        clearInterval(this.heartbeatInterval);
-        this.heartbeatInterval = null;
-      }
-      
-      // Async file delete is safe here
-      try {
-        await fs.unlink(this.lockFile);
-        console.error('[Dashboard] Lock file released');
-      } catch (error: any) {
-        if (error.code !== 'ENOENT') {
-          console.error('[Dashboard] Failed to release lock file:', error.message);
-        }
-      }
-      
-      this.isPrimary = false;
-    };
-    
-    // Signal handler that performs async cleanup then exits
-    const signalHandler = (signal: string) => {
+
       console.error(`[Dashboard] Received ${signal}`);
-      cleanupAsync()
+      this.stop()
         .catch(err => console.error('[Dashboard] Cleanup error:', err))
-        .finally(() => process.exit(0));
+        .finally(() => {
+          if (signal !== 'exit') {
+            this.shutdownEvents.emit({ kind: 'shutdown_requested', signal });
+          }
+        });
     };
     
     // 'exit' uses sync cleanup (Node.js won't wait for async)
-    process.on('exit', cleanupSync);
+    this.processSignals.on('exit', cleanupSync);
     
     // Signals use async cleanup then explicitly exit
-    process.on('SIGINT', () => signalHandler('SIGINT'));
-    process.on('SIGTERM', () => signalHandler('SIGTERM'));
-    process.on('SIGHUP', () => signalHandler('SIGHUP'));
+    this.processSignals.on('SIGINT', () => signalHandler('SIGINT'));
+    this.processSignals.on('SIGTERM', () => signalHandler('SIGTERM'));
+    this.processSignals.on('SIGHUP', () => signalHandler('SIGHUP'));
   }
   
   /**
@@ -831,7 +834,8 @@ export class HttpServer {
       url += `?session=${sessionId}`;
     }
     
-    if (this.config.autoOpen !== false) {
+    const behavior = this.config.browserBehavior ?? this.browserBehavior;
+    if (behavior.kind === 'auto_open') {
       try {
         await open(url);
         console.error(`🌐 Opened dashboard: ${url}`);
@@ -853,32 +857,33 @@ export class HttpServer {
    */
   async stop(): Promise<void> {
     // 1. FIRST: Stop heartbeat to prevent further lock file writes
-    if (this.heartbeatInterval) {
-      clearInterval(this.heartbeatInterval);
-      this.heartbeatInterval = null;
-    }
+    this.heartbeat.stop();
     
     // 2. Stop all file watchers
     this.sessionManager.unwatchAll();
     
     // 3. Close server with timeout protection
-    return new Promise((resolve) => {
-      if (this.server) {
-        // Timeout to prevent hanging if server.close() never completes
-        const closeTimeout = setTimeout(() => {
-          console.error('[Dashboard] Server close timeout after 5s, forcing shutdown');
-          resolve();
-        }, 5000);
-        
-        this.server.close(() => {
-          clearTimeout(closeTimeout);
-          console.error('HTTP server stopped');
-          resolve();
-        });
-      } else {
+    await new Promise<void>((resolve) => {
+      if (!this.server) return resolve();
+
+      // Timeout to prevent hanging if server.close() never completes
+      const closeTimeout = setTimeout(() => {
+        console.error('[Dashboard] Server close timeout after 5s, forcing shutdown');
         resolve();
-      }
+      }, 5000);
+
+      this.server.close(() => {
+        clearTimeout(closeTimeout);
+        console.error('HTTP server stopped');
+        resolve();
+      });
     });
+
+    // 4. Release lock file when we were primary (so tests/CLI can stop cleanly)
+    if (this.isPrimary) {
+      await releaseLockFile(this.lockFile).catch(() => {});
+      this.isPrimary = false;
+    }
   }
   
   /**
@@ -904,31 +909,7 @@ export class HttpServer {
    * - Now uses .unref() to allow process exit even with active heartbeat
    * - Clears any existing interval before starting new one
    */
-  private startHeartbeat(): void {
-    // Clear any existing interval first (defensive)
-    if (this.heartbeatInterval) {
-      clearInterval(this.heartbeatInterval);
-    }
-    
-    this.heartbeatInterval = setInterval(async () => {
-      if (this.isPrimary) {
-        try {
-          const lockContent = await fs.readFile(this.lockFile, 'utf-8');
-          const lockData: DashboardLock = JSON.parse(lockContent);
-          lockData.lastHeartbeat = new Date().toISOString();
-          await fs.writeFile(this.lockFile, JSON.stringify(lockData, null, 2));
-        } catch (error) {
-          // Lock file might have been removed, that's okay
-        }
-      }
-    }, 30000); // Every 30 seconds
-    
-    // Don't keep process alive just for heartbeat
-    // This allows clean process exit while heartbeat is running
-    if (this.heartbeatInterval.unref) {
-      this.heartbeatInterval.unref();
-    }
-  }
+  // Heartbeat behavior is delegated to DashboardHeartbeat.
   
   /**
    * Quick cleanup of orphaned workrail processes

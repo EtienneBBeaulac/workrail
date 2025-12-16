@@ -90,9 +90,9 @@ describe('External Workflows - REAL Integration Tests', () => {
       // PROOF: We got real workflows
       expect(workflows).toBeDefined();
       expect(workflows.length).toBe(1);
-      expect(workflows[0]?.id).toBe('github-workflow');
-      expect(workflows[0]?.name).toBe('GitHub Workflow');
-      expect(workflows[0]?.steps[0]?.prompt).toContain('real workflow');
+      expect(workflows[0]?.definition.id).toBe('github-workflow');
+      expect(workflows[0]?.definition.name).toBe('GitHub Workflow');
+      expect(workflows[0]?.definition.steps[0]?.prompt).toContain('real workflow');
       
       // PROOF: Files actually exist on disk
       const clonedFile = path.join(localPath, 'workflows', 'github-workflow.json');
@@ -114,8 +114,8 @@ describe('External Workflows - REAL Integration Tests', () => {
 
       // PROOF: Retrieved the exact workflow
       expect(workflow).not.toBeNull();
-      expect(workflow?.id).toBe('github-workflow');
-      expect(workflow?.steps).toHaveLength(1);
+      expect(workflow?.definition.id).toBe('github-workflow');
+      expect(workflow?.definition.steps).toHaveLength(1);
       
       console.log('✅ PROVEN: getWorkflowById works');
     });
@@ -140,8 +140,8 @@ describe('External Workflows - REAL Integration Tests', () => {
 
         // PROOF: We got workflows from BOTH repos
         expect(workflows.length).toBeGreaterThanOrEqual(2);
-        expect(workflows.some(w => w.id === 'github-workflow')).toBe(true);
-        expect(workflows.some(w => w.id === 'gitlab-workflow')).toBe(true);
+        expect(workflows.some(w => w.definition.id === 'github-workflow')).toBe(true);
+        expect(workflows.some(w => w.definition.id === 'gitlab-workflow')).toBe(true);
         
         console.log(`✅ PROVEN: Loaded ${workflows.length} workflows from multiple repos`);
         
@@ -192,8 +192,8 @@ describe('External Workflows - REAL Integration Tests', () => {
         const workflow = await storage.getWorkflowById('conflict-test');
 
         // PROOF: repo2 wins (higher priority)
-        expect(workflow?.name).toBe('Version 2');
-        expect(workflow?.description).toBe('From repo2');
+        expect(workflow?.definition.name).toBe('Version 2');
+        expect(workflow?.definition.description).toBe('From repo2');
         
         console.log('✅ PROVEN: Later repos override earlier ones');
         
@@ -218,7 +218,7 @@ describe('External Workflows - REAL Integration Tests', () => {
       const workflows1 = await storage1.loadAllWorkflows();
       // Could be more than 1 if conflict-test was created in earlier tests
       expect(workflows1.length).toBeGreaterThanOrEqual(1);
-      expect(workflows1.some(w => w.id === 'github-workflow')).toBe(true);
+      expect(workflows1.some(w => w.definition.id === 'github-workflow')).toBe(true);
 
       // PROOF: Files are on disk
       expect(existsSync(localPath)).toBe(true);
@@ -235,7 +235,7 @@ describe('External Workflows - REAL Integration Tests', () => {
       
       // PROOF: Still works from cache even though URL is invalid
       expect(workflows2.length).toBeGreaterThanOrEqual(1);
-      expect(workflows2.some(w => w.id === 'github-workflow')).toBe(true);
+      expect(workflows2.some(w => w.definition.id === 'github-workflow')).toBe(true);
       
       console.log('✅ PROVEN: Offline caching works');
     });
@@ -256,7 +256,7 @@ describe('External Workflows - REAL Integration Tests', () => {
         const sourceInfo = storage.getSourceInfo();
 
         // PROOF: No bundled source
-        expect(sourceInfo.every(s => s.name !== 'bundled')).toBe(true);
+        expect(sourceInfo.every(s => s.definition.name !== 'bundled')).toBe(true);
         
         console.log('✅ PROVEN: includeBundled=false works');
         
@@ -281,7 +281,7 @@ describe('External Workflows - REAL Integration Tests', () => {
 
         // PROOF: Local paths are optimized to use direct file access (custom sources)
         // This is more efficient than git cloning for local directories
-        const customSources = sourceInfo.filter(s => s.name.startsWith('custom:'));
+        const customSources = sourceInfo.filter(s => s.source.kind === 'custom');
         expect(customSources.length).toBe(3);
         
         console.log(`✅ PROVEN: ${customSources.length} local sources configured as direct file access`);
@@ -312,7 +312,7 @@ describe('External Workflows - REAL Integration Tests', () => {
         
         // PROOF: Got workflows from the valid repos
         expect(workflows.length).toBeGreaterThan(0);
-        expect(workflows.some(w => w.id === 'github-workflow' || w.id === 'gitlab-workflow')).toBe(true);
+        expect(workflows.some(w => w.definition.id === 'github-workflow' || w.definition.id === 'gitlab-workflow')).toBe(true);
         
         console.log('✅ PROVEN: Graceful degradation works');
         
@@ -363,8 +363,8 @@ describe('External Workflows - REAL Integration Tests', () => {
         const sourceInfo = storage.getSourceInfo();
         
         // Should have bundled, but no Git
-        expect(sourceInfo.some(s => s.name === 'bundled')).toBe(true);
-        expect(sourceInfo.every(s => s.type !== 'git')).toBe(true);
+        expect(sourceInfo.some(s => s.source.kind === 'bundled')).toBe(true);
+        expect(sourceInfo.every(s => s.source.kind !== 'git')).toBe(true);
         
         console.log('✅ PROVEN: Backward compatible (works without Git config)');
         
@@ -397,8 +397,8 @@ describe('External Workflows - REAL Integration Tests', () => {
         expect(sourceInfo.length).toBeGreaterThan(1);
         
         // PROOF: Got workflows from Git repos
-        expect(workflows.some(w => w.id === 'github-workflow')).toBe(true);
-        expect(workflows.some(w => w.id === 'gitlab-workflow')).toBe(true);
+        expect(workflows.some(w => w.definition.id === 'github-workflow')).toBe(true);
+        expect(workflows.some(w => w.definition.id === 'gitlab-workflow')).toBe(true);
         
         // PROOF: Can list summaries
         const summaries = await storage.listWorkflowSummaries();

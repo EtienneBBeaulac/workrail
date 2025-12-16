@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { DefaultStepSelector } from '../../src/application/services/step-selector';
-import { Workflow } from '../../src/types/mcp-types';
+import { Workflow, createWorkflow, createBundledSource, WorkflowDefinition } from '../../src/types/workflow';
 import { EnhancedContext } from '../../src/types/workflow-types';
 
 describe('DefaultStepSelector', () => {
@@ -12,7 +12,7 @@ describe('DefaultStepSelector', () => {
 
   describe('findEligibleStep', () => {
     it('should find first uncompleted step', () => {
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'test',
         name: 'Test',
         description: 'Test',
@@ -22,7 +22,7 @@ describe('DefaultStepSelector', () => {
           { id: 'step-2', title: 'Step 2', prompt: 'Do 2' },
           { id: 'step-3', title: 'Step 3', prompt: 'Do 3' }
         ]
-      };
+      }, createBundledSource());
 
       const result = selector.findEligibleStep(workflow, new Set(), [], {});
 
@@ -30,7 +30,7 @@ describe('DefaultStepSelector', () => {
     });
 
     it('should skip completed steps', () => {
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'test',
         name: 'Test',
         description: 'Test',
@@ -39,7 +39,7 @@ describe('DefaultStepSelector', () => {
           { id: 'step-1', title: 'Step 1', prompt: 'Do 1' },
           { id: 'step-2', title: 'Step 2', prompt: 'Do 2' }
         ]
-      };
+      }, createBundledSource());
 
       const result = selector.findEligibleStep(workflow, new Set(), ['step-1'], {});
 
@@ -47,7 +47,7 @@ describe('DefaultStepSelector', () => {
     });
 
     it('should evaluate runCondition', () => {
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'test',
         name: 'Test',
         description: 'Test',
@@ -60,7 +60,7 @@ describe('DefaultStepSelector', () => {
             runCondition: { var: 'enabled', equals: true }
           }
         ]
-      };
+      }, createBundledSource());
 
       // Condition not met
       let result = selector.findEligibleStep(workflow, new Set(), [], { enabled: false });
@@ -72,7 +72,7 @@ describe('DefaultStepSelector', () => {
     });
 
     it('should skip loop body steps when not in loop', () => {
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'test',
         name: 'Test',
         description: 'Test',
@@ -81,7 +81,7 @@ describe('DefaultStepSelector', () => {
           { id: 'body-step', title: 'Body', prompt: 'Body' },
           { id: 'regular-step', title: 'Regular', prompt: 'Regular' }
         ]
-      };
+      }, createBundledSource());
 
       const loopBodySteps = new Set(['body-step']);
       const result = selector.findEligibleStep(workflow, loopBodySteps, [], {});
@@ -90,7 +90,7 @@ describe('DefaultStepSelector', () => {
     });
 
     it('should allow loop body steps when in that loop', () => {
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'test',
         name: 'Test',
         description: 'Test',
@@ -98,7 +98,7 @@ describe('DefaultStepSelector', () => {
         steps: [
           { id: 'body-step', title: 'Body', prompt: 'Body' }
         ]
-      };
+      }, createBundledSource());
 
       const loopBodySteps = new Set(['body-step']);
       const context: EnhancedContext = {
@@ -119,7 +119,7 @@ describe('DefaultStepSelector', () => {
 
   describe('handleNoEligibleStep', () => {
     it('should return null when no conditional steps remain', () => {
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'test',
         name: 'Test',
         description: 'Test',
@@ -127,7 +127,7 @@ describe('DefaultStepSelector', () => {
         steps: [
           { id: 'step-1', title: 'Step 1', prompt: 'Do 1' }
         ]
-      };
+      }, createBundledSource());
 
       const result = selector.handleNoEligibleStep(workflow, ['step-1'], {}, new Set());
 
@@ -135,7 +135,7 @@ describe('DefaultStepSelector', () => {
     });
 
     it('should provide guidance for missing variable', () => {
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'test',
         name: 'Test',
         description: 'Test',
@@ -148,7 +148,7 @@ describe('DefaultStepSelector', () => {
             runCondition: { var: 'mode', equals: 'active' }
           }
         ]
-      };
+      }, createBundledSource());
 
       const result = selector.handleNoEligibleStep(workflow, [], {}, new Set());
 
@@ -157,7 +157,7 @@ describe('DefaultStepSelector', () => {
     });
 
     it('should provide guidance for wrong value', () => {
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'test',
         name: 'Test',
         description: 'Test',
@@ -170,7 +170,7 @@ describe('DefaultStepSelector', () => {
             runCondition: { var: 'status', equals: 'ready' }
           }
         ]
-      };
+      }, createBundledSource());
 
       const result = selector.handleNoEligibleStep(workflow, [], { status: 'pending' }, new Set());
 
@@ -179,7 +179,7 @@ describe('DefaultStepSelector', () => {
     });
 
     it('should handle case-insensitive mismatch', () => {
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'test',
         name: 'Test',
         description: 'Test',
@@ -192,7 +192,7 @@ describe('DefaultStepSelector', () => {
             runCondition: { var: 'mode', equals: 'ACTIVE' }
           }
         ]
-      };
+      }, createBundledSource());
 
       const result = selector.handleNoEligibleStep(workflow, [], { mode: 'active' }, new Set());
 

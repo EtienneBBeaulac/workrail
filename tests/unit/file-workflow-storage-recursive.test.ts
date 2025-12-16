@@ -3,6 +3,7 @@ import path from 'path';
 import os from 'os';
 import { FileWorkflowStorage } from '../../src/infrastructure/storage/file-workflow-storage';
 import { IFeatureFlagProvider } from '../../src/config/feature-flags';
+import { createCustomDirectorySource } from '../../src/types/workflow';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 describe('FileWorkflowStorage (Recursive & Flags)', () => {
@@ -58,9 +59,12 @@ describe('FileWorkflowStorage (Recursive & Flags)', () => {
 
   it('should find recursively nested workflows', async () => {
     // Enable flags so everything is visible
-    const storage = new FileWorkflowStorage(tempDir, {
-      featureFlagProvider: createMockFlags(true)
-    });
+    const storage = new FileWorkflowStorage(
+      tempDir,
+      createCustomDirectorySource(tempDir, 'Test'),
+      createMockFlags(true),
+      {}
+    );
 
     const summaries = await storage.listWorkflowSummaries();
     const ids = summaries.map(s => s.id).sort();
@@ -75,9 +79,12 @@ describe('FileWorkflowStorage (Recursive & Flags)', () => {
 
   it('should hide routines when agenticRoutines flag is disabled', async () => {
     // Disable flags
-    const storage = new FileWorkflowStorage(tempDir, {
-      featureFlagProvider: createMockFlags(false)
-    });
+    const storage = new FileWorkflowStorage(
+      tempDir,
+      createCustomDirectorySource(tempDir, 'Test'),
+      createMockFlags(false),
+      {}
+    );
 
     const summaries = await storage.listWorkflowSummaries();
     const ids = summaries.map(s => s.id).sort();
@@ -95,9 +102,12 @@ describe('FileWorkflowStorage (Recursive & Flags)', () => {
 
   it('should show routines when agenticRoutines flag is enabled', async () => {
     // Enable flags
-    const storage = new FileWorkflowStorage(tempDir, {
-      featureFlagProvider: createMockFlags(true)
-    });
+    const storage = new FileWorkflowStorage(
+      tempDir,
+      createCustomDirectorySource(tempDir, 'Test'),
+      createMockFlags(true),
+      {}
+    );
 
     const summaries = await storage.listWorkflowSummaries();
     const ids = summaries.map(s => s.id).sort();

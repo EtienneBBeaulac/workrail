@@ -115,7 +115,7 @@ describe('MCP Server Core Functionality', () => {
 
     it('should create tool context from DI container', () => {
       expect(serverContent).toContain('createToolContext');
-      expect(serverContent).toContain('bootstrap()');
+      expect(serverContent).toContain('bootstrap(');
       expect(serverContent).toContain('container.resolve');
     });
 

@@ -30,7 +30,7 @@ describe('External Workflow Authentication', () => {
       const storage = createEnhancedMultiSourceWorkflowStorage();
       const sourceInfo = storage.getSourceInfo();
 
-      const gitSource = sourceInfo.find(s => s.name.startsWith('git:'));
+      const gitSource = sourceInfo.find(s => s.source.kind === 'git');
       expect(gitSource).toBeDefined();
     });
 
@@ -41,7 +41,7 @@ describe('External Workflow Authentication', () => {
       const storage = createEnhancedMultiSourceWorkflowStorage();
       const sourceInfo = storage.getSourceInfo();
 
-      const gitSource = sourceInfo.find(s => s.name.startsWith('git:'));
+      const gitSource = sourceInfo.find(s => s.source.kind === 'git');
       expect(gitSource).toBeDefined();
     });
 
@@ -52,7 +52,7 @@ describe('External Workflow Authentication', () => {
       const storage = createEnhancedMultiSourceWorkflowStorage();
       const sourceInfo = storage.getSourceInfo();
 
-      const gitSource = sourceInfo.find(s => s.name.startsWith('git:'));
+      const gitSource = sourceInfo.find(s => s.source.kind === 'git');
       expect(gitSource).toBeDefined();
     });
   });
@@ -65,7 +65,7 @@ describe('External Workflow Authentication', () => {
       const storage = createEnhancedMultiSourceWorkflowStorage();
       const sourceInfo = storage.getSourceInfo();
 
-      expect(sourceInfo.some(s => s.name.startsWith('git:'))).toBe(true);
+      expect(sourceInfo.some(s => s.source.kind === 'git')).toBe(true);
     });
 
     it('should convert hostname to env var format correctly', () => {
@@ -94,7 +94,7 @@ describe('External Workflow Authentication', () => {
       const storage = createEnhancedMultiSourceWorkflowStorage();
       const sourceInfo = storage.getSourceInfo();
 
-      expect(sourceInfo.some(s => s.name.startsWith('git:'))).toBe(true);
+      expect(sourceInfo.some(s => s.source.kind === 'git')).toBe(true);
     });
 
     it('should accept SSH URL format ssh://git@host/path', () => {
@@ -103,7 +103,7 @@ describe('External Workflow Authentication', () => {
       const storage = createEnhancedMultiSourceWorkflowStorage();
       const sourceInfo = storage.getSourceInfo();
 
-      expect(sourceInfo.some(s => s.name.startsWith('git:'))).toBe(true);
+      expect(sourceInfo.some(s => s.source.kind === 'git')).toBe(true);
     });
 
     it('should not require token for SSH URLs', () => {
@@ -227,11 +227,11 @@ describe('External Workflow Authentication', () => {
 
       // Should have: bundled, user, git, project
       // Exact order matters for precedence
-      const names = sourceInfo.map(s => s.name);
+      const kinds = sourceInfo.map(s => s.source.kind);
       
       // Git sources should come after bundled/user, before project
-      const gitIndex = names.findIndex(n => n.startsWith('git:'));
-      const projectIndex = names.findIndex(n => n === 'project');
+      const gitIndex = kinds.findIndex(k => k === 'git');
+      const projectIndex = kinds.findIndex(k => k === 'project');
       
       if (gitIndex >= 0 && projectIndex >= 0) {
         expect(gitIndex).toBeLessThan(projectIndex);
@@ -246,7 +246,7 @@ describe('External Workflow Authentication', () => {
       const storage = createEnhancedMultiSourceWorkflowStorage();
       const sourceInfo = storage.getSourceInfo();
 
-      expect(sourceInfo.every(s => s.name !== 'bundled')).toBe(true);
+      expect(sourceInfo.every(s => s.source.kind !== 'bundled')).toBe(true);
     });
 
     it('should respect includeUser flag', () => {
@@ -255,7 +255,7 @@ describe('External Workflow Authentication', () => {
       const storage = createEnhancedMultiSourceWorkflowStorage();
       const sourceInfo = storage.getSourceInfo();
 
-      expect(sourceInfo.every(s => s.name !== 'user')).toBe(true);
+      expect(sourceInfo.every(s => s.source.kind !== 'user')).toBe(true);
     });
 
     it('should respect includeProject flag', () => {
@@ -264,7 +264,7 @@ describe('External Workflow Authentication', () => {
       const storage = createEnhancedMultiSourceWorkflowStorage();
       const sourceInfo = storage.getSourceInfo();
 
-      expect(sourceInfo.every(s => s.name !== 'project')).toBe(true);
+      expect(sourceInfo.every(s => s.source.kind !== 'project')).toBe(true);
     });
   });
 

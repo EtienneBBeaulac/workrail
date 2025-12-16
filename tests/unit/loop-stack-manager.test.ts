@@ -2,7 +2,7 @@ import 'reflect-metadata';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { LoopStackManager } from '../../src/application/services/loop-stack-manager';
 import { LoopStepResolver } from '../../src/application/services/loop-step-resolver';
-import { Workflow, WorkflowStep } from '../../src/types/mcp-types';
+import { Workflow, WorkflowStep, createWorkflow, createBundledSource, WorkflowDefinition } from '../../src/types/workflow';
 import { LoopStep, LoopStackFrame, EnhancedContext } from '../../src/types/workflow-types';
 import { 
   LoopStackCorruptionError, 
@@ -30,7 +30,7 @@ describe('LoopStackManager', () => {
 
   describe('createLoopFrame', () => {
     it('should create valid frame for single-step loop body (string reference)', () => {
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'test-wf',
         name: 'Test',
         description: 'Test',
@@ -46,10 +46,10 @@ describe('LoopStackManager', () => {
           } as LoopStep,
           { id: 'step-1', title: 'Step 1', prompt: 'Step 1' }
         ]
-      };
+      }, createBundledSource());
 
       // Provide count=0 so while condition (count < 3) evaluates to true
-      const frame = manager.createLoopFrame(workflow, workflow.steps[0] as LoopStep, { count: 0 });
+      const frame = manager.createLoopFrame(workflow, workflow.definition.steps[0] as LoopStep, { count: 0 });
 
       expect(frame).not.toBeNull();
       expect(frame!.loopId).toBe('my-loop');
@@ -63,7 +63,7 @@ describe('LoopStackManager', () => {
       const step2: WorkflowStep = { id: 'step-2', title: 'Step 2', prompt: 'Step 2' };
       const step3: WorkflowStep = { id: 'step-3', title: 'Step 3', prompt: 'Step 3' };
 
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'test-wf',
         name: 'Test',
         description: 'Test',
@@ -78,9 +78,9 @@ describe('LoopStackManager', () => {
             body: [step1, step2, step3]
           } as LoopStep
         ]
-      };
+      }, createBundledSource());
 
-      const frame = manager.createLoopFrame(workflow, workflow.steps[0] as LoopStep, {});
+      const frame = manager.createLoopFrame(workflow, workflow.definition.steps[0] as LoopStep, {});
 
       expect(frame).not.toBeNull();
       expect(frame!.bodySteps).toHaveLength(3);
@@ -90,7 +90,7 @@ describe('LoopStackManager', () => {
     });
 
     it('should return null if loop condition is false from start', () => {
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'test-wf',
         name: 'Test',
         description: 'Test',
@@ -106,11 +106,11 @@ describe('LoopStackManager', () => {
           } as LoopStep,
           { id: 'step-1', title: 'Step 1', prompt: 'Step 1' }
         ]
-      };
+      }, createBundledSource());
 
       const frame = manager.createLoopFrame(
         workflow,
-        workflow.steps[0] as LoopStep,
+        workflow.definition.steps[0] as LoopStep,
         { shouldRun: false }
       );
 
@@ -118,7 +118,7 @@ describe('LoopStackManager', () => {
     });
 
     it('should throw EmptyLoopBodyError for empty body array', () => {
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'test-wf',
         name: 'Test',
         description: 'Test',
@@ -133,15 +133,15 @@ describe('LoopStackManager', () => {
             body: []
           } as LoopStep
         ]
-      };
+      }, createBundledSource());
 
       expect(() =>
-        manager.createLoopFrame(workflow, workflow.steps[0] as LoopStep, {})
+        manager.createLoopFrame(workflow, workflow.definition.steps[0] as LoopStep, {})
       ).toThrow(EmptyLoopBodyError);
     });
 
     it('should throw LoopBodyResolutionError for invalid body reference', () => {
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'test-wf',
         name: 'Test',
         description: 'Test',
@@ -156,16 +156,16 @@ describe('LoopStackManager', () => {
             body: 'nonexistent-step'
           } as LoopStep
         ]
-      };
+      }, createBundledSource());
 
       // Provide x=true so loop condition is met and body resolution is attempted
       expect(() =>
-        manager.createLoopFrame(workflow, workflow.steps[0] as LoopStep, { x: true })
+        manager.createLoopFrame(workflow, workflow.definition.steps[0] as LoopStep, { x: true })
       ).toThrow(LoopBodyResolutionError);
     });
 
     it('should preserve warnings when skipping loop', () => {
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'test-wf',
         name: 'Test',
         description: 'Test',
@@ -185,10 +185,10 @@ describe('LoopStackManager', () => {
           } as LoopStep,
           { id: 'step-1', title: 'Step 1', prompt: 'Step 1' }
         ]
-      };
+      }, createBundledSource());
 
       const context: EnhancedContext = {};
-      const frame = manager.createLoopFrame(workflow, workflow.steps[0] as LoopStep, context);
+      const frame = manager.createLoopFrame(workflow, workflow.definition.steps[0] as LoopStep, context);
 
       expect(frame).toBeNull(); // Loop skipped
       expect(context._warnings?.loops?.['my-loop']).toBeDefined();
@@ -207,13 +207,13 @@ describe('LoopStackManager', () => {
         body: [bodyStep]
       };
 
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'test',
         name: 'Test',
         description: 'Test',
         version: '1.0.0',
         steps: [loopStep, bodyStep]
-      };
+      }, createBundledSource());
 
       const frame = manager.createLoopFrame(workflow, loopStep, { continue: true });
       expect(frame).not.toBeNull();
@@ -239,13 +239,13 @@ describe('LoopStackManager', () => {
         body: [bodyStep]
       };
 
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'test',
         name: 'Test',
         description: 'Test',
         version: '1.0.0',
         steps: [loopStep, bodyStep]
-      };
+      }, createBundledSource());
 
       const frame = manager.createLoopFrame(workflow, loopStep, { continue: true });
       const loopStack: LoopStackFrame[] = [frame!];
@@ -270,13 +270,13 @@ describe('LoopStackManager', () => {
         body: [bodyStep]
       };
 
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'test',
         name: 'Test',
         description: 'Test',
         version: '1.0.0',
         steps: [loopStep, bodyStep]
-      };
+      }, createBundledSource());
 
       const frame = manager.createLoopFrame(workflow, loopStep, {});
       const loopStack: LoopStackFrame[] = [frame!];
@@ -336,13 +336,13 @@ describe('LoopStackManager', () => {
         body: [step1, step2]
       };
 
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'test',
         name: 'Test',
         description: 'Test',
         version: '1.0.0',
         steps: [loopStep, step1, step2]
-      };
+      }, createBundledSource());
 
       const frame = manager.createLoopFrame(workflow, loopStep, { doStep1: false, doStep2: true });
       const loopStack: LoopStackFrame[] = [frame!];
@@ -419,13 +419,13 @@ describe('LoopStackManager', () => {
         body: [bodyStep]
       };
 
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'test',
         name: 'Test',
         description: 'Test',
         version: '1.0.0',
         steps: [loopStep, bodyStep]
-      };
+      }, createBundledSource());
 
       const frame = manager.createLoopFrame(workflow, loopStep, {});
       const loopStack: LoopStackFrame[] = [frame!];
@@ -490,7 +490,7 @@ describe('LoopStackManager', () => {
 
   describe('Edge Cases', () => {
     it('should handle forEach loop with empty items array', () => {
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'test-wf',
         name: 'Test',
         description: 'Test',
@@ -506,10 +506,10 @@ describe('LoopStackManager', () => {
           } as LoopStep,
           { id: 'step-1', title: 'Step 1', prompt: 'Step 1' }
         ]
-      };
+      }, createBundledSource());
 
       const context: EnhancedContext = { items: [] };
-      const frame = manager.createLoopFrame(workflow, workflow.steps[0] as LoopStep, context);
+      const frame = manager.createLoopFrame(workflow, workflow.definition.steps[0] as LoopStep, context);
 
       // Should return null (loop has no items to iterate)
       expect(frame).toBeNull();
@@ -529,13 +529,13 @@ describe('LoopStackManager', () => {
         body: [bodyStep]
       };
 
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'test',
         name: 'Test',
         description: 'Test',
         version: '1.0.0',
         steps: [loopStep, bodyStep]
-      };
+      }, createBundledSource());
 
       const frame = manager.createLoopFrame(workflow, loopStep, {});
       const loopStack: LoopStackFrame[] = [frame!];

@@ -293,21 +293,13 @@ export class StaticFeatureFlagProvider implements IFeatureFlagProvider {
 }
 
 /**
- * Factory function for creating feature flag provider
- * 
- * Follows Dependency Injection principle:
- * - Allows different implementations (env, static, remote, etc.)
- * - Makes testing easy
- * - Decouples configuration from usage
- * 
- * @deprecated Use container.resolve(DI.Infra.FeatureFlags) instead
+ * @deprecated Removed. Use container.resolve(DI.Infra.FeatureFlags) instead.
+ * For tests with custom env, use: EnvironmentFeatureFlagProvider.withEnv(env)
  */
-export function createFeatureFlagProvider(
-  env?: Record<string, string | undefined>
-): IFeatureFlagProvider {
-  console.warn('[DEPRECATION] createFeatureFlagProvider() is deprecated. Use DI container instead.');
-  if (env) {
-    return new CustomEnvFeatureFlagProvider(env);
-  }
-  return new EnvironmentFeatureFlagProvider();
+export function createFeatureFlagProvider(): never {
+  throw new Error(
+    'createFeatureFlagProvider() is removed. ' +
+    'Use DI: container.resolve(DI.Infra.FeatureFlags). ' +
+    'For tests: EnvironmentFeatureFlagProvider.withEnv(customEnv)'
+  );
 }
