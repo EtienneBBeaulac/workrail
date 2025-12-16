@@ -11,6 +11,8 @@
  */
 
 import { z } from 'zod';
+import { ExecutionStateSchema } from '../domain/execution/state.js';
+import { WorkflowEventSchema } from '../domain/execution/event.js';
 
 // -----------------------------------------------------------------------------
 // Input Schemas
@@ -36,14 +38,12 @@ export const WorkflowNextInput = z.object({
     .string()
     .regex(/^[A-Za-z0-9_-]+$/, 'Workflow ID must contain only letters, numbers, hyphens, and underscores')
     .describe('The unique identifier of the workflow'),
-  completedSteps: z
-    .array(z.string().regex(/^[A-Za-z0-9_-]+$/))
-    .default([])
-    .describe('Array of step IDs that have been completed'),
+  state: ExecutionStateSchema.describe('Serializable workflow execution state (authoritative)'),
+  event: WorkflowEventSchema.optional().describe('Optional event to apply before selecting the next step'),
   context: z
     .record(z.unknown())
     .optional()
-    .describe('Context variables for conditional step execution'),
+    .describe('External context variables for condition evaluation and loop inputs'),
 });
 export type WorkflowNextInput = z.infer<typeof WorkflowNextInput>;
 
@@ -156,7 +156,14 @@ export const workflowGetTool: ToolDefinition<typeof WorkflowGetInput> = {
 export const workflowNextTool: ToolDefinition<typeof WorkflowNextInput> = {
   name: 'workflow_next',
   title: 'Execute Next Workflow Step',
-  description: `Executes a workflow by getting the next step. Use this tool in a loop to progress through a workflow. You must provide the workflowId and a list of completedSteps. For conditional workflows, provide context with variables that will be used to evaluate step conditions.`,
+  description: `Executes a workflow by getting the next step.
+
+This server is **state + event** driven:
+- Provide the current **state** (JSON-serializable execution state)
+- Optionally provide an **event** (e.g. step completed) to advance state
+- Provide **context** for condition evaluation and loop inputs (forEach items, for counts, etc.)
+
+Repeat calling this tool until it returns isComplete=true.`,
   inputSchema: WorkflowNextInput,
   annotations: {
     readOnlyHint: false,

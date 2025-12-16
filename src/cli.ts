@@ -21,7 +21,7 @@ import type { WorkflowService } from './application/services/workflow-service.js
 import type { ValidationEngine } from './application/services/validation-engine.js';
 import type { HttpServer } from './infrastructure/session/HttpServer.js';
 import type { ProcessTerminator } from './runtime/ports/process-terminator.js';
-import { createWorkflowLookupServer } from './infrastructure/rpc/server.js';
+import { startServer } from './mcp/server.js';
 import type { WorkflowDefinition } from './types/workflow.js';
 import { createWorkflow, createCustomDirectorySource } from './types/workflow.js';
 import { validateWorkflow as schemaValidate } from './application/validation.js';
@@ -170,10 +170,9 @@ program
     await initializeContainer({ runtimeMode: { kind: 'cli' } });
 
     const terminator = container.resolve<ProcessTerminator>(DI.Runtime.ProcessTerminator);
-    const workflowService = container.resolve<WorkflowService>(DI.Services.Workflow);
 
     const result = await executeStartCommand({
-      createServer: () => createWorkflowLookupServer(workflowService),
+      createServer: () => ({ start: () => startServer() }),
     });
 
     // Note: In normal operation, the server keeps running and we don't reach here.

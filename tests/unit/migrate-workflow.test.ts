@@ -2,7 +2,7 @@ import { describe, vi, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import type { LoopStep } from '../../src/types/workflow-types';
+import type { LoopStepDefinition } from '../../src/types/workflow-definition';
 
 // Mock chalk
 vi.mock('chalk', () => ({
@@ -43,7 +43,7 @@ describe('Workflow Migration', () => {
             prompt: 'Loop',
             loop: { type: 'while', condition: { var: 'test', equals: true } },
             body: 'body'
-          } as LoopStep
+          } as LoopStepDefinition
         ]
       };
       expect(detectWorkflowVersion(workflow)).toBe('0.1.0');

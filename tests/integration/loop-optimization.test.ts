@@ -3,6 +3,8 @@ import { setupTest, teardownTest, resolve } from '../di/test-container.js';
 import { DI } from '../../src/di/tokens.js';
 import { InMemoryWorkflowStorage } from '../../src/infrastructure/storage/in-memory-storage.js';
 import type { WorkflowDefinition } from '../../src/types/workflow.js';
+import type { ExecutionState } from '../../src/domain/execution/state.js';
+import type { WorkflowEvent } from '../../src/domain/execution/event.js';
 
 describe('Loop Optimization Integration', () => {
   let storage: InMemoryWorkflowStorage;
@@ -70,7 +72,6 @@ describe('Loop Optimization Integration', () => {
 
       await storage.save(workflow);
 
-      // Initial context with data
       const initialContext = {
         dataItems: [
           { id: 'a', value: 1 },
@@ -79,62 +80,41 @@ describe('Loop Optimization Integration', () => {
         ]
       };
 
-      // First call - should get the setup step
+      // New contract: state + events (no completedSteps/context optimizer)
       const workflowService = resolve(DI.Services.Workflow);
-      let result = await workflowService.getNextStep(
-        'test-workflow',
-        [],
-        initialContext
-      );
-      expect(result.step?.id).toBe('setup');
 
-      // Second call - first loop iteration, should get full context
-      result = await workflowService.getNextStep(
-        'test-workflow',
-        ['setup'],
-        initialContext
-      );
-      
-      expect(result.step?.id).toBe('validate-item');
-      expect(result.guidance.prompt).toContain('Loop Context');
-      expect(result.guidance.prompt).toContain('Iteration: 1');
-      expect(result.guidance.prompt).toContain('Total Items: 3');
-      expect(result.context).toHaveProperty('currentDataItem');
-      expect(result.context?.currentDataItem).toEqual({ id: 'a', value: 1 });
+      let state: ExecutionState = { kind: 'init' };
+      let event: WorkflowEvent | undefined = undefined;
 
-      // Verify full array is in context for first iteration
-      expect(result.context).toHaveProperty('dataItems');
-      expect(result.context?.dataItems).toHaveLength(3);
+      // 1) setup
+      let r1 = await workflowService.getNextStep('test-workflow', state, event, initialContext);
+      expect(r1.kind).toBe('ok');
+      expect(r1.value.next?.step.id).toBe('setup');
+      state = r1.value.state;
 
-      // Third call - still first iteration, second step
-      result = await workflowService.getNextStep(
-        'test-workflow',
-        ['setup', 'validate-item'],
-        result.context || initialContext
-      );
-      
-      expect(result.step?.id).toBe('process-item');
+      // 2) complete setup -> first loop body step (iteration 1)
+      event = { kind: 'step_completed', stepInstanceId: r1.value.next!.stepInstanceId };
+      const r2 = await workflowService.getNextStep('test-workflow', state, event, initialContext);
+      expect(r2.kind).toBe('ok');
+      expect(r2.value.next?.step.id).toBe('validate-item');
+      expect(r2.value.next?.guidance.prompt).toContain('## Loop Context');
+      expect(r2.value.next?.guidance.prompt).toContain('Iteration: 1');
+      state = r2.value.state;
 
-      // Fourth call - second iteration, should get minimal context
-      result = await workflowService.getNextStep(
-        'test-workflow',
-        ['setup', 'validate-item', 'process-item'],
-        result.context || initialContext
-      );
-      
-      expect(result.step?.id).toBe('validate-item');
-      expect(result.guidance.prompt).toContain('Loop Context');
-      expect(result.guidance.prompt).toContain('Iteration: 2');
-      expect(result.guidance.prompt).toContain('Refer to the phase overview');
-      
-      // Should have minimal context
-      expect(result.context).toHaveProperty('currentDataItem');
-      expect(result.context?.currentDataItem).toEqual({ id: 'b', value: 2 });
-      
-      // Large array should be minimized or removed
-      if (result.context?.dataItems) {
-        expect(result.context.dataItems).toHaveLength(1); // Only current item
-      }
+      // 3) complete validate-item -> process-item (still iteration 1)
+      event = { kind: 'step_completed', stepInstanceId: r2.value.next!.stepInstanceId };
+      const r3 = await workflowService.getNextStep('test-workflow', state, event, initialContext);
+      expect(r3.kind).toBe('ok');
+      expect(r3.value.next?.step.id).toBe('process-item');
+      state = r3.value.state;
+
+      // 4) complete process-item -> validate-item again (iteration 2)
+      event = { kind: 'step_completed', stepInstanceId: r3.value.next!.stepInstanceId };
+      const r4 = await workflowService.getNextStep('test-workflow', state, event, initialContext);
+      expect(r4.kind).toBe('ok');
+      expect(r4.value.next?.step.id).toBe('validate-item');
+      expect(r4.value.next?.guidance.prompt).toContain('## Loop Context');
+      expect(r4.value.next?.guidance.prompt).toContain('Iteration: 2');
     });
 
     it('should skip empty loops entirely', async () => {
@@ -159,11 +139,13 @@ describe('Loop Optimization Integration', () => {
               items: 'emptyArray',
               maxIterations: 100
             },
-            body: {
+            body: [
+              {
               id: 'never-executed',
               title: 'Never Executed',
               prompt: 'This should never run'
-            }
+              }
+            ]
           },
           {
             id: 'end',
@@ -179,25 +161,22 @@ describe('Loop Optimization Integration', () => {
         emptyArray: []
       };
 
-      // First step
       const workflowService = resolve(DI.Services.Workflow);
-      let result = await workflowService.getNextStep(
-        'empty-loop-workflow',
-        [],
-        context
-      );
-      expect(result.step?.id).toBe('start');
+      let state: ExecutionState = { kind: 'init' };
 
-      // Second call should skip the empty loop and go to end
-      result = await workflowService.getNextStep(
+      const r1 = await workflowService.getNextStep('empty-loop-workflow', state, undefined, context);
+      expect(r1.kind).toBe('ok');
+      expect(r1.value.next?.step.id).toBe('start');
+      state = r1.value.state;
+
+      const r2 = await workflowService.getNextStep(
         'empty-loop-workflow',
-        ['start'],
+        state,
+        { kind: 'step_completed', stepInstanceId: r1.value.next!.stepInstanceId },
         context
       );
-      expect(result.step?.id).toBe('end');
-      
-      // Should not have any loop context
-      expect(result.context?._currentLoop).toBeUndefined();
+      expect(r2.kind).toBe('ok');
+      expect(r2.value.next?.step.id).toBe('end');
     });
   });
 
@@ -224,11 +203,13 @@ describe('Loop Optimization Integration', () => {
               items: 'largeDataset',
               maxIterations: 200
             },
-            body: {
+            body: [
+              {
               id: 'process',
               title: 'Process Item',
               prompt: 'Process {{currentItem}}'
-            }
+              }
+            ]
           }
         ]
       };
@@ -243,19 +224,22 @@ describe('Loop Optimization Integration', () => {
 
       const context = { largeDataset };
 
-      // First call - should get the setup step
       const workflowService = resolve(DI.Services.Workflow);
-      const firstResult = await workflowService.getNextStep(
+      let state: ExecutionState = { kind: 'init' };
+
+      const first = await workflowService.getNextStep('size-test-workflow', state, undefined, context);
+      expect(first.kind).toBe('ok');
+      expect(first.value.next?.step.id).toBe('setup-step');
+      state = first.value.state;
+
+      const second = await workflowService.getNextStep(
         'size-test-workflow',
-        [],
+        state,
+        { kind: 'step_completed', stepInstanceId: first.value.next!.stepInstanceId },
         context
       );
-      
-      // Verify first step is returned
-      expect(firstResult.step?.id).toBe('setup-step');
-      
-      // Context should be preserved
-      expect(firstResult.context).toHaveProperty('largeDataset');
+      expect(second.kind).toBe('ok');
+      expect(second.value.next?.guidance.prompt).toContain('## Loop Context');
     });
   });
 
@@ -285,17 +269,10 @@ describe('Loop Optimization Integration', () => {
       await storage.save(workflow);
 
       const workflowService = resolve(DI.Services.Workflow);
-      const result = await workflowService.getNextStep(
-        'dsl-workflow',
-        [],
-        {}
-      );
-
-      // First step should be the function step
-      expect(result.step?.id).toBe('use-functions');
-      
-      // The step should have access to function references
-      expect(result.step?.functionReferences).toContain('globalValidate()');
+      const result = await workflowService.getNextStep('dsl-workflow', { kind: 'init' }, undefined, {});
+      expect(result.kind).toBe('ok');
+      expect(result.value.next?.step.id).toBe('use-functions');
+      expect(result.value.next?.step.functionReferences).toContain('globalValidate()');
       
       // Workflow should have function definitions
       expect(workflow.functionDefinitions).toHaveLength(1);

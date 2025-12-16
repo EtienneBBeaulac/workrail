@@ -35,9 +35,9 @@ export interface WorkflowGetOutput {
 }
 
 export interface WorkflowNextOutput {
-  step: unknown | null;
+  state: unknown;
+  next: unknown | null;
   isComplete: boolean;
-  completedSteps?: string[];
 }
 
 export interface WorkflowValidateJsonOutput {
@@ -146,26 +146,27 @@ export async function handleWorkflowNext(
   try {
     console.error(
       `[workflow_next] Starting with workflowId=${input.workflowId}, ` +
-      `completedSteps=${JSON.stringify(input.completedSteps)}, ` +
+      `stateKind=${(input.state as any).kind}, ` +
+      `eventKind=${(input.event as any)?.kind ?? 'none'}, ` +
       `contextKeys=${Object.keys(input.context ?? {})}`
     );
 
     const result = await withTimeout(
-      ctx.workflowService.getNextStep(
-        input.workflowId,
-        input.completedSteps,
-        input.context
-      ),
+      ctx.workflowService.getNextStep(input.workflowId, input.state, input.event, input.context),
       TIMEOUT_MS,
       'workflow_next'
     );
 
     console.error(
       `[workflow_next] Completed in ${Date.now() - startTime}ms, ` +
-      `returned step=${result.step?.id ?? 'null'}`
+      `returned=${result.kind}`
     );
 
-    return success(result);
+    if (result.kind === 'err') {
+      return error('INTERNAL_ERROR', JSON.stringify(result.error));
+    }
+
+    return success(result.value);
   } catch (err) {
     const elapsed = Date.now() - startTime;
     const message = err instanceof Error ? err.message : String(err);
