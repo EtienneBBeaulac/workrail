@@ -3,8 +3,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { container } from 'tsyringe';
 import { ValidationEngine } from '../../src/application/services/validation-engine';
 import { EnhancedLoopValidator } from '../../src/application/services/enhanced-loop-validator';
-import { Workflow, WorkflowStep } from '../../src/types/mcp-types';
-import { LoopStep } from '../../src/types/workflow-types';
+import { createWorkflow, createBundledSource } from '../../src/types/workflow';
+import type { LoopStepDefinition } from '../../src/types/workflow-definition';
 
 describe('Enhanced Loop Validation', () => {
   let validationEngine: ValidationEngine;
@@ -21,7 +21,7 @@ describe('Enhanced Loop Validation', () => {
 
   describe('Complex Conditional Logic Detection', () => {
     it('should warn about complex ternary operators in loop body prompts', () => {
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'test-workflow',
         name: 'Test Workflow',
         description: 'Test',
@@ -45,9 +45,9 @@ describe('Enhanced Loop Validation', () => {
               }
             ],
             requireConfirmation: false
-          } as LoopStep
+          } as LoopStepDefinition
         ]
-      };
+      }, createBundledSource());
 
       const result = validationEngine.validateWorkflow(workflow);
       
@@ -58,7 +58,7 @@ describe('Enhanced Loop Validation', () => {
     });
 
     it('should warn about deeply nested ternary operators', () => {
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'test-workflow',
         name: 'Test Workflow',
         description: 'Test',
@@ -82,9 +82,9 @@ describe('Enhanced Loop Validation', () => {
               }
             ],
             requireConfirmation: false
-          } as LoopStep
+          } as LoopStepDefinition
         ]
-      };
+      }, createBundledSource());
 
       const result = validationEngine.validateWorkflow(workflow);
       
@@ -96,7 +96,7 @@ describe('Enhanced Loop Validation', () => {
     it('should warn when loop body prompts approach length limits', () => {
       const longPrompt = 'A'.repeat(1800); // Close to 2048 limit
       
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'test-workflow',
         name: 'Test Workflow',
         description: 'Test',
@@ -120,9 +120,9 @@ describe('Enhanced Loop Validation', () => {
               }
             ],
             requireConfirmation: false
-          } as LoopStep
+          } as LoopStepDefinition
         ]
-      };
+      }, createBundledSource());
 
       const result = validationEngine.validateWorkflow(workflow);
       
@@ -131,7 +131,7 @@ describe('Enhanced Loop Validation', () => {
     });
 
     it('should error when conditional expansion could exceed limits', () => {
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'test-workflow',
         name: 'Test Workflow',
         description: 'Test',
@@ -155,9 +155,9 @@ describe('Enhanced Loop Validation', () => {
               }
             ],
             requireConfirmation: false
-          } as LoopStep
+          } as LoopStepDefinition
         ]
-      };
+      }, createBundledSource());
 
       const result = validationEngine.validateWorkflow(workflow);
       
@@ -167,7 +167,7 @@ describe('Enhanced Loop Validation', () => {
 
   describe('Template Variable Usage', () => {
     it('should validate loop iteration variables are used correctly', () => {
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'test-workflow',
         name: 'Test Workflow',
         description: 'Test',
@@ -192,9 +192,9 @@ describe('Enhanced Loop Validation', () => {
               }
             ],
             requireConfirmation: false
-          } as LoopStep
+          } as LoopStepDefinition
         ]
-      };
+      }, createBundledSource());
 
       const result = validationEngine.validateWorkflow(workflow);
       
@@ -205,7 +205,7 @@ describe('Enhanced Loop Validation', () => {
 
   describe('Best Practices Validation', () => {
     it('should suggest using runCondition for multi-path loops', () => {
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'test-workflow',
         name: 'Test Workflow',
         description: 'Test',
@@ -229,9 +229,9 @@ describe('Enhanced Loop Validation', () => {
               }
             ],
             requireConfirmation: false
-          } as LoopStep
+          } as LoopStepDefinition
         ]
-      };
+      }, createBundledSource());
 
       const result = validationEngine.validateWorkflow(workflow);
       
@@ -240,7 +240,7 @@ describe('Enhanced Loop Validation', () => {
     });
 
     it('should validate loop body references exist', () => {
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'test-workflow',
         name: 'Test Workflow',
         description: 'Test',
@@ -257,9 +257,9 @@ describe('Enhanced Loop Validation', () => {
             },
             body: 'non-existent-step',
             requireConfirmation: false
-          } as LoopStep
+          } as LoopStepDefinition
         ]
-      };
+      }, createBundledSource());
 
       const result = validationEngine.validateWorkflow(workflow);
       
@@ -270,7 +270,7 @@ describe('Enhanced Loop Validation', () => {
 
   describe('Loop Pattern Detection', () => {
     it('should recognize common loop patterns and provide guidance', () => {
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'test-workflow',
         name: 'Test Workflow',
         description: 'Test',
@@ -295,9 +295,9 @@ describe('Enhanced Loop Validation', () => {
               }
             ],
             requireConfirmation: false
-          } as LoopStep
+          } as LoopStepDefinition
         ]
-      };
+      }, createBundledSource());
 
       const result = validationEngine.validateWorkflow(workflow);
       

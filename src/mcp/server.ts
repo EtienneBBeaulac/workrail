@@ -19,6 +19,9 @@ import type { WorkflowService } from '../application/services/workflow-service.j
 import type { IFeatureFlagProvider } from '../config/feature-flags.js';
 import type { SessionManager } from '../infrastructure/session/SessionManager.js';
 import type { HttpServer } from '../infrastructure/session/HttpServer.js';
+import type { ShutdownEvents, ShutdownEvent } from '../runtime/ports/shutdown-events.js';
+import type { ProcessSignals } from '../runtime/ports/process-signals.js';
+import type { ProcessTerminator } from '../runtime/ports/process-terminator.js';
 
 import type { ToolContext, ToolResult } from './types.js';
 import { createToolFactory, type ToolAnnotations, type ToolDefinition } from './tool-factory.js';
@@ -192,7 +195,7 @@ function createHandler<TInput extends z.ZodType, TOutput>(
  */
 export async function startServer(): Promise<void> {
   // Bootstrap DI container
-  await bootstrap();
+  await bootstrap({ runtimeMode: { kind: 'production' } });
 
   // Create tool context with all dependencies
   const ctx = createToolContext();
@@ -319,4 +322,32 @@ export async function startServer(): Promise<void> {
   await server.connect(transport);
 
   console.error('WorkRail MCP Server running on stdio');
+
+  // Composition-root shutdown hook:
+  // Infrastructure can request shutdown via ShutdownEvents, but only the entrypoint terminates the process.
+  const shutdownEvents = container.resolve<ShutdownEvents>(DI.Runtime.ShutdownEvents);
+  const processSignals = container.resolve<ProcessSignals>(DI.Runtime.ProcessSignals);
+  const terminator = container.resolve<ProcessTerminator>(DI.Runtime.ProcessTerminator);
+
+  // Ensure we can shut down even when session tools are disabled (no HttpServer to emit events).
+  processSignals.on('SIGINT', () => shutdownEvents.emit({ kind: 'shutdown_requested', signal: 'SIGINT' }));
+  processSignals.on('SIGTERM', () => shutdownEvents.emit({ kind: 'shutdown_requested', signal: 'SIGTERM' }));
+  processSignals.on('SIGHUP', () => shutdownEvents.emit({ kind: 'shutdown_requested', signal: 'SIGHUP' }));
+
+  let shutdownStarted = false;
+  shutdownEvents.onShutdown((event: ShutdownEvent) => {
+    if (shutdownStarted) return;
+    shutdownStarted = true;
+
+    void (async () => {
+      try {
+        console.error(`[Shutdown] Requested by ${event.signal}. Stopping services...`);
+        await ctx.httpServer?.stop();
+        terminator.terminate({ kind: 'success' });
+      } catch (err) {
+        console.error('[Shutdown] Error while stopping services:', err);
+        terminator.terminate({ kind: 'failure' });
+      }
+    })();
+  });
 }

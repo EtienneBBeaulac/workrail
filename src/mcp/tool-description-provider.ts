@@ -9,7 +9,7 @@
  * @module mcp/tool-description-provider
  */
 
-import { singleton, inject } from 'tsyringe';
+import { inject, injectable } from 'tsyringe';
 import { DI } from '../di/tokens.js';
 import type { IFeatureFlagProvider } from '../config/feature-flags.js';
 import type { DescriptionMode, WorkflowToolName } from './types/tool-description-types.js';
@@ -34,7 +34,7 @@ export interface IToolDescriptionProvider {
 /**
  * Default implementation: reads mode from feature flags.
  */
-@singleton()
+@injectable()
 export class ToolDescriptionProvider implements IToolDescriptionProvider {
   readonly mode: DescriptionMode;
 
@@ -44,8 +44,6 @@ export class ToolDescriptionProvider implements IToolDescriptionProvider {
     this.mode = featureFlags.isEnabled('authoritativeDescriptions')
       ? 'authoritative'
       : 'standard';
-
-    console.error(`[ToolDescriptions] Mode: ${this.mode}`);
   }
 
   getDescription(toolName: WorkflowToolName): string {

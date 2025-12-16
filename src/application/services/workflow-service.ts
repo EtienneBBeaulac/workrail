@@ -1,89 +1,54 @@
+import { singleton, inject } from 'tsyringe';
+import { DI } from '../../di/tokens.js';
+import type { ConditionContext } from '../../utils/condition-evaluator';
+import type { Workflow, WorkflowSummary, WorkflowStepDefinition } from '../../types/workflow';
+import { ValidationEngine } from './validation-engine';
+import { WorkflowCompiler, CompiledWorkflow } from './workflow-compiler';
+import { WorkflowInterpreter, NextStep } from './workflow-interpreter';
+import type { ExecutionState } from '../../domain/execution/state';
+import type { WorkflowEvent } from '../../domain/execution/event';
+import type { DomainError } from '../../domain/execution/error';
+import { Err } from '../../domain/execution/error';
+import type { Result } from 'neverthrow';
+import { ok, err } from 'neverthrow';
+import { createLogger } from '../../utils/logger';
+
 export interface WorkflowService {
-  /** Return lightweight summaries of all workflows. */
-  listWorkflowSummaries(): Promise<import('../../types/mcp-types').WorkflowSummary[]>;
+  listWorkflowSummaries(): Promise<readonly WorkflowSummary[]>;
+  getWorkflowById(id: string): Promise<Workflow | null>;
 
-  /** Retrieve a workflow by ID, or null if not found. */
-  getWorkflowById(id: string): Promise<import('../../types/mcp-types').Workflow | null>;
-
-  /**
-   * Determine the next step in a workflow given completed step IDs.
-   */
   getNextStep(
     workflowId: string,
-    completedSteps: string[],
+    state: ExecutionState,
+    event?: WorkflowEvent,
     context?: ConditionContext
-  ): Promise<{
-    step: import('../../types/mcp-types').WorkflowStep | null;
-    guidance: import('../../types/mcp-types').WorkflowGuidance;
-    isComplete: boolean;
-    context?: ConditionContext;
-  }>;
+  ): Promise<Result<{ state: ExecutionState; next: NextStep | null; isComplete: boolean }, DomainError>>;
 
-  /** Validate an output for a given step. */
   validateStepOutput(
     workflowId: string,
     stepId: string,
     output: string
   ): Promise<{
     valid: boolean;
-    issues: string[];
-    suggestions: string[];
+    issues: readonly string[];
+    suggestions: readonly string[];
   }>;
 }
 
-import { singleton, inject } from 'tsyringe';
-import { DI } from '../../di/tokens.js';
-import { 
-  Workflow,
-  WorkflowSummary,
-  WorkflowStep
-} from '../../types/mcp-types';
-import { createDefaultWorkflowStorage } from '../../infrastructure/storage';
-import { IWorkflowStorage } from '../../types/storage';
-import { 
-  WorkflowNotFoundError,
-  StepNotFoundError
-} from '../../core/error-handler';
-import { ConditionContext } from '../../utils/condition-evaluator';
-import { ValidationEngine } from './validation-engine';
-import { EnhancedContext } from '../../types/workflow-types';
-import { LoopExecutionContext } from './loop-execution-context';
-import { LoopStepResolver } from './loop-step-resolver';
-import { checkContextSize } from '../../utils/context-size';
-import { ContextOptimizer } from './context-optimizer';
-import { IStepResolutionStrategy, StepResolutionResult } from './step-resolution/i-step-resolution-strategy';
-import { createLogger } from '../../utils/logger';
-import { IterativeStepResolutionStrategy } from './step-resolution/iterative-step-resolution-strategy';
-import { DefaultWorkflowLoader } from './workflow-loader';
-import { DefaultLoopRecoveryService } from './loop-recovery-service';
-import { LoopStackManager } from './loop-stack-manager';
-import { DefaultStepSelector } from './step-selector';
-import { EnhancedLoopValidator } from './enhanced-loop-validator';
-
-/**
- * Default implementation of WorkflowService.
- * 
- * Orchestrates workflow execution by delegating to injected services.
- * Follows Clean Architecture - orchestrates but doesn't contain business logic.
- * 
- * The service delegates step resolution to an injected IStepResolutionStrategy,
- * which allows swapping between iterative and recursive implementations via DI.
- */
 @singleton()
 export class DefaultWorkflowService implements WorkflowService {
   private readonly logger = createLogger('WorkflowService');
+  private readonly compiledCache = new Map<string, CompiledWorkflow>();
+  private readonly COMPILED_CACHE_MAX = 1000;
 
   constructor(
-    @inject(DI.Storage.Primary) private readonly storage: IWorkflowStorage,
+    @inject(DI.Storage.Primary) private readonly storage: import('../../types/storage').IWorkflowReader,
     @inject(ValidationEngine) private readonly validationEngine: ValidationEngine,
-    @inject(IterativeStepResolutionStrategy) private readonly stepResolutionStrategy: IterativeStepResolutionStrategy
-  ) {
-    this.logger.info('WorkflowService initialized', {
-      strategy: stepResolutionStrategy.constructor.name
-    });
-  }
+    @inject(WorkflowCompiler) private readonly compiler: WorkflowCompiler,
+    @inject(WorkflowInterpreter) private readonly interpreter: WorkflowInterpreter
+  ) {}
 
-  async listWorkflowSummaries(): Promise<WorkflowSummary[]> {
+  async listWorkflowSummaries(): Promise<readonly WorkflowSummary[]> {
     return this.storage.listWorkflowSummaries();
   }
 
@@ -93,120 +58,96 @@ export class DefaultWorkflowService implements WorkflowService {
 
   async getNextStep(
     workflowId: string,
-    completedSteps: string[],
+    state: ExecutionState,
+    event?: WorkflowEvent,
     context: ConditionContext = {}
-  ): Promise<StepResolutionResult> {
-    // Delegate to injected strategy - no more feature flag branching!
-    return this.stepResolutionStrategy.getNextStep(workflowId, completedSteps, context);
+  ): Promise<Result<{ state: ExecutionState; next: NextStep | null; isComplete: boolean }, DomainError>> {
+    const workflow = await this.storage.getWorkflowById(workflowId);
+    if (!workflow) return err(Err.workflowNotFound(workflowId));
+
+    const compiled = this.getOrCompile(workflowId, workflow);
+    if (compiled.isErr()) return err(compiled.error);
+
+    // Apply optional event (pure state transition)
+    const advancedState = event ? this.interpreter.applyEvent(state, event) : ok(state);
+    if (advancedState.isErr()) return err(advancedState.error);
+
+    const next = this.interpreter.next(compiled.value, advancedState.value, context as any);
+    if (next.isErr()) return err(next.error);
+
+    return ok({
+      state: next.value.state,
+      next: next.value.next,
+      isComplete: next.value.isComplete,
+    });
   }
 
   async validateStepOutput(
     workflowId: string,
     stepId: string,
     output: string
-  ): Promise<{ valid: boolean; issues: string[]; suggestions: string[] }> {
+  ): Promise<{ valid: boolean; issues: readonly string[]; suggestions: readonly string[] }> {
     const workflow = await this.storage.getWorkflowById(workflowId);
     if (!workflow) {
-      throw new WorkflowNotFoundError(workflowId);
+      // Validation is best-effort; treat missing workflow as invalid.
+      return { valid: false, issues: [`Workflow '${workflowId}' not found`], suggestions: [] };
     }
 
-    const step = workflow.steps.find((s) => s.id === stepId);
+    const step = workflow.definition.steps.find((s) => s.id === stepId) as WorkflowStepDefinition | undefined;
     if (!step) {
-      throw new StepNotFoundError(stepId, workflowId);
+      return { valid: false, issues: [`Step '${stepId}' not found in workflow '${workflowId}'`], suggestions: [] };
     }
 
-    // Use ValidationEngine to handle validation logic
-    const criteria = (step as any).validationCriteria as any[] || [];
+    const criteria = (step as any).validationCriteria;
+    if (!criteria) return { valid: true, issues: [], suggestions: [] };
+
     return this.validationEngine.validate(output, criteria);
   }
 
-  /**
-   * Updates the context when a step is completed, handling loop iteration tracking.
-   * 
-   * Note: This method is kept for backward compatibility.
-   * The strategy implementations handle most context updates internally.
-   * 
-   * @param workflowId The workflow ID
-   * @param stepId The step ID that was completed
-   * @param context The current execution context
-   * @returns Updated context with loop state changes
-   */
-  async updateContextForStepCompletion(
-    workflowId: string,
-    stepId: string,
-    context: ConditionContext
-  ): Promise<EnhancedContext> {
-    let enhancedContext = context as EnhancedContext;
-    
-    // Check if we're in a loop and this is a loop body step
-    if (enhancedContext._currentLoop) {
-      const { loopId, loopStep } = enhancedContext._currentLoop;
-      const workflow = await this.storage.getWorkflowById(workflowId);
-      
-      if (workflow) {
-        // Check if the completed step is part of the loop body
-        const loopStepResolver = new LoopStepResolver();
-        const bodyStep = loopStepResolver.resolveLoopBody(workflow, loopStep.body, loopStep.id);
-        
-        // Only increment iteration for single-step bodies
-        // Multi-step bodies are incremented when all steps complete
-        if (!Array.isArray(bodyStep) && bodyStep.id === stepId) {
-          // Create loop context to increment iteration
-          const loopContext = new LoopExecutionContext(
-            loopId,
-            loopStep.loop,
-            enhancedContext._loopState?.[loopId]
-          );
-          
-          // Increment the loop iteration
-          loopContext.incrementIteration();
-          
-          // Update loop state in context
-          enhancedContext = ContextOptimizer.mergeLoopState(
-            enhancedContext,
-            loopId,
-            loopContext.getCurrentState()
-          );
-        }
-      }
-    }
-    
-    // Check context size after update
-    const sizeCheck = checkContextSize(enhancedContext);
-    if (sizeCheck.isError) {
-      throw new Error(`Context size (${Math.round(sizeCheck.sizeBytes / 1024)}KB) exceeds maximum allowed size (256KB) after step completion`);
-    }
-    
-    return sizeCheck.context as EnhancedContext;
-  }
-}
+  private getOrCompile(workflowId: string, workflow: Workflow): Result<CompiledWorkflow, DomainError> {
+    const cached = this.compiledCache.get(workflowId);
+    if (cached) return ok(cached);
 
-/**
- * Legacy helper for backward compatibility.
- * @deprecated Use DI container: container.resolve(DI.Services.Workflow)
- */
-export function createWorkflowService(): DefaultWorkflowService {
-  console.warn(
-    '[DEPRECATION] createWorkflowService() is deprecated. ' +
-    'Use container.resolve(DI.Services.Workflow) from \'./di/container\' instead.'
-  );
-  
-  // For backward compatibility, manually create dependencies
-  // This bypasses DI but allows legacy code to continue working
-  const storage = createDefaultWorkflowStorage();
-  const loopValidator = new EnhancedLoopValidator();
-  const validator = new ValidationEngine(loopValidator);
-  const resolver = new LoopStepResolver();
-  const stackManager = new LoopStackManager(resolver);
-  const recoveryService = new DefaultLoopRecoveryService(stackManager);
-  const stepSelector = new DefaultStepSelector();
-  const workflowLoader = new DefaultWorkflowLoader(storage, validator);
-  const strategy = new IterativeStepResolutionStrategy(
-    workflowLoader,
-    recoveryService,
-    stackManager,
-    stepSelector
-  );
-  
-  return new DefaultWorkflowService(storage, validator, strategy);
+    // Definition validation stays here: fail fast before compiling.
+    const validation = this.validationEngine.validateWorkflow(workflow);
+    if (!validation.valid) {
+      return err(Err.invalidState(`Invalid workflow structure: ${validation.issues.join('; ')}`));
+    }
+
+    const compiled = this.compiler.compile(workflow);
+    if (compiled.isErr()) return err(compiled.error);
+    this.compiledCache.set(workflowId, compiled.value);
+    this.evictCompiledCacheIfNeeded();
+    return ok(compiled.value);
+  }
+
+  /**
+   * Debug/test-only hook: current compiled workflow cache size.
+   * This exists to prevent regressions to unbounded caches in long-running servers.
+   */
+  __debugCompiledCacheSize(): number {
+    return this.compiledCache.size;
+  }
+
+  /**
+   * Debug/test-only hook: prime the cache with a tiny, valid workflow compilation.
+   * Used by perf tests to simulate churn without depending on storage internals.
+   */
+  __debugPrimeCompiledWorkflow(id: string): void {
+    if (this.compiledCache.has(id)) return;
+    // Minimal compilation payload: keep it tiny and obviously synthetic.
+    // Note: the compiled object shape is trusted-only inside the service.
+    this.compiledCache.set(id, ({} as unknown) as CompiledWorkflow);
+    this.evictCompiledCacheIfNeeded();
+  }
+
+  private evictCompiledCacheIfNeeded(): void {
+    if (this.compiledCache.size <= this.COMPILED_CACHE_MAX) return;
+    // FIFO eviction: remove oldest entries until bounded.
+    while (this.compiledCache.size > this.COMPILED_CACHE_MAX) {
+      const oldestKey = this.compiledCache.keys().next().value as string | undefined;
+      if (!oldestKey) return;
+      this.compiledCache.delete(oldestKey);
+    }
+  }
 }

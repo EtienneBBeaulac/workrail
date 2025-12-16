@@ -1,10 +1,14 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createGetWorkflow, WorkflowGetMode } from '../../src/application/use-cases/get-workflow';
 import { WorkflowService } from '../../src/application/services/workflow-service';
-import { Workflow } from '../../src/types/mcp-types';
-import { WorkflowNotFoundError } from '../../src/core/error-handler';
+import { Workflow, createWorkflow, createBundledSource, WorkflowDefinition } from '../../src/types/workflow';
+import { evaluateCondition } from '../../src/utils/condition-evaluator';
+import { ok, err } from '../../src/domain/execution/result';
+import { Err } from '../../src/domain/execution/error';
+import type { ExecutionState } from '../../src/domain/execution/state';
+import type { WorkflowEvent } from '../../src/domain/execution/event';
 
-const mockWorkflow: Workflow = {
+const mockWorkflow = createWorkflow({
   id: 'test-workflow',
   name: 'Test Workflow',
   description: 'A workflow for testing.',
@@ -17,9 +21,9 @@ const mockWorkflow: Workflow = {
     { id: 'step2', title: 'Step 2', prompt: 'Prompt for step 2' },
     { id: 'step3', title: 'Step 3', prompt: 'Prompt for step 3' },
   ],
-};
+}, createBundledSource());
 
-const mockWorkflowWithConditions: Workflow = {
+const mockWorkflowWithConditions = createWorkflow({
   id: 'conditional-workflow',
   name: 'Conditional Workflow',
   description: 'A workflow with conditional steps.',
@@ -43,17 +47,17 @@ const mockWorkflowWithConditions: Workflow = {
       runCondition: { var: 'complexity', equals: 'low' }
     },
   ],
-};
+}, createBundledSource());
 
-const mockEmptyWorkflow: Workflow = {
+const mockEmptyWorkflow = createWorkflow({
   id: 'empty-workflow',
   name: 'Empty Workflow',
   description: 'A workflow with no steps.',
   version: '0.0.1',
   steps: [],
-};
+}, createBundledSource());
 
-const mockWorkflowWithUndefinedOptionals: Workflow = {
+const mockWorkflowWithUndefinedOptionals = createWorkflow({
   id: 'minimal-workflow',
   name: 'Minimal Workflow',
   description: 'A minimal workflow.',
@@ -61,7 +65,7 @@ const mockWorkflowWithUndefinedOptionals: Workflow = {
   steps: [
     { id: 'step1', title: 'Step 1', prompt: 'Prompt for step 1' },
   ],
-};
+}, createBundledSource());
 
 // Create a mock service that can be controlled by tests
 class MockWorkflowService implements WorkflowService {
@@ -70,7 +74,7 @@ class MockWorkflowService implements WorkflowService {
   private errorToThrow: Error | null = null;
 
   setWorkflow(workflow: Workflow): void {
-    this.workflows.set(workflow.id, workflow);
+    this.workflows.set(workflow.definition.id, workflow);
   }
 
   setError(error: Error): void {
@@ -95,8 +99,30 @@ class MockWorkflowService implements WorkflowService {
     return [];
   }
 
-  async getNextStep() {
-    return { step: null, guidance: { prompt: '' }, isComplete: true };
+  async getNextStep(
+    workflowId: string,
+    state: ExecutionState,
+    _event?: WorkflowEvent,
+    context: Record<string, unknown> = {}
+  ) {
+    const workflow = this.workflows.get(workflowId);
+    if (!workflow) return err(Err.workflowNotFound(workflowId));
+
+    // Minimal behavior for tests: pick the first step whose runCondition passes (or has none).
+    const first = workflow.definition.steps.find((s: any) => {
+      if (!s.runCondition) return true;
+      return evaluateCondition(s.runCondition as any, context as any);
+    }) as any | undefined;
+
+    if (!first) {
+      return ok({ state: { kind: 'complete' } as any, next: null, isComplete: true });
+    }
+
+    return ok({
+      state: { kind: 'running', completed: [], loopStack: [], pendingStep: { stepId: first.id, loopPath: [] } } as any,
+      next: { step: first, stepInstanceId: { stepId: first.id, loopPath: [] }, guidance: { prompt: first.prompt } },
+      isComplete: false,
+    });
   }
 
   async validateStepOutput() {
@@ -122,8 +148,9 @@ describe('createGetWorkflow', () => {
     describe('preview mode (default)', () => {
       it('should return workflow metadata with first step', async () => {
         const result = await getWorkflow('test-workflow');
-        
-        expect(result).toEqual({
+
+        expect(result.isOk()).toBe(true);
+        expect(result.value).toMatchObject({
           id: 'test-workflow',
           name: 'Test Workflow',
           description: 'A workflow for testing.',
@@ -132,18 +159,15 @@ describe('createGetWorkflow', () => {
           clarificationPrompts: ['What is your goal?'],
           metaGuidance: ['Follow best practices'],
           totalSteps: 3,
-          firstStep: {
-            id: 'step1',
-            title: 'Step 1',
-            prompt: 'Prompt for step 1'
-          }
+          firstStep: { id: 'step1', title: 'Step 1', prompt: 'Prompt for step 1' },
         });
       });
 
       it('should return workflow metadata with first step when explicitly set to preview', async () => {
         const result = await getWorkflow('test-workflow', 'preview');
-        
-        expect(result).toEqual({
+
+        expect(result.isOk()).toBe(true);
+        expect(result.value).toMatchObject({
           id: 'test-workflow',
           name: 'Test Workflow',
           description: 'A workflow for testing.',
@@ -152,11 +176,7 @@ describe('createGetWorkflow', () => {
           clarificationPrompts: ['What is your goal?'],
           metaGuidance: ['Follow best practices'],
           totalSteps: 3,
-          firstStep: {
-            id: 'step1',
-            title: 'Step 1',
-            prompt: 'Prompt for step 1'
-          }
+          firstStep: { id: 'step1', title: 'Step 1', prompt: 'Prompt for step 1' },
         });
       });
 
@@ -165,7 +185,8 @@ describe('createGetWorkflow', () => {
         
         const result = await getWorkflow('empty-workflow', 'preview');
         
-        expect(result).toEqual({
+        expect(result.isOk()).toBe(true);
+        expect(result.value).toEqual({
           id: 'empty-workflow',
           name: 'Empty Workflow',
           description: 'A workflow with no steps.',
@@ -180,7 +201,8 @@ describe('createGetWorkflow', () => {
       it('should return workflow metadata without steps', async () => {
         const result = await getWorkflow('test-workflow', 'metadata');
         
-        expect(result).toEqual({
+        expect(result.isOk()).toBe(true);
+        expect(result.value).toEqual({
           id: 'test-workflow',
           name: 'Test Workflow',
           description: 'A workflow for testing.',
@@ -197,7 +219,8 @@ describe('createGetWorkflow', () => {
         
         const result = await getWorkflow('minimal-workflow', 'metadata');
         
-        expect(result).toEqual({
+        expect(result.isOk()).toBe(true);
+        expect(result.value).toEqual({
           id: 'minimal-workflow',
           name: 'Minimal Workflow',
           description: 'A minimal workflow.',
@@ -217,23 +240,20 @@ describe('createGetWorkflow', () => {
 
       it('should return first unconditional step as firstStep', async () => {
         const result = await getWorkflow('conditional-workflow', 'preview');
-        
-        expect(result).toEqual({
+
+        expect(result.isOk()).toBe(true);
+        expect(result.value).toMatchObject({
           id: 'conditional-workflow',
           name: 'Conditional Workflow',
           description: 'A workflow with conditional steps.',
           version: '0.0.1',
           totalSteps: 3,
-          firstStep: {
-            id: 'step1',
-            title: 'Step 1',
-            prompt: 'Always executable step'
-          }
+          firstStep: { id: 'step1', title: 'Step 1', prompt: 'Always executable step' },
         });
       });
 
       it('should return null firstStep if all steps have unmet conditions', async () => {
-        const mockAllConditionalWorkflow: Workflow = {
+        const mockAllConditionalWorkflow = createWorkflow({
           id: 'all-conditional',
           name: 'All Conditional',
           description: 'All steps are conditional.',
@@ -252,13 +272,14 @@ describe('createGetWorkflow', () => {
               runCondition: { var: 'complexity', equals: 'low' }
             }
           ]
-        };
+        }, createBundledSource());
 
         mockService.setWorkflow(mockAllConditionalWorkflow);
         
         const result = await getWorkflow('all-conditional', 'preview');
         
-        expect(result).toEqual({
+        expect(result.isOk()).toBe(true);
+        expect(result.value).toEqual({
           id: 'all-conditional',
           name: 'All Conditional',
           description: 'All steps are conditional.',
@@ -271,16 +292,22 @@ describe('createGetWorkflow', () => {
   });
 
   describe('when workflow does not exist', () => {
-    it('should throw WorkflowNotFoundError for metadata mode', async () => {
-      await expect(getWorkflow('nonexistent-workflow', 'metadata')).rejects.toThrow(WorkflowNotFoundError);
+    it('should return WorkflowNotFound as Err for metadata mode', async () => {
+      const result = await getWorkflow('nonexistent-workflow', 'metadata');
+      expect(result.isErr()).toBe(true);
+      expect(result.error._tag).toBe('WorkflowNotFound');
     });
 
-    it('should throw WorkflowNotFoundError for preview mode', async () => {
-      await expect(getWorkflow('nonexistent-workflow', 'preview')).rejects.toThrow(WorkflowNotFoundError);
+    it('should return WorkflowNotFound as Err for preview mode', async () => {
+      const result = await getWorkflow('nonexistent-workflow', 'preview');
+      expect(result.isErr()).toBe(true);
+      expect(result.error._tag).toBe('WorkflowNotFound');
     });
 
-    it('should throw WorkflowNotFoundError for default mode', async () => {
-      await expect(getWorkflow('nonexistent-workflow')).rejects.toThrow(WorkflowNotFoundError);
+    it('should return WorkflowNotFound as Err for default mode', async () => {
+      const result = await getWorkflow('nonexistent-workflow');
+      expect(result.isErr()).toBe(true);
+      expect(result.error._tag).toBe('WorkflowNotFound');
     });
   });
 

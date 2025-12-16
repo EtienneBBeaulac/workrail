@@ -27,18 +27,12 @@ export const DI = {
   // CORE SERVICES
   // ═══════════════════════════════════════════════════════════════════
   Services: {
-    /** Workflow loading and validation */
-    WorkflowLoader: Symbol('Services.WorkflowLoader'),
-    /** Step selection logic */
-    StepSelector: Symbol('Services.StepSelector'),
-    /** Loop state recovery */
-    LoopRecovery: Symbol('Services.LoopRecovery'),
-    /** Step resolution strategy */
-    StepResolution: Symbol('Services.StepResolution'),
-    /** Loop context optimization (progressive disclosure) */
-    LoopContextOptimizer: Symbol('Services.LoopContextOptimizer'),
     /** Main workflow service (high-level orchestrator) */
     Workflow: Symbol('Services.Workflow'),
+    /** Workflow definition compiler (pure, cached by service) */
+    WorkflowCompiler: Symbol('Services.WorkflowCompiler'),
+    /** Workflow interpreter (state + event engine) */
+    WorkflowInterpreter: Symbol('Services.WorkflowInterpreter'),
   },
 
   // ═══════════════════════════════════════════════════════════════════
@@ -53,10 +47,6 @@ export const DI = {
     HttpServer: Symbol('Infra.HttpServer'),
     /** Validation engine */
     ValidationEngine: Symbol('Infra.ValidationEngine'),
-    /** Loop stack manager */
-    LoopStackManager: Symbol('Infra.LoopStackManager'),
-    /** Loop step resolver */
-    LoopStepResolver: Symbol('Infra.LoopStepResolver'),
     /** Enhanced loop validator */
     EnhancedLoopValidator: Symbol('Infra.EnhancedLoopValidator'),
     /** Session data normalizer */
@@ -74,15 +64,37 @@ export const DI = {
   },
 
   // ═══════════════════════════════════════════════════════════════════
+  // RUNTIME (process-level behavior, injected for explicitness)
+  // ═══════════════════════════════════════════════════════════════════
+  Runtime: {
+    /** Runtime mode (production/test/cli) */
+    Mode: Symbol('Runtime.Mode'),
+    /** Process lifecycle policy (signal handling, etc) */
+    ProcessLifecyclePolicy: Symbol('Runtime.ProcessLifecyclePolicy'),
+    /** Process signal registration port */
+    ProcessSignals: Symbol('Runtime.ProcessSignals'),
+    /** Shutdown request event bus */
+    ShutdownEvents: Symbol('Runtime.ShutdownEvents'),
+    /** Process terminator (composition roots only) */
+    ProcessTerminator: Symbol('Runtime.ProcessTerminator'),
+  },
+
+  // ═══════════════════════════════════════════════════════════════════
   // CONFIGURATION
   // ═══════════════════════════════════════════════════════════════════
   Config: {
+    /** Complete application configuration (validated). Prefer this over individual tokens. */
+    App: Symbol('Config.App'),
     /** Cache TTL in milliseconds */
     CacheTTL: Symbol('Config.CacheTTL'),
     /** Workflow directory path */
     WorkflowDir: Symbol('Config.WorkflowDir'),
     /** Project root path */
     ProjectPath: Symbol('Config.ProjectPath'),
+    /** Dashboard mode (unified vs legacy) */
+    DashboardMode: Symbol('Config.DashboardMode'),
+    /** Browser behavior (auto-open vs manual) */
+    BrowserBehavior: Symbol('Config.BrowserBehavior'),
   },
 } as const;
 

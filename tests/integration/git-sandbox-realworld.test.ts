@@ -61,7 +61,7 @@ describe('GitWorkflowStorage - Real-world MCP Sandbox', () => {
     
     // Commit the workflow
     await execAsync('git add .', { cwd: testRepoDir });
-    await execAsync('git commit -m "Add test workflow"', { cwd: testRepoDir });
+    await execAsync('git commit --no-gpg-sign -m "Add test workflow"', { cwd: testRepoDir });
     
     // Ensure we're on main branch (Git 2.28+ uses different default)
     try {
@@ -104,7 +104,7 @@ describe('GitWorkflowStorage - Real-world MCP Sandbox', () => {
     // Should be able to load the workflow
     const workflow = await storage.getWorkflowById('realworld-test');
     expect(workflow).toBeDefined();
-    expect(workflow?.name).toBe('Real World Test');
+    expect(workflow?.definition.name).toBe('Real World Test');
     
     const summaries = await storage.listWorkflowSummaries();
     const testWorkflow = summaries.find(w => w.id === 'realworld-test');
@@ -123,11 +123,11 @@ describe('GitWorkflowStorage - Real-world MCP Sandbox', () => {
     // file:// URLs use direct file access (no caching)
     const workflow = await storage.getWorkflowById('realworld-test');
     expect(workflow).toBeDefined();
-    expect(workflow?.name).toBe('Real World Test');
+    expect(workflow?.definition.name).toBe('Real World Test');
     
     // Verify workflow can be loaded from the local path
     const sourceInfo = storage.getSourceInfo();
-    const customSources = sourceInfo.filter(s => s.name.startsWith('custom:'));
+    const customSources = sourceInfo.filter(s => s.source.kind === 'custom');
     expect(customSources.length).toBeGreaterThanOrEqual(1);
   }, 10000);
 });

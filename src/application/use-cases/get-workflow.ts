@@ -1,7 +1,10 @@
 import { WorkflowService } from '../services/workflow-service';
-import { Workflow, WorkflowStep } from '../../types/mcp-types';
+import { Workflow, WorkflowStepDefinition } from '../../types/workflow';
 import { WorkflowNotFoundError } from '../../core/error-handler';
-import { evaluateCondition, ConditionContext } from '../../utils/condition-evaluator';
+import { ConditionContext } from '../../utils/condition-evaluator';
+import { initialExecutionState } from '../../domain/execution/state';
+import { ok, err, type Result } from '../../domain/execution/result';
+import { Err, type DomainError } from '../../domain/execution/error';
 
 // Define the mode type
 export type WorkflowGetMode = 'metadata' | 'preview' | undefined;
@@ -12,14 +15,14 @@ export interface WorkflowMetadata {
   name: string;
   description: string;
   version: string;
-  preconditions?: string[] | undefined;
-  clarificationPrompts?: string[] | undefined;
-  metaGuidance?: string[] | undefined;
+  preconditions?: readonly string[] | undefined;
+  clarificationPrompts?: readonly string[] | undefined;
+  metaGuidance?: readonly string[] | undefined;
   totalSteps: number;
 }
 
 export interface WorkflowPreview extends WorkflowMetadata {
-  firstStep: WorkflowStep | null;
+  firstStep: WorkflowStepDefinition | null;
 }
 
 export type WorkflowGetResult = Workflow | WorkflowMetadata | WorkflowPreview;
@@ -29,59 +32,47 @@ export type WorkflowGetResult = Workflow | WorkflowMetadata | WorkflowPreview;
  * Dependencies are injected at creation time, returning a pure function.
  */
 export function createGetWorkflow(service: WorkflowService) {
-  return async (workflowId: string, mode: WorkflowGetMode = 'preview'): Promise<WorkflowGetResult> => {
+  return async (
+    workflowId: string,
+    mode: WorkflowGetMode = 'preview'
+  ): Promise<Result<WorkflowGetResult, DomainError>> => {
     const workflow = await service.getWorkflowById(workflowId);
     if (!workflow) {
-      throw new WorkflowNotFoundError(workflowId);
+      return err(Err.workflowNotFound(workflowId));
     }
 
     // Handle different modes
     switch (mode) {
       case 'metadata':
-        return {
-          id: workflow.id,
-          name: workflow.name,
-          description: workflow.description,
-          version: workflow.version,
-          preconditions: workflow.preconditions,
-          clarificationPrompts: workflow.clarificationPrompts,
-          metaGuidance: workflow.metaGuidance,
-          totalSteps: workflow.steps.length
-        };
+        return ok({
+          id: workflow.definition.id,
+          name: workflow.definition.name,
+          description: workflow.definition.description,
+          version: workflow.definition.version,
+          preconditions: workflow.definition.preconditions,
+          clarificationPrompts: workflow.definition.clarificationPrompts,
+          metaGuidance: workflow.definition.metaGuidance,
+          totalSteps: workflow.definition.steps.length
+        });
 
       case 'preview':
       default:
-        // Find the first eligible step (similar to workflow_next logic)
-        const firstStep = findFirstEligibleStep(workflow.steps);
-        return {
-          id: workflow.id,
-          name: workflow.name,
-          description: workflow.description,
-          version: workflow.version,
-          preconditions: workflow.preconditions,
-          clarificationPrompts: workflow.clarificationPrompts,
-          metaGuidance: workflow.metaGuidance,
-          totalSteps: workflow.steps.length,
+        // Find the first next step via the interpreter (authoritative)
+        const next = await service.getNextStep(workflowId, initialExecutionState(), undefined, {} as ConditionContext);
+        const firstStep = next.isOk() ? (next.value.next ? next.value.next.step : null) : null;
+        return ok({
+          id: workflow.definition.id,
+          name: workflow.definition.name,
+          description: workflow.definition.description,
+          version: workflow.definition.version,
+          preconditions: workflow.definition.preconditions,
+          clarificationPrompts: workflow.definition.clarificationPrompts,
+          metaGuidance: workflow.definition.metaGuidance,
+          totalSteps: workflow.definition.steps.length,
           firstStep
-        };
+        });
     }
   };
-}
-
-/**
- * Helper function to find the first eligible step in a workflow.
- * Uses the same logic as workflow_next but with empty completed steps and context.
- */
-function findFirstEligibleStep(steps: WorkflowStep[], context: ConditionContext = {}): WorkflowStep | null {
-  return steps.find((step) => {
-    // If step has a runCondition, evaluate it
-    if (step.runCondition) {
-      return evaluateCondition(step.runCondition, context);
-    }
-    
-    // No condition means step is eligible
-    return true;
-  }) || null;
 }
 
 /**
@@ -92,5 +83,12 @@ export async function getWorkflow(
   service: WorkflowService,
   workflowId: string
 ): Promise<Workflow> {
-  return createGetWorkflow(service)(workflowId, 'preview') as Promise<Workflow>;
+  const result = await createGetWorkflow(service)(workflowId, 'preview');
+  if (result.isErr()) {
+    if (result.error._tag === 'WorkflowNotFound') {
+      throw new WorkflowNotFoundError(workflowId);
+    }
+    throw new Error(result.error.message);
+  }
+  return result.value as Workflow;
 } 

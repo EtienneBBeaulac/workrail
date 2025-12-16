@@ -21,7 +21,7 @@
     "web"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true});\" && tsc -p tsconfig.build.json",
     "docs:workflows": "node scripts/generate-workflow-docs.js",
     "dev": "npm run build && node dist/mcp-server.js",
     "prepare": "npm run build",
@@ -53,7 +53,7 @@
     "cors": "^2.8.5",
     "dotenv": "^17.2.0",
     "express": "^5.1.0",
-    "json-rpc-2.0": "^1.7.1",
+    "neverthrow": "^8.2.0",
     "open": "^10.2.0",
     "reflect-metadata": "^0.2.0",
     "semver": "^7.7.2",
@@ -86,6 +86,7 @@
     "lit": "^3.3.1",
     "node-fetch": "^2.7.0",
     "semantic-release": "^24.2.0",
+    "ts-morph": "^27.0.2",
     "typescript": "^5.9.3",
     "vite": "^7.1.9",
     "vitest": "^3.2.4"

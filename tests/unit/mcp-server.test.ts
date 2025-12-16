@@ -49,7 +49,8 @@ describe('MCP Server Core Functionality', () => {
       expect(toolsContent).toContain("import { z } from 'zod'");
       expect(toolsContent).toContain('z.object');
       expect(toolsContent).toContain('z.string');
-      expect(toolsContent).toContain('.array('); // Method call syntax
+      // workflow_next now validates an explicit state machine model
+      expect(toolsContent).toContain('ExecutionStateSchema');
     });
 
     it('should define tool annotations for safety hints', () => {
@@ -159,7 +160,7 @@ describe('MCP Server Core Functionality', () => {
 
     it('should create tool context from DI container', () => {
       expect(serverContent).toContain('createToolContext');
-      expect(serverContent).toContain('bootstrap()');
+      expect(serverContent).toContain('bootstrap(');
       expect(serverContent).toContain('container.resolve');
     });
 

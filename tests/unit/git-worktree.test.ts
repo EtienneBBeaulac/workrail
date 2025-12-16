@@ -61,14 +61,13 @@ describe('Git Worktree Detection Logic', () => {
     
     // Initialize main repository
     await fs.mkdir(mainRepo);
-    execSync('git init', { cwd: mainRepo, stdio: 'ignore' });
-    execSync('git config user.name "Test"', { cwd: mainRepo, stdio: 'ignore' });
-    execSync('git config user.email "test@test.com"', { cwd: mainRepo, stdio: 'ignore' });
+    const { initGitRepoSync } = await import('../helpers/git-test-utils.js');
+    initGitRepoSync(mainRepo, { silent: true });
     
     // Create initial commit
     await fs.writeFile(path.join(mainRepo, 'README.md'), '# Test');
     execSync('git add .', { cwd: mainRepo, stdio: 'ignore' });
-    execSync('git commit -m "Initial commit"', { cwd: mainRepo, stdio: 'ignore' });
+    execSync('git commit --no-gpg-sign -m "Initial commit"', { cwd: mainRepo, stdio: 'ignore' });
     
     // Create worktrees
     execSync(`git worktree add ${worktree1} -b feature`, { cwd: mainRepo, stdio: 'ignore' });

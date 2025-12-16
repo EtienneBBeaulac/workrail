@@ -21,9 +21,8 @@ describe('Git Sync & Security - No Corners Rounded', () => {
 
   async function createGitRepo() {
     await fs.mkdir(path.join(sourceRepo, 'workflows'), { recursive: true });
-    
-    await execAsync('git init', { cwd: sourceRepo });
-    await execAsync('git config user.email "test@test.com"', { cwd: sourceRepo });
+    const { initGitRepo } = await import('../helpers/git-test-utils.js');
+    await initGitRepo(sourceRepo);
     await execAsync('git config user.name "Test"', { cwd: sourceRepo });
     
     const workflow = {
@@ -49,7 +48,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
     );
     
     await execAsync('git add .', { cwd: sourceRepo });
-    await execAsync('git commit -m "Initial commit"', { cwd: sourceRepo });
+    await execAsync('git commit --no-gpg-sign -m "Initial commit"', { cwd: sourceRepo });
     await execAsync('git branch -M main', { cwd: sourceRepo });
   }
 
@@ -79,7 +78,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
 
       const initial = await storage.loadAllWorkflows();
       expect(initial.length).toBeGreaterThanOrEqual(1);
-      expect(initial.some(w => w.id === 'sync-test')).toBe(true);
+      expect(initial.some(w => w.definition.id === 'sync-test')).toBe(true);
 
       // Add a new workflow to source repo
       const newWorkflow = {
@@ -103,13 +102,13 @@ describe('Git Sync & Security - No Corners Rounded', () => {
         path.join(sourceRepo, 'workflows', 'new-workflow-test.json'),
         JSON.stringify(newWorkflow, null, 2)
       );
-      await execAsync('git add . && git commit -m "Add new workflow"', { cwd: sourceRepo });
+      await execAsync('git add . && git commit --no-gpg-sign -m "Add new workflow"', { cwd: sourceRepo });
 
       // Load again with same instance - should pull updates
       const updated = await storage.loadAllWorkflows();
       
       // PROOF: Git pull worked
-      expect(updated.some(w => w.id === 'new-workflow-test')).toBe(true);
+      expect(updated.some(w => w.definition.id === 'new-workflow-test')).toBe(true);
       
       console.log('✅ PROVEN: Git pull/sync works');
     });
@@ -126,7 +125,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       });
 
       const initial = await storage.getWorkflowById('sync-test');
-      const originalName = initial?.name;
+      const originalName = initial?.definition.name;
 
       // Update the workflow in source
       const updated = {
@@ -139,15 +138,15 @@ describe('Git Sync & Security - No Corners Rounded', () => {
         path.join(sourceRepo, 'workflows', 'sync-test.json'),
         JSON.stringify(updated, null, 2)
       );
-      await execAsync('git add . && git commit -m "Update workflow"', { cwd: sourceRepo });
+      await execAsync('git add . && git commit --no-gpg-sign -m "Update workflow"', { cwd: sourceRepo });
 
       // Load again with same instance - should pull
       const pulled = await storage.getWorkflowById('sync-test');
       
       // PROOF: Pulled updated content
-      expect(pulled?.name).not.toBe(originalName);
-      expect(pulled?.name).toBe('UPDATED Sync Test Workflow v2');
-      expect(pulled?.version).toBe('2.5.0');
+      expect(pulled?.definition.name).not.toBe(originalName);
+      expect(pulled?.definition.name).toBe('UPDATED Sync Test Workflow v2');
+      expect(pulled?.definition.version).toBe('2.5.0');
       
       console.log('✅ PROVEN: Git pull updates existing workflows');
     });
@@ -188,13 +187,13 @@ describe('Git Sync & Security - No Corners Rounded', () => {
         path.join(sourceRepo, 'workflows', 'should-not-appear.json'),
         JSON.stringify(another, null, 2)
       );
-      await execAsync('git add . && git commit -m "Add workflow that wont sync"', { cwd: sourceRepo });
+      await execAsync('git add . && git commit --no-gpg-sign -m "Add workflow that wont sync"', { cwd: sourceRepo });
 
       // Load immediately - shouldn't pull
       const workflows = await storage.loadAllWorkflows();
       
       // PROOF: Didn't pull (still using cache)
-      expect(workflows.some(w => w.id === 'should-not-appear')).toBe(false);
+      expect(workflows.some(w => w.definition.id === 'should-not-appear')).toBe(false);
       
       console.log('✅ PROVEN: syncInterval is respected');
     });
@@ -224,7 +223,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
         path.join(sourceRepo, 'workflows', 'feature-workflow.json'),
         JSON.stringify(featureWorkflow, null, 2)
       );
-      await execAsync('git add . && git commit -m "Add feature workflow"', { cwd: sourceRepo });
+      await execAsync('git add . && git commit --no-gpg-sign -m "Add feature workflow"', { cwd: sourceRepo });
       await execAsync('git checkout main', { cwd: sourceRepo });
 
       const cachePath = path.join(cloneDir, 'branch-test');
@@ -239,7 +238,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       const workflows = await storage.loadAllWorkflows();
       
       // PROOF: Cloned from feature branch
-      expect(workflows.some(w => w.id === 'feature-workflow')).toBe(true);
+      expect(workflows.some(w => w.definition.id === 'feature-workflow')).toBe(true);
       
       console.log('✅ PROVEN: Branch selection works');
     });
@@ -278,7 +277,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
         JSON.stringify(malicious, null, 2)
       );
 
-      await execAsync('git add . && git commit -m "Malicious"', { cwd: maliciousRepo });
+      await execAsync('git add . && git commit --no-gpg-sign -m "Malicious"', { cwd: maliciousRepo });
       await execAsync('git branch -M main', { cwd: maliciousRepo });
 
       const storage = new GitWorkflowStorage({
@@ -293,8 +292,8 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       
       if (Array.isArray(result)) {
         // If it loaded, IDs must be sanitized
-        expect(result.every(w => !w.id.includes('..'))).toBe(true);
-        expect(result.every(w => !w.id.includes('/'))).toBe(true);
+        expect(result.every(w => !w.definition.id.includes('..'))).toBe(true);
+        expect(result.every(w => !w.definition.id.includes('/'))).toBe(true);
       }
       // If it threw, that's also acceptable
       
@@ -331,7 +330,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
         path.join(largeRepo, 'workflows', 'huge-workflow.json'),
         JSON.stringify(hugeWorkflow, null, 2)
       );
-      await execAsync('git add . && git commit -m "Huge workflow"', { cwd: largeRepo });
+      await execAsync('git add . && git commit --no-gpg-sign -m "Huge workflow"', { cwd: largeRepo });
       await execAsync('git branch -M main', { cwd: largeRepo });
 
       const storage = new GitWorkflowStorage({
@@ -381,7 +380,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
         );
       }
 
-      await execAsync('git add . && git commit -m "Many workflows"', { cwd: manyRepo });
+      await execAsync('git add . && git commit --no-gpg-sign -m "Many workflows"', { cwd: manyRepo });
       await execAsync('git branch -M main', { cwd: manyRepo });
 
       const storage = new GitWorkflowStorage({
@@ -476,7 +475,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
         '{ "id": "bad", invalid json here }'
       );
 
-      await execAsync('git add . && git commit -m "Bad JSON"', { cwd: badRepo });
+      await execAsync('git add . && git commit --no-gpg-sign -m "Bad JSON"', { cwd: badRepo });
       await execAsync('git branch -M main', { cwd: badRepo });
 
       const storage = new GitWorkflowStorage({
@@ -522,7 +521,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
         JSON.stringify(workflow, null, 2)
       );
 
-      await execAsync('git add . && git commit -m "Mismatch"', { cwd: mismatchRepo });
+      await execAsync('git add . && git commit --no-gpg-sign -m "Mismatch"', { cwd: mismatchRepo });
       await execAsync('git branch -M main', { cwd: mismatchRepo });
 
       const storage = new GitWorkflowStorage({
@@ -588,7 +587,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       
       // Commit empty workflows directory
       await fs.writeFile(path.join(emptyRepo, 'workflows', '.gitkeep'), '');
-      await execAsync('git add . && git commit -m "Empty"', { cwd: emptyRepo });
+      await execAsync('git add . && git commit --no-gpg-sign -m "Empty"', { cwd: emptyRepo });
       await execAsync('git branch -M main', { cwd: emptyRepo });
 
       const storage = new GitWorkflowStorage({
@@ -615,7 +614,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       await execAsync('git config user.name "Test"', { cwd: noWorkflowsRepo });
       
       await fs.writeFile(path.join(noWorkflowsRepo, 'README.md'), '# No workflows here');
-      await execAsync('git add . && git commit -m "No workflows"', { cwd: noWorkflowsRepo });
+      await execAsync('git add . && git commit --no-gpg-sign -m "No workflows"', { cwd: noWorkflowsRepo });
       await execAsync('git branch -M main', { cwd: noWorkflowsRepo });
 
       const storage = new GitWorkflowStorage({
@@ -669,7 +668,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       await fs.writeFile(path.join(mixedRepo, 'workflows', '.gitignore'), '*.tmp');
       await fs.writeFile(path.join(mixedRepo, 'workflows', 'notes.txt'), 'some notes');
 
-      await execAsync('git add . && git commit -m "Mixed files"', { cwd: mixedRepo });
+      await execAsync('git add . && git commit --no-gpg-sign -m "Mixed files"', { cwd: mixedRepo });
       await execAsync('git branch -M main', { cwd: mixedRepo });
 
       const storage = new GitWorkflowStorage({
@@ -683,7 +682,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       
       // PROOF: Only loads .json files
       expect(workflows).toHaveLength(1);
-      expect(workflows[0]?.id).toBe('valid');
+      expect(workflows[0]?.definition.id).toBe('valid');
       
       console.log('✅ PROVEN: Ignores non-JSON files');
     });

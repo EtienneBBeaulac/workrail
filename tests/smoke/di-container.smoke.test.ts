@@ -92,7 +92,8 @@ describe('[SMOKE] DI Container Health', () => {
       { name: 'FeatureFlags', token: DI.Infra.FeatureFlags },
       { name: 'ValidationEngine', token: DI.Infra.ValidationEngine },
       { name: 'Storage', token: DI.Storage.Primary },
-      { name: 'LoopStackManager', token: DI.Infra.LoopStackManager },
+      { name: 'WorkflowCompiler', token: DI.Services.WorkflowCompiler },
+      { name: 'WorkflowInterpreter', token: DI.Services.WorkflowInterpreter },
     ];
 
     for (const { name, token } of singletonTests) {
@@ -137,8 +138,8 @@ describe('[SMOKE] DI Container Health', () => {
     try {
       const resolution = Promise.all([
         container.resolve(DI.Services.Workflow),
-        container.resolve(DI.Services.StepResolution),
-        container.resolve(DI.Infra.LoopStackManager),
+        container.resolve(DI.Services.WorkflowCompiler),
+        container.resolve(DI.Services.WorkflowInterpreter),
         container.resolve(DI.Infra.ValidationEngine),
         container.resolve(DI.Infra.FeatureFlags),
       ]);
@@ -174,12 +175,9 @@ describe('[SMOKE] DI Container Health', () => {
 
   it('optional services handle missing dependencies gracefully', async () => {
     await initializeContainer();
-
-    // LoopStackManager has optional contextOptimizer
-    const stackManager = container.resolve<any>(DI.Infra.LoopStackManager);
-    expect(stackManager).toBeDefined();
-
-    // Should work even if contextOptimizer is undefined
+    // No optional loop runtime services remain in the new architecture.
+    // This test remains as a sentinel that container initialization doesn't require optional dependencies.
+    expect(container.resolve(DI.Services.Workflow)).toBeDefined();
   });
 
   it('configuration values are registered correctly', async () => {
