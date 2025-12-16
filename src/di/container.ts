@@ -162,25 +162,14 @@ async function registerServices(): Promise<void> {
   // Import all services - @singleton() auto-registers them
   // Then manually register symbol token aliases
 
-  // Leaf services
-  const { LoopStepResolver } = await import('../application/services/loop-step-resolver.js');
   const { EnhancedLoopValidator } = await import('../application/services/enhanced-loop-validator.js');
-  const { DefaultStepSelector } = await import('../application/services/step-selector.js');
-  const { LoopContextOptimizer } = await import('../application/services/loop-context-optimizer.js');
   const { SessionDataNormalizer } = await import('../infrastructure/session/SessionDataNormalizer.js');
   const { SessionDataValidator } = await import('../infrastructure/session/SessionDataValidator.js');
-
-  // MCP layer
+  const { ValidationEngine } = await import('../application/services/validation-engine.js');
+  const { WorkflowCompiler } = await import('../application/services/workflow-compiler.js');
+  const { WorkflowInterpreter } = await import('../application/services/workflow-interpreter.js');
   const { ToolDescriptionProvider } = await import('../mcp/tool-description-provider.js');
 
-  // Mid-level services
-  const { ValidationEngine } = await import('../application/services/validation-engine.js');
-  const { LoopStackManager } = await import('../application/services/loop-stack-manager.js');
-  const { DefaultWorkflowLoader } = await import('../application/services/workflow-loader.js');
-  const { DefaultLoopRecoveryService } = await import('../application/services/loop-recovery-service.js');
-
-  // High-level services
-  const { IterativeStepResolutionStrategy } = await import('../application/services/step-resolution/iterative-step-resolution-strategy.js');
   const { DefaultWorkflowService } = await import('../application/services/workflow-service.js');
 
   // Infrastructure
@@ -190,21 +179,8 @@ async function registerServices(): Promise<void> {
   // NOW register symbol token aliases
   // Using instanceCachingFactory with class resolution - ensures singleton behavior
   // The factory delegates to the @singleton() class registration
-  container.register(DI.Infra.LoopStepResolver, { 
-    useFactory: instanceCachingFactory((c) => c.resolve(LoopStepResolver)) 
-  });
   container.register(DI.Infra.EnhancedLoopValidator, { 
     useFactory: instanceCachingFactory((c) => c.resolve(EnhancedLoopValidator)) 
-  });
-  container.register(DI.Services.StepSelector, { 
-    useFactory: instanceCachingFactory((c) => c.resolve(DefaultStepSelector)) 
-  });
-  container.register(DI.Services.LoopContextOptimizer, { 
-    useFactory: instanceCachingFactory((c) => c.resolve(LoopContextOptimizer)) 
-  });
-  // FeatureFlags already registered in registerConfig()
-  container.register(DI.Mcp.DescriptionProvider, { 
-    useFactory: instanceCachingFactory((c) => c.resolve(ToolDescriptionProvider)) 
   });
   container.register(DI.Infra.SessionDataNormalizer, { 
     useFactory: instanceCachingFactory((c) => c.resolve(SessionDataNormalizer)) 
@@ -215,17 +191,11 @@ async function registerServices(): Promise<void> {
   container.register(DI.Infra.ValidationEngine, { 
     useFactory: instanceCachingFactory((c) => c.resolve(ValidationEngine)) 
   });
-  container.register(DI.Infra.LoopStackManager, { 
-    useFactory: instanceCachingFactory((c) => c.resolve(LoopStackManager)) 
+  container.register(DI.Services.WorkflowCompiler, {
+    useFactory: instanceCachingFactory((c) => c.resolve(WorkflowCompiler)),
   });
-  container.register(DI.Services.WorkflowLoader, { 
-    useFactory: instanceCachingFactory((c) => c.resolve(DefaultWorkflowLoader)) 
-  });
-  container.register(DI.Services.LoopRecovery, { 
-    useFactory: instanceCachingFactory((c) => c.resolve(DefaultLoopRecoveryService)) 
-  });
-  container.register(DI.Services.StepResolution, { 
-    useFactory: instanceCachingFactory((c) => c.resolve(IterativeStepResolutionStrategy)) 
+  container.register(DI.Services.WorkflowInterpreter, {
+    useFactory: instanceCachingFactory((c) => c.resolve(WorkflowInterpreter)),
   });
   container.register(DI.Services.Workflow, { 
     useFactory: instanceCachingFactory((c) => c.resolve(DefaultWorkflowService)) 
@@ -236,6 +206,13 @@ async function registerServices(): Promise<void> {
   container.register(DI.Infra.HttpServer, { 
     useFactory: instanceCachingFactory((c) => c.resolve(HttpServer)) 
   });
+
+  // MCP layer
+  // Explicit wiring: do not rely on decorator side-effects to register this dependency.
+  // Tests may override this token, so only register when missing.
+  if (!container.isRegistered(DI.Mcp.DescriptionProvider)) {
+    container.registerSingleton(DI.Mcp.DescriptionProvider, ToolDescriptionProvider);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

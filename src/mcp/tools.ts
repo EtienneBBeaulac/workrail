@@ -8,6 +8,8 @@
  */
 
 import { z } from 'zod';
+import { ExecutionStateSchema } from '../domain/execution/state.js';
+import { WorkflowEventSchema } from '../domain/execution/event.js';
 
 // -----------------------------------------------------------------------------
 // Types (re-exported from tool-factory for convenience)
@@ -39,14 +41,12 @@ export const WorkflowNextInput = z.object({
     .string()
     .regex(/^[A-Za-z0-9_-]+$/, 'Workflow ID must contain only letters, numbers, hyphens, and underscores')
     .describe('The unique identifier of the workflow'),
-  completedSteps: z
-    .array(z.string().regex(/^[A-Za-z0-9_-]+$/))
-    .default([])
-    .describe('Array of step IDs that have been completed'),
+  state: ExecutionStateSchema.describe('Serializable workflow execution state (authoritative)'),
+  event: WorkflowEventSchema.optional().describe('Optional event to apply before selecting the next step'),
   context: z
     .record(z.unknown())
     .optional()
-    .describe('Context variables for conditional step execution'),
+    .describe('External context variables for condition evaluation and loop inputs'),
 });
 export type WorkflowNextInput = z.infer<typeof WorkflowNextInput>;
 

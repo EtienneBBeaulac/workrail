@@ -61,7 +61,7 @@ describe('GitWorkflowStorage - Real-world MCP Sandbox', () => {
     
     // Commit the workflow
     await execAsync('git add .', { cwd: testRepoDir });
-    await execAsync('git commit -m "Add test workflow"', { cwd: testRepoDir });
+    await execAsync('git commit --no-gpg-sign -m "Add test workflow"', { cwd: testRepoDir });
     
     // Ensure we're on main branch (Git 2.28+ uses different default)
     try {

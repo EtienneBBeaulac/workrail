@@ -59,7 +59,7 @@ describe('GitWorkflowStorage - Master Branch Support', () => {
     
     // Commit on master branch (Git's old default)
     await execAsync('git add .', { cwd: testRepoDir });
-    await execAsync('git commit -m "Add test workflow"', { cwd: testRepoDir });
+    await execAsync('git commit --no-gpg-sign -m "Add test workflow"', { cwd: testRepoDir });
     // Don't rename to main - keep it as master to test the fallback
   });
 

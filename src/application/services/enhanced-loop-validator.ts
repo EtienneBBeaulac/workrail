@@ -1,6 +1,5 @@
 import { singleton } from 'tsyringe';
-import { WorkflowStep } from '../../types/mcp-types';
-import { LoopStep } from '../../types/workflow-types';
+import type { WorkflowStepDefinition, LoopStepDefinition } from '../../types/workflow-definition';
 
 export interface EnhancedValidationResult {
   warnings: string[];
@@ -19,7 +18,7 @@ export class EnhancedLoopValidator {
   /**
    * Performs enhanced validation on loop steps
    */
-  validateLoopStep(step: LoopStep): EnhancedValidationResult {
+  validateLoopStep(step: LoopStepDefinition): EnhancedValidationResult {
     const warnings: string[] = [];
     const suggestions: string[] = [];
     const info: string[] = [];
@@ -47,7 +46,7 @@ export class EnhancedLoopValidator {
     return { warnings, suggestions, info };
   }
 
-  private getLoopBodySteps(step: LoopStep): WorkflowStep[] {
+  private getLoopBodySteps(step: LoopStepDefinition): WorkflowStepDefinition[] {
     if (Array.isArray(step.body)) {
       return step.body;
     }
@@ -57,7 +56,7 @@ export class EnhancedLoopValidator {
   }
 
   private validateConditionalLogic(
-    step: WorkflowStep,
+    step: WorkflowStepDefinition,
     warnings: string[],
     suggestions: string[]
   ): void {
@@ -92,7 +91,7 @@ export class EnhancedLoopValidator {
   }
 
   private validatePromptLength(
-    step: WorkflowStep,
+    step: WorkflowStepDefinition,
     warnings: string[],
     suggestions: string[]
   ): void {
@@ -142,8 +141,8 @@ export class EnhancedLoopValidator {
   }
 
   private validateTemplateVariables(
-    step: WorkflowStep,
-    loopStep: LoopStep,
+    step: WorkflowStepDefinition,
+    loopStep: LoopStepDefinition,
     warnings: string[],
     suggestions: string[]
   ): void {
@@ -172,7 +171,7 @@ export class EnhancedLoopValidator {
     }
   }
 
-  private getKnownLoopVariables(loopStep: LoopStep): Set<string> {
+  private getKnownLoopVariables(loopStep: LoopStepDefinition): Set<string> {
     const vars = new Set<string>();
 
     // Default iteration variable
@@ -192,7 +191,7 @@ export class EnhancedLoopValidator {
   }
 
   private detectLoopPatterns(
-    step: LoopStep,
+    step: LoopStepDefinition,
     info: string[],
     suggestions: string[]
   ): void {
@@ -222,7 +221,7 @@ export class EnhancedLoopValidator {
   }
 
   private validateLoopStructure(
-    step: LoopStep,
+    step: LoopStepDefinition,
     warnings: string[],
     suggestions: string[]
   ): void {

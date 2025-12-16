@@ -53,10 +53,9 @@ let initMutex: Promise<void> | null = null;
  *
  * Business logic services are NOT mocked:
  * - ValidationEngine
- * - LoopStackManager
- * - DefaultStepSelector
- * - IterativeStepResolutionStrategy
- * - DefaultWorkflowLoader
+ * - WorkflowCompiler
+ * - WorkflowInterpreter
+ * - WorkflowService
  */
 export async function setupIntegrationTest(
   config: IntegrationTestConfig = {}

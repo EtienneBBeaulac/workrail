@@ -3,8 +3,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { container } from 'tsyringe';
 import { ValidationEngine } from '../../src/application/services/validation-engine';
 import { EnhancedLoopValidator } from '../../src/application/services/enhanced-loop-validator';
-import { Workflow, WorkflowStep, createWorkflow, createBundledSource, WorkflowDefinition } from '../../src/types/workflow';
-import { LoopStep } from '../../src/types/workflow-types';
+import { createWorkflow, createBundledSource } from '../../src/types/workflow';
+import type { LoopStepDefinition } from '../../src/types/workflow-definition';
 
 describe('Enhanced Loop Validation', () => {
   let validationEngine: ValidationEngine;
@@ -45,7 +45,7 @@ describe('Enhanced Loop Validation', () => {
               }
             ],
             requireConfirmation: false
-          } as LoopStep
+          } as LoopStepDefinition
         ]
       }, createBundledSource());
 
@@ -82,7 +82,7 @@ describe('Enhanced Loop Validation', () => {
               }
             ],
             requireConfirmation: false
-          } as LoopStep
+          } as LoopStepDefinition
         ]
       }, createBundledSource());
 
@@ -120,7 +120,7 @@ describe('Enhanced Loop Validation', () => {
               }
             ],
             requireConfirmation: false
-          } as LoopStep
+          } as LoopStepDefinition
         ]
       }, createBundledSource());
 
@@ -155,7 +155,7 @@ describe('Enhanced Loop Validation', () => {
               }
             ],
             requireConfirmation: false
-          } as LoopStep
+          } as LoopStepDefinition
         ]
       }, createBundledSource());
 
@@ -192,7 +192,7 @@ describe('Enhanced Loop Validation', () => {
               }
             ],
             requireConfirmation: false
-          } as LoopStep
+          } as LoopStepDefinition
         ]
       }, createBundledSource());
 
@@ -229,7 +229,7 @@ describe('Enhanced Loop Validation', () => {
               }
             ],
             requireConfirmation: false
-          } as LoopStep
+          } as LoopStepDefinition
         ]
       }, createBundledSource());
 
@@ -257,7 +257,7 @@ describe('Enhanced Loop Validation', () => {
             },
             body: 'non-existent-step',
             requireConfirmation: false
-          } as LoopStep
+          } as LoopStepDefinition
         ]
       }, createBundledSource());
 
@@ -295,7 +295,7 @@ describe('Enhanced Loop Validation', () => {
               }
             ],
             requireConfirmation: false
-          } as LoopStep
+          } as LoopStepDefinition
         ]
       }, createBundledSource());
 

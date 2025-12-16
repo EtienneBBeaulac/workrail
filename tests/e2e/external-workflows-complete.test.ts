@@ -31,10 +31,8 @@ describe('🚀 END-TO-END: Complete External Workflows Feature', () => {
 
   async function createTestRepo(repoDir: string, workflowId: string, workflowName: string, service: string) {
     await fs.mkdir(path.join(repoDir, 'workflows'), { recursive: true });
-    
     const { initGitRepo } = await import('../helpers/git-test-utils.js');
     await initGitRepo(repoDir);
-    await execAsync('git config user.definition.name "Test"', { cwd: repoDir });
     
     const workflow = {
       id: workflowId,
@@ -63,7 +61,7 @@ describe('🚀 END-TO-END: Complete External Workflows Feature', () => {
     );
     
     await execAsync('git add .', { cwd: repoDir });
-    await execAsync('git commit -m "Add workflow"', { cwd: repoDir });
+    await execAsync('git commit --no-gpg-sign -m "Add workflow"', { cwd: repoDir });
     await execAsync('git branch -M main', { cwd: repoDir });
   }
 
@@ -244,7 +242,7 @@ describe('🚀 END-TO-END: Complete External Workflows Feature', () => {
           steps: [{ id: 's1', title: 'Step', description: 'Desc', prompt: 'First', expectedOutput: 'out' }]
         }, null, 2)
       );
-      await execAsync('git add . && git commit -m "Add conflict"', { cwd: githubRepo });
+      await execAsync('git add . && git commit --no-gpg-sign -m "Add conflict"', { cwd: githubRepo });
 
       await fs.writeFile(
         path.join(gitlabRepo, 'workflows', `${conflictId}.json`),
@@ -257,7 +255,7 @@ describe('🚀 END-TO-END: Complete External Workflows Feature', () => {
           steps: [{ id: 's1', title: 'Step', description: 'Desc', prompt: 'Second', expectedOutput: 'out' }]
         }, null, 2)
       );
-      await execAsync('git add . && git commit -m "Add conflict"', { cwd: gitlabRepo });
+      await execAsync('git add . && git commit --no-gpg-sign -m "Add conflict"', { cwd: gitlabRepo });
 
       process.env = {
         ...originalEnv,

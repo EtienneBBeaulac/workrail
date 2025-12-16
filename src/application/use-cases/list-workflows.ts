@@ -1,5 +1,5 @@
 import { WorkflowService } from '../services/workflow-service';
-import { WorkflowSummary } from '../../types/mcp-types';
+import { WorkflowSummary } from '../../types/workflow';
 
 /**
  * Factory function that creates a pure use-case for listing workflows.
