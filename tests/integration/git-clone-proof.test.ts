@@ -27,7 +27,7 @@ describe('🔥 DIRECT PROOF: Git Cloning Works', () => {
     
     await execAsync('git init', { cwd: sourceRepoDir });
     await execAsync('git config user.email "test@test.com"', { cwd: sourceRepoDir });
-    await execAsync('git config user.definition.name "Test"', { cwd: sourceRepoDir });
+    await execAsync('git config user.name "Test"', { cwd: sourceRepoDir });
     
     // Create a real workflow
     const workflow = {
@@ -50,7 +50,7 @@ describe('🔥 DIRECT PROOF: Git Cloning Works', () => {
     );
     
     await execAsync('git add .', { cwd: sourceRepoDir });
-    await execAsync('git commit -m "Add proof workflow"', { cwd: sourceRepoDir });
+    await execAsync('git commit --no-gpg-sign -m "Add proof workflow"', { cwd: sourceRepoDir });
     await execAsync('git branch -M main', { cwd: sourceRepoDir });
     
     console.log('✅ Real Git repository created at:', sourceRepoDir);
@@ -187,7 +187,7 @@ describe('🔥 DIRECT PROOF: Git Cloning Works', () => {
       path.join(sourceRepoDir, 'workflows', 'second-proof.json'),
       JSON.stringify(workflow2, null, 2)
     );
-    await execAsync('git add . && git commit -m "Add second"', { cwd: sourceRepoDir });
+    await execAsync('git add . && git commit --no-gpg-sign -m "Add second"', { cwd: sourceRepoDir });
 
     const storage = new GitWorkflowStorage({
       repositoryUrl: sourceRepoDir,

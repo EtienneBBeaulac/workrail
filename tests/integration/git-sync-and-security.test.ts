@@ -24,7 +24,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
     
     await execAsync('git init', { cwd: sourceRepo });
     await execAsync('git config user.email "test@test.com"', { cwd: sourceRepo });
-    await execAsync('git config user.definition.name "Test"', { cwd: sourceRepo });
+    await execAsync('git config user.name "Test"', { cwd: sourceRepo });
     
     const workflow = {
       id: 'sync-test',
@@ -49,7 +49,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
     );
     
     await execAsync('git add .', { cwd: sourceRepo });
-    await execAsync('git commit -m "Initial commit"', { cwd: sourceRepo });
+    await execAsync('git commit --no-gpg-sign -m "Initial commit"', { cwd: sourceRepo });
     await execAsync('git branch -M main', { cwd: sourceRepo });
   }
 
@@ -103,7 +103,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
         path.join(sourceRepo, 'workflows', 'new-workflow-test.json'),
         JSON.stringify(newWorkflow, null, 2)
       );
-      await execAsync('git add . && git commit -m "Add new workflow"', { cwd: sourceRepo });
+      await execAsync('git add . && git commit --no-gpg-sign -m "Add new workflow"', { cwd: sourceRepo });
 
       // Load again with same instance - should pull updates
       const updated = await storage.loadAllWorkflows();
@@ -139,7 +139,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
         path.join(sourceRepo, 'workflows', 'sync-test.json'),
         JSON.stringify(updated, null, 2)
       );
-      await execAsync('git add . && git commit -m "Update workflow"', { cwd: sourceRepo });
+      await execAsync('git add . && git commit --no-gpg-sign -m "Update workflow"', { cwd: sourceRepo });
 
       // Load again with same instance - should pull
       const pulled = await storage.getWorkflowById('sync-test');
@@ -188,7 +188,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
         path.join(sourceRepo, 'workflows', 'should-not-appear.json'),
         JSON.stringify(another, null, 2)
       );
-      await execAsync('git add . && git commit -m "Add workflow that wont sync"', { cwd: sourceRepo });
+      await execAsync('git add . && git commit --no-gpg-sign -m "Add workflow that wont sync"', { cwd: sourceRepo });
 
       // Load immediately - shouldn't pull
       const workflows = await storage.loadAllWorkflows();
@@ -224,7 +224,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
         path.join(sourceRepo, 'workflows', 'feature-workflow.json'),
         JSON.stringify(featureWorkflow, null, 2)
       );
-      await execAsync('git add . && git commit -m "Add feature workflow"', { cwd: sourceRepo });
+      await execAsync('git add . && git commit --no-gpg-sign -m "Add feature workflow"', { cwd: sourceRepo });
       await execAsync('git checkout main', { cwd: sourceRepo });
 
       const cachePath = path.join(cloneDir, 'branch-test');
@@ -252,7 +252,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       
       await execAsync('git init', { cwd: maliciousRepo });
       await execAsync('git config user.email "test@test.com"', { cwd: maliciousRepo });
-      await execAsync('git config user.definition.name "Test"', { cwd: maliciousRepo });
+      await execAsync('git config user.name "Test"', { cwd: maliciousRepo });
 
       // Create a normal workflow but with malicious ID
       const malicious = {
@@ -278,7 +278,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
         JSON.stringify(malicious, null, 2)
       );
 
-      await execAsync('git add . && git commit -m "Malicious"', { cwd: maliciousRepo });
+      await execAsync('git add . && git commit --no-gpg-sign -m "Malicious"', { cwd: maliciousRepo });
       await execAsync('git branch -M main', { cwd: maliciousRepo });
 
       const storage = new GitWorkflowStorage({
@@ -307,7 +307,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       
       await execAsync('git init', { cwd: largeRepo });
       await execAsync('git config user.email "test@test.com"', { cwd: largeRepo });
-      await execAsync('git config user.definition.name "Test"', { cwd: largeRepo });
+      await execAsync('git config user.name "Test"', { cwd: largeRepo });
 
       // Create a workflow that's too large (over 1MB default)
       const hugeWorkflow = {
@@ -331,7 +331,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
         path.join(largeRepo, 'workflows', 'huge-workflow.json'),
         JSON.stringify(hugeWorkflow, null, 2)
       );
-      await execAsync('git add . && git commit -m "Huge workflow"', { cwd: largeRepo });
+      await execAsync('git add . && git commit --no-gpg-sign -m "Huge workflow"', { cwd: largeRepo });
       await execAsync('git branch -M main', { cwd: largeRepo });
 
       const storage = new GitWorkflowStorage({
@@ -354,7 +354,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       
       await execAsync('git init', { cwd: manyRepo });
       await execAsync('git config user.email "test@test.com"', { cwd: manyRepo });
-      await execAsync('git config user.definition.name "Test"', { cwd: manyRepo });
+      await execAsync('git config user.name "Test"', { cwd: manyRepo });
 
       // Create 150 workflows (default limit is 100)
       for (let i = 0; i < 150; i++) {
@@ -381,7 +381,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
         );
       }
 
-      await execAsync('git add . && git commit -m "Many workflows"', { cwd: manyRepo });
+      await execAsync('git add . && git commit --no-gpg-sign -m "Many workflows"', { cwd: manyRepo });
       await execAsync('git branch -M main', { cwd: manyRepo });
 
       const storage = new GitWorkflowStorage({
@@ -468,7 +468,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       
       await execAsync('git init', { cwd: badRepo });
       await execAsync('git config user.email "test@test.com"', { cwd: badRepo });
-      await execAsync('git config user.definition.name "Test"', { cwd: badRepo });
+      await execAsync('git config user.name "Test"', { cwd: badRepo });
 
       // Write malformed JSON
       await fs.writeFile(
@@ -476,7 +476,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
         '{ "id": "bad", invalid json here }'
       );
 
-      await execAsync('git add . && git commit -m "Bad JSON"', { cwd: badRepo });
+      await execAsync('git add . && git commit --no-gpg-sign -m "Bad JSON"', { cwd: badRepo });
       await execAsync('git branch -M main', { cwd: badRepo });
 
       const storage = new GitWorkflowStorage({
@@ -497,7 +497,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       
       await execAsync('git init', { cwd: mismatchRepo });
       await execAsync('git config user.email "test@test.com"', { cwd: mismatchRepo });
-      await execAsync('git config user.definition.name "Test"', { cwd: mismatchRepo });
+      await execAsync('git config user.name "Test"', { cwd: mismatchRepo });
 
       const workflow = {
         id: 'actual-id',
@@ -522,7 +522,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
         JSON.stringify(workflow, null, 2)
       );
 
-      await execAsync('git add . && git commit -m "Mismatch"', { cwd: mismatchRepo });
+      await execAsync('git add . && git commit --no-gpg-sign -m "Mismatch"', { cwd: mismatchRepo });
       await execAsync('git branch -M main', { cwd: mismatchRepo });
 
       const storage = new GitWorkflowStorage({
@@ -584,11 +584,11 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       
       await execAsync('git init', { cwd: emptyRepo });
       await execAsync('git config user.email "test@test.com"', { cwd: emptyRepo });
-      await execAsync('git config user.definition.name "Test"', { cwd: emptyRepo });
+      await execAsync('git config user.name "Test"', { cwd: emptyRepo });
       
       // Commit empty workflows directory
       await fs.writeFile(path.join(emptyRepo, 'workflows', '.gitkeep'), '');
-      await execAsync('git add . && git commit -m "Empty"', { cwd: emptyRepo });
+      await execAsync('git add . && git commit --no-gpg-sign -m "Empty"', { cwd: emptyRepo });
       await execAsync('git branch -M main', { cwd: emptyRepo });
 
       const storage = new GitWorkflowStorage({
@@ -612,10 +612,10 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       
       await execAsync('git init', { cwd: noWorkflowsRepo });
       await execAsync('git config user.email "test@test.com"', { cwd: noWorkflowsRepo });
-      await execAsync('git config user.definition.name "Test"', { cwd: noWorkflowsRepo });
+      await execAsync('git config user.name "Test"', { cwd: noWorkflowsRepo });
       
       await fs.writeFile(path.join(noWorkflowsRepo, 'README.md'), '# No workflows here');
-      await execAsync('git add . && git commit -m "No workflows"', { cwd: noWorkflowsRepo });
+      await execAsync('git add . && git commit --no-gpg-sign -m "No workflows"', { cwd: noWorkflowsRepo });
       await execAsync('git branch -M main', { cwd: noWorkflowsRepo });
 
       const storage = new GitWorkflowStorage({
@@ -639,7 +639,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       
       await execAsync('git init', { cwd: mixedRepo });
       await execAsync('git config user.email "test@test.com"', { cwd: mixedRepo });
-      await execAsync('git config user.definition.name "Test"', { cwd: mixedRepo });
+      await execAsync('git config user.name "Test"', { cwd: mixedRepo });
 
       // Add a valid workflow
       const valid = {
@@ -669,7 +669,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       await fs.writeFile(path.join(mixedRepo, 'workflows', '.gitignore'), '*.tmp');
       await fs.writeFile(path.join(mixedRepo, 'workflows', 'notes.txt'), 'some notes');
 
-      await execAsync('git add . && git commit -m "Mixed files"', { cwd: mixedRepo });
+      await execAsync('git add . && git commit --no-gpg-sign -m "Mixed files"', { cwd: mixedRepo });
       await execAsync('git branch -M main', { cwd: mixedRepo });
 
       const storage = new GitWorkflowStorage({

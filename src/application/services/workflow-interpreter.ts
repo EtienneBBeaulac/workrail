@@ -2,8 +2,9 @@ import { singleton } from 'tsyringe';
 import { evaluateCondition } from '../../utils/condition-evaluator';
 import { isLoopStepDefinition, WorkflowStepDefinition, LoopStepDefinition } from '../../types/workflow';
 import { CompiledWorkflow, CompiledLoop } from './workflow-compiler';
-import { Result, ok, err } from '../../domain/execution/result';
-import { DomainError } from '../../domain/execution/error';
+import type { Result } from 'neverthrow';
+import { ok, err } from 'neverthrow';
+import { type DomainError, Err } from '../../domain/execution/error';
 import { ExecutionState, LoopFrame } from '../../domain/execution/state';
 import { WorkflowEvent } from '../../domain/execution/event';
 import { StepInstanceId, toStepInstanceKey } from '../../domain/execution/ids';
@@ -25,11 +26,11 @@ export class WorkflowInterpreter {
   applyEvent(state: ExecutionState, event: WorkflowEvent): Result<ExecutionState, DomainError> {
     if (state.kind === 'complete') return ok(state);
     const running = this.ensureRunning(state);
-    if (running.kind === 'err') return running;
+    if (running.isErr()) return err(running.error);
 
     const s = running.value;
     if (!s.pendingStep) {
-      return err({ kind: 'invalid_state', message: 'No pending step to complete' });
+      return err(Err.invalidState('No pending step to complete'));
     }
 
     switch (event.kind) {
@@ -37,10 +38,9 @@ export class WorkflowInterpreter {
         const expectedKey = toStepInstanceKey(s.pendingStep);
         const actualKey = toStepInstanceKey(event.stepInstanceId);
         if (expectedKey !== actualKey) {
-          return err({
-            kind: 'invalid_state',
-            message: `StepCompleted does not match pendingStep (expected '${expectedKey}', got '${actualKey}')`,
-          });
+          return err(
+            Err.invalidState(`StepCompleted does not match pendingStep (expected '${expectedKey}', got '${actualKey}')`)
+          );
         }
 
         return ok({
@@ -52,7 +52,7 @@ export class WorkflowInterpreter {
       }
       default: {
         // Exhaustive by type; TS should ensure never.
-        return err({ kind: 'invalid_state', message: 'Unsupported event' });
+        return err(Err.invalidState('Unsupported event'));
       }
     }
   }
@@ -63,13 +63,13 @@ export class WorkflowInterpreter {
     }
 
     const runningRes = this.ensureRunning(state);
-    if (runningRes.kind === 'err') return runningRes;
+    if (runningRes.isErr()) return err(runningRes.error);
     let running = runningRes.value;
 
     // If a step is pending, return it again (idempotent "what should I do now?")
     if (running.pendingStep) {
       const step = this.lookupStepInstance(compiled, running.pendingStep);
-      if (step.kind === 'err') return step;
+      if (step.isErr()) return err(step.error);
       return ok({
         state: running,
         next: step.value,
@@ -82,7 +82,7 @@ export class WorkflowInterpreter {
       // If inside a loop, drive it first.
       if (running.loopStack.length > 0) {
         const inLoop = this.nextInCurrentLoop(compiled, running, context);
-        if (inLoop.kind === 'err') return inLoop;
+        if (inLoop.isErr()) return err(inLoop.error);
         const result = inLoop.value;
         running = result.state;
         if (result.next) {
@@ -98,7 +98,7 @@ export class WorkflowInterpreter {
 
       // Top-level selection
       const top = this.nextTopLevel(compiled, running, context);
-      if (top.kind === 'err') return top;
+      if (top.isErr()) return err(top.error);
       const out = top.value;
       running = out.state;
       if (out.next) {
@@ -114,7 +114,7 @@ export class WorkflowInterpreter {
       return ok({ state: { kind: 'complete' }, next: null, isComplete: true });
     }
 
-    return err({ kind: 'invalid_state', message: 'Interpreter exceeded guard iterations (possible infinite loop)' });
+    return err(Err.invalidState('Interpreter exceeded guard iterations (possible infinite loop)'));
   }
 
   private ensureRunning(state: ExecutionState): Result<Extract<ExecutionState, { kind: 'running' }>, DomainError> {
@@ -122,7 +122,7 @@ export class WorkflowInterpreter {
       return ok({ kind: 'running', completed: [], loopStack: [], pendingStep: undefined });
     }
     if (state.kind !== 'running') {
-      return err({ kind: 'invalid_state', message: `Unsupported state kind '${(state as any).kind}'` });
+      return err(Err.invalidState(`Unsupported state kind '${(state as any).kind}'`));
     }
     return ok(state);
   }
@@ -155,7 +155,7 @@ export class WorkflowInterpreter {
 
       const instance: StepInstanceId = { stepId: step.id, loopPath: [] };
       const next = this.materializeStep(compiled, instance, context);
-      if (next.kind === 'err') return next;
+      if (next.isErr()) return err(next.error);
 
       return ok({
         state: { ...state, pendingStep: instance },
@@ -174,12 +174,12 @@ export class WorkflowInterpreter {
     const frame = state.loopStack[state.loopStack.length - 1];
     const loopCompiled = compiled.compiledLoops.get(frame.loopId);
     if (!loopCompiled) {
-      return err({ kind: 'invalid_loop', loopId: frame.loopId, message: 'Loop not found in compiled metadata' });
+      return err(Err.invalidLoop(frame.loopId, 'Loop not found in compiled metadata'));
     }
 
     // Check continuation before selecting body step
     const shouldContinue = this.shouldContinueLoop(loopCompiled.loop, frame, context);
-    if (shouldContinue.kind === 'err') return shouldContinue;
+    if (shouldContinue.isErr()) return err(shouldContinue.error);
     if (!shouldContinue.value) {
       // Exit loop: mark loop step completed as top-level instance and pop frame.
       const popped = state.loopStack.slice(0, -1);
@@ -210,7 +210,7 @@ export class WorkflowInterpreter {
       }
 
       const next = this.materializeStep(compiled, instance, projectedContext);
-      if (next.kind === 'err') return next;
+      if (next.isErr()) return err(next.error);
 
       // Update frame body index to point at the selected step (still needs completion)
       const updatedTop: LoopFrame = { ...frame, bodyIndex: i };
@@ -223,7 +223,7 @@ export class WorkflowInterpreter {
 
     // No eligible steps left in this iteration => advance iteration
     if (frame.iteration + 1 >= loopCompiled.loop.loop.maxIterations) {
-      return err({ kind: 'max_iterations_exceeded', loopId: frame.loopId, maxIterations: loopCompiled.loop.loop.maxIterations });
+      return err(Err.maxIterationsExceeded(frame.loopId, loopCompiled.loop.loop.maxIterations));
     }
 
     const advanced: LoopFrame = { ...frame, iteration: frame.iteration + 1, bodyIndex: 0 };
@@ -250,31 +250,31 @@ export class WorkflowInterpreter {
         if (typeof count === 'string') {
           const raw = (context as any)[count];
           if (typeof raw !== 'number') {
-            return err({ kind: 'missing_context', message: `for loop '${loop.id}' requires numeric context['${count}']` });
+            return err(Err.missingContext(`for loop '${loop.id}' requires numeric context['${count}']`));
           }
           return ok(frame.iteration < raw);
         }
-        return err({ kind: 'invalid_loop', loopId: loop.id, message: `for loop '${loop.id}' missing count` });
+        return err(Err.invalidLoop(loop.id, `for loop '${loop.id}' missing count`));
       }
       case 'forEach': {
         const itemsVar = loop.loop.items;
-        if (!itemsVar) return err({ kind: 'invalid_loop', loopId: loop.id, message: `forEach loop '${loop.id}' missing items` });
+        if (!itemsVar) return err(Err.invalidLoop(loop.id, `forEach loop '${loop.id}' missing items`));
         const raw = (context as any)[itemsVar];
         if (!Array.isArray(raw)) {
-          return err({ kind: 'missing_context', message: `forEach loop '${loop.id}' requires array context['${itemsVar}']` });
+          return err(Err.missingContext(`forEach loop '${loop.id}' requires array context['${itemsVar}']`));
         }
         return ok(frame.iteration < raw.length);
       }
       case 'while': {
-        if (!loop.loop.condition) return err({ kind: 'invalid_loop', loopId: loop.id, message: `while loop '${loop.id}' missing condition` });
+        if (!loop.loop.condition) return err(Err.invalidLoop(loop.id, `while loop '${loop.id}' missing condition`));
         return ok(evaluateCondition(loop.loop.condition as any, this.projectLoopContext(loop, frame, context) as any));
       }
       case 'until': {
-        if (!loop.loop.condition) return err({ kind: 'invalid_loop', loopId: loop.id, message: `until loop '${loop.id}' missing condition` });
+        if (!loop.loop.condition) return err(Err.invalidLoop(loop.id, `until loop '${loop.id}' missing condition`));
         return ok(!evaluateCondition(loop.loop.condition as any, this.projectLoopContext(loop, frame, context) as any));
       }
       default:
-        return err({ kind: 'invalid_loop', loopId: loop.id, message: `Unknown loop type '${(loop.loop as any).type}'` });
+        return err(Err.invalidLoop(loop.id, `Unknown loop type '${(loop.loop as any).type}'`));
     }
   }
 
@@ -301,8 +301,8 @@ export class WorkflowInterpreter {
 
   private lookupStepInstance(compiled: CompiledWorkflow, id: StepInstanceId): Result<NextStep, DomainError> {
     const step = compiled.stepById.get(id.stepId) as WorkflowStepDefinition | LoopStepDefinition | undefined;
-    if (!step) return err({ kind: 'invalid_state', message: `Unknown stepId '${id.stepId}'` });
-    if (isLoopStepDefinition(step)) return err({ kind: 'invalid_state', message: `pendingStep cannot be a loop step ('${id.stepId}')` });
+    if (!step) return err(Err.invalidState(`Unknown stepId '${id.stepId}'`));
+    if (isLoopStepDefinition(step)) return err(Err.invalidState(`pendingStep cannot be a loop step ('${id.stepId}')`));
     return this.materializeStep(compiled, id, {});
   }
 
@@ -312,9 +312,9 @@ export class WorkflowInterpreter {
     context: Record<string, unknown>
   ): Result<NextStep, DomainError> {
     const step = compiled.stepById.get(instance.stepId) as WorkflowStepDefinition | LoopStepDefinition | undefined;
-    if (!step) return err({ kind: 'invalid_state', message: `Unknown stepId '${instance.stepId}'` });
+    if (!step) return err(Err.invalidState(`Unknown stepId '${instance.stepId}'`));
     if (isLoopStepDefinition(step)) {
-      return err({ kind: 'invalid_state', message: `Cannot execute loop step '${step.id}' directly` });
+      return err(Err.invalidState(`Cannot execute loop step '${step.id}' directly`));
     }
 
     const promptParts: string[] = [];
@@ -337,7 +337,7 @@ export class WorkflowInterpreter {
       stepInstanceId: instance,
       guidance: {
         prompt: promptParts.join('\n'),
-        requiresConfirmation: step.requireConfirmation,
+        requiresConfirmation: !!step.requireConfirmation,
       },
     });
   }

@@ -5,8 +5,9 @@ import {
   LoopStepDefinition,
   isLoopStepDefinition,
 } from '../../types/workflow';
-import { ok, err, Result } from '../../domain/execution/result';
-import { DomainError } from '../../domain/execution/error';
+import type { Result } from 'neverthrow';
+import { ok, err } from 'neverthrow';
+import { type DomainError, Err } from '../../domain/execution/error';
 
 export interface CompiledLoop {
   readonly loop: LoopStepDefinition;
@@ -33,10 +34,7 @@ export class WorkflowCompiler {
     const stepById = new Map<string, WorkflowStepDefinition | LoopStepDefinition>();
     for (const step of steps) {
       if (stepById.has(step.id)) {
-        return err({
-          kind: 'invalid_state',
-          message: `Duplicate step id '${step.id}' in workflow '${workflow.definition.id}'`,
-        });
+        return err(Err.invalidState(`Duplicate step id '${step.id}' in workflow '${workflow.definition.id}'`));
       }
       stepById.set(step.id, step);
     }
@@ -49,7 +47,7 @@ export class WorkflowCompiler {
 
       const loop = step;
       const bodyResolved = this.resolveLoopBody(loop, stepById, workflow);
-      if (bodyResolved.kind === 'err') return bodyResolved;
+      if (bodyResolved.isErr()) return err(bodyResolved.error);
 
       for (const bodyStep of bodyResolved.value) {
         loopBodyStepIds.add(bodyStep.id);
@@ -80,11 +78,7 @@ export class WorkflowCompiler {
       // v1: forbid nested loops in body
       for (const s of loop.body) {
         if (isLoopStepDefinition(s as any)) {
-          return err({
-            kind: 'invalid_loop',
-            loopId: loop.id,
-            message: `Nested loops are not supported (inline step '${s.id}' is a loop)`,
-          });
+          return err(Err.invalidLoop(loop.id, `Nested loops are not supported (inline step '${s.id}' is a loop)`));
         }
       }
 
@@ -93,10 +87,11 @@ export class WorkflowCompiler {
       for (const s of loop.body) {
         const existing = stepById.get(s.id);
         if (existing) {
-          return err({
-            kind: 'invalid_state',
-            message: `Inline loop body step id '${s.id}' collides with existing step id in workflow '${workflow.definition.id}'`,
-          });
+          return err(
+            Err.invalidState(
+              `Inline loop body step id '${s.id}' collides with existing step id in workflow '${workflow.definition.id}'`
+            )
+          );
         }
         stepById.set(s.id, s);
       }
@@ -107,19 +102,11 @@ export class WorkflowCompiler {
     const bodyRef = loop.body as string;
     const referenced = stepById.get(bodyRef);
     if (!referenced) {
-      return err({
-        kind: 'invalid_loop',
-        loopId: loop.id,
-        message: `Loop body references missing step '${bodyRef}'`,
-      });
+      return err(Err.invalidLoop(loop.id, `Loop body references missing step '${bodyRef}'`));
     }
 
     if (isLoopStepDefinition(referenced)) {
-      return err({
-        kind: 'invalid_loop',
-        loopId: loop.id,
-        message: `Nested loops are not supported (referenced step '${referenced.id}' is a loop)`,
-      });
+      return err(Err.invalidLoop(loop.id, `Nested loops are not supported (referenced step '${referenced.id}' is a loop)`));
     }
 
     return ok([referenced]);

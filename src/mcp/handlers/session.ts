@@ -7,6 +7,14 @@
 
 import type { ToolContext, ToolResult } from '../types.js';
 import { success, error } from '../types.js';
+import {
+  CreateSessionOutputSchema,
+  OpenDashboardOutputSchema,
+  ReadSessionOutputSchema,
+  ReadSessionSchemaOutputSchema,
+  UpdateSessionOutputSchema,
+} from '../output-schemas.js';
+import { mapUnknownErrorToToolError } from '../error-mapper.js';
 import type {
   CreateSessionInput,
   UpdateSessionInput,
@@ -134,16 +142,17 @@ export async function handleCreateSession(
     const baseUrl = httpServer.getBaseUrl();
     const dashboardUrl = baseUrl ? `${baseUrl}?session=${input.sessionId}` : null;
 
-    return success({
+    const payload = CreateSessionOutputSchema.parse({
       sessionId: session.id,
       workflowId: session.workflowId,
       path: sessionManager.getSessionPath(input.workflowId, input.sessionId),
       dashboardUrl,
       createdAt: session.createdAt,
     });
+    return success(payload);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return error('INTERNAL_ERROR', message);
+    const mapped = mapUnknownErrorToToolError(err);
+    return error(mapped.code, mapped.message, mapped.suggestion);
   }
 }
 
@@ -163,9 +172,8 @@ export async function handleUpdateSession(
       input.updates
     );
 
-    return success({
-      updatedAt: new Date().toISOString(),
-    });
+    const payload = UpdateSessionOutputSchema.parse({ updatedAt: new Date().toISOString() });
+    return success(payload);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
 
@@ -177,7 +185,8 @@ export async function handleUpdateSession(
       );
     }
 
-    return error('INTERNAL_ERROR', message);
+    const mapped = mapUnknownErrorToToolError(err);
+    return error(mapped.code, mapped.message, mapped.suggestion);
   }
 }
 
@@ -192,10 +201,11 @@ export async function handleReadSession(
 
   // Special case: $schema returns structure overview
   if (input.path === '$schema') {
-    return success({
+    const payload = ReadSessionSchemaOutputSchema.parse({
       query: '$schema' as const,
       schema: SESSION_SCHEMA_OVERVIEW,
     });
+    return success(payload);
   }
 
   try {
@@ -205,10 +215,11 @@ export async function handleReadSession(
       input.path
     );
 
-    return success({
+    const payload = ReadSessionOutputSchema.parse({
       query: input.path ?? '(full session)',
       data,
     });
+    return success(payload);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
 
@@ -220,7 +231,8 @@ export async function handleReadSession(
       );
     }
 
-    return error('INTERNAL_ERROR', message);
+    const mapped = mapUnknownErrorToToolError(err);
+    return error(mapped.code, mapped.message, mapped.suggestion);
   }
 }
 
@@ -236,9 +248,10 @@ export async function handleOpenDashboard(
   try {
     const url = await httpServer.openDashboard(input.sessionId);
 
-    return success({ url });
+    const payload = OpenDashboardOutputSchema.parse({ url });
+    return success(payload);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return error('INTERNAL_ERROR', message);
+    const mapped = mapUnknownErrorToToolError(err);
+    return error(mapped.code, mapped.message, mapped.suggestion);
   }
 }

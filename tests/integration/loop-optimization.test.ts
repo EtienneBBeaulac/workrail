@@ -6,6 +6,14 @@ import type { WorkflowDefinition } from '../../src/types/workflow.js';
 import type { ExecutionState } from '../../src/domain/execution/state.js';
 import type { WorkflowEvent } from '../../src/domain/execution/event.js';
 
+function expectOk<T>(result: any): T {
+  expect(result.isOk()).toBe(true);
+  if (result.isErr()) {
+    throw new Error(`Expected Ok but got Err: ${JSON.stringify(result.error)}`);
+  }
+  return result.value as T;
+}
+
 describe('Loop Optimization Integration', () => {
   let storage: InMemoryWorkflowStorage;
 
@@ -87,34 +95,34 @@ describe('Loop Optimization Integration', () => {
       let event: WorkflowEvent | undefined = undefined;
 
       // 1) setup
-      let r1 = await workflowService.getNextStep('test-workflow', state, event, initialContext);
-      expect(r1.kind).toBe('ok');
-      expect(r1.value.next?.step.id).toBe('setup');
-      state = r1.value.state;
+      const r1 = await workflowService.getNextStep('test-workflow', state, event, initialContext);
+      const v1 = expectOk<{ state: ExecutionState; next: any | null; isComplete: boolean }>(r1);
+      expect(v1.next?.step.id).toBe('setup');
+      state = v1.state;
 
       // 2) complete setup -> first loop body step (iteration 1)
-      event = { kind: 'step_completed', stepInstanceId: r1.value.next!.stepInstanceId };
+      event = { kind: 'step_completed', stepInstanceId: v1.next!.stepInstanceId };
       const r2 = await workflowService.getNextStep('test-workflow', state, event, initialContext);
-      expect(r2.kind).toBe('ok');
-      expect(r2.value.next?.step.id).toBe('validate-item');
-      expect(r2.value.next?.guidance.prompt).toContain('## Loop Context');
-      expect(r2.value.next?.guidance.prompt).toContain('Iteration: 1');
-      state = r2.value.state;
+      const v2 = expectOk<{ state: ExecutionState; next: any | null; isComplete: boolean }>(r2);
+      expect(v2.next?.step.id).toBe('validate-item');
+      expect(v2.next?.guidance.prompt).toContain('## Loop Context');
+      expect(v2.next?.guidance.prompt).toContain('Iteration: 1');
+      state = v2.state;
 
       // 3) complete validate-item -> process-item (still iteration 1)
-      event = { kind: 'step_completed', stepInstanceId: r2.value.next!.stepInstanceId };
+      event = { kind: 'step_completed', stepInstanceId: v2.next!.stepInstanceId };
       const r3 = await workflowService.getNextStep('test-workflow', state, event, initialContext);
-      expect(r3.kind).toBe('ok');
-      expect(r3.value.next?.step.id).toBe('process-item');
-      state = r3.value.state;
+      const v3 = expectOk<{ state: ExecutionState; next: any | null; isComplete: boolean }>(r3);
+      expect(v3.next?.step.id).toBe('process-item');
+      state = v3.state;
 
       // 4) complete process-item -> validate-item again (iteration 2)
-      event = { kind: 'step_completed', stepInstanceId: r3.value.next!.stepInstanceId };
+      event = { kind: 'step_completed', stepInstanceId: v3.next!.stepInstanceId };
       const r4 = await workflowService.getNextStep('test-workflow', state, event, initialContext);
-      expect(r4.kind).toBe('ok');
-      expect(r4.value.next?.step.id).toBe('validate-item');
-      expect(r4.value.next?.guidance.prompt).toContain('## Loop Context');
-      expect(r4.value.next?.guidance.prompt).toContain('Iteration: 2');
+      const v4 = expectOk<{ state: ExecutionState; next: any | null; isComplete: boolean }>(r4);
+      expect(v4.next?.step.id).toBe('validate-item');
+      expect(v4.next?.guidance.prompt).toContain('## Loop Context');
+      expect(v4.next?.guidance.prompt).toContain('Iteration: 2');
     });
 
     it('should skip empty loops entirely', async () => {
@@ -165,18 +173,18 @@ describe('Loop Optimization Integration', () => {
       let state: ExecutionState = { kind: 'init' };
 
       const r1 = await workflowService.getNextStep('empty-loop-workflow', state, undefined, context);
-      expect(r1.kind).toBe('ok');
-      expect(r1.value.next?.step.id).toBe('start');
-      state = r1.value.state;
+      const v1 = expectOk<{ state: ExecutionState; next: any | null; isComplete: boolean }>(r1);
+      expect(v1.next?.step.id).toBe('start');
+      state = v1.state;
 
       const r2 = await workflowService.getNextStep(
         'empty-loop-workflow',
         state,
-        { kind: 'step_completed', stepInstanceId: r1.value.next!.stepInstanceId },
+        { kind: 'step_completed', stepInstanceId: v1.next!.stepInstanceId },
         context
       );
-      expect(r2.kind).toBe('ok');
-      expect(r2.value.next?.step.id).toBe('end');
+      const v2 = expectOk<{ state: ExecutionState; next: any | null; isComplete: boolean }>(r2);
+      expect(v2.next?.step.id).toBe('end');
     });
   });
 
@@ -228,18 +236,18 @@ describe('Loop Optimization Integration', () => {
       let state: ExecutionState = { kind: 'init' };
 
       const first = await workflowService.getNextStep('size-test-workflow', state, undefined, context);
-      expect(first.kind).toBe('ok');
-      expect(first.value.next?.step.id).toBe('setup-step');
-      state = first.value.state;
+      const v1 = expectOk<{ state: ExecutionState; next: any | null; isComplete: boolean }>(first);
+      expect(v1.next?.step.id).toBe('setup-step');
+      state = v1.state;
 
       const second = await workflowService.getNextStep(
         'size-test-workflow',
         state,
-        { kind: 'step_completed', stepInstanceId: first.value.next!.stepInstanceId },
+        { kind: 'step_completed', stepInstanceId: v1.next!.stepInstanceId },
         context
       );
-      expect(second.kind).toBe('ok');
-      expect(second.value.next?.guidance.prompt).toContain('## Loop Context');
+      const v2 = expectOk<{ state: ExecutionState; next: any | null; isComplete: boolean }>(second);
+      expect(v2.next?.guidance.prompt).toContain('## Loop Context');
     });
   });
 
@@ -270,9 +278,9 @@ describe('Loop Optimization Integration', () => {
 
       const workflowService = resolve(DI.Services.Workflow);
       const result = await workflowService.getNextStep('dsl-workflow', { kind: 'init' }, undefined, {});
-      expect(result.kind).toBe('ok');
-      expect(result.value.next?.step.id).toBe('use-functions');
-      expect(result.value.next?.step.functionReferences).toContain('globalValidate()');
+      const v1 = expectOk<{ state: ExecutionState; next: any | null; isComplete: boolean }>(result);
+      expect(v1.next?.step.id).toBe('use-functions');
+      expect(v1.next?.step.functionReferences).toContain('globalValidate()');
       
       // Workflow should have function definitions
       expect(workflow.functionDefinitions).toHaveLength(1);
