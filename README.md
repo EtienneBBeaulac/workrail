@@ -34,9 +34,22 @@ Instead of one system prompt that fades over time, WorkRail drip-feeds instructi
 the [Model Context Protocol](https://modelcontextprotocol.org). The agent calls `workflow_next`,
 gets ONE step, completes it, calls again. Future steps stay hidden until previous ones are done.
 
-**The agent can't skip to implementation because it doesn't know those steps exist yet.**
+**The agent can't skip to implementation because it doesn't know those steps exist yet.** (It can still go off-rail intentionally, but the workflow strongly prevents premature jumps.)
 
-### The Mechanism
+### North Star (Today)
+WorkRail is a **supervision layer for AI agents**. It replaces prompt babysitting with **curated workflows** that emulate how an expert guides an agent: clarify, plan, execute in small steps, and verify.
+
+Mechanism: it drip-feeds the next step via MCP (information hiding), keeping guidance fresh and preventing premature jumps.
+
+### Direction (Evolving)
+Over time, WorkRail should evolve toward a more explicit **execution protocol**—typed progress, structured blockers, and artifact references—while keeping agent UX **text-first**.
+
+This keeps the agent experience simple while making blocked and missing-input states deterministic and actionable.
+
+### Note on model variability
+Different LLMs vary in how reliably they follow multi-step tool loops. Workflows should favor short steps, explicit checklists, and clear confirmation gates to reduce variance.
+
+### The Delivery Mechanism (How supervision is enforced)
 
 ```
 You                      Agent                     WorkRail
@@ -123,7 +136,7 @@ This isn't arbitrary structure. It's how experienced developers actually work.
 | System Prompt | WorkRail |
 |---------------|----------|
 | "Plan first" fades as context grows | Each step is fresh and immediate |
-| Agent decides what to follow | Agent can't skip - next step is hidden |
+| Agent decides what to follow | Agent can't see future steps - information hiding |
 | One-size-fits-all instructions | Workflows adapt to task complexity |
 | Inconsistent results | Repeatable, consistent quality |
 
@@ -196,11 +209,7 @@ is how senior engineers think - now encoded into every workflow.
 
 ### Replacing the Human Guide
 
-A skilled developer doesn't let AI run unsupervised on complex tasks. They guide it: "Wait, did you
-check X?" "What about edge case Y?" "Show me your reasoning."
-
-WorkRail does this automatically. The workflow asks the questions a senior dev would ask, at the
-moments they'd ask them.
+WorkRail automates the supervision a skilled developer provides when guiding AI through complex work.
 
 ---
 
