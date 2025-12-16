@@ -67,7 +67,7 @@ describe('[SMOKE] DI Container Health', () => {
     // Report all failures at once for easier debugging
     if (failures.length > 0) {
       const errorReport = failures
-        .map((f) => `  ❌ ${f.name}: ${f.error}`)
+        .map((f) => `  ❌ ${f.definition.name}: ${f.error}`)
         .join('\n');
 
       throw new Error(

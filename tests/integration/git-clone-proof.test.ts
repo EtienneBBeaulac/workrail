@@ -25,9 +25,9 @@ describe('🔥 DIRECT PROOF: Git Cloning Works', () => {
     // Create a real Git repository
     await fs.mkdir(path.join(sourceRepoDir, 'workflows'), { recursive: true });
     
-    await execAsync('git init', { cwd: sourceRepoDir });
-    await execAsync('git config user.email "test@test.com"', { cwd: sourceRepoDir });
-    await execAsync('git config user.name "Test"', { cwd: sourceRepoDir });
+    const { initGitRepo } = await import('../helpers/git-test-utils.js');
+    await initGitRepo(sourceRepoDir);
+    await execAsync('git config user.definition.name "Test"', { cwd: sourceRepoDir });
     
     // Create a real workflow
     const workflow = {
@@ -85,11 +85,11 @@ describe('🔥 DIRECT PROOF: Git Cloning Works', () => {
 
     // PROOF 2: Correct workflow data
     const workflow = workflows[0]!;
-    console.log(`✅ Workflow ID: ${workflow.id}`);
-    console.log(`✅ Workflow Name: ${workflow.name}`);
-    expect(workflow.id).toBe('proof-workflow');
-    expect(workflow.name).toBe('Proof Workflow');
-    expect(workflow.steps).toHaveLength(1);
+    console.log(`✅ Workflow ID: ${workflow.definition.id}`);
+    console.log(`✅ Workflow Name: ${workflow.definition.name}`);
+    expect(workflow.definition.id).toBe('proof-workflow');
+    expect(workflow.definition.name).toBe('Proof Workflow');
+    expect(workflow.definition.steps).toHaveLength(1);
 
     // PROOF 3: Files actually exist on disk
     const clonedFile = path.join(cloneDir, 'test1', 'workflows', 'proof-workflow.json');
@@ -116,8 +116,8 @@ describe('🔥 DIRECT PROOF: Git Cloning Works', () => {
 
     // PROOF: Retrieved specific workflow
     expect(workflow).not.toBeNull();
-    expect(workflow?.id).toBe('proof-workflow');
-    expect(workflow?.name).toBe('Proof Workflow');
+    expect(workflow?.definition.id).toBe('proof-workflow');
+    expect(workflow?.definition.name).toBe('Proof Workflow');
     
     console.log('✅✅ PROVEN: getWorkflowById works! ✅✅');
   });
@@ -136,7 +136,7 @@ describe('🔥 DIRECT PROOF: Git Cloning Works', () => {
     expect(summaries).toHaveLength(1);
     expect(summaries[0]?.id).toBe('proof-workflow');
     expect(summaries[0]?.name).toBe('Proof Workflow');
-    expect(summaries[0]?.category).toBe('community');
+    expect(summaries[0]?.source.kind).toBe('git');
     
     console.log('✅✅ PROVEN: listWorkflowSummaries works! ✅✅');
   });
@@ -168,7 +168,7 @@ describe('🔥 DIRECT PROOF: Git Cloning Works', () => {
 
     const workflows2 = await storage2.loadAllWorkflows();
     expect(workflows2).toHaveLength(1);
-    expect(workflows2[0]?.id).toBe('proof-workflow');
+    expect(workflows2[0]?.definition.id).toBe('proof-workflow');
     
     console.log('✅✅ PROVEN: Caching works (loaded from cache)! ✅✅');
   });
@@ -200,8 +200,8 @@ describe('🔥 DIRECT PROOF: Git Cloning Works', () => {
 
     // PROOF: Got both workflows
     expect(workflows.length).toBeGreaterThanOrEqual(2);
-    expect(workflows.some(w => w.id === 'proof-workflow')).toBe(true);
-    expect(workflows.some(w => w.id === 'second-proof')).toBe(true);
+    expect(workflows.some(w => w.definition.id === 'proof-workflow')).toBe(true);
+    expect(workflows.some(w => w.definition.id === 'second-proof')).toBe(true);
     
     console.log(`✅✅ PROVEN: Multiple workflows work (${workflows.length} loaded)! ✅✅`);
   });

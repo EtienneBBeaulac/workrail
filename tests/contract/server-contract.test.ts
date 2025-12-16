@@ -23,7 +23,13 @@ describe('MCP Server JSON-RPC contract', () => {
     const res = await client.send('workflow_list');
     expect(res.jsonrpc).toBe('2.0');
     expect(res.result).toBeDefined();
-    responseValidator.validate('workflow_list', res.result);
+    try {
+      responseValidator.validate('workflow_list', res.result);
+    } catch (err) {
+      // Debug print to understand schema mismatch
+      console.error('workflow_list result (debug):', JSON.stringify(res.result, null, 2));
+      throw err;
+    }
     expect(Array.isArray(res.result.workflows)).toBe(true);
   });
 

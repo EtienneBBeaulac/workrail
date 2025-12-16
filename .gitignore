@@ -49,4 +49,7 @@ coverage/
 sessions/
 
 # Temporary working files
-temp/ 
+temp/
+
+# Git worktrees
+.worktrees/ 

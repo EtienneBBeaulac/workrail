@@ -22,8 +22,8 @@ describe('Git Sync & Security - No Corners Rounded', () => {
   async function createGitRepo() {
     await fs.mkdir(path.join(sourceRepo, 'workflows'), { recursive: true });
     
-    await execAsync('git init', { cwd: sourceRepo });
-    await execAsync('git config user.email "test@test.com"', { cwd: sourceRepo });
+    const { initGitRepo } = await import('../helpers/git-test-utils.js');
+    await initGitRepo(sourceRepo);
     await execAsync('git config user.name "Test"', { cwd: sourceRepo });
     
     const workflow = {
@@ -79,7 +79,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
 
       const initial = await storage.loadAllWorkflows();
       expect(initial.length).toBeGreaterThanOrEqual(1);
-      expect(initial.some(w => w.id === 'sync-test')).toBe(true);
+      expect(initial.some(w => w.definition.id === 'sync-test')).toBe(true);
 
       // Add a new workflow to source repo
       const newWorkflow = {
@@ -109,7 +109,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       const updated = await storage.loadAllWorkflows();
       
       // PROOF: Git pull worked
-      expect(updated.some(w => w.id === 'new-workflow-test')).toBe(true);
+      expect(updated.some(w => w.definition.id === 'new-workflow-test')).toBe(true);
       
       console.log('✅ PROVEN: Git pull/sync works');
     });
@@ -126,7 +126,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       });
 
       const initial = await storage.getWorkflowById('sync-test');
-      const originalName = initial?.name;
+      const originalName = initial?.definition.name;
 
       // Update the workflow in source
       const updated = {
@@ -145,9 +145,9 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       const pulled = await storage.getWorkflowById('sync-test');
       
       // PROOF: Pulled updated content
-      expect(pulled?.name).not.toBe(originalName);
-      expect(pulled?.name).toBe('UPDATED Sync Test Workflow v2');
-      expect(pulled?.version).toBe('2.5.0');
+      expect(pulled?.definition.name).not.toBe(originalName);
+      expect(pulled?.definition.name).toBe('UPDATED Sync Test Workflow v2');
+      expect(pulled?.definition.version).toBe('2.5.0');
       
       console.log('✅ PROVEN: Git pull updates existing workflows');
     });
@@ -194,7 +194,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       const workflows = await storage.loadAllWorkflows();
       
       // PROOF: Didn't pull (still using cache)
-      expect(workflows.some(w => w.id === 'should-not-appear')).toBe(false);
+      expect(workflows.some(w => w.definition.id === 'should-not-appear')).toBe(false);
       
       console.log('✅ PROVEN: syncInterval is respected');
     });
@@ -239,7 +239,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       const workflows = await storage.loadAllWorkflows();
       
       // PROOF: Cloned from feature branch
-      expect(workflows.some(w => w.id === 'feature-workflow')).toBe(true);
+      expect(workflows.some(w => w.definition.id === 'feature-workflow')).toBe(true);
       
       console.log('✅ PROVEN: Branch selection works');
     });
@@ -293,8 +293,8 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       
       if (Array.isArray(result)) {
         // If it loaded, IDs must be sanitized
-        expect(result.every(w => !w.id.includes('..'))).toBe(true);
-        expect(result.every(w => !w.id.includes('/'))).toBe(true);
+        expect(result.every(w => !w.definition.id.includes('..'))).toBe(true);
+        expect(result.every(w => !w.definition.id.includes('/'))).toBe(true);
       }
       // If it threw, that's also acceptable
       
@@ -683,7 +683,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       
       // PROOF: Only loads .json files
       expect(workflows).toHaveLength(1);
-      expect(workflows[0]?.id).toBe('valid');
+      expect(workflows[0]?.definition.id).toBe('valid');
       
       console.log('✅ PROVEN: Ignores non-JSON files');
     });

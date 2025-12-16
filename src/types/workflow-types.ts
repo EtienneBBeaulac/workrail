@@ -1,98 +1,102 @@
-// Workflow Schema Type Definitions
-// Based on JSON Schema Draft 7 specification
+/**
+ * Workflow Schema Type Definitions
+ * 
+ * This file contains LEGACY and RUNTIME types that extend the core workflow types.
+ * For core workflow types (Workflow, WorkflowDefinition, WorkflowStep), use ./workflow.ts
+ */
 
 import { Condition, ConditionContext } from '../utils/condition-evaluator';
+import {
+  WorkflowStepDefinition,
+  LoopStepDefinition,
+  LoopConfigDefinition,
+  FunctionDefinition,
+  FunctionParameter,
+  FunctionCall
+} from './workflow-definition';
 
 // =============================================================================
-// CORE WORKFLOW TYPES
+// RE-EXPORTS FROM CANONICAL SOURCES
 // =============================================================================
 
-export interface Workflow {
-  id: string;
-  name: string;
-  description: string;
-  version: string;
-  preconditions?: string[];
-  clarificationPrompts?: string[];
-  steps: (WorkflowStep | LoopStep)[];
-  metaGuidance?: string[];
-  functionDefinitions?: FunctionDefinition[];
+// Re-export core types from workflow.ts (primary source of truth)
+export type {
+  Workflow,
+  WorkflowDefinition,
+  WorkflowStepDefinition,
+  LoopStepDefinition,
+  LoopConfigDefinition,
+  FunctionDefinition,
+  FunctionParameter,
+  FunctionCall,
+  WorkflowSummary,
+  WorkflowSource,
+  WorkflowSourceInfo
+} from './workflow';
+
+export {
+  createWorkflow,
+  toWorkflowSummary,
+  isWorkflow,
+  isWorkflowDefinition,
+  isLoopStepDefinition,
+  isWorkflowStepDefinition
+} from './workflow';
+
+// =============================================================================
+// LEGACY TYPE ALIASES (for backward compatibility)
+// =============================================================================
+
+/** @deprecated Use WorkflowStepDefinition from ./workflow */
+export type WorkflowStep = WorkflowStepDefinition;
+
+/** @deprecated Use LoopStepDefinition from ./workflow */
+export type LoopStep = LoopStepDefinition;
+
+/** @deprecated Use LoopConfigDefinition from ./workflow */
+export type LoopConfig = LoopConfigDefinition;
+
+/** @deprecated Use isLoopStepDefinition from ./workflow */
+export function isLoopStep(step: WorkflowStepDefinition | LoopStepDefinition): step is LoopStepDefinition {
+  return 'type' in step && step.type === 'loop';
 }
 
-export interface WorkflowStep {
-  id: string;
-  title: string;
-  prompt: string;
-  agentRole?: string;
-  guidance?: string[];
-  askForFiles?: boolean;
-  requireConfirmation?: boolean;
-  runCondition?: object;
-  functionDefinitions?: FunctionDefinition[];
-  functionCalls?: FunctionCall[];
-  functionReferences?: string[];
-}
-
-// Loop-related types
-export interface LoopStep extends WorkflowStep {
-  type: 'loop';
-  loop: LoopConfig;
-  body: string | WorkflowStep[];
-}
-
-export interface LoopConfig {
-  type: 'while' | 'until' | 'for' | 'forEach';
-  condition?: Condition; // For while/until loops
-  items?: string; // Context variable name for forEach
-  count?: number | string; // Number or context variable for 'for' loops
-  maxIterations: number; // Safety limit
-  iterationVar?: string; // Custom iteration counter name
-  itemVar?: string; // Custom item variable name (forEach)
-  indexVar?: string; // Custom index variable name (forEach)
-}
+// =============================================================================
+// LOOP EXECUTION TYPES (Runtime-specific, not in definition)
+// =============================================================================
 
 export interface LoopState {
   [loopId: string]: {
     iteration: number;
-    started: number; // timestamp
-    items?: any[]; // for forEach loops
-    index?: number; // current array index
-    warnings?: string[]; // accumulated warnings
+    started: number;
+    items?: unknown[];
+    index?: number;
+    warnings?: string[];
   };
 }
 
-// Enhanced context for loops
 export interface EnhancedContext extends ConditionContext {
   _loopState?: LoopState;
-  _loopStack?: LoopStackFrame[]; // ✅ NEW: Explicit loop stack
+  _loopStack?: LoopStackFrame[];
   _warnings?: {
     loops?: {
       [loopId: string]: string[];
     };
   };
-  _contextSize?: number; // tracked for validation
+  _contextSize?: number;
   _currentLoop?: {
     loopId: string;
-    loopStep: LoopStep;
+    loopStep: LoopStepDefinition;
   };
 }
 
-/**
- * Loop execution states for structured logging and observability.
- * These states are implicit in the code flow but logged explicitly for debugging.
- * 
- * Enable state logging with: WORKRAIL_LOG_LEVEL=DEBUG
- */
 export enum LoopExecutionState {
-  // Main execution states (in getNextStepIterative)
   RECOVERING_LOOP_STATE = 'RECOVERING_LOOP_STATE',
   IN_LOOP = 'IN_LOOP',
   FINDING_NEXT_STEP = 'FINDING_NEXT_STEP',
   ENTERING_LOOP = 'ENTERING_LOOP',
   RETURNING_STEP = 'RETURNING_STEP',
   WORKFLOW_COMPLETE = 'WORKFLOW_COMPLETE',
-  
-  // Loop handling states (in handleCurrentLoop)
   CHECKING_LOOP_CONDITION = 'CHECKING_LOOP_CONDITION',
   SCANNING_BODY = 'SCANNING_BODY',
   CHECKING_ELIGIBILITY = 'CHECKING_ELIGIBILITY',
@@ -101,60 +105,68 @@ export enum LoopExecutionState {
   INCREMENTING_ITERATION = 'INCREMENTING_ITERATION'
 }
 
-/**
- * Represents a single frame in the loop execution stack.
- * Each frame tracks the state of an active loop.
- * 
- * The loop stack is maintained in EnhancedContext._loopStack to keep
- * the WorkflowService stateless and concurrency-safe.
- */
 export interface LoopStackFrame {
-  /** Unique identifier of the loop */
   readonly loopId: string;
-  
-  /** The loop step definition */
-  readonly loopStep: LoopStep;
-  
-  /** Execution context for this loop (tracks iteration, evaluates conditions) */
-  readonly loopContext: any; // LoopExecutionContext - avoid circular dependency
-  
-  /** Body steps normalized to array (even for single-step bodies) */
-  readonly bodySteps: ReadonlyArray<WorkflowStep>;
-  
-  /** Current position in body steps array (0-based, mutable) */
+  readonly loopStep: LoopStepDefinition;
+  readonly loopContext: LoopExecutionContextLike;
+  readonly bodySteps: readonly WorkflowStepDefinition[];
   currentBodyIndex: number;
 }
 
 /**
- * Result type for loop handling operations.
- * Uses discriminated union for type-safe handling.
+ * State snapshot from a loop execution.
  */
+export interface LoopStateSnapshot {
+  readonly iteration: number;
+  readonly started: number;
+  readonly items?: unknown[];
+  readonly index?: number;
+  readonly warnings?: string[];
+}
+
+/**
+ * Minimal interface for loop execution context.
+ * Avoids circular dependency while providing type safety.
+ * Only includes methods actually called on the interface.
+ */
+export interface LoopExecutionContextLike {
+  getCurrentState(): LoopStateSnapshot;
+  incrementIteration(): void;
+  shouldContinue(context: ConditionContext): boolean;
+  isFirstIteration(): boolean;
+  injectVariables(context: ConditionContext, minimal?: boolean): EnhancedContext | OptimizedLoopContext;
+  initializeForEach(context: ConditionContext): void;
+}
+
+export interface StepResult {
+  step: WorkflowStepDefinition;
+  isComplete: boolean;
+  context: EnhancedContext;
+  guidance: import('./mcp-types').WorkflowGuidance;
+}
+
 export type LoopHandlerResult =
-  | { type: 'step'; result: any } // StepResult - avoid circular dependency
+  | { type: 'step'; result: StepResult }
   | { type: 'continue' }
   | { type: 'complete' };
 
-/**
- * Type guard to validate LoopStackFrame structure.
- * Used for runtime invariant checking.
- */
-export function isValidLoopStackFrame(frame: any): frame is LoopStackFrame {
+export function isValidLoopStackFrame(frame: unknown): frame is LoopStackFrame {
+  if (!frame || typeof frame !== 'object') return false;
+  const f = frame as Record<string, unknown>;
+  
   return (
-    frame &&
-    typeof frame.loopId === 'string' &&
-    frame.loopStep &&
-    typeof frame.loopStep === 'object' &&
-    frame.loopContext &&
-    typeof frame.loopContext === 'object' &&
-    Array.isArray(frame.bodySteps) &&
-    frame.bodySteps.length > 0 &&
-    typeof frame.currentBodyIndex === 'number' &&
-    frame.currentBodyIndex >= 0 &&
-    frame.currentBodyIndex <= frame.bodySteps.length
+    typeof f['loopId'] === 'string' &&
+    f['loopStep'] !== null &&
+    typeof f['loopStep'] === 'object' &&
+    f['loopContext'] !== null &&
+    typeof f['loopContext'] === 'object' &&
+    Array.isArray(f['bodySteps']) &&
+    f['bodySteps'].length > 0 &&
+    typeof f['currentBodyIndex'] === 'number' &&
+    f['currentBodyIndex'] >= 0
   );
 }
 
-// Optimized context for loops with progressive disclosure
 export interface OptimizedLoopContext extends ConditionContext {
   _loopState?: LoopState;
   _warnings?: {
@@ -173,47 +185,17 @@ export interface OptimizedLoopContext extends ConditionContext {
   _loopPhaseReference?: LoopPhaseReference;
 }
 
-// Reference to loop phase for subsequent iterations
 export interface LoopPhaseReference {
   loopId: string;
   phaseTitle: string;
   totalSteps: number;
-  functionDefinitions?: FunctionDefinition[];
+  functionDefinitions?: readonly FunctionDefinition[];
 }
 
-// Function DSL support
-export interface FunctionParameter {
-  name: string;
-  type: 'string' | 'number' | 'boolean' | 'array' | 'object';
-  required?: boolean;
-  description?: string;
-  enum?: Array<string | number | boolean>;
-  default?: unknown;
-}
-
-export interface FunctionDefinition {
-  name: string;
-  definition: string;
-  parameters?: FunctionParameter[];
-  scope?: 'workflow' | 'loop' | 'step';
-}
-
-export interface FunctionCall {
-  name: string;
-  args: Record<string, unknown>;
-}
-
-// Type guard for loop steps
-export function isLoopStep(step: WorkflowStep | LoopStep): step is LoopStep {
-  return 'type' in step && step.type === 'loop';
-}
-
-// Type guard for first loop iteration
 export function isFirstLoopIteration(context: EnhancedContext | OptimizedLoopContext): boolean {
   if ('isFirstIteration' in (context._currentLoop || {})) {
     return (context as OptimizedLoopContext)._currentLoop?.isFirstIteration === true;
   }
-  // For legacy EnhancedContext, check if it's in a loop state
   const loopState = context._loopState;
   if (loopState) {
     const currentLoopId = context._currentLoop?.loopId;
@@ -252,8 +234,8 @@ export interface WorkflowValidationRule {
   type: 'required' | 'pattern' | 'length' | 'custom' | 'schema';
   field: string;
   message: string;
-  validator?: (value: any, context?: any) => boolean;
-  schema?: Record<string, any>;
+  validator?: (value: unknown, context?: unknown) => boolean;
+  schema?: Record<string, unknown>;
 }
 
 // =============================================================================
@@ -282,7 +264,7 @@ export type WorkflowExecutionStatus =
 export interface WorkflowExecutionState {
   currentStep?: string;
   completedSteps: string[];
-  context: Record<string, any>;
+  context: Record<string, unknown>;
   stepResults: Record<string, WorkflowStepResult>;
   metadata: WorkflowExecutionMetadata;
 }
@@ -300,7 +282,7 @@ export interface WorkflowStepResult {
 export interface WorkflowExecutionMetadata {
   totalSteps: number;
   completedSteps: number;
-  progress: number; // 0-100
+  progress: number;
   estimatedTimeRemaining?: number;
   lastActivity: Date;
 }
@@ -309,7 +291,7 @@ export interface WorkflowExecutionError {
   code: string;
   message: string;
   stepId?: string;
-  details?: Record<string, any>;
+  details?: Record<string, unknown>;
 }
 
 // =============================================================================
@@ -321,12 +303,12 @@ export interface WorkflowGuidance {
   modelHint?: string;
   requiresConfirmation?: boolean;
   validationCriteria?: string[];
-  context?: Record<string, any>;
+  context?: Record<string, unknown>;
   suggestions?: string[];
 }
 
 export interface WorkflowStepGuidance {
-  step: WorkflowStep;
+  step: WorkflowStepDefinition;
   guidance: WorkflowGuidance;
   isComplete: boolean;
   nextStep?: string;
@@ -334,43 +316,7 @@ export interface WorkflowStepGuidance {
 }
 
 // =============================================================================
-// WORKFLOW STORAGE TYPES
-// =============================================================================
-
-export interface WorkflowStorage {
-  type: 'file' | 'database' | 'memory';
-  path?: string;
-  connectionString?: string;
-}
-
-export interface WorkflowMetadata {
-  id: string;
-  name: string;
-  description: string;
-  category: string;
-  version: string;
-  author?: string;
-  tags?: string[];
-  createdAt: Date;
-  updatedAt: Date;
-  usageCount: number;
-  rating?: number;
-  complexity: 'simple' | 'medium' | 'complex';
-  estimatedDuration: number; // in minutes
-}
-
-export interface WorkflowSearchCriteria {
-  category?: string;
-  tags?: string[];
-  complexity?: 'simple' | 'medium' | 'complex';
-  maxDuration?: number;
-  author?: string;
-  rating?: number;
-  searchTerm?: string;
-}
-
-// =============================================================================
-// WORKFLOW CATEGORIES AND TAGS
+// WORKFLOW SEARCH AND METADATA TYPES
 // =============================================================================
 
 export type WorkflowCategory = 
@@ -386,10 +332,63 @@ export type WorkflowCategory =
   | 'migration'
   | 'custom';
 
+export type WorkflowComplexity = 
+  | 'simple'
+  | 'medium'
+  | 'complex';
+
+export type WorkflowStepStatus = 
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'skipped'
+  | 'cancelled';
+
 export interface WorkflowTag {
   name: string;
   description: string;
   color?: string;
+}
+
+export interface WorkflowSearchCriteria {
+  category?: string;
+  tags?: string[];
+  complexity?: 'simple' | 'medium' | 'complex';
+  maxDuration?: number;
+  author?: string;
+  rating?: number;
+  searchTerm?: string;
+}
+
+export interface WorkflowSearchResult {
+  workflows: import('./workflow').WorkflowSummary[];
+  total: number;
+  page: number;
+  pageSize: number;
+  filters: WorkflowSearchCriteria;
+}
+
+export interface WorkflowMetadata {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  version: string;
+  author?: string;
+  tags?: string[];
+  createdAt: Date;
+  updatedAt: Date;
+  usageCount: number;
+  rating?: number;
+  complexity: WorkflowComplexity;
+  estimatedDuration: number;
+}
+
+export interface WorkflowStorage {
+  type: 'file' | 'database' | 'memory';
+  path?: string;
+  connectionString?: string;
 }
 
 // =============================================================================
@@ -421,7 +420,7 @@ export interface WorkflowTemplate {
   name: string;
   description: string;
   category: WorkflowCategory;
-  template: Workflow;
+  template: import('./workflow').Workflow;
   variables: WorkflowTemplateVariable[];
   examples: WorkflowTemplateExample[];
 }
@@ -431,15 +430,15 @@ export interface WorkflowTemplateVariable {
   description: string;
   type: 'string' | 'number' | 'boolean' | 'array' | 'object';
   required: boolean;
-  defaultValue?: any;
-  validation?: Record<string, any>;
+  defaultValue?: unknown;
+  validation?: Record<string, unknown>;
 }
 
 export interface WorkflowTemplateExample {
   name: string;
   description: string;
-  variables: Record<string, any>;
-  result: Workflow;
+  variables: Record<string, unknown>;
+  result: import('./workflow').Workflow;
 }
 
 // =============================================================================
@@ -504,52 +503,14 @@ export interface WorkflowPluginHook {
 export interface WorkflowPluginCommand {
   name: string;
   description: string;
-  parameters: Record<string, any>;
-  handler: (params: Record<string, any>) => Promise<any>;
+  parameters: Record<string, unknown>;
+  handler: (params: Record<string, unknown>) => Promise<unknown>;
 }
 
 export interface WorkflowPluginContext {
   workflowId: string;
   executionId: string;
   stepId?: string;
-  data: Record<string, any>;
+  data: Record<string, unknown>;
   state: WorkflowExecutionState;
 }
-
-// =============================================================================
-// UTILITY TYPES
-// =============================================================================
-
-export type WorkflowStepStatus = 
-  | 'pending'
-  | 'running'
-  | 'completed'
-  | 'failed'
-  | 'skipped'
-  | 'cancelled';
-
-export type WorkflowComplexity = 
-  | 'simple'
-  | 'medium'
-  | 'complex';
-
-export interface WorkflowSummary {
-  id: string;
-  name: string;
-  description: string;
-  category: WorkflowCategory;
-  version: string;
-  complexity: WorkflowComplexity;
-  estimatedDuration: number;
-  tags: string[];
-  rating?: number;
-  usageCount: number;
-}
-
-export interface WorkflowSearchResult {
-  workflows: WorkflowSummary[];
-  total: number;
-  page: number;
-  pageSize: number;
-  filters: WorkflowSearchCriteria;
-} 

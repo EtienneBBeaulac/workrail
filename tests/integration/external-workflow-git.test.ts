@@ -86,8 +86,8 @@ describe('GitWorkflowStorage Integration', () => {
       const workflows = await storage.loadAllWorkflows();
 
       expect(workflows).toHaveLength(1);
-      expect(workflows[0]?.id).toBe('test-workflow');
-      expect(workflows[0]?.name).toBe('Test Workflow');
+      expect(workflows[0]?.definition.id).toBe('test-workflow');
+      expect(workflows[0]?.definition.name).toBe('Test Workflow');
     });
 
     it('should load workflows from cloned repository', async () => {
@@ -101,7 +101,7 @@ describe('GitWorkflowStorage Integration', () => {
 
       expect(summaries).toHaveLength(1);
       expect(summaries[0]?.id).toBe('test-workflow');
-      expect(summaries[0]?.category).toBe('community');
+      expect(summaries[0]?.source.kind).toBe('git');
     });
 
     it('should get specific workflow by ID', async () => {
@@ -114,8 +114,8 @@ describe('GitWorkflowStorage Integration', () => {
       const workflow = await storage.getWorkflowById('test-workflow');
 
       expect(workflow).not.toBeNull();
-      expect(workflow?.id).toBe('test-workflow');
-      expect(workflow?.steps).toHaveLength(1);
+      expect(workflow?.definition.id).toBe('test-workflow');
+      expect(workflow?.definition.steps).toHaveLength(1);
     });
 
     it('should return null for non-existent workflow', async () => {
@@ -156,7 +156,7 @@ describe('GitWorkflowStorage Integration', () => {
 
       const workflows2 = await storage2.loadAllWorkflows();
       expect(workflows2).toHaveLength(1);
-      expect(workflows2[0]?.id).toBe('test-workflow');
+      expect(workflows2[0]?.definition.id).toBe('test-workflow');
     });
   });
 
@@ -183,7 +183,7 @@ describe('GitWorkflowStorage Integration', () => {
       // GitWorkflowStorage now gracefully falls back to default branch when requested branch doesn't exist
       const workflows = await storage.loadAllWorkflows();
       expect(workflows).toHaveLength(1);
-      expect(workflows[0]?.id).toBe('test-workflow');
+      expect(workflows[0]?.definition.id).toBe('test-workflow');
     });
 
     it('should accept any valid HTTPS URL with proper structure', () => {
@@ -261,8 +261,8 @@ describe('GitWorkflowStorage Integration', () => {
       const workflows = await storage.loadAllWorkflows();
 
       expect(workflows.length).toBeGreaterThanOrEqual(2);
-      expect(workflows.some(w => w.id === 'test-workflow')).toBe(true);
-      expect(workflows.some(w => w.id === 'second-workflow')).toBe(true);
+      expect(workflows.some(w => w.definition.id === 'test-workflow')).toBe(true);
+      expect(workflows.some(w => w.definition.id === 'second-workflow')).toBe(true);
     });
   });
 

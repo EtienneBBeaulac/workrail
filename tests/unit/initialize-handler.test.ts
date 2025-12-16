@@ -1,5 +1,5 @@
 import { initializeHandler } from '../../src/tools/mcp_initialize';
-import { MCPInitializeRequest, MCPErrorCodes } from '../../src/types/mcp-types';
+import { MCPErrorCodes, MCPInitializeRequest } from '../../src/types/mcp-types';
 import { MCPError } from '../../src/core/error-handler';
 import { describe, it, expect } from 'vitest';
 
@@ -53,8 +53,9 @@ describe('initializeHandler', () => {
         method: 'initialize'
       } as MCPInitializeRequest;
 
-      await expect(initializeHandler(request)).rejects.toThrow(MCPError);
-      await expect(initializeHandler(request)).rejects.toMatchObject({
+      const promise = initializeHandler(request);
+      await expect(promise).rejects.toThrow(MCPError);
+      await expect(promise).rejects.toMatchObject({
         code: MCPErrorCodes.INVALID_PARAMS,
         message: 'Invalid params: params object is required'
       });
@@ -70,8 +71,9 @@ describe('initializeHandler', () => {
         } as any
       };
 
-      await expect(initializeHandler(request)).rejects.toThrow(MCPError);
-      await expect(initializeHandler(request)).rejects.toMatchObject({
+      const promise = initializeHandler(request);
+      await expect(promise).rejects.toThrow(MCPError);
+      await expect(promise).rejects.toMatchObject({
         code: MCPErrorCodes.INVALID_PARAMS,
         message: 'Invalid params: protocolVersion is required'
       });
@@ -87,8 +89,9 @@ describe('initializeHandler', () => {
         } as any
       };
 
-      await expect(initializeHandler(request)).rejects.toThrow(MCPError);
-      await expect(initializeHandler(request)).rejects.toMatchObject({
+      const promise = initializeHandler(request);
+      await expect(promise).rejects.toThrow(MCPError);
+      await expect(promise).rejects.toMatchObject({
         code: MCPErrorCodes.INVALID_PARAMS,
         message: 'Invalid params: capabilities is required'
       });
@@ -105,8 +108,9 @@ describe('initializeHandler', () => {
         }
       };
 
-      await expect(initializeHandler(request)).rejects.toThrow(MCPError);
-      await expect(initializeHandler(request)).rejects.toMatchObject({
+      const promise = initializeHandler(request);
+      await expect(promise).rejects.toThrow(MCPError);
+      await expect(promise).rejects.toMatchObject({
         code: MCPErrorCodes.INVALID_PARAMS,
         message: 'Invalid params: protocolVersion is required'
       });
@@ -125,8 +129,9 @@ describe('initializeHandler', () => {
         }
       };
 
-      await expect(initializeHandler(request)).rejects.toThrow(MCPError);
-      await expect(initializeHandler(request)).rejects.toMatchObject({
+      const promise = initializeHandler(request);
+      await expect(promise).rejects.toThrow(MCPError);
+      await expect(promise).rejects.toMatchObject({
         code: MCPErrorCodes.SERVER_ERROR,
         message: 'Unsupported protocol version',
         data: {
@@ -147,8 +152,9 @@ describe('initializeHandler', () => {
         }
       };
 
-      await expect(initializeHandler(request)).rejects.toThrow(MCPError);
-      await expect(initializeHandler(request)).rejects.toMatchObject({
+      const promise = initializeHandler(request);
+      await expect(promise).rejects.toThrow(MCPError);
+      await expect(promise).rejects.toMatchObject({
         code: MCPErrorCodes.SERVER_ERROR,
         message: 'Unsupported protocol version',
         data: {
@@ -169,8 +175,9 @@ describe('initializeHandler', () => {
         }
       };
 
-      await expect(initializeHandler(request)).rejects.toThrow(MCPError);
-      await expect(initializeHandler(request)).rejects.toMatchObject({
+      const promise = initializeHandler(request);
+      await expect(promise).rejects.toThrow(MCPError);
+      await expect(promise).rejects.toMatchObject({
         code: MCPErrorCodes.SERVER_ERROR,
         message: 'Unsupported protocol version',
         data: {

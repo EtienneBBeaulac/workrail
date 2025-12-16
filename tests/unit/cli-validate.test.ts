@@ -65,7 +65,7 @@ describe('CLI Validate Command', () => {
       const result = runCliCommand(['validate', validWorkflowPath]);
       
       expect(result.exitCode).toBe(0);
-      expect(result.output).toContain('✅ Workflow is valid:');
+      expect(result.output).toContain('✅ Workflow is valid');
       expect(result.output).toContain('valid-workflow.json');
     });
 
@@ -74,7 +74,7 @@ describe('CLI Validate Command', () => {
       const result = runCliCommand(['validate', relativePath]);
       
       expect(result.exitCode).toBe(0);
-      expect(result.output).toContain('✅ Workflow is valid:');
+      expect(result.output).toContain('✅ Workflow is valid');
     });
 
     it('should work with absolute paths', () => {
@@ -82,7 +82,7 @@ describe('CLI Validate Command', () => {
       const result = runCliCommand(['validate', absolutePath]);
       
       expect(result.exitCode).toBe(0);
-      expect(result.output).toContain('✅ Workflow is valid:');
+      expect(result.output).toContain('✅ Workflow is valid');
     });
   });
 
@@ -91,16 +91,15 @@ describe('CLI Validate Command', () => {
       const result = runCliCommand(['validate', invalidWorkflowPath]);
       
       expect(result.exitCode).toBe(1);
-      expect(result.error).toContain('❌ Workflow validation failed:');
-      expect(result.error).toContain('Validation errors:');
+      expect(result.error).toContain('❌ Workflow validation failed');
     });
 
     it('should display validation errors with bullet points', () => {
       const result = runCliCommand(['validate', invalidWorkflowPath]);
       
+      // New format shows errors as bullet points directly
       expect(result.error).toContain('•');
-      expect(result.error).toContain('Validation errors:');
-      expect(result.error).toContain('Please fix the errors above');
+      expect(result.error).toContain('❌ Workflow validation failed');
     });
 
     it('should handle workflow with missing required fields', () => {
@@ -112,7 +111,7 @@ describe('CLI Validate Command', () => {
       const result = runCliCommand(['validate', tempFile]);
       
       expect(result.exitCode).toBe(1);
-      expect(result.error).toContain('❌ Workflow validation failed:');
+      expect(result.error).toContain('❌ Workflow validation failed');
     });
 
     it('should handle workflow with invalid field types', () => {
@@ -127,7 +126,7 @@ describe('CLI Validate Command', () => {
       const result = runCliCommand(['validate', tempFile]);
       
       expect(result.exitCode).toBe(1);
-      expect(result.error).toContain('❌ Workflow validation failed:');
+      expect(result.error).toContain('❌ Workflow validation failed');
     });
   });
 
@@ -137,8 +136,7 @@ describe('CLI Validate Command', () => {
       const result = runCliCommand(['validate', nonExistentPath]);
       
       expect(result.exitCode).toBe(1);
-      expect(result.error).toContain('❌ Error: File not found:');
-      expect(result.error).toContain('Please check the file path and try again.');
+      expect(result.error).toContain('❌ File not found');
     });
 
     it('should handle empty file', () => {
@@ -146,7 +144,7 @@ describe('CLI Validate Command', () => {
       const result = runCliCommand(['validate', emptyFile]);
       
       expect(result.exitCode).toBe(1);
-      expect(result.error).toContain('❌ Error: Invalid JSON syntax');
+      expect(result.error).toContain('❌ Invalid JSON syntax');
     });
 
     it('should handle file with only whitespace', () => {
@@ -154,7 +152,7 @@ describe('CLI Validate Command', () => {
       const result = runCliCommand(['validate', whitespaceFile]);
       
       expect(result.exitCode).toBe(1);
-      expect(result.error).toContain('❌ Error: Invalid JSON syntax');
+      expect(result.error).toContain('❌ Invalid JSON syntax');
     });
 
     it('should handle invalid JSON syntax', () => {
@@ -162,8 +160,7 @@ describe('CLI Validate Command', () => {
       const result = runCliCommand(['validate', invalidJson]);
       
       expect(result.exitCode).toBe(1);
-      expect(result.error).toContain('❌ Error: Invalid JSON syntax');
-      expect(result.error).toContain('Please check the JSON syntax and try again.');
+      expect(result.error).toContain('❌ Invalid JSON syntax');
     });
 
     it('should handle malformed JSON with missing quotes', () => {
@@ -171,7 +168,7 @@ describe('CLI Validate Command', () => {
       const result = runCliCommand(['validate', malformedJson]);
       
       expect(result.exitCode).toBe(1);
-      expect(result.error).toContain('❌ Error: Invalid JSON syntax');
+      expect(result.error).toContain('❌ Invalid JSON syntax');
     });
 
     it('should handle non-object JSON', () => {
@@ -179,7 +176,7 @@ describe('CLI Validate Command', () => {
       const result = runCliCommand(['validate', nonObjectJson]);
       
       expect(result.exitCode).toBe(1);
-      expect(result.error).toContain('❌ Workflow validation failed:');
+      expect(result.error).toContain('❌ Workflow validation failed');
     });
   });
 
@@ -200,7 +197,7 @@ describe('CLI Validate Command', () => {
       const result = runCliCommand(['validate', tempFile]);
       
       expect(result.exitCode).toBe(0);
-      expect(result.output).toContain('✅ Workflow is valid:');
+      expect(result.output).toContain('✅ Workflow is valid');
     });
 
     it('should handle workflow with unicode characters', () => {
@@ -219,7 +216,7 @@ describe('CLI Validate Command', () => {
       const result = runCliCommand(['validate', tempFile]);
       
       expect(result.exitCode).toBe(0);
-      expect(result.output).toContain('✅ Workflow is valid:');
+      expect(result.output).toContain('✅ Workflow is valid');
     });
 
     it('should handle paths with spaces', () => {
@@ -239,7 +236,7 @@ describe('CLI Validate Command', () => {
       const result = runCliCommand(['validate', `"${tempFile}"`]);
       
       expect(result.exitCode).toBe(0);
-      expect(result.output).toContain('✅ Workflow is valid:');
+      expect(result.output).toContain('✅ Workflow is valid');
     });
   });
 
@@ -263,7 +260,7 @@ describe('CLI Validate Command', () => {
   });
 
   describe('Error message formatting', () => {
-    it('should use singular form for single validation error', () => {
+    it('should show validation errors with bullet points', () => {
       const workflowWithOneError = {
         id: 'INVALID_ID_WITH_CAPS', // Only ID error
         name: 'Valid Name',
@@ -279,20 +276,27 @@ describe('CLI Validate Command', () => {
       const result = runCliCommand(['validate', tempFile]);
       
       expect(result.exitCode).toBe(1);
-      // Output format shows validation errors with bullet points
-      expect(result.error).toContain('Validation errors:');
+      // New format shows validation errors with bullet points
+      expect(result.error).toContain('❌ Workflow validation failed');
       expect(result.error).toContain('•');
     });
 
-    it('should use plural form for multiple validation errors', () => {
+    it('should show multiple validation errors', () => {
       const result = runCliCommand(['validate', invalidWorkflowPath]);
       
       expect(result.exitCode).toBe(1);
-      // Output format shows validation errors with bullet points
-      expect(result.error).toContain('Validation errors:');
+      expect(result.error).toContain('❌ Workflow validation failed');
       // Multiple errors should have multiple bullet points
       const bulletCount = (result.error.match(/•/g) || []).length;
       expect(bulletCount).toBeGreaterThan(1);
     });
+
+    it('should show suggestions section', () => {
+      const result = runCliCommand(['validate', invalidWorkflowPath]);
+      
+      expect(result.exitCode).toBe(1);
+      // New format includes suggestions
+      expect(result.error).toContain('💡 Suggestions');
+    });
   });
-}); 
+});
