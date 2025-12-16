@@ -2,7 +2,7 @@ import 'reflect-metadata';
 import { describe, vi, it, expect, beforeEach, jest } from 'vitest';
 import { DefaultWorkflowService } from '../../src/application/services/workflow-service';
 import { IWorkflowStorage } from '../../src/types/storage';
-import { Workflow } from '../../src/types/mcp-types';
+import { Workflow, createWorkflow, createBundledSource, WorkflowDefinition } from '../../src/types/workflow';
 import { LoopStep } from '../../src/types/workflow-types';
 import { ValidationEngine } from '../../src/application/services/validation-engine';
 import { EnhancedLoopValidator } from '../../src/application/services/enhanced-loop-validator';
@@ -36,7 +36,7 @@ describe('WorkflowService - Loop Recognition', () => {
   let mockStorage: jest.Mocked<IWorkflowStorage>;
   let service: DefaultWorkflowService;
 
-  const mockWorkflowWithLoop: Workflow = {
+  const mockWorkflowWithLoop = createWorkflow({
     id: 'test-workflow-loop',
     name: 'Test Workflow with Loop',
     description: 'A workflow with a loop step',
@@ -70,12 +70,14 @@ describe('WorkflowService - Loop Recognition', () => {
         prompt: 'Final step'
       }
     ]
-  };
+  }, createBundledSource());
 
   beforeEach(() => {
     vi.clearAllMocks();
     
     mockStorage = {
+      kind: 'single' as const,
+      source: createBundledSource(),
       listWorkflowSummaries: vi.fn(),
       getWorkflowById: vi.fn(),
       saveWorkflow: vi.fn(),
@@ -87,7 +89,7 @@ describe('WorkflowService - Loop Recognition', () => {
 
     // Set default mock implementation
     mockStorage.getWorkflowById.mockImplementation(async (id: string) => {
-      if (id === mockWorkflowWithLoop.id) return mockWorkflowWithLoop;
+      if (id === mockWorkflowWithLoop.definition.id) return mockWorkflowWithLoop;
       return null;
     });
     mockStorage.loadAllWorkflows.mockResolvedValue([mockWorkflowWithLoop]);
@@ -147,7 +149,7 @@ describe('WorkflowService - Loop Recognition', () => {
     });
 
     it('should handle workflows without loops normally', async () => {
-      const regularWorkflow: Workflow = {
+      const regularWorkflow = createWorkflow({
         id: 'regular-workflow',
         name: 'Regular Workflow',
         description: 'No loops',
@@ -156,7 +158,7 @@ describe('WorkflowService - Loop Recognition', () => {
           { id: 'step1', title: 'Step 1', prompt: 'First' },
           { id: 'step2', title: 'Step 2', prompt: 'Second' }
         ]
-      };
+      }, createBundledSource());
 
       mockStorage.getWorkflowById.mockResolvedValue(regularWorkflow);
 
@@ -168,7 +170,7 @@ describe('WorkflowService - Loop Recognition', () => {
     });
 
     it('should handle loop steps with runCondition', async () => {
-      const workflowWithConditionalLoop: Workflow = {
+      const workflowWithConditionalLoop = createWorkflow({
         id: 'conditional-loop-workflow',
         name: 'Conditional Loop Workflow',
         description: 'Loop with run condition',
@@ -198,7 +200,7 @@ describe('WorkflowService - Loop Recognition', () => {
             prompt: 'After the loop'
           }
         ]
-      };
+      }, createBundledSource());
 
       mockStorage.getWorkflowById.mockResolvedValue(workflowWithConditionalLoop);
 

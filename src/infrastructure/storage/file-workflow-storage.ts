@@ -15,7 +15,7 @@ import {
   InvalidWorkflowError,
   SecurityError
 } from '../../core/error-handler';
-import { IFeatureFlagProvider, createFeatureFlagProvider } from '../../config/feature-flags';
+import { IFeatureFlagProvider, EnvironmentFeatureFlagProvider } from '../../config/feature-flags';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -61,8 +61,8 @@ interface FileWorkflowStorageOptions {
   cacheSize?: number;
   /** Index cache TTL in milliseconds. Default 30000 (30 seconds) */
   indexCacheTTLms?: number;
-  /** Feature flag provider (optional, defaults to environment-based) */
-  featureFlagProvider?: IFeatureFlagProvider;
+  /** Feature flag provider (required) */
+  featureFlagProvider: IFeatureFlagProvider;
 }
 
 /**
@@ -91,7 +91,8 @@ export class FileWorkflowStorage implements IWorkflowStorage {
   constructor(
     directory: string, 
     source: WorkflowSource,
-    options: FileWorkflowStorageOptions = {}
+    featureFlagProvider: IFeatureFlagProvider,
+    options: Omit<FileWorkflowStorageOptions, 'featureFlagProvider'> = {}
   ) {
     this.source = source;
     this.baseDirReal = path.resolve(directory);
@@ -99,7 +100,7 @@ export class FileWorkflowStorage implements IWorkflowStorage {
     this.cacheTTL = options.cacheTTLms ?? 5000;
     this.cacheLimit = options.cacheSize ?? 100;
     this.indexCacheTTL = options.indexCacheTTLms ?? 30000; // 30 seconds
-    this.featureFlags = options.featureFlagProvider ?? createFeatureFlagProvider();
+    this.featureFlags = featureFlagProvider;
   }
 
   /**
@@ -332,25 +333,11 @@ export class FileWorkflowStorage implements IWorkflowStorage {
 }
 
 /**
- * Helper factory that resolves the workflow directory according to the
- * previous behaviour (env override → bundled workflows).
- * 
- * Uses bundled source by default.
+ * @deprecated Use DI container: container.resolve(DI.Storage.Primary)
  */
-export function createDefaultFileWorkflowStorage(): FileWorkflowStorage {
-  const DEFAULT_WORKFLOW_DIR = path.resolve(__dirname, '../../../workflows');
-  const envPath = process.env['WORKFLOW_STORAGE_PATH'];
-  const resolved = envPath ? path.resolve(envPath) : null;
-  const directory = resolved && existsSync(resolved) ? resolved : DEFAULT_WORKFLOW_DIR;
-  
-  // Use optimized settings for better performance
-  return new FileWorkflowStorage(
-    directory, 
-    createBundledSource(),
-    {
-      cacheTTLms: 10000,      // 10 second cache for individual workflows
-      cacheSize: 200,         // Larger cache
-      indexCacheTTLms: 60000, // 1 minute index cache
-    }
+export function createDefaultFileWorkflowStorage(): never {
+  throw new Error(
+    'createDefaultFileWorkflowStorage() is removed. ' +
+    'Use DI container: container.resolve(DI.Storage.Primary)'
   );
 }

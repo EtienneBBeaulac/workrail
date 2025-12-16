@@ -41,9 +41,9 @@ vi.mock('../../src/utils/storage-security', () => ({
 }));
 
 // Import after mocks are set up
-import { PluginWorkflowStorage, PLUGIN_WORKFLOW_CONFIGS } from '../../src/infrastructure/storage/plugin-workflow-storage';
+import { PluginWorkflowStorage } from '../../src/infrastructure/storage/plugin-workflow-storage';
 import { StorageError, InvalidWorkflowError, SecurityError } from '../../src/core/error-handler';
-import { Workflow } from '../../src/types/mcp-types';
+import { createPluginSource, createWorkflow, WorkflowDefinition } from '../../src/types/workflow';
 
 describe('PluginWorkflowStorage', () => {
   let storage: PluginWorkflowStorage;
@@ -108,10 +108,7 @@ describe('PluginWorkflowStorage', () => {
       expect(config.scanInterval).toBe(30000);
     });
 
-    it('should use predefined configurations correctly', () => {
-      expect(PLUGIN_WORKFLOW_CONFIGS.development.scanInterval).toBe(60000);
-      expect(PLUGIN_WORKFLOW_CONFIGS.production.maxFileSize).toBe(1024 * 1024);
-    });
+    // NOTE: Predefined config presets were removed; config normalization is tested above.
   });
 
   describe('Security Features', () => {
@@ -401,7 +398,7 @@ describe('PluginWorkflowStorage', () => {
     });
 
     it('should successfully load valid workflows', async () => {
-      const mockWorkflow: Workflow = {
+      const mockDefinition: WorkflowDefinition = {
         id: 'test-workflow',
         name: 'Test Workflow',
         description: 'A test workflow',
@@ -436,7 +433,7 @@ describe('PluginWorkflowStorage', () => {
           return Promise.resolve(JSON.stringify(mockPackageJson));
         }
         if (pathStr.endsWith('test-workflow.json')) {
-          return Promise.resolve(JSON.stringify(mockWorkflow));
+          return Promise.resolve(JSON.stringify(mockDefinition));
         }
         return Promise.resolve('[]');
       });
@@ -445,11 +442,13 @@ describe('PluginWorkflowStorage', () => {
       mockSecurity.sanitizeId.mockImplementation((id: string) => id);
 
       const workflows = await storage.loadAllWorkflows();
-      expect(workflows).toEqual([mockWorkflow]);
+      expect(workflows).toEqual([
+        createWorkflow(mockDefinition, createPluginSource('workrail-workflows-test', '1.0.0'))
+      ]);
     });
 
     it('should find workflow by ID correctly', async () => {
-      const mockWorkflow: Workflow = {
+      const mockDefinition: WorkflowDefinition = {
         id: 'test-workflow',
         name: 'Test Workflow',
         description: 'A test workflow',
@@ -481,14 +480,16 @@ describe('PluginWorkflowStorage', () => {
         if (pathStr.endsWith('package.json')) {
           return Promise.resolve(JSON.stringify(mockPackageJson));
         }
-        return Promise.resolve(JSON.stringify(mockWorkflow));
+        return Promise.resolve(JSON.stringify(mockDefinition));
       });
 
       // Mock sanitizeId to return unchanged for valid IDs
       mockSecurity.sanitizeId.mockImplementation((id: string) => id);
 
       const found = await storage.getWorkflowById('test-workflow');
-      expect(found).toEqual(mockWorkflow);
+      expect(found).toEqual(
+        createWorkflow(mockDefinition, createPluginSource('workrail-workflows-test', '1.0.0'))
+      );
 
       const notFound = await storage.getWorkflowById('nonexistent');
       expect(notFound).toBeNull();
