@@ -1,0 +1,215 @@
+{
+  "id": "design-thinking-workflow-autonomous-agentic",
+  "name": "Design Thinking Workflow (Autonomous, Tiered Agent Cascade)",
+  "description": "Autonomous design thinking: minimal human input; doc-first execution; supports Agent Cascade Protocol tiers (Solo/Proxy/Delegation) with explicit fallbacks.",
+  "version": "0.1.0",
+  "preconditions": [
+    "User can provide a short problem/opportunity statement and constraints",
+    "Agent can create and update a single canonical design doc file for resumption"
+  ],
+  "clarificationPrompts": [
+    "What problem/opportunity are we addressing (1–3 paragraphs)?",
+    "What constraints matter (hard vs soft)?",
+    "What are the non-negotiable principles and anti-goals?",
+    "What is the intended deliverable (proposal, spec, roadmap, prototype API, etc.)?"
+  ],
+  "metaGuidance": [
+    "AUTONOMOUS: Minimize human input. If information is missing, create explicit assumptions and a validation plan; do not invent facts silently.",
+    "DOC-FIRST: `designDocPath` is the canonical source of truth. Keep chat output short; write the real work into the doc.",
+    "AGENT CASCADE PROTOCOL: Use the highest tier available and fall back explicitly:",
+    "- Tier 3 (Delegation / Gold): Subagents can call WorkRail MCP tools → delegate full routines/work packages.",
+    "- Tier 2 (Proxy / Silver): Subagents exist but cannot call WorkRail tools → delegate the work via natural language; you (main agent) write/synthesize.",
+    "- Tier 1 (Solo / Bronze): No subagents → you simulate specialization via persona instructions.",
+    "VERIFY THEN DELEGATE: Never assume subagent/tool availability. If uncertain, default to Tier 1.",
+    "SUBAGENT PRINCIPLES: Subagents are stateless cognitive specialists. Provide a complete work package. Prefer auditor model when possible.",
+    "PARALLELISM: Only run subagents in parallel when their work is independent (e.g., persona interviews, ideation perspectives, audits).",
+    "QUALITY GATES: If a deliverable is weak, record gaps in the doc and iterate. Do not pretend it is complete.",
+    "DT IDs: Maintain an append-only Idea Backlog with DT-### IDs tracked in the design doc Counters section."
+  ],
+  "functionDefinitions": [
+    {
+      "name": "ideaEntryTemplate",
+      "definition": "Use this template for each idea entry:\n- Idea ID: DT-###\n- Title: …\n- One-liner: …\n- Category: protocol | UX | authoring | observability | reliability | tooling | packaging | policy | other\n- Addresses: (pain/insight/constraint this targets)\n- Inspiration: (what prompted it)\n- Why it might work: …\n- Key risks: …\n- Notes: …\n\nID rule: Allocate the next DT-### from the design doc section `## Counters` (e.g., `Next DT ID: DT-001`) and increment it after each new idea."
+    },
+    {
+      "name": "clusterTemplate",
+      "definition": "Use this template for each cluster/theme:\n- Theme name: …\n- Why these ideas belong together (1 line): …\n- Member idea IDs: DT-…\n- What it enables: …\n- Biggest risk/unknown: …"
+    },
+    {
+      "name": "prototypeSpecTemplate",
+      "definition": "Use this template for a minimal prototype spec:\n## Goal\n## Non-goals\n## Prototype learning question\n## Prototype artifact (what you built)\n## Proposed API / Interface (if applicable)\n- Inputs\n- Outputs\n- Invariants\n- Error cases (as data)\n## Migration strategy\n## Pre-mortem (how this fails)\n## Falsification criteria\n## Test plan\n"
+    },
+    {
+      "name": "testPlanTemplate",
+      "definition": "Use this template for the test/dogfood plan:\n## Scenarios to run\n## Agents/models/IDEs to test\n## Pass/fail metrics\n## Instrumentation needed\n## Rollback/contingency\n"
+    },
+    {
+      "name": "personaInterviewTemplate",
+      "definition": "Use this template for each persona interview (real or simulated):\n## Persona\n- Name: …\n- Context: …\n- Goals: …\n- Pains: …\n- Constraints: …\n\n## Interview (Q → A)\n- Q: What does success look like?\n  A: …\n- Q: What would make you reject this direction?\n  A: …\n- Q: What is your biggest fear/risk?\n  A: …\n- Q: What tradeoff do you care about most?\n  A: …\n- Q: What would delight you?\n  A: …\n\n## Notes\n- …\n\nLabel: If simulated, state clearly: `Evidence Type: Simulated`."
+    }
+  ],
+  "steps": [
+    {
+      "id": "phase-0-triage",
+      "title": "Phase 0: Minimal Intake (Autonomous)",
+      "prompt": "Capture the minimal human input needed to run autonomously.\n\nDeliverable (bullets under headings):\n## Problem / Opportunity\n- …\n## Constraints\n- Hard: …\n- Soft: …\n## Non-negotiable principles\n- …\n## Anti-goals / out-of-scope\n- …\n## Intended deliverable\n- …\n\nAutonomy rule: If something is missing, write it as an explicit assumption with a validation plan (do not invent).\n\nEnd with 'Next Input' checklist (only items truly required to proceed).",
+      "agentRole": "You are a product/engineering facilitator. Keep intake minimal and make assumptions explicit.",
+      "requireConfirmation": true
+    },
+    {
+      "id": "phase-0a-init-design-doc",
+      "title": "Phase 0A: Initialize Canonical Design Doc (Resumption Anchor)",
+      "prompt": "Create a single canonical design doc that will be the source of truth for the rest of this workflow.\n\nDeliverable:\n1) Choose and confirm a file path: `designDocPath`\n   - Default suggestion: `ideas/<short-slug>-design-thinking.md`\n2) Create the file (if missing) and write the initial skeleton sections:\n   - Context / Problem\n   - Constraints / Principles / Anti-goals\n   - Execution Tier\n   - Assumption Register\n   - Persona Bank\n   - Empathy Findings (Observations / Insights)\n   - POV + HMW\n   - Success Criteria\n   - Idea Backlog (append-only)\n   - Clusters + Scoring\n   - Decision Log\n   - Pre-mortem + Falsification\n   - Prototype Spec\n   - Test Plan\n   - Iteration Notes\n   - Counters (DT IDs)\n3) Persist Phase 0 outputs into the doc under the appropriate sections.\n\nIn `Counters`, initialize:\n- Next DT ID: DT-001\n\nState (must be explicit):\n- Set `designDocPath` to the chosen path.\n\nChat output: only confirm `designDocPath` and list any missing inputs before proceeding.",
+      "agentRole": "You create a resumption-proof anchor artifact and ensure all future work is doc-first.",
+      "requireConfirmation": true
+    },
+    {
+      "id": "phase-0b-environment-handshake",
+      "title": "Phase 0B: Agent Cascade Boot Check (Tier 1/2/3)",
+      "prompt": "Determine which execution tier you can use (Agent Cascade Protocol).\n\nDoc-first: In `designDocPath`, fill `## Execution Tier` with:\n- Tier chosen: 1 (Solo) | 2 (Proxy) | 3 (Delegation)\n- Evidence: what you observed\n- Constraints: what you cannot do\n\nBoot check procedure:\n1) Check if subagents exist in your environment.\n   - If none: Tier 1.\n2) If subagents exist, ask one subagent to call `workflow_list`.\n   - If they can call WorkRail MCP tools: Tier 3.\n   - If they cannot: Tier 2.\n\nRule: If anything is uncertain, default to Tier 1.\n\nChat: one line stating Tier chosen.",
+      "agentRole": "You are verifying capabilities before using them. Prevent hallucinated delegation.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-1a-plan-personas",
+      "title": "Phase 1A: Plan Empathy via Persona Simulation",
+      "prompt": "Plan how you will gather empathy signals with minimal human input.\n\nDoc-first: In `designDocPath`, update `## Persona Bank` with 3–5 personas you will interview (real or simulated).\nFor each persona: name, why it matters, what it can falsify.\n\nRequired personas (minimum):\n- Primary User\n- Power User\n- Skeptic (Stakeholder / Risk owner)\n- Operator (maintenance/support)\n\nEnd with a short plan: which 3 questions matter most for this problem.",
+      "agentRole": "You plan a structured empathy strategy. No ideation yet.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-1b-persona-interviews",
+      "title": "Phase 1B: Conduct Persona Interviews (Tiered)",
+      "prompt": "Conduct persona interviews and capture results. Label simulated evidence clearly.\n\nTiered execution:\n\nIF Tier 3 (Delegation):\n- Spawn 4 persona interviewers SIMULTANEOUSLY (Primary User, Power User, Skeptic, Operator).\n- Provide each a complete work package including: problem, constraints, intended deliverable, and the personaInterviewTemplate.\n- Each must return a structured deliverable with the template and `Evidence Type: Simulated` unless you have real quotes.\n\nIF Tier 2 (Proxy):\n- Ask subagents to roleplay each persona via natural language.\n- You (main agent) transcribe results into the doc using personaInterviewTemplate and label as simulated.\n\nIF Tier 1 (Solo):\n- ACT AS each persona sequentially. Use personaInterviewTemplate. Label as simulated.\n\nDoc-first: Append interviews under `## Persona Bank` (or a `## Persona Interviews` section).\nChat: short recap + 'Next Input' checklist.",
+      "agentRole": "You are gathering empathy signals via structured interviews. Be explicit about what is simulated.",
+      "requireConfirmation": false,
+      "functionReferences": ["personaInterviewTemplate()"]
+    },
+    {
+      "id": "phase-1c-synthesize-empathy",
+      "title": "Phase 1C: Synthesize Empathy (Observations → Insights)",
+      "prompt": "Synthesize persona interviews into grounded observations and insights.\n\nDoc-first: Update `## Empathy Findings` with:\n- Observations (5–10)\n- Insights (5–10), each tied to at least one observation\n- Unknowns\n- Assumption Register updates (explicit)\n\nAdversarial/self-reflection (required):\n- What might we be misreading?\n- What evidence would contradict the top insight?\n- What could be \"working as designed\" (not actually a problem)?\n\nOptional Tier 3 audit (recommended for important decisions):\n- Spawn 2 auditors simultaneously (Completeness focus, Depth focus) to audit your empathy synthesis and call out gaps/assumptions.\n- If Tier 2/1: self-audit with the same questions.\n\nChat: short recap + 'Next Input' checklist.",
+      "agentRole": "You converge empathy into actionable insights and explicit assumptions.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-2-define",
+      "title": "Phase 2: Define (POV + HMW + Success Criteria)",
+      "prompt": "Turn empathy into a precise definition.\n\nDoc-first: Update `## POV + HMW` and `## Success Criteria` with:\n## POV\n- [Persona] needs [need] because [insight].\n\n## Problem statement (2–4 lines)\n- …\n\n## Alternative framings (2)\n- If we are wrong about the core problem, what else could it be?\n- What would be a radically simpler interpretation?\n\nAnchoring check: If you cannot produce two plausible alternative framings, say so explicitly and go back to Empathy Findings to improve them.\n\n## How might we… (3–7)\n- …\n\n## Success criteria\n- …\n\n## Key tensions / tradeoffs\n- …\n\n## Riskiest assumption\n- …\n\n## What would change our mind?\n- …\n\nChat: short recap + 'Next Input' checklist.",
+      "agentRole": "You create a crisp, testable framing and protect against anchoring.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-2b-challenge-framing",
+      "title": "Phase 2B: Adversarial Challenge the Framing (Tiered)",
+      "prompt": "Challenge your own framing before ideation.\n\nIF Tier 3 (Delegation):\n- Delegate to the **WorkRail Executor** to run `routine-hypothesis-challenge` at rigor=3.\n- Mission: Attack POV, HMW, riskiest assumption, and success criteria.\n- Provide complete context: paste the relevant doc sections.\n- Incorporate valid critique into the doc.\n\nIF Tier 2 (Proxy):\n- Ask a subagent to act as an adversarial critic (no WorkRail tools).\n- You synthesize their critique and update the doc.\n\nIF Tier 1 (Solo):\n- ACT AS a skeptical reviewer. Try to prove the framing is wrong.\n\nDoc-first: append a short `## Framing Challenge` section with findings and changes made.",
+      "agentRole": "You are preventing premature convergence by adversarially testing the framing.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-3-ideation-loop",
+      "type": "loop",
+      "title": "Phase 3: Ideation (4 Rounds)",
+      "loop": { "type": "for", "count": 4, "maxIterations": 4, "iterationVar": "ideationRound" },
+      "body": [
+        {
+          "id": "ideation-round-1",
+          "title": "Ideation Round 1: General Divergence",
+          "runCondition": { "var": "ideationRound", "equals": 1 },
+          "prompt": "Generate a broad set of ideas directly relevant to the defined problem.\n\nDoc-first: Append ideas to Idea Backlog in `designDocPath` using ideaEntryTemplate.\nDT IDs: allocate next DT-### from `## Counters`.\n\nTiered execution:\n- Tier 3: Spawn 2–3 ideators SIMULTANEOUSLY with different perspectives (Simplicity, Maintainability, Pragmatic). Synthesize into one backlog.\n- Tier 2: Ask subagents to brainstorm per perspective; you curate into the backlog.\n- Tier 1: ACT AS each perspective sequentially; then curate.\n\nReflection (brief, required):\n- Which category is underrepresented?\n- What is the simplest idea we are dismissing too quickly?\n- What assumption seems to be driving most ideas?",
+          "agentRole": "Divergent ideation with explicit perspective diversity.",
+          "functionReferences": ["ideaEntryTemplate()"]
+        },
+        {
+          "id": "ideation-round-2",
+          "title": "Ideation Round 2: Orthogonal / Unrelated Inspiration",
+          "runCondition": { "var": "ideationRound", "equals": 2 },
+          "prompt": "Generate ideas that are intentionally NOT obvious extensions of Round 1.\n\nDoc-first: Append ideas with DT IDs.\nTechniques: analogies, inversions, constraint creativity.\n\nConstraint inversion (required): add 5 ideas that assume a hard constraint and explain why it changes the solution.\n\nTiered execution:\n- Tier 3: Spawn 2 ideators SIMULTANEOUSLY (Contrarian, Analogist). Synthesize.\n- Tier 2: Proxy brainstorm via subagents; you curate.\n- Tier 1: Do it yourself, explicitly switching personas.\n\nReflection (brief, required):\n- Which analogy created the most leverage?\n- What is the simplest idea we are dismissing too quickly?\n- What assumption seems to be driving most ideas?",
+          "agentRole": "Break local maxima with orthogonal ideation.",
+          "functionReferences": ["ideaEntryTemplate()"]
+        },
+        {
+          "id": "ideation-round-3",
+          "title": "Ideation Round 3: Combine / Mutate / Package",
+          "runCondition": { "var": "ideationRound", "equals": 3 },
+          "prompt": "Generate ideas that combine and strengthen the existing backlog.\n\nDoc-first: Append derived ideas with DT IDs.\nAlso produce 5 concept packages referencing member DT-IDs.\n\nTiered execution:\n- Tier 3: Spawn 2 ideators SIMULTANEOUSLY (Systems, Pragmatic). Synthesize.\n- Tier 2: Proxy brainstorm; you curate.\n- Tier 1: Do it yourself.\n\nReflection (brief, required):\n- What critical primitive is missing?\n- What is the simplest idea we are dismissing too quickly?\n- What assumption seems to be driving most ideas?",
+          "agentRole": "Converge divergent ideas into packages without prematurely selecting.",
+          "functionReferences": ["ideaEntryTemplate()"]
+        },
+        {
+          "id": "ideation-round-4",
+          "title": "Ideation Round 4: Coverage Sweep & Blind Spots",
+          "runCondition": { "var": "ideationRound", "equals": 4 },
+          "prompt": "Audit the idea space for blind spots and fill gaps.\n\nChecklist: protocol, resumption, authoring UX, validation, dashboard/observability, model variability, external workflow packaging, loops correctness, capability negotiation.\n\nDoc-first: Add 10–15 missing ideas with DT IDs.\nAdd Coverage Map: Dimension | coverage (low/med/high) | top DT-IDs.\n\nTiered execution:\n- Tier 3: Optional parallel audit: one ideator does blind spots; another acts as skeptic.\n- Tier 2: Proxy.\n- Tier 1: Solo.\n\nReflection (brief, required):\n- Where would we regret not exploring further?\n- What category did we avoid because it felt uncomfortable or \"too big\"?\n- What assumption seems to be driving most ideas?",
+          "agentRole": "Ensure coverage and surface blind spots.",
+          "functionReferences": ["ideaEntryTemplate()"]
+        }
+      ]
+    },
+    {
+      "id": "phase-4-synthesize",
+      "title": "Phase 4: Synthesize (Cluster + Prioritize)",
+      "prompt": "Synthesize the backlog into themes and a shortlist.\n\nDoc-first: Update `## Clusters + Scoring` with:\n- 5–10 clusters (use clusterTemplate)\n- Candidate directions (top 3–7) with North Star + scoring (Impact/Confidence/Migration/Model-robustness/Time-to-value)\n- Shortlist (2–3)\n\nAdversarial challenge (brief):\n- Argue the top direction is wrong. What would a skeptic say?\n- What is the strongest alternative and why might it win?\n\nTiered optional validation:\n- Tier 3: Spawn **two WorkRail Executor delegations** in parallel:\n  - WorkRail Executor #1: run `routine-plan-analysis` to audit shortlist completeness, scoring, and migration risk.\n  - WorkRail Executor #2: run `routine-hypothesis-challenge` at rigor=3 to adversarially challenge the top direction.\n- Tier 2/1: self-audit using the same prompts.\n\nEnd with a short Decision Log entry: what you chose and why.",
+      "agentRole": "You converge and make tradeoffs explicit.",
+      "requireConfirmation": false,
+      "functionReferences": ["clusterTemplate()"]
+    },
+    {
+      "id": "phase-4a-quality-gate",
+      "title": "Phase 4A: Synthesis Quality Gate",
+      "prompt": "Verify readiness to prototype.\n\nDoc-first: Add `## Synthesis Quality Gate` checklist with ✅/❌:\n- POV exists\n- 3–7 HMW exist\n- Success criteria exist\n- Key tensions exist\n- Idea Backlog has breadth\n- Shortlist (2–3) exists\n- Top direction has at least one falsifiable learning question\n\nIf FAIL: list what is missing and fix it before proceeding.",
+      "agentRole": "You enforce blueprint quality.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-4b-premortem-falsification",
+      "title": "Phase 4B: Pre-mortem & Falsification",
+      "prompt": "Before prototyping, add a pre-mortem and explicit falsification criteria for the top direction. Treat directions as hypotheses; tests exist to falsify.\n\nDoc-first: Update `## Pre-mortem + Falsification` with:\n- Pre-mortem (top 5): failure mode | why | mitigation\n- Falsification criteria (1–3): if X happens, we pivot/stop because…\n\nReflection (brief):\n- What second-order effect is most dangerous?\n- What would we regret not testing?",
+      "agentRole": "You pressure-test before investing in a prototype.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-5-prototype",
+      "title": "Phase 5: Prototype (Learning Artifact)",
+      "prompt": "Build a low-fidelity prototype intended to answer one learning question.\n\nChoose ONE prototype artifact:\n- Storyboard (6 panels)\n- Concierge script (manual end-to-end flow)\n- API sketch (request/response examples + mocked outputs)\n- Wireframe (markdown screens + interactions)\n\nDoc-first: Write the full prototype spec and artifact into `designDocPath` using prototypeSpecTemplate.\nInclude falsification criteria (copy verbatim, then refine).\n\nReflection (brief):\n- What is the smallest slice that still proves/disproves the concept?\n- If falsified, what is the next-best direction from the shortlist?",
+      "agentRole": "You create a falsifiable learning prototype.",
+      "requireConfirmation": false,
+      "functionReferences": ["prototypeSpecTemplate()"]
+    },
+    {
+      "id": "phase-6-test-plan",
+      "title": "Phase 6: Test Plan (Dogfood + Validation)",
+      "prompt": "Define how to test the prototype with real usage constraints.\n\nDoc-first: Write the test plan into `designDocPath` using testPlanTemplate.\nMust include: Claude + one weaker model (GPT/Grok/Gemini) in the model/IDE matrix.\n\nReflection (brief):\n- If the test fails, what do we do next (iterate, pivot, stop)?",
+      "agentRole": "You design an evidence-producing test plan.",
+      "requireConfirmation": false,
+      "functionReferences": ["testPlanTemplate()"]
+    },
+    {
+      "id": "phase-7-iterate-loop",
+      "type": "loop",
+      "title": "Phase 7: Iterate (Test → Learn → Refine)",
+      "loop": { "type": "for", "count": 2, "maxIterations": 2, "iterationVar": "iteration" },
+      "body": [
+        {
+          "id": "iteration-test",
+          "title": "Iteration {{iteration}}: Dogfood Test & Capture Feedback",
+          "prompt": "Run a lightweight dogfood test of the prototype (thought experiment, adversarial critique, stakeholder Q&A simulation).\n\nDoc-first: Append to `## Iteration Notes`:\n- What we tried\n- What worked\n- What failed\n- Confusions/friction\n- New insights\n\nChat: short recap only.",
+          "agentRole": "You generate learning signals cheaply."
+        },
+        {
+          "id": "iteration-learn-update",
+          "title": "Iteration {{iteration}}: Learn & Update Artifacts",
+          "prompt": "Based on feedback, update the key artifacts in `designDocPath` and add `## Iteration {{iteration}}: Updates`.\n\nDeliverable:\n- Changes made (POV/HMW/shortlist/prototype/test plan)\n- Rationale\n\nReflection (brief):\n- What surprised us?\n- What did we previously believe that is now false?",
+          "agentRole": "You update artifacts based on learning."
+        }
+      ]
+    },
+    {
+      "id": "phase-8-handoff",
+      "title": "Phase 8: Final Summary & Handoff",
+      "prompt": "Finalize the design doc and produce a crisp handoff.\n\nDoc-first: Add `## Final Summary` with:\n- Problem statement\n- POV/HMW\n- Chosen direction + why\n- Falsification criteria\n- Prototype artifact summary\n- Test plan summary\n- What we learned across iterations\n- Next actions\n\nChat: one-paragraph summary + path to `designDocPath`.",
+      "agentRole": "You conclude the autonomous design thinking cycle with a handoff.",
+      "requireConfirmation": false
+    }
+  ]
+}
