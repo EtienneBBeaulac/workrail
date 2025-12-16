@@ -168,6 +168,7 @@ async function registerServices(): Promise<void> {
   const { ValidationEngine } = await import('../application/services/validation-engine.js');
   const { WorkflowCompiler } = await import('../application/services/workflow-compiler.js');
   const { WorkflowInterpreter } = await import('../application/services/workflow-interpreter.js');
+  const { ToolDescriptionProvider } = await import('../mcp/tool-description-provider.js');
 
   const { DefaultWorkflowService } = await import('../application/services/workflow-service.js');
 
@@ -205,6 +206,13 @@ async function registerServices(): Promise<void> {
   container.register(DI.Infra.HttpServer, { 
     useFactory: instanceCachingFactory((c) => c.resolve(HttpServer)) 
   });
+
+  // MCP layer
+  // Explicit wiring: do not rely on decorator side-effects to register this dependency.
+  // Tests may override this token, so only register when missing.
+  if (!container.isRegistered(DI.Mcp.DescriptionProvider)) {
+    container.registerSingleton(DI.Mcp.DescriptionProvider, ToolDescriptionProvider);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
