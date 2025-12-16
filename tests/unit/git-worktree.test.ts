@@ -67,7 +67,7 @@ describe('Git Worktree Detection Logic', () => {
     // Create initial commit
     await fs.writeFile(path.join(mainRepo, 'README.md'), '# Test');
     execSync('git add .', { cwd: mainRepo, stdio: 'ignore' });
-    execSync('git commit -m "Initial commit"', { cwd: mainRepo, stdio: 'ignore' });
+    execSync('git commit --no-gpg-sign -m "Initial commit"', { cwd: mainRepo, stdio: 'ignore' });
     
     // Create worktrees
     execSync(`git worktree add ${worktree1} -b feature`, { cwd: mainRepo, stdio: 'ignore' });

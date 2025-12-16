@@ -27,18 +27,12 @@ export const DI = {
   // CORE SERVICES
   // ═══════════════════════════════════════════════════════════════════
   Services: {
-    /** Workflow loading and validation */
-    WorkflowLoader: Symbol('Services.WorkflowLoader'),
-    /** Step selection logic */
-    StepSelector: Symbol('Services.StepSelector'),
-    /** Loop state recovery */
-    LoopRecovery: Symbol('Services.LoopRecovery'),
-    /** Step resolution strategy */
-    StepResolution: Symbol('Services.StepResolution'),
-    /** Loop context optimization (progressive disclosure) */
-    LoopContextOptimizer: Symbol('Services.LoopContextOptimizer'),
     /** Main workflow service (high-level orchestrator) */
     Workflow: Symbol('Services.Workflow'),
+    /** Workflow definition compiler (pure, cached by service) */
+    WorkflowCompiler: Symbol('Services.WorkflowCompiler'),
+    /** Workflow interpreter (state + event engine) */
+    WorkflowInterpreter: Symbol('Services.WorkflowInterpreter'),
   },
 
   // ═══════════════════════════════════════════════════════════════════
@@ -53,10 +47,6 @@ export const DI = {
     HttpServer: Symbol('Infra.HttpServer'),
     /** Validation engine */
     ValidationEngine: Symbol('Infra.ValidationEngine'),
-    /** Loop stack manager */
-    LoopStackManager: Symbol('Infra.LoopStackManager'),
-    /** Loop step resolver */
-    LoopStepResolver: Symbol('Infra.LoopStepResolver'),
     /** Enhanced loop validator */
     EnhancedLoopValidator: Symbol('Infra.EnhancedLoopValidator'),
     /** Session data normalizer */
