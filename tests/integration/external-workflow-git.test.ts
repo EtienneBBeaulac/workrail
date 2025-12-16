@@ -56,7 +56,7 @@ describe('GitWorkflowStorage Integration', () => {
     
     // Commit the workflow
     await execAsync('git add .', { cwd: testRepoDir });
-    await execAsync('git commit -m "Initial commit"', { cwd: testRepoDir });
+    await execAsync('git commit --no-gpg-sign -m "Initial commit"', { cwd: testRepoDir });
     await execAsync('git branch -M main', { cwd: testRepoDir });
   });
 
@@ -250,7 +250,7 @@ describe('GitWorkflowStorage Integration', () => {
       );
 
       await execAsync('git add .', { cwd: testRepoDir });
-      await execAsync('git commit -m "Add second workflow"', { cwd: testRepoDir });
+      await execAsync('git commit --no-gpg-sign -m "Add second workflow"', { cwd: testRepoDir });
 
       const storage = new GitWorkflowStorage({
         repositoryUrl: testRepoDir,
@@ -283,7 +283,7 @@ describe('GitWorkflowStorage Integration', () => {
       );
 
       await execAsync('git add .', { cwd: testRepoDir });
-      await execAsync('git commit -m "Add large workflow"', { cwd: testRepoDir });
+      await execAsync('git commit --no-gpg-sign -m "Add large workflow"', { cwd: testRepoDir });
 
       const storage = new GitWorkflowStorage({
         repositoryUrl: testRepoDir,

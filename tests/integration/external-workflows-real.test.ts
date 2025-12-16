@@ -52,7 +52,7 @@ describe('External Workflows - REAL Integration Tests', () => {
     
     // Commit it
     await execAsync('git add .', { cwd: repoDir });
-    await execAsync('git commit -m "Add workflow"', { cwd: repoDir });
+    await execAsync('git commit --no-gpg-sign -m "Add workflow"', { cwd: repoDir });
     await execAsync('git branch -M main', { cwd: repoDir });
   }
 
@@ -164,7 +164,7 @@ describe('External Workflows - REAL Integration Tests', () => {
         path.join(repo1Dir, 'workflows', 'conflict-test.json'),
         JSON.stringify(conflictWorkflow, null, 2)
       );
-      await execAsync('git add . && git commit -m "Add conflict"', { cwd: repo1Dir });
+      await execAsync('git add . && git commit --no-gpg-sign -m "Add conflict"', { cwd: repo1Dir });
 
       const conflictWorkflow2 = {
         ...conflictWorkflow,
@@ -176,7 +176,7 @@ describe('External Workflows - REAL Integration Tests', () => {
         path.join(repo2Dir, 'workflows', 'conflict-test.json'),
         JSON.stringify(conflictWorkflow2, null, 2)
       );
-      await execAsync('git add . && git commit -m "Add conflict"', { cwd: repo2Dir });
+      await execAsync('git add . && git commit --no-gpg-sign -m "Add conflict"', { cwd: repo2Dir });
 
       const originalEnv = process.env;
       try {

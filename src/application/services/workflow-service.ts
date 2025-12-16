@@ -8,8 +8,9 @@ import { WorkflowInterpreter, NextStep } from './workflow-interpreter';
 import type { ExecutionState } from '../../domain/execution/state';
 import type { WorkflowEvent } from '../../domain/execution/event';
 import type { DomainError } from '../../domain/execution/error';
-import type { Result } from '../../domain/execution/result';
-import { ok, err } from '../../domain/execution/result';
+import { Err } from '../../domain/execution/error';
+import type { Result } from 'neverthrow';
+import { ok, err } from 'neverthrow';
 import { createLogger } from '../../utils/logger';
 
 export interface WorkflowService {
@@ -62,17 +63,17 @@ export class DefaultWorkflowService implements WorkflowService {
     context: ConditionContext = {}
   ): Promise<Result<{ state: ExecutionState; next: NextStep | null; isComplete: boolean }, DomainError>> {
     const workflow = await this.storage.getWorkflowById(workflowId);
-    if (!workflow) return err({ kind: 'workflow_not_found', workflowId });
+    if (!workflow) return err(Err.workflowNotFound(workflowId));
 
     const compiled = this.getOrCompile(workflowId, workflow);
-    if (compiled.kind === 'err') return compiled;
+    if (compiled.isErr()) return err(compiled.error);
 
     // Apply optional event (pure state transition)
     const advancedState = event ? this.interpreter.applyEvent(state, event) : ok(state);
-    if (advancedState.kind === 'err') return advancedState;
+    if (advancedState.isErr()) return err(advancedState.error);
 
     const next = this.interpreter.next(compiled.value, advancedState.value, context as any);
-    if (next.kind === 'err') return next;
+    if (next.isErr()) return err(next.error);
 
     return ok({
       state: next.value.state,
@@ -110,17 +111,14 @@ export class DefaultWorkflowService implements WorkflowService {
     // Definition validation stays here: fail fast before compiling.
     const validation = this.validationEngine.validateWorkflow(workflow);
     if (!validation.valid) {
-      return err({
-        kind: 'invalid_state',
-        message: `Invalid workflow structure: ${validation.issues.join('; ')}`,
-      });
+      return err(Err.invalidState(`Invalid workflow structure: ${validation.issues.join('; ')}`));
     }
 
     const compiled = this.compiler.compile(workflow);
-    if (compiled.kind === 'err') return compiled;
+    if (compiled.isErr()) return err(compiled.error);
     this.compiledCache.set(workflowId, compiled.value);
     this.evictCompiledCacheIfNeeded();
-    return compiled;
+    return ok(compiled.value);
   }
 
   /**

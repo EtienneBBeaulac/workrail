@@ -7,6 +7,14 @@
 
 import type { ToolContext, ToolResult } from '../types.js';
 import { success, error } from '../types.js';
+import {
+  WorkflowGetOutputSchema,
+  WorkflowGetSchemaOutputSchema,
+  WorkflowListOutputSchema,
+  WorkflowNextOutputSchema,
+  WorkflowValidateJsonOutputSchema,
+} from '../output-schemas.js';
+import { mapDomainErrorToToolError, mapUnknownErrorToToolError } from '../error-mapper.js';
 import type {
   WorkflowListInput,
   WorkflowGetInput,
@@ -102,10 +110,11 @@ export async function handleWorkflowList(
       'workflow_list'
     );
 
-    return success({ workflows });
+    const payload = WorkflowListOutputSchema.parse({ workflows });
+    return success(payload);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return error('INTERNAL_ERROR', message);
+    const mapped = mapUnknownErrorToToolError(err);
+    return error(mapped.code, mapped.message, mapped.suggestion);
   }
 }
 
@@ -118,22 +127,28 @@ export async function handleWorkflowGet(
     const { createGetWorkflow } = await import('../../application/use-cases/get-workflow.js');
     const getWorkflowUseCase = createGetWorkflow(ctx.workflowService);
 
-    const workflow = await withTimeout(
+    const result = await withTimeout(
       getWorkflowUseCase(input.id, input.mode),
       TIMEOUT_MS,
       'workflow_get'
     );
 
-    return success({ workflow });
+    if (result.isErr()) {
+      const mapped = mapDomainErrorToToolError(result.error);
+      return error(mapped.code, mapped.message, mapped.suggestion);
+    }
+
+    const payload = WorkflowGetOutputSchema.parse({ workflow: result.value });
+    return success(payload);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
 
-    // Check for not found errors
-    if (message.toLowerCase().includes('not found')) {
-      return error('NOT_FOUND', message, `Check available workflows with workflow_list`);
+    if (message.includes('timed out')) {
+      return error('TIMEOUT', message);
     }
 
-    return error('INTERNAL_ERROR', message);
+    const mapped = mapUnknownErrorToToolError(err);
+    return error(mapped.code, mapped.message, mapped.suggestion);
   }
 }
 
@@ -159,14 +174,16 @@ export async function handleWorkflowNext(
 
     console.error(
       `[workflow_next] Completed in ${Date.now() - startTime}ms, ` +
-      `returned=${result.kind}`
+      `returned=${result.isOk() ? 'ok' : 'err'}`
     );
 
-    if (result.kind === 'err') {
-      return error('INTERNAL_ERROR', JSON.stringify(result.error));
+    if (result.isErr()) {
+      const mapped = mapDomainErrorToToolError(result.error);
+      return error(mapped.code, mapped.message, mapped.suggestion);
     }
 
-    return success(result.value);
+    const payload = WorkflowNextOutputSchema.parse(result.value);
+    return success(payload);
   } catch (err) {
     const elapsed = Date.now() - startTime;
     const message = err instanceof Error ? err.message : String(err);
@@ -177,11 +194,8 @@ export async function handleWorkflowNext(
       return error('TIMEOUT', message);
     }
 
-    if (message.toLowerCase().includes('not found')) {
-      return error('NOT_FOUND', message, `Check available workflows with workflow_list`);
-    }
-
-    return error('INTERNAL_ERROR', message);
+    const mapped = mapUnknownErrorToToolError(err);
+    return error(mapped.code, mapped.message, mapped.suggestion);
   }
 }
 
@@ -199,10 +213,11 @@ export async function handleWorkflowValidateJson(
 
     const result = await validateWorkflowJsonUseCase(input.workflowJson);
 
-    return success(result);
+    const payload = WorkflowValidateJsonOutputSchema.parse(result);
+    return success(payload);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return error('INTERNAL_ERROR', message);
+    const mapped = mapUnknownErrorToToolError(err);
+    return error(mapped.code, mapped.message, mapped.suggestion);
   }
 }
 
@@ -248,7 +263,8 @@ export async function handleWorkflowGetSchema(
       },
     };
 
-    return success(result);
+    const payload = WorkflowGetSchemaOutputSchema.parse(result);
+    return success(payload);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return error(

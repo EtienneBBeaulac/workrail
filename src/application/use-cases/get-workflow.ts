@@ -3,6 +3,8 @@ import { Workflow, WorkflowStepDefinition } from '../../types/workflow';
 import { WorkflowNotFoundError } from '../../core/error-handler';
 import { ConditionContext } from '../../utils/condition-evaluator';
 import { initialExecutionState } from '../../domain/execution/state';
+import { ok, err, type Result } from '../../domain/execution/result';
+import { Err, type DomainError } from '../../domain/execution/error';
 
 // Define the mode type
 export type WorkflowGetMode = 'metadata' | 'preview' | undefined;
@@ -30,16 +32,19 @@ export type WorkflowGetResult = Workflow | WorkflowMetadata | WorkflowPreview;
  * Dependencies are injected at creation time, returning a pure function.
  */
 export function createGetWorkflow(service: WorkflowService) {
-  return async (workflowId: string, mode: WorkflowGetMode = 'preview'): Promise<WorkflowGetResult> => {
+  return async (
+    workflowId: string,
+    mode: WorkflowGetMode = 'preview'
+  ): Promise<Result<WorkflowGetResult, DomainError>> => {
     const workflow = await service.getWorkflowById(workflowId);
     if (!workflow) {
-      throw new WorkflowNotFoundError(workflowId);
+      return err(Err.workflowNotFound(workflowId));
     }
 
     // Handle different modes
     switch (mode) {
       case 'metadata':
-        return {
+        return ok({
           id: workflow.definition.id,
           name: workflow.definition.name,
           description: workflow.definition.description,
@@ -48,17 +53,14 @@ export function createGetWorkflow(service: WorkflowService) {
           clarificationPrompts: workflow.definition.clarificationPrompts,
           metaGuidance: workflow.definition.metaGuidance,
           totalSteps: workflow.definition.steps.length
-        };
+        });
 
       case 'preview':
       default:
         // Find the first next step via the interpreter (authoritative)
         const next = await service.getNextStep(workflowId, initialExecutionState(), undefined, {} as ConditionContext);
-        const firstStep =
-          next.kind === 'ok'
-            ? (next.value.next ? next.value.next.step : null)
-            : null;
-        return {
+        const firstStep = next.isOk() ? (next.value.next ? next.value.next.step : null) : null;
+        return ok({
           id: workflow.definition.id,
           name: workflow.definition.name,
           description: workflow.definition.description,
@@ -68,7 +70,7 @@ export function createGetWorkflow(service: WorkflowService) {
           metaGuidance: workflow.definition.metaGuidance,
           totalSteps: workflow.definition.steps.length,
           firstStep
-        };
+        });
     }
   };
 }
@@ -81,5 +83,12 @@ export async function getWorkflow(
   service: WorkflowService,
   workflowId: string
 ): Promise<Workflow> {
-  return createGetWorkflow(service)(workflowId, 'preview') as Promise<Workflow>;
+  const result = await createGetWorkflow(service)(workflowId, 'preview');
+  if (result.isErr()) {
+    if (result.error._tag === 'WorkflowNotFound') {
+      throw new WorkflowNotFoundError(workflowId);
+    }
+    throw new Error(result.error.message);
+  }
+  return result.value as Workflow;
 } 
