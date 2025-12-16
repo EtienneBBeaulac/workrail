@@ -1,8 +1,12 @@
 import { describe, vi, it, expect, beforeEach, jest } from 'vitest';
-import { RemoteWorkflowStorage, CommunityWorkflowStorage } from '../../src/infrastructure/storage/remote-workflow-storage';
-import { Workflow, WorkflowSummary } from '../../src/types/mcp-types';
+import { RemoteWorkflowStorage } from '../../src/infrastructure/storage/remote-workflow-storage';
+import {
+  WorkflowDefinition,
+  WorkflowSummary,
+  createRemoteRegistrySource,
+  createWorkflow,
+} from '../../src/types/workflow';
 import { SecurityError, StorageError, InvalidWorkflowError } from '../../src/core/error-handler';
-import { InMemoryWorkflowStorage } from '../../src/infrastructure/storage/in-memory-storage';
 
 // Mock fetch globally
 const mockFetch = vi.fn() as jest.MockedFunction<typeof fetch>;
@@ -107,7 +111,7 @@ describe('Remote Workflow Storage', () => {
       });
 
       it('should load workflows from registry with workflows format', async () => {
-        const mockWorkflows: Workflow[] = [
+        const mockDefinitions: WorkflowDefinition[] = [
           {
             id: 'test-workflow',
             name: 'Test Workflow',
@@ -119,11 +123,15 @@ describe('Remote Workflow Storage', () => {
 
         mockFetch.mockResolvedValueOnce({
           ok: true,
-          text: () => Promise.resolve(JSON.stringify({ workflows: mockWorkflows }))
+          text: () => Promise.resolve(JSON.stringify({ workflows: mockDefinitions }))
         } as Response);
 
         const result = await storage.loadAllWorkflows();
-        expect(result).toEqual(mockWorkflows);
+        expect(result).toEqual(
+          mockDefinitions.map(def =>
+            createWorkflow(def, createRemoteRegistrySource('https://registry.example.com'))
+          )
+        );
         expect(mockFetch).toHaveBeenCalledWith(
           'https://registry.example.com/workflows',
           expect.objectContaining({
@@ -136,7 +144,7 @@ describe('Remote Workflow Storage', () => {
       });
 
       it('should load workflows from registry with data format', async () => {
-        const mockWorkflows: Workflow[] = [
+        const mockDefinitions: WorkflowDefinition[] = [
           {
             id: 'test-workflow',
             name: 'Test Workflow',
@@ -148,11 +156,15 @@ describe('Remote Workflow Storage', () => {
 
         mockFetch.mockResolvedValueOnce({
           ok: true,
-          text: () => Promise.resolve(JSON.stringify({ data: mockWorkflows }))
+          text: () => Promise.resolve(JSON.stringify({ data: mockDefinitions }))
         } as Response);
 
         const result = await storage.loadAllWorkflows();
-        expect(result).toEqual(mockWorkflows);
+        expect(result).toEqual(
+          mockDefinitions.map(def =>
+            createWorkflow(def, createRemoteRegistrySource('https://registry.example.com'))
+          )
+        );
       });
 
       it('should filter out invalid workflows', async () => {
@@ -173,7 +185,7 @@ describe('Remote Workflow Storage', () => {
 
         const result = await storage.loadAllWorkflows();
         expect(result).toHaveLength(1);
-        expect(result[0]!.id).toBe('valid');
+        expect(result[0]!.definition.id).toBe('valid');
       });
 
       it('should throw StorageError for network failures', async () => {
@@ -216,7 +228,7 @@ describe('Remote Workflow Storage', () => {
       });
 
       it('should retrieve workflow by ID', async () => {
-        const mockWorkflow: Workflow = {
+        const mockDefinition: WorkflowDefinition = {
           id: 'test-workflow',
           name: 'Test Workflow',
           description: 'A test workflow',
@@ -226,11 +238,16 @@ describe('Remote Workflow Storage', () => {
 
         mockFetch.mockResolvedValueOnce({
           ok: true,
-          text: () => Promise.resolve(JSON.stringify(mockWorkflow))
+          text: () => Promise.resolve(JSON.stringify(mockDefinition))
         } as Response);
 
         const result = await storage.getWorkflowById('test-workflow');
-        expect(result).toEqual(mockWorkflow);
+        expect(result).toEqual(
+          createWorkflow(
+            mockDefinition,
+            createRemoteRegistrySource('https://registry.example.com')
+          )
+        );
         expect(mockFetch).toHaveBeenCalledWith(
           'https://registry.example.com/workflows/test-workflow',
           expect.any(Object)
@@ -260,13 +277,13 @@ describe('Remote Workflow Storage', () => {
       });
 
       it('should sanitize workflow ID', async () => {
-        expect(storage.getWorkflowById('test workflow')).rejects.toThrow(InvalidWorkflowError);
-        expect(storage.getWorkflowById('test/workflow')).rejects.toThrow(InvalidWorkflowError);
-        expect(storage.getWorkflowById('test\u0000workflow')).rejects.toThrow(SecurityError);
+        await expect(storage.getWorkflowById('test workflow')).rejects.toThrow(InvalidWorkflowError);
+        await expect(storage.getWorkflowById('test/workflow')).rejects.toThrow(InvalidWorkflowError);
+        await expect(storage.getWorkflowById('test\u0000workflow')).rejects.toThrow(SecurityError);
       });
 
       it('should validate returned workflow ID matches request', async () => {
-        const mockWorkflow: Workflow = {
+        const mockDefinition: WorkflowDefinition = {
           id: 'different-id',
           name: 'Test Workflow',
           description: 'A test workflow',
@@ -276,11 +293,10 @@ describe('Remote Workflow Storage', () => {
 
         mockFetch.mockResolvedValueOnce({
           ok: true,
-          text: () => Promise.resolve(JSON.stringify(mockWorkflow))
+          text: () => Promise.resolve(JSON.stringify(mockDefinition))
         } as Response);
 
         await expect(storage.getWorkflowById('test-workflow')).rejects.toThrow(InvalidWorkflowError);
-        await expect(storage.getWorkflowById('test-workflow')).rejects.toThrow('Failed to fetch');
       });
     });
 
@@ -296,37 +312,46 @@ describe('Remote Workflow Storage', () => {
       });
 
       it('should list workflow summaries', async () => {
-        const mockSummaries: WorkflowSummary[] = [
+        const mockDefinitions: WorkflowDefinition[] = [
           {
             id: 'workflow-1',
             name: 'Workflow 1',
             description: 'First workflow',
-            category: 'test',
-            version: '1.0.0'
-          }
+            version: '1.0.0',
+            steps: [{ id: 's1', title: 'S1', prompt: 'P1' }],
+          },
         ];
 
         mockFetch.mockResolvedValueOnce({
           ok: true,
-          text: () => Promise.resolve(JSON.stringify({ summaries: mockSummaries }))
+          text: () => Promise.resolve(JSON.stringify({ workflows: mockDefinitions }))
         } as Response);
 
         const result = await storage.listWorkflowSummaries();
-        expect(result).toEqual(mockSummaries);
+        const expected: WorkflowSummary[] = [
+          {
+            id: 'workflow-1',
+            name: 'Workflow 1',
+            description: 'First workflow',
+            version: '1.0.0',
+            source: { kind: 'remote', displayName: 'registry.example.com' }
+          }
+        ];
+        expect(result).toEqual(expected);
         expect(mockFetch).toHaveBeenCalledWith(
-          'https://registry.example.com/workflows/summaries',
+          'https://registry.example.com/workflows',
           expect.any(Object)
         );
       });
 
       it('should filter out invalid summaries', async () => {
         const mockResponse = {
-          summaries: [
-            { id: 'valid', name: 'Valid Summary' },
-            { name: 'Invalid - no ID' },
+          workflows: [
+            { id: 'valid', name: 'Valid', steps: [{ id: 's1', title: 'S1', prompt: 'P1' }] },
+            { name: 'Invalid - no ID', steps: [] },
             null,
-            { id: 'invalid/id', name: 'Invalid ID' }
-          ]
+            { id: 'invalid/id', name: 'Invalid ID', steps: [] }
+          ],
         };
 
         mockFetch.mockResolvedValueOnce({
@@ -352,7 +377,7 @@ describe('Remote Workflow Storage', () => {
       });
 
       it('should save workflow to registry', async () => {
-        const workflow: Workflow = {
+        const definition: WorkflowDefinition = {
           id: 'test-workflow',
           name: 'Test Workflow',
           description: 'A test workflow',
@@ -365,7 +390,7 @@ describe('Remote Workflow Storage', () => {
           text: () => Promise.resolve('{}')
         } as Response);
 
-        await storage.save(workflow);
+        await storage.save(definition);
 
         expect(mockFetch).toHaveBeenCalledWith(
           'https://registry.example.com/workflows',
@@ -375,7 +400,7 @@ describe('Remote Workflow Storage', () => {
               'Content-Type': 'application/json',
               'Authorization': 'Bearer test-api-key'
             }),
-            body: JSON.stringify(workflow)
+            body: JSON.stringify(definition)
           })
         );
       });
@@ -395,7 +420,7 @@ describe('Remote Workflow Storage', () => {
       });
 
       it('should handle registry errors', async () => {
-        const workflow: Workflow = {
+        const definition: WorkflowDefinition = {
           id: 'test-workflow',
           name: 'Test Workflow',
           description: 'A test workflow',
@@ -408,8 +433,9 @@ describe('Remote Workflow Storage', () => {
           text: () => Promise.resolve(JSON.stringify({ message: 'Validation failed' }))
         } as Response);
 
-        await expect(storage.save(workflow)).rejects.toThrow(StorageError);
-        await expect(storage.save(workflow)).rejects.toThrow('Failed to save workflow to remote registry');
+        const promise = storage.save(definition);
+        await expect(promise).rejects.toThrow(StorageError);
+        await expect(promise).rejects.toThrow('Failed to publish workflow');
       });
     });
 
@@ -448,162 +474,4 @@ describe('Remote Workflow Storage', () => {
     });
   });
 
-  describe('CommunityWorkflowStorage', () => {
-    let bundledStorage: InMemoryWorkflowStorage;
-    let localStorage: InMemoryWorkflowStorage;
-    let communityStorage: CommunityWorkflowStorage;
-
-    beforeEach(() => {
-      const bundledWorkflow: Workflow = {
-        id: 'bundled-workflow',
-        name: 'Bundled Workflow',
-        description: 'A bundled workflow',
-        version: '1.0.0',
-        steps: []
-      };
-
-      const localWorkflow: Workflow = {
-        id: 'local-workflow',
-        name: 'Local Workflow',
-        description: 'A local workflow',
-        version: '1.0.0',
-        steps: []
-      };
-
-      bundledStorage = new InMemoryWorkflowStorage([bundledWorkflow]);
-      localStorage = new InMemoryWorkflowStorage([localWorkflow]);
-
-      communityStorage = new CommunityWorkflowStorage(
-        bundledStorage,
-        localStorage,
-        { 
-          baseUrl: 'https://registry.example.com',
-          timeout: 100,      // Short timeout for tests
-          retryAttempts: 1   // Minimal retries for tests
-        }
-      );
-
-      // Mock remote workflows - handle both loadAllWorkflows and getWorkflowById
-      const remoteWorkflow = {
-        id: 'remote-workflow',
-        name: 'Remote Workflow',
-        description: 'A remote workflow',
-        version: '1.0.0',
-        steps: [{ id: 'step1', title: 'Remote Step', prompt: 'Remote step prompt' }]
-      };
-
-      mockFetch.mockImplementation((url: string | URL | Request) => {
-        if ((url as string).endsWith('/workflows')) {
-          // loadAllWorkflows call
-          return Promise.resolve({
-            ok: true,
-            text: () => Promise.resolve(JSON.stringify({
-              workflows: [remoteWorkflow]
-            }))
-          } as Response);
-        } else if ((url as string).includes('/workflows/remote-workflow')) {
-          // getWorkflowById call
-          return Promise.resolve({
-            ok: true,
-            text: () => Promise.resolve(JSON.stringify(remoteWorkflow))
-          } as Response);
-        }
-        // Default fallback
-        return Promise.resolve({
-          ok: true,
-          text: () => Promise.resolve('{}')
-        } as Response);
-      });
-    });
-
-    it('should load workflows from all sources', async () => {
-      const workflows = await communityStorage.loadAllWorkflows();
-      
-      expect(workflows).toHaveLength(3);
-      expect(workflows.map(w => w.id)).toContain('bundled-workflow');
-      expect(workflows.map(w => w.id)).toContain('local-workflow');
-      expect(workflows.map(w => w.id)).toContain('remote-workflow');
-    });
-
-    it('should handle precedence correctly - later sources override earlier ones', async () => {
-      // Add a workflow with same ID to local storage
-      const overrideWorkflow: Workflow = {
-        id: 'bundled-workflow', // Same ID as bundled
-        name: 'Override Workflow',
-        description: 'An override workflow',
-        version: '2.0.0',
-        steps: []
-      };
-
-      localStorage = new InMemoryWorkflowStorage([overrideWorkflow]);
-      communityStorage = new CommunityWorkflowStorage(
-        bundledStorage,
-        localStorage,
-        { 
-          baseUrl: 'https://registry.example.com',
-          timeout: 100,      // Short timeout for tests
-          retryAttempts: 1   // Minimal retries for tests
-        }
-      );
-
-      const workflows = await communityStorage.loadAllWorkflows();
-      const bundledWorkflow = workflows.find(w => w.id === 'bundled-workflow');
-      
-      expect(bundledWorkflow!.name).toBe('Override Workflow'); // Local overrides bundled
-      expect(bundledWorkflow!.version).toBe('2.0.0');
-    });
-
-    it('should continue loading when one source fails', async () => {
-      // Make remote storage fail by overriding the implementation 
-      mockFetch.mockImplementation(() => {
-        return Promise.reject(new Error('Network error'));
-      });
-
-      const workflows = await communityStorage.loadAllWorkflows();
-      
-      // Should still get bundled and local workflows
-      expect(workflows).toHaveLength(2);
-      expect(workflows.map(w => w.id)).toContain('bundled-workflow');
-      expect(workflows.map(w => w.id)).toContain('local-workflow');
-    });
-
-    it('should sanitize IDs in getWorkflowById', async () => {
-      await expect(communityStorage.getWorkflowById('invalid id')).rejects.toThrow(InvalidWorkflowError);
-    });
-
-    it('should search sources in reverse order for getWorkflowById', async () => {
-      const result = await communityStorage.getWorkflowById('remote-workflow');
-      expect(result).toBeDefined();
-      expect(result!.name).toBe('Remote Workflow');
-    });
-
-    it('should generate summaries from all workflows', async () => {
-      const summaries = await communityStorage.listWorkflowSummaries();
-      
-      expect(summaries).toHaveLength(3);
-      expect(summaries.every(s => s.category === 'community')).toBe(true);
-    });
-
-    it('should delegate save to remote storage', async () => {
-      const workflow: Workflow = {
-        id: 'test-save',
-        name: 'Test Save',
-        description: 'Test save workflow',
-        version: '1.0.0',
-        steps: []
-      };
-
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        text: () => Promise.resolve('{}')
-      } as Response);
-
-      await communityStorage.save(workflow);
-
-      expect(mockFetch).toHaveBeenCalledWith(
-        'https://registry.example.com/workflows',
-        expect.objectContaining({ method: 'POST' })
-      );
-    });
-  });
 }); 

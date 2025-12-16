@@ -78,31 +78,5 @@ export function untrackResource(cleanupFn: () => Promise<void>): void {
   createElement: vi.fn()
 };
 
-// Add process cleanup handlers
-process.on('exit', () => {
-  console.log('📋 Process exiting, final cleanup...');
-});
-
-process.on('SIGINT', async () => {
-  console.log('🛑 Received SIGINT, cleaning up...');
-  for (const cleanup of globalResources) {
-    try {
-      await cleanup();
-    } catch (error) {
-      console.error('Error during SIGINT cleanup:', error);
-    }
-  }
-  process.exit(0);
-});
-
-process.on('SIGTERM', async () => {
-  console.log('🛑 Received SIGTERM, cleaning up...');
-  for (const cleanup of globalResources) {
-    try {
-      await cleanup();
-    } catch (error) {
-      console.error('Error during SIGTERM cleanup:', error);
-    }
-  }
-  process.exit(0);
-});
+// NOTE: Do not register process-level signal handlers in tests.
+// Vitest owns the process lifecycle; cleanup should happen via test hooks above.

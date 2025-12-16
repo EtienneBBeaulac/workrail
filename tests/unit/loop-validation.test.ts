@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { container } from 'tsyringe';
 import { ValidationEngine } from '../../src/application/services/validation-engine';
 import { EnhancedLoopValidator } from '../../src/application/services/enhanced-loop-validator';
-import { Workflow, LoopStep } from '../../src/types/workflow-types';
+import { Workflow, LoopStep, createWorkflow, createBundledSource } from '../../src/types/workflow';
 
 describe('Loop Validation', () => {
   let engine: ValidationEngine;
@@ -19,7 +19,7 @@ describe('Loop Validation', () => {
   });
 
   describe('validateLoopStep', () => {
-    const baseWorkflow: Workflow = {
+    const baseWorkflow = createWorkflow({
       id: 'test-workflow',
       name: 'Test Workflow',
       description: 'Test',
@@ -27,7 +27,7 @@ describe('Loop Validation', () => {
       steps: [
         { id: 'loop-body', title: 'Loop Body', prompt: 'Do something' }
       ]
-    };
+    }, createBundledSource());
 
     const baseLoopStep: LoopStep = {
       id: 'test-loop',
@@ -176,10 +176,10 @@ describe('Loop Validation', () => {
     });
 
     it('should reject nested loops', () => {
-      const workflowWithNestedLoop: Workflow = {
+      const workflowWithNestedLoop = createWorkflow({
         ...baseWorkflow,
         steps: [
-          ...baseWorkflow.steps,
+          ...baseWorkflow.definition.steps,
           {
             id: 'nested-loop',
             type: 'loop',
@@ -193,7 +193,7 @@ describe('Loop Validation', () => {
             body: 'loop-body'
           } as LoopStep
         ]
-      };
+      }, createBundledSource());
       const invalidLoop: LoopStep = {
         ...baseLoopStep,
         body: 'nested-loop'
@@ -238,7 +238,7 @@ describe('Loop Validation', () => {
 
   describe('validateWorkflow', () => {
     it('should validate a workflow with loops', () => {
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'loop-workflow',
         name: 'Loop Workflow',
         description: 'Test',
@@ -259,13 +259,13 @@ describe('Loop Validation', () => {
           { id: 'process', title: 'Process', prompt: 'Do work' },
           { id: 'done', title: 'Done', prompt: 'Complete' }
         ]
-      };
+      }, createBundledSource());
       const result = engine.validateWorkflow(workflow);
       expect(result.valid).toBe(true);
     });
 
     it('should detect duplicate step IDs', () => {
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'dup-workflow',
         name: 'Duplicate Workflow',
         description: 'Test',
@@ -274,14 +274,14 @@ describe('Loop Validation', () => {
           { id: 'step1', title: 'Step 1', prompt: 'First' },
           { id: 'step1', title: 'Step 2', prompt: 'Second' }
         ]
-      };
+      }, createBundledSource());
       const result = engine.validateWorkflow(workflow);
       expect(result.valid).toBe(false);
       expect(result.issues[0]).toContain('Duplicate step ID');
     });
 
     it('should validate all loop steps in workflow', () => {
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'multi-loop-workflow',
         name: 'Multi Loop Workflow',
         description: 'Test',
@@ -314,13 +314,13 @@ describe('Loop Validation', () => {
           } as LoopStep,
           { id: 'step2', title: 'Step 2', prompt: 'In loop 2' }
         ]
-      };
+      }, createBundledSource());
       const result = engine.validateWorkflow(workflow);
       expect(result.valid).toBe(true);
     });
 
     it('should warn about loop body steps with runCondition', () => {
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'condition-workflow',
         name: 'Condition Workflow',
         description: 'Test',
@@ -345,14 +345,14 @@ describe('Loop Validation', () => {
             runCondition: { var: 'extra' }
           }
         ]
-      };
+      }, createBundledSource());
       const result = engine.validateWorkflow(workflow);
       expect(result.valid).toBe(false);
       expect(result.issues[0]).toContain('loop body but has runCondition');
     });
 
     it('should validate steps without loops', () => {
-      const workflow: Workflow = {
+      const workflow = createWorkflow({
         id: 'simple-workflow',
         name: 'Simple Workflow',
         description: 'Test',
@@ -361,7 +361,7 @@ describe('Loop Validation', () => {
           { id: 'step1', title: 'Step 1', prompt: 'First' },
           { id: 'step2', title: 'Step 2', prompt: 'Second' }
         ]
-      };
+      }, createBundledSource());
       const result = engine.validateWorkflow(workflow);
       expect(result.valid).toBe(true);
     });

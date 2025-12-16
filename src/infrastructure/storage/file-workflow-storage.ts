@@ -2,12 +2,20 @@ import fs from 'fs/promises';
 import { existsSync, statSync } from 'fs';
 import path from 'path';
 import { IWorkflowStorage } from '../../types/storage';
-import { Workflow, WorkflowSummary } from '../../types/mcp-types';
+import { 
+  Workflow, 
+  WorkflowSummary, 
+  WorkflowDefinition,
+  WorkflowSource,
+  createWorkflow,
+  toWorkflowSummary,
+  createBundledSource
+} from '../../types/workflow';
 import {
   InvalidWorkflowError,
   SecurityError
 } from '../../core/error-handler';
-import { IFeatureFlagProvider, createFeatureFlagProvider } from '../../config/feature-flags';
+import { IFeatureFlagProvider, EnvironmentFeatureFlagProvider } from '../../config/feature-flags';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -40,7 +48,7 @@ interface CacheEntry {
 interface WorkflowIndexEntry {
   id: string;
   filename: string;
-  summary: WorkflowSummary;
+  definition: WorkflowDefinition;
   lastModified: number;
 }
 
@@ -53,16 +61,21 @@ interface FileWorkflowStorageOptions {
   cacheSize?: number;
   /** Index cache TTL in milliseconds. Default 30000 (30 seconds) */
   indexCacheTTLms?: number;
-  /** Feature flag provider (optional, defaults to environment-based) */
-  featureFlagProvider?: IFeatureFlagProvider;
+  /** Feature flag provider (required) */
+  featureFlagProvider: IFeatureFlagProvider;
 }
 
 /**
  * Optimized file-system based workflow storage with intelligent caching.
  * Uses an index cache to avoid repeatedly scanning directories and 
  * reading files unnecessarily.
+ * 
+ * Each instance is bound to a single WorkflowSource, injected at construction.
  */
 export class FileWorkflowStorage implements IWorkflowStorage {
+  public readonly kind = 'single' as const;
+  public readonly source: WorkflowSource;
+  
   private readonly baseDirReal: string;
   private readonly maxFileSize: number;
   private readonly cacheTTL: number;
@@ -75,13 +88,19 @@ export class FileWorkflowStorage implements IWorkflowStorage {
   private workflowIndex: Map<string, WorkflowIndexEntry> | null = null;
   private indexExpires: number = 0;
 
-  constructor(directory: string, options: FileWorkflowStorageOptions = {}) {
+  constructor(
+    directory: string, 
+    source: WorkflowSource,
+    featureFlagProvider: IFeatureFlagProvider,
+    options: Omit<FileWorkflowStorageOptions, 'featureFlagProvider'> = {}
+  ) {
+    this.source = source;
     this.baseDirReal = path.resolve(directory);
     this.maxFileSize = options.maxFileSizeBytes ?? 1_000_000; // 1 MB default
     this.cacheTTL = options.cacheTTLms ?? 5000;
     this.cacheLimit = options.cacheSize ?? 100;
     this.indexCacheTTL = options.indexCacheTTLms ?? 30000; // 30 seconds
-    this.featureFlags = options.featureFlagProvider ?? createFeatureFlagProvider();
+    this.featureFlags = featureFlagProvider;
   }
 
   /**
@@ -124,71 +143,63 @@ export class FileWorkflowStorage implements IWorkflowStorage {
     const index = new Map<string, WorkflowIndexEntry>();
 
     // First pass: Create map of ID -> Filename to detect overrides
-    const idToFiles = new Map<string, string[]>();
+    const idToFiles = new Map<string, { file: string; definition: WorkflowDefinition }[]>();
 
     // Scan all files first to map IDs
     for (const file of relativeFiles) {
       try {
-         // Skip agentic routines if flag is disabled
-         if (!this.featureFlags.isEnabled('agenticRoutines')) {
-           if (file.includes('routines/') || path.basename(file).startsWith('routine-')) {
-          continue;
+        // Skip agentic routines if flag is disabled
+        if (!this.featureFlags.isEnabled('agenticRoutines')) {
+          if (file.includes('routines/') || path.basename(file).startsWith('routine-')) {
+            continue;
+          }
         }
-         }
 
-         // Skip reading content for mapping if we assume filename convention, 
-         // but we can't assume that yet. So we read IDs.
-         const filePathRaw = path.resolve(this.baseDirReal, file);
-         assertWithinBase(filePathRaw, this.baseDirReal);
+        const filePathRaw = path.resolve(this.baseDirReal, file);
+        assertWithinBase(filePathRaw, this.baseDirReal);
 
-         const stats = statSync(filePathRaw);
-         if (stats.size > this.maxFileSize) continue;
+        const stats = statSync(filePathRaw);
+        if (stats.size > this.maxFileSize) continue;
 
         const raw = await fs.readFile(filePathRaw, 'utf-8');
-        const data = JSON.parse(raw) as Workflow;
-         if (!data.id) continue;
+        const definition = JSON.parse(raw) as WorkflowDefinition;
+        if (!definition.id) continue;
 
-         const files = idToFiles.get(data.id) || [];
-         files.push(file);
-         idToFiles.set(data.id, files);
-      } catch (e) { continue; }
+        const files = idToFiles.get(definition.id) || [];
+        files.push({ file, definition });
+        idToFiles.set(definition.id, files);
+      } catch {
+        continue;
+      }
     }
 
     // Second pass: Select correct file for each ID
     for (const [id, files] of idToFiles) {
-      let selectedFile = files[0];
+      let selected = files[0]!;
 
       // Agentic Override Logic
       if (this.featureFlags.isEnabled('agenticRoutines')) {
-         const agenticFile = files.find(f => f.includes('.agentic.'));
-         if (agenticFile) {
-           selectedFile = agenticFile;
-         }
+        const agenticEntry = files.find(f => f.file.includes('.agentic.'));
+        if (agenticEntry) {
+          selected = agenticEntry;
+        }
       } else {
-         // Ensure we DON'T pick the agentic file if flag is off
-         const standardFile = files.find(f => !f.includes('.agentic.'));
-         if (standardFile) {
-            selectedFile = standardFile;
+        // Ensure we DON'T pick the agentic file if flag is off
+        const standardEntry = files.find(f => !f.file.includes('.agentic.'));
+        if (standardEntry) {
+          selected = standardEntry;
         }
       }
 
       // Add to index
-      const filePath = path.resolve(this.baseDirReal, selectedFile);
+      const filePath = path.resolve(this.baseDirReal, selected.file);
       const stats = statSync(filePath);
-      const raw = await fs.readFile(filePath, 'utf-8');
-      const data = JSON.parse(raw) as Workflow;
       
       index.set(id, {
-          id: data.id,
-        filename: selectedFile,
-          lastModified: stats.mtimeMs,
-          summary: {
-            id: data.id,
-            name: data.name,
-            description: data.description,
-            category: 'default',
-            version: data.version
-          }
+        id: selected.definition.id,
+        filename: selected.file,
+        definition: selected.definition,
+        lastModified: stats.mtimeMs,
       });
     }
 
@@ -213,9 +224,9 @@ export class FileWorkflowStorage implements IWorkflowStorage {
   }
 
   /**
-   * Load a specific workflow from file
+   * Load a specific workflow definition from file
    */
-  private async loadWorkflowFromFile(filename: string): Promise<Workflow | null> {
+  private async loadDefinitionFromFile(filename: string): Promise<WorkflowDefinition | null> {
     const filePath = path.resolve(this.baseDirReal, filename);
     assertWithinBase(filePath, this.baseDirReal);
 
@@ -226,8 +237,8 @@ export class FileWorkflowStorage implements IWorkflowStorage {
       }
 
       const raw = await fs.readFile(filePath, 'utf-8');
-      const data = JSON.parse(raw) as Workflow;
-      return data;
+      const definition = JSON.parse(raw) as WorkflowDefinition;
+      return definition;
     } catch (err) {
       console.warn(`[FileWorkflowStorage] Failed to load workflow from ${filename}:`, err);
       return null;
@@ -235,23 +246,19 @@ export class FileWorkflowStorage implements IWorkflowStorage {
   }
 
   /**
-   * Load *all* JSON files from the configured directory.
-   * NOTE: This method is expensive and should be avoided when possible.
-   * Use getWorkflowIndex() + loadWorkflowFromFile() for better performance.
+   * Load *all* workflows from the configured directory.
+   * Returns Workflow objects with source attached.
    */
-  public async loadAllWorkflows(): Promise<Workflow[]> {
+  public async loadAllWorkflows(): Promise<readonly Workflow[]> {
     const index = await this.getWorkflowIndex();
     const workflows: Workflow[] = [];
 
-    // Load workflows in parallel for better performance
-    const loadPromises = Array.from(index.values()).map(async (entry) => {
-      const workflow = await this.loadWorkflowFromFile(entry.filename);
-      if (workflow) {
-        workflows.push(workflow);
-      }
-    });
+    // Use cached definitions from index when available
+    for (const entry of index.values()) {
+      const workflow = createWorkflow(entry.definition, this.source);
+      workflows.push(workflow);
+    }
 
-    await Promise.all(loadPromises);
     return workflows;
   }
 
@@ -272,17 +279,16 @@ export class FileWorkflowStorage implements IWorkflowStorage {
       return null; // Workflow doesn't exist
     }
 
-    // Load the specific workflow file
-    const workflow = await this.loadWorkflowFromFile(indexEntry.filename);
-    
-    if (!workflow) {
-      return null;
-    }
+    // Use definition from index (already loaded)
+    const definition = indexEntry.definition;
 
     // Verify ID matches (security check)
-    if (workflow.id !== safeId) {
+    if (definition.id !== safeId) {
       throw new InvalidWorkflowError(safeId, 'ID mismatch between index and workflow.id');
     }
+
+    // Create workflow with source
+    const workflow = createWorkflow(definition, this.source);
 
     // Cache the result
     if (this.cacheTTL > 0) {
@@ -297,32 +303,41 @@ export class FileWorkflowStorage implements IWorkflowStorage {
     return workflow;
   }
 
-  public async listWorkflowSummaries(): Promise<WorkflowSummary[]> {
-    // Use the index to get summaries without loading full workflows
-    const index = await this.getWorkflowIndex();
-    return Array.from(index.values()).map(entry => entry.summary);
+  public async listWorkflowSummaries(): Promise<readonly WorkflowSummary[]> {
+    const workflows = await this.loadAllWorkflows();
+    return workflows.map(toWorkflowSummary);
   }
 
-  public async save(): Promise<void> {
-    // No-op for now – file storage is read-only in this phase.
-    return Promise.resolve();
+  public async save(definition: WorkflowDefinition): Promise<void> {
+    // Validate the definition has required fields
+    if (!definition.id || !definition.name || !definition.steps) {
+      throw new InvalidWorkflowError(
+        definition.id || 'unknown',
+        'Definition must have id, name, and steps'
+      );
+    }
+
+    const safeId = sanitizeId(definition.id);
+    const filename = `${safeId}.json`;
+    const filePath = path.resolve(this.baseDirReal, filename);
+    
+    assertWithinBase(filePath, this.baseDirReal);
+
+    const content = JSON.stringify(definition, null, 2);
+    await fs.writeFile(filePath, content, 'utf-8');
+
+    // Invalidate caches
+    this.cache.delete(safeId);
+    this.workflowIndex = null;
   }
 }
 
 /**
- * Helper factory that resolves the workflow directory according to the
- * previous behaviour (env override → bundled workflows).
+ * @deprecated Use DI container: container.resolve(DI.Storage.Primary)
  */
-export function createDefaultFileWorkflowStorage(): FileWorkflowStorage {
-  const DEFAULT_WORKFLOW_DIR = path.resolve(__dirname, '../../../workflows');
-  const envPath = process.env['WORKFLOW_STORAGE_PATH'];
-  const resolved = envPath ? path.resolve(envPath) : null;
-  const directory = resolved && existsSync(resolved) ? resolved : DEFAULT_WORKFLOW_DIR;
-  
-  // Use optimized settings for better performance
-  return new FileWorkflowStorage(directory, {
-    cacheTTLms: 10000,    // 10 second cache for individual workflows
-    cacheSize: 200,       // Larger cache
-    indexCacheTTLms: 60000, // 1 minute index cache
-  });
-} 
+export function createDefaultFileWorkflowStorage(): never {
+  throw new Error(
+    'createDefaultFileWorkflowStorage() is removed. ' +
+    'Use DI container: container.resolve(DI.Storage.Primary)'
+  );
+}

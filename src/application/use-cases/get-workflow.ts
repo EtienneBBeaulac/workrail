@@ -1,5 +1,5 @@
 import { WorkflowService } from '../services/workflow-service';
-import { Workflow, WorkflowStep } from '../../types/mcp-types';
+import { Workflow, WorkflowStepDefinition } from '../../types/workflow';
 import { WorkflowNotFoundError } from '../../core/error-handler';
 import { evaluateCondition, ConditionContext } from '../../utils/condition-evaluator';
 
@@ -12,14 +12,14 @@ export interface WorkflowMetadata {
   name: string;
   description: string;
   version: string;
-  preconditions?: string[] | undefined;
-  clarificationPrompts?: string[] | undefined;
-  metaGuidance?: string[] | undefined;
+  preconditions?: readonly string[] | undefined;
+  clarificationPrompts?: readonly string[] | undefined;
+  metaGuidance?: readonly string[] | undefined;
   totalSteps: number;
 }
 
 export interface WorkflowPreview extends WorkflowMetadata {
-  firstStep: WorkflowStep | null;
+  firstStep: WorkflowStepDefinition | null;
 }
 
 export type WorkflowGetResult = Workflow | WorkflowMetadata | WorkflowPreview;
@@ -39,29 +39,29 @@ export function createGetWorkflow(service: WorkflowService) {
     switch (mode) {
       case 'metadata':
         return {
-          id: workflow.id,
-          name: workflow.name,
-          description: workflow.description,
-          version: workflow.version,
-          preconditions: workflow.preconditions,
-          clarificationPrompts: workflow.clarificationPrompts,
-          metaGuidance: workflow.metaGuidance,
-          totalSteps: workflow.steps.length
+          id: workflow.definition.id,
+          name: workflow.definition.name,
+          description: workflow.definition.description,
+          version: workflow.definition.version,
+          preconditions: workflow.definition.preconditions,
+          clarificationPrompts: workflow.definition.clarificationPrompts,
+          metaGuidance: workflow.definition.metaGuidance,
+          totalSteps: workflow.definition.steps.length
         };
 
       case 'preview':
       default:
         // Find the first eligible step (similar to workflow_next logic)
-        const firstStep = findFirstEligibleStep(workflow.steps);
+        const firstStep = findFirstEligibleStep(workflow.definition.steps);
         return {
-          id: workflow.id,
-          name: workflow.name,
-          description: workflow.description,
-          version: workflow.version,
-          preconditions: workflow.preconditions,
-          clarificationPrompts: workflow.clarificationPrompts,
-          metaGuidance: workflow.metaGuidance,
-          totalSteps: workflow.steps.length,
+          id: workflow.definition.id,
+          name: workflow.definition.name,
+          description: workflow.definition.description,
+          version: workflow.definition.version,
+          preconditions: workflow.definition.preconditions,
+          clarificationPrompts: workflow.definition.clarificationPrompts,
+          metaGuidance: workflow.definition.metaGuidance,
+          totalSteps: workflow.definition.steps.length,
           firstStep
         };
     }
@@ -72,7 +72,7 @@ export function createGetWorkflow(service: WorkflowService) {
  * Helper function to find the first eligible step in a workflow.
  * Uses the same logic as workflow_next but with empty completed steps and context.
  */
-function findFirstEligibleStep(steps: WorkflowStep[], context: ConditionContext = {}): WorkflowStep | null {
+function findFirstEligibleStep(steps: readonly WorkflowStepDefinition[], context: ConditionContext = {}): WorkflowStepDefinition | null {
   return steps.find((step) => {
     // If step has a runCondition, evaluate it
     if (step.runCondition) {

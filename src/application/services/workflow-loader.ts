@@ -1,10 +1,9 @@
 import { singleton, inject } from 'tsyringe';
-import { Workflow } from '../../types/mcp-types';
+import { Workflow, isLoopStepDefinition, LoopStepDefinition } from '../../types/workflow';
 import { IWorkflowLoader, LoadedWorkflow } from './i-workflow-loader';
-import { IWorkflowStorage } from '../../types/storage';
+import { IWorkflowStorage, ICompositeWorkflowStorage } from '../../types/storage';
 import { ValidationEngine } from './validation-engine';
 import { WorkflowNotFoundError } from '../../core/error-handler';
-import { isLoopStep, LoopStep } from '../../types/workflow-types';
 import { createLogger } from '../../utils/logger';
 import { DI } from '../../di/tokens.js';
 
@@ -21,7 +20,7 @@ export class DefaultWorkflowLoader implements IWorkflowLoader {
   private readonly logger = createLogger('WorkflowLoader');
 
   constructor(
-    @inject(DI.Storage.Primary) private readonly storage: IWorkflowStorage,
+    @inject(DI.Storage.Primary) private readonly storage: import('../../types/storage').IWorkflowReader,
     @inject(ValidationEngine) private readonly validationEngine: ValidationEngine
   ) {}
 
@@ -45,7 +44,7 @@ export class DefaultWorkflowLoader implements IWorkflowLoader {
     
     this.logger.debug('Workflow loaded and validated', {
       workflowId,
-      stepCount: workflow.steps.length,
+      stepCount: workflow.definition.steps.length,
       loopBodyStepCount: loopBodySteps.size
     });
 
@@ -62,14 +61,12 @@ export class DefaultWorkflowLoader implements IWorkflowLoader {
   private buildLoopBodyStepSet(workflow: Workflow): Set<string> {
     const bodySteps = new Set<string>();
     
-    for (const step of workflow.steps) {
-      if (isLoopStep(step)) {
-        const loopStep = step as LoopStep;
-        
-        if (typeof loopStep.body === 'string') {
-          bodySteps.add(loopStep.body);
-        } else if (Array.isArray(loopStep.body)) {
-          loopStep.body.forEach(bodyStep => {
+    for (const step of workflow.definition.steps) {
+      if (isLoopStepDefinition(step)) {
+        if (typeof step.body === 'string') {
+          bodySteps.add(step.body);
+        } else if (Array.isArray(step.body)) {
+          step.body.forEach(bodyStep => {
             bodySteps.add(bodyStep.id);
           });
         }

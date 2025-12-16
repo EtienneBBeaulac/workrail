@@ -1,5 +1,5 @@
 import { createDefaultWorkflowStorage } from '../../src/infrastructure/storage';
-import { Workflow } from '../../src/types/mcp-types';
+import { Workflow, createWorkflow, createBundledSource, WorkflowDefinition } from '../../src/types/workflow';
 
 describe('FileWorkflowStorage', () => {
   const storage = createDefaultWorkflowStorage();
@@ -9,8 +9,10 @@ describe('FileWorkflowStorage', () => {
     expect(Array.isArray(workflows)).toBe(true);
     expect(workflows.length).toBeGreaterThan(0);
     const wf = workflows[0]! as Workflow;
-    expect(wf).toHaveProperty('id');
-    expect(wf).toHaveProperty('steps');
+    expect(wf).toHaveProperty('definition');
+    expect(wf).toHaveProperty('source');
+    expect(wf.definition).toHaveProperty('id');
+    expect(wf.definition).toHaveProperty('steps');
   });
 
   it('should cache workflows and provide hit/miss stats', async () => {
@@ -33,13 +35,13 @@ describe('FileWorkflowStorage', () => {
     
     // Check that no workflow IDs contain 'simple-' prefix (from examples/loops/)
     const exampleWorkflows = workflows.filter((wf: Workflow) => 
-      wf.id.startsWith('simple-') || wf.id.includes('example')
+      wf.definition.id.startsWith('simple-') || wf.definition.id.includes('example')
     );
     
     expect(exampleWorkflows).toHaveLength(0);
     
     // Specifically check for known example workflow IDs that should be excluded
-    const workflowIds = workflows.map((wf: Workflow) => wf.id);
+    const workflowIds = workflows.map((wf: Workflow) => wf.definition.id);
     expect(workflowIds).not.toContain('simple-batch-example');
     expect(workflowIds).not.toContain('simple-polling-example');
     expect(workflowIds).not.toContain('simple-retry-example');

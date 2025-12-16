@@ -82,8 +82,8 @@ describe('External Workflows E2E', () => {
 
       // Should have workflows from both repos
       expect(workflows.length).toBeGreaterThanOrEqual(2);
-      expect(workflows.some(w => w.id === 'community-workflow')).toBe(true);
-      expect(workflows.some(w => w.id === 'team-workflow')).toBe(true);
+      expect(workflows.some(w => w.definition.id === 'community-workflow')).toBe(true);
+      expect(workflows.some(w => w.definition.id === 'team-workflow')).toBe(true);
 
       process.env = originalEnv;
     });
@@ -129,8 +129,8 @@ describe('External Workflows E2E', () => {
       const workflow = await storage.getWorkflowById('conflict-test');
 
       // Later repo (repo2) should override earlier one (repo1)
-      expect(workflow?.name).toBe('Second Version');
-      expect(workflow?.description).toBe('From repo2');
+      expect(workflow?.definition.name).toBe('Second Version');
+      expect(workflow?.definition.description).toBe('From repo2');
 
       process.env = originalEnv;
     });
@@ -197,7 +197,7 @@ describe('External Workflows E2E', () => {
       
       // Should not throw, should load from valid repo only
       const workflows = await storage.loadAllWorkflows();
-      expect(workflows.some(w => w.id === 'community-workflow')).toBe(true);
+      expect(workflows.some(w => w.definition.id === 'community-workflow')).toBe(true);
 
       process.env = originalEnv;
     });
@@ -216,7 +216,7 @@ describe('External Workflows E2E', () => {
 
       // Local paths are optimized to use direct file access (custom) instead of git cloning
       // So they appear as file sources with custom: prefix
-      const customSources = sourceInfo.filter(s => s.name.startsWith('custom:'));
+      const customSources = sourceInfo.filter(s => s.source.kind === 'custom');
       expect(customSources.length).toBe(2);
       expect(customSources.every(s => s.type === 'file')).toBe(true);
 

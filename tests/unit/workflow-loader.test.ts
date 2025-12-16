@@ -4,7 +4,7 @@ import { DefaultWorkflowLoader } from '../../src/application/services/workflow-l
 import { InMemoryWorkflowStorage } from '../../src/infrastructure/storage/in-memory-storage';
 import { ValidationEngine } from '../../src/application/services/validation-engine';
 import { EnhancedLoopValidator } from '../../src/application/services/enhanced-loop-validator';
-import { Workflow } from '../../src/types/mcp-types';
+import { Workflow, createWorkflow, createBundledSource, WorkflowDefinition } from '../../src/types/workflow';
 import { WorkflowNotFoundError } from '../../src/core/error-handler';
 import { container } from 'tsyringe';
 
@@ -31,7 +31,7 @@ describe('DefaultWorkflowLoader', () => {
 
   describe('loadAndValidate', () => {
     it('should load and validate a simple workflow', async () => {
-      const workflow: Workflow = {
+      const workflowDef: WorkflowDefinition = {
         id: 'simple',
         name: 'Simple Workflow',
         description: 'Test',
@@ -42,11 +42,11 @@ describe('DefaultWorkflowLoader', () => {
         ]
       };
 
-      storage.setWorkflows([workflow]);
+      storage.setWorkflows([workflowDef]);
 
       const result = await loader.loadAndValidate('simple');
 
-      expect(result.workflow).toEqual(workflow);
+      expect(result.workflow.definition).toEqual(workflowDef);
       expect(result.loopBodySteps.size).toBe(0);
     });
 
@@ -72,7 +72,7 @@ describe('DefaultWorkflowLoader', () => {
     });
 
     it('should identify loop body steps with string body', async () => {
-      const workflow: Workflow = {
+      const workflowDef: WorkflowDefinition = {
         id: 'loop-workflow',
         name: 'Loop',
         description: 'Test',
@@ -91,7 +91,7 @@ describe('DefaultWorkflowLoader', () => {
         ]
       };
 
-      storage.setWorkflows([workflow]);
+      storage.setWorkflows([workflowDef]);
 
       const result = await loader.loadAndValidate('loop-workflow');
 
@@ -102,7 +102,7 @@ describe('DefaultWorkflowLoader', () => {
     });
 
     it('should identify loop body steps with array body', async () => {
-      const workflow: Workflow = {
+      const workflowDef: WorkflowDefinition = {
         id: 'multi-body-loop',
         name: 'Multi Body',
         description: 'Test',
@@ -124,7 +124,7 @@ describe('DefaultWorkflowLoader', () => {
         ]
       };
 
-      storage.setWorkflows([workflow]);
+      storage.setWorkflows([workflowDef]);
 
       const result = await loader.loadAndValidate('multi-body-loop');
 
@@ -137,7 +137,7 @@ describe('DefaultWorkflowLoader', () => {
     });
 
     it('should handle multiple loops', async () => {
-      const workflow: Workflow = {
+      const workflowDef: WorkflowDefinition = {
         id: 'multi-loop',
         name: 'Multi Loop',
         description: 'Test',
@@ -164,7 +164,7 @@ describe('DefaultWorkflowLoader', () => {
         ]
       };
 
-      storage.setWorkflows([workflow]);
+      storage.setWorkflows([workflowDef]);
 
       const result = await loader.loadAndValidate('multi-loop');
 

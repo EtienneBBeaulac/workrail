@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeEach, jest } from 'vitest';
 import { LoopStepResolver } from '../../src/application/services/loop-step-resolver';
-import { Workflow, WorkflowStep } from '../../src/types/mcp-types';
+import { Workflow, WorkflowStep, createWorkflow, createBundledSource, WorkflowDefinition } from '../../src/types/workflow';
 import { LoopStep } from '../../src/types/workflow-types';
 import { StepNotFoundError } from '../../src/core/error-handler';
 
 describe('LoopStepResolver', () => {
   let resolver: LoopStepResolver;
   
-  const mockWorkflow: Workflow = {
+  const mockWorkflow = createWorkflow({
     id: 'test-workflow',
     name: 'Test Workflow',
     description: 'Test workflow with loops',
@@ -53,7 +53,7 @@ describe('LoopStepResolver', () => {
         prompt: 'Third step'
       }
     ]
-  };
+  }, createBundledSource());
 
   beforeEach(() => {
     resolver = new LoopStepResolver();
@@ -84,7 +84,7 @@ describe('LoopStepResolver', () => {
     });
 
     it('should prevent self-referencing loop steps', () => {
-      const selfRefWorkflow: Workflow = {
+      const selfRefWorkflow = createWorkflow({
         ...mockWorkflow,
         steps: [
           {
@@ -100,7 +100,7 @@ describe('LoopStepResolver', () => {
             body: 'self-loop'
           } as LoopStep
         ]
-      };
+      }, createBundledSource());
 
       expect(() => {
         resolver.resolveLoopBody(selfRefWorkflow, 'self-loop', 'self-loop');
@@ -146,7 +146,7 @@ describe('LoopStepResolver', () => {
     });
 
     it('should ignore inline step arrays', () => {
-      const workflowWithInline: Workflow = {
+      const workflowWithInline = createWorkflow({
         ...mockWorkflow,
         steps: [
           {
@@ -165,7 +165,7 @@ describe('LoopStepResolver', () => {
             ]
           } as LoopStep
         ]
-      };
+      }, createBundledSource());
 
       const references = resolver.findAllLoopReferences(workflowWithInline);
       expect(references).toHaveLength(0);
@@ -180,10 +180,10 @@ describe('LoopStepResolver', () => {
     });
 
     it('should throw for invalid reference', () => {
-      const invalidWorkflow: Workflow = {
+      const invalidWorkflow = createWorkflow({
         ...mockWorkflow,
         steps: [
-          ...mockWorkflow.steps,
+          ...mockWorkflow.definition.steps,
           {
             id: 'bad-loop',
             type: 'loop',
@@ -197,7 +197,7 @@ describe('LoopStepResolver', () => {
             body: 'non-existent-step'
           } as LoopStep
         ]
-      };
+      }, createBundledSource());
 
       expect(() => {
         resolver.validateAllReferences(invalidWorkflow);
@@ -205,7 +205,7 @@ describe('LoopStepResolver', () => {
     });
 
     it('should throw for self-referencing loops', () => {
-      const selfRefWorkflow: Workflow = {
+      const selfRefWorkflow = createWorkflow({
         ...mockWorkflow,
         steps: [
           {
@@ -221,7 +221,7 @@ describe('LoopStepResolver', () => {
             body: 'self-ref'
           } as LoopStep
         ]
-      };
+      }, createBundledSource());
 
       expect(() => {
         resolver.validateAllReferences(selfRefWorkflow);
@@ -239,10 +239,10 @@ describe('LoopStepResolver', () => {
     });
 
     it('should maintain separate cache entries for different workflows', () => {
-      const anotherWorkflow: Workflow = {
-        ...mockWorkflow,
+      const anotherWorkflow = createWorkflow({
+        ...mockWorkflow.definition,
         id: 'another-workflow'
-      };
+      }, createBundledSource());
 
       resolver.resolveLoopBody(mockWorkflow, 'step2');
       resolver.resolveLoopBody(anotherWorkflow, 'step2');

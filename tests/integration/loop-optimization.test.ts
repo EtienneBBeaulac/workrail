@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { setupTest, teardownTest, resolve } from '../di/test-container.js';
 import { DI } from '../../src/di/tokens.js';
-import { Workflow } from '../../src/types/mcp-types.js';
 import { InMemoryWorkflowStorage } from '../../src/infrastructure/storage/in-memory-storage.js';
+import type { WorkflowDefinition } from '../../src/types/workflow.js';
 
 describe('Loop Optimization Integration', () => {
   let storage: InMemoryWorkflowStorage;
@@ -18,7 +18,7 @@ describe('Loop Optimization Integration', () => {
 
   describe('Progressive Context Disclosure', () => {
     it('should provide full context on first iteration and minimal on subsequent', async () => {
-      const workflow: Workflow = {
+      const workflow: WorkflowDefinition = {
         id: 'test-workflow',
         name: 'Test Workflow',
         description: 'Test workflow with optimized loop',
@@ -33,6 +33,7 @@ describe('Loop Optimization Integration', () => {
             id: 'process-loop',
             type: 'loop',
             title: 'Process Items Loop',
+            prompt: 'Loop over dataItems',
             loop: {
               type: 'forEach',
               items: 'dataItems',
@@ -137,7 +138,7 @@ describe('Loop Optimization Integration', () => {
     });
 
     it('should skip empty loops entirely', async () => {
-      const workflow: Workflow = {
+      const workflow: WorkflowDefinition = {
         id: 'empty-loop-workflow',
         name: 'Empty Loop Workflow',
         description: 'Test skipping empty loops',
@@ -152,6 +153,7 @@ describe('Loop Optimization Integration', () => {
             id: 'empty-loop',
             type: 'loop',
             title: 'Process Empty Array',
+            prompt: 'Loop over emptyArray',
             loop: {
               type: 'forEach',
               items: 'emptyArray',
@@ -201,7 +203,7 @@ describe('Loop Optimization Integration', () => {
 
   describe('Context Size Reduction', () => {
     it('should return step with loop context for forEach loops', async () => {
-      const workflow: Workflow = {
+      const workflow: WorkflowDefinition = {
         id: 'size-test-workflow',
         name: 'Size Test Workflow',
         description: 'Test context handling in loops',
@@ -216,6 +218,7 @@ describe('Loop Optimization Integration', () => {
             id: 'large-loop',
             type: 'loop',
             title: 'Process Large Dataset',
+            prompt: 'Loop over largeDataset',
             loop: {
               type: 'forEach',
               items: 'largeDataset',
@@ -258,7 +261,7 @@ describe('Loop Optimization Integration', () => {
 
   describe('Function DSL Integration', () => {
     it('should support function definitions in workflows', async () => {
-      const workflow: Workflow = {
+      const workflow: WorkflowDefinition = {
         id: 'dsl-workflow',
         name: 'DSL Workflow',
         description: 'Test function DSL',

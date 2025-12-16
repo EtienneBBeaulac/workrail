@@ -83,8 +83,8 @@ describe('GitWorkflowStorage - Master Branch Support', () => {
     // Should successfully load the workflow despite branch mismatch
     const workflows = await storage.loadAllWorkflows();
     expect(workflows).toHaveLength(1);
-    expect(workflows[0].id).toBe('master-test');
-    expect(workflows[0].name).toBe('Master Branch Test');
+    expect(workflows[0]?.definition.id).toBe('master-test');
+    expect(workflows[0]?.definition.name).toBe('Master Branch Test');
   }, 15000);
 
   it('should work with explicit master branch specification', async () => {
@@ -97,7 +97,7 @@ describe('GitWorkflowStorage - Master Branch Support', () => {
 
     const workflows = await storage.loadAllWorkflows();
     expect(workflows).toHaveLength(1);
-    expect(workflows[0].id).toBe('master-test');
+    expect(workflows[0]?.definition.id).toBe('master-test');
   }, 15000);
 });
 

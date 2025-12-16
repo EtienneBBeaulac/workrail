@@ -74,15 +74,37 @@ export const DI = {
   },
 
   // ═══════════════════════════════════════════════════════════════════
+  // RUNTIME (process-level behavior, injected for explicitness)
+  // ═══════════════════════════════════════════════════════════════════
+  Runtime: {
+    /** Runtime mode (production/test/cli) */
+    Mode: Symbol('Runtime.Mode'),
+    /** Process lifecycle policy (signal handling, etc) */
+    ProcessLifecyclePolicy: Symbol('Runtime.ProcessLifecyclePolicy'),
+    /** Process signal registration port */
+    ProcessSignals: Symbol('Runtime.ProcessSignals'),
+    /** Shutdown request event bus */
+    ShutdownEvents: Symbol('Runtime.ShutdownEvents'),
+    /** Process terminator (composition roots only) */
+    ProcessTerminator: Symbol('Runtime.ProcessTerminator'),
+  },
+
+  // ═══════════════════════════════════════════════════════════════════
   // CONFIGURATION
   // ═══════════════════════════════════════════════════════════════════
   Config: {
+    /** Complete application configuration (validated). Prefer this over individual tokens. */
+    App: Symbol('Config.App'),
     /** Cache TTL in milliseconds */
     CacheTTL: Symbol('Config.CacheTTL'),
     /** Workflow directory path */
     WorkflowDir: Symbol('Config.WorkflowDir'),
     /** Project root path */
     ProjectPath: Symbol('Config.ProjectPath'),
+    /** Dashboard mode (unified vs legacy) */
+    DashboardMode: Symbol('Config.DashboardMode'),
+    /** Browser behavior (auto-open vs manual) */
+    BrowserBehavior: Symbol('Config.BrowserBehavior'),
   },
 } as const;
 

@@ -2,7 +2,8 @@ import 'reflect-metadata';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { DefaultWorkflowService } from '../../src/application/services/workflow-service';
 import { InMemoryWorkflowStorage } from '../../src/infrastructure/storage/in-memory-storage';
-import { Workflow, LoopStep } from '../../src/types/workflow-types';
+import { WorkflowDefinition } from '../../src/types/workflow';
+import { LoopStepDefinition } from '../../src/types/workflow-definition';
 import { ValidationEngine } from '../../src/application/services/validation-engine';
 import { EnhancedLoopValidator } from '../../src/application/services/enhanced-loop-validator';
 import { IterativeStepResolutionStrategy } from '../../src/application/services/step-resolution/iterative-step-resolution-strategy';
@@ -42,7 +43,7 @@ describe('Loop runCondition Bug - Body Steps with Iteration Variable', () => {
 
   it('should inject loop variables BEFORE evaluating body step runConditions', async () => {
     // This replicates the exact structure of phase-1-iterative-analysis
-    const bugWorkflow: Workflow = {
+    const bugWorkflow: WorkflowDefinition = {
       id: 'bug-repro-workflow',
       name: 'Bug Reproduction',
       description: 'Reproduces the loop skipping bug',
@@ -83,7 +84,7 @@ describe('Loop runCondition Bug - Body Steps with Iteration Variable', () => {
               runCondition: { var: 'analysisPhase', equals: 3 }
             }
           ]
-        } as LoopStep,
+        } as LoopStepDefinition,
         {
           id: 'after-loop',
           title: 'After Loop',
@@ -119,7 +120,7 @@ describe('Loop runCondition Bug - Body Steps with Iteration Variable', () => {
   });
 
   it('should execute all loop iterations when body steps use iteration variable in runCondition', async () => {
-    const workflow: Workflow = {
+    const workflow: WorkflowDefinition = {
       id: 'full-loop-test',
       name: 'Full Loop Test',
       description: 'Test complete loop execution',
@@ -155,7 +156,7 @@ describe('Loop runCondition Bug - Body Steps with Iteration Variable', () => {
               runCondition: { var: 'phase', equals: 3 }
             }
           ]
-        } as LoopStep,
+        } as LoopStepDefinition,
         {
           id: 'done',
           title: 'Done',

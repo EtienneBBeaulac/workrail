@@ -159,6 +159,13 @@ export class LoopExecutionContext {
   }
 
   /**
+   * Gets the loop configuration (alias for compatibility)
+   */
+  getConfig(): LoopConfig {
+    return this.getLoopConfig();
+  }
+
+  /**
    * Generates minimal context for subsequent loop iterations
    * Used for progressive disclosure pattern
    */

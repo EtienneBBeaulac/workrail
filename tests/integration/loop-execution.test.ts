@@ -2,7 +2,7 @@ import 'reflect-metadata';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { DefaultWorkflowService } from '../../src/application/services/workflow-service';
 import { InMemoryWorkflowStorage } from '../../src/infrastructure/storage/in-memory-storage';
-import { Workflow, WorkflowStep } from '../../src/types/mcp-types';
+import { Workflow, WorkflowStep, createWorkflow, createBundledSource, WorkflowDefinition } from '../../src/types/workflow';
 import { LoopStep } from '../../src/types/workflow-types';
 import { ValidationEngine } from '../../src/application/services/validation-engine';
 import { EnhancedLoopValidator } from '../../src/application/services/enhanced-loop-validator';
@@ -43,7 +43,7 @@ describe('Loop Execution Integration Tests', () => {
 
   describe('End-to-End Loop Scenarios', () => {
     it('should execute a polling workflow with while loop', async () => {
-      const pollingWorkflow: Workflow = {
+      const pollingWorkflow = createWorkflow({
         id: 'polling-workflow',
         name: 'Polling Workflow',
         description: 'Poll an API until data is ready',
@@ -76,9 +76,9 @@ describe('Loop Execution Integration Tests', () => {
             prompt: 'Process the received data'
           }
         ]
-      };
+      }, createBundledSource());
 
-      storage.setWorkflows([pollingWorkflow]);
+      storage.setWorkflows([pollingWorkflow.definition]);
 
       // Initial context
       let context: any = { dataReady: false, pollData: [] };
@@ -120,7 +120,7 @@ describe('Loop Execution Integration Tests', () => {
     });
 
     it('should execute a retry workflow with for loop', async () => {
-      const retryWorkflow: Workflow = {
+      const retryWorkflow = createWorkflow({
         id: 'retry-workflow',
         name: 'Retry Workflow',
         description: 'Retry an operation up to 3 times',
@@ -153,9 +153,9 @@ describe('Loop Execution Integration Tests', () => {
             prompt: 'Report final result'
           }
         ]
-      };
+      }, createBundledSource());
 
-      storage.setWorkflows([retryWorkflow]);
+      storage.setWorkflows([retryWorkflow.definition]);
 
       let context: any = { operationFailed: true };
       let completedSteps: string[] = [];
@@ -186,7 +186,7 @@ describe('Loop Execution Integration Tests', () => {
     });
 
     it('should process batch data with forEach loop', async () => {
-      const batchWorkflow: Workflow = {
+      const batchWorkflow = createWorkflow({
         id: 'batch-workflow',
         name: 'Batch Processing',
         description: 'Process items in batches',
@@ -221,9 +221,9 @@ describe('Loop Execution Integration Tests', () => {
             prompt: 'Generate batch processing report'
           }
         ]
-      };
+      }, createBundledSource());
 
-      storage.setWorkflows([batchWorkflow]);
+      storage.setWorkflows([batchWorkflow.definition]);
 
       const items = [
         { id: 1, name: 'Item 1' },
@@ -264,7 +264,7 @@ describe('Loop Execution Integration Tests', () => {
     });
 
     it('should handle search workflow with until loop', async () => {
-      const searchWorkflow: Workflow = {
+      const searchWorkflow = createWorkflow({
         id: 'search-workflow',
         name: 'Search Workflow',
         description: 'Search until target found',
@@ -293,9 +293,9 @@ describe('Loop Execution Integration Tests', () => {
             prompt: 'Process search result'
           }
         ]
-      };
+      }, createBundledSource());
 
-      storage.setWorkflows([searchWorkflow]);
+      storage.setWorkflows([searchWorkflow.definition]);
 
       let context: any = { targetFound: false, searchIndex: 0 };
       let completedSteps: string[] = [];
@@ -322,7 +322,7 @@ describe('Loop Execution Integration Tests', () => {
 
   describe('Loop Limits and Safety', () => {
     it('should respect max iterations limit', async () => {
-      const infiniteWorkflow: Workflow = {
+      const infiniteWorkflow = createWorkflow({
         id: 'infinite-workflow',
         name: 'Infinite Loop Test',
         description: 'Test max iterations safety',
@@ -351,9 +351,9 @@ describe('Loop Execution Integration Tests', () => {
             prompt: 'Should reach here after max iterations'
           }
         ]
-      };
+      }, createBundledSource());
 
-      storage.setWorkflows([infiniteWorkflow]);
+      storage.setWorkflows([infiniteWorkflow.definition]);
 
       let context: any = { alwaysTrue: true, counter: 0 };
       let completedSteps: string[] = [];
@@ -391,7 +391,7 @@ describe('Loop Execution Integration Tests', () => {
     });
 
     it('should handle context size limits', async () => {
-      const contextGrowthWorkflow: Workflow = {
+      const contextGrowthWorkflow = createWorkflow({
         id: 'context-growth-workflow',
         name: 'Context Growth Test',
         description: 'Test context size monitoring',
@@ -415,9 +415,9 @@ describe('Loop Execution Integration Tests', () => {
             prompt: 'Add large data to context'
           }
         ]
-      };
+      }, createBundledSource());
 
-      storage.setWorkflows([contextGrowthWorkflow]);
+      storage.setWorkflows([contextGrowthWorkflow.definition]);
 
       // Create a large string (10KB)
       const largeString = 'x'.repeat(10 * 1024);
@@ -454,7 +454,7 @@ describe('Loop Execution Integration Tests', () => {
 
   describe('Nested Workflow Patterns', () => {
     it('should handle workflow with multiple sequential loops', async () => {
-      const multiLoopWorkflow: Workflow = {
+      const multiLoopWorkflow = createWorkflow({
         id: 'multi-loop-workflow',
         name: 'Multiple Loops',
         description: 'Workflow with sequential loops',
@@ -518,9 +518,9 @@ describe('Loop Execution Integration Tests', () => {
             prompt: 'All done'
           }
         ]
-      };
+      }, createBundledSource());
 
-      storage.setWorkflows([multiLoopWorkflow]);
+      storage.setWorkflows([multiLoopWorkflow.definition]);
 
       let context: any = { preparedItems: ['A', 'B'], needsCleanup: true };
       
@@ -552,7 +552,7 @@ describe('Loop Execution Integration Tests', () => {
 
   describe('Error Scenarios', () => {
     it('should handle invalid loop configurations gracefully', async () => {
-      const invalidWorkflow: Workflow = {
+      const invalidWorkflow = createWorkflow({
         id: 'invalid-loop-workflow',
         name: 'Invalid Loop',
         description: 'Workflow with invalid loop',
@@ -572,9 +572,9 @@ describe('Loop Execution Integration Tests', () => {
           } as LoopStep,
           { id: 'step', title: 'Step', prompt: 'Step' }
         ]
-      };
+      }, createBundledSource());
 
-      storage.setWorkflows([invalidWorkflow]);
+      storage.setWorkflows([invalidWorkflow.definition]);
 
       await expect(
         service.getNextStep('invalid-loop-workflow', [], {})
@@ -582,7 +582,7 @@ describe('Loop Execution Integration Tests', () => {
     });
 
     it('should handle missing forEach items gracefully', async () => {
-      const missingItemsWorkflow: Workflow = {
+      const missingItemsWorkflow = createWorkflow({
         id: 'missing-items-workflow',
         name: 'Missing Items',
         description: 'ForEach with missing items',
@@ -603,9 +603,9 @@ describe('Loop Execution Integration Tests', () => {
           { id: 'process', title: 'Process', prompt: 'Process item' },
           { id: 'done', title: 'Done', prompt: 'Complete' }
         ]
-      };
+      }, createBundledSource());
 
-      storage.setWorkflows([missingItemsWorkflow]);
+      storage.setWorkflows([missingItemsWorkflow.definition]);
 
       let result = await service.getNextStep('missing-items-workflow', [], {});
       

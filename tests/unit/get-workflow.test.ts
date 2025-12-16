@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createGetWorkflow, WorkflowGetMode } from '../../src/application/use-cases/get-workflow';
 import { WorkflowService } from '../../src/application/services/workflow-service';
-import { Workflow } from '../../src/types/mcp-types';
+import { Workflow, createWorkflow, createBundledSource, WorkflowDefinition } from '../../src/types/workflow';
 import { WorkflowNotFoundError } from '../../src/core/error-handler';
 
-const mockWorkflow: Workflow = {
+const mockWorkflow = createWorkflow({
   id: 'test-workflow',
   name: 'Test Workflow',
   description: 'A workflow for testing.',
@@ -17,9 +17,9 @@ const mockWorkflow: Workflow = {
     { id: 'step2', title: 'Step 2', prompt: 'Prompt for step 2' },
     { id: 'step3', title: 'Step 3', prompt: 'Prompt for step 3' },
   ],
-};
+}, createBundledSource());
 
-const mockWorkflowWithConditions: Workflow = {
+const mockWorkflowWithConditions = createWorkflow({
   id: 'conditional-workflow',
   name: 'Conditional Workflow',
   description: 'A workflow with conditional steps.',
@@ -43,17 +43,17 @@ const mockWorkflowWithConditions: Workflow = {
       runCondition: { var: 'complexity', equals: 'low' }
     },
   ],
-};
+}, createBundledSource());
 
-const mockEmptyWorkflow: Workflow = {
+const mockEmptyWorkflow = createWorkflow({
   id: 'empty-workflow',
   name: 'Empty Workflow',
   description: 'A workflow with no steps.',
   version: '0.0.1',
   steps: [],
-};
+}, createBundledSource());
 
-const mockWorkflowWithUndefinedOptionals: Workflow = {
+const mockWorkflowWithUndefinedOptionals = createWorkflow({
   id: 'minimal-workflow',
   name: 'Minimal Workflow',
   description: 'A minimal workflow.',
@@ -61,7 +61,7 @@ const mockWorkflowWithUndefinedOptionals: Workflow = {
   steps: [
     { id: 'step1', title: 'Step 1', prompt: 'Prompt for step 1' },
   ],
-};
+}, createBundledSource());
 
 // Create a mock service that can be controlled by tests
 class MockWorkflowService implements WorkflowService {
@@ -70,7 +70,7 @@ class MockWorkflowService implements WorkflowService {
   private errorToThrow: Error | null = null;
 
   setWorkflow(workflow: Workflow): void {
-    this.workflows.set(workflow.id, workflow);
+    this.workflows.set(workflow.definition.id, workflow);
   }
 
   setError(error: Error): void {
@@ -233,7 +233,7 @@ describe('createGetWorkflow', () => {
       });
 
       it('should return null firstStep if all steps have unmet conditions', async () => {
-        const mockAllConditionalWorkflow: Workflow = {
+        const mockAllConditionalWorkflow = createWorkflow({
           id: 'all-conditional',
           name: 'All Conditional',
           description: 'All steps are conditional.',
@@ -252,7 +252,7 @@ describe('createGetWorkflow', () => {
               runCondition: { var: 'complexity', equals: 'low' }
             }
           ]
-        };
+        }, createBundledSource());
 
         mockService.setWorkflow(mockAllConditionalWorkflow);
         

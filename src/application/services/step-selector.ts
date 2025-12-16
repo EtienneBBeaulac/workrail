@@ -1,5 +1,6 @@
 import { singleton } from 'tsyringe';
-import { Workflow, WorkflowStep, WorkflowGuidance } from '../../types/mcp-types';
+import { Workflow, WorkflowStepDefinition } from '../../types/workflow';
+import { WorkflowGuidance } from '../../types/mcp-types';
 import { IStepSelector } from './i-step-selector';
 import { EnhancedContext } from '../../types/workflow-types';
 import { evaluateCondition } from '../../utils/condition-evaluator';
@@ -21,8 +22,8 @@ export class DefaultStepSelector implements IStepSelector {
     loopBodySteps: Set<string>,
     completed: string[],
     context: EnhancedContext
-  ): WorkflowStep | null {
-    return workflow.steps.find(step => {
+  ): WorkflowStepDefinition | null {
+    return workflow.definition.steps.find(step => {
       // Skip if already completed
       if (completed.includes(step.id)) {
         return false;
@@ -57,10 +58,10 @@ export class DefaultStepSelector implements IStepSelector {
     loopBodySteps: Set<string>
   ): WorkflowGuidance | null {
     // Check if there are conditional steps with unmet conditions
-    const remainingConditionalSteps = workflow.steps.filter((step) => {
+    const remainingConditionalSteps = workflow.definition.steps.filter((step) => {
       if (completed.includes(step.id)) return false;
       if (loopBodySteps.has(step.id)) return false;
-      return !!(step as any).runCondition;
+      return !!step.runCondition;
     });
 
     if (remainingConditionalSteps.length > 0) {
@@ -69,7 +70,7 @@ export class DefaultStepSelector implements IStepSelector {
       const allowedValues: Record<string, Set<string>> = {};
 
       for (const step of remainingConditionalSteps) {
-        const condition = (step as any).runCondition as any;
+        const condition = step.runCondition;
         this.collectConditionVars(condition, requiredVars);
         this.collectEqualsValues(condition, allowedValues);
       }
@@ -117,18 +118,19 @@ export class DefaultStepSelector implements IStepSelector {
    * @param condition - The condition to analyze
    * @param sink - Set to collect variable names into
    */
-  private collectConditionVars(condition: any, sink: Set<string>): void {
+  private collectConditionVars(condition: unknown, sink: Set<string>): void {
     if (!condition || typeof condition !== 'object') return;
-    if (typeof condition.var === 'string' && condition.var.length > 0) {
-      sink.add(condition.var);
+    const cond = condition as Record<string, unknown>;
+    if (typeof cond['var'] === 'string' && cond['var'].length > 0) {
+      sink.add(cond['var']);
     }
-    if (Array.isArray(condition.and)) {
-      for (const sub of condition.and) this.collectConditionVars(sub, sink);
+    if (Array.isArray(cond['and'])) {
+      for (const sub of cond['and']) this.collectConditionVars(sub, sink);
     }
-    if (Array.isArray(condition.or)) {
-      for (const sub of condition.or) this.collectConditionVars(sub, sink);
+    if (Array.isArray(cond['or'])) {
+      for (const sub of cond['or']) this.collectConditionVars(sub, sink);
     }
-    if (condition.not) this.collectConditionVars(condition.not, sink);
+    if (cond['not']) this.collectConditionVars(cond['not'], sink);
   }
 
   /**
@@ -137,22 +139,23 @@ export class DefaultStepSelector implements IStepSelector {
    * @param condition - The condition to analyze
    * @param sink - Map of variable name to set of allowed values
    */
-  private collectEqualsValues(condition: any, sink: Record<string, Set<string>>): void {
+  private collectEqualsValues(condition: unknown, sink: Record<string, Set<string>>): void {
     if (!condition || typeof condition !== 'object') return;
-    if (typeof condition.var === 'string' && Object.prototype.hasOwnProperty.call(condition, 'equals')) {
-      const variableName = condition.var;
-      const value = condition.equals;
+    const cond = condition as Record<string, unknown>;
+    if (typeof cond['var'] === 'string' && Object.prototype.hasOwnProperty.call(cond, 'equals')) {
+      const variableName = cond['var'];
+      const value = cond['equals'];
       if (value !== undefined && value !== null) {
         if (!sink[variableName]) sink[variableName] = new Set<string>();
         sink[variableName].add(String(value));
       }
     }
-    if (Array.isArray(condition.and)) {
-      for (const sub of condition.and) this.collectEqualsValues(sub, sink);
+    if (Array.isArray(cond['and'])) {
+      for (const sub of cond['and']) this.collectEqualsValues(sub, sink);
     }
-    if (Array.isArray(condition.or)) {
-      for (const sub of condition.or) this.collectEqualsValues(sub, sink);
+    if (Array.isArray(cond['or'])) {
+      for (const sub of cond['or']) this.collectEqualsValues(sub, sink);
     }
-    if (condition.not) this.collectEqualsValues(condition.not, sink);
+    if (cond['not']) this.collectEqualsValues(cond['not'], sink);
   }
 }

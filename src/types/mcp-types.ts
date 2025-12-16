@@ -2,6 +2,49 @@
 // Model Context Protocol (MCP) specification types
 
 // =============================================================================
+// RE-EXPORT WORKFLOW TYPES FROM CANONICAL SOURCE
+// =============================================================================
+
+// These are the canonical workflow types - import from here for MCP handlers
+export {
+  // Core types
+  Workflow,
+  WorkflowSummary,
+  WorkflowSourceInfo,
+  
+  // Definition types (what's in JSON files)
+  WorkflowDefinition,
+  WorkflowStepDefinition,
+  LoopStepDefinition,
+  LoopConfigDefinition,
+  FunctionDefinition,
+  FunctionParameter,
+  FunctionCall,
+  
+  // Source types
+  WorkflowSource,
+  WorkflowSourceKind,
+  
+  // Factory functions
+  createWorkflow,
+  toWorkflowSummary,
+  toWorkflowSourceInfo,
+  
+  // Type guards
+  isWorkflow,
+  isWorkflowDefinition,
+  isLoopStepDefinition,
+  isWorkflowStepDefinition,
+  
+  // Convenience accessors
+  getStepById,
+  getAllStepIds
+} from './workflow';
+
+// Legacy alias for backward compatibility
+export type WorkflowStep = import('./workflow').WorkflowStepDefinition;
+
+// =============================================================================
 // JSON-RPC 2.0 BASE TYPES
 // =============================================================================
 
@@ -9,20 +52,20 @@ export interface JSONRPCRequest {
   jsonrpc: "2.0";
   id: number | string;
   method: string;
-  params?: any;
+  params?: unknown;
 }
 
 export interface JSONRPCResponse {
   jsonrpc: "2.0";
   id: number | string | null;
-  result?: any;
+  result?: unknown;
   error?: JSONRPCError;
 }
 
 export interface JSONRPCError {
   code: number;
   message: string;
-  data?: any;
+  data?: unknown;
 }
 
 // =============================================================================
@@ -34,8 +77,8 @@ export interface MCPInitializeRequest extends JSONRPCRequest {
   params: {
     protocolVersion: string;
     capabilities: {
-      tools?: Record<string, any>;
-      resources?: Record<string, any>;
+      tools?: Record<string, unknown>;
+      resources?: Record<string, unknown>;
     };
     clientInfo?: {
       name: string;
@@ -72,11 +115,11 @@ export interface MCPToolsListRequest extends JSONRPCRequest {
 export interface MCPTool {
   name: string;
   description: string;
-  inputSchema: Record<string, any>;
-  outputSchema?: Record<string, any>;
+  inputSchema: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
   examples?: {
-    request: Record<string, any>;
-    response: Record<string, any>;
+    request: Record<string, unknown>;
+    response: Record<string, unknown>;
   };
 }
 
@@ -87,12 +130,12 @@ export interface MCPToolsListResponse extends JSONRPCResponse {
 }
 
 export interface MCPToolCallRequest extends JSONRPCRequest {
-  method: string; // Tool name
-  params: Record<string, any>;
+  method: string;
+  params: Record<string, unknown>;
 }
 
 export interface MCPToolCallResponse extends JSONRPCResponse {
-  result: any;
+  result: unknown;
 }
 
 export interface MCPShutdownRequest extends JSONRPCRequest {
@@ -109,14 +152,11 @@ export interface MCPShutdownResponse extends JSONRPCResponse {
 // =============================================================================
 
 export enum MCPErrorCodes {
-  // Standard JSON-RPC 2.0 error codes
   PARSE_ERROR = -32700,
   INVALID_REQUEST = -32600,
   METHOD_NOT_FOUND = -32601,
   INVALID_PARAMS = -32602,
   INTERNAL_ERROR = -32603,
-  
-  // MCP-specific error codes (-32000 to -32099)
   SERVER_ERROR = -32000,
   WORKFLOW_NOT_FOUND = -32001,
   INVALID_WORKFLOW = -32002,
@@ -128,7 +168,7 @@ export enum MCPErrorCodes {
 }
 
 // =============================================================================
-// WORKFLOW ORCHESTRATION SPECIFIC TYPES
+// WORKFLOW ORCHESTRATION REQUEST/RESPONSE TYPES
 // =============================================================================
 
 export interface WorkflowListRequest extends MCPToolCallRequest {
@@ -136,17 +176,9 @@ export interface WorkflowListRequest extends MCPToolCallRequest {
   params: Record<string, never>;
 }
 
-export interface WorkflowSummary {
-  id: string;
-  name: string;
-  description: string;
-  category: string;
-  version: string;
-}
-
 export interface WorkflowListResponse extends MCPToolCallResponse {
   result: {
-    workflows: WorkflowSummary[];
+    workflows: import('./workflow').WorkflowSummary[];
   };
 }
 
@@ -157,55 +189,8 @@ export interface WorkflowGetRequest extends MCPToolCallRequest {
   };
 }
 
-export interface FunctionParameter {
-  name: string;
-  type: 'string' | 'number' | 'boolean' | 'array' | 'object';
-  required?: boolean;
-  description?: string;
-  enum?: Array<string | number | boolean>;
-  default?: unknown;
-}
-
-export interface FunctionDefinition {
-  name: string;
-  definition: string;
-  parameters?: FunctionParameter[];
-  scope?: 'workflow' | 'loop' | 'step';
-}
-
-export interface FunctionCall {
-  name: string;
-  args: Record<string, unknown>;
-}
-
-export interface WorkflowStep {
-  id: string;
-  title: string;
-  prompt: string;
-  agentRole?: string;
-  guidance?: string[];
-  askForFiles?: boolean;
-  requireConfirmation?: boolean;
-  runCondition?: object;
-  functionDefinitions?: FunctionDefinition[];
-  functionCalls?: FunctionCall[];
-  functionReferences?: string[];
-}
-
-export interface Workflow {
-  id: string;
-  name: string;
-  description: string;
-  version: string;
-  preconditions?: string[];
-  clarificationPrompts?: string[];
-  steps: WorkflowStep[];
-  metaGuidance?: string[];
-  functionDefinitions?: FunctionDefinition[];
-}
-
 export interface WorkflowGetResponse extends MCPToolCallResponse {
-  result: Workflow;
+  result: import('./workflow').Workflow;
 }
 
 export interface WorkflowNextRequest extends MCPToolCallRequest {
@@ -214,7 +199,7 @@ export interface WorkflowNextRequest extends MCPToolCallRequest {
     workflowId: string;
     currentStep?: string;
     completedSteps: string[];
-    context?: Record<string, any>;
+    context?: Record<string, unknown>;
   };
 }
 
@@ -227,7 +212,7 @@ export interface WorkflowGuidance {
 
 export interface WorkflowNextResponse extends MCPToolCallResponse {
   result: {
-    step: WorkflowStep | null;
+    step: import('./workflow').WorkflowStepDefinition | null;
     guidance: WorkflowGuidance;
     isComplete: boolean;
   };
@@ -258,7 +243,7 @@ export interface WorkflowState {
   workflowId: string;
   currentStep?: string;
   completedSteps: string[];
-  context: Record<string, any>;
+  context: Record<string, unknown>;
   startedAt: Date;
   lastUpdated: Date;
 }
@@ -275,18 +260,15 @@ export interface WorkflowExecution {
 // VALIDATION TYPES
 // =============================================================================
 
-export interface ValidationRule {
-  type: 'required' | 'pattern' | 'length' | 'custom';
-  field: string;
-  message: string;
-  validator?: (value: any) => boolean;
-}
+// Re-export validation types from domain layer
+export type {
+  ValidationRule,
+  ValidationComposition,
+  ValidationCriteria,
+  ValidationResult
+} from './validation';
 
-export interface ValidationResult {
-  valid: boolean;
-  errors: ValidationError[];
-}
-
+// Legacy type (different from workflow validation - kept for MCP protocol)
 export interface ValidationError {
   field: string;
   message: string;
@@ -330,7 +312,7 @@ export interface LogEntry {
   timestamp: Date;
   level: 'debug' | 'info' | 'warn' | 'error';
   message: string;
-  context?: Record<string, any>;
+  context?: Record<string, unknown>;
   error?: Error;
 }
 
@@ -367,4 +349,4 @@ export type WorkflowToolResponse =
   | WorkflowListResponse
   | WorkflowGetResponse
   | WorkflowNextResponse
-  | WorkflowValidateResponse; 
+  | WorkflowValidateResponse;

@@ -166,7 +166,7 @@ export class IterativeStepResolutionStrategy implements IStepResolutionStrategy 
     throw new MaxIterationsExceededError(
       `Workflow execution exceeded ${MAX_ITERATIONS} iterations. This likely indicates an infinite loop or logic error in the workflow.`,
       {
-        workflowId: workflow.id,
+        workflowId: workflow.definition.id,
         completedSteps: completed,
         loopStackDepth: loopStack.length,
         loopIds: loopStack.map((f: any) => f.loopId)

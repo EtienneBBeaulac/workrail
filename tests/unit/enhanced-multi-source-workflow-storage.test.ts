@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { EnhancedMultiSourceWorkflowStorage } from '../../src/infrastructure/storage/enhanced-multi-source-workflow-storage';
 import { IWorkflowStorage } from '../../src/types/storage';
-import { Workflow } from '../../src/types/mcp-types';
+import { Workflow } from '../../src/types/workflow';
 import os from 'os';
 import path from 'path';
 
@@ -25,7 +25,7 @@ class MockWorkflowStorage implements IWorkflowStorage {
     if (this.shouldFail) {
       throw new Error('Mock storage failure');
     }
-    return this.workflows.find(w => w.id === id) || null;
+    return this.workflows.find(w => w.definition.id === id) || null;
   }
 
   async listWorkflowSummaries() {
@@ -34,10 +34,10 @@ class MockWorkflowStorage implements IWorkflowStorage {
     }
     return this.workflows.map(w => ({
       id: w.id,
-      name: w.name,
+      name: w.definition.name,
       description: w.description,
       category: 'test' as const,
-      version: w.version
+      version: w.definition.version
     }));
   }
 
@@ -128,7 +128,7 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
       });
 
       const sourceInfo = storage.getSourceInfo();
-      const hasBundled = sourceInfo.some(s => s.name === 'bundled');
+      const hasBundled = sourceInfo.some(s => s.definition.name === 'bundled');
       expect(hasBundled).toBe(false);
     });
 
@@ -140,7 +140,7 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
       });
 
       const sourceInfo = storage.getSourceInfo();
-      const hasUser = sourceInfo.some(s => s.name === 'user');
+      const hasUser = sourceInfo.some(s => s.definition.name === 'user');
       expect(hasUser).toBe(false);
     });
 
@@ -152,7 +152,7 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
       });
 
       const sourceInfo = storage.getSourceInfo();
-      const hasProject = sourceInfo.some(s => s.name === 'project');
+      const hasProject = sourceInfo.some(s => s.source.kind === 'project');
       expect(hasProject).toBe(false);
     });
   });
@@ -176,7 +176,7 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
       });
 
       const sourceInfo = storage.getSourceInfo();
-      const hasGit = sourceInfo.some(s => s.name.startsWith('git:'));
+      const hasGit = sourceInfo.some(s => s.source.kind === 'git');
       expect(hasGit).toBe(true);
     });
 
@@ -200,7 +200,7 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
       });
 
       const sourceInfo = storage.getSourceInfo();
-      const gitSources = sourceInfo.filter(s => s.name.startsWith('git:'));
+      const gitSources = sourceInfo.filter(s => s.source.kind === 'git');
       expect(gitSources.length).toBe(2);
     });
   });
@@ -221,7 +221,7 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
       });
 
       const sourceInfo = storage.getSourceInfo();
-      const hasRemote = sourceInfo.some(s => s.name.startsWith('remote:'));
+      const hasRemote = sourceInfo.some(s => s.source.kind === 'remote');
       expect(hasRemote).toBe(true);
     });
   });
@@ -259,10 +259,10 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
       const sourceInfo = storage.getSourceInfo();
       
       // Verify order (bundled should come before user, user before git, git before project)
-      const bundledIndex = sourceInfo.findIndex(s => s.name === 'bundled');
-      const userIndex = sourceInfo.findIndex(s => s.name === 'user');
-      const gitIndex = sourceInfo.findIndex(s => s.name.startsWith('git:'));
-      const projectIndex = sourceInfo.findIndex(s => s.name === 'project');
+      const bundledIndex = sourceInfo.findIndex(s => s.source.kind === 'bundled');
+      const userIndex = sourceInfo.findIndex(s => s.source.kind === 'user');
+      const gitIndex = sourceInfo.findIndex(s => s.source.kind === 'git');
+      const projectIndex = sourceInfo.findIndex(s => s.source.kind === 'project');
 
       // If sources exist, verify they're in the right order
       if (bundledIndex >= 0 && userIndex >= 0) {
@@ -357,7 +357,7 @@ describe('EnhancedMultiSourceWorkflowStorage', () => {
       });
 
       const summaries = await storage.listWorkflowSummaries();
-      const ids = summaries.map(s => s.id);
+      const ids = summaries.map(s => s.definition.id);
       const uniqueIds = new Set(ids);
       
       // All IDs should be unique

@@ -9,9 +9,10 @@ describe('Workflow Storage', () => {
     expect(Array.isArray(workflows)).toBe(true);
     expect(workflows.length).toBeGreaterThan(0);
     for (const wf of workflows) {
-      expect(typeof wf.id).toBe('string');
-      expect(typeof wf.name).toBe('string');
-      expect(Array.isArray(wf.steps)).toBe(true);
+      expect(typeof wf.definition.id).toBe('string');
+      expect(typeof wf.definition.name).toBe('string');
+      expect(Array.isArray(wf.definition.steps)).toBe(true);
+      expect(wf.source).toBeDefined();
     }
   });
 
@@ -22,9 +23,9 @@ describe('Workflow Storage', () => {
       // Skip test if no workflows are loaded
       return;
     }
-    const found = await storage.getWorkflowById(first.id);
+    const found = await storage.getWorkflowById(first.definition.id);
     expect(found).toBeDefined();
-    expect(found?.id).toBe(first.id);
+    expect(found?.definition.id).toBe(first.definition.id);
   });
 
   it('should return null for a missing workflow ID', async () => {
@@ -40,6 +41,7 @@ describe('Workflow Storage', () => {
       expect(typeof summary.id).toBe('string');
       expect(typeof summary.name).toBe('string');
       expect(typeof summary.description).toBe('string');
+      expect(summary.source).toBeDefined();
     }
   });
 }); 

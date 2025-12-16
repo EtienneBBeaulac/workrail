@@ -29,7 +29,7 @@ describe('Unified Dashboard - Primary/Secondary Pattern', () => {
     
     // Get fresh instance from DI
     httpServer = container.resolve<HttpServer>(DI.Infra.HttpServer);
-    httpServer.setConfig({ autoOpen: false });
+    httpServer.setConfig({ browserBehavior: { kind: 'manual' } });
   });
   
   afterEach(async () => {
@@ -88,7 +88,10 @@ describe('Unified Dashboard - Primary/Secondary Pattern', () => {
   
   it('should fall back to legacy mode when unified dashboard disabled', async () => {
     // Force legacy mode
-    httpServer.setConfig({ disableUnifiedDashboard: true, autoOpen: false });
+    httpServer.setConfig({
+      dashboardMode: { kind: 'legacy' },
+      browserBehavior: { kind: 'manual' }
+    });
     
     const url = await httpServer.start();
     
@@ -111,7 +114,7 @@ describe('Unified Dashboard - API Endpoints', () => {
     await fs.unlink(lockFile).catch(() => {});
     
     httpServer = container.resolve<HttpServer>(DI.Infra.HttpServer);
-    httpServer.setConfig({ autoOpen: false });
+    httpServer.setConfig({ browserBehavior: { kind: 'manual' } });
     await httpServer.start();
   });
   

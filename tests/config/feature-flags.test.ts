@@ -216,15 +216,14 @@ describe('FeatureFlags - Functionality', () => {
     });
   });
 
-  describe('Factory Function', () => {
-    it('creates EnvironmentFeatureFlagProvider by default', () => {
-      const provider = createFeatureFlagProvider();
-      
+  describe('Static Factory (withEnv)', () => {
+    it('creates provider with default env', () => {
+      const provider = new EnvironmentFeatureFlagProvider();
       expect(provider).toBeInstanceOf(EnvironmentFeatureFlagProvider);
     });
 
-    it('accepts custom environment', () => {
-      const provider = createFeatureFlagProvider({
+    it('creates provider with custom environment', () => {
+      const provider = EnvironmentFeatureFlagProvider.withEnv({
         WORKRAIL_ENABLE_SESSION_TOOLS: 'true',
       });
       

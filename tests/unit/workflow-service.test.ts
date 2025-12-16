@@ -2,7 +2,7 @@ import 'reflect-metadata';
 import { describe, vi, it, expect, beforeEach, afterEach, jest } from 'vitest';
 import { DefaultWorkflowService } from '../../src/application/services/workflow-service';
 import { IWorkflowStorage } from '../../src/types/storage';
-import { Workflow, WorkflowSummary } from '../../src/types/mcp-types';
+import { Workflow, WorkflowSummary, createWorkflow, createBundledSource, WorkflowDefinition } from '../../src/types/workflow';
 import { LoopStep } from '../../src/types/workflow-types';
 import { ValidationEngine } from '../../src/application/services/validation-engine';
 import { EnhancedLoopValidator } from '../../src/application/services/enhanced-loop-validator';
@@ -13,7 +13,7 @@ import { LoopStackManager } from '../../src/application/services/loop-stack-mana
 import { DefaultStepSelector } from '../../src/application/services/step-selector';
 import { LoopStepResolver } from '../../src/application/services/loop-step-resolver';
 
-const mockWorkflow: Workflow = {
+const mockWorkflow = createWorkflow({
   id: 'test-workflow',
   name: 'Test Workflow',
   description: 'A workflow for testing.',
@@ -28,9 +28,9 @@ const mockWorkflow: Workflow = {
     },
     { id: 'step3', title: 'Step 3', prompt: 'Prompt for step 3' },
   ],
-};
+}, createBundledSource());
 
-const mockWorkflowWithAgentRole: Workflow = {
+const mockWorkflowWithAgentRole = createWorkflow({
   id: 'test-workflow-agent-role',
   name: 'Test Workflow with Agent Role',
   description: 'A workflow for testing agentRole functionality.',
@@ -63,7 +63,7 @@ const mockWorkflowWithAgentRole: Workflow = {
       guidance: ['Handle empty agentRole']
     },
   ],
-};
+}, createBundledSource());
 
 // Helper function to create a workflow service with a mock storage
 function createTestWorkflowService(mockStorage: IWorkflowStorage): DefaultWorkflowService {
@@ -93,6 +93,8 @@ describe('DefaultWorkflowService', () => {
     vi.clearAllMocks();
     
     mockStorage = {
+      kind: 'single' as const,
+      source: createBundledSource(),
       getWorkflowById: vi.fn(),
       listWorkflowSummaries: vi.fn(),
       loadAllWorkflows: vi.fn()
@@ -100,10 +102,10 @@ describe('DefaultWorkflowService', () => {
     
     // Default mock implementations - set AFTER clearing mocks
     mockStorage.getWorkflowById.mockImplementation(async (id: string) => {
-      if (id === mockWorkflow.id) {
+      if (id === mockWorkflow.definition.id) {
         return mockWorkflow;
       }
-      if (id === mockWorkflowWithAgentRole.id) {
+      if (id === mockWorkflowWithAgentRole.definition.id) {
         return mockWorkflowWithAgentRole;
       }
       return null;
@@ -212,7 +214,7 @@ describe('DefaultWorkflowService', () => {
 
   describe('getNextStep with loop steps', () => {
     it('should recognize loop steps and initialize loop context', async () => {
-      const workflowWithLoop: Workflow = {
+      const workflowWithLoop = createWorkflow({
         id: 'loop-workflow',
         name: 'Loop Workflow',
         description: 'Workflow with loops',
@@ -235,7 +237,7 @@ describe('DefaultWorkflowService', () => {
           { id: 'loop-body', title: 'Loop Body', prompt: 'Process item' },
           { id: 'end', title: 'End', prompt: 'Workflow complete' }
         ]
-      };
+      }, createBundledSource());
 
       mockStorage.getWorkflowById.mockResolvedValue(workflowWithLoop);
 
@@ -252,7 +254,7 @@ describe('DefaultWorkflowService', () => {
     });
 
     it('should handle while loop iterations correctly', async () => {
-      const workflowWithWhile: Workflow = {
+      const workflowWithWhile = createWorkflow({
         id: 'while-workflow',
         name: 'While Workflow',
         description: 'Workflow with while loop',
@@ -277,7 +279,7 @@ describe('DefaultWorkflowService', () => {
             prompt: 'Increment counter'
           }
         ]
-      };
+      }, createBundledSource());
 
       mockStorage.getWorkflowById.mockResolvedValue(workflowWithWhile);
 
@@ -308,7 +310,7 @@ describe('DefaultWorkflowService', () => {
     });
 
     it('should handle until loop iterations correctly', async () => {
-      const workflowWithUntil: Workflow = {
+      const workflowWithUntil = createWorkflow({
         id: 'until-workflow',
         name: 'Until Workflow',
         description: 'Workflow with until loop',
@@ -338,7 +340,7 @@ describe('DefaultWorkflowService', () => {
             prompt: 'After loop'
           }
         ]
-      };
+      }, createBundledSource());
 
       mockStorage.getWorkflowById.mockResolvedValue(workflowWithUntil);
 
@@ -363,7 +365,7 @@ describe('DefaultWorkflowService', () => {
     });
 
     it('should handle for loop with fixed count', async () => {
-      const workflowWithFor: Workflow = {
+      const workflowWithFor = createWorkflow({
         id: 'for-workflow',
         name: 'For Workflow',
         description: 'Workflow with for loop',
@@ -393,7 +395,7 @@ describe('DefaultWorkflowService', () => {
             prompt: 'All done'
           }
         ]
-      };
+      }, createBundledSource());
 
       mockStorage.getWorkflowById.mockResolvedValue(workflowWithFor);
 
@@ -422,7 +424,7 @@ describe('DefaultWorkflowService', () => {
     });
 
     it('should handle for loop with variable count', async () => {
-      const workflowWithVarFor: Workflow = {
+      const workflowWithVarFor = createWorkflow({
         id: 'var-for-workflow',
         name: 'Variable For Workflow',
         description: 'Workflow with variable for loop',
@@ -446,7 +448,7 @@ describe('DefaultWorkflowService', () => {
             prompt: 'Do something'
           }
         ]
-      };
+      }, createBundledSource());
 
       mockStorage.getWorkflowById.mockResolvedValue(workflowWithVarFor);
 
@@ -471,7 +473,7 @@ describe('DefaultWorkflowService', () => {
     });
 
     it('should handle forEach loop over array', async () => {
-      const workflowWithForEach: Workflow = {
+      const workflowWithForEach = createWorkflow({
         id: 'foreach-workflow',
         name: 'ForEach Workflow',
         description: 'Workflow with forEach loop',
@@ -502,7 +504,7 @@ describe('DefaultWorkflowService', () => {
             prompt: 'Summarize results'
           }
         ]
-      };
+      }, createBundledSource());
 
       mockStorage.getWorkflowById.mockResolvedValue(workflowWithForEach);
 
@@ -536,7 +538,7 @@ describe('DefaultWorkflowService', () => {
     });
 
     it('should handle forEach with empty array', async () => {
-      const workflowWithEmptyForEach: Workflow = {
+      const workflowWithEmptyForEach = createWorkflow({
         id: 'empty-foreach-workflow',
         name: 'Empty ForEach Workflow',
         description: 'Workflow with empty forEach loop',
@@ -565,7 +567,7 @@ describe('DefaultWorkflowService', () => {
             prompt: 'No items to process'
           }
         ]
-      };
+      }, createBundledSource());
 
       mockStorage.getWorkflowById.mockResolvedValue(workflowWithEmptyForEach);
 
@@ -576,7 +578,7 @@ describe('DefaultWorkflowService', () => {
     });
 
     it('should handle forEach with non-array value gracefully', async () => {
-      const workflowWithBadForEach: Workflow = {
+      const workflowWithBadForEach = createWorkflow({
         id: 'bad-foreach-workflow',
         name: 'Bad ForEach Workflow',
         description: 'Workflow with bad forEach loop',
@@ -605,7 +607,7 @@ describe('DefaultWorkflowService', () => {
             prompt: 'Fallback step'
           }
         ]
-      };
+      }, createBundledSource());
 
       mockStorage.getWorkflowById.mockResolvedValue(workflowWithBadForEach);
 
@@ -618,7 +620,7 @@ describe('DefaultWorkflowService', () => {
     });
 
     it('should inject loop variables into context', async () => {
-      const workflowWithVars: Workflow = {
+      const workflowWithVars = createWorkflow({
         id: 'vars-workflow',
         name: 'Variables Workflow',
         description: 'Workflow with loop variables',
@@ -643,7 +645,7 @@ describe('DefaultWorkflowService', () => {
             prompt: 'Check loop variable'
           }
         ]
-      };
+      }, createBundledSource());
 
       mockStorage.getWorkflowById.mockResolvedValue(workflowWithVars);
 
@@ -655,7 +657,7 @@ describe('DefaultWorkflowService', () => {
     });
 
     it('should respect max iterations limit', async () => {
-      const workflowWithLimit: Workflow = {
+      const workflowWithLimit = createWorkflow({
         id: 'limit-workflow',
         name: 'Limit Workflow',
         description: 'Workflow with iteration limit',
@@ -679,7 +681,7 @@ describe('DefaultWorkflowService', () => {
             prompt: 'Do something'
           }
         ]
-      };
+      }, createBundledSource());
 
       mockStorage.getWorkflowById.mockResolvedValue(workflowWithLimit);
 
@@ -702,7 +704,7 @@ describe('DefaultWorkflowService', () => {
     });
 
     it('should skip loop if initial condition is false', async () => {
-      const workflowWithFalseLoop: Workflow = {
+      const workflowWithFalseLoop = createWorkflow({
         id: 'false-loop-workflow',
         name: 'False Loop Workflow',
         description: 'Workflow with initially false loop',
@@ -723,7 +725,7 @@ describe('DefaultWorkflowService', () => {
           { id: 'never-run', title: 'Never Run', prompt: 'Should not execute' },
           { id: 'after-loop', title: 'After Loop', prompt: 'Runs after skipped loop' }
         ]
-      };
+      }, createBundledSource());
 
       mockStorage.getWorkflowById.mockResolvedValue(workflowWithFalseLoop);
 
@@ -732,7 +734,7 @@ describe('DefaultWorkflowService', () => {
     });
 
     it('should handle multi-step loop body', async () => {
-      const workflowWithMultiStep: Workflow = {
+      const workflowWithMultiStep = createWorkflow({
         id: 'multi-step-workflow',
         name: 'Multi-Step Workflow',
         description: 'Workflow with multi-step loop body',
@@ -756,7 +758,7 @@ describe('DefaultWorkflowService', () => {
           } as LoopStep,
           { id: 'final', title: 'Final', prompt: 'After loop' }
         ]
-      };
+      }, createBundledSource());
 
       mockStorage.getWorkflowById.mockResolvedValue(workflowWithMultiStep);
 
@@ -807,7 +809,7 @@ describe('DefaultWorkflowService', () => {
     });
 
     it('should handle multi-step forEach loop', async () => {
-      const workflowWithMultiForEach: Workflow = {
+      const workflowWithMultiForEach = createWorkflow({
         id: 'multi-foreach-workflow',
         name: 'Multi ForEach Workflow',
         description: 'Workflow with multi-step forEach loop',
@@ -833,7 +835,7 @@ describe('DefaultWorkflowService', () => {
           } as LoopStep,
           { id: 'complete', title: 'Complete', prompt: 'All tasks done' }
         ]
-      };
+      }, createBundledSource());
 
       mockStorage.getWorkflowById.mockResolvedValue(workflowWithMultiForEach);
 
@@ -893,7 +895,7 @@ describe('DefaultWorkflowService', () => {
     });
 
     it('should handle multi-step body with conditions', async () => {
-      const workflowWithConditionalMulti: Workflow = {
+      const workflowWithConditionalMulti = createWorkflow({
         id: 'conditional-multi-workflow',
         name: 'Conditional Multi Workflow',
         description: 'Multi-step loop with conditional steps',
@@ -922,7 +924,7 @@ describe('DefaultWorkflowService', () => {
           } as LoopStep,
           { id: 'done', title: 'Done', prompt: 'Workflow complete' }
         ]
-      };
+      }, createBundledSource());
 
       mockStorage.getWorkflowById.mockResolvedValue(workflowWithConditionalMulti);
 
@@ -970,7 +972,7 @@ describe('DefaultWorkflowService', () => {
 
   describe('getNextStep with context size monitoring', () => {
     it('should track context size and add warnings', async () => {
-      const workflowWithContext: Workflow = {
+      const workflowWithContext = createWorkflow({
         id: 'context-workflow',
         name: 'Context Workflow',
         description: 'Workflow for testing context size',
@@ -979,7 +981,7 @@ describe('DefaultWorkflowService', () => {
           { id: 'step1', title: 'Step 1', prompt: 'First step' },
           { id: 'step2', title: 'Step 2', prompt: 'Second step' }
         ]
-      };
+      }, createBundledSource());
 
       mockStorage.getWorkflowById.mockResolvedValue(workflowWithContext);
 
@@ -993,7 +995,7 @@ describe('DefaultWorkflowService', () => {
     });
 
     it('should add warning when context approaches size limit', async () => {
-      const workflowWithContext: Workflow = {
+      const workflowWithContext = createWorkflow({
         id: 'context-workflow',
         name: 'Context Workflow',
         description: 'Workflow for testing context size',
@@ -1001,7 +1003,7 @@ describe('DefaultWorkflowService', () => {
         steps: [
           { id: 'step1', title: 'Step 1', prompt: 'First step' }
         ]
-      };
+      }, createBundledSource());
 
       mockStorage.getWorkflowById.mockResolvedValue(workflowWithContext);
 
@@ -1015,7 +1017,7 @@ describe('DefaultWorkflowService', () => {
     });
 
     it('should throw error when context exceeds max size', async () => {
-      const workflowWithContext: Workflow = {
+      const workflowWithContext = createWorkflow({
         id: 'context-workflow',
         name: 'Context Workflow',
         description: 'Workflow for testing context size',
@@ -1023,7 +1025,7 @@ describe('DefaultWorkflowService', () => {
         steps: [
           { id: 'step1', title: 'Step 1', prompt: 'First step' }
         ]
-      };
+      }, createBundledSource());
 
       mockStorage.getWorkflowById.mockResolvedValue(workflowWithContext);
 
@@ -1036,7 +1038,7 @@ describe('DefaultWorkflowService', () => {
     });
 
     it('should monitor context size during loop execution', async () => {
-      const loopWorkflow: Workflow = {
+      const loopWorkflow = createWorkflow({
         id: 'loop-size-workflow',
         name: 'Loop Size Workflow',
         description: 'Workflow with loop and growing context',
@@ -1060,7 +1062,7 @@ describe('DefaultWorkflowService', () => {
             prompt: 'Add more data'
           }
         ]
-      };
+      }, createBundledSource());
 
       mockStorage.getWorkflowById.mockResolvedValue(loopWorkflow);
 
@@ -1088,7 +1090,7 @@ describe('DefaultWorkflowService', () => {
 
   describe('getNextStep with loop validation', () => {
     it('should validate workflow structure and reject invalid loops', async () => {
-      const invalidLoopWorkflow: Workflow = {
+      const invalidLoopWorkflow = createWorkflow({
         id: 'invalid-loop-workflow',
         name: 'Invalid Loop Workflow',
         description: 'Workflow with invalid loop',
@@ -1108,7 +1110,7 @@ describe('DefaultWorkflowService', () => {
           } as LoopStep,
           { id: 'step1', title: 'Step 1', prompt: 'Body step' }
         ]
-      };
+      }, createBundledSource());
 
       mockStorage.getWorkflowById.mockResolvedValue(invalidLoopWorkflow);
 
@@ -1118,7 +1120,7 @@ describe('DefaultWorkflowService', () => {
     });
 
     it('should validate and reject workflow with non-existent loop body', async () => {
-      const invalidBodyWorkflow: Workflow = {
+      const invalidBodyWorkflow = createWorkflow({
         id: 'invalid-body-workflow',
         name: 'Invalid Body Workflow',
         description: 'Workflow with non-existent loop body',
@@ -1137,7 +1139,7 @@ describe('DefaultWorkflowService', () => {
             body: 'non-existent-step'
           } as LoopStep
         ]
-      };
+      }, createBundledSource());
 
       mockStorage.getWorkflowById.mockResolvedValue(invalidBodyWorkflow);
 
@@ -1147,7 +1149,7 @@ describe('DefaultWorkflowService', () => {
     });
 
     it('should accept valid loop workflows', async () => {
-      const validLoopWorkflow: Workflow = {
+      const validLoopWorkflow = createWorkflow({
         id: 'valid-loop-workflow',
         name: 'Valid Loop Workflow',
         description: 'Workflow with valid loop',
@@ -1168,7 +1170,7 @@ describe('DefaultWorkflowService', () => {
           { id: 'process', title: 'Process', prompt: 'Do something' },
           { id: 'done', title: 'Done', prompt: 'Complete' }
         ]
-      };
+      }, createBundledSource());
 
       mockStorage.getWorkflowById.mockResolvedValue(validLoopWorkflow);
 
@@ -1177,7 +1179,7 @@ describe('DefaultWorkflowService', () => {
     });
 
     it('should accept valid multi-step loop workflows', async () => {
-      const validMultiStepWorkflow: Workflow = {
+      const validMultiStepWorkflow = createWorkflow({
         id: 'valid-multi-workflow',
         name: 'Valid Multi-Step Workflow',
         description: 'Workflow with valid multi-step loop',
@@ -1201,7 +1203,7 @@ describe('DefaultWorkflowService', () => {
           } as LoopStep,
           { id: 'end', title: 'End', prompt: 'End of workflow' }
         ]
-      };
+      }, createBundledSource());
 
       mockStorage.getWorkflowById.mockResolvedValue(validMultiStepWorkflow);
 

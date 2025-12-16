@@ -2,7 +2,8 @@ import 'reflect-metadata';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { DefaultWorkflowService } from '../../src/application/services/workflow-service';
 import { InMemoryWorkflowStorage } from '../../src/infrastructure/storage/in-memory-storage';
-import { Workflow, LoopStep } from '../../src/types/workflow-types';
+import { WorkflowDefinition } from '../../src/types/workflow';
+import { LoopStepDefinition } from '../../src/types/workflow-definition';
 import { ValidationEngine } from '../../src/application/services/validation-engine';
 import { EnhancedLoopValidator } from '../../src/application/services/enhanced-loop-validator';
 import { IterativeStepResolutionStrategy } from '../../src/application/services/step-resolution/iterative-step-resolution-strategy';
@@ -42,9 +43,10 @@ describe('Loop with Conditional Body Steps Bug Fix', () => {
 
   it('should advance loop iteration when only eligible body steps are completed', async () => {
     // This replicates the exact structure of phase-1-multi-analysis from coding-task-workflow-with-loops
-    const workflow: Workflow = {
+    const workflow: WorkflowDefinition = {
       id: 'conditional-body-workflow',
       name: 'Test Workflow with Conditional Body Steps',
+      description: 'Test workflow',
       version: '1.0.0',
       steps: [
         {
@@ -88,7 +90,7 @@ describe('Loop with Conditional Body Steps Bug Fix', () => {
               runCondition: { var: 'analysisStep', equals: 4 }
             }
           ]
-        } as LoopStep,
+        } as LoopStepDefinition,
         {
           id: 'after-loop',
           title: 'After Loop',
@@ -149,9 +151,10 @@ describe('Loop with Conditional Body Steps Bug Fix', () => {
 
   it('should handle the exact bug scenario from the user report', async () => {
     // Replicate the exact scenario from the user's bug report
-    const workflow: Workflow = {
+    const workflow: WorkflowDefinition = {
       id: 'coding-task-workflow-with-loops',
       name: 'Coding Task Workflow',
+      description: 'Test workflow',
       version: '1.0.0',
       steps: [
         { id: 'phase-0-intelligent-triage', title: 'Triage', prompt: 'Triage task' },
@@ -193,7 +196,7 @@ describe('Loop with Conditional Body Steps Bug Fix', () => {
               runCondition: { var: 'analysisStep', equals: 4 }
             }
           ]
-        } as LoopStep
+        } as LoopStepDefinition
       ]
     };
 

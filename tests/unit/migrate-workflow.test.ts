@@ -1,8 +1,8 @@
-import { describe, vi, it, expect, beforeEach, afterEach, jest } from 'vitest';
+import { describe, vi, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { LoopStep } from '../../src/types/workflow-types';
+import type { LoopStep } from '../../src/types/workflow-types';
 
 // Mock chalk
 vi.mock('chalk', () => ({
@@ -16,11 +16,12 @@ vi.mock('chalk', () => ({
   }
 }));
 
-import { 
-  detectWorkflowVersion, 
-  migrateWorkflow, 
-  migrateWorkflowFile 
-} from '../../src/cli/migrate-workflow';
+import {
+  detectWorkflowVersion,
+  migrateWorkflow,
+  migrateWorkflowFile,
+  type MigrateFileDeps,
+} from '../../src/cli/commands/migrate';
 
 describe('Workflow Migration', () => {
   describe('detectWorkflowVersion', () => {
@@ -61,31 +62,36 @@ describe('Workflow Migration', () => {
   });
 
   describe('migrateWorkflow', () => {
-    it('should skip migration if already at target version', () => {
+    it('should return already_current if at target version', () => {
       const workflow = {
         version: '0.1.0',
         id: 'test',
         name: 'Test',
         steps: []
       };
-      
+
       const result = migrateWorkflow(workflow);
-      expect(result.success).toBe(true);
-      expect(result.warnings).toContain('Workflow is already at version 0.1.0');
-      expect(result.migratedWorkflow).toEqual(workflow);
+      expect(result.kind).toBe('already_current');
+      if (result.kind === 'already_current') {
+        expect(result.version).toBe('0.1.0');
+        expect(result.workflow).toEqual(workflow);
+      }
     });
 
-    it('should prevent downgrade', () => {
+    it('should return cannot_downgrade for newer versions', () => {
       const workflow = {
         version: '0.2.0',
         id: 'test',
         name: 'Test',
         steps: []
       };
-      
+
       const result = migrateWorkflow(workflow);
-      expect(result.success).toBe(false);
-      expect(result.errors).toContain('Cannot downgrade from version 0.2.0 to 0.1.0');
+      expect(result.kind).toBe('cannot_downgrade');
+      if (result.kind === 'cannot_downgrade') {
+        expect(result.originalVersion).toBe('0.2.0');
+        expect(result.targetVersion).toBe('0.1.0');
+      }
     });
 
     it('should add version field during migration', () => {
@@ -97,11 +103,13 @@ describe('Workflow Migration', () => {
           { id: 'step1', title: 'Step 1', prompt: 'Do something' }
         ]
       };
-      
+
       const result = migrateWorkflow(workflow);
-      expect(result.success).toBe(true);
-      expect(result.changes).toContain('Added version field: 0.1.0');
-      expect(result.migratedWorkflow?.version).toBe('0.1.0');
+      expect(result.kind).toBe('migrated');
+      if (result.kind === 'migrated') {
+        expect(result.changes).toContain('Added version field: 0.1.0');
+        expect(result.workflow.version).toBe('0.1.0');
+      }
     });
 
     it('should detect loop-like patterns and warn', () => {
@@ -110,10 +118,10 @@ describe('Workflow Migration', () => {
         name: 'Test',
         description: 'Test workflow',
         steps: [
-          { 
-            id: 'step1', 
-            title: 'Repeat Process', 
-            prompt: 'Iterate through each item in the list' 
+          {
+            id: 'step1',
+            title: 'Repeat Process',
+            prompt: 'Iterate through each item in the list'
           },
           {
             id: 'step2',
@@ -123,15 +131,17 @@ describe('Workflow Migration', () => {
           }
         ]
       };
-      
+
       const result = migrateWorkflow(workflow);
-      expect(result.success).toBe(true);
-      expect(result.warnings.length).toBeGreaterThan(0);
-      expect(result.warnings.some(w => w.includes('loop-related keywords'))).toBe(true);
-      expect(result.warnings.some(w => w.includes('manual iteration'))).toBe(true);
+      expect(result.kind).toBe('migrated');
+      if (result.kind === 'migrated') {
+        expect(result.warnings.length).toBeGreaterThan(0);
+        expect(result.warnings.some(w => w.includes('loop-related keywords'))).toBe(true);
+        expect(result.warnings.some(w => w.includes('manual iteration'))).toBe(true);
+      }
     });
 
-    it('should validate required fields', () => {
+    it('should return invalid_workflow for missing required fields', () => {
       const workflow = {
         // Missing id
         name: 'Test',
@@ -139,8 +149,10 @@ describe('Workflow Migration', () => {
       };
 
       const result = migrateWorkflow(workflow);
-      expect(result.success).toBe(false);
-      expect(result.errors).toContain('Workflow must have an id');
+      expect(result.kind).toBe('invalid_workflow');
+      if (result.kind === 'invalid_workflow') {
+        expect(result.errors).toContain('Workflow must have an id');
+      }
     });
 
     it('performs upgrade from older version', () => {
@@ -152,8 +164,10 @@ describe('Workflow Migration', () => {
       };
 
       const result = migrateWorkflow(workflow);
-      expect(result.success).toBe(true);
-      expect(result.migratedWorkflow?.version).toBe('0.1.0');
+      expect(result.kind).toBe('migrated');
+      if (result.kind === 'migrated') {
+        expect(result.workflow.version).toBe('0.1.0');
+      }
     });
 
     it('is no-op when workflow already at target version', () => {
@@ -165,8 +179,10 @@ describe('Workflow Migration', () => {
       };
 
       const result = migrateWorkflow(workflow);
-      expect(result.success).toBe(true);
-      expect(result.migratedWorkflow).toEqual(workflow);
+      expect(result.kind).toBe('already_current');
+      if (result.kind === 'already_current') {
+        expect(result.workflow).toEqual(workflow);
+      }
     });
 
     it('detects downgrade from newer version', () => {
@@ -178,8 +194,11 @@ describe('Workflow Migration', () => {
       };
 
       const result = migrateWorkflow(workflow);
-      expect(result.success).toBe(false);
-      expect(result.errors).toContain('Cannot downgrade from version 0.10.0 to 0.1.0');
+      expect(result.kind).toBe('cannot_downgrade');
+      if (result.kind === 'cannot_downgrade') {
+        expect(result.originalVersion).toBe('0.10.0');
+        expect(result.targetVersion).toBe('0.1.0');
+      }
     });
   });
 
@@ -193,8 +212,13 @@ describe('Workflow Migration', () => {
     });
 
     afterEach(() => {
-      // Clean up temp directory
       fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    const createDeps = (): MigrateFileDeps => ({
+      readFile: (p: string) => fs.promises.readFile(p, 'utf-8'),
+      writeFile: (p: string, content: string) => fs.promises.writeFile(p, content, 'utf-8'),
+      copyFile: (src: string, dest: string) => fs.promises.copyFile(src, dest),
     });
 
     it('should migrate a file successfully', async () => {
@@ -206,14 +230,16 @@ describe('Workflow Migration', () => {
           { id: 'step1', title: 'Step 1', prompt: 'Do something' }
         ]
       };
-      
+
       fs.writeFileSync(testFile, JSON.stringify(workflow, null, 2));
-      
-      const result = await migrateWorkflowFile(testFile);
-      expect(result.success).toBe(true);
-      expect(result.originalVersion).toBe('0.0.1');
-      expect(result.targetVersion).toBe('0.1.0');
-      
+
+      const result = await migrateWorkflowFile(testFile, {}, createDeps());
+      expect(result.kind).toBe('file_migrated');
+      if (result.kind === 'file_migrated') {
+        expect(result.migration.originalVersion).toBe('0.0.1');
+        expect(result.migration.targetVersion).toBe('0.1.0');
+      }
+
       // Check file was updated
       const migrated = JSON.parse(fs.readFileSync(testFile, 'utf-8'));
       expect(migrated.version).toBe('0.1.0');
@@ -228,13 +254,17 @@ describe('Workflow Migration', () => {
           { id: 'step1', title: 'Step 1', prompt: 'Do something' }
         ]
       };
-      
+
       fs.writeFileSync(testFile, JSON.stringify(workflow, null, 2));
       const originalContent = fs.readFileSync(testFile, 'utf-8');
-      
-      const result = await migrateWorkflowFile(testFile, undefined, { dryRun: true });
-      expect(result.success).toBe(true);
-      
+
+      const result = await migrateWorkflowFile(
+        testFile,
+        { dryRun: true },
+        createDeps()
+      );
+      expect(result.kind).toBe('dry_run');
+
       // File should not be modified
       const afterContent = fs.readFileSync(testFile, 'utf-8');
       expect(afterContent).toBe(originalContent);
@@ -249,16 +279,19 @@ describe('Workflow Migration', () => {
           { id: 'step1', title: 'Step 1', prompt: 'Do something' }
         ]
       };
-      
+
       fs.writeFileSync(testFile, JSON.stringify(workflow, null, 2));
-      
-      const result = await migrateWorkflowFile(testFile, undefined, { backup: true });
-      expect(result.success).toBe(true);
-      
-      // Check backup was created
-      const backupFile = result.changes.find(c => c.includes('Created backup'));
-      expect(backupFile).toBeDefined();
-      
+
+      const result = await migrateWorkflowFile(
+        testFile,
+        { backup: true },
+        createDeps()
+      );
+      expect(result.kind).toBe('file_migrated');
+      if (result.kind === 'file_migrated') {
+        expect(result.backupPath).toBeDefined();
+      }
+
       // Verify backup exists
       const files = fs.readdirSync(tempDir);
       const backupFiles = files.filter(f => f.includes('.backup.'));
@@ -266,17 +299,25 @@ describe('Workflow Migration', () => {
     });
 
     it('should handle file read errors', async () => {
-      const result = await migrateWorkflowFile('/non/existent/file.json');
-      expect(result.success).toBe(false);
-      expect(result.errors.some(e => e.includes('Failed to read file'))).toBe(true);
+      const result = await migrateWorkflowFile(
+        '/non/existent/file.json',
+        {},
+        createDeps()
+      );
+      expect(result.kind).toBe('file_read_error');
+      if (result.kind === 'file_read_error') {
+        expect(result.message).toBeTruthy();
+      }
     });
 
     it('should handle invalid JSON', async () => {
       fs.writeFileSync(testFile, 'not valid json');
-      
-      const result = await migrateWorkflowFile(testFile);
-      expect(result.success).toBe(false);
-      expect(result.errors.some(e => e.includes('Invalid JSON'))).toBe(true);
+
+      const result = await migrateWorkflowFile(testFile, {}, createDeps());
+      expect(result.kind).toBe('file_parse_error');
+      if (result.kind === 'file_parse_error') {
+        expect(result.message).toBeTruthy();
+      }
     });
 
     it('should write to different output path', async () => {
@@ -288,20 +329,27 @@ describe('Workflow Migration', () => {
           { id: 'step1', title: 'Step 1', prompt: 'Do something' }
         ]
       };
-      
+
       fs.writeFileSync(testFile, JSON.stringify(workflow, null, 2));
       const outputFile = path.join(tempDir, 'migrated-workflow.json');
-      
-      const result = await migrateWorkflowFile(testFile, outputFile);
-      expect(result.success).toBe(true);
-      
+
+      const result = await migrateWorkflowFile(
+        testFile,
+        { outputPath: outputFile },
+        createDeps()
+      );
+      expect(result.kind).toBe('file_migrated');
+      if (result.kind === 'file_migrated') {
+        expect(result.outputPath).toBe(outputFile);
+      }
+
       // Original should be unchanged
       const original = JSON.parse(fs.readFileSync(testFile, 'utf-8'));
       expect(original.version).toBeUndefined();
-      
+
       // Output should be migrated
       const migrated = JSON.parse(fs.readFileSync(outputFile, 'utf-8'));
       expect(migrated.version).toBe('0.1.0');
     });
   });
-}); 
+});
