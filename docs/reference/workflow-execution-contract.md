@@ -4,6 +4,18 @@ This document describes the proposed “token-based” workflow execution tools 
 
 Decision record: `docs/adrs/005-agent-first-workflow-execution-tokens.md`
 
+## Recorded decisions (from design discussions)
+
+- **Text rendering template versioning (internal-only)**: we may version the deterministic `text` template for testing and export stability, but we do **not** expose the template version to the agent as part of the MCP contract.
+- **Text-first scope**: “text-first + JSON backbone” is **required for execution outputs** (e.g., `workflow_start`, `workflow_advance`, and `workflow_checkpoint` when present). It is optional for discovery/inspection tools (`workflow_list`, `workflow_inspect`).
+- **AC/REJECT usage**: the detailed acceptance criteria and rejection triggers are treated as **non-normative guardrails** (test targets / design constraints). The contract remains defined by the normative sections in this document.
+
+## MCP platform constraints
+
+This contract is shaped by constraints of the stdio MCP environment (no server push, no transcript access, lossy agents, etc.). The full list is recorded in:
+
+- `docs/reference/mcp-platform-constraints.md`
+
 ## Goals
 
 - Provide a minimal, primitives-only MCP contract that agents can use reliably.
@@ -47,16 +59,9 @@ Record durable “work progress” without advancing workflow state. This exists
 
 This tool can be gated behind a feature flag while it is validated in real usage.
 
-To keep WorkRail opt-in and avoid “checkpointing every chat”, `workflow_checkpoint` should require an existing WorkRail handle:
+To keep WorkRail opt-in and avoid “checkpointing every chat”, `workflow_checkpoint` should require an existing workflow run handle (`stateToken`).
 
-- `stateToken` (attach checkpoint to a specific workflow node), or
-- `sessionId` (attach checkpoint at the session level).
-
-If neither is present, the tool should fail with a clear precondition error (prompting the agent to ask whether to start a WorkRail session).
-
-#### `workrail_start_session` (optional / experimental)
-
-If you want checkpoint-only sessions (no workflow has started), introduce a `workrail_start_session` tool behind a separate feature flag. It returns a `sessionId` that can be used with `workflow_checkpoint`.
+If checkpoint-only sessions (no workflow has started) are desired later, introduce a `workrail_start_session` tool behind a separate feature flag and extend `workflow_checkpoint` to accept `sessionId`. Until then, checkpointing outside workflows is intentionally unsupported.
 
 ## End-to-End Flows
 
@@ -100,9 +105,17 @@ No special “nesting API” is required for correctness; it is an orchestration
 ### `stateToken` (opaque snapshot)
 
 - **Minted by WorkRail**.
-- Encodes (internally): `workflowId`, `workflowVersion` (or schema hash), `runId`, and execution snapshot data.
+- Encodes (internally): `workflowId`, `workflowHash`, `runId`, and execution snapshot data.
 - Must be **opaque** to clients: clients round-trip it without modification.
 - Must be **validated** by WorkRail (version + signature/HMAC) to prevent tampering.
+
+### `workflowHash` (pinned workflow identity)
+
+Runs are pinned to a specific workflow definition at `workflow_start` time to avoid “live” behavior changes when workflow files evolve.
+
+- WorkRail computes `workflowHash` from a normalized (or compiled) workflow definition.
+- The hash is embedded into `stateToken` so future calls are deterministic.
+- WorkRail persists a workflow snapshot keyed by `workflowHash` in the session store (required for export/import and for continuing runs when the workflow file changes or disappears).
 
 ### `ackToken` (opaque completion acknowledgement)
 
@@ -124,6 +137,22 @@ No special “nesting API” is required for correctness; it is an orchestration
 - constraints: “don’t run detekt”, “no network”, etc.
 
 Do not place workflow progress state in `context`.
+
+## Workflow pinning and evolution
+
+### Pinning policy (normative)
+
+- `workflow_start` MUST compute a `workflowHash` and pin the run to it.
+- Subsequent `workflow_advance` calls MUST execute against the pinned workflow snapshot identified by the `workflowHash` embedded in `stateToken`.
+
+### Workflow changes on disk (recommended behavior)
+
+If the workflow file at `workflowId` changes after a run is started:
+
+- WorkRail should continue using the pinned snapshot for that run.
+- WorkRail should surface a structured warning (as data) that the on-disk workflow differs from the pinned snapshot.
+
+Explicit “migration” of a run to a new workflow version is a separate, opt-in feature.
 
 ## What the Agent Must and Must Not Do
 
@@ -214,17 +243,39 @@ Notes:
 ```
 
 Notes:
-- `workflow_checkpoint` should accept either `stateToken` (attach to a specific node) or `sessionId` (attach to the session when no workflow run is active).
+- For now, `workflow_checkpoint` requires `stateToken` (attach to a specific workflow node). Session-only checkpointing is a future feature behind `workrail_start_session`.
 
 ## Dashboard / Sessions (UX Projection)
 
 Sessions are a UX layer that should be updated **natively** as a side effect of `workflow_start`/`workflow_advance`:
 
-- Store token lineage as an append-only graph:
+- A single **session** represents a single workstream (ticket/PR/chat) and may contain **multiple workflow runs**.
+- Each **run** corresponds to a single workflow execution and has its own branching token lineage.
+
+### Persistence model (recommended)
+
+Use an **append-only event log as the source of truth**, stored per session.
+
+- Events drive the dashboard; projections are derived (pure functions).
+- Token lineage is derived from `step_acked` events:
   - node: `stateTokenHash`
-  - edge: `parentStateTokenHash -> childStateTokenHash` (created on successful advance)
+  - edge: `parentStateTokenHash -> childStateTokenHash` (keyed by `ackTokenHash`)
 - Rewinds naturally create branches (multiple children for the same parent) instead of “desync”.
 - Session pointers (like “latest”) are derived views, not authoritative state.
+
+### UI guidance (avoid “confusing soup”)
+
+If a session contains multiple workflow runs, the UI MUST make boundaries explicit.
+
+Recommended baseline UI:
+
+- **Runs sidebar**: list runs with `workflowId` + human title + status (Running/Complete) + branch count.
+- **Single active run view**: render one run at a time (its branch graph + steps + artifacts) to avoid mixing content.
+- **Session Notes**: a session-level notes area for global context and “between workflows” summaries.
+
+Advanced view (optional):
+
+- **Session Timeline**: a chronological timeline view with lanes per run (color-coded), plus an optional session-level lane for global checkpoints. This makes multi-workflow sessions understandable without intermixing details in the default view.
 
 ### Local-only dashboard and sharing
 
