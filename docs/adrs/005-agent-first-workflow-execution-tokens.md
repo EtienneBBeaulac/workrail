@@ -7,11 +7,15 @@
 
 WorkRail workflows are driven by an LLM agent operating inside a chat UI. Chat UIs allow users to rewind/edit conversation history, which makes any server-side “current pointer” state inherently unreliable: the agent can unknowingly resume from an earlier point in time.
 
+WorkRail runs locally (stdio MCP) and is intended for a single developer machine. We optimize for an “honest-but-buggy” caller model rather than malicious clients. Confidentiality is not a primary requirement, but integrity and fail-fast validation remain important to catch accidental corruption and protocol drift.
+
 We recently moved to a state/event workflow engine and exposed internal engine state at the MCP boundary (`state` + optional `event`). While correct and expressive, this leaks engine internals into the agent contract. In practice it increases agent error rate, increases payload complexity, and makes tool descriptions harder to keep aligned with actual tool schemas.
 
 We also have “session tools” primarily to power a dashboard. Today, session state can drift out of sync under rewinds because the dashboard/session layer treats the server’s session pointer as authoritative.
 
 As a concrete example of boundary drift, we observed `workflow_next` tool descriptions still referencing `completedSteps` while the actual tool contract had already shifted to a state/event schema. This kind of mismatch is easy to introduce when the public API exposes engine internals and evolves quickly.
+
+Rewinds create an additional reality gap: meaningful work often happens “between workflow calls.” If a user rewinds after substantial off-workflow work (e.g., implementing code guided by the agent without advancing a workflow step), that context is lost unless WorkRail offers a durable persistence primitive that does not advance workflow state.
 
 ## Before / After (Why this ADR exists)
 
@@ -50,8 +54,12 @@ Sessions are **demoted** to a dashboard/UX projection over immutable token linea
 
 Tools are renamed for clarity:
 
-- `workflow_get` → `workflow_inspect` (read-only definition/preview)
-- `workflow_next` → split into `workflow_start` + `workflow_advance` (execution)
+- `workflow_get` → `workflow_inspect` (read-only definition/preview; never executes)
+- `workflow_next` → split into `workflow_start` + `workflow_advance` (explicit lifecycle: start a run, then advance it)
+
+Introduce a checkpoint primitive for rewind resilience outside the strict workflow step loop:
+
+- `workflow_checkpoint`: append a durable summary/artifact without advancing workflow state. This is intended for “off-workflow” work and post-workflow iteration. It should be treated as opt-in and can be gated behind a feature flag while it is validated in real usage.
 
 ## Consequences
 
@@ -61,11 +69,14 @@ Tools are renamed for clarity:
 - **Agent usability**: the agent no longer constructs engine internals (loop stacks, discriminated unions, etc.).
 - **Idempotent progress**: replays of the same completion do not advance twice.
 - **Dashboard consistency**: sessions become a graph/timeline of token lineage; rewinds produce branches rather than desync.
+- **Durable memory**: checkpoints capture high-signal progress that would otherwise be lost when rewinding or trimming chat context.
+- **Portable sharing**: sessions can be exported/imported locally, and rendered exports (e.g., Markdown/PDF) can be generated as projections of session artifacts.
 
 ### Negative
 
 - **Token design requirements**: tokens must be versioned, validated, and (at minimum) tamper-evident (e.g., signature/HMAC).
 - **Migration effort**: MCP tool names and contracts change; workflow authors may need to add explicit output contracts for structured dashboards (see contract spec).
+- **More surface area**: checkpointing adds a new tool and a new user/agent behavior. To mitigate, keep checkpoint payloads minimal and gate behind a feature flag until proven.
 
 ## Alternatives Considered
 
