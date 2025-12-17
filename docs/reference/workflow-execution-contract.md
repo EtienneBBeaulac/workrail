@@ -10,6 +10,7 @@ Decision record: `docs/adrs/005-agent-first-workflow-execution-tokens.md`
 - Support rewinds/forks/parallel runs naturally (chat UIs are not monotonic).
 - Keep the workflow engine internal; avoid leaking execution internals to clients.
 - Treat errors as data (structured error payloads; no throwing across boundaries).
+- Preserve high-signal progress even when work happens outside a workflow step loop (rewinds can delete chat context without warning).
 
 ## Non-Goals
 
@@ -17,6 +18,12 @@ Decision record: `docs/adrs/005-agent-first-workflow-execution-tokens.md`
 - Require the agent to manage dashboard sessions explicitly.
 
 ## Tool Set
+
+These tool names are chosen to make the workflow lifecycle explicit and reduce agent confusion:
+
+- **Inspect**: read-only discovery and preview (never mutates execution)
+- **Start**: begins a new run and returns the first pending step
+- **Advance**: progresses an existing run from opaque tokens
 
 ### `workflow_list`
 
@@ -34,6 +41,23 @@ Starts a new workflow run and returns the first pending step plus opaque tokens.
 
 Advances an existing workflow run by acknowledging completion of the pending step for a given snapshot.
 
+### `workflow_checkpoint` (optional / experimental)
+
+Record durable “work progress” without advancing workflow state. This exists because meaningful work often happens outside a workflow step loop, and rewinds can delete chat context without warning.
+
+This tool can be gated behind a feature flag while it is validated in real usage.
+
+To keep WorkRail opt-in and avoid “checkpointing every chat”, `workflow_checkpoint` should require an existing WorkRail handle:
+
+- `stateToken` (attach checkpoint to a specific workflow node), or
+- `sessionId` (attach checkpoint at the session level).
+
+If neither is present, the tool should fail with a clear precondition error (prompting the agent to ask whether to start a WorkRail session).
+
+#### `workrail_start_session` (optional / experimental)
+
+If you want checkpoint-only sessions (no workflow has started), introduce a `workrail_start_session` tool behind a separate feature flag. It returns a `sessionId` that can be used with `workflow_checkpoint`.
+
 ## End-to-End Flows
 
 ### Basic flow (single workflow)
@@ -44,6 +68,10 @@ Advances an existing workflow run by acknowledging completion of the pending ste
    - Follow `pending.prompt`
    - Call `workflow_advance` with the returned `stateToken` and `ackToken`
 4. Stop when `isComplete == true` (and `pending == null`).
+
+### Off-workflow work (checkpoint)
+
+When the agent is doing substantial work outside a workflow step loop (implementation, iteration, tuning output, etc.), it should call `workflow_checkpoint` to persist a short recap. This reduces the cost of rewinds and long chats by moving durable memory into the session store.
 
 ### Rewind/fork behavior (chat UIs)
 
@@ -83,9 +111,6 @@ No special “nesting API” is required for correctness; it is an orchestration
 - Must be **idempotent**:
   - Replaying the same `(stateToken, ackToken)` returns the same response payload.
   - Replaying does not advance the run twice.
-- Must be **replay-safe by design**:
-  - Clients may resend the same request due to retries or tool-call replay.
-  - WorkRail must return the same response for the same `(stateToken, ackToken)` pair.
 - Must be **scoped**:
   - An `ackToken` from run A must not be usable on run B.
   - An `ackToken` from snapshot X must not be usable on snapshot Y.
@@ -179,6 +204,18 @@ Notes:
 }
 ```
 
+### `workflow_checkpoint` request (example)
+
+```json
+{
+  "stateToken": "st.v1....",
+  "notesMarkdown": "Implemented token-based description updates. Next: update workflow_next tool naming and add checkpoint tool behind flag."
+}
+```
+
+Notes:
+- `workflow_checkpoint` should accept either `stateToken` (attach to a specific node) or `sessionId` (attach to the session when no workflow run is active).
+
 ## Dashboard / Sessions (UX Projection)
 
 Sessions are a UX layer that should be updated **natively** as a side effect of `workflow_start`/`workflow_advance`:
@@ -188,6 +225,15 @@ Sessions are a UX layer that should be updated **natively** as a side effect of 
   - edge: `parentStateTokenHash -> childStateTokenHash` (created on successful advance)
 - Rewinds naturally create branches (multiple children for the same parent) instead of “desync”.
 - Session pointers (like “latest”) are derived views, not authoritative state.
+
+### Local-only dashboard and sharing
+
+The dashboard is local-only. Sharing is achieved via explicit export/import:
+
+- Export session bundle (versioned) for another developer to import into their local dashboard.
+- Export rendered views (e.g., Markdown, optionally PDF) as projections of stored session artifacts.
+
+Retention/expiration (TTL) should be configurable; a reasonable default is 30–90 days.
 
 ## Replacing File-Based Docs with Dashboard Artifacts (Optional)
 
@@ -324,3 +370,7 @@ No. `workflowId` can be embedded into `stateToken`. Keep `workflowId` only on `w
 Sessions become a UX projection, so session creation/updating can happen as a side effect of `workflow_start`/`workflow_advance` without extra agent-facing tools.
 
 Separate session tools can still exist for human/ops convenience (open dashboard, inspect stored session graphs, cleanup), but normal agents should not need to call them.
+
+### Why do we need `workflow_checkpoint` at all?
+
+Because rewinds are external to the workflow engine. If meaningful work happens outside a workflow step loop and the user rewinds without warning, that progress is lost unless WorkRail has already recorded a durable recap in the session store.
