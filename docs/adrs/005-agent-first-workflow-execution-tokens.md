@@ -9,6 +9,10 @@ WorkRail workflows are driven by an LLM agent operating inside a chat UI. Chat U
 
 WorkRail runs locally (stdio MCP) and is intended for a single developer machine. We optimize for an “honest-but-buggy” caller model rather than malicious clients. Confidentiality is not a primary requirement, but integrity and fail-fast validation remain important to catch accidental corruption and protocol drift.
 
+This ADR is constrained by the MCP platform model (no server push into the chat, no transcript access, lossy/replayed tool calls). See:
+
+- `docs/reference/mcp-platform-constraints.md`
+
 We recently moved to a state/event workflow engine and exposed internal engine state at the MCP boundary (`state` + optional `event`). While correct and expressive, this leaks engine internals into the agent contract. In practice it increases agent error rate, increases payload complexity, and makes tool descriptions harder to keep aligned with actual tool schemas.
 
 We also have “session tools” primarily to power a dashboard. Today, session state can drift out of sync under rewinds because the dashboard/session layer treats the server’s session pointer as authoritative.
@@ -52,6 +56,12 @@ Sessions are **demoted** to a dashboard/UX projection over immutable token linea
 - The workflow “truth” is always derived from the token presented by the client.
 - Rewinds/forks are represented as branches in token lineage, not as “session desync”.
 
+Pin workflow definitions for deterministic runs:
+
+- `workflow_start` pins a run to a specific workflow snapshot identified by a content hash (`workflowHash`).
+- `stateToken` embeds `workflowHash` so runs remain deterministic even if workflow files evolve.
+- Pinned workflow snapshots must be persisted in session storage to support export/import and long-lived runs.
+
 Tools are renamed for clarity:
 
 - `workflow_get` → `workflow_inspect` (read-only definition/preview; never executes)
@@ -71,12 +81,14 @@ Introduce a checkpoint primitive for rewind resilience outside the strict workfl
 - **Dashboard consistency**: sessions become a graph/timeline of token lineage; rewinds produce branches rather than desync.
 - **Durable memory**: checkpoints capture high-signal progress that would otherwise be lost when rewinding or trimming chat context.
 - **Portable sharing**: sessions can be exported/imported locally, and rendered exports (e.g., Markdown/PDF) can be generated as projections of session artifacts.
+- **Deterministic runs**: pinning workflows by content hash prevents “live” behavior changes mid-run when workflow files are edited.
 
 ### Negative
 
 - **Token design requirements**: tokens must be versioned, validated, and (at minimum) tamper-evident (e.g., signature/HMAC).
 - **Migration effort**: MCP tool names and contracts change; workflow authors may need to add explicit output contracts for structured dashboards (see contract spec).
 - **More surface area**: checkpointing adds a new tool and a new user/agent behavior. To mitigate, keep checkpoint payloads minimal and gate behind a feature flag until proven.
+- **More persistence**: pinning workflow snapshots and storing event logs requires explicit session storage (still local-only and small).
 
 ## Alternatives Considered
 
