@@ -1,0 +1,85 @@
+# WorkRail v2 — One Pager
+
+## Definition
+
+Workrail v2 makes agent workflows resumable and rewind-proof by persisting durable outputs and execution lineage in an append-only run graph.
+
+## Public MCP surface (final names)
+
+Core tools:
+- `list_workflows`
+- `inspect_workflow`
+- `start_workflow`
+- `continue_workflow`
+
+Rollout-only flagged (become core):
+- `resume_session` (unflag earlier)
+- `checkpoint_workflow` (unflag later)
+
+Advanced (flagged longer):
+- `start_session` (enables checkpoint-only sessions; not required for core v2 value)
+
+## Invariants (v2 guarantees)
+
+1) **Token-based execution**: agents only round-trip opaque handles; `continue_workflow` supports safe rehydrate and idempotent advance.
+2) **Pinned determinism**: every run pins to a `workflowHash` of the fully expanded compiled workflow (builtins/templates/features/contracts included).
+3) **Append-only truth**: durable state is an append-only session/run graph; all “latest” views are projections.
+4) **Rewinds are branches**: using a non-tip snapshot auto-forks and returns lost branch context (bounded downstream recap).
+5) **Single durable write path**: durable memory is written only via `output` (notes + optional artifacts); `context` is inputs only.
+6) **Bounded memory**: recaps/snippets are full when small, otherwise deterministically truncated with explicit markers.
+7) **Resumable portability**: export/import bundles are versioned + integrity-checked; imports re-mint tokens from stored snapshots.
+8) **Builtin authoring power + auditability**: workflows can reference builtin templates/features/contract packs; bounded decision traces exist for dashboard/logs/exports (not agent-facing by default).
+
+## Explicit non-goals
+
+- No transcript dependence for correctness.
+- No server push into the chat.
+- No agent-managed engine internals (completed steps, loop stacks, cursors, etc.).
+- No heuristic inference of structure from prose.
+- No user-defined plugin code (builtin-only).
+- No mutable session CRUD surface for agents.
+- No implicit merges on import (default: import-as-new session).
+
+## What’s new vs v1
+
+- **Durable truth**: v2 stores an append-only run graph + durable outputs; v1 relies on chat state and mutable side channels.
+- **Resumption**: v2 supports “resume by query” and resumable import/export; v1 resumption is fragile without transcript context.
+- **Rewind safety**: v2 models rewinds as explicit forks with recovered context; v1 risks silent drift/desync.
+- **Determinism**: v2 pins execution to hashed compiled workflow snapshots (including builtins); v1 behavior can drift with workflow changes.
+- **Authoring power**: v2 adds builtin templates/features/contract packs to speed up authoring and standardize behavior.
+
+## Epics
+
+1) **Protocol v2 MCP surface**
+   - Implement the v2 tools, token/ack semantics, and rehydrate vs advance modes.
+   - Deterministic recap generation and truncation markers.
+
+2) **Durable store + pinning**
+   - Append-only session/run graph (nodes/edges/outputs/observations).
+   - Workflow hashing over fully expanded compiled workflows + snapshot persistence.
+   - Bounded decision trace for auditability.
+
+3) **Resumption + sharing**
+   - `resume_session` layered search and deterministic ranking.
+   - Export/import bundles (schema versioning, integrity manifest, token re-minting).
+   - Conflict policy: import-as-new session by default.
+
+4) **Authoring + durability extensions**
+   - `checkpoint_workflow` rollout and guardrails.
+   - `start_session` (checkpoint-only sessions) as an advanced, flagged capability.
+   - Builtin templates/features/contract packs, provenance, and `inspect_workflow` capability surfacing.
+   - Namespaced workflow IDs (`namespace.name`) with `wr.*` reserved, legacy ID migration warnings.
+
+5) **Console (observability + management UI)**
+   - Workflow list/detail/edit/validate with JSON-first editing and source picker.
+   - Sources management (add/remove/health).
+   - Feature flags UI with desired-vs-applied config and "restart required" guidance.
+   - Sessions/runs dashboard with branch graph, decision traces, logs, export/import.
+
+## Canonical references
+
+- `docs/reference/workflow-execution-contract.md`
+- `docs/reference/mcp-platform-constraints.md`
+- `docs/adrs/005-agent-first-workflow-execution-tokens.md`
+- `docs/adrs/006-append-only-session-run-event-log.md`
+- `docs/adrs/007-resume-and-checkpoint-only-sessions.md`

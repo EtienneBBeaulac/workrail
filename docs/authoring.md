@@ -2,6 +2,71 @@
 
 Create custom workflows to guide AI agents through your team's processes.
 
+---
+
+## WorkRail v2 authoring (conceptual)
+
+> **Draft / design notes (not implemented yet).**
+>
+> This section captures the **v2 direction** for workflow authoring. It is intentionally conceptual and may change.
+> If you are authoring workflows for the current shipped system, use the rest of this document.
+>
+> See also:
+> - `docs/reference/workflow-execution-contract.md`
+> - `docs/adrs/006-append-only-session-run-event-log.md`
+> - `docs/adrs/007-resume-and-checkpoint-only-sessions.md`
+
+WorkRail v2 aims to keep workflow authoring **as simple as possible** while making execution **deterministic, rewind-safe, and resumable**.
+
+### Baseline (Tier 0): notes-first
+
+- **You can write workflows with no special authoring features.**
+- The default durable output is a short recap in `output.notesMarkdown` (recorded by the agent when advancing or checkpointing).
+- Structured artifacts are **optional** and must never be required for a workflow to be usable.
+
+### Builtins (no user-defined plugins)
+
+WorkRail v2 provides **built-in** building blocks that workflows (including external workflows) can reference:
+
+- **Templates**: pre-built steps (or step sequences) authors can “call” to speed up authoring and ensure consistency.
+- **Features**: deterministic, closed-set “middleware” applied by WorkRail (e.g., tier-aware instructions, formatting, durable recap guidance).
+- **Contract packs**: server-side definitions for allowed artifact kinds and small examples (no schema authoring required by workflow authors).
+
+External workflows can reference these builtins, but cannot define arbitrary new plugin code.
+
+### Where injections happen: templates as anchors
+
+When something needs to be injected at a specific point (“run an audit here”, “insert a standard gate here”), **template references are the primary anchor**:
+
+- Explicit at the callsite (less hidden magic).
+- Deterministic and debuggable.
+- Avoids tag-taxonomy sprawl.
+
+Tags can still exist as optional **classification** metadata (for UI organization and search), but should not be the primary injection mechanism.
+
+### Step identity and provenance
+
+To keep authoring simple:
+
+- Author step IDs remain the primary, stable identifiers (what agents see as `pending.stepId`).
+- Template-expanded/internal step IDs are **reserved/internal** and carry provenance (what injected them, where, and why).
+- By default, injected steps should be **collapsed** for agent UX; provenance exists for debugging/auditing and advanced views.
+
+### Versioning and determinism
+
+- The canonical pin is a **content hash** of the **fully expanded compiled workflow** (including template expansions, feature application, and contract pack selection), not a human-maintained `version` string.
+- Human `version` fields may exist as labels, but should not be the source of truth for determinism.
+
+### Debugging and auditing
+
+WorkRail v2 treats debugging/auditing as first-class:
+
+- WorkRail should record a bounded “decision trace” (why a step was selected/skipped, loop decisions, fork detection) as durable data.
+- Dashboards and exports can surface this trace for post-mortems without requiring the agent to carry debugging internals in chat.
+- “Cognitive audits” (subagent auditor model) are supported via built-in templates/features, not bespoke author boilerplate.
+
+---
+
 ## Quick Start
 
 ### 1. Create a Workflow File
@@ -92,9 +157,11 @@ Tell your AI agent:
     "Consider security implications of all changes"
   ],
   
-  "steps": [...]
+  "steps": []
 }
 ```
+
+Note: `steps` is shown as an empty array here for brevity.
 
 ---
 
