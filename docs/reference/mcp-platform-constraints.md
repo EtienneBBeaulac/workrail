@@ -29,6 +29,7 @@ This document records platform constraints that shape WorkRail’s architecture 
 - **Tool discovery is bounded**
   - Tool schemas/descriptions are learned at MCP initialization (and after restarts).
   - Do not assume dynamic renegotiation mid-session.
+  - Preference/mode changes must be represented as durable inputs/events (and surfaced via Studio) rather than relying on implicit chat state.
 
 ## Determinism and recovery constraints
 

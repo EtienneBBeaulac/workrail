@@ -29,6 +29,7 @@ Advanced (flagged longer):
 6) **Bounded memory**: recaps/snippets are full when small, otherwise deterministically truncated with explicit markers.
 7) **Resumable portability**: export/import bundles are versioned + integrity-checked; imports re-mint tokens from stored snapshots.
 8) **Builtin authoring power + auditability**: workflows can reference builtin templates/features/contract packs; bounded decision traces exist for dashboard/logs/exports (not agent-facing by default).
+9) **Modes + preferences**: execution behavior (guided vs full-auto) is controlled by a closed set of preferences, recorded durably so behavior is rewind-safe and portable.
 
 ## Explicit non-goals
 
@@ -53,6 +54,7 @@ Advanced (flagged longer):
 1) **Protocol v2 MCP surface**
    - Implement the v2 tools, token/ack semantics, and rehydrate vs advance modes.
    - Deterministic recap generation and truncation markers.
+   - Closed-set preferences/modes (global → session overrides) that can be updated mid-session and apply going forward.
 
 2) **Durable store + pinning**
    - Append-only session/run graph (nodes/edges/outputs/observations).

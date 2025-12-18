@@ -21,6 +21,11 @@ Definitions:
 
 We also record **observations** (e.g., git branch, HEAD SHA) as append-only events to improve resume/search accuracy without relying on agent-provided identity.
 
+Preference changes are also treated as durable truth:
+
+- Preferences are a closed set of WorkRail-defined values (not arbitrary key/value).
+- Effective preferences are recorded on nodes (or via append-only events) so behavior is rewind-safe and export/import safe.
+
 Compiled workflow snapshots are treated as part of the durable truth:
 
 - Workflow execution is pinned to a `workflowHash` computed from the **fully expanded compiled workflow** (including built-in template expansion, feature application, and selected contract packs).
@@ -42,6 +47,8 @@ Compiled workflow snapshots are treated as part of the durable truth:
   - portable node payloads sufficient to rehydrate execution deterministically
 - The event log may include a bounded “decision trace” (step selection reasons, loop decisions, fork detection) to support debugging/auditing as first-class capabilities without relying on chat transcript history.
 - “Sessions” and “latest” are derived views; no authoritative server-side cursor.
+
+- Global preferences are treated as defaults only: they are copied into a session baseline at the start of work, so later global changes do not retroactively affect existing runs.
 
 - Export/import bundles should be able to carry the durable truth (events, node snapshots, pinned workflow snapshots) so another machine can import and resume deterministically.
 

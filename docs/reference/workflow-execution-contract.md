@@ -87,6 +87,15 @@ Read-only lookup for resuming work in a brand new chat. Supports queries like �
    - Call `continue_workflow` with the returned `stateToken` and `ackToken` to advance (or call without `ackToken` to rehydrate a pending step)
 4. Stop when `isComplete == true` (and `pending == null`).
 
+#### Full-auto execution (modes)
+
+WorkRail supports “full-auto” execution as a first-class behavior. In full-auto modes, the agent must play the role of both the agent and the user: it does not silently skip user-directed prompts. Instead, it resolves them via best-effort context gathering and explicit assumptions.
+
+Two full-auto variants are intentionally supported:
+
+- **`full_auto_never_stop`**: never returns `blocked`. When required user input is unavailable, the agent continues by gathering context elsewhere, making explicit assumptions, or skipping steps, while recording durable warnings and gaps.
+- **`full_auto_stop_on_user_deps`**: blocks only for formalized user-only dependencies (see below).
+
 ### Off-workflow work (checkpoint)
 
 When the agent is doing substantial work outside a workflow step loop (implementation, iteration, tuning output, etc.), it should call `checkpoint_workflow` to persist a short recap. This reduces the cost of rewinds and long chats by moving durable memory into the session store.
@@ -159,6 +168,36 @@ Idempotency is keyed to the server-minted ack capability (replay of the same `ac
 
 Do not place workflow progress state in `context`.
 
+## Preferences & modes (normative)
+
+WorkRail v2 supports user-selectable execution behavior (e.g., guided vs full-auto) without expanding the MCP boundary or leaking engine internals.
+
+### Preferences (closed set)
+
+Preferences are a **WorkRail-defined closed set** of typed values (enums / discriminated unions). They are not arbitrary key/value bags.
+
+- Workflows may **recommend** preferences (or presets), but they do not invent new preference keys.
+- Preferences influence execution behavior, but correctness remains token-driven (`stateToken`, `ackToken`).
+
+### Modes (presets)
+
+“Modes” are **display-friendly presets** (Studio/UX-facing) that map to one or more preference values. WorkRail owns the preset set and labels so the UX can stay simple without sacrificing determinism.
+
+### Scopes and precedence
+
+Preferences exist at multiple scopes:
+
+- **Global**: developer defaults.
+- **Session**: defaults for a workstream; override global.
+
+Global preferences are treated as defaults only: they are copied into a session baseline at the start of work, so future global changes do not retroactively affect past runs.
+
+### Node-attached effective preferences
+
+WorkRail must evaluate each next-step decision against the **effective preference snapshot** and record it durably as part of the run graph (e.g., stored on the node or via append-only events).
+
+That snapshot applies to descendant nodes until another preference change occurs. This makes preference-driven behavior rewind-safe and export/import safe: replaying an older `stateToken` replays with the preference state that was effective at that node, not “whatever is configured today”.
+
 ## Durable outputs (`output` envelope)
 
 WorkRail needs durable memory outside the chat transcript. To keep the system simple for agents, there should be a **single write path** for durable updates:
@@ -194,6 +233,24 @@ WorkRail should return the **full recap when it is small**, and a **deterministi
     - the policy used (e.g., “kept most recent entries”)
 
 This keeps the “rewind resilience” promise without turning every response into an unbounded history dump.
+
+## User-only dependencies (normative)
+
+WorkRail should treat “user-only dependencies” as a **closed set of reasons** that can justify returning `kind: "blocked"` (e.g., a required design doc that only the user can supply).
+
+The behavior depends on the effective full-auto preference:
+
+- Under **`full_auto_stop_on_user_deps`**, WorkRail returns `blocked` with structured reasons and next-input guidance.
+- Under **`full_auto_never_stop`**, WorkRail never blocks. User-only dependency reasons must be converted into structured warnings plus durable disclosure (“gaps”) while execution continues.
+
+The exact enum set for user-only dependency reasons is intentionally deferred (see Open items).
+
+## Mode safety, warnings, and recommendations (normative)
+
+WorkRail must never hard-block a user-selected mode. Instead:
+
+- Workflows may declare a **recommended maximum automation** (a suggested preset).
+- If the user selects a more aggressive mode, WorkRail returns structured warnings and recommends the highest automation combination it considers safe for that workflow.
 
 ## Brand new chat resumption (normative)
 
@@ -278,6 +335,8 @@ Explicit “migration” of a run to a new workflow version is a separate, opt-i
   - Treat `stateToken` and `ackToken` as opaque values.
   - Round-trip both tokens exactly as returned.
   - Only advance the workflow by calling `continue_workflow` with the current tokens (`stateToken` + `ackToken`).
+  - In full-auto modes, resolve user-directed prompts by best-effort context gathering and explicit assumptions rather than silently skipping questions.
+  - Disclose assumptions, skips, and missing inputs via durable `output` so progress survives rewinds.
 - **MUST NOT**:
   - Construct or mutate workflow execution state (completed steps, loop stacks, etc.).
   - Guess tool payload shapes beyond what the tool schema and examples provide.
@@ -312,12 +371,18 @@ Explicit “migration” of a run to a new workflow version is a separate, opt-i
   "session": {
     "sessionId": "AUTH-1234",
     "runId": "run_01JFD..."
+  },
+  "preferences": {
+    "autonomy": "guided",
+    "gateHandling": "block",
+    "assumptionPolicy": "record_when_missing"
   }
 }
 ```
 
 Notes:
 - `session` is **informational** and for dashboard UX only. Correctness is driven by tokens.
+- `preferences` is **informational** for UX/debugging; it does not replace the durable run graph as source of truth.
 
 ### `continue_workflow` request
 
@@ -351,6 +416,11 @@ Notes:
   "session": {
     "sessionId": "AUTH-1234",
     "runId": "run_01JFD..."
+  },
+  "preferences": {
+    "autonomy": "full_auto_stop_on_user_deps",
+    "gateHandling": "risk_signal",
+    "assumptionPolicy": "record_when_missing"
   }
 }
 ```
@@ -589,6 +659,12 @@ If checkpoint-only sessions are desired later, add a narrowly-scoped `start_sess
 ### Why do we need `checkpoint_workflow` at all?
 
 Because rewinds are external to the workflow engine. If meaningful work happens outside a workflow step loop and the user rewinds without warning, that progress is lost unless WorkRail has already recorded a durable recap in the session store.
+
+## Open items (non-normative)
+
+- Finalize the closed set of user-only dependency reasons (for structured `blocked` and warning payloads).
+- Finalize the closed set of preference keys and enum values, including display-friendly labels and descriptions for Studio.
+- Define a standard “gaps” shape for `full_auto_never_stop` so Studio can surface incomplete/missing inputs without blocking execution.
 
 ## Related
 
