@@ -12,6 +12,14 @@ This document records platform constraints that shape WorkRail’s architecture 
   - WorkRail cannot read or depend on the user’s conversation history.
   - Rewinds/editing can delete context without warning; durable memory must live in WorkRail storage.
 
+## Resumption and rewind implications
+
+- **Brand new chat resumption requires an external handle**
+  - Without transcript access, a new chat cannot “resume” unless the agent/user supplies a handle (e.g., a token or a lookup query resolved against durable storage).
+
+- **Rewinds are indistinguishable from legitimate replays at the transport layer**
+  - WorkRail should infer fork/resume behavior from its own durable graph state (e.g., whether the provided snapshot is a tip) rather than attempting to reason about chat history.
+
 ## Tool-call and agent behavior constraints
 
 - **Agents are lossy and inconsistent**
@@ -32,6 +40,12 @@ This document records platform constraints that shape WorkRail’s architecture 
   - Even locally, tool calls can be repeated (restart/regenerate/retry).
   - Protocols should be idempotent where possible (e.g., token/ack for workflow advancement).
 
+## Observation-only metadata
+
+- **Environment metadata can only be observed at tool-call time**
+  - Some useful signals (e.g., git branch, HEAD SHA) cannot be “kept updated” continuously without an agent-initiated call.
+  - These signals should be recorded as append-only observations to improve resume/search accuracy, not as mutable state.
+
 ## Environment and storage constraints
 
 - **Local-only by default (stdio)**
@@ -41,6 +55,12 @@ This document records platform constraints that shape WorkRail’s architecture 
 - **Integrity over confidentiality**
   - Confidentiality is not a primary requirement in local-only mode.
   - Integrity and fail-fast validation still matter to catch accidental corruption or contract drift.
+
+### Export/import implications
+
+- **Resumable sharing requires portable truth**
+  - Opaque runtime tokens are not sufficient for portability; exported bundles must include portable snapshots and versioned schemas so imports can resume deterministically.
+  - Integrity checks (e.g., manifest digests) are recommended to detect corruption and fail fast with actionable errors.
 
 ## Payload and capability constraints
 
@@ -57,3 +77,10 @@ This document records platform constraints that shape WorkRail’s architecture 
 - **Cross-transport drift risk**
   - MCP/CLI/JSON-RPC must share canonical models and normalization/validation logic.
   - “One protocol, multiple doors” is a requirement to prevent inconsistent behavior.
+
+## See also
+
+- Normative execution protocol: `docs/reference/workflow-execution-contract.md`
+- ADR 005 (opaque tokens): `docs/adrs/005-agent-first-workflow-execution-tokens.md`
+- ADR 006 (append-only session/run log): `docs/adrs/006-append-only-session-run-event-log.md`
+- ADR 007 (resume + checkpoint-only sessions): `docs/adrs/007-resume-and-checkpoint-only-sessions.md`

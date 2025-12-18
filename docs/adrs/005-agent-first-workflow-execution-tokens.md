@@ -1,6 +1,6 @@
 # ADR 005: Agent-First Workflow Execution via Opaque Tokens
 
-**Status:** Proposed  
+**Status:** Accepted  
 **Date:** 2025-12-17
 
 ## Context
@@ -58,18 +58,18 @@ Sessions are **demoted** to a dashboard/UX projection over immutable token linea
 
 Pin workflow definitions for deterministic runs:
 
-- `workflow_start` pins a run to a specific workflow snapshot identified by a content hash (`workflowHash`).
+- `start_workflow` pins a run to a specific workflow snapshot identified by a content hash (`workflowHash`).
 - `stateToken` embeds `workflowHash` so runs remain deterministic even if workflow files evolve.
 - Pinned workflow snapshots must be persisted in session storage to support export/import and long-lived runs.
 
 Tools are renamed for clarity:
 
-- `workflow_get` → `workflow_inspect` (read-only definition/preview; never executes)
-- `workflow_next` → split into `workflow_start` + `workflow_advance` (explicit lifecycle: start a run, then advance it)
+- `workflow_get` → `inspect_workflow` (read-only definition/preview; never executes)
+- `workflow_next` → split into `start_workflow` + `continue_workflow` (explicit lifecycle: start a run, then continue it)
 
 Introduce a checkpoint primitive for rewind resilience outside the strict workflow step loop:
 
-- `workflow_checkpoint`: append a durable summary/artifact without advancing workflow state. This is intended for “off-workflow” work and post-workflow iteration. It should be treated as opt-in and can be gated behind a feature flag while it is validated in real usage.
+- `checkpoint_workflow`: append a durable summary/artifact without advancing workflow state. This is intended for “off-workflow” work and post-workflow iteration. It should be treated as opt-in and can be gated behind a feature flag while it is validated in real usage.
 
 ## Consequences
 
@@ -100,3 +100,5 @@ Introduce a checkpoint primitive for rewind resilience outside the strict workfl
 ## Related
 
 - Tool contract spec: `docs/reference/workflow-execution-contract.md`
+- Append-only session/run log: `docs/adrs/006-append-only-session-run-event-log.md`
+- Resumption lookup + checkpoint-only sessions: `docs/adrs/007-resume-and-checkpoint-only-sessions.md`
