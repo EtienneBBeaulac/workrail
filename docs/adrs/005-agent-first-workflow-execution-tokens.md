@@ -77,6 +77,7 @@ Introduce a checkpoint primitive for rewind resilience outside the strict workfl
 
 - **Rewind/fork correctness**: rewinding a chat naturally reuses an older `stateToken` and continues from that snapshot.
 - **Agent usability**: the agent no longer constructs engine internals (loop stacks, discriminated unions, etc.).
+- **Modes without boundary expansion**: guided vs full-auto behavior can be controlled by WorkRail-defined preferences without exposing engine internals at the MCP boundary.
 - **Idempotent progress**: replays of the same completion do not advance twice.
 - **Dashboard consistency**: sessions become a graph/timeline of token lineage; rewinds produce branches rather than desync.
 - **Durable memory**: checkpoints capture high-signal progress that would otherwise be lost when rewinding or trimming chat context.
