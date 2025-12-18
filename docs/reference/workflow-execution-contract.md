@@ -7,7 +7,7 @@ Decision record: `docs/adrs/005-agent-first-workflow-execution-tokens.md`
 ## Recorded decisions (from design discussions)
 
 - **Text rendering template versioning (internal-only)**: we may version the deterministic `text` template for testing and export stability, but we do **not** expose the template version to the agent as part of the MCP contract.
-- **Text-first scope**: “text-first + JSON backbone” is **required for execution outputs** (e.g., `workflow_start`, `workflow_advance`, and `workflow_checkpoint` when present). It is optional for discovery/inspection tools (`workflow_list`, `workflow_inspect`).
+- **Text-first scope**: “text-first + JSON backbone” is **required for execution outputs** (e.g., `start_workflow`, `continue_workflow`, and `checkpoint_workflow` when present). It is optional for discovery/inspection tools (`list_workflows`, `inspect_workflow`).
 - **AC/REJECT usage**: the detailed acceptance criteria and rejection triggers are treated as **non-normative guardrails** (test targets / design constraints). The contract remains defined by the normative sections in this document.
 
 ## MCP platform constraints
@@ -31,52 +31,65 @@ This contract is shaped by constraints of the stdio MCP environment (no server p
 
 ## Tool Set
 
-These tool names are chosen to make the workflow lifecycle explicit and reduce agent confusion:
+These tool names are chosen to make the workflow lifecycle explicit, reduce agent confusion, and keep durable state inside WorkRail:
 
 - **Inspect**: read-only discovery and preview (never mutates execution)
 - **Start**: begins a new run and returns the first pending step
-- **Advance**: progresses an existing run from opaque tokens
+- **Advance**: progresses an existing run from opaque tokens (or rehydrates/resumes a pending step)
 
-### `workflow_list`
+### `list_workflows`
 
 Lists available workflows.
 
-### `workflow_inspect`
+### `inspect_workflow`
 
 Read-only retrieval of workflow metadata and/or a preview to help select a workflow.
 
-### `workflow_start`
+### `start_workflow`
 
 Starts a new workflow run and returns the first pending step plus opaque tokens.
 
-### `workflow_advance`
+### `continue_workflow`
 
-Advances an existing workflow run by acknowledging completion of the pending step for a given snapshot.
+Continues an existing workflow run.
 
-### `workflow_checkpoint` (optional / experimental)
+- If `ackToken` is provided: acknowledge completion of the pending step for the given snapshot (idempotent).
+- If `ackToken` is omitted: rehydrate/resume the pending step for the given snapshot (no advancement).
+
+### `checkpoint_workflow` (optional / experimental)
 
 Record durable “work progress” without advancing workflow state. This exists because meaningful work often happens outside a workflow step loop, and rewinds can delete chat context without warning.
 
 This tool can be gated behind a feature flag while it is validated in real usage.
 
-To keep WorkRail opt-in and avoid “checkpointing every chat”, `workflow_checkpoint` should require an existing workflow run handle (`stateToken`).
+To keep WorkRail opt-in and avoid “checkpointing every chat”, `checkpoint_workflow` should require an existing workflow run handle (`stateToken`) unless checkpoint-only sessions are explicitly enabled.
 
-If checkpoint-only sessions (no workflow has started) are desired later, introduce a `workrail_start_session` tool behind a separate feature flag and extend `workflow_checkpoint` to accept `sessionId`. Until then, checkpointing outside workflows is intentionally unsupported.
+If checkpoint-only sessions (no workflow has started) are desired later, introduce a `start_session` tool behind a separate feature flag and extend `checkpoint_workflow` to accept `sessionToken`. Until then, checkpointing outside workflows is intentionally unsupported.
+
+### `start_session` (optional / feature-flagged)
+
+Create a session handle for checkpoint-only workflows (no active run). This tool exists to reduce friction in “brand new chat” scenarios where a user wants durable notes without starting a workflow run.
+
+This tool is intentionally narrow and should not reintroduce session CRUD surfaces.
+
+### `resume_session` (optional / feature-flagged)
+
+Read-only lookup for resuming work in a brand new chat. Supports queries like “resume my session about xyz” and returns **tip-only** resume targets (latest branch tip by deterministic policy), plus small snippets for disambiguation.
 
 ## End-to-End Flows
 
 ### Basic flow (single workflow)
 
-1. Call `workflow_list` and `workflow_inspect` to select a workflow (read-only).
-2. Call `workflow_start` to begin execution.
+1. Call `list_workflows` and `inspect_workflow` to select a workflow (read-only).
+2. Call `start_workflow` to begin execution.
 3. Repeat:
    - Follow `pending.prompt`
-   - Call `workflow_advance` with the returned `stateToken` and `ackToken`
+   - Call `continue_workflow` with the returned `stateToken` and `ackToken` to advance (or call without `ackToken` to rehydrate a pending step)
 4. Stop when `isComplete == true` (and `pending == null`).
 
 ### Off-workflow work (checkpoint)
 
-When the agent is doing substantial work outside a workflow step loop (implementation, iteration, tuning output, etc.), it should call `workflow_checkpoint` to persist a short recap. This reduces the cost of rewinds and long chats by moving durable memory into the session store.
+When the agent is doing substantial work outside a workflow step loop (implementation, iteration, tuning output, etc.), it should call `checkpoint_workflow` to persist a short recap. This reduces the cost of rewinds and long chats by moving durable memory into the session store.
 
 ### Rewind/fork behavior (chat UIs)
 
@@ -111,7 +124,7 @@ No special “nesting API” is required for correctness; it is an orchestration
 
 ### `workflowHash` (pinned workflow identity)
 
-Runs are pinned to a specific workflow definition at `workflow_start` time to avoid “live” behavior changes when workflow files evolve.
+Runs are pinned to a specific workflow definition at `start_workflow` time to avoid “live” behavior changes when workflow files evolve.
 
 - WorkRail computes `workflowHash` from a normalized (or compiled) workflow definition.
 - The hash is embedded into `stateToken` so future calls are deterministic.
@@ -128,6 +141,14 @@ Runs are pinned to a specific workflow definition at `workflow_start` time to av
   - An `ackToken` from run A must not be usable on run B.
   - An `ackToken` from snapshot X must not be usable on snapshot Y.
 
+#### Branching and “attempt acks” (normative)
+
+Rewinds and replays are expected. The system must support **branching** from the same snapshot (older `stateToken`) without requiring the agent to construct identifiers.
+
+To enable branching, WorkRail must be able to mint a **fresh attempt acknowledgement** for the same snapshot when the agent wants to intentionally fork (or when a replay is detected).
+
+Idempotency is keyed to the server-minted ack capability (replay of the same `ackToken` is a no-op returning the same response).
+
 ### `context` (external inputs)
 
 `context` carries external facts that can influence conditions and loop inputs, e.g.:
@@ -138,12 +159,109 @@ Runs are pinned to a specific workflow definition at `workflow_start` time to av
 
 Do not place workflow progress state in `context`.
 
+## Durable outputs (`output` envelope)
+
+WorkRail needs durable memory outside the chat transcript. To keep the system simple for agents, there should be a **single write path** for durable updates:
+
+- Use `output` for durable summaries and structured artifacts that should appear in the session/dashboard and survive rewinds.
+- Use `context` only for external inputs that influence execution (conditions, loops, parameters), not for durable notes.
+
+## Resumption vs rewind behavior (normative)
+
+WorkRail cannot read the chat transcript. It must infer “resume” vs “fork” from the durable run graph.
+
+- **Resumption (tip node)**:
+  - When the provided snapshot is the latest tip of its branch, WorkRail should return a durable recap (“rehydration”) up to the pending step to help agents recover from lost chat context.
+
+- **Rewind/fork (non-tip node)**:
+  - When the provided snapshot already has children (advancing would create a new sibling branch), WorkRail should:
+    - return branch-focused information (existing children summaries)
+    - automatically fork (no user confirmation required)
+    - return branch context the agent likely lost (including a bounded “downstream recap” for the preferred/latest branch), while still avoiding an unbounded full-history dump (“confusing soup”)
+
+### Recap budgets and truncation (normative)
+
+WorkRail should return the **full recap when it is small**, and a **deterministically truncated recap** when it would exceed reasonable payload budgets.
+
+- **Budgeting rule**:
+  - Prefer byte-based budgets (most deterministic across models/clients).
+  - Include as many most-recent recap entries as fit within the budget, preserving deterministic ordering.
+
+- **Truncation marker**:
+  - When truncating, include an explicit marker in both `text` and structured fields indicating:
+    - that the recap was truncated
+    - how many entries were omitted (when known)
+    - the policy used (e.g., “kept most recent entries”)
+
+This keeps the “rewind resilience” promise without turning every response into an unbounded history dump.
+
+## Brand new chat resumption (normative)
+
+Because WorkRail cannot access chat history, a brand new chat must either:
+
+- supply an existing handle (e.g., a `stateToken` or a short `resumeRef`), or
+- use `resume_session` (when enabled) to find the correct session/run tip.
+
+`resume_session` should use a layered search strategy:
+
+1. session keys/titles/tags and obvious identifiers (high precision)
+2. durable notes (`output.notesMarkdown`) and small artifact previews on run tips
+3. deep search across durable outputs as a last resort (bounded)
+
+Results should be **tip-only** and deterministically ranked.
+
+### Minimal `output` shape (recommended)
+
+- `output.notesMarkdown` (optional but strongly encouraged): short recap (≤10 lines) of what happened and what’s next.
+- `output.artifacts[]` (optional): small structured payloads, used only when you have concrete structured results.
+
+Artifact kinds should be from a closed set (examples):
+
+- `mr_review.changed_files`
+- `mr_review.findings`
+- `working_agreement_patch` (rare; only derived from explicit user preferences)
+
+The exact allowed artifact kinds and schemas can be workflow-specific via explicit output contracts.
+
 ## Workflow pinning and evolution
+
+### Workflow identity and namespaces (normative)
+
+WorkRail v2 adopts a **namespaced workflow ID format** for clarity, organization, and protection of core workflows.
+
+**ID format:**
+- `namespace.name` with **exactly one dot**
+- Both `namespace` and `name` segments use: `[a-z][a-z0-9_-]*` (lowercase, alphanumeric, hyphens, underscores)
+- Examples: `wr.bug_investigation`, `project.auth_review`, `team.onboarding`
+
+**Reserved namespace:**
+- The `wr.*` namespace is **reserved exclusively for bundled/core workflows**.
+- Non-core sources (user, project, git, remote, plugin) must not define workflows with IDs starting with `wr.*`.
+- WorkRail must reject such definitions at load/validate time with an actionable error.
+
+**Legacy IDs (no dot):**
+- Workflows with legacy IDs (e.g., `bug-investigation`) remain **runnable** for backward compatibility.
+- Creating or saving new workflows with legacy IDs is **rejected**.
+- Usage/inspection of legacy workflows must emit **structured warnings** with suggested namespaced renames based on the workflow's source:
+  - User directory → `user.<id>`
+  - Project directory → `project.<id>`
+  - Git/remote/plugin → `repo.<id>` or `team.<id>` (deterministic suggestion)
+
+**Discovery behavior:**
+- `list_workflows` returns both workflows and routines, including:
+  - `kind: "workflow" | "routine"`
+  - `idStatus: "legacy" | "namespaced"`
+- Deterministic sort order: **namespace → kind (workflow first) → name/id**
 
 ### Pinning policy (normative)
 
-- `workflow_start` MUST compute a `workflowHash` and pin the run to it.
-- Subsequent `workflow_advance` calls MUST execute against the pinned workflow snapshot identified by the `workflowHash` embedded in `stateToken`.
+- `start_workflow` MUST compute a `workflowHash` and pin the run to it.
+- The `workflowHash` is computed from the **fully expanded compiled workflow**, including:
+  - the workflow definition (with namespaced ID)
+  - all builtin template expansions
+  - all feature applications
+  - all selected contract packs
+- Subsequent `continue_workflow` calls MUST execute against the pinned workflow snapshot identified by the `workflowHash` embedded in `stateToken`.
 
 ### Workflow changes on disk (recommended behavior)
 
@@ -159,14 +277,14 @@ Explicit “migration” of a run to a new workflow version is a separate, opt-i
 - **MUST**:
   - Treat `stateToken` and `ackToken` as opaque values.
   - Round-trip both tokens exactly as returned.
-  - Only advance the workflow by calling `workflow_advance` with the current tokens.
+  - Only advance the workflow by calling `continue_workflow` with the current tokens (`stateToken` + `ackToken`).
 - **MUST NOT**:
   - Construct or mutate workflow execution state (completed steps, loop stacks, etc.).
   - Guess tool payload shapes beyond what the tool schema and examples provide.
 
 ## Request/Response Shapes
 
-### `workflow_start` request
+### `start_workflow` request
 
 ```json
 {
@@ -178,7 +296,7 @@ Explicit “migration” of a run to a new workflow version is a separate, opt-i
 }
 ```
 
-### `workflow_start` response (example)
+### `start_workflow` response (example)
 
 ```json
 {
@@ -201,19 +319,23 @@ Explicit “migration” of a run to a new workflow version is a separate, opt-i
 Notes:
 - `session` is **informational** and for dashboard UX only. Correctness is driven by tokens.
 
-### `workflow_advance` request
+### `continue_workflow` request
 
 ```json
 {
   "stateToken": "st.v1....",
   "ackToken": "ack.v1....",
   "context": {
+    "ticketId": "AUTH-1234",
+    "complexity": "Standard"
+  },
+  "output": {
     "notesMarkdown": "Completed phase 0. MR is Standard complexity; focus on DI wiring and tool contract correctness."
   }
 }
 ```
 
-### `workflow_advance` response (example)
+### `continue_workflow` response (example)
 
 ```json
 {
@@ -233,21 +355,23 @@ Notes:
 }
 ```
 
-### `workflow_checkpoint` request (example)
+### `checkpoint_workflow` request (example)
 
 ```json
 {
   "stateToken": "st.v1....",
-  "notesMarkdown": "Implemented token-based description updates. Next: update workflow_next tool naming and add checkpoint tool behind flag."
+  "output": {
+    "notesMarkdown": "Implemented token-based description updates. Next: update workflow_next tool naming and add checkpoint tool behind flag."
+  }
 }
 ```
 
 Notes:
-- For now, `workflow_checkpoint` requires `stateToken` (attach to a specific workflow node). Session-only checkpointing is a future feature behind `workrail_start_session`.
+- For now, `checkpoint_workflow` requires `stateToken` (attach to a specific workflow node). Session-only checkpointing is a future feature behind `start_session`.
 
 ## Dashboard / Sessions (UX Projection)
 
-Sessions are a UX layer that should be updated **natively** as a side effect of `workflow_start`/`workflow_advance`:
+Sessions are a UX layer that should be updated **natively** as a side effect of `start_workflow`/`continue_workflow`:
 
 - A single **session** represents a single workstream (ticket/PR/chat) and may contain **multiple workflow runs**.
 - Each **run** corresponds to a single workflow execution and has its own branching token lineage.
@@ -262,6 +386,10 @@ Use an **append-only event log as the source of truth**, stored per session.
   - edge: `parentStateTokenHash -> childStateTokenHash` (keyed by `ackTokenHash`)
 - Rewinds naturally create branches (multiple children for the same parent) instead of “desync”.
 - Session pointers (like “latest”) are derived views, not authoritative state.
+
+### Environment observations (recommended)
+
+Record high-signal local observations (e.g., git branch name and HEAD SHA) as append-only events. Use these observations to improve resume ranking and session identification in `resume_session`.
 
 ### UI guidance (avoid “confusing soup”)
 
@@ -286,18 +414,45 @@ The dashboard is local-only. Sharing is achieved via explicit export/import:
 
 Retention/expiration (TTL) should be configurable; a reasonable default is 30–90 days.
 
+## Export/import bundles (resumable) (normative)
+
+WorkRail must support **resumable** export/import of stored sessions. After import, an agent should be able to use `resume_session` and `continue_workflow` to proceed deterministically.
+
+### Bundle format (recommended)
+
+- A single, versioned bundle file (e.g., JSON). Zip/folder formats can be added later, but the bundle must remain self-describing and deterministic.
+- The bundle MUST include a `bundleSchemaVersion` so imports can fail fast (or migrate explicitly).
+
+### Required bundle contents (normative)
+
+To be resumable, a bundle MUST include:
+
+- **Session metadata** used for lookup/ranking (titles/keys/tags if present) and timestamps
+- **Observations** (e.g., git branch name + HEAD SHA) as append-only data for better resume ranking
+- **Runs** (0..N) and their run DAG (nodes + edges), including stable identifiers
+- **Portable node snapshots** sufficient to rehydrate execution deterministically on another machine
+- **Durable outputs** (`output.notesMarkdown` and artifacts/previews) attached to nodes for recap/search
+- **Pinned workflow snapshots by `workflowHash`**, where `workflowHash` is computed from the **fully expanded compiled workflow**
+
+Tokens (`stateToken`, `ackToken`) are not portable and must not be relied upon across export/import. On import, WorkRail re-mints new tokens from stored node snapshots.
+
+### Integrity and conflicts (recommended behavior)
+
+- Include a manifest of digests (hashes) to detect bundle corruption and surface an actionable error.
+- If importing a bundle collides with an existing session identifier, default to importing as a **new** session (no implicit merges). Merge can be an explicit, opt-in feature later.
+
 ## Replacing File-Based Docs with Dashboard Artifacts (Optional)
 
-Some workflows currently instruct the agent to write markdown files. The token-based contract can support dashboard-native documents by allowing an optional, step-defined `output` payload in `workflow_advance`:
+Some workflows currently instruct the agent to write markdown files. The token-based contract can support dashboard-native documents by allowing an optional, step-defined `output` payload in `continue_workflow`:
 
-- Default: accept `notesMarkdown` and render it per step.
+- Default: accept `output.notesMarkdown` and render it per step.
 - For workflows that need structured dashboards: steps should explicitly define an output contract (schema + example) to avoid inference.
 
 ### Defaults for legacy workflows (no output contract)
 
 If a workflow has not been updated to include an explicit output contract, WorkRail can still provide a usable dashboard without guessing semantics:
 
-- Render a per-step “Notes” artifact from `context.notesMarkdown` (or a dedicated `notesMarkdown` field if introduced later).
+- Render a per-step “Notes” artifact from `output.notesMarkdown`.
 - Show token lineage, pending step metadata, and completion timestamps.
 
 This is intentionally generic. Structured artifacts (tables, findings, MR comments, etc.) require explicit contracts.
@@ -317,7 +472,7 @@ This approach keeps the agent interaction primitive and moves deterministic “d
 
 This appendix illustrates the *shape* of what an agent might send and what the dashboard might render. It is intentionally small and primitives-only for the agent. The exact schema should be declared explicitly by the workflow (or by a referenced contract registry).
 
-#### Example: `workflow_advance` with structured `output`
+#### Example: `continue_workflow` with structured `output`
 
 ```json
 {
@@ -404,6 +559,15 @@ Opaque means clients treat it as an uninterpreted string. WorkRail is free to en
 
 In practice, WorkRail should make tokens tamper-evident (e.g., signature/HMAC) and versioned (e.g., `st.v1...`, `st.v2...`) to support safe evolution.
 
+### Are tokens portable across export/import?
+
+Tokens are handles, not durable truth. Exports/imports must be **resumable**, which implies:
+
+- the durable store must persist portable run graph nodes and pinned workflow snapshots
+- on import, WorkRail re-mints new tokens from stored node snapshots
+
+See ADR 006 and ADR 007.
+
 ### Is `ackToken` enough? What about loops and confirmations?
 
 Yes. Loops, confirmations, and other control structures are internal workflow mechanics represented in the snapshot behind `stateToken`. The public contract is simply:
@@ -412,16 +576,23 @@ Yes. Loops, confirmations, and other control structures are internal workflow me
 - The agent completes it.
 - The agent acknowledges completion using the `ackToken` issued for that snapshot.
 
-### Do we need `workflowId` on `workflow_advance`?
+### Do we need `workflowId` on `continue_workflow`?
 
-No. `workflowId` can be embedded into `stateToken`. Keep `workflowId` only on `workflow_start` (because there is no token yet). Optionally return `workflowId` in responses as informational metadata for the dashboard.
+No. `workflowId` can be embedded into `stateToken`. Keep `workflowId` only on `start_workflow` (because there is no token yet). Optionally return `workflowId` in responses as informational metadata for the dashboard.
 
 ### If sessions are “demoted”, do we still need session tools?
 
-Sessions become a UX projection, so session creation/updating can happen as a side effect of `workflow_start`/`workflow_advance` without extra agent-facing tools.
+Sessions become a UX projection, so session creation and updates should happen as a side effect of `start_workflow`/`continue_workflow` without broad agent-facing session CRUD tools.
 
-Separate session tools can still exist for human/ops convenience (open dashboard, inspect stored session graphs, cleanup), but normal agents should not need to call them.
+If checkpoint-only sessions are desired later, add a narrowly-scoped `start_session` tool behind a feature flag. For brand new chat resumption without token copy/paste, use a read-only `resume_session` lookup tool behind a feature flag.
 
-### Why do we need `workflow_checkpoint` at all?
+### Why do we need `checkpoint_workflow` at all?
 
 Because rewinds are external to the workflow engine. If meaningful work happens outside a workflow step loop and the user rewinds without warning, that progress is lost unless WorkRail has already recorded a durable recap in the session store.
+
+## Related
+
+- MCP constraints: `docs/reference/mcp-platform-constraints.md`
+- ADR 005 (opaque tokens): `docs/adrs/005-agent-first-workflow-execution-tokens.md`
+- ADR 006 (append-only session/run log): `docs/adrs/006-append-only-session-run-event-log.md`
+- ADR 007 (resume + checkpoint-only sessions): `docs/adrs/007-resume-and-checkpoint-only-sessions.md`
