@@ -254,3 +254,30 @@ Lock:
   - `canonicalId?` (when an alias is used)
   - `suggestedId?` (deterministic)
   - `sourceKind` (closed set: bundled | user | project | remote | plugin)
+
+---
+
+## 8) Tools vs docs alignment locks (drift prevention)
+
+v1 suffered from schema/description/documentation drift. v2 must treat this as a first-class failure mode.
+
+### Single canonical source of truth
+
+Lock:
+- MCP tool **schemas** and **descriptions** must be generated from the same canonical source (code), not maintained in parallel.
+- Any docs that restate tool schemas are **derived artifacts** and must not be hand-edited.
+
+### Generation + verification
+
+Lock:
+- Provide a deterministic generator that produces:
+  - tool catalog (names, titles, schemas)
+  - mode-specific descriptions (all supported modes)
+  - any human-facing “tool reference” docs
+- CI (or precommit) must fail if generated outputs are out of date relative to the canonical source.
+
+### Editing rule
+
+Lock:
+- If a schema or description needs to change, the change is made **only** in the canonical definitions; regenerated outputs follow.
+- This prevents “fix docs but forget schema” and “fix schema but forget docs” classes of bugs.
