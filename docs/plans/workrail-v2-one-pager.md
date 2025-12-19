@@ -91,3 +91,4 @@ Advanced (flagged longer):
 - `docs/adrs/005-agent-first-workflow-execution-tokens.md`
 - `docs/adrs/006-append-only-session-run-event-log.md`
 - `docs/adrs/007-resume-and-checkpoint-only-sessions.md`
+- `docs/design/v2-core-design-locks.md`
