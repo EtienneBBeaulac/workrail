@@ -31,6 +31,11 @@ Capability observations are also durable truth:
 - WorkRail cannot introspect the agent’s environment/tooling.
 - Capability availability must be learned via explicit agent-reported observations (e.g., probe steps) and recorded durably so projections and resumption do not depend on ambient IDE state.
 
+Output contracts and enforcement outcomes are also durable truth (when enabled):
+
+- WorkRail must not infer schemas from prompts; required outputs are declared explicitly (contract packs).
+- If a step acknowledgement is blocked due to missing/invalid required output, the structured reason should be recorded (or reconstructible) from the durable run graph so Studio and exports remain explainable without relying on chat transcript.
+
 Compiled workflow snapshots are treated as part of the durable truth:
 
 - Workflow execution is pinned to a `workflowHash` computed from the **fully expanded compiled workflow** (including built-in template expansion, feature application, and selected contract packs).
@@ -65,3 +70,4 @@ Compiled workflow snapshots are treated as part of the durable truth:
 - Normative tool contract: `docs/reference/workflow-execution-contract.md`
 - Token boundary decision: `docs/adrs/005-agent-first-workflow-execution-tokens.md`
 - Resume and checkpoint-only sessions: `docs/adrs/007-resume-and-checkpoint-only-sessions.md`
+- Tracked open items (preferred tip policy, event union, enums, etc.): `docs/design/v2-open-items.md`
