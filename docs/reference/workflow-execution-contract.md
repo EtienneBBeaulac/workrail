@@ -702,6 +702,48 @@ Notes:
 - The workflow can keep using its rich prompts (and “functionReferences” in the workflow definition) while the dashboard replaces file I/O by treating these outputs as structured artifacts.
 - If a workflow does not provide an output contract, WorkRail should fall back to the generic per-step notes dashboard (no inference).
 
+## Output contracts & enforcement (normative)
+
+WorkRail v2 enables workflows to declare **required structured outputs** via contract packs, and enforces these requirements (or records gaps) based on the effective mode.
+
+### How contracts are declared
+
+Steps (and templates) may declare output requirements via an `output` object:
+
+- `output.contractRef` (optional): references a WorkRail-owned closed-set contract pack (e.g., `wr.contracts.capability_observation`).
+- `output.hints` (optional): non-enforced guidance for the agent (e.g., "≤10 lines").
+
+Template calls may **automatically imply a contractRef** without the author specifying it (e.g., `wr.templates.capability_probe` implies `wr.contracts.capability_observation`).
+
+### Enforcement on `continue_workflow`
+
+When a step declares `output.contractRef`, WorkRail validates the contract output before advancing:
+
+- **Blocking modes (guided / full_auto_stop_on_user_deps)**: if required output is missing or invalid, return `kind: "blocked"` with structured "missing required output" reason, example payload, and the same pending step.
+- **Never-stop mode**: if required output is missing or invalid, record a **critical gap** and continue.
+
+This enables the self-correcting loop: step tells the agent what to fill out; the next `continue_workflow` verifies it.
+
+### Contract pack versioning
+
+Contract packs are referenced by ID only. Versioning is implicit: the pinned compiled workflow snapshot carries the exact contract pack schemas resolved at compile time.
+
+## PromptBlocks & rendered prompts (normative)
+
+Workflows may author steps with **structured `promptBlocks`** rather than a single `prompt` string. WorkRail compiles `promptBlocks` into a deterministic, text-first `pending.prompt`.
+
+Canonical block set: `goal`, `constraints`, `procedure`, `outputRequired`, `verify`.
+
+Blocks are **optional**; plain `prompt` strings are still allowed.
+
+## AgentRole (normative clarification)
+
+WorkRail **cannot control the agent's system prompt**. The `agentRole` field is workflow/step-scoped stance text injected into the rendered prompt. Workflow-level applies to all steps; step-level overrides.
+
+## Divergence markers (normative)
+
+Agents may report `workflow_divergence` artifacts when intentionally deviating from step instructions. Structure: `reason` (closed set), `summary`, optional `relatedStepId`. Studio badges these nodes. Enforcement: optional unless a step explicitly requires it.
+
 ## FAQ
 
 ### How is `stateToken` “opaque”?
@@ -746,6 +788,12 @@ Because rewinds are external to the workflow engine. If meaningful work happens 
 - Finalize the closed set of user-only dependency reasons (for structured `blocked` and warning payloads).
 - Finalize the closed set of preference keys and enum values, including display-friendly labels and descriptions for Studio.
 - Define a standard “gaps” shape for `full_auto_never_stop` so Studio can surface incomplete/missing inputs without blocking execution.
+- Define initial contract packs (capability_observation, workflow_divergence, gaps) and their schemas.
+- Define minimal metadata schema for builtins so Studio's generated catalog can render/autocomplete/insert.
+- Decide whitelist of configurable features and their config schemas.
+- Decide whether promptBlocks becomes required or remains optional (current direction: optional).
+- Define closed set of divergence reasons enum.
+- Finalize "preferred tip" policy for resume and default Studio view.
 
 ## Related
 
