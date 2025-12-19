@@ -69,7 +69,8 @@ Advanced (flagged longer):
 4) **Authoring + durability extensions**
    - `checkpoint_workflow` rollout and guardrails.
    - `start_session` (checkpoint-only sessions) as an advanced, flagged capability.
-   - Builtin templates/features/contract packs, provenance, and `inspect_workflow` capability surfacing.
+   - JSON-first authoring with promptBlocks (structured), output contracts (validated), and explicit template/feature/capability refs.
+   - Builtin templates/features/contract packs with generated catalog for discoverability (autocomplete/insert in Studio).
    - Namespaced workflow IDs (`namespace.name`) with `wr.*` reserved, legacy ID migration warnings.
 
 5) **Console (observability + management UI)**
