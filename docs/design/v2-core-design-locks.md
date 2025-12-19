@@ -200,3 +200,57 @@ Lock:
   - the **compiled** workflow snapshot
   - the **pinned** snapshot for a given run (`workflowHash`)
 - If the on-disk source differs from the pinned snapshot for a run, Console must surface a **pinned drift warning** as structured data (for explainability).
+
+---
+
+## 7) Workflow ID namespaces + migration locks
+
+### Namespaced ID format (normative)
+
+Lock:
+- Workflow IDs use `namespace.name` with **exactly one dot**.
+- Allowed pattern per segment: `[a-z][a-z0-9_-]*`.
+- Reserved namespace: **`wr.*`** is reserved exclusively for bundled/core workflows.
+
+### Enforcement rules (normative)
+
+Lock:
+- Any non-core source attempting to define a workflow whose ID starts with `wr.` is **rejected at load/validate time** with an actionable error.
+- **No shadowing**: bundled/core (`wr.*`) workflows cannot be overridden by priority order or source precedence.
+
+### Legacy IDs (no dot)
+
+Lock:
+- Legacy IDs remain runnable for backward compatibility.
+- Creating/saving new workflows with legacy IDs is **rejected** (authoring-time enforcement).
+- Loading existing legacy workflows is **warn-only** (do not break existing installs).
+
+### Deterministic rename suggestions
+
+Lock:
+- Rename suggestions are deterministic and based on workflow **source**, not user choice:
+  - user dir → `user.<name>`
+  - project dir → `project.<name>`
+  - git/remote/plugin → `repo.<name>` (or `team.<name>` only when explicitly configured)
+- The `<name>` segment is the legacy ID normalized (lowercase; hyphens → underscores).
+- If the suggested ID collides, append a short deterministic suffix (e.g., `_<sourceHash4>`). Never use timestamps.
+
+### Bundled ID rename timing + aliasing
+
+Lock:
+- Bundled workflows should be renamed to `wr.*` **before** v2 pinning is widely created.
+- Keep read-only aliases (legacy bundled id → canonical `wr.*`) for backward compatibility, emitting structured warnings.
+
+### Relationship to pinning
+
+Lock:
+- `workflowId` is part of the compiled workflow snapshot that is hashed into `workflowHash`. This avoids “same content, different identity” ambiguity and keeps export/import and Console inspection explainable.
+
+### Discovery output to support migration UX
+
+Lock:
+- Discovery returns explicit migration fields:
+  - `idStatus: namespaced | legacy`
+  - `canonicalId?` (when an alias is used)
+  - `suggestedId?` (deterministic)
+  - `sourceKind` (closed set: bundled | user | project | remote | plugin)
