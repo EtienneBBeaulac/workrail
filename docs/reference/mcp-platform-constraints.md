@@ -31,6 +31,10 @@ This document records platform constraints that shape WorkRail’s architecture 
   - Do not assume dynamic renegotiation mid-session.
   - Preference/mode changes must be represented as durable inputs/events (and surfaced via Studio) rather than relying on implicit chat state.
 
+- **WorkRail cannot introspect the agent’s environment**
+  - WorkRail only knows the tools it exposes; it cannot “see” what other tools an agentic IDE provides.
+  - Capability detection must be done via explicit agent-reported observations (e.g., probe steps) and recorded durably, not inferred.
+
 ## Determinism and recovery constraints
 
 - **Requests and responses must be self-contained**

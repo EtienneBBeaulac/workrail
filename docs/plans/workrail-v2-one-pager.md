@@ -74,9 +74,14 @@ Advanced (flagged longer):
 
 5) **Console (observability + management UI)**
    - Workflow list/detail/edit/validate with JSON-first editing and source picker.
+   - Source vs compiled inspection, with pinned snapshot drift warnings (pinned run vs current source).
+   - Protected bundled workflows with fork/copy to editable namespaces.
    - Sources management (add/remove/health).
    - Feature flags UI with desired-vs-applied config and "restart required" guidance.
+   - Preferences hub (global defaults + session overrides) with pending → applied-at-node visibility.
    - Sessions/runs dashboard with branch graph, decision traces, logs, export/import.
+   - Sessions-first navigation (Sessions / Workflows / Settings); import from Sessions list and export from Session detail.
+   - Default run view shows the preferred tip path (forks collapsed); `complete_with_gaps` is treated as done-with-follow-ups, not still-in-progress.
 
 ## Canonical references
 
