@@ -18,6 +18,25 @@ Create custom workflows to guide AI agents through your team's processes.
 
 WorkRail v2 aims to keep workflow authoring **as simple as possible** while making execution **deterministic, rewind-safe, and resumable**.
 
+### JSON-first authoring
+
+WorkRail v2 uses **JSON** as the canonical authoring format. DSL and YAML remain possible future input formats, but for v2 we optimize for determinism and simple validation.
+
+Workflows are hashed based on their **compiled canonical model** (after templates/features/contracts are expanded), not raw text, so the hash remains stable and deterministic.
+
+### Authoring primitives (v2)
+
+WorkRail v2 introduces several primitives for expressive workflows:
+
+- **Capabilities** (workflow-global): declare optional agent capabilities like `delegation` or `web_browsing` (required/preferred).
+- **Features** (compiler middleware): mostly toggle IDs; a small subset supports typed config objects (`{id, config}`).
+- **Templates**: reusable step sequences, called explicitly via `type: "template_call"`.
+- **Contract packs**: WorkRail-owned output schemas for structured artifacts (e.g., `wr.contracts.capability_observation`).
+- **PromptBlocks** (optional): structure step prompts as blocks (goal/constraints/procedure/outputRequired/verify) which compile to deterministic text.
+- **AgentRole**: workflow and/or step-level stance/persona (not system prompt control).
+
+For detailed JSON syntax and examples, see: `docs/design/workflow-authoring-v2.md`.
+
 ### Baseline (Tier 0): notes-first
 
 - **You can write workflows with no special authoring features.**

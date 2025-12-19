@@ -134,6 +134,31 @@ Saving is validation-gated:
 
 - invalid workflows cannot be saved; errors are actionable
 
+## Builtins catalog and discoverability (authoring ergonomics)
+
+Workflows that reference builtins (templates, features, contract packs, capabilities) must be authorable without “secret menu” knowledge.
+
+Studio should provide a first-class Builtins Catalog (under Workflows) that is:
+
+- searchable and filterable by kind (`template`, `feature`, `contract_pack`, `capability`)
+- explicit about provenance (`bundled`), editability, and reserved namespaces (e.g., `wr.*`)
+- actionable: each entry includes copyable JSON snippets and/or an “Insert” action for:
+  - enabling a feature in `features[]`
+  - inserting a `template_call` step
+  - referencing a contract pack (`output.contractRef`)
+  - declaring capability requirements (`capabilities.*`)
+
+### Generated registry (avoid drift)
+
+The catalog must be powered by a **generated registry** sourced from the same canonical builtin definitions the compiler uses (not hand-maintained UI metadata). This prevents “Studio vs engine” drift and allows compiled workflow preview to link provenance directly back to catalog entries.
+
+### Contextual suggestions
+
+While editing workflows, Studio should provide contextual discoverability:
+
+- autocomplete for `features[]`, `templateId`, and `output.contractRef`
+- validation feedback that can suggest builtins (e.g., “this workflow appears to assume web browsing; consider declaring `capabilities.web_browsing`”)
+
 ## Sources management
 
 - Sources live under Settings but are deep-linked from Workflows.
@@ -170,3 +195,7 @@ Saving is validation-gated:
 ## Pinned (later) features
 
 - Session buttons / queued intents applied at next node boundary (preferences-like mechanism).
+
+## Related tracked open items
+
+- `docs/design/v2-open-items.md`
