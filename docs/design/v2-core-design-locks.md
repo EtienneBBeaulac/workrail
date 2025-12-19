@@ -151,3 +151,52 @@ Capability observations must be durable and self-correcting. To prevent “agent
 - Capability observations must include a closed-set provenance.
 - Only “strong” provenance (e.g., a WorkRail-injected probe step) is treated as enforcement-grade.
 - “Weak” provenance (manual claim) may inform UX but must not unlock required capability paths.
+
+---
+
+## 6) Console architecture locks (control plane, not execution plane)
+
+The Console is a WorkRail control plane and observability UI. It must not become an alternate execution truth.
+
+### Desired vs applied (restart-first UX)
+
+Because tool discovery is bounded at initialization, the Console must model config as:
+- **desired**: what the user wants
+- **applied**: what is currently active in the running MCP server
+
+Lock:
+- On server start, WorkRail computes and records an **`appliedConfigHash`** for the config that is actually in effect.
+- The Console must always show **desired vs applied** and the **restart requirement** when they differ.
+
+### Restart-required triggers (closed set)
+
+A config change is **restart-required** if it changes any of:
+- the MCP **tool set** (tools added/removed)
+- any MCP tool **schema** (inputs/outputs)
+- workflow source registration that impacts discovery/catalog (adding/removing sources, enabling/disabling sources)
+- feature flags that gate tools or tool schemas
+
+A config change is **runtime-safe** if it only changes:
+- read-only presentation settings (UI-only)
+- data retention settings for projections (must not affect correctness of existing run graphs)
+
+### Workflow editing (edit source only)
+
+Lock:
+- The Console edits **source workflows**, never compiled snapshots.
+- Compiled workflows are derived artifacts used for pinning (`workflowHash`) and must not be user-editable.
+
+### Bundled namespace protections
+
+Lock:
+- `wr.*` is reserved for bundled/core workflows and is **read-only**.
+- Console must provide **fork/copy-to-editable-namespace** for any changes, rather than allowing overrides/shadowing of `wr.*`.
+
+### Source vs compiled inspection + pinned drift warnings
+
+Lock:
+- Console must support inspecting:
+  - the **source** workflow
+  - the **compiled** workflow snapshot
+  - the **pinned** snapshot for a given run (`workflowHash`)
+- If the on-disk source differs from the pinned snapshot for a run, Console must surface a **pinned drift warning** as structured data (for explainability).
