@@ -198,6 +198,76 @@ WorkRail must evaluate each next-step decision against the **effective preferenc
 
 That snapshot applies to descendant nodes until another preference change occurs. This makes preference-driven behavior rewind-safe and export/import safe: replaying an older `stateToken` replays with the preference state that was effective at that node, not “whatever is configured today”.
 
+## Optional capabilities (normative)
+
+Some workflows can optionally leverage enhanced agent capabilities (e.g., delegation/subagents or web browsing). WorkRail cannot introspect what tools an agentic IDE provides, so capability availability must be learned through explicit, durable observations rather than assumed or inferred.
+
+### Capabilities (closed set)
+
+Capabilities are a WorkRail-defined closed set. For v2 we explicitly plan for:
+
+- `delegation` (subagents / parallel delegation)
+- `web_browsing` (external knowledge lookup via agent tooling)
+
+### Desired vs observed
+
+Workflows may declare whether a capability is:
+
+- **required**: the workflow is not meaningfully executable without it.
+- **preferred**: use it when available; otherwise degrade.
+
+WorkRail does not attempt to enumerate or model “baseline” agent tools (file read/write, grep, terminal, etc.). Capabilities are only for optional enhancements that materially change how a workflow is executed or whether it can run at all.
+
+Capability requirements are part of the workflow’s compiled behavior (they change prompts, probing steps, and fallback paths) and must therefore be included in the compiled workflow that is hashed into `workflowHash`.
+
+WorkRail tracks the observed status per run/branch:
+
+- `unknown` (default)
+- `available` (observed working)
+- `unavailable` (observed failing / not supported)
+
+Observed status must be recorded durably (node-attached or via append-only events) so resumption and export/import do not depend on ambient IDE configuration.
+
+### Probing and degradation
+
+Because capability status is learned, workflows must specify how to discover it:
+
+- If `web_browsing` is **required**, probe early so blocking modes can fail fast with an actionable recommendation (e.g., “install a web browsing MCP” or provide the needed source material manually).
+- If `delegation` is **preferred**, probing can be lazy: attempt when needed and fall back to a sequential approach if unavailable.
+
+When a preferred capability is unavailable, WorkRail should degrade gracefully and surface a Studio warning (and/or durable notes) that the enhanced path was not applied.
+
+### Recording capability observations (recommended)
+
+Observed capability status should be recorded as durable data associated with the current node (or as an append-only event). Because WorkRail cannot introspect the agent environment, this observation must come from explicit agent-reported results (e.g., a probe step that attempts to use the capability).
+
+Where structured artifacts are used, WorkRail should provide a small, closed-set artifact kind for capability observations so Studio can render consistent warnings and history.
+
+### Example patterns (recommended)
+
+#### Web browsing required: injected early probe
+
+If a workflow requires `web_browsing`, the compiled workflow should include an early, injected probe step (collapsed by default for agent UX) whose purpose is to determine observed capability status.
+
+Behavior:
+
+- The probe step instructs the agent to attempt a minimal web-browsing action (e.g., fetch any short page or search query).
+- On acknowledgement, the agent reports a durable capability observation (e.g., `capability=web_browsing`, `status=available|unavailable`, optional remediation).
+- If the agent attempts to advance without providing the required observation, WorkRail returns `blocked` with a structured “missing required output” reason and an example payload.
+
+This enables:
+
+- `full_auto_stop_on_user_deps` (or guided) to fail fast when web browsing is required but unavailable.
+- `full_auto_never_stop` to continue while recording a critical gap when web browsing is required but unavailable.
+
+#### Delegation preferred: lazy attempt + sequential fallback
+
+If a workflow prefers `delegation`, it should not require an upfront probe. Instead:
+
+- At steps that can benefit from parallelism, the prompt instructs the agent to attempt delegation/subagents when available.
+- If delegation is unavailable, the agent executes the sequential alternative and records a durable capability observation indicating `delegation` is unavailable.
+- Studio surfaces a warning that the delegated path was not applied, but the workflow continues normally.
+
 ## Durable outputs (`output` envelope)
 
 WorkRail needs durable memory outside the chat transcript. To keep the system simple for agents, there should be a **single write path** for durable updates:
@@ -451,11 +521,22 @@ Sessions are a UX layer that should be updated **natively** as a side effect of 
 Use an **append-only event log as the source of truth**, stored per session.
 
 - Events drive the dashboard; projections are derived (pure functions).
-- Token lineage is derived from `step_acked` events:
-  - node: `stateTokenHash`
-  - edge: `parentStateTokenHash -> childStateTokenHash` (keyed by `ackTokenHash`)
+- Token lineage is derived from durable node and edge events. At minimum:
+  - advancing a step creates an edge (`step_acked`) from parent snapshot to child snapshot
+  - checkpointing creates a node snapshot without advancing workflow state
+- Nodes represent durable snapshots. For Studio, it is useful to treat node kinds as a closed set, e.g.:
+  - `nodeKind=step` (created by `continue_workflow` advancement)
+  - `nodeKind=checkpoint` (created by `checkpoint_workflow`)
 - Rewinds naturally create branches (multiple children for the same parent) instead of “desync”.
 - Session pointers (like “latest”) are derived views, not authoritative state.
+
+### Preferences, capabilities, and divergence (recommended)
+
+Studio-visible signals should be recorded as durable data attached to the node where they occurred, for example:
+
+- effective preferences (and preference-change markers)
+- capability observations (requested vs observed)
+- divergence markers (when the agent intentionally deviates from step instructions)
 
 ### Environment observations (recommended)
 

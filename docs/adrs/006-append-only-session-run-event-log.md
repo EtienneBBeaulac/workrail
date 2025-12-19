@@ -17,7 +17,7 @@ Definitions:
 
 - **Session**: a UX grouping for a single workstream (ticket/PR/chat). Sessions are not an authoritative pointer; they are a projection over stored events.
 - **Run**: a single workflow execution pinned to a workflow snapshot. A session can contain 0..N runs.
-- **Node graph**: each run forms a **DAG of nodes** representing execution snapshots. Rewinds naturally create **branches** (multiple children from the same parent node).
+- **Node graph**: each run forms a **DAG of nodes** representing durable execution snapshots. Rewinds naturally create **branches** (multiple children from the same parent node). Nodes can be created both by step advancement and by checkpointing (durable writes without advancement).
 
 We also record **observations** (e.g., git branch, HEAD SHA) as append-only events to improve resume/search accuracy without relying on agent-provided identity.
 
@@ -25,6 +25,11 @@ Preference changes are also treated as durable truth:
 
 - Preferences are a closed set of WorkRail-defined values (not arbitrary key/value).
 - Effective preferences are recorded on nodes (or via append-only events) so behavior is rewind-safe and export/import safe.
+
+Capability observations are also durable truth:
+
+- WorkRail cannot introspect the agent’s environment/tooling.
+- Capability availability must be learned via explicit agent-reported observations (e.g., probe steps) and recorded durably so projections and resumption do not depend on ambient IDE state.
 
 Compiled workflow snapshots are treated as part of the durable truth:
 
