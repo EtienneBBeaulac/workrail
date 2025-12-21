@@ -260,6 +260,67 @@ Or using structured blocks:
 - WorkRail renders blocks in deterministic order into a text-first `pending.prompt`
 - Features can inject/override specific blocks (e.g., mode guidance → constraints)
 
+### Prompt references (`wr.refs.*`) (initial v2 authoring)
+Workflows may inject small, canonical WorkRail-owned snippets inline (e.g., “WorkRail v2 definition”, “append-only truth”, “modes semantics”) to avoid copy/paste and keep prompts consistent.
+
+Locks (v2 intent):
+- **Compile-time only**: references are resolved during compilation and included in the compiled snapshot (and therefore `workflowHash`).
+- **Closed set**: reference IDs are WorkRail-owned and namespaced: `wr.refs.*`.
+- **No templating**: do not support `{{ }}` interpolation, file-path includes, or URL includes. References must be typed and validated.
+- **Budgets**: references are byte-bounded; budget violations are validation errors (no silent truncation).
+- **Placement discipline**: references are allowed only within structured prompt sections (to keep prompts instruction-first).
+
+Locked choice (v2): the compiled workflow snapshot embeds the fully resolved reference text for every `wr.refs.*` usage (not just `{refId, refContentHash}`), so pinned compiled snapshots are self-contained for export/import.
+
+Authoring shape (conceptual, code-canonical schema will be generated):
+- `PromptValue = string | PromptParts`
+- `PromptParts = [PromptPart, ...]` (non-empty list)
+- `PromptPart` (closed union):
+  - `{ "kind": "text", "text": "..." }`
+  - `{ "kind": "ref", "refId": "wr.refs.some_snippet" }`
+
+Recommended placements:
+- `promptBlocks.goal`: `PromptValue`
+- `promptBlocks.constraints[]`: `PromptValue[]`
+- `promptBlocks.procedure[]`: `PromptValue[]`
+- `promptBlocks.verify[]`: `PromptValue[]`
+
+Example (conceptual):
+
+```jsonc
+{
+  "id": "project.planning_v2",
+  "steps": [
+    {
+      "id": "plan_storage",
+      "title": "Plan the two-stream commit protocol",
+      "promptBlocks": {
+        "goal": [
+          { "kind": "text", "text": "Plan the durable commit protocol for WorkRail v2." },
+          { "kind": "ref", "refId": "wr.refs.v2_definition" }
+        ],
+        "constraints": [
+          [
+            { "kind": "ref", "refId": "wr.refs.append_only_truth" },
+            { "kind": "text", "text": "Do not introduce salvage scanning as a correctness path." }
+          ]
+        ],
+        "procedure": [
+          "Define the AppendPlan commit ordering.",
+          "List crash states and recovery rules."
+        ],
+        "verify": [
+          [
+            { "kind": "text", "text": "Hashing inputs are canonical and deterministic." },
+            { "kind": "ref", "refId": "wr.refs.jcs_hashing" }
+          ]
+        ]
+      }
+    }
+  ]
+}
+```
+
 **Output object** (optional):
 - `contractRef` (string): references a WorkRail-owned contract pack; WorkRail validates on `continue_workflow`
 - `hints` (object): non-enforced guidance
