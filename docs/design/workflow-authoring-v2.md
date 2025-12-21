@@ -16,7 +16,7 @@ WorkRail v2 uses **JSON** as the canonical authoring format.
 
 ## Top-level workflow structure
 
-```json
+```jsonc
 {
   "id": "namespace.workflow_name",
   "name": "Human-Readable Name",
@@ -24,6 +24,7 @@ WorkRail v2 uses **JSON** as the canonical authoring format.
   "agentRole": "Optional: workflow-level stance/persona for the agent",
   "capabilities": { ... },
   "features": [ ... ],
+  "conditions": [ ... ],
   "steps": [ ... ]
 }
 ```
@@ -32,7 +33,7 @@ WorkRail v2 uses **JSON** as the canonical authoring format.
 
 Capabilities declare optional agent environment enhancements that materially affect workflow execution or are required for correctness.
 
-```json
+```jsonc
 "capabilities": {
   "delegation": "preferred",
   "web_browsing": "required"
@@ -61,7 +62,7 @@ Features are closed-set, WorkRail-defined behaviors applied globally during work
 
 Most features are simple toggles:
 
-```json
+```jsonc
 "features": [
   "wr.features.mode_guidance",
   "wr.features.durable_recap_guidance"
@@ -70,7 +71,7 @@ Most features are simple toggles:
 
 A small subset of features can accept typed configuration:
 
-```json
+```jsonc
 "features": [
   {
     "id": "wr.features.capabilities",
@@ -99,9 +100,121 @@ Config schemas are WorkRail-owned and validated per feature.
 
 Steps can be either normal steps or template calls.
 
+### Identifier constraints (authoring-time validation, locked)
+To keep execution deterministic and avoid escaping footguns, step and loop identifiers used in execution state must be delimiter-safe.
+
+Locks:
+- `step.id` (StepId) MUST match: `[a-z0-9_-]+`
+- `loopId` (when/if loop constructs are used) MUST match: `[a-z0-9_-]+`
+- The following characters are not allowed in these identifiers: `@`, `/`, `:`
+
+Studio/CLI should provide deterministic auto-fix suggestions (lowercase + replace invalid characters with `_`).
+
+### Loops (explicit, deterministic) (initial v2 authoring)
+Loops are authored as first-class steps to keep execution deterministic and Studio-renderable. The compiler assigns a stable `bodyIndex` corresponding to the index in the authored `body[]` list.
+
+Locks:
+- Loops are expressed as `type: "loop"` steps with a unique `loopId` (delimiter-safe).
+- Loop bodies are explicit and ordered: `body[]` is the authoritative step list for `bodyIndex`.
+- Every loop MUST declare `maxIterations` (no defaults).
+- Loop continuation is defined by a `while` condition reference (see Conditions below), not by ad-hoc booleans or free-form strings.
+
+Example:
+
+```jsonc
+{
+  "type": "loop",
+  "loopId": "investigation_pass",
+  "while": { "kind": "condition_ref", "conditionId": "hypotheses_stable" },
+  "maxIterations": 5,
+  "body": [
+    { "id": "gather_evidence", "title": "Gather evidence", "prompt": "..." },
+    { "id": "update_hypotheses", "title": "Update hypotheses", "prompt": "..." }
+  ]
+}
+```
+
+### Conditions (closed set, reusable) (initial v2 authoring)
+Conditions are authored as a closed set of reusable definitions and referenced by loops and (later) other control structures. This keeps control flow based on data state and avoids stringly-typed expression bags.
+
+Identifier constraints:
+- `conditions[].id` MUST match: `[a-z0-9_-]+`
+
+Shape:
+
+```jsonc
+{
+  "conditions": [
+    {
+      "id": "hypotheses_stable",
+      "kind": "always_false"
+    }
+  ]
+}
+```
+
+Initial closed set (minimal, expandable):
+- `always_true`
+- `always_false`
+- `loop_control` (recommended for most real loops)
+
+#### `loop_control` condition kind (recommended)
+Because WorkRail cannot infer intent from prompts and we avoid arbitrary expression strings, the most practical deterministic loop exit is an explicit loop control signal produced by the workflow itself.
+
+Pattern:
+- A step in the loop body emits a small, contract-validated control artifact indicating whether to continue.
+- The loop’s `while` condition references a `loop_control` condition definition.
+
+Example condition definition:
+
+```jsonc
+{
+  "id": "keep_iterating",
+  "kind": "loop_control",
+  "continueWhen": "continue" // closed set: continue | stop
+}
+```
+
+Notes:
+- The control signal should be validated via a WorkRail-owned output contract pack (e.g., `wr.contracts.loop_control`) to keep it self-correcting and deterministic.
+- This avoids reading arbitrary `context` keys or relying on free-form strings for control flow.
+- Deterministic evaluation intent:
+  - On each loop iteration, the workflow must produce a validated `wr.loop_control` artifact for the loop’s `loopId`.
+  - The loop continues while the most recent validated artifact indicates `decision == continueWhen`.
+  - Missing/invalid loop control output is handled by effective autonomy:
+    - blocking modes: `blocked` with structured missing/invalid required output
+    - never-stop: record a critical gap and treat as `decision="stop"` (fail-safe to prevent runaway loops)
+
+#### `wr.contracts.loop_control` (initial contract pack, locked)
+This contract pack validates a loop control artifact emitted via `output.artifacts[]`.
+
+Artifact kind:
+- `wr.loop_control`
+
+Required fields:
+- `loopId` (must match the enclosing loop step’s `loopId`)
+- `decision`: `continue | stop`
+
+Optional fields:
+- `summary` (bounded text)
+
+Example artifact:
+
+```jsonc
+{
+  "kind": "wr.loop_control",
+  "loopId": "investigation_pass",
+  "decision": "continue",
+  "summary": "More hypotheses to test; proceed."
+}
+```
+
+Notes:
+- The initial set is intentionally tiny; richer condition kinds should be added only when needed and must remain a closed set.
+
 ### Normal step
 
-```json
+```jsonc
 {
   "id": "phase-1",
   "title": "Phase 1: Analysis",
@@ -112,7 +225,7 @@ Steps can be either normal steps or template calls.
 
 Or using structured blocks:
 
-```json
+```jsonc
 {
   "id": "phase-1",
   "title": "Phase 1: Analysis",
@@ -153,7 +266,7 @@ Or using structured blocks:
 
 ### Template call step
 
-```json
+```jsonc
 {
   "type": "template_call",
   "templateId": "wr.templates.capability_probe",
@@ -193,6 +306,7 @@ WorkRail defines a small, closed set of contract packs. Initial set (conceptual)
 
 - `wr.contracts.capability_observation`
 - `wr.contracts.workflow_divergence`
+- `wr.contracts.loop_control`
 - (and gaps-related contracts when formalized)
 
 Each pack includes:
@@ -220,7 +334,7 @@ The `verify` block (in `promptBlocks`) is **instructional by default**: the agen
 
 To make verification **enforceable**, express it as an output contract:
 
-```json
+```jsonc
 "output": {
   "contractRef": "wr.contracts.verification_report",
   "hints": { ... }
@@ -235,14 +349,21 @@ Agents can report `workflow_divergence` when intentionally deviating from instru
 
 Divergence is a structured artifact:
 
-```json
+```jsonc
 {
   "kind": "workflow_divergence",
-  "reason": "skipped_for_efficiency",  // closed set
+  "reason": "efficiency_skip",  // closed set (WorkRail-owned)
   "summary": "Skipped hypothesis X because ...",
   "relatedStepId": "phase-2"
 }
 ```
+
+Initial closed set (conceptual; generated from canonical contract pack definitions to prevent drift):
+- `missing_user_context`
+- `capability_unavailable`
+- `efficiency_skip`
+- `safety_stop`
+- `policy_constraint`
 
 Studio badges nodes with divergence for auditability.
 
@@ -250,7 +371,7 @@ Enforcement: divergence is **optional** (agent reports when applicable); it shou
 
 ## Example: complete v2 workflow
 
-```json
+```jsonc
 {
   "id": "project.bug_investigation_v2",
   "name": "Bug Investigation (v2)",
