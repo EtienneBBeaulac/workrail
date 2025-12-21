@@ -2,7 +2,7 @@
 
 > **Auto-generated** from workflow files. Run `workrail list` for the latest.
 >
-> Last updated: 2025-12-05
+> Generated deterministically (no timestamps).
 
 ## Overview
 

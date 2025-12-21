@@ -22,6 +22,7 @@ The event log is truth for lineage and facts; node snapshots exist only to rehyd
 
 ### Storage invariants (must hold)
 - **Authoritative ordering**: a monotonic per-session `EventIndex` is the ordering source for projections and policies. Timestamps (if any) are informational only.
+- **EventIndex origin (locked)**: `EventIndex` is **0-based**. The first domain event in a session has `eventIndex=0`.
 - **Crash-safe append**: append-only, atomic writes; JSONL **segment files** (not one monolithic file).
   - write temp → `fsync(file)` → `rename` → `fsync(dir)`
 - **Single writer per session**: enforce cross-process lock; if busy, fail fast with structured retryable error.
@@ -36,6 +37,32 @@ The event log is truth for lineage and facts; node snapshots exist only to rehyd
 - **Integrity + recovery**:
   - On load, validate using `manifest.jsonl`; stop at the last valid manifest entry and fail explicitly (no guessing).
   - Segment digests must match; otherwise treat the segment (and anything after, if contiguous loading) as invalid.
+
+### Append transaction protocol (AppendPlan → segment → manifest) (locked)
+To prevent drift and “partial truth” states, all durable mutation must occur through a single append transaction protocol.
+
+Locks:
+- The storage subsystem exposes a single durable mutation operation: `append(sessionId, plan: AppendPlan)`.
+- `AppendPlan` is the **atomic unit** of durable truth for the domain stream:
+  - either the plan is fully committed (and becomes part of truth),
+  - or it has no effect on truth (orphan segment rule applies).
+- Commit is deterministic and uses the two-stream model:
+  1) **Write domain events segment**:
+     - write the plan’s domain events to a new temp segment file under `events/` (JSONL, ordered by `EventIndex`)
+     - `fsync(file)` → `rename` to final `events/<first>-<last>.jsonl` → `fsync(dir)`
+  2) **Attest the segment in the control stream**:
+     - append `manifest.segment_closed` referencing the final segment rel path + sha256 digest + bounds
+     - `fsync(manifest)`
+  3) **Pin new snapshot refs (pin-after-close, locked)**:
+     - append `manifest.snapshot_pinned` records for any `snapshotRef` introduced by the plan’s committed domain events segment
+     - `fsync(manifest)`
+- All of the above occurs while holding the session lock (`sessions/<sessionId>/.lock`).
+- Orphan segment rule remains authoritative: any segment without a corresponding `segment_closed` is ignored and MUST NOT be scanned for salvage.
+
+Crash-state intent (locked):
+- Crash before step (2) → orphan segment ignored (no truth change).
+- Crash after step (2) but before step (3) → committed segment exists, but pins may be missing. This is treated as corruption of the append transaction and MUST fail fast on load (no “pin-on-load” repair).
+- Crash after step (3) → committed segment + pins exist (normal).
 
 #### `manifest.jsonl` record ordering (locked)
 - The manifest has its own monotonic per-session **`ManifestIndex`** (authoritative ordering for manifest records).
@@ -67,14 +94,14 @@ Invariants:
 Example:
 
 ```json
-{"v":1,"manifestIndex":12,"sessionId":"sess_01JH...","kind":"segment_closed","firstEventIndex":1,"lastEventIndex":5000,"segmentRelPath":"events/00000001-00005000.jsonl","sha256":"sha256:seg_7fd2...","bytes":1837421}
+{"v":1,"manifestIndex":12,"sessionId":"sess_01JH...","kind":"segment_closed","firstEventIndex":0,"lastEventIndex":4999,"segmentRelPath":"events/00000000-00004999.jsonl","sha256":"sha256:seg_7fd2...","bytes":1837421}
 ```
 
 ##### `snapshot_pinned` (locked)
 Purpose: make snapshot reachability explicit for export/import and CAS GC (without scanning the event log).
 
 Locks:
-- **Pin-on-create**: record `snapshot_pinned` immediately when a new `snapshotRef` is introduced.
+- **Pin-on-create**: record `snapshot_pinned` immediately when a new `snapshotRef` is introduced (as part of the append transaction; see pin-after-close ordering).
 - Pins are append-only; duplicates are allowed; projections dedupe by `snapshotRef`.
 
 Required fields:
@@ -104,7 +131,8 @@ Closed event kinds:
 - `observation_recorded` (session-first, node-scoped allowed but rare/high-signal)
 - `run_started` (pins `workflowId` + `workflowHash`)
 - `node_created` (`nodeKind`: `step|checkpoint`, references typed snapshot)
-- `edge_created` (`edgeKind`: `acked_step|forked_from_non_tip`)
+- `edge_created` (`edgeKind`: `acked_step`)
+- `advance_recorded` (**durable result of an attempted advance (ack attempt)**, see below)
 - `node_output_appended` (append-only durable write path; optional `supersedesOutputId?` for corrections without mutation)
 - `preferences_changed` (node-scoped; stores delta + effective snapshot)
 - `capability_observed` (node-scoped; includes closed-set provenance)
@@ -133,6 +161,8 @@ Rules (locked intent):
 - `dedupeKey` is length-bounded and ASCII-safe.
 - When incorporating a value-like field (e.g., an observation value), use a digest rather than embedding raw free-form text.
 
+**Hard rule (clarification, locked):** `dedupeKey` MUST NOT be derived from `eventId`. `eventId` is server-minted per append and is not available/stable across retries. If you need an idempotency handle, use a dedicated, typed identifier in the event payload (e.g., `outputId`, `changeId`, `observationId`, `gapId`, `advanceId`).
+
 Initial v2 recipes (illustrative, locked intent):
 - `run_started`: `run_started:<sessionId>:<runId>`
 - `node_created`: `node_created:<sessionId>:<runId>:<nodeId>`
@@ -140,6 +170,8 @@ Initial v2 recipes (illustrative, locked intent):
 - `node_output_appended`: `node_output_appended:<sessionId>:<outputId>`
 - `gap_recorded`: `gap_recorded:<sessionId>:<gapId>`
 - `preferences_changed`: `preferences_changed:<sessionId>:<changeId>`
+- `capability_observed`: `capability_observed:<sessionId>:<capObsId>`
+- `advance_recorded`: `advance_recorded:<sessionId>:<advanceId>`
 - `observation_recorded`: `observation_recorded:<sessionId>:<key>:<valueDigest>`
 
 #### `session_created` (locked)
@@ -200,7 +232,7 @@ Locks:
 
 Invariants:
 - `parentNodeId` (when present) must refer to a node in the same run.
-- `snapshotRef` must be pinned in `manifest.jsonl` via `snapshot_pinned` (pin-on-create).
+- `snapshotRef` must be pinned in `manifest.jsonl` via `snapshot_pinned` (pin-on-create, pin-after-close ordering).
 
 Example:
 
@@ -223,13 +255,14 @@ Payload fields:
 Example:
 
 ```json
-{"v":1,"eventId":"evt_01JH...","eventIndex":120,"sessionId":"sess_01JH...","kind":"preferences_changed","scope":{"runId":"run_01JH...","nodeId":"node_01JH..."},"dedupeKey":"preferences_changed:sess_01JH:evt_01JH...","data":{"changeId":"prefchg_01JH...","source":"user","delta":[{"key":"autonomy","value":"full_auto_never_stop"}],"effective":{"autonomy":"full_auto_never_stop","riskPolicy":"conservative"}}}
+{"v":1,"eventId":"evt_01JH...","eventIndex":120,"sessionId":"sess_01JH...","kind":"preferences_changed","scope":{"runId":"run_01JH...","nodeId":"node_01JH..."},"dedupeKey":"preferences_changed:sess_01JH:prefchg_01JH...","data":{"changeId":"prefchg_01JH...","source":"user","delta":[{"key":"autonomy","value":"full_auto_never_stop"}],"effective":{"autonomy":"full_auto_never_stop","riskPolicy":"conservative"}}}
 ```
 
 #### `capability_observed` (locked)
 Purpose: record observed capability status with provenance so “agent said so” is never enforcement-grade truth by default.
 
 Payload fields:
+- `capObsId` (stable identifier; primary idempotency key)
 - `capability`: `delegation | web_browsing`
 - `status`: `unknown | available | unavailable`
 - `provenance` (closed set):
@@ -244,8 +277,83 @@ Payload fields:
 Example:
 
 ```json
-{"v":1,"eventId":"evt_01JH...","eventIndex":121,"sessionId":"sess_01JH...","kind":"capability_observed","scope":{"runId":"run_01JH...","nodeId":"node_01JH..."},"dedupeKey":"capability_observed:sess_01JH:run_01JH:node_01JH:web_browsing","data":{"capability":"web_browsing","status":"available","provenance":{"kind":"probe_step","enforcementGrade":"strong","detail":{"probeTemplateId":"wr.templates.capability_probe","probeStepId":"wr_probe_web_browsing","result":"success"}}}}
+{"v":1,"eventId":"evt_01JH...","eventIndex":121,"sessionId":"sess_01JH...","kind":"capability_observed","scope":{"runId":"run_01JH...","nodeId":"node_01JH..."},"dedupeKey":"capability_observed:sess_01JH:capobs_01JH...","data":{"capObsId":"capobs_01JH...","capability":"web_browsing","status":"available","provenance":{"kind":"probe_step","enforcementGrade":"strong","detail":{"probeTemplateId":"wr.templates.capability_probe","probeStepId":"wr_probe_web_browsing","result":"success"}}}}
 ```
+
+**Projection rule (locked intent):** capability status is **derived**.
+- History is append-only: multiple `capability_observed` events may exist for the same `(nodeId, capability)`.
+- The “current” status for a node is the latest event by `EventIndex` for that `(nodeId, capability)` (ties impossible by ordering).
+- `dedupeKey` prevents only true retries (same `capObsId`), not legitimate status evolution.
+
+#### `advance_recorded` (initial v2 schema, locked)
+Purpose: record the durable outcome of an attempted `continue_workflow` operation so Studio and exports never infer “what happened” from transient tool responses.
+
+Locks:
+- `advance_recorded` is the canonical durable record for **ack attempts** (attempted advancement), including **blocked** and **advanced** outcomes.
+- Rehydrate-only is side-effect-free (see contract): `continue_workflow` without `ackToken` MUST NOT create durable events, therefore it MUST NOT create `advance_recorded`.
+- Idempotency is keyed by `advanceId` (not by tokens, timestamps, or `eventId`).
+- `advance_recorded` is **node-scoped** (the node the agent attempted to operate on).
+
+Payload fields:
+- `advanceId` (stable identifier; primary idempotency key)
+- `intent` (closed set):
+  - `ack_pending` (attempt to advance using `ackToken`)
+- `outcome` (closed-set discriminated union):
+  - `{ kind: "blocked", blockers: BlockerReport }`
+  - `{ kind: "advanced", toNodeId }`
+
+#### `BlockerReport` (initial v2 schema, locked)
+Purpose: represent “blocked” reasons as typed, deterministic errors-as-data so Studio/exports never infer from chat history.
+
+Locks:
+- `BlockerReport` is a closed-set structure (no free-form codes).
+- Ordering is deterministic.
+- Payloads are bounded by byte budgets.
+
+Shape (conceptual):
+- `blockers: [Blocker, ...]` (non-empty)
+- `Blocker` fields (required):
+  - `code` (closed set; see below)
+  - `pointer` (typed pointer; see below)
+  - `message` (bounded text)
+  - `suggestedFix` (bounded text; optional but strongly recommended)
+
+`Blocker.code` (closed set, initial; derived from `ReasonCode`):
+- `USER_ONLY_DEPENDENCY`
+- `MISSING_REQUIRED_OUTPUT`
+- `INVALID_REQUIRED_OUTPUT`
+- `REQUIRED_CAPABILITY_UNKNOWN`
+- `REQUIRED_CAPABILITY_UNAVAILABLE`
+- `INVARIANT_VIOLATION`
+- `STORAGE_CORRUPTION_DETECTED`
+
+`Blocker.pointer` (closed set, initial):
+- `{ kind: "context_key", key: string }` (use only for declared external inputs; key must be delimiter-safe)
+- `{ kind: "output_contract", contractRef: string }`
+- `{ kind: "capability", capability: "delegation" | "web_browsing" }`
+- `{ kind: "workflow_step", stepId: string }`
+
+Budgets (locked):
+- max blockers per report: 10
+- max bytes per `message`: 512
+- max bytes per `suggestedFix`: 1024
+- if a budget would be exceeded: fail fast during validation (do not truncate silently)
+
+Deterministic ordering (locked):
+- sort blockers by `(code, pointer.kind, pointer.* stable fields)` in ascending lexical order before returning/storing.
+
+Mapping lock (ReasonCode → Blocker.code) (locked):
+- `ReasonCode.user_only_dependency:*` → `USER_ONLY_DEPENDENCY`
+- `ReasonCode.contract_violation:missing_required_output` → `MISSING_REQUIRED_OUTPUT`
+- `ReasonCode.contract_violation:invalid_required_output` → `INVALID_REQUIRED_OUTPUT`
+- `ReasonCode.capability_missing:required_capability_unknown` → `REQUIRED_CAPABILITY_UNKNOWN`
+- `ReasonCode.capability_missing:required_capability_unavailable` → `REQUIRED_CAPABILITY_UNAVAILABLE`
+- `ReasonCode.unexpected:invariant_violation` → `INVARIANT_VIOLATION`
+- `ReasonCode.unexpected:storage_corruption_detected` → `STORAGE_CORRUPTION_DETECTED`
+
+Notes:
+- When `outcome.kind == "advanced"`, an `edge_created` + `node_created` MUST also exist for the same logical operation (either in the same append plan or as the idempotent replay result).
+- When `outcome.kind == "blocked"`, the run status projection can rely on `gap_recorded` (for never-stop) and/or blockers here (for UX). Blockers are errors-as-data and must be bounded.
 
 #### `divergence_recorded` (initial v2 schema, locked)
 Purpose: record intentional off-script behavior as a durable, node-attached explainability signal (Studio badges; not required for correctness).
@@ -334,7 +442,7 @@ Example:
 Purpose: record authoritative relationships between nodes in a run DAG (advancement and explicit fork-from-non-tip markers).
 
 Payload fields:
-- `edgeKind`: `acked_step | forked_from_non_tip`
+- `edgeKind`: `acked_step`
 - `fromNodeId`, `toNodeId`
 - `cause`:
   - `kind`: `idempotent_replay | intentional_fork | non_tip_advance`
@@ -344,10 +452,9 @@ Invariants:
 - `fromNodeId` and `toNodeId` must refer to nodes in the same run.
 - For `edgeKind=acked_step`:
   - `toNodeId` must have `parentNodeId == fromNodeId`.
-  - `cause.kind` must be `idempotent_replay` or `intentional_fork`.
-- For `edgeKind=forked_from_non_tip`:
-  - `cause.kind` must be `non_tip_advance`.
-  - `fromNodeId` must already have at least one child when this edge is recorded (this is a fork marker, not a normal first advance).
+  - `cause.kind` must be `idempotent_replay` or `intentional_fork` or `non_tip_advance`.
+
+Lock (simplification): do not model fork-from-non-tip as a separate edge kind. Fork-ness is represented via `cause.kind=non_tip_advance` on the normal `acked_step` edge and derived via projections/Studio badges.
 
 Example:
 
@@ -494,8 +601,8 @@ Use strict tiered matching (layered search as ordering), not probabilistic scori
 Tier order (highest to lowest):
 1) exact match on `git_head_sha` observation
 2) exact or prefix match on `git_branch` observation
-3) substring match on latest preferred-tip `node_output_appended` recap notes (`outputChannel=recap`, `payloadKind=notes`)
-4) substring match on workflow id/name (source/compiled metadata)
+3) token match on latest preferred-tip `node_output_appended` recap notes (`outputChannel=recap`, `payloadKind=notes`) using the locked normalization rules below
+4) token match on workflow id/name (source/compiled metadata) using the locked normalization rules below
 5) fallback to recency only
 
 Within a tier, order by:
@@ -513,6 +620,19 @@ Each candidate includes a closed-set `whyMatched[]`, e.g.:
 - `matched_notes`
 - `matched_workflow_id`
 - `recency_fallback`
+
+### Text matching semantics (locked)
+To prevent cross-implementation drift, any “match on text” in resume ranking uses a single deterministic normalization and token matching policy.
+
+Locks:
+- Normalize both query and candidate text by:
+  1) Unicode normalization: **NFKC**
+  2) Lowercase (locale-independent)
+  3) Extract tokens matching regex: `[a-z0-9_-]+`
+- A candidate “matches notes” iff **all query tokens** appear in the candidate token set (set membership; not raw substring).
+- The searchable text corpus excludes:
+  - the canonical truncation marker `\n\n[TRUNCATED]`
+  - superseded outputs (only “current recap” output for the preferred tip is considered)
 
 
 ### Node snapshots: typed, versioned, minimal
@@ -563,7 +683,25 @@ WorkRail v2 uses tokens as opaque handles at the MCP boundary. Tokens are **not*
 - `stateToken` format: `st.v1.<payload>.<sig>`
 - `ackToken` format: `ack.v1.<payload>.<sig>`
 - `<payload>` is base64url of **RFC 8785 (JCS)** canonical JSON containing only the locked fields.
-- `<sig>` is an HMAC/signature over `<payload>` using a locally held key; key rotation validates against a small active key set (current + previous).
+
+### Token signing + keyring (locked)
+To prevent cross-implementation drift and keep validation deterministic, v2 locks the signing algorithm and keyring semantics.
+
+Locks:
+- **Signing algorithm**: `HMAC-SHA256`
+- **Signing key material**:
+  - 32-byte random key
+  - stored in a local WorkRail-owned keyring file under the data directory (`keys/keyring.json`)
+- **Signature input bytes (locked)**:
+  - `<sig>` is computed as `HMAC_SHA256(key, payloadBytes)` where `payloadBytes` are the UTF-8 bytes of the base64url-decoded `<payload>` (which is RFC 8785 JCS canonical JSON).
+  - No additional separators, prefixes, or surrounding token strings are included in the HMAC input.
+- **Keyring active set (locked)**:
+  - exactly two keys are permitted: `current` and optional `previous`
+  - verification order is deterministic: try `current`, then `previous`
+- **Rotation (locked)**:
+  - rotation is explicit (not time-based)
+  - on rotation: `current → previous`, generate a fresh `current`
+  - tokens signed by `previous` remain valid until the next rotation
 
 ### Token payload fields (locked)
 `stateToken` payload (all required):
@@ -747,6 +885,41 @@ Projection rule (recommended):
 - In `guided` and `full_auto_stop_on_user_deps`: user-only dependencies can return `blocked`.
 - In `full_auto_never_stop`: never `blocked`; record critical gaps and proceed with explicit durable disclosure.
 
+### Unified reason model (blocked ↔ gaps) (initial v2, locked)
+To prevent semantic drift between “blocked” (UX/control-flow) and “gaps” (durable disclosure), v2 locks a single underlying closed-set reason model.
+
+Locks:
+- Define a single closed-set `ReasonCode` used as the semantic source of truth for both:
+  - `BlockerReport` (returned when the run is blocked in blocking modes)
+  - `GapReason` (recorded durably in never-stop and for auditability)
+- Blocking vs never-stop changes **control flow**, not meaning:
+  - In blocking modes, a `ReasonCode` may produce `blocked` plus durable accounting.
+  - In never-stop, the same `ReasonCode` MUST produce a `gap_recorded` (severity per mapping) and execution continues.
+- Mapping is deterministic and table-driven (no ad-hoc conversions).
+
+`ReasonCode` (closed set, initial):
+- `user_only_dependency:<UserOnlyDependencyReason>`
+- `contract_violation:missing_required_output`
+- `contract_violation:invalid_required_output`
+- `capability_missing:required_capability_unknown`
+- `capability_missing:required_capability_unavailable`
+- `unexpected:invariant_violation`
+- `unexpected:storage_corruption_detected`
+
+Deterministic mapping (locked intent):
+- `ReasonCode.user_only_dependency:*`:
+  - blocking modes → `blocked`
+  - never-stop → `gap_recorded(severity=critical, category=user_only_dependency, detail=<reason>)`
+- `ReasonCode.contract_violation:*`:
+  - blocking modes → `blocked`
+  - never-stop → `gap_recorded(severity=critical, category=contract_violation, detail=<reason>)`
+- `ReasonCode.capability_missing:*`:
+  - blocking modes → `blocked` iff the capability is required by the compiled workflow
+  - never-stop → `gap_recorded(severity=critical, category=capability_missing, detail=<reason>)`
+- `ReasonCode.unexpected:*`:
+  - always → `gap_recorded(severity=critical, category=unexpected, detail=<reason>)`
+  - and the protocol path must fail fast where correctness would be compromised (e.g., corruption on advancement).
+
 ---
 
 ## 4) Preferences + modes (minimal closed set)
@@ -844,6 +1017,14 @@ To keep `workflowHash` stable and avoid “order by accident” drift, compilati
 - session/run/node identifiers
 - any timestamps
 - any environment observations (git branch/SHA, workspace paths)
+
+#### Embedded schema canonicalization (locked)
+Compiled workflow snapshots may embed contract schemas (and other structured definitions) that are used for validation and Studio inspection.
+
+Locks:
+- Embedded schemas MUST be represented as **typed canonical data** within `CompiledWorkflowSnapshotV1` (not as raw JSON strings/blobs).
+- Canonicalization and hashing MUST be performed over the single JCS serialization of the compiled snapshot (no secondary ad-hoc stringification).
+- Any ordering within embedded schema structures that is semantically irrelevant MUST be normalized deterministically during compilation (e.g., sort object keys by JCS; sort lists where order is not semantically meaningful).
 
 Closed-set recommendation targets:
 - `recommendedAutonomy` (same closed set as `autonomy`)
@@ -1127,6 +1308,103 @@ To prevent drift and rework, WorkRail v2 implementation MUST follow a “type-fi
 5) **Determinism suite**:
    - golden hash fixtures, replay/idempotency tests, export/import roundtrip tests
 
+## 16.1) Implementation blueprint (where to look) (locked intent)
+When implementing WorkRail v2, treat the following documents as the authoritative “blueprint” set. This is intentionally a short list to prevent drift.
+
+1) **Primary authority (locks):**
+   - `docs/design/v2-core-design-locks.md` (this document)
+
+2) **Normative MCP boundary contract:**
+   - `docs/reference/workflow-execution-contract.md`
+
+3) **Hard platform constraints:**
+   - `docs/reference/mcp-platform-constraints.md`
+
+4) **Accepted decision records (rationale for core choices):**
+   - `docs/adrs/005-agent-first-workflow-execution-tokens.md`
+   - `docs/adrs/006-append-only-session-run-event-log.md`
+   - `docs/adrs/007-resume-and-checkpoint-only-sessions.md`
+
+5) **Authoring/compilation shape (compiler must match):**
+   - `docs/design/workflow-authoring-v2.md`
+
+6) **Console/Studio UX constraints (UI must not become truth):**
+   - `docs/design/studio.md`
+
+7) **High-level summary (non-normative):**
+   - `docs/plans/workrail-v2-one-pager.md`
+
+## 16.2) Generation + verifier contract (anti-drift) (locked intent)
+To prevent v1-style schema/description drift, v2 requires a deterministic generator + verifier pipeline.
+
+Locks:
+- Canonical source of truth is **code-canonical** (TypeScript domain types + Zod schemas).
+- Any “tool reference” docs or registries are **generated artifacts**; they must not be hand-edited.
+- The verifier regenerates to a temp location and diffs byte-for-byte; it fails fast with an actionable error when outputs are out of date.
+- Generated outputs MUST be deterministic:
+  - stable ordering
+  - no timestamps
+  - stable formatting
+
+## 16.3) Closed sets index (v2 minimal) (locked intent)
+This section is a convenience index for the closed sets already defined elsewhere in this document. It exists to prevent “string bag” drift during implementation.
+
+- **Preferences**
+  - `autonomy`: `guided | full_auto_stop_on_user_deps | full_auto_never_stop`
+  - `riskPolicy`: `conservative | balanced | aggressive`
+- **Capabilities**: `delegation | web_browsing`
+- **Edge kind**: `acked_step`
+  - `cause.kind`: `idempotent_replay | intentional_fork | non_tip_advance`
+- **ReasonCode** (semantic source for blockers/gaps): see “Unified reason model (blocked ↔ gaps)”
+- **Blocker codes**: `USER_ONLY_DEPENDENCY | MISSING_REQUIRED_OUTPUT | INVALID_REQUIRED_OUTPUT | REQUIRED_CAPABILITY_UNKNOWN | REQUIRED_CAPABILITY_UNAVAILABLE | INVARIANT_VIOLATION | STORAGE_CORRUPTION_DETECTED`
+- **Token payload kinds**: `state | ack`
+- **Token validation errors**: `TOKEN_INVALID_FORMAT | TOKEN_UNSUPPORTED_VERSION | TOKEN_BAD_SIGNATURE | TOKEN_SCOPE_MISMATCH | TOKEN_UNKNOWN_NODE | TOKEN_WORKFLOW_HASH_MISMATCH | TOKEN_SESSION_LOCKED`
+- **Manifest record kinds**: `segment_closed | snapshot_pinned`
+- **Run status**: `in_progress | blocked | complete | complete_with_gaps`
+
+## 16.4) Implementation playbook (how to execute safely) (locked intent)
+This section records execution guidance for large v2 refactors so we keep the implementation aligned with the locks and avoid mid-project drift.
+
+### Before starting (what to consider)
+- Prioritize determinism-critical substrate work first (schemas, hashing, idempotency, storage ordering). Do not build features on unstable foundations.
+- Maintain strict bounded context boundaries (`src/v2/`) to prevent v2 truth from leaking into v1 mutable session paths.
+- Keep closed sets explicit and versioned; do not introduce “bags” (strings/booleans) where an enum/union applies.
+- Treat failure modes (crash/retry/rewind) as first-class requirements; design them upfront.
+- Enforce anti-drift (generator + verifier) early so docs/schemas cannot diverge.
+
+### How to split the work (layered phases)
+Split by **layer** (not by feature) to prevent building on incomplete primitives:
+1) **Phase 0 — Canonical core (no I/O)**:
+   - branded IDs + discriminated unions + Zod schemas
+   - RFC 8785 (JCS) canonicalization + sha256 helpers
+   - token signing/validation helpers (via ports for crypto/keyring)
+   - generator + verifier (deterministic, no timestamps)
+2) **Phase 1 — Pure projections**:
+   - preferred tip, run status, current outputs/gaps, resume ranking
+3) **Phase 2 — Storage substrate (ports/adapters)**:
+   - segments + manifest + pin-after-close ordering + single-writer locks
+   - CAS snapshots, pinned workflows, keyring I/O
+4) **Phase 3 — Protocol orchestration**:
+   - start/continue/checkpoint/resume/export/import
+   - idempotency + replay + branching semantics
+5) **Phase 4 — Determinism suite**:
+   - golden hash fixtures
+   - replay/idempotency tests
+   - export/import roundtrip tests
+
+### Quality gates (how we know each phase is “done”)
+- **Gate 0 (schemas + hashing)**: all artifacts validate; generator/verifier passes; golden hash fixtures stable.
+- **Gate 1 (projections)**: projections are pure and deterministic; ordering/truncation rules are tested.
+- **Gate 2 (storage)**: crash-safety invariants hold; single-writer enforcement works; no salvage guessing.
+- **Gate 3 (protocol)**: rehydrate is read-only; ack advancement is idempotent; forks behave as locked.
+- **Gate 4 (portability)**: export/import integrity passes; tokens re-mint deterministically; projections are equivalent post-import.
+
+### Handling issues mid-implementation
+- If an invariant mismatch appears, stop and fix the model/lock explicitly; do not add compatibility patches that expand surface area.
+- Keep commits small and layered (avoid mixing schema changes with storage changes in one commit).
+- Prefer recording bounded, typed trace data (events) over ad-hoc debugging paths when explainability is required.
+- When a lock conflicts with reality, make an explicit decision to amend the lock or change approach; never silently diverge.
+
 ---
 
 ## 9) Authoring ergonomics locks (initial v2)
@@ -1143,6 +1421,27 @@ These locks exist to keep authoring low-friction without compromising determinis
 - Templates/features/contract packs/capabilities are WorkRail-owned closed sets.
 - Studio’s Builtins Catalog is generated from the same canonical definitions used by the compiler (never hand-maintained).
 - Authoring UX must not require “secret menu knowledge”: autocomplete + insert actions are first-class.
+
+### Prompt references / inline canonical injections (initial v2, locked)
+Workflows may reference WorkRail-owned canonical information *inline* in prompts (e.g., “WorkRail v2 definition”, “append-only truth”, “modes semantics”) without copy/paste.
+
+Locks:
+- **Compile-time only**: reference resolution happens only during workflow compilation. Runtime does not “look up” refs.
+- **Closed set**: referenced snippets use WorkRail-owned IDs in the reserved namespace: `wr.refs.*` (no author-defined arbitrary include paths).
+- **No string templating**: do not support `{{ }}` interpolation, file-path includes, or URL includes. References must be typed and validated.
+- **Hashing (locked choice)**: the compiled workflow snapshot MUST embed the **fully resolved reference text** for every `wr.refs.*` usage (not just `{refId, refContentHash}`). This embedded text is part of the hashed compiled snapshot and therefore influences `workflowHash` (pinned determinism).
+- **Export/import implication**: because refs are embedded, resumable bundles do not need any additional “ref registry snapshot” concept; the pinned compiled workflow snapshot remains self-contained.
+- **Budgets**:
+  - per referenced snippet max bytes (compiler enforced)
+  - per step injected bytes cap (compiler enforced)
+  - on violation: fail validation with errors-as-data (no silent truncation).
+- **Allowed placements** (to keep prompts instruction-first):
+  - references are allowed only within structured prompt sections (`promptBlocks.constraints`, `promptBlocks.procedure`, `promptBlocks.verify`, and optionally `promptBlocks.goal`).
+  - references are disallowed inside arbitrary free-form prose fields where they would become unreadable walls of text.
+- **Provenance**: compiled steps must retain provenance for injected content (at minimum: `refId` + `refContentHash` + byte counts) so Studio can render Source vs Compiled and explain “where this text came from”.
+
+Design intent:
+- Treat `wr.refs.*` as a builtin kind (like templates/features/contracts) and power it via a generated registry from canonical compiler definitions (anti-drift).
 
 ### Capabilities + contracts ergonomics (locked intent)
 - Capability probes for `required` capabilities should be compiler-injected (collapsed by default) and recorded durably with strong provenance.

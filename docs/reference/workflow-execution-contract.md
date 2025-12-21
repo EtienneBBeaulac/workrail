@@ -4,6 +4,9 @@ This document describes the proposed “token-based” workflow execution tools 
 
 Decision record: `docs/adrs/005-agent-first-workflow-execution-tokens.md`
 
+## Normative vs illustrative (how to read this doc)
+Sections explicitly labeled **(normative)** define binding protocol semantics. Examples and appendices are illustrative and must not be treated as authoritative when they conflict with normative sections or the code-canonical schemas referenced by v2 locks.
+
 ## Recorded decisions (from design discussions)
 
 - **Text rendering template versioning (internal-only)**: we may version the deterministic `text` template for testing and export stability, but we do **not** expose the template version to the agent as part of the MCP contract.
@@ -54,7 +57,11 @@ Starts a new workflow run and returns the first pending step plus opaque tokens.
 Continues an existing workflow run.
 
 - If `ackToken` is provided: acknowledge completion of the pending step for the given snapshot (idempotent).
-- If `ackToken` is omitted: rehydrate/resume the pending step for the given snapshot (no advancement).
+- If `ackToken` is omitted: rehydrate/resume the pending step for the given snapshot (**no advancement and no durable mutation**).
+
+**Rehydrate-only is side-effect-free (normative):**
+- Calling `continue_workflow` without `ackToken` MUST NOT create nodes, edges, outputs, gaps, observations, or any other durable events.
+- It exists solely to recover a lost pending prompt/recap after rewinds, restarts, or long chats.
 
 ### `checkpoint_workflow` (optional / experimental)
 
@@ -315,6 +322,51 @@ The behavior depends on the effective full-auto preference:
 
 The exact enum set for user-only dependency reasons is intentionally deferred (see Open items).
 
+## Blocked vs gaps (mode-driven, drift prevention) (recommended)
+To keep behavior deterministic across modes and prevent semantic drift, treat “blocked” (control flow) and “gaps” (durable disclosure) as two views over the same underlying closed-set reasons.
+
+Recommended rules:
+- In blocking modes (`guided`, `full_auto_stop_on_user_deps`), eligible reasons return `kind:"blocked"` with structured blockers.
+- In `full_auto_never_stop`, the engine must not return `blocked`; instead it records critical gaps and continues, while still disclosing the same underlying reason.
+
+Additional recommendation:
+- Blockers should use a closed-set `code` enum and deterministic ordering, and include a typed pointer so Studio can render actionable unblock guidance without reading chat history.
+
+## `blocked.blockers[]` schema (normative)
+When WorkRail returns `kind:"blocked"`, the `blockers[]` payload MUST conform to a closed, deterministic shape so clients do not infer meaning from prose.
+
+Locks:
+- `blockers` is a non-empty list.
+- `blockers` MUST be deterministically ordered by `(code, pointer.kind, pointer.* stable fields)` ascending.
+- Each blocker MUST include: `code`, `pointer`, `message`. `suggestedFix` is optional but strongly recommended.
+- Payloads are bounded:
+  - max blockers: 10
+  - max `message` bytes: 512 (UTF-8)
+  - max `suggestedFix` bytes: 1024 (UTF-8)
+
+`blockers[].code` (closed set, initial):
+- `USER_ONLY_DEPENDENCY`
+- `MISSING_REQUIRED_OUTPUT`
+- `INVALID_REQUIRED_OUTPUT`
+- `REQUIRED_CAPABILITY_UNKNOWN`
+- `REQUIRED_CAPABILITY_UNAVAILABLE`
+- `INVARIANT_VIOLATION`
+- `STORAGE_CORRUPTION_DETECTED`
+
+`blockers[].pointer` (closed set, initial):
+- `{ "kind": "context_key", "key": "..." }`
+- `{ "kind": "output_contract", "contractRef": "..." }`
+- `{ "kind": "capability", "capability": "delegation" | "web_browsing" }`
+- `{ "kind": "workflow_step", "stepId": "..." }`
+
+## Durable accounting for outcomes (recommended, drift-prevention)
+
+Because chat transcripts are not reliable storage, WorkRail should not require Studio/exports to infer what happened from transient tool responses.
+
+Recommended (non-normative) approach:
+- Persist a durable, node-scoped record of each attempted `continue_workflow` **ack** intent (advancement attempt) and its outcome (blocked | advanced) as append-only truth.
+- Treat dedupe/idempotency as a first-class concern: retries must not create duplicate “attempt” records, but legitimate evolution (e.g., a later unblock) must remain appendable.
+
 ## Mode safety, warnings, and recommendations (normative)
 
 WorkRail must never hard-block a user-selected mode. Instead:
@@ -444,8 +496,7 @@ Explicit “migration” of a run to a new workflow version is a separate, opt-i
   },
   "preferences": {
     "autonomy": "guided",
-    "gateHandling": "block",
-    "assumptionPolicy": "record_when_missing"
+    "riskPolicy": "conservative"
   }
 }
 ```
@@ -489,8 +540,7 @@ Notes:
   },
   "preferences": {
     "autonomy": "full_auto_stop_on_user_deps",
-    "gateHandling": "risk_signal",
-    "assumptionPolicy": "record_when_missing"
+    "riskPolicy": "balanced"
   }
 }
 ```
@@ -501,7 +551,7 @@ Notes:
 {
   "stateToken": "st.v1....",
   "output": {
-    "notesMarkdown": "Implemented token-based description updates. Next: update workflow_next tool naming and add checkpoint tool behind flag."
+    "notesMarkdown": "Implemented token-based description updates. Next: update tool naming to `start_workflow`/`continue_workflow` and add checkpoint tool behind flag."
   }
 }
 ```
@@ -686,7 +736,7 @@ Dashboard render intent:
     {
       "severity": "Major",
       "location": { "file": "src/mcp/tool-descriptions.ts", "line": 79 },
-      "title": "Tool description drift: mentions completedSteps but tool uses state/event",
+      "title": "Tool description drift: mentions workflow_next/completedSteps but contract uses start_workflow/continue_workflow tokens",
       "rationale": "Agents will send the wrong shape and fail the tool boundary contract.",
       "suggestion": "Update authoritative and standard descriptions to match the current schema."
     }
@@ -694,8 +744,8 @@ Dashboard render intent:
   "mrComments": [
     {
       "location": { "file": "src/mcp/tool-descriptions.ts", "line": 79 },
-      "title": "Fix workflow_next tool description drift",
-      "body": "The description references completedSteps, but the tool input schema now expects state + optional event. This mismatch will cause agent misuse; please update descriptions to match the current contract."
+      "title": "Fix workflow tool description drift",
+      "body": "The description references older workflow_next/completedSteps terminology, but the current v2 contract uses start_workflow/continue_workflow with stateToken/ackToken. This mismatch will cause agent misuse; please update descriptions to match the current contract."
     }
   ]
 }

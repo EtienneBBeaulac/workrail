@@ -15,6 +15,8 @@ Create custom workflows to guide AI agents through your team's processes.
 > - `docs/reference/workflow-execution-contract.md`
 > - `docs/adrs/006-append-only-session-run-event-log.md`
 > - `docs/adrs/007-resume-and-checkpoint-only-sessions.md`
+>
+> **Important v1 vs v2 boundary:** v2 intentionally changes several semantics (execution via opaque tokens, append-only truth, and loop/condition modeling). If you are reading sections later in this document about v0.x loop expressions or context-driven state, treat those as **v1-era behavior** and prefer the v2 authoring reference: `docs/design/workflow-authoring-v2.md`.
 
 WorkRail v2 aims to keep workflow authoring **as simple as possible** while making execution **deterministic, rewind-safe, and resumable**.
 
