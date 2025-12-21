@@ -1,5 +1,7 @@
 # Feature Flags Architecture
 
+> **Note (WorkRail v1 vs v2):** This document may reference v1 MCP tool names (e.g., `workflow_next`) in examples/diagrams. WorkRail v2 uses `start_workflow` / `continue_workflow` with opaque tokens; see `docs/reference/workflow-execution-contract.md` and `docs/design/v2-core-design-locks.md`.
+
 ## System Overview
 
 ```

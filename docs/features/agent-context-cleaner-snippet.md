@@ -2,6 +2,8 @@
 
 ## Quick Copy-Paste Function
 
+> **Note (WorkRail v1 vs v2):** This snippet is for v1 (`workflow_next` + large context payloads). WorkRail v2 uses opaque tokens (`start_workflow`/`continue_workflow`) and does not rely on agent-managed engine state. See `docs/reference/workflow-execution-contract.md`.
+
 Add this to your agent implementation to automatically clean context before sending to `workflow_next`:
 
 ```typescript
@@ -69,7 +71,7 @@ const response = await workflow_next({
 
 If you're manually calling workflow_next, just remember:
 
-```json
+```jsonc
 {
   "workflowId": "...",
   "completedSteps": [...],
