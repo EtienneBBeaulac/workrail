@@ -2,6 +2,8 @@
 
 ## Overview
 
+> **Note (WorkRail v1 vs v2):** This guide describes v1 behavior (`workflow_next` with agent-sent context). WorkRail v2 uses `start_workflow` / `continue_workflow` with opaque tokens and does not rely on agent-managed engine state. See `docs/reference/workflow-execution-contract.md`.
+
 The MCP server now includes automatic context optimization instructions that help AI agents reduce the size of context sent with each `workflow_next` call. This guide explains how workflows can
 use this feature effectively.
 
@@ -15,7 +17,7 @@ The MCP server is **completely stateless**. This means:
 ## What Gets Optimized
 
 ### Before Optimization
-```json
+```jsonc
 {
       "workflowId": "coding-task-workflow-with-loops",
   "completedSteps": ["phase-1", "phase-2"],
@@ -33,7 +35,7 @@ The MCP server is **completely stateless**. This means:
 ```
 
 ### After Optimization
-```json
+```jsonc
 {
       "workflowId": "coding-task-workflow-with-loops",
   "completedSteps": ["phase-1", "phase-2", "phase-3"],
@@ -54,7 +56,7 @@ The MCP server is **completely stateless**. This means:
 
 If a step has a `runCondition`, ALL referenced variables MUST be included:
 
-```json
+```jsonc
 {
   "id": "conditional-step",
   "runCondition": {
@@ -67,7 +69,7 @@ If a step has a `runCondition`, ALL referenced variables MUST be included:
 ```
 
 **Required context:**
-```json
+```jsonc
 {
   "taskComplexity": "Large",
   "needsReview": true
@@ -78,7 +80,7 @@ If a step has a `runCondition`, ALL referenced variables MUST be included:
 
 Any `{{variable}}` in prompts, titles, or guidance MUST be included:
 
-```json
+```jsonc
 {
   "id": "loop-step",
   "title": "Step {{currentStepNumber}} of {{totalSteps}}",
@@ -87,7 +89,7 @@ Any `{{variable}}` in prompts, titles, or guidance MUST be included:
 ```
 
 **Required context:**
-```json
+```jsonc
 {
   "currentStepNumber": 3,
   "totalSteps": 10,
@@ -99,7 +101,7 @@ Any `{{variable}}` in prompts, titles, or guidance MUST be included:
 
 When inside a loop, specific variables are injected and must be preserved:
 
-```json
+```jsonc
 {
   // For forEach loops:
   "currentItem": {...},      // Current item being processed
@@ -121,7 +123,7 @@ When inside a loop, specific variables are injected and must be preserved:
 ### 1. Avoid Large Array Storage
 
  **Bad: Storing large arrays**
-```json
+```jsonc
 {
   "id": "prepare-implementation",
   "prompt": "Extract all implementation steps into an array"
@@ -130,7 +132,7 @@ When inside a loop, specific variables are injected and must be preserved:
 ```
 
  **Good: Store count and read on-demand**
-```json
+```jsonc
 {
   "id": "count-steps",
   "prompt": "Count the implementation steps in the plan"
@@ -142,7 +144,7 @@ When inside a loop, specific variables are injected and must be preserved:
 
 Make it clear which variables are important:
 
-```json
+```jsonc
 {
   "id": "validation-step",
   "prompt": "Validate the code. Set 'validationPassed' to true/false",
@@ -154,7 +156,7 @@ Make it clear which variables are important:
 
 Add guidance about what needs to be preserved:
 
-```json
+```jsonc
 {
   "id": "analysis-step",
   "guidance": [
@@ -170,7 +172,7 @@ Add guidance about what needs to be preserved:
 
 The coding task workflow now includes explicit optimization instructions:
 
-```json
+```jsonc
 {
   "id": "phase-6-prep",
   "prompt": "...\n\n**CRITICAL CONTEXT OPTIMIZATION:**\nWhen calling workflow_next after this step, send ONLY:\n- currentStepNumber and totalImplementationSteps\n- Any NEW variables you created (like featureBranch)\n- DO NOT send: arrays, plans, _loopState, _currentLoop, unchanged data"
@@ -181,7 +183,7 @@ The coding task workflow now includes explicit optimization instructions:
 
 You can add similar instructions to your workflows:
 
-```json
+```jsonc
 {
   "id": "data-processing",
   "prompt": "Process the data...",

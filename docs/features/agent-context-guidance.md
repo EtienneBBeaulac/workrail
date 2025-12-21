@@ -2,13 +2,15 @@
 
 ## The Problem
 
+> **Note (WorkRail v1 vs v2):** This guide describes v1 behavior where agents send large `context` payloads to `workflow_next`. WorkRail v2 uses `start_workflow` / `continue_workflow` with opaque tokens; agents do not send engine internals. See `docs/reference/workflow-execution-contract.md`.
+
 Agents currently send back the ENTIRE context (15-20KB) on every `workflow_next` call, even though they only need to send what changed.
 
 ## The Solution: Send Only What Changed
 
 ###  DON'T DO THIS (Current Behavior)
 
-```json
+```jsonc
 {
   "workflowId": "coding-task-workflow-with-loops",
   "completedSteps": ["phase-6-prep"],
@@ -26,7 +28,7 @@ Agents currently send back the ENTIRE context (15-20KB) on every `workflow_next`
 
 ###  DO THIS INSTEAD (Optimized)
 
-```json
+```jsonc
 {
   "workflowId": "coding-task-workflow-with-loops", 
   "completedSteps": ["phase-6-prep"],
@@ -49,7 +51,7 @@ Agents currently send back the ENTIRE context (15-20KB) on every `workflow_next`
 
 ### 1. Never Echo Arrays
 
-```json
+```jsonc
 //  BAD: Sending back unchanged array
 "implementationSteps": [/* all 14 items */]
 
@@ -67,7 +69,7 @@ Never send these back:
 
 ### 3. Only Send What You Modified
 
-```json
+```jsonc
 // If you created a new variable:
 "verificationResult": true
 
@@ -82,7 +84,7 @@ Never send these back:
 
 ### For Loop Steps
 
-```json
+```jsonc
 {
   "workflowId": "coding-task-workflow-with-loops",
   "completedSteps": ["phase-6-prep", "phase-6-implement"],
@@ -98,7 +100,7 @@ Never send these back:
 
 ### For Clarification Steps
 
-```json
+```jsonc
 {
   "workflowId": "coding-task-workflow-with-loops",
   "completedSteps": ["phase-2-informed-clarification"],

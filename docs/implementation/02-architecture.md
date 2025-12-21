@@ -2,6 +2,8 @@
 
 > 🏛️ **System architecture and design principles**
 
+> **Note (WorkRail v1 vs v2):** This document references v1 MCP tool names (e.g., `workflow_next`). WorkRail v2 uses `start_workflow` / `continue_workflow` with opaque tokens and an append-only durable store. For v2 canonical docs, see `docs/reference/workflow-execution-contract.md` and `docs/design/v2-core-design-locks.md`.
+
 [![Build](https://img.shields.io/github/actions/workflow/status/EtienneBBeaulac/mcp/ci.yml?branch=main)]()
 [![Spec Version](https://img.shields.io/badge/spec-1.0.0-blue.svg)](specs/)
 [![MCP Compatible](https://img.shields.io/badge/MCP-compatible-purple.svg)](https://modelcontextprotocol.org)
