@@ -13,6 +13,9 @@ We need workflow execution to be deterministic, rewind-safe, and export/import r
 
 Use an **append-only event log per session** as the **source of truth** for durable state, and derive all dashboard/session views as projections.
 
+Storage-level invariants (segmentation, crash-safe append, integrity/recovery, etc.) are consolidated and locked in:
+- `docs/design/v2-core-design-locks.md`
+
 Definitions:
 
 - **Session**: a UX grouping for a single workstream (ticket/PR/chat). Sessions are not an authoritative pointer; they are a projection over stored events.
@@ -70,4 +73,4 @@ Compiled workflow snapshots are treated as part of the durable truth:
 - Normative tool contract: `docs/reference/workflow-execution-contract.md`
 - Token boundary decision: `docs/adrs/005-agent-first-workflow-execution-tokens.md`
 - Resume and checkpoint-only sessions: `docs/adrs/007-resume-and-checkpoint-only-sessions.md`
-- Tracked open items (preferred tip policy, event union, enums, etc.): `docs/design/v2-open-items.md`
+- Storage and other “easy to drift” v2 locks: `docs/design/v2-core-design-locks.md`
