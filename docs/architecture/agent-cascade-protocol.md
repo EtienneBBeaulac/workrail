@@ -1,5 +1,7 @@
 # The Agent Cascade Protocol
 
+> **Note (WorkRail v1 vs v2):** Some examples in this document reference v1 workflow tooling (e.g., `workflow_next`). WorkRail v2 uses `start_workflow` / `continue_workflow` with opaque tokens; the v2 canonical contract is `docs/reference/workflow-execution-contract.md`.
+
 ## Executive Summary
 
 The **Agent Cascade Protocol** is the architectural foundation that allows WorkRail to function universally across different agentic environments—from simple "chat" interfaces to complex, multi-agent IDEs like Firebender and Cursor.

@@ -136,17 +136,18 @@ Saving is validation-gated:
 
 ## Builtins catalog and discoverability (authoring ergonomics)
 
-Workflows that reference builtins (templates, features, contract packs, capabilities) must be authorable without “secret menu” knowledge.
+Workflows that reference builtins (templates, features, contract packs, capabilities, prompt refs) must be authorable without “secret menu” knowledge.
 
 Studio should provide a first-class Builtins Catalog (under Workflows) that is:
 
-- searchable and filterable by kind (`template`, `feature`, `contract_pack`, `capability`)
+- searchable and filterable by kind (`template`, `feature`, `contract_pack`, `capability`, `ref`)
 - explicit about provenance (`bundled`), editability, and reserved namespaces (e.g., `wr.*`)
 - actionable: each entry includes copyable JSON snippets and/or an “Insert” action for:
   - enabling a feature in `features[]`
   - inserting a `template_call` step
   - referencing a contract pack (`output.contractRef`)
   - declaring capability requirements (`capabilities.*`)
+  - inserting a prompt reference (`wr.refs.*`) into `promptBlocks` (where allowed)
 
 ### Generated registry (avoid drift)
 
@@ -156,7 +157,7 @@ The catalog must be powered by a **generated registry** sourced from the same ca
 
 While editing workflows, Studio should provide contextual discoverability:
 
-- autocomplete for `features[]`, `templateId`, and `output.contractRef`
+- autocomplete for `features[]`, `templateId`, `output.contractRef`, and `wr.refs.*`
 - validation feedback that can suggest builtins (e.g., “this workflow appears to assume web browsing; consider declaring `capabilities.web_browsing`”)
 
 ## Sources management
@@ -188,6 +189,7 @@ While editing workflows, Studio should provide contextual discoverability:
 ## Error states & recovery
 
 - Blocked runs present a single unblock panel with copyable prompt.
+  - Blocked state and its reasons must be representable as **durable, node-attached data** (not inferred from chat history), so Studio can explain “why blocked” after rewinds.
 - Editor deep-links are opportunistic later; baseline is path/line/JSON pointer guidance.
 - Corruption safe-mode (read-only salvage/export) is a later enhancement, but storage should be designed to allow it.
 - If workflow source disappears, pinned snapshots remain usable; Studio shows “source missing, pinned used”.
