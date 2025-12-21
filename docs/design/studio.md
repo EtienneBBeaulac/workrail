@@ -198,4 +198,4 @@ While editing workflows, Studio should provide contextual discoverability:
 
 ## Related tracked open items
 
-- `docs/design/v2-open-items.md`
+- `docs/design/v2-core-design-locks.md` (locked decisions and remaining open edges are tracked there until a dedicated open-items tracker exists)

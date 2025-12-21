@@ -520,6 +520,9 @@ Sessions are a UX layer that should be updated **natively** as a side effect of 
 
 Use an **append-only event log as the source of truth**, stored per session.
 
+Storage invariants (segmentation, crash-safe append, integrity/recovery, snapshot identity/layout, etc.) are consolidated and locked in:
+- `docs/design/v2-core-design-locks.md`
+
 - Events drive the dashboard; projections are derived (pure functions).
 - Token lineage is derived from durable node and edge events. At minimum:
   - advancing a step creates an edge (`step_acked`) from parent snapshot to child snapshot
@@ -578,7 +581,7 @@ WorkRail must support **resumable** export/import of stored sessions. After impo
 
 To be resumable, a bundle MUST include:
 
-- **Session metadata** used for lookup/ranking (titles/keys/tags if present) and timestamps
+- **Session metadata** used for lookup/ranking and timestamps (when present). v2 does not require mutable session-level fields; lookup/ranking may be derived from durable observations and outputs.
 - **Observations** (e.g., git branch name + HEAD SHA) as append-only data for better resume ranking
 - **Runs** (0..N) and their run DAG (nodes + edges), including stable identifiers
 - **Portable node snapshots** sufficient to rehydrate execution deterministically on another machine
