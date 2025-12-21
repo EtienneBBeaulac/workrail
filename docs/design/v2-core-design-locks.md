@@ -1372,25 +1372,76 @@ This section records execution guidance for large v2 refactors so we keep the im
 - Treat failure modes (crash/retry/rewind) as first-class requirements; design them upfront.
 - Enforce anti-drift (generator + verifier) early so docs/schemas cannot diverge.
 
-### How to split the work (layered phases)
-Split by **layer** (not by feature) to prevent building on incomplete primitives:
-1) **Phase 0 — Canonical core (no I/O)**:
-   - branded IDs + discriminated unions + Zod schemas
-   - RFC 8785 (JCS) canonicalization + sha256 helpers
-   - token signing/validation helpers (via ports for crypto/keyring)
-   - generator + verifier (deterministic, no timestamps)
-2) **Phase 1 — Pure projections**:
-   - preferred tip, run status, current outputs/gaps, resume ranking
-3) **Phase 2 — Storage substrate (ports/adapters)**:
-   - segments + manifest + pin-after-close ordering + single-writer locks
-   - CAS snapshots, pinned workflows, keyring I/O
-4) **Phase 3 — Protocol orchestration**:
-   - start/continue/checkpoint/resume/export/import
-   - idempotency + replay + branching semantics
-5) **Phase 4 — Determinism suite**:
-   - golden hash fixtures
-   - replay/idempotency tests
-   - export/import roundtrip tests
+### How to split the work (recommended: vertical slices with layer discipline)
+Build **thin end-to-end paths first**, then expand primitives incrementally. This front-loads integration risk and gives working feedback early while maintaining strict layer boundaries.
+
+**Layer discipline (enforced throughout)**:
+- `v2/durable-core/**` stays pure (no Node I/O)
+- `v2/ports/**` are interfaces only
+- `v2/infra/**` is the only place Node I/O exists
+
+**Vertical slices (recommended sequencing)**:
+
+**Slice 1 — Minimal read-only flow (proves hashing + pinning)**:
+- Goal: `list_workflows` + `inspect_workflow` work end-to-end from pinned compiled snapshots
+- Build:
+  - minimal `CompiledWorkflowSnapshotV1` schema (id/name/description only)
+  - JCS canonicalization + `workflowHash` computation (pure)
+  - pinned workflow CAS store (port + adapter)
+  - minimal MCP handlers (read-only)
+- Why first: validates hashing/pinning compose correctly before storage complexity
+
+**Slice 2 — Start workflow + first step (proves tokens + durable truth)**:
+- Goal: `start_workflow` returns `stateToken` + `pending.prompt` from a trivial workflow
+- Build:
+  - token schemas + HMAC-SHA256 signing/validation (pure, behind CryptoPort)
+  - execution snapshot schema (minimal: just `pending` state)
+  - snapshot CAS store
+  - session event log (write only: `session_created` + `run_started`)
+  - minimal segment + manifest with pin-after-close (single-event segments initially)
+  - keyring store (port + adapter)
+- Why second: validates tokens + append-only truth + pinning all compose
+
+**Slice 3 — Continue workflow (one step advance, proves idempotency)**:
+- Goal: `continue_workflow` with `ackToken` advances and returns next step; replay is idempotent
+- Build:
+  - `node_created` + `edge_created` + `advance_recorded` events
+  - ack attempt idempotency (dedupe by `advanceId`)
+  - pure projection: "next pending step from snapshot"
+  - expand AppendPlan to support multi-event segments
+- Why third: proves append transaction + idempotency before modes/preferences/blockers
+
+**Slice 4 — Rehydrate + fork (proves rewind safety)**:
+- Goal: `continue_workflow` without `ackToken` (rehydrate) + advancing from non-tip (auto-fork)
+- Build:
+  - rehydrate as pure read (verify no durable writes)
+  - fork detection (non-tip snapshot → `cause.kind=non_tip_advance`)
+  - recap/branch context generation (bounded, deterministic truncation)
+- Why fourth: validates rewind-safety story before blocked/gaps
+
+**Slice 5 — Blocked + gaps (proves modes/reasons)**:
+- Goal: workflow with required output contract → `continue_workflow` returns `blocked` in guided, records gap in never-stop
+- Build:
+  - `gap_recorded` event
+  - `ReasonCode` + `BlockerReport` schemas + deterministic mapping
+  - preferences (autonomy/riskPolicy) effective snapshot + node-attached storage (`preferences_changed`)
+  - output contract validation
+- Why fifth: proves unified reason model + mode semantics
+
+**Slice 6+ — Export/import, resume, checkpoint (proves portability)**:
+- Build export bundle integrity + import validation + token re-minting
+- Build `resume_session` with locked ranking/matching
+- Build `checkpoint_workflow`
+
+**Alternative (horizontal phases, safer for inexperienced teams)**:
+If vertical slices feel too risky, use the original horizontal sequencing:
+1. Phase 0 (canonical core, no I/O)
+2. Phase 1 (pure projections)
+3. Phase 2 (storage substrate)
+4. Phase 3 (protocol orchestration)
+5. Phase 4 (determinism suite)
+
+Trade-off: slower feedback but less risk of "cut corners to integrate early."
 
 ### Quality gates (how we know each phase is “done”)
 - **Gate 0 (schemas + hashing)**: all artifacts validate; generator/verifier passes; golden hash fixtures stable.
