@@ -131,7 +131,7 @@ Closed event kinds:
 - `observation_recorded` (session-first, node-scoped allowed but rare/high-signal)
 - `run_started` (pins `workflowId` + `workflowHash`)
 - `node_created` (`nodeKind`: `step|checkpoint`, references typed snapshot)
-- `edge_created` (`edgeKind`: `acked_step`)
+- `edge_created` (`edgeKind`: `acked_step|checkpoint`)
 - `advance_recorded` (**durable result of an attempted advance (ack attempt)**, see below)
 - `node_output_appended` (append-only durable write path; optional `supersedesOutputId?` for corrections without mutation)
 - `preferences_changed` (node-scoped; stores delta + effective snapshot)
@@ -161,7 +161,7 @@ Rules (locked intent):
 - `dedupeKey` is length-bounded and ASCII-safe.
 - When incorporating a value-like field (e.g., an observation value), use a digest rather than embedding raw free-form text.
 
-**Hard rule (clarification, locked):** `dedupeKey` MUST NOT be derived from `eventId`. `eventId` is server-minted per append and is not available/stable across retries. If you need an idempotency handle, use a dedicated, typed identifier in the event payload (e.g., `outputId`, `changeId`, `observationId`, `gapId`, `advanceId`).
+**Hard rule (clarification, locked):** `dedupeKey` MUST NOT be derived from `eventId`. `eventId` is server-minted per append and is not available/stable across retries. If you need an idempotency handle, use a dedicated, typed identifier in the event payload (e.g., `outputId`, `changeId`, `observationId`, `gapId`, `attemptId`, `divergenceId`, `traceId`).
 
 Initial v2 recipes (illustrative, locked intent):
 - `run_started`: `run_started:<sessionId>:<runId>`
@@ -171,7 +171,9 @@ Initial v2 recipes (illustrative, locked intent):
 - `gap_recorded`: `gap_recorded:<sessionId>:<gapId>`
 - `preferences_changed`: `preferences_changed:<sessionId>:<changeId>`
 - `capability_observed`: `capability_observed:<sessionId>:<capObsId>`
-- `advance_recorded`: `advance_recorded:<sessionId>:<advanceId>`
+- `advance_recorded`: `advance_recorded:<sessionId>:<nodeId>:<attemptId>`
+- `divergence_recorded`: `divergence_recorded:<sessionId>:<divergenceId>`
+- `decision_trace_appended`: `decision_trace_appended:<sessionId>:<traceId>`
 - `observation_recorded`: `observation_recorded:<sessionId>:<key>:<valueDigest>`
 
 #### `session_created` (locked)
@@ -225,10 +227,6 @@ Payload fields:
 - `parentNodeId` (nullable only for the run root node; otherwise required)
 - `workflowHash` (must match the run’s pinned `workflowHash`)
 - `snapshotRef`
-- `createdByEventId`
-
-Locks:
-- `createdByEventId == eventId` for `node_created` (initial v2 schema).
 
 Invariants:
 - `parentNodeId` (when present) must refer to a node in the same run.
@@ -237,7 +235,7 @@ Invariants:
 Example:
 
 ```json
-{"v":1,"eventId":"evt_01JH...","eventIndex":2,"sessionId":"sess_01JH...","kind":"node_created","scope":{"runId":"run_01JH...","nodeId":"node_01JH_root"},"dedupeKey":"node_created:sess_01JH:run_01JH:node_01JH_root","data":{"nodeKind":"step","parentNodeId":null,"workflowHash":"sha256:wf_9a3b...","snapshotRef":"sha256:snap_f2c1...","createdByEventId":"evt_01JH..." }}
+{"v":1,"eventId":"evt_01JH...","eventIndex":2,"sessionId":"sess_01JH...","kind":"node_created","scope":{"runId":"run_01JH...","nodeId":"node_01JH_root"},"dedupeKey":"node_created:sess_01JH:run_01JH:node_01JH_root","data":{"nodeKind":"step","parentNodeId":null,"workflowHash":"sha256:wf_9a3b...","snapshotRef":"sha256:snap_f2c1..." }}
 ```
 
 #### `preferences_changed` (locked)
@@ -291,11 +289,12 @@ Purpose: record the durable outcome of an attempted `continue_workflow` operatio
 Locks:
 - `advance_recorded` is the canonical durable record for **ack attempts** (attempted advancement), including **blocked** and **advanced** outcomes.
 - Rehydrate-only is side-effect-free (see contract): `continue_workflow` without `ackToken` MUST NOT create durable events, therefore it MUST NOT create `advance_recorded`.
-- Idempotency is keyed by `advanceId` (not by tokens, timestamps, or `eventId`).
+- Idempotency is keyed by `attemptId` (not by tokens, timestamps, or `eventId`).
 - `advance_recorded` is **node-scoped** (the node the agent attempted to operate on).
+- `advance_recorded.dedupeKey` MUST be scoped by node: `advance_recorded:<sessionId>:<nodeId>:<attemptId>`. This prevents catastrophic false-dedupe if an `attemptId` is accidentally reused on a different node.
 
 Payload fields:
-- `advanceId` (stable identifier; primary idempotency key)
+- `attemptId` (stable identifier; primary idempotency key; matches `ackToken` payload field name)
 - `intent` (closed set):
   - `ack_pending` (attempt to advance using `ackToken`)
 - `outcome` (closed-set discriminated union):
@@ -363,6 +362,7 @@ Envelope requirements:
 - `scope.nodeId` must be present.
 
 Payload fields:
+- `divergenceId` (stable identifier; primary idempotency key)
 - `reason` (closed set, initial):
   - `missing_user_context`
   - `capability_unavailable`
@@ -375,7 +375,7 @@ Payload fields:
 Example:
 
 ```json
-{"v":1,"eventId":"evt_01JH...","eventIndex":126,"sessionId":"sess_01JH...","kind":"divergence_recorded","scope":{"runId":"run_01JH...","nodeId":"node_01JH..."},"dedupeKey":"divergence_recorded:sess_01JH:evt_01JH...","data":{"reason":"capability_unavailable","summary":"Delegation was unavailable; executed sequentially and recorded results.","relatedStepId":"investigate"}}
+{"v":1,"eventId":"evt_01JH...","eventIndex":126,"sessionId":"sess_01JH...","kind":"divergence_recorded","scope":{"runId":"run_01JH...","nodeId":"node_01JH..."},"dedupeKey":"divergence_recorded:sess_01JH:div_01JH...","data":{"divergenceId":"div_01JH...","reason":"capability_unavailable","summary":"Delegation was unavailable; executed sequentially and recorded results.","relatedStepId":"investigate"}}
 ```
 
 #### `gap_recorded` (locked)
@@ -411,6 +411,7 @@ Envelope requirements:
 - `scope.nodeId` must be present.
 
 Payload fields:
+- `traceId` (stable identifier; primary idempotency key)
 - `entries` (non-empty list, bounded)
   - each entry has:
     - `kind` (closed set, initial):
@@ -435,17 +436,17 @@ Canonical truncation marker (locked):
 Example:
 
 ```json
-{"v":1,"eventId":"evt_01JH...","eventIndex":127,"sessionId":"sess_01JH...","kind":"decision_trace_appended","scope":{"runId":"run_01JH...","nodeId":"node_01JH..."},"dedupeKey":"decision_trace_appended:sess_01JH:evt_01JH...","data":{"entries":[{"kind":"selected_next_step","summary":"Chose step 'investigate' because prior evidence reduced uncertainty most.","refs":{"stepId":"investigate"}},{"kind":"detected_non_tip_advance","summary":"Provided state token was non-tip; recording fork marker and continuing on a new branch."}]}}
+{"v":1,"eventId":"evt_01JH...","eventIndex":127,"sessionId":"sess_01JH...","kind":"decision_trace_appended","scope":{"runId":"run_01JH...","nodeId":"node_01JH..."},"dedupeKey":"decision_trace_appended:sess_01JH:trace_01JH...","data":{"traceId":"trace_01JH...","entries":[{"kind":"selected_next_step","summary":"Chose step 'investigate' because prior evidence reduced uncertainty most.","refs":{"stepId":"investigate"}},{"kind":"detected_non_tip_advance","summary":"Provided state token was non-tip; recording fork marker and continuing on a new branch."}]}}
 ```
 
 #### `edge_created` (locked)
 Purpose: record authoritative relationships between nodes in a run DAG (advancement and explicit fork-from-non-tip markers).
 
 Payload fields:
-- `edgeKind`: `acked_step`
+- `edgeKind`: `acked_step | checkpoint`
 - `fromNodeId`, `toNodeId`
 - `cause`:
-  - `kind`: `idempotent_replay | intentional_fork | non_tip_advance`
+  - `kind`: `idempotent_replay | intentional_fork | non_tip_advance | checkpoint_created`
   - `eventId` (required for explainability; references an event in this session)
 
 Invariants:
@@ -453,6 +454,10 @@ Invariants:
 - For `edgeKind=acked_step`:
   - `toNodeId` must have `parentNodeId == fromNodeId`.
   - `cause.kind` must be `idempotent_replay` or `intentional_fork` or `non_tip_advance`.
+- For `edgeKind=checkpoint`:
+  - `toNodeId` must have `parentNodeId == fromNodeId`.
+  - `toNodeId` must refer to a node with `nodeKind == checkpoint`.
+  - `cause.kind` must be `checkpoint_created`.
 
 Lock (simplification): do not model fork-from-non-tip as a separate edge kind. Fork-ness is represented via `cause.kind=non_tip_advance` on the normal `acked_step` edge and derived via projections/Studio badges.
 
@@ -467,7 +472,7 @@ Durable outputs exist to preserve high-signal progress outside the chat transcri
 
 Locks:
 - Outputs are recorded only via **append-only** `node_output_appended` events (no in-place edits).
-- Each output append mints a stable **`outputId`** (server-owned identifier for idempotency and explainability).
+- Each output append assigns a stable **`outputId`** (server-owned identifier for idempotency and explainability).
 - Corrections use **linkage**, not mutation:
   - `supersedesOutputId` is optional and indicates “this output corrects/replaces an earlier output”.
   - `supersedesOutputId` is **node-scoped**: it may only reference outputs from the same `nodeId`.
@@ -486,6 +491,10 @@ Locks:
 - `supersedesOutputId` is node-scoped: it may only reference outputs from the same `nodeId`.
 - Corrections are channel-scoped: `supersedesOutputId` may only reference an output with the same `outputChannel`.
 - Output payload is a closed set (initial v2 schema).
+- **Deterministic expansion + ordering (locked):** if a single logical operation produces multiple outputs for a node (e.g., multiple `artifact_ref` entries), WorkRail MUST append outputs in a deterministic order:
+  - at most one `outputChannel=recap` output first (if produced),
+  - then `outputChannel=artifact` outputs ordered by `(sha256, contentType)` ascending (lexical).
+- **Deterministic outputId derivation (locked intent):** `outputId` must be stable under retries. When an output is produced as part of an ack attempt, the `outputId` MUST be deterministically derived from the attempt identity and the payload discriminator (do not mint random IDs). The specific string encoding is intentionally opaque and versioned; only the derivation inputs are locked.
 
 Payload fields:
 - `outputId` (stable identifier; primary idempotency key)
@@ -682,6 +691,7 @@ WorkRail v2 uses tokens as opaque handles at the MCP boundary. Tokens are **not*
 ### Token string encoding (locked intent)
 - `stateToken` format: `st.v1.<payload>.<sig>`
 - `ackToken` format: `ack.v1.<payload>.<sig>`
+- `checkpointToken` format: `chk.v1.<payload>.<sig>`
 - `<payload>` is base64url of **RFC 8785 (JCS)** canonical JSON containing only the locked fields.
 
 ### Token signing + keyring (locked)
@@ -718,12 +728,24 @@ Locks:
 - `sessionId`
 - `runId`
 - `nodeId`
-- `ackAttemptId`
+- `attemptId`
+
+`checkpointToken` payload (all required):
+- `tokenVersion: 1`
+- `tokenKind: "checkpoint"`
+- `sessionId`
+- `runId`
+- `nodeId`
+- `attemptId`
 
 ### Ack idempotency + branching (locked)
-- Idempotency key: `(sessionId, runId, nodeId, ackAttemptId)`.
+- Idempotency key: `(sessionId, runId, nodeId, attemptId)`.
 - Replaying the same `ackToken` is an idempotent no-op: return the same response; do not double-advance.
-- WorkRail may mint multiple `ackToken`s for the same `(runId, nodeId)` with different `ackAttemptId` values to support intentional forks and safe replay handling.
+- WorkRail may mint multiple `ackToken`s for the same `(runId, nodeId)` with different `attemptId` values to support intentional forks and safe replay handling.
+
+### Checkpoint idempotency (locked)
+- Idempotency key: `(sessionId, runId, nodeId, attemptId)`.
+- Replaying the same `checkpointToken` is an idempotent no-op: do not create duplicate checkpoint nodes/edges/outputs; return the same response deterministically.
 
 ### Token validation errors (errors as data, initial closed set)
 - `TOKEN_INVALID_FORMAT`
@@ -1231,11 +1253,20 @@ To prevent cross-tool drift (MCP vs CLI vs Studio), all surfaced errors MUST use
 Envelope shape (conceptual):
 - `code` (closed set)
 - `message` (human-readable, concise)
-- `suggestion?` (actionable next step)
+- `retry` (closed set; drives deterministic client behavior without parsing prose):
+  - `{ kind: "not_retryable" }`
+  - `{ kind: "retryable_immediate" }`
+  - `{ kind: "retryable_after_ms", afterMs: number }`
 - `details?` (bounded, structured; never required for correctness)
 
 Lock:
 - Never throw errors across MCP boundaries; map to structured error envelopes.
+- Retry guidance MUST be conveyed via `retry` (not `message` or other free-form strings-as-data).
+
+### Error code domains + boundary rule (locked intent)
+To keep errors type-safe and prevent “guess which layer failed” behavior:
+- Token-driven MCP execution tools (`start_workflow`, `continue_workflow`, `checkpoint_workflow`) MUST return only `TOKEN_*` codes for token/session locking and token validation failures.
+- Storage/projection/Console/CLI operations MUST return only non-token domains (e.g., `SESSION_*`, `STORE_*`, `BUNDLE_*`) for non-token failures.
 
 ---
 
@@ -1353,11 +1384,11 @@ This section is a convenience index for the closed sets already defined elsewher
   - `autonomy`: `guided | full_auto_stop_on_user_deps | full_auto_never_stop`
   - `riskPolicy`: `conservative | balanced | aggressive`
 - **Capabilities**: `delegation | web_browsing`
-- **Edge kind**: `acked_step`
-  - `cause.kind`: `idempotent_replay | intentional_fork | non_tip_advance`
+- **Edge kind**: `acked_step | checkpoint`
+  - `cause.kind`: `idempotent_replay | intentional_fork | non_tip_advance | checkpoint_created`
 - **ReasonCode** (semantic source for blockers/gaps): see “Unified reason model (blocked ↔ gaps)”
 - **Blocker codes**: `USER_ONLY_DEPENDENCY | MISSING_REQUIRED_OUTPUT | INVALID_REQUIRED_OUTPUT | REQUIRED_CAPABILITY_UNKNOWN | REQUIRED_CAPABILITY_UNAVAILABLE | INVARIANT_VIOLATION | STORAGE_CORRUPTION_DETECTED`
-- **Token payload kinds**: `state | ack`
+- **Token payload kinds**: `state | ack | checkpoint`
 - **Token validation errors**: `TOKEN_INVALID_FORMAT | TOKEN_UNSUPPORTED_VERSION | TOKEN_BAD_SIGNATURE | TOKEN_SCOPE_MISMATCH | TOKEN_UNKNOWN_NODE | TOKEN_WORKFLOW_HASH_MISMATCH | TOKEN_SESSION_LOCKED`
 - **Manifest record kinds**: `segment_closed | snapshot_pinned`
 - **Run status**: `in_progress | blocked | complete | complete_with_gaps`
@@ -1406,7 +1437,7 @@ Build **thin end-to-end paths first**, then expand primitives incrementally. Thi
 - Goal: `continue_workflow` with `ackToken` advances and returns next step; replay is idempotent
 - Build:
   - `node_created` + `edge_created` + `advance_recorded` events
-  - ack attempt idempotency (dedupe by `advanceId`)
+  - ack attempt idempotency (dedupe by `attemptId`)
   - pure projection: "next pending step from snapshot"
   - expand AppendPlan to support multi-event segments
 - Why third: proves append transaction + idempotency before modes/preferences/blockers
@@ -1541,6 +1572,24 @@ Salvage surface (locked intent):
 - `resume_session` must only return candidates from fully validated sessions (no candidates that require corrupted tail data).
 - Corruption must be surfaced as structured warnings/errors with a closed set of codes (no silent fallback).
 
+### Session health + tool gating (locked)
+To prevent accidentally using salvage reads as an execution correctness path, v2 defines a closed-set session health classification and gates tools accordingly.
+
+`SessionHealth` (closed set, initial):
+- `healthy`
+- `corrupt_tail` (validated prefix available)
+- `corrupt_head` (no usable prefix)
+- `unknown_version`
+
+Tool gating (locked intent):
+- Execution correctness tools MUST require `SessionHealth=healthy` for the target session/run/node:
+  - `continue_workflow` advancement (with `ackToken`)
+  - `checkpoint_workflow`
+  - token minting/advancement paths that depend on durable truth for correctness
+- Read-only tooling (Studio/Console inspection and export) MAY operate on `SessionHealth=corrupt_tail` using only the validated prefix, but MUST:
+  - set an explicit salvage/banner flag in responses/exports (no silent partial data)
+  - forbid any advancement/mutation from salvaged sessions
+
 ### Token signing key management (locked intent)
 - Use a local **key ring file** containing a small active set (current + previous).
 - Rotation is explicit (manual / controlled), not time-driven.
@@ -1573,6 +1622,21 @@ Provide a minimal “no excuses” suite that asserts v2 guarantees:
 - golden fixtures for `workflowHash` (compiled snapshot → JCS bytes → sha256)
 - replay harness for idempotency and branching (replay tool calls / ack attempts yields identical durable truth)
 - export/import roundtrip tests (bundle integrity + token re-mint + projection equivalence)
+
+### Rollout flags: unflag criteria (locked intent)
+Some tools begin feature-flagged to reduce rollout risk. Unflagging MUST be evidence-based and driven by deterministic quality gates (not “it feels stable”).
+
+#### `resume_session` unflag gates
+- Session health gating is implemented: only `SessionHealth=healthy` sessions are eligible candidates.
+- Deterministic ranking/matching is implemented exactly as locked (tiers + normalization + bounded snippets).
+- Export/import roundtrip preserves resume results (post-import candidate set and ordering is equivalent for the same store contents).
+- Corruption/salvage behavior is correct: corrupt sessions do not appear as candidates; errors are structured.
+
+#### `checkpoint_workflow` unflag gates
+- Idempotency is enforced via `checkpointToken` (replay-safe; no duplicate checkpoint nodes/edges/outputs).
+- Checkpoint edges are recorded (`edgeKind=checkpoint`, `cause.kind=checkpoint_created`) and visible in projections.
+- Rehydrate-only remains side-effect-free and cannot accidentally create checkpoint artifacts.
+- Export/import roundtrip preserves checkpoint nodes/edges/outputs and re-mints `checkpointToken` deterministically.
 
 ---
 
