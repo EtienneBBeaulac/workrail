@@ -26,12 +26,18 @@ function normalizeWorkflowIdForTemplate(value: unknown): string {
   return value;
 }
 
+function variablesToContextTemplate(value: unknown): Record<string, unknown> {
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
+}
+
 export function preValidateWorkflowNextArgs(args: unknown): PreValidateResult {
   if (args == null || typeof args !== 'object' || Array.isArray(args)) {
     return { ok: false, code: 'VALIDATION_ERROR', message: 'Invalid input: expected a JSON object.' };
   }
 
   const a = args as Record<string, unknown>;
+  const suggestedContext = variablesToContextTemplate(a.variables);
 
   if (!('workflowId' in a)) {
     return { ok: false, code: 'VALIDATION_ERROR', message: 'Missing required field: workflowId.' };
@@ -45,7 +51,7 @@ export function preValidateWorkflowNextArgs(args: unknown): PreValidateResult {
       correctTemplate: {
         workflowId: normalizeWorkflowIdForTemplate(a.workflowId),
         state: { kind: 'init' },
-        context: {},
+        context: suggestedContext,
       },
     };
   }
@@ -81,6 +87,21 @@ export function preValidateWorkflowNextArgs(args: unknown): PreValidateResult {
         correctTemplate: { kind: 'running', completed: [], loopStack: [] },
       };
     }
+  }
+
+  // Common mistake: using `variables` instead of `context` (context is the only supported key).
+  if ('variables' in a && !('context' in a)) {
+    return {
+      ok: false,
+      code: 'VALIDATION_ERROR',
+      message: 'Unexpected top-level key: variables. Use context (object) for condition evaluation and loop inputs.',
+      correctTemplate: {
+        workflowId: normalizeWorkflowIdForTemplate(a.workflowId),
+        state: a.state,
+        ...(a.event ? { event: a.event } : {}),
+        context: suggestedContext,
+      },
+    };
   }
 
   // Leave detailed validation to Zod (source of truth).

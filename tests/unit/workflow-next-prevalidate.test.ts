@@ -44,4 +44,20 @@ describe('workflow_next pre-validation (error UX only)', () => {
     expect(byteLen(r.correctTemplate)).toBeLessThanOrEqual(512);
     expect((r.correctTemplate as any).workflowId).toBe('<workflowId>');
   });
+
+  it('detects variables used instead of context and suggests context', () => {
+    const r = preValidateWorkflowNextArgs({
+      workflowId: 'w',
+      state: { kind: 'init' },
+      variables: { foo: 'bar' },
+    });
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error('expected failure');
+
+    expect(r.code).toBe('VALIDATION_ERROR');
+    expect(r.message).toContain('variables');
+    expect(r.correctTemplate).toBeTruthy();
+    expect((r.correctTemplate as any).context).toEqual({ foo: 'bar' });
+    expect(byteLen(r.correctTemplate)).toBeLessThanOrEqual(512);
+  });
 });
