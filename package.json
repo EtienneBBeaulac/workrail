@@ -29,6 +29,7 @@
     "precommit": "npm run validate:workflows",
     "preinstall": "node -e \"const v=parseInt(process.versions.node.split('.')[0],10); if(v<20){console.error('WorkRail requires Node.js >=20. Current: '+process.versions.node+'\\nPlease upgrade: https://nodejs.org/'); process.exit(1);}\"",
     "web:dev": "npm run build && WORKRAIL_ENABLE_SESSION_TOOLS=true node dist/mcp-server.js",
+    "web:ci": "WORKRAIL_ENABLE_SESSION_TOOLS=true node dist/mcp-server.js",
     "web:typecheck": "tsc -p tsconfig.web.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest",

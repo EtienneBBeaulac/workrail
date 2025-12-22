@@ -48,7 +48,7 @@ export default defineConfig({
     // CI should not rebuild; it should run against the pre-built dist artifact.
     // Local dev stays ergonomic.
     command: process.env.CI
-      ? 'WORKRAIL_ENABLE_SESSION_TOOLS=true node dist/mcp-server.js'
+      ? 'npm run web:ci'
       : 'npm run web:dev',
     url: 'http://localhost:3456',
     reuseExistingServer: !process.env.CI,
