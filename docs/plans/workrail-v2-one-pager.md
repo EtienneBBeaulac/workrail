@@ -19,6 +19,14 @@ Rollout-only flagged (become core):
 Advanced (flagged longer):
 - `start_session` (enables checkpoint-only sessions; not required for core v2 value)
 
+## Current rollout note (implementation)
+
+Until v2 is fully shipped, the v2 MCP tool surface may be gated behind an explicit opt-in flag:
+- `WORKRAIL_ENABLE_V2_TOOLS=true`
+
+Local data may also be rooted under a WorkRail-owned data dir, optionally overridden for testing/dev:
+- `WORKRAIL_DATA_DIR=/path/to/workrail-data`
+
 ## Invariants (v2 guarantees)
 
 1) **Token-based execution**: agents only round-trip opaque handles; `continue_workflow` supports safe rehydrate and idempotent advance (`ackToken` with `attemptId`).

@@ -163,6 +163,21 @@ Then prompt your agent:
 
 The agent will find the workflow, start at step 1, and proceed systematically.
 
+### Experimental: v2 MCP tools (explicit opt-in)
+
+WorkRail v2 introduces a new, rewind-safe tool surface (e.g., `list_workflows`, `inspect_workflow`, `start_workflow`, `continue_workflow`).
+During rollout, these tools may be gated behind an explicit opt-in flag:
+
+```bash
+WORKRAIL_ENABLE_V2_TOOLS=true
+```
+
+For local/testing, you can also override the WorkRail-owned data directory:
+
+```bash
+WORKRAIL_DATA_DIR=/path/to/workrail-data
+```
+
 ---
 
 ## CI & Releases
