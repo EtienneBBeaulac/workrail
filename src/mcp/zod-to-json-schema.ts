@@ -13,7 +13,9 @@ type JsonSchema = {
   properties?: Record<string, JsonSchema>;
   required?: string[];
   items?: JsonSchema;
+  oneOf?: JsonSchema[];
   enum?: string[];
+  const?: unknown;
   default?: unknown;
   description?: string;
   pattern?: string;
@@ -71,6 +73,27 @@ function convertZodType(schema: z.ZodType): JsonSchema {
     result.additionalProperties = false;
 
     return result;
+  }
+
+  // Handle ZodDiscriminatedUnion (e.g., state machines)
+  if (schema instanceof z.ZodDiscriminatedUnion) {
+    const discriminator = schema._def.discriminator as string;
+    const options = schema._def.options as Array<z.ZodType>;
+    return {
+      oneOf: options.map((opt) => {
+        // Best-effort: each option is typically a ZodObject with a literal discriminator.
+        const s = convertZodType(opt);
+        if (s.type !== 'object') return s;
+
+        // Ensure discriminator appears required (helps clients / agents)
+        const required = new Set(s.required ?? []);
+        required.add(discriminator);
+        return {
+          ...s,
+          required: Array.from(required),
+        };
+      }),
+    };
   }
 
   // Handle ZodString
@@ -143,6 +166,17 @@ function convertZodType(schema: z.ZodType): JsonSchema {
     }
 
     return result;
+  }
+
+  // Handle ZodLiteral
+  if (schema instanceof z.ZodLiteral) {
+    const value = schema._def.value as unknown;
+    // Prefer JSON Schema "const" to preserve literal typing.
+    if (typeof value === 'string') return { type: 'string', const: value };
+    if (typeof value === 'number') return { type: 'number', const: value };
+    if (typeof value === 'boolean') return { type: 'boolean', const: value };
+    if (value === null) return { type: 'null' as any, const: null };
+    return { const: value };
   }
 
   // Handle ZodRecord (for context objects)

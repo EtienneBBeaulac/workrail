@@ -31,7 +31,24 @@ Your process:
 
     workflow_get: `Retrieves workflow information with configurable detail level. Supports progressive disclosure to prevent "workflow spoiling" while providing necessary context for workflow selection and initiation.`,
 
-    workflow_next: `Executes a workflow by getting the next step. Use this tool in a loop to progress through a workflow. You must provide the workflowId and a list of completedSteps. For conditional workflows, provide context with variables that will be used to evaluate step conditions.`,
+    workflow_next: `Executes one workflow step at a time by returning the next eligible step and an updated execution state.
+
+Inputs:
+- workflowId: string
+- state: { kind: "init" } | { kind: "running", completed: string[], loopStack: LoopFrame[], pendingStep?: StepInstanceId } | { kind: "complete" }
+- event (optional): { kind: "step_completed", stepInstanceId: StepInstanceId }
+- context (optional): variables used to evaluate conditions and to drive loops (for/forEach/while/until)
+
+Common usage:
+1) First call:
+{ "workflowId": "...", "state": { "kind": "init" } }
+
+2) After completing the returned step:
+{ "workflowId": "...", "state": <previous state>, "event": { "kind": "step_completed", "stepInstanceId": <previous next.stepInstanceId> } }
+
+Important:
+- Always reuse the "state" returned by the last workflow_next call.
+- When completing a step, the event.stepInstanceId must match the previous next.stepInstanceId exactly.`,
 
     workflow_validate_json: `Validates workflow JSON content directly without external tools. Use this tool when you need to verify that a workflow JSON file is syntactically correct and follows the proper schema.
 
@@ -94,8 +111,9 @@ The user created this workflow because they want THIS process followed, not your
 
 Parameters:
 - workflowId: The workflow you are executing
-- completedSteps: Array of step IDs you have fully completed
-- context: Variables for conditional step evaluation`,
+- state: Execution state returned by the previous workflow_next call (use { kind: "init" } for the first call)
+- event (optional): { kind: "step_completed", stepInstanceId: <previous next.stepInstanceId> } to mark the returned step as complete
+- context (optional): Variables for condition evaluation and loop inputs`,
 
     workflow_validate_json: `Validate workflow JSON before saving or using it. This ensures the workflow will function correctly.
 

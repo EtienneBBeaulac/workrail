@@ -1,5 +1,6 @@
 import type { DomainError } from '../domain/execution/error.js';
 import type { ErrorCode } from './types.js';
+import { toBoundedJsonString } from './validation/bounded-json.js';
 
 export interface ToolErrorMapping {
   readonly code: ErrorCode;
@@ -24,7 +25,19 @@ export function mapDomainErrorToToolError(err: DomainError): ToolErrorMapping {
       return {
         code: 'VALIDATION_ERROR',
         message: err.message,
-        suggestion: 'Reset state to { kind: "init" } or use the state returned by the last workflow_next call',
+        suggestion:
+          `Use the "state" returned by the last workflow_next call.\n` +
+          `If you are completing a step, send an event like:\n` +
+          toBoundedJsonString(
+            {
+              kind: 'step_completed',
+              stepInstanceId: {
+                stepId: '<previous next.stepInstanceId.stepId>',
+                loopPath: [],
+              },
+            },
+            512
+          ),
       };
 
     case 'InvalidLoop':
@@ -38,7 +51,10 @@ export function mapDomainErrorToToolError(err: DomainError): ToolErrorMapping {
       return {
         code: 'PRECONDITION_FAILED',
         message: err.message,
-        suggestion: 'Provide the required keys in the `context` object for condition evaluation',
+        suggestion:
+          'Provide the required keys in the `context` object for condition evaluation and loop inputs.\n' +
+          'Example:\n' +
+          toBoundedJsonString({ context: { '<requiredKey>': '<value>' } }, 256),
       };
 
     case 'ConditionEvalFailed':
