@@ -94,6 +94,45 @@ describe('MCP Server Core Functionality', () => {
       expect(descriptionsContent).toContain('workflow_next');
     });
 
+    it('workflow_next descriptions should align with the state+event contract', () => {
+      const descriptionsPath = path.join(mcpDir, 'tool-descriptions.ts');
+      const descriptionsContent = fs.readFileSync(descriptionsPath, 'utf8');
+
+      // Must mention the real input shape
+      expect(descriptionsContent).toContain('state');
+      expect(descriptionsContent).toContain('event');
+      expect(descriptionsContent).toContain('step_completed');
+
+      // Must not instruct agents to send fields that are not in the schema
+      expect(descriptionsContent).not.toContain('completedSteps');
+      expect(descriptionsContent).not.toContain('currentStep');
+    });
+
+    it('workflow_next descriptions should be consistent across BOTH modes', () => {
+      const descriptionsPath = path.join(mcpDir, 'tool-descriptions.ts');
+      const descriptionsContent = fs.readFileSync(descriptionsPath, 'utf8');
+
+      // Ensure both mode blocks exist
+      expect(descriptionsContent).toContain('standard:');
+      expect(descriptionsContent).toContain('authoritative:');
+
+      // Extract blocks (cheap but stable)
+      const standardBlock = descriptionsContent.split('standard:')[1]?.split('authoritative:')[0] ?? '';
+      const authoritativeBlock = descriptionsContent.split('authoritative:')[1] ?? '';
+
+      // Both must mention state + event (the contract primitives)
+      expect(standardBlock).toContain('state');
+      expect(standardBlock).toContain('event');
+      expect(authoritativeBlock).toContain('state');
+      expect(authoritativeBlock).toContain('event');
+
+      // Neither mode should mention fields that don't exist
+      expect(standardBlock).not.toContain('completedSteps');
+      expect(standardBlock).not.toContain('currentStep');
+      expect(authoritativeBlock).not.toContain('completedSteps');
+      expect(authoritativeBlock).not.toContain('currentStep');
+    });
+
     it('should have tool description provider', () => {
       const providerPath = path.join(mcpDir, 'tool-description-provider.ts');
       expect(fs.existsSync(providerPath)).toBe(true);
