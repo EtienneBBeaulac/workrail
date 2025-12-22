@@ -19,6 +19,13 @@ This contract is shaped by constraints of the stdio MCP environment (no server p
 
 - `docs/reference/mcp-platform-constraints.md`
 
+## Shared locks (authoritative references)
+
+To prevent drift between MCP/CLI/Studio and keep error handling deterministic:
+
+- **Unified error envelope** (including the closed-set `retry` union): `docs/design/v2-core-design-locks.md` (Section 12)
+- **Corruption/salvage gating** (including `SessionHealth` and execution-vs-read-only tool gating): `docs/design/v2-core-design-locks.md` (Operational envelope: Corruption handling)
+
 ## Goals
 
 - Provide a minimal, primitives-only MCP contract that agents can use reliably.
@@ -26,6 +33,11 @@ This contract is shaped by constraints of the stdio MCP environment (no server p
 - Keep the workflow engine internal; avoid leaking execution internals to clients.
 - Treat errors as data (structured error payloads; no throwing across boundaries).
 - Preserve high-signal progress even when work happens outside a workflow step loop (rewinds can delete chat context without warning).
+
+## Error handling (normative)
+
+- Tool handlers MUST return errors as data using the unified error envelope shape (see v2 locks).
+- Retryability MUST be conveyed via the closed-set `retry` union (do not encode retry semantics in free-form prose).
 
 ## Non-Goals
 
@@ -69,7 +81,12 @@ Record durable “work progress” without advancing workflow state. This exists
 
 This tool can be gated behind a feature flag while it is validated in real usage.
 
-To keep WorkRail opt-in and avoid “checkpointing every chat”, `checkpoint_workflow` should require an existing workflow run handle (`stateToken`) unless checkpoint-only sessions are explicitly enabled.
+To keep WorkRail opt-in and avoid “checkpointing every chat”, `checkpoint_workflow` should require an existing workflow run handle (`stateToken`) and a WorkRail-minted `checkpointToken` unless checkpoint-only sessions are explicitly enabled.
+
+Idempotency (required for rewind-safe correctness):
+- `checkpoint_workflow` MUST be idempotent under retries/replays.
+- WorkRail achieves this by minting a `checkpointToken` (opaque, scoped, replay-safe) alongside `stateToken`/`ackToken` in `start_workflow`/`continue_workflow` responses.
+- Callers MUST round-trip `checkpointToken` unchanged when invoking `checkpoint_workflow`.
 
 If checkpoint-only sessions (no workflow has started) are desired later, introduce a `start_session` tool behind a separate feature flag and extend `checkpoint_workflow` to accept `sessionToken`. Until then, checkpointing outside workflows is intentionally unsupported.
 
@@ -164,6 +181,17 @@ Rewinds and replays are expected. The system must support **branching** from the
 To enable branching, WorkRail must be able to mint a **fresh attempt acknowledgement** for the same snapshot when the agent wants to intentionally fork (or when a replay is detected).
 
 Idempotency is keyed to the server-minted ack capability (replay of the same `ackToken` is a no-op returning the same response).
+
+### `checkpointToken` (opaque checkpoint acknowledgement)
+
+- **Minted by WorkRail** for checkpointing against a specific `stateToken` snapshot/node.
+- Represents “the client wants to append a checkpoint at this node”.
+- Must be **idempotent**:
+  - Replaying the same `(stateToken, checkpointToken)` MUST NOT create duplicate checkpoint nodes/edges/outputs.
+  - Replaying returns the same response deterministically.
+- Must be **scoped**:
+  - A `checkpointToken` from run A must not be usable on run B.
+  - A `checkpointToken` from snapshot X must not be usable on snapshot Y.
 
 ### `context` (external inputs)
 
@@ -454,9 +482,10 @@ Explicit “migration” of a run to a new workflow version is a separate, opt-i
 ## What the Agent Must and Must Not Do
 
 - **MUST**:
-  - Treat `stateToken` and `ackToken` as opaque values.
-  - Round-trip both tokens exactly as returned.
+  - Treat `stateToken`, `ackToken`, and `checkpointToken` as opaque values.
+  - Round-trip all tokens exactly as returned.
   - Only advance the workflow by calling `continue_workflow` with the current tokens (`stateToken` + `ackToken`).
+  - Only record a checkpoint by calling `checkpoint_workflow` with the current `stateToken` and `checkpointToken`.
   - In full-auto modes, resolve user-directed prompts by best-effort context gathering and explicit assumptions rather than silently skipping questions.
   - Disclose assumptions, skips, and missing inputs via durable `output` so progress survives rewinds.
 - **MUST NOT**:
@@ -489,6 +518,7 @@ Explicit “migration” of a run to a new workflow version is a separate, opt-i
     "requireConfirmation": true
   },
   "ackToken": "ack.v1....",
+  "checkpointToken": "chk.v1....",
   "isComplete": false,
   "session": {
     "sessionId": "AUTH-1234",
@@ -533,6 +563,7 @@ Notes:
     "requireConfirmation": true
   },
   "ackToken": "ack.v1.next....",
+  "checkpointToken": "chk.v1.next....",
   "isComplete": false,
   "session": {
     "sessionId": "AUTH-1234",
@@ -550,6 +581,7 @@ Notes:
 ```json
 {
   "stateToken": "st.v1....",
+  "checkpointToken": "chk.v1....",
   "output": {
     "notesMarkdown": "Implemented token-based description updates. Next: update tool naming to `start_workflow`/`continue_workflow` and add checkpoint tool behind flag."
   }
@@ -557,7 +589,7 @@ Notes:
 ```
 
 Notes:
-- For now, `checkpoint_workflow` requires `stateToken` (attach to a specific workflow node). Session-only checkpointing is a future feature behind `start_session`.
+- For now, `checkpoint_workflow` requires `stateToken` and `checkpointToken` (attach to a specific workflow node). Session-only checkpointing is a future feature behind `start_session`.
 
 ## Dashboard / Sessions (UX Projection)
 
@@ -575,8 +607,8 @@ Storage invariants (segmentation, crash-safe append, integrity/recovery, snapsho
 
 - Events drive the dashboard; projections are derived (pure functions).
 - Token lineage is derived from durable node and edge events. At minimum:
-  - advancing a step creates an edge (`step_acked`) from parent snapshot to child snapshot
-  - checkpointing creates a node snapshot without advancing workflow state
+  - advancing a step creates an edge (`edgeKind=acked_step`) from parent snapshot to child snapshot
+  - checkpointing creates a node snapshot **and** an edge (`edgeKind=checkpoint`) from parent snapshot to checkpoint snapshot (no advancement)
 - Nodes represent durable snapshots. For Studio, it is useful to treat node kinds as a closed set, e.g.:
   - `nodeKind=step` (created by `continue_workflow` advancement)
   - `nodeKind=checkpoint` (created by `checkpoint_workflow`)
