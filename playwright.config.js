@@ -45,7 +45,9 @@ export default defineConfig({
 
   // Run your local dev server before starting the tests
   webServer: {
-    command: 'npm run web:dev',
+    // CI should not rebuild; it should run against the pre-built dist artifact.
+    // Local dev stays ergonomic.
+    command: process.env.CI ? 'node dist/mcp-server.js' : 'npm run web:dev',
     url: 'http://localhost:3456',
     reuseExistingServer: !process.env.CI,
   },

@@ -12,6 +12,40 @@ on:
 
 jobs:
   # ============================================================================
+  # REQUIRED: Build Artifact (single source of truth for dist/)
+  # ============================================================================
+  build-artifact:
+    name: Build Artifact (dist/)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js (toolchain)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies (no lifecycle scripts)
+        run: npm ci --ignore-scripts
+
+      - name: Build dist/
+        run: npm run build
+
+      - name: Verify dist artifacts
+        run: |
+          test -f dist/mcp-server.js || (echo "Missing dist/mcp-server.js" && exit 1)
+          test -f dist/cli.js || (echo "Missing dist/cli.js" && exit 1)
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  # ============================================================================
   # REQUIRED: Type Check (catches type errors that build might miss)
   # ============================================================================
   typecheck:
@@ -72,6 +106,7 @@ jobs:
   validate-workflows:
     name: Validate Workflows
     runs-on: ubuntu-latest
+    needs: build-artifact
     
     steps:
       - name: Checkout code
@@ -84,10 +119,12 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
-      - name: Build project
-        run: npm run build
+      - name: Download build artifact (dist/)
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
 
       - name: Validate all workflows
         run: npm run validate:workflows
@@ -110,6 +147,7 @@ jobs:
   build-and-test:
     name: Build & Test (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
+    needs: build-artifact
     strategy:
       matrix:
         node-version: [ 20, 22 ]
@@ -126,10 +164,12 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
-      - name: Build project
-        run: npm run build
+      - name: Download build artifact (dist/)
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
 
       - name: Run unit and integration tests
         run: npx vitest run --exclude="tests/contract/**"
@@ -149,6 +189,7 @@ jobs:
   contract-tests:
     name: Contract Tests
     runs-on: ubuntu-latest
+    needs: build-artifact
     
     steps:
       - name: Checkout code
@@ -161,10 +202,12 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
-      - name: Build project
-        run: npm run build
+      - name: Download build artifact (dist/)
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
 
       - name: Run contract tests
         run: npx vitest run tests/contract/ --testTimeout=30000
@@ -176,6 +219,7 @@ jobs:
   e2e-tests:
     name: E2E Tests (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
+    needs: build-artifact
     strategy:
       matrix:
         node-version: [ 20, 22 ]
@@ -192,10 +236,12 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
-      - name: Build project
-        run: npm run build
+      - name: Download build artifact (dist/)
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
 
       - name: Install Playwright browsers with dependencies
         run: npx playwright install --with-deps chromium
@@ -218,13 +264,21 @@ jobs:
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [ typecheck, validate-workflows, build-and-test, contract-tests, e2e-tests ]
+    needs: [ build-artifact, typecheck, validate-workflows, build-and-test, contract-tests, e2e-tests ]
     if: always()
     steps:
       - name: Check required jobs
         run: |
           echo "## CI Success Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Check build-artifact
+          if [[ "${{ needs.build-artifact.result }}" != "success" ]]; then
+            echo "- Build Artifact: FAILED" >> $GITHUB_STEP_SUMMARY
+            echo "Build Artifact job failed"
+            exit 1
+          fi
+          echo "- Build Artifact: PASSED" >> $GITHUB_STEP_SUMMARY
           
           # Check typecheck
           if [[ "${{ needs.typecheck.result }}" != "success" ]]; then

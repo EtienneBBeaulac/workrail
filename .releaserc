@@ -1,23 +1,68 @@
-# WorkRail Release Configuration
-RELEASE_TYPE="minor"
-RELEASE_VERSION=""
-RELEASE_DESC="Fixed dual-mode CLI interface bugs"
-RELEASE_FEATURES="### Bug Fixes
-- Fixed multi-line --features argument parsing issue
-- Resolved unexpected interactive mode fallback  
-- Fixed publish prompt not waiting for user input
+branches:
+  - main
 
-### New Features
-- Added explicit --interactive flag for interactive mode
-- Added .releaserc config file support
-- Added --migrate flag to convert commands to config
-- Default to batch mode for better CI/CD compatibility
+tagFormat: "v${version}"
 
-### Improvements
-- Clear mode separation between batch and interactive
-- Better error messages in batch mode
-- No stdin pollution in batch mode"
-RELEASE_PUSH=false
-RELEASE_PUBLISH=false
-RELEASE_ACCESS="public"
-RELEASE_FORCE=false
+plugins:
+  - - "@semantic-release/commit-analyzer"
+    - preset: conventionalcommits
+      releaseRules:
+        - type: feat
+          release: minor
+        - type: fix
+          release: patch
+        - type: perf
+          release: patch
+        - type: revert
+          release: patch
+        - type: docs
+          release: false
+        - type: style
+          release: false
+        - type: chore
+          release: false
+        - type: refactor
+          release: false
+        - type: test
+          release: false
+        - type: build
+          release: false
+        - type: ci
+          release: false
+        - breaking: true
+          release: major
+  - - "@semantic-release/release-notes-generator"
+    - preset: conventionalcommits
+      presetConfig:
+        types:
+          - type: feat
+            section: Features
+          - type: fix
+            section: Bug Fixes
+          - type: perf
+            section: Performance Improvements
+          - type: revert
+            section: Reverts
+          - type: docs
+            section: Documentation
+            hidden: true
+          - type: style
+            section: Styles
+            hidden: true
+          - type: chore
+            section: Miscellaneous Chores
+            hidden: true
+          - type: refactor
+            section: Code Refactoring
+            hidden: true
+          - type: test
+            section: Tests
+            hidden: true
+          - type: build
+            section: Build System
+            hidden: true
+          - type: ci
+            section: Continuous Integration
+            hidden: true
+  - "@semantic-release/npm"
+  - "@semantic-release/github"

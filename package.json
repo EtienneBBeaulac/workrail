@@ -5,12 +5,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/EtienneBBeaulac/mcp.git"
+    "url": "https://github.com/EtienneBBeaulac/workrail.git"
   },
   "bugs": {
-    "url": "https://github.com/EtienneBBeaulac/mcp/issues"
+    "url": "https://github.com/EtienneBBeaulac/workrail/issues"
   },
-  "homepage": "https://github.com/EtienneBBeaulac/mcp#readme",
+  "homepage": "https://github.com/EtienneBBeaulac/workrail#readme",
   "bin": {
     "workrail": "dist/mcp-server.js"
   },
@@ -24,7 +24,6 @@
     "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true});\" && tsc -p tsconfig.build.json",
     "docs:workflows": "node scripts/generate-workflow-docs.js",
     "dev": "npm run build && node dist/mcp-server.js",
-    "prepare": "npm run build",
     "watch": "tsc --watch",
     "validate:workflows": "bash scripts/validate-workflows.sh",
     "precommit": "npm run validate:workflows",
