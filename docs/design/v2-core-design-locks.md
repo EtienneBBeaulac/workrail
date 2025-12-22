@@ -1277,6 +1277,9 @@ Locks:
 - The data directory is **WorkRail-owned** (not inside workflow source directories).
 - All paths stored in manifests/bundles are **relative** to the session root or bundle root (no absolute paths).
 
+Implementation note:
+- The root may be configurable for dev/testing (e.g., via an env var like `WORKRAIL_DATA_DIR`), but **relative-path-only** storage remains a hard invariant.
+
 Conceptual layout (authoritative intent; exact root resolution is platform-specific):
 - `data/`
   - `sessions/<sessionId>/`
