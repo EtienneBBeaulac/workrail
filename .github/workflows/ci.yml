@@ -125,6 +125,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: dist
+          path: dist
 
       - name: Validate all workflows
         run: npm run validate:workflows
@@ -170,6 +171,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: dist
+          path: dist
 
       - name: Run unit and integration tests
         run: npx vitest run --exclude="tests/contract/**"
@@ -208,6 +210,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: dist
+          path: dist
 
       - name: Run contract tests
         run: npx vitest run tests/contract/ --testTimeout=30000
@@ -242,6 +245,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: dist
+          path: dist
 
       - name: Install Playwright browsers with dependencies
         run: npx playwright install --with-deps chromium
