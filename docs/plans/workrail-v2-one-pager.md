@@ -21,7 +21,7 @@ Advanced (flagged longer):
 
 ## Invariants (v2 guarantees)
 
-1) **Token-based execution**: agents only round-trip opaque handles; `continue_workflow` supports safe rehydrate and idempotent advance.
+1) **Token-based execution**: agents only round-trip opaque handles; `continue_workflow` supports safe rehydrate and idempotent advance (`ackToken` with `attemptId`).
 2) **Pinned determinism**: every run pins to a `workflowHash` of the fully expanded compiled workflow (builtins/templates/features/contracts included).
 3) **Append-only truth**: durable state is an append-only session/run graph; all “latest” views are projections.
 4) **Rewinds are branches**: using a non-tip snapshot auto-forks and returns lost branch context (bounded downstream recap).
@@ -30,6 +30,7 @@ Advanced (flagged longer):
 7) **Resumable portability**: export/import bundles are versioned + integrity-checked; imports re-mint tokens from stored snapshots.
 8) **Builtin authoring power + auditability**: workflows can reference builtin templates/features/contract packs; bounded decision traces exist for dashboard/logs/exports (not agent-facing by default).
 9) **Modes + preferences**: execution behavior (guided vs full-auto) is controlled by a closed set of preferences, recorded durably so behavior is rewind-safe and portable.
+10) **Checkpointing is replay-safe**: `checkpoint_workflow` is idempotent via an opaque `checkpointToken` and records a checkpoint node + checkpoint edge in the run DAG.
 
 ## Explicit non-goals
 
