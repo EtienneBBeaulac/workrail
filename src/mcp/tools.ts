@@ -94,6 +94,17 @@ export const WORKFLOW_TOOL_ANNOTATIONS: Readonly<Record<WorkflowToolName, ToolAn
     destructiveHint: false,
     idempotentHint: true,
   },
+  // v2 tools (feature-flagged)
+  list_workflows: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+  },
+  inspect_workflow: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+  },
 } as const;
 
 // -----------------------------------------------------------------------------
@@ -106,6 +117,9 @@ export const WORKFLOW_TOOL_TITLES: Readonly<Record<WorkflowToolName, string>> = 
   workflow_next: 'Execute Next Workflow Step',
   workflow_validate_json: 'Validate Workflow JSON',
   workflow_get_schema: 'Get Workflow Schema',
+  // v2 tools (feature-flagged)
+  list_workflows: 'List Workflows (v2)',
+  inspect_workflow: 'Inspect Workflow (v2)',
 } as const;
 
 // -----------------------------------------------------------------------------

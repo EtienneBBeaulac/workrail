@@ -41,4 +41,22 @@ describe('Architecture boundaries', () => {
 
     expect(offenders).toEqual([]);
   });
+
+  it('does not allow v2 durable-core to import MCP wiring', async () => {
+    const v2CoreDir = path.resolve(__dirname, '../../src/v2/durable-core');
+    const files = await listFilesRecursive(v2CoreDir);
+
+    const offenders: Array<{ file: string; reason: string }> = [];
+
+    for (const file of files) {
+      const content = await fs.readFile(file, 'utf8');
+
+      // Any import that reaches into src/mcp is a layering violation.
+      if (/\bfrom\s+['"][^'"]*\/mcp\/[^'"]*['"]/.test(content) || /\bfrom\s+['"]\.\.\/\.\.\/mcp\//.test(content)) {
+        offenders.push({ file, reason: 'imports from src/mcp/**' });
+      }
+    }
+
+    expect(offenders).toEqual([]);
+  });
 });

@@ -48,6 +48,10 @@ This tool provides:
 - Field descriptions and validation rules
 - Examples of valid patterns and formats
 - Schema version and metadata information`,
+
+    list_workflows: `Lists available workflows using the WorkRail v2 read-only surface (feature-flagged). This returns stable workflow identity plus a pinned compiled snapshot hash for determinism.`,
+
+    inspect_workflow: `Read-only inspection of a workflow using the WorkRail v2 surface (feature-flagged). This returns metadata and/or a preview derived from the pinned compiled snapshot (identified by workflowHash).`,
   },
 
   // ─────────────────────────────────────────────────────────────────
@@ -109,5 +113,13 @@ Returns validation result with specific errors and suggestions if invalid.`,
     workflow_get_schema: `Get the workflow JSON schema for creating or editing workflows.
 
 Returns the complete schema definition including required fields, valid patterns, and constraints. Use this as reference when authoring workflow JSON.`,
+
+    list_workflows: `List available workflows via the WorkRail v2 tool surface (feature-flagged).
+
+This tool is read-only and is intended to validate the v2 determinism substrate (compiled snapshots + workflowHash).`,
+
+    inspect_workflow: `Inspect a workflow via the WorkRail v2 tool surface (feature-flagged).
+
+This tool is read-only. It MUST reflect the pinned compiled snapshot identified by workflowHash (not mutable on-disk source).`,
   },
 } as const;

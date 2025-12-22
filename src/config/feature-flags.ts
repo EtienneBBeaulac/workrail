@@ -78,6 +78,14 @@ export const FEATURE_FLAG_DEFINITIONS: ReadonlyArray<FeatureFlagDefinition> = [
     since: '0.9.0',
     stable: false,
   },
+  {
+    key: 'v2Tools',
+    envVar: 'WORKRAIL_ENABLE_V2_TOOLS',
+    defaultValue: false,
+    description: 'Enable WorkRail v2 MCP tools (Slice 1: list_workflows, inspect_workflow) behind an explicit opt-in flag',
+    since: '0.9.0',
+    stable: false,
+  },
 ] as const;
 
 /**

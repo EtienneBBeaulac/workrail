@@ -33,6 +33,9 @@ export const WORKFLOW_TOOL_NAMES = [
   'workflow_next',
   'workflow_validate_json',
   'workflow_get_schema',
+  // v2 tools (feature-flagged)
+  'list_workflows',
+  'inspect_workflow',
 ] as const;
 
 export type WorkflowToolName = typeof WORKFLOW_TOOL_NAMES[number];
