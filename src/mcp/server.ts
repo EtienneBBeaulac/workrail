@@ -26,6 +26,8 @@ import type { ProcessTerminator } from '../runtime/ports/process-terminator.js';
 import type { ToolContext, ToolResult } from './types.js';
 import { createToolFactory, type ToolAnnotations, type ToolDefinition } from './tool-factory.js';
 import type { IToolDescriptionProvider } from './tool-description-provider.js';
+import { preValidateWorkflowNextArgs, type PreValidateResult } from './validation/workflow-next-prevalidate.js';
+import { toBoundedJsonValue } from './validation/bounded-json.js';
 import {
   // Workflow tool input schemas
   WorkflowListInput,
@@ -188,6 +190,41 @@ function createHandler<TInput extends z.ZodType, TOutput>(
 }
 
 // -----------------------------------------------------------------------------
+// Validation-heavy tool support (error UX)
+// -----------------------------------------------------------------------------
+
+function createValidatingHandler<TInput extends z.ZodType, TOutput>(
+  schema: TInput,
+  preValidate: (args: unknown) => PreValidateResult,
+  handler: (input: z.infer<TInput>, ctx: ToolContext) => Promise<ToolResult<TOutput>>
+): ToolHandler {
+  return async (args: unknown, ctx: ToolContext): Promise<McpCallToolResult> => {
+    const pre = preValidate(args);
+    if (!pre.ok) {
+      const bounded = pre.correctTemplate ? toBoundedJsonValue(pre.correctTemplate, 512) : undefined;
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(
+            {
+              error: pre.message,
+              code: pre.code,
+              ...(bounded ? { correctTemplate: bounded } : {}),
+            },
+            null,
+            2
+          ),
+        }],
+        isError: true,
+      };
+    }
+
+    // Fall back to the standard Zod + handler pipeline
+    return createHandler(schema, handler)(args, ctx);
+  };
+}
+
+// -----------------------------------------------------------------------------
 // Server Start
 // -----------------------------------------------------------------------------
 
@@ -299,7 +336,7 @@ export async function startServer(): Promise<void> {
   const handlers: Record<string, ToolHandler> = {
     workflow_list: createHandler(WorkflowListInput, handleWorkflowList),
     workflow_get: createHandler(WorkflowGetInput, handleWorkflowGet),
-    workflow_next: createHandler(WorkflowNextInput, handleWorkflowNext),
+    workflow_next: createValidatingHandler(WorkflowNextInput, preValidateWorkflowNextArgs, handleWorkflowNext),
     workflow_validate_json: createHandler(WorkflowValidateJsonInput, handleWorkflowValidateJson),
     workflow_get_schema: createHandler(WorkflowGetSchemaInput, handleWorkflowGetSchema),
     workrail_create_session: createHandler(createSessionTool.inputSchema, handleCreateSession),

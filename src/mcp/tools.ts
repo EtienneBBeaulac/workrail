@@ -41,7 +41,11 @@ export const WorkflowNextInput = z.object({
     .string()
     .regex(/^[A-Za-z0-9_-]+$/, 'Workflow ID must contain only letters, numbers, hyphens, and underscores')
     .describe('The unique identifier of the workflow'),
-  state: ExecutionStateSchema.describe('Serializable workflow execution state (authoritative)'),
+  state: ExecutionStateSchema.describe(
+    'Serializable workflow execution state (authoritative). ' +
+    'For the first call, use: { kind: "init" }. ' +
+    'For subsequent calls, use the "state" returned by the previous workflow_next response.'
+  ),
   event: WorkflowEventSchema.optional().describe('Optional event to apply before selecting the next step'),
   context: z
     .record(z.unknown())

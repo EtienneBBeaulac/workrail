@@ -152,6 +152,16 @@ The agent will find the workflow, start at step 1, and proceed systematically.
 
 ---
 
+## CI & Releases
+
+- **Lockfile is enforced**: `package-lock.json` is canonical and CI will fail if `npm ci` would modify it. Commit lockfile changes intentionally.
+- **Release authority**: releases are produced by **semantic-release** in GitHub Actions (don’t bump versions/tags locally).
+- **Preview a release (dry-run)**:
+  - **Locally**: `npx semantic-release --dry-run --no-ci`
+  - **In Actions**: run the **Release (dry-run)** workflow (`.github/workflows/release-dry-run.yml`).
+
+---
+
 ## Included Workflows
 
 20+ workflows included for development, debugging, review, documentation, and more:
@@ -237,4 +247,4 @@ support [conditions, loops, validation criteria](docs/authoring.md), and more.
 
 ---
 
-[GitHub](https://github.com/EtienneBBeaulac/mcp) · MIT License
+[GitHub](https://github.com/EtienneBBeaulac/workrail) · MIT License
