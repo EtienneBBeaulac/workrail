@@ -1586,6 +1586,10 @@ This phase is **cross-cutting quality work** (not a functional slice). It touche
   - Runs on every commit
   - Fails fast with actionable diff if schemas/registries/docs are out of sync
   - Enforces deterministic output (no timestamps, stable ordering)
+- **CI workflow validation includes v2 tools**:
+  - Extend `scripts/validate-workflows.sh` or add separate v2 tool validation
+  - Validate v2 MCP tool schemas match code-canonical definitions
+  - Run as part of CI `validate-workflows` job (`.github/workflows/ci.yml`)
 
 ### Sub-phase E: Test coverage gaps (non-functional but high-signal)
 - **Property-based tests** for deterministic helpers:
