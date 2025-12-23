@@ -206,4 +206,54 @@ describe('v2 local session store (Slice 2 substrate)', () => {
       expect(loaded.error.code).toBe('SESSION_STORE_CORRUPTION_DETECTED');
     }
   });
+
+  it('append is idempotent: replaying the same events by dedupeKey is a no-op', async () => {
+    const root = await mkTempDataDir();
+    const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: root });
+    const fsPort = new NodeFileSystemV2();
+    const sha = new NodeSha256V2();
+    const lock = new LocalSessionLockV2(dataDir, fsPort);
+    const store = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha, lock);
+
+    const sessionId = asSessionId('sess_test_idempotency');
+    const snapshotRef = asSnapshotRef(asSha256Digest('sha256:5947229239ac2966c1099d6d74f4448c064e54ae25959eaebfd89cec073bdc11'));
+
+    const evt: DomainEventV1 = {
+      v: 1,
+      eventId: 'evt_1',
+      eventIndex: 0,
+      sessionId,
+      kind: 'session_created',
+      dedupeKey: `session_created:${sessionId}`,
+      data: {},
+    };
+
+    await store
+      .append(sessionId, { events: [evt], snapshotPins: [{ snapshotRef, eventIndex: 0, createdByEventId: 'evt_1' }] })
+      .match(
+        () => undefined,
+        (e) => {
+          throw new Error(`unexpected append error: ${e.code}`);
+        }
+      );
+
+    // Replay the same append (same dedupeKey).
+    await store
+      .append(sessionId, { events: [evt], snapshotPins: [{ snapshotRef, eventIndex: 0, createdByEventId: 'evt_1' }] })
+      .match(
+        () => undefined,
+        (e) => {
+          throw new Error(`unexpected append error on replay: ${e.code}`);
+        }
+      );
+
+    // Load and verify only one event exists.
+    const loaded = await store.load(sessionId).match(
+      (v) => v,
+      (e) => {
+        throw new Error(`unexpected load error: ${e.code}`);
+      }
+    );
+    expect(loaded.events.length).toBe(1);
+  });
 });
