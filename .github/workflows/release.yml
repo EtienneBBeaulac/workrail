@@ -85,16 +85,28 @@ jobs:
         run: |
           POST_TAG="$(git describe --tags --abbrev=0 --match "v*" 2>/dev/null || true)"
           MANIFEST_SHA="$(sha256sum dist/manifest.json | awk '{print $1}')"
+
+          if [ -n "$POST_TAG" ] && [ "$POST_TAG" != "${PRE_RELEASE_TAG:-}" ]; then
+            echo "::notice title=Release outcome::Released ${POST_TAG}"
+            OUTCOME_LINE="Released ${POST_TAG}"
+            TAG_LINE="- Tag: ${POST_TAG}"
+            RELEASE_LINE="- GitHub Release: https://github.com/${REPO}/releases/tag/${POST_TAG}"
+          else
+            echo "::notice title=Release outcome::No release (no version bump)"
+            OUTCOME_LINE="No release (no version bump)"
+            TAG_LINE="- Tag: (no release created)"
+            RELEASE_LINE=""
+          fi
+
           {
             echo "## Release Summary"
             echo
+            echo "- Outcome: ${OUTCOME_LINE}"
             echo "- CI run: ${CI_RUN_URL} (run_id=${CI_RUN_ID})"
             echo "- Commit: ${CI_SHA}"
             echo "- dist manifest sha256: ${MANIFEST_SHA}"
-            if [ -n "$POST_TAG" ] && [ "$POST_TAG" != "${PRE_RELEASE_TAG:-}" ]; then
-              echo "- Tag: ${POST_TAG}"
-              echo "- GitHub Release: https://github.com/${REPO}/releases/tag/${POST_TAG}"
-            else
-              echo "- Tag: (no release created)"
+            echo "${TAG_LINE}"
+            if [ -n "${RELEASE_LINE}" ]; then
+              echo "${RELEASE_LINE}"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
