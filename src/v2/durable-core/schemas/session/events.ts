@@ -251,7 +251,16 @@ export const DomainEventV1Schema = z.discriminatedUnion('kind', [
   DomainEventEnvelopeV1Schema.extend({ kind: z.literal('session_created'), data: z.object({}) }),
   DomainEventEnvelopeV1Schema.extend({
     kind: z.literal('observation_recorded'),
-    data: JsonValueSchema,
+    scope: z.undefined(),
+    data: z.object({
+      key: z.enum(['git_branch', 'git_head_sha', 'repo_root_hash']),
+      value: z.discriminatedUnion('type', [
+        z.object({ type: z.literal('short_string'), value: z.string().min(1).max(80) }),
+        z.object({ type: z.literal('git_sha1'), value: z.string().regex(/^[0-9a-f]{40}$/) }),
+        z.object({ type: z.literal('sha256'), value: sha256DigestSchema }),
+      ]),
+      confidence: z.enum(['low', 'med', 'high']),
+    }),
   }),
   DomainEventEnvelopeV1Schema.extend({
     kind: z.literal('run_started'),
@@ -339,8 +348,33 @@ export const DomainEventV1Schema = z.discriminatedUnion('kind', [
     scope: z.object({ runId: z.string().min(1), nodeId: z.string().min(1) }),
     data: GapRecordedDataV1Schema,
   }),
-  DomainEventEnvelopeV1Schema.extend({ kind: z.literal('divergence_recorded'), data: JsonValueSchema }),
-  DomainEventEnvelopeV1Schema.extend({ kind: z.literal('decision_trace_appended'), data: JsonValueSchema }),
+  DomainEventEnvelopeV1Schema.extend({
+    kind: z.literal('divergence_recorded'),
+    scope: z.object({ runId: z.string().min(1), nodeId: z.string().min(1) }),
+    data: z.object({
+      divergenceId: z.string().min(1),
+      reason: z.enum(['missing_user_context', 'capability_unavailable', 'efficiency_skip', 'safety_stop', 'policy_constraint']),
+      summary: z.string().min(1),
+      relatedStepId: z.string().min(1).optional(),
+    }),
+  }),
+  DomainEventEnvelopeV1Schema.extend({
+    kind: z.literal('decision_trace_appended'),
+    scope: z.object({ runId: z.string().min(1), nodeId: z.string().min(1) }),
+    data: z.object({
+      traceId: z.string().min(1),
+      entries: z
+        .array(
+          z.object({
+            kind: z.enum(['selected_next_step', 'evaluated_condition', 'entered_loop', 'exited_loop', 'detected_non_tip_advance']),
+            summary: z.string().min(1).max(512),
+            refs: z.record(z.unknown()).optional(),
+          })
+        )
+        .min(1)
+        .max(25),
+    }),
+  }),
 ]);
 
 export type DomainEventV1 = z.infer<typeof DomainEventV1Schema>;
