@@ -192,19 +192,65 @@ export function projectRunDagV2(events: readonly DomainEventV1[]): Result<RunDag
       continue;
     }
 
-    // Prefer the most recently created node by eventIndex; tiebreak by nodeId lexical.
-    let best = run.nodesById[tips[0]!]!;
+    // Preferred tip policy (locked): choose leaf with highest "last activity" across its reachable history.
+    // Reachable history is approximated as the node's ancestor chain (including itself).
+    // lastActivity is max EventIndex among events touching any ancestor nodeId, plus edges that touch those nodes.
+    const parentById: Record<string, string | null> = {};
+    for (const n of Object.values(run.nodesById)) parentById[n.nodeId] = n.parentNodeId;
+
+    const ancestryOf = (leafId: string): Set<string> => {
+      const set = new Set<string>();
+      let cur: string | null = leafId;
+      while (cur) {
+        if (set.has(cur)) break;
+        set.add(cur);
+        cur = parentById[cur] ?? null;
+      }
+      return set;
+    };
+
+    const lastActivityFor = (leafId: string): number => {
+      const ancestors = ancestryOf(leafId);
+      let max = run.nodesById[leafId]!.createdAtEventIndex;
+
+      for (const e of events) {
+        if (e.kind === 'edge_created') {
+          if (ancestors.has(e.data.fromNodeId) || ancestors.has(e.data.toNodeId)) {
+            if (e.eventIndex > max) max = e.eventIndex;
+          }
+          continue;
+        }
+        const nodeId = (e as any).scope?.nodeId as string | undefined;
+        if (nodeId && ancestors.has(nodeId)) {
+          if (e.eventIndex > max) max = e.eventIndex;
+        }
+      }
+
+      return max;
+    };
+
+    let bestTip = tips[0]!;
+    let bestActivity = lastActivityFor(bestTip);
+
     for (let i = 1; i < tips.length; i++) {
-      const candidate = run.nodesById[tips[i]!]!;
-      if (candidate.createdAtEventIndex > best.createdAtEventIndex) best = candidate;
+      const tip = tips[i]!;
+      const activity = lastActivityFor(tip);
+      if (activity > bestActivity) {
+        bestTip = tip;
+        bestActivity = activity;
+      } else if (activity === bestActivity) {
+        // Tie-breakers (locked): node_created index, then lexical nodeId.
+        const bestCreated = run.nodesById[bestTip]!.createdAtEventIndex;
+        const tipCreated = run.nodesById[tip]!.createdAtEventIndex;
+        if (tipCreated > bestCreated) {
+          bestTip = tip;
+        } else if (tipCreated === bestCreated && tip < bestTip) {
+          bestTip = tip;
+        }
+      }
     }
-    // If multiple share best.createdAtEventIndex, the sort() above ensures lexical determinism.
-    const bestCandidates = tips
-      .map((id) => run.nodesById[id]!)
-      .filter((n) => n.createdAtEventIndex === best.createdAtEventIndex)
-      .map((n) => n.nodeId)
-      .sort();
-    run.preferredTipNodeId = bestCandidates[0] ?? null;
+
+    run.preferredTipNodeId = bestTip;
   }
 
   const runsById: Record<string, RunDagRunV2> = {};
