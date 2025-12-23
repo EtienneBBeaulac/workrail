@@ -17,4 +17,24 @@ export class LocalDataDirV2 implements DataDirPortV2 {
   pinnedWorkflowPath(workflowHash: string): string {
     return path.join(this.pinnedWorkflowsDir(), `${workflowHash}.json`);
   }
+
+  sessionsDir(): string {
+    return path.join(this.root(), 'sessions');
+  }
+
+  sessionDir(sessionId: string): string {
+    return path.join(this.sessionsDir(), sessionId);
+  }
+
+  sessionEventsDir(sessionId: string): string {
+    return path.join(this.sessionDir(sessionId), 'events');
+  }
+
+  sessionManifestPath(sessionId: string): string {
+    return path.join(this.sessionDir(sessionId), 'manifest.jsonl');
+  }
+
+  sessionLockPath(sessionId: string): string {
+    return path.join(this.sessionDir(sessionId), '.lock');
+  }
 }
