@@ -35,6 +35,8 @@ jobs:
         with:
           node-version: 22.14.0
           cache: 'npm'
+          # Align with npm trusted publishing reference setup
+          registry-url: https://registry.npmjs.org
 
       # npm Trusted Publishing (OIDC) requires npm >= 11.5.1
       - name: Upgrade npm (Trusted Publishing)
@@ -70,9 +72,37 @@ jobs:
           test -f dist/cli.js || (echo "Missing dist/cli.js" && exit 1)
           echo "Build artifacts verified."
 
+      - name: Debug publish environment
+        run: |
+          set -euo pipefail
+
+          echo "node=$(node --version)"
+          echo "npm=$(npm --version)"
+          echo "registry=$(npm config get registry)"
+          echo "userconfig=$(npm config get userconfig)"
+          echo "cache=$(npm config get cache)"
+
+          echo "ACTIONS_ID_TOKEN_REQUEST_URL=${ACTIONS_ID_TOKEN_REQUEST_URL:+set}"
+          echo "ACTIONS_ID_TOKEN_REQUEST_TOKEN=${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+set}"
+          echo "GITHUB_WORKFLOW_REF=${GITHUB_WORKFLOW_REF:-unset}"
+
+          echo "PWD=$(pwd)"
+          echo "HOME=${HOME:-unset}"
+
+          echo "--- npm config (safe subset) ---"
+          npm config list -l | egrep -i '^(; )?(registry|@exaudeus:registry|always-auth|auth-type|userconfig|cache|provenance)=' || true
+
+          echo "--- potential npmrc files ---"
+          ls -la "${HOME:-/home/runner}" || true
+          ls -la "${HOME:-/home/runner}/.npmrc" || true
+          ls -la .npmrc || true
+
       - name: Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Increase signal for npm auth behavior during publish
+          NPM_CONFIG_LOGLEVEL: verbose
+          DEBUG: semantic-release:*,@semantic-release/*
         run: npx semantic-release
 
       - name: Release summary
