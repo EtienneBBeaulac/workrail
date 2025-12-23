@@ -60,10 +60,11 @@ Local data may also be rooted under a WorkRail-owned data dir, optionally overri
 
 ## Current Status (2025-12-23)
 
-- ✅ Slice 1 (read-only tools + pinning) merged
-- ✅ Slice 2 (append-only substrate + projections) merged
-- ✅ Slice 2.5 (gate+witness + execution safety) in review
-- **Next**: Slice 3 prerequisites → Slice 3 (token orchestration)
+- Slice 1 (read-only tools + pinning) merged
+- Slice 2 (append-only substrate + projections) merged
+- Slice 2.5 (gate+witness + execution safety) merged
+- Slice 3 prereqs (execution snapshots, CAS, token signing) shipped (`feature/etienneb/v2-slice3-prereqs`)
+- **Next**: Slice 3 (token orchestration: `start_workflow`, `continue_workflow`)
 
 ## Epics
 

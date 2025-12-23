@@ -392,41 +392,40 @@ This is a concise record of what we did in this chat, for resumption continuity 
 
 ### What's next (current status as of 2025-12-23)
 
-**Design is locked.** Slice 2.5 (execution safety boundaries) is in review. **Before starting Slice 3** (token orchestration), the following high-leverage boundary primitives must be code-locked to avoid mid-slice refactors:
+**Design is locked.** Slice 2.5 (execution safety boundaries) merged. **Slice 3 prerequisites** (execution snapshots, snapshot CAS, token codec/signing/keyring) shipped on `feature/etienneb/v2-slice3-prereqs` (2025-12-23).
 
-#### Slice 3 prerequisites (must exist before orchestration work)
+#### Slice 3 prerequisites (complete; PR ready for review)
 
-**Implementation ordering** (locked; dependencies flow downward):
-1. **Execution snapshot schema** first (everything else depends on snapshot types)
-2. **Token payload codec** second (depends on snapshot schema for payload fields)
-3. **Snapshot CAS port + adapter** third (depends on snapshot schema)
-4. **Snapshot-state helpers** fourth (depends on snapshot schema)
-5. **Event union audit** last (likely already complete; just verify)
+Implemented on `feature/etienneb/v2-slice3-prereqs`:
+- Execution snapshot schema + golden JCS fixture
+- Snapshot CAS port + local adapter
+- Token payload codec + HMAC signing + keyring (current/previous keys)
+- Snapshot-state helpers (pure)
+- Event union audit (all 12 kinds present)
 
-**Details**:
+**Implementation details** (reference):
 - **Execution snapshot schema** (`src/v2/durable-core/schemas/execution-snapshot/`):
   - `ExecutionSnapshotFileV1` + `EnginePayloadV1` Zod schemas
   - `EngineStateV1` union (`init | running | complete`)
   - `StepInstanceKey` canonical format + validation (delimiter-safe: `[a-z0-9_-]+`)
   - `PendingStep`, `LoopFrame` typed structures
   - Golden fixture: snapshot → JCS bytes → sha256 (proves canonicalization)
-- **Token payload codec (pure, no signer yet)**:
+- **Token payload codec + signing**:
   - `src/v2/durable-core/tokens/` (encode/decode for `stateToken`, `ackToken`, `checkpointToken` payloads)
-  - Use JCS → `CanonicalBytes`; signing/keyring is later
+  - JCS canonical bytes → base64url encoding
+  - HMAC-SHA256 signing with keyring (current/previous keys, deterministic verify order)
   - Payloads locked in v2-core-design-locks.md (tokenVersion, tokenKind, sessionId, runId, nodeId, workflowHash/attemptId)
-  - Test: encode → decode roundtrip
-- **Snapshot CAS port + minimal adapter**:
+  - Tests: encode/decode roundtrip, sign/verify, rotation, tamper detection
+- **Snapshot CAS port + adapter**:
   - `SnapshotStorePortV2` (`put(snapshot) -> SnapshotRef`, `get(ref) -> snapshot`)
-  - `src/v2/infra/local/snapshot-store/` (minimal; just prove put/get works)
-  - Test: put → get yields byte-identical (or JCS-equivalent) snapshot
-- **Tiny snapshot-state helpers** (projection stubs):
+  - `src/v2/infra/local/snapshot-store/` with crash-safe writes
+  - Test: put → get yields byte-identical snapshot
+- **Snapshot-state helpers** (projection stubs):
   - `src/v2/durable-core/projections/snapshot-state.ts`
   - `deriveIsComplete(state: EngineStateV1): boolean`
   - `derivePendingStep(state: EngineStateV1): PendingStep | null`
   - Tests: unit tests for pure helpers
-- **Event union audit** (likely already complete):
-  - Confirm all 12 locked event kinds exist in `DomainEventV1Schema` with typed payloads
-  - From audit: ✅ all present; no gaps
+- **Event union**: all 12 locked event kinds present in `DomainEventV1Schema`
 
 #### Recent lock tightening (sessions 2025-12-21, 2025-12-23)
 We audited the v2 locks + docs for gaps/inconsistencies and applied architectural fixes:
@@ -461,11 +460,16 @@ The full v2 blueprint is recorded in `v2-core-design-locks.md` section 16.1 (whi
 - Event union is audited (covers all locked kinds for Slice 3).
 - Snapshot-state helpers exist (minimal: `deriveIsComplete`, `derivePendingStep`).
 
+**Prereq invariants enforced** (must continue to hold in orchestration):
+- Execution snapshots are JCS-canonicalizable; `SnapshotRef = sha256(JCS(snapshot))` is deterministic.
+- Token payloads use JCS canonical bytes as HMAC input (no alternate canonicalization paths).
+- `StepInstanceKey` format is delimiter-safe and locked; impossible states (pending in completed, duplicate loop IDs) are schema-rejected.
+- Token error codes aligned with locked set; no throwing across codec/signing boundaries.
+- Keyring uses crash-safe writes (tmp+rename+fsync) and canonical JSON storage.
+
 **Next agent should**:
 - Read `v2-core-design-locks.md` sections 16.1–16.5 (implementation blueprint + playbook + readiness audit + polish phase).
-- Complete Slice 3 prereqs if missing.
 - Implement Slice 3 (token orchestration: `start_workflow`, `continue_workflow`, rehydrate/advance/replay use-cases).
-- Do not skip the readiness audit; it prevents mid-slice substrate churn.
 - After all functional slices (1–6+): run the Polish & Hardening Phase (see `v2-core-design-locks.md` section 16.5) before unflagging v2.
 
 ### Conversation style & collaboration patterns
