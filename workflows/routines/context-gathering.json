@@ -56,10 +56,6 @@
     {
       "id": "step-execute-depth-0",
       "title": "Execution: Depth 0 (Survey)",
-      "runCondition": {
-        "var": "depth",
-        "gte": 0
-      },
       "prompt": "**EXECUTE DEPTH 0: SURVEY**\n\nExecute your research plan at Depth 0 (Map the territory).\n\n**MISSION:** Understand what exists in the target area without reading contents.\n\n**EXECUTE:**\n1. Follow `research-plan.md`\n2. Use `list_dir` on target scopes\n3. Map file structure and purpose\n4. Identify architectural patterns\n\n**WORKING NOTES:**\n- File Tree & Purpose\n- Observed Patterns\n- Suspicious Areas",
       "agentRole": "You are a systematic cartographer mapping the territory.",
       "requireConfirmation": false,
