@@ -747,6 +747,19 @@ Locks:
 - Idempotency key: `(sessionId, runId, nodeId, attemptId)`.
 - Replaying the same `checkpointToken` is an idempotent no-op: do not create duplicate checkpoint nodes/edges/outputs; return the same response deterministically.
 
+### Rehydrate/advance/replay separation (locked)
+These are **semantics locks** (not just “implementation suggestions”) because v2 correctness depends on them under rewinds/retries.
+
+Locks:
+- **Rehydrate is pure**: `continue_workflow` without `ackToken` MUST NOT produce durable writes (no `append`, no outputs, no observations, no gaps, no nodes/edges).
+- **Advance is append-capable**: `continue_workflow` with `ackToken` is the only correctness path that can append durable truth for the targeted node.
+- **Replay is fact-returning**: replaying the same idempotency key `(sessionId, nodeId, attemptId)` MUST return from durable recorded facts (e.g., `advance_recorded` + referenced nodes/edges/outputs) and MUST NOT “re-run” step selection, validation, or rendering logic.
+- **Fail-closed**: if an idempotency key is presented that should have a recorded outcome but none exists, treat it as `ReasonCode.unexpected:invariant_violation` (never silently fall back to recompute).
+
+Implementation lock (TypeScript / structural typing):
+- Append-capable APIs MUST require a non-forgeable **capability witness** (e.g., `WithHealthySessionLock` / `CanAppend`) minted only by the session health + lock gate. This prevents accidental writes by “structural” interface matching and makes illegal calls unrepresentable without deliberate construction.
+- Witness misuse-after-release MUST fail-fast: if a witness is used outside the lexical lifetime of the gate callback that minted it, append-capable APIs MUST reject the call before any durable I/O. (This prevents “stash-and-reuse” of an old witness, including after a subsequent re-lock of the same session.)
+
 ### Token validation errors (errors as data, initial closed set)
 - `TOKEN_INVALID_FORMAT`
 - `TOKEN_UNSUPPORTED_VERSION`
@@ -1425,44 +1438,43 @@ Build **thin end-to-end paths first**, then expand primitives incrementally. Thi
   - minimal MCP handlers (read-only)
 - Why first: validates hashing/pinning compose correctly before storage complexity
 
-**Slice 2 — Start workflow + first step (proves tokens + durable truth)**:
-- Goal: `start_workflow` returns `stateToken` + `pending.prompt` from a trivial workflow
+**Slice 2 — Append-only substrate + projections (proves durable truth)**:
+- Goal: session event log segments + `manifest.jsonl` + pure projections working end-to-end
 - Build:
-  - token schemas + HMAC-SHA256 signing/validation (pure, behind CryptoPort)
-  - execution snapshot schema (minimal: just `pending` state)
-  - snapshot CAS store
-  - session event log (write only: `session_created` + `run_started`)
+  - session event log (write + load): `session_created`, `run_started`, minimal `node_created`/etc.
   - minimal segment + manifest with pin-after-close (single-event segments initially)
-  - keyring store (port + adapter)
-- Why second: validates tokens + append-only truth + pinning all compose
+  - typed event schema union (locked closed set)
+  - pure deterministic projections (run DAG, session health, outputs, capabilities, gaps, advance outcomes, preferences)
+- Why second: validates append-only truth + corruption gating + projection correctness before tokens
 
-**Slice 3 — Continue workflow (one step advance, proves idempotency)**:
-- Goal: `continue_workflow` with `ackToken` advances and returns next step; replay is idempotent
+**Slice 2.5 — Execution safety boundaries (prep for Slice 3)**:
+- Goal: gate+witness + readonly/append separation + corruption union so Slice 3 cannot violate purity
 - Build:
-  - `node_created` + `edge_created` + `advance_recorded` events
-  - ack attempt idempotency (dedupe by `attemptId`)
-  - pure projection: "next pending step from snapshot"
-  - expand AppendPlan to support multi-event segments
-- Why third: proves append transaction + idempotency before modes/preferences/blockers
+  - `ExecutionSessionGateV2` (lock+health choke-point)
+  - `WithHealthySessionLock` (opaque branded witness; append requires proof)
+  - readonly vs append port split
+  - `SessionHealthV2` union (`healthy | corrupt_tail | corrupt_head | unknown_version`) with manifest-attested reasons
+  - typed snapshot pin enforcement (no `any`)
+- Why 2.5: makes rehydrate-purity + replay-no-recompute architecturally enforceable before orchestration
 
-**Slice 4 — Rehydrate + fork (proves rewind safety)**:
-- Goal: `continue_workflow` without `ackToken` (rehydrate) + advancing from non-tip (auto-fork)
+**Slice 3 — Token orchestration (start/continue/rehydrate/replay)**:
+- Goal: `start_workflow` + `continue_workflow` working end-to-end; rehydrate is pure; replay is idempotent
+- Prerequisites (code-locked before starting Slice 3; see readiness audit below):
+  - execution snapshot schema (`ExecutionSnapshotFileV1`, `EnginePayloadV1`)
+  - snapshot CAS port + adapter skeleton
+  - token payload codec (pure, no signer yet)
+  - event union audit (confirm completeness)
+  - snapshot-state helpers (`deriveIsComplete`, `derivePendingStep`)
 - Build:
-  - rehydrate as pure read (verify no durable writes)
-  - fork detection (non-tip snapshot → `cause.kind=non_tip_advance`)
-  - recap/branch context generation (bounded, deterministic truncation)
-- Why fourth: validates rewind-safety story before blocked/gaps
+  - token signing + validation (HMAC-SHA256; keyring port + adapter)
+  - rehydrate use-case (readonly-only; pure)
+  - advance use-case (append-capable; requires witness)
+  - replay use-case (fact-returning; fail-closed)
+  - MCP handlers (`start_workflow`, `continue_workflow`)
+- Why third: proves token/snapshot/replay correctness before modes/preferences/blockers
 
-**Slice 5 — Blocked + gaps (proves modes/reasons)**:
-- Goal: workflow with required output contract → `continue_workflow` returns `blocked` in guided, records gap in never-stop
-- Build:
-  - `gap_recorded` event
-  - `ReasonCode` + `BlockerReport` schemas + deterministic mapping
-  - preferences (autonomy/riskPolicy) effective snapshot + node-attached storage (`preferences_changed`)
-  - output contract validation
-- Why fifth: proves unified reason model + mode semantics
-
-**Slice 6+ — Export/import, resume, checkpoint (proves portability)**:
+**Slice 4+ — Blocked + gaps, export/import, resume**:
+- Build modes/preferences + output contracts + blocked/gap behavior
 - Build export bundle integrity + import validation + token re-minting
 - Build `resume_session` with locked ranking/matching
 - Build `checkpoint_workflow`
@@ -1477,11 +1489,30 @@ If vertical slices feel too risky, use the original horizontal sequencing:
 
 Trade-off: slower feedback but less risk of "cut corners to integrate early."
 
+### Slice N+1 readiness audit (locked; required before complex integration slices)
+Before starting a complex integration slice (like Slice 3: orchestration), run this explicit checklist to verify prerequisite boundary schemas/ports/codecs exist. Failing this audit forces mid-slice refactors and risks drift.
+
+**Checklist** (customize per slice):
+- [ ] All required schemas exist in code (Zod + TS types) and are locked/versioned.
+- [ ] All required ports exist (interfaces) and are well-typed (no base-type bags).
+- [ ] Minimal adapters/skeletons exist for critical I/O paths.
+- [ ] Golden fixtures exist for canonicalization/hashing (if applicable).
+- [ ] Pure helpers/projections needed for orchestration exist and are testable.
+
+**Example: Slice 3 readiness audit** (per resumption pack):
+- [ ] Execution snapshot schema (`ExecutionSnapshotFileV1`, `EnginePayloadV1`) exists + golden JCS fixtures.
+- [ ] Snapshot CAS port (`SnapshotStorePortV2`) exists.
+- [ ] Snapshot CAS adapter skeleton exists (`put`/`get` working).
+- [ ] Token payload codec exists (pure encode/decode; signing is later).
+- [ ] Event union audited (all locked kinds for Slice 3 are present and typed).
+- [ ] Snapshot-state helpers exist (`deriveIsComplete`, `derivePendingStep`).
+
 ### Quality gates (how we know each phase is “done”)
 - **Gate 0 (schemas + hashing)**: all artifacts validate; generator/verifier passes; golden hash fixtures stable.
 - **Gate 1 (projections)**: projections are pure and deterministic; ordering/truncation rules are tested.
 - **Gate 2 (storage)**: crash-safety invariants hold; single-writer enforcement works; no salvage guessing.
-- **Gate 3 (protocol)**: rehydrate is read-only; ack advancement is idempotent; forks behave as locked.
+- **Gate 2.5 (execution safety)**: append requires witness; rehydrate cannot access append ports; health gating works.
+- **Gate 3 (protocol)**: rehydrate is read-only; ack advancement is idempotent; replay is fact-returning; forks behave as locked.
 - **Gate 4 (portability)**: export/import integrity passes; tokens re-mint deterministically; projections are equivalent post-import.
 
 ### Handling issues mid-implementation
@@ -1489,6 +1520,113 @@ Trade-off: slower feedback but less risk of "cut corners to integrate early."
 - Keep commits small and layered (avoid mixing schema changes with storage changes in one commit).
 - Prefer recording bounded, typed trace data (events) over ad-hoc debugging paths when explainability is required.
 - When a lock conflicts with reality, make an explicit decision to amend the lock or change approach; never silently diverge.
+
+## 16.5) Polish & Hardening Phase (locked; required before "v2 production-ready")
+
+This phase is **cross-cutting quality work** (not a functional slice). It touches all prior slices to raise code quality, maintainability, and anti-drift enforcement before declaring v2 production-ready.
+
+### When to run this phase
+- After all functional slices ship (Slices 1–6+).
+- Before v2 unflag / public rollout.
+- Can be done in sub-phases (separate PRs) or as one cleanup pass.
+
+### Sub-phase A: Extract constants + remove dead code
+- **Magic constants → config/constants module**:
+  - Hard-coded budgets/thresholds (e.g., `maxBlockers: 10`, `maxNotesBytes: 4096`, `maxTraceEntries: 25`, `defaultRetryAfterMs: 1000`) → `src/v2/durable-core/constants.ts`
+  - Each constant must have a KDoc explaining why the limit exists and referencing the lock doc section
+- **Repetitive error messages → builders/templates**:
+  - Extract common error message patterns into pure helper functions
+- **Hard-coded regex → named constants**:
+  - E.g., `STEP_ID_PATTERN`, `SHA256_DIGEST_PATTERN` with comments
+- **Remove dead code**:
+  - Unused `as any` casts after schema tightening
+  - Commented-out code blocks
+  - Unused helper functions or types
+  - Redundant type assertions
+
+### Sub-phase B: Naming & organization consistency
+- **Naming conventions** (pick one and enforce):
+  - Ensure all v2 classes/functions/types use consistent `V2` suffixing
+  - Port naming: `*PortV2` (consistent across all ports)
+  - Error types: `*ErrorV2` or `*Error` (pick one)
+- **File organization**:
+  - Verify similar abstractions live in similar places (all ports in `ports/`, all adapters in `infra/local/`, all projections in `projections/`)
+  - No "misc" or "utils" dumping grounds
+- **Import ordering**:
+  - Alphabetize or group by layer (types → ports → infra → external)
+  - Use consistent import style (named vs default)
+
+### Sub-phase C: Documentation completeness (code-level KDoc)
+- **Every port interface** has KDoc explaining:
+  - Purpose and locked invariants
+  - When/how it should be used
+  - What guarantees it provides (e.g., "idempotent", "pure", "crash-safe")
+- **Every branded type** has a comment explaining:
+  - What footgun it prevents
+  - How to construct it safely
+- **Every closed-set enum/union** has a comment:
+  - Referencing the lock doc section
+  - Explaining why it's closed (what drift it prevents)
+- **Complex pure functions** have KDoc with:
+  - Examples or edge cases
+  - Performance characteristics if relevant
+  - References to lock doc sections
+
+### Sub-phase D: Anti-drift enforcement (build-time guards)
+- **Forbidden import graph tests**:
+  - `durable-core/**` must not import from `infra/**` or Node modules (`fs`, `crypto`, `path`)
+  - `projections/**` must not import MCP wiring
+  - MCP handlers must not import projections directly (only via use-cases)
+- **Exact MCP tool registry snapshot test**:
+  - Assert the exposed tool set is exactly the locked list (core + flagged)
+  - Prevent accidental "projection MCP tools" from being added
+- **Generator/verifier in CI**:
+  - Runs on every commit
+  - Fails fast with actionable diff if schemas/registries/docs are out of sync
+  - Enforces deterministic output (no timestamps, stable ordering)
+
+### Sub-phase E: Test coverage gaps (non-functional but high-signal)
+- **Property-based tests** for deterministic helpers:
+  - JCS canonicalization produces stable bytes for equivalent objects
+  - StepInstanceKey formatting roundtrips correctly
+  - Token payload encode/decode is bijective
+- **Negative path coverage**:
+  - Every error code in error unions has at least one test producing it
+  - Every corruption reason has a test case
+- **Boundary value tests**:
+  - Empty arrays, max budgets reached, edge cases for sorting/truncation/deduplication
+- **Idempotency/determinism stress tests** (the "no excuses" suite):
+  - Replay harness: same operation replayed 100x yields byte-identical results
+  - Fork harness: N different `attemptId`s from same node create N distinct branches
+  - Export/import roundtrip: projections are equivalent post-import
+  - Golden hash stability: workflowHash + token payloads + bundle integrity don't drift
+
+### Sub-phase F: Error ergonomics polish
+- **Error message quality**:
+  - Every error includes: what went wrong, why it's a problem, what to do next
+  - Retry guidance is explicit and bounded (not vague)
+  - Structured error payloads include actionable hints (e.g., example next-input for blocked states)
+- **Retry union correctness**:
+  - Verify all `retry` unions are set correctly (not defaulting to `not_retryable` when retry is safe)
+  - Lock-busy errors must include explicit retry timing and "if this persists" guidance
+
+### Sub-phase G: Performance observability (not optimization)
+- **Optional trace/timing hooks** (off by default; enabled for debugging):
+  - Add minimal hooks in hot paths (projections, event loading, I/O) so you can profile bottlenecks later
+  - Use a typed `TracePort` (not `console.log`)
+- **Algorithm audit**:
+  - Ensure no O(n²) in hot paths (projections, event loading)
+  - No accidental repeated file reads (e.g., loading the same snapshot multiple times)
+- **Projection budget enforcement**:
+  - Verify bounded projections (recap, truncation) actually respect budgets in worst-case scenarios
+
+### Sub-phase H: v1/v2 firewall (deprecation clarity)
+- **Boundary tests**:
+  - v2 code must not import from v1 session/dashboard paths
+  - v2 must not leak into v1 mutable session world
+- **Deprecation markers**:
+  - Add explicit warnings in v1 code pointing to v2 equivalents
+  - Ensure v2 feature flag gating is clean (no "half v2" states where some tools are v2 and others are v1)
 
 ---
 
@@ -1640,6 +1778,13 @@ Some tools begin feature-flagged to reduce rollout risk. Unflagging MUST be evid
 - Checkpoint edges are recorded (`edgeKind=checkpoint`, `cause.kind=checkpoint_created`) and visible in projections.
 - Rehydrate-only remains side-effect-free and cannot accidentally create checkpoint artifacts.
 - Export/import roundtrip preserves checkpoint nodes/edges/outputs and re-mints `checkpointToken` deterministically.
+
+### Notable refinement ideas (deferred; non-blocking)
+These emerged during Slice 2.5 risk analysis and Polish & Hardening ideation but are not required for v2 correctness. They may be valuable later enhancements:
+
+- **Linear append transaction primitive**: make `AppendPlan` one-shot/consumed (prevents accidental partial appends or stale plan reuse). This would require wrapping the plan in a linear capability token that is invalidated after append.
+- **Pure deterministic renderer with fixtures**: for response text (recap/pending prompts). Keeps replay deterministic without storing full responses in durable truth. Renderer version is internal-only (not exposed to MCP).
+- **Determinism diff tool**: for debugging; given two runs/bundles, compute canonical JCS diffs of key artifacts (events, snapshots, manifests) to localize drift. Useful for troubleshooting "why did replay produce different bytes?"
 
 ---
 

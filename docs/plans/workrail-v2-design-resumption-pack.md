@@ -280,13 +280,15 @@ This section tracks remaining work. Most design locks are now complete; the focu
 - **Implementation status**:
   - ✅ **Slice 1 complete** (merged to main): v2 bounded context (`src/v2/`), JCS canonicalization, `workflowHash` pinning, compiled workflow snapshots, pinned workflow store, read-only v2 MCP tools (`list_workflows`, `inspect_workflow`) behind `WORKRAIL_ENABLE_V2_TOOLS` flag.
   - ✅ **Slice 2 complete** (merged to main): append-only session event log substrate (segments + `manifest.jsonl` + single-writer lock + corruption gating), typed closed-set event schemas for all 12 locked event kinds, idempotency enforcement, and pure deterministic projections (run DAG, session health, node outputs, capabilities, gaps, advance outcomes, run status signals, preferences propagation).
-  - **Next**: Slice 3 (token-based orchestration: `start_workflow`, `continue_workflow`, opaque tokens, execution snapshots, rehydration).
+  - ✅ **Slice 2.5 complete** (in review): `ExecutionSessionGateV2` (lock+health+witness choke-point); `WithHealthySessionLock` (opaque branded witness; append requires proof); readonly/append port split; `SessionHealthV2` union with manifest-attested corruption reasons; typed snapshot pin enforcement (no `any`); tests + docs updated.
+  - **Next**: Slice 3 prerequisites → Slice 3 implementation.
   - The locked type-first sequencing remains:
     1. ✅ Canonical models + hashing (no I/O)
     2. ✅ Pure projections
     3. ✅ Storage substrate (ports + adapters)
-    4. Protocol orchestration (next)
-    5. Determinism suite
+    4. ✅ Execution safety boundaries (gate+witness; Slice 2.5)
+    5. Protocol orchestration (next; requires prereq locks below)
+    6. Determinism suite
 - **Authoring is finalized**:
   - Initial contract packs are locked: `capability_observation`, `workflow_divergence`, `loop_control` (and gaps integrated into event model).
   - Builtins metadata schema defined (code-canonical + generated).
@@ -335,11 +337,12 @@ This section is intentionally opinionated. It exists to preserve the *discipline
 
 ### The pressure points (where v2 can regress into v1)
 
-- **Rehydrate becoming a hidden mutation path**: if rehydrate accidentally writes durable truth, resumption becomes non-deterministic.
-- **Convenience projection tools creeping into MCP**: expanding the agent tool surface for read models reintroduces drift and “session pointer” ambiguity.
-- **Idempotent “same response” drifting under retries/forks**: if we recompute outcomes on replay, tiny changes can break determinism.
-- **Canonicalization splintering**: if hashing/signing/integrity use different “canonical JSON” implementations, determinism collapses.
-- **Loop-control authoring friction**: if loops aren’t self-validating by construction, authors will route around with ad-hoc context reads.
+- **Rehydrate becoming a hidden mutation path**: if rehydrate accidentally writes durable truth, resumption becomes non-deterministic. *(Mitigated in Slice 2.5: gate+witness + port split make append impossible without proof.)*
+- **Convenience projection tools creeping into MCP**: expanding the agent tool surface for read models reintroduces drift and "session pointer" ambiguity.
+- **Idempotent "same response" drifting under retries/forks**: if we recompute outcomes on replay, tiny changes can break determinism. *(Locked normatively in contract: replay must return from durable recorded facts.)*
+- **Canonicalization splintering**: if hashing/signing/integrity use different "canonical JSON" implementations, determinism collapses.
+- **Loop-control authoring friction**: if loops aren't self-validating by construction, authors will route around with ad-hoc context reads.
+- **Slice N+1 substrate gaps** (new lesson, added 2025-12-23): starting a complex integration slice (like Slice 3: orchestration) without verifying that prerequisite boundary schemas/ports/codecs exist forces mid-slice refactors and risks drift. *(Solution: explicit "Slice N+1 readiness audit" checklist in playbook.)*
 
 ### Invariants (make these true in code, then enforce with tests)
 
@@ -350,14 +353,14 @@ This section is intentionally opinionated. It exists to preserve the *discipline
   - Tool registry is a closed set with a build-time test asserting the exact allowed tools (core + flagged).
   - Enforce architectural boundaries: projections must not import MCP wiring (lint rule / boundary test).
 - **Idempotent same-response**:
-  - Do not “re-run logic” on replay. Make replay return from durable facts keyed by `(sessionId, nodeId, attemptId)`.
+  - Do not "re-run logic" on replay. Make replay return from durable facts keyed by `(sessionId, nodeId, attemptId)`.
   - Keep the outcome record minimal and stable (see `advance_recorded` in `docs/design/v2-core-design-locks.md`).
 - **One canonicalization path**:
   - One `CanonicalJsonPort` (RFC 8785 JCS) used for `workflowHash`, token signing inputs, and bundle integrity.
-  - Make “hashable” inputs a branded type (e.g., `CanonicalBytes`) so callers can’t pass `unknown` or ad-hoc JSON.
+  - Make "hashable" inputs a branded type (e.g., `CanonicalBytes`) so callers can't pass `unknown` or ad-hoc JSON.
 - **Loops are deterministic by construction**:
   - Loop control should be part of loop compilation (compiler-injected gate), not an optional author discipline.
-  - Conditions remain closed set; do not add “read arbitrary context key” condition kinds to paper over friction.
+  - Conditions remain closed set; do not add "read arbitrary context key" condition kinds to paper over friction.
 
 See the normative mechanics and hard locks in:
 - `docs/design/v2-core-design-locks.md`
@@ -387,11 +390,45 @@ This is a concise record of what we did in this chat, for resumption continuity 
 - Verified doc consistency via repo-wide grep and a final "thorough check".
 - **v1 usability fix (shipped)**: improved `workflow_next` error UX with pre-validation + copy-pasteable templates (agents were failing until they guessed the right `state` shape; now errors are self-correcting without schema changes).
 
-### What's next (current status as of 2025-12-21)
+### What's next (current status as of 2025-12-23)
 
-**Design is locked.** The next phase is **Phase 0 implementation** (canonical core, no I/O yet).
+**Design is locked.** Slice 2.5 (execution safety boundaries) is in review. **Before starting Slice 3** (token orchestration), the following high-leverage boundary primitives must be code-locked to avoid mid-slice refactors:
 
-#### Recent lock tightening (session 2025-12-21)
+#### Slice 3 prerequisites (must exist before orchestration work)
+
+**Implementation ordering** (locked; dependencies flow downward):
+1. **Execution snapshot schema** first (everything else depends on snapshot types)
+2. **Token payload codec** second (depends on snapshot schema for payload fields)
+3. **Snapshot CAS port + adapter** third (depends on snapshot schema)
+4. **Snapshot-state helpers** fourth (depends on snapshot schema)
+5. **Event union audit** last (likely already complete; just verify)
+
+**Details**:
+- **Execution snapshot schema** (`src/v2/durable-core/schemas/execution-snapshot/`):
+  - `ExecutionSnapshotFileV1` + `EnginePayloadV1` Zod schemas
+  - `EngineStateV1` union (`init | running | complete`)
+  - `StepInstanceKey` canonical format + validation (delimiter-safe: `[a-z0-9_-]+`)
+  - `PendingStep`, `LoopFrame` typed structures
+  - Golden fixture: snapshot → JCS bytes → sha256 (proves canonicalization)
+- **Token payload codec (pure, no signer yet)**:
+  - `src/v2/durable-core/tokens/` (encode/decode for `stateToken`, `ackToken`, `checkpointToken` payloads)
+  - Use JCS → `CanonicalBytes`; signing/keyring is later
+  - Payloads locked in v2-core-design-locks.md (tokenVersion, tokenKind, sessionId, runId, nodeId, workflowHash/attemptId)
+  - Test: encode → decode roundtrip
+- **Snapshot CAS port + minimal adapter**:
+  - `SnapshotStorePortV2` (`put(snapshot) -> SnapshotRef`, `get(ref) -> snapshot`)
+  - `src/v2/infra/local/snapshot-store/` (minimal; just prove put/get works)
+  - Test: put → get yields byte-identical (or JCS-equivalent) snapshot
+- **Tiny snapshot-state helpers** (projection stubs):
+  - `src/v2/durable-core/projections/snapshot-state.ts`
+  - `deriveIsComplete(state: EngineStateV1): boolean`
+  - `derivePendingStep(state: EngineStateV1): PendingStep | null`
+  - Tests: unit tests for pure helpers
+- **Event union audit** (likely already complete):
+  - Confirm all 12 locked event kinds exist in `DomainEventV1Schema` with typed payloads
+  - From audit: ✅ all present; no gaps
+
+#### Recent lock tightening (sessions 2025-12-21, 2025-12-23)
 We audited the v2 locks + docs for gaps/inconsistencies and applied architectural fixes:
 - **Durability semantics**: added `advance_recorded` event (durable ack outcomes); made rehydrate side-effect-free.
 - **Idempotency**: unified `attemptId` naming; tightened dedupe rules (no `eventId` in dedupe keys; stable IDs only); `advance_recorded` dedupe is node-scoped (`<sessionId>:<nodeId>:<attemptId>`); capability observations are "latest wins by projection."
@@ -404,25 +441,32 @@ We audited the v2 locks + docs for gaps/inconsistencies and applied architectura
 - **Embedded schema canonicalization locked**: schemas in compiled snapshots are typed canonical data, not JSON blobs.
 - **Prompt refs introduced**: workflows can inject canonical snippets inline (`wr.refs.*`) at compile time; resolved text is embedded and hashed into `workflowHash`.
 - **Error envelope locked**: unified error envelope uses a closed-set `retry` union (no stringly retry semantics); token vs storage error domains are separated.
-- **Corruption gating locked**: `SessionHealth` closed set; execution requires `healthy`, salvage is read-only (validated prefix + explicit banner).
+- **Corruption gating locked**: `SessionHealth` closed set (expanded to `healthy | corrupt_tail | corrupt_head | unknown_version` with manifest-attested reasons only); execution requires `healthy`, salvage is read-only (validated prefix + explicit banner).
+- **Rehydrate/advance/replay separation locked** (2025-12-23):
+  - Rehydrate (`continue_workflow` without `ackToken`) is pure (no durable writes).
+  - Advance (`continue_workflow` with `ackToken`) is the only append-capable correctness path.
+  - Replay is fact-returning (keyed by `attemptId`; no recompute).
+  - Implementation lock (TypeScript): append requires non-forgeable capability witness (`WithHealthySessionLock`) minted only by `ExecutionSessionGateV2`.
+  - Witness misuse-after-release must fail-fast before any I/O.
 
 All v1-era docs (`workflow_next`, `completedSteps`, expression-based loops) now have v1/v2 boundary banners to prevent confusion.
 
 #### Implementation readiness
 The full v2 blueprint is recorded in `v2-core-design-locks.md` section 16.1 (which docs to use as authority).
 
-Phase 0 can start now:
-1. Canonical models (branded IDs, Zod schemas, discriminated unions)
-2. JCS canonicalization + SHA-256 helpers + token signing/validation
-3. Generator + verifier (schemas/registries)
-4. Pure projections (no storage I/O yet)
-
-**Before building**: review Phase 0 quality gate (everything compiles, schemas validate, generator/verifier is deterministic + enforced).
+**Before starting Slice 3**, run the **Slice N+1 readiness audit** (now locked in playbook):
+- Execution snapshot schema exists + has golden JCS fixtures.
+- Snapshot CAS port + minimal adapter skeleton exists.
+- Token payload codec exists (pure encode/decode; signer is later).
+- Event union is audited (covers all locked kinds for Slice 3).
+- Snapshot-state helpers exist (minimal: `deriveIsComplete`, `derivePendingStep`).
 
 **Next agent should**:
-- Read `v2-core-design-locks.md` sections 16.1–16.4 (implementation blueprint + playbook).
-- Begin Phase 0 (canonical types + hashing).
-- Do not start storage I/O until Phase 0 gates pass.
+- Read `v2-core-design-locks.md` sections 16.1–16.5 (implementation blueprint + playbook + readiness audit + polish phase).
+- Complete Slice 3 prereqs if missing.
+- Implement Slice 3 (token orchestration: `start_workflow`, `continue_workflow`, rehydrate/advance/replay use-cases).
+- Do not skip the readiness audit; it prevents mid-slice substrate churn.
+- After all functional slices (1–6+): run the Polish & Hardening Phase (see `v2-core-design-locks.md` section 16.5) before unflagging v2.
 
 ### Conversation style & collaboration patterns
 

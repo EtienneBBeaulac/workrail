@@ -170,6 +170,8 @@ Runs are pinned to a specific workflow definition at `start_workflow` time to av
 - Must be **idempotent**:
   - Replaying the same `(stateToken, ackToken)` returns the same response payload.
   - Replaying does not advance the run twice.
+- **Idempotency must not be implemented via recompute (normative):**
+  - When replaying the same `(stateToken, ackToken)`, WorkRail MUST return from durable recorded facts keyed by the attempt identity (see v2 locks `advance_recorded`) and MUST NOT re-run step selection, contract validation, or other execution logic that could drift.
 - Must be **scoped**:
   - An `ackToken` from run A must not be usable on run B.
   - An `ackToken` from snapshot X must not be usable on snapshot Y.
@@ -387,13 +389,14 @@ Locks:
 - `{ "kind": "capability", "capability": "delegation" | "web_browsing" }`
 - `{ "kind": "workflow_step", "stepId": "..." }`
 
-## Durable accounting for outcomes (recommended, drift-prevention)
+## Durable accounting for outcomes (normative, drift-prevention)
 
 Because chat transcripts are not reliable storage, WorkRail should not require Studio/exports to infer what happened from transient tool responses.
 
-Recommended (non-normative) approach:
-- Persist a durable, node-scoped record of each attempted `continue_workflow` **ack** intent (advancement attempt) and its outcome (blocked | advanced) as append-only truth.
-- Treat dedupe/idempotency as a first-class concern: retries must not create duplicate “attempt” records, but legitimate evolution (e.g., a later unblock) must remain appendable.
+Locks:
+- WorkRail MUST persist a durable, node-scoped record of each attempted `continue_workflow` **ack** intent (advancement attempt) and its outcome (blocked | advanced) as append-only truth (see v2 lock: `advance_recorded`).
+- Replay MUST be derived from this durable record (fact-returning); replays MUST NOT recompute outcomes.
+- Dedupe/idempotency MUST be first-class: retries must not create duplicate “attempt” records, but legitimate evolution (e.g., a later unblock with a new attempt) must remain appendable.
 
 ## Mode safety, warnings, and recommendations (normative)
 
