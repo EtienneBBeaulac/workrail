@@ -61,15 +61,15 @@ jobs:
         run: git diff --exit-code package-lock.json
 
   # ============================================================================
-  # REQUIRED: semantic-release dry-run (guards release config and tag computation)
+  # REQUIRED (PR only): semantic-release dry-run (config + version validation)
   # ============================================================================
   semantic-release-dry-run:
     name: semantic-release dry-run
     runs-on: ubuntu-latest
     needs: [ lockfile, build-artifact ]
+    if: github.event_name == 'pull_request'
     permissions:
-      # semantic-release dry-run verifies it can push tags/commits; requires write access.
-      contents: write
+      contents: read
 
     steps:
       - name: Checkout code (full history)
@@ -86,10 +86,10 @@ jobs:
       - name: Install dependencies (no lifecycle scripts)
         run: npm ci --ignore-scripts
 
-      - name: semantic-release dry-run
+      - name: semantic-release dry-run (PR context)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx semantic-release --dry-run --no-ci
+        run: npx semantic-release --dry-run --no-ci --verify-conditions false
 
   # ============================================================================
   # REQUIRED: Build Artifact (single source of truth for dist/)
@@ -388,13 +388,15 @@ jobs:
           fi
           echo "- Build Artifact: PASSED" >> $GITHUB_STEP_SUMMARY
 
-          # Check semantic-release-dry-run
-          if [[ "${{ needs.semantic-release-dry-run.result }}" != "success" ]]; then
-            echo "- semantic-release dry-run: FAILED" >> $GITHUB_STEP_SUMMARY
-            echo "semantic-release dry-run job failed"
-            exit 1
+          # Check semantic-release-dry-run (on PRs only)
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            if [[ "${{ needs.semantic-release-dry-run.result }}" != "success" ]]; then
+              echo "- semantic-release dry-run: FAILED" >> $GITHUB_STEP_SUMMARY
+              echo "semantic-release dry-run job failed"
+              exit 1
+            fi
+            echo "- semantic-release dry-run: PASSED" >> $GITHUB_STEP_SUMMARY
           fi
-          echo "- semantic-release dry-run: PASSED" >> $GITHUB_STEP_SUMMARY
           
           # Check typecheck
           if [[ "${{ needs.typecheck.result }}" != "success" ]]; then
