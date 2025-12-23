@@ -109,6 +109,72 @@ const NodeOutputAppendedDataV1Schema = z
     }
   });
 
+const BlockerCodeSchema = z.enum([
+  'USER_ONLY_DEPENDENCY',
+  'MISSING_REQUIRED_OUTPUT',
+  'INVALID_REQUIRED_OUTPUT',
+  'REQUIRED_CAPABILITY_UNKNOWN',
+  'REQUIRED_CAPABILITY_UNAVAILABLE',
+  'INVARIANT_VIOLATION',
+  'STORAGE_CORRUPTION_DETECTED',
+]);
+
+const BlockerPointerSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('context_key'), key: z.string().min(1) }),
+  z.object({ kind: z.literal('output_contract'), contractRef: z.string().min(1) }),
+  z.object({ kind: z.literal('capability'), capability: z.enum(['delegation', 'web_browsing']) }),
+  z.object({ kind: z.literal('workflow_step'), stepId: z.string().min(1) }),
+]);
+
+const BlockerSchema = z.object({
+  code: BlockerCodeSchema,
+  pointer: BlockerPointerSchema,
+  message: z.string().min(1),
+  suggestedFix: z.string().min(1).optional(),
+});
+
+const BlockerReportV1Schema = z
+  .object({
+    blockers: z.array(BlockerSchema).min(1).max(10),
+  })
+  .superRefine((v, ctx) => {
+    // Deterministic ordering lock: (code, pointer.kind, pointer.* stable fields) ascending.
+    const keyFor = (b: z.infer<typeof BlockerSchema>): string => {
+      const p = b.pointer as any;
+      const ptrStable =
+        b.pointer.kind === 'context_key'
+          ? p.key
+          : b.pointer.kind === 'output_contract'
+            ? p.contractRef
+            : b.pointer.kind === 'capability'
+              ? p.capability
+              : p.stepId;
+      return `${b.code}|${b.pointer.kind}|${String(ptrStable)}`;
+    };
+
+    for (let i = 1; i < v.blockers.length; i++) {
+      if (keyFor(v.blockers[i - 1]!) > keyFor(v.blockers[i]!)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'blockers must be deterministically sorted',
+          path: ['blockers'],
+        });
+        break;
+      }
+    }
+  });
+
+const AdvanceRecordedOutcomeV1Schema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('blocked'), blockers: BlockerReportV1Schema }),
+  z.object({ kind: z.literal('advanced'), toNodeId: z.string().min(1) }),
+]);
+
+const AdvanceRecordedDataV1Schema = z.object({
+  attemptId: z.string().min(1),
+  intent: z.literal('ack_pending'),
+  outcome: AdvanceRecordedOutcomeV1Schema,
+});
+
 /**
  * Closed-set domain event kinds (initial v2 union, locked).
  *
@@ -136,7 +202,11 @@ export const DomainEventV1Schema = z.discriminatedUnion('kind', [
     scope: z.object({ runId: z.string().min(1) }),
     data: EdgeCreatedDataV1Schema,
   }),
-  DomainEventEnvelopeV1Schema.extend({ kind: z.literal('advance_recorded'), data: JsonValueSchema }),
+  DomainEventEnvelopeV1Schema.extend({
+    kind: z.literal('advance_recorded'),
+    scope: z.object({ runId: z.string().min(1), nodeId: z.string().min(1) }),
+    data: AdvanceRecordedDataV1Schema,
+  }),
   DomainEventEnvelopeV1Schema.extend({
     kind: z.literal('node_output_appended'),
     scope: z.object({ runId: z.string().min(1), nodeId: z.string().min(1) }),
