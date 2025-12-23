@@ -43,5 +43,7 @@ export interface FileSystemPortV2 {
 
   rename(fromPath: string, toPath: string): ResultAsync<void, FsError>;
 
+  unlink(filePath: string): ResultAsync<void, FsError>;
+
   stat(filePath: string): ResultAsync<{ readonly sizeBytes: number }, FsError>;
 }

@@ -33,11 +33,27 @@ export class NodeFileSystemV2 implements FileSystemPortV2 {
   }
 
   openWriteTruncate(filePath: string): ResultAsync<{ readonly fd: number }, FsError> {
-    return RA.fromPromise(fs.open(filePath, 'w'), (e) => mapFsError(e, filePath)).map((h) => ({ fd: h.fd }));
+    return RA.fromPromise(
+      new Promise<{ fd: number }>((resolve, reject) => {
+        fsCb.open(filePath, fsConstants.O_CREAT | fsConstants.O_TRUNC | fsConstants.O_WRONLY, 0o600, (err, fd) => {
+          if (err) reject(err);
+          else resolve({ fd });
+        });
+      }),
+      (e) => mapFsError(e, filePath)
+    );
   }
 
   openAppend(filePath: string): ResultAsync<{ readonly fd: number }, FsError> {
-    return RA.fromPromise(fs.open(filePath, 'a'), (e) => mapFsError(e, filePath)).map((h) => ({ fd: h.fd }));
+    return RA.fromPromise(
+      new Promise<{ fd: number }>((resolve, reject) => {
+        fsCb.open(filePath, fsConstants.O_CREAT | fsConstants.O_APPEND | fsConstants.O_WRONLY, 0o600, (err, fd) => {
+          if (err) reject(err);
+          else resolve({ fd });
+        });
+      }),
+      (e) => mapFsError(e, filePath)
+    );
   }
 
   writeAll(fd: number, bytes: Uint8Array): ResultAsync<void, FsError> {
@@ -56,14 +72,21 @@ export class NodeFileSystemV2 implements FileSystemPortV2 {
     return RA.fromPromise(
       (async () => {
         // Use low-level open to guarantee exclusive create semantics.
-        const handle = await fs.open(filePath, fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY, 0o600);
+        const fd = await new Promise<number>((resolve, reject) => {
+          fsCb.open(filePath, fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY, 0o600, (err, opened) => {
+            if (err) reject(err);
+            else resolve(opened);
+          });
+        });
+
         await new Promise<void>((resolve, reject) => {
-          fsCb.write(handle.fd, Buffer.from(bytes), 0, bytes.length, null, (err) => {
+          fsCb.write(fd, Buffer.from(bytes), 0, bytes.length, null, (err) => {
             if (err) reject(err);
             else resolve();
           });
         });
-        return { fd: handle.fd };
+
+        return { fd };
       })(),
       (e) => mapFsError(e, filePath)
     );
@@ -114,6 +137,10 @@ export class NodeFileSystemV2 implements FileSystemPortV2 {
 
   rename(fromPath: string, toPath: string): ResultAsync<void, FsError> {
     return RA.fromPromise(fs.rename(fromPath, toPath), (e) => mapFsError(e, `${fromPath} -> ${toPath}`));
+  }
+
+  unlink(filePath: string): ResultAsync<void, FsError> {
+    return RA.fromPromise(fs.unlink(filePath).then(() => undefined), (e) => mapFsError(e, filePath));
   }
 
   stat(filePath: string): ResultAsync<{ readonly sizeBytes: number }, FsError> {
