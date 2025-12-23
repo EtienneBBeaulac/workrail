@@ -7,6 +7,9 @@ on:
   # Allow this workflow to be called by other workflows (e.g., release)
   workflow_call:
 
+permissions:
+  contents: read
+
 jobs:
   # ============================================================================
   # REQUIRED: semantic-release dry-run (guards release config and tag computation)
@@ -20,12 +23,12 @@ jobs:
 
     steps:
       - name: Checkout code (full history)
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
 
       - name: Setup Node.js (toolchain)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22.14.0
           cache: 'npm'
@@ -47,10 +50,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Node.js (toolchain)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22.14.0
           cache: 'npm'
@@ -66,11 +69,15 @@ jobs:
           test -f dist/mcp-server.js || (echo "Missing dist/mcp-server.js" && exit 1)
           test -f dist/cli.js || (echo "Missing dist/cli.js" && exit 1)
 
+      - name: Write dist manifest
+        run: node scripts/dist-manifest.js --dist dist --write dist/manifest.json
+
       - name: Upload dist artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dist
           path: dist/
+          if-no-files-found: error
 
   # ============================================================================
   # REQUIRED: Type Check (catches type errors that build might miss)
@@ -81,16 +88,16 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22.14.0
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Type check
         run: npm run typecheck
@@ -105,16 +112,16 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22.14.0
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Run security audit
         run: |
@@ -137,10 +144,10 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22.14.0
           cache: 'npm'
@@ -149,10 +156,13 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Download build artifact (dist/)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: dist
           path: dist
+
+      - name: Verify dist manifest
+        run: node scripts/dist-manifest.js --dist dist --verify dist/manifest.json
 
       - name: Validate all workflows
         run: npm run validate:workflows
@@ -183,10 +193,10 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
@@ -195,10 +205,13 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Download build artifact (dist/)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: dist
           path: dist
+
+      - name: Verify dist manifest
+        run: node scripts/dist-manifest.js --dist dist --verify dist/manifest.json
 
       - name: Run unit and integration tests
         run: npx vitest run --exclude="tests/contract/**"
@@ -222,10 +235,10 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22.14.0
           cache: 'npm'
@@ -234,10 +247,13 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Download build artifact (dist/)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: dist
           path: dist
+
+      - name: Verify dist manifest
+        run: node scripts/dist-manifest.js --dist dist --verify dist/manifest.json
 
       - name: Run contract tests
         run: npx vitest run tests/contract/ --testTimeout=30000
@@ -257,10 +273,10 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
@@ -269,10 +285,13 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Download build artifact (dist/)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: dist
           path: dist
+
+      - name: Verify dist manifest
+        run: node scripts/dist-manifest.js --dist dist --verify dist/manifest.json
 
       - name: Install Playwright browsers with dependencies
         run: npx playwright install --with-deps chromium
@@ -282,7 +301,7 @@ jobs:
 
       - name: Upload Playwright report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: playwright-report-node-${{ matrix.node-version }}
           path: ./playwright-report/
