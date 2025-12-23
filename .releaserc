@@ -3,6 +3,8 @@ branches:
 
 tagFormat: "v${version}"
 
+repositoryUrl: "https://github.com/EtienneBBeaulac/workrail.git"
+
 plugins:
   - - "@semantic-release/commit-analyzer"
     - preset: conventionalcommits
@@ -64,5 +66,7 @@ plugins:
           - type: ci
             section: Continuous Integration
             hidden: true
-  - "@semantic-release/npm"
+  - - "@semantic-release/exec"
+    - prepareCmd: "npm pkg set version=${nextRelease.version}"
+      publishCmd: "npm publish --provenance --access public"
   - "@semantic-release/github"
