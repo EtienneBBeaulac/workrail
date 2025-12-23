@@ -15,9 +15,9 @@ export interface WorkflowMetadata {
   name: string;
   description: string;
   version: string;
-  preconditions?: readonly string[] | undefined;
-  clarificationPrompts?: readonly string[] | undefined;
-  metaGuidance?: readonly string[] | undefined;
+  preconditions?: readonly string[];
+  clarificationPrompts?: readonly string[];
+  metaGuidance?: readonly string[];
   totalSteps: number;
 }
 
@@ -41,6 +41,18 @@ export function createGetWorkflow(service: WorkflowService) {
       return err(Err.workflowNotFound(workflowId));
     }
 
+    const optional = {
+      ...(workflow.definition.preconditions !== undefined
+        ? { preconditions: workflow.definition.preconditions }
+        : {}),
+      ...(workflow.definition.clarificationPrompts !== undefined
+        ? { clarificationPrompts: workflow.definition.clarificationPrompts }
+        : {}),
+      ...(workflow.definition.metaGuidance !== undefined
+        ? { metaGuidance: workflow.definition.metaGuidance }
+        : {}),
+    };
+
     // Handle different modes
     switch (mode) {
       case 'metadata':
@@ -49,27 +61,28 @@ export function createGetWorkflow(service: WorkflowService) {
           name: workflow.definition.name,
           description: workflow.definition.description,
           version: workflow.definition.version,
-          preconditions: workflow.definition.preconditions,
-          clarificationPrompts: workflow.definition.clarificationPrompts,
-          metaGuidance: workflow.definition.metaGuidance,
-          totalSteps: workflow.definition.steps.length
+          ...optional,
+          totalSteps: workflow.definition.steps.length,
         });
 
       case 'preview':
       default:
         // Find the first next step via the interpreter (authoritative)
-        const next = await service.getNextStep(workflowId, initialExecutionState(), undefined, {} as ConditionContext);
+        const next = await service.getNextStep(
+          workflowId,
+          initialExecutionState(),
+          undefined,
+          {} as ConditionContext
+        );
         const firstStep = next.isOk() ? (next.value.next ? next.value.next.step : null) : null;
         return ok({
           id: workflow.definition.id,
           name: workflow.definition.name,
           description: workflow.definition.description,
           version: workflow.definition.version,
-          preconditions: workflow.definition.preconditions,
-          clarificationPrompts: workflow.definition.clarificationPrompts,
-          metaGuidance: workflow.definition.metaGuidance,
+          ...optional,
           totalSteps: workflow.definition.steps.length,
-          firstStep
+          firstStep,
         });
     }
   };

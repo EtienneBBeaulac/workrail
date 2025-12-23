@@ -214,22 +214,25 @@ describe('createGetWorkflow', () => {
         });
       });
 
-      it('should handle workflows with undefined optional fields', async () => {
+      it('should omit optional fields when undefined', async () => {
         mockService.setWorkflow(mockWorkflowWithUndefinedOptionals);
-        
+
         const result = await getWorkflow('minimal-workflow', 'metadata');
-        
+
         expect(result.isOk()).toBe(true);
+
+        // Important: MCP output boundary forbids `undefined`, so we must omit absent fields.
         expect(result.value).toEqual({
           id: 'minimal-workflow',
           name: 'Minimal Workflow',
           description: 'A minimal workflow.',
           version: '0.0.1',
-          preconditions: undefined,
-          clarificationPrompts: undefined,
-          metaGuidance: undefined,
-          totalSteps: 1
+          totalSteps: 1,
         });
+
+        expect('preconditions' in (result.value as any)).toBe(false);
+        expect('clarificationPrompts' in (result.value as any)).toBe(false);
+        expect('metaGuidance' in (result.value as any)).toBe(false);
       });
     });
 
