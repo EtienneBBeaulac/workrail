@@ -1582,16 +1582,25 @@ This phase is **cross-cutting quality work** (not a functional slice). It touche
 - **Exact MCP tool registry snapshot test**:
   - Assert the exposed tool set is exactly the locked list (core + flagged)
   - Prevent accidental "projection MCP tools" from being added
-- **Generator/verifier in CI**:
-  - Runs on every commit
-  - Fails fast with actionable diff if schemas/registries/docs are out of sync
-  - Enforces deterministic output (no timestamps, stable ordering)
+- **Generator/verifier in CI** (three targets):
+  - **MCP tool schemas/descriptions**: generate JSON Schemas from code-canonical Zod definitions; verifier diffs and fails if out of sync
+  - **Builtins registry**: generate Studio-ready metadata (templates/features/contracts/capabilities/refs) from compiler canonical definitions
+  - **Durable store schemas**: generate reference docs for events/manifest/snapshots/bundles from Zod schemas
+  - All generators run on every commit; fail fast with actionable diff if out of sync
+  - Enforce deterministic output (no timestamps, stable ordering)
 - **CI workflow validation includes v2 tools**:
-  - Extend `scripts/validate-workflows.sh` or add separate v2 tool validation
-  - Validate v2 MCP tool schemas match code-canonical definitions
-  - Run as part of CI `validate-workflows` job (`.github/workflows/ci.yml`)
+  - Extend `scripts/validate-workflows.sh` or add separate v2 tool validation script
+  - Validate v2 MCP tool schemas match code-canonical definitions (invoke generator in verify mode)
+  - Validate v2 tool descriptions are non-empty and reference current tool names (not v1 `workflow_next`)
+  - Run as part of CI `validate-workflows` job or as new CI job (`.github/workflows/ci.yml`)
 
 ### Sub-phase E: Test coverage gaps (non-functional but high-signal)
+- **Contract tests for v2 MCP tools** (add to `tests/contract/`):
+  - `start_workflow` returns expected response shape with valid tokens
+  - `continue_workflow` (rehydrate-only) is pure and idempotent
+  - `continue_workflow` (with ackToken) advances and returns new tokens
+  - `inspect_workflow` returns compiled snapshot with stable workflowHash
+  - Response schemas match generated JSON Schemas (verifier ensures this)
 - **Property-based tests** for deterministic helpers:
   - JCS canonicalization produces stable bytes for equivalent objects
   - StepInstanceKey formatting roundtrips correctly
