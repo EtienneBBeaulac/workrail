@@ -105,6 +105,47 @@ jobs:
           DEBUG: semantic-release:*,@semantic-release/*
         run: npx semantic-release
 
+      - name: Cleanup tag on failed publish
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          POST_TAG="$(git describe --tags --abbrev=0 --match "v*" 2>/dev/null || true)"
+
+          # Only clean up if a new tag was created during this run.
+          if [ -z "${POST_TAG}" ] || [ "${POST_TAG}" = "${PRE_RELEASE_TAG:-}" ]; then
+            echo "RELEASE_TAG_CLEANUP_STATUS=none" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          TAG_SHA="$(git rev-list -n 1 "${POST_TAG}")"
+          if [ "${TAG_SHA}" != "${CI_SHA}" ]; then
+            echo "Refusing to delete ${POST_TAG}: tag sha ${TAG_SHA} != run sha ${CI_SHA}"
+            exit 1
+          fi
+
+          VERSION="${POST_TAG#v}"
+
+          # If npm already has this version, keep the tag (avoid flip-flopping).
+          if npm view "@exaudeus/workrail@${VERSION}" version >/dev/null 2>&1; then
+            echo "Version ${VERSION} exists on npm; keeping tag ${POST_TAG}"
+            echo "RELEASE_TAG_CLEANUP_STATUS=kept_published" >> "$GITHUB_ENV"
+            echo "RELEASE_TAG_CLEANUP_TAG=${POST_TAG}" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          echo "Deleting tag ${POST_TAG} (${TAG_SHA}) from origin"
+          git push origin ":refs/tags/${POST_TAG}"
+
+          # Delete GitHub Release if it exists (ignore if not found).
+          gh release delete "${POST_TAG}" -y || true
+
+          echo "RELEASE_TAG_CLEANUP_STATUS=deleted" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG_CLEANUP_TAG=${POST_TAG}" >> "$GITHUB_ENV"
+
       - name: Release summary
         if: always()
         env:
@@ -112,21 +153,40 @@ jobs:
           CI_RUN_ID: ${{ github.event.workflow_run.id }}
           CI_SHA: ${{ github.event.workflow_run.head_sha }}
           REPO: ${{ github.repository }}
+          JOB_STATUS: ${{ job.status }}
+          RELEASE_TAG_CLEANUP_STATUS: ${{ env.RELEASE_TAG_CLEANUP_STATUS }}
+          RELEASE_TAG_CLEANUP_TAG: ${{ env.RELEASE_TAG_CLEANUP_TAG }}
         run: |
           POST_TAG="$(git describe --tags --abbrev=0 --match "v*" 2>/dev/null || true)"
           MANIFEST_SHA="$(sha256sum dist/manifest.json | awk '{print $1}')"
 
-          if [ -n "$POST_TAG" ] && [ "$POST_TAG" != "${PRE_RELEASE_TAG:-}" ]; then
-            echo "::notice title=Release outcome::Released ${POST_TAG}"
-            OUTCOME_LINE="Released ${POST_TAG}"
-            TAG_LINE="- Tag: ${POST_TAG}"
-            RELEASE_LINE="- GitHub Release: https://github.com/${REPO}/releases/tag/${POST_TAG}"
+          if [ "${JOB_STATUS}" = "failure" ]; then
+            if [ "${RELEASE_TAG_CLEANUP_STATUS:-}" = "deleted" ]; then
+              OUTCOME_LINE="Failed (deleted ${RELEASE_TAG_CLEANUP_TAG}; will retry next run)"
+              echo "::error title=Release outcome::Failed; deleted ${RELEASE_TAG_CLEANUP_TAG} to allow retry"
+            elif [ "${RELEASE_TAG_CLEANUP_STATUS:-}" = "kept_published" ]; then
+              OUTCOME_LINE="Failed (kept ${RELEASE_TAG_CLEANUP_TAG}; version already on npm)"
+              echo "::error title=Release outcome::Failed; kept ${RELEASE_TAG_CLEANUP_TAG} (version already on npm)"
+            else
+              OUTCOME_LINE="Failed"
+              echo "::error title=Release outcome::Failed"
+            fi
           else
-            echo "::notice title=Release outcome::No release (no version bump)"
-            OUTCOME_LINE="No release (no version bump)"
-            TAG_LINE="- Tag: (no release created)"
-            RELEASE_LINE=""
+            if [ -n "$POST_TAG" ] && [ "$POST_TAG" != "${PRE_RELEASE_TAG:-}" ]; then
+              echo "::notice title=Release outcome::Released ${POST_TAG}"
+              OUTCOME_LINE="Released ${POST_TAG}"
+              TAG_LINE="- Tag: ${POST_TAG}"
+              RELEASE_LINE="- GitHub Release: https://github.com/${REPO}/releases/tag/${POST_TAG}"
+            else
+              echo "::notice title=Release outcome::No release (no version bump)"
+              OUTCOME_LINE="No release (no version bump)"
+              TAG_LINE="- Tag: (no release created)"
+              RELEASE_LINE=""
+            fi
           fi
+
+          TAG_LINE="${TAG_LINE:-}";
+          RELEASE_LINE="${RELEASE_LINE:-}";
 
           {
             echo "## Release Summary"
@@ -135,7 +195,9 @@ jobs:
             echo "- CI run: ${CI_RUN_URL} (run_id=${CI_RUN_ID})"
             echo "- Commit: ${CI_SHA}"
             echo "- dist manifest sha256: ${MANIFEST_SHA}"
-            echo "${TAG_LINE}"
+            if [ -n "${TAG_LINE}" ]; then
+              echo "${TAG_LINE}"
+            fi
             if [ -n "${RELEASE_LINE}" ]; then
               echo "${RELEASE_LINE}"
             fi
