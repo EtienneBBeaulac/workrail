@@ -10,6 +10,22 @@ export class LocalDataDirV2 implements DataDirPortV2 {
     return configured ? configured : path.join(os.homedir(), '.workrail', 'data');
   }
 
+  snapshotsDir(): string {
+    return path.join(this.root(), 'snapshots');
+  }
+
+  snapshotPath(snapshotRef: string): string {
+    return path.join(this.snapshotsDir(), `${snapshotRef}.json`);
+  }
+
+  keysDir(): string {
+    return path.join(this.root(), 'keys');
+  }
+
+  keyringPath(): string {
+    return path.join(this.keysDir(), 'keyring.json');
+  }
+
   pinnedWorkflowsDir(): string {
     return path.join(this.root(), 'workflows', 'pinned');
   }
