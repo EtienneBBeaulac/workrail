@@ -107,6 +107,22 @@
       "requireConfirmation": true
     },
     {
+      "id": "phase-4b-locks-compliance-audit",
+      "title": "Phase 4b: Locks Compliance Audit (Canonical Docs → Slices Matrix)",
+      "runCondition": {
+        "and": [
+          { "var": "taskComplexity", "not_equals": "Small" },
+          { "var": "riskLevel", "equals": "High" }
+        ]
+      },
+      "prompt": "Audit your slice plan against canonical lock documents to ensure no locked requirements are accidentally omitted.\n\n**This step exists to prevent the planning gap we just encountered (abstracting \"projections\" without enumerating all locked event schemas + idempotency enforcement).**\n\n**Do:**\n\n1) **Identify canonical docs** referenced in context/invariants (e.g., ADRs, `*-locks.md`, contract specs).\n   - If none exist, skip this audit (no canonical locks to check).\n\n2) **Extract locked items** from those docs:\n   - Search for: \"MUST\", \"locked\", \"required\", \"invariant\", closed-set enums, explicit schema lists, enforcement rules.\n   - List each as a distinct **lock ID** with a short description.\n\n3) **Map locks to slices** (create a matrix table):\n   - For each lock, identify which slice covers it.\n   - If a lock is not covered, either:\n     - add it to an existing slice (update `slices`), or\n     - add a new slice, or\n     - mark \"Deferred to [next phase/PR]\" with explicit reasoning.\n\n4) **Output the locks-to-slices matrix** (table format):\n\n| Lock ID | Lock Description | Mapped Slice | Status | Notes |\n|---------|------------------|--------------|--------|-------|\n| L1      | Idempotency via dedupeKey | Slice 2 | ✅ Mapped | enforced in append() |\n| L2      | Event schema closed set (12 kinds) | Multiple slices | ✅ Mapped | incremental |\n| L3      | Preferred tip last-activity | Projections | ⚠️ GAP | add to run DAG slice |\n\n**Set context variable:**\n- `locksMatrix` (the table for later reference)\n\n**VERIFY (if gaps detected):**\n- Require user confirmation to either: update slices to cover gaps, or explicitly defer with reasoning.\n- Do not proceed with unmapped locks unless user approves the deferral.",
+      "requireConfirmation": {
+        "or": [
+          { "var": "automationLevel", "equals": "Low" }
+        ]
+      }
+    },
+    {
       "id": "phase-5-plan-iteration-init",
       "title": "Phase 5: Plan Iteration Init (Bounded Loop Setup)",
       "runCondition": { "var": "taskComplexity", "not_equals": "Small" },
