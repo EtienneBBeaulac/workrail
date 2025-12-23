@@ -1,6 +1,8 @@
 import type { ResultAsync } from 'neverthrow';
 import type { SessionId, SnapshotRef } from '../durable-core/ids/index.js';
 import type { DomainEventV1, ManifestRecordV1 } from '../durable-core/schemas/session/index.js';
+import type { WithHealthySessionLock } from '../durable-core/ids/with-healthy-session-lock.js';
+import type { CorruptionReasonV2 } from '../durable-core/schemas/session/session-health.js';
 
 export interface SnapshotPinV2 {
   readonly snapshotRef: SnapshotRef;
@@ -27,7 +29,12 @@ export interface AppendPlanV2 {
 export type SessionEventLogStoreError =
   | { readonly code: 'SESSION_STORE_LOCK_BUSY'; readonly message: string; readonly retry: { readonly kind: 'retryable'; readonly afterMs: number } }
   | { readonly code: 'SESSION_STORE_IO_ERROR'; readonly message: string }
-  | { readonly code: 'SESSION_STORE_CORRUPTION_DETECTED'; readonly message: string }
+  | {
+      readonly code: 'SESSION_STORE_CORRUPTION_DETECTED';
+      readonly message: string;
+      readonly location: 'head' | 'tail';
+      readonly reason: CorruptionReasonV2;
+    }
   | { readonly code: 'SESSION_STORE_INVARIANT_VIOLATION'; readonly message: string };
 
 export interface LoadedSessionTruthV2 {
@@ -35,12 +42,33 @@ export interface LoadedSessionTruthV2 {
   readonly events: readonly DomainEventV1[];
 }
 
+export type LoadedValidatedPrefixV2 = {
+  readonly truth: LoadedSessionTruthV2;
+  readonly isComplete: boolean;
+  readonly tailReason: CorruptionReasonV2 | null;
+};
+
 /**
  * Append-only session truth substrate.
  *
  * Locked: the only durable mutation is `append(sessionId, plan)`.
  */
-export interface SessionEventLogStorePortV2 {
-  append(sessionId: SessionId, plan: AppendPlanV2): ResultAsync<void, SessionEventLogStoreError>;
+export interface SessionEventLogReadonlyStorePortV2 {
   load(sessionId: SessionId): ResultAsync<LoadedSessionTruthV2, SessionEventLogStoreError>;
+
+  /**
+   * Read-only salvage path: return the validated prefix, if any.
+   *
+   * Slice 2.5 lock: used for inspection/export only; execution requires SessionHealth=healthy.
+   */
+  loadValidatedPrefix(sessionId: SessionId): ResultAsync<LoadedValidatedPrefixV2, SessionEventLogStoreError>;
+}
+
+export interface SessionEventLogAppendStorePortV2 {
+  /**
+   * Append durable truth under a healthy-held session lock witness.
+   *
+   * Slice 2.5 lock: append requires a non-forgeable witness.
+   */
+  append(lock: WithHealthySessionLock, plan: AppendPlanV2): ResultAsync<void, SessionEventLogStoreError>;
 }

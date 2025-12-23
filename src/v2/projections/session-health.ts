@@ -1,17 +1,8 @@
 import type { Result } from 'neverthrow';
-import { err, ok } from 'neverthrow';
+import { ok } from 'neverthrow';
 import type { LoadedSessionTruthV2 } from '../ports/session-event-log-store.port.js';
+import type { SessionHealthV2 } from '../durable-core/schemas/session/session-health.js';
 import { projectRunDagV2 } from './run-dag.js';
-
-export type SessionHealthV2 =
-  | { readonly kind: 'healthy' }
-  | {
-      readonly kind: 'corrupted';
-      readonly reason:
-        | { readonly code: 'MANIFEST_INVALID'; readonly message: string }
-        | { readonly code: 'EVENT_LOG_INVALID'; readonly message: string }
-        | { readonly code: 'RUN_DAG_INVALID'; readonly message: string };
-    };
 
 /**
  * Pure corruption gating.
@@ -27,10 +18,9 @@ export function projectSessionHealthV2(truth: LoadedSessionTruthV2): Result<Sess
   // Deterministic additional check: run DAG must be projectable without invariant violations.
   const dag = projectRunDagV2(truth.events);
   if (dag.isErr()) {
-    return ok({
-      kind: 'corrupted',
-      reason: { code: 'RUN_DAG_INVALID', message: dag.error.message },
-    });
+    // We intentionally keep the corruption reason closed-set (Slice 2.5 lock).
+    // Map projection invalidity into `non_contiguous_indices` and preserve details in message.
+    return ok({ kind: 'corrupt_tail', reason: { code: 'non_contiguous_indices', message: dag.error.message } });
   }
 
   return ok({ kind: 'healthy' });
