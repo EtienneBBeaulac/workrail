@@ -143,7 +143,57 @@ export const DomainEventV1Schema = z.discriminatedUnion('kind', [
     data: NodeOutputAppendedDataV1Schema,
   }),
   DomainEventEnvelopeV1Schema.extend({ kind: z.literal('preferences_changed'), data: JsonValueSchema }),
-  DomainEventEnvelopeV1Schema.extend({ kind: z.literal('capability_observed'), data: JsonValueSchema }),
+  DomainEventEnvelopeV1Schema.extend({
+    kind: z.literal('capability_observed'),
+    scope: z.object({ runId: z.string().min(1), nodeId: z.string().min(1) }),
+    data: z
+      .object({
+        capObsId: z.string().min(1),
+        capability: z.enum(['delegation', 'web_browsing']),
+        status: z.enum(['unknown', 'available', 'unavailable']),
+        provenance: z.discriminatedUnion('kind', [
+          z.object({
+            kind: z.literal('probe_step'),
+            enforcementGrade: z.literal('strong'),
+            detail: z.object({
+              probeTemplateId: z.string().min(1),
+              probeStepId: z.string().min(1),
+              result: z.enum(['success', 'failure']),
+            }),
+          }),
+          z.object({
+            kind: z.literal('attempted_use'),
+            enforcementGrade: z.literal('strong'),
+            detail: z.object({
+              attemptContext: z.enum(['workflow_step', 'system_probe']),
+              result: z.enum(['success', 'failure']),
+              failureCode: z.enum(['tool_missing', 'tool_error', 'policy_blocked', 'unknown']).optional(),
+            }),
+          }),
+          z.object({
+            kind: z.literal('manual_claim'),
+            enforcementGrade: z.literal('weak'),
+            detail: z.object({
+              claimedBy: z.enum(['agent', 'user']),
+              claim: z.enum(['available', 'unavailable']),
+            }),
+          }),
+        ]),
+      })
+      .superRefine((v, ctx) => {
+        // Lock: attempted_use failure must include failureCode.
+        if (v.provenance.kind === 'attempted_use') {
+          const detail = v.provenance.detail;
+          if (detail.result === 'failure' && !detail.failureCode) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: 'attempted_use failure requires failureCode',
+              path: ['provenance', 'detail', 'failureCode'],
+            });
+          }
+        }
+      }),
+  }),
   DomainEventEnvelopeV1Schema.extend({ kind: z.literal('gap_recorded'), data: JsonValueSchema }),
   DomainEventEnvelopeV1Schema.extend({ kind: z.literal('divergence_recorded'), data: JsonValueSchema }),
   DomainEventEnvelopeV1Schema.extend({ kind: z.literal('decision_trace_appended'), data: JsonValueSchema }),
