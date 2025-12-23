@@ -53,8 +53,25 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogStorePortV2 {
 
       await this.unwrap(this.fs.mkdirp(eventsDir), mapFsToStoreError);
 
-      const manifest = await this.readManifestOrEmpty(sessionId);
+      const { manifest, events: existingEvents } = await this.loadTruthOrEmpty(sessionId);
       validateManifestContiguityOrThrow(manifest);
+
+      // Idempotency check (locked): if all events already exist by dedupeKey, this is a replay.
+      const existingByDedupeKey = new Set(existingEvents.map((e) => e.dedupeKey));
+      const allExist = plan.events.every((e) => existingByDedupeKey.has(e.dedupeKey));
+      if (allExist) {
+        // Idempotent no-op: all events in this plan already exist. Return without appending.
+        return;
+      }
+
+      // Partial replay detection (locked invariant violation): if ANY event exists but NOT all, fail fast.
+      const anyExist = plan.events.some((e) => existingByDedupeKey.has(e.dedupeKey));
+      if (anyExist && !allExist) {
+        throw new StoreFailure({
+          code: 'SESSION_STORE_INVARIANT_VIOLATION',
+          message: 'Partial dedupeKey collision detected (some events exist, some do not); this is an invariant violation',
+        });
+      }
 
       const expectedFirstEventIndex = nextEventIndexFromManifest(manifest);
       validateAppendPlanOrThrow(sessionId, plan, expectedFirstEventIndex);
@@ -202,6 +219,24 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogStorePortV2 {
     );
     if (raw.trim() === '') return [];
     return parseJsonlText(raw, ManifestRecordV1Schema);
+  }
+
+  private async loadTruthOrEmpty(sessionId: SessionId): Promise<{ manifest: ManifestRecordV1[]; events: DomainEventV1[] }> {
+    const manifest = await this.readManifestOrEmpty(sessionId);
+    if (manifest.length === 0) return { manifest: [], events: [] };
+
+    const segments = manifest.filter((m): m is Extract<ManifestRecordV1, { kind: 'segment_closed' }> => m.kind === 'segment_closed');
+    const sessionDir = this.dataDir.sessionDir(sessionId);
+    const events: DomainEventV1[] = [];
+
+    for (const seg of segments) {
+      const segmentPath = `${sessionDir}/${seg.segmentRelPath}`;
+      const bytes = await this.unwrap(this.fs.readFileBytes(segmentPath), mapFsToStoreError);
+      const parsed = parseJsonlLines(bytes, DomainEventV1Schema);
+      events.push(...parsed);
+    }
+
+    return { manifest, events };
   }
 
   private async appendManifestRecords(manifestPath: string, records: readonly ManifestRecordV1[]): Promise<void> {
