@@ -1399,6 +1399,8 @@ This section is a convenience index for the closed sets already defined elsewher
 - **Preferences**
   - `autonomy`: `guided | full_auto_stop_on_user_deps | full_auto_never_stop`
   - `riskPolicy`: `conservative | balanced | aggressive`
+- **Next intent (boundary discipline)**
+  - `nextIntent`: `perform_pending_then_continue | await_user_confirmation | rehydrate_only | complete`
 - **Capabilities**: `delegation | web_browsing`
 - **Edge kind**: `acked_step | checkpoint`
   - `cause.kind`: `idempotent_replay | intentional_fork | non_tip_advance | checkpoint_created`

@@ -824,6 +824,22 @@ Canonical block set: `goal`, `constraints`, `procedure`, `outputRequired`, `veri
 
 Blocks are **optional**; plain `prompt` strings are still allowed.
 
+## Boundary discipline (`nextIntent`) (recommended)
+
+Agents do not (and must not) know the next workflow step until WorkRail returns it. In practice, agents may “fill the gap” with confident speculation (“after this I’ll implement…”) and may even skip calling `continue_workflow` when they believe they know what’s next. This undermines the “one step at a time” property that makes v2 rewind-safe.
+
+Recommended response affordance:
+- Add a **closed-set** `nextIntent` field to execution responses that states the **only safe next action**, without revealing future steps:
+  - `perform_pending_then_continue`
+  - `await_user_confirmation`
+  - `rehydrate_only`
+  - `complete`
+- Pair `nextIntent` with a deterministic, byte-budgeted footer in `pending.prompt` that reinforces:
+  - the next step is unknown until fetched
+  - the next move is to call `continue_workflow`
+
+This is behavioral shaping, not enforcement (WorkRail cannot inspect the transcript). It is still valuable because it reduces both narrative drift and tool-call drift across model variability.
+
 ## AgentRole (normative clarification)
 
 WorkRail **cannot control the agent's system prompt**. The `agentRole` field is workflow/step-scoped stance text injected into the rendered prompt. Workflow-level applies to all steps; step-level overrides.
