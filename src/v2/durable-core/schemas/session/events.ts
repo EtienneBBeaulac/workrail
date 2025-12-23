@@ -75,6 +75,40 @@ const EdgeCreatedDataV1Schema = z
     }
   });
 
+const OutputChannelSchema = z.enum(['recap', 'artifact']);
+
+const NotesPayloadV1Schema = z.object({
+  payloadKind: z.literal('notes'),
+  notesMarkdown: z.string().min(1),
+});
+
+const ArtifactRefPayloadV1Schema = z.object({
+  payloadKind: z.literal('artifact_ref'),
+  sha256: sha256DigestSchema,
+  contentType: z.string().min(1),
+  byteLength: z.number().int().nonnegative(),
+});
+
+const OutputPayloadV1Schema = z.discriminatedUnion('payloadKind', [NotesPayloadV1Schema, ArtifactRefPayloadV1Schema]);
+
+const NodeOutputAppendedDataV1Schema = z
+  .object({
+    outputId: z.string().min(1),
+    supersedesOutputId: z.string().min(1).optional(),
+    outputChannel: OutputChannelSchema,
+    payload: OutputPayloadV1Schema,
+  })
+  .superRefine((v, ctx) => {
+    // Locked: recap channel must use notes payload.
+    if (v.outputChannel === 'recap' && v.payload.payloadKind !== 'notes') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'outputChannel=recap requires payloadKind=notes',
+        path: ['payload', 'payloadKind'],
+      });
+    }
+  });
+
 /**
  * Closed-set domain event kinds (initial v2 union, locked).
  *
@@ -103,7 +137,11 @@ export const DomainEventV1Schema = z.discriminatedUnion('kind', [
     data: EdgeCreatedDataV1Schema,
   }),
   DomainEventEnvelopeV1Schema.extend({ kind: z.literal('advance_recorded'), data: JsonValueSchema }),
-  DomainEventEnvelopeV1Schema.extend({ kind: z.literal('node_output_appended'), data: JsonValueSchema }),
+  DomainEventEnvelopeV1Schema.extend({
+    kind: z.literal('node_output_appended'),
+    scope: z.object({ runId: z.string().min(1), nodeId: z.string().min(1) }),
+    data: NodeOutputAppendedDataV1Schema,
+  }),
   DomainEventEnvelopeV1Schema.extend({ kind: z.literal('preferences_changed'), data: JsonValueSchema }),
   DomainEventEnvelopeV1Schema.extend({ kind: z.literal('capability_observed'), data: JsonValueSchema }),
   DomainEventEnvelopeV1Schema.extend({ kind: z.literal('gap_recorded'), data: JsonValueSchema }),
