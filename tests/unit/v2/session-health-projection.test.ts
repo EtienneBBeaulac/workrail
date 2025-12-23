@@ -44,7 +44,7 @@ describe('v2 session health projection', () => {
     expect(res._unsafeUnwrap().kind).toBe('healthy');
   });
 
-  it('is corrupted when run DAG projection fails', () => {
+  it('is corrupt_tail when run DAG projection fails', () => {
     const events: DomainEventV1[] = [
       {
         v: 1,
@@ -67,9 +67,9 @@ describe('v2 session health projection', () => {
     const res = projectSessionHealthV2(truth);
     expect(res.isOk()).toBe(true);
     const health = res._unsafeUnwrap();
-    expect(health.kind).toBe('corrupted');
-    if (health.kind === 'corrupted') {
-      expect(health.reason.code).toBe('RUN_DAG_INVALID');
+    expect(health.kind).toBe('corrupt_tail');
+    if (health.kind === 'corrupt_tail') {
+      expect(health.reason.code).toBe('non_contiguous_indices');
     }
   });
 });

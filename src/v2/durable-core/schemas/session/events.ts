@@ -1,10 +1,15 @@
 import { z } from 'zod';
 import { JsonValueSchema } from '../../canonical/json-zod.js';
+import { asSha256Digest, asSnapshotRef } from '../../ids/index.js';
 
 const sha256DigestSchema = z
   .string()
   .regex(/^sha256:[0-9a-f]{64}$/, 'Expected sha256:<64 hex chars>')
   .describe('sha256 digest in WorkRail v2 format');
+
+const snapshotRefSchema = sha256DigestSchema
+  .transform((v) => asSnapshotRef(asSha256Digest(v)))
+  .describe('SnapshotRef (content-addressed sha256 ref)');
 
 /**
  * Minimal domain event envelope (initial v2 schema, locked)
@@ -47,7 +52,7 @@ const NodeCreatedDataV1Schema = z.object({
   nodeKind: NodeKindSchema,
   parentNodeId: z.string().min(1).nullable(),
   workflowHash: sha256DigestSchema,
-  snapshotRef: sha256DigestSchema,
+  snapshotRef: snapshotRefSchema,
 });
 
 const EdgeKindSchema = z.enum(['acked_step', 'checkpoint']);
@@ -140,16 +145,16 @@ const BlockerReportV1Schema = z
   .superRefine((v, ctx) => {
     // Deterministic ordering lock: (code, pointer.kind, pointer.* stable fields) ascending.
     const keyFor = (b: z.infer<typeof BlockerSchema>): string => {
-      const p = b.pointer as any;
+      const p = b.pointer;
       const ptrStable =
-        b.pointer.kind === 'context_key'
+        p.kind === 'context_key'
           ? p.key
-          : b.pointer.kind === 'output_contract'
+          : p.kind === 'output_contract'
             ? p.contractRef
-            : b.pointer.kind === 'capability'
+            : p.kind === 'capability'
               ? p.capability
               : p.stepId;
-      return `${b.code}|${b.pointer.kind}|${String(ptrStable)}`;
+      return `${b.code}|${p.kind}|${String(ptrStable)}`;
     };
 
     for (let i = 1; i < v.blockers.length; i++) {
