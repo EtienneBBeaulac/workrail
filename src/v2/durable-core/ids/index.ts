@@ -18,6 +18,12 @@ export type ManifestIndex = Brand<number, 'v2.ManifestIndex'>; // 0-based, monot
 
 export type SnapshotRef = Brand<Sha256Digest, 'v2.SnapshotRef'>; // content-addressed snapshot ref (sha256:...)
 
+// Slice 3 prereq: stable attempt id for ack/checkpoint idempotency.
+export type AttemptId = Brand<string, 'v2.AttemptId'>;
+
+// Slice 3 prereq: opaque token strings.
+export type TokenStringV1 = Brand<string, 'v2.TokenStringV1'>;
+
 export function asWorkflowId(value: string): WorkflowId {
   return value as WorkflowId;
 }
@@ -60,4 +66,12 @@ export function asManifestIndex(value: number): ManifestIndex {
 
 export function asSnapshotRef(value: Sha256Digest): SnapshotRef {
   return value as SnapshotRef;
+}
+
+export function asAttemptId(value: string): AttemptId {
+  return value as AttemptId;
+}
+
+export function asTokenStringV1(value: string): TokenStringV1 {
+  return value as TokenStringV1;
 }
