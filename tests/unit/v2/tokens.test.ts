@@ -128,7 +128,10 @@ describe('v2 tokens (Slice 3 prereq)', () => {
     const token = signTokenV1('st.v1.', payloadBytes, keyring, hmac)._unsafeUnwrap();
 
     const raw = String(token);
-    const tampered = raw.slice(0, -1) + (raw.endsWith('A') ? 'B' : 'A');
+    // Tamper with the signature segment more aggressively to ensure bytes change significantly.
+    const parts = raw.split('.');
+    const sigPart = parts[3]!;
+    const tampered = `${parts[0]}.${parts[1]}.${parts[2]}.${sigPart.slice(0, -8)}AAAAAAAA`;
     const parsed = parseTokenV1(tampered)._unsafeUnwrap();
     const verified = verifyTokenSignatureV1(parsed, keyring, hmac);
     expect(verified.isErr()).toBe(true);
