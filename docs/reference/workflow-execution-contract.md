@@ -524,7 +524,7 @@ Explicit “migration” of a run to a new workflow version is a separate, opt-i
   "checkpointToken": "chk.v1....",
   "isComplete": false,
   "session": {
-    "sessionId": "AUTH-1234",
+    "sessionId": "sess_01JH8X2...",
     "runId": "run_01JFD..."
   },
   "preferences": {
@@ -569,7 +569,7 @@ Notes:
   "checkpointToken": "chk.v1.next....",
   "isComplete": false,
   "session": {
-    "sessionId": "AUTH-1234",
+    "sessionId": "sess_01JH8X2...",
     "runId": "run_01JFD..."
   },
   "preferences": {

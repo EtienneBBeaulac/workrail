@@ -1411,6 +1411,20 @@ This section is a convenience index for the closed sets already defined elsewher
 - **Manifest record kinds**: `segment_closed | snapshot_pinned`
 - **Run status**: `in_progress | blocked | complete | complete_with_gaps`
 
+## 16.3.1) Genuinely open items (not yet locked)
+
+The following are intentionally deferred and should be locked before implementing the features that depend on them:
+
+- **UserOnlyDependencyReason enumeration** (`ReasonCode.user_only_dependency:<reason>`):
+  - Used by: `full_auto_stop_on_user_deps` blocking logic, gaps recording, Studio unblock guidance
+  - Must be: closed set, deterministic, actionable (each reason implies specific remediation)
+  - Examples (illustrative): `missing_design_doc`, `missing_external_artifact`, `needs_product_decision`
+
+- **Non-assumable choice boundary semantics**:
+  - When can full-auto "assume/derive/skip+disclose" vs when must it block?
+  - Locked intent: should be based on a closed-set gate (e.g., `needs_user_choice` kind) not heuristic inference
+  - This determines the agent's autonomy limits and shapes full-auto UX
+
 ## 16.4) Implementation playbook (how to execute safely) (locked intent)
 This section records execution guidance for large v2 refactors so we keep the implementation aligned with the locks and avoid mid-project drift.
 

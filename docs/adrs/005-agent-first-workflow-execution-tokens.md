@@ -47,7 +47,7 @@ Rewinds create an additional reality gap: meaningful work often happens “betwe
 
 Make workflow execution tools **agent-first** by hiding engine internals behind two opaque primitives:
 
-- **`stateToken`**: an opaque, server-minted representation of the workflow execution snapshot (including workflow identity/version and run identity). The client must round-trip it unchanged.
+- **`stateToken`**: an opaque, server-minted handle that refers to a workflow execution snapshot (identified by workflow hash and run/node identity). The client must round-trip it unchanged.
 - **`ackToken`**: an opaque, server-minted acknowledgement token representing “I completed the pending step WorkRail instructed for this `stateToken`”. The server must treat `(stateToken, ackToken)` as **idempotent** (replay returns the same response and does not double-advance).
 
 Sessions are **demoted** to a dashboard/UX projection over immutable token lineage rather than an authoritative pointer:

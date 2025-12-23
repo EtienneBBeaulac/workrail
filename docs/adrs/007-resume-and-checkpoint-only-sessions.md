@@ -34,7 +34,7 @@ Both tools are behind the same feature flag(s) as the capability they unlock.
 ## Consequences
 
 - `resume_session` must be backed by durable storage and stable projections (see ADR 006).
-- Resume ranking should incorporate high-signal local observations (e.g., current git branch/HEAD SHA) to increase match accuracy.
+- Resume ranking uses layered search: git observations (branch/HEAD SHA) at highest tier, then durable node recap outputs, then workflow id/name matching. No session-level title/tag fields exist; aboutness is derived from observations and outputs.
 - The contract must clearly separate:
   - **resumption** (tip): return bounded durable recap up to the pending step
   - **rewind/fork** (non-tip): automatically fork and return branch-focused context the agent likely lost (including a bounded downstream recap), without requiring user confirmation
