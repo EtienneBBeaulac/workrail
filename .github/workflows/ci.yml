@@ -217,6 +217,9 @@ jobs:
       - name: Validate all workflows
         run: npm run validate:workflows
 
+      - name: Validate workflow discovery (workflow_list/workflow_get)
+        run: npm run validate:workflow-discovery
+
       - name: Summary
         if: success()
         run: |
