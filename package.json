@@ -5,7 +5,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/EtienneBBeaulac/workrail.git"
+    "url": "git+https://github.com/EtienneBBeaulac/workrail.git"
   },
   "bugs": {
     "url": "https://github.com/EtienneBBeaulac/workrail/issues"
