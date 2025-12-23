@@ -19,6 +19,7 @@ jobs:
     permissions:
       contents: write
       actions: read
+      id-token: write
     
     steps:
       - name: Checkout
@@ -64,7 +65,6 @@ jobs:
       - name: Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npx semantic-release
 
       - name: Release summary
