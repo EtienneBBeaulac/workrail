@@ -48,6 +48,11 @@ jobs:
       - name: Verify dist manifest
         run: node scripts/dist-manifest.js --dist dist --verify dist/manifest.json
 
+      - name: Capture pre-release tag
+        run: |
+          PRE_TAG="$(git describe --tags --abbrev=0 --match "v*" 2>/dev/null || true)"
+          echo "PRE_RELEASE_TAG=$PRE_TAG" >> "$GITHUB_ENV"
+
       - name: Verify build artifacts
         run: |
           echo "Checking build artifacts..."
@@ -61,3 +66,27 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npx semantic-release
+
+      - name: Release summary
+        if: always()
+        env:
+          CI_RUN_URL: ${{ github.event.workflow_run.html_url }}
+          CI_RUN_ID: ${{ github.event.workflow_run.id }}
+          CI_SHA: ${{ github.event.workflow_run.head_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          POST_TAG="$(git describe --tags --abbrev=0 --match "v*" 2>/dev/null || true)"
+          MANIFEST_SHA="$(sha256sum dist/manifest.json | awk '{print $1}')"
+          {
+            echo "## Release Summary"
+            echo
+            echo "- CI run: ${CI_RUN_URL} (run_id=${CI_RUN_ID})"
+            echo "- Commit: ${CI_SHA}"
+            echo "- dist manifest sha256: ${MANIFEST_SHA}"
+            if [ -n "$POST_TAG" ] && [ "$POST_TAG" != "${PRE_RELEASE_TAG:-}" ]; then
+              echo "- Tag: ${POST_TAG}"
+              echo "- GitHub Release: https://github.com/${REPO}/releases/tag/${POST_TAG}"
+            else
+              echo "- Tag: (no release created)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
