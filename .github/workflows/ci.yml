@@ -68,7 +68,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [ lockfile, build-artifact ]
     permissions:
-      contents: read
+      # semantic-release dry-run verifies it can push tags/commits; requires write access.
+      contents: write
 
     steps:
       - name: Checkout code (full history)
