@@ -222,7 +222,8 @@ export class WorkflowInterpreter {
     }
 
     // No eligible steps left in this iteration => advance iteration
-    if (frame.iteration + 1 >= loopCompiled.loop.loop.maxIterations) {
+    // Allow advancing up to maxIterations; shouldContinueLoop will reject if we've hit the count/condition
+    if (frame.iteration + 1 > loopCompiled.loop.loop.maxIterations) {
       return err(Err.maxIterationsExceeded(frame.loopId, loopCompiled.loop.loop.maxIterations));
     }
 

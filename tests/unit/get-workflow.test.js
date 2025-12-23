@@ -255,7 +255,7 @@ var MockWorkflowService = /** @class */ (function () {
                     }
                 });
             }); });
-            (0, globals_1.it)('should handle workflows with undefined optional fields', function () { return __awaiter(void 0, void 0, void 0, function () {
+            (0, globals_1.it)('should omit optional fields when undefined', function () { return __awaiter(void 0, void 0, void 0, function () {
                 var result;
                 return __generator(this, function (_a) {
                     switch (_a.label) {
@@ -264,16 +264,17 @@ var MockWorkflowService = /** @class */ (function () {
                             return [4 /*yield*/, getWorkflow('minimal-workflow', 'metadata')];
                         case 1:
                             result = _a.sent();
+                            // Important: MCP output boundary forbids `undefined`, so we must omit absent fields.
                             (0, globals_1.expect)(result).toEqual({
                                 id: 'minimal-workflow',
                                 name: 'Minimal Workflow',
                                 description: 'A minimal workflow.',
                                 version: '0.0.1',
-                                preconditions: undefined,
-                                clarificationPrompts: undefined,
-                                metaGuidance: undefined,
                                 totalSteps: 1
                             });
+                            (0, globals_1.expect)('preconditions' in result).toBe(false);
+                            (0, globals_1.expect)('clarificationPrompts' in result).toBe(false);
+                            (0, globals_1.expect)('metaGuidance' in result).toBe(false);
                             return [2 /*return*/];
                     }
                 });
