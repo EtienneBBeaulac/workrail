@@ -4,6 +4,9 @@ on:
   pull_request:
     branches:
       - '**'
+  push:
+    branches:
+      - main
   # Allow this workflow to be called by other workflows (e.g., release)
   workflow_call:
 
@@ -12,12 +15,35 @@ permissions:
 
 jobs:
   # ============================================================================
+  # REQUIRED: Lockfile is stable under npm ci
+  # ============================================================================
+  lockfile:
+    name: Lockfile Stable
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Node.js (toolchain)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.14.0
+          cache: 'npm'
+
+      - name: Install dependencies (no lifecycle scripts)
+        run: npm ci --ignore-scripts
+
+      - name: Verify lockfile unchanged
+        run: git diff --exit-code package-lock.json
+
+  # ============================================================================
   # REQUIRED: semantic-release dry-run (guards release config and tag computation)
   # ============================================================================
   semantic-release-dry-run:
     name: semantic-release dry-run
     runs-on: ubuntu-latest
-    needs: build-artifact
+    needs: [ lockfile, build-artifact ]
     permissions:
       contents: read
 
@@ -218,7 +244,7 @@ jobs:
 
       - name: Upload coverage reports
         if: matrix.node-version == 20
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
         with:
           directory: ./coverage
           flags: unittests
@@ -314,13 +340,21 @@ jobs:
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [ build-artifact, semantic-release-dry-run, typecheck, validate-workflows, build-and-test, contract-tests, e2e-tests ]
+    needs: [ lockfile, build-artifact, semantic-release-dry-run, typecheck, validate-workflows, build-and-test, contract-tests, e2e-tests ]
     if: always()
     steps:
       - name: Check required jobs
         run: |
           echo "## CI Success Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Check lockfile
+          if [[ "${{ needs.lockfile.result }}" != "success" ]]; then
+            echo "- Lockfile Stable: FAILED" >> $GITHUB_STEP_SUMMARY
+            echo "Lockfile job failed"
+            exit 1
+          fi
+          echo "- Lockfile Stable: PASSED" >> $GITHUB_STEP_SUMMARY
 
           # Check build-artifact
           if [[ "${{ needs.build-artifact.result }}" != "success" ]]; then
