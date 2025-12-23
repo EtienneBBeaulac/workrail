@@ -279,7 +279,7 @@ This section tracks remaining work. Most design locks are now complete; the focu
 - **v2 core design is locked**: see `docs/design/v2-core-design-locks.md` for the comprehensive implementation locks (durable model, projections, authoring, ops envelope, architecture map, module layout, and ports).
 - **Implementation status**:
   - ✅ **Slice 1 complete** (merged to main): v2 bounded context (`src/v2/`), JCS canonicalization, `workflowHash` pinning, compiled workflow snapshots, pinned workflow store, read-only v2 MCP tools (`list_workflows`, `inspect_workflow`) behind `WORKRAIL_ENABLE_V2_TOOLS` flag.
-  - ✅ **Slice 2 complete** (PR open): append-only session event log substrate (segments + `manifest.jsonl` + single-writer lock + corruption gating), typed closed-set event schemas for all 12 locked event kinds, idempotency enforcement, and pure deterministic projections (run DAG, session health, node outputs, capabilities, gaps, advance outcomes, run status signals, preferences propagation).
+  - ✅ **Slice 2 complete** (merged to main): append-only session event log substrate (segments + `manifest.jsonl` + single-writer lock + corruption gating), typed closed-set event schemas for all 12 locked event kinds, idempotency enforcement, and pure deterministic projections (run DAG, session health, node outputs, capabilities, gaps, advance outcomes, run status signals, preferences propagation).
   - **Next**: Slice 3 (token-based orchestration: `start_workflow`, `continue_workflow`, opaque tokens, execution snapshots, rehydration).
   - The locked type-first sequencing remains:
     1. ✅ Canonical models + hashing (no I/O)
