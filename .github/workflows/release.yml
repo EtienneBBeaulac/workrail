@@ -72,48 +72,17 @@ jobs:
           test -f dist/cli.js || (echo "Missing dist/cli.js" && exit 1)
           echo "Build artifacts verified."
 
-      - name: Debug publish environment
-        run: |
-          set -euo pipefail
-
-          echo "node=$(node --version)"
-          echo "npm=$(npm --version)"
-          echo "registry=$(npm config get registry)"
-          echo "userconfig=$(npm config get userconfig)"
-          echo "cache=$(npm config get cache)"
-
-          echo "ACTIONS_ID_TOKEN_REQUEST_URL=${ACTIONS_ID_TOKEN_REQUEST_URL:+set}"
-          echo "ACTIONS_ID_TOKEN_REQUEST_TOKEN=${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+set}"
-          echo "GITHUB_WORKFLOW_REF=${GITHUB_WORKFLOW_REF:-unset}"
-
-          echo "PWD=$(pwd)"
-          echo "HOME=${HOME:-unset}"
-
-          echo "--- npm config (safe subset) ---"
-          npm config list -l | egrep -i '^(; )?(registry|@exaudeus:registry|always-auth|auth-type|userconfig|cache|provenance)=' || true
-
-          echo "--- potential npmrc files ---"
-          ls -la "${HOME:-/home/runner}" || true
-          ls -la "${HOME:-/home/runner}/.npmrc" || true
-          ls -la .npmrc || true
-
       - name: Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Increase signal for npm auth behavior during publish
-          NPM_CONFIG_LOGLEVEL: verbose
-          DEBUG: semantic-release:*,@semantic-release/*
         run: |
           set -euo pipefail
 
-          echo "pre-sanitize: npm=$(command -v npm) ($(npm --version))"
-
+          # Ensure we use the upgraded global npm (OIDC requires npm >= 11.5.1).
           # npx prepends ./node_modules/.bin to PATH, which can shadow the global npm
           # with a bundled npm package version that does not support trusted publishing.
           export PATH="$(echo "$PATH" | tr ':' '\n' | awk '!/\/node_modules\/\.bin/' | paste -sd ':' -)"
           hash -r
-
-          echo "post-sanitize: npm=$(command -v npm) ($(npm --version))"
 
           # Avoid npx so PATH is not implicitly modified.
           node ./node_modules/semantic-release/bin/semantic-release.js
