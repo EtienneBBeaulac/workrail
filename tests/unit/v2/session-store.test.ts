@@ -178,7 +178,12 @@ describe('v2 local session store (Slice 2 substrate)', () => {
       kind: 'node_created',
       dedupeKey: `node_created:${sessionId}:run_1:node_1`,
       scope: { runId: 'run_1', nodeId: 'node_1' },
-      data: { snapshotRef },
+      data: {
+        nodeKind: 'step',
+        parentNodeId: null,
+        workflowHash: 'sha256:5947229239ac2966c1099d6d74f4448c064e54ae25959eaebfd89cec073bdc11',
+        snapshotRef,
+      },
     };
 
     const appendRes = await store.append(sessionId, {
