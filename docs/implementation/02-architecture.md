@@ -231,7 +231,7 @@ Step Output → ValidationEngine.validate() → {
 
 * **Horizontal Scaling** – Multiple server instances can run behind a queue; stdin transport can be swapped for HTTP without touching domain code.
 * **Caching** – `CachingWorkflowStorage` reduces disk access; switch to Redis in distributed setups.
-* **Observability** – Structured logging via the error handler + TODO: OTEL traces.
+* **Observability** – Structured logging via the error handler. OTEL trace integration is planned for future observability enhancements.
 
 ---
 

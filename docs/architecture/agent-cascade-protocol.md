@@ -63,7 +63,7 @@ When a session starts (or via the `workflow-diagnose-environment` workflow), Wor
 When executing a workflow step that calls for a specialized routine:
 
 *   **If Tier 3:** WorkRail provides the **Delegation Instruction**:
-    > "Delegate the `routine-gather` workflow to your Researcher Subagent. Instruct them to run it using `workflow_next`."
+    > "Delegate the `routine-gather` workflow to your Researcher Subagent. Instruct them to run it using `workflow_next` (v1) or `start_workflow`/`continue_workflow` (v2)."
 
 *   **If Tier 2:** WorkRail provides the **Proxy Instruction**:
     > "Act as a Proxy. Read the steps of `routine-gather`. For each step, instruct your Researcher Subagent to perform the work via natural language. Validate their results yourself."
