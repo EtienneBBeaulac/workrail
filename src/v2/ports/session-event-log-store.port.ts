@@ -2,6 +2,12 @@ import type { ResultAsync } from 'neverthrow';
 import type { SessionId, SnapshotRef } from '../durable-core/ids/index.js';
 import type { DomainEventV1, ManifestRecordV1 } from '../durable-core/schemas/session/index.js';
 
+export interface SnapshotPinV2 {
+  readonly snapshotRef: SnapshotRef;
+  readonly eventIndex: number;
+  readonly createdByEventId: string;
+}
+
 export interface AppendPlanV2 {
   /**
    * Domain events to append as the atomic truth unit.
@@ -15,7 +21,7 @@ export interface AppendPlanV2 {
    *
    * Locked: pins must be written AFTER `segment_closed`.
    */
-  readonly snapshotRefsToPin: readonly SnapshotRef[];
+  readonly snapshotPins: readonly SnapshotPinV2[];
 }
 
 export type SessionEventLogStoreError =
