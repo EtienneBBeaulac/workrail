@@ -280,8 +280,9 @@ This section tracks remaining work. Most design locks are now complete; the focu
 - **Implementation status**:
   - ✅ **Slice 1 complete** (merged to main): v2 bounded context (`src/v2/`), JCS canonicalization, `workflowHash` pinning, compiled workflow snapshots, pinned workflow store, read-only v2 MCP tools (`list_workflows`, `inspect_workflow`) behind `WORKRAIL_ENABLE_V2_TOOLS` flag.
   - ✅ **Slice 2 complete** (merged to main): append-only session event log substrate (segments + `manifest.jsonl` + single-writer lock + corruption gating), typed closed-set event schemas for all 12 locked event kinds, idempotency enforcement, and pure deterministic projections (run DAG, session health, node outputs, capabilities, gaps, advance outcomes, run status signals, preferences propagation).
-  - ✅ **Slice 2.5 complete** (in review): `ExecutionSessionGateV2` (lock+health+witness choke-point); `WithHealthySessionLock` (opaque branded witness; append requires proof); readonly/append port split; `SessionHealthV2` union with manifest-attested corruption reasons; typed snapshot pin enforcement (no `any`); tests + docs updated.
-  - **Next**: Slice 3 prerequisites → Slice 3 implementation.
+  - ✅ **Slice 2.5 complete** (merged to main): `ExecutionSessionGateV2` (lock+health+witness choke-point); `WithHealthySessionLock` (opaque branded witness; append requires proof); readonly/append port split; `SessionHealthV2` union with manifest-attested corruption reasons; typed snapshot pin enforcement (no `any`); tests + docs updated.
+  - ✅ **Slice 3 prereqs complete** (PR `feature/etienneb/v2-slice3-prereqs`): execution snapshot schemas with locked invariants, snapshot CAS store (port + local adapter), token payload codec + HMAC-SHA256 signing/verification, crash-safe keyring (current/previous keys), snapshot-state helpers; golden fixtures + full unit test coverage.
+  - **Next**: Slice 3 implementation (token orchestration: `start_workflow`, `continue_workflow`, rehydrate/advance/replay use-cases).
   - The locked type-first sequencing remains:
     1. ✅ Canonical models + hashing (no I/O)
     2. ✅ Pure projections
