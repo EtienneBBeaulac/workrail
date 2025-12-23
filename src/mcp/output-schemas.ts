@@ -72,6 +72,30 @@ export const WorkflowGetSchemaOutputSchema = z.object({
 });
 
 // -----------------------------------------------------------------------------
+// v2 tool outputs (Slice 1)
+// -----------------------------------------------------------------------------
+
+export const V2WorkflowListItemSchema = z.object({
+  workflowId: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().min(1),
+  version: z.string().min(1),
+  kind: z.literal('workflow'),
+  workflowHash: z.string().nullable(),
+});
+
+export const V2WorkflowListOutputSchema = z.object({
+  workflows: z.array(V2WorkflowListItemSchema),
+});
+
+export const V2WorkflowInspectOutputSchema = z.object({
+  workflowId: z.string().min(1),
+  workflowHash: z.string().min(1),
+  mode: z.enum(['metadata', 'preview']),
+  compiled: JsonValueSchema,
+});
+
+// -----------------------------------------------------------------------------
 // Session tool outputs
 // -----------------------------------------------------------------------------
 

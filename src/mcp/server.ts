@@ -45,6 +45,8 @@ import {
   openDashboardTool,
 } from './tools.js';
 
+import { buildV2ToolRegistry } from './v2/tool-registry.js';
+
 import {
   handleWorkflowList,
   handleWorkflowGet,
@@ -321,6 +323,15 @@ export async function startServer(): Promise<void> {
     );
   }
 
+  // Add v2 tools if enabled (explicit opt-in)
+  const v2Registry = ctx.featureFlags.isEnabled('v2Tools') ? buildV2ToolRegistry(buildTool) : null;
+  if (v2Registry) {
+    console.error('[FeatureFlags] v2 tools enabled (enable with WORKRAIL_ENABLE_V2_TOOLS=true)');
+    tools.push(...v2Registry.tools.map(toMcpTool));
+  } else {
+    console.error('[FeatureFlags] v2 tools disabled (enable with WORKRAIL_ENABLE_V2_TOOLS=true)');
+  }
+
   // Build handler map (uses input schemas directly)
   const handlers: Record<string, ToolHandler> = {
     workflow_list: createHandler(WorkflowListInput, handleWorkflowList),
@@ -333,6 +344,13 @@ export async function startServer(): Promise<void> {
     workrail_read_session: createHandler(readSessionTool.inputSchema, handleReadSession),
     workrail_open_dashboard: createHandler(openDashboardTool.inputSchema, handleOpenDashboard),
   };
+
+  // Register v2 handlers only when tools are enabled (prevents tool leaks)
+  if (v2Registry) {
+    for (const [name, entry] of Object.entries(v2Registry.handlers)) {
+      handlers[name] = createHandler(entry.schema, entry.handler);
+    }
+  }
 
   // Register ListTools handler
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
