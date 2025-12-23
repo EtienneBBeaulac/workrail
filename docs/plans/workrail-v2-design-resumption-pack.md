@@ -277,12 +277,16 @@ See the canonical docs for full mechanics:
 This section tracks remaining work. Most design locks are now complete; the focus is implementation.
 
 - **v2 core design is locked**: see `docs/design/v2-core-design-locks.md` for the comprehensive implementation locks (durable model, projections, authoring, ops envelope, architecture map, module layout, and ports).
-- **Implementation status**: ready to begin Phase 0 (canonical schemas + JCS/hashing + generators). The locked type-first sequencing is:
-  1. Canonical models + hashing (no I/O)
-  2. Pure projections
-  3. Storage substrate (ports + adapters)
-  4. Protocol orchestration
-  5. Determinism suite
+- **Implementation status**:
+  - ✅ **Slice 1 complete** (merged to main): v2 bounded context (`src/v2/`), JCS canonicalization, `workflowHash` pinning, compiled workflow snapshots, pinned workflow store, read-only v2 MCP tools (`list_workflows`, `inspect_workflow`) behind `WORKRAIL_ENABLE_V2_TOOLS` flag.
+  - ✅ **Slice 2 complete** (PR open): append-only session event log substrate (segments + `manifest.jsonl` + single-writer lock + corruption gating), typed closed-set event schemas for all 12 locked event kinds, idempotency enforcement, and pure deterministic projections (run DAG, session health, node outputs, capabilities, gaps, advance outcomes, run status signals, preferences propagation).
+  - **Next**: Slice 3 (token-based orchestration: `start_workflow`, `continue_workflow`, opaque tokens, execution snapshots, rehydration).
+  - The locked type-first sequencing remains:
+    1. ✅ Canonical models + hashing (no I/O)
+    2. ✅ Pure projections
+    3. ✅ Storage substrate (ports + adapters)
+    4. Protocol orchestration (next)
+    5. Determinism suite
 - **Authoring is finalized**:
   - Initial contract packs are locked: `capability_observation`, `workflow_divergence`, `loop_control` (and gaps integrated into event model).
   - Builtins metadata schema defined (code-canonical + generated).
