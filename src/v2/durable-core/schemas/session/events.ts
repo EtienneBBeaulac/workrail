@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { JsonValueSchema } from '../../canonical/json-zod.js';
 
 /**
  * Minimal domain event envelope (initial v2 schema, locked)
@@ -19,7 +20,7 @@ export const DomainEventEnvelopeV1Schema = z.object({
       nodeId: z.string().min(1).optional(),
     })
     .optional(),
-  data: z.record(z.unknown()),
+  data: JsonValueSchema,
 });
 
 /**
@@ -32,18 +33,18 @@ export const DomainEventV1Schema = z.discriminatedUnion('kind', [
   DomainEventEnvelopeV1Schema.extend({ kind: z.literal('session_created'), data: z.object({}) }),
   DomainEventEnvelopeV1Schema.extend({
     kind: z.literal('observation_recorded'),
-    data: z.record(z.unknown()),
+    data: JsonValueSchema,
   }),
-  DomainEventEnvelopeV1Schema.extend({ kind: z.literal('run_started'), data: z.record(z.unknown()) }),
-  DomainEventEnvelopeV1Schema.extend({ kind: z.literal('node_created'), data: z.record(z.unknown()) }),
-  DomainEventEnvelopeV1Schema.extend({ kind: z.literal('edge_created'), data: z.record(z.unknown()) }),
-  DomainEventEnvelopeV1Schema.extend({ kind: z.literal('advance_recorded'), data: z.record(z.unknown()) }),
-  DomainEventEnvelopeV1Schema.extend({ kind: z.literal('node_output_appended'), data: z.record(z.unknown()) }),
-  DomainEventEnvelopeV1Schema.extend({ kind: z.literal('preferences_changed'), data: z.record(z.unknown()) }),
-  DomainEventEnvelopeV1Schema.extend({ kind: z.literal('capability_observed'), data: z.record(z.unknown()) }),
-  DomainEventEnvelopeV1Schema.extend({ kind: z.literal('gap_recorded'), data: z.record(z.unknown()) }),
-  DomainEventEnvelopeV1Schema.extend({ kind: z.literal('divergence_recorded'), data: z.record(z.unknown()) }),
-  DomainEventEnvelopeV1Schema.extend({ kind: z.literal('decision_trace_appended'), data: z.record(z.unknown()) }),
+  DomainEventEnvelopeV1Schema.extend({ kind: z.literal('run_started'), data: JsonValueSchema }),
+  DomainEventEnvelopeV1Schema.extend({ kind: z.literal('node_created'), data: JsonValueSchema }),
+  DomainEventEnvelopeV1Schema.extend({ kind: z.literal('edge_created'), data: JsonValueSchema }),
+  DomainEventEnvelopeV1Schema.extend({ kind: z.literal('advance_recorded'), data: JsonValueSchema }),
+  DomainEventEnvelopeV1Schema.extend({ kind: z.literal('node_output_appended'), data: JsonValueSchema }),
+  DomainEventEnvelopeV1Schema.extend({ kind: z.literal('preferences_changed'), data: JsonValueSchema }),
+  DomainEventEnvelopeV1Schema.extend({ kind: z.literal('capability_observed'), data: JsonValueSchema }),
+  DomainEventEnvelopeV1Schema.extend({ kind: z.literal('gap_recorded'), data: JsonValueSchema }),
+  DomainEventEnvelopeV1Schema.extend({ kind: z.literal('divergence_recorded'), data: JsonValueSchema }),
+  DomainEventEnvelopeV1Schema.extend({ kind: z.literal('decision_trace_appended'), data: JsonValueSchema }),
 ]);
 
 export type DomainEventV1 = z.infer<typeof DomainEventV1Schema>;
