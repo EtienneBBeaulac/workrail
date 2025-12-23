@@ -1,0 +1,122 @@
+import * as fs from 'fs/promises';
+import * as fsCb from 'fs';
+import { constants as fsConstants } from 'fs';
+import type { ResultAsync } from 'neverthrow';
+import { ResultAsync as RA } from 'neverthrow';
+import type { FileSystemPortV2, FsError } from '../../../ports/fs.port.js';
+
+function mapFsError(e: unknown, filePath: string): FsError {
+  const any = e as any;
+  const code = any?.code as string | undefined;
+
+  if (code === 'ENOENT') return { code: 'FS_NOT_FOUND', message: `Not found: ${filePath}` };
+  if (code === 'EEXIST') return { code: 'FS_ALREADY_EXISTS', message: `Already exists: ${filePath}` };
+  if (code === 'EACCES' || code === 'EPERM') return { code: 'FS_PERMISSION_DENIED', message: `Permission denied: ${filePath}` };
+  return { code: 'FS_IO_ERROR', message: `FS error at ${filePath}: ${e instanceof Error ? e.message : String(e)}` };
+}
+
+export class NodeFileSystemV2 implements FileSystemPortV2 {
+  mkdirp(dirPath: string): ResultAsync<void, FsError> {
+    return RA.fromPromise(fs.mkdir(dirPath, { recursive: true }).then(() => undefined), (e) => mapFsError(e, dirPath));
+  }
+
+  readFileUtf8(filePath: string): ResultAsync<string, FsError> {
+    return RA.fromPromise(fs.readFile(filePath, 'utf8'), (e) => mapFsError(e, filePath));
+  }
+
+  readFileBytes(filePath: string): ResultAsync<Uint8Array, FsError> {
+    return RA.fromPromise(fs.readFile(filePath), (e) => mapFsError(e, filePath)).map((b) => new Uint8Array(b));
+  }
+
+  writeFileBytes(filePath: string, bytes: Uint8Array): ResultAsync<void, FsError> {
+    return RA.fromPromise(fs.writeFile(filePath, Buffer.from(bytes)), (e) => mapFsError(e, filePath));
+  }
+
+  openWriteTruncate(filePath: string): ResultAsync<{ readonly fd: number }, FsError> {
+    return RA.fromPromise(fs.open(filePath, 'w'), (e) => mapFsError(e, filePath)).map((h) => ({ fd: h.fd }));
+  }
+
+  openAppend(filePath: string): ResultAsync<{ readonly fd: number }, FsError> {
+    return RA.fromPromise(fs.open(filePath, 'a'), (e) => mapFsError(e, filePath)).map((h) => ({ fd: h.fd }));
+  }
+
+  writeAll(fd: number, bytes: Uint8Array): ResultAsync<void, FsError> {
+    return RA.fromPromise(
+      new Promise<void>((resolve, reject) => {
+        fsCb.write(fd, Buffer.from(bytes), 0, bytes.length, null, (err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      }),
+      (e) => mapFsError(e, `fd:${fd}`)
+    );
+  }
+
+  openExclusive(filePath: string, bytes: Uint8Array): ResultAsync<{ readonly fd: number }, FsError> {
+    return RA.fromPromise(
+      (async () => {
+        // Use low-level open to guarantee exclusive create semantics.
+        const handle = await fs.open(filePath, fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY, 0o600);
+        await new Promise<void>((resolve, reject) => {
+          fsCb.write(handle.fd, Buffer.from(bytes), 0, bytes.length, null, (err) => {
+            if (err) reject(err);
+            else resolve();
+          });
+        });
+        return { fd: handle.fd };
+      })(),
+      (e) => mapFsError(e, filePath)
+    );
+  }
+
+  fsyncFile(fd: number): ResultAsync<void, FsError> {
+    return RA.fromPromise(
+      new Promise<void>((resolve, reject) => {
+        fsCb.fsync(fd, (err) => (err ? reject(err) : resolve()));
+      }),
+      (e) => mapFsError(e, `fd:${fd}`)
+    );
+  }
+
+  fsyncDir(dirPath: string): ResultAsync<void, FsError> {
+    return RA.fromPromise(
+      (async () => {
+        // fsync a directory by opening it, then fsyncing the fd.
+        // This may not be supported on all platforms; fail fast if unsupported.
+        const dirHandle = await fs.open(dirPath, 'r');
+        try {
+          await new Promise<void>((resolve, reject) => {
+            fsCb.fsync(dirHandle.fd, (err) => (err ? reject(err) : resolve()));
+          });
+        } finally {
+          await dirHandle.close();
+        }
+      })(),
+      (e) => {
+        const any = e as any;
+        const code = any?.code as string | undefined;
+        if (code === 'EINVAL' || code === 'ENOTSUP') {
+          return { code: 'FS_UNSUPPORTED', message: `Directory fsync unsupported for: ${dirPath}` };
+        }
+        return mapFsError(e, dirPath);
+      }
+    );
+  }
+
+  closeFile(fd: number): ResultAsync<void, FsError> {
+    return RA.fromPromise(
+      new Promise<void>((resolve, reject) => {
+        fsCb.close(fd, (err) => (err ? reject(err) : resolve()));
+      }),
+      (e) => mapFsError(e, `fd:${fd}`)
+    );
+  }
+
+  rename(fromPath: string, toPath: string): ResultAsync<void, FsError> {
+    return RA.fromPromise(fs.rename(fromPath, toPath), (e) => mapFsError(e, `${fromPath} -> ${toPath}`));
+  }
+
+  stat(filePath: string): ResultAsync<{ readonly sizeBytes: number }, FsError> {
+    return RA.fromPromise(fs.stat(filePath), (e) => mapFsError(e, filePath)).map((s) => ({ sizeBytes: s.size }));
+  }
+}
