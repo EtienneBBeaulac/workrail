@@ -103,7 +103,20 @@ jobs:
           # Increase signal for npm auth behavior during publish
           NPM_CONFIG_LOGLEVEL: verbose
           DEBUG: semantic-release:*,@semantic-release/*
-        run: npx semantic-release
+        run: |
+          set -euo pipefail
+
+          echo "pre-sanitize: npm=$(command -v npm) ($(npm --version))"
+
+          # npx prepends ./node_modules/.bin to PATH, which can shadow the global npm
+          # with a bundled npm package version that does not support trusted publishing.
+          export PATH="$(echo "$PATH" | tr ':' '\n' | awk '!/\/node_modules\/\.bin/' | paste -sd ':' -)"
+          hash -r
+
+          echo "post-sanitize: npm=$(command -v npm) ($(npm --version))"
+
+          # Avoid npx so PATH is not implicitly modified.
+          node ./node_modules/semantic-release/bin/semantic-release.js
 
       - name: Cleanup tag on failed publish
         if: failure()
