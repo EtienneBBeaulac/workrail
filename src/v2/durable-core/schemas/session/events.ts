@@ -175,6 +175,72 @@ const AdvanceRecordedDataV1Schema = z.object({
   outcome: AdvanceRecordedOutcomeV1Schema,
 });
 
+const AutonomySchema = z.enum(['guided', 'full_auto_stop_on_user_deps', 'full_auto_never_stop']);
+const RiskPolicySchema = z.enum(['conservative', 'balanced', 'aggressive']);
+
+const PreferencesChangedDataV1Schema = z
+  .object({
+    changeId: z.string().min(1),
+    source: z.enum(['user', 'workflow_recommendation', 'system']),
+    delta: z
+      .array(
+        z.discriminatedUnion('key', [
+          z.object({ key: z.literal('autonomy'), value: AutonomySchema }),
+          z.object({ key: z.literal('riskPolicy'), value: RiskPolicySchema }),
+        ])
+      )
+      .min(1),
+    effective: z.object({
+      autonomy: AutonomySchema,
+      riskPolicy: RiskPolicySchema,
+    }),
+  })
+  .superRefine((v, ctx) => {
+    const keys = v.delta.map((d) => d.key);
+    const unique = new Set(keys);
+    if (unique.size !== keys.length) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'delta must not contain duplicate keys', path: ['delta'] });
+    }
+  });
+
+const UserOnlyDependencyReasonSchema = z.enum([
+  'needs_user_secret_or_token',
+  'needs_user_account_access',
+  'needs_user_artifact',
+  'needs_user_choice',
+  'needs_user_approval',
+  'needs_user_environment_action',
+]);
+
+const GapReasonSchema = z.discriminatedUnion('category', [
+  z.object({ category: z.literal('user_only_dependency'), detail: UserOnlyDependencyReasonSchema }),
+  z.object({ category: z.literal('contract_violation'), detail: z.enum(['missing_required_output', 'invalid_required_output']) }),
+  z.object({
+    category: z.literal('capability_missing'),
+    detail: z.enum(['required_capability_unavailable', 'required_capability_unknown']),
+  }),
+  z.object({ category: z.literal('unexpected'), detail: z.enum(['invariant_violation', 'storage_corruption_detected']) }),
+]);
+
+const GapResolutionSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('unresolved') }),
+  z.object({ kind: z.literal('resolves'), resolvesGapId: z.string().min(1) }),
+]);
+
+const GapEvidenceRefSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('event'), eventId: z.string().min(1) }),
+  z.object({ kind: z.literal('output'), outputId: z.string().min(1) }),
+]);
+
+const GapRecordedDataV1Schema = z.object({
+  gapId: z.string().min(1),
+  severity: z.enum(['info', 'warning', 'critical']),
+  reason: GapReasonSchema,
+  summary: z.string().min(1),
+  resolution: GapResolutionSchema,
+  evidenceRefs: z.array(GapEvidenceRefSchema).optional(),
+});
+
 /**
  * Closed-set domain event kinds (initial v2 union, locked).
  *
@@ -212,7 +278,11 @@ export const DomainEventV1Schema = z.discriminatedUnion('kind', [
     scope: z.object({ runId: z.string().min(1), nodeId: z.string().min(1) }),
     data: NodeOutputAppendedDataV1Schema,
   }),
-  DomainEventEnvelopeV1Schema.extend({ kind: z.literal('preferences_changed'), data: JsonValueSchema }),
+  DomainEventEnvelopeV1Schema.extend({
+    kind: z.literal('preferences_changed'),
+    scope: z.object({ runId: z.string().min(1), nodeId: z.string().min(1) }),
+    data: PreferencesChangedDataV1Schema,
+  }),
   DomainEventEnvelopeV1Schema.extend({
     kind: z.literal('capability_observed'),
     scope: z.object({ runId: z.string().min(1), nodeId: z.string().min(1) }),
@@ -264,7 +334,11 @@ export const DomainEventV1Schema = z.discriminatedUnion('kind', [
         }
       }),
   }),
-  DomainEventEnvelopeV1Schema.extend({ kind: z.literal('gap_recorded'), data: JsonValueSchema }),
+  DomainEventEnvelopeV1Schema.extend({
+    kind: z.literal('gap_recorded'),
+    scope: z.object({ runId: z.string().min(1), nodeId: z.string().min(1) }),
+    data: GapRecordedDataV1Schema,
+  }),
   DomainEventEnvelopeV1Schema.extend({ kind: z.literal('divergence_recorded'), data: JsonValueSchema }),
   DomainEventEnvelopeV1Schema.extend({ kind: z.literal('decision_trace_appended'), data: JsonValueSchema }),
 ]);
