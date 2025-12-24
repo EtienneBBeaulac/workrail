@@ -23,7 +23,7 @@ import type { ShutdownEvents, ShutdownEvent } from '../runtime/ports/shutdown-ev
 import type { ProcessSignals } from '../runtime/ports/process-signals.js';
 import type { ProcessTerminator } from '../runtime/ports/process-terminator.js';
 
-import type { ToolContext, ToolResult } from './types.js';
+import type { ToolContext, ToolResult, ToolError, JsonValue } from './types.js';
 import { createToolFactory, type ToolAnnotations, type ToolDefinition } from './tool-factory.js';
 import type { IToolDescriptionProvider } from './tool-description-provider.js';
 import { preValidateWorkflowNextArgs, type PreValidateResult } from './validation/workflow-next-prevalidate.js';
@@ -172,20 +172,19 @@ function createHandler<TInput extends z.ZodType, TOutput>(
   return async (args: unknown, ctx: ToolContext): Promise<McpCallToolResult> => {
     const parseResult = schema.safeParse(args);
     if (!parseResult.success) {
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            error: 'Invalid input',
-            code: 'VALIDATION_ERROR',
-            details: parseResult.error.errors.map(e => ({
-              path: e.path.join('.'),
-              message: e.message,
-            })),
-          }, null, 2),
-        }],
-        isError: true,
+      // Unified error envelope (v2 locks): Zod parse failures use the same ToolError shape as handlers.
+      const validationIssues = parseResult.error.errors.map(e => ({
+        path: e.path.join('.'),
+        message: e.message,
+      }));
+      const toolError: ToolError = {
+        type: 'error',
+        code: 'VALIDATION_ERROR',
+        message: 'Invalid input',
+        retry: { kind: 'not_retryable' },
+        details: { validationIssues },
       };
+      return toMcpResult(toolError);
     }
     return toMcpResult(await handler(parseResult.data, ctx));
   };
@@ -203,22 +202,16 @@ function createValidatingHandler<TInput extends z.ZodType, TOutput>(
   return async (args: unknown, ctx: ToolContext): Promise<McpCallToolResult> => {
     const pre = preValidate(args);
     if (!pre.ok) {
+      // Unified error envelope: prevalidation failures use ToolError with details.correctTemplate.
       const bounded = pre.correctTemplate ? toBoundedJsonValue(pre.correctTemplate, 512) : undefined;
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify(
-            {
-              error: pre.message,
-              code: pre.code,
-              ...(bounded ? { correctTemplate: bounded } : {}),
-            },
-            null,
-            2
-          ),
-        }],
-        isError: true,
+      const toolError: ToolError = {
+        type: 'error',
+        code: pre.code,
+        message: pre.message,
+        retry: { kind: 'not_retryable' },
+        ...(bounded !== undefined ? { details: { correctTemplate: bounded } as JsonValue } : {}),
       };
+      return toMcpResult(toolError);
     }
 
     // Fall back to the standard Zod + handler pipeline
