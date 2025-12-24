@@ -1425,6 +1425,14 @@ The following are intentionally deferred and should be locked before implementin
   - Locked intent: should be based on a closed-set gate (e.g., `needs_user_choice` kind) not heuristic inference
   - This determines the agent's autonomy limits and shapes full-auto UX
 
+- **Context budget and schema discipline**:
+  - Problem: agents can stuff unlimited junk into `context` (large docs, debug logs, irrelevant data); responses may echo entire `context` back (payload bloat)
+  - Should workflows declare expected context keys and size budgets?
+  - Should responses suppress echoing `context` the agent already has (avoid "send it back verbatim" waste)?
+  - Should incoming `context` be size-limited and validated against a declared schema?
+  - Used by: all v2 execution tools; impacts agent UX, token payload size, and resumption quality
+  - Lock intent: prefer declared schemas + budgets over heuristic trimming; fail fast on oversized context rather than silently truncating
+
 ## 16.4) Implementation playbook (how to execute safely) (locked intent)
 This section records execution guidance for large v2 refactors so we keep the implementation aligned with the locks and avoid mid-project drift.
 
