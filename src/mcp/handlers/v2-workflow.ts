@@ -4,7 +4,7 @@ import { mapUnknownErrorToToolError } from '../error-mapper.js';
 import type { V2InspectWorkflowInput, V2ListWorkflowsInput } from '../v2/tools.js';
 import { V2WorkflowInspectOutputSchema, V2WorkflowListOutputSchema } from '../output-schemas.js';
 
-import { compileV1WorkflowToV2CompiledSnapshotV1 } from '../../v2/read-only/v1-to-v2-shim.js';
+import { compileV1WorkflowToV2PreviewSnapshot } from '../../v2/read-only/v1-to-v2-shim.js';
 import { NodeCryptoV2 } from '../../v2/infra/local/crypto/index.js';
 import { LocalDataDirV2 } from '../../v2/infra/local/data-dir/index.js';
 import { LocalPinnedWorkflowStoreV2 } from '../../v2/infra/local/pinned-workflow-store/index.js';
@@ -44,7 +44,7 @@ export async function handleV2ListWorkflows(
           };
         }
 
-        const snapshot = compileV1WorkflowToV2CompiledSnapshotV1(wf);
+        const snapshot = compileV1WorkflowToV2PreviewSnapshot(wf);
         const hashRes = workflowHashForCompiledSnapshot(snapshot as unknown as JsonValue, crypto);
         if (hashRes.isErr()) {
           return {
@@ -98,7 +98,7 @@ export async function handleV2InspectWorkflow(
     const dataDir = new LocalDataDirV2(process.env);
     const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir);
 
-    const snapshot = compileV1WorkflowToV2CompiledSnapshotV1(workflow);
+    const snapshot = compileV1WorkflowToV2PreviewSnapshot(workflow);
     const hashRes = workflowHashForCompiledSnapshot(snapshot as unknown as JsonValue, crypto);
     if (hashRes.isErr()) {
       return error('INTERNAL_ERROR', hashRes.error.message);

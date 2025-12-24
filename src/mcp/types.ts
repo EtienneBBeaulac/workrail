@@ -25,7 +25,20 @@ export type ErrorCode =
   | 'NOT_FOUND'            // Requested resource doesn't exist
   | 'PRECONDITION_FAILED'  // Feature disabled, missing dependency, etc.
   | 'TIMEOUT'              // Operation timed out
-  | 'INTERNAL_ERROR';      // Unexpected failure
+  | 'INTERNAL_ERROR'       // Unexpected failure
+  // v2 execution (locked token error codes)
+  | 'TOKEN_INVALID_FORMAT'
+  | 'TOKEN_UNSUPPORTED_VERSION'
+  | 'TOKEN_BAD_SIGNATURE'
+  | 'TOKEN_SCOPE_MISMATCH'
+  | 'TOKEN_UNKNOWN_NODE'
+  | 'TOKEN_WORKFLOW_HASH_MISMATCH'
+  | 'TOKEN_SESSION_LOCKED';
+
+export type ToolRetry =
+  | { readonly kind: 'not_retryable' }
+  | { readonly kind: 'retryable_immediate' }
+  | { readonly kind: 'retryable_after_ms'; readonly afterMs: number };
 
 // -----------------------------------------------------------------------------
 // Tool Result
@@ -47,6 +60,8 @@ export interface ToolError {
   readonly code: ErrorCode;
   readonly message: string;
   readonly suggestion?: string;
+  readonly retry: ToolRetry;
+  readonly details?: unknown;
 }
 
 /**
@@ -75,12 +90,16 @@ export const success = <T>(data: T): ToolResult<T> => ({
 export const error = (
   code: ErrorCode,
   message: string,
-  suggestion?: string
+  suggestion?: string,
+  retry?: ToolRetry,
+  details?: unknown
 ): ToolResult<never> => ({
   type: 'error',
   code,
   message,
   suggestion,
+  retry: retry ?? { kind: 'not_retryable' },
+  ...(details !== undefined ? { details } : {}),
 });
 
 // -----------------------------------------------------------------------------

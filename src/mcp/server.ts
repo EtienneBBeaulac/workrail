@@ -97,9 +97,11 @@ function toMcpResult<T>(result: ToolResult<T>): McpCallToolResult {
         content: [{
           type: 'text',
           text: JSON.stringify({
-            error: result.message,
             code: result.code,
+            message: result.message,
+            retry: result.retry,
             ...(result.suggestion && { suggestion: result.suggestion }),
+            ...(result.details !== undefined ? { details: result.details } : {}),
           }, null, 2),
         }],
         isError: true,

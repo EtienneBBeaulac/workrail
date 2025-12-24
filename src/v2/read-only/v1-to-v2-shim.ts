@@ -2,13 +2,12 @@ import type { Workflow } from '../../types/workflow.js';
 import type { CompiledWorkflowSnapshotV1 } from '../durable-core/schemas/compiled-workflow/index.js';
 
 /**
- * Slice 1 only: compile a v1 Workflow into a minimal v2 compiled snapshot shape.
+ * Slice 1: compile a v1 Workflow into a read-only preview snapshot.
  *
- * Guardrail: this is intentionally named and scoped as a shim so it does not
- * become the long-term v2 compiler. It should be deleted once v2 authoring
- * and compilation are implemented.
+ * Guardrail: this is intentionally named and scoped as a shim. Preview snapshots
+ * are not executable; they exist only for `inspect_workflow` metadata/hashing.
  */
-export function compileV1WorkflowToV2CompiledSnapshotV1(workflow: Workflow): CompiledWorkflowSnapshotV1 {
+export function compileV1WorkflowToV2PreviewSnapshot(workflow: Workflow): Extract<CompiledWorkflowSnapshotV1, { sourceKind: 'v1_preview' }> {
   const firstStep = workflow.definition.steps[0];
 
   // v1 workflows always have at least one step (validated on load),
@@ -16,7 +15,7 @@ export function compileV1WorkflowToV2CompiledSnapshotV1(workflow: Workflow): Com
   if (!firstStep) {
     return {
       schemaVersion: 1,
-      sourceKind: 'v1_shim',
+      sourceKind: 'v1_preview',
       workflowId: workflow.definition.id,
       name: workflow.definition.name,
       description: workflow.definition.description,
@@ -40,7 +39,7 @@ export function compileV1WorkflowToV2CompiledSnapshotV1(workflow: Workflow): Com
 
   return {
     schemaVersion: 1,
-    sourceKind: 'v1_shim',
+    sourceKind: 'v1_preview',
     workflowId: workflow.definition.id,
     name: workflow.definition.name,
     description: workflow.definition.description,
@@ -50,5 +49,23 @@ export function compileV1WorkflowToV2CompiledSnapshotV1(workflow: Workflow): Com
       title: (firstStep as any).title ?? firstStep.id,
       prompt,
     },
+  };
+}
+
+/**
+ * Slice 3: pin the full v1 workflow definition as durable truth for deterministic v2 execution.
+ *
+ * This is still a v1-backed execution strategy (not v2 authoring). It exists so `workflowHash`
+ * reflects the full workflow definition and remains stable even if on-disk sources change.
+ */
+export function compileV1WorkflowToPinnedSnapshot(workflow: Workflow): Extract<CompiledWorkflowSnapshotV1, { sourceKind: 'v1_pinned' }> {
+  return {
+    schemaVersion: 1,
+    sourceKind: 'v1_pinned',
+    workflowId: workflow.definition.id,
+    name: workflow.definition.name,
+    description: workflow.definition.description,
+    version: workflow.definition.version,
+    definition: workflow.definition as unknown,
   };
 }
