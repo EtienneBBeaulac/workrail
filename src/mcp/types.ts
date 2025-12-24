@@ -13,6 +13,18 @@ import type { SessionManager } from '../infrastructure/session/SessionManager.js
 import type { HttpServer } from '../infrastructure/session/HttpServer.js';
 
 // -----------------------------------------------------------------------------
+// JSON-safe details payload (prevents undefined / functions leaking across boundary)
+// -----------------------------------------------------------------------------
+
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly JsonValue[]
+  | { readonly [key: string]: JsonValue };
+
+// -----------------------------------------------------------------------------
 // Error Codes
 // -----------------------------------------------------------------------------
 
@@ -61,7 +73,7 @@ export interface ToolError {
   readonly message: string;
   readonly suggestion?: string;
   readonly retry: ToolRetry;
-  readonly details?: unknown;
+  readonly details?: JsonValue;
 }
 
 /**
@@ -92,7 +104,7 @@ export const error = (
   message: string,
   suggestion?: string,
   retry?: ToolRetry,
-  details?: unknown
+  details?: JsonValue
 ): ToolResult<never> => ({
   type: 'error',
   code,
@@ -101,6 +113,36 @@ export const error = (
   retry: retry ?? { kind: 'not_retryable' },
   ...(details !== undefined ? { details } : {}),
 });
+
+export type ToolErrorOptions = Readonly<{
+  suggestion?: string;
+  details?: JsonValue;
+}>;
+
+export function errNotRetryable(
+  code: ErrorCode,
+  message: string,
+  options?: ToolErrorOptions
+): ToolResult<never> {
+  return error(code, message, options?.suggestion, { kind: 'not_retryable' }, options?.details);
+}
+
+export function errRetryableImmediate(
+  code: ErrorCode,
+  message: string,
+  options?: ToolErrorOptions
+): ToolResult<never> {
+  return error(code, message, options?.suggestion, { kind: 'retryable_immediate' }, options?.details);
+}
+
+export function errRetryableAfterMs(
+  code: ErrorCode,
+  message: string,
+  afterMs: number,
+  options?: ToolErrorOptions
+): ToolResult<never> {
+  return error(code, message, options?.suggestion, { kind: 'retryable_after_ms', afterMs }, options?.details);
+}
 
 // -----------------------------------------------------------------------------
 // Tool Context
