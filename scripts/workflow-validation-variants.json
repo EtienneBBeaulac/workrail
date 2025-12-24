@@ -1,0 +1,14 @@
+{
+  "variants": [
+    {
+      "name": "default",
+      "env": {}
+    },
+    {
+      "name": "agentic-routines-enabled",
+      "env": {
+        "WORKRAIL_ENABLE_AGENTIC_ROUTINES": "true"
+      }
+    }
+  ]
+}
