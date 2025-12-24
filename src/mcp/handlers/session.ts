@@ -152,7 +152,7 @@ export async function handleCreateSession(
     return success(payload);
   } catch (err) {
     const mapped = mapUnknownErrorToToolError(err);
-    return error(mapped.code, mapped.message, mapped.suggestion);
+    return error(mapped.code, mapped.message, mapped.suggestion, mapped.retry, mapped.details);
   }
 }
 
@@ -186,7 +186,7 @@ export async function handleUpdateSession(
     }
 
     const mapped = mapUnknownErrorToToolError(err);
-    return error(mapped.code, mapped.message, mapped.suggestion);
+    return error(mapped.code, mapped.message, mapped.suggestion, mapped.retry, mapped.details);
   }
 }
 
@@ -232,7 +232,7 @@ export async function handleReadSession(
     }
 
     const mapped = mapUnknownErrorToToolError(err);
-    return error(mapped.code, mapped.message, mapped.suggestion);
+    return error(mapped.code, mapped.message, mapped.suggestion, mapped.retry, mapped.details);
   }
 }
 
@@ -252,6 +252,6 @@ export async function handleOpenDashboard(
     return success(payload);
   } catch (err) {
     const mapped = mapUnknownErrorToToolError(err);
-    return error(mapped.code, mapped.message, mapped.suggestion);
+    return error(mapped.code, mapped.message, mapped.suggestion, mapped.retry, mapped.details);
   }
 }

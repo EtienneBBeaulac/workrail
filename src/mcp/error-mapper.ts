@@ -1,11 +1,13 @@
 import type { DomainError } from '../domain/execution/error.js';
-import type { ErrorCode } from './types.js';
+import type { ErrorCode, ToolRetry, JsonValue } from './types.js';
 import { toBoundedJsonString } from './validation/bounded-json.js';
 
 export interface ToolErrorMapping {
   readonly code: ErrorCode;
   readonly message: string;
+  readonly retry: ToolRetry;
   readonly suggestion?: string;
+  readonly details?: JsonValue;
 }
 
 function assertNever(x: never): never {
@@ -18,6 +20,7 @@ export function mapDomainErrorToToolError(err: DomainError): ToolErrorMapping {
       return {
         code: 'NOT_FOUND',
         message: err.message,
+        retry: { kind: 'not_retryable' },
         suggestion: `Check available workflows with workflow_list`,
       };
 
@@ -25,6 +28,7 @@ export function mapDomainErrorToToolError(err: DomainError): ToolErrorMapping {
       return {
         code: 'VALIDATION_ERROR',
         message: err.message,
+        retry: { kind: 'not_retryable' },
         suggestion:
           `Use the "state" returned by the last workflow_next call.\n` +
           `If you are completing a step, send an event like:\n` +
@@ -44,6 +48,7 @@ export function mapDomainErrorToToolError(err: DomainError): ToolErrorMapping {
       return {
         code: 'VALIDATION_ERROR',
         message: err.message,
+        retry: { kind: 'not_retryable' },
         suggestion: 'Validate the workflow definition and ensure loop/body step IDs are consistent',
       };
 
@@ -51,6 +56,7 @@ export function mapDomainErrorToToolError(err: DomainError): ToolErrorMapping {
       return {
         code: 'PRECONDITION_FAILED',
         message: err.message,
+        retry: { kind: 'not_retryable' },
         suggestion:
           'Provide the required keys in the `context` object for condition evaluation and loop inputs.\n' +
           'Example:\n' +
@@ -61,6 +67,7 @@ export function mapDomainErrorToToolError(err: DomainError): ToolErrorMapping {
       return {
         code: 'INTERNAL_ERROR',
         message: err.message,
+        retry: { kind: 'not_retryable' },
         suggestion: 'Validate workflow JSON and condition expressions with workflow_validate_json',
       };
 
@@ -68,6 +75,7 @@ export function mapDomainErrorToToolError(err: DomainError): ToolErrorMapping {
       return {
         code: 'PRECONDITION_FAILED',
         message: err.message,
+        retry: { kind: 'not_retryable' },
         suggestion: `Increase maxIterations for loop '${err.loopId}' or adjust its condition/body`,
       };
 
@@ -78,7 +86,7 @@ export function mapDomainErrorToToolError(err: DomainError): ToolErrorMapping {
 
 export function mapUnknownErrorToToolError(err: unknown): ToolErrorMapping {
   if (err instanceof Error) {
-    return { code: 'INTERNAL_ERROR', message: err.message };
+    return { code: 'INTERNAL_ERROR', message: err.message, retry: { kind: 'not_retryable' } };
   }
-  return { code: 'INTERNAL_ERROR', message: String(err) };
+  return { code: 'INTERNAL_ERROR', message: String(err), retry: { kind: 'not_retryable' } };
 }
