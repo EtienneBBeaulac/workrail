@@ -200,4 +200,169 @@ describe('v2 replay is fact-returning and fail-closed (Phase 3)', () => {
       process.env.WORKRAIL_DATA_DIR = prev;
     }
   });
+
+  it('fails closed when advance_recorded(advanced) exists but snapshot is missing from CAS', async () => {
+    const root = await mkTempDataDir();
+    const prev = process.env.WORKRAIL_DATA_DIR;
+    process.env.WORKRAIL_DATA_DIR = root;
+    try {
+      const dataDir = new LocalDataDirV2(process.env);
+      const fsPort = new NodeFileSystemV2();
+      const sha256 = new NodeSha256V2();
+      const store = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha256);
+      const lock = new LocalSessionLockV2(dataDir, fsPort);
+      const gate = new ExecutionSessionGateV2(lock, store);
+      const crypto = new NodeCryptoV2();
+      const snapshotStore = new LocalSnapshotStoreV2(dataDir, fsPort, crypto);
+
+      const sessionId = 'sess_test_missing_snap';
+      const runId = 'run_2';
+      const nodeId = 'node_1';
+      const nodeId2 = 'node_2';
+      const workflowHash = 'sha256:5b2d9fb885d0adc6565e1fd59e6abb3769b69e4dba5a02b6eea750137a5c0be2';
+
+      // Pin a v1-backed compiled snapshot so the ack handler can load compiled workflow.
+      const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir);
+      await pinnedStore
+        .put(workflowHash as any, {
+          schemaVersion: 1,
+          sourceKind: 'v1_pinned',
+          workflowId: 'test-wf',
+          name: 'Test WF',
+          description: 'Test',
+          version: '1.0.0',
+          definition: {
+            id: 'test-wf',
+            name: 'Test WF',
+            description: 'Test',
+            version: '1.0.0',
+            steps: [{ id: 'triage', title: 'Triage', prompt: 'Do triage' }],
+          },
+        } as any)
+        .match(
+          () => undefined,
+          (e) => {
+            throw new Error(`unexpected pinned store put error: ${e.code}`);
+          }
+        );
+
+      // Create snapshot for node_1 and store it
+      const snapshot1 = ExecutionSnapshotFileV1Schema.parse({
+        v: 1,
+        kind: 'execution_snapshot',
+        enginePayload: {
+          v: 1,
+          engineState: { kind: 'running', completed: { kind: 'set', values: [] }, loopStack: [], pending: { kind: 'some', step: { stepId: 'triage', loopPath: [] } } },
+        },
+      });
+      const snapshotRef1 = await snapshotStore.putExecutionSnapshotV1(snapshot1).match(
+        (v) => v,
+        (e) => {
+          throw new Error(`unexpected snapshot put error for node_1: ${e.code}`);
+        }
+      );
+
+      // Create snapshot for node_2 but DO NOT store it in CAS (simulate missing snapshot)
+      // Use a valid sha256 format but with a ref that doesn't exist in the store
+      const snapshotRef2 = 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+
+      // Seed session/run/node_1/node_2 + advance_recorded(advanced)
+      await gate
+        .withHealthySessionLock(sessionId as any, (witness) =>
+          store.append(witness, {
+            events: [
+              { v: 1, eventId: 'evt_0', eventIndex: 0, sessionId, kind: 'session_created', dedupeKey: `session_created:${sessionId}`, data: {} },
+              {
+                v: 1,
+                eventId: 'evt_1',
+                eventIndex: 1,
+                sessionId,
+                kind: 'run_started',
+                dedupeKey: `run_started:${sessionId}:${runId}`,
+                scope: { runId },
+                data: { workflowId: 'test-wf', workflowHash, workflowSourceKind: 'project', workflowSourceRef: 'workflows/test.json' },
+              },
+              {
+                v: 1,
+                eventId: 'evt_2',
+                eventIndex: 2,
+                sessionId,
+                kind: 'node_created',
+                dedupeKey: `node_created:${sessionId}:${runId}:${nodeId}`,
+                scope: { runId, nodeId },
+                data: { nodeKind: 'step', parentNodeId: null, workflowHash, snapshotRef: snapshotRef1 },
+              },
+              {
+                v: 1,
+                eventId: 'evt_3',
+                eventIndex: 3,
+                sessionId,
+                kind: 'node_created',
+                dedupeKey: `node_created:${sessionId}:${runId}:${nodeId2}`,
+                scope: { runId, nodeId: nodeId2 },
+                data: { nodeKind: 'step', parentNodeId: nodeId, workflowHash, snapshotRef: snapshotRef2 },
+              },
+              {
+                v: 1,
+                eventId: 'evt_4',
+                eventIndex: 4,
+                sessionId,
+                kind: 'edge_created',
+                dedupeKey: `edge_created:${sessionId}:${runId}:${nodeId}:${nodeId2}`,
+                scope: { runId, nodeId },
+                data: { edgeKind: 'acked_step', fromNodeId: nodeId, toNodeId: nodeId2, cause: { kind: 'idempotent_replay', eventId: 'evt_5' } },
+              },
+              {
+                v: 1,
+                eventId: 'evt_5',
+                eventIndex: 5,
+                sessionId,
+                kind: 'advance_recorded',
+                dedupeKey: `advance_recorded:${sessionId}:${nodeId}:attempt_1`,
+                scope: { runId, nodeId },
+                data: { attemptId: 'attempt_1', intent: 'ack_pending', outcome: { kind: 'advanced', toNodeId: nodeId2 } },
+              },
+            ] as any,
+            snapshotPins: [
+              { snapshotRef: snapshotRef1, eventIndex: 2, createdByEventId: 'evt_2' },
+              { snapshotRef: snapshotRef2, eventIndex: 3, createdByEventId: 'evt_3' },
+            ],
+          })
+        )
+        .match(
+          () => undefined,
+          (e) => {
+            throw new Error(`unexpected seed append error: ${String((e as any).code ?? e)}`);
+          }
+        );
+
+      const statePayload = StateTokenPayloadV1Schema.parse({
+        tokenVersion: 1,
+        tokenKind: 'state',
+        sessionId,
+        runId,
+        nodeId,
+        workflowHash,
+      });
+      const ackPayload = AckTokenPayloadV1Schema.parse({
+        tokenVersion: 1,
+        tokenKind: 'ack',
+        sessionId,
+        runId,
+        nodeId,
+        attemptId: 'attempt_1',
+      });
+
+      const stateToken = await mkSignedToken({ unsignedPrefix: 'st.v1.', payload: statePayload });
+      const ackToken = await mkSignedToken({ unsignedPrefix: 'ack.v1.', payload: ackPayload });
+
+      const res = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx());
+      expect(res.type).toBe('error');
+      if (res.type !== 'error') return;
+      expect(res.code).toBe('INTERNAL_ERROR');
+      expect(res.message).toContain('Missing execution snapshot');
+    } finally {
+      process.env.WORKRAIL_DATA_DIR = prev;
+    }
+  });
 });

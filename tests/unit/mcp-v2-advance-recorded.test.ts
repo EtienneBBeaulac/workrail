@@ -221,4 +221,178 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
       process.env.WORKRAIL_DATA_DIR = prev;
     }
   });
+
+  it('does not create duplicate node_output_appended on ack replay with output', async () => {
+    const root = await mkTempDataDir();
+    const prev = process.env.WORKRAIL_DATA_DIR;
+    process.env.WORKRAIL_DATA_DIR = root;
+    try {
+      const dataDir = new LocalDataDirV2(process.env);
+      const fsPort = new NodeFileSystemV2();
+      const sha256 = new NodeSha256V2();
+      const store = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha256);
+      const lock = new LocalSessionLockV2(dataDir, fsPort);
+      const gate = new ExecutionSessionGateV2(lock, store);
+
+      const crypto = new NodeCryptoV2();
+      const snapshotStore = new LocalSnapshotStoreV2(dataDir, fsPort, crypto);
+
+      const sessionId = 'sess_test_output';
+      const runId = 'run_2';
+      const nodeId = 'node_2';
+      const workflowHash = 'sha256:5b2d9fb885d0adc6565e1fd59e6abb3769b69e4dba5a02b6eea750137a5c0be2';
+
+      // Pin a v1-backed compiled snapshot (schemaVersion=1, sourceKind=v1_pinned) so v2 execution can run deterministically.
+      const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir);
+      await pinnedStore.put(workflowHash as any, {
+        schemaVersion: 1,
+        sourceKind: 'v1_pinned',
+        workflowId: 'bug-investigation',
+        name: 'Bug Investigation',
+        description: 'Pinned test workflow',
+        version: '1.0.0',
+        definition: {
+          id: 'bug-investigation',
+          name: 'Bug Investigation',
+          description: 'Pinned test workflow',
+          version: '1.0.0',
+          steps: [{ id: 'triage', title: 'Triage', prompt: 'Do triage' }],
+        },
+      } as any).match(
+        () => undefined,
+        (e) => {
+          throw new Error(`unexpected pinned store put error: ${e.code}`);
+        }
+      );
+
+      const snapshot = ExecutionSnapshotFileV1Schema.parse({
+        v: 1,
+        kind: 'execution_snapshot',
+        enginePayload: {
+          v: 1,
+          engineState: {
+            kind: 'running',
+            completed: { kind: 'set', values: [] },
+            loopStack: [],
+            pending: { kind: 'some', step: { stepId: 'triage', loopPath: [] } },
+          },
+        },
+      });
+      const snapshotRef = await snapshotStore.putExecutionSnapshotV1(snapshot).match(
+        (v) => v,
+        (e) => {
+          throw new Error(`unexpected snapshot put error: ${e.code}`);
+        }
+      );
+
+      // Seed durable run + node state so ack attempts are valid.
+      await gate
+        .withHealthySessionLock(sessionId as any, (witness) =>
+          store.append(witness, {
+            events: [
+              {
+                v: 1,
+                eventId: 'evt_0',
+                eventIndex: 0,
+                sessionId,
+                kind: 'session_created',
+                dedupeKey: `session_created:${sessionId}`,
+                data: {},
+              },
+              {
+                v: 1,
+                eventId: 'evt_1',
+                eventIndex: 1,
+                sessionId,
+                kind: 'run_started',
+                dedupeKey: `run_started:${sessionId}:${runId}`,
+                scope: { runId },
+                data: { workflowId: 'bug-investigation', workflowHash, workflowSourceKind: 'project', workflowSourceRef: 'workflows/bug.json' },
+              },
+              {
+                v: 1,
+                eventId: 'evt_2',
+                eventIndex: 2,
+                sessionId,
+                kind: 'node_created',
+                dedupeKey: `node_created:${sessionId}:${runId}:${nodeId}`,
+                scope: { runId, nodeId },
+                data: { nodeKind: 'step', parentNodeId: null, workflowHash, snapshotRef },
+              },
+            ] as any,
+            snapshotPins: [{ snapshotRef, eventIndex: 2, createdByEventId: 'evt_2' }],
+          })
+        )
+        .match(
+          () => undefined,
+          (e) => {
+            throw new Error(`unexpected seed append error: ${String((e as any).code ?? e)}`);
+          }
+        );
+
+      const statePayload = StateTokenPayloadV1Schema.parse({
+        tokenVersion: 1,
+        tokenKind: 'state',
+        sessionId,
+        runId,
+        nodeId,
+        workflowHash,
+      });
+      const ackPayload = AckTokenPayloadV1Schema.parse({
+        tokenVersion: 1,
+        tokenKind: 'ack',
+        sessionId,
+        runId,
+        nodeId,
+        attemptId: 'attempt_2',
+      });
+
+      const stateToken = await mkSignedToken({ unsignedPrefix: 'st.v1.', payload: statePayload });
+      const ackToken = await mkSignedToken({ unsignedPrefix: 'ack.v1.', payload: ackPayload });
+
+      const outputNotes = '## Triage Summary\n\nBug found in authentication module.';
+
+      // First call with output
+      const first = await handleV2ContinueWorkflow(
+        { stateToken, ackToken, output: { notesMarkdown: outputNotes } } as any,
+        dummyCtx()
+      );
+      expect(first.type).toBe('success');
+      if (first.type !== 'success') return;
+      expect(first.data.kind).toBe('ok');
+      expect(first.data.isComplete).toBe(true);
+      expect(first.data.pending).toBeNull();
+
+      // Replay same ackToken + output
+      const second = await handleV2ContinueWorkflow(
+        { stateToken, ackToken, output: { notesMarkdown: outputNotes } } as any,
+        dummyCtx()
+      );
+      expect(second).toEqual(first);
+
+      // Load truth and verify deduplication
+      const truth = await store.load(sessionId as any).match(
+        (v) => v,
+        (e) => {
+          throw new Error(`unexpected load error: ${e.code}`);
+        }
+      );
+
+      // Verify exact event counts
+      const outputAppendedCount = truth.events.filter((e) => e.kind === 'node_output_appended').length;
+      expect(outputAppendedCount).toBe(1);
+
+      const advanceRecordedCount = truth.events.filter((e) => e.kind === 'advance_recorded').length;
+      expect(advanceRecordedCount).toBe(1);
+
+      const edgeCreatedCount = truth.events.filter((e) => e.kind === 'edge_created').length;
+      expect(edgeCreatedCount).toBe(1);
+
+      // root node + advanced node
+      const nodeCreatedCount = truth.events.filter((e) => e.kind === 'node_created').length;
+      expect(nodeCreatedCount).toBe(2);
+    } finally {
+      process.env.WORKRAIL_DATA_DIR = prev;
+    }
+  });
 });
