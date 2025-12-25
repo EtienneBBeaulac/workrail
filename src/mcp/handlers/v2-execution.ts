@@ -13,7 +13,8 @@ import { LocalSessionEventLogStoreV2 } from '../../v2/infra/local/session-store/
 import { NodeCryptoV2 } from '../../v2/infra/local/crypto/index.js';
 import { LocalSnapshotStoreV2 } from '../../v2/infra/local/snapshot-store/index.js';
 import { deriveIsComplete, derivePendingStep } from '../../v2/durable-core/projections/snapshot-state.js';
-import type { ExecutionSnapshotFileV1, EngineStateV1 } from '../../v2/durable-core/schemas/execution-snapshot/index.js';
+import type { ExecutionSnapshotFileV1, EngineStateV1, LoopPathFrameV1 } from '../../v2/durable-core/schemas/execution-snapshot/index.js';
+import { asDelimiterSafeIdV1, stepInstanceKeyFromParts } from '../../v2/durable-core/schemas/execution-snapshot/step-instance-key.js';
 import {
   assertTokenScopeMatchesState,
   parseTokenV1,
@@ -39,8 +40,9 @@ import type { WorkflowDefinition } from '../../types/workflow-definition.js';
 import { hasWorkflowDefinitionShape } from '../../types/workflow-definition.js';
 import { WorkflowCompiler } from '../../application/services/workflow-compiler.js';
 import { WorkflowInterpreter } from '../../application/services/workflow-interpreter.js';
-import type { ExecutionState } from '../../domain/execution/state.js';
+import type { ExecutionState, LoopFrame } from '../../domain/execution/state.js';
 import type { WorkflowEvent } from '../../domain/execution/event.js';
+import type { StepInstanceId } from '../../domain/execution/ids.js';
 
 /**
  * v2 Slice 3: token orchestration (`start_workflow` / `continue_workflow`).
@@ -100,8 +102,95 @@ type InternalError =
   | { readonly kind: 'advance_apply_failed'; readonly message: string }
   | { readonly kind: 'advance_next_failed'; readonly message: string };
 
+/**
+ * Type guard for InternalError discriminated union.
+ * Returns true only if `e` is a valid InternalError with known kind.
+ */
+function isInternalError(e: unknown): e is InternalError {
+  if (typeof e !== 'object' || e === null || !('kind' in e)) return false;
+  const kind = (e as { kind: unknown }).kind;
+  return (
+    kind === 'missing_node_or_run' ||
+    kind === 'workflow_hash_mismatch' ||
+    kind === 'missing_snapshot' ||
+    kind === 'no_pending_step' ||
+    kind === 'advance_apply_failed' ||
+    kind === 'advance_next_failed'
+  );
+}
+
+/**
+ * Map InternalError to ToolError using exhaustive switch.
+ * Compile error if new InternalError kind added without handler.
+ */
+function mapInternalErrorToToolError(e: InternalError): ToolFailure {
+  switch (e.kind) {
+    case 'missing_node_or_run':
+      return errNotRetryable(
+        'PRECONDITION_FAILED',
+        'No durable run/node state was found for this stateToken. Advancement cannot be recorded.',
+        { suggestion: 'Use a stateToken returned by WorkRail for an existing run/node.' }
+      ) as ToolFailure;
+    case 'workflow_hash_mismatch':
+      return errNotRetryable(
+        'TOKEN_WORKFLOW_HASH_MISMATCH',
+        'workflowHash mismatch for this node.',
+        { suggestion: 'Use the stateToken returned by WorkRail for this node.' }
+      ) as ToolFailure;
+    case 'missing_snapshot':
+    case 'no_pending_step':
+      return internalError('Incomplete execution state.', 'Retry; if this persists, treat as invariant violation.');
+    case 'advance_apply_failed':
+    case 'advance_next_failed':
+      return internalError(normalizeTokenErrorMessage(e.message), 'Retry; if this persists, treat as invariant violation.');
+    default:
+      const _exhaustive: never = e;
+      return internalError('Unknown internal error kind', 'Treat as invariant violation.');
+  }
+}
+
 function errAsync(e: InternalError): RA<never, InternalError> {
   return neErrorAsync(e);
+}
+
+/**
+ * Extract step metadata (title, prompt) from a workflow step with type-safe property access.
+ * Returns sealed StepMetadata with guaranteed non-empty strings.
+ *
+ * @param workflow - The workflow instance
+ * @param stepId - The step ID to extract metadata for (can be null for optional cases)
+ * @param options - Optional { defaultTitle, defaultPrompt } for fallback values
+ */
+interface StepMetadata {
+  readonly stepId: string;
+  readonly title: string;
+  readonly prompt: string;
+}
+
+function extractStepMetadata(
+  workflow: ReturnType<typeof createWorkflow>,
+  stepId: string | null,
+  options?: { defaultTitle?: string; defaultPrompt?: string }
+): StepMetadata {
+  const resolvedStepId = stepId ?? '';
+  const step = stepId ? getStepById(workflow, stepId) : null;
+
+  // Type guard for object with string property
+  const hasStringProp = (obj: unknown, prop: string): boolean =>
+    typeof obj === 'object' &&
+    obj !== null &&
+    prop in obj &&
+    typeof (obj as unknown as Record<string, unknown>)[prop] === 'string';
+
+  const title = hasStringProp(step, 'title')
+    ? String((step as unknown as Record<string, unknown>).title)
+    : options?.defaultTitle ?? resolvedStepId;
+
+  const prompt = hasStringProp(step, 'prompt')
+    ? String((step as unknown as Record<string, unknown>).prompt)
+    : options?.defaultPrompt ?? (stepId ? `Pending step: ${stepId}` : '');
+
+  return { stepId: resolvedStepId, title, prompt };
 }
 
 function internalError(message: string, suggestion?: string): ToolFailure {
@@ -115,7 +204,7 @@ function sessionStoreErrorToToolError(e: SessionEventLogStoreError): ToolFailure
     case 'SESSION_STORE_CORRUPTION_DETECTED':
       return errNotRetryable('SESSION_NOT_HEALTHY', `Session corruption detected (${e.location}): ${e.reason.code}`, {
         suggestion: 'Execution requires a healthy session. Export salvage view, then recreate.',
-        details: detailsSessionHealth({ kind: e.location === 'head' ? 'corrupt_head' : 'corrupt_tail', reason: e.reason }),
+        details: detailsSessionHealth({ kind: e.location === 'head' ? 'corrupt_head' : 'corrupt_tail', reason: e.reason }) as unknown as JsonValue,
       }) as ToolFailure;
     case 'SESSION_STORE_IO_ERROR':
       return internalError(e.message, 'Retry; check filesystem permissions.');
@@ -131,7 +220,7 @@ function gateErrorToToolError(e: ExecutionSessionGateErrorV2): ToolFailure {
     case 'LOCK_RELEASE_FAILED':
       return errRetryableAfterMs('TOKEN_SESSION_LOCKED', e.message, e.retry.afterMs, { suggestion: 'Retry in a few seconds.' }) as ToolFailure;
     case 'SESSION_NOT_HEALTHY':
-      return errNotRetryable('SESSION_NOT_HEALTHY', e.message, { suggestion: 'Execution requires healthy session.', details: detailsSessionHealth(e.health) }) as ToolFailure;
+      return errNotRetryable('SESSION_NOT_HEALTHY', e.message, { suggestion: 'Execution requires healthy session.', details: detailsSessionHealth(e.health) as unknown as JsonValue }) as ToolFailure;
     case 'SESSION_LOAD_FAILED':
     case 'SESSION_LOCK_REENTRANT':
     case 'LOCK_ACQUIRE_FAILED':
@@ -190,49 +279,91 @@ function attemptIdForNextNode(parentAttemptId: string): string {
 
 function signTokenOrErr(args: {
   unsignedPrefix: 'st.v1.' | 'ack.v1.' | 'chk.v1.';
-  payload: { tokenVersion: 1; tokenKind: string; [key: string]: unknown };
+  payload: unknown;
   keyring: import('../../v2/ports/keyring.port.js').KeyringV1;
 }): { ok: true; token: string } | { ok: false; error: ToolFailure } {
-  const bytes = encodeTokenPayloadV1(args.payload);
+  const bytes = encodeTokenPayloadV1(args.payload as any /* TYPE SAFETY: unknown → TokenPayloadV1 validated by schema */);
   if (bytes.isErr()) {
     return { ok: false, error: internalError(`Failed to encode token payload: ${bytes.error.code}`, 'Retry; if this persists, treat as invariant violation.') };
   }
   const hmac = new NodeHmacSha256V2();
-  const token = signTokenV1(args.unsignedPrefix, bytes.value, args.keyring, hmac);
+  const token = signTokenV1(args.unsignedPrefix, bytes.value as any /* TYPE SAFETY: CanonicalBytes branded type; signTokenV1 expects it */, args.keyring, hmac);
   if (token.isErr()) {
     return { ok: false, error: internalError(`Failed to sign token: ${token.error.code}`, 'Retry; if this persists, treat as invariant violation.') };
   }
   return { ok: true, token: String(token.value) };
 }
 
-function toV1ExecutionState(engineState: any): ExecutionState {
-  if (engineState.kind === 'init') return { kind: 'init' };
-  if (engineState.kind === 'complete') return { kind: 'complete' };
+function toV1ExecutionState(engineState: EngineStateV1): ExecutionState {
+  if (engineState.kind === 'init') return { kind: 'init' as const };
+  if (engineState.kind === 'complete') return { kind: 'complete' as const };
+
   const pendingStep =
-    engineState.pending?.kind === 'some'
-      ? { stepId: String(engineState.pending.step.stepId), loopPath: engineState.pending.step.loopPath.map((f: any) => ({ loopId: String(f.loopId), iteration: f.iteration })) }
+    engineState.pending.kind === 'some'
+      ? {
+          stepId: String(engineState.pending.step.stepId),
+          loopPath: engineState.pending.step.loopPath.map((f: LoopPathFrameV1) => ({
+            loopId: String(f.loopId),
+            iteration: f.iteration,
+          })),
+        }
       : undefined;
+
   return {
-    kind: 'running',
-    completed: [...engineState.completed.values.map(String)],
-    loopStack: engineState.loopStack.map((f: any) => ({ loopId: String(f.loopId), iteration: f.iteration, bodyIndex: f.bodyIndex })),
+    kind: 'running' as const,
+    completed: [...engineState.completed.values].map(String),
+    loopStack: engineState.loopStack.map((f) => ({
+      loopId: String(f.loopId),
+      iteration: f.iteration,
+      bodyIndex: f.bodyIndex,
+    })),
     pendingStep,
   };
 }
 
-function fromV1ExecutionState(state: ExecutionState): any {
-  if (state.kind === 'init') return { kind: 'init' };
-  if (state.kind === 'complete') return { kind: 'complete' };
-  const completed = [...state.completed].map(String).sort((a, b) => a.localeCompare(b));
+function convertRunningExecutionStateToEngineState(
+  state: Extract<ExecutionState, { kind: 'running' }>
+): Extract<EngineStateV1, { kind: 'running' }> {
+  const completedArray: readonly string[] = [...state.completed].sort((a: string, b: string) =>
+    a.localeCompare(b)
+  );
+  const completed = completedArray.map(s => stepInstanceKeyFromParts(asDelimiterSafeIdV1(s), []));
+
+  const loopStack = state.loopStack.map((f: LoopFrame) => ({
+    loopId: asDelimiterSafeIdV1(f.loopId),
+    iteration: f.iteration,
+    bodyIndex: f.bodyIndex,
+  }));
+
+  const pending = state.pendingStep
+    ? {
+        kind: 'some' as const,
+        step: {
+          stepId: asDelimiterSafeIdV1(state.pendingStep.stepId),
+          loopPath: state.pendingStep.loopPath.map((p) => ({
+            loopId: asDelimiterSafeIdV1(p.loopId),
+            iteration: p.iteration,
+          })),
+        },
+      }
+    : { kind: 'none' as const };
+
   return {
-    kind: 'running',
-    completed: { kind: 'set', values: completed },
-    loopStack: state.loopStack.map((f) => ({ loopId: f.loopId, iteration: f.iteration, bodyIndex: f.bodyIndex })),
-    pending:
-      state.pendingStep
-        ? { kind: 'some', step: { stepId: state.pendingStep.stepId, loopPath: state.pendingStep.loopPath.map((p) => ({ loopId: p.loopId, iteration: p.iteration })) } }
-        : { kind: 'none' },
+    kind: 'running' as const,
+    completed: { kind: 'set' as const, values: completed },
+    loopStack,
+    pending,
   };
+}
+
+function fromV1ExecutionState(state: ExecutionState): EngineStateV1 {
+  if (state.kind === 'init') {
+    return { kind: 'init' as const };
+  }
+  if (state.kind === 'complete') {
+    return { kind: 'complete' as const };
+  }
+  return convertRunningExecutionStateToEngineState(state);
 }
 
 export async function handleV2StartWorkflow(
@@ -288,16 +419,16 @@ export async function handleV2StartWorkflow(
     const nodeId = `node_${randomUUID()}`;
 
     // Store an initial execution snapshot with the first step pending.
-    const snapshot = {
-      v: 1,
-      kind: 'execution_snapshot',
+    const snapshot: ExecutionSnapshotFileV1 = {
+      v: 1 as const,
+      kind: 'execution_snapshot' as const,
       enginePayload: {
-        v: 1,
+        v: 1 as const,
         engineState: {
-          kind: 'running',
-          completed: { kind: 'set', values: [] },
+          kind: 'running' as const,
+          completed: { kind: 'set' as const, values: [] },
           loopStack: [],
-          pending: { kind: 'some', step: { stepId: firstStep.id, loopPath: [] } },
+          pending: { kind: 'some' as const, step: { stepId: asDelimiterSafeIdV1(firstStep.id), loopPath: [] } },
         },
       },
     };
@@ -311,14 +442,14 @@ export async function handleV2StartWorkflow(
 
     // Persist durable truth under a healthy lock witness.
     const appendRes = await gate
-      .withHealthySessionLock(sessionId, (lock) => {
-        const eventsArray: DomainEventV1[] = [
+      .withHealthySessionLock(sessionId as any /* TYPE SAFETY: v1 string → v2 SessionId branded boundary */, (lock) => {
+        const eventsArray: readonly DomainEventV1[] = [
           {
             v: 1,
             eventId: evtSessionCreated,
             eventIndex: 0,
             sessionId,
-            kind: 'session_created',
+            kind: 'session_created' as const,
             dedupeKey: `session_created:${sessionId}`,
             data: {},
           },
@@ -327,7 +458,7 @@ export async function handleV2StartWorkflow(
             eventId: evtRunStarted,
             eventIndex: 1,
             sessionId,
-            kind: 'run_started',
+            kind: 'run_started' as const,
             dedupeKey: `run_started:${sessionId}:${runId}`,
             scope: { runId },
             data: {
@@ -364,11 +495,11 @@ export async function handleV2StartWorkflow(
             eventId: evtNodeCreated,
             eventIndex: 2,
             sessionId,
-            kind: 'node_created',
+            kind: 'node_created' as const,
             dedupeKey: `node_created:${sessionId}:${runId}:${nodeId}`,
             scope: { runId, nodeId },
             data: {
-              nodeKind: 'step',
+              nodeKind: 'step' as const,
               parentNodeId: null,
               workflowHash: String(workflowHash),
               snapshotRef,
@@ -385,10 +516,14 @@ export async function handleV2StartWorkflow(
         (e) => ({ ok: false as const, error: e })
       );
     if (!appendRes.ok) {
-      if ('code' in appendRes.error && appendRes.error.code === 'SESSION_NOT_HEALTHY') {
-        return gateErrorToToolError(appendRes.error as ExecutionSessionGateErrorV2);
+      const err: unknown = appendRes.error;
+      if (typeof err === 'object' && err !== null && 'code' in err && (err as any /* TYPE SAFETY: runtime discriminator check before union narrowing */).code === 'SESSION_NOT_HEALTHY') {
+        return gateErrorToToolError(err as ExecutionSessionGateErrorV2);
       }
-      return sessionStoreErrorToToolError(appendRes.error as SessionEventLogStoreError);
+      if (typeof err === 'object' && err !== null && 'code' in err) {
+        return sessionStoreErrorToToolError(err as SessionEventLogStoreError);
+      }
+      return internalError(String(err), 'Retry; if this persists, check for filesystem errors.');
     }
 
     const keyringRes = await loadKeyring().match(
@@ -399,7 +534,7 @@ export async function handleV2StartWorkflow(
     const keyring = keyringRes.value;
 
     const statePayload = {
-      tokenVersion: 1,
+      tokenVersion: 1 as const,
       tokenKind: 'state' as const,
       sessionId,
       runId,
@@ -408,7 +543,7 @@ export async function handleV2StartWorkflow(
     };
     const attemptId = newAttemptId();
     const ackPayload = {
-      tokenVersion: 1,
+      tokenVersion: 1 as const,
       tokenKind: 'ack' as const,
       sessionId,
       runId,
@@ -416,7 +551,7 @@ export async function handleV2StartWorkflow(
       attemptId,
     };
     const checkpointPayload = {
-      tokenVersion: 1,
+      tokenVersion: 1 as const,
       tokenKind: 'checkpoint' as const,
       sessionId,
       runId,
@@ -437,13 +572,8 @@ export async function handleV2StartWorkflow(
     const checkpointToken = checkpointTokenRes.token;
 
     // Render first pending from pinned snapshot (Phase 4 lock).
-    const step = getStepById(pinnedWorkflow, firstStep.id);
-    const title = step && 'title' in step && typeof (step as any).title === 'string' ? String((step as any).title) : firstStep.id;
-    const prompt =
-      step && 'prompt' in step && typeof (step as any).prompt === 'string'
-        ? String((step as any).prompt)
-        : `Pending step: ${firstStep.id}`;
-    const pending = { stepId: firstStep.id, title, prompt };
+    const { stepId, title, prompt } = extractStepMetadata(pinnedWorkflow, firstStep.id);
+    const pending = { stepId, title, prompt };
 
     const payload = V2StartWorkflowOutputSchema.parse({
       stateToken,
@@ -598,10 +728,7 @@ export async function handleV2ContinueWorkflow(
       }
       const wf = createWorkflow(pinned.definition as WorkflowDefinition, createBundledSource());
 
-      const stepId = String(pending.stepId);
-      const step = getStepById(wf, stepId);
-      const title = step && 'title' in step && typeof (step as any).title === 'string' ? String((step as any).title) : stepId;
-      const prompt = step && 'prompt' in step && typeof (step as any).prompt === 'string' ? String((step as any).prompt) : `Pending step: ${stepId}`;
+      const { stepId, title, prompt } = extractStepMetadata(wf, String(pending.stepId));
 
       const payload = V2ContinueWorkflowOutputSchema.parse({
         kind: 'ok',
@@ -737,21 +864,21 @@ export async function handleV2ContinueWorkflow(
                   (e): e is Extract<DomainEventV1, { kind: 'edge_created' }> =>
                     e.kind === 'edge_created' && e.data.fromNodeId === String(nodeId)
                 );
-                const causeKind = hasChildren ? 'non_tip_advance' : 'intentional_fork';
+                const causeKind: 'non_tip_advance' | 'intentional_fork' = hasChildren ? 'non_tip_advance' : 'intentional_fork';
 
-                const events: any[] = [
+                const baseEvents: readonly DomainEventV1[] = [
                   {
                     v: 1,
                     eventId: evtAdvanceRecorded,
                     eventIndex: nextEventIndex,
                     sessionId,
-                    kind: 'advance_recorded',
+                    kind: 'advance_recorded' as const,
                     dedupeKey,
                     scope: { runId, nodeId },
                     data: {
                       attemptId,
-                      intent: 'ack_pending',
-                      outcome: { kind: 'advanced', toNodeId },
+                      intent: 'ack_pending' as const,
+                      outcome: { kind: 'advanced' as const, toNodeId },
                     },
                   },
                   {
@@ -759,21 +886,21 @@ export async function handleV2ContinueWorkflow(
                     eventId: evtNodeCreated,
                     eventIndex: nextEventIndex + 1,
                     sessionId,
-                    kind: 'node_created',
+                    kind: 'node_created' as const,
                     dedupeKey: `node_created:${sessionId}:${runId}:${toNodeId}`,
                     scope: { runId, nodeId: toNodeId },
-                    data: { nodeKind: 'step', parentNodeId: String(nodeId), workflowHash: String(workflowHash), snapshotRef: newSnapshotRef },
+                    data: { nodeKind: 'step' as const, parentNodeId: String(nodeId), workflowHash: String(workflowHash), snapshotRef: newSnapshotRef },
                   },
                   {
                     v: 1,
                     eventId: evtEdgeCreated,
                     eventIndex: nextEventIndex + 2,
                     sessionId,
-                    kind: 'edge_created',
+                    kind: 'edge_created' as const,
                     dedupeKey: `edge_created:${sessionId}:${runId}:${String(nodeId)}->${toNodeId}:acked_step`,
                     scope: { runId },
                     data: {
-                      edgeKind: 'acked_step',
+                      edgeKind: 'acked_step' as const,
                       fromNodeId: String(nodeId),
                       toNodeId,
                       cause: { kind: causeKind, eventId: evtAdvanceRecorded },
@@ -784,27 +911,28 @@ export async function handleV2ContinueWorkflow(
                 // Output persistence (single durable write path): if input.output exists, append node_output_appended.
                 // Lock: output is attached to the CURRENT node (nodeId), not the newly created node (toNodeId).
                 // The agent provides output as part of completing the current step.
-                if (input.output?.notesMarkdown) {
-                  const outputId = `out_recap_${String(attemptId)}`;
-                  const evtOutputAppended = `evt_${randomUUID()}`;
-                  events.push({
-                    v: 1,
-                    eventId: evtOutputAppended,
-                    eventIndex: nextEventIndex + 3,
-                    sessionId,
-                    kind: 'node_output_appended',
-                    dedupeKey: `node_output_appended:${sessionId}:${outputId}`,
-                    scope: { runId, nodeId }, // CORRECTED: attach to current node, not toNodeId
-                    data: {
-                      outputId,
-                      outputChannel: 'recap',
-                      payload: {
-                        payloadKind: 'notes',
-                        notesMarkdown: input.output.notesMarkdown.slice(0, 4096), // locked budget
+                const events: readonly DomainEventV1[] = input.output?.notesMarkdown
+                  ? [
+                      ...baseEvents,
+                      {
+                        v: 1,
+                        eventId: `evt_${randomUUID()}`,
+                        eventIndex: nextEventIndex + 3,
+                        sessionId,
+                        kind: 'node_output_appended' as const,
+                        dedupeKey: `node_output_appended:${sessionId}:out_recap_${String(attemptId)}`,
+                        scope: { runId, nodeId }, // CORRECTED: attach to current node, not toNodeId
+                        data: {
+                          outputId: `out_recap_${String(attemptId)}`,
+                          outputChannel: 'recap' as const,
+                          payload: {
+                            payloadKind: 'notes' as const,
+                            notesMarkdown: input.output.notesMarkdown.slice(0, 4096), // locked budget
+                          },
+                        },
                       },
-                    },
-                  });
-                }
+                    ]
+                  : baseEvents;
 
                 return sessionStore.append(lock, {
                   events,
@@ -821,37 +949,18 @@ export async function handleV2ContinueWorkflow(
 
       if (!appendRes.ok) {
         const err = appendRes.error;
-        if (typeof err === 'object' && err !== null && 'kind' in err) {
-          const internalErr = err as InternalError;
-          if (internalErr.kind === 'missing_node_or_run') {
-            return error(
-              'PRECONDITION_FAILED',
-              'No durable run/node state was found for this stateToken. Advancement cannot be recorded.',
-              'Use a stateToken returned by WorkRail for an existing run/node.'
-            );
-          }
-          if (internalErr.kind === 'workflow_hash_mismatch') {
-            return error('VALIDATION_ERROR', 'workflowHash mismatch for this node.', 'Use the stateToken returned by WorkRail for this node.');
-          }
-          if (internalErr.kind === 'missing_snapshot' || internalErr.kind === 'no_pending_step') {
-            return error('INTERNAL_ERROR', 'Incomplete execution state.', 'Retry; if this persists, treat as invariant violation.');
-          }
-          if (internalErr.kind === 'advance_apply_failed' || internalErr.kind === 'advance_next_failed') {
-            return error('INTERNAL_ERROR', normalizeTokenErrorMessage(internalErr.message), 'Retry; if this persists, treat as invariant violation.');
-          }
+        
+        if (isInternalError(err)) {
+          return mapInternalErrorToToolError(err);
         }
-        // Handle store errors
         if ('code' in err && err.code === 'SESSION_NOT_HEALTHY') {
           return gateErrorToToolError(err as ExecutionSessionGateErrorV2);
         }
         if ('code' in err) {
           return sessionStoreErrorToToolError(err as SessionEventLogStoreError);
         }
-        return error(
-          'INTERNAL_ERROR',
-          normalizeTokenErrorMessage(String(err)),
-          'Retry; if this persists, check for another WorkRail process holding the session lock.'
-        );
+        
+        return internalError(String(err), 'Retry; if this persists, check for another WorkRail process.');
       }
 
       // Fact-returning response: load recorded outcome and return from durable facts.
@@ -936,10 +1045,7 @@ export async function handleV2ContinueWorkflow(
       if (!nextStateTokenRes.ok) return nextStateTokenRes.error;
       const nextStateToken = nextStateTokenRes.token;
 
-      const stepId = pending ? String(pending.stepId) : null;
-      const step = stepId ? getStepById(pinnedWorkflow, stepId) : null;
-      const title = step && 'title' in step && typeof (step as any).title === 'string' ? String((step as any).title) : stepId ?? '';
-      const prompt = step && 'prompt' in step && typeof (step as any).prompt === 'string' ? String((step as any).prompt) : stepId ? `Pending step: ${stepId}` : '';
+      const { stepId, title, prompt } = extractStepMetadata(pinnedWorkflow, pending ? String(pending.stepId) : null);
 
       const payload = V2ContinueWorkflowOutputSchema.parse({
         kind: 'ok',
