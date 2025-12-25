@@ -200,7 +200,7 @@ function internalError(message: string, suggestion?: string): ToolFailure {
 function sessionStoreErrorToToolError(e: SessionEventLogStoreError): ToolFailure {
   switch (e.code) {
     case 'SESSION_STORE_LOCK_BUSY':
-      return errRetryableAfterMs('TOKEN_SESSION_LOCKED', e.message, e.retry.afterMs, { suggestion: 'Retry in a few seconds; if this persists >10s, ensure no other WorkRail process is running.' }) as ToolFailure;
+      return errRetryableAfterMs('TOKEN_SESSION_LOCKED', e.message, e.retry.afterMs, { suggestion: 'Retry in 1–3 seconds; if this persists >10s, ensure no other WorkRail process is running.' }) as ToolFailure;
     case 'SESSION_STORE_CORRUPTION_DETECTED':
       return errNotRetryable('SESSION_NOT_HEALTHY', `Session corruption detected (${e.location}): ${e.reason.code}`, {
         suggestion: 'Execution requires a healthy session. Export salvage view, then recreate.',
@@ -210,15 +210,18 @@ function sessionStoreErrorToToolError(e: SessionEventLogStoreError): ToolFailure
       return internalError(e.message, 'Retry; check filesystem permissions.');
     case 'SESSION_STORE_INVARIANT_VIOLATION':
       return internalError(e.message, 'Treat as invariant violation.');
+    default:
+      const _exhaustive: never = e;
+      return internalError('Unknown session store error', 'Treat as invariant violation.');
   }
 }
 
 function gateErrorToToolError(e: ExecutionSessionGateErrorV2): ToolFailure {
   switch (e.code) {
     case 'SESSION_LOCKED':
-      return errRetryableAfterMs('TOKEN_SESSION_LOCKED', e.message, e.retry.afterMs, { suggestion: 'Retry in a few seconds.' }) as ToolFailure;
+      return errRetryableAfterMs('TOKEN_SESSION_LOCKED', e.message, e.retry.afterMs, { suggestion: 'Retry in 1–3 seconds; if this persists >10s, ensure no other WorkRail process is running.' }) as ToolFailure;
     case 'LOCK_RELEASE_FAILED':
-      return errRetryableAfterMs('TOKEN_SESSION_LOCKED', e.message, e.retry.afterMs, { suggestion: 'Retry in a few seconds.' }) as ToolFailure;
+      return errRetryableAfterMs('TOKEN_SESSION_LOCKED', e.message, e.retry.afterMs, { suggestion: 'Retry in 1–3 seconds; if this persists >10s, ensure no other WorkRail process is running.' }) as ToolFailure;
     case 'SESSION_NOT_HEALTHY':
       return errNotRetryable('SESSION_NOT_HEALTHY', e.message, { suggestion: 'Execution requires healthy session.', details: detailsSessionHealth(e.health) as unknown as JsonValue }) as ToolFailure;
     case 'SESSION_LOAD_FAILED':
@@ -226,6 +229,9 @@ function gateErrorToToolError(e: ExecutionSessionGateErrorV2): ToolFailure {
     case 'LOCK_ACQUIRE_FAILED':
     case 'GATE_CALLBACK_FAILED':
       return internalError(e.message, 'Retry; if persists, treat as invariant violation.');
+    default:
+      const _exhaustive: never = e;
+      return internalError('Unknown gate error', 'Treat as invariant violation.');
   }
 }
 
@@ -244,28 +250,52 @@ function loadKeyring(): RA<import('../../v2/ports/keyring.port.js').KeyringV1, T
   return keyringPort.loadOrCreate().mapErr((e) => internalError(`Keyring error: ${e.code}`, 'Retry; delete keyring if persists.'));
 }
 
-function parseAndVerifyOrReturn(
+// Branded token input types (compile-time guarantee of token kind)
+type StateTokenInput = ParsedTokenV1 & { readonly payload: import('../../v2/durable-core/tokens/payloads.js').StateTokenPayloadV1 };
+type AckTokenInput = ParsedTokenV1 & { readonly payload: import('../../v2/durable-core/tokens/payloads.js').AckTokenPayloadV1 };
+
+function parseStateTokenOrFail(
   raw: string,
   keyring: import('../../v2/ports/keyring.port.js').KeyringV1
-): { ok: true; token: ParsedTokenV1 } | { ok: false; result: ToolResult<never> } {
+): { ok: true; token: StateTokenInput } | { ok: false; result: ToolResult<never> } {
   const parsedRes = parseTokenV1(raw);
   if (parsedRes.isErr()) {
-    return {
-      ok: false,
-      result: tokenDecodeErrorToToolError(parsedRes.error),
-    };
+    return { ok: false, result: tokenDecodeErrorToToolError(parsedRes.error) };
   }
 
   const hmac = new NodeHmacSha256V2();
   const verified = verifyTokenSignatureV1(parsedRes.value, keyring, hmac);
   if (verified.isErr()) {
-    return {
-      ok: false,
-      result: tokenDecodeErrorToToolError(verified.error),
-    };
+    return { ok: false, result: tokenDecodeErrorToToolError(verified.error) };
   }
 
-  return { ok: true, token: parsedRes.value };
+  if (parsedRes.value.payload.tokenKind !== 'state') {
+    return { ok: false, result: error('TOKEN_INVALID_FORMAT', 'Expected a state token (st.v1.*).', 'Use the stateToken returned by WorkRail.') };
+  }
+
+  return { ok: true, token: parsedRes.value as StateTokenInput };
+}
+
+function parseAckTokenOrFail(
+  raw: string,
+  keyring: import('../../v2/ports/keyring.port.js').KeyringV1
+): { ok: true; token: AckTokenInput } | { ok: false; result: ToolResult<never> } {
+  const parsedRes = parseTokenV1(raw);
+  if (parsedRes.isErr()) {
+    return { ok: false, result: tokenDecodeErrorToToolError(parsedRes.error) };
+  }
+
+  const hmac = new NodeHmacSha256V2();
+  const verified = verifyTokenSignatureV1(parsedRes.value, keyring, hmac);
+  if (verified.isErr()) {
+    return { ok: false, result: tokenDecodeErrorToToolError(verified.error) };
+  }
+
+  if (parsedRes.value.payload.tokenKind !== 'ack') {
+    return { ok: false, result: error('TOKEN_INVALID_FORMAT', 'Expected an ack token (ack.v1.*).', 'Use the ackToken returned by WorkRail.') };
+  }
+
+  return { ok: true, token: parsedRes.value as AckTokenInput };
 }
 
 function newAttemptId(): string {
@@ -606,11 +636,8 @@ export async function handleV2ContinueWorkflow(
     if (!keyringRes.ok) return keyringRes.error;
     const keyring = keyringRes.value;
 
-    const state = parseAndVerifyOrReturn(input.stateToken, keyring);
+    const state = parseStateTokenOrFail(input.stateToken, keyring);
     if (!state.ok) return state.result;
-    if (state.token.payload.tokenKind !== 'state') {
-      return error('TOKEN_INVALID_FORMAT', 'Expected a state token (st.v1.*).', 'Use the stateToken returned by WorkRail.');
-    }
 
     if (!input.ackToken) {
       // Slice 3.3: rehydrate-only path (must be side-effect-free).
@@ -748,11 +775,8 @@ export async function handleV2ContinueWorkflow(
     // Ack-token path: Slice 3.4 (advance/replay): record an idempotent, fact-returning blocked outcome for now.
     // This is the minimal durable "advance_recorded" path that enables replay semantics without requiring full step selection yet.
     {
-      const ack = parseAndVerifyOrReturn(input.ackToken, keyring);
+      const ack = parseAckTokenOrFail(input.ackToken, keyring);
       if (!ack.ok) return ack.result;
-      if (ack.token.payload.tokenKind !== 'ack') {
-        return error('TOKEN_INVALID_FORMAT', 'Expected an ack token (ack.v1.*).', 'Use the ackToken returned by WorkRail.');
-      }
 
       const scope = assertTokenScopeMatchesState(state.token, ack.token);
       if (scope.isErr()) {
