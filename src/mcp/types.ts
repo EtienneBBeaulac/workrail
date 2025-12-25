@@ -11,6 +11,7 @@ import type { WorkflowService } from '../application/services/workflow-service.j
 import type { IFeatureFlagProvider } from '../config/feature-flags.js';
 import type { SessionManager } from '../infrastructure/session/SessionManager.js';
 import type { HttpServer } from '../infrastructure/session/HttpServer.js';
+import type { SessionHealthV2 } from '../v2/durable-core/schemas/session/session-health.js';
 
 // -----------------------------------------------------------------------------
 // JSON-safe details payload (prevents undefined / functions leaking across boundary)
@@ -23,6 +24,14 @@ export type JsonValue =
   | null
   | readonly JsonValue[]
   | { readonly [key: string]: JsonValue };
+
+/**
+ * Session health details for SESSION_NOT_HEALTHY errors.
+ * Contains comprehensive health classification and reason codes.
+ */
+export interface SessionHealthDetails {
+  readonly health: SessionHealthV2;
+}
 
 // -----------------------------------------------------------------------------
 // Error Codes
@@ -45,7 +54,8 @@ export type ErrorCode =
   | 'TOKEN_SCOPE_MISMATCH'
   | 'TOKEN_UNKNOWN_NODE'
   | 'TOKEN_WORKFLOW_HASH_MISMATCH'
-  | 'TOKEN_SESSION_LOCKED';
+  | 'TOKEN_SESSION_LOCKED'
+  | 'SESSION_NOT_HEALTHY';
 
 export type ToolRetry =
   | { readonly kind: 'not_retryable' }
@@ -142,6 +152,13 @@ export function errRetryableAfterMs(
   options?: ToolErrorOptions
 ): ToolResult<never> {
   return error(code, message, options?.suggestion, { kind: 'retryable_after_ms', afterMs }, options?.details);
+}
+
+/**
+ * Create SessionHealthDetails for SESSION_NOT_HEALTHY errors.
+ */
+export function detailsSessionHealth(health: SessionHealthV2): SessionHealthDetails {
+  return { health };
 }
 
 // -----------------------------------------------------------------------------
