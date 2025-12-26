@@ -116,7 +116,12 @@ describe('v2 execution: SESSION_NOT_HEALTHY error response', () => {
 
       // Assert: details contain health information with proper structure
       expect(result.details).toBeDefined();
-      const details = result.details as SessionHealthDetails;
+      const envelope = result.details as any;
+      expect(envelope.suggestion).toBeTruthy();
+      expect(envelope.suggestion).toContain('healthy session');
+      expect(envelope.details).toBeDefined();
+      
+      const details = envelope.details as SessionHealthDetails;
       expect(details).toHaveProperty('health');
       expect(details.health).toHaveProperty('kind');
       expect(['corrupt_tail', 'corrupt_head', 'unknown_version']).toContain(details.health.kind);
@@ -130,10 +135,8 @@ describe('v2 execution: SESSION_NOT_HEALTHY error response', () => {
         expect(typeof details.health.reason.message).toBe('string');
       }
 
-      // Assert: message and suggestion exist
+      // Assert: message exists
       expect(result.message).toBeTruthy();
-      expect(result.suggestion).toBeTruthy();
-      expect(result.suggestion).toContain('healthy session');
     } finally {
       process.env.WORKRAIL_DATA_DIR = prev;
     }
@@ -172,11 +175,11 @@ describe('v2 execution: SESSION_NOT_HEALTHY error response', () => {
       
       // Type assertion: health.kind must be one of the valid discriminators
       const validKinds: readonly string[] = ['corrupt_tail', 'corrupt_head', 'unknown_version'];
-      expect(validKinds).toContain(details.health.kind);
+      expect(validKinds).toContain(details.details.health.kind);
       
       // Verify reason structure is present and valid
-      if (details.health.reason) {
-        const reason = details.health.reason;
+      if (details.details.health.reason) {
+        const reason = details.details.health.reason;
         expect(typeof reason.code).toBe('string');
         expect(typeof reason.message).toBe('string');
         expect(reason.code.length).toBeGreaterThan(0);

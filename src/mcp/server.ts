@@ -24,6 +24,7 @@ import type { ProcessSignals } from '../runtime/ports/process-signals.js';
 import type { ProcessTerminator } from '../runtime/ports/process-terminator.js';
 
 import type { ToolContext, ToolResult, V2Dependencies } from './types.js';
+import { errNotRetryable } from './types.js';
 import { createToolFactory, type ToolAnnotations, type ToolDefinition } from './tool-factory.js';
 import type { IToolDescriptionProvider } from './tool-description-provider.js';
 import { preValidateWorkflowNextArgs, type PreValidateResult } from './validation/workflow-next-prevalidate.js';
@@ -85,6 +86,9 @@ type McpCallToolResult = {
 
 /**
  * Convert our ToolResult<T> to MCP's CallToolResult format.
+ * 
+ * For error results, serializes the unified envelope:
+ * { code, message, retry, details? }
  */
 function toMcpResult<T>(result: ToolResult<T>): McpCallToolResult {
   switch (result.type) {
@@ -97,9 +101,10 @@ function toMcpResult<T>(result: ToolResult<T>): McpCallToolResult {
         content: [{
           type: 'text',
           text: JSON.stringify({
-            error: result.message,
             code: result.code,
-            ...(result.suggestion && { suggestion: result.suggestion }),
+            message: result.message,
+            retry: result.retry,
+            ...(result.details !== undefined ? { details: result.details } : {}),
           }, null, 2),
         }],
         isError: true,
@@ -204,20 +209,14 @@ function createHandler<TInput extends z.ZodType, TOutput>(
   return async (args: unknown, ctx: ToolContext): Promise<McpCallToolResult> => {
     const parseResult = schema.safeParse(args);
     if (!parseResult.success) {
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            error: 'Invalid input',
-            code: 'VALIDATION_ERROR',
-            details: parseResult.error.errors.map(e => ({
-              path: e.path.join('.'),
-              message: e.message,
-            })),
-          }, null, 2),
-        }],
-        isError: true,
-      };
+      return toMcpResult(
+        errNotRetryable('VALIDATION_ERROR', 'Invalid input', {
+          validationErrors: parseResult.error.errors.map(e => ({
+            path: e.path.join('.'),
+            message: e.message,
+          })),
+        })
+      );
     }
     return toMcpResult(await handler(parseResult.data, ctx));
   };
@@ -235,22 +234,23 @@ function createValidatingHandler<TInput extends z.ZodType, TOutput>(
   return async (args: unknown, ctx: ToolContext): Promise<McpCallToolResult> => {
     const pre = preValidate(args);
     if (!pre.ok) {
-      const bounded = pre.correctTemplate ? toBoundedJsonValue(pre.correctTemplate, 512) : undefined;
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify(
-            {
-              error: pre.message,
-              code: pre.code,
-              ...(bounded ? { correctTemplate: bounded } : {}),
+      // Extract correctTemplate from details if present
+      const boundedTemplate = pre.error.details && typeof pre.error.details === 'object' && 'correctTemplate' in pre.error.details
+        ? toBoundedJsonValue((pre.error.details as any).correctTemplate, 512)
+        : undefined;
+      
+      // Create a new error with bounded template in details
+      const boundedError = boundedTemplate
+        ? {
+            ...pre.error,
+            details: {
+              ...(pre.error.details ? (pre.error.details as any) : {}),
+              correctTemplate: boundedTemplate,
             },
-            null,
-            2
-          ),
-        }],
-        isError: true,
-      };
+          }
+        : pre.error;
+      
+      return toMcpResult(boundedError);
     }
 
     // Fall back to the standard Zod + handler pipeline

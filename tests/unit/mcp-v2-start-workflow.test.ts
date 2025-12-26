@@ -95,13 +95,14 @@ describe('v2 start_workflow (Slice 3.5)', () => {
       expect(res.code).toBe('VALIDATION_ERROR');
       expect(res.message).toContain('context is too large');
       expect(res.message).toContain('JCS');
-      expect(res.suggestion).toBeTruthy();
+      expect(res.retry).toEqual({ kind: 'not_retryable' });
 
       const details = res.details as any;
-      expect(details.kind).toBe('context_budget_exceeded');
-      expect(details.tool).toBe('start_workflow');
-      expect(details.maxBytes).toBe(262144);
-      expect(details.measuredBytes).toBeGreaterThan(262144);
+      expect(details.suggestion).toBeTruthy();
+      expect(details.details.kind).toBe('context_budget_exceeded');
+      expect(details.details.tool).toBe('start_workflow');
+      expect(details.details.maxBytes).toBe(262144);
+      expect(details.details.measuredBytes).toBeGreaterThan(262144);
     } finally {
       process.env.WORKRAIL_DATA_DIR = prev;
     }
@@ -120,12 +121,13 @@ describe('v2 start_workflow (Slice 3.5)', () => {
       if (res.type !== 'error') return;
 
       expect(res.code).toBe('VALIDATION_ERROR');
-      expect(res.suggestion).toBeTruthy();
+      expect(res.retry).toEqual({ kind: 'not_retryable' });
 
       const details = res.details as any;
-      expect(details.kind).toBe('context_non_finite_number');
-      expect(details.tool).toBe('start_workflow');
-      expect(details.path).toBe('$.bad');
+      expect(details.suggestion).toBeTruthy();
+      expect(details.details.kind).toBe('context_non_finite_number');
+      expect(details.details.tool).toBe('start_workflow');
+      expect(details.details.path).toBe('$.bad');
     } finally {
       process.env.WORKRAIL_DATA_DIR = prev;
     }
@@ -149,10 +151,13 @@ describe('v2 start_workflow (Slice 3.5)', () => {
       if (res.type !== 'error') return;
 
       expect(res.code).toBe('VALIDATION_ERROR');
+      expect(res.retry).toEqual({ kind: 'not_retryable' });
+      
       const details = res.details as any;
-      expect(details.kind).toBe('context_budget_exceeded');
-      expect(details.tool).toBe('continue_workflow');
-      expect(details.measuredBytes).toBeGreaterThan(262144);
+      expect(details.suggestion).toBeTruthy();
+      expect(details.details.kind).toBe('context_budget_exceeded');
+      expect(details.details.tool).toBe('continue_workflow');
+      expect(details.details.measuredBytes).toBeGreaterThan(262144);
     } finally {
       process.env.WORKRAIL_DATA_DIR = prev;
     }

@@ -12,6 +12,12 @@ import {
   parseTokenV1,
   verifyTokenSignatureV1,
   type ParsedTokenV1,
+  type TokenDecodeErrorV2,
+  type TokenVerifyErrorV2,
+  type AttemptId,
+  type OutputId,
+  asAttemptId,
+  asOutputId,
 } from '../../v2/durable-core/tokens/index.js';
 import { encodeTokenPayloadV1, signTokenV1 } from '../../v2/durable-core/tokens/index.js';
 import { createWorkflow, getStepById } from '../../types/workflow.js';
@@ -21,7 +27,7 @@ import type { SessionEventLogStoreError } from '../../v2/ports/session-event-log
 import type { SnapshotStoreError } from '../../v2/ports/snapshot-store.port.js';
 import type { PinnedWorkflowStoreError } from '../../v2/ports/pinned-workflow-store.port.js';
 import type { HmacSha256PortV2 } from '../../v2/ports/hmac-sha256.port.js';
-import { ResultAsync as RA, okAsync, errAsync as neErrorAsync } from 'neverthrow';
+import { ResultAsync as RA, okAsync, errAsync as neErrorAsync, ok, err } from 'neverthrow';
 import { compileV1WorkflowToPinnedSnapshot } from '../../v2/read-only/v1-to-v2-shim.js';
 import { workflowHashForCompiledSnapshot } from '../../v2/durable-core/canonical/hashing.js';
 import type { JsonObject, JsonValue } from '../../v2/durable-core/canonical/json-types.js';
@@ -275,7 +281,7 @@ function checkContextBudget(args: { readonly tool: ContextToolNameV2; readonly c
   return { ok: true };
 }
 
-function tokenDecodeErrorToToolError(e: { readonly code: string; readonly message: string }): ToolResult<never> {
+function tokenDecodeErrorToToolError(e: TokenDecodeErrorV2 | TokenVerifyErrorV2): ToolResult<never> {
   switch (e.code) {
     case 'TOKEN_INVALID_FORMAT':
       return error(
@@ -301,8 +307,15 @@ function tokenDecodeErrorToToolError(e: { readonly code: string; readonly messag
         normalizeTokenErrorMessage(e.message),
         'Tokens must come from the same WorkRail response. Do not mix tokens from different runs or nodes.'
       );
+    case 'TOKEN_PAYLOAD_INVALID':
+      return error(
+        'TOKEN_INVALID_FORMAT',
+        normalizeTokenErrorMessage(e.message),
+        'Use the exact tokens returned by WorkRail.'
+      );
     default:
-      return error('TOKEN_INVALID_FORMAT', normalizeTokenErrorMessage(e.message), 'Use the exact tokens returned by WorkRail.');
+      const _exhaustive: never = e;
+      return _exhaustive;
   }
 }
 
@@ -415,9 +428,12 @@ function internalError(message: string, suggestion?: string): ToolFailure {
 function sessionStoreErrorToToolError(e: SessionEventLogStoreError): ToolFailure {
   switch (e.code) {
     case 'SESSION_STORE_LOCK_BUSY':
-      return errRetryAfterMs('TOKEN_SESSION_LOCKED', e.message, e.retry.afterMs, { suggestion: 'Retry in 1–3 seconds; if this persists >10s, ensure no other WorkRail process is running.' }) as ToolFailure;
+      // CRITICAL FIX: This is a storage error, NOT a token error
+      return errRetryAfterMs('INTERNAL_ERROR', normalizeTokenErrorMessage(e.message), e.retry.afterMs, {
+        suggestion: 'Another WorkRail process may be writing to this session; retry.',
+      }) as ToolFailure;
     case 'SESSION_STORE_CORRUPTION_DETECTED':
-      return errNotRetryable('SESSION_NOT_HEALTHY', `Session corruption detected (${e.location}): ${e.reason.code}`, {
+      return errNotRetryable('SESSION_NOT_HEALTHY', `Session corruption detected: ${e.reason.code}`, {
         suggestion: 'Execution requires a healthy session. Export salvage view, then recreate.',
         details: detailsSessionHealth({ kind: e.location === 'head' ? 'corrupt_head' : 'corrupt_tail', reason: e.reason }) as unknown as JsonValue,
       }) as ToolFailure;
@@ -504,12 +520,6 @@ function parseAckTokenOrFail(
   }
 
   return { ok: true, token: parsedRes.value as AckTokenInput };
-}
-
-type AttemptId = string & { readonly __brand: 'AttemptId' };
-
-function asAttemptId(raw: string): AttemptId {
-  return raw as AttemptId;
 }
 
 function newAttemptId(): AttemptId {
@@ -610,6 +620,23 @@ function fromV1ExecutionState(state: ExecutionState): EngineStateV1 {
   return convertRunningExecutionStateToEngineState(state);
 }
 
+// Sealed mapper for workflowSourceKind (no substring matching)
+type WorkflowSourceKind = 'bundled' | 'user' | 'project' | 'remote' | 'plugin';
+const workflowSourceKindMap: Record<string, WorkflowSourceKind> = {
+  bundled: 'bundled',
+  user: 'user',
+  project: 'project',
+  remote: 'remote',
+  plugin: 'plugin',
+  git: 'remote',
+  custom: 'project',
+};
+
+function mapWorkflowSourceKind(kind: string): WorkflowSourceKind {
+  const mapped = workflowSourceKindMap[kind];
+  return mapped ?? 'project';
+}
+
 export async function handleV2StartWorkflow(
   input: V2StartWorkflowInput,
   ctx: ToolContext
@@ -707,20 +734,7 @@ export async function handleV2StartWorkflow(
             data: {
               workflowId: workflow.definition.id,
               workflowHash: String(workflowHash),
-              workflowSourceKind:
-                workflow.source.kind === 'bundled'
-                  ? 'bundled'
-                  : workflow.source.kind === 'user'
-                    ? 'user'
-                    : workflow.source.kind === 'project'
-                      ? 'project'
-                      : workflow.source.kind === 'remote'
-                        ? 'remote'
-                        : workflow.source.kind === 'plugin'
-                          ? 'plugin'
-                          : workflow.source.kind === 'git'
-                            ? 'remote'
-                            : 'project', // custom directory treated as project-local for v2 store schema
+              workflowSourceKind: mapWorkflowSourceKind(workflow.source.kind),
               workflowSourceRef:
                 workflow.source.kind === 'user' || workflow.source.kind === 'project' || workflow.source.kind === 'custom'
                   ? workflow.source.directoryPath
@@ -1005,12 +1019,6 @@ export async function handleV2ContinueWorkflow(
       }
 
       const pinnedWorkflow = createWorkflow(compiled.definition as WorkflowDefinition, createBundledSource());
-      const compiler = new WorkflowCompiler();
-      const interpreter = new WorkflowInterpreter();
-      const compiledWf = compiler.compile(pinnedWorkflow);
-      if (compiledWf.isErr()) {
-        return error('INTERNAL_ERROR', compiledWf.error.message);
-      }
 
       const appendRes = await gate
         .withHealthySessionLock(sessionId, (lock) => {
@@ -1030,6 +1038,14 @@ export async function handleV2ContinueWorkflow(
             if (existing) {
               // Idempotent replay: store.append would no-op too, but we can short-circuit.
               return okAsync(undefined);
+            }
+
+            // NOW instantiate compiler/interpreter (only on non-replay path, after idempotency check)
+            const compiler = new WorkflowCompiler();
+            const interpreter = new WorkflowInterpreter();
+            const compiledWf = compiler.compile(pinnedWorkflow);
+            if (compiledWf.isErr()) {
+              return errAsync({ kind: 'advance_apply_failed', message: compiledWf.error.message } as const);
             }
 
             // Load current node snapshot to compute next state.
@@ -1128,6 +1144,7 @@ export async function handleV2ContinueWorkflow(
                 // Output persistence (single durable write path): if input.output exists, append node_output_appended.
                 // Lock: output is attached to the CURRENT node (nodeId), not the newly created node (toNodeId).
                 // The agent provides output as part of completing the current step.
+                const outputId = asOutputId(`out_recap_${String(attemptId)}`);
                 const events: readonly DomainEventV1[] = input.output?.notesMarkdown
                   ? [
                       ...baseEvents,
@@ -1137,7 +1154,7 @@ export async function handleV2ContinueWorkflow(
                         eventIndex: nextEventIndex + 3,
                         sessionId,
                         kind: 'node_output_appended' as const,
-                        dedupeKey: `node_output_appended:${sessionId}:out_recap_${attemptId}`,
+                        dedupeKey: `node_output_appended:${sessionId}:${outputId}`,
                         scope: { runId, nodeId }, // CORRECTED: attach to current node, not toNodeId
                         data: {
                           outputId: `out_recap_${attemptId}`,
