@@ -141,10 +141,14 @@ export async function handleWorkflowGet(
     const payload = WorkflowGetOutputSchema.parse({ workflow: result.value });
     return success(payload);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-
-    if (message.includes('timed out')) {
-      return error('TIMEOUT', message);
+    // Check for timeout errors via structured error type (not string matching)
+    if (err instanceof Error && err.name === 'TimeoutError') {
+      return {
+        type: 'error',
+        code: 'TIMEOUT',
+        message: err.message,
+        retry: { kind: 'retryable_immediate' },
+      };
     }
 
     const mapped = mapUnknownErrorToToolError(err);
@@ -190,8 +194,14 @@ export async function handleWorkflowNext(
 
     console.error(`[workflow_next] Failed after ${elapsed}ms: ${message}`);
 
-    if (message.includes('timed out')) {
-      return error('TIMEOUT', message);
+    // Check for timeout errors via structured error type (not string matching)
+    if (err instanceof Error && err.name === 'TimeoutError') {
+      return {
+        type: 'error',
+        code: 'TIMEOUT',
+        message: err.message,
+        retry: { kind: 'retryable_immediate' },
+      };
     }
 
     const mapped = mapUnknownErrorToToolError(err);

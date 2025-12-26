@@ -6,8 +6,16 @@ import { toBoundedJsonString } from './validation/bounded-json.js';
 // Deprecated: use ToolError directly
 export type ToolErrorMapping = ToolError;
 
-function assertNever(x: never): never {
-  throw new Error(`Unhandled DomainError variant: ${JSON.stringify(x)}`);
+function assertNever(x: never): ToolError {
+  // This should never execute at runtime if all cases are handled.
+  // Return a fail-closed error instead of throwing.
+  return {
+    type: 'error',
+    code: 'INTERNAL_ERROR',
+    message: `Unhandled DomainError variant: ${JSON.stringify(x)}`,
+    retry: { kind: 'not_retryable' },
+    details: { invariantViolation: 'exhaustiveness_check_failed' },
+  };
 }
 
 export function mapDomainErrorToToolError(err: DomainError): ToolError {

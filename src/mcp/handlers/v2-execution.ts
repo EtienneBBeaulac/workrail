@@ -58,6 +58,7 @@ function normalizeTokenErrorMessage(message: string): string {
 }
 
 type Bytes = number & { readonly __brand: 'Bytes' };
+type TokenPrefix = 'st.v1.' | 'ack.v1.' | 'chk.v1.';
 
 const MAX_CONTEXT_BYTES_V2 = (256 * 1024) as Bytes;
 
@@ -532,7 +533,7 @@ function attemptIdForNextNode(parentAttemptId: AttemptId): AttemptId {
 }
 
 function signTokenOrErr(args: {
-  unsignedPrefix: 'st.v1.' | 'ack.v1.' | 'chk.v1.';
+  unsignedPrefix: TokenPrefix;
   payload: unknown;
   keyring: import('../../v2/ports/keyring.port.js').KeyringV1;
   hmac: HmacSha256PortV2;
