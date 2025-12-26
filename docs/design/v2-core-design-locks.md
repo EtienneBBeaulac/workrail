@@ -1428,10 +1428,33 @@ The following are intentionally deferred and should be locked before implementin
 - **Context budget and schema discipline**:
   - Problem: agents can stuff unlimited junk into `context` (large docs, debug logs, irrelevant data); responses may echo entire `context` back (payload bloat)
   - Should workflows declare expected context keys and size budgets?
-  - Should responses suppress echoing `context` the agent already has (avoid "send it back verbatim" waste)?
+  - Should responses suppress echoing `context` the agent already has (avoid send-it-back-verbatim waste)?
   - Should incoming `context` be size-limited and validated against a declared schema?
   - Used by: all v2 execution tools; impacts agent UX, token payload size, and resumption quality
-  - Lock intent: prefer declared schemas + budgets over heuristic trimming; fail fast on oversized context rather than silently truncating
+  - Lock intent: prefer declared schemas and budgets over heuristic trimming; fail fast on oversized context rather than silently truncating
+
+- **Function definitions in resumption/rewind context (important)**:
+  - V1 supports workflow-level `functionDefinitions` and step-level `functionReferences` for context reduction (define once, reference many times)
+  - Problem: rewinds and new-chat resumption can cause agent to lose function definition context
+  - V2 tip/non-tip detection provides the signal: tip = resume/normal progression; non-tip = rewind/fork
+  - Must lock: function definitions should be part of recap/recovery context returned by continue_workflow
+  - Inclusion strategy (proposed):
+    - Tip nodes (resume): include functions referenced by pending step and/or used in ancestor lineage
+    - Non-tip nodes (rewind): include functions referenced by pending step plus functions used in downstream branches (recovery context)
+  - Budget discipline: function definitions count toward response budget; if exceeded, prioritize pending step functions then truncate with marker
+  - Alternative: inline expand all function references at compile time (loses context reduction benefit)
+  - Used by: workflows with repeated patterns (MR review, code analysis, multi-phase workflows)
+  - Lock intent needed: formalize that functions are part of bounded recap (not separate metadata) and define inclusion rules for tip vs non-tip
+
+- **Workflow-author-defined output schemas (vs WorkRail-owned contract packs only)**:
+  - Current lock: output contracts reference WorkRail-owned closed-set packs only (`wr.contracts.*`); no inline schema authoring
+  - Question: should workflows be able to define custom output schemas for workflow-specific structured artifacts (e.g., bug investigation findings table, MR review comments)?
+  - Tradeoffs:
+    - WorkRail-owned only (current): simpler authoring, deterministic Studio rendering, no schema drift, but limited to predefined artifact kinds
+    - Inline schemas allowed: more expressive, custom templates per workflow, but increases authoring burden and risks schema drift/validation inconsistency
+    - Hybrid: allow workflows to declare schema refs pointing to project-local or git-hosted schema definitions (validated at compile time)
+  - Used by: workflows wanting structured dashboard artifacts beyond generic notes; Studio rendering; export format consistency
+  - Lock intent preference: favor expanding WorkRail-owned contract pack catalog over allowing arbitrary inline schemas (preserves determinism and reduces drift risk)
 
 ## 16.4) Implementation playbook (how to execute safely) (locked intent)
 This section records execution guidance for large v2 refactors so we keep the implementation aligned with the locks and avoid mid-project drift.
