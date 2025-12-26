@@ -128,9 +128,12 @@ describe('MCP contract: v2 start_workflow / continue_workflow (Slice 3)', () => 
 
     // Verify v2 context is properly initialized
     expect(ctx.v2).toBeDefined();
-    expect(ctx.v2.engine).toBeDefined();
-    expect(ctx.v2.stateManager).toBeDefined();
-    expect(ctx.v2.ackTokens).toBeDefined();
-    expect(ctx.v2.checkpointManager).toBeDefined();
+    expect(ctx.v2.gate).toBeDefined();
+    expect(ctx.v2.sessionStore).toBeDefined();
+    expect(ctx.v2.snapshotStore).toBeDefined();
+    expect(ctx.v2.pinnedStore).toBeDefined();
+    expect(ctx.v2.keyring).toBeDefined();
+    expect(ctx.v2.crypto).toBeDefined();
+    expect(ctx.v2.hmac).toBeDefined();
   });
 });

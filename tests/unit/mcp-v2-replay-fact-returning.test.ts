@@ -106,7 +106,7 @@ describe('v2 replay is fact-returning and fail-closed (Phase 3)', () => {
     process.env.WORKRAIL_DATA_DIR = root;
     try {
       const v2Ctx = await createV2Context();
-      const { dataDir, fsPort, sha256, store, lock, gate, crypto, snapshotStore, pinnedStore } = v2;
+      const { dataDir, fsPort, sha256, store, lock, gate, crypto, snapshotStore, pinnedStore } = v2Ctx;
 
       const sessionId = 'sess_test';
       const runId = 'run_1';
@@ -236,7 +236,7 @@ describe('v2 replay is fact-returning and fail-closed (Phase 3)', () => {
     process.env.WORKRAIL_DATA_DIR = root;
     try {
       const v2Ctx = await createV2Context();
-      const { dataDir, fsPort, sha256, store, lock, gate, crypto, snapshotStore, pinnedStore } = v2;
+      const { dataDir, fsPort, sha256, store, lock, gate, crypto, snapshotStore, pinnedStore } = v2Ctx;
 
       const sessionId = 'sess_test_missing_snap';
       const runId = 'run_2';

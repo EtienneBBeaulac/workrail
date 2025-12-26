@@ -25,6 +25,7 @@ import { ResultAsync as RA, okAsync, errAsync as neErrorAsync } from 'neverthrow
 import { compileV1WorkflowToPinnedSnapshot } from '../../v2/read-only/v1-to-v2-shim.js';
 import { workflowHashForCompiledSnapshot } from '../../v2/durable-core/canonical/hashing.js';
 import type { JsonValue } from '../../v2/durable-core/canonical/json-types.js';
+import { toCanonicalBytes } from '../../v2/durable-core/canonical/jcs.js';
 import { createBundledSource } from '../../types/workflow-source.js';
 import type { WorkflowDefinition } from '../../types/workflow-definition.js';
 import { hasWorkflowDefinitionShape } from '../../types/workflow-definition.js';
@@ -48,6 +49,141 @@ function normalizeTokenErrorMessage(message: string): string {
   // Keep errors deterministic and compact; avoid leaking environment-specific file paths.
   // NOTE: avoid String.prototype.replaceAll to keep compatibility with older TS lib targets.
   return message.split(os.homedir()).join('~');
+}
+
+const MAX_CONTEXT_BYTES_V2 = 256 * 1024;
+
+type ContextValidationIssue =
+  | { readonly kind: 'not_an_object' }
+  | { readonly kind: 'unsupported_value'; readonly path: string; readonly valueType: string }
+  | { readonly kind: 'non_finite_number'; readonly path: string; readonly value: string }
+  | { readonly kind: 'circular_reference'; readonly path: string }
+  | { readonly kind: 'too_deep'; readonly path: string; readonly maxDepth: number };
+
+function validateJsonValueOrIssue(value: unknown, path: string, depth: number, seen: WeakSet<object>): ContextValidationIssue | null {
+  if (depth > 64) return { kind: 'too_deep', path, maxDepth: 64 };
+
+  if (value === null) return null;
+
+  const t = typeof value;
+  if (t === 'string' || t === 'boolean') return null;
+
+  if (t === 'number') {
+    if (!Number.isFinite(value)) {
+      return { kind: 'non_finite_number', path, value: String(value) };
+    }
+    return null;
+  }
+
+  if (t === 'object') {
+    if (Array.isArray(value)) {
+      if (seen.has(value)) return { kind: 'circular_reference', path };
+      seen.add(value);
+      for (let i = 0; i < value.length; i++) {
+        const child = validateJsonValueOrIssue(value[i], `${path}[${i}]`, depth + 1, seen);
+        if (child) return child;
+      }
+      return null;
+    }
+
+    // Plain object
+    if (seen.has(value as object)) return { kind: 'circular_reference', path };
+    seen.add(value as object);
+
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      const child = validateJsonValueOrIssue(v, path === '$' ? `$.${k}` : `${path}.${k}`, depth + 1, seen);
+      if (child) return child;
+    }
+
+    return null;
+  }
+
+  return { kind: 'unsupported_value', path, valueType: t };
+}
+
+function validateContextBudgetOrError(args: {
+  readonly tool: 'start_workflow' | 'continue_workflow';
+  readonly context: unknown;
+}): ToolFailure | null {
+  if (args.context === undefined) return null;
+
+  if (typeof args.context !== 'object' || args.context === null || Array.isArray(args.context)) {
+    return errNotRetryable('VALIDATION_ERROR', `context must be a JSON object for ${args.tool}.`, {
+      suggestion:
+        'Pass context as an object of external inputs (e.g., {"ticketId":"...","repoPath":"..."}). Do not pass arrays or primitives.',
+      details: {
+        kind: 'context_invalid_shape',
+        tool: args.tool,
+        expected: 'object',
+      },
+    }) as ToolFailure;
+  }
+
+  const issue = validateJsonValueOrIssue(args.context, '$', 0, new WeakSet());
+  if (issue) {
+    const detail: JsonValue =
+      issue.kind === 'unsupported_value'
+        ? { kind: 'context_unsupported_value', tool: args.tool, path: issue.path, valueType: issue.valueType }
+        : issue.kind === 'non_finite_number'
+          ? { kind: 'context_non_finite_number', tool: args.tool, path: issue.path, value: issue.value }
+          : issue.kind === 'circular_reference'
+            ? { kind: 'context_circular_reference', tool: args.tool, path: issue.path }
+            : issue.kind === 'too_deep'
+              ? { kind: 'context_too_deep', tool: args.tool, path: issue.path, maxDepth: issue.maxDepth }
+              : { kind: 'context_invalid_shape', tool: args.tool, expected: 'object' };
+
+    return errNotRetryable(
+      'VALIDATION_ERROR',
+      normalizeTokenErrorMessage(`context is not JSON-serializable for ${args.tool} (see details).`),
+      {
+        suggestion:
+          'Remove non-JSON values (undefined/functions/symbols), circular references, and non-finite numbers. Keep context to plain JSON objects/arrays/primitives only.',
+        details: detail,
+      }
+    ) as ToolFailure;
+  }
+
+  const canonicalRes = toCanonicalBytes(args.context as JsonValue);
+  if (canonicalRes.isErr()) {
+    return errNotRetryable(
+      'VALIDATION_ERROR',
+      normalizeTokenErrorMessage(`context cannot be canonicalized for ${args.tool}: ${canonicalRes.error.code}`),
+      {
+        suggestion:
+          canonicalRes.error.code === 'CANONICAL_JSON_NON_FINITE_NUMBER'
+            ? 'Remove NaN/Infinity/-Infinity from context. Canonical JSON forbids non-finite numbers.'
+            : 'Ensure context contains only JSON primitives, arrays, and objects (no undefined/functions/symbols).',
+        details: {
+          kind: 'context_not_canonical_json',
+          tool: args.tool,
+          measuredAs: 'jcs_utf8_bytes',
+          code: canonicalRes.error.code,
+          message: canonicalRes.error.message,
+        },
+      }
+    ) as ToolFailure;
+  }
+
+  const measuredBytes = (canonicalRes.value as unknown as Uint8Array).length;
+  if (measuredBytes > MAX_CONTEXT_BYTES_V2) {
+    return errNotRetryable(
+      'VALIDATION_ERROR',
+      `context is too large for ${args.tool}: ${measuredBytes} bytes (max ${MAX_CONTEXT_BYTES_V2}). Size is measured as UTF-8 bytes of RFC 8785 (JCS) canonical JSON.`,
+      {
+        suggestion:
+          'Remove large blobs from context (docs/logs/diffs). Pass references instead (file paths, IDs, hashes). If you must include text, include only the minimal excerpt, then retry.',
+        details: {
+          kind: 'context_budget_exceeded',
+          tool: args.tool,
+          measuredBytes,
+          maxBytes: MAX_CONTEXT_BYTES_V2,
+          measuredAs: 'jcs_utf8_bytes',
+        },
+      }
+    ) as ToolFailure;
+  }
+
+  return null;
 }
 
 function tokenDecodeErrorToToolError(e: { readonly code: string; readonly message: string }): ToolResult<never> {
@@ -389,6 +525,9 @@ export async function handleV2StartWorkflow(
     }
 
     const { gate, sessionStore, snapshotStore, pinnedStore, keyring, crypto, hmac } = ctx.v2;
+
+    const ctxErr = validateContextBudgetOrError({ tool: 'start_workflow', context: input.context });
+    if (ctxErr) return ctxErr;
 
     const workflow = await ctx.workflowService.getWorkflowById(input.workflowId);
     if (!workflow) {
