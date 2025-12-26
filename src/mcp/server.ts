@@ -137,6 +137,7 @@ export function createToolContext(): ToolContext {
     featureFlags,
     sessionManager,
     httpServer,
+    v2: null, // TODO: wire v2 dependencies when v2Tools flag is enabled
   };
 }
 

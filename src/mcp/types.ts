@@ -12,6 +12,14 @@ import type { IFeatureFlagProvider } from '../config/feature-flags.js';
 import type { SessionManager } from '../infrastructure/session/SessionManager.js';
 import type { HttpServer } from '../infrastructure/session/HttpServer.js';
 import type { SessionHealthV2 } from '../v2/durable-core/schemas/session/session-health.js';
+import type { ExecutionSessionGateV2 } from '../v2/usecases/execution-session-gate.js';
+import type { 
+  SessionEventLogAppendStorePortV2,
+  SessionEventLogReadonlyStorePortV2 
+} from '../v2/ports/session-event-log-store.port.js';
+import type { SnapshotStorePortV2 } from '../v2/ports/snapshot-store.port.js';
+import type { PinnedWorkflowStorePortV2 } from '../v2/ports/pinned-workflow-store.port.js';
+import type { KeyringV1 } from '../v2/ports/keyring.port.js';
 
 // -----------------------------------------------------------------------------
 // JSON-safe details payload (prevents undefined / functions leaking across boundary)
@@ -162,6 +170,24 @@ export function detailsSessionHealth(health: SessionHealthV2): SessionHealthDeta
 }
 
 // -----------------------------------------------------------------------------
+// V2 Dependencies (bounded context for append-only truth + token execution)
+// -----------------------------------------------------------------------------
+
+/**
+ * v2 bounded context dependencies (injected when v2Tools flag is enabled).
+ * 
+ * v2 represents WorkRail's rewrite to make workflows deterministic and rewind-safe
+ * via append-only event logs, opaque token-based execution, and pinned workflow snapshots.
+ */
+export interface V2Dependencies {
+  readonly gate: ExecutionSessionGateV2;
+  readonly sessionStore: SessionEventLogAppendStorePortV2 & SessionEventLogReadonlyStorePortV2;
+  readonly snapshotStore: SnapshotStorePortV2;
+  readonly pinnedStore: PinnedWorkflowStorePortV2;
+  readonly keyring: KeyringV1;
+}
+
+// -----------------------------------------------------------------------------
 // Tool Context
 // -----------------------------------------------------------------------------
 
@@ -177,6 +203,8 @@ export interface ToolContext {
   // Session-related dependencies are null when session tools are disabled
   readonly sessionManager: SessionManager | null;
   readonly httpServer: HttpServer | null;
+  // v2 dependencies are null when v2Tools flag is disabled
+  readonly v2: V2Dependencies | null;
 }
 
 // -----------------------------------------------------------------------------
