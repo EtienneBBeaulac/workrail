@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 
-import { handleV2StartWorkflow } from '../../src/mcp/handlers/v2-execution.js';
+import { handleV2ContinueWorkflow, handleV2StartWorkflow } from '../../src/mcp/handlers/v2-execution.js';
 import type { ToolContext } from '../../src/mcp/types.js';
 
 import { createWorkflow } from '../../src/types/workflow.js';
@@ -79,6 +79,58 @@ async function mkCtxWithWorkflow(workflowId: string): Promise<ToolContext> {
 }
 
 describe('v2 start_workflow (Slice 3.5)', () => {
+  it('returns VALIDATION_ERROR with actionable details for oversized context', async () => {
+    const root = await mkTempDataDir();
+    const prev = process.env.WORKRAIL_DATA_DIR;
+    process.env.WORKRAIL_DATA_DIR = root;
+    try {
+      const workflowId = 'test-workflow';
+      const ctx = await mkCtxWithWorkflow(workflowId);
+
+      const big = 'a'.repeat(262_200);
+      const res = await handleV2StartWorkflow({ workflowId, context: { big } } as any, ctx);
+      expect(res.type).toBe('error');
+      if (res.type !== 'error') return;
+
+      expect(res.code).toBe('VALIDATION_ERROR');
+      expect(res.message).toContain('context is too large');
+      expect(res.message).toContain('JCS');
+      expect(res.suggestion).toBeTruthy();
+
+      const details = res.details as any;
+      expect(details.kind).toBe('context_budget_exceeded');
+      expect(details.tool).toBe('start_workflow');
+      expect(details.maxBytes).toBe(262144);
+      expect(details.measuredBytes).toBeGreaterThan(262144);
+    } finally {
+      process.env.WORKRAIL_DATA_DIR = prev;
+    }
+  });
+
+  it('returns VALIDATION_ERROR for non-finite numbers in context (agent-actionable)', async () => {
+    const root = await mkTempDataDir();
+    const prev = process.env.WORKRAIL_DATA_DIR;
+    process.env.WORKRAIL_DATA_DIR = root;
+    try {
+      const workflowId = 'test-workflow';
+      const ctx = await mkCtxWithWorkflow(workflowId);
+
+      const res = await handleV2StartWorkflow({ workflowId, context: { bad: Infinity } } as any, ctx);
+      expect(res.type).toBe('error');
+      if (res.type !== 'error') return;
+
+      expect(res.code).toBe('VALIDATION_ERROR');
+      expect(res.suggestion).toBeTruthy();
+
+      const details = res.details as any;
+      expect(details.kind).toBe('context_non_finite_number');
+      expect(details.tool).toBe('start_workflow');
+      expect(details.path).toBe('$.bad');
+    } finally {
+      process.env.WORKRAIL_DATA_DIR = prev;
+    }
+  });
+
   it('creates durable session/run/root node and returns signed tokens + first pending step', async () => {
     const root = await mkTempDataDir();
     const prev = process.env.WORKRAIL_DATA_DIR;

@@ -749,6 +749,9 @@ export async function handleV2ContinueWorkflow(
     const state = parseStateTokenOrFail(input.stateToken, keyring, hmac);
     if (!state.ok) return state.result;
 
+    const ctxErr = validateContextBudgetOrError({ tool: 'continue_workflow', context: input.context });
+    if (ctxErr) return ctxErr;
+
     if (!input.ackToken) {
       // Slice 3.3: rehydrate-only path (must be side-effect-free).
       const sessionId = state.token.payload.sessionId;

@@ -47,18 +47,21 @@ async function createV2Context() {
   );
 
   return {
+    // V2Dependencies structure (for handlers):
+    gate,
+    sessionStore: store,
+    snapshotStore,
+    pinnedStore,
+    keyring,
+    crypto,
+    hmac,
+    // Test convenience (aliases):
     dataDir,
     fsPort,
     sha256,
     store,
     lock,
-    gate,
-    crypto,
-    snapshotStore,
-    pinnedStore,
-    hmac,
-    keyring,
-  };
+  } as any;
 }
 
 function dummyCtx(v2?: any): ToolContext {
