@@ -72,7 +72,7 @@ describe('ExecutionSessionGateV2', () => {
     if (res.ok) return;
     expect(res.error.code).toBe('SESSION_LOCKED');
     expect(res.error.sessionId).toBe(sessionId);
-    expect(res.error.retry.kind).toBe('retryable');
+    expect(res.error.retry.kind).toBe('retryable_after_ms');
     expect(res.error.message).toContain('retry in 1–3 seconds');
   });
 

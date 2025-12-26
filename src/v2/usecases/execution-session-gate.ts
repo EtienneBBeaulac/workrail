@@ -11,10 +11,10 @@ import type {
 import { projectSessionHealthV2 } from '../projections/session-health.js';
 
 export type ExecutionSessionGateErrorV2 =
-  | { readonly code: 'SESSION_LOCKED'; readonly message: string; readonly sessionId: SessionId; readonly retry: { readonly kind: 'retryable'; readonly afterMs: number } }
+  | { readonly code: 'SESSION_LOCKED'; readonly message: string; readonly sessionId: SessionId; readonly retry: { readonly kind: 'retryable_after_ms'; readonly afterMs: number } }
   | { readonly code: 'SESSION_LOCK_REENTRANT'; readonly message: string; readonly sessionId: SessionId }
   | { readonly code: 'LOCK_ACQUIRE_FAILED'; readonly message: string; readonly sessionId: SessionId }
-  | { readonly code: 'LOCK_RELEASE_FAILED'; readonly message: string; readonly sessionId: SessionId; readonly retry: { readonly kind: 'retryable'; readonly afterMs: number } }
+  | { readonly code: 'LOCK_RELEASE_FAILED'; readonly message: string; readonly sessionId: SessionId; readonly retry: { readonly kind: 'retryable_after_ms'; readonly afterMs: number } }
   | { readonly code: 'SESSION_NOT_HEALTHY'; readonly message: string; readonly sessionId: SessionId; readonly health: SessionHealthV2 }
   | { readonly code: 'SESSION_LOAD_FAILED'; readonly message: string; readonly sessionId: SessionId; readonly cause: SessionEventLogStoreError }
   | { readonly code: 'GATE_CALLBACK_FAILED'; readonly message: string; readonly sessionId: SessionId };
@@ -111,7 +111,7 @@ export class ExecutionSessionGateV2 {
               code: 'SESSION_LOCKED',
               message: `Session is locked; retry in 1–3 seconds; if this persists >10s, ensure no other WorkRail process is running for this session.`,
               sessionId,
-              retry: { kind: 'retryable', afterMs: 1000 },
+              retry: { kind: 'retryable_after_ms', afterMs: 1000 },
             });
           }
           throw new GateFailure<ExecutionSessionGateErrorV2 | E>({ code: 'LOCK_ACQUIRE_FAILED', message: e.message, sessionId });
@@ -201,7 +201,7 @@ export class ExecutionSessionGateV2 {
               code: 'LOCK_RELEASE_FAILED',
               message: 'Failed to release session lock; retry in 1–3 seconds; if this persists >10s, ensure no other WorkRail process is running for this session.',
               sessionId,
-              retry: { kind: 'retryable', afterMs: 1000 },
+              retry: { kind: 'retryable_after_ms', afterMs: 1000 },
             });
           }
         );
