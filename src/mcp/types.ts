@@ -22,18 +22,9 @@ import type { PinnedWorkflowStorePortV2 } from '../v2/ports/pinned-workflow-stor
 import type { KeyringV1 } from '../v2/ports/keyring.port.js';
 import type { CryptoPortV2 } from '../v2/durable-core/canonical/hashing.js';
 import type { HmacSha256PortV2 } from '../v2/ports/hmac-sha256.port.js';
+import type { JsonValue } from './output-schemas.js';
 
-// -----------------------------------------------------------------------------
-// JSON-safe details payload (prevents undefined / functions leaking across boundary)
-// -----------------------------------------------------------------------------
-
-export type JsonValue =
-  | string
-  | number
-  | boolean
-  | null
-  | readonly JsonValue[]
-  | { readonly [key: string]: JsonValue };
+// Note: JsonValue type is imported from output-schemas.js above
 
 /**
  * Session health details for SESSION_NOT_HEALTHY errors.
@@ -86,12 +77,17 @@ export interface ToolSuccess<T> {
 
 /**
  * Error result from a tool handler.
+ * 
+ * Unified envelope (v2 lock compliance):
+ * - code: closed-set error code
+ * - message: human-readable description
+ * - retry: always present; indicates retryability
+ * - details: optional structured data (validation errors, templates, etc.)
  */
 export interface ToolError {
   readonly type: 'error';
   readonly code: ErrorCode;
   readonly message: string;
-  readonly suggestion?: string;
   readonly retry: ToolRetry;
   readonly details?: JsonValue;
 }
@@ -117,52 +113,68 @@ export const success = <T>(data: T): ToolResult<T> => ({
 });
 
 /**
+ * Create a non-retryable error.
+ */
+export const errNotRetryable = (
+  code: ErrorCode,
+  message: string,
+  details?: JsonValue
+): ToolError => ({
+  type: 'error',
+  code,
+  message,
+  retry: { kind: 'not_retryable' },
+  details,
+});
+
+/**
+ * Create a retryable error with delay.
+ */
+export const errRetryAfterMs = (
+  code: ErrorCode,
+  message: string,
+  afterMs: number,
+  details?: JsonValue
+): ToolError => ({
+  type: 'error',
+  code,
+  message,
+  retry: { kind: 'retryable_after_ms', afterMs },
+  details,
+});
+
+/**
+ * Create an immediately retryable error.
+ */
+export const errRetryImmediate = (
+  code: ErrorCode,
+  message: string,
+  details?: JsonValue
+): ToolError => ({
+  type: 'error',
+  code,
+  message,
+  retry: { kind: 'retryable_immediate' },
+  details,
+});
+
+/**
  * Create an error result.
+ * 
+ * @deprecated Use errNotRetryable, errRetryAfterMs, or errRetryImmediate for explicit retry semantics.
  */
 export const error = (
   code: ErrorCode,
   message: string,
   suggestion?: string,
-  retry?: ToolRetry,
-  details?: JsonValue
-): ToolResult<never> => ({
+  retry?: ToolRetry
+): ToolError => ({
   type: 'error',
   code,
   message,
-  suggestion,
   retry: retry ?? { kind: 'not_retryable' },
-  ...(details !== undefined ? { details } : {}),
+  details: suggestion ? { suggestion } : undefined,
 });
-
-export type ToolErrorOptions = Readonly<{
-  suggestion?: string;
-  details?: JsonValue;
-}>;
-
-export function errNotRetryable(
-  code: ErrorCode,
-  message: string,
-  options?: ToolErrorOptions
-): ToolResult<never> {
-  return error(code, message, options?.suggestion, { kind: 'not_retryable' }, options?.details);
-}
-
-export function errRetryableImmediate(
-  code: ErrorCode,
-  message: string,
-  options?: ToolErrorOptions
-): ToolResult<never> {
-  return error(code, message, options?.suggestion, { kind: 'retryable_immediate' }, options?.details);
-}
-
-export function errRetryableAfterMs(
-  code: ErrorCode,
-  message: string,
-  afterMs: number,
-  options?: ToolErrorOptions
-): ToolResult<never> {
-  return error(code, message, options?.suggestion, { kind: 'retryable_after_ms', afterMs }, options?.details);
-}
 
 /**
  * Create SessionHealthDetails for SESSION_NOT_HEALTHY errors.

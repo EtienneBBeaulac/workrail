@@ -1,7 +1,7 @@
 import * as os from 'os';
 import { randomUUID } from 'crypto';
 import type { ToolContext, ToolResult } from '../types.js';
-import { error, success, errNotRetryable, errRetryableAfterMs, detailsSessionHealth } from '../types.js';
+import { error, success, errNotRetryable, errRetryAfterMs, detailsSessionHealth } from '../types.js';
 import type { V2ContinueWorkflowInput, V2StartWorkflowInput } from '../v2/tools.js';
 import { V2ContinueWorkflowOutputSchema, V2StartWorkflowOutputSchema } from '../output-schemas.js';
 import { deriveIsComplete, derivePendingStep } from '../../v2/durable-core/projections/snapshot-state.js';
@@ -24,7 +24,7 @@ import type { HmacSha256PortV2 } from '../../v2/ports/hmac-sha256.port.js';
 import { ResultAsync as RA, okAsync, errAsync as neErrorAsync } from 'neverthrow';
 import { compileV1WorkflowToPinnedSnapshot } from '../../v2/read-only/v1-to-v2-shim.js';
 import { workflowHashForCompiledSnapshot } from '../../v2/durable-core/canonical/hashing.js';
-import type { JsonValue } from '../../v2/durable-core/canonical/json-types.js';
+import type { JsonObject, JsonValue } from '../../v2/durable-core/canonical/json-types.js';
 import { toCanonicalBytes } from '../../v2/durable-core/canonical/jcs.js';
 import { createBundledSource } from '../../types/workflow-source.js';
 import type { WorkflowDefinition } from '../../types/workflow-definition.js';
@@ -51,14 +51,55 @@ function normalizeTokenErrorMessage(message: string): string {
   return message.split(os.homedir()).join('~');
 }
 
-const MAX_CONTEXT_BYTES_V2 = 256 * 1024;
+type Bytes = number & { readonly __brand: 'Bytes' };
+
+const MAX_CONTEXT_BYTES_V2 = (256 * 1024) as Bytes;
+
+type ContextToolNameV2 = 'start_workflow' | 'continue_workflow';
 
 type ContextValidationIssue =
-  | { readonly kind: 'not_an_object' }
   | { readonly kind: 'unsupported_value'; readonly path: string; readonly valueType: string }
   | { readonly kind: 'non_finite_number'; readonly path: string; readonly value: string }
   | { readonly kind: 'circular_reference'; readonly path: string }
   | { readonly kind: 'too_deep'; readonly path: string; readonly maxDepth: number };
+
+type ContextValidationDetails =
+  | { readonly kind: 'context_invalid_shape'; readonly tool: ContextToolNameV2; readonly expected: 'object' }
+  | {
+      readonly kind: 'context_unsupported_value';
+      readonly tool: ContextToolNameV2;
+      readonly path: string;
+      readonly valueType: string;
+    }
+  | {
+      readonly kind: 'context_non_finite_number';
+      readonly tool: ContextToolNameV2;
+      readonly path: string;
+      readonly value: string;
+    }
+  | { readonly kind: 'context_circular_reference'; readonly tool: ContextToolNameV2; readonly path: string }
+  | {
+      readonly kind: 'context_too_deep';
+      readonly tool: ContextToolNameV2;
+      readonly path: string;
+      readonly maxDepth: number;
+    }
+  | {
+      readonly kind: 'context_not_canonical_json';
+      readonly tool: ContextToolNameV2;
+      readonly measuredAs: 'jcs_utf8_bytes';
+      readonly code: string;
+      readonly message: string;
+    }
+  | {
+      readonly kind: 'context_budget_exceeded';
+      readonly tool: ContextToolNameV2;
+      readonly measuredBytes: number;
+      readonly maxBytes: number;
+      readonly measuredAs: 'jcs_utf8_bytes';
+    };
+
+type ContextBudgetCheck = { readonly ok: true } | { readonly ok: false; readonly error: ToolFailure };
 
 function validateJsonValueOrIssue(value: unknown, path: string, depth: number, seen: WeakSet<object>): ContextValidationIssue | null {
   if (depth > 64) return { kind: 'too_deep', path, maxDepth: 64 };
@@ -101,89 +142,137 @@ function validateJsonValueOrIssue(value: unknown, path: string, depth: number, s
   return { kind: 'unsupported_value', path, valueType: t };
 }
 
-function validateContextBudgetOrError(args: {
-  readonly tool: 'start_workflow' | 'continue_workflow';
-  readonly context: unknown;
-}): ToolFailure | null {
-  if (args.context === undefined) return null;
+function checkContextBudget(args: { readonly tool: ContextToolNameV2; readonly context: unknown }): ContextBudgetCheck {
+  if (args.context === undefined) return { ok: true };
 
   if (typeof args.context !== 'object' || args.context === null || Array.isArray(args.context)) {
-    return errNotRetryable('VALIDATION_ERROR', `context must be a JSON object for ${args.tool}.`, {
-      suggestion:
-        'Pass context as an object of external inputs (e.g., {"ticketId":"...","repoPath":"..."}). Do not pass arrays or primitives.',
-      details: {
-        kind: 'context_invalid_shape',
-        tool: args.tool,
-        expected: 'object',
-      },
-    }) as ToolFailure;
+    const details = {
+      kind: 'context_invalid_shape',
+      tool: args.tool,
+      expected: 'object',
+    } satisfies ContextValidationDetails & JsonObject;
+
+    return {
+      ok: false,
+      error: errNotRetryable('VALIDATION_ERROR', `context must be a JSON object for ${args.tool}.`, {
+        suggestion:
+          'Pass context as an object of external inputs (e.g., {"ticketId":"...","repoPath":"..."}). Do not pass arrays or primitives.',
+        details,
+      }) as ToolFailure,
+    };
   }
 
-  const issue = validateJsonValueOrIssue(args.context, '$', 0, new WeakSet());
+  const contextObj = args.context as JsonObject;
+
+  const issue = validateJsonValueOrIssue(contextObj, '$', 0, new WeakSet());
   if (issue) {
-    const detail: JsonValue =
-      issue.kind === 'unsupported_value'
-        ? { kind: 'context_unsupported_value', tool: args.tool, path: issue.path, valueType: issue.valueType }
-        : issue.kind === 'non_finite_number'
-          ? { kind: 'context_non_finite_number', tool: args.tool, path: issue.path, value: issue.value }
-          : issue.kind === 'circular_reference'
-            ? { kind: 'context_circular_reference', tool: args.tool, path: issue.path }
-            : issue.kind === 'too_deep'
-              ? { kind: 'context_too_deep', tool: args.tool, path: issue.path, maxDepth: issue.maxDepth }
-              : { kind: 'context_invalid_shape', tool: args.tool, expected: 'object' };
-
-    return errNotRetryable(
-      'VALIDATION_ERROR',
-      normalizeTokenErrorMessage(`context is not JSON-serializable for ${args.tool} (see details).`),
-      {
-        suggestion:
-          'Remove non-JSON values (undefined/functions/symbols), circular references, and non-finite numbers. Keep context to plain JSON objects/arrays/primitives only.',
-        details: detail,
+    const details = (() => {
+      switch (issue.kind) {
+        case 'unsupported_value':
+          return {
+            kind: 'context_unsupported_value',
+            tool: args.tool,
+            path: issue.path,
+            valueType: issue.valueType,
+          } satisfies ContextValidationDetails & JsonObject;
+        case 'non_finite_number':
+          return {
+            kind: 'context_non_finite_number',
+            tool: args.tool,
+            path: issue.path,
+            value: issue.value,
+          } satisfies ContextValidationDetails & JsonObject;
+        case 'circular_reference':
+          return {
+            kind: 'context_circular_reference',
+            tool: args.tool,
+            path: issue.path,
+          } satisfies ContextValidationDetails & JsonObject;
+        case 'too_deep':
+          return {
+            kind: 'context_too_deep',
+            tool: args.tool,
+            path: issue.path,
+            maxDepth: issue.maxDepth,
+          } satisfies ContextValidationDetails & JsonObject;
+        default: {
+          const _exhaustive: never = issue;
+          return {
+            kind: 'context_invalid_shape',
+            tool: args.tool,
+            expected: 'object',
+          } satisfies ContextValidationDetails & JsonObject;
+        }
       }
-    ) as ToolFailure;
+    })();
+
+    return {
+      ok: false,
+      error: errNotRetryable(
+        'VALIDATION_ERROR',
+        normalizeTokenErrorMessage(`context is not JSON-serializable for ${args.tool} (see details).`),
+        {
+          suggestion:
+            'Remove non-JSON values (undefined/functions/symbols), circular references, and non-finite numbers. Keep context to plain JSON objects/arrays/primitives only.',
+          details,
+        }
+      ) as ToolFailure,
+    };
   }
 
-  const canonicalRes = toCanonicalBytes(args.context as JsonValue);
+  const canonicalRes = toCanonicalBytes(contextObj);
   if (canonicalRes.isErr()) {
-    return errNotRetryable(
-      'VALIDATION_ERROR',
-      normalizeTokenErrorMessage(`context cannot be canonicalized for ${args.tool}: ${canonicalRes.error.code}`),
-      {
-        suggestion:
-          canonicalRes.error.code === 'CANONICAL_JSON_NON_FINITE_NUMBER'
-            ? 'Remove NaN/Infinity/-Infinity from context. Canonical JSON forbids non-finite numbers.'
-            : 'Ensure context contains only JSON primitives, arrays, and objects (no undefined/functions/symbols).',
-        details: {
-          kind: 'context_not_canonical_json',
-          tool: args.tool,
-          measuredAs: 'jcs_utf8_bytes',
-          code: canonicalRes.error.code,
-          message: canonicalRes.error.message,
-        },
-      }
-    ) as ToolFailure;
+    const details = {
+      kind: 'context_not_canonical_json',
+      tool: args.tool,
+      measuredAs: 'jcs_utf8_bytes',
+      code: canonicalRes.error.code,
+      message: canonicalRes.error.message,
+    } satisfies ContextValidationDetails & JsonObject;
+
+    const suggestion =
+      canonicalRes.error.code === 'CANONICAL_JSON_NON_FINITE_NUMBER'
+        ? 'Remove NaN/Infinity/-Infinity from context. Canonical JSON forbids non-finite numbers.'
+        : 'Ensure context contains only JSON primitives, arrays, and objects (no undefined/functions/symbols).';
+
+    return {
+      ok: false,
+      error: errNotRetryable(
+        'VALIDATION_ERROR',
+        normalizeTokenErrorMessage(`context cannot be canonicalized for ${args.tool}: ${canonicalRes.error.code}`),
+        {
+          suggestion,
+          details,
+        }
+      ) as ToolFailure,
+    };
   }
 
-  const measuredBytes = (canonicalRes.value as unknown as Uint8Array).length;
+  const measuredBytes = (canonicalRes.value as unknown as Uint8Array).length as Bytes;
   if (measuredBytes > MAX_CONTEXT_BYTES_V2) {
-    return errNotRetryable(
-      'VALIDATION_ERROR',
-      `context is too large for ${args.tool}: ${measuredBytes} bytes (max ${MAX_CONTEXT_BYTES_V2}). Size is measured as UTF-8 bytes of RFC 8785 (JCS) canonical JSON.`,
-      {
-        suggestion:
-          'Remove large blobs from context (docs/logs/diffs). Pass references instead (file paths, IDs, hashes). If you must include text, include only the minimal excerpt, then retry.',
-        details: {
-          kind: 'context_budget_exceeded',
-          tool: args.tool,
-          measuredBytes,
-          maxBytes: MAX_CONTEXT_BYTES_V2,
-          measuredAs: 'jcs_utf8_bytes',
-        },
-      }
-    ) as ToolFailure;
+    const details = {
+      kind: 'context_budget_exceeded',
+      tool: args.tool,
+      measuredBytes,
+      maxBytes: MAX_CONTEXT_BYTES_V2,
+      measuredAs: 'jcs_utf8_bytes',
+    } satisfies ContextValidationDetails & JsonObject;
+
+    return {
+      ok: false,
+      error: errNotRetryable(
+        'VALIDATION_ERROR',
+        `context is too large for ${args.tool}: ${measuredBytes} bytes (max ${MAX_CONTEXT_BYTES_V2}). Size is measured as UTF-8 bytes of RFC 8785 (JCS) canonical JSON.`,
+        {
+          suggestion:
+            'Remove large blobs from context (docs/logs/diffs). Pass references instead (file paths, IDs, hashes). If you must include text, include only the minimal excerpt, then retry.',
+          details,
+        }
+      ) as ToolFailure,
+    };
   }
 
-  return null;
+  return { ok: true };
 }
 
 function tokenDecodeErrorToToolError(e: { readonly code: string; readonly message: string }): ToolResult<never> {
@@ -326,7 +415,7 @@ function internalError(message: string, suggestion?: string): ToolFailure {
 function sessionStoreErrorToToolError(e: SessionEventLogStoreError): ToolFailure {
   switch (e.code) {
     case 'SESSION_STORE_LOCK_BUSY':
-      return errRetryableAfterMs('TOKEN_SESSION_LOCKED', e.message, e.retry.afterMs, { suggestion: 'Retry in 1–3 seconds; if this persists >10s, ensure no other WorkRail process is running.' }) as ToolFailure;
+      return errRetryAfterMs('TOKEN_SESSION_LOCKED', e.message, e.retry.afterMs, { suggestion: 'Retry in 1–3 seconds; if this persists >10s, ensure no other WorkRail process is running.' }) as ToolFailure;
     case 'SESSION_STORE_CORRUPTION_DETECTED':
       return errNotRetryable('SESSION_NOT_HEALTHY', `Session corruption detected (${e.location}): ${e.reason.code}`, {
         suggestion: 'Execution requires a healthy session. Export salvage view, then recreate.',
@@ -345,9 +434,9 @@ function sessionStoreErrorToToolError(e: SessionEventLogStoreError): ToolFailure
 function gateErrorToToolError(e: ExecutionSessionGateErrorV2): ToolFailure {
   switch (e.code) {
     case 'SESSION_LOCKED':
-      return errRetryableAfterMs('TOKEN_SESSION_LOCKED', e.message, e.retry.afterMs, { suggestion: 'Retry in 1–3 seconds; if this persists >10s, ensure no other WorkRail process is running.' }) as ToolFailure;
+      return errRetryAfterMs('TOKEN_SESSION_LOCKED', e.message, e.retry.afterMs, { suggestion: 'Retry in 1–3 seconds; if this persists >10s, ensure no other WorkRail process is running.' }) as ToolFailure;
     case 'LOCK_RELEASE_FAILED':
-      return errRetryableAfterMs('TOKEN_SESSION_LOCKED', e.message, e.retry.afterMs, { suggestion: 'Retry in 1–3 seconds; if this persists >10s, ensure no other WorkRail process is running.' }) as ToolFailure;
+      return errRetryAfterMs('TOKEN_SESSION_LOCKED', e.message, e.retry.afterMs, { suggestion: 'Retry in 1–3 seconds; if this persists >10s, ensure no other WorkRail process is running.' }) as ToolFailure;
     case 'SESSION_NOT_HEALTHY':
       return errNotRetryable('SESSION_NOT_HEALTHY', e.message, { suggestion: 'Execution requires healthy session.', details: detailsSessionHealth(e.health) as unknown as JsonValue }) as ToolFailure;
     case 'SESSION_LOAD_FAILED':
@@ -417,13 +506,19 @@ function parseAckTokenOrFail(
   return { ok: true, token: parsedRes.value as AckTokenInput };
 }
 
-function newAttemptId(): string {
-  return `attempt_${randomUUID()}`;
+type AttemptId = string & { readonly __brand: 'AttemptId' };
+
+function asAttemptId(raw: string): AttemptId {
+  return raw as AttemptId;
 }
 
-function attemptIdForNextNode(parentAttemptId: string): string {
+function newAttemptId(): AttemptId {
+  return asAttemptId(`attempt_${randomUUID()}`);
+}
+
+function attemptIdForNextNode(parentAttemptId: AttemptId): AttemptId {
   // Deterministic derivation so replay responses can re-mint the same next-node ack/checkpoint tokens.
-  return `next_${parentAttemptId}`;
+  return asAttemptId(`next_${parentAttemptId}`);
 }
 
 function signTokenOrErr(args: {
@@ -526,8 +621,8 @@ export async function handleV2StartWorkflow(
 
     const { gate, sessionStore, snapshotStore, pinnedStore, keyring, crypto, hmac } = ctx.v2;
 
-    const ctxErr = validateContextBudgetOrError({ tool: 'start_workflow', context: input.context });
-    if (ctxErr) return ctxErr;
+    const ctxCheck = checkContextBudget({ tool: 'start_workflow', context: input.context });
+    if (!ctxCheck.ok) return ctxCheck.error;
 
     const workflow = await ctx.workflowService.getWorkflowById(input.workflowId);
     if (!workflow) {
@@ -749,8 +844,8 @@ export async function handleV2ContinueWorkflow(
     const state = parseStateTokenOrFail(input.stateToken, keyring, hmac);
     if (!state.ok) return state.result;
 
-    const ctxErr = validateContextBudgetOrError({ tool: 'continue_workflow', context: input.context });
-    if (ctxErr) return ctxErr;
+    const ctxCheck = checkContextBudget({ tool: 'continue_workflow', context: input.context });
+    if (!ctxCheck.ok) return ctxCheck.error;
 
     if (!input.ackToken) {
       // Slice 3.3: rehydrate-only path (must be side-effect-free).
@@ -893,7 +988,7 @@ export async function handleV2ContinueWorkflow(
       const sessionId = state.token.payload.sessionId;
       const runId = state.token.payload.runId;
       const nodeId = state.token.payload.nodeId;
-      const attemptId = ack.token.payload.attemptId;
+      const attemptId = asAttemptId(ack.token.payload.attemptId);
       const workflowHash = state.token.payload.workflowHash;
 
       const dedupeKey = `advance_recorded:${sessionId}:${nodeId}:${attemptId}`;
@@ -1042,10 +1137,10 @@ export async function handleV2ContinueWorkflow(
                         eventIndex: nextEventIndex + 3,
                         sessionId,
                         kind: 'node_output_appended' as const,
-                        dedupeKey: `node_output_appended:${sessionId}:out_recap_${String(attemptId)}`,
+                        dedupeKey: `node_output_appended:${sessionId}:out_recap_${attemptId}`,
                         scope: { runId, nodeId }, // CORRECTED: attach to current node, not toNodeId
                         data: {
-                          outputId: `out_recap_${String(attemptId)}`,
+                          outputId: `out_recap_${attemptId}`,
                           outputChannel: 'recap' as const,
                           payload: {
                             payloadKind: 'notes' as const,
@@ -1142,7 +1237,7 @@ export async function handleV2ContinueWorkflow(
       const pending = derivePendingStep(snap.enginePayload.engineState);
       const isComplete = deriveIsComplete(snap.enginePayload.engineState);
 
-      const nextAttemptId = attemptIdForNextNode(String(attemptId));
+      const nextAttemptId = attemptIdForNextNode(attemptId);
       const nextAckTokenRes = signTokenOrErr({
         unsignedPrefix: 'ack.v1.',
         payload: { tokenVersion: 1, tokenKind: 'ack', sessionId, runId, nodeId: toNodeId, attemptId: nextAttemptId },

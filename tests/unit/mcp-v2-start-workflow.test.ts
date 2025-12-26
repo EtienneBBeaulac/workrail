@@ -131,6 +131,33 @@ describe('v2 start_workflow (Slice 3.5)', () => {
     }
   });
 
+  it('returns VALIDATION_ERROR for oversized context on continue_workflow (rehydrate-only path)', async () => {
+    const root = await mkTempDataDir();
+    const prev = process.env.WORKRAIL_DATA_DIR;
+    process.env.WORKRAIL_DATA_DIR = root;
+    try {
+      const workflowId = 'test-workflow';
+      const ctx = await mkCtxWithWorkflow(workflowId);
+
+      const start = await handleV2StartWorkflow({ workflowId } as any, ctx);
+      expect(start.type).toBe('success');
+      if (start.type !== 'success') return;
+
+      const big = 'a'.repeat(262_200);
+      const res = await handleV2ContinueWorkflow({ stateToken: start.data.stateToken, context: { big } } as any, ctx);
+      expect(res.type).toBe('error');
+      if (res.type !== 'error') return;
+
+      expect(res.code).toBe('VALIDATION_ERROR');
+      const details = res.details as any;
+      expect(details.kind).toBe('context_budget_exceeded');
+      expect(details.tool).toBe('continue_workflow');
+      expect(details.measuredBytes).toBeGreaterThan(262144);
+    } finally {
+      process.env.WORKRAIL_DATA_DIR = prev;
+    }
+  });
+
   it('creates durable session/run/root node and returns signed tokens + first pending step', async () => {
     const root = await mkTempDataDir();
     const prev = process.env.WORKRAIL_DATA_DIR;

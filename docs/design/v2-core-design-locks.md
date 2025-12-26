@@ -1290,6 +1290,15 @@ Lock:
 - Never throw errors across MCP boundaries; map to structured error envelopes.
 - Retry guidance MUST be conveyed via `retry` (not `message` or other free-form strings-as-data).
 
+### Agent-first, self-correcting error messages (locked)
+v2 must optimize for an honest-but-buggy agent caller. Errors must be actionable without requiring the agent to guess or reverse-engineer schemas.
+
+Locks:
+- Errors MUST be **specific**: state what is wrong, where it applies (which tool/input), and why it matters.
+- Errors MUST be **self-correcting**: include a `suggestion` that tells the agent exactly what to do next.
+- Errors SHOULD include structured `details` that are JSON-safe and deterministic (no file paths, no timestamps).
+- For input-size/budget violations (e.g., `context` budget): the error MUST include the measured size, the max size, and the measurement method (e.g., JCS UTF-8 bytes), plus concrete reduction guidance ("remove blobs; pass references").
+
 ### Error code domains + boundary rule (locked intent)
 To keep errors type-safe and prevent “guess which layer failed” behavior:
 - Token-driven MCP execution tools (`start_workflow`, `continue_workflow`, `checkpoint_workflow`) MUST return only `TOKEN_*` codes for token/session locking and token validation failures.
@@ -1436,7 +1445,7 @@ Locks:
 - **Byte budget (fail fast; no silent truncation)**:
   - WorkRail MUST compute context size as UTF-8 bytes of **RFC 8785 (JCS)** canonical JSON for the provided `context`.
   - If the canonicalization fails or size exceeds **256KB**, the tool MUST fail fast with errors-as-data.
-  - Use `blocked` with `Blocker.code=INVARIANT_VIOLATION` and `Blocker.pointer={ kind:"context_budget" }` when surfaced through execution flows.
+  - On MCP tool calls (`start_workflow`, `continue_workflow`), WorkRail MUST fail fast with a **tool error** (code `VALIDATION_ERROR`) that includes: measured bytes, max bytes (256KB), and measurement method (RFC 8785 / JCS UTF-8 bytes), plus concrete reduction guidance (remove blobs; pass references).
 - **Schema discipline**:
   - v2 does not support workflow-authored arbitrary context schemas.
   - If a workflow needs required inputs, it must express this via step instructions + mode behavior (block in blocking modes; assume/skip+disclose in never-stop) rather than relying on implicit context echoing.
