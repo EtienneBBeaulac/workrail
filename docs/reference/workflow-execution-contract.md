@@ -341,6 +341,13 @@ WorkRail should return the **full recap when it is small**, and a **deterministi
 
 This keeps the “rewind resilience” promise without turning every response into an unbounded history dump.
 
+### Function definitions in rehydrate/rewind recovery (normative clarification)
+Some workflows use `functionDefinitions` + `functionReferences` to reduce repeated instructions (define once, reference many times). Because WorkRail cannot access chat history, `continue_workflow` (rehydrate-only) MUST return enough recovery context for the agent to understand any referenced functions.
+
+Lock intent:
+- Function definition recovery MUST be satisfied by deterministic rendering from the pinned compiled workflow snapshot (part of `workflowHash`), not by transcript memory.
+- Function definitions SHOULD be included as part of the bounded recovery text (e.g., expanded into `pending.prompt`) and MUST respect the same byte-budget and truncation rules as other recap/recovery content.
+
 ## User-only dependencies (normative)
 
 WorkRail should treat “user-only dependencies” as a **closed set of reasons** that can justify returning `kind: "blocked"` (e.g., a required design doc that only the user can supply).
@@ -350,7 +357,7 @@ The behavior depends on the effective full-auto preference:
 - Under **`full_auto_stop_on_user_deps`**, WorkRail returns `blocked` with structured reasons and next-input guidance.
 - Under **`full_auto_never_stop`**, WorkRail never blocks. User-only dependency reasons must be converted into structured warnings plus durable disclosure (“gaps”) while execution continues.
 
-The exact enum set for user-only dependency reasons is intentionally deferred (see Open items).
+The closed set for user-only dependency reasons is locked in `docs/design/v2-core-design-locks.md` (see “User-only dependencies: closed reasons”).
 
 ## Blocked vs gaps (mode-driven, drift prevention) (recommended)
 To keep behavior deterministic across modes and prevent semantic drift, treat “blocked” (control flow) and “gaps” (durable disclosure) as two views over the same underlying closed-set reasons.
@@ -385,6 +392,7 @@ Locks:
 
 `blockers[].pointer` (closed set, initial):
 - `{ "kind": "context_key", "key": "..." }`
+- `{ "kind": "context_budget" }`
 - `{ "kind": "output_contract", "contractRef": "..." }`
 - `{ "kind": "capability", "capability": "delegation" | "web_browsing" }`
 - `{ "kind": "workflow_step", "stepId": "..." }`
@@ -700,8 +708,8 @@ This is intentionally generic. Structured artifacts (tables, findings, MR commen
 
 Two compatible approaches:
 
-1. **In-workflow contract**: each step includes an output schema + example (kept small).
-2. **Server-side registry**: the workflow references a named output contract, and WorkRail provides the schema and example.
+1. **WorkRail-owned contract packs (preferred, v2 direction)**: steps reference `output.contractRef` pointing to a WorkRail-owned contract pack (`wr.contracts.*`). The pinned compiled workflow snapshot embeds the resolved schemas/examples to keep behavior deterministic.
+2. **Server-side registry (future, optional)**: the workflow references a named output contract, and WorkRail provides the schema and example (still WorkRail-owned; not project-local).
 
 Either way, the workflow (not heuristics) is authoritative.
 
@@ -887,17 +895,17 @@ If checkpoint-only sessions are desired later, add a narrowly-scoped `start_sess
 
 Because rewinds are external to the workflow engine. If meaningful work happens outside a workflow step loop and the user rewinds without warning, that progress is lost unless WorkRail has already recorded a durable recap in the session store.
 
-## Open items (non-normative)
+## Status notes (non-normative)
 
-- Finalize the closed set of user-only dependency reasons (for structured `blocked` and warning payloads).
-- Finalize the closed set of preference keys and enum values, including display-friendly labels and descriptions for Studio.
-- Define a standard “gaps” shape for `full_auto_never_stop` so Studio can surface incomplete/missing inputs without blocking execution.
-- Define initial contract packs (capability_observation, workflow_divergence, gaps) and their schemas.
-- Define minimal metadata schema for builtins so Studio's generated catalog can render/autocomplete/insert.
-- Decide whitelist of configurable features and their config schemas.
-- Decide whether promptBlocks becomes required or remains optional (current direction: optional).
-- Define closed set of divergence reasons enum.
-- Finalize "preferred tip" policy for resume and default Studio view.
+The previously listed “open items” have been **locked in the v2 core design locks** (so the contract does not become a second, drifting source of truth). For the authoritative definitions, see:
+
+- **Preferred tip policy**: `docs/design/v2-core-design-locks.md` (Section 2)
+- **Gaps + user-only dependencies + unified reason model**: `docs/design/v2-core-design-locks.md` (Section 3)
+- **Preferences + modes (minimal closed set + preset guidance)**: `docs/design/v2-core-design-locks.md` (Section 4)
+- **`resume_session` deterministic ranking + budgets + normalization**: `docs/design/v2-core-design-locks.md` (Section 2.3)
+- **Authoring model (promptBlocks optional, contract packs, builtins/feature configs)**: `docs/design/workflow-authoring-v2.md`
+
+Remaining work is implementation (Slice 4+) and keeping docs/code aligned.
 
 ## Related
 

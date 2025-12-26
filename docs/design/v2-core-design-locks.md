@@ -328,6 +328,7 @@ Shape (conceptual):
 
 `Blocker.pointer` (closed set, initial):
 - `{ kind: "context_key", key: string }` (use only for declared external inputs; key must be delimiter-safe)
+- `{ kind: "context_budget" }` (request context exceeded byte budget or was non-serializable; see Context budget lock)
 - `{ kind: "output_contract", contractRef: string }`
 - `{ kind: "capability", capability: "delegation" | "web_browsing" }`
 - `{ kind: "workflow_step", stepId: string }`
@@ -1000,6 +1001,19 @@ The compiled snapshot MUST contain enough information to:
 - execute capability probing/fallback paths deterministically
 - explain provenance (what was authored vs injected)
 
+#### Function definitions in rewind/resumption context (locked)
+Some workflows use `functionDefinitions` + `functionReferences` to reduce repeated instructions (define once, reference many times). Under chat rewinds and brand-new chat resumption, the agent may lose “what does `foo()` mean?” context unless WorkRail rehydrates it deterministically.
+
+Locks:
+- Any function definitions and reference wiring that affect the agent-visible instructions MUST be included in the pinned compiled workflow snapshot (and therefore in `workflowHash`). No reliance on transcript memory or external files is permitted for correctness.
+- `continue_workflow` **rehydrate-only** responses MUST include the relevant function definitions as part of the bounded recovery context by expanding them into the rendered `pending.prompt` text (preferred) rather than introducing separate agent-facing metadata fields.
+- Inclusion is deterministic and byte-budgeted:
+  - **Tip node (resume)**: include all function definitions referenced by the pending step instance (including any workflow/loop/step scoped definitions visible to that step).
+  - **Non-tip node (rewind/fork)**: include pending step functions **plus** any function definitions referenced by the branch-focused recovery context returned (preferred tip downstream recap + any included child-branch summaries).
+  - **Priority**: pending-step referenced functions first, then downstream recap referenced functions, then other branch summaries.
+  - **Ordering**: deterministic by `(scope precedence: step → loop → workflow, functionName lex)`.
+  - **Truncation**: if function definitions would exceed the response budget, deterministically truncate by bytes (UTF-8) and append the canonical truncation marker `\n\n[TRUNCATED]`, plus a short deterministic omission note (e.g., “Omitted N function definitions”).
+
 Conceptual fields (exact schema is code-canonical and generated):
 - `schemaVersion`
 - `workflowId`, `name?`, `description?` (identity/explainability; included in the hash to avoid “same content, different identity” ambiguity)
@@ -1411,27 +1425,21 @@ This section is a convenience index for the closed sets already defined elsewher
 - **Manifest record kinds**: `segment_closed | snapshot_pinned`
 - **Run status**: `in_progress | blocked | complete | complete_with_gaps`
 
-## 16.3.1) Genuinely open items (not yet locked)
+## 16.3.1) Context budget and schema discipline (locked)
 
-The following are intentionally deferred and should be locked before implementing the features that depend on them:
+`context` exists to carry **external inputs** (ticket IDs, repo paths, workflow parameters). It is not durable memory and must not be treated as a “payload bag” for large documents.
 
-- **UserOnlyDependencyReason enumeration** (`ReasonCode.user_only_dependency:<reason>`):
-  - Used by: `full_auto_stop_on_user_deps` blocking logic, gaps recording, Studio unblock guidance
-  - Must be: closed set, deterministic, actionable (each reason implies specific remediation)
-  - Examples (illustrative): `missing_design_doc`, `missing_external_artifact`, `needs_product_decision`
-
-- **Non-assumable choice boundary semantics**:
-  - When can full-auto "assume/derive/skip+disclose" vs when must it block?
-  - Locked intent: should be based on a closed-set gate (e.g., `needs_user_choice` kind) not heuristic inference
-  - This determines the agent's autonomy limits and shapes full-auto UX
-
-- **Context budget and schema discipline**:
-  - Problem: agents can stuff unlimited junk into `context` (large docs, debug logs, irrelevant data); responses may echo entire `context` back (payload bloat)
-  - Should workflows declare expected context keys and size budgets?
-  - Should responses suppress echoing `context` the agent already has (avoid "send it back verbatim" waste)?
-  - Should incoming `context` be size-limited and validated against a declared schema?
-  - Used by: all v2 execution tools; impacts agent UX, token payload size, and resumption quality
-  - Lock intent: prefer declared schemas + budgets over heuristic trimming; fail fast on oversized context rather than silently truncating
+Locks:
+- **No echo**: execution responses MUST NOT echo the caller’s `context` back verbatim (avoid payload bloat and accidental “send it back” loops).
+- **No durability**: `context` is not persisted as durable truth (use `output` for durable memory).
+- **JSON-only**: `context` must be JSON-serializable (objects/arrays/primitives only; no functions, symbols, `undefined`, circular refs).
+- **Byte budget (fail fast; no silent truncation)**:
+  - WorkRail MUST compute context size as UTF-8 bytes of **RFC 8785 (JCS)** canonical JSON for the provided `context`.
+  - If the canonicalization fails or size exceeds **256KB**, the tool MUST fail fast with errors-as-data.
+  - Use `blocked` with `Blocker.code=INVARIANT_VIOLATION` and `Blocker.pointer={ kind:"context_budget" }` when surfaced through execution flows.
+- **Schema discipline**:
+  - v2 does not support workflow-authored arbitrary context schemas.
+  - If a workflow needs required inputs, it must express this via step instructions + mode behavior (block in blocking modes; assume/skip+disclose in never-stop) rather than relying on implicit context echoing.
 
 ## 16.4) Implementation playbook (how to execute safely) (locked intent)
 This section records execution guidance for large v2 refactors so we keep the implementation aligned with the locks and avoid mid-project drift.
@@ -1498,10 +1506,17 @@ Build **thin end-to-end paths first**, then expand primitives incrementally. Thi
 - Why third: proves token/snapshot/replay correctness before modes/preferences/blockers
 
 **Slice 4+ — Blocked + gaps, export/import, resume**:
-- Build modes/preferences + output contracts + blocked/gap behavior
-- Build export bundle integrity + import validation + token re-minting
-- Build `resume_session` with locked ranking/matching
-- Build `checkpoint_workflow`
+To keep scope coherent and reduce drift risk, treat Slice 4+ as three sub-slices with explicit gates:
+
+- **Slice 4a — Semantics lockdown (blocked ↔ gaps, prefs/modes, contracts)**:
+  - build modes/preferences + output contracts + blocked/gap behavior (table-driven; no parallel “reason models”)
+  - reconcile canonical docs so the contract points to these locks (avoid “open items” drift)
+- **Slice 4b — Portability (Gate 4)**:
+  - build export bundle integrity + import validation + token re-minting
+  - add export→import equivalence tests over projections (excluding runtime-only tokens/timestamps)
+- **Slice 4c — Resumption + checkpoints**:
+  - build `resume_session` with locked ranking/matching + budgets (healthy-only)
+  - build `checkpoint_workflow` (idempotent via `checkpointToken`)
 
 **Alternative (horizontal phases, safer for inexperienced teams)**:
 If vertical slices feel too risky, use the original horizontal sequencing:
@@ -1706,6 +1721,25 @@ Design intent:
 ### Capabilities + contracts ergonomics (locked intent)
 - Capability probes for `required` capabilities should be compiler-injected (collapsed by default) and recorded durably with strong provenance.
 - Structured outputs require explicit contracts (no inline schema authoring); templates may imply `contractRef` to reduce author burden.
+
+#### Workflow-authored output schemas (rejected for v2; locked)
+Workflows often want workflow-specific structured artifacts (tables, findings, comment sets) beyond free-form notes. v2 intentionally **does not** allow workflows to author arbitrary inline JSON schemas (or project-local schema refs) for required outputs.
+
+Locks:
+- Output schema authoring is **WorkRail-owned**:
+  - Steps declare requirements only by referencing a WorkRail-owned contract pack via `output.contractRef` (`wr.contracts.*`).
+  - The set of contract packs is a closed set generated from code-canonical definitions (anti-drift).
+- No workflow-authored schema sources:
+  - Disallow inline schema definitions in workflow JSON.
+  - Disallow “schemaRef” fields that point to project files, git URLs, or external registries.
+- If a workflow needs richer structured artifacts:
+  - Expand the WorkRail-owned contract pack catalog (preferred), or
+  - fall back to `output.notesMarkdown` (generic durability) until an appropriate pack exists.
+
+Rationale:
+- Prevents schema drift and validation inconsistency across MCP/CLI/Studio.
+- Keeps compilation deterministic and `workflowHash` stable.
+- Preserves Studio rendering determinism and avoids “arbitrary schema” footguns.
 
 ### Contract pack registry + pinning (locked intent)
 - Contract packs are WorkRail-owned and generated from canonical definitions (code).

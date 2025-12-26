@@ -23,15 +23,13 @@ import { LocalKeyringV2 } from '../../src/v2/infra/local/keyring/index.js';
 import { encodeTokenPayloadV1, signTokenV1 } from '../../src/v2/durable-core/tokens/index.js';
 import { StateTokenPayloadV1Schema, AckTokenPayloadV1Schema } from '../../src/v2/durable-core/tokens/index.js';
 
-import { WorkflowCoreV2 } from '../../src/v2/usecases/workflow-core.js';
-import { CompiledWorkflowStoreV2 } from '../../src/v2/infra/local/compiled-workflow-store/index.js';
-import type { V2Deps } from '../../src/mcp/types.js';
+
 
 async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-adv-'));
 }
 
-async function mkV2Deps(dataDir: LocalDataDirV2): Promise<V2Deps> {
+async function mkV2Deps(dataDir: LocalDataDirV2): Promise<V2Dependencies> {
   const fsPort = new NodeFileSystemV2();
   const sha256 = new NodeSha256V2();
   const sessionEventLogStore = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha256);
@@ -40,27 +38,26 @@ async function mkV2Deps(dataDir: LocalDataDirV2): Promise<V2Deps> {
   const crypto = new NodeCryptoV2();
   const hmac = new NodeHmacSha256V2();
   const snapshotStore = new LocalSnapshotStoreV2(dataDir, fsPort, crypto);
-  const compiledWorkflowStore = new CompiledWorkflowStoreV2(dataDir, fsPort);
-  const workflowCore = new WorkflowCoreV2(
-    sessionGate,
-    sessionEventLogStore,
-    snapshotStore,
-    compiledWorkflowStore
-  );
+  const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir, fsPort);
+  const keyringPort = new LocalKeyringV2(dataDir, fsPort);
+  const keyring = await keyringPort.loadOrCreate().match(v => v, e => { throw new Error(`keyring: ${e.code}`); });
   
   return {
-    sessionEventLogStore,
-    sessionLock,
-    sessionGate,
-    snapshotStore,
-    compiledWorkflowStore,
-    workflowCore,
+    // Handler structure (V2Dependencies):
+    gate: sessionGate,
+    sessionStore: sessionEventLogStore,
+    keyring,
     crypto,
     hmac,
-  };
+    snapshotStore,
+    pinnedStore,
+    // Test convenience (aliases):
+    sessionGate,
+    sessionEventLogStore,
+  } as any;
 }
 
-function dummyCtx(v2?: V2Deps): ToolContext {
+function dummyCtx(v2?: any): ToolContext {
   return {
     workflowService: null as any,
     featureFlags: null as any,

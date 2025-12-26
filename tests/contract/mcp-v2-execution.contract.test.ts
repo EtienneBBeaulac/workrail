@@ -9,10 +9,15 @@ import type { ToolContext } from '../../src/mcp/types.js';
 
 import { handleV2StartWorkflow, handleV2ContinueWorkflow } from '../../src/mcp/handlers/v2-execution.js';
 import { InMemoryWorkflowStorage } from '../../src/infrastructure/storage/in-memory-storage.js';
-import { V2WorkflowEngine } from '../../src/v2/execution/engine.js';
-import { V2StateManager } from '../../src/v2/state/manager.js';
-import { V2AckTokenGenerator } from '../../src/v2/tokens/ack-generator.js';
-import { V2CheckpointManager } from '../../src/v2/state/checkpoint-manager.js';
+import { LocalDataDirV2 } from '../../src/v2/infra/local/data-dir/index.js';
+import { NodeFileSystemV2 } from '../../src/v2/infra/local/fs/index.js';
+import { NodeSha256V2 } from '../../src/v2/infra/local/sha256/index.js';
+import { LocalSessionEventLogStoreV2 } from '../../src/v2/infra/local/session-store/index.js';
+import { LocalSessionLockV2 } from '../../src/v2/infra/local/session-lock/index.js';
+import { ExecutionSessionGateV2 } from '../../src/v2/usecases/execution-session-gate.js';
+import { LocalSnapshotStoreV2 } from '../../src/v2/infra/local/snapshot-store/index.js';
+import { LocalPinnedWorkflowStoreV2 } from '../../src/v2/infra/local/pinned-workflow-store/index.js';
+import { LocalKeyringV2 } from '../../src/v2/infra/local/keyring/index.js';
 import { NodeCryptoV2 } from '../../src/v2/infra/local/crypto/index.js';
 import { NodeHmacSha256V2 } from '../../src/v2/infra/local/hmac-sha256/index.js';
 
@@ -22,19 +27,23 @@ async function mkTempDataDir(): Promise<string> {
 
 /**
  * Helper to create a v2-enabled ToolContext with deterministic workflow dependencies.
- * Provides: v2Engine, v2StateManager, v2AckTokens, v2CheckpointManager
  */
-async function createV2Context(): Promise<ToolContext & { v2: { engine: V2WorkflowEngine; stateManager: V2StateManager; ackTokens: V2AckTokenGenerator; checkpointManager: V2CheckpointManager } }> {
+async function createV2Context(): Promise<ToolContext> {
   const workflowService = resolveService<any>(DI.Services.Workflow);
   const featureFlags = resolveService<any>(DI.Infra.FeatureFlags);
 
-  // Initialize v2 dependencies
-  const v2Engine = new V2WorkflowEngine(workflowService);
-  const v2StateManager = new V2StateManager();
-  const v2AckTokens = new V2AckTokenGenerator();
-  const v2CheckpointManager = new V2CheckpointManager(v2StateManager);
+  const dataDir = new LocalDataDirV2(process.env);
+  const fsPort = new NodeFileSystemV2();
+  const sha256 = new NodeSha256V2();
   const crypto = new NodeCryptoV2();
   const hmac = new NodeHmacSha256V2();
+  const sessionStore = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha256);
+  const lockPort = new LocalSessionLockV2(dataDir, fsPort);
+  const gate = new ExecutionSessionGateV2(lockPort, sessionStore);
+  const snapshotStore = new LocalSnapshotStoreV2(dataDir, fsPort, crypto);
+  const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir);
+  const keyringPort = new LocalKeyringV2(dataDir, fsPort);
+  const keyring = await keyringPort.loadOrCreate().match(v => v, e => { throw new Error(`keyring: ${e.code}`); });
 
   return {
     workflowService,
@@ -42,10 +51,11 @@ async function createV2Context(): Promise<ToolContext & { v2: { engine: V2Workfl
     sessionManager: null,
     httpServer: null,
     v2: {
-      engine: v2Engine,
-      stateManager: v2StateManager,
-      ackTokens: v2AckTokens,
-      checkpointManager: v2CheckpointManager,
+      gate,
+      sessionStore,
+      snapshotStore,
+      pinnedStore,
+      keyring,
       crypto,
       hmac,
     },

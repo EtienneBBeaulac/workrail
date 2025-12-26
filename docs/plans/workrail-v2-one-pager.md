@@ -65,6 +65,7 @@ Local data may also be rooted under a WorkRail-owned data dir, optionally overri
 - Slice 2.5 (gate+witness + execution safety) merged
 - Slice 3 prereqs (execution snapshots, CAS, token signing) shipped (`feature/etienneb/v2-slice3-prereqs`)
 - **Next**: Slice 3 (token orchestration: `start_workflow`, `continue_workflow`)
+- **After Slice 3**: Slice 4+ is executed as **4a (semantics lockdown)** → **4b (export/import Gate 4)** → **4c (resume + checkpoints)** (see `docs/design/v2-core-design-locks.md`).
 
 ## Epics
 

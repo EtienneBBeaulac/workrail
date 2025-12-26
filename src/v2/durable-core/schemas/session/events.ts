@@ -126,6 +126,7 @@ const BlockerCodeSchema = z.enum([
 
 const BlockerPointerSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('context_key'), key: z.string().min(1) }),
+  z.object({ kind: z.literal('context_budget') }),
   z.object({ kind: z.literal('output_contract'), contractRef: z.string().min(1) }),
   z.object({ kind: z.literal('capability'), capability: z.enum(['delegation', 'web_browsing']) }),
   z.object({ kind: z.literal('workflow_step'), stepId: z.string().min(1) }),

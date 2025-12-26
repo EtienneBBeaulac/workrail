@@ -375,6 +375,17 @@ Each pack includes:
 - required fields
 - minimal example payload
 
+### Workflow-authored output schemas (rejected for v2)
+v2 does **not** allow workflows to define arbitrary inline JSON schemas (or point to project-local / git-hosted schema files) for required outputs.
+
+Instead:
+- Use `output.contractRef` referencing a **WorkRail-owned** contract pack (`wr.contracts.*`).
+- If you need richer structured artifacts than existing packs support, prefer:
+  - expanding the WorkRail-owned contract pack catalog (recommended), or
+  - using `output.notesMarkdown` temporarily (generic durability) until a pack exists.
+
+This preserves determinism, prevents drift, and keeps Studio rendering consistent.
+
 ### Enforcement
 
 When a step declares `output.contractRef`:

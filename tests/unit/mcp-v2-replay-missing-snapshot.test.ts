@@ -27,12 +27,13 @@ async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-replay-'));
 }
 
-function dummyCtx(): ToolContext {
+function dummyCtx(v2?: any): ToolContext {
   return {
     workflowService: null as any,
     featureFlags: null as any,
     sessionManager: null,
     httpServer: null,
+    v2: v2 ?? null,
   };
 }
 
@@ -220,7 +221,21 @@ describe('v2 replay fail-closed: missing snapshot', () => {
       const stateToken = await mkSignedToken({ unsignedPrefix: 'st.v1.', payload: statePayload });
       const ackToken = await mkSignedToken({ unsignedPrefix: 'ack.v1.', payload: ackPayload });
 
-      const res = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx());
+      const v2 = {
+        gate,
+        sessionStore: store,
+        snapshotStore,
+        pinnedStore,
+        keyring: await new LocalKeyringV2(dataDir, fsPort).loadOrCreate().match(
+          (v) => v,
+          (e) => {
+            throw new Error(`unexpected keyring error: ${e.code}`);
+          }
+        ),
+        crypto,
+        hmac: new NodeHmacSha256V2(),
+      };
+      const res = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx(v2));
       expect(res.type).toBe('error');
       if (res.type !== 'error') return;
       expect(res.code).toBe('INTERNAL_ERROR');

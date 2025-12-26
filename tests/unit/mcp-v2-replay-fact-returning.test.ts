@@ -105,7 +105,7 @@ describe('v2 replay is fact-returning and fail-closed (Phase 3)', () => {
     const prev = process.env.WORKRAIL_DATA_DIR;
     process.env.WORKRAIL_DATA_DIR = root;
     try {
-      const v2 = await createV2Context();
+      const v2Ctx = await createV2Context();
       const { dataDir, fsPort, sha256, store, lock, gate, crypto, snapshotStore, pinnedStore } = v2;
 
       const sessionId = 'sess_test';
@@ -219,8 +219,8 @@ describe('v2 replay is fact-returning and fail-closed (Phase 3)', () => {
       const stateToken = await mkSignedToken({ unsignedPrefix: 'st.v1.', payload: statePayload });
       const ackToken = await mkSignedToken({ unsignedPrefix: 'ack.v1.', payload: ackPayload });
 
-      const v2 = await createV2Context();
-      const res = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx(v2));
+      const v2Ctx2 = await createV2Context();
+      const res = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx(v2Ctx2));
       expect(res.type).toBe('error');
       if (res.type !== 'error') return;
       expect(res.code).toBe('INTERNAL_ERROR');
@@ -235,7 +235,7 @@ describe('v2 replay is fact-returning and fail-closed (Phase 3)', () => {
     const prev = process.env.WORKRAIL_DATA_DIR;
     process.env.WORKRAIL_DATA_DIR = root;
     try {
-      const v2 = await createV2Context();
+      const v2Ctx = await createV2Context();
       const { dataDir, fsPort, sha256, store, lock, gate, crypto, snapshotStore, pinnedStore } = v2;
 
       const sessionId = 'sess_test_missing_snap';
@@ -378,8 +378,8 @@ describe('v2 replay is fact-returning and fail-closed (Phase 3)', () => {
       const stateToken = await mkSignedToken({ unsignedPrefix: 'st.v1.', payload: statePayload });
       const ackToken = await mkSignedToken({ unsignedPrefix: 'ack.v1.', payload: ackPayload });
 
-      const v2 = await createV2Context();
-      const res = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx(v2));
+      const v2Ctx2 = await createV2Context();
+      const res = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx(v2Ctx2));
       expect(res.type).toBe('error');
       if (res.type !== 'error') return;
       expect(res.code).toBe('INTERNAL_ERROR');
