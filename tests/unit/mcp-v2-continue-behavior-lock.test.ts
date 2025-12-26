@@ -28,9 +28,33 @@ import { LocalDataDirV2 } from '../../src/v2/infra/local/data-dir/index.js';
 import { NodeFileSystemV2 } from '../../src/v2/infra/local/fs/index.js';
 import { NodeSha256V2 } from '../../src/v2/infra/local/sha256/index.js';
 import { LocalSessionEventLogStoreV2 } from '../../src/v2/infra/local/session-store/index.js';
+import { NodeCryptoV2 } from '../../src/v2/infra/local/crypto/index.js';
+import { NodeHmacSha256V2 } from '../../src/v2/infra/local/hmac-sha256/index.js';
+import { LocalSessionLockV2 } from '../../src/v2/infra/local/session-lock/index.js';
+import { LocalSnapshotStoreV2 } from '../../src/v2/infra/local/snapshot-store/index.js';
+import { LocalPinnedWorkflowStoreV2 } from '../../src/v2/infra/local/pinned-workflow-store/index.js';
+import { ExecutionSessionGateV2 } from '../../src/v2/usecases/execution-session-gate.js';
+import { LocalKeyringV2 } from '../../src/v2/infra/local/keyring/index.js';
 
 async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-continue-lock-'));
+}
+
+async function mkV2Deps() {
+  const dataDir = new LocalDataDirV2(process.env);
+  const fsPort = new NodeFileSystemV2();
+  const sha256 = new NodeSha256V2();
+  const crypto = new NodeCryptoV2();
+  const hmac = new NodeHmacSha256V2();
+  const sessionStore = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha256);
+  const lockPort = new LocalSessionLockV2(dataDir, fsPort);
+  const gate = new ExecutionSessionGateV2(lockPort, sessionStore);
+  const snapshotStore = new LocalSnapshotStoreV2(dataDir, fsPort, crypto);
+  const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir);
+  const keyringPort = new LocalKeyringV2(dataDir, fsPort);
+  const keyring = await keyringPort.loadOrCreate().match(v => v, e => { throw new Error(`keyring: ${e.code}`); });
+
+  return { gate, sessionStore, snapshotStore, pinnedStore, keyring, crypto, hmac };
 }
 
 describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => {
@@ -68,7 +92,8 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
   it('full happy path: start → advance 3 times → complete', async () => {
     const workflowService = resolveService<any>(DI.Services.Workflow);
     const featureFlags = resolveService<any>(DI.Infra.FeatureFlags);
-    const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null };
+    const v2 = await mkV2Deps();
+    const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null, v2 };
 
     // Start
     const start = await handleV2StartWorkflow({ workflowId: 'behavior-lock-wf' } as any, ctx);
@@ -105,7 +130,8 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
   it('advance with output persists node_output_appended event', async () => {
     const workflowService = resolveService<any>(DI.Services.Workflow);
     const featureFlags = resolveService<any>(DI.Infra.FeatureFlags);
-    const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null };
+    const v2 = await mkV2Deps();
+    const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null, v2 };
 
     const start = await handleV2StartWorkflow({ workflowId: 'behavior-lock-wf' } as any, ctx);
     expect(start.type).toBe('success');
@@ -142,7 +168,8 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
   it('replay same ack twice returns identical response (idempotency)', async () => {
     const workflowService = resolveService<any>(DI.Services.Workflow);
     const featureFlags = resolveService<any>(DI.Infra.FeatureFlags);
-    const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null };
+    const v2 = await mkV2Deps();
+    const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null, v2 };
 
     const start = await handleV2StartWorkflow({ workflowId: 'behavior-lock-wf' } as any, ctx);
     expect(start.type).toBe('success');
@@ -177,7 +204,8 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
   it('fork detection: advancing from non-tip creates fork edge', async () => {
     const workflowService = resolveService<any>(DI.Services.Workflow);
     const featureFlags = resolveService<any>(DI.Infra.FeatureFlags);
-    const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null };
+    const v2 = await mkV2Deps();
+    const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null, v2 };
 
     const start = await handleV2StartWorkflow({ workflowId: 'behavior-lock-wf' } as any, ctx);
     expect(start.type).toBe('success');
@@ -220,7 +248,8 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
   it('TOKEN_UNKNOWN_NODE when stateToken references non-existent run', async () => {
     const workflowService = resolveService<any>(DI.Services.Workflow);
     const featureFlags = resolveService<any>(DI.Infra.FeatureFlags);
-    const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null };
+    const v2 = await mkV2Deps();
+    const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null, v2 };
 
     // Create a valid token for a non-existent session
     const { encodeTokenPayloadV1, signTokenV1 } = await import('../../src/v2/durable-core/tokens/index.js');
@@ -264,7 +293,8 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
   it('TOKEN_WORKFLOW_HASH_MISMATCH when node hash differs from stateToken', async () => {
     const workflowService = resolveService<any>(DI.Services.Workflow);
     const featureFlags = resolveService<any>(DI.Infra.FeatureFlags);
-    const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null };
+    const v2 = await mkV2Deps();
+    const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null, v2 };
 
     // This test would require seeding a session with mismatched hash; defer to simpler mocking
     // or accept that TOKEN_WORKFLOW_HASH_MISMATCH is covered by unit test in mcp-v2-execution.test.ts

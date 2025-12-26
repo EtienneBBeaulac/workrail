@@ -23,16 +23,50 @@ import { LocalKeyringV2 } from '../../src/v2/infra/local/keyring/index.js';
 import { encodeTokenPayloadV1, signTokenV1 } from '../../src/v2/durable-core/tokens/index.js';
 import { StateTokenPayloadV1Schema, AckTokenPayloadV1Schema } from '../../src/v2/durable-core/tokens/index.js';
 
+import { WorkflowCoreV2 } from '../../src/v2/usecases/workflow-core.js';
+import { CompiledWorkflowStoreV2 } from '../../src/v2/infra/local/compiled-workflow-store/index.js';
+import type { V2Deps } from '../../src/mcp/types.js';
+
 async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-adv-'));
 }
 
-function dummyCtx(): ToolContext {
+async function mkV2Deps(dataDir: LocalDataDirV2): Promise<V2Deps> {
+  const fsPort = new NodeFileSystemV2();
+  const sha256 = new NodeSha256V2();
+  const sessionEventLogStore = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha256);
+  const sessionLock = new LocalSessionLockV2(dataDir, fsPort);
+  const sessionGate = new ExecutionSessionGateV2(sessionLock, sessionEventLogStore);
+  const crypto = new NodeCryptoV2();
+  const hmac = new NodeHmacSha256V2();
+  const snapshotStore = new LocalSnapshotStoreV2(dataDir, fsPort, crypto);
+  const compiledWorkflowStore = new CompiledWorkflowStoreV2(dataDir, fsPort);
+  const workflowCore = new WorkflowCoreV2(
+    sessionGate,
+    sessionEventLogStore,
+    snapshotStore,
+    compiledWorkflowStore
+  );
+  
+  return {
+    sessionEventLogStore,
+    sessionLock,
+    sessionGate,
+    snapshotStore,
+    compiledWorkflowStore,
+    workflowCore,
+    crypto,
+    hmac,
+  };
+}
+
+function dummyCtx(v2?: V2Deps): ToolContext {
   return {
     workflowService: null as any,
     featureFlags: null as any,
     sessionManager: null,
     httpServer: null,
+    ...(v2 && { v2 }),
   };
 }
 
@@ -74,14 +108,7 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
     process.env.WORKRAIL_DATA_DIR = root;
     try {
       const dataDir = new LocalDataDirV2(process.env);
-      const fsPort = new NodeFileSystemV2();
-      const sha256 = new NodeSha256V2();
-      const store = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha256);
-      const lock = new LocalSessionLockV2(dataDir, fsPort);
-      const gate = new ExecutionSessionGateV2(lock, store);
-
-      const crypto = new NodeCryptoV2();
-      const snapshotStore = new LocalSnapshotStoreV2(dataDir, fsPort, crypto);
+      const v2 = await mkV2Deps(dataDir);
 
       const sessionId = 'sess_test';
       const runId = 'run_1';
@@ -124,7 +151,7 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
           },
         },
       });
-      const snapshotRef = await snapshotStore.putExecutionSnapshotV1(snapshot).match(
+      const snapshotRef = await v2.snapshotStore.putExecutionSnapshotV1(snapshot).match(
         (v) => v,
         (e) => {
           throw new Error(`unexpected snapshot put error: ${e.code}`);
@@ -132,9 +159,9 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
       );
 
       // Seed durable run + node state so ack attempts are valid.
-      await gate
+      await v2.sessionGate
         .withHealthySessionLock(sessionId as any, (witness) =>
-          store.append(witness, {
+          v2.sessionEventLogStore.append(witness, {
             events: [
               {
                 v: 1,
@@ -196,17 +223,17 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
       const stateToken = await mkSignedToken({ unsignedPrefix: 'st.v1.', payload: statePayload });
       const ackToken = await mkSignedToken({ unsignedPrefix: 'ack.v1.', payload: ackPayload });
 
-      const first = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx());
+      const first = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx(v2));
       expect(first.type).toBe('success');
       if (first.type !== 'success') return;
       expect(first.data.kind).toBe('ok');
       expect(first.data.isComplete).toBe(true);
       expect(first.data.pending).toBeNull();
 
-      const second = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx());
+      const second = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx(v2));
       expect(second).toEqual(first);
 
-      const truth = await store.load(sessionId as any).match(
+      const truth = await v2.sessionEventLogStore.load(sessionId as any).match(
         (v) => v,
         (e) => {
           throw new Error(`unexpected load error: ${e.code}`);
@@ -228,14 +255,7 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
     process.env.WORKRAIL_DATA_DIR = root;
     try {
       const dataDir = new LocalDataDirV2(process.env);
-      const fsPort = new NodeFileSystemV2();
-      const sha256 = new NodeSha256V2();
-      const store = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha256);
-      const lock = new LocalSessionLockV2(dataDir, fsPort);
-      const gate = new ExecutionSessionGateV2(lock, store);
-
-      const crypto = new NodeCryptoV2();
-      const snapshotStore = new LocalSnapshotStoreV2(dataDir, fsPort, crypto);
+      const v2 = await mkV2Deps(dataDir);
 
       const sessionId = 'sess_test_output';
       const runId = 'run_2';
@@ -278,7 +298,7 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
           },
         },
       });
-      const snapshotRef = await snapshotStore.putExecutionSnapshotV1(snapshot).match(
+      const snapshotRef = await v2.snapshotStore.putExecutionSnapshotV1(snapshot).match(
         (v) => v,
         (e) => {
           throw new Error(`unexpected snapshot put error: ${e.code}`);
@@ -286,9 +306,9 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
       );
 
       // Seed durable run + node state so ack attempts are valid.
-      await gate
+      await v2.sessionGate
         .withHealthySessionLock(sessionId as any, (witness) =>
-          store.append(witness, {
+          v2.sessionEventLogStore.append(witness, {
             events: [
               {
                 v: 1,
@@ -355,7 +375,7 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
       // First call with output
       const first = await handleV2ContinueWorkflow(
         { stateToken, ackToken, output: { notesMarkdown: outputNotes } } as any,
-        dummyCtx()
+        dummyCtx(v2)
       );
       expect(first.type).toBe('success');
       if (first.type !== 'success') return;
@@ -366,12 +386,12 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
       // Replay same ackToken + output
       const second = await handleV2ContinueWorkflow(
         { stateToken, ackToken, output: { notesMarkdown: outputNotes } } as any,
-        dummyCtx()
+        dummyCtx(v2)
       );
       expect(second).toEqual(first);
 
       // Load truth and verify deduplication
-      const truth = await store.load(sessionId as any).match(
+      const truth = await v2.sessionEventLogStore.load(sessionId as any).match(
         (v) => v,
         (e) => {
           throw new Error(`unexpected load error: ${e.code}`);

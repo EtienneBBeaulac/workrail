@@ -13,6 +13,13 @@ import { LocalDataDirV2 } from '../../src/v2/infra/local/data-dir/index.js';
 import { NodeFileSystemV2 } from '../../src/v2/infra/local/fs/index.js';
 import { NodeSha256V2 } from '../../src/v2/infra/local/sha256/index.js';
 import { LocalSessionEventLogStoreV2 } from '../../src/v2/infra/local/session-store/index.js';
+import { NodeCryptoV2 } from '../../src/v2/infra/local/crypto/index.js';
+import { NodeHmacSha256V2 } from '../../src/v2/infra/local/hmac-sha256/index.js';
+import { LocalSessionLockV2 } from '../../src/v2/infra/local/session-lock/index.js';
+import { LocalSnapshotStoreV2 } from '../../src/v2/infra/local/snapshot-store/index.js';
+import { LocalPinnedWorkflowStoreV2 } from '../../src/v2/infra/local/pinned-workflow-store/index.js';
+import { ExecutionSessionGateV2 } from '../../src/v2/usecases/execution-session-gate.js';
+import { LocalKeyringV2 } from '../../src/v2/infra/local/keyring/index.js';
 
 import { parseTokenV1 } from '../../src/v2/durable-core/tokens/index.js';
 
@@ -20,7 +27,24 @@ async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-output-replay-'));
 }
 
-function mkCtxWithWorkflow(workflowId: string): ToolContext {
+async function mkV2Deps() {
+  const dataDir = new LocalDataDirV2(process.env);
+  const fsPort = new NodeFileSystemV2();
+  const sha256 = new NodeSha256V2();
+  const crypto = new NodeCryptoV2();
+  const hmac = new NodeHmacSha256V2();
+  const sessionStore = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha256);
+  const lockPort = new LocalSessionLockV2(dataDir, fsPort);
+  const gate = new ExecutionSessionGateV2(lockPort, sessionStore);
+  const snapshotStore = new LocalSnapshotStoreV2(dataDir, fsPort, crypto);
+  const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir);
+  const keyringPort = new LocalKeyringV2(dataDir, fsPort);
+  const keyring = await keyringPort.loadOrCreate().match(v => v, e => { throw new Error(`keyring: ${e.code}`); });
+
+  return { gate, sessionStore, snapshotStore, pinnedStore, keyring, crypto, hmac };
+}
+
+async function mkCtxWithWorkflow(workflowId: string): Promise<ToolContext> {
   const wf = createWorkflow(
     {
       id: workflowId,
@@ -31,6 +55,8 @@ function mkCtxWithWorkflow(workflowId: string): ToolContext {
     } as any,
     createProjectDirectorySource('/tmp/project')
   );
+
+  const v2 = await mkV2Deps();
 
   return {
     workflowService: {
@@ -44,6 +70,7 @@ function mkCtxWithWorkflow(workflowId: string): ToolContext {
     featureFlags: null as any,
     sessionManager: null,
     httpServer: null,
+    v2,
   };
 }
 
@@ -54,7 +81,7 @@ describe('v2 output replay idempotency', () => {
     process.env.WORKRAIL_DATA_DIR = root;
     try {
       const workflowId = 'output-test';
-      const ctx = mkCtxWithWorkflow(workflowId);
+      const ctx = await mkCtxWithWorkflow(workflowId);
 
       const start = await handleV2StartWorkflow({ workflowId } as any, ctx);
       expect(start.type).toBe('success');

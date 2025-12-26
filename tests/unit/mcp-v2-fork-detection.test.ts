@@ -13,12 +13,19 @@ import { LocalDataDirV2 } from '../../src/v2/infra/local/data-dir/index.js';
 import { NodeFileSystemV2 } from '../../src/v2/infra/local/fs/index.js';
 import { NodeSha256V2 } from '../../src/v2/infra/local/sha256/index.js';
 import { LocalSessionEventLogStoreV2 } from '../../src/v2/infra/local/session-store/index.js';
+import { LocalSessionLockV2 } from '../../src/v2/infra/local/session-lock/index.js';
+import { LocalSnapshotStoreV2 } from '../../src/v2/infra/local/snapshot-store/index.js';
+import { LocalPinnedWorkflowStoreV2 } from '../../src/v2/infra/local/pinned-workflow-store/index.js';
+import { ExecutionSessionGateV2 } from '../../src/v2/usecases/execution-session-gate.js';
+import { LocalKeyringV2 } from '../../src/v2/infra/local/keyring/index.js';
+import { NodeCryptoV2 } from '../../src/v2/infra/local/crypto/index.js';
+import { NodeHmacSha256V2 } from '../../src/v2/infra/local/hmac-sha256/index.js';
 
 async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-fork-'));
 }
 
-function mkCtxWithWorkflow(workflowId: string): ToolContext {
+async function mkCtxWithWorkflow(workflowId: string, dataDir: string): Promise<ToolContext> {
   const wf = createWorkflow(
     {
       id: workflowId,
@@ -33,6 +40,19 @@ function mkCtxWithWorkflow(workflowId: string): ToolContext {
     createProjectDirectorySource('/tmp/project')
   );
 
+  const dataDirV2 = new LocalDataDirV2({ WORKRAIL_DATA_DIR: dataDir });
+  const fsPortV2 = new NodeFileSystemV2();
+  const sha256V2 = new NodeSha256V2();
+  const cryptoV2 = new NodeCryptoV2();
+  const hmacV2 = new NodeHmacSha256V2();
+  const sessionStoreV2 = new LocalSessionEventLogStoreV2(dataDirV2, fsPortV2, sha256V2);
+  const lockV2 = new LocalSessionLockV2(dataDirV2, fsPortV2);
+  const gateV2 = new ExecutionSessionGateV2(lockV2, sessionStoreV2);
+  const snapshotStoreV2 = new LocalSnapshotStoreV2(dataDirV2, fsPortV2, cryptoV2);
+  const pinnedStoreV2 = new LocalPinnedWorkflowStoreV2(dataDirV2);
+  const keyringPortV2 = new LocalKeyringV2(dataDirV2, fsPortV2);
+  const keyringV2 = await keyringPortV2.loadOrCreate().match(v => v, e => { throw new Error(`keyring: ${e.code}`); });
+
   return {
     workflowService: {
       listWorkflowSummaries: async () => [],
@@ -45,6 +65,15 @@ function mkCtxWithWorkflow(workflowId: string): ToolContext {
     featureFlags: null as any,
     sessionManager: null,
     httpServer: null,
+    v2: {
+      gate: gateV2,
+      sessionStore: sessionStoreV2,
+      snapshotStore: snapshotStoreV2,
+      pinnedStore: pinnedStoreV2,
+      keyring: keyringV2,
+      crypto: cryptoV2,
+      hmac: hmacV2,
+    },
   };
 }
 
@@ -55,7 +84,7 @@ describe('v2 fork detection (Phase 5)', () => {
     process.env.WORKRAIL_DATA_DIR = root;
     try {
       const workflowId = 'fork-test';
-      const ctx = mkCtxWithWorkflow(workflowId);
+      const ctx = await mkCtxWithWorkflow(workflowId, root);
 
       // Start workflow and advance once.
       const start = await handleV2StartWorkflow({ workflowId } as any, ctx);
@@ -85,20 +114,11 @@ describe('v2 fork detection (Phase 5)', () => {
       // - 2 node_created events (root + 2 children)
       // - 2 edge_created events
       // - at least one edge has cause.kind=non_tip_advance
-      const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: root });
-      const fsPort = new NodeFileSystemV2();
-      const sha256 = new NodeSha256V2();
-      const store = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha256);
-
-      const sessionId = start.data.stateToken.includes('sessionId') ? 'sess_' : '';  // Extract from token parsing
-      const sessionStore = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha256);
-      
-      // Get sessionId by parsing the stateToken.
       const { parseTokenV1 } = await import('../../src/v2/durable-core/tokens/index.js');
       const parsed = parseTokenV1(start.data.stateToken)._unsafeUnwrap();
       const sid = parsed.payload.sessionId;
 
-      const truth = await sessionStore.load(sid).match(
+      const truth = await ctx.v2!.sessionStore.load(sid).match(
         (v) => v,
         (e) => {
           throw new Error(`unexpected load error: ${e.code}`);

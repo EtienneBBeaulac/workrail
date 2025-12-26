@@ -146,12 +146,17 @@ export async function createToolContext(): Promise<ToolContext> {
       throw new Error(`Failed to initialize v2 keyring: ${keyringResult.error.message}`);
     }
 
+    const crypto = container.resolve<any>(DI.V2.Crypto);
+    const hmac = container.resolve<any>(DI.V2.HmacSha256);
+
     v2 = {
       gate,
       sessionStore,
       snapshotStore,
       pinnedStore,
       keyring: keyringResult.value,
+      crypto,
+      hmac,
     };
     console.error('[FeatureFlags] v2 tools enabled');
   } else {

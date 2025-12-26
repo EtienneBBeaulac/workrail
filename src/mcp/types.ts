@@ -20,6 +20,8 @@ import type {
 import type { SnapshotStorePortV2 } from '../v2/ports/snapshot-store.port.js';
 import type { PinnedWorkflowStorePortV2 } from '../v2/ports/pinned-workflow-store.port.js';
 import type { KeyringV1 } from '../v2/ports/keyring.port.js';
+import type { CryptoPortV2 } from '../v2/durable-core/canonical/hashing.js';
+import type { HmacSha256PortV2 } from '../v2/ports/hmac-sha256.port.js';
 
 // -----------------------------------------------------------------------------
 // JSON-safe details payload (prevents undefined / functions leaking across boundary)
@@ -185,6 +187,8 @@ export interface V2Dependencies {
   readonly snapshotStore: SnapshotStorePortV2;
   readonly pinnedStore: PinnedWorkflowStorePortV2;
   readonly keyring: KeyringV1;
+  readonly crypto: CryptoPortV2;
+  readonly hmac: HmacSha256PortV2;
 }
 
 // -----------------------------------------------------------------------------

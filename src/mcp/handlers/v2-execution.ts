@@ -1,17 +1,9 @@
 import * as os from 'os';
+import { randomUUID } from 'crypto';
 import type { ToolContext, ToolResult } from '../types.js';
 import { error, success, errNotRetryable, errRetryableAfterMs, detailsSessionHealth } from '../types.js';
 import type { V2ContinueWorkflowInput, V2StartWorkflowInput } from '../v2/tools.js';
 import { V2ContinueWorkflowOutputSchema, V2StartWorkflowOutputSchema } from '../output-schemas.js';
-
-import { LocalDataDirV2 } from '../../v2/infra/local/data-dir/index.js';
-import { NodeFileSystemV2 } from '../../v2/infra/local/fs/index.js';
-import { NodeHmacSha256V2 } from '../../v2/infra/local/hmac-sha256/index.js';
-import { LocalKeyringV2 } from '../../v2/infra/local/keyring/index.js';
-import { NodeSha256V2 } from '../../v2/infra/local/sha256/index.js';
-import { LocalSessionEventLogStoreV2 } from '../../v2/infra/local/session-store/index.js';
-import { NodeCryptoV2 } from '../../v2/infra/local/crypto/index.js';
-import { LocalSnapshotStoreV2 } from '../../v2/infra/local/snapshot-store/index.js';
 import { deriveIsComplete, derivePendingStep } from '../../v2/durable-core/projections/snapshot-state.js';
 import type { ExecutionSnapshotFileV1, EngineStateV1, LoopPathFrameV1 } from '../../v2/durable-core/schemas/execution-snapshot/index.js';
 import { asDelimiterSafeIdV1, stepInstanceKeyFromParts } from '../../v2/durable-core/schemas/execution-snapshot/step-instance-key.js';
@@ -21,20 +13,18 @@ import {
   verifyTokenSignatureV1,
   type ParsedTokenV1,
 } from '../../v2/durable-core/tokens/index.js';
+import { encodeTokenPayloadV1, signTokenV1 } from '../../v2/durable-core/tokens/index.js';
 import { createWorkflow, getStepById } from '../../types/workflow.js';
 import type { DomainEventV1 } from '../../v2/durable-core/schemas/session/index.js';
-import { LocalSessionLockV2 } from '../../v2/infra/local/session-lock/index.js';
-import { ExecutionSessionGateV2, type ExecutionSessionGateErrorV2 } from '../../v2/usecases/execution-session-gate.js';
+import type { ExecutionSessionGateErrorV2 } from '../../v2/usecases/execution-session-gate.js';
 import type { SessionEventLogStoreError } from '../../v2/ports/session-event-log-store.port.js';
 import type { SnapshotStoreError } from '../../v2/ports/snapshot-store.port.js';
 import type { PinnedWorkflowStoreError } from '../../v2/ports/pinned-workflow-store.port.js';
+import type { HmacSha256PortV2 } from '../../v2/ports/hmac-sha256.port.js';
 import { ResultAsync as RA, okAsync, errAsync as neErrorAsync } from 'neverthrow';
 import { compileV1WorkflowToPinnedSnapshot } from '../../v2/read-only/v1-to-v2-shim.js';
 import { workflowHashForCompiledSnapshot } from '../../v2/durable-core/canonical/hashing.js';
 import type { JsonValue } from '../../v2/durable-core/canonical/json-types.js';
-import { LocalPinnedWorkflowStoreV2 } from '../../v2/infra/local/pinned-workflow-store/index.js';
-import { encodeTokenPayloadV1, signTokenV1 } from '../../v2/durable-core/tokens/index.js';
-import { randomUUID } from 'crypto';
 import { createBundledSource } from '../../types/workflow-source.js';
 import type { WorkflowDefinition } from '../../types/workflow-definition.js';
 import { hasWorkflowDefinitionShape } from '../../types/workflow-definition.js';
@@ -243,27 +233,20 @@ function pinnedWorkflowStoreErrorToToolError(e: PinnedWorkflowStoreError, sugges
   return internalError(`Pinned workflow store error: ${e.message}`, suggestion);
 }
 
-function loadKeyring(): RA<import('../../v2/ports/keyring.port.js').KeyringV1, ToolFailure> {
-  const dataDir = new LocalDataDirV2(process.env);
-  const fsPort = new NodeFileSystemV2();
-  const keyringPort = new LocalKeyringV2(dataDir, fsPort);
-  return keyringPort.loadOrCreate().mapErr((e) => internalError(`Keyring error: ${e.code}`, 'Retry; delete keyring if persists.'));
-}
-
 // Branded token input types (compile-time guarantee of token kind)
 type StateTokenInput = ParsedTokenV1 & { readonly payload: import('../../v2/durable-core/tokens/payloads.js').StateTokenPayloadV1 };
 type AckTokenInput = ParsedTokenV1 & { readonly payload: import('../../v2/durable-core/tokens/payloads.js').AckTokenPayloadV1 };
 
 function parseStateTokenOrFail(
   raw: string,
-  keyring: import('../../v2/ports/keyring.port.js').KeyringV1
+  keyring: import('../../v2/ports/keyring.port.js').KeyringV1,
+  hmac: HmacSha256PortV2
 ): { ok: true; token: StateTokenInput } | { ok: false; result: ToolResult<never> } {
   const parsedRes = parseTokenV1(raw);
   if (parsedRes.isErr()) {
     return { ok: false, result: tokenDecodeErrorToToolError(parsedRes.error) };
   }
 
-  const hmac = new NodeHmacSha256V2();
   const verified = verifyTokenSignatureV1(parsedRes.value, keyring, hmac);
   if (verified.isErr()) {
     return { ok: false, result: tokenDecodeErrorToToolError(verified.error) };
@@ -278,14 +261,14 @@ function parseStateTokenOrFail(
 
 function parseAckTokenOrFail(
   raw: string,
-  keyring: import('../../v2/ports/keyring.port.js').KeyringV1
+  keyring: import('../../v2/ports/keyring.port.js').KeyringV1,
+  hmac: HmacSha256PortV2
 ): { ok: true; token: AckTokenInput } | { ok: false; result: ToolResult<never> } {
   const parsedRes = parseTokenV1(raw);
   if (parsedRes.isErr()) {
     return { ok: false, result: tokenDecodeErrorToToolError(parsedRes.error) };
   }
 
-  const hmac = new NodeHmacSha256V2();
   const verified = verifyTokenSignatureV1(parsedRes.value, keyring, hmac);
   if (verified.isErr()) {
     return { ok: false, result: tokenDecodeErrorToToolError(verified.error) };
@@ -311,13 +294,13 @@ function signTokenOrErr(args: {
   unsignedPrefix: 'st.v1.' | 'ack.v1.' | 'chk.v1.';
   payload: unknown;
   keyring: import('../../v2/ports/keyring.port.js').KeyringV1;
+  hmac: HmacSha256PortV2;
 }): { ok: true; token: string } | { ok: false; error: ToolFailure } {
   const bytes = encodeTokenPayloadV1(args.payload as any /* TYPE SAFETY: unknown → TokenPayloadV1 validated by schema */);
   if (bytes.isErr()) {
     return { ok: false, error: internalError(`Failed to encode token payload: ${bytes.error.code}`, 'Retry; if this persists, treat as invariant violation.') };
   }
-  const hmac = new NodeHmacSha256V2();
-  const token = signTokenV1(args.unsignedPrefix, bytes.value as any /* TYPE SAFETY: CanonicalBytes branded type; signTokenV1 expects it */, args.keyring, hmac);
+  const token = signTokenV1(args.unsignedPrefix, bytes.value as any /* TYPE SAFETY: CanonicalBytes branded type; signTokenV1 expects it */, args.keyring, args.hmac);
   if (token.isErr()) {
     return { ok: false, error: internalError(`Failed to sign token: ${token.error.code}`, 'Retry; if this persists, treat as invariant violation.') };
   }
@@ -401,6 +384,12 @@ export async function handleV2StartWorkflow(
   ctx: ToolContext
 ): Promise<ToolResult<unknown>> {
   try {
+    if (!ctx.v2) {
+      return errNotRetryable('PRECONDITION_FAILED', 'v2 tools disabled', { suggestion: 'Enable v2Tools flag' });
+    }
+
+    const { gate, sessionStore, snapshotStore, pinnedStore, keyring, crypto, hmac } = ctx.v2;
+
     const workflow = await ctx.workflowService.getWorkflowById(input.workflowId);
     if (!workflow) {
       return error('NOT_FOUND', `Workflow not found: ${input.workflowId}`, 'Use list_workflows to discover available workflows.');
@@ -410,16 +399,6 @@ export async function handleV2StartWorkflow(
     if (!firstStep) {
       return error('PRECONDITION_FAILED', 'Workflow has no steps and cannot be started.', 'Fix the workflow definition (must contain at least one step).');
     }
-
-    const dataDir = new LocalDataDirV2(process.env);
-    const fsPort = new NodeFileSystemV2();
-    const sha256 = new NodeSha256V2();
-    const crypto = new NodeCryptoV2();
-    const sessionStore = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha256);
-    const lockPort = new LocalSessionLockV2(dataDir, fsPort);
-    const gate = new ExecutionSessionGateV2(lockPort, sessionStore);
-    const snapshotStore = new LocalSnapshotStoreV2(dataDir, fsPort, crypto);
-    const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir);
 
     // Pin the full v1 workflow definition for determinism (until v2 authoring exists).
     const compiled = compileV1WorkflowToPinnedSnapshot(workflow);
@@ -556,13 +535,6 @@ export async function handleV2StartWorkflow(
       return internalError(String(err), 'Retry; if this persists, check for filesystem errors.');
     }
 
-    const keyringRes = await loadKeyring().match(
-      (v) => ({ ok: true as const, value: v }),
-      (e) => ({ ok: false as const, error: e })
-    );
-    if (!keyringRes.ok) return keyringRes.error;
-    const keyring = keyringRes.value;
-
     const statePayload = {
       tokenVersion: 1 as const,
       tokenKind: 'state' as const,
@@ -589,15 +561,15 @@ export async function handleV2StartWorkflow(
       attemptId,
     };
 
-    const stateTokenRes = signTokenOrErr({ unsignedPrefix: 'st.v1.', payload: statePayload, keyring });
+    const stateTokenRes = signTokenOrErr({ unsignedPrefix: 'st.v1.', payload: statePayload, keyring, hmac });
     if (!stateTokenRes.ok) return stateTokenRes.error;
     const stateToken = stateTokenRes.token;
     
-    const ackTokenRes = signTokenOrErr({ unsignedPrefix: 'ack.v1.', payload: ackPayload, keyring });
+    const ackTokenRes = signTokenOrErr({ unsignedPrefix: 'ack.v1.', payload: ackPayload, keyring, hmac });
     if (!ackTokenRes.ok) return ackTokenRes.error;
     const ackToken = ackTokenRes.token;
     
-    const checkpointTokenRes = signTokenOrErr({ unsignedPrefix: 'chk.v1.', payload: checkpointPayload, keyring });
+    const checkpointTokenRes = signTokenOrErr({ unsignedPrefix: 'chk.v1.', payload: checkpointPayload, keyring, hmac });
     if (!checkpointTokenRes.ok) return checkpointTokenRes.error;
     const checkpointToken = checkpointTokenRes.token;
 
@@ -629,26 +601,17 @@ export async function handleV2ContinueWorkflow(
   // Slice 3.2: validate tokens and scope at the boundary even before orchestration exists.
   // This prevents agents from "training" on incorrect payload shapes and catches copy/paste corruption early.
   try {
-    const keyringRes = await loadKeyring().match(
-      (v) => ({ ok: true as const, value: v }),
-      (e) => ({ ok: false as const, error: e })
-    );
-    if (!keyringRes.ok) return keyringRes.error;
-    const keyring = keyringRes.value;
+    if (!ctx.v2) {
+      return errNotRetryable('PRECONDITION_FAILED', 'v2 tools disabled', { suggestion: 'Enable v2Tools flag' });
+    }
 
-    const state = parseStateTokenOrFail(input.stateToken, keyring);
+    const { gate, sessionStore, snapshotStore, pinnedStore, keyring, crypto, hmac } = ctx.v2;
+
+    const state = parseStateTokenOrFail(input.stateToken, keyring, hmac);
     if (!state.ok) return state.result;
 
     if (!input.ackToken) {
       // Slice 3.3: rehydrate-only path (must be side-effect-free).
-      const dataDir = new LocalDataDirV2(process.env);
-      const fsPort = new NodeFileSystemV2();
-      const sha256 = new NodeSha256V2();
-      const sessionStore = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha256);
-      const crypto = new NodeCryptoV2();
-      const snapshotStore = new LocalSnapshotStoreV2(dataDir, fsPort, crypto);
-      const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir);
-
       const sessionId = state.token.payload.sessionId;
       const runId = state.token.payload.runId;
       const nodeId = state.token.payload.nodeId;
@@ -717,6 +680,7 @@ export async function handleV2ContinueWorkflow(
         unsignedPrefix: 'ack.v1.',
         payload: { tokenVersion: 1, tokenKind: 'ack', sessionId, runId, nodeId, attemptId },
         keyring,
+        hmac,
       });
       if (!ackTokenRes.ok) return ackTokenRes.error;
       const ackToken = ackTokenRes.token;
@@ -725,6 +689,7 @@ export async function handleV2ContinueWorkflow(
         unsignedPrefix: 'chk.v1.',
         payload: { tokenVersion: 1, tokenKind: 'checkpoint', sessionId, runId, nodeId, attemptId },
         keyring,
+        hmac,
       });
       if (!checkpointTokenRes.ok) return checkpointTokenRes.error;
       const checkpointToken = checkpointTokenRes.token;
@@ -775,20 +740,13 @@ export async function handleV2ContinueWorkflow(
     // Ack-token path: Slice 3.4 (advance/replay): record an idempotent, fact-returning blocked outcome for now.
     // This is the minimal durable "advance_recorded" path that enables replay semantics without requiring full step selection yet.
     {
-      const ack = parseAckTokenOrFail(input.ackToken, keyring);
+      const ack = parseAckTokenOrFail(input.ackToken, keyring, hmac);
       if (!ack.ok) return ack.result;
 
       const scope = assertTokenScopeMatchesState(state.token, ack.token);
       if (scope.isErr()) {
         return tokenDecodeErrorToToolError(scope.error);
       }
-
-      const dataDir = new LocalDataDirV2(process.env);
-      const fsPort = new NodeFileSystemV2();
-      const sha256 = new NodeSha256V2();
-      const sessionStore = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha256);
-      const lockPort = new LocalSessionLockV2(dataDir, fsPort);
-      const gate = new ExecutionSessionGateV2(lockPort, sessionStore);
 
       const sessionId = state.token.payload.sessionId;
       const runId = state.token.payload.runId;
@@ -798,7 +756,7 @@ export async function handleV2ContinueWorkflow(
 
       const dedupeKey = `advance_recorded:${sessionId}:${nodeId}:${attemptId}`;
 
-      const compiled = await new LocalPinnedWorkflowStoreV2(new LocalDataDirV2(process.env)).get(workflowHash).match((v) => v, () => null);
+      const compiled = await pinnedStore.get(workflowHash).match((v) => v, () => null);
       if (!compiled) {
         return error('PRECONDITION_FAILED', 'Pinned workflow snapshot is missing for this run.', 'Re-run start_workflow or re-pin via inspect_workflow.');
       }
@@ -816,8 +774,6 @@ export async function handleV2ContinueWorkflow(
       if (compiledWf.isErr()) {
         return error('INTERNAL_ERROR', compiledWf.error.message);
       }
-
-      const snapshotStore = new LocalSnapshotStoreV2(new LocalDataDirV2(process.env), new NodeFileSystemV2(), new NodeCryptoV2());
 
       const appendRes = await gate
         .withHealthySessionLock(sessionId, (lock) => {
@@ -988,8 +944,7 @@ export async function handleV2ContinueWorkflow(
       }
 
       // Fact-returning response: load recorded outcome and return from durable facts.
-      const sessionStore2 = new LocalSessionEventLogStoreV2(new LocalDataDirV2(process.env), new NodeFileSystemV2(), new NodeSha256V2());
-      const truth2Res = await sessionStore2.load(sessionId);
+      const truth2Res = await sessionStore.load(sessionId);
       if (truth2Res.isErr()) return sessionStoreErrorToToolError(truth2Res.error);
       const truth2 = truth2Res.value;
       const recordedEvent = truth2.events.find((e) => e.kind === 'advance_recorded' && e.dedupeKey === dedupeKey);
@@ -1001,6 +956,7 @@ export async function handleV2ContinueWorkflow(
         unsignedPrefix: 'chk.v1.',
         payload: { tokenVersion: 1, tokenKind: 'checkpoint', sessionId, runId, nodeId, attemptId },
         keyring,
+        hmac,
       });
       if (!checkpointTokenRes.ok) return checkpointTokenRes.error;
       const checkpointToken = checkpointTokenRes.token;
@@ -1049,6 +1005,7 @@ export async function handleV2ContinueWorkflow(
         unsignedPrefix: 'ack.v1.',
         payload: { tokenVersion: 1, tokenKind: 'ack', sessionId, runId, nodeId: toNodeId, attemptId: nextAttemptId },
         keyring,
+        hmac,
       });
       if (!nextAckTokenRes.ok) return nextAckTokenRes.error;
       const nextAckToken = nextAckTokenRes.token;
@@ -1057,6 +1014,7 @@ export async function handleV2ContinueWorkflow(
         unsignedPrefix: 'chk.v1.',
         payload: { tokenVersion: 1, tokenKind: 'checkpoint', sessionId, runId, nodeId: toNodeId, attemptId: nextAttemptId },
         keyring,
+        hmac,
       });
       if (!nextCheckpointTokenRes.ok) return nextCheckpointTokenRes.error;
       const nextCheckpointToken = nextCheckpointTokenRes.token;
@@ -1065,6 +1023,7 @@ export async function handleV2ContinueWorkflow(
         unsignedPrefix: 'st.v1.',
         payload: { tokenVersion: 1, tokenKind: 'state', sessionId, runId, nodeId: toNodeId, workflowHash: String(workflowHash) },
         keyring,
+        hmac,
       });
       if (!nextStateTokenRes.ok) return nextStateTokenRes.error;
       const nextStateToken = nextStateTokenRes.token;

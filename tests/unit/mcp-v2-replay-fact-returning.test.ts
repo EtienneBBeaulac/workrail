@@ -27,12 +27,47 @@ async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-replay-'));
 }
 
-function dummyCtx(): ToolContext {
+async function createV2Context() {
+  const dataDir = new LocalDataDirV2(process.env);
+  const fsPort = new NodeFileSystemV2();
+  const sha256 = new NodeSha256V2();
+  const store = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha256);
+  const lock = new LocalSessionLockV2(dataDir, fsPort);
+  const gate = new ExecutionSessionGateV2(lock, store);
+  const crypto = new NodeCryptoV2();
+  const snapshotStore = new LocalSnapshotStoreV2(dataDir, fsPort, crypto);
+  const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir);
+  const hmac = new NodeHmacSha256V2();
+  const keyringPort = new LocalKeyringV2(dataDir, fsPort);
+  const keyring = await keyringPort.loadOrCreate().match(
+    (v) => v,
+    (e) => {
+      throw new Error(`unexpected keyring error: ${e.code}`);
+    }
+  );
+
+  return {
+    dataDir,
+    fsPort,
+    sha256,
+    store,
+    lock,
+    gate,
+    crypto,
+    snapshotStore,
+    pinnedStore,
+    hmac,
+    keyring,
+  };
+}
+
+function dummyCtx(v2?: any): ToolContext {
   return {
     workflowService: null as any,
     featureFlags: null as any,
     sessionManager: null,
     httpServer: null,
+    v2,
   };
 }
 
@@ -70,14 +105,8 @@ describe('v2 replay is fact-returning and fail-closed (Phase 3)', () => {
     const prev = process.env.WORKRAIL_DATA_DIR;
     process.env.WORKRAIL_DATA_DIR = root;
     try {
-      const dataDir = new LocalDataDirV2(process.env);
-      const fsPort = new NodeFileSystemV2();
-      const sha256 = new NodeSha256V2();
-      const store = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha256);
-      const lock = new LocalSessionLockV2(dataDir, fsPort);
-      const gate = new ExecutionSessionGateV2(lock, store);
-      const crypto = new NodeCryptoV2();
-      const snapshotStore = new LocalSnapshotStoreV2(dataDir, fsPort, crypto);
+      const v2 = await createV2Context();
+      const { dataDir, fsPort, sha256, store, lock, gate, crypto, snapshotStore, pinnedStore } = v2;
 
       const sessionId = 'sess_test';
       const runId = 'run_1';
@@ -85,7 +114,6 @@ describe('v2 replay is fact-returning and fail-closed (Phase 3)', () => {
       const workflowHash = 'sha256:5b2d9fb885d0adc6565e1fd59e6abb3769b69e4dba5a02b6eea750137a5c0be2';
 
       // Pin a v1-backed compiled snapshot so the ack handler can load compiled workflow.
-      const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir);
       await pinnedStore
         .put(workflowHash as any, {
           schemaVersion: 1,
@@ -191,7 +219,8 @@ describe('v2 replay is fact-returning and fail-closed (Phase 3)', () => {
       const stateToken = await mkSignedToken({ unsignedPrefix: 'st.v1.', payload: statePayload });
       const ackToken = await mkSignedToken({ unsignedPrefix: 'ack.v1.', payload: ackPayload });
 
-      const res = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx());
+      const v2 = await createV2Context();
+      const res = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx(v2));
       expect(res.type).toBe('error');
       if (res.type !== 'error') return;
       expect(res.code).toBe('INTERNAL_ERROR');
@@ -206,14 +235,8 @@ describe('v2 replay is fact-returning and fail-closed (Phase 3)', () => {
     const prev = process.env.WORKRAIL_DATA_DIR;
     process.env.WORKRAIL_DATA_DIR = root;
     try {
-      const dataDir = new LocalDataDirV2(process.env);
-      const fsPort = new NodeFileSystemV2();
-      const sha256 = new NodeSha256V2();
-      const store = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha256);
-      const lock = new LocalSessionLockV2(dataDir, fsPort);
-      const gate = new ExecutionSessionGateV2(lock, store);
-      const crypto = new NodeCryptoV2();
-      const snapshotStore = new LocalSnapshotStoreV2(dataDir, fsPort, crypto);
+      const v2 = await createV2Context();
+      const { dataDir, fsPort, sha256, store, lock, gate, crypto, snapshotStore, pinnedStore } = v2;
 
       const sessionId = 'sess_test_missing_snap';
       const runId = 'run_2';
@@ -222,7 +245,6 @@ describe('v2 replay is fact-returning and fail-closed (Phase 3)', () => {
       const workflowHash = 'sha256:5b2d9fb885d0adc6565e1fd59e6abb3769b69e4dba5a02b6eea750137a5c0be2';
 
       // Pin a v1-backed compiled snapshot so the ack handler can load compiled workflow.
-      const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir);
       await pinnedStore
         .put(workflowHash as any, {
           schemaVersion: 1,
@@ -356,7 +378,8 @@ describe('v2 replay is fact-returning and fail-closed (Phase 3)', () => {
       const stateToken = await mkSignedToken({ unsignedPrefix: 'st.v1.', payload: statePayload });
       const ackToken = await mkSignedToken({ unsignedPrefix: 'ack.v1.', payload: ackPayload });
 
-      const res = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx());
+      const v2 = await createV2Context();
+      const res = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx(v2));
       expect(res.type).toBe('error');
       if (res.type !== 'error') return;
       expect(res.code).toBe('INTERNAL_ERROR');

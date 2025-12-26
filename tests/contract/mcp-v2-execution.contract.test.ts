@@ -9,9 +9,47 @@ import type { ToolContext } from '../../src/mcp/types.js';
 
 import { handleV2StartWorkflow, handleV2ContinueWorkflow } from '../../src/mcp/handlers/v2-execution.js';
 import { InMemoryWorkflowStorage } from '../../src/infrastructure/storage/in-memory-storage.js';
+import { V2WorkflowEngine } from '../../src/v2/execution/engine.js';
+import { V2StateManager } from '../../src/v2/state/manager.js';
+import { V2AckTokenGenerator } from '../../src/v2/tokens/ack-generator.js';
+import { V2CheckpointManager } from '../../src/v2/state/checkpoint-manager.js';
+import { NodeCryptoV2 } from '../../src/v2/infra/local/crypto/index.js';
+import { NodeHmacSha256V2 } from '../../src/v2/infra/local/hmac-sha256/index.js';
 
 async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-exec-contract-'));
+}
+
+/**
+ * Helper to create a v2-enabled ToolContext with deterministic workflow dependencies.
+ * Provides: v2Engine, v2StateManager, v2AckTokens, v2CheckpointManager
+ */
+async function createV2Context(): Promise<ToolContext & { v2: { engine: V2WorkflowEngine; stateManager: V2StateManager; ackTokens: V2AckTokenGenerator; checkpointManager: V2CheckpointManager } }> {
+  const workflowService = resolveService<any>(DI.Services.Workflow);
+  const featureFlags = resolveService<any>(DI.Infra.FeatureFlags);
+
+  // Initialize v2 dependencies
+  const v2Engine = new V2WorkflowEngine(workflowService);
+  const v2StateManager = new V2StateManager();
+  const v2AckTokens = new V2AckTokenGenerator();
+  const v2CheckpointManager = new V2CheckpointManager(v2StateManager);
+  const crypto = new NodeCryptoV2();
+  const hmac = new NodeHmacSha256V2();
+
+  return {
+    workflowService,
+    featureFlags,
+    sessionManager: null,
+    httpServer: null,
+    v2: {
+      engine: v2Engine,
+      stateManager: v2StateManager,
+      ackTokens: v2AckTokens,
+      checkpointManager: v2CheckpointManager,
+      crypto,
+      hmac,
+    },
+  };
 }
 
 describe('MCP contract: v2 start_workflow / continue_workflow (Slice 3)', () => {
@@ -43,15 +81,7 @@ describe('MCP contract: v2 start_workflow / continue_workflow (Slice 3)', () => 
   });
 
   it('start -> rehydrate -> ack replay is deterministic and idempotent', async () => {
-    const workflowService = resolveService<any>(DI.Services.Workflow);
-    const featureFlags = resolveService<any>(DI.Infra.FeatureFlags);
-
-    const ctx: ToolContext = {
-      workflowService,
-      featureFlags,
-      sessionManager: null,
-      httpServer: null,
-    };
+    const ctx = await createV2Context();
 
     const start = await handleV2StartWorkflow({ workflowId: 'v2-exec-contract', context: {} } as any, ctx);
     expect(start.type).toBe('success');
@@ -85,5 +115,12 @@ describe('MCP contract: v2 start_workflow / continue_workflow (Slice 3)', () => 
 
     const ack2 = await handleV2ContinueWorkflow({ stateToken: start.data.stateToken, ackToken: start.data.ackToken } as any, ctx);
     expect(ack2).toEqual(ack1); // idempotent replay
+
+    // Verify v2 context is properly initialized
+    expect(ctx.v2).toBeDefined();
+    expect(ctx.v2.engine).toBeDefined();
+    expect(ctx.v2.stateManager).toBeDefined();
+    expect(ctx.v2.ackTokens).toBeDefined();
+    expect(ctx.v2.checkpointManager).toBeDefined();
   });
 });
