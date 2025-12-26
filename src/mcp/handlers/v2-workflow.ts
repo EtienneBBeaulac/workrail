@@ -80,7 +80,7 @@ export async function handleV2ListWorkflows(
     return success(payload);
   } catch (err) {
     const mapped = mapUnknownErrorToToolError(err);
-    return error(mapped.code, mapped.message, mapped.suggestion, mapped.retry, mapped.details);
+    return mapped;
   }
 }
 
@@ -131,6 +131,6 @@ export async function handleV2InspectWorkflow(
     return success(payload);
   } catch (err) {
     const mapped = mapUnknownErrorToToolError(err);
-    return error(mapped.code, mapped.message, mapped.suggestion, mapped.retry, mapped.details);
+    return mapped;
   }
 }

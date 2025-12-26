@@ -114,7 +114,7 @@ export async function handleWorkflowList(
     return success(payload);
   } catch (err) {
     const mapped = mapUnknownErrorToToolError(err);
-    return error(mapped.code, mapped.message, mapped.suggestion, mapped.retry, mapped.details);
+    return mapped;
   }
 }
 
@@ -135,7 +135,7 @@ export async function handleWorkflowGet(
 
     if (result.isErr()) {
       const mapped = mapDomainErrorToToolError(result.error);
-      return error(mapped.code, mapped.message, mapped.suggestion, mapped.retry, mapped.details);
+      return mapped;
     }
 
     const payload = WorkflowGetOutputSchema.parse({ workflow: result.value });
@@ -148,7 +148,7 @@ export async function handleWorkflowGet(
     }
 
     const mapped = mapUnknownErrorToToolError(err);
-    return error(mapped.code, mapped.message, mapped.suggestion, mapped.retry, mapped.details);
+    return mapped;
   }
 }
 
@@ -179,7 +179,7 @@ export async function handleWorkflowNext(
 
     if (result.isErr()) {
       const mapped = mapDomainErrorToToolError(result.error);
-      return error(mapped.code, mapped.message, mapped.suggestion, mapped.retry, mapped.details);
+      return mapped;
     }
 
     const payload = WorkflowNextOutputSchema.parse(result.value);
@@ -195,7 +195,7 @@ export async function handleWorkflowNext(
     }
 
     const mapped = mapUnknownErrorToToolError(err);
-    return error(mapped.code, mapped.message, mapped.suggestion, mapped.retry, mapped.details);
+    return mapped;
   }
 }
 
@@ -217,7 +217,7 @@ export async function handleWorkflowValidateJson(
     return success(payload);
   } catch (err) {
     const mapped = mapUnknownErrorToToolError(err);
-    return error(mapped.code, mapped.message, mapped.suggestion, mapped.retry, mapped.details);
+    return mapped;
   }
 }
 

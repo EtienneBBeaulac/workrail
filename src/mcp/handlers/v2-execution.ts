@@ -220,7 +220,7 @@ function checkContextBudget(args: { readonly tool: ContextToolNameV2; readonly c
         {
           suggestion:
             'Remove non-JSON values (undefined/functions/symbols), circular references, and non-finite numbers. Keep context to plain JSON objects/arrays/primitives only.',
-          details,
+          details: details as unknown as JsonValue,
         }
       ) as ToolFailure,
     };
