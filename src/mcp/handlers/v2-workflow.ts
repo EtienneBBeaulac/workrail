@@ -1,5 +1,5 @@
 import type { ToolContext, ToolResult } from '../types.js';
-import { success, error } from '../types.js';
+import { success, errNotRetryable } from '../types.js';
 import { mapUnknownErrorToToolError } from '../error-mapper.js';
 import type { V2InspectWorkflowInput, V2ListWorkflowsInput } from '../v2/tools.js';
 import { V2WorkflowInspectOutputSchema, V2WorkflowListOutputSchema } from '../output-schemas.js';
@@ -91,7 +91,7 @@ export async function handleV2InspectWorkflow(
   try {
     const workflow = await withTimeout(ctx.workflowService.getWorkflowById(input.workflowId), TIMEOUT_MS, 'inspect_workflow');
     if (!workflow) {
-      return error('NOT_FOUND', `Workflow not found: ${input.workflowId}`);
+      return errNotRetryable('NOT_FOUND', `Workflow not found: ${input.workflowId}`);
     }
 
     const crypto = new NodeCryptoV2();
@@ -101,7 +101,7 @@ export async function handleV2InspectWorkflow(
     const snapshot = compileV1WorkflowToV2PreviewSnapshot(workflow);
     const hashRes = workflowHashForCompiledSnapshot(snapshot as unknown as JsonValue, crypto);
     if (hashRes.isErr()) {
-      return error('INTERNAL_ERROR', hashRes.error.message);
+      return errNotRetryable('INTERNAL_ERROR', hashRes.error.message);
     }
 
     const workflowHash = hashRes.value;
@@ -112,7 +112,7 @@ export async function handleV2InspectWorkflow(
         (e) => ({ ok: false as const, error: e })
       );
       if (!wrote.ok) {
-        return error('INTERNAL_ERROR', wrote.error.message);
+        return errNotRetryable('INTERNAL_ERROR', wrote.error.message);
       }
     }
 

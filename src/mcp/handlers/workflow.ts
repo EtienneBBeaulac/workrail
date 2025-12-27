@@ -6,7 +6,7 @@
  */
 
 import type { ToolContext, ToolResult } from '../types.js';
-import { success, error } from '../types.js';
+import { success, errNotRetryable } from '../types.js';
 import {
   WorkflowGetOutputSchema,
   WorkflowGetSchemaOutputSchema,
@@ -277,10 +277,10 @@ export async function handleWorkflowGetSchema(
     return success(payload);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return error(
+    return errNotRetryable(
       'INTERNAL_ERROR',
       message,
-      'Ensure the workflow schema file exists at spec/workflow.schema.json'
+      { suggestion: 'Ensure the workflow schema file exists at spec/workflow.schema.json' }
     );
   }
 }

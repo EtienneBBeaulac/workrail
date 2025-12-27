@@ -6,7 +6,7 @@
  */
 
 import type { ToolContext, ToolResult } from '../types.js';
-import { success, error } from '../types.js';
+import { success, errNotRetryable } from '../types.js';
 import {
   CreateSessionOutputSchema,
   OpenDashboardOutputSchema,
@@ -108,10 +108,10 @@ const SESSION_SCHEMA_OVERVIEW: SchemaOverview = {
  */
 function requireSessionTools(ctx: ToolContext): ToolResult<never> | null {
   if (!ctx.sessionManager || !ctx.httpServer) {
-    return error(
+    return errNotRetryable(
       'PRECONDITION_FAILED',
       'Session tools are not enabled',
-      'Set WORKRAIL_ENABLE_SESSION_TOOLS=true to enable session tools'
+      { suggestion: 'Set WORKRAIL_ENABLE_SESSION_TOOLS=true to enable session tools' }
     );
   }
   return null;

@@ -1,10 +1,7 @@
 import type { DomainError } from '../domain/execution/error.js';
-import type { ErrorCode, ToolRetry, ToolError } from './types.js';
+import type { ToolError } from './types.js';
 import type { JsonValue } from './output-schemas.js';
 import { toBoundedJsonString } from './validation/bounded-json.js';
-
-// Deprecated: use ToolError directly
-export type ToolErrorMapping = ToolError;
 
 function assertNever(x: never): ToolError {
   // This should never execute at runtime if all cases are handled.

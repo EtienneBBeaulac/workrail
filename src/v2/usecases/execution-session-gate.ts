@@ -1,5 +1,5 @@
 import type { ResultAsync } from 'neverthrow';
-import { ResultAsync as RA, errAsync } from 'neverthrow';
+import { errAsync, okAsync } from 'neverthrow';
 import type { SessionId } from '../durable-core/ids/index.js';
 import type { WithHealthySessionLock } from '../durable-core/ids/with-healthy-session-lock.js';
 import type { SessionHealthV2 } from '../durable-core/schemas/session/session-health.js';
@@ -26,6 +26,7 @@ export type ExecutionSessionGateErrorV2 =
  * - witness minting (`WithHealthySessionLock`)
  *
  * Slice 2.5 (locked): implemented as the single choke point for locking + health gating + witness minting.
+ * Refactored to use ResultAsync (errors-as-data) instead of throwing GateFailure exceptions.
  */
 export class ExecutionSessionGateV2 {
   private readonly activeSessions = new Set<SessionId>();
@@ -48,191 +49,169 @@ export class ExecutionSessionGateV2 {
     const witnessToken = Symbol(`withHealthySessionLock:${sessionId}`);
     this.activeWitnessTokens.add(witnessToken);
 
-    const doWork = async (): Promise<T> => {
-      // Lock-free health check (early hint):
-      // - allowed to fail closed on manifest-attested corruption (fast return)
-      // - IO errors are explicitly modeled as "precheck unavailable" (not empty truth)
-      // Locked invariant: re-check under lock before minting witness / allowing append (TOCTOU guard).
-      const precheckResult = await this.store.loadValidatedPrefix(sessionId).match(
-        (v) => ({ kind: 'available' as const, prefix: v }),
-        (e) => {
+    const doWork = (): ResultAsync<T, ExecutionSessionGateErrorV2 | E> => {
+      return this.store.loadValidatedPrefix(sessionId)
+        .mapErr((e) => {
           if (e.code === 'SESSION_STORE_CORRUPTION_DETECTED') {
             const health: SessionHealthV2 =
               e.location === 'head'
                 ? { kind: 'corrupt_head', reason: e.reason }
                 : { kind: 'corrupt_tail', reason: e.reason };
-            throw new GateFailure<ExecutionSessionGateErrorV2 | E>({
-              code: 'SESSION_NOT_HEALTHY',
+            return {
+              code: 'SESSION_NOT_HEALTHY' as const,
               message: 'Session is not healthy',
               sessionId,
               health,
-            });
+            };
           }
-          // IO errors: precheck unavailable; defer health decision to locked path.
-          return { kind: 'unavailable' as const };
-        }
-      );
-
-      const pre = precheckResult.kind === 'available' ? precheckResult.prefix : null;
-
-      if (pre !== null) {
-        if (!pre.isComplete) {
-          throw new GateFailure<ExecutionSessionGateErrorV2 | E>({
-            code: 'SESSION_NOT_HEALTHY',
-            message: 'Session is not healthy (validated prefix indicates corrupt tail)',
-            sessionId,
-            health: {
-              kind: 'corrupt_tail',
-              reason: pre.tailReason ?? { code: 'non_contiguous_indices', message: 'Validated prefix stopped early (corrupt tail)' },
-            },
-          });
-        }
-
-        const preHealth = projectSessionHealthV2(pre.truth).match(
-          (h) => h,
-          () => ({ kind: 'corrupt_tail', reason: { code: 'non_contiguous_indices', message: 'unknown' } } as SessionHealthV2)
-        );
-        if (preHealth.kind !== 'healthy') {
-          throw new GateFailure<ExecutionSessionGateErrorV2 | E>({
-            code: 'SESSION_NOT_HEALTHY',
-            message: 'Session is not healthy',
-            sessionId,
-            health: preHealth,
-          });
-        }
-      }
-      // If precheck was unavailable (IO error), defer health decision to strict load under lock.
-
-      const handle = await this.lock.acquire(sessionId).match(
-        (h) => h,
-        (e) => {
-          if (e.code === 'SESSION_LOCK_BUSY') {
-            throw new GateFailure<ExecutionSessionGateErrorV2 | E>({
-              code: 'SESSION_LOCKED',
-              message: `Session is locked; retry in 1–3 seconds; if this persists >10s, ensure no other WorkRail process is running for this session.`,
-              sessionId,
-              retry: { kind: 'retryable_after_ms', afterMs: 1000 },
-            });
+          throw { kind: 'defer_to_locked' as const };
+        })
+        .orElse((e) => {
+          if ((e as any).kind === 'defer_to_locked') {
+            return okAsync(null);
           }
-          throw new GateFailure<ExecutionSessionGateErrorV2 | E>({ code: 'LOCK_ACQUIRE_FAILED', message: e.message, sessionId });
-        }
-      );
-
-      try {
-        const truth = await this.store.load(sessionId).match(
-          (v) => v,
-          (e) => {
-            if (e.code === 'SESSION_STORE_CORRUPTION_DETECTED') {
-              const health: SessionHealthV2 =
-                e.location === 'head'
-                  ? { kind: 'corrupt_head', reason: e.reason }
-                  : { kind: 'corrupt_tail', reason: e.reason };
-              throw new GateFailure<ExecutionSessionGateErrorV2 | E>({
-                code: 'SESSION_NOT_HEALTHY',
-                message: 'Session is not healthy',
+          return errAsync(e as ExecutionSessionGateErrorV2);
+        })
+        .andThen((pre) => {
+          if (pre !== null) {
+            if (!pre.isComplete) {
+              return errAsync({
+                code: 'SESSION_NOT_HEALTHY' as const,
+                message: 'Session is not healthy (validated prefix indicates corrupt tail)',
                 sessionId,
-                health,
+                health: {
+                  kind: 'corrupt_tail' as const,
+                  reason: pre.tailReason ?? { code: 'non_contiguous_indices', message: 'Validated prefix stopped early (corrupt tail)' },
+                },
               });
             }
-            throw new GateFailure<ExecutionSessionGateErrorV2 | E>({
-              code: 'SESSION_LOAD_FAILED',
-              message: `Failed to load session`,
+
+            const preHealth = projectSessionHealthV2(pre.truth).match(
+              (h) => h,
+              () => ({ kind: 'corrupt_tail', reason: { code: 'non_contiguous_indices', message: 'unknown' } } as SessionHealthV2)
+            );
+            if (preHealth.kind !== 'healthy') {
+              return errAsync({
+                code: 'SESSION_NOT_HEALTHY' as const,
+                message: 'Session is not healthy',
+                sessionId,
+                health: preHealth,
+              });
+            }
+          }
+          return okAsync(undefined);
+        })
+        .andThen(() =>
+          this.lock.acquire(sessionId)
+            .mapErr((e) => {
+              if (e.code === 'SESSION_LOCK_BUSY') {
+                return {
+                  code: 'SESSION_LOCKED' as const,
+                  message: `Session is locked; retry in 1–3 seconds; if this persists >10s, ensure no other WorkRail process is running for this session.`,
+                  sessionId,
+                  retry: { kind: 'retryable_after_ms' as const, afterMs: 1000 },
+                };
+              }
+              return { code: 'LOCK_ACQUIRE_FAILED' as const, message: e.message, sessionId };
+            })
+        )
+        .andThen((handle) =>
+          this.store.load(sessionId)
+            .mapErr((e) => {
+              if (e.code === 'SESSION_STORE_CORRUPTION_DETECTED') {
+                const health: SessionHealthV2 =
+                  e.location === 'head'
+                    ? { kind: 'corrupt_head', reason: e.reason }
+                    : { kind: 'corrupt_tail', reason: e.reason };
+                return {
+                  code: 'SESSION_NOT_HEALTHY' as const,
+                  message: 'Session is not healthy',
+                  sessionId,
+                  health,
+                };
+              }
+              return {
+                code: 'SESSION_LOAD_FAILED' as const,
+                message: `Failed to load session`,
+                sessionId,
+                cause: e,
+              };
+            })
+            .andThen((truth) => {
+              const health = projectSessionHealthV2(truth).match(
+                (h) => h,
+                () => {
+                  return { kind: 'corrupt_tail', reason: { code: 'non_contiguous_indices', message: 'unknown' } } as SessionHealthV2;
+                }
+              );
+
+              if (health.kind !== 'healthy') {
+                return errAsync({
+                  code: 'SESSION_NOT_HEALTHY' as const,
+                  message: `Session is not healthy`,
+                  sessionId,
+                  health,
+                });
+              }
+
+              return okAsync({ handle, truth });
+            })
+        )
+        .andThen(({ handle }) => {
+          const witness = {
+            ...handle,
+            assertHeld: () => this.activeWitnessTokens.has(witnessToken),
+          } as unknown as WithHealthySessionLock;
+
+          let callback: ResultAsync<T, E>;
+          try {
+            callback = fn(witness);
+          } catch (e) {
+            return errAsync({
+              code: 'GATE_CALLBACK_FAILED' as const,
+              message: e instanceof Error ? e.message : String(e),
               sessionId,
-              cause: e,
             });
           }
-        );
 
-        const health = projectSessionHealthV2(truth).match(
-          (h) => h,
-          () => {
-            // projectSessionHealthV2 is currently infallible
-            return { kind: 'corrupt_tail', reason: { code: 'non_contiguous_indices', message: 'unknown' } } as SessionHealthV2;
-          }
-        );
-
-        if (health.kind !== 'healthy') {
-          throw new GateFailure<ExecutionSessionGateErrorV2 | E>({
-            code: 'SESSION_NOT_HEALTHY',
-            message: `Session is not healthy`,
-            sessionId,
-            health,
-          });
-        }
-
-        const witness = {
-          ...handle,
-          assertHeld: () => this.activeWitnessTokens.has(witnessToken),
-        } as unknown as WithHealthySessionLock;
-        let callback: ResultAsync<T, E>;
-        try {
-          callback = fn(witness);
-        } catch (e) {
-          throw new GateFailure<ExecutionSessionGateErrorV2 | E>({
-            code: 'GATE_CALLBACK_FAILED',
-            message: e instanceof Error ? e.message : String(e),
-            sessionId,
-          });
-        }
-
-        const res = await callback.match(
-          (v) => ({ ok: true as const, value: v }),
-          (e) => ({ ok: false as const, error: e })
-        );
-
-        if (!res.ok) {
-          // Callback errors propagate as-is (E) to keep the gate generic.
-          throw new GateFailure<ExecutionSessionGateErrorV2 | E>(res.error);
-        }
-
-        return res.value;
-      } catch (e) {
-        if (e instanceof GateFailure) throw e;
-        throw new GateFailure<ExecutionSessionGateErrorV2 | E>({
-          code: 'GATE_CALLBACK_FAILED',
-          message: e instanceof Error ? e.message : String(e),
-          sessionId,
+          return callback
+            .andThen((result) =>
+              this.lock.release(handle)
+                .mapErr(() => ({
+                  code: 'LOCK_RELEASE_FAILED' as const,
+                  message: 'Failed to release session lock; retry in 1–3 seconds; if this persists >10s, ensure no other WorkRail process is running for this session.',
+                  sessionId,
+                  retry: { kind: 'retryable_after_ms' as const, afterMs: 1000 },
+                }))
+                .map(() => result)
+            )
+            .orElse((callbackErr) =>
+              this.lock.release(handle)
+                .map(() => callbackErr)
+                .mapErr(() => ({
+                  code: 'LOCK_RELEASE_FAILED' as const,
+                  message: 'Failed to release session lock; retry in 1–3 seconds; if this persists >10s, ensure no other WorkRail process is running for this session.',
+                  sessionId,
+                  retry: { kind: 'retryable_after_ms' as const, afterMs: 1000 },
+                }))
+                .andThen((err) => errAsync(err))
+            );
         });
-      } finally {
-        await this.lock.release(handle).match(
-          () => undefined,
-          () => {
-            throw new GateFailure<ExecutionSessionGateErrorV2 | E>({
-              code: 'LOCK_RELEASE_FAILED',
-              message: 'Failed to release session lock; retry in 1–3 seconds; if this persists >10s, ensure no other WorkRail process is running for this session.',
-              sessionId,
-              retry: { kind: 'retryable_after_ms', afterMs: 1000 },
-            });
-          }
-        );
-      }
     };
 
-    return RA.fromPromise(
-      (async () => {
-        try {
-          return await doWork();
-        } finally {
-          // Locked: lexical lifetime + no leaks. Cleanup must happen exactly once.
-          this.activeSessions.delete(sessionId);
-          this.activeWitnessTokens.delete(witnessToken);
-        }
-      })(),
-      (e) => {
-        if (e instanceof GateFailure) return e.error as ExecutionSessionGateErrorV2 | E;
-        return {
-          code: 'GATE_CALLBACK_FAILED',
-          message: e instanceof Error ? e.message : String(e),
-          sessionId,
-        } as ExecutionSessionGateErrorV2;
-      }
-    );
+    return doWork()
+      .map((result) => {
+        this.cleanupWitness(sessionId, witnessToken);
+        return result;
+      })
+      .mapErr((e) => {
+        this.cleanupWitness(sessionId, witnessToken);
+        return e;
+      });
   }
-}
 
-class GateFailure<E> extends Error {
-  constructor(readonly error: E) {
-    const msg = (error as { readonly message?: unknown } | null | undefined)?.message;
-    super(typeof msg === 'string' ? msg : 'GateFailure');
+  private cleanupWitness(sessionId: SessionId, token: symbol): void {
+    this.activeSessions.delete(sessionId);
+    this.activeWitnessTokens.delete(token);
   }
 }

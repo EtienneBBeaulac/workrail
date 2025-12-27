@@ -23,7 +23,7 @@ import type { ShutdownEvents, ShutdownEvent } from '../runtime/ports/shutdown-ev
 import type { ProcessSignals } from '../runtime/ports/process-signals.js';
 import type { ProcessTerminator } from '../runtime/ports/process-terminator.js';
 
-import type { ToolContext, ToolResult, V2Dependencies } from './types.js';
+import type { ToolContext, ToolResult, ToolError, V2Dependencies } from './types.js';
 import { errNotRetryable } from './types.js';
 import { createToolFactory, type ToolAnnotations, type ToolDefinition } from './tool-factory.js';
 import type { IToolDescriptionProvider } from './tool-description-provider.js';
@@ -233,24 +233,27 @@ function createValidatingHandler<TInput extends z.ZodType, TOutput>(
 ): ToolHandler {
   return async (args: unknown, ctx: ToolContext): Promise<McpCallToolResult> => {
     const pre = preValidate(args);
-    if (!pre.ok) {
-      // Extract correctTemplate from details if present
-      const boundedTemplate = pre.error.details && typeof pre.error.details === 'object' && 'correctTemplate' in pre.error.details
-        ? toBoundedJsonValue((pre.error.details as any).correctTemplate, 512)
-        : undefined;
+    if ('error' in pre && !pre.ok) {
+      const error = pre.error;
       
-      // Create a new error with bounded template in details
-      const boundedError = boundedTemplate
-        ? {
-            ...pre.error,
-            details: {
-              ...(pre.error.details ? (pre.error.details as any) : {}),
-              correctTemplate: boundedTemplate,
-            },
-          }
-        : pre.error;
+      // Extract correctTemplate from details and bound it if present
+      const details = error.details && typeof error.details === 'object' ? (error.details as any) : {};
+      const correctTemplate = details.correctTemplate;
       
-      return toMcpResult(boundedError);
+      // If template exists, bound it to prevent oversized payloads
+      if (correctTemplate !== undefined) {
+        const boundedTemplate = toBoundedJsonValue(correctTemplate, 512);
+        const boundedError: ToolError = {
+          ...error,
+          details: {
+            ...details,
+            correctTemplate: boundedTemplate,
+          },
+        };
+        return toMcpResult(boundedError);
+      }
+      
+      return toMcpResult(error);
     }
 
     // Fall back to the standard Zod + handler pipeline
