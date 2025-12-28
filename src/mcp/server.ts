@@ -23,7 +23,8 @@ import type { ShutdownEvents, ShutdownEvent } from '../runtime/ports/shutdown-ev
 import type { ProcessSignals } from '../runtime/ports/process-signals.js';
 import type { ProcessTerminator } from '../runtime/ports/process-terminator.js';
 
-import type { ToolContext, ToolResult } from './types.js';
+import type { ToolContext, ToolResult, ToolError, V2Dependencies } from './types.js';
+import { errNotRetryable } from './types.js';
 import { createToolFactory, type ToolAnnotations, type ToolDefinition } from './tool-factory.js';
 import type { IToolDescriptionProvider } from './tool-description-provider.js';
 import { preValidateWorkflowNextArgs, type PreValidateResult } from './validation/workflow-next-prevalidate.js';
@@ -85,6 +86,9 @@ type McpCallToolResult = {
 
 /**
  * Convert our ToolResult<T> to MCP's CallToolResult format.
+ * 
+ * For error results, serializes the unified envelope:
+ * { code, message, retry, details? }
  */
 function toMcpResult<T>(result: ToolResult<T>): McpCallToolResult {
   switch (result.type) {
@@ -97,9 +101,10 @@ function toMcpResult<T>(result: ToolResult<T>): McpCallToolResult {
         content: [{
           type: 'text',
           text: JSON.stringify({
-            error: result.message,
             code: result.code,
-            ...(result.suggestion && { suggestion: result.suggestion }),
+            message: result.message,
+            retry: result.retry,
+            ...(result.details !== undefined ? { details: result.details } : {}),
           }, null, 2),
         }],
         isError: true,
@@ -115,7 +120,7 @@ function toMcpResult<T>(result: ToolResult<T>): McpCallToolResult {
  * Create the tool context from DI container.
  * This provides dependencies to all handlers.
  */
-export function createToolContext(): ToolContext {
+export async function createToolContext(): Promise<ToolContext> {
   const workflowService = container.resolve<WorkflowService>(DI.Services.Workflow);
   const featureFlags = container.resolve<IFeatureFlagProvider>(DI.Infra.FeatureFlags);
 
@@ -130,11 +135,45 @@ export function createToolContext(): ToolContext {
     console.error('[FeatureFlags] Session tools disabled (enable with WORKRAIL_ENABLE_SESSION_TOOLS=true)');
   }
 
+  let v2: V2Dependencies | null = null;
+
+  if (featureFlags.isEnabled('v2Tools')) {
+    const gate = container.resolve<any>(DI.V2.ExecutionGate);
+    const sessionStore = container.resolve<any>(DI.V2.SessionStore);
+    const snapshotStore = container.resolve<any>(DI.V2.SnapshotStore);
+    const pinnedStore = container.resolve<any>(DI.V2.PinnedWorkflowStore);
+    const keyringPort = container.resolve<any>(DI.V2.Keyring);
+    
+    // Keyring must be loaded before use (returns Result)
+    const keyringResult = await keyringPort.loadOrCreate();
+    if (keyringResult.isErr()) {
+      console.error(`[FeatureFlags] v2 tools enabled but keyring load failed: ${keyringResult.error.code}`);
+      throw new Error(`Failed to initialize v2 keyring: ${keyringResult.error.message}`);
+    }
+
+    const crypto = container.resolve<any>(DI.V2.Crypto);
+    const hmac = container.resolve<any>(DI.V2.HmacSha256);
+
+    v2 = {
+      gate,
+      sessionStore,
+      snapshotStore,
+      pinnedStore,
+      keyring: keyringResult.value,
+      crypto,
+      hmac,
+    };
+    console.error('[FeatureFlags] v2 tools enabled');
+  } else {
+    console.error('[FeatureFlags] v2 tools disabled (enable with WORKRAIL_ENABLE_V2_TOOLS=true)');
+  }
+
   return {
     workflowService,
     featureFlags,
     sessionManager,
     httpServer,
+    v2,
   };
 }
 
@@ -170,20 +209,14 @@ function createHandler<TInput extends z.ZodType, TOutput>(
   return async (args: unknown, ctx: ToolContext): Promise<McpCallToolResult> => {
     const parseResult = schema.safeParse(args);
     if (!parseResult.success) {
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            error: 'Invalid input',
-            code: 'VALIDATION_ERROR',
-            details: parseResult.error.errors.map(e => ({
-              path: e.path.join('.'),
-              message: e.message,
-            })),
-          }, null, 2),
-        }],
-        isError: true,
-      };
+      return toMcpResult(
+        errNotRetryable('VALIDATION_ERROR', 'Invalid input', {
+          validationErrors: parseResult.error.errors.map(e => ({
+            path: e.path.join('.'),
+            message: e.message,
+          })),
+        })
+      );
     }
     return toMcpResult(await handler(parseResult.data, ctx));
   };
@@ -200,23 +233,27 @@ function createValidatingHandler<TInput extends z.ZodType, TOutput>(
 ): ToolHandler {
   return async (args: unknown, ctx: ToolContext): Promise<McpCallToolResult> => {
     const pre = preValidate(args);
-    if (!pre.ok) {
-      const bounded = pre.correctTemplate ? toBoundedJsonValue(pre.correctTemplate, 512) : undefined;
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify(
-            {
-              error: pre.message,
-              code: pre.code,
-              ...(bounded ? { correctTemplate: bounded } : {}),
-            },
-            null,
-            2
-          ),
-        }],
-        isError: true,
-      };
+    if ('error' in pre && !pre.ok) {
+      const error = pre.error;
+      
+      // Extract correctTemplate from details and bound it if present
+      const details = error.details && typeof error.details === 'object' ? (error.details as any) : {};
+      const correctTemplate = details.correctTemplate;
+      
+      // If template exists, bound it to prevent oversized payloads
+      if (correctTemplate !== undefined) {
+        const boundedTemplate = toBoundedJsonValue(correctTemplate, 512);
+        const boundedError: ToolError = {
+          ...error,
+          details: {
+            ...details,
+            correctTemplate: boundedTemplate,
+          },
+        };
+        return toMcpResult(boundedError);
+      }
+      
+      return toMcpResult(error);
     }
 
     // Fall back to the standard Zod + handler pipeline
@@ -237,7 +274,7 @@ export async function startServer(): Promise<void> {
   await bootstrap({ runtimeMode: { kind: 'production' } });
 
   // Create tool context with all dependencies
-  const ctx = createToolContext();
+  const ctx = await createToolContext();
 
   // Resolve description provider from DI
   const descriptionProvider = container.resolve<IToolDescriptionProvider>(

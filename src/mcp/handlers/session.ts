@@ -6,7 +6,7 @@
  */
 
 import type { ToolContext, ToolResult } from '../types.js';
-import { success, error } from '../types.js';
+import { success, errNotRetryable } from '../types.js';
 import {
   CreateSessionOutputSchema,
   OpenDashboardOutputSchema,
@@ -108,10 +108,10 @@ const SESSION_SCHEMA_OVERVIEW: SchemaOverview = {
  */
 function requireSessionTools(ctx: ToolContext): ToolResult<never> | null {
   if (!ctx.sessionManager || !ctx.httpServer) {
-    return error(
+    return errNotRetryable(
       'PRECONDITION_FAILED',
       'Session tools are not enabled',
-      'Set WORKRAIL_ENABLE_SESSION_TOOLS=true to enable session tools'
+      { suggestion: 'Set WORKRAIL_ENABLE_SESSION_TOOLS=true to enable session tools' }
     );
   }
   return null;
@@ -152,7 +152,7 @@ export async function handleCreateSession(
     return success(payload);
   } catch (err) {
     const mapped = mapUnknownErrorToToolError(err);
-    return error(mapped.code, mapped.message, mapped.suggestion);
+    return mapped;
   }
 }
 
@@ -175,18 +175,24 @@ export async function handleUpdateSession(
     const payload = UpdateSessionOutputSchema.parse({ updatedAt: new Date().toISOString() });
     return success(payload);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-
-    if (message.toLowerCase().includes('not found')) {
-      return error(
-        'NOT_FOUND',
-        message,
-        'Make sure the session exists. Use workrail_create_session() first.'
-      );
+    // Check for SessionManager "not found" errors via error name/type (preferred) or message fallback
+    // TODO: SessionManager should return typed Result errors instead of throwing
+    if (err instanceof Error && (
+      err.name === 'SessionNotFoundError' ||
+      err.message.toLowerCase().includes('not found') ||
+      err.message.toLowerCase().includes('does not exist')
+    )) {
+      return {
+        type: 'error',
+        code: 'NOT_FOUND',
+        message: err.message,
+        retry: { kind: 'not_retryable' },
+        details: { suggestion: 'Make sure the session exists. Use workrail_create_session() first.' },
+      };
     }
 
     const mapped = mapUnknownErrorToToolError(err);
-    return error(mapped.code, mapped.message, mapped.suggestion);
+    return mapped;
   }
 }
 
@@ -221,18 +227,24 @@ export async function handleReadSession(
     });
     return success(payload);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-
-    if (message.toLowerCase().includes('not found')) {
-      return error(
-        'NOT_FOUND',
-        message,
-        'Make sure the session exists. Use workrail_create_session() first.'
-      );
+    // Check for SessionManager "not found" errors via error name/type (preferred) or message fallback
+    // TODO: SessionManager should return typed Result errors instead of throwing
+    if (err instanceof Error && (
+      err.name === 'SessionNotFoundError' ||
+      err.message.toLowerCase().includes('not found') ||
+      err.message.toLowerCase().includes('does not exist')
+    )) {
+      return {
+        type: 'error',
+        code: 'NOT_FOUND',
+        message: err.message,
+        retry: { kind: 'not_retryable' },
+        details: { suggestion: 'Make sure the session exists. Use workrail_create_session() first.' },
+      };
     }
 
     const mapped = mapUnknownErrorToToolError(err);
-    return error(mapped.code, mapped.message, mapped.suggestion);
+    return mapped;
   }
 }
 
@@ -252,6 +264,6 @@ export async function handleOpenDashboard(
     return success(payload);
   } catch (err) {
     const mapped = mapUnknownErrorToToolError(err);
-    return error(mapped.code, mapped.message, mapped.suggestion);
+    return mapped;
   }
 }

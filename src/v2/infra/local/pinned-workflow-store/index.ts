@@ -4,21 +4,21 @@ import { ResultAsync as RA } from 'neverthrow';
 import type { PinnedWorkflowStorePortV2, PinnedWorkflowStoreError } from '../../../ports/pinned-workflow-store.port.js';
 import type { WorkflowHash } from '../../../durable-core/ids/index.js';
 import type { DataDirPortV2 } from '../../../ports/data-dir.port.js';
-import { CompiledWorkflowSnapshotV1Schema, type CompiledWorkflowSnapshotV1 } from '../../../durable-core/schemas/compiled-workflow/index.js';
+import { CompiledWorkflowSnapshotSchema, type CompiledWorkflowSnapshot } from '../../../durable-core/schemas/compiled-workflow/index.js';
 import { toCanonicalBytes } from '../../../durable-core/canonical/jcs.js';
 import type { JsonValue } from '../../../durable-core/canonical/json-types.js';
 
 export class LocalPinnedWorkflowStoreV2 implements PinnedWorkflowStorePortV2 {
   constructor(private readonly dataDir: DataDirPortV2) {}
 
-  get(workflowHash: WorkflowHash): ResultAsync<CompiledWorkflowSnapshotV1 | null, PinnedWorkflowStoreError> {
+  get(workflowHash: WorkflowHash): ResultAsync<CompiledWorkflowSnapshot | null, PinnedWorkflowStoreError> {
     const filePath = this.dataDir.pinnedWorkflowPath(workflowHash);
     return RA.fromPromise(
       (async () => {
         try {
           const raw = await fs.readFile(filePath, 'utf8');
           const parsed = JSON.parse(raw);
-          const validated = CompiledWorkflowSnapshotV1Schema.safeParse(parsed);
+          const validated = CompiledWorkflowSnapshotSchema.safeParse(parsed);
           if (!validated.success) {
             throw new Error(`Pinned workflow snapshot is invalid: ${filePath}`);
           }
@@ -35,7 +35,7 @@ export class LocalPinnedWorkflowStoreV2 implements PinnedWorkflowStorePortV2 {
     );
   }
 
-  put(workflowHash: WorkflowHash, compiled: CompiledWorkflowSnapshotV1): ResultAsync<void, PinnedWorkflowStoreError> {
+  put(workflowHash: WorkflowHash, compiled: CompiledWorkflowSnapshot): ResultAsync<void, PinnedWorkflowStoreError> {
     const dir = this.dataDir.pinnedWorkflowsDir();
     const filePath = this.dataDir.pinnedWorkflowPath(workflowHash);
 

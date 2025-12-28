@@ -6,7 +6,7 @@
  */
 
 import type { ToolContext, ToolResult } from '../types.js';
-import { success, error } from '../types.js';
+import { success, errNotRetryable } from '../types.js';
 import {
   WorkflowGetOutputSchema,
   WorkflowGetSchemaOutputSchema,
@@ -114,7 +114,7 @@ export async function handleWorkflowList(
     return success(payload);
   } catch (err) {
     const mapped = mapUnknownErrorToToolError(err);
-    return error(mapped.code, mapped.message, mapped.suggestion);
+    return mapped;
   }
 }
 
@@ -135,20 +135,24 @@ export async function handleWorkflowGet(
 
     if (result.isErr()) {
       const mapped = mapDomainErrorToToolError(result.error);
-      return error(mapped.code, mapped.message, mapped.suggestion);
+      return mapped;
     }
 
     const payload = WorkflowGetOutputSchema.parse({ workflow: result.value });
     return success(payload);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-
-    if (message.includes('timed out')) {
-      return error('TIMEOUT', message);
+    // Check for timeout errors via structured error type (not string matching)
+    if (err instanceof Error && err.name === 'TimeoutError') {
+      return {
+        type: 'error',
+        code: 'TIMEOUT',
+        message: err.message,
+        retry: { kind: 'retryable_immediate' },
+      };
     }
 
     const mapped = mapUnknownErrorToToolError(err);
-    return error(mapped.code, mapped.message, mapped.suggestion);
+    return mapped;
   }
 }
 
@@ -179,7 +183,7 @@ export async function handleWorkflowNext(
 
     if (result.isErr()) {
       const mapped = mapDomainErrorToToolError(result.error);
-      return error(mapped.code, mapped.message, mapped.suggestion);
+      return mapped;
     }
 
     const payload = WorkflowNextOutputSchema.parse(result.value);
@@ -190,12 +194,18 @@ export async function handleWorkflowNext(
 
     console.error(`[workflow_next] Failed after ${elapsed}ms: ${message}`);
 
-    if (message.includes('timed out')) {
-      return error('TIMEOUT', message);
+    // Check for timeout errors via structured error type (not string matching)
+    if (err instanceof Error && err.name === 'TimeoutError') {
+      return {
+        type: 'error',
+        code: 'TIMEOUT',
+        message: err.message,
+        retry: { kind: 'retryable_immediate' },
+      };
     }
 
     const mapped = mapUnknownErrorToToolError(err);
-    return error(mapped.code, mapped.message, mapped.suggestion);
+    return mapped;
   }
 }
 
@@ -217,7 +227,7 @@ export async function handleWorkflowValidateJson(
     return success(payload);
   } catch (err) {
     const mapped = mapUnknownErrorToToolError(err);
-    return error(mapped.code, mapped.message, mapped.suggestion);
+    return mapped;
   }
 }
 
@@ -267,10 +277,10 @@ export async function handleWorkflowGetSchema(
     return success(payload);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return error(
+    return errNotRetryable(
       'INTERNAL_ERROR',
       message,
-      'Ensure the workflow schema file exists at spec/workflow.schema.json'
+      { suggestion: 'Ensure the workflow schema file exists at spec/workflow.schema.json' }
     );
   }
 }

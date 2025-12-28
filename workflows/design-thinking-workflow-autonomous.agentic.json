@@ -110,7 +110,7 @@
       "id": "phase-3-ideation-loop",
       "type": "loop",
       "title": "Phase 3: Ideation (4 Rounds)",
-      "loop": { "type": "for", "count": 4, "maxIterations": 4, "iterationVar": "ideationRound" },
+      "loop": { "type": "for", "count": 4, "maxIterations": 5, "iterationVar": "ideationRound" },
       "body": [
         {
           "id": "ideation-round-1",
