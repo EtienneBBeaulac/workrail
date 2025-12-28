@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
-import { ResultAsync as RA } from 'neverthrow';
+import { errAsync } from 'neverthrow';
 
 import { LocalDataDirV2 } from '../../../src/v2/infra/local/data-dir/index.js';
 import { NodeFileSystemV2 } from '../../../src/v2/infra/local/fs/index.js';
@@ -242,7 +242,7 @@ describe('v2 local session store (Slice 2 substrate)', () => {
         if (filePath === manifestPath) {
           openAppendCount++;
           if (openAppendCount >= 2) {
-            return RA.err<FsError>({ code: 'FS_IO_ERROR', message: 'simulated crash during pin append' });
+            return errAsync({ code: 'FS_IO_ERROR' as const, message: 'simulated crash during pin append' } satisfies FsError);
           }
         }
         return baseFs.openAppend(filePath);

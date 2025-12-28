@@ -96,6 +96,74 @@ export const V2WorkflowInspectOutputSchema = z.object({
 });
 
 // -----------------------------------------------------------------------------
+// v2 execution tool outputs (Slice 3)
+// -----------------------------------------------------------------------------
+
+export const V2PendingStepSchema = z.object({
+  stepId: z.string().min(1),
+  title: z.string().min(1),
+  prompt: z.string().min(1),
+});
+
+const V2BlockerPointerSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('context_key'), key: z.string().min(1) }),
+  z.object({ kind: z.literal('output_contract'), contractRef: z.string().min(1) }),
+  z.object({ kind: z.literal('capability'), capability: z.enum(['delegation', 'web_browsing']) }),
+  z.object({ kind: z.literal('workflow_step'), stepId: z.string().min(1) }),
+]);
+
+const V2BlockerSchema = z.object({
+  code: z.enum([
+    'USER_ONLY_DEPENDENCY',
+    'MISSING_REQUIRED_OUTPUT',
+    'INVALID_REQUIRED_OUTPUT',
+    'REQUIRED_CAPABILITY_UNKNOWN',
+    'REQUIRED_CAPABILITY_UNAVAILABLE',
+    'INVARIANT_VIOLATION',
+    'STORAGE_CORRUPTION_DETECTED',
+  ]),
+  pointer: V2BlockerPointerSchema,
+  message: z.string().min(1).max(512),
+  suggestedFix: z.string().min(1).max(1024).optional(),
+});
+
+export const V2BlockerReportSchema = z.object({
+  blockers: z.array(V2BlockerSchema).min(1).max(10),
+});
+
+const V2ContinueWorkflowOkSchema = z.object({
+  kind: z.literal('ok'),
+  stateToken: z.string().min(1),
+  ackToken: z.string().min(1),
+  checkpointToken: z.string().min(1),
+  isComplete: z.boolean(),
+  pending: V2PendingStepSchema.nullable(),
+});
+
+const V2ContinueWorkflowBlockedSchema = z.object({
+  kind: z.literal('blocked'),
+  stateToken: z.string().min(1),
+  ackToken: z.string().min(1),
+  checkpointToken: z.string().min(1),
+  isComplete: z.boolean(),
+  pending: V2PendingStepSchema.nullable(),
+  blockers: V2BlockerReportSchema,
+});
+
+export const V2ContinueWorkflowOutputSchema = z.discriminatedUnion('kind', [
+  V2ContinueWorkflowOkSchema,
+  V2ContinueWorkflowBlockedSchema,
+]);
+
+export const V2StartWorkflowOutputSchema = z.object({
+  stateToken: z.string().min(1),
+  ackToken: z.string().min(1),
+  checkpointToken: z.string().min(1),
+  isComplete: z.boolean(),
+  pending: V2PendingStepSchema.nullable(),
+});
+
+// -----------------------------------------------------------------------------
 // Session tool outputs
 // -----------------------------------------------------------------------------
 

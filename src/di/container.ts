@@ -216,8 +216,106 @@ async function registerServices(): Promise<void> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// V2 BOUNDED CONTEXT REGISTRATION
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Register v2 bounded context services (append-only truth + token execution).
+ * 
+ * v2 represents a rewrite to make workflows deterministic and rewind-safe via:
+ * - Append-only event logs (immutable truth)
+ * - Token-based execution (opaque handles, no agent-owned state)
+ * - Pinned workflow snapshots (content-addressed determinism)
+ * 
+ * Dependency levels:
+ * - Level 1: Primitives (DataDir, FS, Sha256, Crypto, Hmac) - no deps
+ * - Level 2: Stores (Keyring, SessionStore, SnapshotStore, PinnedStore, SessionLock) - depend on Level 1
+ * - Level 3: Orchestration (ExecutionGate) - depends on Level 2
+ */
+async function registerV2Services(): Promise<void> {
+  // Level 1: Primitives (no dependencies)
+  const { LocalDataDirV2 } = await import('../v2/infra/local/data-dir/index.js');
+  const { NodeFileSystemV2 } = await import('../v2/infra/local/fs/index.js');
+  const { NodeSha256V2 } = await import('../v2/infra/local/sha256/index.js');
+  const { NodeCryptoV2 } = await import('../v2/infra/local/crypto/index.js');
+  const { NodeHmacSha256V2 } = await import('../v2/infra/local/hmac-sha256/index.js');
+
+  container.register(DI.V2.DataDir, {
+    useFactory: instanceCachingFactory(() => new LocalDataDirV2(process.env)),
+  });
+  container.register(DI.V2.FileSystem, {
+    useFactory: instanceCachingFactory(() => new NodeFileSystemV2()),
+  });
+  container.register(DI.V2.Sha256, {
+    useFactory: instanceCachingFactory(() => new NodeSha256V2()),
+  });
+  container.register(DI.V2.Crypto, {
+    useFactory: instanceCachingFactory(() => new NodeCryptoV2()),
+  });
+  container.register(DI.V2.HmacSha256, {
+    useFactory: instanceCachingFactory(() => new NodeHmacSha256V2()),
+  });
+
+  // Level 2: Stores (depend on Level 1 primitives)
+  const { LocalKeyringV2 } = await import('../v2/infra/local/keyring/index.js');
+  const { LocalSessionEventLogStoreV2 } = await import('../v2/infra/local/session-store/index.js');
+  const { LocalSnapshotStoreV2 } = await import('../v2/infra/local/snapshot-store/index.js');
+  const { LocalPinnedWorkflowStoreV2 } = await import('../v2/infra/local/pinned-workflow-store/index.js');
+  const { LocalSessionLockV2 } = await import('../v2/infra/local/session-lock/index.js');
+
+  container.register(DI.V2.Keyring, {
+    useFactory: instanceCachingFactory((c: DependencyContainer) => {
+      const dataDir = c.resolve<any>(DI.V2.DataDir);
+      const fs = c.resolve<any>(DI.V2.FileSystem);
+      return new LocalKeyringV2(dataDir, fs);
+    }),
+  });
+  container.register(DI.V2.SessionStore, {
+    useFactory: instanceCachingFactory((c: DependencyContainer) => {
+      const dataDir = c.resolve<any>(DI.V2.DataDir);
+      const fs = c.resolve<any>(DI.V2.FileSystem);
+      const sha256 = c.resolve<any>(DI.V2.Sha256);
+      return new LocalSessionEventLogStoreV2(dataDir, fs, sha256);
+    }),
+  });
+  container.register(DI.V2.SnapshotStore, {
+    useFactory: instanceCachingFactory((c: DependencyContainer) => {
+      const dataDir = c.resolve<any>(DI.V2.DataDir);
+      const fs = c.resolve<any>(DI.V2.FileSystem);
+      const crypto = c.resolve<any>(DI.V2.Crypto);
+      return new LocalSnapshotStoreV2(dataDir, fs, crypto);
+    }),
+  });
+  container.register(DI.V2.PinnedWorkflowStore, {
+    useFactory: instanceCachingFactory((c: DependencyContainer) => {
+      const dataDir = c.resolve<any>(DI.V2.DataDir);
+      return new LocalPinnedWorkflowStoreV2(dataDir);
+    }),
+  });
+  container.register(DI.V2.SessionLock, {
+    useFactory: instanceCachingFactory((c: DependencyContainer) => {
+      const dataDir = c.resolve<any>(DI.V2.DataDir);
+      const fs = c.resolve<any>(DI.V2.FileSystem);
+      return new LocalSessionLockV2(dataDir, fs);
+    }),
+  });
+
+  // Level 3: Orchestration (depends on Level 2 stores)
+  const { ExecutionSessionGateV2 } = await import('../v2/usecases/execution-session-gate.js');
+
+  container.register(DI.V2.ExecutionGate, {
+    useFactory: instanceCachingFactory((c: DependencyContainer) => {
+      const lock = c.resolve<any>(DI.V2.SessionLock);
+      const store = c.resolve<any>(DI.V2.SessionStore);
+      return new ExecutionSessionGateV2(lock, store);
+    }),
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // PUBLIC API
 // ═══════════════════════════════════════════════════════════════════════════
+
 
 /**
  * Initialize the DI container.
@@ -264,6 +362,7 @@ export async function initializeContainer(options: ContainerInitOptions = {}): P
     registerRuntime(options);
     await registerConfig();
     await registerStorageChain();
+    await registerV2Services();
     await registerServices();
     initialized = true;
     console.error('[DI] Container initialized');

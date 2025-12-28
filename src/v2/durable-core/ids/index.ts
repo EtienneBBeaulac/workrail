@@ -21,6 +21,9 @@ export type SnapshotRef = Brand<Sha256Digest, 'v2.SnapshotRef'>; // content-addr
 // Slice 3 prereq: stable attempt id for ack/checkpoint idempotency.
 export type AttemptId = Brand<string, 'v2.AttemptId'>;
 
+// Slice 3 prereq: opaque output identifiers (used in node_output_appended dedupeKey).
+export type OutputId = Brand<string, 'v2.OutputId'>;
+
 // Slice 3 prereq: opaque token strings.
 export type TokenStringV1 = Brand<string, 'v2.TokenStringV1'>;
 
@@ -70,6 +73,10 @@ export function asSnapshotRef(value: Sha256Digest): SnapshotRef {
 
 export function asAttemptId(value: string): AttemptId {
   return value as AttemptId;
+}
+
+export function asOutputId(value: string): OutputId {
+  return value as OutputId;
 }
 
 export function asTokenStringV1(value: string): TokenStringV1 {

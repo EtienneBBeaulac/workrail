@@ -11,9 +11,10 @@ describe('workflow_next pre-validation (error UX only)', () => {
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error('expected failure');
 
-    expect(r.code).toBe('VALIDATION_ERROR');
-    expect(r.correctTemplate).toBeTruthy();
-    expect(byteLen(r.correctTemplate)).toBeLessThanOrEqual(512);
+    expect(r.error.code).toBe('VALIDATION_ERROR');
+    const correctTemplate = (r.error.details as any)?.correctTemplate;
+    expect(correctTemplate).toBeTruthy();
+    expect(byteLen(correctTemplate)).toBeLessThanOrEqual(512);
   });
 
   it('returns a bounded correctTemplate when state.kind is missing', () => {
@@ -21,9 +22,10 @@ describe('workflow_next pre-validation (error UX only)', () => {
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error('expected failure');
 
-    expect(r.code).toBe('VALIDATION_ERROR');
-    expect(r.correctTemplate).toEqual({ kind: 'init' });
-    expect(byteLen(r.correctTemplate)).toBeLessThanOrEqual(512);
+    expect(r.error.code).toBe('VALIDATION_ERROR');
+    const correctTemplate = (r.error.details as any)?.correctTemplate;
+    expect(correctTemplate).toEqual({ kind: 'init' });
+    expect(byteLen(correctTemplate)).toBeLessThanOrEqual(512);
   });
 
   it('returns a bounded correctTemplate when running state is missing required arrays', () => {
@@ -31,9 +33,10 @@ describe('workflow_next pre-validation (error UX only)', () => {
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error('expected failure');
 
-    expect(r.code).toBe('VALIDATION_ERROR');
-    expect(r.correctTemplate).toEqual({ kind: 'running', completed: [], loopStack: [] });
-    expect(byteLen(r.correctTemplate)).toBeLessThanOrEqual(512);
+    expect(r.error.code).toBe('VALIDATION_ERROR');
+    const correctTemplate = (r.error.details as any)?.correctTemplate;
+    expect(correctTemplate).toEqual({ kind: 'running', completed: [], loopStack: [] });
+    expect(byteLen(correctTemplate)).toBeLessThanOrEqual(512);
   });
 
   it('normalizes workflowId in templates to stay bounded', () => {
@@ -41,8 +44,9 @@ describe('workflow_next pre-validation (error UX only)', () => {
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error('expected failure');
 
-    expect(byteLen(r.correctTemplate)).toBeLessThanOrEqual(512);
-    expect((r.correctTemplate as any).workflowId).toBe('<workflowId>');
+    const correctTemplate = (r.error.details as any)?.correctTemplate;
+    expect(byteLen(correctTemplate)).toBeLessThanOrEqual(512);
+    expect((correctTemplate as any)?.workflowId).toBe('<workflowId>');
   });
 
   it('detects variables used instead of context and suggests context', () => {
@@ -54,10 +58,11 @@ describe('workflow_next pre-validation (error UX only)', () => {
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error('expected failure');
 
-    expect(r.code).toBe('VALIDATION_ERROR');
-    expect(r.message).toContain('variables');
-    expect(r.correctTemplate).toBeTruthy();
-    expect((r.correctTemplate as any).context).toEqual({ foo: 'bar' });
-    expect(byteLen(r.correctTemplate)).toBeLessThanOrEqual(512);
+    expect(r.error.code).toBe('VALIDATION_ERROR');
+    expect(r.error.message).toContain('variables');
+    const correctTemplate = (r.error.details as any)?.correctTemplate;
+    expect(correctTemplate).toBeTruthy();
+    expect((correctTemplate as any)?.context).toEqual({ foo: 'bar' });
+    expect(byteLen(correctTemplate)).toBeLessThanOrEqual(512);
   });
 });
