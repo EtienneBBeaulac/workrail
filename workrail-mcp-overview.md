@@ -31,6 +31,19 @@ This is the key insight: information hiding enforces the process. The agent isn'
 "please plan first" - it literally cannot see "edit the code" until it has completed the planning
 steps. The creativity stays; the shortcuts don't.
 
+### North Star (Today)
+WorkRail is a **supervision layer for AI agents**. It replaces prompt babysitting with **curated workflows** that emulate how an expert guides an agent: clarify, plan, execute in small steps, and verify.
+
+Mechanism: it drip-feeds the next step via MCP (information hiding), keeping guidance fresh and preventing premature jumps.
+
+### Direction (Evolving)
+Over time, WorkRail should evolve toward a more explicit execution protocol—typed progress, structured blockers, and artifact references—while keeping agent UX text-first.
+
+This keeps the agent experience simple while making blocked and missing-input states deterministic and actionable.
+
+### Note on model variability
+Different LLMs vary in how reliably they follow multi-step tool loops. Workflows should favor short steps, explicit checklists, and clear confirmation gates to reduce variance.
+
 ### Why This Works
 
 Guardrails don't limit the agent's capabilities - they channel them productively:
@@ -121,8 +134,8 @@ This MCP server is the heart of the system, providing structured workflow guidan
     - Validates step completion
     - Suggests next actions based on workflow state
 - **What it doesn't do**:
-    - Force execution order (agents maintain autonomy)
-    - Manage conversation state
+    - Directly execute work or hard-control the agent (it enforces process via information hiding and guidance)
+    - Manage the agent's conversation state (the client/agent owns that)
     - Make decisions requiring user interaction
 - **Why an MCP server**:
     - Works with any MCP-compatible agent
@@ -144,7 +157,9 @@ Instead of building a separate orchestration engine (which would require modifyi
 
 ### How Workflow Guidance Actually Works
 
-The reactive approach provides structured guidance without a central engine:
+The reactive approach provides structured guidance without a central engine.
+
+**Note:** The example below is conceptual and uses simplified field names; treat it as an illustration of the pattern, not a strict API contract. For canonical tool schemas, see `src/mcp/tools.ts` and/or query `workflow_get_schema` at runtime.
 
 ```typescript
 // Agent calls WorkRail for next step
@@ -671,14 +686,7 @@ Visual workflow creator with:
 - Preview mode
 ```
 
-**2. State Persistence & Resumption**
-```
-- Save workflow state between sessions
-- Branch and merge execution paths
-- Time-travel debugging through state history
-```
-
-**3. Workflow Analytics**
+**2. Workflow Analytics**
 ```
 - Track which workflows are most used
 - Identify common failure points
@@ -817,7 +825,7 @@ These questions catch ambiguities before they cause problems:
 "What should happen when a user tries to login with an unverified email?",
 "Should we implement rate limiting for login attempts? If so, what limits?",
 "Do you need to support social login (Google, GitHub, etc.) or just email/password?",
-"What session duration do you want? Should it be configurable?"
+"How long should authentication remain valid? Should it be configurable?"
 ]
 ```
 
@@ -995,60 +1003,15 @@ workflows/
 
 ### Tool Specifications
 
-The WorkRail server exposes tools via MCP's JSON-RPC protocol:
+WorkRail exposes a small tool surface (e.g., workflow listing, retrieval, and next-step guidance).
 
-```typescript
-// List all available workflows
-tool: "workflow_list"
-returns: {
-  workflows: Array<{
-    id: string
-    name: string
-    description: string
-    category: string
-    version: string
-  }>
-}
+**Important:** Do not treat this document as the canonical API reference. Tool schemas evolve.
 
-// Get a specific workflow
-tool: "workflow_get"
-arguments: {
-  id: string
-}
-returns: Workflow  // Full workflow JSON
+Source of truth:
+- `src/mcp/tools.ts` (runtime MCP tool schemas)
+- `spec/workflow.schema.json` (workflow file schema)
 
-// Get next step guidance (core orchestration feature)
-tool: "workflow_next"
-arguments: {
-  workflowId: string
-  currentStep?: string
-  completedSteps: string[]
-  context?: Record<string, any>
-}
-returns: {
-  step: Step
-  guidance: {
-    prompt: string
-    modelHint?: string
-    requiresConfirmation?: boolean
-    validationCriteria?: string[]
-  }
-  isComplete: boolean
-}
-
-// Validate step output
-tool: "workflow_validate"
-arguments: {
-  workflowId: string
-  stepId: string
-  output: string
-}
-returns: {
-  valid: boolean
-  issues?: string[]
-  suggestions?: string[]
-}
-```
+If your MCP client supports it, you can also query the schema at runtime using `workflow_get_schema`.
 
 ### Installation & Configuration
 
@@ -1585,102 +1548,45 @@ class ReliableWorkflowOrchestrator {
 
 #### State Management Integration
 
-```kotlin
-// WorkflowState.kt
-data class WorkflowState(
-    val workflowId: String,
-    val currentStepIndex: Int,
-    val completedSteps: List<StepResult>,
-    val context: Map<String, Any>,
-    val startTime: Instant,
-    val lastUpdateTime: Instant
-)
-
-// Saving state for resumption
-class StatefulWorkflowOrchestrator {
-    suspend fun saveState(state: WorkflowState) {
-        val serialized = Json.encodeToString(state)
-        thinking.log(
-            ThinkingEntry(
-                workflowId = state.workflowId,
-                stepId = "state-save",
-                content = serialized,
-                type = EntryType.STATE_CHECKPOINT
-            )
-        )
-    }
-
-    suspend fun resumeWorkflow(workflowId: String): WorkflowState? {
-        val entries = thinking.getEntries(workflowId, type = EntryType.STATE_CHECKPOINT)
-        return entries.lastOrNull()?.let { entry ->
-            Json.decodeFromString<WorkflowState>(entry.content)
-        }
-    }
-}
-```
+*Omitted in this overview for now.*
 
 ### Complete Integration Example
 
-Here's how all the pieces come together in a real usage scenario:
+Here's how the pieces come together in a real usage scenario:
 
 ```kotlin
 // Main orchestration flow
-class FirebenderWorkflowIntegration {
+class McpWorkflowIntegration {
     suspend fun handleUserRequest(request: String) {
-        // 1. Discover appropriate workflow
+        // 1) Discover appropriate workflow
         val workflows = orchestrator.discoverWorkflows(request)
         val selected = agent.confirmSelection(workflows)
 
-        // 2. Retrieve full workflow
+        // 2) Retrieve full workflow
         val workflow = workflowLookup.retrieve(selected.id)
 
-        // 3. Check preconditions
+        // 3) Check preconditions + clarifications
         val context = gatherContext(workflow.preconditions)
+        orchestrator.executeClarifications(workflow.clarificationPrompts, context)
 
-        // 4. Execute clarifications
-        val clarifications = orchestrator.executeClarifications(
-            workflow.clarificationPrompts,
-            context
-        )
+        // 4) Step loop: request next step, execute it, mark complete
+        val completed = mutableListOf<String>()
+        while (true) {
+            val next = workflowLookup.next(workflow.id, completedSteps = completed, context = context.data)
+            if (next.isComplete) break
 
-        // 5. Begin step execution with appropriate model
-        workflow.steps.forEach { step ->
-            // Notify user of model preference
-            if (step.id.contains("plan")) {
-                agent.notify(
-                    "Switching to a model with superior reasoning capabilities for planning..."
-                )
-            } else if (step.id.contains("implement")) {
-                agent.notify(
-                    "Switching to a model with superior tool-use abilities for implementation..."
-                )
-            }
-
-            // Execute with state tracking
-            val result = orchestrator.executeStep(workflow, step, context)
-            context.addResult(result)
-
-            // Save state after each step
-            orchestrator.saveState(
-                WorkflowState(
-                    workflowId = workflow.id,
-                    currentStepIndex = workflow.steps.indexOf(step),
-                    completedSteps = context.results,
-                    context = context.data,
-                    startTime = context.startTime,
-                    lastUpdateTime = Instant.now()
-                )
-            )
+            val step = next.step
+            val output = agent.execute(step.prompt)
+            completed.add(step.id)
+            context.addResult(step.id, output)
         }
 
-        // 6. Generate final summary
-        val summary = orchestrator.generateSummary(workflow, context)
-        agent.present(summary)
+        agent.present("Workflow complete")
     }
 }
 ```
 
-These examples demonstrate the clean separation of concerns and the practical integration patterns that make the Workflow Orchestration System both powerful and maintainable.
+These examples demonstrate the clean separation of concerns and the practical integration patterns that make WorkRail both powerful and maintainable.
 
 ## 10. Metrics and Success Criteria
 
@@ -1701,7 +1607,7 @@ Indicates: Which workflows provide most value
 
 **Workflow Completion Patterns**
 ```
-Definition: Sequence of steps requested for each workflow session
+Definition: Sequence of steps requested for each workflow execution
 Measurement: /next endpoint call patterns
 Reveals: Where users get stuck or abandon workflows
 ```
@@ -1731,7 +1637,7 @@ Indicates: Which steps are well-designed vs problematic
 **Usage Patterns**
 ```
 - Peak usage times
-- Average session duration
+- Average execution duration
 - Geographic distribution
 ```
 
@@ -1775,7 +1681,7 @@ Based on the structured approach, we hypothesize these improvements:
 │ 3. ticket-creation           (634 uses)     │
 │                                             │
 │ Completion Patterns                         │
-│ • Average steps/session: 4.2                │
+│ • Average steps/execution: 4.2             │
 │ • Most abandoned step: "plan approval"      │
 │ • Success rate: 78% reach completion        │
 │                                             │
@@ -1886,383 +1792,15 @@ The Workflow Orchestration System is designed to work independently, with or wit
 
 ## Appendix: Future Enhancement - Non-Linear Workflow Execution
 
-### Overview
+*Omitted in this overview for now.*
 
-While the current linear execution model is sufficient for MVP, real-world development often
-requires more flexibility. This section outlines a potential upgrade to support non-linear workflow
-execution within the MCP framework.
-
-### Core Concept: Execution State Graph
-
-Instead of tracking a linear sequence of completed steps, an enhanced workflowlookup server could
-maintain an execution graph where:
-
-- **Nodes** represent workflow states (completed steps + context)
-- **Edges** represent transitions (forward progress, branching, backtracking, or merging)
-- **Current Position** tracks active node(s) in the graph
-
-### Enhanced MCP Tools
-
-The non-linear model would introduce new tools while maintaining backward compatibility:
-
-```typescript
-// Create a branch point for exploring alternatives
-tool: "workflow_branch"
-arguments: {
-  workflowId: string
-  fromState: string  // Node ID to branch from
-  branchName: string
-  reason: string
-}
-returns: {
-  branchId: string
-  newStateId: string
-}
-
-// Return to a previous state
-tool: "workflow_backtrack"
-arguments: {
-  workflowId: string
-  targetStateId: string
-  reason: string
-}
-returns: {
-  stateId: string
-  stepsToRevert: string[]
-}
-
-// Merge results from different branches
-tool: "workflow_merge"
-arguments: {
-  workflowId: string
-  branchIds: string[]
-  mergeStrategy: "union" | "intersection" | "manual"
-}
-returns: {
-  mergedStateId: string
-  conflicts?: Array<{step: string, branches: string[]}>
-}
-
-// Visualize execution graph
-tool: "workflow_state_tree"
-arguments: {
-  workflowId: string
-}
-returns: {
-  graph: {
-    nodes: Array<{id: string, step: string, branch?: string}>
-    edges: Array<{from: string, to: string, type: string}>
-    currentNodes: string[]
-  }
-}
-```
-
-### Enhanced Workflow Schema
-
-Workflows could support branching and merge points:
-
-```json
-{
-  "id": "feature-implementation-exploratory",
-  "executionMode": "non-linear",
-  "steps": [
-    {
-      "id": "design-approach",
-      "title": "Design implementation approach",
-      "branches": [
-        {
-          "id": "approach-a",
-          "condition": "Performance-focused implementation",
-          "steps": ["optimize-algorithm", "benchmark"]
-        },
-        {
-          "id": "approach-b",
-          "condition": "Simplicity-focused implementation",
-          "steps": ["simple-implementation", "document"]
-        }
-      ]
-    },
-    {
-      "id": "implementation",
-      "title": "Implement chosen approach",
-      "allowBacktrack": true,
-      "checkpoints": true
-    }
-  ],
-  "mergePoints": [
-    {
-      "id": "final-review",
-      "afterSteps": ["approach-a", "approach-b"],
-      "mergeStrategy": "manual"
-    }
-  ]
-}
-```
-
-### Example User Interaction
-
-```
-User: "Let's try implementing this with approach A"
-Agent: [Executes approach A steps]
-
-User: "Actually, I want to see what approach B would look like too"
-Agent: "I'll create a branch to explore approach B while preserving approach A"
-[Creates branch, implements approach B]
-
-User: "Show me both implementations"
-Agent: [Uses workflow_state_tree to show both branches]
-
-User: "Let's go with approach A but use the error handling from approach B"
-Agent: "I'll merge the relevant parts"
-[Uses workflow_merge with manual strategy]
-```
-
-### Benefits of Non-Linear Execution
-
-1. **Exploratory Development**: Try multiple approaches without losing work
-2. **Safe Experimentation**: Backtrack when assumptions prove incorrect
-3. **Parallel Investigation**: Explore different solutions simultaneously
-4. **Direct Comparison**: Evaluate different approaches side-by-side
-5. **Selective Merging**: Combine the best aspects of different attempts
-
-### Implementation Considerations
-
-- **State Management**: The server would maintain a DAG (Directed Acyclic Graph) of execution states
-- **Backward Compatibility**: Linear workflows would work unchanged as a special case
-- **Agent Autonomy**: The system would still provide guidance rather than control
-- **Persistence**: State graphs would need reliable storage and recovery mechanisms
-
-This enhancement would maintain the MCP philosophy while enabling the flexibility required for
-complex, real-world development scenarios.
+This section previously described speculative non-linear execution tools (branch/backtrack/merge). It is intentionally excluded here to keep the overview focused on stable, always-on capabilities.
 
 ## Appendix: Future Enhancement - Dynamic Adaptation
 
-### Overview
+*Omitted in this overview for now.*
 
-Dynamic adaptation would allow workflows to intelligently adjust their behavior based on runtime
-signals while maintaining the MCP philosophy of guidance over control. Rather than static execution,
-workflows would respond to user expertise, model capabilities, task complexity, and execution
-history.
-
-### Core Concept: Adaptation Context Engine
-
-The workflowlookup server would maintain an adaptation context that influences how workflows
-execute:
-
-```typescript
-interface AdaptationContext {
-  userProfile: {
-    expertiseLevel: "novice" | "intermediate" | "expert"
-    domainKnowledge: Map<string, number>  // domain -> proficiency
-    executionHistory: WorkflowHistory[]
-    preferences: UserPreferences
-  }
-  modelCapabilities: {
-    strengths: string[]
-    weaknesses: string[]
-    contextWindow: number
-    toolUseReliability: number
-  }
-  taskAnalysis: {
-    complexity: number
-    riskLevel: "low" | "medium" | "high"
-    estimatedDuration: number
-    similarTasksCompleted: number
-  }
-  environmentFactors: {
-    timeConstraints?: string
-    teamContext?: string
-    productionReadiness: boolean
-  }
-}
-```
-
-### New MCP Tools for Dynamic Adaptation
-
-The adaptation system would introduce new tools while maintaining backward compatibility:
-
-```typescript
-// Analyze task and recommend adaptations
-tool: "workflow_analyze_context"
-arguments: {
-  workflowId: string
-  taskDescription: string
-  userContext?: Partial<AdaptationContext>
-}
-returns: {
-  recommendedAdaptations: Array<{
-    type: "skip" | "expand" | "simplify" | "add_validation"
-    stepId: string
-    reason: string
-    confidence: number
-  }>
-  complexityScore: number
-  estimatedDuration: number
-}
-
-// Get adapted workflow based on context
-tool: "workflow_get_adapted"
-arguments: {
-  workflowId: string
-  adaptationContext: AdaptationContext
-  adaptationLevel: "minimal" | "moderate" | "aggressive"
-}
-returns: {
-  workflow: Workflow  // Dynamically modified version
-  adaptations: Array<{
-    stepId: string
-    modification: string
-    reason: string
-  }>
-  confidence: number
-}
-
-// Record execution feedback for learning
-tool: "workflow_record_feedback"
-arguments: {
-  workflowId: string
-  stepId: string
-  outcome: "success" | "failure" | "skipped"
-  duration: number
-  userSatisfaction?: number
-  notes?: string
-}
-returns: {
-  recorded: boolean
-  patternsDetected?: string[]
-}
-```
-
-### Enhanced Workflow Schema with Adaptation Rules
-
-Workflows could include rules for dynamic adaptation:
-
-```json
-{
-  "id": "adaptive-feature-implementation",
-  "name": "Adaptive Feature Implementation",
-  "adaptationRules": {
-    "skipConditions": [
-      {
-        "stepId": "basic-setup",
-        "when": {
-          "userExpertise": ">= intermediate",
-          "similarTasksCompleted": ">= 3"
-        },
-        "confidence": 0.8
-      }
-    ],
-    "expansionTriggers": [
-      {
-        "stepId": "implementation",
-        "when": {
-          "previousStepErrors": ">= 2",
-          "taskComplexity": ">= 0.7"
-        },
-        "action": "add_substeps",
-        "substeps": ["review-approach", "implement-incrementally", "test-each-part"]
-      }
-    ],
-    "simplificationRules": [
-      {
-        "when": {
-          "modelContextWindow": "< 8000",
-          "stepPromptLength": "> 2000"
-        },
-        "action": "use_condensed_prompts"
-      }
-    ]
-  },
-  "steps": [
-    {
-      "id": "planning",
-      "adaptiveVersions": {
-        "expert": {
-          "prompt": "Create implementation plan focusing on architecture decisions..."
-        },
-        "intermediate": {
-          "prompt": "Create a detailed plan covering: architecture, implementation steps, testing strategy..."
-        },
-        "novice": {
-          "prompt": "Let's break this down step by step. First, what are the main components needed?...",
-          "additionalGuidance": ["Consider existing patterns", "Think about error cases"]
-        }
-      }
-    }
-  ]
-}
-```
-
-### Adaptation Strategies
-
-#### 1. Expertise-Based Adaptation
-
-- **Novice users**: Add detailed explanations, examples, confirmation steps, and learning resources
-- **Expert users**: Skip basic steps, allow step combination, reduce confirmations
-- **Domain specialists**: Customize based on specific domain knowledge
-
-#### 2. Model-Aware Adaptation
-
-- **Limited context windows**: Break down prompts, summarize previous steps, use compression
-- **Weak tool-use models**: Simplify tool steps, add validation, provide fallbacks
-- **Strong reasoning models**: Allow more complex planning and architectural steps
-
-#### 3. Task Complexity Adaptation
-
-- **High-risk changes**: Add review steps, mandatory testing, rollback planning
-- **Simple tasks**: Combine steps, reduce overhead, fast-track execution
-- **Unknown complexity**: Start conservative, adapt based on early steps
-
-### Example Adaptation Scenarios
-
-**Scenario 1: Expert User, Simple Task**
-
-```
-User: "Add a new field to the User model"
-System: [Detects expert user + simple task]
-
-Adapted Workflow:
-- Skips "understand current architecture" (user knows it)
-- Combines "plan" and "implement" steps
-- Maintains "test" step (always required)
-- Total steps: 2 instead of 5
-```
-
-**Scenario 2: Novice User, Complex Task**
-
-```
-User: "Implement OAuth2 authentication"
-System: [Detects novice user + complex task]
-
-Adapted Workflow:
-- Expands "understand requirements" with OAuth2 primer
-- Adds "review auth libraries" step
-- Breaks "implementation" into 5 sub-steps
-- Adds "security checklist" validation
-- Includes learning resources
-- Total steps: 12 instead of 5
-```
-
-### Benefits of Dynamic Adaptation
-
-1. **Personalized Experience**: Each user gets workflows suited to their level
-2. **Efficiency Gains**: Experts skip redundant steps, novices get needed guidance
-3. **Higher Success Rates**: Adaptations prevent common failure patterns
-4. **Model Flexibility**: Works optimally across different LLM capabilities
-5. **Continuous Improvement**: System learns and improves from usage
-6. **Context Awareness**: Responds to task complexity and risk levels
-
-### Implementation Considerations
-
-- **Privacy**: User profiling must be optional and transparent
-- **Predictability**: Adaptations should be explainable, not magic
-- **Override Control**: Users can always force standard execution
-- **Gradual Rollout**: Start with simple rule-based adaptations
-- **A/B Testing**: Compare adapted vs. standard execution outcomes
-- **Feedback Loops**: Clear mechanisms for users to correct bad adaptations
-
-This enhancement would transform the workflow system from a static guide to an intelligent assistant
-that truly understands and responds to the unique needs of each user and situation.
+This appendix previously explored speculative dynamic adaptation. It is intentionally excluded to keep the overview focused on stable, always-on capabilities.
 
 ## Appendix: Speculative Future - Workflow Marketplace
 

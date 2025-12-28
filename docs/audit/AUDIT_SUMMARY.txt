@@ -1,0 +1,149 @@
+================================================================================
+MCP ERROR ENVELOPE IMPLEMENTATION AUDIT - SUMMARY
+================================================================================
+
+AUDIT SCOPE: src/mcp/**
+FOCUS: Unified error envelope shape, serialization, type-safety, and v2 semantics
+STATUS: Complete - 16 findings identified
+
+================================================================================
+KEY FINDINGS
+================================================================================
+
+✓ CORRECT (8 findings):
+  1. retry field always serialized in toMcpResult
+  2. Zod parse errors produce correct envelope
+  3. Prevalidation errors use same envelope
+  4. ToolError interface requires retry (never undefined)
+  5. Error constructors set retry correctly
+  6. Domain error mapper has correct casts
+  7. Unknown error mapper correctly typed
+  8. v2 execution error mappers type-safe (session health)
+
+⚠️ NEEDS IMPROVEMENT (8 findings):
+  9.  Token error mappers don't use details field
+ 10.  v2 execution errors use mixed constructor styles
+ 11.  Suggestion strings not bounded
+ 12.  JsonValue type duplicated and underdocumented
+ 13.  continueAckErrorToToolError has unsafe type narrowing
+ 14.  No runtime validation of error details at boundary
+ 15.  Error mappers don't document JsonValue requirement
+ 16.  Token errors could benefit from structured details
+
+================================================================================
+PRIORITY RECOMMENDATIONS
+================================================================================
+
+P0 - TYPE-SAFETY & SERIALIZATION:
+  • Add JsonValue runtime validation in toMcpResult (boundary safety)
+  • Consolidate JsonValue definition (single source of truth)
+  • Document why retry is always serialized (clarity)
+
+P1 - CONSISTENCY & CLARITY:
+  • Use named options in error() constructor (clarity)
+  • Bound all suggestion strings (data hygiene)
+  • Add structured details to token errors (UX)
+
+P2 - TYPE SAFETY:
+  • Use Zod discriminator for ContinueAckError (type safety)
+  • Document JsonValue in error mappers (documentation)
+
+================================================================================
+ENVELOPE SHAPE - VERIFIED CORRECT
+================================================================================
+
+{
+  "code": "ErrorCode",           // ✓ Required
+  "message": "string",           // ✓ Required
+  "retry": ToolRetry,            // ✓ ALWAYS serialized (never optional)
+  "suggestion"?: "string",       // ✓ Optional
+  "details"?: JsonValue          // ✓ Optional, must be JSON-safe
+}
+
+Where ToolRetry is one of:
+  { kind: "not_retryable" }
+  { kind: "retryable_immediate" }
+  { kind: "retryable_after_ms", afterMs: number }
+
+Where JsonValue cannot contain: undefined, functions, symbols, circular refs
+
+================================================================================
+VERIFICATION CHECKLIST
+================================================================================
+
+✓ Single envelope shape everywhere: {code, message, retry, suggestion?, details?}
+✓ retry required on ToolError and always serialized
+✓ suggestion top-level semantics (distinct from BlockerReport.suggestedFix)
+✓ details type is JsonValue (no unknown bags crossing boundary)
+✓ Zod parse errors produce correct envelope via toMcpResult
+✓ Prevalidation errors produce correct envelope via toMcpResult
+✓ Error mappers return correct retry and don't throw
+⚠ Error details validated at boundary (missing runtime check)
+⚠ All suggestion strings bounded (missing in some paths)
+⚠ Token error details structured (opportunity for improvement)
+
+================================================================================
+FILE CHANGES NEEDED
+================================================================================
+
+Files with findings:
+  • src/mcp/server.ts (3 findings: comment, documentation, validation)
+  • src/mcp/types.ts (2 findings: consolidation, documentation)
+  • src/mcp/handlers/v2-execution.ts (5 findings: style, bounding, details, types)
+  • src/mcp/error-mapper.ts (1 finding: documentation)
+  • src/mcp/output-schemas.ts (1 finding: consolidation)
+  • src/mcp/validation/bounded-json.ts (1 finding: new bounding helper)
+
+Total files to modify: 6
+Estimated effort: Low risk, additive changes
+
+================================================================================
+IMPLEMENTATION ROADMAP
+================================================================================
+
+Week 1: P0 changes
+  [ ] Add JsonValue runtime validation in toMcpResult
+  [ ] Consolidate JsonValue to types.ts
+  [ ] Add documentation comments
+
+Week 2: P1 changes
+  [ ] Refactor error() to use named options
+  [ ] Implement boundedSuggestion() helper
+  [ ] Add token error details
+
+Week 3: P2 changes
+  [ ] Implement Zod discriminator for ContinueAckError
+  [ ] Add JSDoc to error mappers
+
+Week 4: Testing & Verification
+  [ ] Unit tests for validation
+  [ ] Integration tests for envelope shape
+  [ ] Audit re-verification
+
+================================================================================
+RISK ASSESSMENT
+================================================================================
+
+Breaking Changes: None (all improvements are additive/internal)
+Backward Compatibility: 100% maintained
+Testing Impact: Low (mostly data validation, no behavior changes)
+Performance Impact: Negligible (validation at boundary only)
+
+Overall Risk Level: LOW
+
+================================================================================
+CONCLUSION
+================================================================================
+
+The MCP error envelope implementation is FUNDAMENTALLY SOUND with:
+  ✓ Correct discriminated union design
+  ✓ Mandatory retry field
+  ✓ Consistent routing through toMcpResult
+  ✓ Type-safe constructors
+
+All identified issues are improvements that can be addressed with LOW RISK.
+No breaking changes required. Implementation can proceed incrementally.
+
+For detailed findings, see: docs/audit/mcp-error-envelope-audit.md
+
+================================================================================
