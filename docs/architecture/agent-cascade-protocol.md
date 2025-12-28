@@ -1,5 +1,7 @@
 # The Agent Cascade Protocol
 
+> **Note (WorkRail v1 vs v2):** Some examples in this document reference v1 workflow tooling (e.g., `workflow_next`). WorkRail v2 uses `start_workflow` / `continue_workflow` with opaque tokens; the v2 canonical contract is `docs/reference/workflow-execution-contract.md`.
+
 ## Executive Summary
 
 The **Agent Cascade Protocol** is the architectural foundation that allows WorkRail to function universally across different agentic environments—from simple "chat" interfaces to complex, multi-agent IDEs like Firebender and Cursor.
@@ -61,7 +63,7 @@ When a session starts (or via the `workflow-diagnose-environment` workflow), Wor
 When executing a workflow step that calls for a specialized routine:
 
 *   **If Tier 3:** WorkRail provides the **Delegation Instruction**:
-    > "Delegate the `routine-gather` workflow to your Researcher Subagent. Instruct them to run it using `workflow_next`."
+    > "Delegate the `routine-gather` workflow to your Researcher Subagent. Instruct them to run it using `workflow_next` (v1) or `start_workflow`/`continue_workflow` (v2)."
 
 *   **If Tier 2:** WorkRail provides the **Proxy Instruction**:
     > "Act as a Proxy. Read the steps of `routine-gather`. For each step, instruct your Researcher Subagent to perform the work via natural language. Validate their results yourself."
