@@ -2,6 +2,8 @@
 
 This guide covers the loop functionality introduced in Workrail v0.1.0, enabling powerful iteration patterns within workflows while maintaining the system's stateless architecture.
 
+> **WorkRail v2 note:** v2 loop semantics are intentionally different. v2 prefers explicit, deterministic loops with closed-set conditions and contract-validated loop control artifacts (not free-form context expression evaluation). For v2 authoring, see `docs/design/workflow-authoring-v2.md`.
+
 ## Table of Contents
 - [Overview](#overview)
 - [Loop Types](#loop-types)
