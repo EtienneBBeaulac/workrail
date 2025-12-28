@@ -24,6 +24,10 @@ For most users, no configuration is needed. Just add WorkRail to your MCP client
 WorkRail loads workflows from multiple sources with priority-based merging (later sources override
 earlier ones with the same ID).
 
+**WorkRail v2 note (reserved namespaces / no shadowing):**
+- In v2, bundled/core workflows use the reserved `wr.*` namespace and are **protected**: non-core sources must not define `wr.*` IDs, and `wr.*` workflows cannot be overridden/shadowed by higher-priority sources.
+  - This is an intentional correctness/safety rule and supersedes “later sources override earlier ones” for `wr.*` only.
+
 ### Priority Order (lowest to highest)
 
 1. **Bundled** – Built-in workflows shipped with WorkRail

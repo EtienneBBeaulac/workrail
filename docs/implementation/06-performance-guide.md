@@ -2,6 +2,8 @@
 
 >  **Performance best practices and optimization strategies**
 
+> **Note (WorkRail v1 vs v2):** This document includes v1-era MCP tool names in some examples (e.g., `workflow_next`). WorkRail v2 uses `start_workflow` / `continue_workflow` with opaque tokens; for v2 canonical behavior see `docs/reference/workflow-execution-contract.md` and `docs/design/v2-core-design-locks.md`.
+
 [![Status](https://img.shields.io/badge/status-specification-orange.svg)](https://github.com/EtienneBBeaulac/mcp)
 [![Spec Version](https://img.shields.io/badge/spec-1.0.0-blue.svg)](specs/)
 [![MCP Compatible](https://img.shields.io/badge/MCP-compatible-purple.svg)](https://modelcontextprotocol.org)

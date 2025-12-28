@@ -1,5 +1,7 @@
 # Firebender Integration Guide
 
+> **Note (WorkRail v1 vs v2):** This document references v1 tool names like `workflow_next`. WorkRail v2 uses `start_workflow` / `continue_workflow` with opaque tokens. For v2 canonical behavior, see `docs/reference/workflow-execution-contract.md` and `docs/design/v2-core-design-locks.md`.
+
 ## Overview
 Firebender is an Agentic IDE that supports multiple subagents. WorkRail works with Firebender in two modes: **Delegation** (Gold) and **Proxy** (Silver).
 
@@ -11,7 +13,7 @@ Firebender has a specific behavior regarding Tool Access that you must understan
 If you define a subagent **without** a `tools` configuration block, it inherits **ALL** tools from the main agent, including WorkRail.
 
 ** Recommended Config (Tier 3 Enabled):**
-```json
+```jsonc
 {
   "subagents": {
     "researcher": {
@@ -26,7 +28,7 @@ If you define a subagent **without** a `tools` configuration block, it inherits 
 If you define a `tools` block (even if empty), the subagent loses access to everything except what is listed.
 
 ** Broken Config (Tier 2 Only):**
-```json
+```jsonc
 {
   "subagents": {
     "researcher": {
@@ -38,8 +40,10 @@ If you define a `tools` block (even if empty), the subagent loses access to ever
 ```
 
 ** Fixed Whitelist Config:**
-If you MUST whitelist tools, you must explicitly add the WorkRail suite:
-```json
+If you MUST whitelist tools, you must explicitly add the WorkRail suite.
+
+**V1 tools (current default):**
+```jsonc
 {
   "subagents": {
     "researcher": {
@@ -50,12 +54,35 @@ If you MUST whitelist tools, you must explicitly add the WorkRail suite:
         "workflow_list",
         "workflow_get",
         "workflow_next",
-        "workflow_validate"
+        "workflow_validate_json"
       ]
     }
   }
 }
 ```
+
+**V2 tools (when `WORKRAIL_ENABLE_V2_TOOLS=true`):**
+```jsonc
+{
+  "subagents": {
+    "researcher": {
+      "systemPrompt": "...",
+      "tools": [
+        "read_file",
+        "grep",
+        "list_workflows",
+        "inspect_workflow",
+        "start_workflow",
+        "continue_workflow",
+        "checkpoint_workflow",
+        "resume_session"
+      ]
+    }
+  }
+}
+```
+
+Note: v2 tools are feature-flagged. See `docs/reference/workflow-execution-contract.md` for the v2 contract.
 
 ## Step-by-Step Setup
 
@@ -217,13 +244,15 @@ Each executor works independently, exploring different solution spaces.
 
 ## Troubleshooting
 
-### **"WorkRail Executor can't find workflow_list"**
+### **"WorkRail Executor can't find workflow_list" (or list_workflows in v2)**
 
 **Cause:** Subagent has a `tools` whitelist that excludes WorkRail tools.
 
 **Fix:** Either:
 - Remove the `tools` field entirely from the YAML frontmatter (use inheritance)
-- Or add WorkRail tools to the whitelist: `workflow_list`, `workflow_get`, `workflow_next`
+- Or add WorkRail tools to the whitelist:
+  - **V1**: `workflow_list`, `workflow_get`, `workflow_next`, `workflow_validate_json`
+  - **V2** (when `WORKRAIL_ENABLE_V2_TOOLS=true`): `list_workflows`, `inspect_workflow`, `start_workflow`, `continue_workflow`, `checkpoint_workflow`, `resume_session`
 
 The provided `workrail-executor.md` uses inheritance (no `tools` field), so this shouldn't happen unless you modified it.
 
@@ -269,8 +298,11 @@ mkdir .firebender/agents/
 
 # Copy and customize subagents
 cp ~/.firebender/agents/context-researcher.md .firebender/agents/
+```
 
-# Register in project firebender.json
+Register in project `firebender.json`:
+
+```jsonc
 {
   "subagents": [
     ".firebender/agents/context-researcher.md"
@@ -304,9 +336,9 @@ Choose models based on task complexity:
 ```yaml
 ---
 name: context-researcher
+# Choose one:
 model: claude-haiku-4  # Fast, cheap (for depth 0-1)
-# OR
-model: claude-sonnet-4  # Powerful (for depth 2+)
+# model: claude-sonnet-4  # Powerful (for depth 2+)
 ---
 ```
 
