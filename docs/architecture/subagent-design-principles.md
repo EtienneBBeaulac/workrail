@@ -1,5 +1,7 @@
 # Subagent Design Principles & Catalog
 
+> **Note (WorkRail v1 vs v2):** Some examples in this document reference v1 workflow tooling (e.g., `workflow_next`). WorkRail v2 uses `start_workflow` / `continue_workflow` tokens; the v2 canonical contract is `docs/reference/workflow-execution-contract.md`.
+
 ## Overview
 
 This document defines WorkRail's approach to subagent design for agentic IDEs. It outlines the core principles, patterns, and catalog of specialized subagents that enhance WorkRail workflows.
