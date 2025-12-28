@@ -26,7 +26,7 @@ export class LocalSessionLockV2 implements SessionLockPortV2 {
         return {
           code: 'SESSION_LOCK_BUSY',
           message: `Session is locked by another process: ${sessionId}`,
-          retry: { kind: 'retryable', afterMs: 250 },
+          retry: { kind: 'retryable_after_ms', afterMs: 250 },
           lockPath,
         };
       }

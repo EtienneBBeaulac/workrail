@@ -69,6 +69,17 @@ This tool provides:
     list_workflows: `Lists available workflows using the WorkRail v2 read-only surface (feature-flagged). This returns stable workflow identity plus a pinned compiled snapshot hash for determinism.`,
 
     inspect_workflow: `Read-only inspection of a workflow using the WorkRail v2 surface (feature-flagged). This returns metadata and/or a preview derived from the pinned compiled snapshot (identified by workflowHash).`,
+
+    start_workflow: `Start a WorkRail v2 workflow run (feature-flagged). Returns an initial pending step plus opaque execution tokens.
+
+Notes:
+- Tokens are opaque: round-trip them unchanged.
+- This tool may create durable session/run state. Keep inputs small and deterministic.`,
+
+    continue_workflow: `Continue a WorkRail v2 workflow run (feature-flagged).
+
+- If you provide \`ackToken\`: acknowledge completion of the pending step for the given snapshot (idempotent).
+- If you omit \`ackToken\`: rehydrate the pending step for the given snapshot (MUST be side-effect-free).`,
   },
 
   // ─────────────────────────────────────────────────────────────────
@@ -139,5 +150,15 @@ This tool is read-only and is intended to validate the v2 determinism substrate 
     inspect_workflow: `Inspect a workflow via the WorkRail v2 tool surface (feature-flagged).
 
 This tool is read-only. It MUST reflect the pinned compiled snapshot identified by workflowHash (not mutable on-disk source).`,
+
+    start_workflow: `Start a workflow run via the WorkRail v2 token-based execution surface (feature-flagged).
+
+You MUST treat returned tokens as opaque and round-trip them unchanged.`,
+
+    continue_workflow: `Continue a workflow run via the WorkRail v2 token-based execution surface (feature-flagged).
+
+REQUIRED BEHAVIOR:
+- If \`ackToken\` is omitted: rehydrate-only MUST be side-effect-free (no durable writes).
+- If \`ackToken\` is provided: advancement MUST be idempotent and replay-safe for the given tokens.`,
   },
 } as const;

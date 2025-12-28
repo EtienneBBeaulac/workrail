@@ -5,7 +5,7 @@ export type SessionLockError =
   | {
       readonly code: 'SESSION_LOCK_BUSY';
       readonly message: string;
-      readonly retry: { readonly kind: 'retryable'; readonly afterMs: number };
+      readonly retry: { readonly kind: 'retryable_after_ms'; readonly afterMs: number };
       readonly lockPath: string;
     }
   | { readonly code: 'SESSION_LOCK_IO_ERROR'; readonly message: string; readonly lockPath: string };

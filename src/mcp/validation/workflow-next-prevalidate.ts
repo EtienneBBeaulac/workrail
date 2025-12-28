@@ -9,14 +9,13 @@
  * - This MUST NOT silently coerce invalid input into valid input.
  */
 
+import { errNotRetryable } from '../types.js';
+import type { ToolError } from '../types.js';
+import type { JsonValue } from '../output-schemas.js';
+
 export type PreValidateResult =
   | { readonly ok: true }
-  | {
-      readonly ok: false;
-      readonly code: 'VALIDATION_ERROR' | 'PRECONDITION_FAILED';
-      readonly message: string;
-      readonly correctTemplate?: unknown;
-    };
+  | { readonly ok: false; readonly error: ToolError };
 
 function normalizeWorkflowIdForTemplate(value: unknown): string {
   if (typeof value !== 'string') return '<workflowId>';
@@ -26,33 +25,41 @@ function normalizeWorkflowIdForTemplate(value: unknown): string {
   return value;
 }
 
-function variablesToContextTemplate(value: unknown): Record<string, unknown> {
+function variablesToContextTemplate(value: unknown): Record<string, JsonValue> {
   if (value == null || typeof value !== 'object' || Array.isArray(value)) return {};
-  return value as Record<string, unknown>;
+  const obj = value as Record<string, unknown>;
+  const result: Record<string, JsonValue> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    // Only include values that are JSON-safe (filter out undefined)
+    if (v !== undefined) {
+      result[k] = v as JsonValue;
+    }
+  }
+  return result;
 }
 
 export function preValidateWorkflowNextArgs(args: unknown): PreValidateResult {
   if (args == null || typeof args !== 'object' || Array.isArray(args)) {
-    return { ok: false, code: 'VALIDATION_ERROR', message: 'Invalid input: expected a JSON object.' };
+    return { ok: false, error: errNotRetryable('VALIDATION_ERROR', 'Invalid input: expected a JSON object.') };
   }
 
   const a = args as Record<string, unknown>;
   const suggestedContext = variablesToContextTemplate(a.variables);
 
   if (!('workflowId' in a)) {
-    return { ok: false, code: 'VALIDATION_ERROR', message: 'Missing required field: workflowId.' };
+    return { ok: false, error: errNotRetryable('VALIDATION_ERROR', 'Missing required field: workflowId.') };
   }
 
   if (!('state' in a)) {
     return {
       ok: false,
-      code: 'VALIDATION_ERROR',
-      message: 'Missing required field: state. For the first call, use { kind: "init" }.',
-      correctTemplate: {
-        workflowId: normalizeWorkflowIdForTemplate(a.workflowId),
-        state: { kind: 'init' },
-        context: suggestedContext,
-      },
+      error: errNotRetryable('VALIDATION_ERROR', 'Missing required field: state. For the first call, use { kind: "init" }.', {
+        correctTemplate: {
+          workflowId: normalizeWorkflowIdForTemplate(a.workflowId),
+          state: { kind: 'init' },
+          context: suggestedContext,
+        },
+      }),
     };
   }
 
@@ -60,9 +67,9 @@ export function preValidateWorkflowNextArgs(args: unknown): PreValidateResult {
   if (state == null || typeof state !== 'object' || Array.isArray(state)) {
     return {
       ok: false,
-      code: 'VALIDATION_ERROR',
-      message: 'Invalid state: expected an object with discriminator field "kind".',
-      correctTemplate: { kind: 'init' },
+      error: errNotRetryable('VALIDATION_ERROR', 'Invalid state: expected an object with discriminator field "kind".', {
+        correctTemplate: { kind: 'init' },
+      }),
     };
   }
 
@@ -70,9 +77,9 @@ export function preValidateWorkflowNextArgs(args: unknown): PreValidateResult {
   if (typeof kind !== 'string') {
     return {
       ok: false,
-      code: 'VALIDATION_ERROR',
-      message: 'Invalid state: missing state.kind. Valid values: "init" | "running" | "complete".',
-      correctTemplate: { kind: 'init' },
+      error: errNotRetryable('VALIDATION_ERROR', 'Invalid state: missing state.kind. Valid values: "init" | "running" | "complete".', {
+        correctTemplate: { kind: 'init' },
+      }),
     };
   }
 
@@ -82,25 +89,28 @@ export function preValidateWorkflowNextArgs(args: unknown): PreValidateResult {
     if (!Array.isArray(completed) || !Array.isArray(loopStack)) {
       return {
         ok: false,
-        code: 'VALIDATION_ERROR',
-        message: 'Invalid state: state.kind="running" requires completed: string[] and loopStack: LoopFrame[].',
-        correctTemplate: { kind: 'running', completed: [], loopStack: [] },
+        error: errNotRetryable('VALIDATION_ERROR', 'Invalid state: state.kind="running" requires completed: string[] and loopStack: LoopFrame[].', {
+          correctTemplate: { kind: 'running', completed: [], loopStack: [] },
+        }),
       };
     }
   }
 
   // Common mistake: using `variables` instead of `context` (context is the only supported key).
   if ('variables' in a && !('context' in a)) {
+    const correctTemplate: Record<string, JsonValue> = {
+      workflowId: normalizeWorkflowIdForTemplate(a.workflowId),
+      state: a.state as JsonValue,
+      context: suggestedContext,
+    };
+    if (a.event && typeof a.event === 'object') {
+      correctTemplate.event = a.event as JsonValue;
+    }
     return {
       ok: false,
-      code: 'VALIDATION_ERROR',
-      message: 'Unexpected top-level key: variables. Use context (object) for condition evaluation and loop inputs.',
-      correctTemplate: {
-        workflowId: normalizeWorkflowIdForTemplate(a.workflowId),
-        state: a.state,
-        ...(a.event ? { event: a.event } : {}),
-        context: suggestedContext,
-      },
+      error: errNotRetryable('VALIDATION_ERROR', 'Unexpected top-level key: variables. Use context (object) for condition evaluation and loop inputs.', {
+        correctTemplate,
+      }),
     };
   }
 

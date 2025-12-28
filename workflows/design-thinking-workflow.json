@@ -92,7 +92,7 @@
       "loop": {
         "type": "for",
         "count": 4,
-        "maxIterations": 4,
+        "maxIterations": 5,
         "iterationVar": "ideationRound"
       },
       "body": [

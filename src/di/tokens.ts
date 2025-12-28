@@ -64,6 +64,28 @@ export const DI = {
   },
 
   // ═══════════════════════════════════════════════════════════════════
+  // V2 BOUNDED CONTEXT (append-only truth, token-based execution)
+  // ═══════════════════════════════════════════════════════════════════
+  V2: {
+    // Primitives (Level 1: no dependencies)
+    DataDir: Symbol('V2.DataDir'),
+    FileSystem: Symbol('V2.FileSystem'),
+    Sha256: Symbol('V2.Sha256'),
+    Crypto: Symbol('V2.Crypto'),
+    HmacSha256: Symbol('V2.HmacSha256'),
+    
+    // Stores (Level 2: depend on primitives)
+    Keyring: Symbol('V2.Keyring'),
+    SessionStore: Symbol('V2.SessionStore'),
+    SnapshotStore: Symbol('V2.SnapshotStore'),
+    PinnedWorkflowStore: Symbol('V2.PinnedWorkflowStore'),
+    SessionLock: Symbol('V2.SessionLock'),
+    
+    // Orchestration (Level 3: depends on stores)
+    ExecutionGate: Symbol('V2.ExecutionGate'),
+  },
+
+  // ═══════════════════════════════════════════════════════════════════
   // RUNTIME (process-level behavior, injected for explicitness)
   // ═══════════════════════════════════════════════════════════════════
   Runtime: {

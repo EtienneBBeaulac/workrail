@@ -17,6 +17,9 @@ export type {
 export {
   success,
   error,
+  errNotRetryable,
+  errRetryAfterMs,
+  errRetryImmediate,
 } from './types.js';
 
 // Tool factory and definitions

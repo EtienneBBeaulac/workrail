@@ -27,7 +27,7 @@ export interface AppendPlanV2 {
 }
 
 export type SessionEventLogStoreError =
-  | { readonly code: 'SESSION_STORE_LOCK_BUSY'; readonly message: string; readonly retry: { readonly kind: 'retryable'; readonly afterMs: number } }
+  | { readonly code: 'SESSION_STORE_LOCK_BUSY'; readonly message: string; readonly retry: { readonly kind: 'retryable_after_ms'; readonly afterMs: number } }
   | { readonly code: 'SESSION_STORE_IO_ERROR'; readonly message: string }
   | {
       readonly code: 'SESSION_STORE_CORRUPTION_DETECTED';
