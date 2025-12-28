@@ -1,5 +1,5 @@
 import type { ResultAsync } from 'neverthrow';
-import { ResultAsync as RA, errAsync } from 'neverthrow';
+import { ResultAsync as RA, errAsync, okAsync, ok, err, type Result } from 'neverthrow';
 import type { DataDirPortV2 } from '../../../ports/data-dir.port.js';
 import type { FileSystemPortV2, FsError } from '../../../ports/fs.port.js';
 import type { Sha256PortV2 } from '../../../ports/sha256.port.js';
@@ -19,12 +19,6 @@ import { DomainEventV1Schema, ManifestRecordV1Schema, type DomainEventV1, type M
 import type { WithHealthySessionLock } from '../../../durable-core/ids/with-healthy-session-lock.js';
 import type { CorruptionReasonV2 } from '../../../durable-core/schemas/session/session-health.js';
 
-class StoreFailure extends Error {
-  constructor(readonly storeError: SessionEventLogStoreError) {
-    super(storeError.message);
-  }
-}
-
 export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStorePortV2, SessionEventLogAppendStorePortV2 {
   constructor(
     private readonly dataDir: DataDirPortV2,
@@ -35,358 +29,430 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStore
   append(lock: WithHealthySessionLock, plan: AppendPlanV2): ResultAsync<void, SessionEventLogStoreError> {
     if (!lock.assertHeld()) {
       return errAsync({
-        code: 'SESSION_STORE_INVARIANT_VIOLATION',
+        code: 'SESSION_STORE_INVARIANT_VIOLATION' as const,
         message: 'WithHealthySessionLock used after gate callback ended (witness misuse-after-release)',
-      });
+      } satisfies SessionEventLogStoreError);
     }
-    return RA.fromPromise(this.appendImpl(lock.sessionId, plan), (e) => {
-      if (e instanceof StoreFailure) return e.storeError;
-      return { code: 'SESSION_STORE_IO_ERROR', message: e instanceof Error ? e.message : String(e) };
-    });
+    return this.appendImpl(lock.sessionId, plan);
   }
 
   load(sessionId: SessionId): ResultAsync<LoadedSessionTruthV2, SessionEventLogStoreError> {
-    return RA.fromPromise(this.loadImpl(sessionId), (e) => {
-      if (e instanceof StoreFailure) return e.storeError;
-      return { code: 'SESSION_STORE_IO_ERROR', message: e instanceof Error ? e.message : String(e) };
-    });
+    return this.loadImpl(sessionId);
   }
 
   loadValidatedPrefix(sessionId: SessionId): ResultAsync<LoadedValidatedPrefixV2, SessionEventLogStoreError> {
-    return RA.fromPromise(this.loadValidatedPrefixImpl(sessionId), (e) => {
-      if (e instanceof StoreFailure) return e.storeError;
-      return { code: 'SESSION_STORE_IO_ERROR', message: e instanceof Error ? e.message : String(e) };
-    });
+    return this.loadValidatedPrefixImpl(sessionId);
   }
 
-  private async appendImpl(sessionId: SessionId, plan: AppendPlanV2): Promise<void> {
+  private appendImpl(sessionId: SessionId, plan: AppendPlanV2): ResultAsync<void, SessionEventLogStoreError> {
     const sessionDir = this.dataDir.sessionDir(sessionId);
     const eventsDir = this.dataDir.sessionEventsDir(sessionId);
     const manifestPath = this.dataDir.sessionManifestPath(sessionId);
 
-    await this.unwrap(this.fs.mkdirp(eventsDir), mapFsToStoreError);
+    return this.fs.mkdirp(eventsDir)
+      .mapErr(mapFsToStoreError)
+      .andThen(() => this.loadTruthOrEmpty(sessionId))
+      .andThen(({ manifest, events: existingEvents }) => {
+        const contiguityRes = validateManifestContiguity(manifest);
+        if (contiguityRes.isErr()) return errAsync(contiguityRes.error);
 
-    const { manifest, events: existingEvents } = await this.loadTruthOrEmpty(sessionId);
-    validateManifestContiguityOrThrow(manifest);
-
-    // Idempotency check (locked): if all events already exist by dedupeKey, this is a replay.
-    const existingByDedupeKey = new Set(existingEvents.map((e) => e.dedupeKey));
-    const allExist = plan.events.every((e) => existingByDedupeKey.has(e.dedupeKey));
-    if (allExist) {
-      // Idempotent no-op: all events in this plan already exist. Return without appending.
-      return;
-    }
-
-    // Partial replay detection (locked invariant violation): if ANY event exists but NOT all, fail fast.
-    const anyExist = plan.events.some((e) => existingByDedupeKey.has(e.dedupeKey));
-    if (anyExist && !allExist) {
-      throw new StoreFailure({
-        code: 'SESSION_STORE_INVARIANT_VIOLATION',
-        message: 'Partial dedupeKey collision detected (some events exist, some do not); this is an invariant violation',
-      });
-    }
-
-    const expectedFirstEventIndex = nextEventIndexFromManifest(manifest);
-    validateAppendPlanOrThrow(sessionId, plan, expectedFirstEventIndex);
-
-    const first = plan.events[0]!.eventIndex;
-    const last = plan.events[plan.events.length - 1]!.eventIndex;
-
-    const segmentRelPath = segmentRelPathFor(first, last);
-    const segmentPath = `${sessionDir}/${segmentRelPath}`;
-    const tmpPath = `${segmentPath}.tmp`;
-
-    // Encode the segment deterministically (canonical JSONL).
-    const segmentBytes = concatJsonlRecords(plan.events as unknown as readonly JsonValue[]);
-
-    // (1) Write domain segment: tmp → fsync(file) → rename → fsync(dir)
-    const tmpHandle = await this.unwrap(this.fs.openWriteTruncate(tmpPath), mapFsToStoreError);
-    await this.unwrap(this.fs.writeAll(tmpHandle.fd, segmentBytes), mapFsToStoreError);
-    await this.unwrap(this.fs.fsyncFile(tmpHandle.fd), mapFsToStoreError);
-    await this.unwrap(this.fs.closeFile(tmpHandle.fd), mapFsToStoreError);
-    await this.unwrap(this.fs.rename(tmpPath, segmentPath), mapFsToStoreError);
-    await this.unwrap(this.fs.fsyncDir(eventsDir), mapFsToStoreError);
-
-    const digest = this.sha256.sha256(segmentBytes);
-
-    // (2) Attest segment in manifest: append segment_closed → fsync(manifest)
-    const segClosed: ManifestRecordV1 = {
-      v: 1,
-      manifestIndex: nextManifestIndex(manifest),
-      sessionId,
-      kind: 'segment_closed',
-      firstEventIndex: first,
-      lastEventIndex: last,
-      segmentRelPath,
-      sha256: digest,
-      bytes: segmentBytes.length,
-    };
-    await this.appendManifestRecords(manifestPath, [segClosed]);
-
-    // (3) Pin snapshots: append snapshot_pinned records → fsync(manifest)
-    const pins = sortedPins(plan.snapshotPins);
-    if (pins.length > 0) {
-      const startIndex = segClosed.manifestIndex + 1;
-      const records: ManifestRecordV1[] = pins.map((p, i) => ({
-        v: 1,
-        manifestIndex: startIndex + i,
-        sessionId,
-        kind: 'snapshot_pinned',
-        eventIndex: p.eventIndex,
-        snapshotRef: p.snapshotRef,
-        createdByEventId: p.createdByEventId,
-      }));
-      await this.appendManifestRecords(manifestPath, records);
-    }
-  }
-
-  private async loadImpl(sessionId: SessionId): Promise<LoadedSessionTruthV2> {
-    const sessionDir = this.dataDir.sessionDir(sessionId);
-
-    const manifest = await this.readManifestOrEmpty(sessionId);
-    validateManifestContiguityOrThrow(manifest);
-    validateSegmentClosedContiguityOrThrow(manifest);
-
-    const segments = manifest.filter((m): m is Extract<ManifestRecordV1, { kind: 'segment_closed' }> => m.kind === 'segment_closed');
-
-    const events: DomainEventV1[] = [];
-    for (const seg of segments) {
-      const segmentPath = `${sessionDir}/${seg.segmentRelPath}`;
-      const bytes = await this.fs.readFileBytes(segmentPath).match(
-        (v) => v,
-        (e) => {
-          if (e.code === 'FS_NOT_FOUND') {
-            throw new StoreFailure({
-              code: 'SESSION_STORE_CORRUPTION_DETECTED',
-              location: 'tail',
-              reason: { code: 'missing_attested_segment', message: `Missing attested segment: ${seg.segmentRelPath}` },
-              message: `Missing attested segment: ${seg.segmentRelPath}`,
-            });
-          }
-          throw new StoreFailure(mapFsToStoreError(e));
+        // Idempotency check (locked): if all events already exist by dedupeKey, this is a replay.
+        const existingByDedupeKey = new Set(existingEvents.map((e) => e.dedupeKey));
+        const allExist = plan.events.every((e) => existingByDedupeKey.has(e.dedupeKey));
+        if (allExist) {
+          // Idempotent no-op: all events in this plan already exist. Return without appending.
+          return okAsync(undefined);
         }
-      );
-      const actual = this.sha256.sha256(bytes);
-      if (actual !== seg.sha256) {
-        throw new StoreFailure({
-          code: 'SESSION_STORE_CORRUPTION_DETECTED',
-          location: 'tail',
-          reason: { code: 'digest_mismatch', message: `Segment digest mismatch: ${seg.segmentRelPath}` },
-          message: `Segment digest mismatch: ${seg.segmentRelPath}`,
-        });
-      }
-      const parsed = parseJsonlLines(bytes, DomainEventV1Schema);
-      // Validate bounds for this segment.
-      if (parsed.length === 0) {
-        throw new StoreFailure({
-          code: 'SESSION_STORE_CORRUPTION_DETECTED',
-          location: 'tail',
-          reason: { code: 'non_contiguous_indices', message: `Empty segment referenced by manifest: ${seg.segmentRelPath}` },
-          message: `Empty segment referenced by manifest: ${seg.segmentRelPath}`,
-        });
-      }
-      if (parsed[0]!.eventIndex !== seg.firstEventIndex || parsed[parsed.length - 1]!.eventIndex !== seg.lastEventIndex) {
-        throw new StoreFailure({
-          code: 'SESSION_STORE_CORRUPTION_DETECTED',
-          location: 'tail',
-          reason: { code: 'non_contiguous_indices', message: `Segment bounds mismatch: ${seg.segmentRelPath}` },
-          message: `Segment bounds mismatch: ${seg.segmentRelPath}`,
-        });
-      }
-      // Contiguity within segment
-      for (let i = 1; i < parsed.length; i++) {
-        if (parsed[i]!.eventIndex !== parsed[i - 1]!.eventIndex + 1) {
-          throw new StoreFailure({
-            code: 'SESSION_STORE_CORRUPTION_DETECTED',
-            location: 'tail',
-            reason: { code: 'non_contiguous_indices', message: `Non-contiguous eventIndex inside segment: ${seg.segmentRelPath}` },
-            message: `Non-contiguous eventIndex inside segment: ${seg.segmentRelPath}`,
+
+        // Partial replay detection (locked invariant violation): if ANY event exists but NOT all, fail fast.
+        const anyExist = plan.events.some((e) => existingByDedupeKey.has(e.dedupeKey));
+        if (anyExist && !allExist) {
+          return errAsync({
+            code: 'SESSION_STORE_INVARIANT_VIOLATION' as const,
+            message: 'Partial dedupeKey collision detected (some events exist, some do not); this is an invariant violation',
+          } satisfies SessionEventLogStoreError);
+        }
+
+        const expectedFirstEventIndex = nextEventIndexFromManifest(manifest);
+        const planRes = validateAppendPlan(sessionId, plan, expectedFirstEventIndex);
+        if (planRes.isErr()) return errAsync(planRes.error);
+
+        const first = plan.events[0]!.eventIndex;
+        const last = plan.events[plan.events.length - 1]!.eventIndex;
+
+        const segmentRelPath = segmentRelPathFor(first, last);
+        const segmentPath = `${sessionDir}/${segmentRelPath}`;
+        const tmpPath = `${segmentPath}.tmp`;
+
+        // Encode the segment deterministically (canonical JSONL).
+        const segmentBytesRes = concatJsonlRecords(plan.events as unknown as readonly JsonValue[]);
+        if (segmentBytesRes.isErr()) return errAsync(segmentBytesRes.error);
+        const segmentBytes = segmentBytesRes.value;
+
+        // (1) Write domain segment: tmp → fsync(file) → rename → fsync(dir)
+        return this.fs.openWriteTruncate(tmpPath)
+          .mapErr(mapFsToStoreError)
+          .andThen((tmpHandle) => 
+            this.fs.writeAll(tmpHandle.fd, segmentBytes).mapErr(mapFsToStoreError)
+              .andThen(() => this.fs.fsyncFile(tmpHandle.fd).mapErr(mapFsToStoreError))
+              .andThen(() => this.fs.closeFile(tmpHandle.fd).mapErr(mapFsToStoreError))
+          )
+          .andThen(() => this.fs.rename(tmpPath, segmentPath).mapErr(mapFsToStoreError))
+          .andThen(() => this.fs.fsyncDir(eventsDir).mapErr(mapFsToStoreError))
+          .andThen(() => {
+            const digest = this.sha256.sha256(segmentBytes);
+
+            // (2) Attest segment in manifest: append segment_closed → fsync(manifest)
+            const segClosed: ManifestRecordV1 = {
+              v: 1,
+              manifestIndex: nextManifestIndex(manifest),
+              sessionId,
+              kind: 'segment_closed',
+              firstEventIndex: first,
+              lastEventIndex: last,
+              segmentRelPath,
+              sha256: digest,
+              bytes: segmentBytes.length,
+            };
+            
+            return this.appendManifestRecords(manifestPath, [segClosed])
+              .andThen(() => {
+                // (3) Pin snapshots: append snapshot_pinned records → fsync(manifest)
+                const pins = sortedPins(plan.snapshotPins);
+                if (pins.length === 0) return okAsync(undefined);
+
+                const startIndex = segClosed.manifestIndex + 1;
+                const records: ManifestRecordV1[] = pins.map((p, i) => ({
+                  v: 1,
+                  manifestIndex: startIndex + i,
+                  sessionId,
+                  kind: 'snapshot_pinned',
+                  eventIndex: p.eventIndex,
+                  snapshotRef: p.snapshotRef,
+                  createdByEventId: p.createdByEventId,
+                }));
+                return this.appendManifestRecords(manifestPath, records);
+              });
           });
-        }
-      }
-      events.push(...parsed);
-    }
-
-    // Pin-after-close corruption gating: any introduced snapshotRef must be pinned.
-    const expectedPins = extractSnapshotPinsFromEvents(events);
-    const actualPins = new Set(
-      manifest
-        .filter((m): m is Extract<ManifestRecordV1, { kind: 'snapshot_pinned' }> => m.kind === 'snapshot_pinned')
-        .map((p) => `${p.eventIndex}:${p.createdByEventId}:${p.snapshotRef}`)
-    );
-    for (const ep of expectedPins) {
-      const key = `${ep.eventIndex}:${ep.createdByEventId}:${ep.snapshotRef}`;
-      if (!actualPins.has(key)) {
-        throw new StoreFailure({
-          code: 'SESSION_STORE_CORRUPTION_DETECTED',
-          location: 'tail',
-          // Slice 2.5 lock: corruption reasons are manifest-only and closed-set.
-          // Missing snapshot pins are treated as "missing required attested record" under `missing_attested_segment`.
-          reason: { code: 'missing_attested_segment', message: `Missing snapshot_pinned for introduced snapshotRef: ${key}` },
-          message: `Missing snapshot_pinned for introduced snapshotRef: ${key}`,
-        });
-      }
-    }
-
-    return { manifest, events };
-  }
-
-  private async readManifestOrEmpty(sessionId: SessionId): Promise<ManifestRecordV1[]> {
-    const manifestPath = this.dataDir.sessionManifestPath(sessionId);
-    const raw = await this.fs.readFileUtf8(manifestPath).match(
-      (v) => v,
-      (e) => {
-        if (e.code === 'FS_NOT_FOUND') return '';
-        throw new StoreFailure(mapFsToStoreError(e));
-      }
-    );
-    if (raw.trim() === '') return [];
-    return parseJsonlText(raw, ManifestRecordV1Schema);
-  }
-
-  private async loadValidatedPrefixImpl(sessionId: SessionId): Promise<LoadedValidatedPrefixV2> {
-    const sessionDir = this.dataDir.sessionDir(sessionId);
-    const manifestPath = this.dataDir.sessionManifestPath(sessionId);
-
-    const raw = await this.fs.readFileUtf8(manifestPath).match(
-      (v) => v,
-      (e) => {
-        if (e.code === 'FS_NOT_FOUND') return '';
-        throw new StoreFailure(mapFsToStoreError(e));
-      }
-    );
-    if (raw.trim() === '') return { truth: { manifest: [], events: [] }, isComplete: true, tailReason: null };
-
-    // Validate manifest prefix line-by-line; stop at first invalid record.
-    const lines = raw.split('\n').filter((l) => l.trim() !== '');
-    const manifest: ManifestRecordV1[] = [];
-    let isComplete = true;
-    let tailReason: CorruptionReasonV2 | null = null;
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i]!;
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(line);
-      } catch {
-        isComplete = false;
-        tailReason = { code: 'non_contiguous_indices', message: 'Invalid JSON in manifest (corrupt tail)' };
-        break;
-      }
-      const validated = ManifestRecordV1Schema.safeParse(parsed);
-      if (!validated.success) {
-        isComplete = false;
-        tailReason = { code: 'unknown_schema_version', message: 'Unknown manifest schema version (corrupt tail)' };
-        break;
-      }
-      if (validated.data.manifestIndex !== i) {
-        isComplete = false;
-        tailReason = { code: 'non_contiguous_indices', message: 'Non-contiguous manifestIndex in prefix (corrupt tail)' };
-        break;
-      }
-      manifest.push(validated.data);
-    }
-    if (manifest.length === 0) {
-      throw new StoreFailure({
-        code: 'SESSION_STORE_CORRUPTION_DETECTED',
-        location: 'head',
-        reason: { code: 'non_contiguous_indices', message: 'No validated manifest prefix' },
-        message: 'No validated manifest prefix',
       });
-    }
-
-    // Load attested segments until a missing/digest mismatch occurs (stop at tail).
-    const segments = manifest.filter((m): m is Extract<ManifestRecordV1, { kind: 'segment_closed' }> => m.kind === 'segment_closed');
-    const events: DomainEventV1[] = [];
-
-    for (const seg of segments) {
-      const segmentPath = `${sessionDir}/${seg.segmentRelPath}`;
-      const bytes = await this.fs.readFileBytes(segmentPath).match(
-        (v) => v,
-        (e) => {
-          if (e.code === 'FS_NOT_FOUND') return null;
-          throw new StoreFailure(mapFsToStoreError(e));
-        }
-      );
-      if (bytes === null) {
-        isComplete = false;
-        tailReason ??= { code: 'missing_attested_segment', message: `Missing attested segment: ${seg.segmentRelPath}` };
-        break;
-      }
-
-      const actual = this.sha256.sha256(bytes);
-      if (actual !== seg.sha256) {
-        isComplete = false;
-        tailReason ??= { code: 'digest_mismatch', message: `Segment digest mismatch: ${seg.segmentRelPath}` };
-        break;
-      }
-
-      const parsed = parseJsonlLines(bytes, DomainEventV1Schema);
-      if (parsed.length === 0) {
-        isComplete = false;
-        tailReason ??= { code: 'non_contiguous_indices', message: `Empty segment referenced by manifest: ${seg.segmentRelPath}` };
-        break;
-      }
-      if (parsed[0]!.eventIndex !== seg.firstEventIndex || parsed[parsed.length - 1]!.eventIndex !== seg.lastEventIndex) {
-        isComplete = false;
-        tailReason ??= { code: 'non_contiguous_indices', message: `Segment bounds mismatch: ${seg.segmentRelPath}` };
-        break;
-      }
-      for (let i = 1; i < parsed.length; i++) {
-        if (parsed[i]!.eventIndex !== parsed[i - 1]!.eventIndex + 1) {
-          isComplete = false;
-          tailReason ??= { code: 'non_contiguous_indices', message: `Non-contiguous eventIndex inside segment: ${seg.segmentRelPath}` };
-          break;
-        }
-      }
-      events.push(...parsed);
-    }
-
-    // Do NOT enforce pin-after-close here (salvage is read-only; this is a validated prefix view).
-    return { truth: { manifest, events }, isComplete, tailReason };
   }
 
-  private async loadTruthOrEmpty(sessionId: SessionId): Promise<{ manifest: ManifestRecordV1[]; events: DomainEventV1[] }> {
-    const manifest = await this.readManifestOrEmpty(sessionId);
-    if (manifest.length === 0) return { manifest: [], events: [] };
-
-    const segments = manifest.filter((m): m is Extract<ManifestRecordV1, { kind: 'segment_closed' }> => m.kind === 'segment_closed');
+  private loadImpl(sessionId: SessionId): ResultAsync<LoadedSessionTruthV2, SessionEventLogStoreError> {
     const sessionDir = this.dataDir.sessionDir(sessionId);
-    const events: DomainEventV1[] = [];
 
-    for (const seg of segments) {
-      const segmentPath = `${sessionDir}/${seg.segmentRelPath}`;
-      const bytes = await this.unwrap(this.fs.readFileBytes(segmentPath), mapFsToStoreError);
-      const parsed = parseJsonlLines(bytes, DomainEventV1Schema);
-      events.push(...parsed);
-    }
+    return this.readManifestOrEmpty(sessionId)
+      .andThen((manifest) => {
+        const contRes = validateManifestContiguity(manifest);
+        if (contRes.isErr()) return errAsync(contRes.error);
+        
+        const segRes = validateSegmentClosedContiguity(manifest);
+        if (segRes.isErr()) return errAsync(segRes.error);
 
-    return { manifest, events };
+        const segments = manifest.filter((m): m is Extract<ManifestRecordV1, { kind: 'segment_closed' }> => m.kind === 'segment_closed');
+
+        const loadSegments = (segs: typeof segments): ResultAsync<DomainEventV1[], SessionEventLogStoreError> => {
+          if (segs.length === 0) return okAsync([]);
+          const [head, ...tail] = segs;
+          const segmentPath = `${sessionDir}/${head.segmentRelPath}`;
+          
+          return this.fs.readFileBytes(segmentPath)
+            .mapErr((e) => {
+              if (e.code === 'FS_NOT_FOUND') {
+                return {
+                  code: 'SESSION_STORE_CORRUPTION_DETECTED' as const,
+                  location: 'tail' as const,
+                  reason: { code: 'missing_attested_segment' as const, message: `Missing attested segment: ${head.segmentRelPath}` },
+                  message: `Missing attested segment: ${head.segmentRelPath}`,
+                };
+              }
+              return mapFsToStoreError(e);
+            })
+            .andThen((bytes) => {
+              const actual = this.sha256.sha256(bytes);
+              if (actual !== head.sha256) {
+                return errAsync({
+                  code: 'SESSION_STORE_CORRUPTION_DETECTED' as const,
+                  location: 'tail' as const,
+                  reason: { code: 'digest_mismatch' as const, message: `Segment digest mismatch: ${head.segmentRelPath}` },
+                  message: `Segment digest mismatch: ${head.segmentRelPath}`,
+                });
+              }
+              const parsedRes = parseJsonlLines(bytes, DomainEventV1Schema);
+              if (parsedRes.isErr()) return errAsync(parsedRes.error);
+              const parsed = parsedRes.value;
+
+              // Validate bounds for this segment.
+              if (parsed.length === 0) {
+                return errAsync({
+                  code: 'SESSION_STORE_CORRUPTION_DETECTED' as const,
+                  location: 'tail' as const,
+                  reason: { code: 'non_contiguous_indices' as const, message: `Empty segment referenced by manifest: ${head.segmentRelPath}` },
+                  message: `Empty segment referenced by manifest: ${head.segmentRelPath}`,
+                });
+              }
+              if (parsed[0]!.eventIndex !== head.firstEventIndex || parsed[parsed.length - 1]!.eventIndex !== head.lastEventIndex) {
+                return errAsync({
+                  code: 'SESSION_STORE_CORRUPTION_DETECTED' as const,
+                  location: 'tail' as const,
+                  reason: { code: 'non_contiguous_indices' as const, message: `Segment bounds mismatch: ${head.segmentRelPath}` },
+                  message: `Segment bounds mismatch: ${head.segmentRelPath}`,
+                });
+              }
+              // Contiguity within segment
+              for (let i = 1; i < parsed.length; i++) {
+                if (parsed[i]!.eventIndex !== parsed[i - 1]!.eventIndex + 1) {
+                  return errAsync({
+                    code: 'SESSION_STORE_CORRUPTION_DETECTED' as const,
+                    location: 'tail' as const,
+                    reason: { code: 'non_contiguous_indices' as const, message: `Non-contiguous eventIndex inside segment: ${head.segmentRelPath}` },
+                    message: `Non-contiguous eventIndex inside segment: ${head.segmentRelPath}`,
+                  });
+                }
+              }
+              return okAsync(parsed);
+            })
+            .andThen((events) => loadSegments(tail).map((rest) => [...events, ...rest]));
+        };
+
+        return loadSegments(segments).andThen((events) => {
+          // Pin-after-close corruption gating: any introduced snapshotRef must be pinned.
+          const expectedPins = extractSnapshotPinsFromEvents(events);
+          const actualPins = new Set(
+            manifest
+              .filter((m): m is Extract<ManifestRecordV1, { kind: 'snapshot_pinned' }> => m.kind === 'snapshot_pinned')
+              .map((p) => `${p.eventIndex}:${p.createdByEventId}:${p.snapshotRef}`)
+          );
+          for (const ep of expectedPins) {
+            const key = `${ep.eventIndex}:${ep.createdByEventId}:${ep.snapshotRef}`;
+            if (!actualPins.has(key)) {
+              return errAsync({
+                code: 'SESSION_STORE_CORRUPTION_DETECTED' as const,
+                location: 'tail' as const,
+                reason: { code: 'missing_attested_segment' as const, message: `Missing snapshot_pinned for introduced snapshotRef: ${key}` },
+                message: `Missing snapshot_pinned for introduced snapshotRef: ${key}`,
+              });
+            }
+          }
+          return okAsync({ manifest, events });
+        });
+      });
   }
 
-  private async appendManifestRecords(manifestPath: string, records: readonly ManifestRecordV1[]): Promise<void> {
+  private readManifestOrEmpty(sessionId: SessionId): ResultAsync<ManifestRecordV1[], SessionEventLogStoreError> {
+    const manifestPath = this.dataDir.sessionManifestPath(sessionId);
+    return this.fs
+      .readFileUtf8(manifestPath)
+      .orElse((e) => (e.code === 'FS_NOT_FOUND' ? okAsync('') : errAsync(mapFsToStoreError(e))))
+      .andThen((raw) => {
+        if (raw.trim() === '') return okAsync([]);
+        const parsed = parseJsonlText(raw, ManifestRecordV1Schema);
+        return parsed.isErr() ? errAsync(parsed.error) : okAsync(parsed.value);
+      });
+  }
+
+  private loadValidatedPrefixImpl(sessionId: SessionId): ResultAsync<LoadedValidatedPrefixV2, SessionEventLogStoreError> {
+    const sessionDir = this.dataDir.sessionDir(sessionId);
+    const manifestPath = this.dataDir.sessionManifestPath(sessionId);
+
+    return this.fs
+      .readFileUtf8(manifestPath)
+      .orElse((e) => (e.code === 'FS_NOT_FOUND' ? okAsync('') : errAsync(mapFsToStoreError(e))))
+      .andThen((raw) => {
+        if (raw.trim() === '') {
+          return okAsync({ truth: { manifest: [], events: [] }, isComplete: true, tailReason: null });
+        }
+
+        // Validate manifest prefix line-by-line; stop at first invalid record.
+        const lines = raw.split('\n').filter((l) => l.trim() !== '');
+        const manifest: ManifestRecordV1[] = [];
+        let isComplete = true;
+        let tailReason: CorruptionReasonV2 | null = null;
+
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i]!;
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(line);
+          } catch {
+            isComplete = false;
+            tailReason ??= { code: 'non_contiguous_indices', message: 'Invalid JSON in manifest (corrupt tail)' };
+            break;
+          }
+
+          const validated = ManifestRecordV1Schema.safeParse(parsed);
+          if (!validated.success) {
+            isComplete = false;
+            tailReason ??= { code: 'unknown_schema_version', message: 'Unknown manifest schema version (corrupt tail)' };
+            break;
+          }
+
+          if (validated.data.manifestIndex !== i) {
+            isComplete = false;
+            tailReason ??= { code: 'non_contiguous_indices', message: 'Non-contiguous manifestIndex in prefix (corrupt tail)' };
+            break;
+          }
+
+          manifest.push(validated.data);
+        }
+
+        if (manifest.length === 0) {
+          return errAsync({
+            code: 'SESSION_STORE_CORRUPTION_DETECTED' as const,
+            location: 'head' as const,
+            reason: { code: 'non_contiguous_indices' as const, message: 'No validated manifest prefix' },
+            message: 'No validated manifest prefix',
+          } satisfies SessionEventLogStoreError);
+        }
+
+        const segments = manifest.filter(
+          (m): m is Extract<ManifestRecordV1, { kind: 'segment_closed' }> => m.kind === 'segment_closed'
+        );
+
+        type SalvageState = {
+          readonly events: DomainEventV1[];
+          readonly isComplete: boolean;
+          readonly tailReason: CorruptionReasonV2 | null;
+          readonly done: boolean;
+        };
+
+        const initial: SalvageState = { events: [], isComplete, tailReason, done: false };
+
+        const processSegment = (
+          seg: Extract<ManifestRecordV1, { kind: 'segment_closed' }>,
+          state: SalvageState
+        ): ResultAsync<SalvageState, SessionEventLogStoreError> => {
+          if (state.done) return okAsync(state);
+
+          const segmentPath = `${sessionDir}/${seg.segmentRelPath}`;
+          return this.fs
+            .readFileBytes(segmentPath)
+            .map((bytes) => ({ kind: 'present' as const, bytes }))
+            .orElse((e) => (e.code === 'FS_NOT_FOUND' ? okAsync({ kind: 'missing' as const }) : errAsync(mapFsToStoreError(e))))
+            .andThen((res) => {
+              if (res.kind === 'missing') {
+                return okAsync({
+                  ...state,
+                  isComplete: false,
+                  tailReason: state.tailReason ?? { code: 'missing_attested_segment', message: `Missing attested segment: ${seg.segmentRelPath}` },
+                  done: true,
+                });
+              }
+
+              const bytes = res.bytes;
+              const actual = this.sha256.sha256(bytes);
+              if (actual !== seg.sha256) {
+                return okAsync({
+                  ...state,
+                  isComplete: false,
+                  tailReason: state.tailReason ?? { code: 'digest_mismatch', message: `Segment digest mismatch: ${seg.segmentRelPath}` },
+                  done: true,
+                });
+              }
+
+              const parsedRes = parseJsonlLines(bytes, DomainEventV1Schema);
+              if (parsedRes.isErr()) {
+                return okAsync({
+                  ...state,
+                  isComplete: false,
+                  tailReason: state.tailReason ?? { code: 'non_contiguous_indices', message: `Invalid JSONL inside segment: ${seg.segmentRelPath}` },
+                  done: true,
+                });
+              }
+              const parsed = parsedRes.value;
+
+              if (parsed.length === 0) {
+                return okAsync({
+                  ...state,
+                  isComplete: false,
+                  tailReason: state.tailReason ?? { code: 'non_contiguous_indices', message: `Empty segment referenced by manifest: ${seg.segmentRelPath}` },
+                  done: true,
+                });
+              }
+
+              if (parsed[0]!.eventIndex !== seg.firstEventIndex || parsed[parsed.length - 1]!.eventIndex !== seg.lastEventIndex) {
+                return okAsync({
+                  ...state,
+                  isComplete: false,
+                  tailReason: state.tailReason ?? { code: 'non_contiguous_indices', message: `Segment bounds mismatch: ${seg.segmentRelPath}` },
+                  done: true,
+                });
+              }
+
+              for (let i = 1; i < parsed.length; i++) {
+                if (parsed[i]!.eventIndex !== parsed[i - 1]!.eventIndex + 1) {
+                  return okAsync({
+                    ...state,
+                    isComplete: false,
+                    tailReason: state.tailReason ?? { code: 'non_contiguous_indices', message: `Non-contiguous eventIndex inside segment: ${seg.segmentRelPath}` },
+                    done: true,
+                  });
+                }
+              }
+
+              return okAsync({
+                ...state,
+                events: [...state.events, ...parsed],
+              });
+            });
+        };
+
+        return segments
+          .reduce<ResultAsync<SalvageState, SessionEventLogStoreError>>(
+            (acc, seg) => acc.andThen((s) => processSegment(seg, s)),
+            okAsync(initial)
+          )
+          .map((final) => ({
+            truth: { manifest, events: final.events },
+            isComplete: final.isComplete,
+            tailReason: final.tailReason,
+          }));
+      });
+  }
+
+  private loadTruthOrEmpty(sessionId: SessionId): ResultAsync<{ manifest: ManifestRecordV1[]; events: DomainEventV1[] }, SessionEventLogStoreError> {
+    return this.readManifestOrEmpty(sessionId)
+      .andThen((manifest) => {
+        if (manifest.length === 0) return okAsync({ manifest: [], events: [] });
+
+        const segments = manifest.filter((m): m is Extract<ManifestRecordV1, { kind: 'segment_closed' }> => m.kind === 'segment_closed');
+        const sessionDir = this.dataDir.sessionDir(sessionId);
+        
+        const loadSegments = (segs: typeof segments): ResultAsync<DomainEventV1[], SessionEventLogStoreError> => {
+          if (segs.length === 0) return okAsync([]);
+          const [head, ...tail] = segs;
+          const segmentPath = `${sessionDir}/${head.segmentRelPath}`;
+          return this.fs.readFileBytes(segmentPath)
+            .mapErr(mapFsToStoreError)
+            .andThen((bytes) => {
+              const parsedRes = parseJsonlLines(bytes, DomainEventV1Schema);
+              if (parsedRes.isErr()) return errAsync(parsedRes.error);
+              return okAsync(parsedRes.value);
+            })
+            .andThen((events) => loadSegments(tail).map((rest) => [...events, ...rest]));
+        };
+
+        return loadSegments(segments).map((events) => ({ manifest, events }));
+      });
+  }
+
+  private appendManifestRecords(manifestPath: string, records: readonly ManifestRecordV1[]): ResultAsync<void, SessionEventLogStoreError> {
     // Write records as append-only JSONL and fsync once for this batch.
-    const handle = await this.unwrap(this.fs.openAppend(manifestPath), mapFsToStoreError);
-    const bytes = concatJsonlRecords(records as unknown as readonly JsonValue[]);
-    await this.unwrap(this.fs.writeAll(handle.fd, bytes), mapFsToStoreError);
-    await this.unwrap(this.fs.fsyncFile(handle.fd), mapFsToStoreError);
-    await this.unwrap(this.fs.closeFile(handle.fd), mapFsToStoreError);
-  }
+    return this.fs.openAppend(manifestPath)
+      .mapErr(mapFsToStoreError)
+      .andThen((handle) => {
+        const bytesRes = concatJsonlRecords(records as unknown as readonly JsonValue[]);
+        if (bytesRes.isErr()) return errAsync(bytesRes.error);
+        const bytes = bytesRes.value;
 
-  private async unwrap<T, E>(
-    ra: ResultAsync<T, E>,
-    map: (e: E) => SessionEventLogStoreError
-  ): Promise<T> {
-    return ra.match(
-      (v) => v,
-      (e) => {
-        throw new StoreFailure(map(e));
-      }
-    );
+        return this.fs.writeAll(handle.fd, bytes).mapErr(mapFsToStoreError)
+          .andThen(() => this.fs.fsyncFile(handle.fd).mapErr(mapFsToStoreError))
+          .andThen(() => this.fs.closeFile(handle.fd).mapErr(mapFsToStoreError));
+      });
   }
 }
 
 function mapFsToStoreError(e: FsError): SessionEventLogStoreError {
-  return { code: 'SESSION_STORE_IO_ERROR', message: e.message };
+  return { code: 'SESSION_STORE_IO_ERROR' as const, message: e.message } satisfies SessionEventLogStoreError;
 }
 
 function nextManifestIndex(manifest: readonly ManifestRecordV1[]): number {
@@ -400,11 +466,11 @@ function nextEventIndexFromManifest(manifest: readonly ManifestRecordV1[]): numb
   return segments[segments.length - 1]!.lastEventIndex + 1;
 }
 
-function validateManifestContiguityOrThrow(manifest: readonly ManifestRecordV1[]): void {
+function validateManifestContiguity(manifest: readonly ManifestRecordV1[]): Result<void, SessionEventLogStoreError> {
   for (let i = 0; i < manifest.length; i++) {
     const expected = i;
     if (manifest[i]!.manifestIndex !== expected) {
-      throw new StoreFailure({
+      return err({
         code: 'SESSION_STORE_CORRUPTION_DETECTED',
         location: i === 0 ? 'head' : 'tail',
         reason: {
@@ -415,15 +481,16 @@ function validateManifestContiguityOrThrow(manifest: readonly ManifestRecordV1[]
       });
     }
   }
+  return ok(undefined);
 }
 
-function validateSegmentClosedContiguityOrThrow(manifest: readonly ManifestRecordV1[]): void {
+function validateSegmentClosedContiguity(manifest: readonly ManifestRecordV1[]): Result<void, SessionEventLogStoreError> {
   const segments = manifest.filter((m): m is Extract<ManifestRecordV1, { kind: 'segment_closed' }> => m.kind === 'segment_closed');
   for (let i = 1; i < segments.length; i++) {
     const prev = segments[i - 1]!;
     const cur = segments[i]!;
     if (cur.firstEventIndex !== prev.lastEventIndex + 1) {
-      throw new StoreFailure({
+      return err({
         code: 'SESSION_STORE_CORRUPTION_DETECTED',
         location: 'tail',
         reason: {
@@ -434,17 +501,18 @@ function validateSegmentClosedContiguityOrThrow(manifest: readonly ManifestRecor
       });
     }
   }
+  return ok(undefined);
 }
 
-function validateAppendPlanOrThrow(sessionId: SessionId, plan: AppendPlanV2, expectedFirstEventIndex: number): void {
+function validateAppendPlan(sessionId: SessionId, plan: AppendPlanV2, expectedFirstEventIndex: number): Result<void, SessionEventLogStoreError> {
   if (plan.events.length === 0) {
-    throw new StoreFailure({ code: 'SESSION_STORE_INVARIANT_VIOLATION', message: 'AppendPlan.events must be non-empty' });
+    return err({ code: 'SESSION_STORE_INVARIANT_VIOLATION', message: 'AppendPlan.events must be non-empty' });
   }
 
   // Validate schema + sessionId, and contiguity.
   const first = plan.events[0]!;
   if (first.eventIndex !== expectedFirstEventIndex) {
-    throw new StoreFailure({
+    return err({
       code: 'SESSION_STORE_INVARIANT_VIOLATION',
       message: `AppendPlan.eventIndex must start at ${expectedFirstEventIndex} (got ${first.eventIndex})`,
     });
@@ -453,16 +521,16 @@ function validateAppendPlanOrThrow(sessionId: SessionId, plan: AppendPlanV2, exp
   for (let i = 0; i < plan.events.length; i++) {
     const e = DomainEventV1Schema.safeParse(plan.events[i]);
     if (!e.success) {
-      throw new StoreFailure({ code: 'SESSION_STORE_INVARIANT_VIOLATION', message: `Invalid domain event at index ${i}` });
+      return err({ code: 'SESSION_STORE_INVARIANT_VIOLATION', message: `Invalid domain event at index ${i}` });
     }
     if (e.data.sessionId !== sessionId) {
-      throw new StoreFailure({
+      return err({
         code: 'SESSION_STORE_INVARIANT_VIOLATION',
         message: `Domain event sessionId mismatch at index ${i}`,
       });
     }
     if (i > 0 && plan.events[i]!.eventIndex !== plan.events[i - 1]!.eventIndex + 1) {
-      throw new StoreFailure({
+      return err({
         code: 'SESSION_STORE_INVARIANT_VIOLATION',
         message: `Non-contiguous eventIndex in AppendPlan at index ${i}`,
       });
@@ -473,12 +541,13 @@ function validateAppendPlanOrThrow(sessionId: SessionId, plan: AppendPlanV2, exp
   const pins = sortedPins(plan.snapshotPins);
   for (const p of pins) {
     if (p.eventIndex < first.eventIndex || p.eventIndex > plan.events[plan.events.length - 1]!.eventIndex) {
-      throw new StoreFailure({
+      return err({
         code: 'SESSION_STORE_INVARIANT_VIOLATION',
         message: `SnapshotPin.eventIndex must refer to an event in the appended segment`,
       });
     }
   }
+  return ok(undefined);
 }
 
 function sortedPins(pins: readonly SnapshotPinV2[]): SnapshotPinV2[] {
@@ -497,18 +566,15 @@ function segmentRelPathFor(firstEventIndex: number, lastEventIndex: number): str
   return `events/${first}-${last}.jsonl`;
 }
 
-function concatJsonlRecords(records: readonly JsonValue[]): Uint8Array {
+function concatJsonlRecords(records: readonly JsonValue[]): Result<Uint8Array, SessionEventLogStoreError> {
   const parts: Uint8Array[] = [];
   let total = 0;
   for (const r of records) {
-    const encoded = toJsonlLineBytes(r).match(
-      (v) => v,
-      (e) => {
-        throw new StoreFailure({ code: 'SESSION_STORE_INVARIANT_VIOLATION', message: e.message });
-      }
-    );
-    parts.push(encoded);
-    total += encoded.length;
+    const encoded = toJsonlLineBytes(r);
+    if (encoded.isErr()) return err({ code: 'SESSION_STORE_INVARIANT_VIOLATION', message: encoded.error.message });
+    const val = encoded.value;
+    parts.push(val);
+    total += val.length;
   }
   const out = new Uint8Array(total);
   let offset = 0;
@@ -516,10 +582,10 @@ function concatJsonlRecords(records: readonly JsonValue[]): Uint8Array {
     out.set(p, offset);
     offset += p.length;
   }
-  return out;
+  return ok(out);
 }
 
-function parseJsonlText<T>(text: string, schema: { safeParse: (v: unknown) => { success: true; data: T } | { success: false } }): T[] {
+function parseJsonlText<T>(text: string, schema: { safeParse: (v: unknown) => { success: true; data: T } | { success: false } }): Result<T[], SessionEventLogStoreError> {
   const lines = text.split('\n').filter((l) => l.trim() !== '');
   const out: T[] = [];
   for (let i = 0; i < lines.length; i++) {
@@ -528,7 +594,7 @@ function parseJsonlText<T>(text: string, schema: { safeParse: (v: unknown) => { 
     try {
       parsed = JSON.parse(raw);
     } catch {
-      throw new StoreFailure({
+      return err({
         code: 'SESSION_STORE_CORRUPTION_DETECTED',
         location: i === 0 ? 'head' : 'tail',
         reason: { code: 'non_contiguous_indices', message: `Invalid JSONL at line ${i}` },
@@ -537,7 +603,7 @@ function parseJsonlText<T>(text: string, schema: { safeParse: (v: unknown) => { 
     }
     const validated = schema.safeParse(parsed);
     if (!validated.success) {
-      throw new StoreFailure({
+      return err({
         code: 'SESSION_STORE_CORRUPTION_DETECTED',
         location: i === 0 ? 'head' : 'tail',
         reason: { code: 'unknown_schema_version', message: `Invalid record at line ${i}` },
@@ -546,10 +612,10 @@ function parseJsonlText<T>(text: string, schema: { safeParse: (v: unknown) => { 
     }
     out.push(validated.data);
   }
-  return out;
+  return ok(out);
 }
 
-function parseJsonlLines<T>(bytes: Uint8Array, schema: { safeParse: (v: unknown) => { success: true; data: T } | { success: false } }): T[] {
+function parseJsonlLines<T>(bytes: Uint8Array, schema: { safeParse: (v: unknown) => { success: true; data: T } | { success: false } }): Result<T[], SessionEventLogStoreError> {
   const text = new TextDecoder().decode(bytes);
   return parseJsonlText(text, schema);
 }

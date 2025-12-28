@@ -14,6 +14,7 @@ import {
   type ParsedTokenV1,
   type TokenDecodeErrorV2,
   type TokenVerifyErrorV2,
+  type TokenPayloadV1,
   type AttemptId,
   type OutputId,
   asAttemptId,
@@ -22,12 +23,26 @@ import {
 import { encodeTokenPayloadV1, signTokenV1 } from '../../v2/durable-core/tokens/index.js';
 import { createWorkflow, getStepById } from '../../types/workflow.js';
 import type { DomainEventV1 } from '../../v2/durable-core/schemas/session/index.js';
+import {
+  asWorkflowId,
+  asSessionId,
+  asRunId,
+  asNodeId,
+  asWorkflowHash,
+  asSha256Digest,
+  type SessionId,
+  type RunId,
+  type NodeId,
+  type WorkflowHash,
+} from '../../v2/durable-core/ids/index.js';
+import type { LoadedSessionTruthV2 } from '../../v2/ports/session-event-log-store.port.js';
+import type { WithHealthySessionLock } from '../../v2/durable-core/ids/with-healthy-session-lock.js';
 import type { ExecutionSessionGateErrorV2 } from '../../v2/usecases/execution-session-gate.js';
 import type { SessionEventLogStoreError } from '../../v2/ports/session-event-log-store.port.js';
 import type { SnapshotStoreError } from '../../v2/ports/snapshot-store.port.js';
 import type { PinnedWorkflowStoreError } from '../../v2/ports/pinned-workflow-store.port.js';
 import type { HmacSha256PortV2 } from '../../v2/ports/hmac-sha256.port.js';
-import { ResultAsync as RA, okAsync, errAsync as neErrorAsync, ok, err } from 'neverthrow';
+import { ResultAsync as RA, okAsync, errAsync as neErrorAsync, ok, err, type Result } from 'neverthrow';
 import { compileV1WorkflowToPinnedSnapshot } from '../../v2/read-only/v1-to-v2-shim.js';
 import { workflowHashForCompiledSnapshot } from '../../v2/durable-core/canonical/hashing.js';
 import type { JsonObject, JsonValue } from '../../v2/durable-core/canonical/json-types.js';
@@ -40,6 +55,15 @@ import { WorkflowInterpreter } from '../../application/services/workflow-interpr
 import type { ExecutionState, LoopFrame } from '../../domain/execution/state.js';
 import type { WorkflowEvent } from '../../domain/execution/event.js';
 import type { StepInstanceId } from '../../domain/execution/ids.js';
+import {
+  mapStartWorkflowErrorToToolError,
+  mapContinueWorkflowErrorToToolError,
+  mapTokenDecodeErrorToToolError,
+  mapTokenVerifyErrorToToolError,
+  type StartWorkflowError,
+  type ContinueWorkflowError,
+} from './v2-execution-helpers.js';
+import * as z from 'zod';
 
 /**
  * v2 Slice 3: token orchestration (`start_workflow` / `continue_workflow`).
@@ -282,44 +306,6 @@ function checkContextBudget(args: { readonly tool: ContextToolNameV2; readonly c
   return { ok: true };
 }
 
-function tokenDecodeErrorToToolError(e: TokenDecodeErrorV2 | TokenVerifyErrorV2): ToolResult<never> {
-  switch (e.code) {
-    case 'TOKEN_INVALID_FORMAT':
-      return error(
-        'TOKEN_INVALID_FORMAT',
-        normalizeTokenErrorMessage(e.message),
-        'Use the exact tokens returned by WorkRail. Tokens are opaque; do not edit or construct them.'
-      );
-    case 'TOKEN_UNSUPPORTED_VERSION':
-      return error(
-        'TOKEN_UNSUPPORTED_VERSION',
-        normalizeTokenErrorMessage(e.message),
-        'Update WorkRail to a version that supports this token format.'
-      );
-    case 'TOKEN_BAD_SIGNATURE':
-      return error(
-        'TOKEN_BAD_SIGNATURE',
-        normalizeTokenErrorMessage(e.message),
-        'Token signature verification failed. Use the exact tokens returned by WorkRail.'
-      );
-    case 'TOKEN_SCOPE_MISMATCH':
-      return error(
-        'TOKEN_SCOPE_MISMATCH',
-        normalizeTokenErrorMessage(e.message),
-        'Tokens must come from the same WorkRail response. Do not mix tokens from different runs or nodes.'
-      );
-    case 'TOKEN_PAYLOAD_INVALID':
-      return error(
-        'TOKEN_INVALID_FORMAT',
-        normalizeTokenErrorMessage(e.message),
-        'Use the exact tokens returned by WorkRail.'
-      );
-    default:
-      const _exhaustive: never = e;
-      return _exhaustive;
-  }
-}
-
 type ToolFailure = Extract<ToolResult<unknown>, { readonly type: 'error' }>;
 
 // Typed error discriminators for internal flow control (not exposed to users)
@@ -376,6 +362,322 @@ function mapInternalErrorToToolError(e: InternalError): ToolFailure {
       const _exhaustive: never = e;
       return internalError('Unknown internal error kind', 'Treat as invariant violation.');
   }
+}
+
+/**
+ * Replay response from recorded advance facts (idempotent path).
+ * Fact-returning response: load recorded outcome and return from durable facts without recompute.
+ */
+function replayFromRecordedAdvance(args: {
+  readonly recordedEvent: Extract<DomainEventV1, { kind: 'advance_recorded' }>;
+  readonly truth: LoadedSessionTruthV2;
+  readonly sessionId: SessionId;
+  readonly runId: RunId;
+  readonly nodeId: NodeId;
+  readonly workflowHash: WorkflowHash;
+  readonly attemptId: AttemptId;
+  readonly inputStateToken: string;
+  readonly inputAckToken: string;
+  readonly pinnedWorkflow: ReturnType<typeof createWorkflow>;
+  readonly snapshotStore: import('../../v2/ports/snapshot-store.port.js').SnapshotStorePortV2;
+  readonly keyring: import('../../v2/ports/keyring.port.js').KeyringV1;
+  readonly hmac: HmacSha256PortV2;
+}): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, ContinueWorkflowError> {
+  const {
+    recordedEvent,
+    truth,
+    sessionId,
+    runId,
+    nodeId,
+    workflowHash,
+    attemptId,
+    inputStateToken,
+    inputAckToken,
+    pinnedWorkflow,
+    snapshotStore,
+    keyring,
+    hmac,
+  } = args;
+
+  const checkpointTokenRes = signTokenOrErr({
+    unsignedPrefix: 'chk.v1.',
+    payload: { tokenVersion: 1, tokenKind: 'checkpoint', sessionId, runId, nodeId, attemptId },
+    keyring,
+    hmac,
+  });
+  if (checkpointTokenRes.isErr()) {
+    return neErrorAsync({ kind: 'token_signing_failed' as const, cause: checkpointTokenRes.error });
+  }
+  const checkpointToken = checkpointTokenRes.value;
+
+  if (recordedEvent.data.outcome.kind === 'blocked') {
+    const blockers = recordedEvent.data.outcome.blockers;
+    const snapNode = truth.events.find(
+      (e): e is Extract<DomainEventV1, { kind: 'node_created' }> =>
+        e.kind === 'node_created' && e.scope?.nodeId === String(nodeId)
+    );
+
+    const snapRA = snapNode
+      ? snapshotStore.getExecutionSnapshotV1(snapNode.data.snapshotRef).mapErr((cause) => ({ kind: 'snapshot_load_failed' as const, cause }))
+      : okAsync(null);
+
+    return snapRA.map((snap) => {
+      const pendingNow = snap ? derivePendingStep(snap.enginePayload.engineState) : null;
+      const isCompleteNow = snap ? deriveIsComplete(snap.enginePayload.engineState) : false;
+
+      return V2ContinueWorkflowOutputSchema.parse({
+        kind: 'blocked',
+        stateToken: inputStateToken,
+        ackToken: inputAckToken,
+        checkpointToken,
+        isComplete: isCompleteNow,
+        pending: pendingNow
+          ? { stepId: String(pendingNow.stepId), title: String(pendingNow.stepId), prompt: `Pending step: ${String(pendingNow.stepId)}` }
+          : null,
+        blockers,
+      });
+    });
+  }
+
+  const toNodeId = recordedEvent.data.outcome.toNodeId;
+  const toNodeIdBranded = asNodeId(String(toNodeId));
+  const toNode = truth.events.find(
+    (e): e is Extract<DomainEventV1, { kind: 'node_created' }> =>
+      e.kind === 'node_created' && e.scope?.nodeId === String(toNodeId)
+  );
+  if (!toNode) {
+    return neErrorAsync({
+      kind: 'invariant_violation' as const,
+      message: 'Missing node_created for advanced toNodeId (invariant violation).',
+      suggestion: 'Retry; if this persists, treat as invariant violation.',
+    });
+  }
+
+  return snapshotStore
+    .getExecutionSnapshotV1(toNode.data.snapshotRef)
+    .mapErr((cause) => ({ kind: 'snapshot_load_failed' as const, cause }))
+    .andThen((snap) => {
+      if (!snap) {
+        return neErrorAsync({
+          kind: 'invariant_violation' as const,
+          message: 'Missing execution snapshot for advanced node (invariant violation).',
+          suggestion: 'Retry; if this persists, treat as invariant violation.',
+        });
+      }
+
+      const pending = derivePendingStep(snap.enginePayload.engineState);
+      const isComplete = deriveIsComplete(snap.enginePayload.engineState);
+
+      const nextAttemptId = attemptIdForNextNode(attemptId);
+      const nextAckTokenRes = signTokenOrErr({
+        unsignedPrefix: 'ack.v1.',
+        payload: { tokenVersion: 1, tokenKind: 'ack', sessionId, runId, nodeId: toNodeIdBranded, attemptId: nextAttemptId },
+        keyring,
+        hmac,
+      });
+      if (nextAckTokenRes.isErr()) {
+        return neErrorAsync({ kind: 'token_signing_failed' as const, cause: nextAckTokenRes.error });
+      }
+
+      const nextCheckpointTokenRes = signTokenOrErr({
+        unsignedPrefix: 'chk.v1.',
+        payload: { tokenVersion: 1, tokenKind: 'checkpoint', sessionId, runId, nodeId: toNodeIdBranded, attemptId: nextAttemptId },
+        keyring,
+        hmac,
+      });
+      if (nextCheckpointTokenRes.isErr()) {
+        return neErrorAsync({ kind: 'token_signing_failed' as const, cause: nextCheckpointTokenRes.error });
+      }
+
+      const nextStateTokenRes = signTokenOrErr({
+        unsignedPrefix: 'st.v1.',
+        payload: { tokenVersion: 1, tokenKind: 'state', sessionId, runId, nodeId: toNodeIdBranded, workflowHash },
+        keyring,
+        hmac,
+      });
+      if (nextStateTokenRes.isErr()) {
+        return neErrorAsync({ kind: 'token_signing_failed' as const, cause: nextStateTokenRes.error });
+      }
+
+      const { stepId, title, prompt } = extractStepMetadata(pinnedWorkflow, pending ? String(pending.stepId) : null);
+
+      return okAsync(
+        V2ContinueWorkflowOutputSchema.parse({
+          kind: 'ok',
+          stateToken: nextStateTokenRes.value,
+          ackToken: nextAckTokenRes.value,
+          checkpointToken: nextCheckpointTokenRes.value,
+          isComplete,
+          pending: stepId ? { stepId, title, prompt } : null,
+        })
+      );
+    });
+}
+
+/**
+ * Compute next state, append events, and return success sentinel (first-advance path).
+ * Executed under a healthy session lock witness.
+ */
+function advanceAndRecord(args: {
+  readonly truth: LoadedSessionTruthV2;
+  readonly sessionId: SessionId;
+  readonly runId: RunId;
+  readonly nodeId: NodeId;
+  readonly attemptId: AttemptId;
+  readonly workflowHash: WorkflowHash;
+  readonly dedupeKey: string;
+  readonly inputContext: JsonValue | undefined;
+  readonly inputOutput: V2ContinueWorkflowInput['output'];
+  readonly lock: WithHealthySessionLock;
+  readonly pinnedWorkflow: ReturnType<typeof createWorkflow>;
+  readonly snapshotStore: import('../../v2/ports/snapshot-store.port.js').SnapshotStorePortV2;
+  readonly sessionStore: import('../../v2/ports/session-event-log-store.port.js').SessionEventLogAppendStorePortV2;
+}): RA<void, InternalError | SessionEventLogStoreError | SnapshotStoreError> {
+  const { truth, sessionId, runId, nodeId, attemptId, workflowHash, dedupeKey, inputContext, inputOutput, lock, pinnedWorkflow, snapshotStore, sessionStore } = args;
+
+  // Enforce invariants: do not record advance attempts for unknown nodes.
+  const hasRun = truth.events.some((e) => e.kind === 'run_started' && e.scope?.runId === String(runId));
+  const hasNode = truth.events.some(
+    (e) => e.kind === 'node_created' && e.scope?.runId === String(runId) && e.scope?.nodeId === String(nodeId)
+  );
+  if (!hasRun || !hasNode) {
+    return errAsync({ kind: 'missing_node_or_run' as const });
+  }
+
+  // NOW instantiate compiler/interpreter
+  const compiler = new WorkflowCompiler();
+  const interpreter = new WorkflowInterpreter();
+  const compiledWf = compiler.compile(pinnedWorkflow);
+  if (compiledWf.isErr()) {
+    return errAsync({ kind: 'advance_apply_failed', message: compiledWf.error.message } as const);
+  }
+
+  // Load current node snapshot to compute next state.
+  const nodeCreated = truth.events.find(
+    (e): e is Extract<DomainEventV1, { kind: 'node_created' }> => e.kind === 'node_created' && e.scope?.nodeId === String(nodeId)
+  );
+  if (!nodeCreated) {
+    return errAsync({ kind: 'missing_node_or_run' as const });
+  }
+  if (String(nodeCreated.data.workflowHash) !== String(workflowHash)) {
+    return errAsync({ kind: 'workflow_hash_mismatch' as const });
+  }
+
+  return snapshotStore.getExecutionSnapshotV1(nodeCreated.data.snapshotRef).andThen((snap) => {
+    if (!snap) return errAsync({ kind: 'missing_snapshot' as const });
+    const currentState = toV1ExecutionState(snap.enginePayload.engineState);
+    const pendingStep = (currentState.kind === 'running' && currentState.pendingStep) ? currentState.pendingStep : null;
+    if (!pendingStep) {
+      return errAsync({ kind: 'no_pending_step' as const });
+    }
+    const event: WorkflowEvent = { kind: 'step_completed', stepInstanceId: pendingStep };
+    const advanced = interpreter.applyEvent(currentState, event);
+    if (advanced.isErr()) {
+      return errAsync({ kind: 'advance_apply_failed', message: advanced.error.message } as const);
+    }
+    const ctxObj: Record<string, unknown> =
+      inputContext && typeof inputContext === 'object' && inputContext !== null && !Array.isArray(inputContext)
+        ? (inputContext as unknown as Record<string, unknown>)
+        : {};
+    const nextRes = interpreter.next(compiledWf.value, advanced.value, ctxObj);
+    if (nextRes.isErr()) {
+      return errAsync({ kind: 'advance_next_failed', message: nextRes.error.message } as const);
+    }
+
+    const out = nextRes.value;
+    const newEngineState = fromV1ExecutionState(out.state);
+    const snapshotFile: ExecutionSnapshotFileV1 = {
+      v: 1,
+      kind: 'execution_snapshot',
+      enginePayload: { v: 1, engineState: newEngineState },
+    };
+
+    return snapshotStore.putExecutionSnapshotV1(snapshotFile).andThen((newSnapshotRef) => {
+      const toNodeId = `node_${randomUUID()}`;
+      const nextEventIndex = truth.events.length === 0 ? 0 : truth.events[truth.events.length - 1]!.eventIndex + 1;
+
+      const evtAdvanceRecorded = `evt_${randomUUID()}`;
+      const evtNodeCreated = `evt_${randomUUID()}`;
+      const evtEdgeCreated = `evt_${randomUUID()}`;
+
+      const hasChildren = truth.events.some(
+        (e): e is Extract<DomainEventV1, { kind: 'edge_created' }> =>
+          e.kind === 'edge_created' && e.data.fromNodeId === String(nodeId)
+      );
+      const causeKind: 'non_tip_advance' | 'intentional_fork' = hasChildren ? 'non_tip_advance' : 'intentional_fork';
+
+      const baseEvents: readonly DomainEventV1[] = [
+        {
+          v: 1,
+          eventId: evtAdvanceRecorded,
+          eventIndex: nextEventIndex,
+          sessionId,
+          kind: 'advance_recorded' as const,
+          dedupeKey,
+          scope: { runId, nodeId },
+          data: {
+            attemptId,
+            intent: 'ack_pending' as const,
+            outcome: { kind: 'advanced' as const, toNodeId },
+          },
+        },
+        {
+          v: 1,
+          eventId: evtNodeCreated,
+          eventIndex: nextEventIndex + 1,
+          sessionId,
+          kind: 'node_created' as const,
+          dedupeKey: `node_created:${sessionId}:${runId}:${toNodeId}`,
+          scope: { runId, nodeId: toNodeId },
+          data: { nodeKind: 'step' as const, parentNodeId: String(nodeId), workflowHash, snapshotRef: newSnapshotRef },
+        },
+        {
+          v: 1,
+          eventId: evtEdgeCreated,
+          eventIndex: nextEventIndex + 2,
+          sessionId,
+          kind: 'edge_created' as const,
+          dedupeKey: `edge_created:${sessionId}:${runId}:${String(nodeId)}->${toNodeId}:acked_step`,
+          scope: { runId },
+          data: {
+            edgeKind: 'acked_step' as const,
+            fromNodeId: String(nodeId),
+            toNodeId,
+            cause: { kind: causeKind, eventId: evtAdvanceRecorded },
+          },
+        },
+      ];
+
+      const outputId = asOutputId(`out_recap_${String(attemptId)}`);
+      const events: readonly DomainEventV1[] = inputOutput?.notesMarkdown
+        ? [
+            ...baseEvents,
+            {
+              v: 1,
+              eventId: `evt_${randomUUID()}`,
+              eventIndex: nextEventIndex + 3,
+              sessionId,
+              kind: 'node_output_appended' as const,
+              dedupeKey: `node_output_appended:${sessionId}:${outputId}`,
+              scope: { runId, nodeId },
+              data: {
+                outputId: `out_recap_${attemptId}`,
+                outputChannel: 'recap' as const,
+                payload: {
+                  payloadKind: 'notes' as const,
+                  notesMarkdown: inputOutput.notesMarkdown.slice(0, 4096),
+                },
+              },
+            },
+          ]
+        : baseEvents;
+
+      return sessionStore.append(lock, {
+        events,
+        snapshotPins: [{ snapshotRef: newSnapshotRef, eventIndex: nextEventIndex + 1, createdByEventId: evtNodeCreated }],
+      });
+    });
+  });
 }
 
 function errAsync(e: InternalError): RA<never, InternalError> {
@@ -483,19 +785,24 @@ function parseStateTokenOrFail(
   raw: string,
   keyring: import('../../v2/ports/keyring.port.js').KeyringV1,
   hmac: HmacSha256PortV2
-): { ok: true; token: StateTokenInput } | { ok: false; result: ToolResult<never> } {
+): { ok: true; token: StateTokenInput } | { ok: false; failure: ToolFailure } {
   const parsedRes = parseTokenV1(raw);
   if (parsedRes.isErr()) {
-    return { ok: false, result: tokenDecodeErrorToToolError(parsedRes.error) };
+    return { ok: false, failure: mapTokenDecodeErrorToToolError(parsedRes.error) };
   }
 
   const verified = verifyTokenSignatureV1(parsedRes.value, keyring, hmac);
   if (verified.isErr()) {
-    return { ok: false, result: tokenDecodeErrorToToolError(verified.error) };
+    return { ok: false, failure: mapTokenVerifyErrorToToolError(verified.error) };
   }
 
   if (parsedRes.value.payload.tokenKind !== 'state') {
-    return { ok: false, result: error('TOKEN_INVALID_FORMAT', 'Expected a state token (st.v1.*).', 'Use the stateToken returned by WorkRail.') };
+    return {
+      ok: false,
+      failure: errNotRetryable('TOKEN_INVALID_FORMAT', 'Expected a state token (st.v1.*).', {
+        suggestion: 'Use the stateToken returned by WorkRail.',
+      }) as ToolFailure,
+    };
   }
 
   return { ok: true, token: parsedRes.value as StateTokenInput };
@@ -505,19 +812,24 @@ function parseAckTokenOrFail(
   raw: string,
   keyring: import('../../v2/ports/keyring.port.js').KeyringV1,
   hmac: HmacSha256PortV2
-): { ok: true; token: AckTokenInput } | { ok: false; result: ToolResult<never> } {
+): { ok: true; token: AckTokenInput } | { ok: false; failure: ToolFailure } {
   const parsedRes = parseTokenV1(raw);
   if (parsedRes.isErr()) {
-    return { ok: false, result: tokenDecodeErrorToToolError(parsedRes.error) };
+    return { ok: false, failure: mapTokenDecodeErrorToToolError(parsedRes.error) };
   }
 
   const verified = verifyTokenSignatureV1(parsedRes.value, keyring, hmac);
   if (verified.isErr()) {
-    return { ok: false, result: tokenDecodeErrorToToolError(verified.error) };
+    return { ok: false, failure: mapTokenVerifyErrorToToolError(verified.error) };
   }
 
   if (parsedRes.value.payload.tokenKind !== 'ack') {
-    return { ok: false, result: error('TOKEN_INVALID_FORMAT', 'Expected an ack token (ack.v1.*).', 'Use the ackToken returned by WorkRail.') };
+    return {
+      ok: false,
+      failure: errNotRetryable('TOKEN_INVALID_FORMAT', 'Expected an ack token (ack.v1.*).', {
+        suggestion: 'Use the ackToken returned by WorkRail.',
+      }) as ToolFailure,
+    };
   }
 
   return { ok: true, token: parsedRes.value as AckTokenInput };
@@ -534,19 +846,17 @@ function attemptIdForNextNode(parentAttemptId: AttemptId): AttemptId {
 
 function signTokenOrErr(args: {
   unsignedPrefix: TokenPrefix;
-  payload: unknown;
+  payload: TokenPayloadV1;
   keyring: import('../../v2/ports/keyring.port.js').KeyringV1;
   hmac: HmacSha256PortV2;
-}): { ok: true; token: string } | { ok: false; error: ToolFailure } {
-  const bytes = encodeTokenPayloadV1(args.payload as any /* TYPE SAFETY: unknown → TokenPayloadV1 validated by schema */);
-  if (bytes.isErr()) {
-    return { ok: false, error: internalError(`Failed to encode token payload: ${bytes.error.code}`, 'Retry; if this persists, treat as invariant violation.') };
-  }
-  const token = signTokenV1(args.unsignedPrefix, bytes.value as any /* TYPE SAFETY: CanonicalBytes branded type; signTokenV1 expects it */, args.keyring, args.hmac);
-  if (token.isErr()) {
-    return { ok: false, error: internalError(`Failed to sign token: ${token.error.code}`, 'Retry; if this persists, treat as invariant violation.') };
-  }
-  return { ok: true, token: String(token.value) };
+}): Result<string, TokenDecodeErrorV2 | TokenVerifyErrorV2> {
+  const bytes = encodeTokenPayloadV1(args.payload);
+  if (bytes.isErr()) return err(bytes.error);
+
+  const token = signTokenV1(args.unsignedPrefix, bytes.value, args.keyring, args.hmac);
+  if (token.isErr()) return err(token.error);
+
+  return ok(String(token.value));
 }
 
 function toV1ExecutionState(engineState: EngineStateV1): ExecutionState {
@@ -642,666 +952,482 @@ export async function handleV2StartWorkflow(
   input: V2StartWorkflowInput,
   ctx: ToolContext
 ): Promise<ToolResult<unknown>> {
-  try {
-    if (!ctx.v2) {
-      return errNotRetryable('PRECONDITION_FAILED', 'v2 tools disabled', { suggestion: 'Enable v2Tools flag' });
-    }
+  return executeStartWorkflow(input, ctx).match(
+    (payload) => success(payload),
+    (e) => mapStartWorkflowErrorToToolError(e)
+  );
+}
 
-    const { gate, sessionStore, snapshotStore, pinnedStore, keyring, crypto, hmac } = ctx.v2;
-
-    const ctxCheck = checkContextBudget({ tool: 'start_workflow', context: input.context });
-    if (!ctxCheck.ok) return ctxCheck.error;
-
-    const workflow = await ctx.workflowService.getWorkflowById(input.workflowId);
-    if (!workflow) {
-      return error('NOT_FOUND', `Workflow not found: ${input.workflowId}`, 'Use list_workflows to discover available workflows.');
-    }
-
-    const firstStep = workflow.definition.steps[0];
-    if (!firstStep) {
-      return error('PRECONDITION_FAILED', 'Workflow has no steps and cannot be started.', 'Fix the workflow definition (must contain at least one step).');
-    }
-
-    // Pin the full v1 workflow definition for determinism (until v2 authoring exists).
-    const compiled = compileV1WorkflowToPinnedSnapshot(workflow);
-    const workflowHashRes = workflowHashForCompiledSnapshot(compiled as unknown as JsonValue, crypto);
-    if (workflowHashRes.isErr()) {
-      return error('INTERNAL_ERROR', workflowHashRes.error.message);
-    }
-    const workflowHash = workflowHashRes.value;
-    const existingPinned = await pinnedStore.get(workflowHash).match((v) => v, () => null);
-    if (!existingPinned) {
-      const putRes = await pinnedStore.put(workflowHash, compiled);
-      if (putRes.isErr()) return pinnedWorkflowStoreErrorToToolError(putRes.error, 'Retry start_workflow.');
-    }
-
-    // Phase 4 lock: render first pending from the pinned snapshot (not live source) to eliminate TOCTOU.
-    const pinnedRes = await pinnedStore.get(workflowHash);
-    if (pinnedRes.isErr()) return pinnedWorkflowStoreErrorToToolError(pinnedRes.error, 'Retry start_workflow.');
-    const pinned = pinnedRes.value;
-    if (!pinned || pinned.sourceKind !== 'v1_pinned' || !hasWorkflowDefinitionShape(pinned.definition)) {
-      return error('INTERNAL_ERROR', 'Failed to pin executable workflow snapshot.', 'Retry start_workflow.');
-    }
-    const pinnedWorkflow = createWorkflow(pinned.definition as WorkflowDefinition, createBundledSource());
-
-    // Mint identifiers (opaque; not hashed into workflowHash).
-    const sessionId = `sess_${randomUUID()}`;
-    const runId = `run_${randomUUID()}`;
-    const nodeId = `node_${randomUUID()}`;
-
-    // Store an initial execution snapshot with the first step pending.
-    const snapshot: ExecutionSnapshotFileV1 = {
-      v: 1 as const,
-      kind: 'execution_snapshot' as const,
-      enginePayload: {
-        v: 1 as const,
-        engineState: {
-          kind: 'running' as const,
-          completed: { kind: 'set' as const, values: [] },
-          loopStack: [],
-          pending: { kind: 'some' as const, step: { stepId: asDelimiterSafeIdV1(firstStep.id), loopPath: [] } },
-        },
-      },
-    };
-    const snapshotRefRes = await snapshotStore.putExecutionSnapshotV1(snapshot);
-    if (snapshotRefRes.isErr()) return snapshotStoreErrorToToolError(snapshotRefRes.error, 'Retry start_workflow.');
-    const snapshotRef = snapshotRefRes.value;
-
-    const evtSessionCreated = `evt_${randomUUID()}`;
-    const evtRunStarted = `evt_${randomUUID()}`;
-    const evtNodeCreated = `evt_${randomUUID()}`;
-
-    // Persist durable truth under a healthy lock witness.
-    const appendRes = await gate
-      .withHealthySessionLock(sessionId as any /* TYPE SAFETY: v1 string → v2 SessionId branded boundary */, (lock) => {
-        const eventsArray: readonly DomainEventV1[] = [
-          {
-            v: 1,
-            eventId: evtSessionCreated,
-            eventIndex: 0,
-            sessionId,
-            kind: 'session_created' as const,
-            dedupeKey: `session_created:${sessionId}`,
-            data: {},
-          },
-          {
-            v: 1,
-            eventId: evtRunStarted,
-            eventIndex: 1,
-            sessionId,
-            kind: 'run_started' as const,
-            dedupeKey: `run_started:${sessionId}:${runId}`,
-            scope: { runId },
-            data: {
-              workflowId: workflow.definition.id,
-              workflowHash: String(workflowHash),
-              workflowSourceKind: mapWorkflowSourceKind(workflow.source.kind),
-              workflowSourceRef:
-                workflow.source.kind === 'user' || workflow.source.kind === 'project' || workflow.source.kind === 'custom'
-                  ? workflow.source.directoryPath
-                  : workflow.source.kind === 'git'
-                    ? `${workflow.source.repositoryUrl}#${workflow.source.branch}`
-                    : workflow.source.kind === 'remote'
-                      ? workflow.source.registryUrl
-                      : workflow.source.kind === 'plugin'
-                        ? `${workflow.source.pluginName}@${workflow.source.pluginVersion}`
-                        : '(bundled)',
-            },
-          },
-          {
-            v: 1,
-            eventId: evtNodeCreated,
-            eventIndex: 2,
-            sessionId,
-            kind: 'node_created' as const,
-            dedupeKey: `node_created:${sessionId}:${runId}:${nodeId}`,
-            scope: { runId, nodeId },
-            data: {
-              nodeKind: 'step' as const,
-              parentNodeId: null,
-              workflowHash: String(workflowHash),
-              snapshotRef,
-            },
-          },
-        ];
-        return sessionStore.append(lock, {
-          events: eventsArray,
-          snapshotPins: [{ snapshotRef, eventIndex: 2, createdByEventId: evtNodeCreated }],
-        });
-      })
-      .match(
-        () => ({ ok: true as const }),
-        (e) => ({ ok: false as const, error: e })
-      );
-    if (!appendRes.ok) {
-      const err: unknown = appendRes.error;
-      if (typeof err === 'object' && err !== null && 'code' in err && (err as any /* TYPE SAFETY: runtime discriminator check before union narrowing */).code === 'SESSION_NOT_HEALTHY') {
-        return gateErrorToToolError(err as ExecutionSessionGateErrorV2);
-      }
-      if (typeof err === 'object' && err !== null && 'code' in err) {
-        return sessionStoreErrorToToolError(err as SessionEventLogStoreError);
-      }
-      return internalError(String(err), 'Retry; if this persists, check for filesystem errors.');
-    }
-
-    const statePayload = {
-      tokenVersion: 1 as const,
-      tokenKind: 'state' as const,
-      sessionId,
-      runId,
-      nodeId,
-      workflowHash: String(workflowHash),
-    };
-    const attemptId = newAttemptId();
-    const ackPayload = {
-      tokenVersion: 1 as const,
-      tokenKind: 'ack' as const,
-      sessionId,
-      runId,
-      nodeId,
-      attemptId,
-    };
-    const checkpointPayload = {
-      tokenVersion: 1 as const,
-      tokenKind: 'checkpoint' as const,
-      sessionId,
-      runId,
-      nodeId,
-      attemptId,
-    };
-
-    const stateTokenRes = signTokenOrErr({ unsignedPrefix: 'st.v1.', payload: statePayload, keyring, hmac });
-    if (!stateTokenRes.ok) return stateTokenRes.error;
-    const stateToken = stateTokenRes.token;
-    
-    const ackTokenRes = signTokenOrErr({ unsignedPrefix: 'ack.v1.', payload: ackPayload, keyring, hmac });
-    if (!ackTokenRes.ok) return ackTokenRes.error;
-    const ackToken = ackTokenRes.token;
-    
-    const checkpointTokenRes = signTokenOrErr({ unsignedPrefix: 'chk.v1.', payload: checkpointPayload, keyring, hmac });
-    if (!checkpointTokenRes.ok) return checkpointTokenRes.error;
-    const checkpointToken = checkpointTokenRes.token;
-
-    // Render first pending from pinned snapshot (Phase 4 lock).
-    const { stepId, title, prompt } = extractStepMetadata(pinnedWorkflow, firstStep.id);
-    const pending = { stepId, title, prompt };
-
-    const payload = V2StartWorkflowOutputSchema.parse({
-      stateToken,
-      ackToken,
-      checkpointToken,
-      isComplete: false,
-      pending,
-    });
-    return success(payload);
-  } catch (e) {
-    return error(
-      'INTERNAL_ERROR',
-      normalizeTokenErrorMessage(e instanceof Error ? e.message : String(e)),
-      'Retry; if this persists, delete the WorkRail v2 data directory for this repo and retry.'
-    );
+function executeStartWorkflow(
+  input: V2StartWorkflowInput,
+  ctx: ToolContext
+): RA<z.infer<typeof V2StartWorkflowOutputSchema>, StartWorkflowError> {
+  if (!ctx.v2) {
+    return neErrorAsync({ kind: 'precondition_failed', message: 'v2 tools disabled', suggestion: 'Enable v2Tools flag' });
   }
+
+  const { gate, sessionStore, snapshotStore, pinnedStore, keyring, crypto, hmac } = ctx.v2;
+
+  const ctxCheck = checkContextBudget({ tool: 'start_workflow', context: input.context });
+  if (!ctxCheck.ok) return neErrorAsync({ kind: 'validation_failed', failure: ctxCheck.error });
+
+  return RA.fromPromise(ctx.workflowService.getWorkflowById(input.workflowId), (e) => ({
+    kind: 'precondition_failed' as const,
+    message: e instanceof Error ? e.message : String(e),
+  }))
+    .andThen((workflow) => {
+      if (!workflow) {
+        return neErrorAsync({ kind: 'workflow_not_found' as const, workflowId: asWorkflowId(input.workflowId) });
+      }
+      const firstStep = workflow.definition.steps[0];
+      if (!firstStep) {
+        return neErrorAsync({ kind: 'workflow_has_no_steps' as const, workflowId: asWorkflowId(input.workflowId) });
+      }
+      return okAsync({ workflow, firstStep });
+    })
+    .andThen(({ workflow, firstStep }) => {
+      // Pin the full v1 workflow definition for determinism.
+      const compiled = compileV1WorkflowToPinnedSnapshot(workflow);
+      const workflowHashRes = workflowHashForCompiledSnapshot(compiled as unknown as JsonValue, crypto);
+      if (workflowHashRes.isErr()) {
+        return neErrorAsync({ kind: 'hash_computation_failed' as const, message: workflowHashRes.error.message });
+      }
+      const workflowHash = workflowHashRes.value;
+
+      return pinnedStore.get(workflowHash)
+        .mapErr((cause) => ({ kind: 'pinned_workflow_store_failed' as const, cause }))
+        .andThen((existingPinned) => {
+          if (!existingPinned) {
+            return pinnedStore.put(workflowHash, compiled)
+              .mapErr((cause) => ({ kind: 'pinned_workflow_store_failed' as const, cause }));
+          }
+          return okAsync(undefined);
+        })
+        .andThen(() => pinnedStore.get(workflowHash).mapErr((cause) => ({ kind: 'pinned_workflow_store_failed' as const, cause })))
+        .andThen((pinned) => {
+          if (!pinned || pinned.sourceKind !== 'v1_pinned' || !hasWorkflowDefinitionShape(pinned.definition)) {
+            return neErrorAsync({
+              kind: 'invariant_violation' as const,
+              message: 'Failed to pin executable workflow snapshot (missing or invalid pinned workflow).',
+              suggestion: 'Retry start_workflow; if this persists, treat as invariant violation.',
+            });
+          }
+          const pinnedWorkflow = createWorkflow(pinned.definition as WorkflowDefinition, createBundledSource());
+          return okAsync({ workflow, firstStep, workflowHash, pinnedWorkflow });
+        });
+    })
+    .andThen(({ workflow, firstStep, workflowHash, pinnedWorkflow }) => {
+      const sessionId = asSessionId(`sess_${randomUUID()}`);
+      const runId = asRunId(`run_${randomUUID()}`);
+      const nodeId = asNodeId(`node_${randomUUID()}`);
+
+      const snapshot: ExecutionSnapshotFileV1 = {
+        v: 1 as const,
+        kind: 'execution_snapshot' as const,
+        enginePayload: {
+          v: 1 as const,
+          engineState: {
+            kind: 'running' as const,
+            completed: { kind: 'set' as const, values: [] },
+            loopStack: [],
+            pending: { kind: 'some' as const, step: { stepId: asDelimiterSafeIdV1(firstStep.id), loopPath: [] } },
+          },
+        },
+      };
+
+      return snapshotStore.putExecutionSnapshotV1(snapshot)
+        .mapErr((cause) => ({ kind: 'snapshot_creation_failed' as const, cause }))
+        .andThen((snapshotRef) => {
+          const evtSessionCreated = `evt_${randomUUID()}`;
+          const evtRunStarted = `evt_${randomUUID()}`;
+          const evtNodeCreated = `evt_${randomUUID()}`;
+
+          return gate.withHealthySessionLock(sessionId, (lock) => {
+            const eventsArray: readonly DomainEventV1[] = [
+              {
+                v: 1,
+                eventId: evtSessionCreated,
+                eventIndex: 0,
+                sessionId,
+                kind: 'session_created' as const,
+                dedupeKey: `session_created:${sessionId}`,
+                data: {},
+              },
+              {
+                v: 1,
+                eventId: evtRunStarted,
+                eventIndex: 1,
+                sessionId,
+                kind: 'run_started' as const,
+                dedupeKey: `run_started:${sessionId}:${runId}`,
+                scope: { runId },
+                data: {
+                  workflowId: workflow.definition.id,
+                  workflowHash,
+                  workflowSourceKind: mapWorkflowSourceKind(workflow.source.kind),
+                  workflowSourceRef:
+                    workflow.source.kind === 'user' || workflow.source.kind === 'project' || workflow.source.kind === 'custom'
+                      ? workflow.source.directoryPath
+                      : workflow.source.kind === 'git'
+                        ? `${workflow.source.repositoryUrl}#${workflow.source.branch}`
+                        : workflow.source.kind === 'remote'
+                          ? workflow.source.registryUrl
+                          : workflow.source.kind === 'plugin'
+                            ? `${workflow.source.pluginName}@${workflow.source.pluginVersion}`
+                            : '(bundled)',
+                },
+              },
+              {
+                v: 1,
+                eventId: evtNodeCreated,
+                eventIndex: 2,
+                sessionId,
+                kind: 'node_created' as const,
+                dedupeKey: `node_created:${sessionId}:${runId}:${nodeId}`,
+                scope: { runId, nodeId },
+                data: {
+                  nodeKind: 'step' as const,
+                  parentNodeId: null,
+                  workflowHash,
+                  snapshotRef,
+                },
+              },
+            ];
+            return sessionStore.append(lock, {
+              events: eventsArray,
+              snapshotPins: [{ snapshotRef, eventIndex: 2, createdByEventId: evtNodeCreated }],
+            });
+          })
+            .mapErr((cause) => ({ kind: 'session_append_failed' as const, cause }))
+            .map(() => ({ workflow, firstStep, workflowHash, pinnedWorkflow, sessionId, runId, nodeId }));
+        });
+    })
+    .andThen(({ pinnedWorkflow, firstStep, workflowHash, sessionId, runId, nodeId }) => {
+      const statePayload = {
+        tokenVersion: 1 as const,
+        tokenKind: 'state' as const,
+        sessionId,
+        runId,
+        nodeId,
+        workflowHash,
+      };
+      const attemptId = newAttemptId();
+      const ackPayload = {
+        tokenVersion: 1 as const,
+        tokenKind: 'ack' as const,
+        sessionId,
+        runId,
+        nodeId,
+        attemptId,
+      };
+      const checkpointPayload = {
+        tokenVersion: 1 as const,
+        tokenKind: 'checkpoint' as const,
+        sessionId,
+        runId,
+        nodeId,
+        attemptId,
+      };
+
+      const stateToken = signTokenOrErr({ unsignedPrefix: 'st.v1.', payload: statePayload, keyring, hmac });
+      if (stateToken.isErr()) return neErrorAsync({ kind: 'token_signing_failed' as const, cause: stateToken.error });
+      
+      const ackToken = signTokenOrErr({ unsignedPrefix: 'ack.v1.', payload: ackPayload, keyring, hmac });
+      if (ackToken.isErr()) return neErrorAsync({ kind: 'token_signing_failed' as const, cause: ackToken.error });
+      
+      const checkpointToken = signTokenOrErr({ unsignedPrefix: 'chk.v1.', payload: checkpointPayload, keyring, hmac });
+      if (checkpointToken.isErr()) return neErrorAsync({ kind: 'token_signing_failed' as const, cause: checkpointToken.error });
+
+      const { stepId, title, prompt } = extractStepMetadata(pinnedWorkflow, firstStep.id);
+      const pending = { stepId, title, prompt };
+
+      return okAsync(V2StartWorkflowOutputSchema.parse({
+        stateToken: stateToken.value,
+        ackToken: ackToken.value,
+        checkpointToken: checkpointToken.value,
+        isComplete: false,
+        pending,
+      }));
+    });
 }
 
 export async function handleV2ContinueWorkflow(
   input: V2ContinueWorkflowInput,
   ctx: ToolContext
 ): Promise<ToolResult<unknown>> {
-  // Slice 3.2: validate tokens and scope at the boundary even before orchestration exists.
-  // This prevents agents from "training" on incorrect payload shapes and catches copy/paste corruption early.
-  try {
-    if (!ctx.v2) {
-      return errNotRetryable('PRECONDITION_FAILED', 'v2 tools disabled', { suggestion: 'Enable v2Tools flag' });
-    }
+  return executeContinueWorkflow(input, ctx).match(
+    (payload) => success(payload),
+    (e) => mapContinueWorkflowErrorToToolError(e)
+  );
+}
 
-    const { gate, sessionStore, snapshotStore, pinnedStore, keyring, crypto, hmac } = ctx.v2;
-
-    const state = parseStateTokenOrFail(input.stateToken, keyring, hmac);
-    if (!state.ok) return state.result;
-
-    const ctxCheck = checkContextBudget({ tool: 'continue_workflow', context: input.context });
-    if (!ctxCheck.ok) return ctxCheck.error;
-
-    if (!input.ackToken) {
-      // Slice 3.3: rehydrate-only path (must be side-effect-free).
-      const sessionId = state.token.payload.sessionId;
-      const runId = state.token.payload.runId;
-      const nodeId = state.token.payload.nodeId;
-      const workflowHash = state.token.payload.workflowHash;
-
-      const truthRes = await sessionStore.load(sessionId);
-      if (truthRes.isErr()) return sessionStoreErrorToToolError(truthRes.error);
-      const truth = truthRes.value;
-
-      const runStarted = truth.events.find(
-        (e): e is Extract<DomainEventV1, { kind: 'run_started' }> => e.kind === 'run_started' && e.scope.runId === String(runId)
-      );
-      const workflowId = runStarted?.data.workflowId;
-      if (!runStarted || typeof workflowId !== 'string' || workflowId.trim() === '') {
-        return error(
-          'TOKEN_UNKNOWN_NODE',
-          'No durable run state was found for this stateToken (missing run_started).',
-          'Use start_workflow to mint a new run, or use a stateToken returned by WorkRail for an existing run.'
-        );
-      }
-      if (String(runStarted.data.workflowHash) !== String(workflowHash)) {
-        return error(
-          'TOKEN_WORKFLOW_HASH_MISMATCH',
-          'workflowHash mismatch for this run.',
-          'Use the stateToken returned by WorkRail for this run.'
-        );
-      }
-
-      const nodeCreated = truth.events.find(
-        (e): e is Extract<DomainEventV1, { kind: 'node_created' }> =>
-          e.kind === 'node_created' && e.scope.nodeId === String(nodeId) && e.scope.runId === String(runId)
-      );
-      if (!nodeCreated) {
-        return error(
-          'TOKEN_UNKNOWN_NODE',
-          'No durable node state was found for this stateToken (missing node_created).',
-          'Use a stateToken returned by WorkRail for an existing node.'
-        );
-      }
-      if (String(nodeCreated.data.workflowHash) !== String(workflowHash)) {
-        return error(
-          'TOKEN_WORKFLOW_HASH_MISMATCH',
-          'workflowHash mismatch for this node.',
-          'Use the stateToken returned by WorkRail for this node.'
-        );
-      }
-
-      const snapshotRef = nodeCreated.data.snapshotRef;
-      const snapshotRes = await snapshotStore.getExecutionSnapshotV1(snapshotRef);
-      if (snapshotRes.isErr()) return snapshotStoreErrorToToolError(snapshotRes.error);
-      const snapshot = snapshotRes.value;
-      if (!snapshot) {
-        return error(
-          'TOKEN_UNKNOWN_NODE',
-          'No execution snapshot was found for this node.',
-          'Use a stateToken returned by WorkRail for an existing node.'
-        );
-      }
-
-      const engineState = snapshot.enginePayload.engineState;
-      const pending = derivePendingStep(engineState);
-      const isComplete = deriveIsComplete(engineState);
-
-      const attemptId = newAttemptId();
-      const ackTokenRes = signTokenOrErr({
-        unsignedPrefix: 'ack.v1.',
-        payload: { tokenVersion: 1, tokenKind: 'ack', sessionId, runId, nodeId, attemptId },
-        keyring,
-        hmac,
-      });
-      if (!ackTokenRes.ok) return ackTokenRes.error;
-      const ackToken = ackTokenRes.token;
-      
-      const checkpointTokenRes = signTokenOrErr({
-        unsignedPrefix: 'chk.v1.',
-        payload: { tokenVersion: 1, tokenKind: 'checkpoint', sessionId, runId, nodeId, attemptId },
-        keyring,
-        hmac,
-      });
-      if (!checkpointTokenRes.ok) return checkpointTokenRes.error;
-      const checkpointToken = checkpointTokenRes.token;
-
-      if (!pending) {
-        const payload = V2ContinueWorkflowOutputSchema.parse({
-          kind: 'ok',
-          stateToken: input.stateToken,
-          ackToken,
-          checkpointToken,
-          isComplete,
-          pending: null,
-        });
-        return success(payload);
-      }
-
-      const pinnedRes = await pinnedStore.get(workflowHash);
-      if (pinnedRes.isErr()) return pinnedWorkflowStoreErrorToToolError(pinnedRes.error);
-      const pinned = pinnedRes.value;
-      if (!pinned) {
-        return error('PRECONDITION_FAILED', 'Pinned workflow snapshot is missing for this run.', 'Re-run start_workflow or re-pin the workflow via inspect_workflow.');
-      }
-      if (pinned.sourceKind !== 'v1_pinned') {
-        return error('PRECONDITION_FAILED', 'Pinned workflow snapshot is read-only (v1_preview) and cannot be executed.', 'Re-run start_workflow to pin an executable snapshot.');
-      }
-      if (!hasWorkflowDefinitionShape(pinned.definition)) {
-        return error('INTERNAL_ERROR', 'Pinned workflow snapshot has an invalid workflow definition shape.', 'Re-pin the workflow.');
-      }
-      const wf = createWorkflow(pinned.definition as WorkflowDefinition, createBundledSource());
-
-      const { stepId, title, prompt } = extractStepMetadata(wf, String(pending.stepId));
-
-      const payload = V2ContinueWorkflowOutputSchema.parse({
-        kind: 'ok',
-        stateToken: input.stateToken,
-        ackToken,
-        checkpointToken,
-        isComplete,
-        pending: {
-          stepId,
-          title,
-          prompt,
-        },
-      });
-      return success(payload);
-    }
-
-    // Ack-token path: Slice 3.4 (advance/replay): record an idempotent, fact-returning blocked outcome for now.
-    // This is the minimal durable "advance_recorded" path that enables replay semantics without requiring full step selection yet.
-    {
-      const ack = parseAckTokenOrFail(input.ackToken, keyring, hmac);
-      if (!ack.ok) return ack.result;
-
-      const scope = assertTokenScopeMatchesState(state.token, ack.token);
-      if (scope.isErr()) {
-        return tokenDecodeErrorToToolError(scope.error);
-      }
-
-      const sessionId = state.token.payload.sessionId;
-      const runId = state.token.payload.runId;
-      const nodeId = state.token.payload.nodeId;
-      const attemptId = asAttemptId(ack.token.payload.attemptId);
-      const workflowHash = state.token.payload.workflowHash;
-
-      const dedupeKey = `advance_recorded:${sessionId}:${nodeId}:${attemptId}`;
-
-      const compiled = await pinnedStore.get(workflowHash).match((v) => v, () => null);
-      if (!compiled) {
-        return error('PRECONDITION_FAILED', 'Pinned workflow snapshot is missing for this run.', 'Re-run start_workflow or re-pin via inspect_workflow.');
-      }
-      if (compiled.sourceKind !== 'v1_pinned') {
-        return error('PRECONDITION_FAILED', 'Pinned workflow snapshot is read-only (v1_preview) and cannot be executed.', 'Re-run start_workflow to pin an executable snapshot.');
-      }
-      if (!hasWorkflowDefinitionShape(compiled.definition)) {
-        return error('INTERNAL_ERROR', 'Pinned workflow snapshot has invalid definition shape.', 'Re-pin the workflow via start_workflow.');
-      }
-
-      const pinnedWorkflow = createWorkflow(compiled.definition as WorkflowDefinition, createBundledSource());
-
-      const appendRes = await gate
-        .withHealthySessionLock(sessionId, (lock) => {
-          // NOTE: do all reads and "already recorded?" checks under the lock to keep behavior deterministic.
-          return sessionStore.load(sessionId).andThen((truth) => {
-            // Enforce invariants: do not record advance attempts for unknown nodes.
-            const hasRun = truth.events.some((e) => e.kind === 'run_started' && e.scope?.runId === String(runId));
-            const hasNode = truth.events.some(
-              (e) => e.kind === 'node_created' && e.scope?.runId === String(runId) && e.scope?.nodeId === String(nodeId)
-            );
-            if (!hasRun || !hasNode) {
-              // No append: treat as precondition failure.
-              return errAsync({ kind: 'missing_node_or_run' } as const);
-            }
-
-            const existing = truth.events.find((e) => e.kind === 'advance_recorded' && e.dedupeKey === dedupeKey);
-            if (existing) {
-              // Idempotent replay: store.append would no-op too, but we can short-circuit.
-              return okAsync(undefined);
-            }
-
-            // NOW instantiate compiler/interpreter (only on non-replay path, after idempotency check)
-            const compiler = new WorkflowCompiler();
-            const interpreter = new WorkflowInterpreter();
-            const compiledWf = compiler.compile(pinnedWorkflow);
-            if (compiledWf.isErr()) {
-              return errAsync({ kind: 'advance_apply_failed', message: compiledWf.error.message } as const);
-            }
-
-            // Load current node snapshot to compute next state.
-            const nodeCreated = truth.events.find(
-              (e): e is Extract<DomainEventV1, { kind: 'node_created' }> => e.kind === 'node_created' && e.scope?.nodeId === String(nodeId)
-            );
-            if (!nodeCreated) {
-              return errAsync({ kind: 'missing_node_or_run' } as const);
-            }
-            if (String(nodeCreated.data.workflowHash) !== String(workflowHash)) {
-              return errAsync({ kind: 'workflow_hash_mismatch' } as const);
-            }
-
-            // Snapshot load is outside the append plan, but still within the lock to keep behavior coherent.
-            return snapshotStore.getExecutionSnapshotV1(nodeCreated.data.snapshotRef).andThen((snap) => {
-              if (!snap) return errAsync({ kind: 'missing_snapshot' } as const);
-              const currentState = toV1ExecutionState(snap.enginePayload.engineState);
-              const pendingStep = (currentState.kind === 'running' && currentState.pendingStep) ? currentState.pendingStep : null;
-              if (!pendingStep) {
-                return errAsync({ kind: 'no_pending_step' } as const);
-              }
-              const event: WorkflowEvent = { kind: 'step_completed', stepInstanceId: pendingStep };
-              const advanced = interpreter.applyEvent(currentState, event);
-              if (advanced.isErr()) {
-                return errAsync({ kind: 'advance_apply_failed', message: advanced.error.message } as const);
-              }
-              const nextRes = interpreter.next(compiledWf.value, advanced.value, input.context ?? {});
-              if (nextRes.isErr()) {
-                return errAsync({ kind: 'advance_next_failed', message: nextRes.error.message } as const);
-              }
-
-              const out = nextRes.value;
-              const newEngineState = fromV1ExecutionState(out.state);
-              const snapshotFile: ExecutionSnapshotFileV1 = {
-                v: 1,
-                kind: 'execution_snapshot',
-                enginePayload: { v: 1, engineState: newEngineState },
-              };
-
-              return snapshotStore.putExecutionSnapshotV1(snapshotFile).andThen((newSnapshotRef) => {
-                const toNodeId = `node_${randomUUID()}`;
-                const nextEventIndex = truth.events.length === 0 ? 0 : truth.events[truth.events.length - 1]!.eventIndex + 1;
-
-                const evtAdvanceRecorded = `evt_${randomUUID()}`;
-                const evtNodeCreated = `evt_${randomUUID()}`;
-                const evtEdgeCreated = `evt_${randomUUID()}`;
-
-                const hasChildren = truth.events.some(
-                  (e): e is Extract<DomainEventV1, { kind: 'edge_created' }> =>
-                    e.kind === 'edge_created' && e.data.fromNodeId === String(nodeId)
-                );
-                const causeKind: 'non_tip_advance' | 'intentional_fork' = hasChildren ? 'non_tip_advance' : 'intentional_fork';
-
-                const baseEvents: readonly DomainEventV1[] = [
-                  {
-                    v: 1,
-                    eventId: evtAdvanceRecorded,
-                    eventIndex: nextEventIndex,
-                    sessionId,
-                    kind: 'advance_recorded' as const,
-                    dedupeKey,
-                    scope: { runId, nodeId },
-                    data: {
-                      attemptId,
-                      intent: 'ack_pending' as const,
-                      outcome: { kind: 'advanced' as const, toNodeId },
-                    },
-                  },
-                  {
-                    v: 1,
-                    eventId: evtNodeCreated,
-                    eventIndex: nextEventIndex + 1,
-                    sessionId,
-                    kind: 'node_created' as const,
-                    dedupeKey: `node_created:${sessionId}:${runId}:${toNodeId}`,
-                    scope: { runId, nodeId: toNodeId },
-                    data: { nodeKind: 'step' as const, parentNodeId: String(nodeId), workflowHash: String(workflowHash), snapshotRef: newSnapshotRef },
-                  },
-                  {
-                    v: 1,
-                    eventId: evtEdgeCreated,
-                    eventIndex: nextEventIndex + 2,
-                    sessionId,
-                    kind: 'edge_created' as const,
-                    dedupeKey: `edge_created:${sessionId}:${runId}:${String(nodeId)}->${toNodeId}:acked_step`,
-                    scope: { runId },
-                    data: {
-                      edgeKind: 'acked_step' as const,
-                      fromNodeId: String(nodeId),
-                      toNodeId,
-                      cause: { kind: causeKind, eventId: evtAdvanceRecorded },
-                    },
-                  },
-                ];
-
-                // Output persistence (single durable write path): if input.output exists, append node_output_appended.
-                // Lock: output is attached to the CURRENT node (nodeId), not the newly created node (toNodeId).
-                // The agent provides output as part of completing the current step.
-                const outputId = asOutputId(`out_recap_${String(attemptId)}`);
-                const events: readonly DomainEventV1[] = input.output?.notesMarkdown
-                  ? [
-                      ...baseEvents,
-                      {
-                        v: 1,
-                        eventId: `evt_${randomUUID()}`,
-                        eventIndex: nextEventIndex + 3,
-                        sessionId,
-                        kind: 'node_output_appended' as const,
-                        dedupeKey: `node_output_appended:${sessionId}:${outputId}`,
-                        scope: { runId, nodeId }, // CORRECTED: attach to current node, not toNodeId
-                        data: {
-                          outputId: `out_recap_${attemptId}`,
-                          outputChannel: 'recap' as const,
-                          payload: {
-                            payloadKind: 'notes' as const,
-                            notesMarkdown: input.output.notesMarkdown.slice(0, 4096), // locked budget
-                          },
-                        },
-                      },
-                    ]
-                  : baseEvents;
-
-                return sessionStore.append(lock, {
-                  events,
-                  snapshotPins: [{ snapshotRef: newSnapshotRef, eventIndex: nextEventIndex + 1, createdByEventId: evtNodeCreated }],
-                });
-              });
-            });
-          });
-        })
-        .match(
-          () => ({ ok: true as const }),
-          (e) => ({ ok: false as const, error: e })
-        );
-
-      if (!appendRes.ok) {
-        const err = appendRes.error;
-        
-        if (isInternalError(err)) {
-          return mapInternalErrorToToolError(err);
-        }
-        if ('code' in err && err.code === 'SESSION_NOT_HEALTHY') {
-          return gateErrorToToolError(err as ExecutionSessionGateErrorV2);
-        }
-        if ('code' in err) {
-          return sessionStoreErrorToToolError(err as SessionEventLogStoreError);
-        }
-        
-        return internalError(String(err), 'Retry; if this persists, check for another WorkRail process.');
-      }
-
-      // Fact-returning response: load recorded outcome and return from durable facts.
-      const truth2Res = await sessionStore.load(sessionId);
-      if (truth2Res.isErr()) return sessionStoreErrorToToolError(truth2Res.error);
-      const truth2 = truth2Res.value;
-      const recordedEvent = truth2.events.find((e) => e.kind === 'advance_recorded' && e.dedupeKey === dedupeKey);
-      if (!recordedEvent || recordedEvent.kind !== 'advance_recorded') {
-        return error('INTERNAL_ERROR', 'Missing recorded advance outcome for ack replay.', 'Retry; if this persists, treat as invariant violation.');
-      }
-
-      const checkpointTokenRes = signTokenOrErr({
-        unsignedPrefix: 'chk.v1.',
-        payload: { tokenVersion: 1, tokenKind: 'checkpoint', sessionId, runId, nodeId, attemptId },
-        keyring,
-        hmac,
-      });
-      if (!checkpointTokenRes.ok) return checkpointTokenRes.error;
-      const checkpointToken = checkpointTokenRes.token;
-
-      if (recordedEvent.data.outcome.kind === 'blocked') {
-        const snapNode = truth2.events.find(
-          (e): e is Extract<DomainEventV1, { kind: 'node_created' }> =>
-            e.kind === 'node_created' && e.scope?.nodeId === String(nodeId)
-        );
-        const snap = snapNode
-          ? await snapshotStore.getExecutionSnapshotV1(snapNode.data.snapshotRef).match((v) => v, () => null)
-          : null;
-        const pendingNow = snap ? derivePendingStep(snap.enginePayload.engineState) : null;
-        const isCompleteNow = snap ? deriveIsComplete(snap.enginePayload.engineState) : false;
-        const payload = V2ContinueWorkflowOutputSchema.parse({
-          kind: 'blocked',
-          stateToken: input.stateToken,
-          ackToken: input.ackToken,
-          checkpointToken,
-          isComplete: isCompleteNow,
-          pending: pendingNow ? { stepId: String(pendingNow.stepId), title: String(pendingNow.stepId), prompt: `Pending step: ${String(pendingNow.stepId)}` } : null,
-          blockers: recordedEvent.data.outcome.blockers,
-        });
-        return success(payload);
-      }
-
-      const toNodeId = recordedEvent.data.outcome.toNodeId;
-      const toNode = truth2.events.find(
-        (e): e is Extract<DomainEventV1, { kind: 'node_created' }> =>
-          e.kind === 'node_created' && e.scope?.nodeId === String(toNodeId)
-      );
-      if (!toNode) {
-        return error('INTERNAL_ERROR', 'Missing node_created for advanced toNodeId.', 'Treat as invariant violation.');
-      }
-
-      const snapRes = await snapshotStore.getExecutionSnapshotV1(toNode.data.snapshotRef);
-      if (snapRes.isErr()) return snapshotStoreErrorToToolError(snapRes.error);
-      const snap = snapRes.value;
-      if (!snap) return error('INTERNAL_ERROR', 'Missing execution snapshot for advanced node.', 'Treat as invariant violation.');
-
-      const pending = derivePendingStep(snap.enginePayload.engineState);
-      const isComplete = deriveIsComplete(snap.enginePayload.engineState);
-
-      const nextAttemptId = attemptIdForNextNode(attemptId);
-      const nextAckTokenRes = signTokenOrErr({
-        unsignedPrefix: 'ack.v1.',
-        payload: { tokenVersion: 1, tokenKind: 'ack', sessionId, runId, nodeId: toNodeId, attemptId: nextAttemptId },
-        keyring,
-        hmac,
-      });
-      if (!nextAckTokenRes.ok) return nextAckTokenRes.error;
-      const nextAckToken = nextAckTokenRes.token;
-      
-      const nextCheckpointTokenRes = signTokenOrErr({
-        unsignedPrefix: 'chk.v1.',
-        payload: { tokenVersion: 1, tokenKind: 'checkpoint', sessionId, runId, nodeId: toNodeId, attemptId: nextAttemptId },
-        keyring,
-        hmac,
-      });
-      if (!nextCheckpointTokenRes.ok) return nextCheckpointTokenRes.error;
-      const nextCheckpointToken = nextCheckpointTokenRes.token;
-      
-      const nextStateTokenRes = signTokenOrErr({
-        unsignedPrefix: 'st.v1.',
-        payload: { tokenVersion: 1, tokenKind: 'state', sessionId, runId, nodeId: toNodeId, workflowHash: String(workflowHash) },
-        keyring,
-        hmac,
-      });
-      if (!nextStateTokenRes.ok) return nextStateTokenRes.error;
-      const nextStateToken = nextStateTokenRes.token;
-
-      const { stepId, title, prompt } = extractStepMetadata(pinnedWorkflow, pending ? String(pending.stepId) : null);
-
-      const payload = V2ContinueWorkflowOutputSchema.parse({
-        kind: 'ok',
-        stateToken: nextStateToken,
-        ackToken: nextAckToken,
-        checkpointToken: nextCheckpointToken,
-        isComplete,
-        pending: stepId ? { stepId, title, prompt } : null,
-      });
-      return success(payload);
-    }
-  } catch (e) {
-    return error(
-      'INTERNAL_ERROR',
-      normalizeTokenErrorMessage(e instanceof Error ? e.message : String(e)),
-      'If this persists, delete the WorkRail v2 data directory for this repo and retry.'
-    );
+function executeContinueWorkflow(
+  input: V2ContinueWorkflowInput,
+  ctx: ToolContext
+): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, ContinueWorkflowError> {
+  if (!ctx.v2) {
+    return neErrorAsync({ kind: 'precondition_failed', message: 'v2 tools disabled', suggestion: 'Enable v2Tools flag' });
   }
 
-  return error('INTERNAL_ERROR', 'Unreachable', 'Internal invariant violation');
+  const { gate, sessionStore, snapshotStore, pinnedStore, keyring, crypto, hmac } = ctx.v2;
+
+  const stateRes = parseStateTokenOrFail(input.stateToken, keyring, hmac);
+  if (!stateRes.ok) return neErrorAsync({ kind: 'validation_failed', failure: stateRes.failure });
+  const state = stateRes.token;
+
+  const ctxCheck = checkContextBudget({ tool: 'continue_workflow', context: input.context });
+  if (!ctxCheck.ok) return neErrorAsync({ kind: 'validation_failed', failure: ctxCheck.error });
+
+  const sessionId = asSessionId(state.payload.sessionId);
+  const runId = asRunId(state.payload.runId);
+  const nodeId = asNodeId(state.payload.nodeId);
+  const workflowHash = asWorkflowHash(asSha256Digest(state.payload.workflowHash));
+
+  if (!input.ackToken) {
+    // REHYDRATE PATH
+    return sessionStore.load(sessionId)
+      .mapErr((cause) => ({ kind: 'session_load_failed' as const, cause }))
+      .andThen((truth) => {
+        const runStarted = truth.events.find(
+          (e): e is Extract<DomainEventV1, { kind: 'run_started' }> => e.kind === 'run_started' && e.scope.runId === String(runId)
+        );
+        const workflowId = runStarted?.data.workflowId;
+        if (!runStarted || typeof workflowId !== 'string' || workflowId.trim() === '') {
+          return neErrorAsync({
+            kind: 'token_unknown_node' as const,
+            message: 'No durable run state was found for this stateToken (missing run_started).',
+            suggestion: 'Use start_workflow to mint a new run, or use a stateToken returned by WorkRail for an existing run.',
+          });
+        }
+        if (String(runStarted.data.workflowHash) !== String(workflowHash)) {
+          return neErrorAsync({ kind: 'precondition_failed' as const, message: 'workflowHash mismatch for this run.', suggestion: 'Use the stateToken returned by WorkRail for this run.' });
+        }
+
+        const nodeCreated = truth.events.find(
+          (e): e is Extract<DomainEventV1, { kind: 'node_created' }> =>
+            e.kind === 'node_created' && e.scope.nodeId === String(nodeId) && e.scope.runId === String(runId)
+        );
+        if (!nodeCreated) {
+          return neErrorAsync({
+            kind: 'token_unknown_node' as const,
+            message: 'No durable node state was found for this stateToken (missing node_created).',
+            suggestion: 'Use a stateToken returned by WorkRail for an existing node.',
+          });
+        }
+        if (String(nodeCreated.data.workflowHash) !== String(workflowHash)) {
+          return neErrorAsync({ kind: 'precondition_failed' as const, message: 'workflowHash mismatch for this node.', suggestion: 'Use the stateToken returned by WorkRail for this node.' });
+        }
+
+        return snapshotStore.getExecutionSnapshotV1(nodeCreated.data.snapshotRef)
+          .mapErr((cause) => ({ kind: 'snapshot_load_failed' as const, cause }))
+          .andThen((snapshot) => {
+            if (!snapshot) {
+              return neErrorAsync({
+                kind: 'token_unknown_node' as const,
+                message: 'No execution snapshot was found for this node.',
+                suggestion: 'Use a stateToken returned by WorkRail for an existing node.',
+              });
+            }
+
+            const engineState = snapshot.enginePayload.engineState;
+            const pending = derivePendingStep(engineState);
+            const isComplete = deriveIsComplete(engineState);
+
+            const attemptId = newAttemptId();
+            const ackTokenRes = signTokenOrErr({
+              unsignedPrefix: 'ack.v1.',
+              payload: { tokenVersion: 1, tokenKind: 'ack', sessionId, runId, nodeId, attemptId },
+              keyring,
+              hmac,
+            });
+            if (ackTokenRes.isErr()) return neErrorAsync({ kind: 'token_signing_failed' as const, cause: ackTokenRes.error });
+            
+            const checkpointTokenRes = signTokenOrErr({
+              unsignedPrefix: 'chk.v1.',
+              payload: { tokenVersion: 1, tokenKind: 'checkpoint', sessionId, runId, nodeId, attemptId },
+              keyring,
+              hmac,
+            });
+            if (checkpointTokenRes.isErr()) return neErrorAsync({ kind: 'token_signing_failed' as const, cause: checkpointTokenRes.error });
+
+            if (!pending) {
+              return okAsync(V2ContinueWorkflowOutputSchema.parse({
+                kind: 'ok',
+                stateToken: input.stateToken,
+                ackToken: ackTokenRes.value,
+                checkpointToken: checkpointTokenRes.value,
+                isComplete,
+                pending: null,
+              }));
+            }
+
+            return pinnedStore.get(workflowHash)
+              .mapErr((cause) => ({ kind: 'pinned_workflow_store_failed' as const, cause }))
+              .andThen((pinned) => {
+                if (!pinned) return neErrorAsync({ kind: 'pinned_workflow_missing' as const, workflowHash: asWorkflowHash(asSha256Digest(String(workflowHash))) });
+                if (pinned.sourceKind !== 'v1_pinned') return neErrorAsync({ kind: 'precondition_failed' as const, message: 'Pinned workflow snapshot is read-only (v1_preview) and cannot be executed.' });
+                if (!hasWorkflowDefinitionShape(pinned.definition)) {
+                  return neErrorAsync({
+                    kind: 'precondition_failed' as const,
+                    message: 'Pinned workflow snapshot has an invalid workflow definition shape.',
+                    suggestion: 'Re-pin the workflow via start_workflow.',
+                  });
+                }
+                
+                const wf = createWorkflow(pinned.definition as WorkflowDefinition, createBundledSource());
+                const { stepId, title, prompt } = extractStepMetadata(wf, String(pending.stepId));
+
+                return okAsync(V2ContinueWorkflowOutputSchema.parse({
+                  kind: 'ok',
+                  stateToken: input.stateToken,
+                  ackToken: ackTokenRes.value,
+                  checkpointToken: checkpointTokenRes.value,
+                  isComplete,
+                  pending: { stepId, title, prompt },
+                }));
+              });
+          });
+      });
+  }
+
+  // ADVANCE PATH
+  const ackRes = parseAckTokenOrFail(input.ackToken, keyring, hmac);
+  if (!ackRes.ok) return neErrorAsync({ kind: 'validation_failed', failure: ackRes.failure });
+  const ack = ackRes.token;
+
+  const scopeRes = assertTokenScopeMatchesState(state, ack);
+  if (scopeRes.isErr()) return neErrorAsync({ kind: 'validation_failed', failure: mapTokenDecodeErrorToToolError(scopeRes.error) });
+
+  const attemptId = asAttemptId(ack.payload.attemptId);
+  const dedupeKey = `advance_recorded:${sessionId}:${nodeId}:${attemptId}`;
+
+  return sessionStore.load(sessionId)
+    .mapErr((cause) => ({ kind: 'session_load_failed' as const, cause }))
+    .andThen((truth) => {
+      const existing = truth.events.find(
+        (e): e is Extract<DomainEventV1, { kind: 'advance_recorded' }> => e.kind === 'advance_recorded' && e.dedupeKey === dedupeKey
+      );
+
+      return pinnedStore.get(workflowHash)
+        .mapErr((cause) => ({ kind: 'pinned_workflow_store_failed' as const, cause }))
+        .andThen((compiled) => {
+          if (!compiled) return neErrorAsync({ kind: 'pinned_workflow_missing' as const, workflowHash });
+          if (compiled.sourceKind !== 'v1_pinned') return neErrorAsync({ kind: 'precondition_failed' as const, message: 'Pinned workflow snapshot is read-only (v1_preview) and cannot be executed.' });
+          if (!hasWorkflowDefinitionShape(compiled.definition)) {
+            return neErrorAsync({
+              kind: 'precondition_failed' as const,
+              message: 'Pinned workflow snapshot has an invalid workflow definition shape.',
+              suggestion: 'Re-pin the workflow via start_workflow.',
+            });
+          }
+
+          const pinnedWorkflow = createWorkflow(compiled.definition as WorkflowDefinition, createBundledSource());
+
+          if (existing) {
+            return replayFromRecordedAdvance({
+              recordedEvent: existing,
+              truth,
+              sessionId,
+              runId,
+              nodeId,
+              workflowHash,
+              attemptId,
+              inputStateToken: input.stateToken,
+              inputAckToken: input.ackToken!,
+              pinnedWorkflow,
+              snapshotStore,
+              keyring,
+              hmac,
+            });
+          }
+
+          // Acquire the lock only for the first-advance path. Re-check for existing facts under the lock to avoid
+          // a race where another writer records advance_recorded after our initial read but before we acquire the lock.
+          return gate
+            .withHealthySessionLock(sessionId, (lock) =>
+              sessionStore.load(sessionId).andThen((truthLocked) => {
+                const existingLocked = truthLocked.events.find(
+                  (e): e is Extract<DomainEventV1, { kind: 'advance_recorded' }> =>
+                    e.kind === 'advance_recorded' && e.dedupeKey === dedupeKey
+                );
+                if (existingLocked) return okAsync({ kind: 'replay' as const, truth: truthLocked, recordedEvent: existingLocked });
+
+                return advanceAndRecord({
+                  truth: truthLocked,
+                  sessionId,
+                  runId,
+                  nodeId,
+                  attemptId,
+                  workflowHash,
+                  dedupeKey,
+                  inputContext: input.context as JsonValue | undefined,
+                  inputOutput: input.output,
+                  lock,
+                  pinnedWorkflow,
+                  snapshotStore,
+                  sessionStore,
+                }).andThen(() =>
+                  sessionStore
+                    .load(sessionId)
+                    .map((truthAfter) => ({ kind: 'replay' as const, truth: truthAfter, recordedEvent: null }))
+                );
+              })
+            )
+            .mapErr((cause) => {
+              if (isInternalError(cause)) {
+                return {
+                  kind: 'invariant_violation' as const,
+                  message: `Advance failed due to internal invariant violation: ${cause.kind}`,
+                  suggestion: 'Retry; if this persists, treat as invariant violation.',
+                };
+              }
+              if (typeof cause === 'object' && cause !== null && 'code' in cause) {
+                const code = (cause as { code: string }).code;
+                if (code.startsWith('SNAPSHOT_STORE_')) {
+                  return { kind: 'snapshot_load_failed' as const, cause: cause as SnapshotStoreError };
+                }
+                return { kind: 'advance_execution_failed' as const, cause: cause as ExecutionSessionGateErrorV2 | SessionEventLogStoreError };
+              }
+              return {
+                kind: 'invariant_violation' as const,
+                message: 'Advance failed with an unknown error shape (invariant violation).',
+                suggestion: 'Retry; if this persists, treat as invariant violation.',
+              };
+            })
+            .andThen((res) => {
+              const truth2 = res.truth;
+              const recordedEvent =
+                res.recordedEvent ??
+                truth2.events.find(
+                  (e): e is Extract<DomainEventV1, { kind: 'advance_recorded' }> =>
+                    e.kind === 'advance_recorded' && e.dedupeKey === dedupeKey
+                );
+
+              if (!recordedEvent) {
+                return neErrorAsync({
+                  kind: 'invariant_violation' as const,
+                  message: 'Missing recorded advance outcome after successful append (invariant violation).',
+                  suggestion: 'Retry; if this persists, treat as invariant violation.',
+                });
+              }
+
+              return replayFromRecordedAdvance({
+                recordedEvent,
+                truth: truth2,
+                sessionId,
+                runId,
+                nodeId,
+                workflowHash,
+                attemptId,
+                inputStateToken: input.stateToken,
+                inputAckToken: input.ackToken!,
+                pinnedWorkflow,
+                snapshotStore,
+                keyring,
+                hmac,
+              });
+            });
+        });
+    });
 }
+

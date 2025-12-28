@@ -1,11 +1,15 @@
 import { z } from 'zod';
 import { JsonValueSchema } from '../../canonical/json-zod.js';
-import { asSha256Digest, asSnapshotRef } from '../../ids/index.js';
+import { asSha256Digest, asSnapshotRef, asWorkflowHash } from '../../ids/index.js';
 
 const sha256DigestSchema = z
   .string()
   .regex(/^sha256:[0-9a-f]{64}$/, 'Expected sha256:<64 hex chars>')
   .describe('sha256 digest in WorkRail v2 format');
+
+const workflowHashSchema = sha256DigestSchema
+  .transform((v) => asWorkflowHash(asSha256Digest(v)))
+  .describe('WorkflowHash (sha256 digest of workflow definition)');
 
 const snapshotRefSchema = sha256DigestSchema
   .transform((v) => asSnapshotRef(asSha256Digest(v)))
@@ -41,7 +45,7 @@ const WorkflowSourceKindSchema = z.enum(['bundled', 'user', 'project', 'remote',
 
 const RunStartedDataV1Schema = z.object({
   workflowId: z.string().min(1),
-  workflowHash: sha256DigestSchema,
+  workflowHash: workflowHashSchema,
   workflowSourceKind: WorkflowSourceKindSchema,
   workflowSourceRef: z.string().min(1),
 });
@@ -51,7 +55,7 @@ const NodeKindSchema = z.enum(['step', 'checkpoint']);
 const NodeCreatedDataV1Schema = z.object({
   nodeKind: NodeKindSchema,
   parentNodeId: z.string().min(1).nullable(),
-  workflowHash: sha256DigestSchema,
+  workflowHash: workflowHashSchema,
   snapshotRef: snapshotRefSchema,
 });
 
@@ -147,14 +151,27 @@ const BlockerReportV1Schema = z
     // Deterministic ordering lock: (code, pointer.kind, pointer.* stable fields) ascending.
     const keyFor = (b: z.infer<typeof BlockerSchema>): string => {
       const p = b.pointer;
-      const ptrStable =
-        p.kind === 'context_key'
-          ? p.key
-          : p.kind === 'output_contract'
-            ? p.contractRef
-            : p.kind === 'capability'
-              ? p.capability
-              : p.stepId;
+      let ptrStable: string;
+      switch (p.kind) {
+        case 'context_key':
+          ptrStable = p.key;
+          break;
+        case 'output_contract':
+          ptrStable = p.contractRef;
+          break;
+        case 'capability':
+          ptrStable = p.capability;
+          break;
+        case 'workflow_step':
+          ptrStable = p.stepId;
+          break;
+        case 'context_budget':
+          ptrStable = '';
+          break;
+        default:
+          const _exhaustive: never = p;
+          ptrStable = _exhaustive;
+      }
       return `${b.code}|${p.kind}|${String(ptrStable)}`;
     };
 
