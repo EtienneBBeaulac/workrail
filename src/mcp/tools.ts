@@ -73,27 +73,28 @@ import type { ToolAnnotations } from './tool-factory.js';
 import type { WorkflowToolName } from './types/tool-description-types.js';
 
 export const WORKFLOW_TOOL_ANNOTATIONS: Readonly<Record<WorkflowToolName, ToolAnnotations>> = {
-  workflow_list: {
+  // v1 tools (action-oriented names)
+  discover_workflows: {
     readOnlyHint: true,
     destructiveHint: false,
     idempotentHint: true,
   },
-  workflow_get: {
+  preview_workflow: {
     readOnlyHint: true,
     destructiveHint: false,
     idempotentHint: true,
   },
-  workflow_next: {
+  advance_workflow: {
     readOnlyHint: false,
     destructiveHint: false,
     idempotentHint: false,
   },
-  workflow_validate_json: {
+  validate_workflow: {
     readOnlyHint: true,
     destructiveHint: false,
     idempotentHint: true,
   },
-  workflow_get_schema: {
+  get_workflow_schema: {
     readOnlyHint: true,
     destructiveHint: false,
     idempotentHint: true,
@@ -127,11 +128,12 @@ export const WORKFLOW_TOOL_ANNOTATIONS: Readonly<Record<WorkflowToolName, ToolAn
 // -----------------------------------------------------------------------------
 
 export const WORKFLOW_TOOL_TITLES: Readonly<Record<WorkflowToolName, string>> = {
-  workflow_list: 'List Available Workflows',
-  workflow_get: 'Get Workflow Details',
-  workflow_next: 'Execute Next Workflow Step',
-  workflow_validate_json: 'Validate Workflow JSON',
-  workflow_get_schema: 'Get Workflow Schema',
+  // v1 tools (action-oriented names)
+  discover_workflows: 'Discover Available Workflows',
+  preview_workflow: 'Preview Workflow Details',
+  advance_workflow: 'Advance Workflow Execution',
+  validate_workflow: 'Validate Workflow JSON',
+  get_workflow_schema: 'Get Workflow Schema',
   // v2 tools (feature-flagged)
   list_workflows: 'List Workflows (v2)',
   inspect_workflow: 'Inspect Workflow (v2)',
@@ -191,7 +193,7 @@ export type OpenDashboardInput = z.infer<typeof OpenDashboardInput>;
 import type { ToolDefinition } from './tool-factory.js';
 
 export const createSessionTool: ToolDefinition<typeof CreateSessionInput> = {
-  name: 'workrail_create_session',
+  name: 'create_session',
   title: 'Create Workflow Session',
   description: `Create a new workflow session stored in ~/.workrail/sessions/.
 
@@ -207,7 +209,7 @@ Returns the session ID and file path.`,
 };
 
 export const updateSessionTool: ToolDefinition<typeof UpdateSessionInput> = {
-  name: 'workrail_update_session',
+  name: 'update_session',
   title: 'Update Session Data',
   description: `Update session data with deep merge.
 
@@ -229,7 +231,7 @@ Note: Use dot notation for nested updates.`,
 };
 
 export const readSessionTool: ToolDefinition<typeof ReadSessionInput> = {
-  name: 'workrail_read_session',
+  name: 'read_session',
   title: 'Read Session Data',
   description: `Read session data with optional JSONPath query for targeted reads.
 
@@ -252,7 +254,7 @@ Examples:
 };
 
 export const openDashboardTool: ToolDefinition<typeof OpenDashboardInput> = {
-  name: 'workrail_open_dashboard',
+  name: 'open_dashboard',
   title: 'Open Dashboard',
   description: `Open the web dashboard in the user's default browser.
 
