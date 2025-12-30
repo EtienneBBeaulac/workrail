@@ -7,8 +7,8 @@
   "properties": {
     "id": {
       "type": "string",
-      "description": "Unique identifier for the workflow",
-      "pattern": "^[a-z0-9-]+$",
+      "description": "Unique identifier for the workflow (legacy: [a-z0-9-]+ OR namespaced: [a-z][a-z0-9_-]+\\.[a-z][a-z0-9_-]+)",
+      "pattern": "^([a-z0-9-]+|[a-z][a-z0-9_-]+\\.[a-z][a-z0-9_-]+)$",
       "minLength": 3,
       "maxLength": 64
     },

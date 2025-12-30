@@ -6,6 +6,22 @@ const sha256DigestSchema = z
   .describe('sha256 digest in WorkRail v2 format');
 
 /**
+ * Relative path validation: reject absolute paths and path traversal.
+ * Locked by: `docs/design/v2-core-design-locks.md` Section 13 (paths-relative-only).
+ */
+const relativePathSchema = z
+  .string()
+  .min(1)
+  .refine(
+    (path) => !path.startsWith('/') && !path.startsWith('\\'),
+    'Path must be relative (no absolute paths)',
+  )
+  .refine(
+    (path) => !path.includes('../') && !path.includes('..\\'),
+    'Path must not contain path traversal (..)',
+  );
+
+/**
  * `manifest.jsonl` record kinds (schemaVersion 1, locked)
  *
  * Locked by: `docs/design/v2-core-design-locks.md` (Two-stream model).
@@ -18,7 +34,7 @@ export const ManifestRecordV1Schema = z.discriminatedUnion('kind', [
     kind: z.literal('segment_closed'),
     firstEventIndex: z.number().int().nonnegative(),
     lastEventIndex: z.number().int().nonnegative(),
-    segmentRelPath: z.string().min(1), // relative; no abs validation here (adapter must enforce)
+    segmentRelPath: relativePathSchema,
     sha256: sha256DigestSchema,
     bytes: z.number().int().nonnegative(),
   }),

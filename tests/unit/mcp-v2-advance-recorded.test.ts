@@ -20,6 +20,9 @@ import { ExecutionSnapshotFileV1Schema } from '../../src/v2/durable-core/schemas
 
 import { NodeHmacSha256V2 } from '../../src/v2/infra/local/hmac-sha256/index.js';
 import { LocalKeyringV2 } from '../../src/v2/infra/local/keyring/index.js';
+import { NodeBase64UrlV2 } from '../../src/v2/infra/local/base64url/index.js';
+import { NodeRandomEntropyV2 } from '../../src/v2/infra/local/random-entropy/index.js';
+import { NodeTimeClockV2 } from '../../src/v2/infra/local/time-clock/index.js';
 import { encodeTokenPayloadV1, signTokenV1 } from '../../src/v2/durable-core/tokens/index.js';
 import { StateTokenPayloadV1Schema, AckTokenPayloadV1Schema } from '../../src/v2/durable-core/tokens/index.js';
 
@@ -33,13 +36,16 @@ async function mkV2Deps(dataDir: LocalDataDirV2): Promise<V2Dependencies> {
   const fsPort = new NodeFileSystemV2();
   const sha256 = new NodeSha256V2();
   const sessionEventLogStore = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha256);
-  const sessionLock = new LocalSessionLockV2(dataDir, fsPort);
+  const clock = new NodeTimeClockV2();
+  const sessionLock = new LocalSessionLockV2(dataDir, fsPort, clock);
   const sessionGate = new ExecutionSessionGateV2(sessionLock, sessionEventLogStore);
   const crypto = new NodeCryptoV2();
   const hmac = new NodeHmacSha256V2();
+  const base64url = new NodeBase64UrlV2();
+  const entropy = new NodeRandomEntropyV2();
   const snapshotStore = new LocalSnapshotStoreV2(dataDir, fsPort, crypto);
   const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir, fsPort);
-  const keyringPort = new LocalKeyringV2(dataDir, fsPort);
+  const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url, entropy);
   const keyring = await keyringPort.loadOrCreate().match(v => v, e => { throw new Error(`keyring: ${e.code}`); });
   
   return {
@@ -49,6 +55,7 @@ async function mkV2Deps(dataDir: LocalDataDirV2): Promise<V2Dependencies> {
     keyring,
     crypto,
     hmac,
+    base64url,
     snapshotStore,
     pinnedStore,
     // Test convenience (aliases):
@@ -74,7 +81,8 @@ async function mkSignedToken(args: {
   const dataDir = new LocalDataDirV2(process.env);
   const fsPort = new NodeFileSystemV2();
   const hmac = new NodeHmacSha256V2();
-  const keyringPort = new LocalKeyringV2(dataDir, fsPort);
+  const base64url = new NodeBase64UrlV2();
+  const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url);
   const keyring = await keyringPort.loadOrCreate().match(
     (v) => v,
     (e) => {
@@ -89,7 +97,7 @@ async function mkSignedToken(args: {
     }
   );
 
-  const token = signTokenV1(args.unsignedPrefix, payloadBytes, keyring, hmac).match(
+  const token = signTokenV1(args.unsignedPrefix, payloadBytes, keyring, hmac, base64url).match(
     (v) => v,
     (e) => {
       throw new Error(`unexpected token sign error: ${e.code}`);
@@ -105,6 +113,7 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
     process.env.WORKRAIL_DATA_DIR = root;
     try {
       const dataDir = new LocalDataDirV2(process.env);
+      const localFsPort = new NodeFileSystemV2();
       const v2 = await mkV2Deps(dataDir);
 
       const sessionId = 'sess_test';
@@ -113,7 +122,7 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
       const workflowHash = 'sha256:5b2d9fb885d0adc6565e1fd59e6abb3769b69e4dba5a02b6eea750137a5c0be2';
 
       // Pin a v1-backed compiled snapshot (schemaVersion=1, sourceKind=v1_pinned) so v2 execution can run deterministically.
-      const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir);
+      const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir, localFsPort);
       await pinnedStore.put(workflowHash as any, {
         schemaVersion: 1,
         sourceKind: 'v1_pinned',
@@ -252,6 +261,7 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
     process.env.WORKRAIL_DATA_DIR = root;
     try {
       const dataDir = new LocalDataDirV2(process.env);
+      const localFsPort = new NodeFileSystemV2();
       const v2 = await mkV2Deps(dataDir);
 
       const sessionId = 'sess_test_output';
@@ -260,7 +270,7 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
       const workflowHash = 'sha256:5b2d9fb885d0adc6565e1fd59e6abb3769b69e4dba5a02b6eea750137a5c0be2';
 
       // Pin a v1-backed compiled snapshot (schemaVersion=1, sourceKind=v1_pinned) so v2 execution can run deterministically.
-      const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir);
+      const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir, localFsPort);
       await pinnedStore.put(workflowHash as any, {
         schemaVersion: 1,
         sourceKind: 'v1_pinned',

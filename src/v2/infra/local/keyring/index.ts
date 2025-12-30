@@ -1,10 +1,11 @@
-import { randomBytes } from 'crypto';
 import { z } from 'zod';
-import type { ResultAsync } from 'neverthrow';
-import { ResultAsync as RA, okAsync, errAsync } from 'neverthrow';
+import type { ResultAsync, Result } from 'neverthrow';
+import { ResultAsync as RA, okAsync, errAsync, ok, err } from 'neverthrow';
 import type { DataDirPortV2 } from '../../../ports/data-dir.port.js';
 import type { FileSystemPortV2, FsError } from '../../../ports/fs.port.js';
 import type { KeyringError, KeyringPortV2, KeyringV1 } from '../../../ports/keyring.port.js';
+import type { Base64UrlPortV2 } from '../../../ports/base64url.port.js';
+import type { RandomEntropyPortV2 } from '../../../ports/random-entropy.port.js';
 import { toCanonicalBytes } from '../../../durable-core/canonical/jcs.js';
 import type { JsonValue } from '../../../durable-core/canonical/json-types.js';
 
@@ -19,33 +20,37 @@ const KeyringFileV1Schema = z.object({
   previous: KeyRecordSchema.nullable(),
 });
 
-function encodeBase64Url(bytes: Uint8Array): string {
-  return Buffer.from(bytes).toString('base64url');
-}
-
-function decodeBase64Url(s: string): Uint8Array | null {
-  try {
-    return new Uint8Array(Buffer.from(s, 'base64url'));
-  } catch {
-    return null;
+function validateKeyMaterialWithPort(base64url: Base64UrlPortV2, keyBase64Url: string): Result<void, KeyringError> {
+  const decoded = base64url.decodeBase64Url(keyBase64Url);
+  if (decoded.isErr()) {
+    return err({
+      code: 'KEYRING_CORRUPTION_DETECTED',
+      message: `Invalid base64url in key material: ${decoded.error.code}`,
+    } as const);
   }
+  if (decoded.value.length !== 32) {
+    return err({
+      code: 'KEYRING_CORRUPTION_DETECTED',
+      message: `Key material must be exactly 32 bytes, got ${decoded.value.length}`,
+    } as const);
+  }
+  return ok(undefined);
 }
 
-function validateKeyMaterialOrThrow(keyBase64Url: string): void {
-  const decoded = decodeBase64Url(keyBase64Url);
-  if (!decoded) throw new Error('invalid_base64url');
-  if (decoded.length !== 32) throw new Error('invalid_key_length');
-}
-
-function createFreshKeyRecord(): { readonly alg: 'hmac_sha256'; readonly keyBase64Url: string } {
-  const bytes = randomBytes(32);
-  return { alg: 'hmac_sha256', keyBase64Url: encodeBase64Url(bytes) };
+function createFreshKeyRecord(
+  base64url: Base64UrlPortV2,
+  entropy: RandomEntropyPortV2
+): { readonly alg: 'hmac_sha256'; readonly keyBase64Url: string } {
+  const bytes = entropy.generateBytes(32);
+  return { alg: 'hmac_sha256', keyBase64Url: base64url.encodeBase64Url(bytes) };
 }
 
 export class LocalKeyringV2 implements KeyringPortV2 {
   constructor(
     private readonly dataDir: DataDirPortV2,
-    private readonly fs: FileSystemPortV2
+    private readonly fs: FileSystemPortV2,
+    private readonly base64url: Base64UrlPortV2,
+    private readonly entropy: RandomEntropyPortV2
   ) {}
 
   loadOrCreate(): ResultAsync<KeyringV1, KeyringError> {
@@ -63,7 +68,7 @@ export class LocalKeyringV2 implements KeyringPortV2 {
     return this.loadOrCreate().andThen((kr) => {
       const next: KeyringV1 = {
         v: 1,
-        current: createFreshKeyRecord(),
+        current: createFreshKeyRecord(this.base64url, this.entropy),
         previous: kr.current,
       };
       return this.persist(next).map(() => next);
@@ -71,25 +76,32 @@ export class LocalKeyringV2 implements KeyringPortV2 {
   }
 
   private createAndPersistFresh(): ResultAsync<KeyringV1, KeyringError> {
-    const fresh: KeyringV1 = { v: 1, current: createFreshKeyRecord(), previous: null };
+    const fresh: KeyringV1 = { v: 1, current: createFreshKeyRecord(this.base64url, this.entropy), previous: null };
     return this.persist(fresh).map(() => fresh);
   }
 
   private parseAndValidate(raw: string, filePath: string): ResultAsync<KeyringV1, KeyringError> {
-    return RA.fromPromise(
-      (async () => {
-        const parsed = JSON.parse(raw);
-        const validated = KeyringFileV1Schema.safeParse(parsed);
-        if (!validated.success) throw new Error('invalid_shape');
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return errAsync({ code: 'KEYRING_CORRUPTION_DETECTED', message: `Invalid keyring file: ${filePath}` } as const);
+    }
 
-        // Validate key material lengths deterministically.
-        validateKeyMaterialOrThrow(validated.data.current.keyBase64Url);
-        if (validated.data.previous) validateKeyMaterialOrThrow(validated.data.previous.keyBase64Url);
+    const validated = KeyringFileV1Schema.safeParse(parsed);
+    if (!validated.success) {
+      return errAsync({ code: 'KEYRING_CORRUPTION_DETECTED', message: `Invalid keyring file: ${filePath}` } as const);
+    }
 
-        return validated.data as KeyringV1;
-      })(),
-      () => ({ code: 'KEYRING_CORRUPTION_DETECTED', message: `Invalid keyring file: ${filePath}` } as const)
-    );
+    const currentValidation = validateKeyMaterialWithPort(this.base64url, validated.data.current.keyBase64Url);
+    if (currentValidation.isErr()) return errAsync(currentValidation.error);
+
+    if (validated.data.previous) {
+      const prevValidation = validateKeyMaterialWithPort(this.base64url, validated.data.previous.keyBase64Url);
+      if (prevValidation.isErr()) return errAsync(prevValidation.error);
+    }
+
+    return okAsync(validated.data as KeyringV1);
   }
 
   private persist(keyring: KeyringV1): ResultAsync<void, KeyringError> {

@@ -1,15 +1,13 @@
 import type { Result } from 'neverthrow';
 import { err, ok } from 'neverthrow';
 import type { DomainEventV1 } from '../durable-core/schemas/session/index.js';
+import type { AutonomyV2, RiskPolicyV2 } from '../durable-core/schemas/session/preferences.js';
 
 export type ProjectionError =
   | { readonly code: 'PROJECTION_INVARIANT_VIOLATION'; readonly message: string }
   | { readonly code: 'PROJECTION_CORRUPTION_DETECTED'; readonly message: string };
 
 type PreferencesChangedEventV1 = Extract<DomainEventV1, { kind: 'preferences_changed' }>;
-
-export type AutonomyV2 = 'guided' | 'full_auto_stop_on_user_deps' | 'full_auto_never_stop';
-export type RiskPolicyV2 = 'conservative' | 'balanced' | 'aggressive';
 
 export interface EffectivePreferencesV2 {
   readonly autonomy: AutonomyV2;
@@ -56,21 +54,30 @@ export function projectPreferencesV2(
 
   const byNodeId: Record<string, NodePreferencesV2> = {};
 
-  const ancestorChainOf = (nodeId: string): string[] => {
+  // Fail-closed: Return Result to allow cycle detection errors to propagate
+  const ancestorChainOf = (nodeId: string): Result<readonly string[], ProjectionError> => {
     const chain: string[] = [];
     let cur: string | null = nodeId;
     const visited = new Set<string>();
     while (cur) {
-      if (visited.has(cur)) break; // cycle detection
+      if (visited.has(cur)) {
+        // Fail-closed: cycle detected is an invariant violation, not a silent break
+        return err({
+          code: 'PROJECTION_INVARIANT_VIOLATION',
+          message: `Cycle detected in parent graph at node: ${cur}`,
+        });
+      }
       visited.add(cur);
       chain.push(cur);
       cur = parentByNodeId[cur] ?? null;
     }
-    return chain.reverse(); // root → ... → nodeId
+    return ok(chain.reverse()); // root → ... → nodeId
   };
 
   for (const nodeId of Object.keys(parentByNodeId)) {
-    const chain = ancestorChainOf(nodeId);
+    const chainRes = ancestorChainOf(nodeId);
+    if (chainRes.isErr()) return err(chainRes.error);
+    const chain = chainRes.value;
 
     // Walk the ancestry chain and apply effective preferences changes in order.
     let effective = defaultPrefs;

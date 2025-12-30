@@ -73,6 +73,9 @@ export const DI = {
     Sha256: Symbol('V2.Sha256'),
     Crypto: Symbol('V2.Crypto'),
     HmacSha256: Symbol('V2.HmacSha256'),
+    Base64Url: Symbol('V2.Base64Url'),
+    RandomEntropy: Symbol('V2.RandomEntropy'),
+    TimeClock: Symbol('V2.TimeClock'),
     
     // Stores (Level 2: depend on primitives)
     Keyring: Symbol('V2.Keyring'),

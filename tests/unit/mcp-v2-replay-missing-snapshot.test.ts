@@ -20,6 +20,9 @@ import { ExecutionSnapshotFileV1Schema } from '../../src/v2/durable-core/schemas
 
 import { NodeHmacSha256V2 } from '../../src/v2/infra/local/hmac-sha256/index.js';
 import { LocalKeyringV2 } from '../../src/v2/infra/local/keyring/index.js';
+import { NodeBase64UrlV2 } from '../../src/v2/infra/local/base64url/index.js';
+import { NodeRandomEntropyV2 } from '../../src/v2/infra/local/random-entropy/index.js';
+import { NodeTimeClockV2 } from '../../src/v2/infra/local/time-clock/index.js';
 import { encodeTokenPayloadV1, signTokenV1 } from '../../src/v2/durable-core/tokens/index.js';
 import { StateTokenPayloadV1Schema, AckTokenPayloadV1Schema } from '../../src/v2/durable-core/tokens/index.js';
 
@@ -41,7 +44,9 @@ async function mkSignedToken(args: { unsignedPrefix: 'st.v1.' | 'ack.v1.'; paylo
   const dataDir = new LocalDataDirV2(process.env);
   const fsPort = new NodeFileSystemV2();
   const hmac = new NodeHmacSha256V2();
-  const keyringPort = new LocalKeyringV2(dataDir, fsPort);
+  const base64url = new NodeBase64UrlV2();
+  const entropy = new NodeRandomEntropyV2();
+  const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url, entropy);
   const keyring = await keyringPort.loadOrCreate().match(
     (v) => v,
     (e) => {
@@ -56,7 +61,7 @@ async function mkSignedToken(args: { unsignedPrefix: 'st.v1.' | 'ack.v1.'; paylo
     }
   );
 
-  const token = signTokenV1(args.unsignedPrefix, payloadBytes, keyring, hmac).match(
+  const token = signTokenV1(args.unsignedPrefix, payloadBytes, keyring, hmac, base64url).match(
     (v) => v,
     (e) => {
       throw new Error(`unexpected token sign error: ${e.code}`);
@@ -75,7 +80,8 @@ describe('v2 replay fail-closed: missing snapshot', () => {
       const fsPort = new NodeFileSystemV2();
       const sha256 = new NodeSha256V2();
       const store = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha256);
-      const lock = new LocalSessionLockV2(dataDir, fsPort);
+      const clock = new NodeTimeClockV2();
+      const lock = new LocalSessionLockV2(dataDir, fsPort, clock);
       const gate = new ExecutionSessionGateV2(lock, store);
       const crypto = new NodeCryptoV2();
       const snapshotStore = new LocalSnapshotStoreV2(dataDir, fsPort, crypto);
@@ -87,7 +93,7 @@ describe('v2 replay fail-closed: missing snapshot', () => {
       const workflowHash = 'sha256:5b2d9fb885d0adc6565e1fd59e6abb3769b69e4dba5a02b6eea750137a5c0be2';
 
       // Pin a v1-backed compiled snapshot so the ack handler can load compiled workflow.
-      const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir);
+      const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir, fsPort);
       await pinnedStore
         .put(workflowHash as any, {
           schemaVersion: 1,
@@ -221,12 +227,13 @@ describe('v2 replay fail-closed: missing snapshot', () => {
       const stateToken = await mkSignedToken({ unsignedPrefix: 'st.v1.', payload: statePayload });
       const ackToken = await mkSignedToken({ unsignedPrefix: 'ack.v1.', payload: ackPayload });
 
+      const localBase64url = new NodeBase64UrlV2();
       const v2 = {
         gate,
         sessionStore: store,
         snapshotStore,
         pinnedStore,
-        keyring: await new LocalKeyringV2(dataDir, fsPort).loadOrCreate().match(
+        keyring: await new LocalKeyringV2(dataDir, fsPort, localBase64url, new NodeRandomEntropyV2()).loadOrCreate().match(
           (v) => v,
           (e) => {
             throw new Error(`unexpected keyring error: ${e.code}`);
@@ -234,6 +241,7 @@ describe('v2 replay fail-closed: missing snapshot', () => {
         ),
         crypto,
         hmac: new NodeHmacSha256V2(),
+        base64url: new NodeBase64UrlV2(),
       };
       const res = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx(v2));
       expect(res.type).toBe('error');

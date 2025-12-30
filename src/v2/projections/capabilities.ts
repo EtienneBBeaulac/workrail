@@ -6,7 +6,34 @@ export type ProjectionError =
   | { readonly code: 'PROJECTION_INVARIANT_VIOLATION'; readonly message: string }
   | { readonly code: 'PROJECTION_CORRUPTION_DETECTED'; readonly message: string };
 
+/**
+ * Closed set: Capability (delegation | web_browsing).
+ *
+ * Lock: docs/reference/workflow-execution-contract.md (Optional capabilities)
+ *
+ * Why closed:
+ * - Capabilities are workflow-shaping enhancements, not "any tool"
+ * - Prevents capability sprawl and keeps Studio UX deterministic
+ *
+ * Values:
+ * - `delegation`: parallel task delegation via subagents
+ * - `web_browsing`: external knowledge lookup
+ */
 export type CapabilityV2 = 'delegation' | 'web_browsing';
+
+/**
+ * Closed set: CapabilityStatus (unknown | available | unavailable).
+ *
+ * Lock: observed status is a deterministic state machine (latest observation wins by eventIndex).
+ *
+ * Why closed:
+ * - Avoids ambiguous states and keeps projections exhaustive
+ *
+ * Values:
+ * - `unknown`: not yet probed/attempted
+ * - `available`: observed working (probe or attempted use success)
+ * - `unavailable`: observed failing (probe or attempted use failure)
+ */
 export type CapabilityStatusV2 = 'unknown' | 'available' | 'unavailable';
 
 type CapabilityObservedEventV1 = Extract<DomainEventV1, { kind: 'capability_observed' }>;
