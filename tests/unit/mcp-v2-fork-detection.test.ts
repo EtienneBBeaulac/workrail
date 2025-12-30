@@ -20,6 +20,9 @@ import { ExecutionSessionGateV2 } from '../../src/v2/usecases/execution-session-
 import { LocalKeyringV2 } from '../../src/v2/infra/local/keyring/index.js';
 import { NodeCryptoV2 } from '../../src/v2/infra/local/crypto/index.js';
 import { NodeHmacSha256V2 } from '../../src/v2/infra/local/hmac-sha256/index.js';
+import { NodeBase64UrlV2 } from '../../src/v2/infra/local/base64url/index.js';
+import { NodeRandomEntropyV2 } from '../../src/v2/infra/local/random-entropy/index.js';
+import { NodeTimeClockV2 } from '../../src/v2/infra/local/time-clock/index.js';
 
 async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-fork-'));
@@ -45,12 +48,15 @@ async function mkCtxWithWorkflow(workflowId: string, dataDir: string): Promise<T
   const sha256V2 = new NodeSha256V2();
   const cryptoV2 = new NodeCryptoV2();
   const hmacV2 = new NodeHmacSha256V2();
+  const base64urlV2 = new NodeBase64UrlV2();
   const sessionStoreV2 = new LocalSessionEventLogStoreV2(dataDirV2, fsPortV2, sha256V2);
-  const lockV2 = new LocalSessionLockV2(dataDirV2, fsPortV2);
+  const clockV2 = new NodeTimeClockV2();
+  const lockV2 = new LocalSessionLockV2(dataDirV2, fsPortV2, clockV2);
   const gateV2 = new ExecutionSessionGateV2(lockV2, sessionStoreV2);
   const snapshotStoreV2 = new LocalSnapshotStoreV2(dataDirV2, fsPortV2, cryptoV2);
-  const pinnedStoreV2 = new LocalPinnedWorkflowStoreV2(dataDirV2);
-  const keyringPortV2 = new LocalKeyringV2(dataDirV2, fsPortV2);
+  const pinnedStoreV2 = new LocalPinnedWorkflowStoreV2(dataDirV2, fsPortV2);
+  const entropyV2 = new NodeRandomEntropyV2();
+  const keyringPortV2 = new LocalKeyringV2(dataDirV2, fsPortV2, base64urlV2, entropyV2);
   const keyringV2 = await keyringPortV2.loadOrCreate().match(v => v, e => { throw new Error(`keyring: ${e.code}`); });
 
   return {
@@ -73,6 +79,7 @@ async function mkCtxWithWorkflow(workflowId: string, dataDir: string): Promise<T
       keyring: keyringV2,
       crypto: cryptoV2,
       hmac: hmacV2,
+      base64url: base64urlV2,
     },
   };
 }
@@ -115,7 +122,8 @@ describe('v2 fork detection (Phase 5)', () => {
       // - 2 edge_created events
       // - at least one edge has cause.kind=non_tip_advance
       const { parseTokenV1 } = await import('../../src/v2/durable-core/tokens/index.js');
-      const parsed = parseTokenV1(start.data.stateToken)._unsafeUnwrap();
+      const localBase64url = new NodeBase64UrlV2();
+      const parsed = parseTokenV1(start.data.stateToken, localBase64url)._unsafeUnwrap();
       const sid = parsed.payload.sessionId;
 
       const truth = await ctx.v2!.sessionStore.load(sid).match(

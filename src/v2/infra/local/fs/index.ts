@@ -5,9 +5,18 @@ import type { ResultAsync } from 'neverthrow';
 import { ResultAsync as RA } from 'neverthrow';
 import type { FileSystemPortV2, FsError } from '../../../ports/fs.port.js';
 
+function nodeErrorCode(e: unknown): string | undefined {
+  if (typeof e !== 'object' || e === null) return undefined;
+  // Node errors typically expose a string `code` property; treat it as best-effort.
+  const code = (e as { readonly code?: unknown }).code;
+  return typeof code === 'string' ? code : undefined;
+}
+
 function mapFsError(e: unknown, filePath: string): FsError {
-  const any = e as any;
-  const code = any?.code as string | undefined;
+  // WHY: Node.js fs errors have an undocumented `code` property that varies by error type.
+  // We cannot narrow the type statically since Node error types are not exposed in TypeScript.
+  // This is a one-off escaping point used only for error classification in this adapter.
+  const code = nodeErrorCode(e);
 
   if (code === 'ENOENT') return { code: 'FS_NOT_FOUND', message: `Not found: ${filePath}` };
   if (code === 'EEXIST') return { code: 'FS_ALREADY_EXISTS', message: `Already exists: ${filePath}` };
@@ -116,8 +125,8 @@ export class NodeFileSystemV2 implements FileSystemPortV2 {
         }
       })(),
       (e) => {
-        const any = e as any;
-        const code = any?.code as string | undefined;
+        // WHY: Same rationale as mapFsError—Node.js errors have undocumented `code` property.
+        const code = nodeErrorCode(e);
         if (code === 'EINVAL' || code === 'ENOTSUP') {
           return { code: 'FS_UNSUPPORTED', message: `Directory fsync unsupported for: ${dirPath}` };
         }

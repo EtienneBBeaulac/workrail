@@ -2,6 +2,7 @@ import type { ResultAsync } from 'neverthrow';
 import { errAsync, okAsync } from 'neverthrow';
 import type { SessionId } from '../durable-core/ids/index.js';
 import type { WithHealthySessionLock } from '../durable-core/ids/with-healthy-session-lock.js';
+import { SESSION_LOCK_RETRY_AFTER_MS } from '../durable-core/constants.js';
 import type { SessionHealthV2 } from '../durable-core/schemas/session/session-health.js';
 import type { SessionLockPortV2 } from '../ports/session-lock.port.js';
 import type {
@@ -50,55 +51,58 @@ export class ExecutionSessionGateV2 {
     this.activeWitnessTokens.add(witnessToken);
 
     const doWork = (): ResultAsync<T, ExecutionSessionGateErrorV2 | E> => {
-      return this.store.loadValidatedPrefix(sessionId)
-        .mapErr((e) => {
+      return this.store
+        .loadValidatedPrefix(sessionId)
+        // Pre-check is an optimization: we only fail fast here for explicit corruption.
+        // Any other failure defers to the lock-held load() path (single source of truth for gating).
+        .orElse((e) => {
           if (e.code === 'SESSION_STORE_CORRUPTION_DETECTED') {
             const health: SessionHealthV2 =
               e.location === 'head'
                 ? { kind: 'corrupt_head', reason: e.reason }
                 : { kind: 'corrupt_tail', reason: e.reason };
-            return {
+            return errAsync({
               code: 'SESSION_NOT_HEALTHY' as const,
               message: 'Session is not healthy',
               sessionId,
               health,
-            };
+            });
           }
-          throw { kind: 'defer_to_locked' as const };
-        })
-        .orElse((e) => {
-          if ((e as any).kind === 'defer_to_locked') {
-            return okAsync(null);
-          }
-          return errAsync(e as ExecutionSessionGateErrorV2);
+
+          // Defer to lock-held health gating if validated-prefix is unavailable (I/O, lock busy, etc).
+          return okAsync(null);
         })
         .andThen((pre) => {
-          if (pre !== null) {
-            if (!pre.isComplete) {
-              return errAsync({
-                code: 'SESSION_NOT_HEALTHY' as const,
-                message: 'Session is not healthy (validated prefix indicates corrupt tail)',
-                sessionId,
-                health: {
-                  kind: 'corrupt_tail' as const,
-                  reason: pre.tailReason ?? { code: 'non_contiguous_indices', message: 'Validated prefix stopped early (corrupt tail)' },
-                },
-              });
-            }
+          if (pre === null) return okAsync(undefined);
 
-            const preHealth = projectSessionHealthV2(pre.truth).match(
-              (h) => h,
-              () => ({ kind: 'corrupt_tail', reason: { code: 'non_contiguous_indices', message: 'unknown' } } as SessionHealthV2)
-            );
-            if (preHealth.kind !== 'healthy') {
-              return errAsync({
-                code: 'SESSION_NOT_HEALTHY' as const,
-                message: 'Session is not healthy',
-                sessionId,
-                health: preHealth,
-              });
-            }
+          if (!pre.isComplete) {
+            return errAsync({
+              code: 'SESSION_NOT_HEALTHY' as const,
+              message: 'Session is not healthy (validated prefix indicates corrupt tail)',
+              sessionId,
+              health: {
+                kind: 'corrupt_tail' as const,
+                reason: pre.tailReason ?? {
+                  code: 'non_contiguous_indices',
+                  message: 'Validated prefix stopped early (corrupt tail)',
+                },
+              },
+            });
           }
+
+          const preHealth = projectSessionHealthV2(pre.truth).match(
+            (h) => h,
+            () => ({ kind: 'corrupt_tail', reason: { code: 'non_contiguous_indices', message: 'unknown' } } as SessionHealthV2)
+          );
+          if (preHealth.kind !== 'healthy') {
+            return errAsync({
+              code: 'SESSION_NOT_HEALTHY' as const,
+              message: 'Session is not healthy',
+              sessionId,
+              health: preHealth,
+            });
+          }
+
           return okAsync(undefined);
         })
         .andThen(() =>
@@ -109,7 +113,7 @@ export class ExecutionSessionGateV2 {
                   code: 'SESSION_LOCKED' as const,
                   message: `Session is locked; retry in 1–3 seconds; if this persists >10s, ensure no other WorkRail process is running for this session.`,
                   sessionId,
-                  retry: { kind: 'retryable_after_ms' as const, afterMs: 1000 },
+                  retry: { kind: 'retryable_after_ms' as const, afterMs: SESSION_LOCK_RETRY_AFTER_MS },
                 };
               }
               return { code: 'LOCK_ACQUIRE_FAILED' as const, message: e.message, sessionId };
@@ -181,7 +185,7 @@ export class ExecutionSessionGateV2 {
                   code: 'LOCK_RELEASE_FAILED' as const,
                   message: 'Failed to release session lock; retry in 1–3 seconds; if this persists >10s, ensure no other WorkRail process is running for this session.',
                   sessionId,
-                  retry: { kind: 'retryable_after_ms' as const, afterMs: 1000 },
+                  retry: { kind: 'retryable_after_ms' as const, afterMs: SESSION_LOCK_RETRY_AFTER_MS },
                 }))
                 .map(() => result)
             )
@@ -192,7 +196,7 @@ export class ExecutionSessionGateV2 {
                   code: 'LOCK_RELEASE_FAILED' as const,
                   message: 'Failed to release session lock; retry in 1–3 seconds; if this persists >10s, ensure no other WorkRail process is running for this session.',
                   sessionId,
-                  retry: { kind: 'retryable_after_ms' as const, afterMs: 1000 },
+                  retry: { kind: 'retryable_after_ms' as const, afterMs: SESSION_LOCK_RETRY_AFTER_MS },
                 }))
                 .andThen((err) => errAsync(err))
             );

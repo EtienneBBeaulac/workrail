@@ -16,6 +16,7 @@ import {
   SecurityError
 } from '../../core/error-handler';
 import { IFeatureFlagProvider, EnvironmentFeatureFlagProvider } from '../../config/feature-flags';
+import { validateWorkflowIdForSave } from '../../domain/workflow-id-policy';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -27,7 +28,9 @@ function sanitizeId(id: string): string {
   }
 
   const normalised = id.normalize('NFC');
-  const valid = /^[a-zA-Z0-9_-]+$/.test(normalised);
+  // Allow dotted workflow IDs for v2 namespaced IDs (namespace.name).
+  // Still disallow path separators and other unsafe characters.
+  const valid = /^[a-zA-Z0-9_.-]+$/.test(normalised);
   if (!valid) {
     throw new InvalidWorkflowError(id, 'Invalid characters in workflow id');
   }
@@ -317,10 +320,16 @@ export class FileWorkflowStorage implements IWorkflowStorage {
       );
     }
 
+    // v2 lock: saving new workflows requires namespaced IDs; legacy IDs remain loadable.
+    validateWorkflowIdForSave(definition.id, this.source.kind);
+
     const safeId = sanitizeId(definition.id);
+
+    // NOTE: this storage uses the workflow id as filename stem.
+    // This must remain delimiter-safe and OS-portable.
     const filename = `${safeId}.json`;
     const filePath = path.resolve(this.baseDirReal, filename);
-    
+
     assertWithinBase(filePath, this.baseDirReal);
 
     const content = JSON.stringify(definition, null, 2);

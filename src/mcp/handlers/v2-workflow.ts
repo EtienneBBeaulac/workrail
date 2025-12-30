@@ -5,9 +5,6 @@ import type { V2InspectWorkflowInput, V2ListWorkflowsInput } from '../v2/tools.j
 import { V2WorkflowInspectOutputSchema, V2WorkflowListOutputSchema } from '../output-schemas.js';
 
 import { compileV1WorkflowToV2PreviewSnapshot } from '../../v2/read-only/v1-to-v2-shim.js';
-import { NodeCryptoV2 } from '../../v2/infra/local/crypto/index.js';
-import { LocalDataDirV2 } from '../../v2/infra/local/data-dir/index.js';
-import { LocalPinnedWorkflowStoreV2 } from '../../v2/infra/local/pinned-workflow-store/index.js';
 import { workflowHashForCompiledSnapshot } from '../../v2/durable-core/canonical/hashing.js';
 import type { JsonValue } from '../../v2/durable-core/canonical/json-types.js';
 
@@ -20,15 +17,27 @@ async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, name: st
   return Promise.race([operation, timeoutPromise]);
 }
 
+/**
+ * Require v2 context to be available.
+ * Returns PRECONDITION_FAILED if v2 tools are not enabled.
+ */
+function requireV2(ctx: ToolContext): ToolResult<NonNullable<typeof ctx.v2>> | null {
+  if (!ctx.v2) {
+    return errNotRetryable('PRECONDITION_FAILED', 'v2 tools are not enabled');
+  }
+  return null;
+}
+
 export async function handleV2ListWorkflows(
   _input: V2ListWorkflowsInput,
   ctx: ToolContext
 ): Promise<ToolResult<unknown>> {
+  const v2Err = requireV2(ctx);
+  if (v2Err) return v2Err;
+  const { crypto, pinnedStore } = ctx.v2!;
+
   try {
     const summaries = await withTimeout(ctx.workflowService.listWorkflowSummaries(), TIMEOUT_MS, 'list_workflows');
-    const crypto = new NodeCryptoV2();
-    const dataDir = new LocalDataDirV2(process.env);
-    const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir);
 
     const compiled = await Promise.all(
       summaries.map(async (s) => {
@@ -88,15 +97,15 @@ export async function handleV2InspectWorkflow(
   input: V2InspectWorkflowInput,
   ctx: ToolContext
 ): Promise<ToolResult<unknown>> {
+  const v2Err = requireV2(ctx);
+  if (v2Err) return v2Err;
+  const { crypto, pinnedStore } = ctx.v2!;
+
   try {
     const workflow = await withTimeout(ctx.workflowService.getWorkflowById(input.workflowId), TIMEOUT_MS, 'inspect_workflow');
     if (!workflow) {
       return errNotRetryable('NOT_FOUND', `Workflow not found: ${input.workflowId}`);
     }
-
-    const crypto = new NodeCryptoV2();
-    const dataDir = new LocalDataDirV2(process.env);
-    const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir);
 
     const snapshot = compileV1WorkflowToV2PreviewSnapshot(workflow);
     const hashRes = workflowHashForCompiledSnapshot(snapshot as unknown as JsonValue, crypto);

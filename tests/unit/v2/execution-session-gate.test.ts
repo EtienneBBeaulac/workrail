@@ -1,3 +1,12 @@
+/**
+ * v2 Execution Session Gate Tests
+ *
+ * @enforces witness-required-for-append
+ * @enforces witness-scope-enforced
+ * @enforces execution-gated-by-health
+ * @enforces session-health-closed-set
+ * @enforces single-writer-per-session
+ */
 import { describe, expect, it } from 'vitest';
 import { errAsync, okAsync } from 'neverthrow';
 import { ExecutionSessionGateV2 } from '../../../src/v2/usecases/execution-session-gate.js';

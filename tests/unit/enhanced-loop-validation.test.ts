@@ -40,8 +40,8 @@ describe('Enhanced Loop Validation', () => {
               {
                 id: 'step-1',
                 title: 'Step with complex conditional',
-                prompt: "{{iteration === 1 ? 'First step content' : iteration === 2 ? 'Second step content' : 'Third step content'}}",
-                requireConfirmation: false
+                prompt: "{{currentIteration === 1 ? 'First step content' : currentIteration === 2 ? 'Second step content' : 'Third step content'}}",
+requireConfirmation: false
               }
             ],
             requireConfirmation: false

@@ -24,6 +24,7 @@ const CompletedStepInstancesV1Schema = z
     kind: z.literal('set'),
     values: z.array(StepInstanceKeyV1Schema),
   })
+  .strict()
   .superRefine((v, ctx) => {
     // enforce sorted + unique
     for (let i = 1; i < v.values.length; i++) {
@@ -54,39 +55,39 @@ export const LoopFrameV1Schema = z.object({
   loopId: DelimiterSafeIdV1Schema,
   iteration: z.number().int().nonnegative(),
   bodyIndex: z.number().int().nonnegative(),
-});
+}).strict();
 
 export const LoopPathFrameV1Schema = z.object({
   loopId: DelimiterSafeIdV1Schema,
   iteration: z.number().int().nonnegative(),
-});
+}).strict();
 
 export type PendingStepV1 = z.infer<typeof PendingStepV1Schema>;
 
 export const PendingStepV1Schema = z.object({
   stepId: DelimiterSafeIdV1Schema,
   loopPath: z.array(LoopPathFrameV1Schema),
-});
+}).strict();
 
 export const PendingV1Schema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('none') }),
-  z.object({ kind: z.literal('some'), step: PendingStepV1Schema }),
+  z.object({ kind: z.literal('none') }).strict(),
+  z.object({ kind: z.literal('some'), step: PendingStepV1Schema }).strict(),
 ]);
 
 export type PendingV1 = z.infer<typeof PendingV1Schema>;
 
 export type EngineStateV1 = z.infer<typeof EngineStateV1Schema>;
 
-const EngineStateInitV1Schema = z.object({ kind: z.literal('init') });
+const EngineStateInitV1Schema = z.object({ kind: z.literal('init') }).strict();
 
 const EngineStateRunningV1Schema = z.object({
   kind: z.literal('running'),
   completed: CompletedStepInstancesV1Schema,
   loopStack: z.array(LoopFrameV1Schema),
   pending: PendingV1Schema,
-});
+}).strict();
 
-const EngineStateCompleteV1Schema = z.object({ kind: z.literal('complete') });
+const EngineStateCompleteV1Schema = z.object({ kind: z.literal('complete') }).strict();
 
 export const EngineStateV1Schema = z
   .discriminatedUnion('kind', [EngineStateInitV1Schema, EngineStateRunningV1Schema, EngineStateCompleteV1Schema])
@@ -144,7 +145,7 @@ export type EnginePayloadV1 = z.infer<typeof EnginePayloadV1Schema>;
 export const EnginePayloadV1Schema = z.object({
   v: z.literal(1),
   engineState: EngineStateV1Schema,
-});
+}).strict();
 
 /**
  * Execution snapshot file stored in CAS and referenced by `node_created.data.snapshotRef`.
@@ -158,7 +159,7 @@ export const ExecutionSnapshotFileV1Schema = z.object({
   v: z.literal(1),
   kind: z.literal('execution_snapshot'),
   enginePayload: EnginePayloadV1Schema,
-});
+}).strict();
 
 /**
  * A minimal branded type for an execution snapshot ref (sha256:*), used by CAS and events.

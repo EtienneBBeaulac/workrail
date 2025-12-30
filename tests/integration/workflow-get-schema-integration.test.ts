@@ -138,6 +138,27 @@ describe('Workflow Get Schema Integration', () => {
       const { validateWorkflow } = await import('../../src/application/validation');
       
              // Test with a valid workflow
+
+      // Legacy IDs with underscores are allowed by schema (load-time compatibility).
+      const legacyWithUnderscore = {
+        id: 'legacy_id',
+        name: 'Legacy Workflow',
+        description: 'A workflow with a legacy id containing underscore',
+        version: '1.0.0',
+        steps: [
+          {
+            id: 'step-1',
+            title: 'Step 1',
+            prompt: 'Do the thing',
+          },
+        ],
+      };
+
+      const legacyRes = validateWorkflow(legacyWithUnderscore);
+      expect(legacyRes.valid).toBe(true);
+      expect(legacyRes.errors).toEqual([]);
+      
+             // Test with a valid workflow
        const validWorkflow = {
          id: 'test-workflow',
          name: 'Test Workflow',

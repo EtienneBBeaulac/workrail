@@ -8,6 +8,7 @@ import { type DomainError, Err } from '../../domain/execution/error';
 import { ExecutionState, LoopFrame } from '../../domain/execution/state';
 import { WorkflowEvent } from '../../domain/execution/event';
 import { StepInstanceId, toStepInstanceKey } from '../../domain/execution/ids';
+import { computeLoopDecision, type LoopKernelError } from '../../v2/durable-core/domain/loop-runtime';
 
 export interface NextStep {
   readonly step: WorkflowStepDefinition;
@@ -177,119 +178,190 @@ export class WorkflowInterpreter {
       return err(Err.invalidLoop(frame.loopId, 'Loop not found in compiled metadata'));
     }
 
-    // Check continuation before selecting body step
-    const shouldContinue = this.shouldContinueLoop(loopCompiled.loop, frame, context);
-    if (shouldContinue.isErr()) return err(shouldContinue.error);
-    if (!shouldContinue.value) {
-      // Exit loop: mark loop step completed as top-level instance and pop frame.
-      const popped = state.loopStack.slice(0, -1);
-      return ok({
-        state: {
-          ...state,
-          loopStack: popped,
-          completed: [...state.completed, frame.loopId],
-        },
-        next: null,
-      });
-    }
-
-    // Find next eligible body step
     const body = loopCompiled.bodySteps;
-    for (let i = frame.bodyIndex; i < body.length; i++) {
-      const bodyStep = body[i];
-      const instance: StepInstanceId = {
-        stepId: bodyStep.id,
-        loopPath: [...state.loopStack.map((f) => ({ loopId: f.loopId, iteration: f.iteration }))],
-      };
-      const key = toStepInstanceKey(instance);
-      if (state.completed.includes(key)) continue;
+    const loopPath = [...state.loopStack.map((f) => ({ loopId: f.loopId, iteration: f.iteration }))];
+    const completed = new Set(state.completed);
 
-      const projectedContext = this.projectLoopContext(loopCompiled.loop, frame, context);
-      if (bodyStep.runCondition && !evaluateCondition(bodyStep.runCondition as any, projectedContext as any)) {
-        continue;
-      }
-
-      const next = this.materializeStep(compiled, instance, projectedContext);
-      if (next.isErr()) return err(next.error);
-
-      // Update frame body index to point at the selected step (still needs completion)
-      const updatedTop: LoopFrame = { ...frame, bodyIndex: i };
-      const updatedStack = [...state.loopStack.slice(0, -1), updatedTop];
-      return ok({
-        state: { ...state, loopStack: updatedStack, pendingStep: instance },
-        next: next.value,
-      });
-    }
-
-    // No eligible steps left in this iteration => advance iteration
-    // Allow advancing up to maxIterations; shouldContinueLoop will reject if we've hit the count/condition
-    if (frame.iteration + 1 > loopCompiled.loop.loop.maxIterations) {
-      return err(Err.maxIterationsExceeded(frame.loopId, loopCompiled.loop.loop.maxIterations));
-    }
-
-    const advanced: LoopFrame = { ...frame, iteration: frame.iteration + 1, bodyIndex: 0 };
-    const updatedStack = [...state.loopStack.slice(0, -1), advanced];
-    return ok({ state: { ...state, loopStack: updatedStack }, next: null });
-  }
-
-  private shouldContinueLoop(
-    loop: LoopStepDefinition,
-    frame: LoopFrame,
-    context: Record<string, unknown>
-  ): Result<boolean, DomainError> {
-    // Safety first
-    if (frame.iteration >= loop.loop.maxIterations) {
-      return ok(false);
-    }
-
-    switch (loop.loop.type) {
-      case 'for': {
-        const count = loop.loop.count;
-        if (typeof count === 'number') {
-          return ok(frame.iteration < count);
-        }
-        if (typeof count === 'string') {
-          const raw = (context as any)[count];
-          if (typeof raw !== 'number') {
-            return err(Err.missingContext(`for loop '${loop.id}' requires numeric context['${count}']`));
+    const ports = {
+      shouldEnterIteration: (iteration: number): Result<boolean, LoopKernelError> => {
+        switch (loopCompiled.loop.loop.type) {
+          case 'for': {
+            const count = loopCompiled.loop.loop.count;
+            if (typeof count === 'number') {
+              return ok(iteration < count);
+            }
+            if (typeof count === 'string') {
+              const raw = (context as any)[count];
+              if (typeof raw !== 'number') {
+                return err({
+                  code: 'LOOP_MISSING_CONTEXT',
+                  loopId: loopCompiled.loop.id,
+                  message: `for loop '${loopCompiled.loop.id}' requires numeric context['${count}']`,
+                });
+              }
+              return ok(iteration < raw);
+            }
+            return err({
+              code: 'LOOP_INVALID_CONFIG',
+              loopId: loopCompiled.loop.id,
+              message: `for loop '${loopCompiled.loop.id}' missing count`,
+            });
           }
-          return ok(frame.iteration < raw);
+          case 'forEach': {
+            const itemsVar = loopCompiled.loop.loop.items;
+            if (!itemsVar) {
+              return err({
+                code: 'LOOP_INVALID_CONFIG',
+                loopId: loopCompiled.loop.id,
+                message: `forEach loop '${loopCompiled.loop.id}' missing items`,
+              });
+            }
+            const raw = (context as any)[itemsVar];
+            if (!Array.isArray(raw)) {
+              return err({
+                code: 'LOOP_MISSING_CONTEXT',
+                loopId: loopCompiled.loop.id,
+                message: `forEach loop '${loopCompiled.loop.id}' requires array context['${itemsVar}']`,
+              });
+            }
+            return ok(iteration < raw.length);
+          }
+          case 'while': {
+            if (!loopCompiled.loop.loop.condition) {
+              return err({
+                code: 'LOOP_INVALID_CONFIG',
+                loopId: loopCompiled.loop.id,
+                message: `while loop '${loopCompiled.loop.id}' missing condition`,
+              });
+            }
+            return ok(
+              evaluateCondition(
+                loopCompiled.loop.loop.condition as any,
+                this.projectLoopContextAtIteration(loopCompiled.loop, iteration, context) as any
+              )
+            );
+          }
+          case 'until': {
+            if (!loopCompiled.loop.loop.condition) {
+              return err({
+                code: 'LOOP_INVALID_CONFIG',
+                loopId: loopCompiled.loop.id,
+                message: `until loop '${loopCompiled.loop.id}' missing condition`,
+              });
+            }
+            return ok(
+              !evaluateCondition(
+                loopCompiled.loop.loop.condition as any,
+                this.projectLoopContextAtIteration(loopCompiled.loop, iteration, context) as any
+              )
+            );
+          }
+          default:
+            return err({
+              code: 'LOOP_INVALID_CONFIG',
+              loopId: loopCompiled.loop.id,
+              message: `Unknown loop type '${(loopCompiled.loop.loop as any).type}'`,
+            });
         }
-        return err(Err.invalidLoop(loop.id, `for loop '${loop.id}' missing count`));
+      },
+
+      isBodyIndexEligible: (bodyIndex: number): boolean => {
+        const bodyStep = body[bodyIndex];
+        if (!bodyStep) return false;
+
+        const instance: StepInstanceId = { stepId: bodyStep.id, loopPath };
+        const key = toStepInstanceKey(instance);
+        if (completed.has(key)) return false;
+
+        if (!bodyStep.runCondition) return true;
+
+        const projectedContext = this.projectLoopContext(loopCompiled.loop, frame, context);
+        return evaluateCondition(bodyStep.runCondition as any, projectedContext as any);
+      },
+    } as const;
+
+    const decision = computeLoopDecision({
+      loopId: frame.loopId,
+      iteration: frame.iteration,
+      bodyIndex: frame.bodyIndex,
+      bodyLength: body.length,
+      maxIterations: loopCompiled.loop.loop.maxIterations,
+      ports,
+    });
+
+    if (decision.isErr()) {
+      const e = decision.error;
+      switch (e.code) {
+        case 'LOOP_MAX_ITERATIONS_REACHED':
+          return err(Err.maxIterationsExceeded(e.loopId, e.maxIterations));
+        case 'LOOP_MISSING_CONTEXT':
+          return err(Err.missingContext(e.message));
+        case 'LOOP_INVALID_CONFIG':
+          return err(Err.invalidLoop(e.loopId, e.message));
+        case 'LOOP_INVALID_STATE':
+          return err(Err.invalidState(e.message));
+        default:
+          return err(Err.invalidState('Unhandled loop kernel error'));
       }
-      case 'forEach': {
-        const itemsVar = loop.loop.items;
-        if (!itemsVar) return err(Err.invalidLoop(loop.id, `forEach loop '${loop.id}' missing items`));
-        const raw = (context as any)[itemsVar];
-        if (!Array.isArray(raw)) {
-          return err(Err.missingContext(`forEach loop '${loop.id}' requires array context['${itemsVar}']`));
+    }
+
+    switch (decision.value.kind) {
+      case 'exit_loop': {
+        // Exit loop: mark loop step completed as top-level instance and pop frame.
+        const popped = state.loopStack.slice(0, -1);
+        return ok({
+          state: {
+            ...state,
+            loopStack: popped,
+            completed: [...state.completed, frame.loopId],
+          },
+          next: null,
+        });
+      }
+      case 'advance_iteration': {
+        const advanced: LoopFrame = { ...frame, iteration: decision.value.toIteration, bodyIndex: 0 };
+        const updatedStack = [...state.loopStack.slice(0, -1), advanced];
+        return ok({ state: { ...state, loopStack: updatedStack }, next: null });
+      }
+      case 'execute_body_step': {
+        const bodyStep = body[decision.value.bodyIndex];
+        if (!bodyStep) {
+          return err(Err.invalidState(`Loop '${frame.loopId}' selected missing bodyIndex ${decision.value.bodyIndex}`));
         }
-        return ok(frame.iteration < raw.length);
-      }
-      case 'while': {
-        if (!loop.loop.condition) return err(Err.invalidLoop(loop.id, `while loop '${loop.id}' missing condition`));
-        return ok(evaluateCondition(loop.loop.condition as any, this.projectLoopContext(loop, frame, context) as any));
-      }
-      case 'until': {
-        if (!loop.loop.condition) return err(Err.invalidLoop(loop.id, `until loop '${loop.id}' missing condition`));
-        return ok(!evaluateCondition(loop.loop.condition as any, this.projectLoopContext(loop, frame, context) as any));
+
+        const instance: StepInstanceId = { stepId: bodyStep.id, loopPath };
+        const projectedContext = this.projectLoopContext(loopCompiled.loop, frame, context);
+        const next = this.materializeStep(compiled, instance, projectedContext);
+        if (next.isErr()) return err(next.error);
+
+        const updatedTop: LoopFrame = { ...frame, bodyIndex: decision.value.bodyIndex };
+        const updatedStack = [...state.loopStack.slice(0, -1), updatedTop];
+
+        return ok({
+          state: { ...state, loopStack: updatedStack, pendingStep: instance },
+          next: next.value,
+        });
       }
       default:
-        return err(Err.invalidLoop(loop.id, `Unknown loop type '${(loop.loop as any).type}'`));
+        return err(Err.invalidState('Non-exhaustive loop decision'));
     }
   }
 
-  private projectLoopContext(loop: LoopStepDefinition, frame: LoopFrame, base: Record<string, unknown>): Record<string, unknown> {
+private projectLoopContextAtIteration(
+    loop: LoopStepDefinition,
+    iteration: number,
+    base: Record<string, unknown>
+  ): Record<string, unknown> {
     const out: Record<string, unknown> = { ...base };
 
     const iterationVar = loop.loop.iterationVar || 'currentIteration';
-    out[iterationVar] = frame.iteration + 1; // 1-based for agents
+    out[iterationVar] = iteration + 1; // 1-based for agents
 
     if (loop.loop.type === 'forEach') {
       const itemsVar = loop.loop.items!;
       const raw = (base as any)[itemsVar];
       if (Array.isArray(raw)) {
-        const index = frame.iteration;
+        const index = iteration;
         const itemVar = loop.loop.itemVar || 'currentItem';
         const indexVar = loop.loop.indexVar || 'currentIndex';
         out[itemVar] = raw[index];
@@ -298,6 +370,10 @@ export class WorkflowInterpreter {
     }
 
     return out;
+  }
+
+  private projectLoopContext(loop: LoopStepDefinition, frame: LoopFrame, base: Record<string, unknown>): Record<string, unknown> {
+    return this.projectLoopContextAtIteration(loop, frame.iteration, base);
   }
 
   private lookupStepInstance(compiled: CompiledWorkflow, id: StepInstanceId): Result<NextStep, DomainError> {

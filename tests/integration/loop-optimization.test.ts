@@ -186,6 +186,66 @@ describe('Loop Optimization Integration', () => {
       const v2 = expectOk<{ state: ExecutionState; next: any | null; isComplete: boolean }>(r2);
       expect(v2.next?.step.id).toBe('end');
     });
+
+    it('treats skipped body steps as completed iterations', async () => {
+      const workflow: WorkflowDefinition = {
+        id: 'skip-body-loop-workflow',
+        name: 'Skip Body Loop Workflow',
+        description: 'Test that iterations still advance when body steps are ineligible',
+        version: '1.0.0',
+        steps: [
+          {
+            id: 'start',
+            title: 'Start',
+            prompt: 'Starting workflow',
+          },
+          {
+            id: 'skip-loop',
+            type: 'loop',
+            title: 'Skip Body Loop',
+            prompt: 'Loop where body never becomes eligible',
+            loop: {
+              type: 'for',
+              count: 2,
+              maxIterations: 10,
+            },
+            body: [
+              {
+                id: 'never-executed',
+                title: 'Never Executed',
+                prompt: 'This should never run',
+                runCondition: { var: 'doWork', equals: true },
+              },
+            ],
+          },
+          {
+            id: 'end',
+            title: 'End',
+            prompt: 'Workflow complete',
+          },
+        ],
+      };
+
+      await storage.save(workflow);
+
+      const context = { doWork: false };
+      const workflowService = resolve(DI.Services.Workflow);
+      let state: ExecutionState = { kind: 'init' };
+
+      const r1 = await workflowService.getNextStep('skip-body-loop-workflow', state, undefined, context);
+      const v1 = expectOk<{ state: ExecutionState; next: any | null; isComplete: boolean }>(r1);
+      expect(v1.next?.step.id).toBe('start');
+      state = v1.state;
+
+      const r2 = await workflowService.getNextStep(
+        'skip-body-loop-workflow',
+        state,
+        { kind: 'step_completed', stepInstanceId: v1.next!.stepInstanceId },
+        context
+      );
+      const v2 = expectOk<{ state: ExecutionState; next: any | null; isComplete: boolean }>(r2);
+      expect(v2.next?.step.id).toBe('end');
+    });
   });
 
   describe('Context Size Reduction', () => {

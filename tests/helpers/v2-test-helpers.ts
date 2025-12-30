@@ -5,7 +5,9 @@ import type { ToolContext } from '../../src/mcp/types.js';
 import { LocalDataDirV2 } from '../../src/v2/infra/local/data-dir/index.js';
 import { NodeFileSystemV2 } from '../../src/v2/infra/local/fs/index.js';
 import { NodeHmacSha256V2 } from '../../src/v2/infra/local/hmac-sha256/index.js';
+import { NodeBase64UrlV2 } from '../../src/v2/infra/local/base64url/index.js';
 import { LocalKeyringV2 } from '../../src/v2/infra/local/keyring/index.js';
+import { NodeRandomEntropyV2 } from '../../src/v2/infra/local/random-entropy/index.js';
 import { encodeTokenPayloadV1, signTokenV1 } from '../../src/v2/durable-core/tokens/index.js';
 
 /**
@@ -81,7 +83,9 @@ export async function mkSignedToken(args: {
   const dataDir = new LocalDataDirV2(process.env);
   const fsPort = new NodeFileSystemV2();
   const hmac = new NodeHmacSha256V2();
-  const keyringPort = new LocalKeyringV2(dataDir, fsPort);
+  const base64url = new NodeBase64UrlV2();
+  const entropy = new NodeRandomEntropyV2();
+  const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url, entropy);
   const keyring = await keyringPort.loadOrCreate().match(
     (v) => v,
     (e) => {
@@ -96,7 +100,7 @@ export async function mkSignedToken(args: {
     }
   );
 
-  const token = signTokenV1(args.unsignedPrefix, payloadBytes, keyring, hmac).match(
+  const token = signTokenV1(args.unsignedPrefix, payloadBytes, keyring, hmac, base64url).match(
     (v) => v,
     (e) => {
       throw new Error(`Unexpected token sign error in test helper: ${e.code}`);

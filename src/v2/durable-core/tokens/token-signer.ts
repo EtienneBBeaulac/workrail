@@ -2,7 +2,7 @@ import type { Result } from 'neverthrow';
 import { err, ok } from 'neverthrow';
 import type { HmacSha256PortV2 } from '../../ports/hmac-sha256.port.js';
 import type { KeyringV1 } from '../../ports/keyring.port.js';
-import { decodeBase64Url, encodeBase64Url } from './base64url.js';
+import type { Base64UrlPortV2 } from '../../ports/base64url.port.js';
 import type { CanonicalBytes, TokenStringV1 } from '../ids/index.js';
 import { asTokenStringV1 } from '../ids/index.js';
 import type { ParsedTokenV1, TokenDecodeErrorV2 } from './token-codec.js';
@@ -11,8 +11,8 @@ export type TokenVerifyErrorV2 =
   | { readonly code: 'TOKEN_BAD_SIGNATURE'; readonly message: string }
   | { readonly code: 'TOKEN_INVALID_FORMAT'; readonly message: string };
 
-function decodeKeyBytes(keyBase64Url: string): Result<Uint8Array, TokenVerifyErrorV2> {
-  const decoded = decodeBase64Url(keyBase64Url);
+function decodeKeyBytes(keyBase64Url: string, base64url: Base64UrlPortV2): Result<Uint8Array, TokenVerifyErrorV2> {
+  const decoded = base64url.decodeBase64Url(keyBase64Url);
   if (decoded.isErr()) return err({ code: 'TOKEN_INVALID_FORMAT', message: 'Invalid key encoding' });
   if (decoded.value.length !== 32) return err({ code: 'TOKEN_INVALID_FORMAT', message: 'Invalid key length' });
   return ok(decoded.value);
@@ -22,22 +22,24 @@ export function signTokenV1(
   unsignedTokenPrefix: 'st.v1.' | 'ack.v1.' | 'chk.v1.',
   payloadBytes: CanonicalBytes,
   keyring: KeyringV1,
-  hmac: HmacSha256PortV2
+  hmac: HmacSha256PortV2,
+  base64url: Base64UrlPortV2
 ): Result<TokenStringV1, TokenVerifyErrorV2> {
-  const key = decodeKeyBytes(keyring.current.keyBase64Url);
+  const key = decodeKeyBytes(keyring.current.keyBase64Url, base64url);
   if (key.isErr()) return err(key.error);
 
   const sig = hmac.hmacSha256(key.value, payloadBytes as unknown as Uint8Array);
-  const token = `${unsignedTokenPrefix}${encodeBase64Url(payloadBytes as unknown as Uint8Array)}.${encodeBase64Url(sig)}`;
+  const token = `${unsignedTokenPrefix}${base64url.encodeBase64Url(payloadBytes as unknown as Uint8Array)}.${base64url.encodeBase64Url(sig)}`;
   return ok(asTokenStringV1(token));
 }
 
 export function verifyTokenSignatureV1(
   parsed: ParsedTokenV1,
   keyring: KeyringV1,
-  hmac: HmacSha256PortV2
+  hmac: HmacSha256PortV2,
+  base64url: Base64UrlPortV2
 ): Result<void, TokenVerifyErrorV2> {
-  const sigBytes = decodeBase64Url(parsed.sigBase64Url);
+  const sigBytes = base64url.decodeBase64Url(parsed.sigBase64Url);
   if (sigBytes.isErr()) return err({ code: 'TOKEN_INVALID_FORMAT', message: 'Invalid signature encoding' });
   if (sigBytes.value.length !== 32) return err({ code: 'TOKEN_INVALID_FORMAT', message: 'Invalid signature length' });
 
@@ -45,7 +47,7 @@ export function verifyTokenSignatureV1(
   if (keyring.previous) keys.push(keyring.previous.keyBase64Url);
 
   for (const k of keys) {
-    const key = decodeKeyBytes(k);
+    const key = decodeKeyBytes(k, base64url);
     if (key.isErr()) continue;
     const expected = hmac.hmacSha256(key.value, parsed.payloadBytes as unknown as Uint8Array);
     if (hmac.timingSafeEqual(expected, sigBytes.value)) return ok(undefined);

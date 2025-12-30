@@ -66,7 +66,7 @@ describe('ValidationEngine', () => {
       ];
       const result = await engine.validate('hello world', rules);
       expect(result.valid).toBe(false);
-      expect(result.issues).toContain('Output must include "missing"');
+      expect(result.issues).toContain('Output must include: missing');
     });
 
     it('should handle undefined value', async () => {
@@ -76,6 +76,24 @@ describe('ValidationEngine', () => {
       const result = await engine.validate('hello world', rules);
       expect(result.valid).toBe(false);
       expect(result.issues).toContain('Must contain value');
+    });
+
+    it('should warn when custom message includes quoted JSON snippet (agents often stringify JSON)', async () => {
+      const rules: ValidationRule[] = [
+        {
+          type: 'contains',
+          value: 'state',
+          // Intentionally problematic: looks like a JSON string snippet in quotes.
+          message: 'Output must include "{\\"state\\": \\"init\\"}"'
+        }
+      ];
+
+      const result = await engine.validate('nope', rules);
+      expect(result.valid).toBe(false);
+      expect(result.issues).toContain('Output must include "{\\"state\\": \\"init\\"}"');
+      expect(result.suggestions).toContain(
+        'If you are returning JSON, return an object/array directly (not a JSON-encoded string). Do not wrap it in quotes or escape quotes.'
+      );
     });
   });
 
@@ -469,6 +487,28 @@ describe('ValidationEngine', () => {
       ];
       const booleanResult = await engine.validate('true', booleanRules);
       expect(booleanResult.valid).toBe(true);
+    });
+
+    it('should coerce double-encoded JSON into an object for schema validation and emit a warning', async () => {
+      const rules: ValidationRule[] = [
+        {
+          type: 'schema',
+          schema: {
+            type: 'object',
+            properties: { name: { type: 'string' } },
+            required: ['name'],
+          },
+          message: 'Must be an object',
+        },
+      ];
+
+      // Common agent mistake: JSON-stringify the object, then return it as a JSON string.
+      const doubleEncoded = '"{\\"name\\": \\"John\\"}"';
+      const result = await engine.validate(doubleEncoded, rules);
+      expect(result.valid).toBe(true);
+      expect(result.issues).toHaveLength(0);
+      expect(result.warnings).toBeDefined();
+      expect(result.warnings!.some(w => w.includes('Coerced double-encoded JSON'))).toBe(true);
     });
   });
 

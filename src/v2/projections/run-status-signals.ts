@@ -1,6 +1,7 @@
 import type { Result } from 'neverthrow';
 import { err, ok } from 'neverthrow';
 import type { DomainEventV1 } from '../durable-core/schemas/session/index.js';
+import type { AutonomyV2, RiskPolicyV2 } from '../durable-core/schemas/session/preferences.js';
 import { projectRunDagV2 } from './run-dag.js';
 import { projectGapsV2 } from './gaps.js';
 import { projectAdvanceOutcomesV2 } from './advance-outcomes.js';
@@ -8,9 +9,6 @@ import { projectAdvanceOutcomesV2 } from './advance-outcomes.js';
 export type ProjectionError =
   | { readonly code: 'PROJECTION_INVARIANT_VIOLATION'; readonly message: string }
   | { readonly code: 'PROJECTION_CORRUPTION_DETECTED'; readonly message: string };
-
-export type AutonomyV2 = 'guided' | 'full_auto_stop_on_user_deps' | 'full_auto_never_stop';
-export type RiskPolicyV2 = 'conservative' | 'balanced' | 'aggressive';
 
 export interface PreferencesSnapshotV2 {
   readonly autonomy: AutonomyV2;
