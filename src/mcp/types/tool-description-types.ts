@@ -28,11 +28,12 @@ export type DescriptionMode = typeof DESCRIPTION_MODES[number];
  * Adding a tool here forces descriptions in all modes (compile error otherwise).
  */
 export const WORKFLOW_TOOL_NAMES = [
-  'workflow_list',
-  'workflow_get',
-  'workflow_next',
-  'workflow_validate_json',
-  'workflow_get_schema',
+  // v1 tools (action-oriented names)
+  'discover_workflows',
+  'preview_workflow',
+  'advance_workflow',
+  'validate_workflow',
+  'get_workflow_schema',
   // v2 tools (feature-flagged)
   'list_workflows',
   'inspect_workflow',
