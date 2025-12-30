@@ -215,12 +215,12 @@ During execution, loops inject special variables into the context:
 
 **All loop types:**
 - `{{iterationVar}}`: Current iteration number (1-based)
-- Default: `_iteration`
+- Default: `currentIteration`
 
 **ForEach loops only:**
 - `{{itemVar}}`: Current item from the array
 - `{{indexVar}}`: Current index (0-based)
-- Defaults: `_item` and `_index`
+- Defaults: `currentItem` and `currentIndex`
 
 ### Example Context Flow
 
@@ -235,9 +235,9 @@ During execution, loops inject special variables into the context:
 {
   "items": ["apple", "banana", "cherry"],
   "processed": 1,
-  "_item": "banana",     // Current item
-  "_index": 1,           // Current index
-  "_iteration": 2        // Iteration count
+  "currentItem": "banana",       // Current item
+  "currentIndex": 1,              // Current index
+  "currentIteration": 2           // Iteration count (1-based)
 }
 ```
 
