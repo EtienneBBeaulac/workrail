@@ -1,44 +1,28 @@
 {
-  "generatedAt": "2025-12-29T21:17:19.527Z",
   "registryVersion": "1.0.0",
-  "totalLocks": 101,
-  "coveredLocks": 101,
+  "totalLocks": 109,
+  "coveredLocks": 109,
   "uncoveredLocks": 0,
   "coveragePercent": 100,
   "byCategory": {
-    "storage": {
-      "total": 16,
-      "covered": 16,
-      "uncovered": []
-    },
-    "schema": {
-      "total": 29,
-      "covered": 29,
-      "uncovered": []
-    },
-    "tokens": {
-      "total": 16,
-      "covered": 16,
-      "uncovered": []
-    },
-    "protocol": {
-      "total": 14,
-      "covered": 14,
-      "uncovered": []
-    },
-    "hashing": {
-      "total": 3,
-      "covered": 3,
-      "uncovered": []
-    },
-    "errors": {
-      "total": 6,
-      "covered": 6,
+    "architecture": {
+      "total": 5,
+      "covered": 5,
       "uncovered": []
     },
     "bundle": {
       "total": 6,
       "covered": 6,
+      "uncovered": []
+    },
+    "errors": {
+      "total": 8,
+      "covered": 8,
+      "uncovered": []
+    },
+    "hashing": {
+      "total": 4,
+      "covered": 4,
       "uncovered": []
     },
     "model": {
@@ -51,96 +35,81 @@
       "covered": 3,
       "uncovered": []
     },
-    "types": {
-      "total": 1,
-      "covered": 1,
+    "protocol": {
+      "total": 14,
+      "covered": 14,
       "uncovered": []
     },
-    "architecture": {
-      "total": 4,
-      "covered": 4,
+    "schema": {
+      "total": 32,
+      "covered": 32,
+      "uncovered": []
+    },
+    "storage": {
+      "total": 16,
+      "covered": 16,
+      "uncovered": []
+    },
+    "tokens": {
+      "total": 16,
+      "covered": 16,
+      "uncovered": []
+    },
+    "types": {
+      "total": 2,
+      "covered": 2,
       "uncovered": []
     }
   },
   "covered": [
     {
-      "lockId": "event-index-zero-based",
+      "lockId": "ack-idempotency-key",
       "tests": [
-        "tests/unit/v2/session-store.test.ts"
+        "tests/unit/v2/session-store-idempotency-with-fakes.test.ts",
+        "tests/unit/v2/session-store-idempotency.test.ts"
       ]
     },
     {
-      "lockId": "event-index-monotonic-contiguous",
+      "lockId": "ack-replay-idempotent",
       "tests": [
-        "tests/unit/v2/run-dag-projection.test.ts",
-        "tests/unit/v2/session-store.test.ts"
+        "tests/unit/v2/session-store-idempotency-with-fakes.test.ts",
+        "tests/unit/v2/session-store-idempotency.test.ts"
       ]
     },
     {
-      "lockId": "crash-safe-append",
+      "lockId": "ack-token-payload-fields",
       "tests": [
-        "tests/unit/v2/session-store.test.ts"
+        "tests/unit/v2/tokens.test.ts"
       ]
     },
     {
-      "lockId": "single-writer-per-session",
+      "lockId": "advance-append-capable",
       "tests": [
-        "tests/unit/v2/execution-session-gate.test.ts",
-        "tests/unit/v2/session-store.test.ts"
-      ]
-    },
-    {
-      "lockId": "orphan-segment-ignored",
-      "tests": [
-        "tests/unit/v2/session-store.test.ts"
-      ]
-    },
-    {
-      "lockId": "segment-digest-verification",
-      "tests": [
-        "tests/unit/v2/session-store.test.ts"
-      ]
-    },
-    {
-      "lockId": "manifest-index-monotonic-contiguous",
-      "tests": [
-        "tests/unit/v2/session-store.test.ts"
-      ]
-    },
-    {
-      "lockId": "pin-after-close",
-      "tests": [
-        "tests/unit/v2/session-store.test.ts"
-      ]
-    },
-    {
-      "lockId": "crash-state-detection",
-      "tests": [
-        "tests/unit/v2/session-store.test.ts"
+        "tests/unit/v2/v2-execution-protocol.test.ts"
       ]
     },
     {
       "lockId": "append-plan-atomic",
       "tests": [
+        "tests/unit/v2/session-store-idempotency-with-fakes.test.ts",
         "tests/unit/v2/session-store-idempotency.test.ts",
         "tests/unit/v2/session-store.test.ts"
       ]
     },
     {
-      "lockId": "dedupe-key-idempotent",
+      "lockId": "autonomy-closed-set",
       "tests": [
-        "tests/unit/v2/session-store-idempotency.test.ts",
-        "tests/unit/v2/session-store.test.ts"
+        "tests/unit/v2/schema-locks.test.ts"
       ]
     },
     {
-      "lockId": "dedupe-key-stable",
+      "lockId": "blocker-budget",
       "tests": [
-        "tests/unit/v2/session-store-idempotency.test.ts"
+        "tests/unit/v2/budget-enforcement.test.ts"
       ]
     },
     {
-      "lockId": "event-kinds-closed-set",
+      "lockId": "blocker-codes-closed-set",
       "tests": [
         "tests/unit/v2/schema-locks.test.ts"
       ]
@@ -152,200 +121,19 @@
       ]
     },
     {
-      "lockId": "snapshot-discriminated-union",
+      "lockId": "budget-enforcement",
       "tests": [
-        "tests/unit/v2/execution-snapshot.test.ts"
+        "tests/unit/v2/notes-markdown.test.ts"
       ]
     },
     {
-      "lockId": "snapshot-pending-explicit",
+      "lockId": "bundle-errors-closed-set",
       "tests": [
-        "tests/unit/v2/execution-snapshot.test.ts"
-      ]
-    },
-    {
-      "lockId": "snapshot-impossible-state-rejected",
-      "tests": [
-        "tests/unit/v2/execution-snapshot.test.ts"
-      ]
-    },
-    {
-      "lockId": "snapshot-loop-id-unique",
-      "tests": [
-        "tests/unit/v2/execution-snapshot.test.ts"
-      ]
-    },
-    {
-      "lockId": "snapshot-completed-sorted",
-      "tests": [
-        "tests/unit/v2/execution-snapshot.test.ts"
-      ]
-    },
-    {
-      "lockId": "step-instance-key-delimiter-safe",
-      "tests": [
-        "tests/unit/v2/step-instance-key.test.ts"
-      ]
-    },
-    {
-      "lockId": "step-instance-key-format",
-      "tests": [
-        "tests/unit/v2/step-instance-key.test.ts"
-      ]
-    },
-    {
-      "lockId": "token-format-prefix-version-payload-sig",
-      "tests": [
-        "tests/unit/v2/tokens.test.ts"
-      ]
-    },
-    {
-      "lockId": "token-prefix-closed-set",
-      "tests": [
-        "tests/unit/v2/tokens.test.ts"
-      ]
-    },
-    {
-      "lockId": "token-kind-closed-set",
-      "tests": [
-        "tests/unit/v2/tokens.test.ts"
-      ]
-    },
-    {
-      "lockId": "token-prefix-kind-match",
-      "tests": [
-        "tests/unit/v2/tokens.test.ts"
-      ]
-    },
-    {
-      "lockId": "token-signing-hmac-sha256",
-      "tests": [
-        "tests/unit/v2/tokens.test.ts"
-      ]
-    },
-    {
-      "lockId": "token-signature-input-canonical-only",
-      "tests": [
-        "tests/unit/v2/golden-hashes/golden-hashes.test.ts",
-        "tests/unit/v2/tokens.test.ts"
-      ]
-    },
-    {
-      "lockId": "token-signature-timing-safe",
-      "tests": [
-        "tests/unit/v2/tokens.test.ts"
-      ]
-    },
-    {
-      "lockId": "keyring-two-keys",
-      "tests": [
-        "tests/unit/v2/tokens.test.ts"
-      ]
-    },
-    {
-      "lockId": "keyring-32-byte-entropy",
-      "tests": [
-        "tests/unit/v2/tokens.test.ts"
-      ]
-    },
-    {
-      "lockId": "keyring-verification-order",
-      "tests": [
-        "tests/unit/v2/tokens.test.ts"
-      ]
-    },
-    {
-      "lockId": "state-token-payload-fields",
-      "tests": [
-        "tests/unit/v2/tokens.test.ts"
-      ]
-    },
-    {
-      "lockId": "ack-token-payload-fields",
-      "tests": [
-        "tests/unit/v2/tokens.test.ts"
-      ]
-    },
-    {
-      "lockId": "checkpoint-token-payload-fields",
-      "tests": [
-        "tests/unit/v2/tokens.test.ts"
-      ]
-    },
-    {
-      "lockId": "ack-idempotency-key",
-      "tests": [
-        "tests/unit/v2/session-store-idempotency.test.ts"
-      ]
-    },
-    {
-      "lockId": "ack-replay-idempotent",
-      "tests": [
-        "tests/unit/v2/session-store-idempotency.test.ts"
-      ]
-    },
-    {
-      "lockId": "checkpoint-idempotency",
-      "tests": [
-        "tests/unit/v2/tokens.test.ts"
-      ]
-    },
-    {
-      "lockId": "rehydrate-pure-no-writes",
-      "tests": [
-        "tests/unit/v2/v2-execution-protocol.test.ts"
-      ]
-    },
-    {
-      "lockId": "advance-append-capable",
-      "tests": [
-        "tests/unit/v2/v2-execution-protocol.test.ts"
-      ]
-    },
-    {
-      "lockId": "replay-fact-returning",
-      "tests": [
-        "tests/unit/v2/v2-execution-protocol.test.ts"
-      ]
-    },
-    {
-      "lockId": "replay-fail-closed",
-      "tests": [
-        "tests/unit/v2/v2-execution-protocol.test.ts"
-      ]
-    },
-    {
-      "lockId": "witness-required-for-append",
-      "tests": [
-        "tests/unit/v2/execution-session-gate.test.ts"
-      ]
-    },
-    {
-      "lockId": "witness-scope-enforced",
-      "tests": [
-        "tests/unit/v2/execution-session-gate.test.ts"
-      ]
-    },
-    {
-      "lockId": "token-validation-errors-closed-set",
-      "tests": [
-        "tests/unit/v2/mcp-error-envelope.test.ts"
+        "tests/unit/v2/export-bundle-schema.test.ts"
       ]
     },
     {
       "lockId": "bundle-format-single-json",
-      "tests": [
-        "tests/unit/v2/export-bundle-schema.test.ts"
-      ]
-    },
-    {
-      "lockId": "bundle-tokens-not-portable",
-      "tests": [
-        "tests/unit/v2/export-bundle-schema.test.ts"
-      ]
-    },
-    {
-      "lockId": "bundle-integrity-jcs-sha256",
       "tests": [
         "tests/unit/v2/export-bundle-schema.test.ts"
       ]
@@ -363,113 +151,126 @@
       ]
     },
     {
-      "lockId": "bundle-errors-closed-set",
+      "lockId": "bundle-integrity-jcs-sha256",
       "tests": [
         "tests/unit/v2/export-bundle-schema.test.ts"
       ]
     },
     {
-      "lockId": "snapshot-content-addressed",
+      "lockId": "bundle-tokens-not-portable",
       "tests": [
-        "tests/unit/v2/golden-hashes/golden-hashes.test.ts"
+        "tests/unit/v2/export-bundle-schema.test.ts"
       ]
     },
     {
-      "lockId": "snapshot-rehydration-only",
+      "lockId": "checkpoint-idempotency",
       "tests": [
-        "tests/unit/v2/execution-snapshot.test.ts"
+        "tests/unit/v2/tokens.test.ts"
       ]
     },
     {
-      "lockId": "runs-are-dags",
+      "lockId": "checkpoint-token-payload-fields",
+      "tests": [
+        "tests/unit/v2/tokens.test.ts"
+      ]
+    },
+    {
+      "lockId": "context-budget-256kb",
+      "tests": [
+        "tests/unit/v2/v2-execution-protocol.test.ts"
+      ]
+    },
+    {
+      "lockId": "context-json-only",
+      "tests": [
+        "tests/unit/v2/v2-execution-protocol.test.ts"
+      ]
+    },
+    {
+      "lockId": "context-no-echo",
+      "tests": [
+        "tests/unit/v2/v2-execution-protocol.test.ts"
+      ]
+    },
+    {
+      "lockId": "context-not-durable",
+      "tests": [
+        "tests/unit/v2/v2-execution-protocol.test.ts"
+      ]
+    },
+    {
+      "lockId": "crash-safe-append",
+      "tests": [
+        "tests/unit/v2/session-store.test.ts"
+      ]
+    },
+    {
+      "lockId": "crash-state-detection",
+      "tests": [
+        "tests/unit/v2/session-store.test.ts"
+      ]
+    },
+    {
+      "lockId": "data-dir-workrail-owned",
+      "tests": [
+        "tests/unit/v2/data-dir.test.ts"
+      ]
+    },
+    {
+      "lockId": "decision-trace-bounded",
+      "tests": [
+        "tests/unit/v2/budget-enforcement.test.ts"
+      ]
+    },
+    {
+      "lockId": "dedupe-key-idempotent",
+      "tests": [
+        "tests/unit/v2/session-store-idempotency-with-fakes.test.ts",
+        "tests/unit/v2/session-store-idempotency.test.ts",
+        "tests/unit/v2/session-store.test.ts"
+      ]
+    },
+    {
+      "lockId": "dedupe-key-stable",
+      "tests": [
+        "tests/unit/v2/session-store-idempotency-with-fakes.test.ts",
+        "tests/unit/v2/session-store-idempotency.test.ts"
+      ]
+    },
+    {
+      "lockId": "determinism",
+      "tests": [
+        "tests/unit/v2/notes-markdown.test.ts"
+      ]
+    },
+    {
+      "lockId": "durable-core-no-buffer",
+      "tests": [
+        "tests/architecture/v2-import-boundaries.test.ts"
+      ]
+    },
+    {
+      "lockId": "durable-core-no-node-imports",
+      "tests": [
+        "tests/architecture/v2-import-boundaries.test.ts"
+      ]
+    },
+    {
+      "lockId": "edge-cause-closed-set",
       "tests": [
         "tests/unit/v2/run-dag-projection.test.ts"
       ]
     },
     {
-      "lockId": "preferred-tip-per-run",
+      "lockId": "edge-kind-closed-set",
       "tests": [
         "tests/unit/v2/run-dag-projection.test.ts"
       ]
     },
     {
-      "lockId": "preferred-tip-algorithm",
+      "lockId": "error-budget-details",
       "tests": [
-        "tests/unit/v2/run-dag-projection.test.ts"
-      ]
-    },
-    {
-      "lockId": "preferred-tip-no-timestamps",
-      "tests": [
-        "tests/unit/v2/run-dag-projection.test.ts"
-      ]
-    },
-    {
-      "lockId": "user-only-dependency-closed-set",
-      "tests": [
-        "tests/unit/v2/schema-locks.test.ts"
-      ]
-    },
-    {
-      "lockId": "non-assumable-choice-closed-set",
-      "tests": [
-        "tests/unit/v2/schema-locks.test.ts"
-      ]
-    },
-    {
-      "lockId": "gaps-append-only-resolution",
-      "tests": [
-        "tests/unit/v2/gaps-projection.test.ts"
-      ]
-    },
-    {
-      "lockId": "reason-code-unified",
-      "tests": [
-        "tests/unit/v2/schema-locks.test.ts"
-      ]
-    },
-    {
-      "lockId": "autonomy-closed-set",
-      "tests": [
-        "tests/unit/v2/schema-locks.test.ts"
-      ]
-    },
-    {
-      "lockId": "risk-policy-closed-set",
-      "tests": [
-        "tests/unit/v2/schema-locks.test.ts"
-      ]
-    },
-    {
-      "lockId": "risk-policy-guardrails",
-      "tests": [
-        "tests/unit/v2/run-status-signals-projection.test.ts"
-      ]
-    },
-    {
-      "lockId": "preferences-node-attached",
-      "tests": [
-        "tests/unit/v2/preferences-projection.test.ts"
-      ]
-    },
-    {
-      "lockId": "workflow-hash-jcs-sha256",
-      "tests": [
-        "tests/unit/v2/golden-hashes/golden-hashes.test.ts"
-      ]
-    },
-    {
-      "lockId": "jcs-rfc-8785",
-      "tests": [
-        "tests/unit/v2/golden-hashes/golden-hashes.test.ts",
-        "tests/unit/v2/jcs.test.ts"
-      ]
-    },
-    {
-      "lockId": "hash-format-sha256-hex",
-      "tests": [
-        "tests/unit/v2/golden-hashes/golden-hashes.test.ts",
-        "tests/unit/v2/jcs.test.ts"
+        "tests/unit/v2/mcp-error-envelope.test.ts"
       ]
     },
     {
@@ -497,75 +298,29 @@
       ]
     },
     {
-      "lockId": "error-budget-details",
+      "lockId": "errors-as-data",
       "tests": [
-        "tests/unit/v2/mcp-error-envelope.test.ts"
+        "tests/unit/v2/keyring-adapter.test.ts",
+        "tests/unit/v2/pinned-workflow-store-adapter.test.ts"
       ]
     },
     {
-      "lockId": "data-dir-workrail-owned",
+      "lockId": "event-index-monotonic-contiguous",
       "tests": [
-        "tests/unit/v2/data-dir.test.ts"
+        "tests/unit/v2/run-dag-projection.test.ts",
+        "tests/unit/v2/session-store.test.ts"
       ]
     },
     {
-      "lockId": "paths-relative-only",
+      "lockId": "event-index-zero-based",
       "tests": [
-        "tests/unit/v2/session-manifest-schema.test.ts"
+        "tests/unit/v2/session-store.test.ts"
       ]
     },
     {
-      "lockId": "schema-versioned",
+      "lockId": "event-kinds-closed-set",
       "tests": [
         "tests/unit/v2/schema-locks.test.ts"
-      ]
-    },
-    {
-      "lockId": "schema-additive-within-version",
-      "tests": [
-        "tests/unit/v2/schema-locks.test.ts"
-      ]
-    },
-    {
-      "lockId": "schema-unknown-version-fail-fast",
-      "tests": [
-        "tests/unit/v2/schema-locks.test.ts"
-      ]
-    },
-    {
-      "lockId": "schema-unknown-fields-ignored-conditionally",
-      "tests": [
-        "tests/unit/v2/schema-locks.test.ts"
-      ]
-    },
-    {
-      "lockId": "context-no-echo",
-      "tests": [
-        "tests/unit/v2/v2-execution-protocol.test.ts"
-      ]
-    },
-    {
-      "lockId": "context-not-durable",
-      "tests": [
-        "tests/unit/v2/v2-execution-protocol.test.ts"
-      ]
-    },
-    {
-      "lockId": "context-json-only",
-      "tests": [
-        "tests/unit/v2/v2-execution-protocol.test.ts"
-      ]
-    },
-    {
-      "lockId": "context-budget-256kb",
-      "tests": [
-        "tests/unit/v2/v2-execution-protocol.test.ts"
-      ]
-    },
-    {
-      "lockId": "session-health-closed-set",
-      "tests": [
-        "tests/unit/v2/execution-session-gate.test.ts"
       ]
     },
     {
@@ -575,27 +330,22 @@
       ]
     },
     {
-      "lockId": "salvage-read-only",
+      "lockId": "gaps-append-only-resolution",
       "tests": [
-        "tests/unit/v2/v2-execution-protocol.test.ts"
+        "tests/unit/v2/gaps-projection.test.ts"
       ]
     },
     {
-      "lockId": "durable-core-no-node-imports",
+      "lockId": "hash-format-sha256-hex",
       "tests": [
-        "tests/architecture/v2-import-boundaries.test.ts"
+        "tests/unit/v2/golden-hashes/golden-hashes.test.ts",
+        "tests/unit/v2/jcs.test.ts"
       ]
     },
     {
-      "lockId": "durable-core-no-buffer",
+      "lockId": "illegal-states-unrepresentable",
       "tests": [
-        "tests/architecture/v2-import-boundaries.test.ts"
-      ]
-    },
-    {
-      "lockId": "ports-interfaces-only",
-      "tests": [
-        "tests/architecture/v2-import-boundaries.test.ts"
+        "tests/unit/v2/notes-markdown.test.ts"
       ]
     },
     {
@@ -605,39 +355,65 @@
       ]
     },
     {
-      "lockId": "projection-cache-rebuildable",
+      "lockId": "jcs-rfc-8785",
       "tests": [
-        "tests/unit/v2/projection-cache.test.ts"
+        "tests/unit/v2/golden-hashes/golden-hashes.test.ts",
+        "tests/unit/v2/jcs.test.ts"
       ]
     },
     {
-      "lockId": "blocker-codes-closed-set",
+      "lockId": "keyring-32-byte-entropy",
+      "tests": [
+        "tests/unit/v2/tokens.test.ts"
+      ]
+    },
+    {
+      "lockId": "keyring-two-keys",
+      "tests": [
+        "tests/unit/v2/tokens.test.ts"
+      ]
+    },
+    {
+      "lockId": "keyring-verification-order",
+      "tests": [
+        "tests/unit/v2/tokens.test.ts"
+      ]
+    },
+    {
+      "lockId": "manifest-index-monotonic-contiguous",
+      "tests": [
+        "tests/unit/v2/session-store.test.ts"
+      ]
+    },
+    {
+      "lockId": "no-throws-across-boundaries",
+      "tests": [
+        "tests/unit/v2/keyring-adapter.test.ts",
+        "tests/unit/v2/pinned-workflow-store-adapter.test.ts"
+      ]
+    },
+    {
+      "lockId": "non-assumable-choice-closed-set",
       "tests": [
         "tests/unit/v2/schema-locks.test.ts"
-      ]
-    },
-    {
-      "lockId": "run-status-closed-set",
-      "tests": [
-        "tests/unit/v2/schema-locks.test.ts"
-      ]
-    },
-    {
-      "lockId": "edge-kind-closed-set",
-      "tests": [
-        "tests/unit/v2/run-dag-projection.test.ts"
-      ]
-    },
-    {
-      "lockId": "edge-cause-closed-set",
-      "tests": [
-        "tests/unit/v2/run-dag-projection.test.ts"
       ]
     },
     {
       "lockId": "non-tip-advance-creates-fork",
       "tests": [
         "tests/unit/v2/v2-execution-protocol.test.ts"
+      ]
+    },
+    {
+      "lockId": "notes-markdown-budget",
+      "tests": [
+        "tests/unit/v2/budget-enforcement.test.ts"
+      ]
+    },
+    {
+      "lockId": "orphan-segment-ignored",
+      "tests": [
+        "tests/unit/v2/session-store.test.ts"
       ]
     },
     {
@@ -653,9 +429,269 @@
       ]
     },
     {
-      "lockId": "notes-markdown-budget",
+      "lockId": "paths-relative-only",
       "tests": [
-        "tests/unit/v2/budget-enforcement.test.ts"
+        "tests/unit/v2/session-manifest-schema.test.ts"
+      ]
+    },
+    {
+      "lockId": "pin-after-close",
+      "tests": [
+        "tests/unit/v2/session-store.test.ts"
+      ]
+    },
+    {
+      "lockId": "ports-interfaces-only",
+      "tests": [
+        "tests/architecture/v2-import-boundaries.test.ts"
+      ]
+    },
+    {
+      "lockId": "preferences-node-attached",
+      "tests": [
+        "tests/unit/v2/preferences-projection.test.ts"
+      ]
+    },
+    {
+      "lockId": "preferred-tip-algorithm",
+      "tests": [
+        "tests/unit/v2/run-dag-projection.test.ts"
+      ]
+    },
+    {
+      "lockId": "preferred-tip-no-timestamps",
+      "tests": [
+        "tests/unit/v2/run-dag-projection.test.ts"
+      ]
+    },
+    {
+      "lockId": "preferred-tip-per-run",
+      "tests": [
+        "tests/unit/v2/run-dag-projection.test.ts"
+      ]
+    },
+    {
+      "lockId": "projection-cache-rebuildable",
+      "tests": [
+        "tests/unit/v2/projection-cache.test.ts"
+      ]
+    },
+    {
+      "lockId": "reason-code-unified",
+      "tests": [
+        "tests/unit/v2/schema-locks.test.ts"
+      ]
+    },
+    {
+      "lockId": "rehydrate-pure-no-writes",
+      "tests": [
+        "tests/unit/v2/v2-execution-protocol.test.ts"
+      ]
+    },
+    {
+      "lockId": "replay-fact-returning",
+      "tests": [
+        "tests/unit/v2/v2-execution-protocol.test.ts"
+      ]
+    },
+    {
+      "lockId": "replay-fail-closed",
+      "tests": [
+        "tests/unit/v2/v2-execution-protocol.test.ts"
+      ]
+    },
+    {
+      "lockId": "risk-policy-closed-set",
+      "tests": [
+        "tests/unit/v2/schema-locks.test.ts"
+      ]
+    },
+    {
+      "lockId": "risk-policy-guardrails",
+      "tests": [
+        "tests/unit/v2/run-status-signals-projection.test.ts"
+      ]
+    },
+    {
+      "lockId": "run-status-closed-set",
+      "tests": [
+        "tests/unit/v2/schema-locks.test.ts"
+      ]
+    },
+    {
+      "lockId": "runs-are-dags",
+      "tests": [
+        "tests/unit/v2/run-dag-projection.test.ts"
+      ]
+    },
+    {
+      "lockId": "salvage-read-only",
+      "tests": [
+        "tests/unit/v2/v2-execution-protocol.test.ts"
+      ]
+    },
+    {
+      "lockId": "schema-additive-within-version",
+      "tests": [
+        "tests/unit/v2/schema-locks.test.ts"
+      ]
+    },
+    {
+      "lockId": "schema-modules-load-safe",
+      "tests": [
+        "tests/unit/v2/schema-load.test.ts"
+      ]
+    },
+    {
+      "lockId": "schema-unknown-fields-ignored-conditionally",
+      "tests": [
+        "tests/unit/v2/schema-locks.test.ts"
+      ]
+    },
+    {
+      "lockId": "schema-unknown-version-fail-fast",
+      "tests": [
+        "tests/unit/v2/schema-locks.test.ts"
+      ]
+    },
+    {
+      "lockId": "schema-versioned",
+      "tests": [
+        "tests/unit/v2/schema-locks.test.ts"
+      ]
+    },
+    {
+      "lockId": "segment-digest-verification",
+      "tests": [
+        "tests/unit/v2/session-store.test.ts"
+      ]
+    },
+    {
+      "lockId": "session-health-closed-set",
+      "tests": [
+        "tests/unit/v2/execution-session-gate.test.ts"
+      ]
+    },
+    {
+      "lockId": "single-writer-per-session",
+      "tests": [
+        "tests/unit/v2/execution-session-gate.test.ts",
+        "tests/unit/v2/session-store.test.ts"
+      ]
+    },
+    {
+      "lockId": "snapshot-completed-sorted",
+      "tests": [
+        "tests/unit/v2/execution-snapshot.test.ts"
+      ]
+    },
+    {
+      "lockId": "snapshot-content-addressed",
+      "tests": [
+        "tests/unit/v2/golden-hashes/golden-hashes.test.ts"
+      ]
+    },
+    {
+      "lockId": "snapshot-discriminated-union",
+      "tests": [
+        "tests/unit/v2/execution-snapshot.test.ts"
+      ]
+    },
+    {
+      "lockId": "snapshot-impossible-state-rejected",
+      "tests": [
+        "tests/unit/v2/execution-snapshot.test.ts"
+      ]
+    },
+    {
+      "lockId": "snapshot-loop-id-unique",
+      "tests": [
+        "tests/unit/v2/execution-snapshot.test.ts"
+      ]
+    },
+    {
+      "lockId": "snapshot-pending-explicit",
+      "tests": [
+        "tests/unit/v2/execution-snapshot.test.ts"
+      ]
+    },
+    {
+      "lockId": "snapshot-rehydration-only",
+      "tests": [
+        "tests/unit/v2/execution-snapshot.test.ts"
+      ]
+    },
+    {
+      "lockId": "state-token-payload-fields",
+      "tests": [
+        "tests/unit/v2/tokens.test.ts"
+      ]
+    },
+    {
+      "lockId": "step-instance-key-delimiter-safe",
+      "tests": [
+        "tests/unit/v2/step-instance-key.test.ts"
+      ]
+    },
+    {
+      "lockId": "step-instance-key-format",
+      "tests": [
+        "tests/unit/v2/step-instance-key.test.ts"
+      ]
+    },
+    {
+      "lockId": "test-fakes-usage",
+      "tests": [
+        "tests/unit/v2/session-store-idempotency-with-fakes.test.ts"
+      ]
+    },
+    {
+      "lockId": "token-format-prefix-version-payload-sig",
+      "tests": [
+        "tests/unit/v2/tokens.test.ts"
+      ]
+    },
+    {
+      "lockId": "token-kind-closed-set",
+      "tests": [
+        "tests/unit/v2/tokens.test.ts"
+      ]
+    },
+    {
+      "lockId": "token-prefix-closed-set",
+      "tests": [
+        "tests/unit/v2/tokens.test.ts"
+      ]
+    },
+    {
+      "lockId": "token-prefix-kind-match",
+      "tests": [
+        "tests/unit/v2/tokens.test.ts"
+      ]
+    },
+    {
+      "lockId": "token-signature-input-canonical-only",
+      "tests": [
+        "tests/unit/v2/golden-hashes/golden-hashes.test.ts",
+        "tests/unit/v2/tokens.test.ts"
+      ]
+    },
+    {
+      "lockId": "token-signature-timing-safe",
+      "tests": [
+        "tests/unit/v2/tokens.test.ts"
+      ]
+    },
+    {
+      "lockId": "token-signing-hmac-sha256",
+      "tests": [
+        "tests/unit/v2/tokens.test.ts"
+      ]
+    },
+    {
+      "lockId": "token-validation-errors-closed-set",
+      "tests": [
+        "tests/unit/v2/mcp-error-envelope.test.ts"
       ]
     },
     {
@@ -665,15 +701,33 @@
       ]
     },
     {
-      "lockId": "decision-trace-bounded",
+      "lockId": "type-escapes-quarantined",
       "tests": [
-        "tests/unit/v2/budget-enforcement.test.ts"
+        "tests/architecture/v2-type-safety.test.ts"
       ]
     },
     {
-      "lockId": "blocker-budget",
+      "lockId": "user-only-dependency-closed-set",
       "tests": [
-        "tests/unit/v2/budget-enforcement.test.ts"
+        "tests/unit/v2/schema-locks.test.ts"
+      ]
+    },
+    {
+      "lockId": "witness-required-for-append",
+      "tests": [
+        "tests/unit/v2/execution-session-gate.test.ts"
+      ]
+    },
+    {
+      "lockId": "witness-scope-enforced",
+      "tests": [
+        "tests/unit/v2/execution-session-gate.test.ts"
+      ]
+    },
+    {
+      "lockId": "workflow-hash-jcs-sha256",
+      "tests": [
+        "tests/unit/v2/golden-hashes/golden-hashes.test.ts"
       ]
     }
   ],

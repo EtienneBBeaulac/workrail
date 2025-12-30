@@ -2,17 +2,22 @@
 
 /**
  * Lock Coverage Generator
- * 
+ *
+ * Determinism locks (docs/design/v2-core-design-locks.md:1289-1295):
+ * - Stable ordering
+ * - No timestamps in generated content
+ * - Stable formatting
+ *
  * This script generates an enforcement coverage report by:
  * 1. Reading the lock registry (docs/design/v2-lock-registry.json)
  * 2. Scanning test files for @enforces annotations
- * 3. Producing a coverage report showing which locks are tested
- * 
+ * 3. Producing deterministic coverage outputs under docs/generated/
+ *
  * Usage:
- *   npx ts-node scripts/generate-lock-coverage.ts           # Generate report
+ *   npx ts-node scripts/generate-lock-coverage.ts           # Generate markdown + closure plan
+ *   npx ts-node scripts/generate-lock-coverage.ts --json    # Generate JSON + closure plan
  *   npx ts-node scripts/generate-lock-coverage.ts --check   # CI mode: fail if coverage gaps
- *   npx ts-node scripts/generate-lock-coverage.ts --json    # Output JSON instead of markdown
- * 
+ *
  * Test annotation format:
  *   /**
  *    * @enforces lock-id-here
@@ -45,7 +50,6 @@ interface TestAnnotation {
 }
 
 interface CoverageReport {
-  generatedAt: string;
   registryVersion: string;
   totalLocks: number;
   coveredLocks: number;
@@ -74,19 +78,18 @@ const args = process.argv.slice(2);
 const checkMode = args.includes('--check');
 const jsonMode = args.includes('--json');
 
-// Helpers
 function readLockRegistry(): LockRegistry {
   const content = fs.readFileSync(LOCK_REGISTRY_PATH, 'utf-8');
   return JSON.parse(content) as LockRegistry;
 }
 
-function findTestFiles(dirs: string[]): string[] {
+function findTestFiles(dirs: readonly string[]): string[] {
   const files: string[] = [];
-  
+
   for (const dir of dirs) {
     if (!fs.existsSync(dir)) continue;
-    
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
+
+    const entries = fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
@@ -96,7 +99,7 @@ function findTestFiles(dirs: string[]): string[] {
       }
     }
   }
-  
+
   return files;
 }
 
@@ -105,14 +108,14 @@ function extractEnforcesAnnotations(filePath: string): TestAnnotation[] {
   if (filePath.includes('v2-lock-coverage.test.ts')) {
     return [];
   }
-  
+
   const content = fs.readFileSync(filePath, 'utf-8');
   const lines = content.split('\n');
   const annotations: TestAnnotation[] = [];
-  
+
   // Match @enforces only in JSDoc comment lines (lines with * prefix after whitespace)
   const enforcesRegex = /^\s*\*\s*@enforces\s+([a-z0-9-]+)/i;
-  
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const match = enforcesRegex.exec(line);
@@ -124,35 +127,34 @@ function extractEnforcesAnnotations(filePath: string): TestAnnotation[] {
       });
     }
   }
-  
+
   return annotations;
 }
 
-function generateCoverageReport(registry: LockRegistry, annotations: TestAnnotation[]): CoverageReport {
-  const lockIds = new Set(registry.locks.map(l => l.id));
+function generateCoverageReport(registry: LockRegistry, annotations: readonly TestAnnotation[]): CoverageReport {
+  const locksSorted = [...registry.locks].sort((a, b) => a.id.localeCompare(b.id));
+  const lockIds = new Set(locksSorted.map((l) => l.id));
   const annotationsByLock = new Map<string, string[]>();
   const warnings: string[] = [];
-  
-  // Group annotations by lock ID
+
   for (const annotation of annotations) {
     if (!lockIds.has(annotation.lockId)) {
       warnings.push(`Unknown lock ID "${annotation.lockId}" in ${annotation.testFile}:${annotation.line}`);
       continue;
     }
-    
-    const existing = annotationsByLock.get(annotation.lockId) || [];
+
+    const existing = annotationsByLock.get(annotation.lockId) ?? [];
     existing.push(annotation.testFile);
     annotationsByLock.set(annotation.lockId, existing);
   }
-  
-  // Build coverage data
+
   const covered: Array<{ lockId: string; tests: string[] }> = [];
   const uncovered: Array<{ lockId: string; source: string; summary: string; category: string }> = [];
-  
-  for (const lock of registry.locks) {
+
+  for (const lock of locksSorted) {
     const tests = annotationsByLock.get(lock.id);
     if (tests && tests.length > 0) {
-      covered.push({ lockId: lock.id, tests: [...new Set(tests)] });
+      covered.push({ lockId: lock.id, tests: [...new Set(tests)].sort() });
     } else {
       uncovered.push({
         lockId: lock.id,
@@ -162,25 +164,27 @@ function generateCoverageReport(registry: LockRegistry, annotations: TestAnnotat
       });
     }
   }
-  
-  // Build by-category breakdown
+
+  covered.sort((a, b) => a.lockId.localeCompare(b.lockId));
+  uncovered.sort((a, b) => a.lockId.localeCompare(b.lockId));
+
   const byCategory: Record<string, { total: number; covered: number; uncovered: string[] }> = {};
-  for (const [catId, catDesc] of Object.entries(registry.categories)) {
-    const catLocks = registry.locks.filter(l => l.category === catId);
-    const catCovered = catLocks.filter(l => annotationsByLock.has(l.id));
-    const catUncovered = catLocks.filter(l => !annotationsByLock.has(l.id));
+  for (const catId of Object.keys(registry.categories).sort()) {
+    const catLocks = locksSorted.filter((l) => l.category === catId);
+    const catCovered = catLocks.filter((l) => annotationsByLock.has(l.id));
+    const catUncovered = catLocks.filter((l) => !annotationsByLock.has(l.id)).map((l) => l.id).sort();
+
     byCategory[catId] = {
       total: catLocks.length,
       covered: catCovered.length,
-      uncovered: catUncovered.map(l => l.id),
+      uncovered: catUncovered,
     };
   }
-  
-  const totalLocks = registry.locks.length;
+
+  const totalLocks = locksSorted.length;
   const coveredCount = covered.length;
-  
+
   return {
-    generatedAt: new Date().toISOString(),
     registryVersion: registry.version,
     totalLocks,
     coveredLocks: coveredCount,
@@ -189,47 +193,42 @@ function generateCoverageReport(registry: LockRegistry, annotations: TestAnnotat
     byCategory,
     covered,
     uncovered,
-    warnings,
+    warnings: warnings.sort(),
   };
 }
 
 function formatMarkdownReport(report: CoverageReport): string {
   const lines: string[] = [];
-  
+
   lines.push('# v2 Lock Enforcement Coverage Report');
   lines.push('');
   lines.push('> **Auto-generated** — Do not edit manually.');
-  lines.push(`> Generated: ${report.generatedAt}`);
   lines.push(`> Registry version: ${report.registryVersion}`);
   lines.push('');
   lines.push('---');
   lines.push('');
-  
-  // Summary
+
   lines.push('## Summary');
   lines.push('');
-  const emoji = report.coveragePercent >= 80 ? '✅' : report.coveragePercent >= 50 ? '⚠️' : '❌';
-  lines.push(`| Metric | Value |`);
-  lines.push(`|--------|-------|`);
+  lines.push('| Metric | Value |');
+  lines.push('|--------|-------|');
   lines.push(`| Total locks | ${report.totalLocks} |`);
-  lines.push(`| Covered | ${report.coveredLocks} ${emoji} |`);
+  lines.push(`| Covered | ${report.coveredLocks} |`);
   lines.push(`| Uncovered | ${report.uncoveredLocks} |`);
   lines.push(`| Coverage | **${report.coveragePercent}%** |`);
   lines.push('');
-  
-  // By category
+
   lines.push('## Coverage by Category');
   lines.push('');
   lines.push('| Category | Total | Covered | % |');
   lines.push('|----------|-------|---------|---|');
-  for (const [catId, data] of Object.entries(report.byCategory)) {
+  for (const catId of Object.keys(report.byCategory).sort()) {
+    const data = report.byCategory[catId]!;
     const pct = data.total > 0 ? Math.round((data.covered / data.total) * 100) : 0;
-    const catEmoji = pct >= 80 ? '✅' : pct >= 50 ? '⚠️' : '❌';
-    lines.push(`| ${catId} | ${data.total} | ${data.covered} | ${pct}% ${catEmoji} |`);
+    lines.push(`| ${catId} | ${data.total} | ${data.covered} | ${pct}% |`);
   }
   lines.push('');
-  
-  // Uncovered locks (priority)
+
   if (report.uncovered.length > 0) {
     lines.push('## Uncovered Locks (Action Required)');
     lines.push('');
@@ -244,36 +243,33 @@ function formatMarkdownReport(report: CoverageReport): string {
     lines.push('To fix: Add `@enforces <lock-id>` to test file JSDoc comments.');
     lines.push('');
   }
-  
-  // Covered locks
+
   if (report.covered.length > 0) {
     lines.push('## Covered Locks');
     lines.push('');
     lines.push('<details>');
-    lines.push('<summary>Click to expand (${report.covered.length} locks)</summary>');
+    lines.push(`<summary>Click to expand (${report.covered.length} locks)</summary>`);
     lines.push('');
     lines.push('| Lock ID | Test Files |');
     lines.push('|---------|------------|');
     for (const lock of report.covered) {
-      const files = lock.tests.map(f => `\`${f}\``).join(', ');
+      const files = lock.tests.map((f) => `\`${f}\``).join(', ');
       lines.push(`| \`${lock.lockId}\` | ${files} |`);
     }
     lines.push('');
     lines.push('</details>');
     lines.push('');
   }
-  
-  // Warnings
+
   if (report.warnings.length > 0) {
     lines.push('## Warnings');
     lines.push('');
     for (const warning of report.warnings) {
-      lines.push(`- ⚠️ ${warning}`);
+      lines.push(`- ${warning}`);
     }
     lines.push('');
   }
-  
-  // How to use
+
   lines.push('---');
   lines.push('');
   lines.push('## How to Add Coverage');
@@ -290,9 +286,9 @@ function formatMarkdownReport(report: CoverageReport): string {
   lines.push('});');
   lines.push('```');
   lines.push('');
-  lines.push('Then run: `npx ts-node scripts/generate-lock-coverage.ts`');
+  lines.push('Then run: `npm run generate:locks`');
   lines.push('');
-  
+
   return lines.join('\n');
 }
 
@@ -317,18 +313,37 @@ function suggestionForLock(lockId: string, category: string): { readonly files: 
   // The goal is to reduce decision churn for newcomers while keeping the plan stable.
   switch (category) {
     case 'protocol':
-      return { files: ['tests/unit/v2/v2-execution-protocol.test.ts'], note: 'May require implementing missing protocol behavior before tests can pass.' };
+      return {
+        files: ['tests/unit/v2/v2-execution-protocol.test.ts'],
+        note: 'May require implementing missing protocol behavior before tests can pass.',
+      };
     case 'storage':
       if (lockId === 'paths-relative-only') return { files: ['tests/unit/v2/session-manifest-schema.test.ts'] };
-      if (lockId === 'data-dir-workrail-owned') return { files: ['tests/unit/v2/data-dir.test.ts'], note: 'Requires a precise definition of “WorkRail-owned default”.' };
-      if (lockId === 'projection-cache-rebuildable') return { files: ['tests/unit/v2/projection-cache.test.ts'], note: 'If cache is not implemented yet, implement minimal rebuildable cache semantics first.' };
+      if (lockId === 'data-dir-workrail-owned') {
+        return {
+          files: ['tests/unit/v2/data-dir.test.ts'],
+          note: 'Requires a precise definition of “WorkRail-owned default”.',
+        };
+      }
+      if (lockId === 'projection-cache-rebuildable') {
+        return {
+          files: ['tests/unit/v2/projection-cache.test.ts'],
+          note: 'If cache is not implemented yet, implement minimal rebuildable cache semantics first.',
+        };
+      }
       return { files: ['tests/unit/v2/session-store.test.ts'] };
     case 'tokens':
       return { files: ['tests/unit/v2/tokens.test.ts'] };
     case 'errors':
-      return { files: ['tests/unit/v2/mcp-error-envelope.test.ts'], note: 'Prefer testing handler outputs (envelope shape) over implementation details.' };
+      return {
+        files: ['tests/unit/v2/mcp-error-envelope.test.ts'],
+        note: 'Prefer testing handler outputs (envelope shape) over implementation details.',
+      };
     case 'bundle':
-      return { files: ['tests/unit/v2/export-bundle-schema.test.ts'], note: 'If bundle schemas are not implemented, implement minimal schemas first.' };
+      return {
+        files: ['tests/unit/v2/export-bundle-schema.test.ts'],
+        note: 'If bundle schemas are not implemented, implement minimal schemas first.',
+      };
     case 'schema':
       if (lockId.startsWith('snapshot-')) return { files: ['tests/unit/v2/execution-snapshot.test.ts'] };
       if (lockId.endsWith('-closed-set') || lockId.startsWith('schema-') || lockId === 'reason-code-unified') {
@@ -352,7 +367,6 @@ function formatClosurePlanMarkdown(registry: LockRegistry, report: CoverageRepor
   lines.push('# v2 Lock Closure Plan');
   lines.push('');
   lines.push('> **Auto-generated** — Do not edit manually.');
-  lines.push(`> Generated: ${report.generatedAt}`);
   lines.push(`> Registry version: ${report.registryVersion}`);
   lines.push('');
   lines.push('This file is a deterministic “what to do next” plan for driving **uncovered locks → 0**.');
@@ -411,58 +425,52 @@ function formatClosurePlanMarkdown(registry: LockRegistry, report: CoverageRepor
   lines.push('');
   lines.push('1. Add or extend a test that **asserts** the invariant.');
   lines.push('2. Add `@enforces <lockId>` in that test file JSDoc comment.');
-  lines.push('3. Run `npm test -- tests/architecture/v2-lock-coverage.test.ts` and ensure uncovered locks decrease.');
+  lines.push('3. Run `npm run generate:locks` and ensure uncovered locks decrease.');
   lines.push('');
 
   return lines.join('\n');
 }
 
-// Main
 function main(): void {
   console.log('Reading lock registry...');
   const registry = readLockRegistry();
   console.log(`  Found ${registry.locks.length} locks`);
-  
+
   console.log('Scanning test files...');
   const testFiles = findTestFiles(TEST_DIRS);
   console.log(`  Found ${testFiles.length} test files`);
-  
+
   console.log('Extracting @enforces annotations...');
   const annotations: TestAnnotation[] = [];
   for (const file of testFiles) {
     annotations.push(...extractEnforcesAnnotations(file));
   }
   console.log(`  Found ${annotations.length} annotations`);
-  
+
   console.log('Generating coverage report...');
   const report = generateCoverageReport(registry, annotations);
-  
-  // Output
+
   if (jsonMode) {
     const jsonOutput = JSON.stringify(report, null, 2);
     fs.mkdirSync(path.dirname(OUTPUT_JSON_PATH), { recursive: true });
     fs.writeFileSync(OUTPUT_JSON_PATH, jsonOutput);
     console.log(`Wrote JSON report to ${OUTPUT_JSON_PATH}`);
-    // Also write the closure plan markdown (drift-proof “next actions”)
-    const plan = formatClosurePlanMarkdown(registry, report);
-    fs.mkdirSync(path.dirname(OUTPUT_PLAN_PATH), { recursive: true });
-    fs.writeFileSync(OUTPUT_PLAN_PATH, plan);
-    console.log(`Wrote closure plan to ${OUTPUT_PLAN_PATH}`);
   } else {
     const markdown = formatMarkdownReport(report);
     fs.mkdirSync(path.dirname(OUTPUT_PATH), { recursive: true });
     fs.writeFileSync(OUTPUT_PATH, markdown);
     console.log(`Wrote report to ${OUTPUT_PATH}`);
-    // Also write the closure plan markdown (drift-proof “next actions”)
-    const plan = formatClosurePlanMarkdown(registry, report);
-    fs.writeFileSync(OUTPUT_PLAN_PATH, plan);
-    console.log(`Wrote closure plan to ${OUTPUT_PLAN_PATH}`);
   }
-  
-  // Summary
+
+  // Always write the closure plan markdown (deterministic “next actions”)
+  const plan = formatClosurePlanMarkdown(registry, report);
+  fs.mkdirSync(path.dirname(OUTPUT_PLAN_PATH), { recursive: true });
+  fs.writeFileSync(OUTPUT_PLAN_PATH, plan);
+  console.log(`Wrote closure plan to ${OUTPUT_PLAN_PATH}`);
+
   console.log('');
   console.log(`Coverage: ${report.coveredLocks}/${report.totalLocks} (${report.coveragePercent}%)`);
-  
+
   if (report.warnings.length > 0) {
     console.log('');
     console.log('Warnings:');
@@ -470,8 +478,7 @@ function main(): void {
       console.log(`  - ${w}`);
     }
   }
-  
-  // Check mode: fail if uncovered
+
   if (checkMode && report.uncovered.length > 0) {
     console.log('');
     console.error(`ERROR: ${report.uncovered.length} locks have no test coverage`);
@@ -484,7 +491,7 @@ function main(): void {
     }
     process.exit(1);
   }
-  
+
   console.log('');
   console.log('Done!');
 }
