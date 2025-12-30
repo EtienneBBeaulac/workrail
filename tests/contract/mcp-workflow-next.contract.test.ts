@@ -12,7 +12,7 @@ function buildLoopWorkflow(workflowId: string, count: number, maxIterations: num
   return {
     id: workflowId,
     name: 'Loop Contract Test',
-    description: 'Validates MCP workflow_next state+event contract',
+    description: 'Validates MCP advance_workflow state+event contract',
     version: '1.0.0',
     steps: [
       {
@@ -33,7 +33,7 @@ function buildLoopWorkflow(workflowId: string, count: number, maxIterations: num
   };
 }
 
-describe('MCP contract: workflow_next (state + event)', () => {
+describe('MCP contract: advance_workflow (state + event)', () => {
   beforeEach(async () => {
     const wf = buildLoopWorkflow('loop-contract', 2, 10);
     await setupIntegrationTest({

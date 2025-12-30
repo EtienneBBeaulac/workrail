@@ -284,40 +284,40 @@ export async function startServer(): Promise<void> {
   // Create tool factory with dynamic descriptions
   const buildTool = createToolFactory(descriptionProvider);
 
-  // Build workflow tools with dynamic descriptions
-  const workflowListTool = buildTool({
-    name: 'workflow_list',
-    title: WORKFLOW_TOOL_TITLES.workflow_list,
+  // Build workflow tools with dynamic descriptions (v1, action-oriented names)
+  const discoverWorkflowsTool = buildTool({
+    name: 'discover_workflows',
+    title: WORKFLOW_TOOL_TITLES.discover_workflows,
     inputSchema: WorkflowListInput,
-    annotations: WORKFLOW_TOOL_ANNOTATIONS.workflow_list,
+    annotations: WORKFLOW_TOOL_ANNOTATIONS.discover_workflows,
   });
 
-  const workflowGetTool = buildTool({
-    name: 'workflow_get',
-    title: WORKFLOW_TOOL_TITLES.workflow_get,
+  const previewWorkflowTool = buildTool({
+    name: 'preview_workflow',
+    title: WORKFLOW_TOOL_TITLES.preview_workflow,
     inputSchema: WorkflowGetInput,
-    annotations: WORKFLOW_TOOL_ANNOTATIONS.workflow_get,
+    annotations: WORKFLOW_TOOL_ANNOTATIONS.preview_workflow,
   });
 
-  const workflowNextTool = buildTool({
-    name: 'workflow_next',
-    title: WORKFLOW_TOOL_TITLES.workflow_next,
+  const advanceWorkflowTool = buildTool({
+    name: 'advance_workflow',
+    title: WORKFLOW_TOOL_TITLES.advance_workflow,
     inputSchema: WorkflowNextInput,
-    annotations: WORKFLOW_TOOL_ANNOTATIONS.workflow_next,
+    annotations: WORKFLOW_TOOL_ANNOTATIONS.advance_workflow,
   });
 
-  const workflowValidateJsonTool = buildTool({
-    name: 'workflow_validate_json',
-    title: WORKFLOW_TOOL_TITLES.workflow_validate_json,
+  const validateWorkflowTool = buildTool({
+    name: 'validate_workflow',
+    title: WORKFLOW_TOOL_TITLES.validate_workflow,
     inputSchema: WorkflowValidateJsonInput,
-    annotations: WORKFLOW_TOOL_ANNOTATIONS.workflow_validate_json,
+    annotations: WORKFLOW_TOOL_ANNOTATIONS.validate_workflow,
   });
 
-  const workflowGetSchemaTool = buildTool({
-    name: 'workflow_get_schema',
-    title: WORKFLOW_TOOL_TITLES.workflow_get_schema,
+  const getWorkflowSchemaTool = buildTool({
+    name: 'get_workflow_schema',
+    title: WORKFLOW_TOOL_TITLES.get_workflow_schema,
     inputSchema: WorkflowGetSchemaInput,
-    annotations: WORKFLOW_TOOL_ANNOTATIONS.workflow_get_schema,
+    annotations: WORKFLOW_TOOL_ANNOTATIONS.get_workflow_schema,
   });
 
   // Dynamically import SDK modules (ESM-only)
@@ -343,11 +343,11 @@ export async function startServer(): Promise<void> {
 
   // Build tool list
   const tools: Tool[] = [
-    toMcpTool(workflowListTool),
-    toMcpTool(workflowGetTool),
-    toMcpTool(workflowNextTool),
-    toMcpTool(workflowValidateJsonTool),
-    toMcpTool(workflowGetSchemaTool),
+    toMcpTool(discoverWorkflowsTool),
+    toMcpTool(previewWorkflowTool),
+    toMcpTool(advanceWorkflowTool),
+    toMcpTool(validateWorkflowTool),
+    toMcpTool(getWorkflowSchemaTool),
   ];
 
   // Add session tools if enabled
@@ -371,15 +371,17 @@ export async function startServer(): Promise<void> {
 
   // Build handler map (uses input schemas directly)
   const handlers: Record<string, ToolHandler> = {
-    workflow_list: createHandler(WorkflowListInput, handleWorkflowList),
-    workflow_get: createHandler(WorkflowGetInput, handleWorkflowGet),
-    workflow_next: createValidatingHandler(WorkflowNextInput, preValidateWorkflowNextArgs, handleWorkflowNext),
-    workflow_validate_json: createHandler(WorkflowValidateJsonInput, handleWorkflowValidateJson),
-    workflow_get_schema: createHandler(WorkflowGetSchemaInput, handleWorkflowGetSchema),
-    workrail_create_session: createHandler(createSessionTool.inputSchema, handleCreateSession),
-    workrail_update_session: createHandler(updateSessionTool.inputSchema, handleUpdateSession),
-    workrail_read_session: createHandler(readSessionTool.inputSchema, handleReadSession),
-    workrail_open_dashboard: createHandler(openDashboardTool.inputSchema, handleOpenDashboard),
+    // v1 tools (action-oriented names)
+    discover_workflows: createHandler(WorkflowListInput, handleWorkflowList),
+    preview_workflow: createHandler(WorkflowGetInput, handleWorkflowGet),
+    advance_workflow: createValidatingHandler(WorkflowNextInput, preValidateWorkflowNextArgs, handleWorkflowNext),
+    validate_workflow: createHandler(WorkflowValidateJsonInput, handleWorkflowValidateJson),
+    get_workflow_schema: createHandler(WorkflowGetSchemaInput, handleWorkflowGetSchema),
+    // Session tools
+    create_session: createHandler(createSessionTool.inputSchema, handleCreateSession),
+    update_session: createHandler(updateSessionTool.inputSchema, handleUpdateSession),
+    read_session: createHandler(readSessionTool.inputSchema, handleReadSession),
+    open_dashboard: createHandler(openDashboardTool.inputSchema, handleOpenDashboard),
   };
 
   // Register v2 handlers only when tools are enabled (prevents tool leaks)

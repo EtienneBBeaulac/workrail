@@ -31,11 +31,12 @@ describe('MCP Server Core Functionality', () => {
 
     it('should define workflow tool annotations', () => {
       expect(toolsContent).toContain('WORKFLOW_TOOL_ANNOTATIONS');
-      expect(toolsContent).toContain('workflow_list');
-      expect(toolsContent).toContain('workflow_get');
-      expect(toolsContent).toContain('workflow_next');
-      expect(toolsContent).toContain('workflow_validate_json');
-      expect(toolsContent).toContain('workflow_get_schema');
+      // v1 tools (action-oriented names)
+      expect(toolsContent).toContain('discover_workflows');
+      expect(toolsContent).toContain('preview_workflow');
+      expect(toolsContent).toContain('advance_workflow');
+      expect(toolsContent).toContain('validate_workflow');
+      expect(toolsContent).toContain('get_workflow_schema');
     });
 
     it('should define all session tools', () => {
@@ -61,9 +62,9 @@ describe('MCP Server Core Functionality', () => {
 
     it('should define workflow tool titles', () => {
       expect(toolsContent).toContain('WORKFLOW_TOOL_TITLES');
-      expect(toolsContent).toContain("'List Available Workflows'");
-      expect(toolsContent).toContain("'Get Workflow Details'");
-      expect(toolsContent).toContain("'Execute Next Workflow Step'");
+      expect(toolsContent).toContain("'Discover Available Workflows'");
+      expect(toolsContent).toContain("'Preview Workflow Details'");
+      expect(toolsContent).toContain("'Advance Workflow Execution'");
     });
 
     it('should export session tools collection', () => {
@@ -90,11 +91,12 @@ describe('MCP Server Core Functionality', () => {
       const descriptionsContent = fs.readFileSync(descriptionsPath, 'utf8');
       expect(descriptionsContent).toContain('standard:');
       expect(descriptionsContent).toContain('authoritative:');
-      expect(descriptionsContent).toContain('workflow_list');
-      expect(descriptionsContent).toContain('workflow_next');
+      // v1 tools (action-oriented names)
+      expect(descriptionsContent).toContain('discover_workflows');
+      expect(descriptionsContent).toContain('advance_workflow');
     });
 
-    it('workflow_next descriptions should align with the state+event contract', () => {
+    it('advance_workflow descriptions should align with the state+event contract', () => {
       const descriptionsPath = path.join(mcpDir, 'tool-descriptions.ts');
       const descriptionsContent = fs.readFileSync(descriptionsPath, 'utf8');
 
@@ -108,7 +110,7 @@ describe('MCP Server Core Functionality', () => {
       expect(descriptionsContent).not.toContain('currentStep');
     });
 
-    it('workflow_next descriptions should be consistent across BOTH modes', () => {
+    it('advance_workflow descriptions should be consistent across BOTH modes', () => {
       const descriptionsPath = path.join(mcpDir, 'tool-descriptions.ts');
       const descriptionsContent = fs.readFileSync(descriptionsPath, 'utf8');
 
