@@ -161,6 +161,13 @@ Rules (locked intent):
 - `dedupeKey` is length-bounded and ASCII-safe.
 - When incorporating a value-like field (e.g., an observation value), use a digest rather than embedding raw free-form text.
 
+DedupeKey pattern (locked):
+- Allowed characters: `[a-z0-9_:>-]+` (lowercase letters, digits, underscore, colon, greater-than, hyphen)
+- Max length: 256 characters
+- Recipe format: `<kind>:<parts joined by ":">`
+- Arrow notation (`->`) allowed for edge relationships (e.g., `nodeA->nodeB`)
+- MUST NOT contain uppercase letters, spaces, or other characters
+
 **Hard rule (clarification, locked):** `dedupeKey` MUST NOT be derived from `eventId`. `eventId` is server-minted per append and is not available/stable across retries. If you need an idempotency handle, use a dedicated, typed identifier in the event payload (e.g., `outputId`, `changeId`, `observationId`, `gapId`, `attemptId`, `divergenceId`, `traceId`).
 
 Initial v2 recipes (illustrative, locked intent):
@@ -309,6 +316,11 @@ Locks:
 - Ordering is deterministic.
 - Payloads are bounded by byte budgets.
 
+Text budgets are UTF-8 bytes (locked):
+- All text budget limits (e.g., `message`, `suggestedFix`, `summary`, `notesMarkdown`) are measured in **UTF-8 bytes**, not code units or characters.
+- Validation MUST use UTF-8 byte length measurement (e.g., `TextEncoder.encode(s).length`), not string `.length`.
+- This prevents multi-byte character edge cases and ensures consistent enforcement across runtimes.
+
 Shape (conceptual):
 - `blockers: [Blocker, ...]` (non-empty)
 - `Blocker` fields (required):
@@ -331,7 +343,12 @@ Shape (conceptual):
 - `{ kind: "context_budget" }` (request context exceeded byte budget or was non-serializable; see Context budget lock)
 - `{ kind: "output_contract", contractRef: string }`
 - `{ kind: "capability", capability: "delegation" | "web_browsing" }`
-- `{ kind: "workflow_step", stepId: string }`
+- `{ kind: "workflow_step", stepId: string }` (stepId must be delimiter-safe)
+
+Blocker pointer identifiers (locked):
+- `context_key.key` MUST be delimiter-safe: `[a-z0-9_-]+`
+- `workflow_step.stepId` MUST be delimiter-safe: `[a-z0-9_-]+`
+- This ensures consistency with StepInstanceKey encoding and prevents serialization edge cases.
 
 Budgets (locked):
 - max blockers per report: 10
@@ -421,14 +438,33 @@ Payload fields:
       - `entered_loop`
       - `exited_loop`
       - `detected_non_tip_advance`
-    - `summary` (bounded text)
-    - `refs?` (optional; keep minimal, typed where possible; e.g., `stepId`, `loopId`)
+    - `summary` (bounded text, UTF-8 bytes)
+    - `refs?` (optional; closed union, not an open bag)
+
+Decision trace refs (locked):
+- `refs` is a **closed-set discriminated union** by `kind`, not `record<unknown>`.
+- Allowed ref kinds (initial):
+  - `{ kind: "step_id", stepId: string }` — references a workflow step
+  - `{ kind: "loop_id", loopId: string }` — references a loop
+  - `{ kind: "condition_id", conditionId: string }` — references a condition
+  - `{ kind: "iteration", value: number }` — references an iteration (0-based)
+- All `stepId`, `loopId`, `conditionId` must be **delimiter-safe**: `[a-z0-9_-]+`
+- Max refs per entry: 10
+- New ref kinds require an explicit schema version bump or union extension.
 
 Budgets (locked):
 - max entries: 25
 - max summary bytes per entry: 512
 - max total bytes per event: 8192
 - if budgets are exceeded, deterministically truncate by bytes and append the canonical truncation marker to the affected summary (never drop entries out of order).
+
+Loop trace completeness (locked intent):
+- For any `type:"loop"` execution:
+  - the engine MUST record `entered_loop` at loop entry,
+  - MUST record `evaluated_condition` for each loop condition evaluation that influences control flow,
+  - and MUST record `exited_loop` when the loop terminates.
+- These trace entries SHOULD include `refs: { loopId }` (and `iteration?` when applicable) so “loop did not run” and “why did it exit” are diagnosable without inference.
+- If a loop terminates without running its body (0 iterations), `evaluated_condition` + `exited_loop` MUST still be recorded (no silent short-circuit).
 
 Canonical truncation marker (locked):
 - append exactly: `\n\n[TRUNCATED]`
@@ -1766,6 +1802,28 @@ Rationale:
 - Prefer a contract-validated `loop_control` condition kind for real loops, rather than reading arbitrary `context` keys.
 - `wr.contracts.loop_control` is the initial contract pack for loop exit control:
   - validates an `output.artifacts[]` entry with `kind="wr.loop_control"` and fields `{ loopId, decision, summary? }`
+
+Additional locks (prevents silent loop no-op):
+- **Loop control source (locked):** `while` loop continuation MUST NOT be controlled by mutable ad-hoc `context` keys (e.g., `continuePlanning`) because missing/incorrect agent output can cause the loop body to be skipped without detection.
+- **Loop control contract (locked):** loop continuation MUST be derived from a contract-validated loop-control artifact/output (e.g., `wr.contracts.loop_control`), produced by an explicit loop decision step.
+- **Failure mode (locked):** missing/invalid loop-control output MUST NOT be treated as “exit loop” implicitly.
+  - In blocking modes: return a typed blocker (`MISSING_REQUIRED_OUTPUT` / `INVALID_REQUIRED_OUTPUT`) referencing the loop-control contract.
+  - In never-stop mode: record a `gap_recorded` (severity=critical, category=contract_violation) and proceed according to the mode’s semantics.
+- **Explainability (locked intent):** the loop decision step SHOULD include a bounded summary explaining why the loop continues or exits (stored as part of the loop-control artifact output).
+
+Loop iteration semantics (locked) (prevents maxIterations/iteration conflicts):
+- **Iteration indexing (locked):** `loopStack[].iteration` is **0-based**. The first loop iteration is `iteration=0`.
+- **`maxIterations` meaning (locked):** `maxIterations` is a **count** of allowed loop iterations (not a max index).
+  - Allowed iteration values are: `0..(maxIterations - 1)`.
+  - A loop MUST NOT enter/execute a body iteration when `iteration >= maxIterations`.
+- **Iteration increment point (locked):** `iteration` increments **only when starting the next loop iteration** (i.e., after completing the loop body for the previous iteration and deciding to continue). It MUST NOT increment mid-body.
+- **Termination reason (locked intent):** loop termination MUST be attributable to exactly one of:
+  - condition evaluated false, or
+  - max iterations reached (the next would-be iteration would have `iteration == maxIterations`).
+- **Failure mode (locked):** attempting to continue a loop when `iteration >= maxIterations` MUST fail fast as errors-as-data (no silent stop, no “stuck”):
+  - In blocking modes: return a typed blocker (a dedicated loop-limit code is preferred; `INVARIANT_VIOLATION` is acceptable if no dedicated code exists yet).
+  - In never-stop mode: record a `gap_recorded` (severity=critical, category=unexpected, detail=`invariant_violation`) and proceed according to mode semantics.
+  - The blocker/gap MUST include `loopId`, `iteration`, and `maxIterations` in bounded structured details.
 
 ### Source vs compiled clarity (locked)
 - Studio must clearly distinguish:
