@@ -116,3 +116,139 @@ export function isIterationWithinBounds(iteration: number, maxIterations: number
   // Lock: allowed iterations are 0..(maxIterations - 1)
   return iteration < maxIterations;
 }
+
+// =============================================================================
+// Loop Kernel (Pure)
+// =============================================================================
+
+export type LoopDecision =
+  | { readonly kind: 'execute_body_step'; readonly bodyIndex: number }
+  | { readonly kind: 'advance_iteration'; readonly toIteration: number }
+  | { readonly kind: 'exit_loop' };
+
+export interface LoopKernelInvalidStateError {
+  readonly code: 'LOOP_INVALID_STATE';
+  readonly loopId: string;
+  readonly message: string;
+}
+
+export interface LoopKernelInvalidConfigError {
+  readonly code: 'LOOP_INVALID_CONFIG';
+  readonly loopId: string;
+  readonly message: string;
+}
+
+export interface LoopKernelMissingContextError {
+  readonly code: 'LOOP_MISSING_CONTEXT';
+  readonly loopId: string;
+  readonly message: string;
+}
+
+export type LoopKernelError =
+  | LoopBoundaryError
+  | LoopKernelInvalidStateError
+  | LoopKernelInvalidConfigError
+  | LoopKernelMissingContextError;
+
+export interface LoopKernelPorts {
+  /**
+   * Pre-check semantics.
+   *
+   * Returns whether the engine should ENTER the given iteration (0-based).
+   */
+  readonly shouldEnterIteration: (iteration: number) => Result<boolean, LoopKernelError>;
+
+  /**
+   * Eligibility is an external concern (completed set + runCondition evaluation).
+   */
+  readonly isBodyIndexEligible: (bodyIndex: number) => boolean;
+}
+
+export interface LoopKernelInput {
+  readonly loopId: string;
+  readonly iteration: number;
+  readonly bodyIndex: number;
+  readonly bodyLength: number;
+  readonly maxIterations: number;
+  readonly ports: LoopKernelPorts;
+}
+
+export function computeLoopDecision(input: LoopKernelInput): Result<LoopDecision, LoopKernelError> {
+  const { loopId, iteration, bodyIndex, bodyLength, maxIterations, ports } = input;
+
+  if (!Number.isInteger(iteration) || iteration < 0) {
+    return err({
+      code: 'LOOP_INVALID_STATE',
+      loopId,
+      message: `Invalid loop state: iteration must be a non-negative integer (got ${String(iteration)})`,
+    });
+  }
+
+  if (!Number.isInteger(bodyIndex) || bodyIndex < 0) {
+    return err({
+      code: 'LOOP_INVALID_STATE',
+      loopId,
+      message: `Invalid loop state: bodyIndex must be a non-negative integer (got ${String(bodyIndex)})`,
+    });
+  }
+
+  if (!Number.isInteger(bodyLength) || bodyLength < 1) {
+    return err({
+      code: 'LOOP_INVALID_CONFIG',
+      loopId,
+      message: `Invalid loop config: bodyLength must be >= 1 (got ${String(bodyLength)})`,
+    });
+  }
+
+  if (!Number.isInteger(maxIterations) || maxIterations < 0) {
+    return err({
+      code: 'LOOP_INVALID_CONFIG',
+      loopId,
+      message: `Invalid loop config: maxIterations must be a non-negative integer (got ${String(maxIterations)})`,
+    });
+  }
+
+  // If the frame is already out of bounds, this is an engine bug / invalid state.
+  if (!isIterationWithinBounds(iteration, maxIterations)) {
+    return err({
+      code: 'LOOP_INVALID_STATE',
+      loopId,
+      message: `Invalid loop state: iteration ${iteration} is out of bounds for maxIterations ${maxIterations}`,
+    });
+  }
+
+  if (bodyIndex > bodyLength) {
+    return err({
+      code: 'LOOP_INVALID_STATE',
+      loopId,
+      message: `Invalid loop state: bodyIndex ${bodyIndex} exceeds bodyLength ${bodyLength}`,
+    });
+  }
+
+  // Pre-check: should we even enter this iteration?
+  const shouldEnterThis = ports.shouldEnterIteration(iteration);
+  if (shouldEnterThis.isErr()) return err(shouldEnterThis.error);
+  if (!shouldEnterThis.value) return ok({ kind: 'exit_loop' });
+
+  // Find next eligible body step in this iteration.
+  for (let i = bodyIndex; i < bodyLength; i++) {
+    if (ports.isBodyIndexEligible(i)) {
+      return ok({ kind: 'execute_body_step', bodyIndex: i });
+    }
+  }
+
+  // No eligible steps left in this iteration.
+  // Skipped-body iterations still count as an iteration, so we now consult whether to enter the NEXT iteration.
+  const next = nextIteration(iteration);
+
+  // Natural termination: maxIterations reached.
+  if (!isIterationWithinBounds(next, maxIterations)) {
+    return ok({ kind: 'exit_loop' });
+  }
+
+  const shouldEnterNext = ports.shouldEnterIteration(next);
+  if (shouldEnterNext.isErr()) return err(shouldEnterNext.error);
+  if (!shouldEnterNext.value) return ok({ kind: 'exit_loop' });
+
+  return ok({ kind: 'advance_iteration', toIteration: next });
+}

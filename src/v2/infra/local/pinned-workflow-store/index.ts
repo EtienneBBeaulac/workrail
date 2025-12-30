@@ -23,8 +23,14 @@ export class LocalPinnedWorkflowStoreV2 implements PinnedWorkflowStorePortV2 {
     const filePath = this.dataDir.pinnedWorkflowPath(workflowHash);
 
     return this.fs.readFileUtf8(filePath)
-      .mapErr(mapFsToStoreError)
+      .orElse((e) => {
+        // Map FS_NOT_FOUND to Ok(null) per port contract (errors-as-data: branch on code, not message)
+        if (e.code === 'FS_NOT_FOUND') return okAsync(null);
+        return errAsync(mapFsToStoreError(e));
+      })
       .andThen((raw) => {
+        if (raw === null) return okAsync(null);
+
         let parsed: unknown;
         try {
           parsed = JSON.parse(raw);
@@ -44,11 +50,6 @@ export class LocalPinnedWorkflowStoreV2 implements PinnedWorkflowStorePortV2 {
         }
 
         return okAsync(validated.data);
-      })
-      .orElse((e) => {
-        // Map FS_NOT_FOUND to Ok(null) per port contract
-        if (e.message.includes('Not found:')) return okAsync(null);
-        return errAsync(e);
       });
   }
 

@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest';
+import { ok } from 'neverthrow';
 import {
   canContinueLoop,
+  computeLoopDecision,
+  isIterationWithinBounds,
   nextIteration,
   validateLoopAdvance,
-  isIterationWithinBounds,
 } from '../../../src/v2/durable-core/domain/loop-runtime';
 
 describe('loop-runtime', () => {
@@ -53,8 +55,92 @@ describe('loop-runtime', () => {
     });
   });
 
+  describe('computeLoopDecision', () => {
+    it('returns exit_loop when pre-check denies entry at iteration 0', () => {
+      const result = computeLoopDecision({
+        loopId: 'L',
+        iteration: 0,
+        bodyIndex: 0,
+        bodyLength: 2,
+        maxIterations: 10,
+        ports: {
+          shouldEnterIteration: () => ok(false),
+          isBodyIndexEligible: () => true,
+        },
+      });
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toEqual({ kind: 'exit_loop' });
+    });
+
+    it('returns execute_body_step for first eligible step in iteration', () => {
+      const result = computeLoopDecision({
+        loopId: 'L',
+        iteration: 0,
+        bodyIndex: 0,
+        bodyLength: 3,
+        maxIterations: 10,
+        ports: {
+          shouldEnterIteration: () => ok(true),
+          isBodyIndexEligible: (i) => i === 1,
+        },
+      });
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toEqual({ kind: 'execute_body_step', bodyIndex: 1 });
+    });
+
+    it('returns advance_iteration when no eligible steps remain and next iteration is allowed', () => {
+      const result = computeLoopDecision({
+        loopId: 'L',
+        iteration: 0,
+        bodyIndex: 0,
+        bodyLength: 2,
+        maxIterations: 10,
+        ports: {
+          shouldEnterIteration: () => ok(true),
+          isBodyIndexEligible: () => false,
+        },
+      });
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toEqual({ kind: 'advance_iteration', toIteration: 1 });
+    });
+
+    it('exits naturally when next iteration would exceed maxIterations', () => {
+      const result = computeLoopDecision({
+        loopId: 'L',
+        iteration: 0,
+        bodyIndex: 0,
+        bodyLength: 1,
+        maxIterations: 1,
+        ports: {
+          shouldEnterIteration: () => ok(true),
+          isBodyIndexEligible: () => false,
+        },
+      });
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toEqual({ kind: 'exit_loop' });
+    });
+
+    it('returns Err when iteration is already out of bounds (invalid engine state)', () => {
+      const result = computeLoopDecision({
+        loopId: 'L',
+        iteration: 1,
+        bodyIndex: 0,
+        bodyLength: 1,
+        maxIterations: 1,
+        ports: {
+          shouldEnterIteration: () => ok(true),
+          isBodyIndexEligible: () => false,
+        },
+      });
+      expect(result.isErr()).toBe(true);
+      if (result.isErr()) {
+        expect(result.error.code).toBe('LOOP_INVALID_STATE');
+      }
+    });
+  });
+
   describe('validateLoopAdvance', () => {
-    it('returns Ok(nextIteration) when advance is allowed', () => {
+it('returns Ok(nextIteration) when advance is allowed', () => {
       const result = validateLoopAdvance('test-loop', 0, 5);
       expect(result.isOk()).toBe(true);
       expect(result._unsafeUnwrap()).toBe(1);

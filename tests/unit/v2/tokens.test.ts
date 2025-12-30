@@ -43,6 +43,45 @@ function decodeBase64Url(input: string) {
 }
 
 describe('v2 tokens (Slice 3 prereq)', () => {
+  it('base64url decoding is strict (rejects padding)', () => {
+    const res = decodeBase64Url('a===');
+    expect(res.isErr()).toBe(true);
+    if (res.isErr()) {
+      expect(res.error.code).toBe('INVALID_BASE64URL_PADDING');
+    }
+  });
+
+  it('base64url decoding is strict (rejects invalid characters)', () => {
+    const res = decodeBase64Url('!!');
+    expect(res.isErr()).toBe(true);
+    if (res.isErr()) {
+      expect(res.error.code).toBe('INVALID_BASE64URL_CHARACTERS');
+    }
+  });
+
+  it('base64url decoding is strict (rejects non-canonical encodings)', () => {
+    const res = decodeBase64Url('a');
+    expect(res.isErr()).toBe(true);
+    if (res.isErr()) {
+      expect(res.error.code).toBe('INVALID_BASE64URL_CHARACTERS');
+    }
+  });
+
+  it('parseTokenV1 fails closed on invalid UTF-8 payload bytes', () => {
+    const base64url = new NodeBase64UrlV2();
+
+    // Invalid 2-byte UTF-8 sequence.
+    const invalidUtf8 = new Uint8Array([0xc3, 0x28]);
+    const payloadB64 = base64url.encodeBase64Url(invalidUtf8);
+
+    const token = `st.v1.${payloadB64}.AA`;
+
+    const parsed = parseTokenV1(token, base64url);
+    expect(parsed.isErr()).toBe(true);
+    if (parsed.isErr()) {
+      expect(parsed.error.code).toBe('TOKEN_INVALID_FORMAT');
+    }
+  });
   it('signs and verifies a state token (current key)', async () => {
     const root = await mkTempDataDir();
     const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: root });

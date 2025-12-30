@@ -174,13 +174,13 @@ export class EnhancedLoopValidator {
   private getKnownLoopVariables(loopStep: LoopStepDefinition): Set<string> {
     const vars = new Set<string>();
 
-    // Default iteration variable
-    vars.add(loopStep.loop.iterationVar || 'iteration');
+    // Default loop variables (must match runtime loop context projection)
+    vars.add(loopStep.loop.iterationVar || 'currentIteration');
 
     // For forEach loops
     if (loopStep.loop.type === 'forEach') {
-      vars.add(loopStep.loop.itemVar || 'item');
-      vars.add(loopStep.loop.indexVar || 'index');
+      vars.add(loopStep.loop.itemVar || 'currentItem');
+      vars.add(loopStep.loop.indexVar || 'currentIndex');
     }
 
     // Common context variables (these would be defined elsewhere)

@@ -17,6 +17,7 @@ import {
   ValidationResult 
 } from '../../types/validation';
 import { EnhancedLoopValidator } from './enhanced-loop-validator';
+import { decodeForSchemaValidation } from './step-output-decoder';
 
 /**
  * ValidationEngine handles step output validation with support for
@@ -28,6 +29,11 @@ export class ValidationEngine {
   private ajv: Ajv;
   private schemaCache = new Map<string, any>();
   private enhancedLoopValidator: EnhancedLoopValidator;
+  private static readonly DEFAULT_FAILURE_SUGGESTION = 'Review validation criteria and adjust output accordingly.';
+  private static readonly JSON_OBJECT_NOT_STRING_SUGGESTION =
+    'If you are returning JSON, return an object/array directly (not a JSON-encoded string). Do not wrap it in quotes or escape quotes.';
+  private static readonly JSON_STRING_CONTAINS_JSON_SUGGESTION =
+    'It looks like you returned a JSON string that itself contains JSON. Remove the outer quotes and return the JSON object/array directly.';
   
   constructor(@inject(EnhancedLoopValidator) enhancedLoopValidator: EnhancedLoopValidator) {
     this.ajv = new Ajv({ allErrors: true });
@@ -81,7 +87,8 @@ export class ValidationEngine {
         return {
           valid: compositionResult,
           issues: compositionResult ? [] : ['Validation composition failed'],
-          suggestions: compositionResult ? [] : ['Review validation criteria and adjust output accordingly.']
+          suggestions: compositionResult ? [] : ['Review validation criteria and adjust output accordingly.'],
+          warnings: undefined,
         };
       }
 
@@ -109,6 +116,8 @@ export class ValidationEngine {
     context: ConditionContext
   ): ValidationResult {
     const issues: string[] = [];
+    const suggestions: string[] = [];
+    const warnings: string[] = [];
 
     // Process each validation rule
     for (const rule of rules) {
@@ -119,7 +128,7 @@ export class ValidationEngine {
           continue;
         }
         
-        this.evaluateRule(output, rule, issues);
+        this.evaluateRule(output, rule, issues, suggestions, warnings);
       } catch (error) {
         if (error instanceof ValidationError) {
           throw error;
@@ -131,7 +140,8 @@ export class ValidationEngine {
     return {
       valid: issues.length === 0,
       issues,
-      suggestions: issues.length > 0 ? ['Review validation criteria and adjust output accordingly.'] : []
+      suggestions: issues.length > 0 ? this.uniqueSuggestions([...suggestions, ValidationEngine.DEFAULT_FAILURE_SUGGESTION]) : [],
+      warnings: warnings.length > 0 ? this.uniqueSuggestions(warnings) : undefined,
     };
   }
 
@@ -192,7 +202,9 @@ export class ValidationEngine {
       }
 
       const issues: string[] = [];
-      this.evaluateRule(output, criteria, issues);
+      const suggestions: string[] = [];
+      const warnings: string[] = [];
+      this.evaluateRule(output, criteria, issues, suggestions, warnings);
       return issues.length === 0;
     }
 
@@ -249,17 +261,18 @@ export class ValidationEngine {
     }
 
     // Evaluate criteria (either array format or composition format)
-    const isValid = this.evaluateCriteria(output, criteria, context || {});
+    const evaluation = this.evaluateCriteria(output, criteria, context || {});
     
-    if (!isValid.valid) {
-      issues.push(...isValid.issues);
+    if (!evaluation.valid) {
+      issues.push(...evaluation.issues);
     }
 
     const valid = issues.length === 0;
     return {
       valid,
       issues,
-      suggestions: valid ? [] : ['Review validation criteria and adjust output accordingly.']
+      suggestions: valid ? [] : this.uniqueSuggestions([...evaluation.suggestions, ValidationEngine.DEFAULT_FAILURE_SUGGESTION]),
+      warnings: evaluation.warnings,
     };
   }
 
@@ -270,7 +283,7 @@ export class ValidationEngine {
    * @param rule - The validation rule to apply
    * @param issues - Array to collect validation issues
    */
-  private evaluateRule(output: string, rule: ValidationRule, issues: string[]): void {
+  private evaluateRule(output: string, rule: ValidationRule, issues: string[], suggestions: string[], warnings: string[]): void {
     // Handle legacy string-based rules for backward compatibility
     if (typeof rule === 'string') {
       const re = new RegExp(rule);
@@ -286,7 +299,10 @@ export class ValidationEngine {
         case 'contains': {
           const value = rule.value as string;
           if (typeof value !== 'string' || !output.includes(value)) {
-            issues.push(rule.message || `Output must include "${value}"`);
+            issues.push(rule.message || this.formatDefaultContainsMessage(value));
+            if (this.looksLikeQuotedJsonSnippet(rule.message)) {
+              this.maybePushJsonObjectNotStringSuggestion(suggestions);
+            }
           }
           break;
         }
@@ -295,6 +311,9 @@ export class ValidationEngine {
             const re = new RegExp(rule.pattern!, rule.flags || undefined);
             if (!re.test(output)) {
               issues.push(rule.message || `Pattern mismatch: ${rule.pattern}`);
+              if (this.looksLikeQuotedJsonSnippet(rule.message)) {
+                this.maybePushJsonObjectNotStringSuggestion(suggestions);
+              }
             }
           } catch {
             throw new ValidationError(`Invalid regex pattern in validationCriteria: ${rule.pattern}`);
@@ -305,31 +324,48 @@ export class ValidationEngine {
           const { min, max } = rule;
           if (typeof min === 'number' && output.length < min) {
             issues.push(rule.message || `Output shorter than minimum length ${min}`);
+            if (this.looksLikeQuotedJsonSnippet(rule.message)) {
+              this.maybePushJsonObjectNotStringSuggestion(suggestions);
+            }
           }
           if (typeof max === 'number' && output.length > max) {
             issues.push(rule.message || `Output exceeds maximum length ${max}`);
+            if (this.looksLikeQuotedJsonSnippet(rule.message)) {
+              this.maybePushJsonObjectNotStringSuggestion(suggestions);
+            }
           }
           break;
         }
         case 'schema': {
           if (!rule.schema) {
             issues.push(rule.message || 'Schema validation rule requires a schema property');
+            if (this.looksLikeQuotedJsonSnippet(rule.message)) {
+              this.maybePushJsonObjectNotStringSuggestion(suggestions);
+            }
             break;
           }
           
           try {
-            // Parse the output as JSON
-            let parsedOutput;
-            try {
-              parsedOutput = JSON.parse(output);
-            } catch (parseError: any) {
+            const decoded = decodeForSchemaValidation(output, rule.schema);
+            if (!decoded) {
               issues.push(rule.message || 'Output is not valid JSON for schema validation');
+              if (this.looksLikeQuotedJsonSnippet(rule.message)) {
+                this.maybePushJsonObjectNotStringSuggestion(suggestions);
+              }
               break;
+            }
+
+            if (decoded.warnings.length > 0) {
+              warnings.push(...decoded.warnings);
+              this.maybePushJsonObjectNotStringSuggestion(suggestions);
+              if (!suggestions.includes(ValidationEngine.JSON_STRING_CONTAINS_JSON_SUGGESTION)) {
+                suggestions.push(ValidationEngine.JSON_STRING_CONTAINS_JSON_SUGGESTION);
+              }
             }
             
             // Compile and validate against the schema
             const validate = this.compileSchema(rule.schema);
-            const isValid = validate(parsedOutput);
+            const isValid = validate(decoded.value);
             
             if (!isValid) {
               // Format AJV errors for better readability
@@ -338,6 +374,9 @@ export class ValidationEngine {
               ) || ['Schema validation failed'];
               
               issues.push(rule.message || errorMessages.join('; '));
+              if (this.looksLikeQuotedJsonSnippet(rule.message)) {
+                this.maybePushJsonObjectNotStringSuggestion(suggestions);
+              }
             }
           } catch (error: any) {
             // Handle schema compilation errors
@@ -356,6 +395,61 @@ export class ValidationEngine {
 
     // Unknown rule format
     throw new ValidationError('Invalid validationCriteria format.');
+  }
+
+  private looksLikeQuotedJsonSnippet(message: unknown): boolean {
+    if (typeof message !== 'string') return false;
+    const m = message.trim();
+    if (m.length === 0) return false;
+
+    // Common "please include \"{...}\"" patterns that trick agents into returning JSON-as-a-string.
+    if (m.includes('\\"{') || m.includes('\\"[')) return true;
+    if (m.includes('"{') || m.includes("'{" ) || m.includes('`{')) return true;
+    if (m.includes('"[') || m.includes("'[") || m.includes('`[')) return true;
+
+    // Regex fallback: quote/backtick + optional whitespace + opening brace/bracket.
+    return /["'`]\s*[\[{]/.test(m);
+  }
+
+  private maybePushJsonObjectNotStringSuggestion(suggestions: string[]): void {
+    if (suggestions.includes(ValidationEngine.JSON_OBJECT_NOT_STRING_SUGGESTION)) return;
+    suggestions.push(ValidationEngine.JSON_OBJECT_NOT_STRING_SUGGESTION);
+  }
+
+  private uniqueSuggestions(values: readonly string[]): string[] {
+    const out: string[] = [];
+    for (const v of values) {
+      if (!v) continue;
+      if (out.includes(v)) continue;
+      out.push(v);
+    }
+    return out;
+  }
+
+  /**
+   * Default 'contains' failure message.
+   *
+   * Important: Avoid wrapping the expected snippet in quotes.
+   * Agents frequently interpret quoted JSON-like snippets as "a JSON string to return",
+   * and will escape quotes (e.g., "{\"state\":...}") instead of returning a JSON object.
+   */
+  private formatDefaultContainsMessage(value: unknown): string {
+    if (typeof value !== 'string') {
+      return 'Output must include the required substring.';
+    }
+
+    const snippet = value.trim();
+    const looksJsonLike =
+      snippet.startsWith('{') ||
+      snippet.startsWith('[') ||
+      snippet.includes('"') ||
+      snippet.includes(':');
+
+    if (looksJsonLike) {
+      return `Output must include this literal JSON snippet (not a JSON-encoded string): ${snippet}`;
+    }
+
+    return `Output must include: ${snippet}`;
   }
 
   /**
@@ -545,6 +639,9 @@ export class ValidationEngine {
         if (loopResult.info) {
           info.push(...loopResult.info.map(i => `Step '${step.id}': ${i}`));
         }
+
+        // Lint loop body inline steps + loop-scoped validationCriteria (if present in body steps)
+        this.collectQuotedJsonValidationMessageWarnings(step as any, `Step '${step.id}'`, warnings);
       } else {
         // Basic step validation
         if (!step.id) {
@@ -556,6 +653,8 @@ export class ValidationEngine {
         if (!step.prompt) {
           issues.push(`Step '${step.id}' missing required prompt`);
         }
+
+        this.collectQuotedJsonValidationMessageWarnings(step as any, `Step '${step.id}'`, warnings);
 
         // Validate function calls for standard steps using workflow + step scopes
         const callValidation = this.validateStepFunctionCalls(
@@ -598,6 +697,53 @@ export class ValidationEngine {
       warnings: warnings.length > 0 ? warnings : undefined,
       info: info.length > 0 ? info : undefined
     };
+  }
+
+  private collectQuotedJsonValidationMessageWarnings(
+    stepLike: { readonly validationCriteria?: ValidationCriteria } | undefined,
+    prefix: string,
+    warnings: string[]
+  ): void {
+    const criteria = stepLike?.validationCriteria;
+    if (!criteria) return;
+
+    const msgs = this.collectValidationRuleMessages(criteria);
+    for (const m of msgs) {
+      if (!this.looksLikeQuotedJsonSnippet(m)) continue;
+      warnings.push(
+        `${prefix}: validationCriteria.message appears to contain a quoted JSON snippet. ` +
+          `Agents often respond with a JSON-encoded string (escaping quotes) instead of a JSON object. ` +
+          `Prefer describing the required object/keys without quoting the JSON (or use schema validation).`
+      );
+      // One warning per step is plenty.
+      return;
+    }
+  }
+
+  private collectValidationRuleMessages(criteria: ValidationCriteria): string[] {
+    // Array format (legacy) is handled by callers via any-cast; support it here defensively.
+    if (Array.isArray(criteria)) {
+      const msgs: string[] = [];
+      for (const r of criteria as any[]) {
+        if (r && typeof r === 'object' && typeof (r as any).message === 'string') msgs.push((r as any).message);
+      }
+      return msgs;
+    }
+
+    if (this.isValidationRule(criteria)) {
+      return typeof (criteria as any).message === 'string' ? [String((criteria as any).message)] : [];
+    }
+
+    if (this.isValidationComposition(criteria)) {
+      const msgs: string[] = [];
+      const c = criteria as any;
+      if (Array.isArray(c.and)) for (const child of c.and) msgs.push(...this.collectValidationRuleMessages(child));
+      if (Array.isArray(c.or)) for (const child of c.or) msgs.push(...this.collectValidationRuleMessages(child));
+      if (c.not) msgs.push(...this.collectValidationRuleMessages(c.not));
+      return msgs;
+    }
+
+    return [];
   }
 
   /**

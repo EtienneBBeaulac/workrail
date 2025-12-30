@@ -8,6 +8,7 @@ import { NodeFileSystemV2 } from '../../../src/v2/infra/local/fs/index.js';
 import { CompiledWorkflowSnapshotSchema } from '../../../src/v2/durable-core/schemas/compiled-workflow/index.js';
 import { workflowHashForCompiledSnapshot } from '../../../src/v2/durable-core/canonical/hashing.js';
 import { NodeCryptoV2 } from '../../../src/v2/infra/local/crypto/index.js';
+import { InMemoryFileSystem } from '../../fakes/v2/index.js';
 
 async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-pinned-test-'));
@@ -186,4 +187,21 @@ describe('v2 Pinned Workflow Store adapter (error handling)', () => {
     const getResult = await store.get(hash);
     expect(getResult.isOk()).toBe(true);
   });
+
+  it('get returns null for missing file using InMemoryFileSystem fake (cross-implementation determinism)', async () => {
+    // This test proves the pinned workflow store correctly handles FS_NOT_FOUND
+    // regardless of the FS implementation's message formatting.
+    const inMemFs = new InMemoryFileSystem();
+    const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: '/test-root' });
+    const store = new LocalPinnedWorkflowStoreV2(dataDir, inMemFs);
+
+    const missingHash = 'sha256:0000000000000000000000000000000000000000000000000000000000000000';
+    const result = await store.get(missingHash as any);
+
+    expect(result.isOk()).toBe(true);
+    if (result.isErr()) throw new Error('Expected Ok result');
+
+    expect(result.value).toBeNull();
+  });
 });
+

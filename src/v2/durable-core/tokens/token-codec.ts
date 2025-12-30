@@ -61,9 +61,17 @@ export function parseTokenV1(token: string, base64url: Base64UrlPortV2): Result<
 
   // Payload bytes are the UTF-8 bytes of JCS canonical JSON.
   const payloadBytes = asCanonicalBytes(decoded.value);
+
+  let payloadText: string;
+  try {
+    payloadText = new TextDecoder('utf-8', { fatal: true }).decode(payloadBytes as unknown as Uint8Array);
+  } catch {
+    return err({ code: 'TOKEN_INVALID_FORMAT', message: 'Payload is not valid UTF-8' });
+  }
+
   let payloadJson: unknown;
   try {
-    payloadJson = JSON.parse(new TextDecoder().decode(payloadBytes as unknown as Uint8Array));
+    payloadJson = JSON.parse(payloadText);
   } catch {
     return err({ code: 'TOKEN_INVALID_FORMAT', message: 'Payload is not valid JSON' });
   }

@@ -365,5 +365,35 @@ describe('Loop Validation', () => {
       const result = engine.validateWorkflow(workflow);
       expect(result.valid).toBe(true);
     });
+
+    it('should warn when validationCriteria.message contains quoted JSON snippets (agent confusion risk)', () => {
+      const workflow = createWorkflow(
+        {
+          id: 'warning-workflow',
+          name: 'Warning Workflow',
+          description: 'Test',
+          version: '0.1.0',
+          steps: [
+            {
+              id: 'step1',
+              title: 'Step 1',
+              prompt: 'First',
+              validationCriteria: [
+                {
+                  type: 'contains',
+                  value: 'state',
+                  message: 'Output must include "{\\"state\\": \\"init\\"}"',
+                },
+              ],
+            } as any,
+          ],
+        },
+        createBundledSource()
+      );
+
+      const result = engine.validateWorkflow(workflow);
+      expect(result.valid).toBe(true);
+      expect(result.warnings?.some((w) => w.includes('quoted JSON snippet'))).toBe(true);
+    });
   });
 }); 

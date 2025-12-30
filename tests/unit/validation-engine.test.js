@@ -134,7 +134,7 @@ var error_handler_1 = require("../../src/core/error-handler");
                     case 1:
                         result = _a.sent();
                         (0, globals_1.expect)(result.valid).toBe(false);
-                        (0, globals_1.expect)(result.issues).toContain('Output must include "missing"');
+                        (0, globals_1.expect)(result.issues).toContain('Output must include: missing');
                         return [2 /*return*/];
                 }
             });

@@ -32,6 +32,7 @@ export interface WorkflowService {
     valid: boolean;
     issues: readonly string[];
     suggestions: readonly string[];
+    warnings?: readonly string[];
   }>;
 }
 
@@ -86,20 +87,20 @@ export class DefaultWorkflowService implements WorkflowService {
     workflowId: string,
     stepId: string,
     output: string
-  ): Promise<{ valid: boolean; issues: readonly string[]; suggestions: readonly string[] }> {
+  ): Promise<{ valid: boolean; issues: readonly string[]; suggestions: readonly string[]; warnings?: readonly string[] }> {
     const workflow = await this.storage.getWorkflowById(workflowId);
     if (!workflow) {
       // Validation is best-effort; treat missing workflow as invalid.
-      return { valid: false, issues: [`Workflow '${workflowId}' not found`], suggestions: [] };
+      return { valid: false, issues: [`Workflow '${workflowId}' not found`], suggestions: [], warnings: undefined };
     }
 
     const step = workflow.definition.steps.find((s) => s.id === stepId) as WorkflowStepDefinition | undefined;
     if (!step) {
-      return { valid: false, issues: [`Step '${stepId}' not found in workflow '${workflowId}'`], suggestions: [] };
+      return { valid: false, issues: [`Step '${stepId}' not found in workflow '${workflowId}'`], suggestions: [], warnings: undefined };
     }
 
     const criteria = (step as any).validationCriteria;
-    if (!criteria) return { valid: true, issues: [], suggestions: [] };
+    if (!criteria) return { valid: true, issues: [], suggestions: [], warnings: undefined };
 
     return this.validationEngine.validate(output, criteria);
   }

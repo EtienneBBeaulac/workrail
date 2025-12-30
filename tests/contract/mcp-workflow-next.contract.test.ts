@@ -111,9 +111,10 @@ describe('MCP contract: workflow_next (state + event)', () => {
     expect((r2 as any).code).toBe('VALIDATION_ERROR');
   });
 
-  it('surfaces maxIterations as PRECONDITION_FAILED when safety bound is exceeded', async () => {
-    // maxIterations acts as a safety bound: if count > maxIterations, we should hit the safety check
-    const wf = buildLoopWorkflow('loop-max', 5, 2); // count=5 but max=2 (safety kicks in)
+  it('loop exits naturally when maxIterations bound is reached', async () => {
+    // Lock: maxIterations is a count; allowed iterations are 0..(maxIterations-1).
+    // Test: create a loop with count=5 but maxIterations=2; loop should only run iterations 0 and 1.
+    const wf = buildLoopWorkflow('loop-max', 5, 2); // count=5 but max=2 (bound is enforced)
     await setupIntegrationTest({
       storage: new InMemoryWorkflowStorage([wf]),
       disableSessionTools: true,
@@ -137,7 +138,7 @@ describe('MCP contract: workflow_next (state + event)', () => {
     expect(r1.type).toBe('success');
     const step1 = (r1 as any).data.next.stepInstanceId;
 
-    // Complete iteration 0, advance to iteration 1
+    // Complete iteration 0; shouldContinueLoop checks: next iteration (1) < maxIterations (2) → continue
     const r2 = await handleWorkflowNext(
       { workflowId: 'loop-max', state: (r1 as any).data.state, event: { kind: 'step_completed', stepInstanceId: step1 }, context: {} },
       ctx
@@ -145,12 +146,12 @@ describe('MCP contract: workflow_next (state + event)', () => {
     expect(r2.type).toBe('success');
     const step2 = (r2 as any).data.next.stepInstanceId;
 
-    // Complete iteration 1; shouldContinueLoop will check iteration=2 >= maxIterations=2 → stop naturally
+    // Complete iteration 1; shouldContinueLoop checks: next iteration (2) < maxIterations (2) → false → exit
     const r3 = await handleWorkflowNext(
       { workflowId: 'loop-max', state: (r2 as any).data.state, event: { kind: 'step_completed', stepInstanceId: step2 }, context: {} },
       ctx
     );
-    // Loop should exit naturally (not throw) because maxIterations acts as an upper bound in shouldContinueLoop
+    // Loop should exit naturally because maxIterations=2 allows only iterations 0 and 1
     expect(r3.type).toBe('success');
     expect((r3 as any).data.isComplete).toBe(true);
   });
