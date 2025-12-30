@@ -1,5 +1,3 @@
-export { encodeBase64Url, decodeBase64Url } from './base64url.js';
-
 export {
   TokenPayloadV1Schema,
   StateTokenPayloadV1Schema,

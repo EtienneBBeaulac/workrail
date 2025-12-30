@@ -6,6 +6,19 @@ export type ProjectionError =
   | { readonly code: 'PROJECTION_INVARIANT_VIOLATION'; readonly message: string }
   | { readonly code: 'PROJECTION_CORRUPTION_DETECTED'; readonly message: string };
 
+/**
+ * Closed set: OutputChannel (recap | artifact).
+ *
+ * Lock: docs/design/v2-core-design-locks.md Section 1.1 (`node_output_appended`)
+ *
+ * Why closed:
+ * - Studio and projections rely on stable channel semantics
+ * - Prevents ad-hoc channels that would fragment “current output” logic
+ *
+ * Values:
+ * - `recap`: short human-readable recap (bounded; at most one current per node)
+ * - `artifact`: durable artifact references (may have multiple)
+ */
 export type OutputChannelV2 = 'recap' | 'artifact';
 
 export type OutputPayloadV2 =
@@ -88,23 +101,49 @@ export function projectNodeOutputsV2(events: readonly DomainEventV1[]): Result<N
 
     for (const channel of ['recap', 'artifact'] as const) {
       const history = historyByChannel[channel];
-      const superseded = new Set<string>();
+
+      // Build supersession graph: outputId → what supersedes it
+      const supersededBy = new Map<string, string>();
+      const outputIdSet = new Set<string>();
 
       for (const o of history) {
-        if (!o.supersedesOutputId) continue;
-
-        // Enforce node-scoped + channel-scoped supersedes (projection-level corruption detection).
-        const target = history.find((x) => x.outputId === o.supersedesOutputId);
-        if (!target) {
-          return err({
-            code: 'PROJECTION_CORRUPTION_DETECTED',
-            message: `supersedesOutputId references missing output (nodeId=${nodeId}, channel=${channel}, supersedes=${o.supersedesOutputId})`,
-          });
+        outputIdSet.add(o.outputId);
+        if (o.supersedesOutputId) {
+          // Enforce node-scoped + channel-scoped supersedes (projection-level corruption detection).
+          if (!outputIdSet.has(o.supersedesOutputId)) {
+            return err({
+              code: 'PROJECTION_CORRUPTION_DETECTED',
+              message: `supersedesOutputId references missing output (nodeId=${nodeId}, channel=${channel}, supersedes=${o.supersedesOutputId})`,
+            });
+          }
+          supersededBy.set(o.supersedesOutputId, o.outputId);
         }
-        superseded.add(o.supersedesOutputId);
       }
 
-      const current = history.filter((o) => !superseded.has(o.outputId));
+      // Compute transitive closure: mark ALL outputs in supersession chains as superseded
+      const transitivelySuperseded = new Set<string>();
+
+      for (const output of history) {
+        let cur: string | undefined = output.outputId;
+        const visited = new Set<string>();
+
+        // Walk forward through supersession chain (output → what supersedes it)
+        while (cur && supersededBy.has(cur)) {
+          if (visited.has(cur)) {
+            // Cycle in supersession chain - fail-closed
+            return err({
+              code: 'PROJECTION_INVARIANT_VIOLATION',
+              message: `Cycle detected in supersession chain at output: ${cur}`,
+            });
+          }
+          visited.add(cur);
+          transitivelySuperseded.add(cur);  // ✅ Mark as superseded
+          cur = supersededBy.get(cur);
+        }
+      }
+
+      // Current outputs = not transitively superseded
+      const current = history.filter((o) => !transitivelySuperseded.has(o.outputId));
 
       // Additional invariant: recap channel should have at most one current output.
       if (channel === 'recap' && current.length > 1) {

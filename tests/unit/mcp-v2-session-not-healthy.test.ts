@@ -17,11 +17,14 @@ import { NodeSha256V2 } from '../../src/v2/infra/local/sha256/index.js';
 import { LocalSessionEventLogStoreV2 } from '../../src/v2/infra/local/session-store/index.js';
 import { NodeCryptoV2 } from '../../src/v2/infra/local/crypto/index.js';
 import { NodeHmacSha256V2 } from '../../src/v2/infra/local/hmac-sha256/index.js';
+import { NodeBase64UrlV2 } from '../../src/v2/infra/local/base64url/index.js';
 import { LocalSessionLockV2 } from '../../src/v2/infra/local/session-lock/index.js';
 import { LocalSnapshotStoreV2 } from '../../src/v2/infra/local/snapshot-store/index.js';
 import { LocalPinnedWorkflowStoreV2 } from '../../src/v2/infra/local/pinned-workflow-store/index.js';
 import { ExecutionSessionGateV2 } from '../../src/v2/usecases/execution-session-gate.js';
 import { LocalKeyringV2 } from '../../src/v2/infra/local/keyring/index.js';
+import { NodeRandomEntropyV2 } from '../../src/v2/infra/local/random-entropy/index.js';
+import { NodeTimeClockV2 } from '../../src/v2/infra/local/time-clock/index.js';
 
 async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-health-'));
@@ -33,15 +36,18 @@ async function mkV2Deps() {
   const sha256 = new NodeSha256V2();
   const crypto = new NodeCryptoV2();
   const hmac = new NodeHmacSha256V2();
+  const base64url = new NodeBase64UrlV2();
+  const entropy = new NodeRandomEntropyV2();
+  const clock = new NodeTimeClockV2();
   const sessionStore = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha256);
-  const lockPort = new LocalSessionLockV2(dataDir, fsPort);
+  const lockPort = new LocalSessionLockV2(dataDir, fsPort, clock);
   const gate = new ExecutionSessionGateV2(lockPort, sessionStore);
   const snapshotStore = new LocalSnapshotStoreV2(dataDir, fsPort, crypto);
-  const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir);
-  const keyringPort = new LocalKeyringV2(dataDir, fsPort);
+  const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir, fsPort);
+  const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url, entropy);
   const keyring = await keyringPort.loadOrCreate().match(v => v, e => { throw new Error(`keyring: ${e.code}`); });
 
-  return { gate, sessionStore, snapshotStore, pinnedStore, keyring, crypto, hmac };
+  return { gate, sessionStore, snapshotStore, pinnedStore, keyring, crypto, hmac, base64url };
 }
 
 async function mkCtxWithWorkflow(workflowId: string): Promise<ToolContext> {
@@ -89,7 +95,8 @@ describe('v2 execution: SESSION_NOT_HEALTHY error response', () => {
       if (started.type !== 'success') return;
 
       const stateToken = started.data.stateToken;
-      const parsedState = parseTokenV1(stateToken)._unsafeUnwrap();
+      const localBase64url = new NodeBase64UrlV2();
+      const parsedState = parseTokenV1(stateToken, localBase64url)._unsafeUnwrap();
       const sessionId = parsedState.payload.sessionId;
 
       // Corrupt the session manifest file by truncating it
@@ -156,7 +163,8 @@ describe('v2 execution: SESSION_NOT_HEALTHY error response', () => {
       if (started.type !== 'success') return;
 
       const stateToken = started.data.stateToken;
-      const parsedState = parseTokenV1(stateToken)._unsafeUnwrap();
+      const localBase64url = new NodeBase64UrlV2();
+      const parsedState = parseTokenV1(stateToken, localBase64url)._unsafeUnwrap();
       const sessionId = parsedState.payload.sessionId;
 
       // Corrupt manifest

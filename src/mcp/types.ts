@@ -22,6 +22,7 @@ import type { PinnedWorkflowStorePortV2 } from '../v2/ports/pinned-workflow-stor
 import type { KeyringV1 } from '../v2/ports/keyring.port.js';
 import type { CryptoPortV2 } from '../v2/durable-core/canonical/hashing.js';
 import type { HmacSha256PortV2 } from '../v2/ports/hmac-sha256.port.js';
+import type { Base64UrlPortV2 } from '../v2/ports/base64url.port.js';
 import type { JsonValue } from './output-schemas.js';
 
 // Note: JsonValue type is imported from output-schemas.js above
@@ -201,6 +202,7 @@ export interface V2Dependencies {
   readonly keyring: KeyringV1;
   readonly crypto: CryptoPortV2;
   readonly hmac: HmacSha256PortV2;
+  readonly base64url: Base64UrlPortV2;
 }
 
 // -----------------------------------------------------------------------------

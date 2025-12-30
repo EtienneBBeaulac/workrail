@@ -42,11 +42,19 @@ import type { SessionEventLogStoreError } from '../../v2/ports/session-event-log
 import type { SnapshotStoreError } from '../../v2/ports/snapshot-store.port.js';
 import type { PinnedWorkflowStoreError } from '../../v2/ports/pinned-workflow-store.port.js';
 import type { HmacSha256PortV2 } from '../../v2/ports/hmac-sha256.port.js';
+import type { Base64UrlPortV2 } from '../../v2/ports/base64url.port.js';
 import { ResultAsync as RA, okAsync, errAsync as neErrorAsync, ok, err, type Result } from 'neverthrow';
 import { compileV1WorkflowToPinnedSnapshot } from '../../v2/read-only/v1-to-v2-shim.js';
 import { workflowHashForCompiledSnapshot } from '../../v2/durable-core/canonical/hashing.js';
 import type { JsonObject, JsonValue } from '../../v2/durable-core/canonical/json-types.js';
 import { toCanonicalBytes } from '../../v2/durable-core/canonical/jcs.js';
+import {
+  MAX_CONTEXT_BYTES,
+  MAX_CONTEXT_DEPTH,
+} from '../../v2/durable-core/constants.js';
+import { toNotesMarkdownV1 } from '../../v2/durable-core/domain/notes-markdown.js';
+import { normalizeOutputsForAppend } from '../../v2/durable-core/domain/outputs.js';
+import { buildAckAdvanceAppendPlanV1 } from '../../v2/durable-core/domain/ack-advance-append-plan.js';
 import { createBundledSource } from '../../types/workflow-source.js';
 import type { WorkflowDefinition } from '../../types/workflow-definition.js';
 import { hasWorkflowDefinitionShape } from '../../types/workflow-definition.js';
@@ -84,7 +92,7 @@ function normalizeTokenErrorMessage(message: string): string {
 type Bytes = number & { readonly __brand: 'Bytes' };
 type TokenPrefix = 'st.v1.' | 'ack.v1.' | 'chk.v1.';
 
-const MAX_CONTEXT_BYTES_V2 = (256 * 1024) as Bytes;
+const MAX_CONTEXT_BYTES_V2 = MAX_CONTEXT_BYTES as Bytes;
 
 type ContextToolNameV2 = 'start_workflow' | 'continue_workflow';
 
@@ -133,7 +141,7 @@ type ContextValidationDetails =
 type ContextBudgetCheck = { readonly ok: true } | { readonly ok: false; readonly error: ToolFailure };
 
 function validateJsonValueOrIssue(value: unknown, path: string, depth: number, seen: WeakSet<object>): ContextValidationIssue | null {
-  if (depth > 64) return { kind: 'too_deep', path, maxDepth: 64 };
+  if (depth > MAX_CONTEXT_DEPTH) return { kind: 'too_deep', path, maxDepth: MAX_CONTEXT_DEPTH };
 
   if (value === null) return null;
 
@@ -314,6 +322,7 @@ type InternalError =
   | { readonly kind: 'workflow_hash_mismatch' }
   | { readonly kind: 'missing_snapshot' }
   | { readonly kind: 'no_pending_step' }
+  | { readonly kind: 'invariant_violation'; readonly message: string }
   | { readonly kind: 'advance_apply_failed'; readonly message: string }
   | { readonly kind: 'advance_next_failed'; readonly message: string };
 
@@ -329,6 +338,7 @@ function isInternalError(e: unknown): e is InternalError {
     kind === 'workflow_hash_mismatch' ||
     kind === 'missing_snapshot' ||
     kind === 'no_pending_step' ||
+    kind === 'invariant_violation' ||
     kind === 'advance_apply_failed' ||
     kind === 'advance_next_failed'
   );
@@ -355,6 +365,8 @@ function mapInternalErrorToToolError(e: InternalError): ToolFailure {
     case 'missing_snapshot':
     case 'no_pending_step':
       return internalError('Incomplete execution state.', 'Retry; if this persists, treat as invariant violation.');
+    case 'invariant_violation':
+      return internalError(normalizeTokenErrorMessage(e.message), 'Treat as invariant violation.');
     case 'advance_apply_failed':
     case 'advance_next_failed':
       return internalError(normalizeTokenErrorMessage(e.message), 'Retry; if this persists, treat as invariant violation.');
@@ -382,6 +394,7 @@ function replayFromRecordedAdvance(args: {
   readonly snapshotStore: import('../../v2/ports/snapshot-store.port.js').SnapshotStorePortV2;
   readonly keyring: import('../../v2/ports/keyring.port.js').KeyringV1;
   readonly hmac: HmacSha256PortV2;
+  readonly base64url: Base64UrlPortV2;
 }): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, ContinueWorkflowError> {
   const {
     recordedEvent,
@@ -397,6 +410,7 @@ function replayFromRecordedAdvance(args: {
     snapshotStore,
     keyring,
     hmac,
+    base64url,
   } = args;
 
   const checkpointTokenRes = signTokenOrErr({
@@ -404,6 +418,7 @@ function replayFromRecordedAdvance(args: {
     payload: { tokenVersion: 1, tokenKind: 'checkpoint', sessionId, runId, nodeId, attemptId },
     keyring,
     hmac,
+    base64url,
   });
   if (checkpointTokenRes.isErr()) {
     return neErrorAsync({ kind: 'token_signing_failed' as const, cause: checkpointTokenRes.error });
@@ -474,6 +489,7 @@ function replayFromRecordedAdvance(args: {
         payload: { tokenVersion: 1, tokenKind: 'ack', sessionId, runId, nodeId: toNodeIdBranded, attemptId: nextAttemptId },
         keyring,
         hmac,
+        base64url,
       });
       if (nextAckTokenRes.isErr()) {
         return neErrorAsync({ kind: 'token_signing_failed' as const, cause: nextAckTokenRes.error });
@@ -484,6 +500,7 @@ function replayFromRecordedAdvance(args: {
         payload: { tokenVersion: 1, tokenKind: 'checkpoint', sessionId, runId, nodeId: toNodeIdBranded, attemptId: nextAttemptId },
         keyring,
         hmac,
+        base64url,
       });
       if (nextCheckpointTokenRes.isErr()) {
         return neErrorAsync({ kind: 'token_signing_failed' as const, cause: nextCheckpointTokenRes.error });
@@ -494,6 +511,7 @@ function replayFromRecordedAdvance(args: {
         payload: { tokenVersion: 1, tokenKind: 'state', sessionId, runId, nodeId: toNodeIdBranded, workflowHash },
         keyring,
         hmac,
+        base64url,
       });
       if (nextStateTokenRes.isErr()) {
         return neErrorAsync({ kind: 'token_signing_failed' as const, cause: nextStateTokenRes.error });
@@ -606,76 +624,45 @@ function advanceAndRecord(args: {
       );
       const causeKind: 'non_tip_advance' | 'intentional_fork' = hasChildren ? 'non_tip_advance' : 'intentional_fork';
 
-      const baseEvents: readonly DomainEventV1[] = [
-        {
-          v: 1,
-          eventId: evtAdvanceRecorded,
-          eventIndex: nextEventIndex,
-          sessionId,
-          kind: 'advance_recorded' as const,
-          dedupeKey,
-          scope: { runId, nodeId },
-          data: {
-            attemptId,
-            intent: 'ack_pending' as const,
-            outcome: { kind: 'advanced' as const, toNodeId },
-          },
-        },
-        {
-          v: 1,
-          eventId: evtNodeCreated,
-          eventIndex: nextEventIndex + 1,
-          sessionId,
-          kind: 'node_created' as const,
-          dedupeKey: `node_created:${sessionId}:${runId}:${toNodeId}`,
-          scope: { runId, nodeId: toNodeId },
-          data: { nodeKind: 'step' as const, parentNodeId: String(nodeId), workflowHash, snapshotRef: newSnapshotRef },
-        },
-        {
-          v: 1,
-          eventId: evtEdgeCreated,
-          eventIndex: nextEventIndex + 2,
-          sessionId,
-          kind: 'edge_created' as const,
-          dedupeKey: `edge_created:${sessionId}:${runId}:${String(nodeId)}->${toNodeId}:acked_step`,
-          scope: { runId },
-          data: {
-            edgeKind: 'acked_step' as const,
-            fromNodeId: String(nodeId),
-            toNodeId,
-            cause: { kind: causeKind, eventId: evtAdvanceRecorded },
-          },
-        },
-      ];
-
       const outputId = asOutputId(`out_recap_${String(attemptId)}`);
-      const events: readonly DomainEventV1[] = inputOutput?.notesMarkdown
-        ? [
-            ...baseEvents,
-            {
-              v: 1,
-              eventId: `evt_${randomUUID()}`,
-              eventIndex: nextEventIndex + 3,
-              sessionId,
-              kind: 'node_output_appended' as const,
-              dedupeKey: `node_output_appended:${sessionId}:${outputId}`,
-              scope: { runId, nodeId },
-              data: {
-                outputId: `out_recap_${attemptId}`,
+      const outputsToAppend =
+        inputOutput?.notesMarkdown
+          ? [
+              {
+                outputId: String(outputId),
                 outputChannel: 'recap' as const,
                 payload: {
                   payloadKind: 'notes' as const,
-                  notesMarkdown: inputOutput.notesMarkdown.slice(0, 4096),
+                  notesMarkdown: toNotesMarkdownV1(inputOutput.notesMarkdown),
                 },
               },
-            },
-          ]
-        : baseEvents;
+            ]
+          : [];
 
-      return sessionStore.append(lock, {
-        events,
-        snapshotPins: [{ snapshotRef: newSnapshotRef, eventIndex: nextEventIndex + 1, createdByEventId: evtNodeCreated }],
+      const normalizedOutputs = normalizeOutputsForAppend(outputsToAppend);
+      const outputEventIds = normalizedOutputs.map(() => `evt_${randomUUID()}`);
+
+      const planRes = buildAckAdvanceAppendPlanV1({
+        sessionId: String(sessionId),
+        runId: String(runId),
+        fromNodeId: String(nodeId),
+        workflowHash,
+        attemptId: String(attemptId),
+        nextEventIndex,
+        toNodeId,
+        snapshotRef: newSnapshotRef,
+        causeKind,
+        minted: {
+          advanceRecordedEventId: evtAdvanceRecorded,
+          nodeCreatedEventId: evtNodeCreated,
+          edgeCreatedEventId: evtEdgeCreated,
+          outputEventIds,
+        },
+        outputsToAppend,
       });
+      if (planRes.isErr()) return errAsync({ kind: 'invariant_violation' as const, message: planRes.error.message });
+
+      return sessionStore.append(lock, planRes.value);
     });
   });
 }
@@ -784,14 +771,15 @@ type AckTokenInput = ParsedTokenV1 & { readonly payload: import('../../v2/durabl
 function parseStateTokenOrFail(
   raw: string,
   keyring: import('../../v2/ports/keyring.port.js').KeyringV1,
-  hmac: HmacSha256PortV2
+  hmac: HmacSha256PortV2,
+  base64url: Base64UrlPortV2
 ): { ok: true; token: StateTokenInput } | { ok: false; failure: ToolFailure } {
-  const parsedRes = parseTokenV1(raw);
+  const parsedRes = parseTokenV1(raw, base64url);
   if (parsedRes.isErr()) {
     return { ok: false, failure: mapTokenDecodeErrorToToolError(parsedRes.error) };
   }
 
-  const verified = verifyTokenSignatureV1(parsedRes.value, keyring, hmac);
+  const verified = verifyTokenSignatureV1(parsedRes.value, keyring, hmac, base64url);
   if (verified.isErr()) {
     return { ok: false, failure: mapTokenVerifyErrorToToolError(verified.error) };
   }
@@ -811,14 +799,15 @@ function parseStateTokenOrFail(
 function parseAckTokenOrFail(
   raw: string,
   keyring: import('../../v2/ports/keyring.port.js').KeyringV1,
-  hmac: HmacSha256PortV2
+  hmac: HmacSha256PortV2,
+  base64url: Base64UrlPortV2
 ): { ok: true; token: AckTokenInput } | { ok: false; failure: ToolFailure } {
-  const parsedRes = parseTokenV1(raw);
+  const parsedRes = parseTokenV1(raw, base64url);
   if (parsedRes.isErr()) {
     return { ok: false, failure: mapTokenDecodeErrorToToolError(parsedRes.error) };
   }
 
-  const verified = verifyTokenSignatureV1(parsedRes.value, keyring, hmac);
+  const verified = verifyTokenSignatureV1(parsedRes.value, keyring, hmac, base64url);
   if (verified.isErr()) {
     return { ok: false, failure: mapTokenVerifyErrorToToolError(verified.error) };
   }
@@ -849,11 +838,12 @@ function signTokenOrErr(args: {
   payload: TokenPayloadV1;
   keyring: import('../../v2/ports/keyring.port.js').KeyringV1;
   hmac: HmacSha256PortV2;
+  base64url: Base64UrlPortV2;
 }): Result<string, TokenDecodeErrorV2 | TokenVerifyErrorV2> {
   const bytes = encodeTokenPayloadV1(args.payload);
   if (bytes.isErr()) return err(bytes.error);
 
-  const token = signTokenV1(args.unsignedPrefix, bytes.value, args.keyring, args.hmac);
+  const token = signTokenV1(args.unsignedPrefix, bytes.value, args.keyring, args.hmac, args.base64url);
   if (token.isErr()) return err(token.error);
 
   return ok(String(token.value));
@@ -966,7 +956,7 @@ function executeStartWorkflow(
     return neErrorAsync({ kind: 'precondition_failed', message: 'v2 tools disabled', suggestion: 'Enable v2Tools flag' });
   }
 
-  const { gate, sessionStore, snapshotStore, pinnedStore, keyring, crypto, hmac } = ctx.v2;
+  const { gate, sessionStore, snapshotStore, pinnedStore, keyring, crypto, hmac, base64url } = ctx.v2;
 
   const ctxCheck = checkContextBudget({ tool: 'start_workflow', context: input.context });
   if (!ctxCheck.ok) return neErrorAsync({ kind: 'validation_failed', failure: ctxCheck.error });
@@ -1129,13 +1119,13 @@ function executeStartWorkflow(
         attemptId,
       };
 
-      const stateToken = signTokenOrErr({ unsignedPrefix: 'st.v1.', payload: statePayload, keyring, hmac });
+      const stateToken = signTokenOrErr({ unsignedPrefix: 'st.v1.', payload: statePayload, keyring, hmac, base64url });
       if (stateToken.isErr()) return neErrorAsync({ kind: 'token_signing_failed' as const, cause: stateToken.error });
       
-      const ackToken = signTokenOrErr({ unsignedPrefix: 'ack.v1.', payload: ackPayload, keyring, hmac });
+      const ackToken = signTokenOrErr({ unsignedPrefix: 'ack.v1.', payload: ackPayload, keyring, hmac, base64url });
       if (ackToken.isErr()) return neErrorAsync({ kind: 'token_signing_failed' as const, cause: ackToken.error });
       
-      const checkpointToken = signTokenOrErr({ unsignedPrefix: 'chk.v1.', payload: checkpointPayload, keyring, hmac });
+      const checkpointToken = signTokenOrErr({ unsignedPrefix: 'chk.v1.', payload: checkpointPayload, keyring, hmac, base64url });
       if (checkpointToken.isErr()) return neErrorAsync({ kind: 'token_signing_failed' as const, cause: checkpointToken.error });
 
       const { stepId, title, prompt } = extractStepMetadata(pinnedWorkflow, firstStep.id);
@@ -1169,9 +1159,9 @@ function executeContinueWorkflow(
     return neErrorAsync({ kind: 'precondition_failed', message: 'v2 tools disabled', suggestion: 'Enable v2Tools flag' });
   }
 
-  const { gate, sessionStore, snapshotStore, pinnedStore, keyring, crypto, hmac } = ctx.v2;
+  const { gate, sessionStore, snapshotStore, pinnedStore, keyring, crypto, hmac, base64url } = ctx.v2;
 
-  const stateRes = parseStateTokenOrFail(input.stateToken, keyring, hmac);
+  const stateRes = parseStateTokenOrFail(input.stateToken, keyring, hmac, base64url);
   if (!stateRes.ok) return neErrorAsync({ kind: 'validation_failed', failure: stateRes.failure });
   const state = stateRes.token;
 
@@ -1239,6 +1229,7 @@ function executeContinueWorkflow(
               payload: { tokenVersion: 1, tokenKind: 'ack', sessionId, runId, nodeId, attemptId },
               keyring,
               hmac,
+              base64url,
             });
             if (ackTokenRes.isErr()) return neErrorAsync({ kind: 'token_signing_failed' as const, cause: ackTokenRes.error });
             
@@ -1247,6 +1238,7 @@ function executeContinueWorkflow(
               payload: { tokenVersion: 1, tokenKind: 'checkpoint', sessionId, runId, nodeId, attemptId },
               keyring,
               hmac,
+              base64url,
             });
             if (checkpointTokenRes.isErr()) return neErrorAsync({ kind: 'token_signing_failed' as const, cause: checkpointTokenRes.error });
 
@@ -1291,7 +1283,7 @@ function executeContinueWorkflow(
   }
 
   // ADVANCE PATH
-  const ackRes = parseAckTokenOrFail(input.ackToken, keyring, hmac);
+  const ackRes = parseAckTokenOrFail(input.ackToken, keyring, hmac, base64url);
   if (!ackRes.ok) return neErrorAsync({ kind: 'validation_failed', failure: ackRes.failure });
   const ack = ackRes.token;
 
@@ -1338,6 +1330,7 @@ function executeContinueWorkflow(
               snapshotStore,
               keyring,
               hmac,
+              base64url,
             });
           }
 
@@ -1425,6 +1418,7 @@ function executeContinueWorkflow(
                 snapshotStore,
                 keyring,
                 hmac,
+                base64url,
               });
             });
         });

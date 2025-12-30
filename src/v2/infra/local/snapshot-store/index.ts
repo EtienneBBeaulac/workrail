@@ -11,18 +11,6 @@ import type { CryptoPortV2 } from '../../../durable-core/canonical/hashing.js';
 import { toCanonicalBytes } from '../../../durable-core/canonical/jcs.js';
 import type { JsonValue } from '../../../durable-core/canonical/json-types.js';
 
-function isFsErrorV2(e: unknown): e is FsError {
-  if (typeof e !== 'object' || e === null) return false;
-  const code = (e as any).code;
-  return (
-    code === 'FS_IO_ERROR' ||
-    code === 'FS_NOT_FOUND' ||
-    code === 'FS_ALREADY_EXISTS' ||
-    code === 'FS_PERMISSION_DENIED' ||
-    code === 'FS_UNSUPPORTED'
-  );
-}
-
 export class LocalSnapshotStoreV2 implements SnapshotStorePortV2 {
   constructor(
     private readonly dataDir: DataDirPortV2,
@@ -63,29 +51,30 @@ export class LocalSnapshotStoreV2 implements SnapshotStorePortV2 {
     const filePath = this.dataDir.snapshotPath(String(snapshotRef));
     return this.fs
       .readFileBytes(filePath)
-      .andThen((bytes) =>
-        RA.fromPromise(
-          (async () => {
-            const parsed = JSON.parse(new TextDecoder().decode(bytes));
-            const validated = ExecutionSnapshotFileV1Schema.safeParse(parsed);
-            if (!validated.success) {
-              throw new Error('invalid_snapshot_shape');
-            }
-            return validated.data;
-          })(),
-          (e) => {
-            const msg = e instanceof Error ? e.message : String(e);
-            if (msg === 'invalid_snapshot_shape') {
-              return { code: 'SNAPSHOT_STORE_CORRUPTION_DETECTED', message: `Invalid execution snapshot file: ${filePath}` } as const;
-            }
-            return { code: 'SNAPSHOT_STORE_CORRUPTION_DETECTED', message: `Invalid JSON snapshot file: ${filePath}` } as const;
-          }
-        )
-      )
-      .map((v) => v as ExecutionSnapshotFileV1)
+      .andThen((bytes) => {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(new TextDecoder().decode(bytes));
+        } catch {
+          return errAsync({
+            code: 'SNAPSHOT_STORE_CORRUPTION_DETECTED',
+            message: `Invalid JSON snapshot file: ${filePath}`,
+          } as const);
+        }
+
+        const validated = ExecutionSnapshotFileV1Schema.safeParse(parsed);
+        if (!validated.success) {
+          return errAsync({
+            code: 'SNAPSHOT_STORE_CORRUPTION_DETECTED',
+            message: `Invalid execution snapshot file: ${filePath}`,
+          } as const);
+        }
+
+        return okAsync(validated.data);
+      })
       .orElse((e: FsError | SnapshotStoreError) => {
-        if (isFsErrorV2(e)) {
-          if (e.code === 'FS_NOT_FOUND') return okAsync(null);
+        if (e.code === 'FS_NOT_FOUND') return okAsync(null);
+        if (e.code === 'FS_IO_ERROR' || e.code === 'FS_ALREADY_EXISTS' || e.code === 'FS_PERMISSION_DENIED' || e.code === 'FS_UNSUPPORTED') {
           return errAsync({ code: 'SNAPSHOT_STORE_IO_ERROR', message: e.message } as const);
         }
         return errAsync(e);

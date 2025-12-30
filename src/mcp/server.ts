@@ -144,26 +144,31 @@ export async function createToolContext(): Promise<ToolContext> {
     const pinnedStore = container.resolve<any>(DI.V2.PinnedWorkflowStore);
     const keyringPort = container.resolve<any>(DI.V2.Keyring);
     
-    // Keyring must be loaded before use (returns Result)
+    // Keyring must be loaded before use (returns Result).
+    // Errors are expected failures (missing file on first run creates fresh keyring).
     const keyringResult = await keyringPort.loadOrCreate();
     if (keyringResult.isErr()) {
-      console.error(`[FeatureFlags] v2 tools enabled but keyring load failed: ${keyringResult.error.code}`);
-      throw new Error(`Failed to initialize v2 keyring: ${keyringResult.error.message}`);
+      const err = keyringResult.error;
+      console.error(`[V2Init] Keyring load failed: code=${err.code}, message=${err.message}`);
+      // Do not throw; instead, v2 tools remain disabled (null)
+      console.error('[FeatureFlags] v2 tools disabled due to keyring initialization failure');
+    } else {
+      const crypto = container.resolve<any>(DI.V2.Crypto);
+      const hmac = container.resolve<any>(DI.V2.HmacSha256);
+      const base64url = container.resolve<any>(DI.V2.Base64Url);
+
+      v2 = {
+        gate,
+        sessionStore,
+        snapshotStore,
+        pinnedStore,
+        keyring: keyringResult.value,
+        crypto,
+        hmac,
+        base64url,
+      };
+      console.error('[FeatureFlags] v2 tools enabled');
     }
-
-    const crypto = container.resolve<any>(DI.V2.Crypto);
-    const hmac = container.resolve<any>(DI.V2.HmacSha256);
-
-    v2 = {
-      gate,
-      sessionStore,
-      snapshotStore,
-      pinnedStore,
-      keyring: keyringResult.value,
-      crypto,
-      hmac,
-    };
-    console.error('[FeatureFlags] v2 tools enabled');
   } else {
     console.error('[FeatureFlags] v2 tools disabled (enable with WORKRAIL_ENABLE_V2_TOOLS=true)');
   }

@@ -8,6 +8,21 @@ const workflowHashSchema = sha256DigestSchema.transform((v) => asWorkflowHash(as
 const nonEmpty = z.string().min(1);
 
 export type TokenVersionV1 = 1;
+
+/**
+ * Closed set: TokenKind (state | ack | checkpoint).
+ *
+ * Lock: docs/design/v2-core-design-locks.md (Slice 3 tokens)
+ *
+ * Why closed:
+ * - Token kinds determine verification + decoding rules (must be refactor-safe)
+ * - Enables exhaustive parsing/validation and prevents “stringly” token kinds
+ *
+ * Values:
+ * - `state`: identifies a durable node state (rehydrate / preconditions)
+ * - `ack`: authorizes recording advancement for a specific attemptId
+ * - `checkpoint`: authorizes recording a checkpoint for a specific attemptId
+ */
 export type TokenKindV1 = 'state' | 'ack' | 'checkpoint';
 
 export const AttemptIdSchema = nonEmpty.transform(asAttemptId);
@@ -74,6 +89,15 @@ export const TokenPayloadV1Schema = z.discriminatedUnion('tokenKind', [
 
 export type TokenPayloadV1 = StateTokenPayloadV1 | AckTokenPayloadV1 | CheckpointTokenPayloadV1;
 
+/**
+ * Closed set: TokenPrefix (st | ack | chk).
+ *
+ * Lock: docs/design/v2-core-design-locks.md (token string format)
+ *
+ * Why closed:
+ * - Prevents prefix drift between signing and parsing
+ * - Enables deterministic token string format validation
+ */
 export type TokenPrefixV1 = 'st' | 'ack' | 'chk';
 export function expectedPrefixForTokenKind(kind: TokenKindV1): TokenPrefixV1 {
   if (kind === 'state') return 'st';

@@ -1,0 +1,16 @@
+{
+  "description": "Minimal v1_preview compiled workflow snapshot (Slice 1 baseline)",
+  "input": {
+    "schemaVersion": 1,
+    "sourceKind": "v1_preview",
+    "workflowId": "test.minimal",
+    "name": "Minimal Test Workflow",
+    "description": "A minimal test workflow",
+    "version": "1.0.0",
+    "preview": {
+      "stepId": "step1",
+      "title": "Step 1",
+      "prompt": "Do step 1"
+    }
+  }
+}
