@@ -1,0 +1,11 @@
+{
+  "description": "State token payload",
+  "input": {
+    "tokenVersion": 1,
+    "tokenKind": "state",
+    "sessionId": "sess_01JH8X2ABC",
+    "runId": "run_01JFDXYZ",
+    "nodeId": "node_01JFDN123",
+    "workflowHash": "sha256:5947229239ac2966c1099d6d74f4448c064e54ae25959eaebfd89cec073bdc11"
+  }
+}

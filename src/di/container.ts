@@ -239,6 +239,9 @@ async function registerV2Services(): Promise<void> {
   const { NodeSha256V2 } = await import('../v2/infra/local/sha256/index.js');
   const { NodeCryptoV2 } = await import('../v2/infra/local/crypto/index.js');
   const { NodeHmacSha256V2 } = await import('../v2/infra/local/hmac-sha256/index.js');
+  const { NodeBase64UrlV2 } = await import('../v2/infra/local/base64url/index.js');
+  const { NodeRandomEntropyV2 } = await import('../v2/infra/local/random-entropy/index.js');
+  const { NodeTimeClockV2 } = await import('../v2/infra/local/time-clock/index.js');
 
   container.register(DI.V2.DataDir, {
     useFactory: instanceCachingFactory(() => new LocalDataDirV2(process.env)),
@@ -255,6 +258,15 @@ async function registerV2Services(): Promise<void> {
   container.register(DI.V2.HmacSha256, {
     useFactory: instanceCachingFactory(() => new NodeHmacSha256V2()),
   });
+  container.register(DI.V2.Base64Url, {
+    useFactory: instanceCachingFactory(() => new NodeBase64UrlV2()),
+  });
+  container.register(DI.V2.RandomEntropy, {
+    useFactory: instanceCachingFactory(() => new NodeRandomEntropyV2()),
+  });
+  container.register(DI.V2.TimeClock, {
+    useFactory: instanceCachingFactory(() => new NodeTimeClockV2()),
+  });
 
   // Level 2: Stores (depend on Level 1 primitives)
   const { LocalKeyringV2 } = await import('../v2/infra/local/keyring/index.js');
@@ -267,7 +279,9 @@ async function registerV2Services(): Promise<void> {
     useFactory: instanceCachingFactory((c: DependencyContainer) => {
       const dataDir = c.resolve<any>(DI.V2.DataDir);
       const fs = c.resolve<any>(DI.V2.FileSystem);
-      return new LocalKeyringV2(dataDir, fs);
+      const base64url = c.resolve<any>(DI.V2.Base64Url);
+      const entropy = c.resolve<any>(DI.V2.RandomEntropy);
+      return new LocalKeyringV2(dataDir, fs, base64url, entropy);
     }),
   });
   container.register(DI.V2.SessionStore, {
@@ -289,14 +303,16 @@ async function registerV2Services(): Promise<void> {
   container.register(DI.V2.PinnedWorkflowStore, {
     useFactory: instanceCachingFactory((c: DependencyContainer) => {
       const dataDir = c.resolve<any>(DI.V2.DataDir);
-      return new LocalPinnedWorkflowStoreV2(dataDir);
+      const fs = c.resolve<any>(DI.V2.FileSystem);
+      return new LocalPinnedWorkflowStoreV2(dataDir, fs);
     }),
   });
   container.register(DI.V2.SessionLock, {
     useFactory: instanceCachingFactory((c: DependencyContainer) => {
       const dataDir = c.resolve<any>(DI.V2.DataDir);
       const fs = c.resolve<any>(DI.V2.FileSystem);
-      return new LocalSessionLockV2(dataDir, fs);
+      const clock = c.resolve<any>(DI.V2.TimeClock);
+      return new LocalSessionLockV2(dataDir, fs, clock);
     }),
   });
 

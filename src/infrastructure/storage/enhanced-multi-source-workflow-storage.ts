@@ -282,17 +282,27 @@ export class EnhancedMultiSourceWorkflowStorage implements ICompositeWorkflowSto
       try {
         const workflows = await storage.loadAllWorkflows();
 
-        // Add workflows, with later ones overriding earlier ones with same ID
+        // Add workflows, with later ones overriding earlier ones with same ID.
+        // v2 lock: bundled `wr.*` workflows cannot be shadowed by higher-priority sources.
         for (const workflow of workflows) {
-          if (seenIds.has(workflow.definition.id)) {
-            // Replace existing workflow with same ID
-            const existingIndex = allWorkflows.findIndex(wf => wf.definition.id === workflow.definition.id);
+          const id = workflow.definition.id;
+
+          if (seenIds.has(id)) {
+            const existingIndex = allWorkflows.findIndex((wf) => wf.definition.id === id);
             if (existingIndex >= 0) {
+              const existing = allWorkflows[existingIndex]!;
+
+              const isWr = id.startsWith('wr.');
+              if (isWr && existing.source.kind === 'bundled') {
+                // Keep bundled `wr.*` authoritative; ignore shadow attempts.
+                continue;
+              }
+
               allWorkflows[existingIndex] = workflow;
             }
           } else {
             allWorkflows.push(workflow);
-            seenIds.add(workflow.definition.id);
+            seenIds.add(id);
           }
         }
       } catch (error) {
@@ -304,6 +314,22 @@ export class EnhancedMultiSourceWorkflowStorage implements ICompositeWorkflowSto
   }
 
   async getWorkflowById(id: string): Promise<Workflow | null> {
+    // v2 lock: bundled `wr.*` workflows cannot be shadowed.
+    // If the caller requests a `wr.*` id, prefer bundled, then fall back to normal precedence.
+    if (id.startsWith('wr.')) {
+      for (let i = 0; i < this.storageInstances.length; i++) {
+        const storage = this.storageInstances[i]!;
+        if (storage.source.kind !== 'bundled') continue;
+
+        try {
+          const workflow = await storage.getWorkflowById(id);
+          if (workflow) return workflow;
+        } catch (error) {
+          this.handleSourceError(`source-${i}`, error as Error);
+        }
+      }
+    }
+
     // Search in reverse order (later sources take precedence)
     for (let i = this.storageInstances.length - 1; i >= 0; i--) {
       const storage = this.storageInstances[i]!;
@@ -333,15 +359,24 @@ export class EnhancedMultiSourceWorkflowStorage implements ICompositeWorkflowSto
         const summaries = await storage.listWorkflowSummaries();
 
         for (const summary of summaries) {
-          if (seenIds.has(summary.id)) {
-            // Replace existing summary with same ID
-            const existingIndex = allSummaries.findIndex(s => s.id === summary.id);
+          const id = summary.id;
+
+          if (seenIds.has(id)) {
+            const existingIndex = allSummaries.findIndex((s) => s.id === id);
             if (existingIndex >= 0) {
+              const existing = allSummaries[existingIndex]!;
+
+              const isWr = id.startsWith('wr.');
+              if (isWr && existing.source.kind === 'bundled') {
+                // Keep bundled `wr.*` authoritative; ignore shadow attempts.
+                continue;
+              }
+
               allSummaries[existingIndex] = summary;
             }
           } else {
             allSummaries.push(summary);
-            seenIds.add(summary.id);
+            seenIds.add(id);
           }
         }
       } catch (error) {

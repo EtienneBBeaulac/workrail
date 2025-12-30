@@ -1,0 +1,11 @@
+{
+  "description": "Checkpoint token payload",
+  "input": {
+    "tokenVersion": 1,
+    "tokenKind": "checkpoint",
+    "sessionId": "sess_01JH8X2ABC",
+    "runId": "run_01JFDXYZ",
+    "nodeId": "node_01JFDN123",
+    "attemptId": "attempt_01JH8X2GHI"
+  }
+}

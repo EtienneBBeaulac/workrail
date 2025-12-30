@@ -4,7 +4,7 @@ import { toCanonicalBytes } from '../canonical/jcs.js';
 import type { CanonicalBytes } from '../ids/index.js';
 import { asCanonicalBytes, asTokenStringV1 } from '../ids/index.js';
 import type { TokenStringV1 } from '../ids/index.js';
-import { decodeBase64Url, encodeBase64Url } from './base64url.js';
+import type { Base64UrlPortV2 } from '../../ports/base64url.port.js';
 import { expectedPrefixForTokenKind, TokenPayloadV1Schema, type TokenPayloadV1, type TokenPrefixV1 } from './payloads.js';
 import type { JsonValue } from '../canonical/json-types.js';
 
@@ -31,16 +31,19 @@ export function encodeTokenPayloadV1(payload: TokenPayloadV1): Result<CanonicalB
   }) as const);
 }
 
-export function encodeUnsignedTokenV1(payload: TokenPayloadV1): Result<{ readonly token: TokenStringV1; readonly payloadBytes: CanonicalBytes }, TokenDecodeErrorV2> {
+export function encodeUnsignedTokenV1(
+  payload: TokenPayloadV1,
+  base64url: Base64UrlPortV2
+): Result<{ readonly token: TokenStringV1; readonly payloadBytes: CanonicalBytes }, TokenDecodeErrorV2> {
   const bytes = encodeTokenPayloadV1(payload);
   if (bytes.isErr()) return err(bytes.error);
 
   const prefix = expectedPrefixForTokenKind(payload.tokenKind);
-  const token = `${prefix}.v1.${encodeBase64Url(bytes.value)}.`; // signature appended by signer
+  const token = `${prefix}.v1.${base64url.encodeBase64Url(bytes.value as unknown as Uint8Array)}.`; // signature appended by signer
   return ok({ token: asTokenStringV1(token), payloadBytes: bytes.value });
 }
 
-export function parseTokenV1(token: string): Result<ParsedTokenV1, TokenDecodeErrorV2> {
+export function parseTokenV1(token: string, base64url: Base64UrlPortV2): Result<ParsedTokenV1, TokenDecodeErrorV2> {
   const parts = token.split('.');
   if (parts.length !== 4) return err({ code: 'TOKEN_INVALID_FORMAT', message: 'Expected 4 dot-separated segments' });
 
@@ -53,7 +56,7 @@ export function parseTokenV1(token: string): Result<ParsedTokenV1, TokenDecodeEr
     return err({ code: 'TOKEN_INVALID_FORMAT', message: 'Missing payload or signature segment' });
   }
 
-  const decoded = decodeBase64Url(payloadB64);
+  const decoded = base64url.decodeBase64Url(payloadB64);
   if (decoded.isErr()) return err({ code: 'TOKEN_INVALID_FORMAT', message: decoded.error.message });
 
   // Payload bytes are the UTF-8 bytes of JCS canonical JSON.

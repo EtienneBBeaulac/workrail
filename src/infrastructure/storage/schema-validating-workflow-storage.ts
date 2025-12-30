@@ -10,6 +10,7 @@ import {
   createWorkflow 
 } from '../../types/workflow';
 import { InvalidWorkflowError } from '../../core/error-handler';
+import { validateWorkflowIdForLoad, validateWorkflowIdForSave } from '../../domain/workflow-id-policy';
 
 /**
  * Decorator that validates workflows against the JSON schema.
@@ -38,15 +39,18 @@ export class SchemaValidatingWorkflowStorage implements IWorkflowStorage {
     return this.inner.source;
   }
 
-  private validateDefinition(definition: WorkflowDefinition): boolean {
+  private validateDefinition(definition: WorkflowDefinition, sourceKind: WorkflowSource['kind']): boolean {
     const isValid = this.validator(definition);
     if (!isValid) {
       const id = (definition as { id?: string }).id ?? 'unknown';
-      throw new InvalidWorkflowError(
-        id,
-        JSON.stringify(this.validator.errors)
-      );
+      throw new InvalidWorkflowError(id, JSON.stringify(this.validator.errors));
     }
+
+    // v2 lock: enforce workflow ID namespace rules at load/validate time.
+    // - legacy IDs are warn-only (not rejected)
+    // - wr.* is reserved for bundled workflows
+    validateWorkflowIdForLoad(definition.id, sourceKind);
+
     return true;
   }
 
@@ -58,7 +62,7 @@ export class SchemaValidatingWorkflowStorage implements IWorkflowStorage {
     
     for (const workflow of workflows) {
       try {
-        if (this.validateDefinition(workflow.definition)) {
+        if (this.validateDefinition(workflow.definition, workflow.source.kind)) {
           validWorkflows.push(workflow);
         }
       } catch (err) {
@@ -81,7 +85,7 @@ export class SchemaValidatingWorkflowStorage implements IWorkflowStorage {
     }
     
     try {
-      this.validateDefinition(workflow.definition);
+      this.validateDefinition(workflow.definition, workflow.source.kind);
       return workflow;
     } catch (err) {
       console.error(
@@ -100,8 +104,9 @@ export class SchemaValidatingWorkflowStorage implements IWorkflowStorage {
 
   async save(definition: WorkflowDefinition): Promise<void> {
     // Validate before saving
-    this.validateDefinition(definition);
-    
+    this.validateDefinition(definition, this.source.kind);
+    validateWorkflowIdForSave(definition.id, this.source.kind);
+
     if (typeof this.inner.save === 'function') {
       return this.inner.save(definition);
     }
@@ -122,15 +127,16 @@ export class SchemaValidatingCompositeWorkflowStorage implements ICompositeWorkf
     this.validator = ajv.compile(schema);
   }
   
-  private validateDefinition(definition: WorkflowDefinition): boolean {
+  private validateDefinition(definition: WorkflowDefinition, sourceKind: WorkflowSource['kind']): boolean {
     const isValid = this.validator(definition);
     if (!isValid) {
       const id = (definition as { id?: string }).id ?? 'unknown';
-      throw new InvalidWorkflowError(
-        id,
-        JSON.stringify(this.validator.errors)
-      );
+      throw new InvalidWorkflowError(id, JSON.stringify(this.validator.errors));
     }
+
+    // v2 lock: enforce workflow ID namespace rules at load/validate time.
+    validateWorkflowIdForLoad(definition.id, sourceKind);
+
     return true;
   }
 
@@ -144,7 +150,7 @@ export class SchemaValidatingCompositeWorkflowStorage implements ICompositeWorkf
     const validWorkflows: Workflow[] = [];
     for (const workflow of workflows) {
       try {
-        if (this.validateDefinition(workflow.definition)) {
+        if (this.validateDefinition(workflow.definition, workflow.source.kind)) {
           validWorkflows.push(workflow);
         }
       } catch (err) {
@@ -164,7 +170,7 @@ export class SchemaValidatingCompositeWorkflowStorage implements ICompositeWorkf
     if (!workflow) return null;
     
     try {
-      this.validateDefinition(workflow.definition);
+      this.validateDefinition(workflow.definition, workflow.source.kind);
       return workflow;
     } catch (err) {
       console.error(
@@ -180,8 +186,14 @@ export class SchemaValidatingCompositeWorkflowStorage implements ICompositeWorkf
   }
 
   async save(definition: WorkflowDefinition): Promise<void> {
-    this.validateDefinition(definition);
-    
+    // Lock: composite storage save delegates to highest-priority writable source.
+    // We use 'project' as a conservative sourceKind for validation because:
+    // - validateWorkflowIdForSave rejects legacy IDs and wr.* for ALL non-bundled sourceKinds
+    // - actual save target (project/user/custom) doesn't matter; all have same restrictions
+    // - this prevents needing to query inner storage for actual writable source
+    this.validateDefinition(definition, 'project');
+    validateWorkflowIdForSave(definition.id, 'project');
+
     if (typeof this.inner.save === 'function') {
       return this.inner.save(definition);
     }

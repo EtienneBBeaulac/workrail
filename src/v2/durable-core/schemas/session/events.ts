@@ -1,10 +1,34 @@
 import { z } from 'zod';
 import { JsonValueSchema } from '../../canonical/json-zod.js';
 import { asSha256Digest, asSnapshotRef, asWorkflowHash } from '../../ids/index.js';
+import { AutonomyV2Schema, RiskPolicyV2Schema } from './preferences.js';
+import {
+  MAX_BLOCKERS,
+  MAX_BLOCKER_MESSAGE_BYTES,
+  MAX_BLOCKER_SUGGESTED_FIX_BYTES,
+  MAX_DECISION_TRACE_ENTRIES,
+  MAX_DECISION_TRACE_ENTRY_SUMMARY_BYTES,
+  MAX_DECISION_TRACE_TOTAL_BYTES,
+  MAX_OBSERVATION_SHORT_STRING_LENGTH,
+  MAX_OUTPUT_NOTES_MARKDOWN_BYTES,
+  SHA256_DIGEST_PATTERN,
+  DELIMITER_SAFE_ID_PATTERN,
+} from '../../constants.js';
+import { DecisionTraceRefsV1Schema } from '../lib/decision-trace-ref.js';
+import { DedupeKeyV1Schema } from '../lib/dedupe-key.js';
+import { utf8BoundedString } from '../lib/utf8-bounded-string.js';
+
+/**
+ * Helper to measure UTF-8 byte length (not code units).
+ * Uses TextEncoder for runtime neutrality.
+ */
+function utf8ByteLength(s: string): number {
+  return new TextEncoder().encode(s).length;
+}
 
 const sha256DigestSchema = z
   .string()
-  .regex(/^sha256:[0-9a-f]{64}$/, 'Expected sha256:<64 hex chars>')
+  .regex(SHA256_DIGEST_PATTERN, 'Expected sha256:<64 hex chars>')
   .describe('sha256 digest in WorkRail v2 format');
 
 const workflowHashSchema = sha256DigestSchema
@@ -27,7 +51,8 @@ export const DomainEventEnvelopeV1Schema = z.object({
   eventIndex: z.number().int().nonnegative(), // 0-based
   sessionId: z.string().min(1),
   kind: z.string().min(1), // further constrained by union below
-  dedupeKey: z.string().min(1),
+  // Lock: dedupeKey is ASCII-safe, length-bounded, and follows a recipe pattern
+  dedupeKey: DedupeKeyV1Schema,
   scope: z
     .object({
       runId: z.string().min(1).optional(),
@@ -88,7 +113,15 @@ const OutputChannelSchema = z.enum(['recap', 'artifact']);
 
 const NotesPayloadV1Schema = z.object({
   payloadKind: z.literal('notes'),
-  notesMarkdown: z.string().min(1),
+  // Locked: notesMarkdown is bounded by UTF-8 bytes (not code units).
+  // NOTE: Keep the discriminator branch as a ZodObject (discriminatedUnion requires it),
+  // so we refine the string field instead of wrapping the object in effects.
+  notesMarkdown: z
+    .string()
+    .min(1)
+    .refine((s) => utf8ByteLength(s) <= MAX_OUTPUT_NOTES_MARKDOWN_BYTES, {
+      message: `notesMarkdown exceeds max ${MAX_OUTPUT_NOTES_MARKDOWN_BYTES} UTF-8 bytes`,
+    }),
 });
 
 const ArtifactRefPayloadV1Schema = z.object({
@@ -128,24 +161,38 @@ const BlockerCodeSchema = z.enum([
   'STORAGE_CORRUPTION_DETECTED',
 ]);
 
+// Lock: blocker pointer identifiers must be delimiter-safe where applicable
 const BlockerPointerSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('context_key'), key: z.string().min(1) }),
+  z.object({ kind: z.literal('context_key'), key: z.string().min(1).regex(DELIMITER_SAFE_ID_PATTERN, 'context_key must be delimiter-safe: [a-z0-9_-]+') }),
   z.object({ kind: z.literal('context_budget') }),
   z.object({ kind: z.literal('output_contract'), contractRef: z.string().min(1) }),
   z.object({ kind: z.literal('capability'), capability: z.enum(['delegation', 'web_browsing']) }),
-  z.object({ kind: z.literal('workflow_step'), stepId: z.string().min(1) }),
+  z.object({ kind: z.literal('workflow_step'), stepId: z.string().min(1).regex(DELIMITER_SAFE_ID_PATTERN, 'stepId must be delimiter-safe: [a-z0-9_-]+') }),
 ]);
 
 const BlockerSchema = z.object({
   code: BlockerCodeSchema,
   pointer: BlockerPointerSchema,
-  message: z.string().min(1),
-  suggestedFix: z.string().min(1).optional(),
+  // Locked: message is bounded by UTF-8 bytes (not code units).
+  message: z
+    .string()
+    .min(1)
+    .refine((s) => utf8ByteLength(s) <= MAX_BLOCKER_MESSAGE_BYTES, {
+      message: `Blocker message exceeds ${MAX_BLOCKER_MESSAGE_BYTES} bytes (UTF-8)`,
+    }),
+  // Locked: suggestedFix is bounded by UTF-8 bytes (not code units).
+  suggestedFix: z
+    .string()
+    .min(1)
+    .refine((s) => utf8ByteLength(s) <= MAX_BLOCKER_SUGGESTED_FIX_BYTES, {
+      message: `Blocker suggestedFix exceeds ${MAX_BLOCKER_SUGGESTED_FIX_BYTES} bytes (UTF-8)`,
+    })
+    .optional(),
 });
 
 const BlockerReportV1Schema = z
   .object({
-    blockers: z.array(BlockerSchema).min(1).max(10),
+    blockers: z.array(BlockerSchema).min(1).max(MAX_BLOCKERS),
   })
   .superRefine((v, ctx) => {
     // Deterministic ordering lock: (code, pointer.kind, pointer.* stable fields) ascending.
@@ -198,9 +245,6 @@ const AdvanceRecordedDataV1Schema = z.object({
   outcome: AdvanceRecordedOutcomeV1Schema,
 });
 
-const AutonomySchema = z.enum(['guided', 'full_auto_stop_on_user_deps', 'full_auto_never_stop']);
-const RiskPolicySchema = z.enum(['conservative', 'balanced', 'aggressive']);
-
 const PreferencesChangedDataV1Schema = z
   .object({
     changeId: z.string().min(1),
@@ -208,14 +252,14 @@ const PreferencesChangedDataV1Schema = z
     delta: z
       .array(
         z.discriminatedUnion('key', [
-          z.object({ key: z.literal('autonomy'), value: AutonomySchema }),
-          z.object({ key: z.literal('riskPolicy'), value: RiskPolicySchema }),
+          z.object({ key: z.literal('autonomy'), value: AutonomyV2Schema }),
+          z.object({ key: z.literal('riskPolicy'), value: RiskPolicyV2Schema }),
         ])
       )
       .min(1),
     effective: z.object({
-      autonomy: AutonomySchema,
-      riskPolicy: RiskPolicySchema,
+      autonomy: AutonomyV2Schema,
+      riskPolicy: RiskPolicyV2Schema,
     }),
   })
   .superRefine((v, ctx) => {
@@ -278,7 +322,7 @@ export const DomainEventV1Schema = z.discriminatedUnion('kind', [
     data: z.object({
       key: z.enum(['git_branch', 'git_head_sha', 'repo_root_hash']),
       value: z.discriminatedUnion('type', [
-        z.object({ type: z.literal('short_string'), value: z.string().min(1).max(80) }),
+        z.object({ type: z.literal('short_string'), value: z.string().min(1).max(MAX_OBSERVATION_SHORT_STRING_LENGTH) }),
         z.object({ type: z.literal('git_sha1'), value: z.string().regex(/^[0-9a-f]{40}$/) }),
         z.object({ type: z.literal('sha256'), value: sha256DigestSchema }),
       ]),
@@ -384,19 +428,30 @@ export const DomainEventV1Schema = z.discriminatedUnion('kind', [
   DomainEventEnvelopeV1Schema.extend({
     kind: z.literal('decision_trace_appended'),
     scope: z.object({ runId: z.string().min(1), nodeId: z.string().min(1) }),
-    data: z.object({
-      traceId: z.string().min(1),
-      entries: z
-        .array(
-          z.object({
-            kind: z.enum(['selected_next_step', 'evaluated_condition', 'entered_loop', 'exited_loop', 'detected_non_tip_advance']),
-            summary: z.string().min(1).max(512),
-            refs: z.record(z.unknown()).optional(),
-          })
-        )
-        .min(1)
-        .max(25),
-    }),
+    data: z
+      .object({
+        traceId: z.string().min(1),
+        entries: z
+          .array(
+            z.object({
+              kind: z.enum(['selected_next_step', 'evaluated_condition', 'entered_loop', 'exited_loop', 'detected_non_tip_advance']),
+              // Lock: summary is bounded by UTF-8 bytes (not code units)
+              summary: utf8BoundedString({ maxBytes: MAX_DECISION_TRACE_ENTRY_SUMMARY_BYTES, label: 'decision trace entry summary', minLength: 1 }),
+              // Lock: refs is a closed union, not an open bag. See decision-trace-ref.ts
+              refs: DecisionTraceRefsV1Schema,
+            })
+          )
+          .min(1)
+          .max(MAX_DECISION_TRACE_ENTRIES),
+      })
+      .refine(
+        (data) => {
+          // Locked: total UTF-8 bytes across all entry summaries must not exceed MAX_DECISION_TRACE_TOTAL_BYTES
+          const totalBytes = data.entries.reduce((sum, entry) => sum + utf8ByteLength(entry.summary), 0);
+          return totalBytes <= MAX_DECISION_TRACE_TOTAL_BYTES;
+        },
+        { message: `Decision trace total bytes exceeds ${MAX_DECISION_TRACE_TOTAL_BYTES}` }
+      ),
   }),
 ]);
 

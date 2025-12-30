@@ -1,0 +1,13 @@
+{
+  "description": "Execution snapshot in init state (before first step)",
+  "input": {
+    "v": 1,
+    "kind": "execution_snapshot",
+    "enginePayload": {
+      "v": 1,
+      "engineState": {
+        "kind": "init"
+      }
+    }
+  }
+}

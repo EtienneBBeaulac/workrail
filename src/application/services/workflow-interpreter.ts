@@ -8,6 +8,7 @@ import { type DomainError, Err } from '../../domain/execution/error';
 import { ExecutionState, LoopFrame } from '../../domain/execution/state';
 import { WorkflowEvent } from '../../domain/execution/event';
 import { StepInstanceId, toStepInstanceKey } from '../../domain/execution/ids';
+import { canContinueLoop, nextIteration, isIterationWithinBounds } from '../../v2/durable-core/domain/loop-runtime';
 
 export interface NextStep {
   readonly step: WorkflowStepDefinition;
@@ -222,12 +223,13 @@ export class WorkflowInterpreter {
     }
 
     // No eligible steps left in this iteration => advance iteration
-    // Allow advancing up to maxIterations; shouldContinueLoop will reject if we've hit the count/condition
-    if (frame.iteration + 1 > loopCompiled.loop.loop.maxIterations) {
+    // Lock: use centralized loop-runtime for iteration semantics
+    const next = nextIteration(frame.iteration);
+    if (!canContinueLoop(next, loopCompiled.loop.loop.maxIterations)) {
       return err(Err.maxIterationsExceeded(frame.loopId, loopCompiled.loop.loop.maxIterations));
     }
 
-    const advanced: LoopFrame = { ...frame, iteration: frame.iteration + 1, bodyIndex: 0 };
+    const advanced: LoopFrame = { ...frame, iteration: next, bodyIndex: 0 };
     const updatedStack = [...state.loopStack.slice(0, -1), advanced];
     return ok({ state: { ...state, loopStack: updatedStack }, next: null });
   }
@@ -237,8 +239,8 @@ export class WorkflowInterpreter {
     frame: LoopFrame,
     context: Record<string, unknown>
   ): Result<boolean, DomainError> {
-    // Safety first
-    if (frame.iteration >= loop.loop.maxIterations) {
+    // Lock: use centralized loop-runtime for iteration boundary check
+    if (!isIterationWithinBounds(frame.iteration, loop.loop.maxIterations)) {
       return ok(false);
     }
 

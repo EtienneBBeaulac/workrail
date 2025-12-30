@@ -1,0 +1,29 @@
+{
+  "description": "v1_pinned compiled workflow snapshot with full definition",
+  "input": {
+    "schemaVersion": 1,
+    "sourceKind": "v1_pinned",
+    "workflowId": "test.pinned",
+    "name": "Pinned Test Workflow",
+    "description": "A pinned workflow with full definition",
+    "version": "1.0.0",
+    "definition": {
+      "id": "test.pinned",
+      "name": "Pinned Test Workflow",
+      "description": "A pinned workflow",
+      "version": "1.0.0",
+      "steps": [
+        {
+          "id": "triage",
+          "title": "Triage",
+          "prompt": "Perform triage"
+        },
+        {
+          "id": "execute",
+          "title": "Execute",
+          "prompt": "Execute the work"
+        }
+      ]
+    }
+  }
+}

@@ -1,3 +1,9 @@
+/**
+ * v2 JCS Canonicalization Tests
+ *
+ * @enforces jcs-rfc-8785
+ * @enforces hash-format-sha256-hex
+ */
 import { describe, it, expect } from 'vitest';
 import { toCanonicalBytes } from '../../../src/v2/durable-core/canonical/jcs.js';
 import type { JsonValue } from '../../../src/v2/durable-core/canonical/json-types.js';

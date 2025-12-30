@@ -2,7 +2,63 @@ import type { Result } from 'neverthrow';
 import { err, ok } from 'neverthrow';
 import type { DomainEventV1 } from '../durable-core/schemas/session/index.js';
 
+/**
+ * Safely extract nodeId from an event's scope (if present).
+ * 
+ * Rationale: Some events have scope.nodeId (e.g., node_created), others don't (e.g., edge_created).
+ * TypeScript's type narrowing with `in` operator ensures type safety without unsafe casts.
+ */
+function extractNodeIdFromEvent(e: unknown): string | undefined {
+  // Guard: e must be a plain object
+  if (typeof e !== 'object' || e === null) return undefined;
+  
+  // Guard: check if scope property exists and is an object
+  if (!('scope' in e)) return undefined;
+  const scope = e.scope;
+  if (typeof scope !== 'object' || scope === null) return undefined;
+  
+  // Guard: check if nodeId property exists and is a string
+  if (!('nodeId' in scope)) return undefined;
+  const nodeId = scope.nodeId;
+  return typeof nodeId === 'string' ? nodeId : undefined;
+}
+
+/**
+ * Closed set: NodeKind (step | checkpoint).
+ *
+ * Lock: docs/design/v2-core-design-locks.md Section 1.1 (`node_created`)
+ *
+ * Why closed:
+ * - Prevents ad-hoc node kinds that would break deterministic projections
+ * - Enables exhaustive handling in projections and Studio rendering
+ *
+ * Values:
+ * - `step`: workflow advancement node (created by continue-workflow ack)
+ * - `checkpoint`: durable progress marker (created by checkpoint_workflow)
+ *
+ * Usage:
+ * - node_created.data.nodeKind
+ */
 export type NodeKindV2 = 'step' | 'checkpoint';
+
+/**
+ * Closed set: EdgeKind (acked_step | checkpoint).
+ *
+ * Lock: docs/design/v2-core-design-locks.md Section 1.1 (`edge_created`)
+ *
+ * Why closed:
+ * - Prevents edge semantics drift (graph meaning must stay stable)
+ * - Enables deterministic traversal and rendering
+ *
+ * Values:
+ * - `acked_step`: parent → child after advancement is recorded
+ * - `checkpoint`: parent → checkpoint without advancement
+ *
+ * Lock: For checkpoint edges, cause.kind must be checkpoint_created.
+ *
+ * Usage:
+ * - edge_created.data.edgeKind
+ */
 export type EdgeKindV2 = 'acked_step' | 'checkpoint';
 
 export type ProjectionError =
@@ -195,46 +251,67 @@ export function projectRunDagV2(events: readonly DomainEventV1[]): Result<RunDag
     // Preferred tip policy (locked): choose leaf with highest "last activity" across its reachable history.
     // Reachable history is approximated as the node's ancestor chain (including itself).
     // lastActivity is max EventIndex among events touching any ancestor nodeId, plus edges that touch those nodes.
+    //
+    // OPTIMIZATION (O(n) guarantee): We precompute lastActivityByNodeId in a single pass,
+    // then compute max-to-root with caching. This is O(E + T*D) instead of O(T*E).
+    // - E = event count
+    // - T = tip count
+    // - D = DAG depth (typically small)
+    //
+    // Algorithm:
+    // 1. First pass: build lastActivityByNodeId[nodeId] = max eventIndex for events touching that node
+    // 2. Second phase: for each tip, walk to root computing max(node activities) with caching
+
+    // Step 1: Precompute lastActivityByNodeId in one pass over events.
+    const lastActivityByNodeId: Record<string, number> = {};
+    for (const n of Object.values(run.nodesById)) {
+      lastActivityByNodeId[n.nodeId] = n.createdAtEventIndex;
+    }
+
+    for (const e of events) {
+      if (e.kind === 'edge_created') {
+        const activity = Math.max(
+          lastActivityByNodeId[e.data.fromNodeId] ?? -1,
+          lastActivityByNodeId[e.data.toNodeId] ?? -1,
+          e.eventIndex
+        );
+        lastActivityByNodeId[e.data.fromNodeId] = activity;
+        lastActivityByNodeId[e.data.toNodeId] = activity;
+        continue;
+      }
+      const nodeId = extractNodeIdFromEvent(e);
+      if (nodeId && nodeId in run.nodesById) {
+        lastActivityByNodeId[nodeId] = Math.max(lastActivityByNodeId[nodeId] ?? -1, e.eventIndex);
+      }
+    }
+
+    // Step 2: For each tip, compute max activity to root with caching.
     const parentById: Record<string, string | null> = {};
     for (const n of Object.values(run.nodesById)) parentById[n.nodeId] = n.parentNodeId;
 
-    const ancestryOf = (leafId: string): Set<string> => {
-      const set = new Set<string>();
-      let cur: string | null = leafId;
-      while (cur) {
-        if (set.has(cur)) break;
-        set.add(cur);
-        cur = parentById[cur] ?? null;
-      }
-      return set;
-    };
+    const maxActivityToRootCache: Record<string, number> = {};
 
-    const lastActivityFor = (leafId: string): number => {
-      const ancestors = ancestryOf(leafId);
-      let max = run.nodesById[leafId]!.createdAtEventIndex;
-
-      for (const e of events) {
-        if (e.kind === 'edge_created') {
-          if (ancestors.has(e.data.fromNodeId) || ancestors.has(e.data.toNodeId)) {
-            if (e.eventIndex > max) max = e.eventIndex;
-          }
-          continue;
-        }
-        const nodeId = (e as any).scope?.nodeId as string | undefined;
-        if (nodeId && ancestors.has(nodeId)) {
-          if (e.eventIndex > max) max = e.eventIndex;
-        }
+    const maxActivityToRoot = (nodeId: string): number => {
+      if (nodeId in maxActivityToRootCache) {
+        return maxActivityToRootCache[nodeId]!;
       }
 
+      let max = lastActivityByNodeId[nodeId] ?? -1;
+      const parentId = parentById[nodeId];
+      if (parentId) {
+        max = Math.max(max, maxActivityToRoot(parentId));
+      }
+
+      maxActivityToRootCache[nodeId] = max;
       return max;
     };
 
     let bestTip = tips[0]!;
-    let bestActivity = lastActivityFor(bestTip);
+    let bestActivity = maxActivityToRoot(bestTip);
 
     for (let i = 1; i < tips.length; i++) {
       const tip = tips[i]!;
-      const activity = lastActivityFor(tip);
+      const activity = maxActivityToRoot(tip);
       if (activity > bestActivity) {
         bestTip = tip;
         bestActivity = activity;

@@ -1,0 +1,677 @@
+{
+  "$schema": "./v2-lock-registry.schema.json",
+  "version": "1.0.0",
+  "description": "Machine-readable registry of all v2 design locks. Source of truth for enforcement coverage.",
+  "generatedWarning": "This file is the source of truth for lock IDs. Tests annotate which locks they enforce via @enforces tags.",
+  
+  "locks": [
+    {
+      "id": "event-index-zero-based",
+      "source": "v2-core-design-locks.md §1",
+      "summary": "EventIndex is 0-based; first event has eventIndex=0",
+      "category": "storage"
+    },
+    {
+      "id": "event-index-monotonic-contiguous",
+      "source": "v2-core-design-locks.md §1",
+      "summary": "EventIndex is monotonic and contiguous within and across segments",
+      "category": "storage"
+    },
+    {
+      "id": "crash-safe-append",
+      "source": "v2-core-design-locks.md §1",
+      "summary": "Append uses temp+fsync+rename+fsync pattern for crash safety",
+      "category": "storage"
+    },
+    {
+      "id": "single-writer-per-session",
+      "source": "v2-core-design-locks.md §1, §15",
+      "summary": "Enforce cross-process lock; fail fast with retryable error if busy",
+      "category": "storage"
+    },
+    {
+      "id": "orphan-segment-ignored",
+      "source": "v2-core-design-locks.md §1",
+      "summary": "Segment files without segment_closed in manifest are ignored (no salvage scanning)",
+      "category": "storage"
+    },
+    {
+      "id": "segment-digest-verification",
+      "source": "v2-core-design-locks.md §1",
+      "summary": "Segment digest mismatch is corruption",
+      "category": "storage"
+    },
+    {
+      "id": "manifest-index-monotonic-contiguous",
+      "source": "v2-core-design-locks.md §1",
+      "summary": "ManifestIndex is 0-based, monotonic, and contiguous",
+      "category": "storage"
+    },
+    {
+      "id": "pin-after-close",
+      "source": "v2-core-design-locks.md §1",
+      "summary": "Snapshot pins appear after segment_closed in manifest",
+      "category": "storage"
+    },
+    {
+      "id": "crash-state-detection",
+      "source": "v2-core-design-locks.md §1",
+      "summary": "Crash between segment_closed and snapshot_pinned is detected as corruption",
+      "category": "storage"
+    },
+    {
+      "id": "append-plan-atomic",
+      "source": "v2-core-design-locks.md §1",
+      "summary": "AppendPlan is atomic: all events succeed or none",
+      "category": "storage"
+    },
+    {
+      "id": "dedupe-key-idempotent",
+      "source": "v2-core-design-locks.md §1",
+      "summary": "Same dedupeKey = idempotent no-op, return success based on existing event",
+      "category": "storage"
+    },
+    {
+      "id": "dedupe-key-stable",
+      "source": "v2-core-design-locks.md §1",
+      "summary": "dedupeKey derived from stable identifiers only, not timestamps or eventId",
+      "category": "storage"
+    },
+    {
+      "id": "event-kinds-closed-set",
+      "source": "v2-core-design-locks.md §1",
+      "summary": "Event kinds are a closed set (12 kinds defined)",
+      "category": "schema"
+    },
+    {
+      "id": "branded-id-types",
+      "source": "v2-core-design-locks.md §1",
+      "summary": "Use distinct branded types for identifiers (SessionId, RunId, NodeId, etc.)",
+      "category": "types"
+    },
+    {
+      "id": "snapshot-discriminated-union",
+      "source": "v2-core-design-locks.md §1",
+      "summary": "Snapshot payload uses discriminated union, no booleans-as-state",
+      "category": "schema"
+    },
+    {
+      "id": "snapshot-pending-explicit",
+      "source": "v2-core-design-locks.md §1",
+      "summary": "Pending step presence is explicit: { kind: 'none' } | { kind: 'some', step }",
+      "category": "schema"
+    },
+    {
+      "id": "snapshot-impossible-state-rejected",
+      "source": "v2-core-design-locks.md §1",
+      "summary": "Pending step instance key must not be in completed set",
+      "category": "schema"
+    },
+    {
+      "id": "snapshot-loop-id-unique",
+      "source": "v2-core-design-locks.md §1",
+      "summary": "Loop stack cannot contain same loopId twice",
+      "category": "schema"
+    },
+    {
+      "id": "snapshot-completed-sorted",
+      "source": "v2-core-design-locks.md §1",
+      "summary": "Completed step instances sorted lexicographically by key",
+      "category": "schema"
+    },
+    {
+      "id": "step-instance-key-delimiter-safe",
+      "source": "v2-core-design-locks.md §1",
+      "summary": "stepId and loopId use only [a-z0-9_-]+, disallow @, /, :",
+      "category": "schema"
+    },
+    {
+      "id": "step-instance-key-format",
+      "source": "v2-core-design-locks.md §1",
+      "summary": "StepInstanceKey format: stepId or loopPath::stepId",
+      "category": "schema"
+    },
+    {
+      "id": "token-format-prefix-version-payload-sig",
+      "source": "v2-core-design-locks.md §1.2",
+      "summary": "Token format: <prefix>.v1.<payload>.<sig>",
+      "category": "tokens"
+    },
+    {
+      "id": "token-prefix-closed-set",
+      "source": "v2-core-design-locks.md §1.2",
+      "summary": "Token prefix is closed set: st | ack | chk",
+      "category": "tokens"
+    },
+    {
+      "id": "token-kind-closed-set",
+      "source": "v2-core-design-locks.md §1.2",
+      "summary": "Token kind is closed set: state | ack | checkpoint",
+      "category": "tokens"
+    },
+    {
+      "id": "token-prefix-kind-match",
+      "source": "v2-core-design-locks.md §1.2",
+      "summary": "Token prefix must match payload.tokenKind",
+      "category": "tokens"
+    },
+    {
+      "id": "token-signing-hmac-sha256",
+      "source": "v2-core-design-locks.md §1.2",
+      "summary": "Signing algorithm is HMAC-SHA256",
+      "category": "tokens"
+    },
+    {
+      "id": "token-signature-input-canonical-only",
+      "source": "v2-core-design-locks.md §1.2",
+      "summary": "Signature input is canonical payload bytes only, no separators",
+      "category": "tokens"
+    },
+    {
+      "id": "token-signature-timing-safe",
+      "source": "v2-core-design-locks.md §1.2",
+      "summary": "Signature comparison uses timing-safe equality",
+      "category": "tokens"
+    },
+    {
+      "id": "keyring-two-keys",
+      "source": "v2-core-design-locks.md §1.2",
+      "summary": "Keyring has exactly two keys: current and optional previous",
+      "category": "tokens"
+    },
+    {
+      "id": "keyring-32-byte-entropy",
+      "source": "v2-core-design-locks.md §1.2",
+      "summary": "Each key is 32 bytes, stored as base64url",
+      "category": "tokens"
+    },
+    {
+      "id": "keyring-verification-order",
+      "source": "v2-core-design-locks.md §1.2",
+      "summary": "Verification tries current key, then previous",
+      "category": "tokens"
+    },
+    {
+      "id": "state-token-payload-fields",
+      "source": "v2-core-design-locks.md §1.2",
+      "summary": "stateToken payload: tokenVersion, tokenKind, sessionId, runId, nodeId, workflowHash",
+      "category": "tokens"
+    },
+    {
+      "id": "ack-token-payload-fields",
+      "source": "v2-core-design-locks.md §1.2",
+      "summary": "ackToken payload: tokenVersion, tokenKind, sessionId, runId, nodeId, attemptId",
+      "category": "tokens"
+    },
+    {
+      "id": "checkpoint-token-payload-fields",
+      "source": "v2-core-design-locks.md §1.2",
+      "summary": "checkpointToken payload: tokenVersion, tokenKind, sessionId, runId, nodeId, attemptId",
+      "category": "tokens"
+    },
+    {
+      "id": "ack-idempotency-key",
+      "source": "v2-core-design-locks.md §1.2",
+      "summary": "Ack idempotency key is (sessionId, runId, nodeId, attemptId)",
+      "category": "tokens"
+    },
+    {
+      "id": "ack-replay-idempotent",
+      "source": "v2-core-design-locks.md §1.2",
+      "summary": "Replaying same ackToken is idempotent no-op",
+      "category": "tokens"
+    },
+    {
+      "id": "checkpoint-idempotency",
+      "source": "v2-core-design-locks.md §1.2",
+      "summary": "Replaying same checkpointToken is idempotent no-op",
+      "category": "tokens"
+    },
+    {
+      "id": "rehydrate-pure-no-writes",
+      "source": "v2-core-design-locks.md §1.2",
+      "summary": "continue_workflow without ackToken MUST NOT produce durable writes",
+      "category": "protocol"
+    },
+    {
+      "id": "advance-append-capable",
+      "source": "v2-core-design-locks.md §1.2",
+      "summary": "continue_workflow with ackToken is the only path that can append",
+      "category": "protocol"
+    },
+    {
+      "id": "replay-fact-returning",
+      "source": "v2-core-design-locks.md §1.2",
+      "summary": "Replay returns durable recorded facts, does not re-run logic",
+      "category": "protocol"
+    },
+    {
+      "id": "replay-fail-closed",
+      "source": "v2-core-design-locks.md §1.2",
+      "summary": "Missing recorded outcome for idempotency key is invariant_violation",
+      "category": "protocol"
+    },
+    {
+      "id": "witness-required-for-append",
+      "source": "v2-core-design-locks.md §1.2",
+      "summary": "Append APIs require WithHealthySessionLock capability witness",
+      "category": "protocol"
+    },
+    {
+      "id": "witness-scope-enforced",
+      "source": "v2-core-design-locks.md §1.2",
+      "summary": "Witness used after scope exits must fail-fast before I/O",
+      "category": "protocol"
+    },
+    {
+      "id": "token-validation-errors-closed-set",
+      "source": "v2-core-design-locks.md §1.2",
+      "summary": "Token validation errors are closed set (7 codes)",
+      "category": "errors"
+    },
+    {
+      "id": "bundle-format-single-json",
+      "source": "v2-core-design-locks.md §1.3",
+      "summary": "Export is single JSON bundle with versioned envelope",
+      "category": "bundle"
+    },
+    {
+      "id": "bundle-tokens-not-portable",
+      "source": "v2-core-design-locks.md §1.3",
+      "summary": "Tokens are not included in bundles; re-minted on import",
+      "category": "bundle"
+    },
+    {
+      "id": "bundle-integrity-jcs-sha256",
+      "source": "v2-core-design-locks.md §1.3",
+      "summary": "Bundle integrity uses JCS canonical JSON + SHA-256",
+      "category": "bundle"
+    },
+    {
+      "id": "bundle-import-as-new",
+      "source": "v2-core-design-locks.md §1.3",
+      "summary": "Import defaults to import-as-new on session ID collision",
+      "category": "bundle"
+    },
+    {
+      "id": "bundle-import-validates-first",
+      "source": "v2-core-design-locks.md §1.3",
+      "summary": "Import validates integrity and ordering before storing",
+      "category": "bundle"
+    },
+    {
+      "id": "bundle-errors-closed-set",
+      "source": "v2-core-design-locks.md §1.3",
+      "summary": "Bundle import errors are closed set (7 codes)",
+      "category": "bundle"
+    },
+    {
+      "id": "snapshot-content-addressed",
+      "source": "v2-core-design-locks.md §1.3",
+      "summary": "SnapshotRef is content-addressed (sha256:<digest>)",
+      "category": "storage"
+    },
+    {
+      "id": "snapshot-rehydration-only",
+      "source": "v2-core-design-locks.md §1.3",
+      "summary": "Snapshot payloads are rehydration-only, no cached projections",
+      "category": "schema"
+    },
+    {
+      "id": "runs-are-dags",
+      "source": "v2-core-design-locks.md §1.1",
+      "summary": "Run lineage is DAG of nodes; branch is projection concept",
+      "category": "model"
+    },
+    {
+      "id": "preferred-tip-per-run",
+      "source": "v2-core-design-locks.md §2",
+      "summary": "Preferred tip is defined per run, not per session",
+      "category": "projection"
+    },
+    {
+      "id": "preferred-tip-algorithm",
+      "source": "v2-core-design-locks.md §2",
+      "summary": "Preferred tip: leaf nodes → max last-activity → tie-breakers",
+      "category": "projection"
+    },
+    {
+      "id": "preferred-tip-no-timestamps",
+      "source": "v2-core-design-locks.md §2",
+      "summary": "Never use wall-clock timestamps for tie-breaking",
+      "category": "projection"
+    },
+    {
+      "id": "user-only-dependency-closed-set",
+      "source": "v2-core-design-locks.md §3",
+      "summary": "UserOnlyDependencyReason is closed set (6 reasons)",
+      "category": "schema"
+    },
+    {
+      "id": "non-assumable-choice-closed-set",
+      "source": "v2-core-design-locks.md §3",
+      "summary": "NonAssumableChoiceKind is closed set (5 kinds)",
+      "category": "schema"
+    },
+    {
+      "id": "gaps-append-only-resolution",
+      "source": "v2-core-design-locks.md §3",
+      "summary": "Gaps are append-only; resolution via linkage not mutation",
+      "category": "model"
+    },
+    {
+      "id": "reason-code-unified",
+      "source": "v2-core-design-locks.md §3",
+      "summary": "Single ReasonCode for both blockers and gaps; table-driven mapping",
+      "category": "schema"
+    },
+    {
+      "id": "autonomy-closed-set",
+      "source": "v2-core-design-locks.md §4",
+      "summary": "autonomy: guided | full_auto_stop_on_user_deps | full_auto_never_stop",
+      "category": "schema"
+    },
+    {
+      "id": "risk-policy-closed-set",
+      "source": "v2-core-design-locks.md §4",
+      "summary": "riskPolicy: conservative | balanced | aggressive",
+      "category": "schema"
+    },
+    {
+      "id": "risk-policy-guardrails",
+      "source": "v2-core-design-locks.md §4",
+      "summary": "riskPolicy cannot bypass contracts/capabilities or suppress disclosure",
+      "category": "schema"
+    },
+    {
+      "id": "preferences-node-attached",
+      "source": "v2-core-design-locks.md §4",
+      "summary": "Effective preference snapshots are node-attached (rewind-safe)",
+      "category": "model"
+    },
+    {
+      "id": "workflow-hash-jcs-sha256",
+      "source": "v2-core-design-locks.md §5, §11",
+      "summary": "workflowHash = sha256(JCS(compiledSnapshotV1))",
+      "category": "hashing"
+    },
+    {
+      "id": "jcs-rfc-8785",
+      "source": "v2-core-design-locks.md §11",
+      "summary": "Use RFC 8785 (JCS) for canonical JSON serialization",
+      "category": "hashing"
+    },
+    {
+      "id": "hash-format-sha256-hex",
+      "source": "v2-core-design-locks.md §11",
+      "summary": "Hash format is sha256:<64 lowercase hex>",
+      "category": "hashing"
+    },
+    {
+      "id": "error-envelope-shape",
+      "source": "v2-core-design-locks.md §12",
+      "summary": "Error envelope: code, message, retry, details?",
+      "category": "errors"
+    },
+    {
+      "id": "error-no-throw-across-mcp",
+      "source": "v2-core-design-locks.md §12",
+      "summary": "Never throw errors across MCP boundaries",
+      "category": "errors"
+    },
+    {
+      "id": "error-retry-via-field",
+      "source": "v2-core-design-locks.md §12",
+      "summary": "Retry guidance via retry field, not message prose",
+      "category": "errors"
+    },
+    {
+      "id": "error-self-correcting",
+      "source": "v2-core-design-locks.md §12",
+      "summary": "Errors include suggestion for what to do next",
+      "category": "errors"
+    },
+    {
+      "id": "error-budget-details",
+      "source": "v2-core-design-locks.md §12",
+      "summary": "Budget errors include measured size, max size, method",
+      "category": "errors"
+    },
+    {
+      "id": "data-dir-workrail-owned",
+      "source": "v2-core-design-locks.md §13",
+      "summary": "Data directory is WorkRail-owned, not inside workflow dirs",
+      "category": "storage"
+    },
+    {
+      "id": "paths-relative-only",
+      "source": "v2-core-design-locks.md §13",
+      "summary": "All paths in manifests/bundles are relative, no absolute paths",
+      "category": "storage"
+    },
+    {
+      "id": "schema-versioned",
+      "source": "v2-core-design-locks.md §14",
+      "summary": "Every durable artifact type is versioned",
+      "category": "schema"
+    },
+    {
+      "id": "schema-additive-within-version",
+      "source": "v2-core-design-locks.md §14",
+      "summary": "Adding optional fields OK; changing required fields requires version bump",
+      "category": "schema"
+    },
+    {
+      "id": "schema-unknown-version-fail-fast",
+      "source": "v2-core-design-locks.md §14",
+      "summary": "Unknown versions fail fast, do not guess",
+      "category": "schema"
+    },
+    {
+      "id": "schema-unknown-fields-ignored-conditionally",
+      "source": "v2-core-design-locks.md §14",
+      "summary": "Unknown fields ignored only when version known and fields optional",
+      "category": "schema"
+    },
+    {
+      "id": "context-no-echo",
+      "source": "v2-core-design-locks.md §16.3.1",
+      "summary": "Responses MUST NOT echo caller's context back",
+      "category": "protocol"
+    },
+    {
+      "id": "context-not-durable",
+      "source": "v2-core-design-locks.md §16.3.1",
+      "summary": "context is not persisted as durable truth",
+      "category": "protocol"
+    },
+    {
+      "id": "context-json-only",
+      "source": "v2-core-design-locks.md §16.3.1",
+      "summary": "context must be JSON-serializable",
+      "category": "protocol"
+    },
+    {
+      "id": "context-budget-256kb",
+      "source": "v2-core-design-locks.md §16.3.1",
+      "summary": "context size max 256KB JCS UTF-8 bytes, fail fast if exceeded",
+      "category": "protocol"
+    },
+    {
+      "id": "session-health-closed-set",
+      "source": "v2-core-design-locks.md §10",
+      "summary": "SessionHealth: healthy | corrupt_tail | corrupt_head | unknown_version",
+      "category": "schema"
+    },
+    {
+      "id": "execution-gated-by-health",
+      "source": "v2-core-design-locks.md §10",
+      "summary": "Execution tools require SessionHealth=healthy",
+      "category": "protocol"
+    },
+    {
+      "id": "salvage-read-only",
+      "source": "v2-core-design-locks.md §10",
+      "summary": "Salvage mode is read-only, cannot advance",
+      "category": "protocol"
+    },
+    {
+      "id": "durable-core-no-node-imports",
+      "source": "v2-core-design-locks.md §17",
+      "summary": "durable-core has no node:* imports",
+      "category": "architecture"
+    },
+    {
+      "id": "durable-core-no-buffer",
+      "source": "v2-core-design-locks.md §17",
+      "summary": "durable-core has no Buffer usage",
+      "category": "architecture"
+    },
+    {
+      "id": "ports-interfaces-only",
+      "source": "v2-core-design-locks.md §17",
+      "summary": "ports/** are interfaces only, no implementation",
+      "category": "architecture"
+    },
+    {
+      "id": "infra-only-node-io",
+      "source": "v2-core-design-locks.md §17",
+      "summary": "infra/** is the only place Node I/O exists",
+      "category": "architecture"
+    },
+    {
+      "id": "projection-cache-rebuildable",
+      "source": "v2-core-design-locks.md §10",
+      "summary": "Projection cache is derived/rebuildable, safe to delete",
+      "category": "storage"
+    },
+    {
+      "id": "blocker-codes-closed-set",
+      "source": "v2-core-design-locks.md §16.3",
+      "summary": "Blocker codes are closed set (7 codes)",
+      "category": "schema"
+    },
+    {
+      "id": "run-status-closed-set",
+      "source": "v2-core-design-locks.md §16.3",
+      "summary": "Run status: in_progress | blocked | complete | complete_with_gaps",
+      "category": "schema"
+    },
+    {
+      "id": "edge-kind-closed-set",
+      "source": "v2-core-design-locks.md §16.3",
+      "summary": "Edge kind: acked_step | checkpoint",
+      "category": "schema"
+    },
+    {
+      "id": "edge-cause-closed-set",
+      "source": "v2-core-design-locks.md §16.3",
+      "summary": "Edge cause.kind: idempotent_replay | intentional_fork | non_tip_advance | checkpoint_created",
+      "category": "schema"
+    },
+    {
+      "id": "non-tip-advance-creates-fork",
+      "source": "v2-core-design-locks.md §1.2",
+      "summary": "Non-tip state token creates edge with cause.kind=non_tip_advance",
+      "category": "protocol"
+    },
+    {
+      "id": "output-channel-closed-set",
+      "source": "v2-core-design-locks.md §1",
+      "summary": "Output channel: recap | artifact",
+      "category": "schema"
+    },
+    {
+      "id": "output-ordering-deterministic",
+      "source": "v2-core-design-locks.md §1",
+      "summary": "Outputs ordered: recap first, then artifacts by (sha256, contentType)",
+      "category": "protocol"
+    },
+    {
+      "id": "notes-markdown-budget",
+      "source": "v2-core-design-locks.md §1",
+      "summary": "notesMarkdown max 4096 bytes, truncate with marker",
+      "category": "schema"
+    },
+    {
+      "id": "truncation-marker-format",
+      "source": "v2-core-design-locks.md §1",
+      "summary": "Truncation marker is exactly: \\n\\n[TRUNCATED]",
+      "category": "schema"
+    },
+    {
+      "id": "decision-trace-bounded",
+      "source": "v2-core-design-locks.md §1",
+      "summary": "Decision trace: max 25 entries, 512 bytes/entry, 8192 bytes total",
+      "category": "schema"
+    },
+    {
+      "id": "blocker-budget",
+      "source": "v2-core-design-locks.md §1",
+      "summary": "Max 10 blockers, 512 bytes/message, 1024 bytes/suggestedFix",
+      "category": "schema"
+    },
+    {
+      "id": "type-escapes-quarantined",
+      "source": "v2-architectural-hardening-final.md §7 Workstream I (Rule N3)",
+      "summary": "No `as any` in v2 code except explicitly quarantined paths",
+      "category": "types"
+    },
+    {
+      "id": "no-throws-across-boundaries",
+      "source": "v2-architectural-hardening-final.md §2.0 Result Contract",
+      "summary": "Adapters may throw internally, but ports return Result/ResultAsync; no exceptions cross port boundaries",
+      "category": "errors"
+    },
+    {
+      "id": "errors-as-data",
+      "source": "v2-architectural-hardening-final.md §2 Philosophy",
+      "summary": "Represent failure as Result/ResultAsync values, not exceptions as control flow",
+      "category": "errors"
+    },
+    {
+      "id": "illegal-states-unrepresentable",
+      "source": "v2-architectural-hardening-final.md §2 Philosophy",
+      "summary": "Model bounded/validated states as value objects/ADTs; prevent construction of invalid states",
+      "category": "schema"
+    },
+    {
+      "id": "budget-enforcement",
+      "source": "v2-architectural-hardening-final.md §2.1 Schema Contract",
+      "summary": "All budget constants are enforced via schema refinements and value object constructors",
+      "category": "schema"
+    },
+    {
+      "id": "determinism",
+      "source": "v2-architectural-hardening-final.md §2.0 Purity Contract",
+      "summary": "Same inputs produce same outputs; no side effects, stable canonicalization, no timing dependencies",
+      "category": "hashing"
+    },
+    {
+      "id": "schema-modules-load-safe",
+      "source": "v2-architectural-hardening-final.md §7 Workstream D (Rule N5)",
+      "summary": "Schema modules must not throw at import/construct time; smoke test verifies load safety",
+      "category": "schema"
+    },
+    {
+      "id": "test-fakes-usage",
+      "source": "v2-architectural-hardening-final.md §2.0.1 Pattern P4",
+      "summary": "Tests use centralized in-memory fakes for ports, not mocks that mirror implementation",
+      "category": "architecture"
+    }
+  ],
+
+  "categories": {
+    "storage": "Append-only truth substrate invariants",
+    "schema": "Data shape and closed set invariants",
+    "tokens": "Token format and signing invariants",
+    "protocol": "MCP protocol behavior invariants",
+    "hashing": "Canonicalization and hashing invariants",
+    "errors": "Error handling invariants",
+    "bundle": "Export/import bundle invariants",
+    "model": "Domain model invariants",
+    "projection": "Projection behavior invariants",
+    "types": "Type system invariants",
+    "architecture": "Layer boundary invariants"
+  }
+}

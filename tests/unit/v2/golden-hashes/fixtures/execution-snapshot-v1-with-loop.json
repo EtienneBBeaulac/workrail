@@ -1,0 +1,36 @@
+{
+  "description": "Execution snapshot with active loop stack and pending step inside loop",
+  "input": {
+    "v": 1,
+    "kind": "execution_snapshot",
+    "enginePayload": {
+      "v": 1,
+      "engineState": {
+        "kind": "running",
+        "completed": {
+          "kind": "set",
+          "values": ["outer_loop@0::inner_step", "outer_loop@1::inner_step"]
+        },
+        "loopStack": [
+          {
+            "loopId": "outer_loop",
+            "iteration": 2,
+            "bodyIndex": 0
+          }
+        ],
+        "pending": {
+          "kind": "some",
+          "step": {
+            "stepId": "inner_step",
+            "loopPath": [
+              {
+                "loopId": "outer_loop",
+                "iteration": 2
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

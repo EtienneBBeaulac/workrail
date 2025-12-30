@@ -1,6 +1,7 @@
 import type { ResultAsync } from 'neverthrow';
 import type { DataDirPortV2 } from '../../../ports/data-dir.port.js';
 import type { FileSystemPortV2 } from '../../../ports/fs.port.js';
+import type { TimeClockPortV2 } from '../../../ports/time-clock.port.js';
 import type { SessionId } from '../../../durable-core/ids/index.js';
 import type { SessionLockHandleV2, SessionLockError, SessionLockPortV2 } from '../../../ports/session-lock.port.js';
 
@@ -14,7 +15,8 @@ import type { SessionLockHandleV2, SessionLockError, SessionLockPortV2 } from '.
 export class LocalSessionLockV2 implements SessionLockPortV2 {
   constructor(
     private readonly dataDir: DataDirPortV2,
-    private readonly fs: FileSystemPortV2
+    private readonly fs: FileSystemPortV2,
+    private readonly clock: TimeClockPortV2
   ) {}
 
   acquire(sessionId: SessionId): ResultAsync<SessionLockHandleV2, SessionLockError> {
@@ -42,8 +44,8 @@ export class LocalSessionLockV2 implements SessionLockPortV2 {
             JSON.stringify({
               v: 1,
               sessionId,
-              pid: process.pid,
-              startedAtMs: Date.now(),
+              pid: this.clock.getPid(),
+              startedAtMs: this.clock.nowMs(),
             })
           )
         )

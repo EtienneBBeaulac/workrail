@@ -282,7 +282,17 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStore
           const validated = ManifestRecordV1Schema.safeParse(parsed);
           if (!validated.success) {
             isComplete = false;
-            tailReason ??= { code: 'unknown_schema_version', message: 'Unknown manifest schema version (corrupt tail)' };
+            // Check if this is a version mismatch or a schema validation failure
+            // Safely extract version field by checking if it exists and is a number
+            const rawVersion = (typeof parsed === 'object' && parsed !== null && 'v' in parsed) 
+              ? (parsed as { v?: unknown }).v 
+              : undefined;
+            if (rawVersion !== 1) {
+              tailReason ??= { code: 'unknown_schema_version', message: `Expected v=1, got v=${rawVersion}` };
+            } else {
+              // Not a version mismatch—it's a schema validation failure
+              tailReason ??= { code: 'schema_validation_failed', message: 'Manifest record schema validation failed (corrupt tail)' };
+            }
             break;
           }
 
@@ -437,6 +447,7 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStore
 
   private appendManifestRecords(manifestPath: string, records: readonly ManifestRecordV1[]): ResultAsync<void, SessionEventLogStoreError> {
     // Write records as append-only JSONL and fsync once for this batch.
+    // Guarantees handle is closed on all paths (success and error) using orElse cleanup.
     return this.fs.openAppend(manifestPath)
       .mapErr(mapFsToStoreError)
       .andThen((handle) => {
@@ -444,9 +455,16 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStore
         if (bytesRes.isErr()) return errAsync(bytesRes.error);
         const bytes = bytesRes.value;
 
+        // Chain operations with guaranteed cleanup on error
         return this.fs.writeAll(handle.fd, bytes).mapErr(mapFsToStoreError)
           .andThen(() => this.fs.fsyncFile(handle.fd).mapErr(mapFsToStoreError))
-          .andThen(() => this.fs.closeFile(handle.fd).mapErr(mapFsToStoreError));
+          .andThen(() => this.fs.closeFile(handle.fd).mapErr(mapFsToStoreError))
+          // On any error, attempt close before propagating the original error
+          .orElse((err) =>
+            this.fs.closeFile(handle.fd)
+              .mapErr(() => err)  // Keep original error, ignore close error
+              .andThen(() => errAsync(err))
+          );
       });
   }
 }
@@ -603,11 +621,26 @@ function parseJsonlText<T>(text: string, schema: { safeParse: (v: unknown) => { 
     }
     const validated = schema.safeParse(parsed);
     if (!validated.success) {
+      // Check if this is a version mismatch or a schema validation failure
+      // Safely extract version field by checking if it exists
+      const rawVersion = (typeof parsed === 'object' && parsed !== null && 'v' in parsed) 
+        ? (parsed as { v?: unknown }).v 
+        : undefined;
+      if (rawVersion !== 1) {
+        // It's a genuine version mismatch
+        return err({
+          code: 'SESSION_STORE_CORRUPTION_DETECTED',
+          location: i === 0 ? 'head' : 'tail',
+          reason: { code: 'unknown_schema_version', message: `Expected v=1, got v=${rawVersion}` },
+          message: `Unknown schema version at line ${i}: expected v=1, got v=${rawVersion}`,
+        });
+      }
+      // Not a version mismatch—it's a schema validation failure under current constraints
       return err({
         code: 'SESSION_STORE_CORRUPTION_DETECTED',
         location: i === 0 ? 'head' : 'tail',
-        reason: { code: 'unknown_schema_version', message: `Invalid record at line ${i}` },
-        message: `Invalid record at line ${i}`,
+        reason: { code: 'schema_validation_failed', message: `Schema validation failed at line ${i}` },
+        message: `Schema validation failed at line ${i}`,
       });
     }
     out.push(validated.data);

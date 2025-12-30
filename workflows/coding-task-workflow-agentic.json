@@ -1,8 +1,8 @@
 {
   "id": "coding-task-workflow-agentic",
   "name": "Agentic Task Dev Workflow (Invariants • Architecture • Vertical Slices • PR Sizing • Audits • Resumable)",
-  "version": "1.2.0",
-  "description": "Agentic task development workflow aligned with WorkRail's philosophy: invariants → architecture → vertical slices → verify each slice. Includes bounded audit loops, PR sizing gates, durable artifacts (CONTEXT.md + plan/spec/design), and deterministic resume/rewind via copy‑paste workflow_next payload checkpoints.",
+  "version": "1.4.0",
+  "description": "Coding workflow that explores multiple approaches before committing—avoids anchoring on the first idea. Flow: constraints → approaches → compare → decide → slices → verify. Use when getting it right matters.",
   "preconditions": [
     "User provides a task description (ticket text or equivalent) and success criteria (even if partial).",
     "Agent has read access to the codebase and can use tools (search/read/edit/terminal).",
@@ -35,7 +35,11 @@
     "BUILDER DELEGATION: When delegationMode=delegate AND rigorMode=THOROUGH AND work is non-trivial, you MAY delegate to Builder (routine-feature-implementation). Main agent reviews output against allowlist/denylist/budgets.",
     "VALIDATION: prefer compile-time safety and deterministic tests; verify each slice before moving on; fail fast with meaningful errors.",
     "DECISION LOG: Entry includes Decision, Why (1-3 bullets), Impacted files (≤5), User feedback, Surprises. Cap 8 bullets.",
-    "VARIABLE TYPES: Strings: taskComplexity, rigorMode, prStrategy. Numbers: planConfidence, sliceIndex. Booleans: true/false."
+    "VARIABLE TYPES: Strings: taskComplexity, rigorMode, prStrategy, selectedApproach, runnerUpApproach, leadingCandidate, architectureRationale, keyRiskToMonitor, selectedSliceStrategy.",
+    "VARIABLE TYPES: Strings (cont): pivotSeverity (none/MINOR/MODERATE/MAJOR), pivotReturnPhase, cleanSlateDivergence (None/Minor/Major).",
+    "VARIABLE TYPES: Arrays: approaches, pivotTriggers, preMortemFindings, sliceStrategies, planningGaps, integrationGaps, integrationVerificationFindings, invariantViolations. Numbers: planConfidence, sliceIndex.",
+    "VARIABLE TYPES: Booleans: continuePlanning, pivotTriggered, planningComplete, validationFailed, slicePlanStale, majorConcernsRaised.",
+    "VARIABLE TYPES: Booleans (cont): spikeFailure, assumptionsValidated, planningGapsFound, integrationGapsFound, integrationVerificationPassed, integrationVerificationFailed, regressionDetected."
   ],
   "functionDefinitions": [
     {
@@ -109,7 +113,7 @@
           }
         ]
       },
-      "prompt": "Audit your context understanding before designing.\n\nMode behavior:\n- **QUICK**: skip this step (should not run)\n- **STANDARD**: do a self-audit; delegate at most once if you have subagent support\n- **THOROUGH**: delegate in parallel if you have subagent support\n\n**If subagent support is available and `rigorMode=THOROUGH`:**\n- Delegate to the WorkRail Executor **TWICE SIMULTANEOUSLY** using the **Context Gathering Routine** in **audit mode**:\n  1) Focus: COMPLETENESS (what did I miss?)\n  2) Focus: DEPTH (what did I misunderstand or stay too shallow on?)\n\n**If `rigorMode=STANDARD`:**\n- Prefer self-audit. Optionally delegate ONCE focusing on COMPLETENESS.\n\n**If no subagents:** do a self-audit using the two lenses.\n\n**SYNTHESIZE** audit findings:\n- Update `contextSummary` with gaps filled\n- Resolve uncertainties with tools when possible\n- Update `openQuestions` but keep it <= `maxQuestions` and only for true human decisions\n\n**CONTEXT LOGGING:** Update CONTEXT.md Decision Log (follow format from metaGuidance) - record audit deltas, gaps addressed, and any new decisions.\n\n**Quality gate:** proceed only if you can explain the relevant flow end-to-end.",
+      "prompt": "Audit your context understanding before designing.\n\nMode behavior:\n- **QUICK**: skip this step (should not run)\n- **STANDARD**: do a self-audit; delegate at most once if you have subagent support\n- **THOROUGH**: delegate in parallel if you have subagent support\n\n**If subagent support is available and `rigorMode=THOROUGH`:**\n\nSpawn 2 WorkRail Executors SIMULTANEOUSLY using `routine-context-gathering`:\n\n**Delegation 1 — Completeness Audit:**\n- routine: routine-context-gathering\n- depth: 2 (Explore level)\n- mission: \"Audit main agent's context for missed areas and blind spots\"\n- target: [Areas main agent investigated]\n- focus: COMPLETENESS\n- deliverable: context-audit-completeness.md\n\n**Delegation 2 — Depth Audit:**\n- routine: routine-context-gathering\n- depth: 3 (Analyze level)\n- mission: \"Audit main agent's context for shallow understanding\"\n- target: [Areas main agent investigated]\n- focus: DEPTH\n- deliverable: context-audit-depth.md\n\n**If `rigorMode=STANDARD`:**\n- Prefer self-audit. Optionally delegate ONCE using `routine-context-gathering` (depth: 2) focusing on COMPLETENESS.\n\n**If no subagents:** do a self-audit using the two lenses.\n\n**SYNTHESIZE** audit findings:\n- Update `contextSummary` with gaps filled\n- Resolve uncertainties with tools when possible\n- Update `openQuestions` but keep it <= `maxQuestions` and only for true human decisions\n\n**CONTEXT LOGGING:** Update CONTEXT.md Decision Log (follow format from metaGuidance) - record audit deltas, gaps addressed, and any new decisions.\n\n**Quality gate:** proceed only if you can explain the relevant flow end-to-end.",
       "requireConfirmation": false
     },
     {
@@ -130,13 +134,55 @@
       }
     },
     {
-      "id": "phase-3-architecture-capture",
-      "title": "Phase 3: Architecture Capture (Options → Recommendation → Risks)",
+      "id": "phase-ideation",
+      "title": "Ideation (Divergent Thinking via Lenses)",
       "runCondition": {
         "var": "taskComplexity",
         "not_equals": "Small"
       },
-      "prompt": "Propose architecture options and choose a recommendation.\n\n**Do:**\n1) Identify 2–3 viable approaches (including a conservative one)\n2) Evaluate trade-offs against `invariants`\n3) Recommend one approach\n4) Identify risks and mitigations\n5) Identify what must be proven early (spikes / thin slices)\n\n**If `rigorMode=THOROUGH` and subagents are available:**\n- Delegate to the WorkRail Executor for **parallel ideation** (2–3 perspectives) using **Ideation Routine** (e.g., simplicity / maintainability / performance).\n\n**Output:**\n- Selected approach + rationale\n- Architecture delta (what changes structurally)\n- Risks + mitigations\n\n**Set context variables:** `architectureDecision`, `architectureRisks`.\n\n**CONTEXT LOGGING (required):** Update CONTEXT.md Decision Log (follow format from metaGuidance) - record chosen architecture, rejected alternatives and why, how it respects `invariants` and `userRules`, expected impacted files/areas, and any user pushback.",
+      "prompt": "Generate approaches by answering DIFFERENT questions—not variations of one idea.\n\nThis is DIVERGENT thinking. Do not evaluate or compare yet.\n\n**Answer each lens (minimum 3, add more for THOROUGH):**\n\n1. **Simplicity lens:** What's the simplest approach that could work?\n   - Minimal moving parts, easiest to understand\n   - What would you do if you had 1 hour?\n\n2. **Maintainability lens:** What approach optimizes for future changes?\n   - Easiest to modify in 6 months by someone unfamiliar\n   - What would make a new team member's life easiest?\n\n3. **Clean-slate lens:** If this area didn't exist, how would you design it?\n   - Ignore existing structure—what's the \"right\" architecture?\n   - What would you build if starting fresh today?\n\n4. **(STANDARD+) Constraint-flip lens:** What if a key constraint didn't exist?\n   - Often reveals assumptions worth questioning\n   - What if [performance/compatibility/scope] wasn't a concern?\n\n**For each approach:**\n- **Name**: Short memorable label\n- **Core idea**: 2-3 sentences describing the fundamental approach\n- **Key trade-off**: What does this optimize for? What does it sacrifice?\n- **Shape**: High-level structure (what changes, where)\n\n**Anti-anchoring check:**\nIf your approaches feel like variations of one idea, you haven't diverged enough. The lenses should produce genuinely different shapes.\n\n**If `rigorMode=THOROUGH` and subagents available:**\n\nSpawn 3 WorkRail Executors SIMULTANEOUSLY using `routine-ideation`:\n\n**Delegation 1 — Simplicity Lens:**\n- routine: routine-ideation\n- perspective: simplicity\n- quantity: 3-5 ideas\n- problem: [Task problem statement from Phase 0]\n- constraints: [From invariants]\n- deliverable: ideas-simplicity.md\n\n**Delegation 2 — Maintainability Lens:**\n- routine: routine-ideation\n- perspective: maintainability\n- quantity: 3-5 ideas\n- problem: [Task problem statement]\n- constraints: [From invariants]\n- deliverable: ideas-maintainability.md\n\n**Delegation 3 — Clean-Slate Lens:**\n- routine: routine-ideation\n- perspective: innovation\n- quantity: 3-5 ideas\n- problem: [Task problem statement]\n- constraints: [From invariants, relaxed]\n- deliverable: ideas-clean-slate.md\n\n**Main agent synthesis:**\n- Combine ideas from all 3 deliverables\n- Deduplicate similar ideas (keep best version)\n- Select best from each perspective for `approaches` array\n\n**Output:** `approaches` array with one entry per lens answered.\n\n**Set context variables:** `approaches`\n\n**CONTEXT LOGGING:** Add Approaches section to CONTEXT.md. Preserve ALL approaches—they may become Plan B/C later.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-assess-approaches",
+      "title": "Assess Approaches (Analytical)",
+      "runCondition": {
+        "var": "taskComplexity",
+        "not_equals": "Small"
+      },
+      "prompt": "Assess each approach individually. This is ANALYTICAL thinking—evaluate, don't compare yet.\n\n**For EACH approach in `approaches`:**\n\n1. **Invariant fit**:\n   - Which invariants does it naturally satisfy?\n   - Which require extra effort or workarounds?\n\n2. **Risk profile**:\n   - What could go wrong?\n   - What's the worst-case scenario?\n   - What dependencies does it introduce?\n\n3. **Implementation shape**:\n   - What files/areas change?\n   - What new abstractions are needed?\n   - Complexity estimate (Low/Medium/High)\n\n4. **Pattern alignment**:\n   - Does it match existing `userRules` and repo patterns?\n   - Any deviations needed?\n\n**Output:** Assessment for each approach (can be brief—2-3 bullets each).\n\n**Set:** `approachAssessments` (object mapping approach name to assessment)\n\n**CONTEXT LOGGING:** Update CONTEXT.md Approaches section with assessments.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-compare-approaches",
+      "title": "Compare Approaches (Evaluative)",
+      "runCondition": {
+        "var": "taskComplexity",
+        "not_equals": "Small"
+      },
+      "prompt": "Compare approaches side-by-side to identify the leading candidate.\n\nThis is EVALUATIVE thinking—compare and rank, don't stress-test yet.\n\n**Using `approachAssessments`, compare approaches on:**\n- Which best fits the `invariants`?\n- Which has the best risk profile?\n- Which aligns with `userRules` and existing patterns?\n- If trade-offs conflict, which trade-off is acceptable for THIS task?\n\n**Build comparison summary:**\nFor each dimension, note which approach wins and why.\n\n**Identify:**\n- **Leading candidate**: Which approach scores best overall?\n- **Runner-up**: Which is second-best (this becomes Plan B)?\n\n**Output:**\n- Comparison summary (which approach wins on which dimension)\n- Leading candidate name\n- Runner-up name\n\n**Set:** `leadingCandidate`, `runnerUpApproach`\n\n**CONTEXT LOGGING:** Update CONTEXT.md with comparison summary.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-premortem",
+      "title": "Pre-Mortem (Adversarial)",
+      "runCondition": {
+        "or": [
+          { "var": "rigorMode", "equals": "STANDARD" },
+          { "var": "rigorMode", "equals": "THOROUGH" }
+        ]
+      },
+      "prompt": "Stress-test the leading candidate before committing.\n\nThis is ADVERSARIAL thinking—try to break it.\n\n**For `leadingCandidate` only:**\n\n> \"It's 2 weeks from now. This approach failed catastrophically. What happened?\"\n\n**Identify:**\n- **Most likely failure mode**: What probably goes wrong?\n- **Hidden assumption**: What are we assuming that could be wrong?\n- **Dependency risk**: What external factor could break this?\n\n---\n\n**If `rigorMode=THOROUGH` and subagents available:**\n\nDelegate to WorkRail Executor using `routine-hypothesis-challenge`:\n\n**Pre-Mortem Delegation:**\n- routine: routine-hypothesis-challenge\n- rigor: 3 (use 5 for High-risk tasks)\n- hypotheses:\n  - \"The leading candidate approach will succeed\"\n  - [Key assumptions from the approach: architecture, dependencies, patterns]\n- evidence: `approachAssessments` for leading candidate\n- context:\n  - Read: CONTEXT.md (invariants section)\n  - Filtered userRules: architecture, risk, edge cases\n  - Feature brief: problem + constraints + approach shape\n- deliverable: premortem-challenges.md\n\n**Synthesis:**\n- Review challenges from deliverable\n- Update `preMortemFindings` with subagent insights\n- If major concerns raised: flag for reconsideration in next phase\n\n---\n\n**Output:**\n- Pre-mortem findings for leading candidate\n- Flag if major concerns require reconsidering `leadingCandidate`\n\n**Set:** `preMortemFindings`, `majorConcernsRaised` (boolean)",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-select-architecture",
+      "title": "Select Architecture (Decisive)",
+      "runCondition": {
+        "var": "taskComplexity",
+        "not_equals": "Small"
+      },
+      "prompt": "Make the architecture decision and define early-warning triggers.\n\n**If `majorConcernsRaised = true`:**\nThe pre-mortem raised serious concerns about `leadingCandidate`. Before proceeding:\n1. Review `preMortemFindings` carefully\n2. Consider if `runnerUpApproach` addresses the concerns better\n3. Decide: proceed with `leadingCandidate` (accepting risk) OR switch to `runnerUpApproach`\n\n**PART 1: SELECTION**\n\nBased on comparison and pre-mortem:\n\n- **selectedApproach**: Confirm or change from `leadingCandidate`\n- **architectureRationale**: Why this wins (2-3 sentences referencing comparison)\n- **runnerUpApproach**: Confirm Plan B\n- **keyRiskToMonitor**: The pre-mortem concern to watch during implementation\n\n**PART 2: PIVOT TRIGGERS (STANDARD+)**\n\nDefine conditions that should trigger reconsideration:\n\n```\nPIVOT TRIGGERS (if any occur during implementation, stop and reassess):\n- Trigger 1: [specific, observable condition]\n- Trigger 2: [specific, observable condition]\n```\n\nGood triggers are CONCRETE and OBSERVABLE:\n- \"If we need to touch >2 files outside target module\"\n- \"If the API doesn't support X capability\"\n- \"If tests require mocking >3 dependencies\"\n\nBad triggers (too vague):\n- \"If it gets hard\"\n- \"If there are problems\"\n\n**Set context variables:**\n- `selectedApproach`\n- `architectureRationale`\n- `runnerUpApproach`\n- `architectureRisks`\n- `pivotTriggers` (STANDARD+)\n- `keyRiskToMonitor`\n\n**CONTEXT LOGGING (required):** Update CONTEXT.md Decision Log - record selection + rationale, rejected alternatives and why, pivot triggers.\n\n**VERIFY (Large or High-risk):** User confirms approach selection.",
       "requireConfirmation": {
         "or": [
           {
@@ -146,19 +192,56 @@
           {
             "var": "taskComplexity",
             "equals": "Large"
+          },
+          {
+            "var": "riskLevel",
+            "equals": "High"
+          },
+          {
+            "var": "majorConcernsRaised",
+            "equals": true
           }
         ]
       }
     },
     {
-      "id": "phase-4-vertical-slices-and-pr-plan",
-      "title": "Phase 4: Vertical Slices + PR Plan (Avoid Monster PRs)",
-      "prompt": "Create a vertical-slice plan and PR strategy.\n\n**Define `slices`** as an ordered list where each slice is:\n- Independently testable\n- Reviewable within a small PR\n- Compatible with `invariants`\n\nEach slice must include:\n- Name\n- Scope summary\n- Key files/components\n- Verification plan (tests/build/manual)\n- Rollout considerations (if any)\n\n**PR sizing gate:**\n- If `prStrategy = MultiPR`, map slices to PRs.\n- If `prStrategy = SinglePR` but the plan implies broad changes, recommend switching to MultiPR.\n\n**Set context variables:**\n- `slices` (array)\n- `estimatedPRCount` (number)\n- `prStrategyRationale` (short)\n\n**CONTEXT LOGGING (required):** Update CONTEXT.md Decision Log (follow format from metaGuidance) - record slice boundaries and PR strategy, why these boundaries avoid a monster PR, expected impacted files/areas by slice, and any user pushback.\n\n**VERIFY:** user confirms PR strategy if it affects delivery expectations.",
+      "id": "phase-spike-validation",
+      "title": "Spike Validation (Validate Before Planning)",
+      "runCondition": {
+        "or": [
+          { "var": "rigorMode", "equals": "STANDARD" },
+          { "var": "rigorMode", "equals": "THOROUGH" }
+        ]
+      },
+      "prompt": "Validate key assumptions about `selectedApproach` with quick, time-boxed probes before investing in detailed planning.\n\n**Purpose:** Catch \"this won't work\" early with real code, not just analysis.\n\n---\n\n**STEP 1: Identify key uncertainties**\n\nReview `preMortemFindings` and `keyRiskToMonitor`. For each, ask:\n- Can this be validated with a quick probe?\n- What's the smallest code/test that would prove or disprove this?\n\nPrioritize uncertainties that would INVALIDATE the approach if wrong.\n\n---\n\n**STEP 2: Design 1-3 spikes**\n\nEach spike should be:\n- **Time-boxed**: 5-15 minutes max\n- **Minimal**: Smallest code that validates the assumption\n- **Disposable**: Don't need to keep the code (but can)\n- **Binary outcome**: Works or doesn't\n\n**Example spikes:**\n- API probe: \"Can the API handle batch requests?\" → Try it\n- Pattern probe: \"Can we extend this class?\" → Try it\n- Perf probe: \"Is this fast enough?\" → Quick benchmark\n- Integration probe: \"Does DI work here?\" → Try injecting\n\n**Document each spike:**\n- Assumption being tested\n- Probe approach (what code/test)\n- Expected outcome if assumption holds\n\n---\n\n**STEP 3: Execute spikes**\n\nFor each spike:\n1. Write minimal probe code\n2. Run it\n3. Document result: VALIDATED / INVALIDATED / INCONCLUSIVE\n\n**If INCONCLUSIVE:** Note what additional information would resolve it.\n\n---\n\n**STEP 4: Decide**\n\n**If any spike INVALIDATED a critical assumption:**\n- Set `spikeFailure = true`\n- Document what was learned\n- Return to `phase-select-architecture` with new information\n- Consider `runnerUpApproach` or generate new approaches\n\n**If all spikes VALIDATED (or no critical spikes needed):**\n- Set `assumptionsValidated = true`\n- Proceed to slice planning with higher confidence\n\n---\n\n**Output:**\n- Spikes attempted: [{assumption, probe, result}]\n- Key learnings\n- Decision: proceed / return to selection\n\n**Set:** `spikeResults`, `spikeFailure`, `assumptionsValidated`\n\n**CONTEXT LOGGING:** Add Spike Results section to CONTEXT.md.",
+      "requireConfirmation": {
+        "var": "spikeFailure",
+        "equals": true
+      }
+    },
+    {
+      "id": "phase-generate-slice-strategies",
+      "title": "Generate Slice Strategies (Divergent)",
+      "runCondition": {
+        "var": "taskComplexity",
+        "not_equals": "Small"
+      },
+      "prompt": "Generate 2-3 different ways to slice this work.\n\nThis is DIVERGENT thinking—explore different orderings, not just one.\n\n**Slicing lenses:**\n\n1. **Risk-first**: Order by risk (highest first → fail fast)\n   - What's the riskiest change? Do it first.\n   - Surfaces problems before investment grows\n   - Trade-off: May require more scaffolding upfront\n\n2. **Foundation-first**: Order by dependencies (base → features)\n   - Build the infrastructure/contracts first\n   - Each slice builds on stable ground\n   - Trade-off: May delay visible progress\n\n3. **Value-first**: Order by deliverable value (most valuable first)\n   - Ship something useful early\n   - Get user feedback faster\n   - Trade-off: May need to revisit foundations later\n\n**For each strategy, define:**\n- **Name**: Risk-first / Foundation-first / Value-first (or custom)\n- **Slice order**: List slices in that order\n- **Per slice**: Name, scope, key files, verification plan\n- **PR boundaries**: Where would you split PRs?\n- **Trade-offs**: What's prioritized? What's sacrificed?\n\n**Output:** `sliceStrategies` array (2-3 entries)\n\n**Set:** `sliceStrategies`\n\n**CONTEXT LOGGING:** Add Slice Strategies section to CONTEXT.md.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-compare-select-slices",
+      "title": "Compare & Select Slice Strategy (Evaluative)",
+      "runCondition": {
+        "var": "taskComplexity",
+        "not_equals": "Small"
+      },
+      "prompt": "Compare slice strategies and select the best fit.\n\nThis is EVALUATIVE thinking—compare and decide.\n\n**Compare strategies on:**\n- **Risk management**: Which best surfaces problems early given our invariants?\n- **PR reviewability**: Which produces the cleanest PR boundaries?\n- **Feedback speed**: Which gets us useful feedback fastest?\n- **Rollout constraints**: Which aligns with any flagging/migration requirements?\n- **Implementation flow**: Which has the smoothest dependencies between slices?\n\n**Select:**\n- **selectedSliceStrategy**: [name]\n- **rationale**: Why this wins (2-3 sentences referencing comparison)\n- **slices**: The ordered list from selected strategy\n\n**PR sizing gate:**\n- If `prStrategy = MultiPR`, map slices to PRs.\n- If `prStrategy = SinglePR` but slices suggest broad changes, recommend switching to MultiPR.\n\n**Set context variables:**\n- `selectedSliceStrategy`\n- `slices` (array from selected strategy)\n- `estimatedPRCount` (number)\n- `prStrategyRationale` (short)\n\n**CONTEXT LOGGING (required):** Update CONTEXT.md Decision Log - record selected strategy + rationale, rejected strategies and why, slice boundaries and PR strategy.\n\n**VERIFY:** user confirms slice strategy and PR approach.",
       "requireConfirmation": true
     },
     {
-      "id": "phase-4b-locks-compliance-audit",
-      "title": "Phase 4b: Locks Compliance Audit (Canonical Docs → Slices Matrix)",
+      "id": "phase-locks-compliance-audit",
+      "title": "Locks Compliance Audit (Canonical Docs → Slices Matrix)",
       "runCondition": {
         "and": [
           {
@@ -200,8 +283,17 @@
         "var": "taskComplexity",
         "not_equals": "Small"
       },
-      "prompt": "Initialize a bounded plan-iteration loop.\n\n**Set:** `continuePlanning = true`.\n\nRule: max 3 iterations. Stop early when audits find no Major risks/gaps.",
-      "requireConfirmation": false
+      "prompt": "Initialize a bounded plan-iteration loop.\n\n**Set (required):** `continuePlanning = true`.\n\nRule: max 5 iterations. Continue while issues are found; stop when a pass is clean (no findings).",
+      "requireConfirmation": false,
+      "validationCriteria": {
+        "and": [
+          {
+            "type": "contains",
+            "value": "continuePlanning = true",
+            "message": "Must explicitly set: continuePlanning = true (otherwise the planning loop may not run)"
+          }
+        ]
+      }
     },
     {
       "id": "phase-5-plan-iterations",
@@ -217,19 +309,19 @@
           "var": "continuePlanning",
           "equals": true
         },
-        "maxIterations": 3
+        "maxIterations": 5
       },
       "body": [
         {
           "id": "phase-5a-draft-implementation-plan",
           "title": "Plan Artifact Draft/Update",
-          "prompt": "Create or update the **Plan Artifact** (deterministic schema).\n\n**Write-or-paste rule:** attempt to write/update `implementation_plan.md`. If file writing fails, output full content in chat (canonical).\n\n**Plan Artifact headings (concise, complete):**\n\n1) Problem statement\n2) Acceptance criteria (bullets)\n3) Non-goals (bullets)\n4) **User rules/preferences applied:**\n   - Relevant `userRules` + how plan respects them.\n   - Deviations: rationale + mitigation + user decision (counts toward `maxQuestions`).\n5) Invariants (reference `invariants`)\n6) Proposed approach (1–2 paragraphs)\n7) Alternatives considered (≥1 for STANDARD/THOROUGH) + why rejected\n8) **Vertical slices** (match `slices`: scope, done-definition, files, verification)\n\n   **Work Packages inside each slice (mode-dependent):**\n   - QUICK: skip work packages\n   - STANDARD: optional; recommended when slice is high-risk or multi-layer\n   - THOROUGH: required for non-trivial slices\n\n   Each work package (WP):\n   - ID: `S<sliceIndex>-WP<k>` (e.g., S1-WP1)\n   - Goal: one coherent outcome\n   - Targets (allowlist): dirs/files (+ allowed new files)\n   - Forbidden (denylist): files/dirs not to touch\n   - Budget: maxModified (5 STANDARD/8 THOROUGH), maxNew (2/3)\n   - Done-definition: 2–5 bullets\n   - Verification: 1–3 commands/tests\n   - Dependencies: contracts/types from other WPs (if parallel)\n\n   **Parallelism rule:** parallelize only if Targets don't overlap. Final WP must be \"Hook-up/Integration\" when parallel was used.\n\n9) Test plan (unit/integration/e2e; cite repo patterns)\n10) Risk register (risks + mitigation + rollback/flag)\n11) PR packaging (Single/Multi + rule)\n\n**Set context variables:**\n- `planArtifact`\n- `implementationPlan`\n\n**VERIFY:** concrete enough for another engineer to implement without guessing.",
+          "prompt": "Create or update the **Plan Artifact** (deterministic schema).\n\n**Write-or-paste rule:** attempt to write/update `implementation_plan.md`. If file writing fails, output full content in chat (canonical).\n\n**Plan Artifact headings (concise, complete):**\n\n1) Problem statement\n2) Acceptance criteria (bullets)\n3) Non-goals (bullets)\n4) **User rules/preferences applied:**\n   - Relevant `userRules` + how plan respects them.\n   - Deviations: rationale + mitigation + user decision (counts toward `maxQuestions`).\n5) Invariants (reference `invariants`)\n6) Proposed approach (1–2 paragraphs)\n7) Architecture decision (reference Phase 3/3b outputs):\n   - Selected approach: reference `selectedApproach`\n   - Rationale: reference `architectureRationale`\n   - Runner-up (Plan B): reference `runnerUpApproach`\n   - Key risk: reference `keyRiskToMonitor`\n   - Full alternatives: see CONTEXT.md Approaches section\n8) **Vertical slices** (match `slices`: scope, done-definition, files, verification)\n\n   **Work Packages inside each slice (mode-dependent):**\n   - QUICK: skip work packages\n   - STANDARD: optional; recommended when slice is high-risk or multi-layer\n   - THOROUGH: required for non-trivial slices\n\n   Each work package (WP):\n   - ID: `S<sliceIndex>-WP<k>` (e.g., S1-WP1)\n   - Goal: one coherent outcome\n   - Targets (allowlist): dirs/files (+ allowed new files)\n   - Forbidden (denylist): files/dirs not to touch\n   - Budget: maxModified (5 STANDARD/8 THOROUGH), maxNew (2/3)\n   - Done-definition: 2–5 bullets\n   - Verification: 1–3 commands/tests\n   - Dependencies: contracts/types from other WPs (if parallel)\n\n   **Parallelism rule:** parallelize only if Targets don't overlap. Final WP must be \"Hook-up/Integration\" when parallel was used.\n\n9) Test plan (unit/integration/e2e; cite repo patterns)\n10) Risk register (risks + mitigation + rollback/flag)\n11) PR packaging (Single/Multi + rule)\n\n**Set context variables:**\n- `planArtifact`\n- `implementationPlan`\n\n**VERIFY:** concrete enough for another engineer to implement without guessing.",
           "requireConfirmation": false
         },
         {
           "id": "phase-5b-plan-audit-mode-adaptive",
           "title": "Plan Audit (Subagent-Friendly)",
-          "prompt": "Audit the current plan.\n\n**Mode behavior:**\n- QUICK: self-audit only\n- STANDARD: self-audit; delegate once if subagents exist\n- THOROUGH: parallel delegation if subagents exist\n\n**If subagents + `rigorMode=THOROUGH`:**\n\nYou have permission to spawn THREE subagents SIMULTANEOUSLY for parallel plan validation.\n\nDelegate to WorkRail Executor THREE TIMES with scoped context:\n\n**Delegation 1 — Plan Analysis Routine:**\n- Focus: Completeness/patterns/risks\n- Context (file-reference-first, max 500 words if pasting):\n  - Read: CONTEXT.md (userRules section), implementation_plan.md\n  - Read: spec.md, design.md (if exist)\n  - Filtered userRules: architecture, testing, patterns rules only (use filtering keywords from metaGuidance)\n  - Invariants + locks (if locksMatrix exists)\n  - Feature brief: problem statement + architecture decision + key constraints\n- Deliverable: plan-analysis.md\n\n**Delegation 2 — Hypothesis Challenge (rigor=3):**\n- Focus: Holes/edge cases/unproven assumptions\n- Context:\n  - Read: implementation_plan.md\n  - Filtered userRules: error handling, edge cases, validation rules only (use filtering keywords from metaGuidance)\n  - Invariants (especially high-risk ones)\n  - Feature brief: problem + acceptance criteria + non-goals\n- Deliverable: plan-challenges.md\n\n**Delegation 3 — Execution Simulation:**\n- Focus: Simulate riskiest slice failure modes\n- Context:\n  - Read: implementation_plan.md (riskiest slice section)\n  - Filtered userRules: performance, data flow, state management rules only (use filtering keywords from metaGuidance)\n  - Invariants touched by risky slice\n  - Feature brief: architecture decision + risk register\n- Deliverable: simulation-results.md\n\n**Self-check before delegating (required):**\n✅ Each delegation includes filtered userRules (not full list)\n✅ Each includes invariants + locks (if applicable)\n✅ Each includes feature brief (file refs or <500 word excerpt)\n✅ Each has specific focus/lens\n\n**If subagents + `rigorMode=STANDARD`:**\nDelegate ONCE using Plan Analysis with full context (not filtered).\n\n\n**Note:** delegationMode was detected in phase-0c and cached in CONTEXT.md\n**Else:** self-audit (same three lenses).\n\n**Output:**\n- Findings: Critical / Major / Minor\n- Plan amendments\n\n**Set:** `planFindings`, `planAmendments`, `planConfidence` (1–10)",
+          "prompt": "**Mission: Find gaps, issues, and inconsistencies in this plan.**\n\nActively look for:\n- **Gaps**: What's missing? What's not covered?\n- **Weak assumptions**: What could be wrong? What are we taking for granted?\n- **Inconsistencies**: Do parts contradict each other? Does the plan match the invariants?\n- **Risks**: What could go wrong? What hasn't been stress-tested?\n\n---\n\n**Mode behavior:**\n- QUICK: self-audit only\n- STANDARD: self-audit; delegate once if subagents exist\n- THOROUGH: parallel delegation if subagents exist\n\n**If subagents + `rigorMode=THOROUGH`:**\n\nYou have permission to spawn THREE subagents SIMULTANEOUSLY for parallel plan validation.\n\nDelegate to WorkRail Executor THREE TIMES with scoped context:\n\n**Delegation 1 — Plan Analysis:**\n- routine: routine-plan-analysis\n- plan: implementation_plan.md\n- requirements: [From Phase 2 invariants + acceptance criteria]\n- constraints: [Filtered userRules: architecture, testing, patterns]\n- context (file-reference-first, max 500 words if pasting):\n  - Read: CONTEXT.md (userRules section), implementation_plan.md\n  - Read: spec.md, design.md (if exist)\n  - Invariants + locks (if locksMatrix exists)\n  - Feature brief: problem statement + architecture decision + key constraints\n- deliverable: plan-analysis.md\n\n**Delegation 2 — Hypothesis Challenge:**\n- routine: routine-hypothesis-challenge\n- rigor: 3\n- hypotheses: [Plan's key assumptions about architecture, dependencies, invariant satisfaction]\n- evidence: implementation_plan.md\n- context:\n  - Read: implementation_plan.md\n  - Filtered userRules: error handling, edge cases, validation rules\n  - Invariants (especially high-risk ones)\n  - Feature brief: problem + acceptance criteria + non-goals\n- deliverable: plan-challenges.md\n\n**Delegation 3 — Execution Simulation:**\n- routine: routine-execution-simulation\n- entry_point: [Riskiest slice entry function]\n- inputs: [Expected inputs and state]\n- trace_depth: 3 (follow calls to understand failure modes)\n- context:\n  - Read: implementation_plan.md (riskiest slice section)\n  - Filtered userRules: performance, data flow, state management\n  - Invariants touched by risky slice\n  - Feature brief: architecture decision + risk register\n- deliverable: simulation-results.md\n\n**Self-check before delegating (required):**\n✅ Each delegation includes filtered userRules (not full list)\n✅ Each includes invariants + locks (if applicable)\n✅ Each includes feature brief (file refs or <500 word excerpt)\n✅ Each has specific focus/lens\n\n**If subagents + `rigorMode=STANDARD`:**\nDelegate ONCE using Plan Analysis with full context (not filtered).\n\n\n**Note:** delegationMode was detected in phase-0c and cached in CONTEXT.md\n**Else:** self-audit (same three lenses).\n\n**Output:**\n- Findings: Critical / Major / Minor\n- Plan amendments\n\n---\n\n**CLEAN-SLATE CHECK (STANDARD+, if findings exist):**\n\nBefore applying amendments, briefly answer:\n\n> \"If I started fresh right now, knowing everything I've learned, would I choose the same approach?\"\n\n1. Without looking at current plan, sketch in 1 sentence what approach you'd take\n2. Compare to `selectedApproach`:\n   - **Same**: Proceed with amendments\n   - **Minor variation**: Note the insight; consider incorporating\n   - **Fundamentally different**: STOP. Set `cleanSlateDivergence = Major`\n\n**If fundamentally different:**\n- Document why fresh thinking differs\n- Return to Phase 3b with fresh approach as new candidate, OR\n- Document why current approach is still better despite fresh thinking\n\n**Set:** `planFindings`, `planAmendments`, `planConfidence` (1–10), `cleanSlateDivergence` (None/Minor/Major)",
           "requireConfirmation": false
         },
         {
@@ -252,7 +344,7 @@
         {
           "id": "phase-5d-loop-exit-decision",
           "title": "Loop Exit Decision (Fail-Safe)",
-          "prompt": "**Non-optional:** prevent forgotten `continuePlanning` updates.\n\n**Output (exact format):**\n- `continuePlanning`: true|false\n- `reason`: one sentence\n- `whatChangedSinceLastIteration`: 1–3 bullets\n\n**Default: set `continuePlanning=false` unless:**\n1) Critical finding unresolved\n2) Major finding unresolved\n3) `planConfidence < 8`\n4) User decision in `openQuestions` blocks correctness\n5) High-risk invariant has no test/verification path\n\nIf true, name which condition(s) triggered it + what changes next iteration.\n\n**CONTEXT LOGGING:** Update CONTEXT.md Decision Log (follow format from metaGuidance) and update Machine State Checkpoint (keep last 3).\n\n**Set:** `continuePlanning`",
+          "prompt": "**Non-optional:** prevent forgotten `continuePlanning` updates.\n\n**Output (exact format):**\n- `continuePlanning`: true|false\n- `reason`: one sentence\n- `whatChangedSinceLastIteration`: 1–3 bullets\n\n**Loop continuation logic (continue while issues found):**\n\n- If `planFindings` is **NON-EMPTY** (issues found this pass):\n  → Set `continuePlanning = true`\n  → Rationale: Amendments need verification; may have introduced new issues\n\n- If `planFindings` is **EMPTY** (clean pass):\n  → Set `continuePlanning = false`\n  → Rationale: Plan is stable, no more issues to find\n\n**Max iterations (5) still applies** — if you've hit 5 iterations and still finding issues, exit anyway and note remaining concerns.\n\n**Override to exit early:**\n- User explicitly requests to proceed\n- All findings are Minor AND `planConfidence >= 8`\n\nIf continuing, name what was found + what changes next iteration.\n\n**CONTEXT LOGGING:** Update CONTEXT.md Decision Log (follow format from metaGuidance) and update Machine State Checkpoint (keep last 3).\n\n**Set:** `continuePlanning`",
           "requireConfirmation": true,
           "validationCriteria": {
             "and": [
@@ -318,20 +410,47 @@
       "requireConfirmation": true
     },
     {
-      "id": "phase-6c-slices-validation",
-      "title": "Phase 6c: Slices Validation (Pre-Implementation Gate)",
+      "id": "phase-planning-gap-check",
+      "title": "Planning Gap Check (Discovery)",
       "runCondition": {
         "var": "taskComplexity",
         "not_equals": "Small"
       },
-      "prompt": "Validate slices before entering implementation loop.\n\n**Required checks:**\n- `slices` context variable is defined\n- `slices` is an array with length > 0\n- Each slice has required fields: name, scope, files, verification\n\n**For each slice, verify:**\n- name (non-empty string)\n- scope summary (describes what the slice accomplishes)\n- files/components (list of target files)\n- verification plan (commands or tests to run)\n\n**If validation fails:**\n- Stop immediately\n- Ask user to clarify or return to Phase 4 (slice planning)\n\n**Set context variable:** `slicesValidated = true`\n\n**Output:** Validation report (pass/fail for each slice).",
-      "requireConfirmation": false,
+      "prompt": "**Mission: Find what's MISSING from planning. Do not check boxes—find gaps.**\n\nThis is DISCOVERY mode. Your job is to find problems, not approve.\n\n**Important:** `planningGaps` should represent what is STILL unresolved after you make a best-effort attempt to fix it immediately (update artifacts, clarify decisions). If you can fix it now, do so and do not carry it forward as a gap.\n\n---\n\n**STEP 1: Artifact Check**\n\nWhat SHOULD exist? Look for each and note if missing:\n\n- `CONTEXT.md` — Does it exist? Is it current?\n- `implementation_plan.md` — Does it exist? Is it complete?\n- `approaches` in CONTEXT.md — Are there ≥2 genuinely different approaches?\n- `slices` — Are they defined with scope/files/verification?\n\n**For each, state:** \"EXISTS at [location]\" or \"MISSING\" or \"INCOMPLETE: [what's missing]\"\n\n---\n\n**STEP 2: Decision Check**\n\nWhat decisions should have been made but weren't?\n\n- Is `selectedApproach` decided with rationale?\n- Is `runnerUpApproach` (Plan B) defined?\n- Are `pivotTriggers` concrete and observable?\n- Are there any \"TBD\" or \"TODO\" items in the plan?\n- Are there unresolved questions that block implementation?\n\n**For each fuzzy decision:** State what's unclear and what would resolve it.\n\n---\n\n**STEP 3: Skeptical Review**\n\nPretend a skeptical senior engineer is reviewing your planning:\n\n- \"What would they challenge?\"\n- \"What looks underspecified?\"\n- \"What assumption haven't you validated?\"\n- \"Are you rushing because you want to start coding?\"\n\n---\n\n**STEP 4: Immediate gap-fixing attempt (required)**\n\nIf you found any gaps you can resolve without a product/business decision:\n- Fix them immediately (update `CONTEXT.md` / `implementation_plan.md` / plan variables)\n- Then re-check the items above once\n\nOnly keep gaps that are STILL unresolved after this best-effort attempt.\n\n---\n\n**Output:**\n- Gaps found (unresolved) (list, may be empty)\n- Fuzzy decisions (still unresolved) (list, may be empty)\n- Skeptic's concerns (list, may be empty)\n\n**Output (required exact lines):**\n- planningGaps = [...] \n- planningGapsFound = true|false\n\n**Set (required):**\n- `planningGaps` (unresolved gaps array)\n- `planningGapsFound` (true iff planningGaps is non-empty)\n\n**If ANY unresolved gaps remain (`planningGapsFound = true`):** STOP and ask the user what to do next before proceeding to the planning complete gate.",
+      "requireConfirmation": {
+        "var": "planningGapsFound",
+        "equals": true
+      },
       "validationCriteria": {
         "and": [
           {
             "type": "contains",
-            "value": "slicesValidated = true",
-            "message": "Must confirm slices are valid before implementation"
+            "value": "planningGaps =",
+            "message": "Must set planningGaps = [...] (even if empty)"
+          },
+          {
+            "type": "contains",
+            "value": "planningGapsFound =",
+            "message": "Must set planningGapsFound = true|false"
+          }
+        ]
+      }
+    },
+    {
+      "id": "phase-planning-complete-gate",
+      "title": "Planning Complete Gate (Verification)",
+      "runCondition": {
+        "var": "taskComplexity",
+        "not_equals": "Small"
+      },
+      "prompt": "**BOUNDARY: Planning → Execution**\n\nYou've done gap discovery. Now confirm with EVIDENCE that planning is complete.\n\n---\n\n**ENUMERATION (required):**\n\nDon't just check boxes. For each item, cite the specific artifact:\n\n**Architecture:**\n- [ ] approaches: \"[List approach names] in CONTEXT.md\"\n- [ ] selectedApproach: \"[Name], rationale: [1 sentence summary]\"\n- [ ] runnerUpApproach: \"[Name] is Plan B\"\n- [ ] pivotTriggers: \"[List the actual triggers]\"\n\n**Slices:**\n- [ ] slices defined: \"[N] slices in implementation_plan.md\"\n- [ ] each slice has: \"name, scope, files, verification — verified\"\n\n**Artifacts:**\n- [ ] CONTEXT.md: \"exists, current\"\n- [ ] implementation_plan.md: \"exists, [N] slices defined\"\n\n---\n\n**ANTI-CHECKBOX WARNING:**\n\nIf you're checking boxes quickly without pausing, STOP.\n- Did you actually verify each item exists?\n- Can you point to the specific location?\n- Are you rushing to start coding?\n\n---\n\n**Decision:**\n\n- If ALL items verified with evidence → `planningComplete = true`\n- If ANY item cannot be verified → STOP, return to address gap\n\n**After this gate:** Trust the plan and execute.\n\n**Set:** `planningComplete = true`",
+      "requireConfirmation": true,
+      "validationCriteria": {
+        "and": [
+          {
+            "type": "contains",
+            "value": "planningComplete = true",
+            "message": "Must confirm planning is complete before implementation"
           }
         ]
       }
@@ -357,36 +476,34 @@
       },
       "body": [
         {
-          "id": "phase-7a0-preflight-audit",
-          "title": "PREFLIGHT: Audit Slice Plan vs Current Codebase (STANDARD+)",
-          "runCondition": {
+          "id": "phase-pre-impl-validation",
+          "title": "Pre-Implementation Validation",
+          "prompt": "Validate before implementing slice `{{currentSlice.name}}`.\n\n**FLAG RESET (required):**\nSet these context variables to initial state:\n- planDrift = false\n- rulesDrift = false\n- verificationFailed = false\n- verificationApprovalRequired = false\n- verificationRetried = false\n- sliceVerified = false\n- softReplanCompleted = false\n- replanFailed = false\n- pivotTriggered = false\n- pivotSeverity = none\n- validationFailed = false\n\n---\n\n**PART 1: PIVOT TRIGGER CHECK**\n\nReview `pivotTriggers`:\n```\nPIVOT TRIGGERS:\n- [ ] Trigger 1: [condition] → Status: [Not triggered / Triggered]\n- [ ] Trigger 2: [condition] → Status: [Not triggered / Triggered]\n```\n\n**If ANY trigger fired:**\n1. Set `pivotTriggered = true`, `validationFailed = true`\n2. Assess severity:\n   - **MINOR**: Return to `phase-select-architecture` (try runnerUp)\n   - **MODERATE**: Return to `phase-ideation` (new constraint)\n   - **MAJOR**: Return to `phase-invariants` (problem misunderstood)\n3. Set `pivotSeverity`, `pivotReturnPhase`\n4. STOP — do not continue to Part 2\n\n---\n\n**PART 2: PLAN STALENESS CHECK (STANDARD+)**\n\nQuick audit of slice plan vs current codebase:\n- Are target files still in expected state?\n- Have dependencies/contracts changed since planning?\n- Any new constraints from prior slices?\n\nStaleness: [Fresh / Minor drift / Major drift]\n\n**If Major drift:** Set `slicePlanStale = true`, `validationFailed = true`\n\n---\n\n**PART 3: SANITY CHECK**\n\nVerify implementation prerequisites:\n- **Existence**: Target files/symbols exist\n- **Signatures**: Key function/type signatures match assumptions\n- **Scope**: No hidden touchpoints beyond plan\n- **Verification**: Slice verification commands are runnable\n\n**If any check fails:** Set `validationFailed = true`\n\n---\n\n**OUTPUT:**\n- Pivot triggers: [All clear / Triggered: X]\n- Staleness: [Fresh / Minor / Major]\n- Sanity: [Pass / Fail: reason]\n- `validationFailed`: true/false\n\n**Set:** `pivotTriggered`, `pivotSeverity`, `pivotReturnPhase`, `slicePlanStale`, `validationFailed`",
+          "requireConfirmation": {
             "or": [
               {
-                "var": "rigorMode",
-                "equals": "STANDARD"
+                "var": "pivotTriggered",
+                "equals": true
               },
               {
-                "var": "rigorMode",
-                "equals": "THOROUGH"
+                "var": "slicePlanStale",
+                "equals": true
+              },
+              {
+                "var": "validationFailed",
+                "equals": true
               }
             ]
-          },
-          "prompt": "Before implementing `{{currentSlice.name}}`, audit the slice plan against current codebase state to detect staleness or drift.\n\n**Audit questions:**\n\n1) **Plan staleness:**\n   - When was the plan created? (check CONTEXT.md timestamp)\n   - Have related changes landed since planning? (git log since plan timestamp)\n   - Are target files still in the expected state? (grep/read to confirm)\n\n2) **Dependency drift:**\n   - Does the plan assume dependencies that have changed? (package.json, imports)\n   - Have contracts/interfaces in related modules shifted?\n   - Are there new constraints discovered during prior slices?\n\n3) **Scope reconciliation:**\n   - Does slice scope match what `implementation_plan.md` says?\n   - Are there hidden touchpoints not accounted for? (callers/callees scan)\n   - Do invariants still apply as stated, or have they evolved?\n\n4) **userRules alignment:**\n   - Have user rules/preferences changed since planning?\n   - New patterns emerged in prior slices that this slice should follow?\n\n**Rigor-adaptive delegation:**\n- QUICK: skip this step (runCondition prevents execution)\n- STANDARD: self-audit; quick scan only\n- THOROUGH: parallel delegate (if delegationMode=delegate):\n  - Auditor 1 (COMPLETENESS): Is plan complete for current codebase?\n  - Auditor 2 (RECENCY): Is plan stale; have things changed?\n\n**Output:**\n- Staleness score: [Fresh, Minor drift, Major drift]\n- Findings: list of plan-vs-reality mismatches\n- Recommendation: [Proceed, Update slice scope, Replan slice, Rewind to Phase 5]\n\n**Failure scenarios:**\n- If Major drift detected:\n   - Set `slicePlanStale=true`\n   - Require user decision:\n     a) Update slice scope in-place (soft fix)\n     b) Rewind to Phase 5 (re-plan all remaining slices)\n     c) Continue with acknowledged drift (document + approve)\n\n**Set context variables:**\n- `slicePlanStale` (true/false)\n- `preflightFindings` (list)\n- `staleness` (Fresh/Minor/Major)\n\n**CONTEXT LOGGING:** Update CONTEXT.md Decision Log (follow format from metaGuidance) if drift detected - what changed, how addressed.\n\n**Gate:** If `slicePlanStale=true`, require user approval before proceeding to PREP.",
-          "requireConfirmation": {
-            "var": "slicePlanStale",
-            "equals": true
           }
         },
         {
-          "id": "phase-7a1-reconcile-and-select",
-          "title": "PREP Part 1: Reconcile Plan & Prepare Work Unit",
-          "prompt": "**Per-slice flag reset (required - output exactly):**\nSet these context variables to their initial state:\n- planDrift = false\n- rulesDrift = false  \n- verificationFailed = false\n- verificationApprovalRequired = false\n- verificationRetried = false\n- sliceVerified = false\n- softReplanCompleted = false\n- replanFailed = false\n\nThis prevents flag leakage between slice iterations.\n\n---\n\nPrepare to implement slice `{{currentSlice.name}}`.\n\n**Do:**\n- Re-state slice goal + verification\n- **Reconcile against plan**: confirm slice scope matches `implementationPlan` (from `implementation_plan.md` if exists). If mismatched, set drift flag.\n- Identify exact files/components to change\n- Re-check invariants impacted\n- Match existing patterns (1–3 exemplars)\n- Apply `userRules` (call out if any rule affects this slice)\n\n**Work Package handling (guidance, not iteration):**\n- Check if `currentSlice.workPackages` exist in plan.\n- If yes: use them as **implementation guidance** (order, scope boundaries, budgets).\n  - Plan to implement WPs in sequence within this slice iteration.\n  - Note WP budgets (maxModified/maxNew) and boundaries (Targets/Forbidden) as self-enforcement constraints.\n- If no WPs: proceed with full slice scope as one unit.\n\n**Note:** You'll implement the full slice in the next step, using WPs to organize your work (not as separate loop iterations).\n\n**Git setup (first slice only):**\nIf sliceIndex = 0 (first iteration):\n- Check git availability: run `git status`\n- If available:\n  - Create feature branch: `feature/etienneb/acei-XXXX_<task-name>` (extract ticket ID from context)\n  - Set `featureBranch` context variable\n  - Update CONTEXT.md with branch name\n- If unavailable: skip; note in CONTEXT.md that commits will be manual\n\n**Stop and ask** only if a business decision is required or prerequisite is missing.",
-          "requireConfirmation": false
-        },
-        {
-          "id": "phase-7a2-sanity-check",
-          "title": "PREP Part 2: Pre-Change Sanity Check",
-          "prompt": "Run pre-change sanity checks before implementing.\n\n**Sanity check (pass/fail, grouped):**\n- **Existence**: files/symbols in Targets (or slice scope if no WP) exist\n- **Signature/contract**: key function/type signatures match assumptions\n- **Bounded impact**: 1–2 hop callers/callees for primary touchpoints\n- **Scope reconciliation**: \n  - If WP: Targets don't include Forbidden; no hidden touchpoints beyond plan\n  - If full slice: no hidden touchpoints beyond slice scope\n- **Verification plan**: WP/slice verification commands exist and are runnable\n\n**Hard stop:** if any check fails, update WP/slice/plan OR ask user.",
+          "id": "phase-slice-prep",
+          "title": "Slice Preparation",
+          "runCondition": {
+            "var": "validationFailed",
+            "not_equals": true
+          },
+          "prompt": "Prepare to implement slice `{{currentSlice.name}}`.\n\n**Do:**\n- Re-state slice goal + verification\n- Identify exact files/components to change\n- Re-check invariants impacted\n- Match existing patterns (1–3 exemplars)\n- Apply `userRules` (call out if any rule affects this slice)\n\n**Work Package handling:**\n- If `currentSlice.workPackages` exist: use as implementation guidance\n- If no WPs: proceed with full slice scope as one unit\n\n**Git setup (first slice only):**\nIf sliceIndex = 0:\n- Check git availability: `git status`\n- Create feature branch: `feature/etienneb/acei-XXXX_<task-name>`\n- Set `featureBranch` context variable\n- Update CONTEXT.md with branch name\n\n**Output:**\n- Slice goal + verification (restated)\n- Files to change\n- Patterns to follow\n- userRules that apply",
           "requireConfirmation": false
         },
         {
@@ -398,7 +515,7 @@
         {
           "id": "phase-7c-verify",
           "title": "VERIFY: Slice {{sliceIndex}}",
-          "prompt": "Verify the slice implementation.\n\n**PRIMARY VERIFICATION (always):**\n- Run verification commands from slice (or WP if applicable).\n- Add/adjust tests if needed.\n- Ensure invariants hold.\n- If blocked: request user to run and share output.\n\n---\n\n**PARALLEL VERIFICATION (THOROUGH + high-risk only):**\n\nRun when `rigorMode=THOROUGH` AND slice touches high-risk invariants (auth/payments/security/data integrity/perf-critical).\n\nIf `delegationMode=delegate`:\n\nYou have permission to spawn THREE subagents SIMULTANEOUSLY for parallel verification.\n\nDelegate to WorkRail Executor THREE TIMES with scoped context:\n\n**Verification 1 — Hypothesis Challenger (rigor=3):**\n- Focus: Prove this implementation is wrong\n- Context (file-reference-first):\n  - Read: files changed in this slice\n  - Read: CONTEXT.md (invariants section)\n  - Filtered userRules: edge cases, error handling, validation rules\n  - Feature brief: slice goal + invariants touched + verification plan\n- Deliverable: implementation-challenges.md\n\n**Verification 2 — Execution Simulator:**\n- Focus: Simulate in production scenarios (normal + edge cases)\n- Context:\n  - Read: files changed in this slice\n  - Read: implementation_plan.md (this slice's verification scenarios)\n  - Filtered userRules: performance, state management, data flow rules (use filtering keywords from metaGuidance)\n  - Invariants touched by this slice\n  - Feature brief: architecture decision + risk register for this slice\n- Deliverable: execution-simulation.md\n\n**Verification 3 — Plan Analyzer:**\n- Focus: Verify implementation matches plan\n- Context:\n  - Read: files changed + implementation_plan.md (this slice)\n  - Filtered userRules: patterns, conventions, testing rules (use filtering keywords from metaGuidance)\n  - Feature brief: slice scope + done-definition + targets/forbidden\n- Deliverable: plan-adherence.md\n\n**Self-check before delegating (required):**\n✅ Each delegation includes filtered userRules (relevant to their lens)\n✅ Each includes invariants touched by this slice\n✅ Each includes feature brief (file refs or excerpt)\n✅ Each has specific verification lens\n\n**Synthesize (deterministic, bounded retry):**\n\n- **ALL THREE validate** → set `sliceVerified=true`, proceed to checkpoint\n\n- **ONE concern raised:**\n  1. Investigate the concern and attempt to fix within this slice iteration\n  2. Re-run ONLY the failing validator (max 1 retry per slice)\n  3. If passes after retry: set `sliceVerified=true`, proceed\n  4. If still fails after retry:\n     - Add concern to `verificationFindings`\n     - Require user approval to proceed OR rewind to planning\n     - Set `verificationApprovalRequired=true`\n\n- **TWO+ concerns raised:**\n  1. Do NOT attempt automatic fix\n  2. Set `verificationFailed=true`\n  3. Stop slice loop immediately\n  4. User must choose:\n     - Rewind to planning (Phase 5) via new workflow run with drift context\n     - Manual fix + re-verify\n     - Defer this slice to follow-up ticket\n\n**Set context variables:**\n- `sliceVerified` (true/false)\n- `verificationFindings` (list of concerns)\n- `verificationFailed` (true/false)\n- `verificationApprovalRequired` (true/false)\n- `verificationRetried` (true/false)\n- `parallelVerificationRan` (true/false)\n\n---\n\n**CONTEXT LOGGING:** Update CONTEXT.md Decision Log (follow format from metaGuidance) - record verification approach (primary only / parallel), concerns raised + retry outcome, and user decision (if approval required).",
+          "prompt": "Verify the slice implementation.\n\n**PRIMARY VERIFICATION (always):**\n- Run verification commands from slice (or WP if applicable).\n- Add/adjust tests if needed.\n- Ensure invariants hold.\n- If blocked: request user to run and share output.\n\n---\n\n**PARALLEL VERIFICATION (THOROUGH + high-risk only):**\n\nRun when `rigorMode=THOROUGH` AND slice touches high-risk invariants (auth/payments/security/data integrity/perf-critical).\n\nIf `delegationMode=delegate`:\n\nYou have permission to spawn THREE subagents SIMULTANEOUSLY for parallel verification.\n\nDelegate to WorkRail Executor THREE TIMES with scoped context:\n\n**Verification 1 — Adversarial Challenge:**\n- routine: routine-hypothesis-challenge\n- rigor: 5 (maximum for implementation verification)\n- hypotheses: [\"This implementation is correct\", key assumptions about the changes]\n- evidence: files changed in this slice\n- context (file-reference-first):\n  - Read: files changed in this slice\n  - Read: CONTEXT.md (invariants section)\n  - Filtered userRules: edge cases, error handling, validation rules\n  - Feature brief: slice goal + invariants touched + verification plan\n- deliverable: implementation-challenges.md\n\n**Verification 2 — Execution Simulation:**\n- routine: routine-execution-simulation\n- entry_point: [Changed functions in this slice]\n- inputs: [Test scenarios: normal + edge cases]\n- trace_depth: 3\n- context:\n  - Read: files changed in this slice\n  - Read: implementation_plan.md (this slice's verification scenarios)\n  - Filtered userRules: performance, state management, data flow rules\n  - Invariants touched by this slice\n  - Feature brief: architecture decision + risk register for this slice\n- deliverable: execution-simulation.md\n\n**Verification 3 — Plan Adherence:**\n- routine: routine-plan-analysis\n- plan: implementation_plan.md (this slice section)\n- requirements: [Slice done-definition + targets/forbidden]\n- constraints: [Filtered userRules: patterns, conventions, testing]\n- context:\n  - Read: files changed + implementation_plan.md (this slice)\n  - Feature brief: slice scope + done-definition + targets/forbidden\n- deliverable: plan-adherence.md\n\n**Self-check before delegating (required):**\n✅ Each delegation includes filtered userRules (relevant to their lens)\n✅ Each includes invariants touched by this slice\n✅ Each includes feature brief (file refs or excerpt)\n✅ Each has specific verification lens\n\n**Synthesize (deterministic, bounded retry):**\n\n- **ALL THREE validate** → set `sliceVerified=true`, proceed to checkpoint\n\n- **ONE concern raised:**\n  1. Investigate the concern and attempt to fix within this slice iteration\n  2. Re-run ONLY the failing validator (max 1 retry per slice)\n  3. If passes after retry: set `sliceVerified=true`, proceed\n  4. If still fails after retry:\n     - Add concern to `verificationFindings`\n     - Require user approval to proceed OR rewind to planning\n     - Set `verificationApprovalRequired=true`\n\n- **TWO+ concerns raised:**\n  1. Do NOT attempt automatic fix\n  2. Set `verificationFailed=true`\n  3. Stop slice loop immediately\n  4. User must choose:\n     - Rewind to planning (Phase 5) via new workflow run with drift context\n     - Manual fix + re-verify\n     - Defer this slice to follow-up ticket\n\n**Set context variables:**\n- `sliceVerified` (true/false)\n- `verificationFindings` (list of concerns)\n- `verificationFailed` (true/false)\n- `verificationApprovalRequired` (true/false)\n- `verificationRetried` (true/false)\n- `parallelVerificationRan` (true/false)\n\n---\n\n**CONTEXT LOGGING:** Update CONTEXT.md Decision Log (follow format from metaGuidance) - record verification approach (primary only / parallel), concerns raised + retry outcome, and user decision (if approval required).",
           "requireConfirmation": {
             "or": [
               {
@@ -479,13 +596,40 @@
       ]
     },
     {
-      "id": "phase-7f-integration-verification",
-      "title": "Phase 7f: Integration Verification (All Slices Together)",
+      "id": "phase-integration-gap-check",
+      "title": "Integration Gap Check (Discovery)",
       "runCondition": {
         "var": "taskComplexity",
         "not_equals": "Small"
       },
-      "prompt": "Verify all slices work together without regressions.\n\n**Required verifications (non-negotiable):**\n\n1) **Full test suite** (not per-slice):\n   - Run complete test suite (unit + integration + e2e if exists)\n   - Confirm no regressions in unchanged code\n   - Document any new test failures\n\n2) **Invariant validation** (global check):\n   - For each invariant defined in Phase 2:\n     - Confirm it still holds after all slices\n     - Document which tests prove it (or manual verification if no tests)\n   - Flag any invariants without proof\n\n3) **Performance budgets** (if applicable):\n   - If any invariant includes performance constraints (latency, allocations, query counts):\n     - Run performance suite (if exists) or benchmark critical paths\n     - Compare against baseline (from Phase 2 or repo history)\n     - Flag if budget exceeded by >10%\n\n4) **Backward compatibility** (if applicable):\n   - If any invariant includes backward compat:\n     - Run compatibility test suite (if exists)\n     - Verify no breaking changes to public APIs\n     - Confirm deprecation warnings added (if breaking change is intentional)\n\n5) **Build/compile check**:\n   - Ensure project builds without errors\n   - Check for new warnings/lint violations\n   - Verify no dead code introduced\n\n**Rigor-adaptive execution:**\n- QUICK: Run full test suite only; skip perf/compat checks unless explicitly required by invariants\n- STANDARD: Run test suite + invariant validation; perf/compat if flagged\n- THOROUGH: All 5 checks mandatory; parallel verification (if delegationMode=delegate)\n\n**Failure handling:**\n- If ANY check fails:\n   - Set `integrationVerificationFailed=true`\n   - Document failure in CONTEXT.md Decision Log\n   - User chooses:\n     - Fix and re-verify\n     - Defer failing aspect to follow-up ticket\n     - Rewind to slice that introduced the regression\n\n**Set context variables:**\n- `integrationVerificationPassed` (true/false)\n- `integrationVerificationFindings` (list of issues)\n- `regressionDetected` (true/false)\n- `invariantViolations` (list)\n\n**CONTEXT LOGGING:** Update CONTEXT.md Decision Log (follow format from metaGuidance) - verification approach, all findings, user decisions.\n\n**Gate:** Cannot proceed to Phase 9 (handoff) if `integrationVerificationFailed=true` without explicit user override.",
+      "prompt": "**Mission: Find missing proofs before integration sign-off. Do not approve.**\n\nThis is DISCOVERY mode. Your job is to find gaps in integration verification (missing commands run, missing invariant proofs, missing perf/compat checks, etc.).\n\n**Important:** `integrationGaps` should represent what is STILL unresolved after you make a best-effort attempt to fix it immediately (run commands, document evidence, add missing proofs).\n\n---\n\n**STEP 1: Enumerate what SHOULD be proven**\n\nGiven the plan + invariants, list what evidence should exist for sign-off:\n- Full test suite run (unit + integration + e2e if applicable)\n- Invariant validation coverage (which tests/proofs map to which invariants)\n- Perf budgets validated (if any invariants mention perf)\n- Backward compatibility validated (if any invariants mention compat)\n- Build/compile/lint checks\n\n---\n\n**STEP 2: Find missing evidence**\n\nFor each item, mark:\n- PROVEN: with evidence (command + result summary)\n- MISSING: not run / not documented\n- INCONCLUSIVE: unclear\n\nIf any item is MISSING or INCONCLUSIVE, it is a GAP.\n\n---\n\n**STEP 3: Immediate gap-fixing attempt (required)**\n\nIf any gaps can be resolved without a product/business decision:\n- Fix them immediately (run the missing command(s), add documentation, add missing proof mapping)\n- Then re-check once\n\nOnly keep gaps that are STILL unresolved.\n\n---\n\n**Output:**\n- `integrationGaps`: list of missing or inconclusive proofs (may be empty)\n- Short note for each gap: what to run or document\n\n**Output (required exact lines):**\n- integrationGaps = [...]\n- integrationGapsFound = true|false\n\n**Set (required):**\n- `integrationGaps` (unresolved gaps array)\n- `integrationGapsFound` (true iff integrationGaps is non-empty)\n\n**If ANY unresolved gaps remain (`integrationGapsFound = true`):** STOP and ask the user what to do next before proceeding to the verification gate.",
+      "requireConfirmation": {
+        "var": "integrationGapsFound",
+        "equals": true
+      },
+      "validationCriteria": {
+        "and": [
+          {
+            "type": "contains",
+            "value": "integrationGaps =",
+            "message": "Must set integrationGaps = [...] (even if empty)"
+          },
+          {
+            "type": "contains",
+            "value": "integrationGapsFound =",
+            "message": "Must set integrationGapsFound = true|false"
+          }
+        ]
+      }
+    },
+    {
+      "id": "phase-integration-verification-gate",
+      "title": "Integration Verification Gate (Verification)",
+      "runCondition": {
+        "var": "taskComplexity",
+        "not_equals": "Small"
+      },
+      "prompt": "**BOUNDARY: Execution → Handoff**\n\nYou've done gap discovery. Now verify integration with concrete evidence and set explicit pass/fail flags.\n\n---\n\n**REQUIRED VERIFICATIONS (enumerate commands actually run):**\n\n1) Full test suite\n- Command(s) run:\n- Result summary:\n\n2) Invariant validation\n- For each invariant: how is it proven? (test name or manual proof)\n- Any invariant without proof must be listed in `invariantViolations`\n\n3) Performance budgets (if applicable)\n- Command(s)/benchmark run:\n- Result vs budget:\n\n4) Backward compatibility (if applicable)\n- Command(s) run / checks performed:\n- Result summary:\n\n5) Build/compile check\n- Command(s) run:\n- Result summary:\n\n---\n\n**Output (required exact lines):**\n- integrationVerificationPassed = true|false\n- integrationVerificationFailed = true|false\n- regressionDetected = true|false\n\n---\n\n**Set context variables:**\n- `integrationVerificationPassed`\n- `integrationVerificationFailed`\n- `integrationVerificationFindings` (list of issues)\n- `regressionDetected`\n- `invariantViolations` (list)\n\n**Rule:**\n- If `integrationVerificationFailed = true`, then `integrationVerificationPassed` must be false.\n\n**CONTEXT LOGGING:** Update CONTEXT.md Decision Log - commands run + findings + any user decisions.",
       "requireConfirmation": {
         "or": [
           {
@@ -495,6 +639,25 @@
           {
             "var": "regressionDetected",
             "equals": true
+          }
+        ]
+      },
+      "validationCriteria": {
+        "and": [
+          {
+            "type": "contains",
+            "value": "integrationVerificationPassed =",
+            "message": "Must set integrationVerificationPassed = true|false"
+          },
+          {
+            "type": "contains",
+            "value": "integrationVerificationFailed =",
+            "message": "Must set integrationVerificationFailed = true|false"
+          },
+          {
+            "type": "contains",
+            "value": "regressionDetected =",
+            "message": "Must set regressionDetected = true|false"
           }
         ]
       }
