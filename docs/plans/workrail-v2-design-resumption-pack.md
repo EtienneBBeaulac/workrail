@@ -184,7 +184,8 @@ See the canonical docs for full mechanics:
 
 - **Considered**: only resuming via pasted `stateToken` (low surface area).
 - **Rejected**: high user friction for brand new chats.
-- **Chosen**: `resume_session` lookup tool (layered search, deterministic ranking) as a core usability primitive.
+- **Desired**: `resume_session` lookup tool (layered search, deterministic ranking) as a core usability primitive.
+  - Note: the shipped v2 MCP tool surface is currently the closed set: `list_workflows`, `inspect_workflow`, `start_workflow`, `continue_workflow`.
 
 ### Workflows vs routines
 
@@ -277,18 +278,19 @@ See the canonical docs for full mechanics:
 This section tracks remaining work. Most design locks are now complete; the focus is implementation.
 
 - **v2 core design is locked**: see `docs/design/v2-core-design-locks.md` for the comprehensive implementation locks (durable model, projections, authoring, ops envelope, architecture map, module layout, and ports).
-- **Implementation status**:
-  - ✅ **Slice 1 complete** (merged to main): v2 bounded context (`src/v2/`), JCS canonicalization, `workflowHash` pinning, compiled workflow snapshots, pinned workflow store, read-only v2 MCP tools (`list_workflows`, `inspect_workflow`) behind `WORKRAIL_ENABLE_V2_TOOLS` flag.
-  - ✅ **Slice 2 complete** (merged to main): append-only session event log substrate (segments + `manifest.jsonl` + single-writer lock + corruption gating), typed closed-set event schemas for all 12 locked event kinds, idempotency enforcement, and pure deterministic projections (run DAG, session health, node outputs, capabilities, gaps, advance outcomes, run status signals, preferences propagation).
-  - ✅ **Slice 2.5 complete** (merged to main): `ExecutionSessionGateV2` (lock+health+witness choke-point); `WithHealthySessionLock` (opaque branded witness; append requires proof); readonly/append port split; `SessionHealthV2` union with manifest-attested corruption reasons; typed snapshot pin enforcement (no `any`); tests + docs updated.
-  - ✅ **Slice 3 prereqs complete** (PR `feature/etienneb/v2-slice3-prereqs`): execution snapshot schemas with locked invariants, snapshot CAS store (port + local adapter), token payload codec + HMAC-SHA256 signing/verification, crash-safe keyring (current/previous keys), snapshot-state helpers; golden fixtures + full unit test coverage.
-  - **Next**: Slice 3 implementation (token orchestration: `start_workflow`, `continue_workflow`, rehydrate/advance/replay use-cases).
+- **Implementation status** (verified against `origin/main` @ `v0.13.0`):
+  - ✅ **Slice 1 shipped**: v2 bounded context (`src/v2/`), JCS canonicalization, `workflowHash` pinning, compiled workflow snapshots, pinned workflow store.
+  - ✅ **Slice 2 shipped**: append-only session event log substrate (segments + `manifest.jsonl` + single-writer lock + corruption gating), typed closed-set event schemas for all 12 locked event kinds, idempotency enforcement, and pure deterministic projections (run DAG, session health, node outputs, capabilities, gaps, advance outcomes, run status signals, preferences propagation).
+  - ✅ **Slice 2.5 shipped**: `ExecutionSessionGateV2` (lock+health+witness choke-point); `WithHealthySessionLock` (opaque branded witness; append requires proof); readonly/append port split; `SessionHealthV2` union with manifest-attested corruption reasons; typed snapshot pin enforcement (no `any`).
+  - ✅ **Slice 3 prereqs shipped**: execution snapshot schemas with locked invariants, snapshot CAS store (port + local adapter), token payload codec + HMAC-SHA256 signing/verification, crash-safe keyring (current/previous keys), snapshot-state helpers; golden fixtures + full unit test coverage.
+  - ✅ **Slice 3 orchestration shipped** (`v0.12.0`): token-based execution via `start_workflow` / `continue_workflow` (rehydrate/advance/replay).
+  - ✅ **Hardening shipped** (`v0.13.0`): lock registry + lock coverage CI, loop/runtime semantics hardening, validation feedback hardening.
   - The locked type-first sequencing remains:
     1. ✅ Canonical models + hashing (no I/O)
     2. ✅ Pure projections
     3. ✅ Storage substrate (ports + adapters)
     4. ✅ Execution safety boundaries (gate+witness; Slice 2.5)
-    5. Protocol orchestration (next; requires prereq locks below)
+    5. ✅ Protocol orchestration (Slice 3)
     6. Determinism suite
 - **Authoring is finalized**:
   - Initial contract packs are locked: `capability_observation`, `workflow_divergence`, `loop_control` (and gaps integrated into event model).
@@ -346,6 +348,16 @@ This section is intentionally opinionated. It exists to preserve the *discipline
 - **Slice N+1 substrate gaps** (new lesson, added 2025-12-23): starting a complex integration slice (like Slice 3: orchestration) without verifying that prerequisite boundary schemas/ports/codecs exist forces mid-slice refactors and risks drift. *(Solution: explicit "Slice N+1 readiness audit" checklist in playbook.)*
 
 ### Invariants (make these true in code, then enforce with tests)
+
+#### Lock registry + coverage CI (non-optional)
+
+- `docs/design/v2-lock-registry.json` is a required input (not optional docs):
+  - read by `scripts/generate-lock-coverage.ts`
+  - read by `tests/architecture/v2-lock-coverage.test.ts`
+  - used by CI `npm run verify:generated`
+- Lock coverage is enforced via `@enforces <lockId>` annotations; CI is zero-tolerance for uncovered locks.
+- `npm run generate:locks` writes `docs/generated/v2-lock-coverage.{md,json}` and `docs/generated/v2-lock-closure-plan.md`.
+  - Be explicit about whether `docs/generated/*` is committed. The current verification uses `git diff` on those paths, which will not catch missing/untracked files.
 
 - **Rehydrate is pure**:
   - Implement `rehydrate` and `advance` as separate use-cases (not branches inside one), so rehydrate paths cannot access append-capable ports.
@@ -495,6 +507,11 @@ The full v2 blueprint is recorded in `v2-core-design-locks.md` section 16.1 (whi
 - Don't just acknowledge and move on - explore why I pushed back and incorporate that into the design.
 
 ### Editing this resumption pack
+
+#### Known paper-cuts (keep this list honest)
+
+- The lock registry declares `$schema: "./v2-lock-registry.schema.json"` but that schema file may not exist.
+- Some lock entries reference `v2-architectural-hardening-final.md`; ensure the referenced source exists or update the registry sources.
 
 **IMPORTANT**: Before editing this file, ALWAYS create a backup first:
 ```bash
