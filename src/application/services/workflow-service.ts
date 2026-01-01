@@ -102,7 +102,17 @@ export class DefaultWorkflowService implements WorkflowService {
     const criteria = (step as any).validationCriteria;
     if (!criteria) return { valid: true, issues: [], suggestions: [], warnings: undefined };
 
-    return this.validationEngine.validate(output, criteria);
+    const result = await this.validationEngine.validate(output, criteria);
+    
+    // Add context to warnings for better debuggability
+    const contextualizedWarnings = result.warnings?.map(w => 
+      `Step '${workflowId}/${stepId}': ${w}`
+    );
+
+    return {
+      ...result,
+      warnings: contextualizedWarnings,
+    };
   }
 
   private getOrCompile(workflowId: string, workflow: Workflow): Result<CompiledWorkflow, DomainError> {
