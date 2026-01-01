@@ -2,11 +2,24 @@
 
 **Purpose**: Systematically verify v2 Slices 1-3 (read-only tools, append-only substrate, token orchestration) work correctly with existing v1 workflows.
 
-**Test Strategy**: Each test scenario runs in a **separate chat** to prevent information leakage and ensure clean agent state. The agent executes test steps and reports detailed results.
+**Test Strategy**: Each test scenario runs in a **separate chat** to prevent information leakage and ensure clean agent state.
+
+## Isolation Contract (prevents test bleed)
+For results to be trustworthy, each chat MUST be isolated at two layers:
+1) **New chat** (no conversational memory bleed)
+2) **Fresh durable store** (no persisted-session bleed)
+
+Hard rules:
+- **Do not reuse tokens across chats**. Treat tokens as single-scenario secrets.
+- **Do not run these chats in parallel** against the same WorkRail instance/data dir.
+- Use either:
+  - **Per-chat data dirs** (recommended): set `WORKRAIL_DATA_DIR=/tmp/workrail-v2-tests/<chat-id>` before starting the chat, or
+  - **Wipe between chats**: delete the configured WorkRail sessions directory before starting the next chat.
 
 **Prerequisites**:
 - WorkRail v2 Slices 1-3 implementation complete
 - `WORKRAIL_ENABLE_V2_TOOLS=true` set in environment
+- Ability to isolate durable state per chat (`WORKRAIL_DATA_DIR` or wipe)
 - At least one simple workflow exists (e.g., `bug-investigation.json`)
 
 ---
@@ -14,12 +27,40 @@
 ## Test Execution Instructions (Human Operator)
 
 For each test chat below:
-1. Start a **brand new chat** (critical for isolation)
-2. Copy the "Agent Instructions" section verbatim
-3. Let the agent execute without interruption
-4. Collect the agent's final report
-5. Verify against "Expected Outcomes"
-6. Record pass/fail in the summary table
+1. Pick a unique `CHAT_ID` (e.g., `chat-1-happy-path`).
+2. Ensure durable isolation:
+   - Preferred: set `WORKRAIL_DATA_DIR=/tmp/workrail-v2-tests/<CHAT_ID>` for this chat, or
+   - Alternative: wipe the WorkRail sessions store before starting.
+3. Start a **brand new chat** (critical for isolation).
+4. Copy the **Global Agent Instructions** block, then the chat’s **Agent Instructions** block.
+5. Let the agent execute without interruption.
+6. Collect the agent's final report.
+7. Verify against "Expected Outcomes".
+8. Record pass/fail in the summary table (include the `CHAT_ID` you used).
+
+---
+
+## Global Agent Instructions (prepend to every chat)
+
+Copy/paste this at the very top of every test chat before the chat-specific instructions:
+
+```
+You are running WorkRail v2 slice validation.
+
+NON-NEGOTIABLE ISOLATION RULES:
+- Confirm with the operator that this is a brand new chat AND they used a fresh durable store (unique WORKRAIL_DATA_DIR for this CHAT_ID, or wiped sessions).
+- Do not reuse tokens from any other test chat.
+- Do not run multiple tests in parallel.
+
+TOOLING RULES:
+- Use ONLY v2 tools: list_workflows, inspect_workflow, start_workflow, continue_workflow.
+- Never use workflow_next or any v1 tools.
+- Never inspect/decode token contents.
+
+REPORTING RULES:
+- For each tool call, record: tool name, key inputs (redact tokens to first 16 chars + '…'), and the full response.
+- If you hit an error: record code/message and STOP the chat.
+```
 
 ---
 
@@ -458,16 +499,16 @@ ANALYSIS:
 
 After executing all chats, the human operator fills this table:
 
-| Chat | Scenario | Pass/Fail | Notes |
-|------|----------|-----------|-------|
-| 1 | Basic execution loop | ⬜ | |
-| 2 | Rewind and fork | ⬜ | |
-| 3 | Idempotency and replay | ⬜ | |
-| 4 | Rehydrate-only (pure) | ⬜ | |
-| 5 | Error modes | ⬜ | |
-| 6 | Token tampering | ⬜ | |
-| 7 | Multi-step with outputs | ⬜ | |
-| 8 | Hash stability | ⬜ | |
+| Chat | CHAT_ID | Scenario | Pass/Fail | Notes |
+|------|---------|----------|-----------|-------|
+| 1 |  | Basic execution loop | ⬜ | |
+| 2 |  | Rewind and fork | ⬜ | |
+| 3 |  | Idempotency and replay | ⬜ | |
+| 4 |  | Rehydrate-only (pure) | ⬜ | |
+| 5 |  | Error modes | ⬜ | |
+| 6 |  | Token tampering | ⬜ | |
+| 7 |  | Multi-step with outputs | ⬜ | |
+| 8 |  | Hash stability | ⬜ | |
 
 ---
 
@@ -491,7 +532,7 @@ These are NOT bugs; they are missing Slice 4+ features:
 - ❌ Cannot resume in a new chat (no `resume_session` yet)
 - ❌ Cannot checkpoint without advancing (no `checkpoint_workflow` yet)
 - ❌ Outputs don't appear in responses (storage works, but no recap/export yet)
-- ❌ No blocked state behavior (advance_recorded supports it, but no blocker logic)
+- ❌ Blockers/gaps UX may be incomplete depending on the workflow and mode (verify by observing `outcome`/`isComplete` behavior rather than expecting a specific UI).
 
 ---
 
