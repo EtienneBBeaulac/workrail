@@ -1926,6 +1926,91 @@ These emerged during Slice 2.5 risk analysis and Polish & Hardening ideation but
 
 ---
 
+---
+
+## 18) Namespace isolation (process-level test/CI boundary) (locked)
+
+WorkRail supports namespace isolation for test isolation, CI/CD parallelism, and 
+benchmarking via process-start configuration. This is orthogonal to v2 durable 
+truth but affects storage path layout.
+
+### Namespace as process-start config (locked)
+- Each WorkRail process operates in exactly ONE namespace, determined at startup via `WORKRAIL_NAMESPACE` env var.
+- Namespace is frozen for the container lifetime (no runtime switching).
+- Default: global namespace (no namespacing; legacy paths).
+
+### Storage path scoping (locked)
+When `WORKRAIL_NAMESPACE=test-1` is set:
+- v2 data directory root: `<home>/namespaces/test-1/data/` (unless `WORKRAIL_DATA_DIR` explicitly overrides)
+- v1 sessions: `<home>/namespaces/test-1/sessions/`
+- v1 dashboard lock: `<home>/namespaces/test-1/dashboard.lock`
+- User workflows: `<home>/namespaces/test-1/workflows/`
+- Git cache: `<home>/namespaces/test-1/cache/`
+
+### Keyring NOT namespace-scoped (locked)
+The v2 keyring (`keys/keyring.json`) lives at `<home>/keys/` (outside the 
+namespaces tree). This is correct because:
+- Keyring is a **process-level secret** for HMAC-SHA256 signing (per §10)
+- Token validation fails across namespaces via storage isolation (sessionId not found in namespace B's storage), not crypto namespace checks
+- Shared keyring enables token inspection/debugging across test runs without re-keying
+
+### Directory layout (locked)
+Aligns with §13 (data directory layout):
+```
+<home>/
+├── keys/
+│   └── keyring.json              # SHARED (process secret)
+├── namespaces/
+│   └── <ns>/
+│       ├── .namespace.lock       # exclusive ownership
+│       ├── .namespace.json       # metadata (mode, schemaVersion)
+│       ├── sessions/             # v1 legacy
+│       ├── dashboard.lock        # v1 dashboard primary
+│       ├── workflows/            # user-defined sources
+│       ├── cache/                # git clone cache
+│       └── data/                 # v2 substrate (per §13)
+│           ├── sessions/<sessionId>/
+│           │   ├── events/
+│           │   ├── manifest.jsonl
+│           │   └── cache/
+│           ├── snapshots/        # per-namespace CAS
+│           └── workflows/
+│               └── pinned/
+├── sessions/                     # global mode v1
+├── dashboard.lock                # global mode v1
+├── workflows/                    # global mode
+├── cache/                        # global mode
+└── data/                         # global mode v2 (per §13)
+```
+
+### Token isolation (locked)
+Tokens are NOT namespace-scoped in their payload or signature (§1.2 unchanged). 
+Isolation works via:
+1. Token references `sessionId=sess_xyz`
+2. Validation looks for session in namespace-scoped storage: `<home>/namespaces/<ns>/data/sessions/sess_xyz/`
+3. If session not found → `TOKEN_UNKNOWN_SESSION` error (from §1.2 error codes)
+4. Tokens from namespace A fail in namespace B (session doesn't exist in B's storage)
+
+This preserves v2 token architecture (§1.2) unchanged.
+
+### Export/import portability (locked)
+Export bundles are portable across namespaces:
+- Bundle paths are relative (per §13: no absolute paths)
+- Import into namespace B re-mints tokens using B's storage paths
+- Keyring is shared; signatures remain valid
+- CAS snapshots are per-namespace but bundles embed snapshots (self-contained per §1.3)
+
+### Non-goal (locked)
+Namespace isolation is for **test/CI isolation**, not multi-tenant SaaS:
+- Single-machine only
+- No migration of existing global-mode sessions to namespaced storage
+- No runtime namespace switching (determinism)
+
+### Design reference
+Full specification: `docs/design/test-isolation-mode.md`
+
+---
+
 ## 17) Implementation architecture map (locked)
 WorkRail v2 implementation MUST use a coherent, compositional architecture so components integrate without drift.
 
