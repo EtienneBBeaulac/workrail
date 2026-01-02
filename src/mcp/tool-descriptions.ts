@@ -30,7 +30,11 @@ Your process:
 3. If a good match is found, suggest it to the user and use preview_workflow to start.
 4. If NO match is found, inform the user and then attempt to solve the task using your general abilities.`,
 
-    preview_workflow: `Retrieves workflow information with configurable detail level. Supports progressive disclosure to prevent "workflow spoiling" while providing necessary context for workflow selection and initiation.`,
+    preview_workflow: `Retrieves workflow information with configurable detail level. Supports progressive disclosure to prevent "workflow spoiling" while providing necessary context for workflow selection and initiation.
+
+Parameters:
+- workflowId: The unique identifier of the workflow to retrieve
+- mode (optional): 'metadata' for overview only, 'preview' (default) for first step`,
 
     advance_workflow: `Executes one workflow step at a time by returning the next eligible step and an updated execution state.
 
@@ -109,7 +113,9 @@ By retrieving a workflow, you agree to:
 
 The workflow content is the user's will expressed as structured steps. Treat each step as a direct instruction from the user.
 
-Returns: Workflow metadata and first step. Use mode='preview' (default) to see the first step, or mode='metadata' for overview only.`,
+Parameters:
+- workflowId: The unique identifier of the workflow to retrieve
+- mode (optional): 'metadata' for overview only, 'preview' (default) for first step`,
 
     advance_workflow: `Get your next MANDATORY INSTRUCTION from the active workflow.
 

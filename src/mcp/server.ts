@@ -30,6 +30,11 @@ import type { IToolDescriptionProvider } from './tool-description-provider.js';
 import { preValidateWorkflowNextArgs, type PreValidateResult } from './validation/workflow-next-prevalidate.js';
 import { toBoundedJsonValue } from './validation/bounded-json.js';
 import {
+  generateSuggestions,
+  formatSuggestionDetails,
+  DEFAULT_SUGGESTION_CONFIG,
+} from './validation/index.js';
+import {
   // Workflow tool input schemas
   WorkflowListInput,
   WorkflowGetInput,
@@ -206,6 +211,9 @@ type ToolHandler = (args: unknown, ctx: ToolContext) => Promise<McpCallToolResul
 
 /**
  * Create a type-safe handler wrapper that parses input with Zod.
+ *
+ * When validation fails, generates "did you mean?" suggestions to help
+ * agents self-correct parameter naming and structure mistakes.
  */
 function createHandler<TInput extends z.ZodType, TOutput>(
   schema: TInput,
@@ -214,12 +222,17 @@ function createHandler<TInput extends z.ZodType, TOutput>(
   return async (args: unknown, ctx: ToolContext): Promise<McpCallToolResult> => {
     const parseResult = schema.safeParse(args);
     if (!parseResult.success) {
+      // Generate suggestions for self-correction (pure, deterministic)
+      const suggestionResult = generateSuggestions(args, schema, DEFAULT_SUGGESTION_CONFIG);
+      const suggestionDetails = formatSuggestionDetails(suggestionResult);
+
       return toMcpResult(
         errNotRetryable('VALIDATION_ERROR', 'Invalid input', {
           validationErrors: parseResult.error.errors.map(e => ({
             path: e.path.join('.'),
             message: e.message,
           })),
+          ...suggestionDetails,
         })
       );
     }

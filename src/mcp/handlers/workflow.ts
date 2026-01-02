@@ -128,7 +128,7 @@ export async function handleWorkflowGet(
     const getWorkflowUseCase = createGetWorkflow(ctx.workflowService);
 
     const result = await withTimeout(
-      getWorkflowUseCase(input.id, input.mode),
+      getWorkflowUseCase(input.workflowId, input.mode),
       TIMEOUT_MS,
       'workflow_get'
     );
