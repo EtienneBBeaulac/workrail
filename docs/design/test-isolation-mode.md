@@ -1,155 +1,114 @@
-# WorkRail Namespace Isolation — Design
+# WorkRail v2 Isolation Plan — Design
 
 **Status:** Design  
 **Date:** 2025-12-31  
-**Scope:** Core capability (test isolation, CI/CD, benchmarking)
+**Scope:** v2 manual/agentic test isolation under real MCP constraints
 
 ## Purpose
 
-Enable **complete execution isolation** for WorkRail through namespaced contexts. This is a **foundational capability** supporting:
-- **Test isolation:** repeatable, non-bleeding manual and agentic testing
-- **CI/CD isolation:** parallel pipeline jobs without collision
-- **Development:** isolated environments without cross-contamination
+Make manual and agentic **v2** testing trustworthy in real MCP environments.
 
-The design introduces a **NamespaceContext** abstraction that scopes all WorkRail resources (storage, tokens, ports) to a namespace boundary. All storage is namespace-scoped; there is no legacy or global mode.
+This document defines an isolation contract that is actually achievable when:
+- the MCP server is a **single long-lived process** serving multiple chats
+- the server **cannot** observe chat identity
+- the operator cannot reliably restart the server or inject per-chat env vars
+
+This is **v2-only**. v1 session/dashboard/workflow-storage isolation is out of scope.
 
 ## Problem statement
 
-### Current state (what makes testing hard)
-1) **v1 storage is hardcoded and bleeds across tests:**
-   - `SessionManager` hardcodes `~/.workrail/sessions` (`src/infrastructure/session/SessionManager.ts:56`)
-   - `HttpServer` hardcodes `~/.workrail/dashboard.lock` (`src/infrastructure/session/HttpServer.ts:81`)
-   - `EnhancedMultiSourceWorkflowStorage` hardcodes `~/.workrail/workflows` and `~/.workrail/cache` (`src/infrastructure/storage/enhanced-multi-source-workflow-storage.ts:441,521`)
-   - `GitWorkflowStorage` hardcodes `~/.workrail/cache` (`src/infrastructure/storage/git-workflow-storage.ts:89,96`)
-   - Tests that run in the same WorkRail instance (or on the same machine without cleanup) share session storage, workflow cache, and lock files, causing non-deterministic failures and cross-test contamination.
+### Current state (what makes v2 testing hard)
 
-2) **v2 storage is configurable but not namespaced:**
-   - v2 already supports `WORKRAIL_DATA_DIR` override (`src/v2/infra/local/data-dir/index.ts:8-11`).
-   - But using it for per-test isolation requires:
-     - setting a unique absolute path for each test/chat
-     - restarting the MCP server per test
-     - or writing cleanup scripts that wipe the data dir before each scenario
-   - This is high-friction and error-prone.
+1) **MCP reality: no per-chat durable isolation knob**
+   - In a single long-lived MCP server process, `process.env` and filesystem roots are process-scoped.
+   - WorkRail does not receive a stable “chat id” from the MCP platform.
+   - Therefore, “fresh data dir per chat” is not reliably enforceable for agentic testing.
 
-3) **Manual/agentic testing requires strong isolation guarantees:**
-   - Each v2 tool test scenario (happy path, rewind/fork, replay, rehydrate-only, error modes) must run with:
-     - clean agent memory (new chat)
-     - clean durable storage (no tokens/sessions from prior scenarios)
-   - Without durable isolation, test results are untrustworthy: tokens can leak, sessions can collide, locks can block unrelated chats.
+2) **Agentic testing needs two layers of isolation**
+   - **New chat** (no conversational memory bleed)
+   - **Fresh v2 session boundary** (no token/session reuse bleed)
 
 ### Why this matters (not just "convenience")
-- **Determinism:** test outcomes should depend only on inputs, not leftover state from prior runs.
-- **Architectural fix over patches:** the root cause is scattered hardcoded `~/.workrail/...` paths; we should fix that once, not patch test scripts forever.
-- **Agent-executable repeatability:** we want to hand agents a test plan that they can execute reliably; if isolation is manual/brittle, agents will hit false failures and waste time.
+- **Determinism:** v2 semantics (rehydrate purity, idempotent replay, rewind-as-fork) must be tested without accidental cross-run coupling.
+- **Agent-executable repeatability:** the isolation contract must be something an agent can follow without relying on hidden operator steps.
+
+## Isolation model (closed set)
+
+1) **Chat memory isolation** (required)
+   - Each scenario runs in a brand new chat.
+
+2) **v2 session isolation** (required)
+   - Each scenario starts a **new v2 session** (via `start_workflow`).
+   - Tokens are scenario-scoped secrets: **never reuse tokens across chats**.
+
+3) **Process/storage isolation** (optional; best-effort)
+   - When the operator can restart or the environment supports it, run scenarios with a fresh durable root (e.g. `WORKRAIL_DATA_DIR` per run) or a process namespace.
+   - This is useful for CI and multi-process test harnesses, but is not required for slice 1–3 manual validation.
 
 ## Goals (what success looks like)
 
-1) **Namespaced isolation via config (process-start only):**
-   - Set `WORKRAIL_HOME_DIR` + `WORKRAIL_NAMESPACE` once at MCP server start.
-   - All WorkRail storage (v1 sessions/locks + v2 event logs/snapshots/keys) lives under:
-     - `<home>/namespaces/<namespace>/...`
-   - No runtime switching of namespace (keeps execution deterministic).
+1) **Reliable v2 scenario isolation without per-chat env injection**
+   - New chat per scenario + new v2 session per scenario + no token reuse.
 
-2) **Explicit namespace requirement:**
-   - Namespace MUST be explicitly set via `WORKRAIL_NAMESPACE` environment variable.
-   - All namespaces use isolated paths: `<home>/namespaces/<namespace>/...`
-   - No implicit defaults, no legacy fallback.
-
-4) **Single source of truth for paths (no scattered hardcoding):**
-   - All filesystem roots are derived from a **single capability port** (`WorkRailPathsPort`).
-   - Only the DI composition root touches `process.env`, `os.homedir()`.
-   - Services inject the port and call pure path methods.
-
-5) **Minimal surface area (keep it focused):**
-   - This is not a filesystem abstraction layer or a general storage API.
-   - It's a **canonical path builder** for all WorkRail-owned storage:
-     - `sessionsRoot()` → `SessionsRootPath` — session storage
-     - `dashboardLockPath()` → `LockFilePath` — dashboard primary election
-     - `v2DataRoot()` → `V2DataRootPath` — v2 append-only event logs
-     - `userWorkflowsDir()` → `UserWorkflowsDirPath` — user-defined workflows
-     - `cacheDir()` → `CacheDirPath` — git clone cache and transient data
-     - `activeNamespace()` → `NamespaceConfig` (for observability/logging)
-
-6) **Exclusive namespace ownership (collision detection):**
-   - At most one process may own a namespace at any time.
-   - Acquisition is atomic: first process wins, subsequent processes fail-fast.
-   - Crashed processes don't leave orphaned locks blocking future processes.
-   - Clear error messages identify the owning process (PID, hostname, start time).
+2) **Optional process-level isolation for CI/multi-process**
+   - When `WORKRAIL_NAMESPACE` (or a fresh `WORKRAIL_DATA_DIR`) is provided at process start, all v2 durable state is scoped under that root.
+   - Namespace is process-start config; no runtime switching.
 
 ## Non-goals (explicit boundaries)
 
-- **Not a v2 functional slice:** this is infrastructure, not new execution features (blocked/gaps, export/import, resume).
-- **Not a general "filesystem port":** we already have `FileSystemPort` for I/O; this is **path layout only**.
-- **Not a runtime-switchable namespace:** namespace is process-start config (deterministic); no MCP tool to change it mid-run.
-- **Not network filesystem compatible:** WorkRail requires local filesystem atomicity (O_EXCL). Network filesystems (NFS, SMB, CIFS) are explicitly rejected at startup with fail-fast error. No operator override available.
-- **Not dual-read mode:** path resolution is deterministic from config, not filesystem checks. No "try namespaced, fall back to legacy" logic. Simplifies reasoning and prevents hidden behavior.
-- **Not arbitrary timeout-based locking:** lock validity is determined by explicit process state (alive/dead/suspended/reused), not wall clock time. No 24-hour expiry or similar temporal coupling. This aligns with "determinism over cleverness" — same inputs (process state) always produce same outputs (lock validity decision).
-- **Not backward compatible with v1 tokens:** Namespace isolation introduces v2 tokens with namespace binding. Existing v1 tokens will be rejected with clear error messages. No migration shim or deprecation period.
+- **Not v1 isolation:** v1 sessions/dashboard/workflow cache are out of scope for this doc.
+- **Not automatic per-chat durable store isolation:** without a chat identity signal from MCP, WorkRail cannot safely infer chat boundaries.
+- **Not token namespace binding:** v2 token payload/signature shape is unchanged; isolation is achieved via session IDs and storage layout.
+- **Not runtime namespace switching:** any process-level namespace is fixed at startup.
 
 ## Architecture overview
 
+This design treats isolation as a **closed set of boundaries** (see "Isolation model" above). In real MCP environments with a single long-lived server process, the only always-available isolation boundary is **v2 session identity**.
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                     WorkRail Namespace Architecture                          │
+│                    WorkRail v2 Isolation (Real MCP)                          │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
+│  One long-lived MCP server process (no per-chat identity signal)            │
+│                                                                             │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │                     Root DI Container                                │   │
-│  │  • Global Config (homeDir, basePort)                                │   │
-│  │  • NamespaceRegistry (discovery, lifecycle)                         │   │
-│  │  • BenchmarkOrchestrator (optional)                                 │   │
+│  │ WorkRail MCP Server Process                                          │   │
+│  │  • v2 tools: list_workflows / inspect_workflow / start_workflow /     │   │
+│  │    continue_workflow                                                 │   │
+│  │  • Data root (process-scoped):                                        │   │
+│  │     - default: ~/.workrail/data                                       │   │
+│  │     - optional: WORKRAIL_DATA_DIR=/path                               │   │
 │  └───────────────────────────┬─────────────────────────────────────────┘   │
-│                              │ creates child containers                     │
-│              ┌───────────────┼───────────────┐                             │
-│              ▼               ▼               ▼                             │
-│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐              │
-│  │ Namespace: test1│ │ Namespace: bench│ │ Namespace: prod │              │
-│  │ (scoped child)  │ │ (scoped child)  │ │ (scoped child)  │              │
-│  ├─────────────────┤ ├─────────────────┤ ├──────────────────┤              │
-│  │ mode: ephemeral │ │ mode: sliding   │ │ mode: persistent │              │
-│  │ port: 3472      │ │ port: 3489      │ │ port: 3456       │              │
-│  │ paths: ns/test1 │ │ paths: ns/bench │ │ paths: ns/dev   │              │
-│  │   sessions/     │ │   sessions/     │ │   sessions/      │              │
-│  │   workflows/    │ │   workflows/    │ │   workflows/     │              │
-│  │   cache/        │ │   cache/        │ │   cache/         │              │
-│  │   data/         │ │   data/         │ │   data/          │              │
-│  └─────────────────┘ └─────────────────┘ └──────────────────┘              │
+│                              │ creates durable v2 sessions                   │
+│                              ▼                                               │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ Durable v2 store (process-scoped root)                               │   │
+│  │  data/sessions/<sessionId>/...                                       │   │
+│  │  data/snapshots/...                                                  │   │
+│  │  data/workflows/pinned/...                                           │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+│  Chat isolation requirement: each scenario starts a NEW session via          │
+│  start_workflow and never reuses tokens across chats.                        │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 
-Token Structure (namespace provenance encoded):
-┌──────────────────────────────────────────────────────────────────────────┐
-│ { tokenVersion: 2, namespace: "test1", sessionId: "...", ... }          │
-│ + HMAC-SHA256(namespace_bytes || payload_bytes)  // tamper-proof        │
-└──────────────────────────────────────────────────────────────────────────┘
-
-Port Derivation (deterministic):
-  All namespaces → 3456 + SHA256(namespace) % 256  // 256-port range (3456-3711)
-
-Lifecycle Modes:
-  • ephemeral:  auto-delete on process exit (tests)
-  • sliding:    auto-delete after TTL (CI, benchmarks)
-  • persistent: manual delete only (development)
+Token boundary (v2, unchanged):
+- Tokens are opaque signed refs that include sessionId/runId/nodeId/etc.
+- Isolation between scenarios is achieved by starting a new session and not
+  reusing tokens across chats.
 ```
 
-### Core abstractions
+### Core abstractions (v2-first)
 
-**NamespaceContext** — The single capability bundling all namespace-scoped resources:
-- `paths`: WorkRailPathsPort (storage locations: sessions, lock, v2 data, workflows, cache)
-- `port`: DashboardPort (deterministic from namespace)
-- `tokenOps`: mint/validate tokens scoped to this namespace
-- `config`: NamespaceConfig (identity + lifecycle mode)
+**Session boundary** (required): each scenario is isolated by a fresh `sessionId` created by `start_workflow`.
 
-**NamespaceRegistry** — Manages all namespaces under a home directory:
-- `listNamespaces()`: discover existing namespaces
-- `create(ns)`: create namespace with lifecycle mode
-- `destroy(ns)`: remove namespace and all its data
-- `getContext(ns)`: get NamespaceContext for existing namespace
+**Process/storage boundary** (optional): a process-scoped data root (default `~/.workrail/data`, optional `WORKRAIL_DATA_DIR`) can be used for CI or multi-process isolation, but is not required for manual slice 1–3 validation.
 
-**Scoped DI Containers** — Each namespace gets a child DI container:
-- Root container holds global services (registry, orchestrator)
-- Child container holds namespace-scoped services
-- Prevents cross-namespace mixing at DI level
+## Appendix — Historical namespace design (deprecated)
+
+The sections below describe an earlier namespace-centric isolation design. They are retained for reference, but are not required for v2 slice 1–3 manual/agentic testing in a single long-lived MCP server.
 
 ## Type definitions
 
@@ -256,8 +215,7 @@ type TokenValidationError =
   | { readonly kind: 'malformed'; readonly reason: string }
   | { readonly kind: 'signature_invalid' }  // HMAC verification failed (tampered token)
   | { readonly kind: 'expired'; readonly issuedAt: Timestamp; readonly now: Timestamp }
-  | { readonly kind: 'namespace_mismatch'; readonly expected: NamespaceConfig; readonly actual: NamespaceConfig }
-  | { readonly kind: 'session_not_found'; readonly sessionId: string };
+| { readonly kind: 'session_not_found'; readonly sessionId: string };
 
 // Namespace lock errors (fail-fast with clear diagnostics)
 type NamespaceLockError =
@@ -603,98 +561,39 @@ For CI/CD, mount local volume:
 - Network FS is rare for WorkRail (primarily test isolation use case)
 - Clear workaround available (local directory)
 
-### Decision 6 — Embed namespace in token payload with signature binding
-**Chosen:** Token payload includes `namespace` field, and HMAC signature is computed over `namespace_bytes || payload_bytes`.
+### Decision 6 — Keep v2 tokens namespace-agnostic (process/session isolation only)
 
-**Alternatives considered:**
-- Namespace as separate header/parameter: can be mismatched; no tamper protection.
-- Namespace prefix in token (`ns_<namespace>_<token>`): visible but changes token format; parsing complexity.
-- Namespace only in signature context: tamper-proof but can't inspect namespace from token.
+**Chosen:** Do **not** embed namespace in v2 token payloads or signatures.
 
-**Why embedded + signature:**
-- **Self-describing:** can validate namespace without session lookup (fail-fast).
-- **Tamper-proof:** namespace is bound in HMAC; can't spoof.
-- **Security isolation:** prevents cross-namespace token forgery.
-- **Signature binding:** `HMAC-SHA256(namespace_bytes || payload_bytes)`.
-- **Byte boundary safety:** DNS-safe namespace pattern (`[a-z0-9-]`) guarantees no collision with JSON payload (which starts with `{`). Namespace bytes can never contain `0x7B`, making concatenation unambiguous.
-- **Debuggable:** operators can base64-decode and see which namespace a token belongs to.
-- **Clear errors:** distinct `TOKEN_NAMESPACE_MISMATCH` error code.
-- **Token version bump:** v1 → v2 (breaking change, no backward compatibility per philosophy).
+Tokens remain the locked v2 shape (e.g., `st.v1.*`, `ack.v1.*`, `chk.v1.*`) and remain signed over the canonical payload bytes only.
 
-### Decision 7 — Deterministic dashboard port derivation from namespace
-**Chosen:** `port = 3456 + SHA256(namespace) % 256` (256-port range: 3456-3711).
+**Why:**
+- In real MCP environments, WorkRail cannot reliably observe per-chat identity.
+- Isolation between agent scenarios is achieved via **v2 session boundaries** (fresh `sessionId` per scenario + no token reuse).
+- Optional process-level isolation (CI/multi-process) is achieved via process-scoped storage roots, not by altering token formats.
 
-**Alternatives considered:**
-- Fallback on collision (current behavior): non-deterministic; parallel jobs can't predict ports.
-- Explicit port assignment: full control but operator burden.
-- Port reservation file: coordination complexity; stale entries.
-- Consistent hashing ring: overkill for 256 ports.
+**Namespace interaction (when used at process start):**
+- Tokens reference `sessionId`.
+- Storage lookup for that `sessionId` occurs under the process’s configured root.
+- A token from another process namespace simply fails to resolve because the session does not exist under the current root.
 
-**Why hash-based with 256 ports:**
-- **Deterministic:** same namespace always gets same port; CI jobs can predict.
-- **Low collision:** 0.96% with 100 namespaces, 8.4% with 200 namespaces (birthday paradox: `P ≈ 1 - e^(-n²/2m)` where m=256).
-- **CI/CD scale:** Supports 100+ concurrent jobs with <1% collision probability.
-- **Range:** 3456-3711 (avoids ephemeral port range 32768-65535).
-- **Simple:** ~100 lines of code, no coordination.
-- **Fallback available:** on rare collision, linear scan next 5 ports.
+### Decision 7 — Process-scoped data root override (optional)
 
-### Decision 8 — Scoped DI Containers with Compile-Time Scope Enforcement
+**Chosen:** Keep `WORKRAIL_DATA_DIR` as the primary mechanism for process-level durable root configuration.
 
-**Chosen:** Child containers per namespace + phantom types for scope enforcement.
+**Why:**
+- Works for CI and multi-process test harnesses.
+- Does not require per-chat env injection.
+- Keeps v2 path layout deterministic and centralized.
 
-**Alternatives considered:**
-- Runtime checks only: doesn't prevent registration mistakes (violates type safety)
-- Decorator annotations: metadata only checked at runtime (too late)
-- Explicit service lists: easy to forget; no compile-time guarantee
-- Single container with namespace parameter: viral parameter passing; easy to mix
+### Decision 8 — No per-chat container scoping in a single MCP process
 
-**Why scoped containers + phantom types:**
-- **Compile-time safety:** Can't register wrong-scoped service (type error)
-- **True isolation:** Container boundary prevents cross-namespace mixing
-- **Type-safe:** Services from same container see same namespace
-- **Testable:** Isolated test containers; easy mocking
-- **Familiar:** tsyringe supports child containers natively
-- **Self-documenting:** Type signature shows service scope
+**Chosen:** Do not introduce per-chat namespaces, per-chat child DI containers, or runtime namespace switching.
 
-**Phantom type implementation:**
-```typescript
-declare const APPLICATION_SCOPED: unique symbol;
-declare const NAMESPACE_SCOPED: unique symbol;
-
-type ApplicationScoped<T> = T & { [APPLICATION_SCOPED]: true };
-type NamespaceScoped<T> = T & { [NAMESPACE_SCOPED]: true };
-
-type ApplicationScopedToken<T> = symbol & { __scope: 'application'; __type: ApplicationScoped<T> };
-type NamespaceScopedToken<T> = symbol & { __scope: 'namespace'; __type: NamespaceScoped<T> };
-
-// Tokens are scope-branded at definition site
-export const DI = {
-  Services: {
-    WorkflowCompiler: Symbol('WorkflowCompiler') as ApplicationScopedToken<WorkflowCompiler>,
-    WorkflowInterpreter: Symbol('WorkflowInterpreter') as ApplicationScopedToken<WorkflowInterpreter>,
-  },
-};
-
-// Container factories enforce scope at compile time
-function registerInRoot<T>(token: ApplicationScopedToken<T>, ...): void { ... }
-function registerInChild<T>(token: NamespaceScopedToken<T>, ...): void { ... }
-
-// Compiler enforces correctness
-registerInRoot(DI.Services.WorkflowInterpreter, ...);   // ✅ OK (stateless)
-registerInChild(DI.Services.WorkflowCompiler, ...);     // ❌ Compile error!
-```
-
-**Service scope classification:**
-- **Application-scoped (root container, shared):**
-  - Pure functions: `WorkflowCompiler`, `ValidationEngine`
-  - Immutable config: `AppConfig`, `FeatureFlags`
-  - Stateless ports: `FileSystemPort`, `CryptoPort`
-
-- **Namespace-scoped (child container, isolated):**
-  - Path providers: `WorkRailPathsPort`
-  - Token operations: `TokenSignerV2`
-  - Session state: `SessionManager` (if used)
-  - Execution context: Any service holding per-namespace mutable state
+**Why:**
+- A single long-lived MCP server process serving multiple chats has no reliable chat identifier.
+- Any runtime switching would be implicit/heuristic and would create hidden state.
+- v2 already has a correctness-grade isolation boundary: **sessionId + tokens**.
 
 ## Design locks (architectural constraints)
 
@@ -757,150 +656,42 @@ This layout MUST NOT change without a version bump. **No migration plan** — ha
 
 **Enforcement:** Golden path test asserting expected structure.
 
-### Lock 4 — Explicit Namespace Requirement
+### Lock 4 — Namespace is optional and process-start only
 
-Namespace MUST be set via `WORKRAIL_NAMESPACE`. No default, no fallback.
+`WORKRAIL_NAMESPACE` is an optional **process-start** configuration knob.
 
-**Error message if not set:**
-```
-ERROR: WORKRAIL_NAMESPACE environment variable not set.
+- If `WORKRAIL_NAMESPACE` is set at process start, WorkRail scopes durable storage under `<home>/namespaces/<ns>/...`.
+- If `WORKRAIL_NAMESPACE` is not set, WorkRail uses the default global durable root.
+- WorkRail MUST NOT attempt to infer per-chat identity or auto-switch namespaces at runtime.
 
-WorkRail requires explicit namespace configuration.
-
-Examples:
-  export WORKRAIL_NAMESPACE=dev
-  export WORKRAIL_NAMESPACE=test-$CI_JOB_ID
-```
-
-**Path resolution:**
-```typescript
-// All namespaces use isolated paths
-return {
-  sessions: '<home>/namespaces/<ns>/sessions/',
-  dashboardLock: '<home>/namespaces/<ns>/dashboard.lock',
-  workflows: '<home>/namespaces/<ns>/workflows/',
-  data: '<home>/namespaces/<ns>/data/',
-};
-```
-
-**Why explicit:**
-- No hidden behavior (fail-fast if not set)
-- Aligns with "validate at boundaries, trust inside"
-- Operator makes conscious choice (not implicit default)
-
-**Lock semantics:**
-- **Namespace lock** (`.namespace.lock`): per-namespace ownership; prevents multiple processes from using the same namespace
-- **Dashboard lock** (`dashboard.lock`): per-namespace dashboard primary election; prevents multiple dashboard servers within one namespace
-- Both locks are always present (no special global mode)
-
-**Enforcement:** Config validation fails if `WORKRAIL_NAMESPACE` is unset or empty string.
+**Why:** In real MCP environments the server may be a single long-lived process across many chats. Per-chat durable isolation must be achieved via v2 session boundaries, not namespaces.
 
 ### Lock 6 — branded-types-at-boundaries
 Public APIs of `WorkRailPathsPort` MUST return branded path types. Internal implementations may use `string`, but any path crossing a module boundary MUST be branded.
 
 **Enforcement:** TypeScript compiler (branded types are compile-time enforced).
 
-### Lock 7 — token-namespace-binding
-Tokens MUST include `namespace` field in payload with HMAC signature binding 
-(per Decision 6). Token version is 2.
+### Lock 7 — v2 token shape is unchanged
 
-**Token validation behavior:**
-```typescript
-// Token payload (v2):
-{
-  tokenVersion: 2,
-  namespace: "test-1",  // REQUIRED - proves token provenance
-  tokenKind: "state" | "ack" | "checkpoint",
-  sessionId: "sess_...",
-  // ... other v2 fields (runId, nodeId, etc.)
-}
-// Signature: HMAC-SHA256(key, namespace_bytes || JCS(payload))
-```
+Tokens MUST remain the locked v2 shape (payload/signature inputs unchanged). In particular:
+- Tokens MUST NOT embed any namespace identifier.
+- Token validation MUST be based on signature verification + session lookup.
 
-**Namespace isolation mechanism:**
-1. Token carries namespace in payload (self-describing)
-2. Validation checks `token.namespace === currentNamespace` BEFORE session lookup
-3. Mismatch → fail-fast with `TokenValidationError.namespace_mismatch`
-4. Match → proceed to session lookup in namespace-scoped storage
+Isolation for manual/agentic testing is achieved by:
+- starting a fresh v2 session per scenario (`start_workflow`)
+- never reusing tokens across chats
 
-**Why namespace in token (per Decision 6):**
-- Fail-fast: reject before I/O
-- Debuggable: base64-decode shows which namespace token belongs to
-- Clear errors: `namespace_mismatch` vs ambiguous `session_not_found`
-- Tamper-proof: namespace bound in HMAC signature
+### Lock 8 — no implicit per-chat durable isolation
 
-**Enforcement:** Unit test verifying token from namespace A fails validation in 
-namespace B with `namespace_mismatch` error (not `session_not_found`).
+In a single long-lived MCP server process, WorkRail MUST NOT attempt to infer chat identity or auto-switch durable roots at runtime.
 
-### Lock 8 — deterministic-port-derivation
-Dashboard port MUST be deterministically derived from namespace:
-- All namespaces → `3456 + SHA256(namespaceId) % 256` (256-port range: 3456-3711)
+If a caller needs durable isolation beyond the session boundary, it must be provided at process start (e.g., `WORKRAIL_DATA_DIR` in CI/multi-process scenarios).
 
-Port derivation is a pure function: same namespace always produces same port.
+### Lock 9 — single container per process
 
-**Enforcement:** Unit test asserting `derivePort(ns)` is deterministic across 1000 calls.
+WorkRail runs as a single long-lived MCP server process. The container is process-scoped.
 
-### Lock 9 — Scoped Container Isolation with Compile-Time Enforcement
-
-Each namespace MUST have its own child DI container. Services resolved from a namespace's container MUST NOT access resources from another namespace's container.
-
-**Container hierarchy:**
-```
-Root Container (application-scoped services only)
-├── Child Container: namespace "test-1"
-├── Child Container: namespace "bench-a"
-└── Child Container: namespace "prod"
-```
-
-**Enforcement mechanisms (multiple layers for defense in depth):**
-
-1. **Type-level isolation (primary):** Phantom types brand services with scope
-   ```typescript
-   type ApplicationScopedToken<T> = symbol & { __scope: 'application' };
-   type NamespaceScopedToken<T> = symbol & { __scope: 'namespace' };
-   
-   // Compiler enforces scope boundaries
-   function registerInRoot<T>(token: ApplicationScopedToken<T>, ...): void;
-   function registerInChild<T>(token: NamespaceScopedToken<T>, ...): void;
-   ```
-
-2. **Service classification (documented):**
-   ```typescript
-   // Application-scoped (root container)
-   const DI = {
-     Services: {
-       WorkflowCompiler: Symbol() as ApplicationScopedToken<...>,  // Pure
-       ValidationEngine: Symbol() as ApplicationScopedToken<...>,   // Stateless
-     },
-     Config: {
-       App: Symbol() as ApplicationScopedToken<...>,                // Immutable
-     },
-   };
-   
-   // Namespace-scoped (child container)
-   const DI = {
-     Namespace: {
-       Paths: Symbol() as NamespaceScopedToken<...>,                // Per-namespace
-       TokenSigner: Symbol() as NamespaceScopedToken<...>,          // Namespace-bound
-     },
-   };
-   ```
-
-3. **Architecture test (verification):** `tests/architecture/container-isolation.test.ts`
-   - Create two child containers for namespaces A and B
-   - Resolve all `NamespaceScopedToken` services
-   - Assert instances are different: `contextA !== contextB`
-   - Verify no shared EventEmitters, caches, or mutable state
-
-4. **Code review guideline:** New services must declare scope via type
-   - Is it stateful? → `NamespaceScopedToken`
-   - Is it pure/stateless? → `ApplicationScopedToken`
-   - Update `DI.Services` or `DI.Namespace` accordingly
-
-**Rationale:** 
-- Compile-time enforcement prevents registration mistakes (aligns with type safety philosophy)
-- Runtime tests catch regressions (belt and suspenders)
-- Clear documentation guides developers (which scope to use)
+Per-chat isolation is provided by **v2 session boundaries**, not per-chat DI containers.
 
 ### Lock 10 — namespace-mode-determines-lifecycle
 Namespace lifecycle is determined by its mode at creation time:
@@ -1024,54 +815,18 @@ This pattern automatically excludes:
 
 **Test:** Smart constructor with Result type enforces pattern. Unit tests verify rejection of invalid inputs.
 
-### Invariant 7 — token-namespace-binding
-For any token T minted in namespace N referencing sessionId S:
-- Validation in namespace N finds session S in `<home>/namespaces/N/data/sessions/S/` → succeeds
-- Validation in namespace M looks for session S in `<home>/namespaces/M/data/sessions/S/` → fails with `session_not_found`
+### Invariant 7 — token-session-binding
+For any token referencing a v2 `sessionId = S`:
+- Validation succeeds only if session `S` exists in the process-scoped durable root and the token signature is valid.
+- If session `S` does not exist under the current durable root, validation fails with `session_not_found`.
 
-**Guarantees:** Tokens cannot successfully validate across namespace boundaries 
-because sessions are namespace-isolated via storage paths.
+**Guarantees:** Tokens are capability handles to a specific durable session. They are not transferable across sessions, and scenario isolation is achieved by starting a fresh session per scenario.
 
-**Test:** Mint token in namespace A, attempt validation in namespace B → 
-`session_not_found` error (session exists in A's storage, not B's).
-
-### Invariant 8 — namespace-port-disjointness
-For any two distinct namespaces A and B (with same basePort):
-- `derivePort(A) ≠ derivePort(B)` with high probability (~97.6% for 50 namespaces; fallback scan covers collisions)
-
-**Guarantees:** Parallel namespaces get different ports (barring rare hash collision).
-
-**Test:** Property-based test generating 100 namespace pairs, asserting disjointness.
-
-### Invariant 9 — namespace-lifecycle-consistency
-For any namespace N:
-- `create(N)` → `exists(N) = true`
-- `destroy(N)` → `exists(N) = false` ∧ all paths under N removed
-- `destroy(N)` when `!exists(N)` → idempotent (no error)
-
-**Guarantees:** Lifecycle operations are consistent and idempotent.
-
-**Test:** Create, verify exists, destroy, verify not exists, destroy again (no error).
-
-### Invariant 10 — cross-namespace-read-is-readonly
-Cross-namespace operations (benchmarking comparison) are strictly read-only:
-- Registry can read metrics from multiple namespaces
-- Registry MUST NOT write to a namespace it didn't create in current context
-- Read operations don't affect namespace state
-
-**Guarantees:** Benchmarking doesn't corrupt namespace isolation.
-
-**Test:** Read metrics from namespace A while in namespace B context; verify A unchanged.
-
-### Invariant 11 — namespace-ownership-exclusivity
-For any namespace N at any point in time:
-- At most one process holds `NamespaceLockHandle` for N
-- If process A holds the lock, `acquire(N)` from process B returns `Err(namespace_in_use)`
-- If process A crashes, `acquire(N)` from process B succeeds (stale lock reclaimed)
-
-**Guarantees:** No concurrent processes can corrupt namespace storage.
-
-**Test:** Spawn two processes targeting same namespace; verify exactly one acquires lock; kill winner; verify second can now acquire.
+### Invariant 8 — scenario isolation contract (manual/agentic)
+For manual/agentic testing, each scenario MUST:
+- run in a new chat
+- start a new v2 session (`start_workflow`)
+- never reuse tokens from any other chat
 
 ### Invariant 12 — no-filesystem-probing
 
@@ -1215,7 +970,40 @@ Valid approach:
 
 **Philosophy alignment:** "Determinism over cleverness" + "Control flow from data state". Lock validity is a pure function of process state (alive/dead/suspended/reused), not wall clock time. Same process state always produces same lock validity decision.
 
-## Implementation plan (slices)
+## Implementation plan (v2-only)
+
+This implementation plan focuses on what is achievable and required for v2 manual/agentic testing in a single long-lived MCP server process.
+
+### Slice A — Session isolation contract (docs + ergonomics)
+**Goal:** Make v2 slice 1–3 manual testing reliable without per-chat env injection.
+
+**Changes:**
+- Document the required isolation contract:
+  - new chat per scenario
+  - new v2 session per scenario (`start_workflow`)
+  - never reuse tokens across chats
+  - do not run scenarios in parallel against the same WorkRail instance
+
+### Slice B — Retention/cleanup policy (optional but recommended)
+**Goal:** Prevent the durable store from accumulating confusing state across many runs in a long-lived MCP server.
+
+**Changes:**
+- Add a deterministic retention policy (TTL and/or max session count).
+- Delete only what is safe to delete (derived caches first; sessions only when eligible).
+- On corruption/unknown version: enter safe mode (no deletes) and emit a structured warning.
+
+### Slice C — Process-level isolation for CI (optional)
+**Goal:** Support multi-process isolation when the environment can set process-start config.
+
+**Changes:**
+- Use `WORKRAIL_DATA_DIR` as the primary process-scoped durable root override.
+- `WORKRAIL_NAMESPACE` (if used) remains process-start only and does not affect token formats.
+
+---
+
+## Appendix — Deprecated namespace-based plan (do not implement)
+
+The remainder of this section predates the v2-only, single-process MCP constraints and is retained only for historical context.
 
 ### Slice 1 — Extend config schema + validation
 **Goal:** parse `WORKRAIL_HOME_DIR` + `WORKRAIL_NAMESPACE` at the boundary and return typed values.
@@ -1883,92 +1671,24 @@ Update `LocalKeyringV2` to use `globalKeyringPath()` instead of `keyringPath()`.
 - `tests/integration/namespace-lifecycle-edge-cases.test.ts` (5j)
 
 ### Slice 6 — Update manual test plan (ergonomics)
-**Goal:** make the manual/agentic test plan recommend the new isolation mode.
+**Goal:** make the manual/agentic test plan match real MCP constraints.
 
 **Changes:**
-- Update `docs/testing/v2-slices-1-3-manual-test-plan.md`:
-  - Operator setup: set `WORKRAIL_HOME_DIR=/tmp/workrail-tests`, `WORKRAIL_NAMESPACE=<CHAT_ID>`
-  - Remove mentions of "restart per chat" or "wipe sessions dir" (no longer needed)
+- Update `docs/testing/v2-slices-1-3-manual-test-plan.md` isolation contract:
+  - Required: **new chat** + **fresh v2 session** per scenario (call `start_workflow` in each chat)
+  - Required: **never reuse tokens across chats**
+  - Optional (best-effort): if the operator can restart the server or inject env at process start, use a fresh `WORKRAIL_DATA_DIR` per run
 
 **Files to change:**
 - `docs/testing/v2-slices-1-3-manual-test-plan.md`
 
-### Slice 7 — Token namespace encoding
-**Goal:** Extend token payload to include namespace provenance with signature binding.
+### Slice 7 — (Removed) Token namespace encoding
+This slice is intentionally removed.
 
-**Philosophy alignment:** "Make illegal states unrepresentable" — tokens are bound to namespace at type level via smart constructor.
-
-**Changes:**
-- `src/config/namespace.ts` (new — smart constructor):
-  ```ts
-  export type NamespaceId = Brand<string, 'NamespaceId'>;
-  
-  // Smart constructor — only way to create valid NamespaceId
-  export function parseNamespaceId(input: string): Result<NamespaceId, NamespaceParseError> {
-    const pattern = /^[a-z][a-z0-9-]{0,61}[a-z0-9]$/;
-    if (!pattern.test(input)) {
-      return err({ kind: 'invalid_pattern', value: input, hint: '...' });
-    }
-    return ok(input as NamespaceId);
-  }
-  ```
-
-- `src/v2/durable-core/tokens/token-payload.ts`:
-  ```ts
-  interface TokenPayload {
-    tokenVersion: 2;  // BREAKING CHANGE (was 1)
-    namespace: NamespaceId;  // NEW: branded type (not raw string)
-    sessionId: string;
-    runId: string;
-    nodeId: string;
-    workflowHash: string;
-    issuedAt: number;
-  }
-  ```
-  
-- `src/v2/durable-core/tokens/token-minter.ts`:
-  - Accept `NamespaceId` (branded) in constructor
-  - Include namespace in payload
-  - Compute signature: `HMAC(namespace_utf8_bytes || canonical_payload_bytes)`
-  - **Byte boundary safety:** DNS-safe pattern guarantees namespace can't contain `{` (0x7B), preventing collision with JSON payload
-  - Update token prefix: `st.v1.*` → `st.v2.*`, `ack.v1.*` → `ack.v2.*`, `chk.v1.*` → `chk.v2.*`
-  
-- `src/v2/durable-core/tokens/token-validator.ts`:
-  - **Validation order (fail-fast):**
-    1. Parse structure → `malformed` error
-    2. Verify HMAC → `signature_invalid` error
-    3. Check namespace match → `namespace_mismatch` error (NEW)
-    4. Session lookup → `session_not_found` error
-  - Return `TokenValidationError.namespace_mismatch` if namespace doesn't match current context
-
-**Migration path: Hard break (no backward compatibility)**
-```ts
-type TokenDecodeError =
-  | { readonly kind: 'version_unsupported'; readonly version: 1; 
-      readonly message: 'v1 tokens not supported. Start new session with WORKRAIL_NAMESPACE set.' }
-  // ... other variants
-```
-
-**Why hard break:**
-- Namespace isolation is a new capability; v1 sessions have no namespace
-- Test sessions are ephemeral by nature; starting fresh is expected
-- Philosophy: "No deprecation or backwards compatibility unless specified"
-- Clear error message provides remediation steps
-
-**Tests:**
-- Mint token in namespace A, validate in A → success
-- Mint token in namespace A, validate in B → `namespace_mismatch` error (NOT `session_not_found`)
-- v1 token parsed → `version_unsupported` error with clear message
-- Byte boundary: namespace `test-1` + payload `{"..."}` has unambiguous concatenation
-
-**Files to change:**
-- `src/config/namespace.ts` (new)
-- `src/v2/durable-core/tokens/token-payload.ts`
-- `src/v2/durable-core/tokens/token-minter.ts`
-- `src/v2/durable-core/tokens/token-validator.ts`
-- `tests/unit/v2/tokens.test.ts`
-
-**Estimated Effort:** 0.5 days
+Rationale:
+- In real MCP environments, WorkRail cannot safely infer per-chat identity.
+- v2 tokens are locked to a stable payload/signature shape (no namespace field).
+- Scenario isolation is achieved by **fresh v2 sessions** and **no token reuse across chats**.
 
 ### Slice 8 — Deterministic port derivation
 **Goal:** Derive dashboard port deterministically from namespace with fallback on collision.
