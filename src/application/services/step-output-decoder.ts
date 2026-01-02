@@ -32,6 +32,20 @@ export function decodeForSchemaValidation(output: string, schema: unknown): Sche
   return { value: parsed, warnings: [] };
 }
 
+/**
+ * Determines if a JSON schema expects object or array values.
+ * 
+ * LIMITATIONS:
+ * - Does NOT resolve $ref references. Schemas using { "$ref": "#/$defs/User" }
+ *   will return false even if the referenced schema is object/array.
+ *   To fix this, schema resolution context is required.
+ * - Does NOT handle conditional schemas (if/then/else, dependentSchemas, etc.).
+ * 
+ * CURRENT USAGE:
+ * As of 2025-01-01, no workflows in this repo use schema-type validation rules
+ * (all use contains/regex/length). The limitation is theoretical until schema
+ * validation is adopted in practice.
+ */
 export function schemaExpectsObjectOrArray(schema: unknown): boolean {
   if (schema == null || typeof schema !== 'object') return false;
   const s = schema as any;

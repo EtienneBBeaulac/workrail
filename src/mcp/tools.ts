@@ -25,9 +25,9 @@ export const WorkflowListInput = z.object({});
 export type WorkflowListInput = z.infer<typeof WorkflowListInput>;
 
 export const WorkflowGetInput = z.object({
-  id: z
+  workflowId: z
     .string()
-    .regex(/^[A-Za-z0-9_-]+$/, 'ID must contain only letters, numbers, hyphens, and underscores')
+    .regex(/^[A-Za-z0-9_-]+$/, 'Workflow ID must contain only letters, numbers, hyphens, and underscores')
     .describe('The unique identifier of the workflow to retrieve'),
   mode: z
     .enum(['metadata', 'preview'])
@@ -148,6 +148,7 @@ export const WORKFLOW_TOOL_TITLES: Readonly<Record<WorkflowToolName, string>> = 
 export const CreateSessionInput = z.object({
   workflowId: z
     .string()
+    .regex(/^[A-Za-z0-9_-]+$/, 'Workflow ID must contain only letters, numbers, hyphens, and underscores')
     .describe('Workflow identifier (e.g., "bug-investigation", "mr-review")'),
   sessionId: z
     .string()
@@ -160,7 +161,7 @@ export const CreateSessionInput = z.object({
 export type CreateSessionInput = z.infer<typeof CreateSessionInput>;
 
 export const UpdateSessionInput = z.object({
-  workflowId: z.string().describe('Workflow identifier'),
+  workflowId: z.string().regex(/^[A-Za-z0-9_-]+$/, 'Workflow ID must contain only letters, numbers, hyphens, and underscores').describe('Workflow identifier'),
   sessionId: z.string().describe('Session identifier'),
   updates: z
     .record(z.unknown())
@@ -169,7 +170,7 @@ export const UpdateSessionInput = z.object({
 export type UpdateSessionInput = z.infer<typeof UpdateSessionInput>;
 
 export const ReadSessionInput = z.object({
-  workflowId: z.string().describe('Workflow identifier'),
+  workflowId: z.string().regex(/^[A-Za-z0-9_-]+$/, 'Workflow ID must contain only letters, numbers, hyphens, and underscores').describe('Workflow identifier'),
   sessionId: z.string().describe('Session identifier'),
   path: z
     .string()

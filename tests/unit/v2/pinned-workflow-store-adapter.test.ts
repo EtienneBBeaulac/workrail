@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
+import { errAsync } from 'neverthrow';
 import { LocalPinnedWorkflowStoreV2 } from '../../../src/v2/infra/local/pinned-workflow-store/index.js';
 import { LocalDataDirV2 } from '../../../src/v2/infra/local/data-dir/index.js';
 import { NodeFileSystemV2 } from '../../../src/v2/infra/local/fs/index.js';
@@ -203,5 +204,53 @@ describe('v2 Pinned Workflow Store adapter (error handling)', () => {
 
     expect(result.value).toBeNull();
   });
+
+  it('put cleanup path closes fd even when closeFile fails (error propagation)', async () => {
+    // Create a fake FS that succeeds on most operations but fails on closeFile
+    const closeFileFails = new InMemoryFileSystem();
+    const originalClose = closeFileFails.closeFile.bind(closeFileFails);
+    
+    let closeCalled = false;
+    closeFileFails.closeFile = (fd: number) => {
+      closeCalled = true;
+      return originalClose(fd).andThen(() => 
+        errAsync({ code: 'FS_IO_ERROR', message: 'closeFile failed intentionally' } as const)
+      );
+    };
+
+    const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: '/test-root' });
+    const store = new LocalPinnedWorkflowStoreV2(dataDir, closeFileFails);
+    const crypto = new NodeCryptoV2();
+
+    const compiled = CompiledWorkflowSnapshotSchema.parse({
+      schemaVersion: 1,
+      sourceKind: 'v1_pinned',
+      workflowId: 'test-workflow-id',
+      name: 'Test Workflow',
+      description: 'A test workflow',
+      version: '1.0.0',
+      definition: { nodes: [], edges: [] },
+    });
+
+    const hashResult = workflowHashForCompiledSnapshot(compiled, crypto);
+    const hash = hashResult._unsafeUnwrap();
+
+    // Force a write error by making writeAll fail after fd is opened
+    const originalWriteAll = closeFileFails.writeAll.bind(closeFileFails);
+    closeFileFails.writeAll = () => 
+      errAsync({ code: 'FS_IO_ERROR', message: 'writeAll failed' } as const);
+
+    const putResult = await store.put(hash, compiled);
+
+    // Cleanup should have been attempted
+    expect(closeCalled).toBe(true);
+
+    // Original error should propagate (writeAll failure, not closeFile failure)
+    expect(putResult.isErr()).toBe(true);
+    if (putResult.isOk()) throw new Error('Expected Err result');
+    expect(putResult.error.code).toBe('PINNED_WORKFLOW_IO_ERROR');
+    expect(putResult.error.message).toContain('writeAll failed');
+  });
 });
+
 

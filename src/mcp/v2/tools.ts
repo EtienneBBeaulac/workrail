@@ -5,13 +5,13 @@ export const V2ListWorkflowsInput = z.object({});
 export type V2ListWorkflowsInput = z.infer<typeof V2ListWorkflowsInput>;
 
 export const V2InspectWorkflowInput = z.object({
-  workflowId: z.string().min(1).describe('The workflow ID to inspect'),
+  workflowId: z.string().min(1).regex(/^[A-Za-z0-9_-]+$/, 'Workflow ID must contain only letters, numbers, hyphens, and underscores').describe('The workflow ID to inspect'),
   mode: z.enum(['metadata', 'preview']).default('preview').describe('Detail level'),
 });
 export type V2InspectWorkflowInput = z.infer<typeof V2InspectWorkflowInput>;
 
 export const V2StartWorkflowInput = z.object({
-  workflowId: z.string().min(1).describe('The workflow ID to start'),
+  workflowId: z.string().min(1).regex(/^[A-Za-z0-9_-]+$/, 'Workflow ID must contain only letters, numbers, hyphens, and underscores').describe('The workflow ID to start'),
   context: z.record(z.unknown()).optional().describe('External context inputs (conditions, parameters). Do not include workflow progress state.'),
 });
 export type V2StartWorkflowInput = z.infer<typeof V2StartWorkflowInput>;
