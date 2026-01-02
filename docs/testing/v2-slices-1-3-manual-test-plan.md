@@ -5,21 +5,29 @@
 **Test Strategy**: Each test scenario runs in a **separate chat** to prevent information leakage and ensure clean agent state.
 
 ## Isolation Contract (prevents test bleed)
-For results to be trustworthy, each chat MUST be isolated at two layers:
+For results to be trustworthy, each chat MUST be isolated at three layers:
 1) **New chat** (no conversational memory bleed)
-2) **Fresh durable store** (no persisted-session bleed)
+2) **Fresh v2 session** (session-scoped correctness boundary)
+3) **Token provenance discipline** (no cross-chat token reuse)
 
-Hard rules:
+Hard rules (required):
+- **Start a brand new chat** for each scenario.
+- **In each chat, create a brand new v2 session** by calling `start_workflow` and only use tokens minted in that chat.
 - **Do not reuse tokens across chats**. Treat tokens as single-scenario secrets.
-- **Do not run these chats in parallel** against the same WorkRail instance/data dir.
-- Use either:
-  - **Per-chat data dirs** (recommended): set `WORKRAIL_DATA_DIR=/tmp/workrail-v2-tests/<chat-id>` before starting the chat, or
-  - **Wipe between chats**: delete the configured WorkRail sessions directory before starting the next chat.
+- **If token provenance is uncertain** (copied from another chat, or you’re not sure): STOP and mark the scenario invalid.
+- **Do not advance the same session in parallel** from multiple chats (single-writer per session). Recommended: run all chats sequentially.
+
+Why this works for Slices 1–3:
+- The correctness properties being tested (rehydrate purity, replay/idempotency, fork-on-rewind) are session-scoped.
+- Old sessions on disk do not affect these tests unless you reuse tokens or race on the same session.
+
+Optional stronger durable isolation (only if feasible in your environment):
+- Restart the WorkRail MCP server between chats with a fresh data root.
 
 **Prerequisites**:
 - WorkRail v2 Slices 1-3 implementation complete
 - `WORKRAIL_ENABLE_V2_TOOLS=true` set in environment
-- Ability to isolate durable state per chat (`WORKRAIL_DATA_DIR` or wipe)
+- Ability to run each scenario in a separate chat (no parallel runs)
 - At least one simple workflow exists (e.g., `bug-investigation.json`)
 
 ---
@@ -27,16 +35,19 @@ Hard rules:
 ## Test Execution Instructions (Human Operator)
 
 For each test chat below:
-1. Pick a unique `CHAT_ID` (e.g., `chat-1-happy-path`).
-2. Ensure durable isolation:
-   - Preferred: set `WORKRAIL_DATA_DIR=/tmp/workrail-v2-tests/<CHAT_ID>` for this chat, or
-   - Alternative: wipe the WorkRail sessions store before starting.
-3. Start a **brand new chat** (critical for isolation).
-4. Copy the **Global Agent Instructions** block, then the chat’s **Agent Instructions** block.
+1. Pick a unique `CHAT_ID` label (e.g., `chat-1-happy-path`). (Used only for reporting and output tagging.)
+2. Start a **brand new chat** (critical for isolation).
+3. Copy the **Global Agent Instructions** block, then the chat’s **Agent Instructions** block.
+4. When the agent asks for `CHAT_ID`, provide the value from step 1.
 5. Let the agent execute without interruption.
 6. Collect the agent's final report.
 7. Verify against "Expected Outcomes".
 8. Record pass/fail in the summary table (include the `CHAT_ID` you used).
+
+Stop condition:
+- If token provenance is violated (a token from another chat is used, or provenance is uncertain), stop and restart the chat. Mark the attempt invalid.
+
+Note: This plan assumes the WorkRail MCP server may be a single long-lived process. Durable isolation is achieved by creating a brand new v2 session in each chat via `start_workflow` and never reusing tokens across chats.
 
 ---
 
@@ -47,15 +58,26 @@ Copy/paste this at the very top of every test chat before the chat-specific inst
 ```
 You are running WorkRail v2 slice validation.
 
+SETUP:
+- Ask the operator for CHAT_ID (a short label like "chat-3-replay").
+- Use CHAT_ID in every output you submit.
+
 NON-NEGOTIABLE ISOLATION RULES:
-- Confirm with the operator that this is a brand new chat AND they used a fresh durable store (unique WORKRAIL_DATA_DIR for this CHAT_ID, or wiped sessions).
+- Confirm with the operator that this is a brand new chat.
+- Confirm you will create a brand new v2 session in THIS chat by calling start_workflow.
 - Do not reuse tokens from any other test chat.
-- Do not run multiple tests in parallel.
+- Do not advance the same session in parallel from multiple chats.
+- If token provenance is violated or uncertain: STOP and report "INVALID TEST: TOKEN CONTAMINATION".
 
 TOOLING RULES:
 - Use ONLY v2 tools: list_workflows, inspect_workflow, start_workflow, continue_workflow.
 - Never use workflow_next or any v1 tools.
 - Never inspect/decode token contents.
+- Do not attempt any resume-like behavior; only use sessions created in this chat.
+
+OUTPUT TAGGING RULES:
+- Every notesMarkdown you submit MUST be prefixed with:
+  [CHAT_ID=<CHAT_ID>][SCENARIO=<scenario-name>] 
 
 REPORTING RULES:
 - For each tool call, record: tool name, key inputs (redact tokens to first 16 chars + '…'), and the full response.
@@ -87,7 +109,7 @@ EXECUTION:
 
 3. Complete the first pending step
    - Call continue_workflow with the stateToken and ackToken
-   - Provide minimal output: {"notesMarkdown": "Step 1 complete"}
+   - Provide minimal output: {"notesMarkdown": "[CHAT_ID=<CHAT_ID>][SCENARIO=chat-1-happy-path] Step 1 complete"}
    - Record the response structure
 
 4. Continue until workflow completes
@@ -137,11 +159,11 @@ SETUP:
 
 FIRST EXECUTION PATH:
 3. Advance step 1: call continue_workflow with stateToken_0 and ackToken_0
-   - Output: {"notesMarkdown": "Path A: step 1"}
+   - Output: {"notesMarkdown": "[CHAT_ID=<CHAT_ID>][SCENARIO=chat-2-rewind-fork] Path A: step 1"}
    - Save the NEW tokens (stateToken_1, ackToken_1)
 
 4. Advance step 2: call continue_workflow with stateToken_1 and ackToken_1
-   - Output: {"notesMarkdown": "Path A: step 2"}
+   - Output: {"notesMarkdown": "[CHAT_ID=<CHAT_ID>][SCENARIO=chat-2-rewind-fork] Path A: step 2"}
    - Save the NEW tokens (stateToken_2, ackToken_2)
 
 REWIND TEST:
@@ -150,7 +172,7 @@ REWIND TEST:
    - Step 2 (Path A) should be deleted from your visible history
 
 6. Take a DIFFERENT path: call continue_workflow with stateToken_1 and ackToken_1
-   - Output: {"notesMarkdown": "Path B: step 2 alternative"}
+   - Output: {"notesMarkdown": "[CHAT_ID=<CHAT_ID>][SCENARIO=chat-2-rewind-fork] Path B: step 2 alternative"}
    - Save the tokens (stateToken_2b, ackToken_2b)
 
 REPORT (structured):
@@ -192,13 +214,13 @@ SETUP:
 
 FIRST ADVANCEMENT:
 3. Call continue_workflow with stateToken_0 and ackToken_0
-   - Output: {"notesMarkdown": "First execution"}
+   - Output: {"notesMarkdown": "[CHAT_ID=<CHAT_ID>][SCENARIO=chat-3-idempotency-replay] First execution"}
    - Record ENTIRE response (copy/paste the full JSON)
    - Save the new stateToken_1
 
 REPLAY TEST:
 4. Call continue_workflow AGAIN with the SAME stateToken_0 and ackToken_0
-   - Output: {"notesMarkdown": "First execution"}
+   - Output: {"notesMarkdown": "[CHAT_ID=<CHAT_ID>][SCENARIO=chat-3-idempotency-replay] First execution"}
    - Record ENTIRE response again
 
 5. Compare the two responses from steps 3 and 4
@@ -257,7 +279,7 @@ TEST WITHOUT ACK:
    - Compare with step 3 response
 
 5. Now call continue_workflow WITH stateToken_0 AND ackToken_0
-   - Output: {"notesMarkdown": "Actually advancing now"}
+   - Output: {"notesMarkdown": "[CHAT_ID=<CHAT_ID>][SCENARIO=chat-4-rehydrate-only] Actually advancing now"}
    - Record the new stateToken_1
 
 6. Call continue_workflow with ONLY stateToken_1 (no ackToken)
@@ -410,7 +432,7 @@ EXECUTION WITH OUTPUTS:
 For each step (repeat until isComplete is true):
 4. Read the pending.prompt
 5. Call continue_workflow with current stateToken and ackToken
-   - Provide output: {"notesMarkdown": "Completed step <stepId>: <brief summary of what the prompt asked>"}
+   - Provide output: {"notesMarkdown": "[CHAT_ID=<CHAT_ID>][SCENARIO=chat-7-multi-step] Completed step <stepId>: <brief summary of what the prompt asked>"}
 6. Record:
    - New tokens received
    - Whether pending changed
@@ -539,11 +561,12 @@ These are NOT bugs; they are missing Slice 4+ features:
 ## Debugging Failed Tests
 
 If any test fails:
-1. Check `~/.workrail/data/sessions/` for persisted data
-2. Verify `WORKRAIL_ENABLE_V2_TOOLS=true` is set
-3. Check for lock file conflicts: `~/.workrail/data/sessions/<sessionId>/.lock`
-4. Review agent's exact tool calls (were parameters malformed?)
-5. Check for stack traces in terminal output
+1. Confirm the agent started a fresh session in this chat via `start_workflow` (i.e., did not paste/reuse tokens from another chat).
+2. Confirm tests were not run in parallel.
+3. Review the agent's exact tool calls (were parameters malformed? were stateToken/ackToken mixed across runs?).
+4. Verify `WORKRAIL_ENABLE_V2_TOOLS=true` is set.
+5. (Optional, if you have local filesystem access) Check for lock file conflicts under the WorkRail data dir: `.../data/sessions/<sessionId>/.lock`.
+6. Check for stack traces in terminal output.
 
 ---
 
@@ -553,12 +576,22 @@ If any test fails:
 - Node.js >=20
 - WorkRail v2 Slices 1-3 code complete
 - `WORKRAIL_ENABLE_V2_TOOLS=true` environment variable
-- Clean `~/.workrail/data/` directory (or delete before testing)
+- WorkRail v2 data dir is accessible (no special per-chat data dir setup is required for this plan)
 
 **Recommended:**
 - Use a simple 2-3 step workflow for initial tests
 - Test with a workflow that has NO loops first (loops add complexity)
 - Run each chat in strict sequence (don't parallelize; session conflicts)
+
+---
+
+## Optional: Stronger durable isolation (only if feasible)
+
+If your environment lets you restart the WorkRail MCP server between chats, you can get even stronger isolation by starting each chat against an empty v2 durable store (fresh data dir). This is not required for Slices 1–3 if you follow the token/session isolation rules.
+
+Options:
+- Restart the MCP server with a fresh v2 data root (`WORKRAIL_DATA_DIR`), or
+- Wipe the v2 data dir between chats.
 
 ---
 
