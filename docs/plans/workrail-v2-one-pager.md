@@ -27,6 +27,12 @@ Until v2 is fully shipped, the v2 MCP tool surface may be gated behind an explic
 Local data may also be rooted under a WorkRail-owned data dir, optionally overridden for testing/dev:
 - `WORKRAIL_DATA_DIR=/path/to/workrail-data`
 
+For test isolation and CI/CD parallelism, namespace support is available:
+- `WORKRAIL_NAMESPACE=test-1` (process-start config; scopes all storage paths)
+- `WORKRAIL_HOME_DIR=/tmp/workrail-tests` (optional; override home directory)
+
+See `docs/design/test-isolation-mode.md` for full namespace isolation specification.
+
 ## Invariants (v2 guarantees)
 
 1) **Token-based execution**: agents only round-trip opaque handles; `continue_workflow` supports safe rehydrate and idempotent advance (`ackToken` with `attemptId`).
