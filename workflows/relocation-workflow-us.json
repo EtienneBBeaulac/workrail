@@ -50,7 +50,7 @@
     },
     {
       "name": "defineNonObvious",
-      "definition": "A candidate is 'non-obvious' if:\n- It is NOT in `userTopOfMind`, AND\n- It is NOT in the top-N most populous US metros list used for this run (N default 20).\n\nCustom/city/county candidates: if the candidate's displayName contains or is anchored to a top-N metro/city name, treat it as obvious.\n\nRecord the top-N list source and N in the dossier."
+      "definition": "A candidate is 'non-obvious' if:\n- It is NOT in `userTopOfMind`, AND\n- It is NOT in the top-N most populous US metros list used for this run (N default 100).\n\nDo NOT use substring matching (\"contains\"/\"anchored to\") to infer obviousness for city/county/custom candidates. If you cannot deterministically map a city/county/custom boundary to an MSA in the top-N list, mark obviousness as Unknown and do not count it toward non-obvious requirements.\n\nAdditionally track `qualifyingNonObviousCandidateCount`: candidates that are non-obvious AND plausibly pass dealbreakers (based on first-pass screening signal).\n\nRecord the top-N list source and N in the dossier."
     },
     {
       "name": "missingDataPolicy",
@@ -65,7 +65,7 @@
     {
       "id": "phase-0-scope-and-artifacts",
       "title": "Phase 0: Scope, Modules, and Paper-Trail Artifacts",
-      "prompt": "Establish scope, modules, and artifact structure.\n\n1) Confirm v1 scope: US-only relocation.\n2) Capture top-of-mind list (optional): ask the user for `userTopOfMind` (0–10 areas).\n3) Determine user context and activate lightweight modules (select all that apply):\n   - kids/schools\n   - commute\n   - transit\n   - climate risk\n   - healthcare access\n   - career/job market\n   - outdoors\n   - nightlife/arts\n   - safety\n   - taxes\n   - diversity/community\n   - disability accessibility\n\n4) Define primary search granularity for this run (set `candidateType`):\n   - Default: metro\n   - Optional: city, county, custom\n\n5) Custom areas (v1):\n   - Set `customAreaMode = radius`\n   - Custom AreaSpec format: center (place+stateCode) + radiusMiles\n\n6) Initialize artifacts (write-or-paste):\n   - Master dossier: `RELOCATION_DOSSIER.md`\n   - Profiles directory: `relocation-profiles/`\n   - Profile naming: `relocation-profiles/<candidate-slug>.md`\n\nIn the dossier, create these sections:\n- User Context & Modules\n- Boundary & Definitions\n- Aggregation & Comparability Policy\n- Preferences (Draft)\n- Constraints & Dealbreakers\n- Missing Data Policy\n- Sources Strategy\n- Candidate Pool (Breadth)\n- Screened Candidates\n- Screening Claims Ledger\n- Shortlist\n- Profiles Index\n- Comparison & Ranking\n- Machine State Checkpoints\n- Decision Log (append-only)\n\n**Set context variables (required):**\n- activeModules: string[]\n- candidateType: metro|city|county|custom\n- customAreaMode: radius\n- userTopOfMind: string[] (empty array allowed)\n\nOutput (in chat):\n- activeModules\n- candidateType\n- customAreaMode\n- userTopOfMind\n- Artifact paths created\n\nThen ask user to confirm modules + candidateType before proceeding.",
+      "prompt": "Establish scope, modules, and artifact structure.\n\n1) Confirm v1 scope: US-only relocation.\n2) Capture top-of-mind list (optional): ask the user for `userTopOfMind` (0–10 areas).\n3) Determine user context and activate lightweight modules (select all that apply):\n   - kids/schools\n   - commute\n   - transit\n   - climate risk\n   - healthcare access\n   - career/job market\n   - outdoors\n   - nightlife/arts\n   - safety\n   - taxes\n   - diversity/community\n   - disability accessibility\n   - amenities/errands\n   - air quality\n   - noise\n   - internet/infra\n\n4) Define primary search granularity for this run (set `candidateType`):\n   - Default: metro\n   - Optional: city, county, custom\n\n5) Custom areas (v1):\n   - Set `customAreaMode = radius`\n   - Custom AreaSpec format: center (place+stateCode) + radiusMiles\n\n6) Initialize artifacts (write-or-paste):\n   - Master dossier: `RELOCATION_DOSSIER.md`\n   - Profiles directory: `relocation-profiles/`\n   - Profile naming: `relocation-profiles/<candidate-slug>.md`\n\nIn the dossier, create these sections:\n- User Context & Modules\n- Boundary & Definitions\n- Aggregation & Comparability Policy\n- Preferences (Draft)\n- Constraints & Dealbreakers\n- Missing Data Policy\n- Sources Strategy\n- Candidate Pool (Breadth)\n- Screened Candidates\n- Screening Claims Ledger\n- Baseline Flags (Not Scored)\n- Red Flag Gate Decisions (append-only)\n- Shortlist\n- Profiles Index\n- Comparison & Ranking\n- Machine State Checkpoints\n- Decision Log (append-only)\n\n**Set context variables (required):**\n- activeModules: string[]\n- candidateType: metro|city|county|custom\n- customAreaMode: radius\n- userTopOfMind: string[] (empty array allowed)\n- timelineToMove: 0-3 months|3-12 months|12+ months\n- householdProfile: string\n- housingPlan: { mode: rent|buy|either, budgetRange?: string }\n- workConstraints: { mode: remote|hybrid|onsite, timeZonesAllowed?: string[] }\n- geoExclusions: { excludeStates?: string[], excludeRegions?: string[] }\n- diversityDimensions: string[]\n\nOutput (in chat):\n- activeModules\n- candidateType\n- customAreaMode\n- userTopOfMind\n- timelineToMove\n- householdProfile\n- housingPlan\n- workConstraints\n- geoExclusions\n- diversityDimensions\n- Artifact paths created\n\nThen ask user to confirm modules + candidateType before proceeding.",
       "agentRole": "You are a relocation workflow coordinator. Create structure first, then proceed systematically.",
       "validationCriteria": [
         {
@@ -87,6 +87,36 @@
           "type": "contains",
           "value": "userTopOfMind",
           "message": "Must set userTopOfMind (can be empty)"
+        },
+        {
+          "type": "contains",
+          "value": "timelineToMove",
+          "message": "Must set timelineToMove"
+        },
+        {
+          "type": "contains",
+          "value": "householdProfile",
+          "message": "Must set householdProfile"
+        },
+        {
+          "type": "contains",
+          "value": "housingPlan",
+          "message": "Must set housingPlan"
+        },
+        {
+          "type": "contains",
+          "value": "workConstraints",
+          "message": "Must set workConstraints"
+        },
+        {
+          "type": "contains",
+          "value": "geoExclusions",
+          "message": "Must set geoExclusions (can be empty)"
+        },
+        {
+          "type": "contains",
+          "value": "diversityDimensions",
+          "message": "Must set diversityDimensions"
         }
       ],
       "requireConfirmation": true
@@ -105,9 +135,29 @@
     {
       "id": "phase-1-preference-discovery",
       "title": "Phase 1: Preference Discovery (Draft) + Calibration Setup",
-      "prompt": "Discover what the user cares about before searching.\n\n1) Gather constraints:\n- Hard constraints (must-have): geography constraints, climate constraints, max budget, job constraints, family constraints, health constraints.\n- Anti-goals (explicit non-goals).\n- Timeline.\n\n2) Draft preferences as:\n- Dealbreakers\n- Strong preferences\n- Mild preferences\n\n3) Create an initial weight model (draft) across the activated modules:\n- Pick top 6–10 criteria.\n- Assign weights (sum to 100).\n\n**Required output format (exact keys):**\n- weights: [{ criterion: string, weight: number }]\n- weightsCount: <number>\n- weightsSumCheck: 100\n\n4) Update `RELOCATION_DOSSIER.md`:\n- Fill Preferences (Draft)\n- Fill Constraints & Dealbreakers\n- Add initial Weight Model (Draft)\n\nKeep it generic: prefer questions about tradeoffs (e.g., \"Would you trade smaller home for better walkability?\").\n\nOutput: Draft preferences + a short list of open questions (max 5).",
+      "prompt": "Discover what the user cares about before searching.\n\n1) Gather constraints:\n- Hard constraints (must-have): geography constraints, climate constraints, max budget, job constraints, family constraints, health constraints.\n- Anti-goals (explicit non-goals).\n- Timeline.\n\n2) Draft preferences as:\n- Dealbreakers\n- Strong preferences\n- Mild preferences\n\n3) Create an initial weight model (draft) across the activated modules:\n- Pick top 6–10 criteria.\n- Assign weights (sum to 100).\n\nIf the user is unsure how to pick numbers, use a temporary equal-weight draft (e.g., 8 criteria → 12,12,12,12,12,12,14,14) and proceed. A later step can help derive better weights via Most/Least comparisons.\n\n**Required output format (exact keys):**\n- dealbreakers: string[]\n- geoConstraints: { includeStates?: string[], excludeStates?: string[], includeRegions?: string[], excludeRegions?: string[], timeZonesAllowed?: string[] }\n- proximityConstraints: { near?: [{ feature: string, maxDriveMinutes?: number, maxMiles?: number }] }\n- climateConstraints: { summerHeat?: low|medium|high, humidityTolerance?: low|medium|high, winterSeverityTolerance?: low|medium|high, sunshineNeed?: low|medium|high, snowIceNoGo?: boolean }\n- urbanFormPreference: { density: dense|mixed|suburban|small-town|rural, walkabilityImportance?: low|medium|high }\n- policyCultureConstraints: { mustHave?: string[], mustAvoid?: string[] }\n- weights: [{ criterion: string, weight: number }]\n- weightsCount: <number>\n- weightsSumCheck: 100\n\n4) Update `RELOCATION_DOSSIER.md`: \n- Fill Preferences (Draft)\n- Fill Constraints & Dealbreakers\n- Add initial Weight Model (Draft)\n\nKeep it generic: prefer questions about tradeoffs (e.g., \"Would you trade smaller home for better walkability?\").\n\nOutput: Draft preferences + a short list of open questions (max 5).",
       "agentRole": "You are a facilitator eliciting preferences through tradeoffs and constraints.",
       "validationCriteria": [
+        {
+          "type": "contains",
+          "value": "dealbreakers:",
+          "message": "Must output dealbreakers"
+        },
+        {
+          "type": "contains",
+          "value": "geoConstraints:",
+          "message": "Must output geoConstraints"
+        },
+        {
+          "type": "contains",
+          "value": "climateConstraints:",
+          "message": "Must output climateConstraints"
+        },
+        {
+          "type": "contains",
+          "value": "urbanFormPreference:",
+          "message": "Must output urbanFormPreference"
+        },
         {
           "type": "contains",
           "value": "weights:",
@@ -127,9 +177,24 @@
       "requireConfirmation": false
     },
     {
+      "id": "phase-1c-weights-maxdiff-optional",
+      "title": "Phase 1c: Weight Derivation Helper (MaxDiff, Optional)",
+      "prompt": "Optional helper to reduce weight-setting friction.\n\nAsk the user: \"Do you want help deriving weights using Most/Least comparisons? (yes/no)\"\n\nIf NO:\n- Set pairwiseUsed = false\n- Set maxDiffSetsCount = 0\n- Keep the existing weights from Phase 1\n\nIf YES:\n1) Build deterministic MaxDiff sets from the current criteria list (in the order they appear in `weights`).\n   - Let N = weightsCount\n   - If N <= 7: use 3 sets of 4 criteria\n   - If N >= 8: use 4 sets of 5 criteria\n   - Sets are rotations of the criteria list (no randomness):\n     - set0 = first K\n     - set1 = rotate left by 1, take first K\n     - set2 = rotate left by 2, take first K\n     - set3 = rotate left by 3, take first K (only if 4 sets)\n2) For each set, ask TWO questions:\n   - \"Which is MOST important to you?\"\n   - \"Which is LEAST important to you?\"\n3) Derive weights deterministically from counts:\n   - raw[c] = mostCount[c] - leastCount[c]\n   - shifted[c] = raw[c] - min(raw) + 1 (so all >= 1)\n   - weight[c] = round(shifted[c] / sum(shifted) * 100)\n   - Fix rounding drift by adjusting the largest weight to make the sum exactly 100\n   - If all raw values are equal (no signal), keep original weights and note that in weightsDeltaSummary\n4) Show the derived weights and allow ONE small tweak pass:\n   - User may adjust up to 2 weights; re-normalize to sum=100\n\nUpdate `RELOCATION_DOSSIER.md` Preferences section:\n- Record whether MaxDiff was used\n- Record the sets and user picks (Most/Least)\n- Record the final weights and 1–5 bullets explaining what changed\n\n**Required output format (exact keys):**\n- pairwiseUsed: true|false\n- maxDiffSetsCount: <number>\n- weights: [{ criterion: string, weight: number }]\n- weightsCount: <number>\n- weightsSumCheck: 100\n- weightsDeltaSummary: [1–5 bullets]",
+      "agentRole": "You are helping the user derive stable weights using bounded Most/Least comparisons.",
+      "validationCriteria": [
+        { "type": "regex", "pattern": "pairwiseUsed:\\s*(true|false)", "message": "Must output pairwiseUsed" },
+        { "type": "contains", "value": "maxDiffSetsCount", "message": "Must output maxDiffSetsCount" },
+        { "type": "contains", "value": "weights:", "message": "Must output weights array" },
+        { "type": "regex", "pattern": "weightsCount:\\s*(6|7|8|9|10)", "message": "weightsCount must be 6–10" },
+        { "type": "regex", "pattern": "weightsSumCheck:\\s*100", "message": "weightsSumCheck must be 100" },
+        { "type": "contains", "value": "weightsDeltaSummary", "message": "Must output weightsDeltaSummary" }
+      ],
+      "requireConfirmation": true
+    },
+    {
       "id": "phase-1b-calibration-deck",
       "title": "Phase 1b: Preference Calibration Deck (Anti-Anchoring)",
-      "prompt": "Generate a calibration deck of 8–12 diverse US location archetypes (not specific cities yet). Examples: dense transit metro, college town, mountain small city, coastal mid-size, sunbelt suburb, rust-belt revival city, DC-adjacent, etc.\n\nFor each archetype:\n- 2–3 sentences describing lifestyle and typical tradeoffs\n- Who it fits / who it frustrates\n- What it implies about the weight model\n\nAsk user to:\n- Rank top 3 and bottom 3 archetypes\n- Name 1–2 surprises (\"I didn't expect to like...\")\n\nThen update `RELOCATION_DOSSIER.md`:\n- Add Calibration Findings (what changed in preferences)\n- Revise the Weight Model accordingly\n\n**Required output format (exact keys):**\n- calibrationTop3: [string, string, string]\n- calibrationBottom3: [string, string, string]\n- weightsDeltaSummary: [1–5 bullets]\n- weights: [{ criterion: string, weight: number }]\n\nOutput: Updated weight model and what changed because of calibration.",
+      "prompt": "Generate a calibration deck of 8–12 diverse US location archetypes (not specific cities yet). Examples: dense transit metro, college town, mountain small city, coastal mid-size, sunbelt suburb, rust-belt revival city, DC-adjacent, etc.\n\nFor each archetype:\n- 2–3 sentences describing lifestyle and typical tradeoffs\n- Who it fits / who it frustrates\n- What it implies about the weight model\n\nAsk user to:\n- Rank top 3 and bottom 3 archetypes\n- Name 1–2 surprises (\"I didn't expect to like...\")\n\nThen update `RELOCATION_DOSSIER.md`:\n- Add Calibration Findings (what changed in preferences)\n- Revise the Weight Model accordingly (weights may have been derived via MaxDiff in Phase 1c)\n\nThen revise (explicitly) any of these if calibration implies changes:\n- geoConstraints\n- climateConstraints\n- urbanFormPreference\n- proximityConstraints\n\n**Required output format (exact keys):**\n- calibrationTop3: [string, string, string]\n- calibrationBottom3: [string, string, string]\n- weightsDeltaSummary: [1–5 bullets]\n- derivedSignals: { densityLeaning: string, climateLeaning: string, regionLeaning: string, travelLeaning: string }\n- weights: [{ criterion: string, weight: number }]\n\nOutput: Updated constraints (if changed), updated weight model, and what changed because of calibration.",
       "agentRole": "You are an anti-anchoring specialist. Use diversity to reveal latent preferences.",
       "validationCriteria": [
         {
@@ -149,6 +214,11 @@
         },
         {
           "type": "contains",
+          "value": "derivedSignals",
+          "message": "Must output derivedSignals"
+        },
+        {
+          "type": "contains",
           "value": "weights:",
           "message": "Must output updated weights array"
         }
@@ -158,9 +228,19 @@
     {
       "id": "phase-2-policy-and-gates",
       "title": "Phase 2: Missing-Data Policy + Gates (Lock-In)",
-      "prompt": "Lock in the decision mechanics before researching candidates.\n\n1) Choose a Missing Data Policy (must be explicit) and record it as `missingDataPolicy`:\n- neutral\n- penalize\n- followup_required\n\n2) Define anti-anchoring gate parameters:\n- minCandidatePool (default 20)\n- minNonObviousCandidates (default 6)\n\n3) Define shortlist range:\n- shortlistMin (default 8)\n- shortlistMax (default 12)\n\n4) Define screening caps (to keep Phase 4 scalable):\n- screeningTopCriteriaCount (default 3)  // screen only dealbreakers + top N weighted criteria\n- screeningMaxClaimsPerCandidate (default 3)\n- screeningMaxSourcesPerClaim (default 1)\n- screeningTimeboxMinutesPerCandidate (default 5)\n\n5) Define screening batching (to avoid huge loop iteration limits):\n- screeningBatchSize (default 10)\n\n6) Update `RELOCATION_DOSSIER.md`:\n- Missing Data Policy\n- Anti-Anchoring Gate\n- Shortlist Size Target\n- Screening Caps\n- Screening Batching\n\n**Required output format (exact keys):**\n- missingDataPolicy: neutral|penalize|followup_required\n- minCandidatePool: <number>\n- minNonObviousCandidates: <number>\n- shortlistMin: <number>\n- shortlistMax: <number>\n- screeningTopCriteriaCount: <number>\n- screeningMaxClaimsPerCandidate: <number>\n- screeningTimeboxMinutesPerCandidate: <number>\n- screeningBatchSize: <number>\n- shortlistRangeCheck: ok\n\nAsk user to confirm these policies before proceeding.",
+      "prompt": "Lock in the decision mechanics before researching candidates.\n\n1) Choose a Missing Data Policy (must be explicit) and record it as `missingDataPolicy`:\n- neutral\n- penalize\n- followup_required\n\n2) Intake completeness gate (must be explicit):\n- intakeCompletenessCheck: ok|needs_more_info\n- missingInputs: string[] (empty if ok)\n\n3) Define anti-anchoring + diversity gate parameters:\n- minCandidatePool (default 20)\n- minNonObviousCandidates (default 6)\n- minCoverageRegions (default 3)\n- minCoverageClimateBands (default 2)\n\n4) Define shortlist range:\n- shortlistMin (default 8)\n- shortlistMax (default 12)\n\n5) Define screening caps (to keep Phase 4 scalable):\n- screeningTopCriteriaCount (default 3)  // screen only dealbreakers + top N weighted criteria\n- screeningMaxClaimsPerCandidate (default 3)\n- screeningMaxSourcesPerClaim (default 1)\n- screeningTimeboxMinutesPerCandidate (default 5)\n\n6) Define screening batching (to avoid huge loop iteration limits):\n- screeningBatchSize (default 10)\n\n7) Define candidate discovery seeding cap (Phase 3 breadth search):\n- perSourceCandidateCap (default 8)\n\n8) Define baseline flags caps (Phase 4 baseline flags):\n- baselineMaxFlagsPerCandidate (default 2)\n- baselineMaxSourcesPerFlag (default 1)\n- baselineTimeboxMinutesPerCandidate (default 2)\n\n9) Update `RELOCATION_DOSSIER.md`:\n- Missing Data Policy\n- Anti-Anchoring Gate\n- Diversity Coverage Gate\n- Shortlist Size Target\n- Screening Caps\n- Screening Batching\n- Discovery Seeding Cap\n- Baseline Flags Caps\n\n**Required output format (exact keys):**\n- intakeCompletenessCheck: ok|needs_more_info\n- missingInputs: string[]\n- missingDataPolicy: neutral|penalize|followup_required\n- minCandidatePool: <number>\n- minNonObviousCandidates: <number>\n- minCoverageRegions: <number>\n- minCoverageClimateBands: <number>\n- shortlistMin: <number>\n- shortlistMax: <number>\n- screeningTopCriteriaCount: <number>\n- screeningMaxClaimsPerCandidate: <number>\n- screeningTimeboxMinutesPerCandidate: <number>\n- screeningBatchSize: <number>\n- perSourceCandidateCap: <number>\n- baselineMaxFlagsPerCandidate: <number>\n- baselineMaxSourcesPerFlag: <number>\n- baselineTimeboxMinutesPerCandidate: <number>\n- shortlistRangeCheck: ok\n\nAsk user to confirm these policies before proceeding.",
       "agentRole": "You are a decision systems designer. Make ambiguity explicit and policy-driven.",
       "validationCriteria": [
+        {
+          "type": "regex",
+          "pattern": "intakeCompletenessCheck:\\s*(ok|needs_more_info)",
+          "message": "Must set intakeCompletenessCheck: ok|needs_more_info"
+        },
+        {
+          "type": "contains",
+          "value": "missingInputs",
+          "message": "Must set missingInputs (can be empty)"
+        },
         {
           "type": "regex",
           "pattern": "missingDataPolicy:\\s*(neutral|penalize|followup_required)",
@@ -175,6 +255,16 @@
           "type": "contains",
           "value": "minNonObviousCandidates",
           "message": "Must set minNonObviousCandidates"
+        },
+        {
+          "type": "contains",
+          "value": "minCoverageRegions",
+          "message": "Must set minCoverageRegions"
+        },
+        {
+          "type": "contains",
+          "value": "minCoverageClimateBands",
+          "message": "Must set minCoverageClimateBands"
         },
         {
           "type": "contains",
@@ -207,6 +297,26 @@
           "message": "Must set screeningBatchSize"
         },
         {
+          "type": "contains",
+          "value": "perSourceCandidateCap",
+          "message": "Must set perSourceCandidateCap"
+        },
+        {
+          "type": "contains",
+          "value": "baselineMaxFlagsPerCandidate",
+          "message": "Must set baselineMaxFlagsPerCandidate"
+        },
+        {
+          "type": "contains",
+          "value": "baselineMaxSourcesPerFlag",
+          "message": "Must set baselineMaxSourcesPerFlag"
+        },
+        {
+          "type": "contains",
+          "value": "baselineTimeboxMinutesPerCandidate",
+          "message": "Must set baselineTimeboxMinutesPerCandidate"
+        },
+        {
           "type": "regex",
           "pattern": "shortlistRangeCheck:\\s*ok",
           "message": "Must confirm shortlistMin <= shortlistMax"
@@ -224,7 +334,7 @@
     {
       "id": "phase-3-breadth-search",
       "title": "Phase 3: Breadth Search (Generate Candidate Pool)",
-      "prompt": "Generate a broad candidate pool of US areas that plausibly fit the user's constraints.\n\nBefore generating candidates, update `RELOCATION_DOSSIER.md` with a required section:\n- `## Sources Strategy`\n  - Housing: Zillow (if available) + at least one alternative\n  - Taxes: state revenue sites / reputable summaries\n  - Climate normals: NOAA\n  - Climate risk: FEMA flood maps + local/state sources where applicable\n  - Employment: BLS / state labor stats (if module active)\n  - Transit/commute: local transit agencies / reputable summaries (if module active)\n\nRules:\n- Use the Weight Model + Dealbreakers.\n- Generate at least `minCandidatePool` candidates.\n- Ensure at least `minNonObviousCandidates` candidates qualify per defineNonObvious().\n- Every candidate MUST have an AreaSpec.\n- For each candidate, use normalizeCandidate() and record why included.\n- Record the top-N populous metros list used for defineNonObvious() (N default 20) with a source.\n- Include a mix: some candidates the user likely knows + some non-obvious candidates.\n- Optional: include a small number of custom radius candidates if they are plausible and well-defined.\n\n**Set context variables (required):**\n- candidatePool: normalized candidates array\n- candidatePoolCount: number\n- nonObviousCandidateCount: number\n- nonObviousDefinitionUsed: { topN: number, source: string }\n\nUpdate `RELOCATION_DOSSIER.md`:\n- Candidate Pool (Breadth): table with candidate name, candidateType, region, why included, early risks/unknowns\n- Decision Log entry: how the pool was constructed\n\n**Required output format (exact keys):**\n- candidatePoolCount: <number>\n- nonObviousCandidateCount: <number>\n- nonObviousDefinitionUsed: <summary>",
+      "prompt": "Generate a broad candidate pool of US areas that plausibly fit the user's constraints.\n\nBefore generating candidates, update `RELOCATION_DOSSIER.md` with a required section:\n- `## Sources Strategy`\n  - Housing: Zillow (if available) + at least one alternative\n  - Taxes: state revenue sites / reputable summaries\n  - Climate normals: NOAA\n  - Climate risk: FEMA flood maps + local/state sources where applicable\n  - Employment: BLS / state labor stats (if module active)\n  - Transit/commute: local transit agencies / reputable summaries (if module active)\n  - Air quality: AirNow/EPA + local air district summaries (if module active)\n  - Noise: airport noise contour maps + municipal noise resources (if module active)\n  - Internet/infra: FCC broadband map + ISP availability (if module active)\n  - Amenities/errands: mapping services + local business directories (qualitative; if module active)\n\nRules:\n- Use the Weight Model + Dealbreakers.\n- Discovery breadth must be systematic: tag each candidate with `candidateFacets` (region, climateBand, sizeTier, taxRegime, airportAccess, outdoorsBiome as applicable) and fill obvious coverage gaps.\n- When using curated list sources for discovery, cap contributions to `perSourceCandidateCap` candidates per source to avoid editorial bias dominating.\n- Generate at least `minCandidatePool` candidates.\n- Ensure at least `minNonObviousCandidates` candidates qualify as *qualifying non-obvious* (non-obvious per defineNonObvious() AND plausibly passes dealbreakers based on first-pass screening signal).\n- Every candidate MUST have an AreaSpec.\n- For each candidate, use normalizeCandidate() and record why included.\n- Record the top-N populous metros list used for defineNonObvious() (N default 100) with a source.\n- Include a mix: some candidates the user likely knows + some non-obvious candidates.\n- Optional: include a small number of custom radius candidates if they are plausible and well-defined.\n\n**Set context variables (required):**\n- candidatePool: normalized candidates array\n- candidatePoolCount: number\n- nonObviousCandidateCount: number\n- qualifyingNonObviousCandidateCount: number\n- coverageRegionsCount: number\n- coverageClimateBandsCount: number\n- candidateFacetsSummary: { regions: string[], climateBands: string[], sizeTiers: string[] }\n- coverageMatrix: <summary>\n- coverageGaps: string[]\n- discoverySourcesUsed: { name: string, countAdded: number }[]\n- perSourceCandidateCap: number\n- nonObviousDefinitionUsed: { topN: number, source: string }\n\nUpdate `RELOCATION_DOSSIER.md`:\n- Candidate Pool (Breadth): table with candidate name, candidateType, region, why included, early risks/unknowns\n- Decision Log entry: how the pool was constructed\n\n**Required output format (exact keys):**\n- candidatePoolCount: <number>\n- nonObviousCandidateCount: <number>\n- qualifyingNonObviousCandidateCount: <number>\n- coverageRegionsCount: <number>\n- coverageClimateBandsCount: <number>\n- coverageGaps: <summary>\n- discoverySourcesUsed: <summary>\n- nonObviousDefinitionUsed: <summary>",
       "agentRole": "You are a researcher generating a diverse, constraint-respecting candidate pool.",
       "validationCriteria": [
         {
@@ -244,6 +354,26 @@
         },
         {
           "type": "contains",
+          "value": "qualifyingNonObviousCandidateCount",
+          "message": "Must set qualifyingNonObviousCandidateCount"
+        },
+        {
+          "type": "contains",
+          "value": "coverageRegionsCount",
+          "message": "Must set coverageRegionsCount"
+        },
+        {
+          "type": "contains",
+          "value": "coverageClimateBandsCount",
+          "message": "Must set coverageClimateBandsCount"
+        },
+        {
+          "type": "contains",
+          "value": "discoverySourcesUsed",
+          "message": "Must record discoverySourcesUsed"
+        },
+        {
+          "type": "contains",
           "value": "nonObviousDefinitionUsed",
           "message": "Must record nonObviousDefinitionUsed"
         }
@@ -253,7 +383,7 @@
     {
       "id": "phase-3b-anti-anchoring-gate-check",
       "title": "Phase 3b: Anti-Anchoring Gate Check",
-      "prompt": "Run antiAnchoringGate() deterministically using these comparisons:\n- candidatePoolCount >= minCandidatePool\n- nonObviousCandidateCount >= minNonObviousCandidates\n\nIf the gate fails:\n- Expand the pool until it passes (diversify; avoid adding only obvious metros).\n- Recompute candidatePoolCount and nonObviousCandidateCount.\n\nIf the gate passes:\n- Proceed.\n\n**Required output format (exact keys):**\n- antiAnchoringGate: pass|fail\n- gateFailureReason: <string or empty>\n- poolExpansionCount: <number>\n\nUpdate `RELOCATION_DOSSIER.md` with gate status and any expansions performed.",
+      "prompt": "Run antiAnchoringGate() deterministically using these comparisons:\n- candidatePoolCount >= minCandidatePool\n- qualifyingNonObviousCandidateCount >= minNonObviousCandidates\n- coverageRegionsCount >= minCoverageRegions\n- coverageClimateBandsCount >= minCoverageClimateBands\n\nIf the gate fails:\n- Expand the pool until it passes by filling coverage gaps first (diversify; avoid adding only obvious metros).\n- Recompute candidatePoolCount, qualifyingNonObviousCandidateCount, coverageRegionsCount, and coverageClimateBandsCount.\n\nIf the gate passes:\n- Proceed.\n\n**Required output format (exact keys):**\n- antiAnchoringGate: pass|fail\n- gateFailureReason: <string or empty>\n- poolExpansionCount: <number>\n\nUpdate `RELOCATION_DOSSIER.md` with gate status and any expansions performed.",
       "agentRole": "You enforce anti-anchoring and minimum diversity requirements.",
       "validationCriteria": [
         {
@@ -325,9 +455,40 @@
       ]
     },
     {
+      "id": "phase-4aa-baseline-flags",
+      "title": "Phase 4aa: Baseline Flags (Not Scored)",
+      "prompt": "Perform a lightweight baseline due diligence pass (NOT scored) for candidates that survived screening.\n\nInput: use `screenResults` to identify candidates that are Pass or Maybe.\n\nBaseline scope (keep bounded):\n- Climate risk (high-level)\n- Safety/crime (high-level)\n- If relevant to householdProfile or activeModules: schools and healthcare access (high-level)\n\nCaps (from Phase 2):\n- baselineMaxFlagsPerCandidate\n- baselineMaxSourcesPerFlag\n- baselineTimeboxMinutesPerCandidate\n\nRules:\n- Do not compute or modify ranking scores here.\n- Do not silently turn flags into dealbreakers or weights.\n- If evidence is unclear, record Unknown and add to unknowns.\n\nFor each Pass/Maybe candidate, produce 0..baselineMaxFlagsPerCandidate baseline flags. Each flag must be tagged:\n- category: climate|safety|schools|healthcare|policy|other\n- severity: yellow|orange|red\n- summary: one sentence\n- source (URL/citation)\n- retrievedAt\n- confidenceGrade (High/Medium/Low)\n\nRed flag definition (v1): any flag with severity=red.\n\nUpdate `RELOCATION_DOSSIER.md`:\n- Add/append a Baseline Flags (Not Scored) section with a per-candidate table of flags + unknowns.\n\n**Set context variables (required):**\n- baselineFlags: { [candidateKey: string]: { flags: array, unknowns: string[] } }\n- redFlagCandidates: string[]\n- redFlagCount: number\n\n**Required output format (exact keys):**\n- redFlagCount: <number>\n- redFlagCandidates: <list>\n- baselineFlags: <present>",
+      "agentRole": "You are doing bounded baseline due diligence without affecting scoring.",
+      "validationCriteria": [
+        { "type": "contains", "value": "baselineFlags", "message": "Must set baselineFlags" },
+        { "type": "contains", "value": "redFlagCandidates", "message": "Must set redFlagCandidates" },
+        { "type": "contains", "value": "redFlagCount", "message": "Must set redFlagCount" }
+      ],
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-4ab-red-flag-gate",
+      "title": "Phase 4ab: Red Flag Gate (User Decision)",
+      "prompt": "Handle baseline red flags explicitly before shortlisting.\n\nIf redFlagCount = 0:\n- Output redFlagDecision = fyi\n- Output redFlagDecisionNotes = \"No red flags detected in baseline due diligence\"\n- Proceed.\n\nIf redFlagCount > 0:\n1) Summarize each red flag (candidate + category + one-line summary + source).\n2) Ask user which one to do (pick exactly one):\n   - promote_to_dealbreakers\n   - add_weighted_criterion\n   - fyi\n\nIf promote_to_dealbreakers:\n- Update Dealbreakers in `RELOCATION_DOSSIER.md` and state the new/updated dealbreakers explicitly.\n\nIf add_weighted_criterion:\n- Ask user how it should be weighted and which existing weight(s) should decrease so weights still sum to 100.\n\nIf fyi:\n- Record decision in `RELOCATION_DOSSIER.md` Red Flag Gate Decisions (append-only).\n\n**Required output format (exact keys):**\n- redFlagDecision: promote_to_dealbreakers|add_weighted_criterion|fyi\n- redFlagDecisionNotes: <string>",
+      "agentRole": "You enforce explicit user intent for red flags (no hidden weighting).",
+      "validationCriteria": [
+        {
+          "type": "regex",
+          "pattern": "redFlagDecision:\\s*(promote_to_dealbreakers|add_weighted_criterion|fyi)",
+          "message": "Must set redFlagDecision"
+        },
+        {
+          "type": "contains",
+          "value": "redFlagDecisionNotes",
+          "message": "Must set redFlagDecisionNotes"
+        }
+      ],
+      "requireConfirmation": { "var": "redFlagCount", "gt": 0 }
+    },
+    {
       "id": "phase-4b-select-shortlist",
       "title": "Phase 4b: Select Shortlist for Deep Dives",
-      "prompt": "Select a shortlist for deep dives.\n\nRules:\n- Target shortlist size: within shortlistMin..shortlistMax.\n- Must include at least 3 candidates outside the user's `userTopOfMind` list (if provided).\n- If too many Pass/Maybe, prefer diversity across archetypes.\n\n**Set context variables (required):**\n- shortlist: normalized candidates array\n- shortlistCount: number\n- shortlistNonTopOfMindCount: number\n\n**Required output format (exact keys):**\n- shortlistCount: <number>\n- shortlistNonTopOfMindCount: <number>\n- shortlistRangeCheck: ok\n\nUpdate `RELOCATION_DOSSIER.md`:\n- Shortlist section with rationale per shortlisted candidate\n- Profiles Index (planned profile files)\n\nAsk user to confirm the shortlist before deep dives.",
+      "prompt": "Select a shortlist for deep dives.\n\nRules:\n- Target shortlist size: within shortlistMin..shortlistMax.\n- Must include at least 3 candidates outside the user's `userTopOfMind` list (if provided).\n- If too many Pass/Maybe, prefer diversity across archetypes.\n- Baseline flags are NOT scored, but shortlist rationale must call out any red/orange baseline flags for shortlisted candidates (briefly).\n\n**Set context variables (required):**\n- shortlist: normalized candidates array\n- shortlistCount: number\n- shortlistNonTopOfMindCount: number\n- shortlistNonObviousCount: number\n- shortlistRedFlagCount: number\n\n**Required output format (exact keys):**\n- shortlistCount: <number>\n- shortlistNonTopOfMindCount: <number>\n- shortlistNonObviousCount: <number>\n- shortlistRedFlagCount: <number>\n- shortlistRangeCheck: ok\n\nUpdate `RELOCATION_DOSSIER.md`:\n- Shortlist section with rationale per shortlisted candidate\n- Profiles Index (planned profile files)\n\nAsk user to confirm the shortlist before deep dives.",
       "agentRole": "You are a curator optimizing for diversity, fit, and decision usefulness.",
       "validationCriteria": [
         {
@@ -344,6 +505,16 @@
           "type": "contains",
           "value": "shortlistNonTopOfMindCount",
           "message": "Must set shortlistNonTopOfMindCount"
+        },
+        {
+          "type": "contains",
+          "value": "shortlistNonObviousCount",
+          "message": "Must set shortlistNonObviousCount"
+        },
+        {
+          "type": "contains",
+          "value": "shortlistRedFlagCount",
+          "message": "Must set shortlistRedFlagCount"
         },
         {
           "type": "regex",
@@ -375,7 +546,7 @@
         {
           "id": "phase-5a-write-profile",
           "title": "Profile Deep Dive: {{shortCandidate.name}}",
-          "prompt": "Create/update the per-candidate profile doc at `relocation-profiles/<candidate-slug>.md`.\n\nRequired: include boundary explicitly at the top:\n- CandidateType\n- AreaSpec (exact boundary)\n\nModule-driven rule (required):\n- Include a section ONLY if its module is active in `activeModules`.\n- If a module is inactive, omit the section (do not include placeholders).\n\nProfile template (must follow):\n- Summary (who it fits / who it doesn't)\n- Housing (rent/buy ranges, inventory notes, neighborhood variation)\n- Cost of living (beyond housing)\n- Taxes (income/property/sales; major gotchas)\n- Safety (high-level + neighborhood variance; avoid false precision)\n- Schools/childcare (module: kids/schools)\n- Commute/transit (modules: commute, transit)\n- Healthcare access (module: healthcare access)\n- Climate & climate risk (module: climate risk)\n- Job market (module: career/job market)\n- Lifestyle (modules: outdoors, nightlife/arts, diversity/community)\n- Pros / Cons (evidence-backed)\n\n**Required headings (non-optional):**\n- ## Unknowns & follow-ups\n- ## Claims & Sources\n\nClaims & Sources ledger requirements:\n- Every key claim uses trackClaim() fields: claim, source, retrievedAt, confidenceGrade.\n- If a claim is proxy/aggregate (especially for custom areas), label it as such.\n\nAlso update `RELOCATION_DOSSIER.md`:\n- Add a short entry for this candidate (1 paragraph) linking to the profile and summarizing differentiators.\n\nWrite-or-paste applies.",
+          "prompt": "Create/update the per-candidate profile doc at `relocation-profiles/<candidate-slug>.md`.\n\nRequired: include boundary explicitly at the top:\n- CandidateType\n- AreaSpec (exact boundary)\n\nModule-driven rule (required):\n- Include a section ONLY if its module is active in `activeModules`.\n- If a module is inactive, omit the section (do not include placeholders).\n\nProfile template (must follow):\n- Summary (who it fits / who it doesn't)\n- Housing (rent/buy ranges, inventory notes, neighborhood variation)\n- Cost of living (beyond housing)\n- Taxes (income/property/sales; major gotchas)\n- Safety (high-level + neighborhood variance; avoid false precision)\n- Schools/childcare (module: kids/schools)\n- Commute/transit (modules: commute, transit)\n- Healthcare access (module: healthcare access)\n- Climate & climate risk (module: climate risk)\n- Job market (module: career/job market)\n- Lifestyle (modules: outdoors, nightlife/arts, diversity/community)\n- Amenities & errands (module: amenities/errands)\n- Air quality (module: air quality)\n- Noise (module: noise)\n- Internet & infrastructure (module: internet/infra)\n- Pros / Cons (evidence-backed)\n\n**Required headings (non-optional):**\n- ## Baseline Flags (Not Scored)\n- ## Unknowns & follow-ups\n- ## Claims & Sources\n\nBaseline Flags (Not Scored) requirements:\n- Copy any baseline flags already discovered in Phase 4aa for this candidate (if present).\n- If absent or stale, do a quick refresh within the active modules (bounded; do not over-research).\n- Explicitly state: \"These baseline flags do not affect scoring unless the user chooses to promote them.\"\n\nClaims & Sources ledger requirements:\n- Every key claim uses trackClaim() fields: claim, source, retrievedAt, confidenceGrade.\n- If a claim is proxy/aggregate (especially for custom areas), label it as such.\n\nAlso update `RELOCATION_DOSSIER.md`: \n- Add a short entry for this candidate (1 paragraph) linking to the profile and summarizing differentiators.\n\nWrite-or-paste applies.",
           "agentRole": "You are a meticulous researcher producing consistent, evidence-backed location profiles.",
           "validationCriteria": [
             {
@@ -387,6 +558,11 @@
               "type": "contains",
               "value": "## Unknowns & follow-ups",
               "message": "Profile must include '## Unknowns & follow-ups'"
+            },
+            {
+              "type": "contains",
+              "value": "## Baseline Flags (Not Scored)",
+              "message": "Profile must include '## Baseline Flags (Not Scored)'"
             }
           ],
           "requireConfirmation": false
@@ -396,7 +572,7 @@
     {
       "id": "phase-6-compare-and-rank",
       "title": "Phase 6: Comparison & Explainable Ranking",
-      "prompt": "Produce the final comparison and ranking.\n\n1) Build a comparison matrix in `RELOCATION_DOSSIER.md`:\n- Rows: shortlisted candidates\n- Columns: the weighted criteria\n- Include Unknown markers explicitly\n\n2) Deterministic scoring model (required):\n- For each criterion, assign a normalized subscore:\n  - Strong fit = 1.0\n  - Mixed/conditional fit = 0.5\n  - Weak fit = 0.0\n  - Unknown = depends on missingDataPolicy\n- Missing data handling (must be explicit and consistent):\n  - missingDataPolicy=neutral → Unknown subscore = 0.5\n  - missingDataPolicy=penalize → Unknown subscore = 0.25\n  - missingDataPolicy=followup_required → Unknown subscore = 0.5 AND candidate is ineligible for top 3 if it has Unknown on any criterion with weight >= 15\n\nScore formula:\n- totalScore = Σ (weight_i * subscore_i)\n\n3) For each candidate, add an explainable narrative:\n- \"Ranks #k because it wins on X/Y and loses on Z. Biggest tradeoff: ...\"\n\n4) Produce final ranked list (top to bottom) with confidence notes and key caveats.\n\n5) Re-weight gate (bounded):\n- Ask user to confirm if ranking is directionally correct.\n- If not, allow ONE re-weight of `weights` and re-run scoring.\n- Output `reweightUsed: true|false`.\n\n**Required output format (exact keys):**\n- ranking: [{ name: string, totalScore: number, rank: number }]\n- unknownsImpactSummary: <string>\n- reweightUsed: true|false\n\nUpdate Decision Log with any weight changes and rationale.",
+      "prompt": "Produce the final comparison and ranking.\n\n1) Build a comparison matrix in `RELOCATION_DOSSIER.md`:\n- Rows: shortlisted candidates\n- Columns: the weighted criteria\n- Include Unknown markers explicitly\n\nAlso include a separate, clearly labeled appendix/table for baseline flags:\n- Baseline Flags (Not Scored): summarize red/orange baseline flags per candidate\n- These baseline flags do NOT change totalScore\n\n2) Deterministic scoring model (required):\n- For each criterion, assign a normalized subscore:\n  - Strong fit = 1.0\n  - Mixed/conditional fit = 0.5\n  - Weak fit = 0.0\n  - Unknown = depends on missingDataPolicy\n- Missing data handling (must be explicit and consistent):\n  - missingDataPolicy=neutral → Unknown subscore = 0.5\n  - missingDataPolicy=penalize → Unknown subscore = 0.25\n  - missingDataPolicy=followup_required → Unknown subscore = 0.5 AND candidate is ineligible for top 3 if it has Unknown on any criterion with weight >= 15\n\nScore formula:\n- totalScore = Σ (weight_i * subscore_i)\n\n3) For each candidate, add an explainable narrative:\n- \"Ranks #k because it wins on X/Y and loses on Z. Biggest tradeoff: ...\"\n\n4) Produce final ranked list (top to bottom) with confidence notes and key caveats.\n\n5) Re-weight gate (bounded):\n- Ask user to confirm if ranking is directionally correct.\n- If not, allow ONE re-weight of `weights` and re-run scoring.\n- Output `reweightUsed: true|false`.\n\n**Required output format (exact keys):**\n- ranking: [{ name: string, totalScore: number, rank: number }]\n- unknownsImpactSummary: <string>\n- reweightUsed: true|false\n\nUpdate Decision Log with any weight changes and rationale.",
       "agentRole": "You are an analyst producing an explainable, evidence-backed ranking with explicit tradeoffs.",
       "validationCriteria": [
         {
