@@ -7,6 +7,10 @@ const workflowHashSchema = sha256DigestSchema.transform((v) => asWorkflowHash(as
 
 const nonEmpty = z.string().min(1);
 
+// IDs are interpolated into dedupe keys using ':' as a delimiter.
+// Keep token IDs delimiter-safe to avoid ambiguity and key collisions.
+const delimiterSafeId = nonEmpty.regex(/^[^:\s]+$/, 'Expected a delimiter-safe ID (no ":" or whitespace)');
+
 export type TokenVersionV1 = 1;
 
 /**
@@ -25,10 +29,10 @@ export type TokenVersionV1 = 1;
  */
 export type TokenKindV1 = 'state' | 'ack' | 'checkpoint';
 
-export const AttemptIdSchema = nonEmpty.transform(asAttemptId);
-export const SessionIdSchema = nonEmpty.transform(asSessionId);
-export const RunIdSchema = nonEmpty.transform(asRunId);
-export const NodeIdSchema = nonEmpty.transform(asNodeId);
+export const AttemptIdSchema = delimiterSafeId.transform(asAttemptId);
+export const SessionIdSchema = delimiterSafeId.transform(asSessionId);
+export const RunIdSchema = delimiterSafeId.transform(asRunId);
+export const NodeIdSchema = delimiterSafeId.transform(asNodeId);
 
 export const StateTokenPayloadV1Schema = z.object({
   tokenVersion: z.literal(1),

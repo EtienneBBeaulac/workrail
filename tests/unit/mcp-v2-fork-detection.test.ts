@@ -23,6 +23,7 @@ import { NodeHmacSha256V2 } from '../../src/v2/infra/local/hmac-sha256/index.js'
 import { NodeBase64UrlV2 } from '../../src/v2/infra/local/base64url/index.js';
 import { NodeRandomEntropyV2 } from '../../src/v2/infra/local/random-entropy/index.js';
 import { NodeTimeClockV2 } from '../../src/v2/infra/local/time-clock/index.js';
+import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
 
 async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-fork-'));
@@ -56,6 +57,7 @@ async function mkCtxWithWorkflow(workflowId: string, dataDir: string): Promise<T
   const snapshotStoreV2 = new LocalSnapshotStoreV2(dataDirV2, fsPortV2, cryptoV2);
   const pinnedStoreV2 = new LocalPinnedWorkflowStoreV2(dataDirV2, fsPortV2);
   const entropyV2 = new NodeRandomEntropyV2();
+  const idFactoryV2 = new IdFactoryV2(entropyV2);
   const keyringPortV2 = new LocalKeyringV2(dataDirV2, fsPortV2, base64urlV2, entropyV2);
   const keyringV2 = await keyringPortV2.loadOrCreate().match(v => v, e => { throw new Error(`keyring: ${e.code}`); });
 
@@ -77,9 +79,11 @@ async function mkCtxWithWorkflow(workflowId: string, dataDir: string): Promise<T
       snapshotStore: snapshotStoreV2,
       pinnedStore: pinnedStoreV2,
       keyring: keyringV2,
+      sha256: sha256V2,
       crypto: cryptoV2,
       hmac: hmacV2,
       base64url: base64urlV2,
+      idFactory: idFactoryV2,
     },
   };
 }
