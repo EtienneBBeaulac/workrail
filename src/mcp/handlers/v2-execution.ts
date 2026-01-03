@@ -961,6 +961,13 @@ function executeStartWorkflow(
   }
 
   const { gate, sessionStore, snapshotStore, pinnedStore, keyring, crypto, hmac, base64url, idFactory } = ctx.v2;
+  if (!idFactory) {
+    return neErrorAsync({
+      kind: 'precondition_failed',
+      message: 'v2 context missing idFactory',
+      suggestion: 'Reinitialize v2 tool context (idFactory must be provided when v2Tools are enabled).',
+    });
+  }
 
   const ctxCheck = checkContextBudget({ tool: 'start_workflow', context: input.context });
   if (!ctxCheck.ok) return neErrorAsync({ kind: 'validation_failed', failure: ctxCheck.error });
@@ -1164,6 +1171,13 @@ function executeContinueWorkflow(
   }
 
   const { gate, sessionStore, snapshotStore, pinnedStore, keyring, sha256, crypto, hmac, base64url, idFactory } = ctx.v2;
+  if (!sha256 || !idFactory) {
+    return neErrorAsync({
+      kind: 'precondition_failed',
+      message: 'v2 context missing required dependencies',
+      suggestion: 'Reinitialize v2 tool context (sha256 and idFactory must be provided when v2Tools are enabled).',
+    });
+  }
 
   const stateRes = parseStateTokenOrFail(input.stateToken, keyring, hmac, base64url);
   if (!stateRes.ok) return neErrorAsync({ kind: 'validation_failed', failure: stateRes.failure });

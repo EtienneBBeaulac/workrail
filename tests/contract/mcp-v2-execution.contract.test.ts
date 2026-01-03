@@ -108,6 +108,11 @@ describe('MCP contract: v2 start_workflow / continue_workflow (Slice 3)', () => 
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
 
+    // Token size budget regression guard (prevents future payload bloat).
+    expect(start.data.stateToken.length).toBeLessThan(420);
+    expect(start.data.ackToken.length).toBeLessThan(420);
+    expect(start.data.checkpointToken.length).toBeLessThan(420);
+
     expect(start.data.pending?.stepId).toBe('triage');
     expect(start.data.isComplete).toBe(false);
 
