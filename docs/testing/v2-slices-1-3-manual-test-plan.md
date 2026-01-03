@@ -14,7 +14,7 @@ Hard rules (required):
 - **Start a brand new chat** for each scenario.
 - **In each chat, create a brand new v2 session** by calling `start_workflow` and only use tokens minted in that chat.
 - **Do not reuse tokens across chats**. Treat tokens as single-scenario secrets.
-- **If token provenance is uncertain** (copied from another chat, or you’re not sure): STOP and mark the scenario invalid.
+- **If token provenance is uncertain** (copied from another chat, or you're not sure): STOP and mark the scenario invalid.
 - **Do not advance the same session in parallel** from multiple chats (single-writer per session). Recommended: run all chats sequentially.
 
 Why this works for Slices 1–3:
@@ -28,38 +28,60 @@ Optional stronger durable isolation (only if feasible in your environment):
 - WorkRail v2 Slices 1-3 implementation complete
 - `WORKRAIL_ENABLE_V2_TOOLS=true` set in environment
 - Ability to run each scenario in a separate chat (no parallel runs)
-- At least one simple workflow exists (e.g., `bug-investigation.json`)
+
+**Workflow Assignments** (use these exact workflow IDs):
+| Chat | CHAT_ID | Workflow ID | Reason |
+|------|---------|-------------|--------|
+| 1 | `chat-1-happy-path` | `bug-investigation` | Multi-step, no loops, good for happy path |
+| 2 | `chat-2-rewind-fork` | `workflow-diagnose-environment` | Simple (2-3 steps), fast rewind testing |
+| 3 | `chat-3-idempotency-replay` | `workflow-diagnose-environment` | Simple, fast replay testing |
+| 4 | `chat-4-rehydrate-only` | `workflow-diagnose-environment` | Simple, fast rehydrate testing |
+| 5 | `chat-5-error-modes` | `workflow-diagnose-environment` | Any workflow works for error tests |
+| 6 | `chat-6-token-security` | `workflow-diagnose-environment` | Any workflow works for token tests |
+| 7 | `chat-7-multi-step` | `bug-investigation` | Multi-step, tests full execution |
+| 8 | `chat-8-hash-stability` | `bug-investigation` | Multi-step, tests hash stability |
 
 ---
 
 ## Test Execution Instructions (Human Operator)
 
 For each test chat below:
-1. Pick a unique `CHAT_ID` label (e.g., `chat-1-happy-path`). (Used only for reporting and output tagging.)
-2. Start a **brand new chat** (critical for isolation).
-3. Copy the **Global Agent Instructions** block, then the chat’s **Agent Instructions** block.
-4. When the agent asks for `CHAT_ID`, provide the value from step 1.
-5. Let the agent execute without interruption.
-6. Collect the agent's final report.
-7. Verify against "Expected Outcomes".
-8. Record pass/fail in the summary table (include the `CHAT_ID` you used).
+1. Start a **brand new chat** (critical for isolation).
+2. Copy the entire **Agent Instructions** block for that chat (includes CHAT_ID and all rules).
+3. Let the agent execute without interruption.
+4. Collect the agent's final report.
+5. Verify against "Expected Outcomes".
+6. Record pass/fail in the summary table.
 
 Stop condition:
 - If token provenance is violated (a token from another chat is used, or provenance is uncertain), stop and restart the chat. Mark the attempt invalid.
 
 Note: This plan assumes the WorkRail MCP server may be a single long-lived process. Durable isolation is achieved by creating a brand new v2 session in each chat via `start_workflow` and never reusing tokens across chats.
 
+### Token Copy Discipline (Operator) (prevents agent token corruption)
+Tokens must be used **exactly as returned**. LLM agents may accidentally mutate long opaque tokens when re-printing them.
+
+Rules:
+- When you need to save a token for later (Chat 2), copy it from the **tool response JSON** (the tool output block), not from any agent re-typed/re-printed token.
+- Never retype tokens; always copy/paste.
+- When recording logs, redact token values (first 16 chars + `…`), but keep a private copy of full tokens if you need them to continue the scenario.
+- If you see `TOKEN_BAD_SIGNATURE` while using a token you believe is correct, assume copy/transcription corruption and **restart the chat**. Do **not** “work around” by starting a new session in the same chat.
+
 ---
 
-## Global Agent Instructions (prepend to every chat)
+## Chat 1: Basic Execution Loop (Happy Path)
 
-Copy/paste this at the very top of every test chat before the chat-specific instructions:
+**Scenario**: Execute a workflow from start to completion using v2 tools.
+
+**Information Isolation**: Agent learns workflow exists, executes it, and reports. No prior knowledge of v2 internals needed.
+
+### Agent Instructions (copy verbatim into new chat)
 
 ```
 You are running WorkRail v2 slice validation.
 
 SETUP:
-- Ask the operator for CHAT_ID (a short label like "chat-3-replay").
+- CHAT_ID is: chat-1-happy-path
 - Use CHAT_ID in every output you submit.
 
 NON-NEGOTIABLE ISOLATION RULES:
@@ -77,39 +99,29 @@ TOOLING RULES:
 
 OUTPUT TAGGING RULES:
 - Every notesMarkdown you submit MUST be prefixed with:
-  [CHAT_ID=<CHAT_ID>][SCENARIO=<scenario-name>] 
+  [CHAT_ID=chat-1-happy-path][SCENARIO=basic-execution] 
 
 REPORTING RULES:
 - For each tool call, record: tool name, key inputs (redact tokens to first 16 chars + '…'), and the full response.
 - If you hit an error: record code/message and STOP the chat.
-```
 
 ---
 
-## Chat 1: Basic Execution Loop (Happy Path)
-
-**Scenario**: Execute a workflow from start to completion using v2 tools.
-
-**Information Isolation**: Agent learns workflow exists, executes it, and reports. No prior knowledge of v2 internals needed.
-
-### Agent Instructions (copy verbatim into new chat)
-
-```
 You are testing WorkRail v2 basic execution. Follow these steps exactly and report results:
 
 SETUP:
 1. Verify v2 tools are available by calling list_workflows
    - Confirm you receive a response with workflow list
-   - Pick the simplest workflow you find (prefer one with 2-3 steps, no loops)
+   - Confirm "bug-investigation" is in the list
 
 EXECUTION:
-2. Call start_workflow with the workflow ID you chose
+2. Call start_workflow with workflowId: "bug-investigation"
    - Record the response structure (what fields are present)
    - Save stateToken, ackToken, and the pending step details
 
 3. Complete the first pending step
    - Call continue_workflow with the stateToken and ackToken
-   - Provide minimal output: {"notesMarkdown": "[CHAT_ID=<CHAT_ID>][SCENARIO=chat-1-happy-path] Step 1 complete"}
+   - Provide minimal output: {"notesMarkdown": "[CHAT_ID=chat-1-happy-path][SCENARIO=basic-execution] Step 1 complete"}
    - Record the response structure
 
 4. Continue until workflow completes
@@ -132,12 +144,12 @@ DO NOT:
 ```
 
 ### Expected Outcomes
-- ✅ `list_workflows` returns workflow list
-- ✅ `start_workflow` returns: `{stateToken, ackToken, checkpointToken, isComplete: false, pending: {...}}`
-- ✅ `continue_workflow` advances through steps
-- ✅ Final call returns `isComplete: true, pending: null`
-- ✅ All tokens are opaque strings (format: `st.v1.*`, `ack.v1.*`, `chk.v1.*`)
-- ✅ No errors during happy path
+- `list_workflows` returns workflow list
+- `start_workflow` returns: `{stateToken, ackToken, checkpointToken, isComplete: false, pending: {...}}`
+- `continue_workflow` advances through steps
+- Final call returns `isComplete: true, pending: null`
+- All tokens are opaque strings (format: `st.v1.*`, `ack.v1.*`, `chk.v1.*`)
+- No errors during happy path
 
 ---
 
@@ -150,49 +162,109 @@ DO NOT:
 ### Agent Instructions (copy verbatim into new chat)
 
 ```
-You are testing WorkRail v2 rewind behavior. Follow these steps exactly:
+You are running WorkRail v2 slice validation.
 
 SETUP:
-1. Call list_workflows and pick a simple workflow (2-3 steps minimum)
-2. Call start_workflow with that workflow ID
-   - Save ALL tokens from the response (stateToken_0, ackToken_0)
+- CHAT_ID is: chat-2-rewind-fork
+- Use CHAT_ID in every output you submit.
 
-FIRST EXECUTION PATH:
+NON-NEGOTIABLE ISOLATION RULES:
+- Confirm with the operator that this is a brand new chat.
+- Confirm you will create a brand new v2 session in THIS chat by calling start_workflow.
+- Do not reuse tokens from any other test chat.
+- If token provenance is violated or uncertain: STOP and report "INVALID TEST: TOKEN CONTAMINATION".
+
+TOOLING RULES:
+- Use ONLY v2 tools: list_workflows, inspect_workflow, start_workflow, continue_workflow.
+- Never use workflow_next or any v1 tools.
+- Never inspect/decode token contents.
+
+OUTPUT TAGGING RULES:
+- Every notesMarkdown you submit MUST be prefixed with:
+  [CHAT_ID=chat-2-rewind-fork][SCENARIO=rewind-fork] 
+
+---
+
+This test requires OPERATOR PARTICIPATION with multiple stopping points.
+
+PHASE 1A: SETUP + ADVANCE TO STEP 1
+1. Call list_workflows and confirm "workflow-diagnose-environment" is available
+2. Call start_workflow with workflowId: "workflow-diagnose-environment"
+   - Save stateToken_0 and ackToken_0
 3. Advance step 1: call continue_workflow with stateToken_0 and ackToken_0
-   - Output: {"notesMarkdown": "[CHAT_ID=<CHAT_ID>][SCENARIO=chat-2-rewind-fork] Path A: step 1"}
+   - Output: {"notesMarkdown": "[CHAT_ID=chat-2-rewind-fork][SCENARIO=rewind-fork] Path A: step 1"}
    - Save the NEW tokens (stateToken_1, ackToken_1)
 
-4. Advance step 2: call continue_workflow with stateToken_1 and ackToken_1
-   - Output: {"notesMarkdown": "[CHAT_ID=<CHAT_ID>][SCENARIO=chat-2-rewind-fork] Path A: step 2"}
-   - Save the NEW tokens (stateToken_2, ackToken_2)
+4. STOP and print this message:
 
-REWIND TEST:
-5. Now REWIND your chat to just after step 3 (before you called step 4)
-   - Your chat history should show: setup, start, step 1 complete
-   - Step 2 (Path A) should be deleted from your visible history
+---
+**CHECKPOINT REACHED - OPERATOR ACTION REQUIRED**
 
-6. Take a DIFFERENT path: call continue_workflow with stateToken_1 and ackToken_1
-   - Output: {"notesMarkdown": "[CHAT_ID=<CHAT_ID>][SCENARIO=chat-2-rewind-fork] Path B: step 2 alternative"}
-   - Save the tokens (stateToken_2b, ackToken_2b)
+Step 1 is complete. I now have tokens for the rewind test checkpoint.
+
+**SAVE THESE TOKENS NOW** (copy to notepad or external file):
+- Copy `stateToken_1` and `ackToken_1` from the **Step 3 continue_workflow tool response JSON** (do not rely on any re-typed/re-printed token text).
+
+When you have saved the tokens, reply with: "Tokens saved. Continue to Path A step 2."
+
+I will then advance to step 2 in my NEXT response (which you will later rewind).
+
+If the next `continue_workflow` fails with `TOKEN_BAD_SIGNATURE`, treat this as token transcription/copy corruption and restart the chat.
+---
+
+Then STOP and WAIT for operator response.
+
+PHASE 1B: PATH A STEP 2 (in separate message - THIS IS WHAT GETS REWOUND)
+5. When operator says "Continue to Path A step 2", advance step 2:
+   - Call continue_workflow with stateToken_1 and ackToken_1
+   - Output: {"notesMarkdown": "[CHAT_ID=chat-2-rewind-fork][SCENARIO=rewind-fork] Path A: step 2"}
+   - Save stateToken_2 and ackToken_2
+
+6. STOP and print this message:
+
+---
+**PATH A COMPLETE - REWIND NOW**
+
+Path A step 2 is complete.
+
+**SAVE THIS TOKEN** (the result of Path A):
+- Copy `stateToken_2` from the **Path A step 2 continue_workflow tool response JSON** (do not rely on any re-typed/re-printed token text).
+
+**NOW REWIND THE CHAT:**
+1. Delete THIS message (my response containing Path A step 2)
+2. Your chat should now end with my previous checkpoint message
+3. After rewinding, paste: "Execute Path B with saved tokens:
+   stateToken_1: [paste your saved stateToken_1]
+   ackToken_1: [paste your saved ackToken_1]
+   stateToken_2 from Path A: [paste your saved stateToken_2]"
+---
+
+Then STOP and WAIT for operator to rewind and provide tokens.
+
+PHASE 2: PATH B (after rewind - agent has no memory of Phase 1B)
+7. When operator provides the tokens, call continue_workflow with stateToken_1 and ackToken_1
+   - Output: {"notesMarkdown": "[CHAT_ID=chat-2-rewind-fork][SCENARIO=rewind-fork] Path B: step 2 alternative"}
+   - Save the response as stateToken_2b
+
+8. Compare stateToken_2 (from operator, Path A) vs stateToken_2b (from this call, Path B)
 
 REPORT (structured):
 - Workflow ID: <id>
-- stateToken_2 from original path: <first 20 chars>...
-- stateToken_2b from rewind path: <first 20 chars>...
+- stateToken_2 from Path A (operator provided): <first 20 chars>...
+- stateToken_2b from Path B (this call): <first 20 chars>...
 - Are these tokens different?: yes/no
-- Did the second continue_workflow call succeed?: yes/no
+- Did Path B continue_workflow succeed?: yes/no
 - Any error about "already advanced" or "state mismatch"?: yes/no
-- Did rewind cause any corruption errors?: yes/no
 
 ANALYSIS:
-- Based on the results, what do you think happened when you rewound and advanced again?
+- Based on the results, what do you think happened when you advanced from the same checkpoint twice?
 ```
 
 ### Expected Outcomes
-- ✅ Both `continue_workflow` calls succeed (no "already advanced" error)
-- ✅ Tokens for the two paths are different (different nodes created)
-- ✅ No corruption errors
-- ✅ Agent should observe: "It appears rewinding created two separate paths from the same point"
+- Both `continue_workflow` calls succeed (no "already advanced" error)
+- Tokens for the two paths are different (different nodes created)
+- No corruption errors
+- Agent should observe: "It appears rewinding created two separate paths from the same point"
 
 ---
 
@@ -205,22 +277,51 @@ ANALYSIS:
 ### Agent Instructions (copy verbatim into new chat)
 
 ```
+You are running WorkRail v2 slice validation.
+
+SETUP:
+- CHAT_ID is: chat-3-idempotency-replay
+- Use CHAT_ID in every output you submit.
+
+NON-NEGOTIABLE ISOLATION RULES:
+- Confirm with the operator that this is a brand new chat.
+- Confirm you will create a brand new v2 session in THIS chat by calling start_workflow.
+- Do not reuse tokens from any other test chat.
+- Do not advance the same session in parallel from multiple chats.
+- If token provenance is violated or uncertain: STOP and report "INVALID TEST: TOKEN CONTAMINATION".
+
+TOOLING RULES:
+- Use ONLY v2 tools: list_workflows, inspect_workflow, start_workflow, continue_workflow.
+- Never use workflow_next or any v1 tools.
+- Never inspect/decode token contents.
+- Do not attempt any resume-like behavior; only use sessions created in this chat.
+
+OUTPUT TAGGING RULES:
+- Every notesMarkdown you submit MUST be prefixed with:
+  [CHAT_ID=chat-3-idempotency-replay][SCENARIO=idempotency-replay] 
+
+REPORTING RULES:
+- For each tool call, record: tool name, key inputs (redact tokens to first 16 chars + '…'), and the full response.
+- If you hit an error: record code/message and STOP the chat.
+
+---
+
 You are testing WorkRail v2 replay behavior. Follow these steps exactly:
 
 SETUP:
-1. Call list_workflows and pick a simple workflow
-2. Call start_workflow
+1. Call list_workflows and confirm "workflow-diagnose-environment" is available
+2. Call start_workflow with workflowId: "workflow-diagnose-environment"
    - Save stateToken_0 and ackToken_0
 
 FIRST ADVANCEMENT:
 3. Call continue_workflow with stateToken_0 and ackToken_0
-   - Output: {"notesMarkdown": "[CHAT_ID=<CHAT_ID>][SCENARIO=chat-3-idempotency-replay] First execution"}
+   - Output: {"notesMarkdown": "[CHAT_ID=chat-3-idempotency-replay][SCENARIO=idempotency-replay] First execution"}
    - Record ENTIRE response (copy/paste the full JSON)
    - Save the new stateToken_1
 
 REPLAY TEST:
 4. Call continue_workflow AGAIN with the SAME stateToken_0 and ackToken_0
-   - Output: {"notesMarkdown": "[CHAT_ID=<CHAT_ID>][SCENARIO=chat-3-idempotency-replay] First execution"}
+   - Output: {"notesMarkdown": "[CHAT_ID=chat-3-idempotency-replay][SCENARIO=idempotency-replay] First execution"}
    - Record ENTIRE response again
 
 5. Compare the two responses from steps 3 and 4
@@ -245,10 +346,10 @@ ANALYSIS:
 ```
 
 ### Expected Outcomes
-- ✅ Responses from steps 3 and 4 are **byte-identical** (same tokens, same pending)
-- ✅ Only **one new node** was created (not two)
-- ✅ Advancing from `stateToken_1` works normally
-- ✅ Agent should infer: "Replaying the same ack doesn't create duplicate work"
+- Responses from steps 3 and 4 are **byte-identical** (same tokens, same pending)
+- Only **one new node** was created (not two)
+- Advancing from `stateToken_1` works normally
+- Agent should infer: "Replaying the same ack doesn't create duplicate work"
 
 ---
 
@@ -261,12 +362,41 @@ ANALYSIS:
 ### Agent Instructions (copy verbatim into new chat)
 
 ```
+You are running WorkRail v2 slice validation.
+
+SETUP:
+- CHAT_ID is: chat-4-rehydrate-only
+- Use CHAT_ID in every output you submit.
+
+NON-NEGOTIABLE ISOLATION RULES:
+- Confirm with the operator that this is a brand new chat.
+- Confirm you will create a brand new v2 session in THIS chat by calling start_workflow.
+- Do not reuse tokens from any other test chat.
+- Do not advance the same session in parallel from multiple chats.
+- If token provenance is violated or uncertain: STOP and report "INVALID TEST: TOKEN CONTAMINATION".
+
+TOOLING RULES:
+- Use ONLY v2 tools: list_workflows, inspect_workflow, start_workflow, continue_workflow.
+- Never use workflow_next or any v1 tools.
+- Never inspect/decode token contents.
+- Do not attempt any resume-like behavior; only use sessions created in this chat.
+
+OUTPUT TAGGING RULES:
+- Every notesMarkdown you submit MUST be prefixed with:
+  [CHAT_ID=chat-4-rehydrate-only][SCENARIO=rehydrate-only] 
+
+REPORTING RULES:
+- For each tool call, record: tool name, key inputs (redact tokens to first 16 chars + '…'), and the full response.
+- If you hit an error: record code/message and STOP the chat.
+
+---
+
 You are testing WorkRail v2 continuation modes. Follow these steps exactly:
 
 SETUP:
-1. Call list_workflows and pick a simple workflow
-2. Call start_workflow
-   - Save stateToken_0
+1. Call list_workflows and confirm "workflow-diagnose-environment" is available
+2. Call start_workflow with workflowId: "workflow-diagnose-environment"
+   - Save stateToken_0 and ackToken_0
 
 TEST WITHOUT ACK:
 3. Call continue_workflow with ONLY stateToken_0 (omit ackToken parameter entirely)
@@ -279,7 +409,7 @@ TEST WITHOUT ACK:
    - Compare with step 3 response
 
 5. Now call continue_workflow WITH stateToken_0 AND ackToken_0
-   - Output: {"notesMarkdown": "[CHAT_ID=<CHAT_ID>][SCENARIO=chat-4-rehydrate-only] Actually advancing now"}
+   - Output: {"notesMarkdown": "[CHAT_ID=chat-4-rehydrate-only][SCENARIO=rehydrate-only] Actually advancing now"}
    - Record the new stateToken_1
 
 6. Call continue_workflow with ONLY stateToken_1 (no ackToken)
@@ -297,11 +427,11 @@ ANALYSIS:
 ```
 
 ### Expected Outcomes
-- ✅ Calls without ackToken return: pending step info + fresh tokens (ack/checkpoint for potential future advancement)
-- ✅ Multiple rehydrate calls return identical pending info (pure/deterministic)
-- ✅ Rehydrate does NOT advance the workflow (stateToken stays the same)
-- ✅ Only the call WITH ackToken actually advances
-- ✅ Agent should infer: "Without ack = read current state; with ack = actually advance"
+- Calls without ackToken return: pending step info + fresh tokens (ack/checkpoint for potential future advancement)
+- Multiple rehydrate calls return identical pending info (pure/deterministic)
+- Rehydrate does NOT advance the workflow (stateToken stays the same)
+- Only the call WITH ackToken actually advances
+- Agent should infer: "Without ack = read current state; with ack = actually advance"
 
 ---
 
@@ -314,6 +444,35 @@ ANALYSIS:
 ### Agent Instructions (copy verbatim into new chat)
 
 ```
+You are running WorkRail v2 slice validation.
+
+SETUP:
+- CHAT_ID is: chat-5-error-modes
+- Use CHAT_ID in every output you submit.
+
+NON-NEGOTIABLE ISOLATION RULES:
+- Confirm with the operator that this is a brand new chat.
+- Confirm you will create a brand new v2 session in THIS chat by calling start_workflow.
+- Do not reuse tokens from any other test chat.
+- Do not advance the same session in parallel from multiple chats.
+- If token provenance is violated or uncertain: STOP and report "INVALID TEST: TOKEN CONTAMINATION".
+
+TOOLING RULES:
+- Use ONLY v2 tools: list_workflows, inspect_workflow, start_workflow, continue_workflow.
+- Never use workflow_next or any v1 tools.
+- Never inspect/decode token contents.
+- Do not attempt any resume-like behavior; only use sessions created in this chat.
+
+OUTPUT TAGGING RULES:
+- Every notesMarkdown you submit MUST be prefixed with:
+  [CHAT_ID=chat-5-error-modes][SCENARIO=error-modes] 
+
+REPORTING RULES:
+- For each tool call, record: tool name, key inputs (redact tokens to first 16 chars + '…'), and the full response.
+- Continue through all tests even if errors occur (this test expects errors).
+
+---
+
 You are testing WorkRail v2 error handling. Follow these steps and record ALL errors:
 
 TEST 1: Missing workflow
@@ -321,8 +480,8 @@ TEST 1: Missing workflow
    - Record error code and message
 
 TEST 2: Invalid token format
-2. Call list_workflows and pick any workflow
-3. Call start_workflow with that workflow
+2. Call list_workflows and confirm "workflow-diagnose-environment" is available
+3. Call start_workflow with workflowId: "workflow-diagnose-environment"
    - Save the stateToken
 4. Call continue_workflow with stateToken: "not-a-real-token"
    - Record error code and message
@@ -351,11 +510,11 @@ ANALYSIS:
 ```
 
 ### Expected Outcomes
-- ✅ Test 1: `NOT_FOUND` error
-- ✅ Test 2: `TOKEN_INVALID_FORMAT` or `VALIDATION_ERROR`
-- ✅ Test 3: `TOKEN_SCOPE_MISMATCH` or `VALIDATION_ERROR`
-- ✅ Test 4: Schema validation error (missing required field)
-- ✅ All errors include actionable suggestions
+- Test 1: `NOT_FOUND` error
+- Test 2: `TOKEN_INVALID_FORMAT` or `VALIDATION_ERROR`
+- Test 3: `TOKEN_SCOPE_MISMATCH` or `VALIDATION_ERROR`
+- Test 4: Schema validation error (missing required field)
+- All errors include actionable suggestions
 
 ---
 
@@ -368,11 +527,40 @@ ANALYSIS:
 ### Agent Instructions (copy verbatim into new chat)
 
 ```
+You are running WorkRail v2 slice validation.
+
+SETUP:
+- CHAT_ID is: chat-6-token-security
+- Use CHAT_ID in every output you submit.
+
+NON-NEGOTIABLE ISOLATION RULES:
+- Confirm with the operator that this is a brand new chat.
+- Confirm you will create a brand new v2 session in THIS chat by calling start_workflow.
+- Do not reuse tokens from any other test chat.
+- Do not advance the same session in parallel from multiple chats.
+- If token provenance is violated or uncertain: STOP and report "INVALID TEST: TOKEN CONTAMINATION".
+
+TOOLING RULES:
+- Use ONLY v2 tools: list_workflows, inspect_workflow, start_workflow, continue_workflow.
+- Never use workflow_next or any v1 tools.
+- Never inspect/decode token contents.
+- Do not attempt any resume-like behavior; only use sessions created in this chat.
+
+OUTPUT TAGGING RULES:
+- Every notesMarkdown you submit MUST be prefixed with:
+  [CHAT_ID=chat-6-token-security][SCENARIO=token-security] 
+
+REPORTING RULES:
+- For each tool call, record: tool name, key inputs (redact tokens to first 16 chars + '…'), and the full response.
+- Continue through all tests even if errors occur (this test expects errors).
+
+---
+
 You are testing WorkRail v2 token security. Follow these steps:
 
 SETUP:
-1. Call list_workflows and pick any workflow
-2. Call start_workflow
+1. Call list_workflows and confirm "workflow-diagnose-environment" is available
+2. Call start_workflow with workflowId: "workflow-diagnose-environment"
    - Save the exact stateToken string
 
 TAMPERING TESTS:
@@ -405,10 +593,10 @@ ANALYSIS:
 ```
 
 ### Expected Outcomes
-- ✅ Both tampering attempts fail with `TOKEN_BAD_SIGNATURE` or `VALIDATION_ERROR`
-- ✅ Error messages indicate verification failed
-- ✅ No execution occurs with tampered tokens
-- ✅ Agent should infer: "Tokens are cryptographically signed and cannot be modified"
+- Both tampering attempts fail with `TOKEN_BAD_SIGNATURE` or `VALIDATION_ERROR`
+- Error messages indicate verification failed
+- No execution occurs with tampered tokens
+- Agent should infer: "Tokens are cryptographically signed and cannot be modified"
 
 ---
 
@@ -421,26 +609,54 @@ ANALYSIS:
 ### Agent Instructions (copy verbatim into new chat)
 
 ```
+You are running WorkRail v2 slice validation.
+
+SETUP:
+- CHAT_ID is: chat-7-multi-step
+- Use CHAT_ID in every output you submit.
+
+NON-NEGOTIABLE ISOLATION RULES:
+- Confirm with the operator that this is a brand new chat.
+- Confirm you will create a brand new v2 session in THIS chat by calling start_workflow.
+- Do not reuse tokens from any other test chat.
+- Do not advance the same session in parallel from multiple chats.
+- If token provenance is violated or uncertain: STOP and report "INVALID TEST: TOKEN CONTAMINATION".
+
+TOOLING RULES:
+- Use ONLY v2 tools: list_workflows, inspect_workflow, start_workflow, continue_workflow.
+- Never use workflow_next or any v1 tools.
+- Never inspect/decode token contents.
+- Do not attempt any resume-like behavior; only use sessions created in this chat.
+
+OUTPUT TAGGING RULES:
+- Every notesMarkdown you submit MUST be prefixed with:
+  [CHAT_ID=chat-7-multi-step][SCENARIO=multi-step] 
+
+REPORTING RULES:
+- For each tool call, record: tool name, key inputs (redact tokens to first 16 chars + '…'), and the full response.
+- If you hit an error: record code/message and STOP the chat.
+
+---
+
 You are testing WorkRail v2 end-to-end execution with outputs. Follow these steps:
 
 SETUP:
-1. Call list_workflows
-2. Pick a workflow with at least 3 steps (avoid loops for this test)
-3. Call start_workflow with that workflow ID
+1. Call list_workflows and confirm "bug-investigation" is available
+2. Call start_workflow with workflowId: "bug-investigation"
 
 EXECUTION WITH OUTPUTS:
 For each step (repeat until isComplete is true):
-4. Read the pending.prompt
-5. Call continue_workflow with current stateToken and ackToken
-   - Provide output: {"notesMarkdown": "[CHAT_ID=<CHAT_ID>][SCENARIO=chat-7-multi-step] Completed step <stepId>: <brief summary of what the prompt asked>"}
-6. Record:
+3. Read the pending.prompt
+4. Call continue_workflow with current stateToken and ackToken
+   - Provide output: {"notesMarkdown": "[CHAT_ID=chat-7-multi-step][SCENARIO=multi-step] Completed step <stepId>: <brief summary of what the prompt asked>"}
+5. Record:
    - New tokens received
    - Whether pending changed
    - Whether isComplete changed
 
 FINAL VERIFICATION:
-7. Count total steps executed
-8. List all the output notes you provided
+6. Count total steps executed
+7. List all the output notes you provided
 
 REPORT (structured):
 - Workflow ID: <id>
@@ -456,11 +672,11 @@ ANALYSIS:
 ```
 
 ### Expected Outcomes
-- ✅ Workflow executes to completion
-- ✅ Each step returns updated tokens
-- ✅ Final step returns `isComplete: true, pending: null`
-- ✅ Outputs are accepted (no errors about invalid output format)
-- ✅ Note: outputs may not be visible in responses (that's expected; they're stored durably)
+- Workflow executes to completion
+- Each step returns updated tokens
+- Final step returns `isComplete: true, pending: null`
+- Outputs are accepted (no errors about invalid output format)
+- Note: outputs may not be visible in responses (that's expected; they're stored durably)
 
 ---
 
@@ -473,14 +689,42 @@ ANALYSIS:
 ### Agent Instructions (copy verbatim into new chat)
 
 ```
+You are running WorkRail v2 slice validation.
+
+SETUP:
+- CHAT_ID is: chat-8-hash-stability
+- Use CHAT_ID in every output you submit.
+
+NON-NEGOTIABLE ISOLATION RULES:
+- Confirm with the operator that this is a brand new chat.
+- Confirm you will create a brand new v2 session in THIS chat by calling start_workflow.
+- Do not reuse tokens from any other test chat.
+- Do not advance the same session in parallel from multiple chats.
+- If token provenance is violated or uncertain: STOP and report "INVALID TEST: TOKEN CONTAMINATION".
+
+TOOLING RULES:
+- Use ONLY v2 tools: list_workflows, inspect_workflow, start_workflow, continue_workflow.
+- Never use workflow_next or any v1 tools.
+- Never inspect/decode token contents.
+- Do not attempt any resume-like behavior; only use sessions created in this chat.
+
+OUTPUT TAGGING RULES:
+- Every notesMarkdown you submit MUST be prefixed with:
+  [CHAT_ID=chat-8-hash-stability][SCENARIO=hash-stability] 
+
+REPORTING RULES:
+- For each tool call, record: tool name, key inputs (redact tokens to first 16 chars + '…'), and the full response.
+- If you hit an error: record code/message and STOP the chat.
+
+---
+
 You are testing WorkRail v2 workflow pinning and determinism. Follow these steps:
 
 HASH INSPECTION:
 1. Call list_workflows
-   - Record the workflowHash for each workflow (if present)
-   - Pick one workflow and note its workflowHash
+   - Record the workflowHash for "bug-investigation" (if present)
 
-2. Call inspect_workflow with that workflow ID
+2. Call inspect_workflow with workflowId: "bug-investigation"
    - Record the workflowHash from the response
    - Compare with the hash from step 1
 
@@ -489,7 +733,7 @@ HASH INSPECTION:
    - Compare with hashes from steps 1 and 2
 
 EXECUTION WITH HASH:
-4. Call start_workflow with that workflow ID
+4. Call start_workflow with workflowId: "bug-investigation"
 5. Look at the response structure
    - Is there any reference to workflowHash in the response?: yes/no/where
    - Does the hash appear in any tokens or metadata?
@@ -509,11 +753,11 @@ ANALYSIS:
 ```
 
 ### Expected Outcomes
-- ✅ `workflowHash` is consistent across all calls (deterministic)
-- ✅ Format is `sha256:<64 hex chars>`
-- ✅ Same workflow always produces same hash
-- ✅ Hash may appear in response metadata (informational)
-- ✅ Agent should infer: "Hash identifies a specific version of the workflow"
+- `workflowHash` is consistent across all calls (deterministic)
+- Format is `sha256:<64 hex chars>`
+- Same workflow always produces same hash
+- Hash may appear in response metadata (informational)
+- Agent should infer: "Hash identifies a specific version of the workflow"
 
 ---
 
@@ -523,14 +767,14 @@ After executing all chats, the human operator fills this table:
 
 | Chat | CHAT_ID | Scenario | Pass/Fail | Notes |
 |------|---------|----------|-----------|-------|
-| 1 |  | Basic execution loop | ⬜ | |
-| 2 |  | Rewind and fork | ⬜ | |
-| 3 |  | Idempotency and replay | ⬜ | |
-| 4 |  | Rehydrate-only (pure) | ⬜ | |
-| 5 |  | Error modes | ⬜ | |
-| 6 |  | Token tampering | ⬜ | |
-| 7 |  | Multi-step with outputs | ⬜ | |
-| 8 |  | Hash stability | ⬜ | |
+| 1 | chat-1-happy-path | Basic execution loop | ⬜ | |
+| 2 | chat-2-rewind-fork | Rewind and fork | ⬜ | |
+| 3 | chat-3-idempotency-replay | Idempotency and replay | ⬜ | |
+| 4 | chat-4-rehydrate-only | Rehydrate-only (pure) | ⬜ | |
+| 5 | chat-5-error-modes | Error modes | ⬜ | |
+| 6 | chat-6-token-security | Token tampering | ⬜ | |
+| 7 | chat-7-multi-step | Multi-step with outputs | ⬜ | |
+| 8 | chat-8-hash-stability | Hash stability | ⬜ | |
 
 ---
 
@@ -551,10 +795,10 @@ After executing all chats, the human operator fills this table:
 ## Known Limitations (Expected "Fails")
 
 These are NOT bugs; they are missing Slice 4+ features:
-- ❌ Cannot resume in a new chat (no `resume_session` yet)
-- ❌ Cannot checkpoint without advancing (no `checkpoint_workflow` yet)
-- ❌ Outputs don't appear in responses (storage works, but no recap/export yet)
-- ❌ Blockers/gaps UX may be incomplete depending on the workflow and mode (verify by observing `outcome`/`isComplete` behavior rather than expecting a specific UI).
+- Cannot resume in a new chat (no `resume_session` yet)
+- Cannot checkpoint without advancing (no `checkpoint_workflow` yet)
+- Outputs don't appear in responses (storage works, but no recap/export yet)
+- Blockers/gaps UX may be incomplete depending on the workflow and mode (verify by observing `outcome`/`isComplete` behavior rather than expecting a specific UI).
 
 ---
 
@@ -579,9 +823,8 @@ If any test fails:
 - WorkRail v2 data dir is accessible (no special per-chat data dir setup is required for this plan)
 
 **Recommended:**
-- Use a simple 2-3 step workflow for initial tests
-- Test with a workflow that has NO loops first (loops add complexity)
 - Run each chat in strict sequence (don't parallelize; session conflicts)
+- Workflows are pre-assigned per chat (see table in Prerequisites)
 
 ---
 
