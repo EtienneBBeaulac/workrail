@@ -25,6 +25,7 @@ import { NodeBase64UrlV2 } from '../../src/v2/infra/local/base64url/index.js';
 import { LocalKeyringV2 } from '../../src/v2/infra/local/keyring/index.js';
 import { NodeRandomEntropyV2 } from '../../src/v2/infra/local/random-entropy/index.js';
 import { NodeTimeClockV2 } from '../../src/v2/infra/local/time-clock/index.js';
+import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
 
 async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-start-'));
@@ -56,6 +57,7 @@ async function mkCtxWithWorkflow(workflowId: string): Promise<ToolContext> {
   const hmac = new NodeHmacSha256V2();
   const base64url = new NodeBase64UrlV2();
   const entropy = new NodeRandomEntropyV2();
+  const idFactory = new IdFactoryV2(entropy);
   const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url, entropy);
   const keyringRes = await keyringPort.loadOrCreate();
   if (keyringRes.isErr()) throw new Error(`keyring load failed: ${keyringRes.error.code}`);
@@ -78,9 +80,11 @@ async function mkCtxWithWorkflow(workflowId: string): Promise<ToolContext> {
       snapshotStore,
       pinnedStore,
       keyring: keyringRes.value,
+      sha256,
       crypto,
       hmac,
       base64url,
+      idFactory,
     },
   };
 }

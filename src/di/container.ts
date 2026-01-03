@@ -242,6 +242,7 @@ async function registerV2Services(): Promise<void> {
   const { NodeBase64UrlV2 } = await import('../v2/infra/local/base64url/index.js');
   const { NodeRandomEntropyV2 } = await import('../v2/infra/local/random-entropy/index.js');
   const { NodeTimeClockV2 } = await import('../v2/infra/local/time-clock/index.js');
+  const { IdFactoryV2 } = await import('../v2/infra/local/id-factory/index.js');
 
   container.register(DI.V2.DataDir, {
     useFactory: instanceCachingFactory(() => new LocalDataDirV2(process.env)),
@@ -266,6 +267,12 @@ async function registerV2Services(): Promise<void> {
   });
   container.register(DI.V2.TimeClock, {
     useFactory: instanceCachingFactory(() => new NodeTimeClockV2()),
+  });
+  container.register(DI.V2.IdFactory, {
+    useFactory: instanceCachingFactory((c: DependencyContainer) => {
+      const entropy = c.resolve<any>(DI.V2.RandomEntropy);
+      return new IdFactoryV2(entropy);
+    }),
   });
 
   // Level 2: Stores (depend on Level 1 primitives)

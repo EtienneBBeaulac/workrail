@@ -23,6 +23,7 @@ import { LocalKeyringV2 } from '../../src/v2/infra/local/keyring/index.js';
 import { NodeBase64UrlV2 } from '../../src/v2/infra/local/base64url/index.js';
 import { NodeRandomEntropyV2 } from '../../src/v2/infra/local/random-entropy/index.js';
 import { NodeTimeClockV2 } from '../../src/v2/infra/local/time-clock/index.js';
+import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
 import { encodeTokenPayloadV1, signTokenV1 } from '../../src/v2/durable-core/tokens/index.js';
 import { StateTokenPayloadV1Schema, AckTokenPayloadV1Schema } from '../../src/v2/durable-core/tokens/index.js';
 
@@ -41,6 +42,7 @@ async function mkV2Deps(dataDir: LocalDataDirV2): Promise<V2Dependencies> {
   const hmac = new NodeHmacSha256V2();
   const base64url = new NodeBase64UrlV2();
   const entropy = new NodeRandomEntropyV2();
+  const idFactory = new IdFactoryV2(entropy);
   const snapshotStore = new LocalSnapshotStoreV2(dataDir, fsPort, crypto);
   const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir, fsPort);
   const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url, entropy);
@@ -50,12 +52,14 @@ async function mkV2Deps(dataDir: LocalDataDirV2): Promise<V2Dependencies> {
     // Handler structure (V2Dependencies):
     gate: sessionGate,
     sessionStore: sessionEventLogStore,
+    snapshotStore,
+    pinnedStore,
     keyring,
+    sha256,
     crypto,
     hmac,
     base64url,
-    snapshotStore,
-    pinnedStore,
+    idFactory,
     // Test convenience (aliases):
     sessionGate,
     sessionEventLogStore,

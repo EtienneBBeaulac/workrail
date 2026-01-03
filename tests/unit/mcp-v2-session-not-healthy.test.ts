@@ -25,6 +25,7 @@ import { ExecutionSessionGateV2 } from '../../src/v2/usecases/execution-session-
 import { LocalKeyringV2 } from '../../src/v2/infra/local/keyring/index.js';
 import { NodeRandomEntropyV2 } from '../../src/v2/infra/local/random-entropy/index.js';
 import { NodeTimeClockV2 } from '../../src/v2/infra/local/time-clock/index.js';
+import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
 
 async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-health-'));
@@ -38,6 +39,7 @@ async function mkV2Deps() {
   const hmac = new NodeHmacSha256V2();
   const base64url = new NodeBase64UrlV2();
   const entropy = new NodeRandomEntropyV2();
+  const idFactory = new IdFactoryV2(entropy);
   const clock = new NodeTimeClockV2();
   const sessionStore = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha256);
   const lockPort = new LocalSessionLockV2(dataDir, fsPort, clock);
@@ -47,7 +49,7 @@ async function mkV2Deps() {
   const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url, entropy);
   const keyring = await keyringPort.loadOrCreate().match(v => v, e => { throw new Error(`keyring: ${e.code}`); });
 
-  return { gate, sessionStore, snapshotStore, pinnedStore, keyring, crypto, hmac, base64url };
+  return { gate, sessionStore, snapshotStore, pinnedStore, keyring, sha256, crypto, hmac, base64url, idFactory };
 }
 
 async function mkCtxWithWorkflow(workflowId: string): Promise<ToolContext> {

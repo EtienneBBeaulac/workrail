@@ -158,9 +158,11 @@ export async function createToolContext(): Promise<ToolContext> {
       // Do not throw; instead, v2 tools remain disabled (null)
       console.error('[FeatureFlags] v2 tools disabled due to keyring initialization failure');
     } else {
+      const sha256 = container.resolve<any>(DI.V2.Sha256);
       const crypto = container.resolve<any>(DI.V2.Crypto);
       const hmac = container.resolve<any>(DI.V2.HmacSha256);
       const base64url = container.resolve<any>(DI.V2.Base64Url);
+      const idFactory = container.resolve<any>(DI.V2.IdFactory);
 
       v2 = {
         gate,
@@ -168,9 +170,11 @@ export async function createToolContext(): Promise<ToolContext> {
         snapshotStore,
         pinnedStore,
         keyring: keyringResult.value,
+        sha256,
         crypto,
         hmac,
         base64url,
+        idFactory,
       };
       console.error('[FeatureFlags] v2 tools enabled');
     }
