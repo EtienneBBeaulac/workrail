@@ -1,5 +1,4 @@
 import * as os from 'os';
-import { randomUUID } from 'crypto';
 import type { ToolContext, ToolResult } from '../types.js';
 import { error, success, errNotRetryable, errRetryAfterMs, detailsSessionHealth } from '../types.js';
 import type { V2ContinueWorkflowInput, V2StartWorkflowInput } from '../v2/tools.js';
@@ -35,12 +34,14 @@ import {
   type NodeId,
   type WorkflowHash,
 } from '../../v2/durable-core/ids/index.js';
+import { deriveChildAttemptId } from '../../v2/durable-core/ids/attempt-id-derivation.js';
 import type { LoadedSessionTruthV2 } from '../../v2/ports/session-event-log-store.port.js';
 import type { WithHealthySessionLock } from '../../v2/durable-core/ids/with-healthy-session-lock.js';
 import type { ExecutionSessionGateErrorV2 } from '../../v2/usecases/execution-session-gate.js';
 import type { SessionEventLogStoreError } from '../../v2/ports/session-event-log-store.port.js';
 import type { SnapshotStoreError } from '../../v2/ports/snapshot-store.port.js';
 import type { PinnedWorkflowStoreError } from '../../v2/ports/pinned-workflow-store.port.js';
+import type { Sha256PortV2 } from '../../v2/ports/sha256.port.js';
 import type { HmacSha256PortV2 } from '../../v2/ports/hmac-sha256.port.js';
 import type { Base64UrlPortV2 } from '../../v2/ports/base64url.port.js';
 import { ResultAsync as RA, okAsync, errAsync as neErrorAsync, ok, err, type Result } from 'neverthrow';
@@ -393,6 +394,7 @@ function replayFromRecordedAdvance(args: {
   readonly pinnedWorkflow: ReturnType<typeof createWorkflow>;
   readonly snapshotStore: import('../../v2/ports/snapshot-store.port.js').SnapshotStorePortV2;
   readonly keyring: import('../../v2/ports/keyring.port.js').KeyringV1;
+  readonly sha256: Sha256PortV2;
   readonly hmac: HmacSha256PortV2;
   readonly base64url: Base64UrlPortV2;
 }): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, ContinueWorkflowError> {
@@ -409,6 +411,7 @@ function replayFromRecordedAdvance(args: {
     pinnedWorkflow,
     snapshotStore,
     keyring,
+    sha256,
     hmac,
     base64url,
   } = args;
@@ -483,7 +486,7 @@ function replayFromRecordedAdvance(args: {
       const pending = derivePendingStep(snap.enginePayload.engineState);
       const isComplete = deriveIsComplete(snap.enginePayload.engineState);
 
-      const nextAttemptId = attemptIdForNextNode(attemptId);
+      const nextAttemptId = attemptIdForNextNode(attemptId, sha256);
       const nextAckTokenRes = signTokenOrErr({
         unsignedPrefix: 'ack.v1.',
         payload: { tokenVersion: 1, tokenKind: 'ack', sessionId, runId, nodeId: toNodeIdBranded, attemptId: nextAttemptId },
@@ -550,8 +553,9 @@ function advanceAndRecord(args: {
   readonly pinnedWorkflow: ReturnType<typeof createWorkflow>;
   readonly snapshotStore: import('../../v2/ports/snapshot-store.port.js').SnapshotStorePortV2;
   readonly sessionStore: import('../../v2/ports/session-event-log-store.port.js').SessionEventLogAppendStorePortV2;
+  readonly idFactory: { readonly mintNodeId: () => NodeId; readonly mintEventId: () => string };
 }): RA<void, InternalError | SessionEventLogStoreError | SnapshotStoreError> {
-  const { truth, sessionId, runId, nodeId, attemptId, workflowHash, dedupeKey, inputContext, inputOutput, lock, pinnedWorkflow, snapshotStore, sessionStore } = args;
+  const { truth, sessionId, runId, nodeId, attemptId, workflowHash, dedupeKey, inputContext, inputOutput, lock, pinnedWorkflow, snapshotStore, sessionStore, idFactory } = args;
 
   // Enforce invariants: do not record advance attempts for unknown nodes.
   const hasRun = truth.events.some((e) => e.kind === 'run_started' && e.scope?.runId === String(runId));
@@ -611,12 +615,12 @@ function advanceAndRecord(args: {
     };
 
     return snapshotStore.putExecutionSnapshotV1(snapshotFile).andThen((newSnapshotRef) => {
-      const toNodeId = `node_${randomUUID()}`;
+      const toNodeId = String(idFactory.mintNodeId());
       const nextEventIndex = truth.events.length === 0 ? 0 : truth.events[truth.events.length - 1]!.eventIndex + 1;
 
-      const evtAdvanceRecorded = `evt_${randomUUID()}`;
-      const evtNodeCreated = `evt_${randomUUID()}`;
-      const evtEdgeCreated = `evt_${randomUUID()}`;
+      const evtAdvanceRecorded = idFactory.mintEventId();
+      const evtNodeCreated = idFactory.mintEventId();
+      const evtEdgeCreated = idFactory.mintEventId();
 
       const hasChildren = truth.events.some(
         (e): e is Extract<DomainEventV1, { kind: 'edge_created' }> =>
@@ -640,7 +644,7 @@ function advanceAndRecord(args: {
           : [];
 
       const normalizedOutputs = normalizeOutputsForAppend(outputsToAppend);
-      const outputEventIds = normalizedOutputs.map(() => `evt_${randomUUID()}`);
+      const outputEventIds = normalizedOutputs.map(() => idFactory.mintEventId());
 
       const planRes = buildAckAdvanceAppendPlanV1({
         sessionId: String(sessionId),
@@ -824,13 +828,13 @@ function parseAckTokenOrFail(
   return { ok: true, token: parsedRes.value as AckTokenInput };
 }
 
-function newAttemptId(): AttemptId {
-  return asAttemptId(`attempt_${randomUUID()}`);
+function newAttemptId(idFactory: { readonly mintAttemptId: () => AttemptId }): AttemptId {
+  return idFactory.mintAttemptId();
 }
 
-function attemptIdForNextNode(parentAttemptId: AttemptId): AttemptId {
-  // Deterministic derivation so replay responses can re-mint the same next-node ack/checkpoint tokens.
-  return asAttemptId(`next_${parentAttemptId}`);
+function attemptIdForNextNode(parentAttemptId: AttemptId, sha256: Sha256PortV2): AttemptId {
+  // Deterministic and bounded derivation so replay can re-mint the same next-node tokens.
+  return deriveChildAttemptId(parentAttemptId, sha256);
 }
 
 function signTokenOrErr(args: {
@@ -956,7 +960,7 @@ function executeStartWorkflow(
     return neErrorAsync({ kind: 'precondition_failed', message: 'v2 tools disabled', suggestion: 'Enable v2Tools flag' });
   }
 
-  const { gate, sessionStore, snapshotStore, pinnedStore, keyring, crypto, hmac, base64url } = ctx.v2;
+  const { gate, sessionStore, snapshotStore, pinnedStore, keyring, crypto, hmac, base64url, idFactory } = ctx.v2;
 
   const ctxCheck = checkContextBudget({ tool: 'start_workflow', context: input.context });
   if (!ctxCheck.ok) return neErrorAsync({ kind: 'validation_failed', failure: ctxCheck.error });
@@ -1007,9 +1011,9 @@ function executeStartWorkflow(
         });
     })
     .andThen(({ workflow, firstStep, workflowHash, pinnedWorkflow }) => {
-      const sessionId = asSessionId(`sess_${randomUUID()}`);
-      const runId = asRunId(`run_${randomUUID()}`);
-      const nodeId = asNodeId(`node_${randomUUID()}`);
+      const sessionId = idFactory.mintSessionId();
+      const runId = idFactory.mintRunId();
+      const nodeId = idFactory.mintNodeId();
 
       const snapshot: ExecutionSnapshotFileV1 = {
         v: 1 as const,
@@ -1028,9 +1032,9 @@ function executeStartWorkflow(
       return snapshotStore.putExecutionSnapshotV1(snapshot)
         .mapErr((cause) => ({ kind: 'snapshot_creation_failed' as const, cause }))
         .andThen((snapshotRef) => {
-          const evtSessionCreated = `evt_${randomUUID()}`;
-          const evtRunStarted = `evt_${randomUUID()}`;
-          const evtNodeCreated = `evt_${randomUUID()}`;
+          const evtSessionCreated = idFactory.mintEventId();
+          const evtRunStarted = idFactory.mintEventId();
+          const evtNodeCreated = idFactory.mintEventId();
 
           return gate.withHealthySessionLock(sessionId, (lock) => {
             const eventsArray: readonly DomainEventV1[] = [
@@ -1101,7 +1105,7 @@ function executeStartWorkflow(
         nodeId,
         workflowHash,
       };
-      const attemptId = newAttemptId();
+      const attemptId = newAttemptId(idFactory);
       const ackPayload = {
         tokenVersion: 1 as const,
         tokenKind: 'ack' as const,
@@ -1159,7 +1163,7 @@ function executeContinueWorkflow(
     return neErrorAsync({ kind: 'precondition_failed', message: 'v2 tools disabled', suggestion: 'Enable v2Tools flag' });
   }
 
-  const { gate, sessionStore, snapshotStore, pinnedStore, keyring, crypto, hmac, base64url } = ctx.v2;
+  const { gate, sessionStore, snapshotStore, pinnedStore, keyring, sha256, crypto, hmac, base64url, idFactory } = ctx.v2;
 
   const stateRes = parseStateTokenOrFail(input.stateToken, keyring, hmac, base64url);
   if (!stateRes.ok) return neErrorAsync({ kind: 'validation_failed', failure: stateRes.failure });
@@ -1223,7 +1227,7 @@ function executeContinueWorkflow(
             const pending = derivePendingStep(engineState);
             const isComplete = deriveIsComplete(engineState);
 
-            const attemptId = newAttemptId();
+            const attemptId = newAttemptId(idFactory);
             const ackTokenRes = signTokenOrErr({
               unsignedPrefix: 'ack.v1.',
               payload: { tokenVersion: 1, tokenKind: 'ack', sessionId, runId, nodeId, attemptId },
@@ -1329,6 +1333,7 @@ function executeContinueWorkflow(
               pinnedWorkflow,
               snapshotStore,
               keyring,
+              sha256,
               hmac,
               base64url,
             });
@@ -1359,6 +1364,7 @@ function executeContinueWorkflow(
                   pinnedWorkflow,
                   snapshotStore,
                   sessionStore,
+                  idFactory,
                 }).andThen(() =>
                   sessionStore
                     .load(sessionId)
@@ -1416,8 +1422,9 @@ function executeContinueWorkflow(
                 inputAckToken: input.ackToken!,
                 pinnedWorkflow,
                 snapshotStore,
-                keyring,
-                hmac,
+              keyring,
+              sha256,
+              hmac,
                 base64url,
               });
             });
