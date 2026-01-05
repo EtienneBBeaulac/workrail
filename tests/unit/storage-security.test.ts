@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import * as os from 'os';
+import * as path from 'path';
 import {
   sanitizeId,
   assertWithinBase,
@@ -70,13 +72,13 @@ describe('Storage Security Utilities', () => {
   });
 
   describe('assertWithinBase', () => {
-    const baseDir = '/safe/base/dir';
+    const baseDir = path.join(os.tmpdir(), 'workrail-storage-security', 'safe', 'base', 'dir');
 
     it('should allow paths within base directory', () => {
       const validPaths = [
-        '/safe/base/dir/subdir/file.json',
-        '/safe/base/dir/file.json',
-        '/safe/base/dir'  // base dir itself
+        path.join(baseDir, 'subdir', 'file.json'),
+        path.join(baseDir, 'file.json'),
+        baseDir  // base dir itself
       ];
 
       for (const safePath of validPaths) {
@@ -86,10 +88,10 @@ describe('Storage Security Utilities', () => {
 
     it('should reject paths outside base directory', () => {
       const dangerousPaths = [
-        '/safe/base',  // parent of base
-        '/safe/base/different',  // sibling directory
-        '/completely/different/path',
-        '/etc/passwd'
+        path.dirname(baseDir), // parent of base
+        path.join(path.dirname(baseDir), 'different'), // sibling directory
+        path.join(os.tmpdir(), 'completely', 'different', 'path'),
+        path.join(os.tmpdir(), 'etc', 'passwd')
       ];
 
       for (const dangerousPath of dangerousPaths) {
@@ -118,13 +120,13 @@ describe('Storage Security Utilities', () => {
 
   describe('securePathResolve', () => {
     it('should resolve safe relative paths', () => {
-      const basePath = '/safe/base';
-      expect(securePathResolve(basePath, 'subdir/file.json')).toBe('/safe/base/subdir/file.json');
-      expect(securePathResolve(basePath, './file.json')).toBe('/safe/base/file.json');
+      const basePath = path.join(os.tmpdir(), 'workrail-storage-security', 'safe-base');
+      expect(securePathResolve(basePath, path.join('subdir', 'file.json'))).toBe(path.join(basePath, 'subdir', 'file.json'));
+      expect(securePathResolve(basePath, './file.json')).toBe(path.join(basePath, 'file.json'));
     });
 
     it('should reject path traversal attempts', () => {
-      const basePath = '/safe/base';
+      const basePath = path.join(os.tmpdir(), 'workrail-storage-security', 'safe-base');
       const dangerousRelativePaths = [
         '../../../etc/passwd',
         '../../sensitive',

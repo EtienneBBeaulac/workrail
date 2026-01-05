@@ -44,6 +44,19 @@ function findGitRepoRoot(startPath: string): string | null {
   }
 }
 
+/**
+ * Normalize filesystem paths for cross-platform comparisons:
+ * - realpath to collapse symlinks/aliases
+ * - normalize separators
+ * - lowercase to ignore Windows case differences
+ */
+function realPathKey(p: string): string {
+  const rp = typeof (fsSync.realpathSync as any).native === 'function'
+    ? (fsSync.realpathSync as any).native(p)
+    : fsSync.realpathSync(p);
+  return path.normalize(rp).toLowerCase();
+}
+
 describe('Git Worktree Detection Logic', () => {
   let tempDir: string;
   let mainRepo: string;
@@ -91,7 +104,7 @@ describe('Git Worktree Detection Logic', () => {
   it('should detect main repo as git root', () => {
     const gitRoot = findGitRepoRoot(mainRepo);
     // Use realpath to handle macOS /private symlink
-    expect(fsSync.realpathSync(gitRoot!)).toBe(fsSync.realpathSync(mainRepo));
+    expect(realPathKey(gitRoot!)).toBe(realPathKey(mainRepo));
   });
   
   it('should detect worktrees as valid git repositories', () => {
@@ -114,9 +127,9 @@ describe('Git Worktree Detection Logic', () => {
     
     // git rev-parse returns paths that resolve to the same location
     // (macOS may add /private prefix, so we compare resolved paths)
-    expect(fsSync.realpathSync(mainRepoRoot!)).toBe(fsSync.realpathSync(mainRepo));
-    expect(fsSync.realpathSync(worktree1Root!)).toBe(fsSync.realpathSync(worktree1));
-    expect(fsSync.realpathSync(worktree2Root!)).toBe(fsSync.realpathSync(worktree2));
+    expect(realPathKey(mainRepoRoot!)).toBe(realPathKey(mainRepo));
+    expect(realPathKey(worktree1Root!)).toBe(realPathKey(worktree1));
+    expect(realPathKey(worktree2Root!)).toBe(realPathKey(worktree2));
     
     // Without SessionManager's additional logic, IDs would be different
     const id1 = hashProjectPath(mainRepoRoot!);

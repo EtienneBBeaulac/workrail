@@ -37,7 +37,18 @@ export function sanitizeId(id: string): string {
  * @throws SecurityError if path escapes the base directory
  */
 export function assertWithinBase(resolvedPath: string, baseDir: string): void {
-  if (!resolvedPath.startsWith(baseDir + path.sep) && resolvedPath !== baseDir) {
+  const platform = process.platform;
+  const baseResolved = (platform === 'win32' ? path.win32.resolve(baseDir) : path.resolve(baseDir));
+  const targetResolved = (platform === 'win32' ? path.win32.resolve(resolvedPath) : path.resolve(resolvedPath));
+
+  // Windows paths are case-insensitive. Normalize for comparison.
+  const base = platform === 'win32' ? baseResolved.toLowerCase() : baseResolved;
+  const target = platform === 'win32' ? targetResolved.toLowerCase() : targetResolved;
+
+  const rel = platform === 'win32' ? path.win32.relative(base, target) : path.relative(base, target);
+  const escapes = rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel);
+
+  if (escapes) {
     throw new SecurityError('Path escapes storage sandbox', 'file-access');
   }
 }
