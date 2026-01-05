@@ -25,6 +25,7 @@ describe('🚀 END-TO-END: Complete External Workflows Feature', () => {
   const gitlabRepo = path.join(testDir, 'gitlab-repo');
   const selfHostedRepo = path.join(testDir, 'selfhosted-repo');
   const cacheDir = path.join(process.cwd(), '.workrail-cache-test-' + Date.now());
+  let originalEnv: NodeJS.ProcessEnv;
 
   async function createTestRepo(repoDir: string, workflowId: string, workflowName: string, service: string) {
     await fs.mkdir(path.join(repoDir, 'workflows'), { recursive: true });
@@ -65,13 +66,16 @@ describe('🚀 END-TO-END: Complete External Workflows Feature', () => {
   beforeAll(async () => {
     console.log('\n🔧 Setting up E2E test environment...');
     
+    originalEnv = { ...process.env };
+    process.env['WORKRAIL_CACHE_DIR'] = cacheDir;
+    
     // Clean up any existing test dirs
     if (existsSync(testDir)) {
       await fs.rm(testDir, { recursive: true, force: true });
     }
     
     await fs.mkdir(testDir, { recursive: true });
-    
+
     // Create 3 test repos simulating different Git services
     console.log(`Creating GitHub repo with workflow 'e2e-github' at ${githubRepo}`);
     await createTestRepo(githubRepo, 'e2e-github', 'GitHub E2E Workflow', 'GitHub');
@@ -86,16 +90,14 @@ describe('🚀 END-TO-END: Complete External Workflows Feature', () => {
   });
 
   afterAll(async () => {
-    // Keep directories for debugging
-    console.log(`\n🔍 Test artifacts kept at:`);
-    console.log(`   Repos: ${testDir}`);
-    console.log(`   Cache: ${cacheDir}`);
-    // if (existsSync(testDir)) {
-    //   await fs.rm(testDir, { recursive: true, force: true });
-    // }
-    // if (existsSync(cacheDir)) {
-    //   await fs.rm(cacheDir, { recursive: true, force: true });
-    // }
+    process.env = originalEnv;
+    
+    if (existsSync(testDir)) {
+      await fs.rm(testDir, { recursive: true, force: true });
+    }
+    if (existsSync(cacheDir)) {
+      await fs.rm(cacheDir, { recursive: true, force: true });
+    }
   });
 
   it('🚀 E2E: Complete flow with environment variables', async () => {

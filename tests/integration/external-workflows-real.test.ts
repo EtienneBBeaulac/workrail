@@ -18,6 +18,7 @@ describe('External Workflows - REAL Integration Tests', () => {
   const repo2Dir = path.join(testRootDir, 'repo2');
   const repo3Dir = path.join(testRootDir, 'repo3-self-hosted');
   const cacheDir = path.join(testRootDir, 'cache');
+  let originalEnv: NodeJS.ProcessEnv;
 
   async function createRealGitRepo(repoDir: string, workflowId: string, workflowName: string) {
     await fs.mkdir(path.join(repoDir, 'workflows'), { recursive: true });
@@ -55,6 +56,10 @@ describe('External Workflows - REAL Integration Tests', () => {
 
   beforeAll(async () => {
     console.log('🔧 Setting up REAL Git repositories...');
+    
+    originalEnv = { ...process.env };
+    process.env['WORKRAIL_CACHE_DIR'] = cacheDir;
+    
     await fs.mkdir(testRootDir, { recursive: true });
     
     // Create 3 real Git repos
@@ -66,6 +71,8 @@ describe('External Workflows - REAL Integration Tests', () => {
   });
 
   afterAll(async () => {
+    process.env = originalEnv;
+    
     if (existsSync(testRootDir)) {
       await fs.rm(testRootDir, { recursive: true, force: true });
     }

@@ -553,16 +553,23 @@ export function createEnhancedMultiSourceWorkflowStorage(
         const localPath = (() => {
           if (!url.startsWith('file://')) return url;
           try {
-            return fileURLToPath(new URL(url));
+            // Decode percent-encoded URLs (e.g., file:///C:/Program%20Files/...)
+            const decoded = decodeURIComponent(url);
+            return fileURLToPath(new URL(decoded));
           } catch {
             // Best-effort fallback for malformed file URLs.
-            return url.substring('file://'.length);
+            try {
+              return fileURLToPath(new URL(url));
+            } catch {
+              // Last resort: naive stripping (already validated as local earlier)
+              return url.substring('file://'.length);
+            }
           }
         })();
         config.customPaths.push(localPath);
         logger.info('Using direct file access for local repository', { localPath });
       }
-    }
+}
     
     // Only add actual Git URLs to gitRepositories (these will be cloned)
     if (actualGitUrls.length > 0) {

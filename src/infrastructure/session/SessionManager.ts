@@ -566,8 +566,26 @@ export class SessionManager extends EventEmitter {
       // Write to temp file
       await fs.writeFile(tempPath, JSON.stringify(data, null, 2), 'utf-8');
       
-      // Atomic rename (POSIX guarantees atomicity)
-      await fs.rename(tempPath, filePath);
+      // Rename (atomic on POSIX; best-effort on Windows with retry)
+      let retries = 3;
+      while (retries > 0) {
+        try {
+          await fs.rename(tempPath, filePath);
+          return;
+        } catch (error: any) {
+          if (error.code === 'EPERM' && process.platform === 'win32' && retries > 1) {
+            // Windows: file may be transiently locked; retry after brief delay
+            await new Promise(resolve => setTimeout(resolve, 10));
+            retries--;
+            continue;
+          }
+          // Clean up temp file on terminal error
+          try {
+            await fs.unlink(tempPath);
+          } catch {}
+          throw error;
+        }
+      }
     } catch (error) {
       // Clean up temp file on error
       try {
@@ -575,7 +593,7 @@ export class SessionManager extends EventEmitter {
       } catch {}
       throw error;
     }
-  }
+}
   
   /**
    * Watch a session file for changes

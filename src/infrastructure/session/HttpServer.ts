@@ -629,11 +629,25 @@ export class HttpServer {
         // Write to temp file first
         await fs.writeFile(tempPath, JSON.stringify(newLockData, null, 2));
         
-        // Atomic rename (POSIX guarantees atomicity)
-        await fs.rename(tempPath, this.lockFile);
+        // Rename (atomic on POSIX; best-effort on Windows with retry)
+        let retries = 3;
+        let renamed = false;
+        while (retries > 0 && !renamed) {
+          try {
+            await fs.rename(tempPath, this.lockFile);
+            renamed = true;
+          } catch (err: any) {
+            if (err.code === 'EPERM' && process.platform === 'win32' && retries > 1) {
+              await new Promise(resolve => setTimeout(resolve, 10));
+              retries--;
+              continue;
+            }
+            throw err;
+          }
+        }
         
         console.error('[Dashboard] Lock reclaimed successfully');
-        this.isPrimary = true;
+this.isPrimary = true;
         this.setupPrimaryCleanup();
         this.heartbeat.start();
         return true;

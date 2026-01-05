@@ -336,6 +336,9 @@ jobs:
       - name: Verify dist manifest
         run: node scripts/dist-manifest.js --dist dist --verify dist/manifest.json
 
+      - name: Cross-platform test guardrails
+        run: npm run -s codemod:test-platform-guard
+
       - name: Run contract tests
         run: npx vitest run tests/contract/ --testTimeout=30000
         timeout-minutes: 10

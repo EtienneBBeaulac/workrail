@@ -16,8 +16,12 @@ describe('External Workflows E2E', () => {
   const repo1Dir = path.join(testDir, 'repo1');
   const repo2Dir = path.join(testDir, 'repo2');
   const cacheDir = path.join(testDir, 'cache');
+  let originalEnv: NodeJS.ProcessEnv;
 
   beforeAll(async () => {
+    originalEnv = { ...process.env };
+    process.env['WORKRAIL_CACHE_DIR'] = cacheDir;
+    
     await fs.mkdir(testDir, { recursive: true });
     
     // Create two test repositories simulating different sources
@@ -26,6 +30,8 @@ describe('External Workflows E2E', () => {
   });
 
   afterAll(async () => {
+    process.env = originalEnv;
+    
     if (existsSync(testDir)) {
       await fs.rm(testDir, { recursive: true, force: true });
     }
