@@ -527,9 +527,18 @@ export function createEnhancedMultiSourceWorkflowStorage(
     // Separate local file:// URLs from actual Git URLs
     const localFileUrls: string[] = [];
     const actualGitUrls: string[] = [];
+
+    const isWindowsAbsolutePath = (p: string): boolean => {
+      // Drive path: C:\... or C:/...
+      if (/^[a-zA-Z]:[\\/]/.test(p)) return true;
+      // UNC path: \\server\share\...
+      if (p.startsWith('\\\\')) return true;
+      return false;
+    };
     
     for (const url of urls) {
-      if (url.startsWith('file://') || (!url.includes('://') && url.startsWith('/'))) {
+      const isLocalPath = !url.includes('://') && (url.startsWith('/') || isWindowsAbsolutePath(url));
+      if (url.startsWith('file://') || isLocalPath) {
         localFileUrls.push(url);
       } else {
         actualGitUrls.push(url);

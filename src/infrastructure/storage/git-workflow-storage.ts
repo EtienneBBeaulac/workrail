@@ -112,6 +112,9 @@ export class GitWorkflowStorage implements IWorkflowStorage {
   }
 
   private isValidGitUrl(url: string): boolean {
+    // Windows local paths: `C:\path` / `C:/path` or UNC `\\server\share`
+    if (/^[a-zA-Z]:[\\/]/.test(url) || url.startsWith('\\\\')) return true;
+
     const sshPattern = /^git@[\w.-]+:[\w\/-]+\.git$/;
     if (sshPattern.test(url)) return true;
     if (url.startsWith('ssh://')) return true;
