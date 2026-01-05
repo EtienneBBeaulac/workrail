@@ -17,6 +17,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import { Bech32mAdapterV2 } from '../../../../src/v2/infra/local/bech32m/index.js';
+import { Base32AdapterV2 } from '../../../../src/v2/infra/local/base32/index.js';
 import { parseTokenV1Binary } from '../../../../src/v2/durable-core/tokens/token-codec.js';
 import {
   packStateTokenPayload,
@@ -43,8 +44,9 @@ describe('Golden token fixtures (regression protection)', () => {
   describe('State tokens', () => {
     it('state-token-minimal: packing produces expected bytes', () => {
       const fixture = loadFixture('state-token-minimal.json');
+      const base32 = new Base32AdapterV2();
 
-      const packed = packStateTokenPayload(fixture.payload as StateTokenPayloadV1);
+      const packed = packStateTokenPayload(fixture.payload as StateTokenPayloadV1, base32);
       expect(packed.isOk()).toBe(true);
       if (packed.isErr()) return;
 
@@ -54,8 +56,9 @@ describe('Golden token fixtures (regression protection)', () => {
 
     it('state-token-varied-ids: different IDs produce different bytes', () => {
       const fixture = loadFixture('state-token-varied-ids.json');
+      const base32 = new Base32AdapterV2();
 
-      const packed = packStateTokenPayload(fixture.payload as StateTokenPayloadV1);
+      const packed = packStateTokenPayload(fixture.payload as StateTokenPayloadV1, base32);
       expect(packed.isOk()).toBe(true);
       if (packed.isErr()) return;
 
@@ -67,8 +70,9 @@ describe('Golden token fixtures (regression protection)', () => {
   describe('Ack tokens', () => {
     it('ack-token-minimal: packing produces expected bytes', () => {
       const fixture = loadFixture('ack-token-minimal.json');
+      const base32 = new Base32AdapterV2();
 
-      const packed = packAckTokenPayload(fixture.payload as AckTokenPayloadV1);
+      const packed = packAckTokenPayload(fixture.payload as AckTokenPayloadV1, base32);
       expect(packed.isOk()).toBe(true);
       if (packed.isErr()) return;
 
@@ -82,8 +86,9 @@ describe('Golden token fixtures (regression protection)', () => {
       // Golden token string (generated once, committed as baseline)
       const goldenToken = 'st1qyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqrvu4pvve7uwv22j23skxtzv3h45xv5wxwuaawl2n39dup0gup04qkhavgd';
 
+      const base32 = new Base32AdapterV2();
       const bech32m = new Bech32mAdapterV2();
-      const parsed = parseTokenV1Binary(goldenToken, bech32m);
+      const parsed = parseTokenV1Binary(goldenToken, bech32m, base32);
 
       expect(parsed.isOk()).toBe(true);
       if (parsed.isErr()) {

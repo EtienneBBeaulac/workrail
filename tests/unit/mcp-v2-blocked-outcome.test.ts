@@ -25,6 +25,7 @@ import { NodeRandomEntropyV2 } from '../../src/v2/infra/local/random-entropy/ind
 import { NodeTimeClockV2 } from '../../src/v2/infra/local/time-clock/index.js';
 import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
 import { Bech32mAdapterV2 } from '../../src/v2/infra/local/bech32m/index.js';
+import { Base32AdapterV2 } from '../../src/v2/infra/local/base32/index.js';
 import { signTokenV1Binary } from '../../src/v2/durable-core/tokens/index.js';
 import { StateTokenPayloadV1Schema, AckTokenPayloadV1Schema } from '../../src/v2/durable-core/tokens/index.js';
 import { asWorkflowHash, asSha256Digest } from '../../src/v2/durable-core/ids/index.js';
@@ -46,6 +47,7 @@ async function mkV2Deps(dataDir: LocalDataDirV2): Promise<V2Dependencies> {
   const base64url = new NodeBase64UrlV2();
   const entropy = new NodeRandomEntropyV2();
   const idFactory = new IdFactoryV2(entropy);
+  const base32 = new Base32AdapterV2();
   const bech32m = new Bech32mAdapterV2();
   const snapshotStore = new LocalSnapshotStoreV2(dataDir, fsPort, crypto);
   const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir, fsPort);
@@ -63,6 +65,7 @@ async function mkV2Deps(dataDir: LocalDataDirV2): Promise<V2Dependencies> {
     crypto,
     hmac,
     base64url,
+    base32,
     bech32m,
     idFactory,
     // Test convenience (aliases):
