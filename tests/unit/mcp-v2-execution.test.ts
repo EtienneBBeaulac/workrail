@@ -22,6 +22,7 @@ import { NodeRandomEntropyV2 } from '../../src/v2/infra/local/random-entropy/ind
 import { NodeTimeClockV2 } from '../../src/v2/infra/local/time-clock/index.js';
 import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
 import { Bech32mAdapterV2 } from '../../src/v2/infra/local/bech32m/index.js';
+import { Base32AdapterV2 } from '../../src/v2/infra/local/base32/index.js';
 
 import { signTokenV1Binary } from '../../src/v2/durable-core/tokens/index.js';
 import { StateTokenPayloadV1Schema, AckTokenPayloadV1Schema } from '../../src/v2/durable-core/tokens/index.js';
@@ -94,6 +95,7 @@ async function mkSignedToken(args: { root: string; payload: unknown }): Promise<
   const hmac = new NodeHmacSha256V2();
   const base64url = new NodeBase64UrlV2();
   const entropy = new NodeRandomEntropyV2();
+  const base32 = new Base32AdapterV2();
   const bech32m = new Bech32mAdapterV2();
   const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url, entropy);
   const keyring = await keyringPort.loadOrCreate().match(
@@ -103,7 +105,7 @@ async function mkSignedToken(args: { root: string; payload: unknown }): Promise<
     }
   );
 
-  const token = signTokenV1Binary(args.payload as any, keyring, hmac, base64url, bech32m);
+  const token = signTokenV1Binary(args.payload as any, keyring, hmac, base64url, bech32m, base32);
   if (token.isErr()) throw new Error(`unexpected token sign error: ${token.error.code}`);
   return token.value;
 }

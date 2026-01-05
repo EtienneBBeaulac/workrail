@@ -103,7 +103,7 @@ describe('v2 branded ID types', () => {
 
   describe('TokenStringV1 constructor', () => {
     it('accepts token string and returns branded type', () => {
-      const tokenStr = 'st.v1.payload.signature';
+      const tokenStr = 'st1qpzry9x8gf2tvdw0s3jn54khce6mua7l';
       const token = asTokenStringV1(tokenStr);
       expect(typeof token).toBe('string');
       expect(token).toBe(tokenStr);

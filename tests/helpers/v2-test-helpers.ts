@@ -72,39 +72,3 @@ export function dummyToolContext(): ToolContext {
     httpServer: null,
   };
 }
-
-/**
- * Sign a token using the keyring in the current WORKRAIL_DATA_DIR.
- */
-export async function mkSignedToken(args: {
-  unsignedPrefix: 'st.v1.' | 'ack.v1.' | 'chk.v1.';
-  payload: unknown;
-}): Promise<string> {
-  const dataDir = new LocalDataDirV2(process.env);
-  const fsPort = new NodeFileSystemV2();
-  const hmac = new NodeHmacSha256V2();
-  const base64url = new NodeBase64UrlV2();
-  const entropy = new NodeRandomEntropyV2();
-  const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url, entropy);
-  const keyring = await keyringPort.loadOrCreate().match(
-    (v) => v,
-    (e) => {
-      throw new Error(`Unexpected keyring error in test helper: ${e.code}`);
-    }
-  );
-
-  const payloadBytes = encodeTokenPayloadV1(args.payload as any).match(
-    (v) => v,
-    (e) => {
-      throw new Error(`Unexpected token payload encode error in test helper: ${e.code}`);
-    }
-  );
-
-  const token = signTokenV1(args.unsignedPrefix, payloadBytes, keyring, hmac, base64url).match(
-    (v) => v,
-    (e) => {
-      throw new Error(`Unexpected token sign error in test helper: ${e.code}`);
-    }
-  );
-  return String(token);
-}

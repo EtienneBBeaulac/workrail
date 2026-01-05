@@ -344,7 +344,7 @@ describe('Binary token signing and verification', () => {
     expect(result.isOk()).toBe(true);
     if (result.isOk()) {
       expect(result.value.startsWith('st1')).toBe(true);
-      expect(result.value.length).toBeLessThan(200); // Much shorter than old format
+      expect(result.value.length).toBeLessThan(200); // Target: ~166 chars
     }
   });
 

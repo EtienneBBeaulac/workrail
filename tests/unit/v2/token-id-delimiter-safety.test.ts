@@ -18,7 +18,7 @@ describe('v2 token payload delimiter safety', () => {
     const bytes = new TextEncoder().encode(JSON.stringify(payload));
     const payloadB64 = base64url.encodeBase64Url(bytes);
 
-    const token = `st.v1.${payloadB64}.AA`;
+    const token = `st1invalid${payloadB64}aa`;
 
     const parsed = parseTokenV1(token, base64url);
     expect(parsed.isErr()).toBe(true);

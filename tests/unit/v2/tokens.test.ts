@@ -57,8 +57,8 @@ describe('v2 tokens (binary + bech32m)', () => {
 
   it('parseTokenV1Binary fails closed on invalid prefix', () => {
     const bech32m = new Bech32mAdapterV2();
-  const base32 = new Base32AdapterV2();
-  const parsed = parseTokenV1Binary('st.v1.not-a-token', bech32m, base32);
+    const base32 = new Base32AdapterV2();
+    const parsed = parseTokenV1Binary('invalid-prefix-token', bech32m, base32);
     expect(parsed.isErr()).toBe(true);
     if (parsed.isErr()) {
       expect(parsed.error.code).toBe('TOKEN_INVALID_FORMAT');

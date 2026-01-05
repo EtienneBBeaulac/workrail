@@ -9,7 +9,7 @@
  * Locked invariants (docs/design/v2-core-design-locks.md Section 1.2):
  * - Algorithm: HMAC-SHA256
  * - Key size: 32 bytes (256 bits)
- * - Signature input: canonical bytes (RFC 8785 JCS) of the token payload
+ * - Signature input: binary payload bytes (66 bytes, little-endian)
  * - No additional prefixes/separators in HMAC input
  *
  * Guarantees:

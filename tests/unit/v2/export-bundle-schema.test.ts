@@ -223,7 +223,7 @@ describe('bundle-tokens-not-portable: Tokens are not included in bundle', () => 
   it('rejects bundle if stateToken field is present in session', () => {
     const bundle = createMinimalBundle();
     // @ts-ignore - attempt to add stateToken
-    bundle.session.stateToken = 'st.v1.payload.sig';
+    bundle.session.stateToken = 'st1invalid';
     const result = ExportBundleV1Schema.safeParse(bundle);
     // Schema should not have stateToken field, so this fails strict validation
     expect(result.success).toBe(true); // Zod doesn't reject extra fields by default
@@ -233,7 +233,7 @@ describe('bundle-tokens-not-portable: Tokens are not included in bundle', () => 
   it('rejects bundle if ackToken field is present in session', () => {
     const bundle = createMinimalBundle();
     // @ts-ignore - attempt to add ackToken
-    bundle.session.ackToken = 'ack.v1.payload.sig';
+    bundle.session.ackToken = 'ack1invalid';
     const result = ExportBundleV1Schema.safeParse(bundle);
     // Token fields should not be part of the schema
     expect(result.success).toBe(true);
@@ -243,7 +243,7 @@ describe('bundle-tokens-not-portable: Tokens are not included in bundle', () => 
     // This test verifies that DomainEventV1Schema doesn't include token fields
     const event = createMinimalEvent();
     // @ts-ignore - attempt to add stateToken to event
-    event.stateToken = 'st.v1.payload.sig';
+    event.stateToken = 'st1invalid';
     const result = DomainEventV1Schema.safeParse(event);
     // Event schema doesn't include stateToken, so it should still parse
     // (Zod ignores extra fields by default unless strict is used)

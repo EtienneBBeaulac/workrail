@@ -269,7 +269,7 @@ export type OutputId = Brand<string, 'v2.OutputId'>;
  *
  * Example:
  * ```typescript
- * const token = asTokenStringV1('st.v1.<payload>.<sig>');
+ * const token = asTokenStringV1('st1qpzry9x8gf2tvdw0s3jn54khce6mua7l...');
  * ```
  */
 export type TokenStringV1 = Brand<string, 'v2.TokenStringV1'>;

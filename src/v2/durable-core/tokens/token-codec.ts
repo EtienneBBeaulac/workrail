@@ -182,7 +182,6 @@ export function encodeTokenPayloadV1Binary(
  * 
  * INVARIANTS:
  * - Validates wire format at boundaries (fail fast on corruption)
- * - Old format detection: rejects st.v1./ack.v1./chk.v1. with migration guidance
  * - HRP prefix validation: st1/ack1/chk1 required
  * - Bech32m checksum validated before unpacking (corruption detection)
  * - Length validation: expects exactly 98 bytes (66 payload + 32 signature)
@@ -201,15 +200,6 @@ export function parseTokenV1Binary(
   bech32m: Bech32mPortV2,
   base32: Base32PortV2,
 ): Result<ParsedTokenV1Binary, TokenDecodeErrorV2> {
-  // Detect old token format and provide migration guidance
-  if (tokenString.startsWith('st.v1.') || tokenString.startsWith('ack.v1.') || tokenString.startsWith('chk.v1.')) {
-    const truncated = tokenString.substring(0, Math.min(20, tokenString.indexOf('.', 6) + 1));
-    return err({
-      code: 'TOKEN_UNSUPPORTED_VERSION',
-      message: `Old token format detected (JCS + base64url). This format was replaced by binary + bech32m in v0.9.0. Old format: ${truncated}..., New format: st1.../ack1.../chk1... Migration: Start a new workflow to get tokens in the new format.`,
-    });
-  }
-
   // Detect prefix (st1, ack1, or chk1)
   let hrp: TokenHrp;
   let expectedKind: number;

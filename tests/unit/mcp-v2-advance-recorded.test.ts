@@ -84,7 +84,7 @@ function dummyCtx(v2?: any): ToolContext {
 }
 
 async function mkSignedToken(args: { v2: any; payload: unknown }): Promise<string> {
-  const token = signTokenV1Binary(args.payload as any, args.v2.keyring, args.v2.hmac, args.v2.base64url, args.v2.bech32m);
+  const token = signTokenV1Binary(args.payload as any, args.v2.keyring, args.v2.hmac, args.v2.base64url, args.v2.bech32m, args.v2.base32);
   if (token.isErr()) throw new Error(`unexpected token sign error: ${token.error.code}`);
   return token.value;
 }
