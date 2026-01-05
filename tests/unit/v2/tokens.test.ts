@@ -33,6 +33,7 @@ import {
   signTokenV1Binary,
   verifyTokenSignatureV1Binary,
   StateTokenPayloadV1Schema,
+  unsafeTokenCodecPorts,
 } from '../../../src/v2/durable-core/tokens/index.js';
 
 async function mkTempDataDir(): Promise<string> {
@@ -58,7 +59,8 @@ describe('v2 tokens (binary + bech32m)', () => {
   it('parseTokenV1Binary fails closed on invalid prefix', () => {
     const bech32m = new Bech32mAdapterV2();
     const base32 = new Base32AdapterV2();
-    const parsed = parseTokenV1Binary('invalid-prefix-token', bech32m, base32);
+    // Use minimal ports for parsing (only needs bech32m and base32)
+    const parsed = parseTokenV1Binary('invalid-prefix-token', { bech32m, base32 });
     expect(parsed.isErr()).toBe(true);
     if (parsed.isErr()) {
       expect(parsed.error.code).toBe('TOKEN_INVALID_FORMAT');
@@ -95,11 +97,12 @@ describe('v2 tokens (binary + bech32m)', () => {
       workflowHashRef: String(wfRef),
     });
 
-    const token = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m, base32)._unsafeUnwrap();
+    const ports = unsafeTokenCodecPorts({ keyring, hmac, base64url, base32, bech32m });
+    const token = signTokenV1Binary(payload, ports)._unsafeUnwrap();
     expect(token.startsWith('st1')).toBe(true);
 
-    const parsed = parseTokenV1Binary(token, bech32m, base32)._unsafeUnwrap();
-    const verified = verifyTokenSignatureV1Binary(parsed, keyring, hmac, base64url);
+    const parsed = parseTokenV1Binary(token, ports)._unsafeUnwrap();
+    const verified = verifyTokenSignatureV1Binary(parsed, ports);
     expect(verified.isOk()).toBe(true);
     expect(parsed.payload.tokenKind).toBe('state');
   });
@@ -134,7 +137,8 @@ describe('v2 tokens (binary + bech32m)', () => {
       workflowHashRef: String(wfRef),
     });
 
-    const tokenSignedWithOld = signTokenV1Binary(payload, before, hmac, base64url, bech32m, base32)._unsafeUnwrap();
+    const portsBefore = unsafeTokenCodecPorts({ keyring: before, hmac, base64url, base32, bech32m });
+    const tokenSignedWithOld = signTokenV1Binary(payload, portsBefore)._unsafeUnwrap();
 
     const after = await keyringPort.rotate().match(
       (v) => v,
@@ -143,8 +147,9 @@ describe('v2 tokens (binary + bech32m)', () => {
       }
     );
 
-    const parsed = parseTokenV1Binary(tokenSignedWithOld, bech32m, base32)._unsafeUnwrap();
-    expect(verifyTokenSignatureV1Binary(parsed, after, hmac, base64url).isOk()).toBe(true);
+    const portsAfter = unsafeTokenCodecPorts({ keyring: after, hmac, base64url, base32, bech32m });
+    const parsed = parseTokenV1Binary(tokenSignedWithOld, portsAfter)._unsafeUnwrap();
+    expect(verifyTokenSignatureV1Binary(parsed, portsAfter).isOk()).toBe(true);
   });
 
   it('fails verification for a tampered signature', async () => {
@@ -177,12 +182,13 @@ describe('v2 tokens (binary + bech32m)', () => {
       workflowHashRef: String(wfRef),
     });
 
-    const token = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m, base32)._unsafeUnwrap();
-    const parsed = parseTokenV1Binary(token, bech32m, base32)._unsafeUnwrap();
+    const ports = unsafeTokenCodecPorts({ keyring, hmac, base64url, base32, bech32m });
+    const token = signTokenV1Binary(payload, ports)._unsafeUnwrap();
+    const parsed = parseTokenV1Binary(token, ports)._unsafeUnwrap();
 
     // Mutate signature bytes; verify should fail
     parsed.signatureBytes[0] ^= 0xff;
-    const verified = verifyTokenSignatureV1Binary(parsed, keyring, hmac, base64url);
+    const verified = verifyTokenSignatureV1Binary(parsed, ports);
     expect(verified.isErr()).toBe(true);
     if (verified.isErr()) {
       expect(verified.error.code).toBe('TOKEN_BAD_SIGNATURE');
@@ -219,12 +225,13 @@ describe('v2 tokens (binary + bech32m)', () => {
       workflowHashRef: String(wfRef),
     });
 
-    const token = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m, base32)._unsafeUnwrap();
+    const ports = unsafeTokenCodecPorts({ keyring, hmac, base64url, base32, bech32m });
+    const token = signTokenV1Binary(payload, ports)._unsafeUnwrap();
     const chars = token.split('');
     chars[10] = chars[10] === 'q' ? 'p' : 'q';
     const corrupted = chars.join('');
 
-    const parsed = parseTokenV1Binary(corrupted, bech32m, base32);
+    const parsed = parseTokenV1Binary(corrupted, ports);
     expect(parsed.isErr()).toBe(true);
     if (parsed.isErr()) {
       expect(parsed.error.code).toBe('TOKEN_INVALID_FORMAT');

@@ -88,7 +88,8 @@ describe('Golden token fixtures (regression protection)', () => {
 
       const base32 = new Base32AdapterV2();
       const bech32m = new Bech32mAdapterV2();
-      const parsed = parseTokenV1Binary(goldenToken, bech32m, base32);
+      // parseTokenV1Binary only needs bech32m and base32
+      const parsed = parseTokenV1Binary(goldenToken, { bech32m, base32 });
 
       expect(parsed.isOk()).toBe(true);
       if (parsed.isErr()) {

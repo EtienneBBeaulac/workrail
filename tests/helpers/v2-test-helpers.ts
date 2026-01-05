@@ -19,7 +19,7 @@ import { ExecutionSessionGateV2 } from '../../src/v2/usecases/execution-session-
 import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
 import { Base32AdapterV2 } from '../../src/v2/infra/local/base32/index.js';
 import { Bech32mAdapterV2 } from '../../src/v2/infra/local/bech32m/index.js';
-import { signTokenV1Binary } from '../../src/v2/durable-core/tokens/index.js';
+import { signTokenV1Binary, unsafeTokenCodecPorts } from '../../src/v2/durable-core/tokens/index.js';
 import type { V2Dependencies } from '../../src/mcp/types.js';
 import type { KeyringV1 } from '../../src/v2/ports/keyring.port.js';
 
@@ -120,19 +120,24 @@ export async function createV2Dependencies(dataDir: LocalDataDirV2): Promise<V2D
     }
   );
   
+  // Create grouped token codec ports (prevents "forgot base32" bugs)
+  const tokenCodecPorts = unsafeTokenCodecPorts({
+    keyring,
+    hmac,
+    base64url,
+    base32,
+    bech32m,
+  });
+  
   return {
     gate,
     sessionStore,
     snapshotStore,
     pinnedStore,
-    keyring,
     sha256,
     crypto,
-    hmac,
-    base64url,
-    base32,
-    bech32m,
     idFactory,
+    tokenCodecPorts,
   };
 }
 
@@ -141,18 +146,11 @@ export async function createV2Dependencies(dataDir: LocalDataDirV2): Promise<V2D
  * Throws if signing fails (test helper convenience).
  * 
  * @param payload - Token payload (StateTokenPayloadV1, AckTokenPayloadV1, or CheckpointTokenPayloadV1)
- * @param v2 - V2Dependencies object with keyring, hmac, base64url, bech32m, base32
+ * @param v2 - V2Dependencies object with tokenCodecPorts
  * @returns Signed binary token string (st1... / ack1... / chk1...)
  */
 export function signToken(payload: unknown, v2: V2Dependencies): string {
-  const token = signTokenV1Binary(
-    payload as any,
-    v2.keyring,
-    v2.hmac,
-    v2.base64url,
-    v2.bech32m,
-    v2.base32
-  );
+  const token = signTokenV1Binary(payload as any, v2.tokenCodecPorts);
   if (token.isErr()) {
     throw new Error(`Token signing failed in test helper: ${token.error.code}`);
   }

@@ -34,10 +34,12 @@ import {
   verifyTokenSignatureV1Binary,
   parseTokenV1Binary,
   encodeTokenPayloadV1Binary,
+  unsafeTokenCodecPorts,
   TOKEN_KIND_STATE,
   TOKEN_KIND_ACK,
   TOKEN_KIND_CHECKPOINT,
 } from '../../../src/v2/durable-core/tokens/index.js';
+import type { TokenCodecPorts } from '../../../src/v2/durable-core/tokens/index.js';
 import type {
   StateTokenPayloadV1,
   AckTokenPayloadV1,
@@ -328,18 +330,20 @@ describe('Bech32m encoding', () => {
 
 describe('Binary token signing and verification', () => {
   let keyring: KeyringV1;
+  let ports: TokenCodecPorts;
   const hmac = new NodeHmacSha256V2();
   const base64url = new NodeBase64UrlV2();
   const bech32m = new Bech32mAdapterV2();
 
   beforeEach(async () => {
     keyring = await createTestKeyring();
+    ports = unsafeTokenCodecPorts({ keyring, hmac, base64url, base32, bech32m });
   });
 
   it('signs state token and produces bech32m format', async () => {
     const payload = createTestStatePayload();
 
-    const result = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m, base32);
+    const result = signTokenV1Binary(payload, ports);
 
     expect(result.isOk()).toBe(true);
     if (result.isOk()) {
@@ -351,7 +355,7 @@ describe('Binary token signing and verification', () => {
   it('signs ack token and produces bech32m format', async () => {
     const payload = createTestAckPayload();
 
-    const result = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m, base32);
+    const result = signTokenV1Binary(payload, ports);
 
     expect(result.isOk()).toBe(true);
     if (result.isOk()) {
@@ -362,7 +366,7 @@ describe('Binary token signing and verification', () => {
   it('signs checkpoint token and produces bech32m format', async () => {
     const payload = createTestCheckpointPayload();
 
-    const result = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m, base32);
+    const result = signTokenV1Binary(payload, ports);
 
     expect(result.isOk()).toBe(true);
     if (result.isOk()) {
@@ -377,12 +381,12 @@ describe('Binary token signing and verification', () => {
     const payload = createTestStatePayload();
 
     // Sign
-    const signResult = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m, base32);
+    const signResult = signTokenV1Binary(payload, ports);
     expect(signResult.isOk()).toBe(true);
     const token = signResult._unsafeUnwrap();
 
     // Parse
-    const parseResult = parseTokenV1Binary(token, bech32m, base32);
+    const parseResult = parseTokenV1Binary(token, ports);
     expect(parseResult.isOk()).toBe(true);
     const parsed = parseResult._unsafeUnwrap();
 
@@ -390,7 +394,7 @@ describe('Binary token signing and verification', () => {
     expect(parsed.payload.tokenKind).toBe('state');
 
     // Verify
-    const verifyResult = verifyTokenSignatureV1Binary(parsed, keyring, hmac, base64url);
+    const verifyResult = verifyTokenSignatureV1Binary(parsed, ports);
     expect(verifyResult.isOk()).toBe(true);
   });
 
@@ -398,18 +402,18 @@ describe('Binary token signing and verification', () => {
     const payload = createTestStatePayload();
 
     // Sign
-    const signResult = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m, base32);
+    const signResult = signTokenV1Binary(payload, ports);
     const token = signResult._unsafeUnwrap();
 
     // Parse
-    const parseResult = parseTokenV1Binary(token, bech32m, base32);
+    const parseResult = parseTokenV1Binary(token, ports);
     const parsed = parseResult._unsafeUnwrap();
 
     // Tamper with signature
     parsed.signatureBytes[0] ^= 0xff;
 
     // Verify (should fail)
-    const verifyResult = verifyTokenSignatureV1Binary(parsed, keyring, hmac, base64url);
+    const verifyResult = verifyTokenSignatureV1Binary(parsed, ports);
     expect(verifyResult.isErr()).toBe(true);
     if (verifyResult.isErr()) {
       expect(verifyResult.error.code).toBe('TOKEN_BAD_SIGNATURE');
@@ -421,7 +425,7 @@ describe('Binary token signing and verification', () => {
     const tokens = new Set<string>();
 
     for (let i = 0; i < 100; i++) {
-      const result = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m, base32);
+      const result = signTokenV1Binary(payload, ports);
       expect(result.isOk()).toBe(true);
       tokens.add(result._unsafeUnwrap());
     }
@@ -436,23 +440,25 @@ describe('Binary token signing and verification', () => {
 
 describe('Token corruption detection', () => {
   let keyring: KeyringV1;
+  let ports: TokenCodecPorts;
   const hmac = new NodeHmacSha256V2();
   const base64url = new NodeBase64UrlV2();
   const bech32m = new Bech32mAdapterV2();
 
   beforeEach(async () => {
     keyring = await createTestKeyring();
+    ports = unsafeTokenCodecPorts({ keyring, hmac, base64url, base32, bech32m });
   });
 
   it('detects multi-byte corruption', async () => {
     const payload = createTestStatePayload();
-    const token = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m, base32)._unsafeUnwrap();
+    const token = signTokenV1Binary(payload, ports)._unsafeUnwrap();
 
     // Corrupt multiple characters in the middle
     const pos = Math.floor(token.length / 2);
     const corrupted = token.slice(0, pos) + 'xxx' + token.slice(pos + 3);
 
-    const result = parseTokenV1Binary(corrupted, bech32m, base32);
+    const result = parseTokenV1Binary(corrupted, ports);
     expect(result.isErr()).toBe(true);
     if (result.isErr()) {
       expect(result.error.code).toBe('TOKEN_INVALID_FORMAT');
@@ -461,39 +467,39 @@ describe('Token corruption detection', () => {
 
   it('detects truncation', async () => {
     const payload = createTestStatePayload();
-    const token = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m, base32)._unsafeUnwrap();
+    const token = signTokenV1Binary(payload, ports)._unsafeUnwrap();
 
     // Truncate token
     const truncated = token.slice(0, -10);
 
-    const result = parseTokenV1Binary(truncated, bech32m, base32);
+    const result = parseTokenV1Binary(truncated, ports);
     expect(result.isErr()).toBe(true);
   });
 
   it('detects prefix corruption', async () => {
     const payload = createTestStatePayload();
-    const token = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m, base32)._unsafeUnwrap();
+    const token = signTokenV1Binary(payload, ports)._unsafeUnwrap();
 
     // Replace prefix
     const corrupted = 'ack' + token.slice(2); // Change st -> ack
 
-    const result = parseTokenV1Binary(corrupted, bech32m, base32);
+    const result = parseTokenV1Binary(corrupted, ports);
     expect(result.isErr()).toBe(true);
   });
 
   it('detects insertion', async () => {
     const payload = createTestStatePayload();
-    const token = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m, base32)._unsafeUnwrap();
+    const token = signTokenV1Binary(payload, ports)._unsafeUnwrap();
 
     // Insert extra characters
     const inserted = token.slice(0, 20) + 'xyz' + token.slice(20);
 
-    const result = parseTokenV1Binary(inserted, bech32m, base32);
+    const result = parseTokenV1Binary(inserted, ports);
     expect(result.isErr()).toBe(true);
   });
 
   it('rejects invalid prefix', () => {
-    const result = parseTokenV1Binary('invalid1qpzry9x8gf2tvdw0s3jn54khce6mua7l', bech32m, base32);
+    const result = parseTokenV1Binary('invalid1qpzry9x8gf2tvdw0s3jn54khce6mua7l', ports);
     expect(result.isErr()).toBe(true);
     if (result.isErr()) {
       expect(result.error.code).toBe('TOKEN_INVALID_FORMAT');
@@ -508,17 +514,19 @@ describe('Token corruption detection', () => {
 
 describe('Binary token size', () => {
   let keyring: KeyringV1;
+  let ports: TokenCodecPorts;
   const hmac = new NodeHmacSha256V2();
   const base64url = new NodeBase64UrlV2();
   const bech32m = new Bech32mAdapterV2();
 
   beforeEach(async () => {
     keyring = await createTestKeyring();
+    ports = unsafeTokenCodecPorts({ keyring, hmac, base64url, base32, bech32m });
   });
 
   it('state token is shorter than 170 characters', async () => {
     const payload = createTestStatePayload();
-    const result = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m, base32);
+    const result = signTokenV1Binary(payload, ports);
     expect(result.isOk()).toBe(true);
 
     const token = result._unsafeUnwrap();
@@ -528,7 +536,7 @@ describe('Binary token size', () => {
 
   it('ack token is shorter than 170 characters', async () => {
     const payload = createTestAckPayload();
-    const result = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m, base32);
+    const result = signTokenV1Binary(payload, ports);
     expect(result.isOk()).toBe(true);
 
     const token = result._unsafeUnwrap();
@@ -538,7 +546,7 @@ describe('Binary token size', () => {
 
   it('checkpoint token is shorter than 170 characters', async () => {
     const payload = createTestCheckpointPayload();
-    const result = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m, base32);
+    const result = signTokenV1Binary(payload, ports);
     expect(result.isOk()).toBe(true);
 
     const token = result._unsafeUnwrap();

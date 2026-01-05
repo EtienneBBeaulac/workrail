@@ -3,13 +3,12 @@ import { err, ok } from 'neverthrow';
 import type { HmacSha256PortV2 } from '../../ports/hmac-sha256.port.js';
 import type { KeyringV1 } from '../../ports/keyring.port.js';
 import type { Base64UrlPortV2 } from '../../ports/base64url.port.js';
-import type { Bech32mPortV2 } from '../../ports/bech32m.port.js';
-import type { Base32PortV2 } from '../../ports/base32.port.js';
 import type { CanonicalBytes, TokenStringV1 } from '../ids/index.js';
 import { asTokenStringV1 } from '../ids/index.js';
 import type { ParsedTokenV1, ParsedTokenV1Binary, TokenDecodeErrorV2 } from './token-codec.js';
 import { encodeTokenPayloadV1Binary } from './token-codec.js';
 import type { TokenPayloadV1 } from './payloads.js';
+import type { TokenSignPorts, TokenVerifyPorts } from './token-codec-capabilities.js';
 
 export type TokenVerifyErrorV2 =
   | { readonly code: 'TOKEN_BAD_SIGNATURE'; readonly message: string }
@@ -92,12 +91,10 @@ export type TokenSignErrorV2 =
  */
 export function signTokenV1Binary(
   payload: TokenPayloadV1,
-  keyring: KeyringV1,
-  hmac: HmacSha256PortV2,
-  base64url: Base64UrlPortV2,
-  bech32m: Bech32mPortV2,
-  base32: Base32PortV2,
+  ports: TokenSignPorts,
 ): Result<string, TokenSignErrorV2> {
+  const { keyring, hmac, base64url, base32, bech32m } = ports;
+
   // Decode key from keyring
   const key = decodeKeyBytes(keyring.current.keyBase64Url, base64url);
   if (key.isErr()) {
@@ -136,10 +133,10 @@ export function signTokenV1Binary(
  */
 export function verifyTokenSignatureV1Binary(
   parsed: ParsedTokenV1Binary,
-  keyring: KeyringV1,
-  hmac: HmacSha256PortV2,
-  base64url: Base64UrlPortV2,
+  ports: TokenVerifyPorts,
 ): Result<void, TokenVerifyErrorV2> {
+  const { keyring, hmac, base64url } = ports;
+
   if (parsed.signatureBytes.length !== 32) {
     return err({
       code: 'TOKEN_INVALID_FORMAT',

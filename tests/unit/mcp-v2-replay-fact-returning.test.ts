@@ -26,7 +26,7 @@ import { NodeTimeClockV2 } from '../../src/v2/infra/local/time-clock/index.js';
 import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
 import { Bech32mAdapterV2 } from '../../src/v2/infra/local/bech32m/index.js';
 import { Base32AdapterV2 } from '../../src/v2/infra/local/base32/index.js';
-import { signTokenV1Binary } from '../../src/v2/durable-core/tokens/index.js';
+import { signTokenV1Binary, unsafeTokenCodecPorts } from '../../src/v2/durable-core/tokens/index.js';
 import { StateTokenPayloadV1Schema, AckTokenPayloadV1Schema } from '../../src/v2/durable-core/tokens/index.js';
 import { asWorkflowHash, asSha256Digest } from '../../src/v2/durable-core/ids/index.js';
 import { deriveWorkflowHashRef } from '../../src/v2/durable-core/ids/workflow-hash-ref.js';
@@ -60,6 +60,8 @@ async function createV2Context() {
     }
   );
 
+  const tokenCodecPorts = unsafeTokenCodecPorts({ keyring, hmac, base64url, base32, bech32m });
+
   return {
     // V2Dependencies structure (for handlers):
     gate,
@@ -69,11 +71,12 @@ async function createV2Context() {
     keyring,
     sha256,
     crypto,
+    idFactory,
+    tokenCodecPorts,
     hmac,
     base64url,
     base32,
     bech32m,
-    idFactory,
     // Test convenience (aliases):
     dataDir,
     fsPort,
@@ -93,10 +96,10 @@ function dummyCtx(v2?: any): ToolContext {
 }
 
 async function mkSignedToken(args: {
-  readonly v2: { readonly keyring: any; readonly hmac: any; readonly base64url: any; readonly base32: any; readonly bech32m: any };
+  readonly v2: { readonly tokenCodecPorts: any };
   readonly payload: unknown;
 }): Promise<string> {
-  const token = signTokenV1Binary(args.payload as any, args.v2.keyring, args.v2.hmac, args.v2.base64url, args.v2.bech32m, args.v2.base32);
+  const token = signTokenV1Binary(args.payload as any, args.v2.tokenCodecPorts);
   if (token.isErr()) {
     throw new Error(`unexpected token sign error: ${token.error.code}`);
   }

@@ -19,7 +19,7 @@ import { LocalSnapshotStoreV2 } from '../../src/v2/infra/local/snapshot-store/in
 import { LocalPinnedWorkflowStoreV2 } from '../../src/v2/infra/local/pinned-workflow-store/index.js';
 import { ExecutionSessionGateV2 } from '../../src/v2/usecases/execution-session-gate.js';
 
-import { parseTokenV1Binary, verifyTokenSignatureV1Binary } from '../../src/v2/durable-core/tokens/index.js';
+import { parseTokenV1Binary, verifyTokenSignatureV1Binary, unsafeTokenCodecPorts } from '../../src/v2/durable-core/tokens/index.js';
 import { NodeHmacSha256V2 } from '../../src/v2/infra/local/hmac-sha256/index.js';
 import { NodeBase64UrlV2 } from '../../src/v2/infra/local/base64url/index.js';
 import { LocalKeyringV2 } from '../../src/v2/infra/local/keyring/index.js';
@@ -66,6 +66,14 @@ async function mkCtxWithWorkflow(workflowId: string): Promise<ToolContext> {
   const keyringRes = await keyringPort.loadOrCreate();
   if (keyringRes.isErr()) throw new Error(`keyring load failed: ${keyringRes.error.code}`);
 
+  const tokenCodecPorts = unsafeTokenCodecPorts({
+    keyring: keyringRes.value,
+    hmac,
+    base64url,
+    base32,
+    bech32m,
+  });
+
   return {
     workflowService: {
       listWorkflowSummaries: async () => [],
@@ -83,14 +91,10 @@ async function mkCtxWithWorkflow(workflowId: string): Promise<ToolContext> {
       sessionStore,
       snapshotStore,
       pinnedStore,
-      keyring: keyringRes.value,
       sha256,
       crypto,
-      hmac,
-      base64url,
-      base32,
-      bech32m,
       idFactory,
+      tokenCodecPorts
     },
   };
 }
@@ -215,11 +219,12 @@ describe('v2 start_workflow (Slice 3.5)', () => {
         }
       );
 
-      const parsedState = parseTokenV1Binary(res.data.stateToken, bech32m, base32)._unsafeUnwrap();
-      const parsedAck = parseTokenV1Binary(res.data.ackToken, bech32m, base32)._unsafeUnwrap();
+      const parsedState = parseTokenV1Binary(res.data.stateToken, { bech32m, base32 })._unsafeUnwrap();
+      const parsedAck = parseTokenV1Binary(res.data.ackToken, { bech32m, base32 })._unsafeUnwrap();
 
-      expect(verifyTokenSignatureV1Binary(parsedState, keyring, hmac, localBase64url).isOk()).toBe(true);
-      expect(verifyTokenSignatureV1Binary(parsedAck, keyring, hmac, localBase64url).isOk()).toBe(true);
+      const verifyPorts = { keyring, hmac, base64url: localBase64url };
+      expect(verifyTokenSignatureV1Binary(parsedState, verifyPorts).isOk()).toBe(true);
+      expect(verifyTokenSignatureV1Binary(parsedAck, verifyPorts).isOk()).toBe(true);
 
       // Durable truth exists and is loadable via the session store.
       const sha256 = new NodeSha256V2();

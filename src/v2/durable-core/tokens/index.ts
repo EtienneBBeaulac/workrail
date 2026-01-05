@@ -32,6 +32,13 @@ export {
 } from './token-signer.js';
 export type { TokenSignErrorV2, TokenVerifyErrorV2 } from './token-signer.js';
 
+// Token codec ports (grouped dependencies)
+export { createTokenCodecPorts, unsafeTokenCodecPorts } from './token-codec-ports.js';
+export type { TokenCodecPorts, TokenCodecPortsError } from './token-codec-ports.js';
+
+// Token codec capabilities (minimal surfaces)
+export type { TokenParsePorts, TokenVerifyPorts, TokenSignPorts } from './token-codec-capabilities.js';
+
 // Re-export branded id types for convenient access
 export type { AttemptId, OutputId } from '../ids/index.js';
 export { asAttemptId, asOutputId } from '../ids/index.js';

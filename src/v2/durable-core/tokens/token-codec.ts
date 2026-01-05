@@ -5,7 +5,7 @@ import type { CanonicalBytes } from '../ids/index.js';
 import { asCanonicalBytes, asTokenStringV1 } from '../ids/index.js';
 import type { TokenStringV1 } from '../ids/index.js';
 import type { Base64UrlPortV2 } from '../../ports/base64url.port.js';
-import type { Bech32mPortV2, Bech32mDecodeError, TokenHrp } from '../../ports/bech32m.port.js';
+import type { Bech32mDecodeError, TokenHrp } from '../../ports/bech32m.port.js';
 import type { Base32PortV2 } from '../../ports/base32.port.js';
 import { expectedPrefixForTokenKind, TokenPayloadV1Schema, type TokenPayloadV1, type TokenPrefixV1 } from './payloads.js';
 import type { JsonValue } from '../canonical/json-types.js';
@@ -16,6 +16,7 @@ import {
   unpackTokenPayload,
   type BinaryPackError,
 } from './binary-payload.js';
+import type { TokenParsePorts } from './token-codec-capabilities.js';
 
 export type TokenDecodeErrorV2 =
   | { readonly code: 'TOKEN_INVALID_FORMAT'; readonly message: string; readonly details?: { bech32mError?: Bech32mDecodeError } }
@@ -191,15 +192,14 @@ export function encodeTokenPayloadV1Binary(
  * - Does NOT validate session/run/node existence (handler's responsibility)
  * 
  * @param tokenString - Complete token string (e.g., "st1qpzry9x8gf2tvdw0...")
- * @param bech32m - Bech32m decoder with checksum validation
- * @param base32 - Base32 decoder for ID deserialization
+ * @param ports - Token codec ports (only bech32m and base32 used)
  * @returns ParsedTokenV1Binary with payload and signature bytes, or structured error
  */
 export function parseTokenV1Binary(
   tokenString: string,
-  bech32m: Bech32mPortV2,
-  base32: Base32PortV2,
+  ports: TokenParsePorts,
 ): Result<ParsedTokenV1Binary, TokenDecodeErrorV2> {
+  const { bech32m, base32 } = ports;
   // Detect prefix (st1, ack1, or chk1)
   let hrp: TokenHrp;
   let expectedKind: number;

@@ -26,7 +26,7 @@ import { NodeTimeClockV2 } from '../../src/v2/infra/local/time-clock/index.js';
 import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
 import { Bech32mAdapterV2 } from '../../src/v2/infra/local/bech32m/index.js';
 import { Base32AdapterV2 } from '../../src/v2/infra/local/base32/index.js';
-import { signTokenV1Binary } from '../../src/v2/durable-core/tokens/index.js';
+import { signTokenV1Binary, unsafeTokenCodecPorts } from '../../src/v2/durable-core/tokens/index.js';
 import { StateTokenPayloadV1Schema, AckTokenPayloadV1Schema } from '../../src/v2/durable-core/tokens/index.js';
 import { asWorkflowHash, asSha256Digest } from '../../src/v2/durable-core/ids/index.js';
 import { deriveWorkflowHashRef } from '../../src/v2/durable-core/ids/workflow-hash-ref.js';
@@ -61,7 +61,8 @@ async function mkSignedToken(args: { payload: unknown }): Promise<string> {
     }
   );
 
-  const token = signTokenV1Binary(args.payload as any, keyring, hmac, base64url, bech32m, base32);
+  const ports = unsafeTokenCodecPorts({ keyring, hmac, base64url, base32, bech32m });
+  const token = signTokenV1Binary(args.payload as any, ports);
   if (token.isErr()) throw new Error(`unexpected token sign error: ${token.error.code}`);
   return token.value;
 }
@@ -232,20 +233,24 @@ describe('v2 replay fail-closed: missing snapshot', () => {
       const entropy = new NodeRandomEntropyV2();
       const base32 = new Base32AdapterV2();
       const bech32m = new Bech32mAdapterV2();
+      const hmac = new NodeHmacSha256V2();
+      const keyring = await new LocalKeyringV2(dataDir, fsPort, localBase64url, entropy).loadOrCreate().match(
+        (v) => v,
+        (e) => {
+          throw new Error(`unexpected keyring error: ${e.code}`);
+        }
+      );
+      const tokenCodecPorts = unsafeTokenCodecPorts({ keyring, hmac, base64url: localBase64url, base32, bech32m });
       const v2 = {
         gate,
         sessionStore: store,
         snapshotStore,
         pinnedStore,
-        keyring: await new LocalKeyringV2(dataDir, fsPort, localBase64url, entropy).loadOrCreate().match(
-          (v) => v,
-          (e) => {
-            throw new Error(`unexpected keyring error: ${e.code}`);
-          }
-        ),
+        keyring,
         sha256,
         crypto,
-        hmac: new NodeHmacSha256V2(),
+        tokenCodecPorts,
+        hmac,
         base64url: localBase64url,
         base32,
         bech32m,

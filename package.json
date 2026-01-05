@@ -53,7 +53,15 @@
     "diff-tokens": "node scripts/diff-tokens.ts",
     "benchmark-token-size": "node scripts/benchmark-token-size.ts",
     "generate-golden-tokens": "node scripts/generate-golden-tokens.ts",
-    "verify-endianness": "node scripts/verify-endianness.ts"
+    "verify-endianness": "node scripts/verify-endianness.ts",
+    "codemod:report": "npx ts-node scripts/codemods/run.ts --mod report --tsconfig tsconfig.test.json",
+    "codemod:token-calls:dry": "npx ts-node scripts/codemods/run.ts --mod token-calls --tsconfig tsconfig.test.json",
+    "codemod:v2-contexts:dry": "npx ts-node scripts/codemods/run.ts --mod v2-contexts --tsconfig tsconfig.test.json",
+    "codemod:v2-prune:dry": "npx ts-node scripts/codemods/run.ts --mod v2-prune --tsconfig tsconfig.test.json",
+    "codemod:token-calls": "npx ts-node scripts/codemods/run.ts --mod token-calls --tsconfig tsconfig.test.json --write",
+    "codemod:v2-contexts": "npx ts-node scripts/codemods/run.ts --mod v2-contexts --tsconfig tsconfig.test.json --write",
+    "codemod:v2-prune": "npx ts-node scripts/codemods/run.ts --mod v2-prune --tsconfig tsconfig.test.json --write",
+    "codemod:guard": "npx ts-node scripts/codemods/run.ts --mod guard --tsconfig tsconfig.test.json"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.24.0",

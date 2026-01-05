@@ -26,6 +26,7 @@ import {
   signTokenV1Binary,
   parseTokenV1Binary,
   StateTokenPayloadV1Schema,
+  unsafeTokenCodecPorts,
 } from '../../../src/v2/durable-core/tokens/index.js';
 import { asWorkflowHash, asSha256Digest } from '../../../src/v2/durable-core/ids/index.js';
 import { deriveWorkflowHashRef } from '../../../src/v2/durable-core/ids/workflow-hash-ref.js';
@@ -73,7 +74,8 @@ describe('Token corruption detection', () => {
       workflowHashRef: String(wfRef),
     });
 
-    const token = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m, base32).match(
+    const ports = unsafeTokenCodecPorts({ keyring, hmac, base64url, base32, bech32m });
+    const token = signTokenV1Binary(payload, ports).match(
       (v) => v,
       (e) => { throw new Error(`sign failed: ${e.code}`); }
     );
@@ -81,7 +83,7 @@ describe('Token corruption detection', () => {
     // Corrupt HRP: st1 → xt1
     const corrupted = 'xt1' + token.slice(3);
 
-    const result = parseTokenV1Binary(corrupted, bech32m, base32);
+    const result = parseTokenV1Binary(corrupted, ports);
     expect(result.isErr()).toBe(true);
     if (result.isErr()) {
       expect(result.error.code).toBe('TOKEN_INVALID_FORMAT');
@@ -119,7 +121,8 @@ describe('Token corruption detection', () => {
       workflowHashRef: String(wfRef),
     });
 
-    const token = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m, base32).match(
+    const ports = unsafeTokenCodecPorts({ keyring, hmac, base64url, base32, bech32m });
+    const token = signTokenV1Binary(payload, ports).match(
       (v) => v,
       (e) => { throw new Error(`sign failed: ${e.code}`); }
     );
@@ -129,7 +132,7 @@ describe('Token corruption detection', () => {
     chars[10] = chars[10] === 'q' ? 'p' : 'q';
     const corrupted = chars.join('');
 
-    const result = parseTokenV1Binary(corrupted, bech32m, base32);
+    const result = parseTokenV1Binary(corrupted, ports);
     expect(result.isErr()).toBe(true);
     if (result.isErr()) {
       expect(result.error.code).toBe('TOKEN_INVALID_FORMAT');
@@ -168,7 +171,8 @@ describe('Token corruption detection', () => {
       workflowHashRef: String(wfRef),
     });
 
-    const token = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m, base32).match(
+    const ports = unsafeTokenCodecPorts({ keyring, hmac, base64url, base32, bech32m });
+    const token = signTokenV1Binary(payload, ports).match(
       (v) => v,
       (e) => { throw new Error(`sign failed: ${e.code}`); }
     );
@@ -178,7 +182,7 @@ describe('Token corruption detection', () => {
     chars[100] = chars[100] === 'a' ? 'b' : 'a';
     const corrupted = chars.join('');
 
-    const result = parseTokenV1Binary(corrupted, bech32m, base32);
+    const result = parseTokenV1Binary(corrupted, ports);
     expect(result.isErr()).toBe(true);
     if (result.isErr()) {
       expect(result.error.code).toBe('TOKEN_INVALID_FORMAT');
@@ -216,7 +220,8 @@ describe('Token corruption detection', () => {
       workflowHashRef: String(wfRef),
     });
 
-    const token = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m, base32).match(
+    const ports = unsafeTokenCodecPorts({ keyring, hmac, base64url, base32, bech32m });
+    const token = signTokenV1Binary(payload, ports).match(
       (v) => v,
       (e) => { throw new Error(`sign failed: ${e.code}`); }
     );
@@ -227,7 +232,7 @@ describe('Token corruption detection', () => {
     chars[pos] = chars[pos] === 'z' ? 'y' : 'z';
     const corrupted = chars.join('');
 
-    const result = parseTokenV1Binary(corrupted, bech32m, base32);
+    const result = parseTokenV1Binary(corrupted, ports);
     expect(result.isErr()).toBe(true);
     if (result.isErr()) {
       expect(result.error.code).toBe('TOKEN_INVALID_FORMAT');

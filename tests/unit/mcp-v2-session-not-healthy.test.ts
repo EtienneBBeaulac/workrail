@@ -10,7 +10,7 @@ import type { SessionHealthDetails } from '../../src/mcp/types.js';
 import { createWorkflow } from '../../src/types/workflow.js';
 import { createProjectDirectorySource } from '../../src/types/workflow-source.js';
 
-import { parseTokenV1Binary } from '../../src/v2/durable-core/tokens/index.js';
+import { parseTokenV1Binary, unsafeTokenCodecPorts } from '../../src/v2/durable-core/tokens/index.js';
 import { LocalDataDirV2 } from '../../src/v2/infra/local/data-dir/index.js';
 import { NodeFileSystemV2 } from '../../src/v2/infra/local/fs/index.js';
 import { NodeSha256V2 } from '../../src/v2/infra/local/sha256/index.js';
@@ -53,7 +53,8 @@ async function mkV2Deps() {
   const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url, entropy);
   const keyring = await keyringPort.loadOrCreate().match(v => v, e => { throw new Error(`keyring: ${e.code}`); });
 
-  return { gate, sessionStore, snapshotStore, pinnedStore, keyring, sha256, crypto, hmac, base64url, base32, bech32m, idFactory };
+  const tokenCodecPorts = unsafeTokenCodecPorts({ keyring, hmac, base64url, base32, bech32m });
+  return { gate, sessionStore, snapshotStore, pinnedStore, keyring, sha256, crypto, idFactory, tokenCodecPorts, hmac, base64url, base32, bech32m };
 }
 
 async function mkCtxWithWorkflow(workflowId: string): Promise<ToolContext> {
@@ -101,7 +102,7 @@ describe('v2 execution: SESSION_NOT_HEALTHY error response', () => {
       if (started.type !== 'success') return;
 
       const stateToken = started.data.stateToken;
-      const parsedState = parseTokenV1Binary(stateToken, new Bech32mAdapterV2(), new (await import('../../src/v2/infra/local/base32/index.js')).Base32AdapterV2())._unsafeUnwrap();
+      const parsedState = parseTokenV1Binary(stateToken, { bech32m: new Bech32mAdapterV2(), base32: new (await import('../../src/v2/infra/local/base32/index.js')).Base32AdapterV2() })._unsafeUnwrap();
       const sessionId = parsedState.payload.sessionId;
 
       // Corrupt the session manifest file by truncating it
@@ -168,7 +169,7 @@ describe('v2 execution: SESSION_NOT_HEALTHY error response', () => {
       if (started.type !== 'success') return;
 
       const stateToken = started.data.stateToken;
-      const parsedState = parseTokenV1Binary(stateToken, new Bech32mAdapterV2(), new (await import('../../src/v2/infra/local/base32/index.js')).Base32AdapterV2())._unsafeUnwrap();
+      const parsedState = parseTokenV1Binary(stateToken, { bech32m: new Bech32mAdapterV2(), base32: new (await import('../../src/v2/infra/local/base32/index.js')).Base32AdapterV2() })._unsafeUnwrap();
       const sessionId = parsedState.payload.sessionId;
 
       // Corrupt manifest

@@ -24,7 +24,7 @@ import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
 import { Bech32mAdapterV2 } from '../../src/v2/infra/local/bech32m/index.js';
 import { Base32AdapterV2 } from '../../src/v2/infra/local/base32/index.js';
 
-import { signTokenV1Binary } from '../../src/v2/durable-core/tokens/index.js';
+import { signTokenV1Binary, unsafeTokenCodecPorts } from '../../src/v2/durable-core/tokens/index.js';
 import { StateTokenPayloadV1Schema, AckTokenPayloadV1Schema } from '../../src/v2/durable-core/tokens/index.js';
 import { asWorkflowHash, asSha256Digest } from '../../src/v2/durable-core/ids/index.js';
 import { deriveWorkflowHashRef } from '../../src/v2/durable-core/ids/workflow-hash-ref.js';
@@ -64,19 +64,17 @@ async function mkV2Deps(): Promise<V2Dependencies> {
   );
   const gate = new ExecutionSessionGateV2(lockPort, sessionStore);
 
+  const tokenCodecPorts = unsafeTokenCodecPorts({ keyring, hmac, base64url, base32, bech32m });
+
   return {
     gate,
     sessionStore,
     snapshotStore,
     pinnedStore,
-    keyring,
     sha256: sha256Port,
     crypto,
-    hmac,
-    base64url,
-    base32,
-    bech32m,
     idFactory,
+    tokenCodecPorts,
   };
 }
 
@@ -107,7 +105,8 @@ async function mkSignedToken(args: { root: string; payload: unknown }): Promise<
     }
   );
 
-  const token = signTokenV1Binary(args.payload as any, keyring, hmac, base64url, bech32m, base32);
+  const ports = unsafeTokenCodecPorts({ keyring, hmac, base64url, base32, bech32m });
+  const token = signTokenV1Binary(args.payload as any, ports);
   if (token.isErr()) throw new Error(`unexpected token sign error: ${token.error.code}`);
   return token.value;
 }

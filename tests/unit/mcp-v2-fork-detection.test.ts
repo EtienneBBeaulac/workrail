@@ -26,6 +26,7 @@ import { NodeTimeClockV2 } from '../../src/v2/infra/local/time-clock/index.js';
 import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
 import { Bech32mAdapterV2 } from '../../src/v2/infra/local/bech32m/index.js';
 import { Base32AdapterV2 } from '../../src/v2/infra/local/base32/index.js';
+import { parseTokenV1Binary, unsafeTokenCodecPorts } from '../../src/v2/durable-core/tokens/index.js';
 
 async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-fork-'));
@@ -64,6 +65,7 @@ async function mkCtxWithWorkflow(workflowId: string, dataDir: string): Promise<T
   const bech32mV2 = new Bech32mAdapterV2();
   const keyringPortV2 = new LocalKeyringV2(dataDirV2, fsPortV2, base64urlV2, entropyV2);
   const keyringV2 = await keyringPortV2.loadOrCreate().match(v => v, e => { throw new Error(`keyring: ${e.code}`); });
+  const tokenCodecPorts = unsafeTokenCodecPorts({ keyring: keyringV2, hmac: hmacV2, base64url: base64urlV2, base32: base32V2, bech32m: bech32mV2 });
 
   return {
     workflowService: {
@@ -82,13 +84,9 @@ async function mkCtxWithWorkflow(workflowId: string, dataDir: string): Promise<T
       sessionStore: sessionStoreV2,
       snapshotStore: snapshotStoreV2,
       pinnedStore: pinnedStoreV2,
-      keyring: keyringV2,
       sha256: sha256V2,
       crypto: cryptoV2,
-      hmac: hmacV2,
-      base64url: base64urlV2,
-      base32: base32V2,
-      bech32m: bech32mV2,
+      tokenCodecPorts,
       idFactory: idFactoryV2,
     },
   };
@@ -131,8 +129,10 @@ describe('v2 fork detection (Phase 5)', () => {
       // - 2 node_created events (root + 2 children)
       // - 2 edge_created events
       // - at least one edge has cause.kind=non_tip_advance
-      const { parseTokenV1Binary } = await import('../../src/v2/durable-core/tokens/token-codec.js');
-      const parsed = parseTokenV1Binary(start.data.stateToken, new Bech32mAdapterV2(), new (await import('../../src/v2/infra/local/base32/index.js')).Base32AdapterV2())._unsafeUnwrap();
+      const parsed = parseTokenV1Binary(start.data.stateToken, {
+        bech32m: new Bech32mAdapterV2(),
+        base32: new (await import('../../src/v2/infra/local/base32/index.js')).Base32AdapterV2(),
+      })._unsafeUnwrap();
       const sid = parsed.payload.sessionId;
 
       const truth = await ctx.v2!.sessionStore.load(sid).match(

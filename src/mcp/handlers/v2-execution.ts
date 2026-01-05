@@ -43,8 +43,7 @@ import type { SessionEventLogStoreError } from '../../v2/ports/session-event-log
 import type { SnapshotStoreError } from '../../v2/ports/snapshot-store.port.js';
 import type { PinnedWorkflowStoreError } from '../../v2/ports/pinned-workflow-store.port.js';
 import type { Sha256PortV2 } from '../../v2/ports/sha256.port.js';
-import type { HmacSha256PortV2 } from '../../v2/ports/hmac-sha256.port.js';
-import type { Base64UrlPortV2 } from '../../v2/ports/base64url.port.js';
+import type { TokenCodecPorts } from '../../v2/durable-core/tokens/token-codec-ports.js';
 import { ResultAsync as RA, okAsync, errAsync as neErrorAsync, ok, err, type Result } from 'neverthrow';
 import { compileV1WorkflowToPinnedSnapshot } from '../../v2/read-only/v1-to-v2-shim.js';
 import { workflowHashForCompiledSnapshot } from '../../v2/durable-core/canonical/hashing.js';
@@ -393,12 +392,8 @@ function replayFromRecordedAdvance(args: {
   readonly inputAckToken: string;
   readonly pinnedWorkflow: ReturnType<typeof createWorkflow>;
   readonly snapshotStore: import('../../v2/ports/snapshot-store.port.js').SnapshotStorePortV2;
-  readonly keyring: import('../../v2/ports/keyring.port.js').KeyringV1;
   readonly sha256: Sha256PortV2;
-  readonly hmac: HmacSha256PortV2;
-  readonly base64url: Base64UrlPortV2;
-  readonly base32: import('../../v2/ports/base32.port.js').Base32PortV2;
-  readonly bech32m: import('../../v2/ports/bech32m.port.js').Bech32mPortV2;
+  readonly tokenCodecPorts: TokenCodecPorts;
 }): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, ContinueWorkflowError> {
   const {
     recordedEvent,
@@ -412,12 +407,8 @@ function replayFromRecordedAdvance(args: {
     inputAckToken,
     pinnedWorkflow,
     snapshotStore,
-    keyring,
     sha256,
-    hmac,
-    base64url,
-    base32,
-    bech32m,
+    tokenCodecPorts,
   } = args;
 
   if (recordedEvent.data.outcome.kind === 'blocked') {
@@ -481,11 +472,7 @@ function replayFromRecordedAdvance(args: {
       const nextAckTokenRes = pending
         ? signTokenOrErr({
             payload: { tokenVersion: 1, tokenKind: 'ack', sessionId, runId, nodeId: toNodeIdBranded, attemptId: nextAttemptId },
-        keyring,
-        hmac,
-        base64url,
-        base32,
-        bech32m,
+            ports: tokenCodecPorts,
           })
         : ok(undefined);
       if (nextAckTokenRes.isErr()) {
@@ -498,11 +485,7 @@ function replayFromRecordedAdvance(args: {
       }
       const nextStateTokenRes = signTokenOrErr({
         payload: { tokenVersion: 1, tokenKind: 'state', sessionId, runId, nodeId: toNodeIdBranded, workflowHashRef: wfRefRes.value },
-        keyring,
-        hmac,
-        base64url,
-        base32,
-        bech32m,
+        ports: tokenCodecPorts,
       });
       if (nextStateTokenRes.isErr()) {
         return neErrorAsync({ kind: 'token_signing_failed' as const, cause: nextStateTokenRes.error });
@@ -761,18 +744,14 @@ type AckTokenInput = ParsedTokenV1Binary & { readonly payload: import('../../v2/
 
 function parseStateTokenOrFail(
   raw: string,
-  keyring: import('../../v2/ports/keyring.port.js').KeyringV1,
-  hmac: HmacSha256PortV2,
-  base64url: Base64UrlPortV2,
-  base32: import('../../v2/ports/base32.port.js').Base32PortV2,
-  bech32m: import('../../v2/ports/bech32m.port.js').Bech32mPortV2
+  ports: TokenCodecPorts,
 ): { ok: true; token: StateTokenInput } | { ok: false; failure: ToolFailure } {
-  const parsedRes = parseTokenV1Binary(raw, bech32m, base32);
+  const parsedRes = parseTokenV1Binary(raw, ports);
   if (parsedRes.isErr()) {
     return { ok: false, failure: mapTokenDecodeErrorToToolError(parsedRes.error) };
   }
 
-  const verified = verifyTokenSignatureV1Binary(parsedRes.value, keyring, hmac, base64url);
+  const verified = verifyTokenSignatureV1Binary(parsedRes.value, ports);
   if (verified.isErr()) {
     return { ok: false, failure: mapTokenVerifyErrorToToolError(verified.error) };
   }
@@ -791,18 +770,14 @@ function parseStateTokenOrFail(
 
 function parseAckTokenOrFail(
   raw: string,
-  keyring: import('../../v2/ports/keyring.port.js').KeyringV1,
-  hmac: HmacSha256PortV2,
-  base64url: Base64UrlPortV2,
-  base32: import('../../v2/ports/base32.port.js').Base32PortV2,
-  bech32m: import('../../v2/ports/bech32m.port.js').Bech32mPortV2
+  ports: TokenCodecPorts,
 ): { ok: true; token: AckTokenInput } | { ok: false; failure: ToolFailure } {
-  const parsedRes = parseTokenV1Binary(raw, bech32m, base32);
+  const parsedRes = parseTokenV1Binary(raw, ports);
   if (parsedRes.isErr()) {
     return { ok: false, failure: mapTokenDecodeErrorToToolError(parsedRes.error) };
   }
 
-  const verified = verifyTokenSignatureV1Binary(parsedRes.value, keyring, hmac, base64url);
+  const verified = verifyTokenSignatureV1Binary(parsedRes.value, ports);
   if (verified.isErr()) {
     return { ok: false, failure: mapTokenVerifyErrorToToolError(verified.error) };
   }
@@ -830,13 +805,9 @@ function attemptIdForNextNode(parentAttemptId: AttemptId, sha256: Sha256PortV2):
 
 function signTokenOrErr(args: {
   payload: TokenPayloadV1;
-  keyring: import('../../v2/ports/keyring.port.js').KeyringV1;
-  hmac: HmacSha256PortV2;
-  base64url: Base64UrlPortV2;
-  base32: import('../../v2/ports/base32.port.js').Base32PortV2;
-  bech32m: import('../../v2/ports/bech32m.port.js').Bech32mPortV2;
+  ports: TokenCodecPorts;
 }): Result<string, TokenDecodeErrorV2 | TokenVerifyErrorV2 | TokenSignErrorV2> {
-  const token = signTokenV1Binary(args.payload, args.keyring, args.hmac, args.base64url, args.bech32m, args.base32);
+  const token = signTokenV1Binary(args.payload, args.ports);
   if (token.isErr()) return err(token.error);
   return ok(token.value);
 }
@@ -948,7 +919,7 @@ function executeStartWorkflow(
     return neErrorAsync({ kind: 'precondition_failed', message: 'v2 tools disabled', suggestion: 'Enable v2Tools flag' });
   }
 
-  const { gate, sessionStore, snapshotStore, pinnedStore, keyring, crypto, hmac, base64url, base32, bech32m, idFactory } = ctx.v2;
+  const { gate, sessionStore, snapshotStore, pinnedStore, crypto, tokenCodecPorts, idFactory } = ctx.v2;
   if (!idFactory) {
     return neErrorAsync({
       kind: 'precondition_failed',
@@ -956,11 +927,11 @@ function executeStartWorkflow(
       suggestion: 'Reinitialize v2 tool context (idFactory must be provided when v2Tools are enabled).',
     });
   }
-  if (!bech32m) {
+  if (!tokenCodecPorts) {
     return neErrorAsync({
       kind: 'precondition_failed',
-      message: 'v2 context missing bech32m dependency',
-      suggestion: 'Reinitialize v2 tool context (bech32m must be provided when v2Tools are enabled).',
+      message: 'v2 context missing tokenCodecPorts dependency',
+      suggestion: 'Reinitialize v2 tool context (tokenCodecPorts must be provided when v2Tools are enabled).',
     });
   }
 
@@ -1124,10 +1095,10 @@ function executeStartWorkflow(
         nodeId,
         attemptId,
       };
-      const stateToken = signTokenOrErr({ payload: statePayload, keyring, hmac, base64url, base32, bech32m });
+      const stateToken = signTokenOrErr({ payload: statePayload, ports: tokenCodecPorts });
       if (stateToken.isErr()) return neErrorAsync({ kind: 'token_signing_failed' as const, cause: stateToken.error });
       
-      const ackToken = signTokenOrErr({ payload: ackPayload, keyring, hmac, base64url, base32, bech32m });
+      const ackToken = signTokenOrErr({ payload: ackPayload, ports: tokenCodecPorts });
       if (ackToken.isErr()) return neErrorAsync({ kind: 'token_signing_failed' as const, cause: ackToken.error });
 
       const { stepId, title, prompt } = extractStepMetadata(pinnedWorkflow, firstStep.id);
@@ -1160,7 +1131,7 @@ function executeContinueWorkflow(
     return neErrorAsync({ kind: 'precondition_failed', message: 'v2 tools disabled', suggestion: 'Enable v2Tools flag' });
   }
 
-  const { gate, sessionStore, snapshotStore, pinnedStore, keyring, sha256, crypto, hmac, base64url, base32, bech32m, idFactory } = ctx.v2;
+  const { gate, sessionStore, snapshotStore, pinnedStore, sha256, tokenCodecPorts, idFactory } = ctx.v2;
   if (!sha256 || !idFactory) {
     return neErrorAsync({
       kind: 'precondition_failed',
@@ -1168,15 +1139,15 @@ function executeContinueWorkflow(
       suggestion: 'Reinitialize v2 tool context (sha256 and idFactory must be provided when v2Tools are enabled).',
     });
   }
-  if (!bech32m) {
+  if (!tokenCodecPorts) {
     return neErrorAsync({
       kind: 'precondition_failed',
-      message: 'v2 context missing bech32m dependency',
-      suggestion: 'Reinitialize v2 tool context (bech32m must be provided when v2Tools are enabled).',
+      message: 'v2 context missing tokenCodecPorts dependency',
+      suggestion: 'Reinitialize v2 tool context (tokenCodecPorts must be provided when v2Tools are enabled).',
     });
   }
 
-  const stateRes = parseStateTokenOrFail(input.stateToken, keyring, hmac, base64url, base32, bech32m);
+  const stateRes = parseStateTokenOrFail(input.stateToken, tokenCodecPorts);
   if (!stateRes.ok) return neErrorAsync({ kind: 'validation_failed', failure: stateRes.failure });
   const state = stateRes.token;
 
@@ -1267,11 +1238,7 @@ function executeContinueWorkflow(
             const attemptId = newAttemptId(idFactory);
             const ackTokenRes = signTokenOrErr({
               payload: { tokenVersion: 1, tokenKind: 'ack', sessionId, runId, nodeId, attemptId },
-              keyring,
-              hmac,
-              base64url,
-              base32,
-              bech32m,
+              ports: tokenCodecPorts,
             });
             if (ackTokenRes.isErr()) return neErrorAsync({ kind: 'token_signing_failed' as const, cause: ackTokenRes.error });
 
@@ -1304,7 +1271,7 @@ function executeContinueWorkflow(
   }
 
   // ADVANCE PATH
-  const ackRes = parseAckTokenOrFail(input.ackToken, keyring, hmac, base64url, base32, bech32m);
+  const ackRes = parseAckTokenOrFail(input.ackToken, tokenCodecPorts);
   if (!ackRes.ok) return neErrorAsync({ kind: 'validation_failed', failure: ackRes.failure });
   const ack = ackRes.token;
 
@@ -1403,12 +1370,8 @@ function executeContinueWorkflow(
               inputAckToken: input.ackToken!,
               pinnedWorkflow,
               snapshotStore,
-              keyring,
               sha256,
-              hmac,
-              base64url,
-              base32,
-              bech32m,
+              tokenCodecPorts,
             });
           }
 
@@ -1495,12 +1458,8 @@ function executeContinueWorkflow(
                 inputAckToken: input.ackToken!,
                 pinnedWorkflow,
                 snapshotStore,
-                keyring,
                 sha256,
-                hmac,
-                base64url,
-                base32,
-                bech32m,
+                tokenCodecPorts,
               });
             });
         });
