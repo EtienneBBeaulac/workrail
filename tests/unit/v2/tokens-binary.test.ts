@@ -377,7 +377,7 @@ describe('Binary token signing and verification', () => {
     const payload = createTestStatePayload();
 
     // Sign
-    const signResult = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m);
+    const signResult = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m, base32);
     expect(signResult.isOk()).toBe(true);
     const token = signResult._unsafeUnwrap();
 
@@ -398,7 +398,7 @@ describe('Binary token signing and verification', () => {
     const payload = createTestStatePayload();
 
     // Sign
-    const signResult = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m);
+    const signResult = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m, base32);
     const token = signResult._unsafeUnwrap();
 
     // Parse

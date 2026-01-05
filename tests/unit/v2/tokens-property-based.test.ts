@@ -79,7 +79,7 @@ describe('Property-based: binary token encoding', () => {
           expect(packed.isOk()).toBe(true);
           if (packed.isErr()) return;
 
-          const unpacked = unpackTokenPayload(packed.value);
+          const unpacked = unpackTokenPayload(packed.value, base32);
           expect(unpacked.isOk()).toBe(true);
           if (unpacked.isErr()) return;
 
@@ -138,7 +138,7 @@ describe('Property-based: binary token encoding', () => {
           expect(packed.isOk()).toBe(true);
           if (packed.isErr()) return;
 
-          const unpacked = unpackTokenPayload(packed.value);
+          const unpacked = unpackTokenPayload(packed.value, base32);
           expect(unpacked.isOk()).toBe(true);
           if (unpacked.isErr()) return;
 
@@ -174,7 +174,7 @@ describe('Property-based: binary token encoding', () => {
           expect(packed.isOk()).toBe(true);
           if (packed.isErr()) return;
 
-          const unpacked = unpackTokenPayload(packed.value);
+          const unpacked = unpackTokenPayload(packed.value, base32);
           expect(unpacked.isOk()).toBe(true);
           if (unpacked.isErr()) return;
 
