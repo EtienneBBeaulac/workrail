@@ -160,7 +160,8 @@ describe('GitWorkflowStorage Integration', () => {
   describe('Error Handling', () => {
     it('should handle invalid repository URL', async () => {
       const storage = new GitWorkflowStorage({
-        repositoryUrl: 'https://github.com/nonexistent/repo-that-does-not-exist.git',
+        // Use nonexistent local path instead of GitHub URL to avoid network dependency
+        repositoryUrl: '/nonexistent/repo/that/does/not/exist',
         branch: 'main',
         localPath: path.join(cacheDir, 'error-test'),
         syncInterval: 0 // Force immediate sync

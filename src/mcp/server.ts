@@ -23,44 +23,21 @@ import type { ShutdownEvents, ShutdownEvent } from '../runtime/ports/shutdown-ev
 import type { ProcessSignals } from '../runtime/ports/process-signals.js';
 import type { ProcessTerminator } from '../runtime/ports/process-terminator.js';
 
-import type { ToolContext, ToolResult, ToolError, V2Dependencies } from './types.js';
-import { errNotRetryable } from './types.js';
+import type { ToolContext, V2Dependencies } from './types.js';
+import { assertNever } from '../runtime/assert-never.js';
 import { unsafeTokenCodecPorts } from '../v2/durable-core/tokens/token-codec-ports.js';
 import { createToolFactory, type ToolAnnotations, type ToolDefinition } from './tool-factory.js';
 import type { IToolDescriptionProvider } from './tool-description-provider.js';
-import { preValidateWorkflowNextArgs, type PreValidateResult } from './validation/workflow-next-prevalidate.js';
-import { toBoundedJsonValue } from './validation/bounded-json.js';
+import { createHandler } from './handler-factory.js';
+import type { WrappedToolHandler } from './types/workflow-tool-edition.js';
+import { selectWorkflowToolEdition } from './workflow-tool-edition-selector.js';
 import {
-  generateSuggestions,
-  formatSuggestionDetails,
-  DEFAULT_SUGGESTION_CONFIG,
-} from './validation/index.js';
-import {
-  // Workflow tool input schemas
-  WorkflowListInput,
-  WorkflowGetInput,
-  WorkflowNextInput,
-  WorkflowValidateJsonInput,
-  WorkflowGetSchemaInput,
-  // Workflow tool metadata
-  WORKFLOW_TOOL_ANNOTATIONS,
-  WORKFLOW_TOOL_TITLES,
   // Session tools (static definitions)
   createSessionTool,
   updateSessionTool,
   readSessionTool,
   openDashboardTool,
 } from './tools.js';
-
-import { buildV2ToolRegistry } from './v2/tool-registry.js';
-
-import {
-  handleWorkflowList,
-  handleWorkflowGet,
-  handleWorkflowNext,
-  handleWorkflowValidateJson,
-  handleWorkflowGetSchema,
-} from './handlers/workflow.js';
 
 import {
   handleCreateSession,
@@ -78,44 +55,6 @@ interface Tool {
   description: string;
   inputSchema: Record<string, unknown>;
   annotations?: ToolAnnotations;
-}
-
-// MCP SDK result type (use any to avoid complex SDK type dependencies)
-type McpCallToolResult = {
-  content: Array<{ type: 'text'; text: string }>;
-  isError?: boolean;
-};
-
-// -----------------------------------------------------------------------------
-// Result Conversion
-// -----------------------------------------------------------------------------
-
-/**
- * Convert our ToolResult<T> to MCP's CallToolResult format.
- * 
- * For error results, serializes the unified envelope:
- * { code, message, retry, details? }
- */
-function toMcpResult<T>(result: ToolResult<T>): McpCallToolResult {
-  switch (result.type) {
-    case 'success':
-      return {
-        content: [{ type: 'text', text: JSON.stringify(result.data, null, 2) }],
-      };
-    case 'error':
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            code: result.code,
-            message: result.message,
-            retry: result.retry,
-            ...(result.details !== undefined ? { details: result.details } : {}),
-          }, null, 2),
-        }],
-        isError: true,
-      };
-  }
 }
 
 // -----------------------------------------------------------------------------
@@ -217,81 +156,7 @@ function toMcpTool<TInput extends z.ZodType>(tool: ToolDefinition<TInput>): Tool
   };
 }
 
-// -----------------------------------------------------------------------------
-// Tool Dispatch
-// -----------------------------------------------------------------------------
 
-type ToolHandler = (args: unknown, ctx: ToolContext) => Promise<McpCallToolResult>;
-
-/**
- * Create a type-safe handler wrapper that parses input with Zod.
- *
- * When validation fails, generates "did you mean?" suggestions to help
- * agents self-correct parameter naming and structure mistakes.
- */
-function createHandler<TInput extends z.ZodType, TOutput>(
-  schema: TInput,
-  handler: (input: z.infer<TInput>, ctx: ToolContext) => Promise<ToolResult<TOutput>>
-): ToolHandler {
-  return async (args: unknown, ctx: ToolContext): Promise<McpCallToolResult> => {
-    const parseResult = schema.safeParse(args);
-    if (!parseResult.success) {
-      // Generate suggestions for self-correction (pure, deterministic)
-      const suggestionResult = generateSuggestions(args, schema, DEFAULT_SUGGESTION_CONFIG);
-      const suggestionDetails = formatSuggestionDetails(suggestionResult);
-
-      return toMcpResult(
-        errNotRetryable('VALIDATION_ERROR', 'Invalid input', {
-          validationErrors: parseResult.error.errors.map(e => ({
-            path: e.path.join('.'),
-            message: e.message,
-          })),
-          ...suggestionDetails,
-        })
-      );
-    }
-    return toMcpResult(await handler(parseResult.data, ctx));
-  };
-}
-
-// -----------------------------------------------------------------------------
-// Validation-heavy tool support (error UX)
-// -----------------------------------------------------------------------------
-
-function createValidatingHandler<TInput extends z.ZodType, TOutput>(
-  schema: TInput,
-  preValidate: (args: unknown) => PreValidateResult,
-  handler: (input: z.infer<TInput>, ctx: ToolContext) => Promise<ToolResult<TOutput>>
-): ToolHandler {
-  return async (args: unknown, ctx: ToolContext): Promise<McpCallToolResult> => {
-    const pre = preValidate(args);
-    if ('error' in pre && !pre.ok) {
-      const error = pre.error;
-      
-      // Extract correctTemplate from details and bound it if present
-      const details = error.details && typeof error.details === 'object' ? (error.details as any) : {};
-      const correctTemplate = details.correctTemplate;
-      
-      // If template exists, bound it to prevent oversized payloads
-      if (correctTemplate !== undefined) {
-        const boundedTemplate = toBoundedJsonValue(correctTemplate, 512);
-        const boundedError: ToolError = {
-          ...error,
-          details: {
-            ...details,
-            correctTemplate: boundedTemplate,
-          },
-        };
-        return toMcpResult(boundedError);
-      }
-      
-      return toMcpResult(error);
-    }
-
-    // Fall back to the standard Zod + handler pipeline
-    return createHandler(schema, handler)(args, ctx);
-  };
-}
 
 // -----------------------------------------------------------------------------
 // Server Start
@@ -316,41 +181,25 @@ export async function startServer(): Promise<void> {
   // Create tool factory with dynamic descriptions
   const buildTool = createToolFactory(descriptionProvider);
 
-  // Build workflow tools with dynamic descriptions (v1, action-oriented names)
-  const discoverWorkflowsTool = buildTool({
-    name: 'discover_workflows',
-    title: WORKFLOW_TOOL_TITLES.discover_workflows,
-    inputSchema: WorkflowListInput,
-    annotations: WORKFLOW_TOOL_ANNOTATIONS.discover_workflows,
-  });
+  // -------------------------------------------------------------------------
+  // Workflow tool edition: v1 XOR v2 (mutually exclusive)
+  //
+  // Select the active edition using a discriminated union.
+  // Illegal states (both v1 and v2) are unrepresentable by construction.
+  // -------------------------------------------------------------------------
+  const workflowEdition = selectWorkflowToolEdition(ctx.featureFlags, buildTool);
 
-  const previewWorkflowTool = buildTool({
-    name: 'preview_workflow',
-    title: WORKFLOW_TOOL_TITLES.preview_workflow,
-    inputSchema: WorkflowGetInput,
-    annotations: WORKFLOW_TOOL_ANNOTATIONS.preview_workflow,
-  });
-
-  const advanceWorkflowTool = buildTool({
-    name: 'advance_workflow',
-    title: WORKFLOW_TOOL_TITLES.advance_workflow,
-    inputSchema: WorkflowNextInput,
-    annotations: WORKFLOW_TOOL_ANNOTATIONS.advance_workflow,
-  });
-
-  const validateWorkflowTool = buildTool({
-    name: 'validate_workflow',
-    title: WORKFLOW_TOOL_TITLES.validate_workflow,
-    inputSchema: WorkflowValidateJsonInput,
-    annotations: WORKFLOW_TOOL_ANNOTATIONS.validate_workflow,
-  });
-
-  const getWorkflowSchemaTool = buildTool({
-    name: 'get_workflow_schema',
-    title: WORKFLOW_TOOL_TITLES.get_workflow_schema,
-    inputSchema: WorkflowGetSchemaInput,
-    annotations: WORKFLOW_TOOL_ANNOTATIONS.get_workflow_schema,
-  });
+  // Exhaustive switch for logging (compiler ensures all cases handled)
+  switch (workflowEdition.kind) {
+    case 'v1':
+      console.error('[ToolEdition] v1 workflow tools active');
+      break;
+    case 'v2':
+      console.error('[ToolEdition] v2 workflow tools active (v1 excluded)');
+      break;
+    default:
+      assertNever(workflowEdition);
+  }
 
   // Dynamically import SDK modules (ESM-only)
   const { Server } = await import('@modelcontextprotocol/sdk/server/index.js');
@@ -373,16 +222,10 @@ export async function startServer(): Promise<void> {
     }
   );
 
-  // Build tool list
-  const tools: Tool[] = [
-    toMcpTool(discoverWorkflowsTool),
-    toMcpTool(previewWorkflowTool),
-    toMcpTool(advanceWorkflowTool),
-    toMcpTool(validateWorkflowTool),
-    toMcpTool(getWorkflowSchemaTool),
-  ];
+  // Build tool list from selected edition
+  const tools: Tool[] = workflowEdition.tools.map(toMcpTool);
 
-  // Add session tools if enabled
+  // Add session tools if enabled (independent of workflow edition)
   if (ctx.featureFlags.isEnabled('sessionTools')) {
     tools.push(
       toMcpTool(createSessionTool),
@@ -392,35 +235,15 @@ export async function startServer(): Promise<void> {
     );
   }
 
-  // Add v2 tools if enabled (explicit opt-in)
-  const v2Registry = ctx.featureFlags.isEnabled('v2Tools') ? buildV2ToolRegistry(buildTool) : null;
-  if (v2Registry) {
-    console.error('[FeatureFlags] v2 tools enabled (enable with WORKRAIL_ENABLE_V2_TOOLS=true)');
-    tools.push(...v2Registry.tools.map(toMcpTool));
-  } else {
-    console.error('[FeatureFlags] v2 tools disabled (enable with WORKRAIL_ENABLE_V2_TOOLS=true)');
-  }
+  // Build handler map from selected edition
+  const handlers: Record<string, WrappedToolHandler> = { ...workflowEdition.handlers };
 
-  // Build handler map (uses input schemas directly)
-  const handlers: Record<string, ToolHandler> = {
-    // v1 tools (action-oriented names)
-    discover_workflows: createHandler(WorkflowListInput, handleWorkflowList),
-    preview_workflow: createHandler(WorkflowGetInput, handleWorkflowGet),
-    advance_workflow: createValidatingHandler(WorkflowNextInput, preValidateWorkflowNextArgs, handleWorkflowNext),
-    validate_workflow: createHandler(WorkflowValidateJsonInput, handleWorkflowValidateJson),
-    get_workflow_schema: createHandler(WorkflowGetSchemaInput, handleWorkflowGetSchema),
-    // Session tools
-    create_session: createHandler(createSessionTool.inputSchema, handleCreateSession),
-    update_session: createHandler(updateSessionTool.inputSchema, handleUpdateSession),
-    read_session: createHandler(readSessionTool.inputSchema, handleReadSession),
-    open_dashboard: createHandler(openDashboardTool.inputSchema, handleOpenDashboard),
-  };
-
-  // Register v2 handlers only when tools are enabled (prevents tool leaks)
-  if (v2Registry) {
-    for (const [name, entry] of Object.entries(v2Registry.handlers)) {
-      handlers[name] = createHandler(entry.schema, entry.handler);
-    }
+  // Session handlers only when session tools are enabled (capability-based)
+  if (ctx.featureFlags.isEnabled('sessionTools')) {
+    handlers.create_session = createHandler(createSessionTool.inputSchema, handleCreateSession);
+    handlers.update_session = createHandler(updateSessionTool.inputSchema, handleUpdateSession);
+    handlers.read_session = createHandler(readSessionTool.inputSchema, handleReadSession);
+    handlers.open_dashboard = createHandler(openDashboardTool.inputSchema, handleOpenDashboard);
   }
 
   // Register ListTools handler
