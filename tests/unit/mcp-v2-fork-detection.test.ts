@@ -129,7 +129,7 @@ describe('v2 fork detection (Phase 5)', () => {
       // - 2 edge_created events
       // - at least one edge has cause.kind=non_tip_advance
       const { parseTokenV1Binary } = await import('../../src/v2/durable-core/tokens/token-codec.js');
-      const parsed = parseTokenV1Binary(start.data.stateToken, new Bech32mAdapterV2())._unsafeUnwrap();
+      const parsed = parseTokenV1Binary(start.data.stateToken, new Bech32mAdapterV2(), new (await import('../../src/v2/infra/local/base32/index.js')).Base32AdapterV2())._unsafeUnwrap();
       const sid = parsed.payload.sessionId;
 
       const truth = await ctx.v2!.sessionStore.load(sid).match(

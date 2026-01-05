@@ -25,6 +25,7 @@ import { NodeRandomEntropyV2 } from '../../../src/v2/infra/local/random-entropy/
 import { NodeTimeClockV2 } from '../../../src/v2/infra/local/time-clock/index.js';
 import { IdFactoryV2 } from '../../../src/v2/infra/local/id-factory/index.js';
 import { Bech32mAdapterV2 } from '../../../src/v2/infra/local/bech32m/index.js';
+import { Base32AdapterV2 } from '../../../src/v2/infra/local/base32/index.js';
 import { parseTokenV1Binary } from '../../../src/v2/durable-core/tokens/token-codec.js';
 
 import { projectRunDagV2 } from '../../../src/v2/projections/run-dag.js';
@@ -84,7 +85,8 @@ async function createV2Context(): Promise<ToolContext> {
 
 function extractSessionIdFromToken(stateToken: string): string {
   const bech32m = new Bech32mAdapterV2();
-  const parsed = parseTokenV1Binary(stateToken, bech32m);
+  const base32 = new Base32AdapterV2();
+  const parsed = parseTokenV1Binary(stateToken, bech32m, base32);
   if (parsed.isErr()) {
     throw new Error(`Invalid token format: ${parsed.error.code}`);
   }

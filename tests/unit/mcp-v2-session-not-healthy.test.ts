@@ -99,7 +99,7 @@ describe('v2 execution: SESSION_NOT_HEALTHY error response', () => {
       if (started.type !== 'success') return;
 
       const stateToken = started.data.stateToken;
-      const parsedState = parseTokenV1Binary(stateToken, new Bech32mAdapterV2())._unsafeUnwrap();
+      const parsedState = parseTokenV1Binary(stateToken, new Bech32mAdapterV2(), new (await import('../../src/v2/infra/local/base32/index.js')).Base32AdapterV2())._unsafeUnwrap();
       const sessionId = parsedState.payload.sessionId;
 
       // Corrupt the session manifest file by truncating it
@@ -166,7 +166,7 @@ describe('v2 execution: SESSION_NOT_HEALTHY error response', () => {
       if (started.type !== 'success') return;
 
       const stateToken = started.data.stateToken;
-      const parsedState = parseTokenV1Binary(stateToken, new Bech32mAdapterV2())._unsafeUnwrap();
+      const parsedState = parseTokenV1Binary(stateToken, new Bech32mAdapterV2(), new (await import('../../src/v2/infra/local/base32/index.js')).Base32AdapterV2())._unsafeUnwrap();
       const sessionId = parsedState.payload.sessionId;
 
       // Corrupt manifest

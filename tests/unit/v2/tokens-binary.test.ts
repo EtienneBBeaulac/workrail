@@ -382,7 +382,7 @@ describe('Binary token signing and verification', () => {
     const token = signResult._unsafeUnwrap();
 
     // Parse
-    const parseResult = parseTokenV1Binary(token, bech32m);
+    const parseResult = parseTokenV1Binary(token, bech32m, base32);
     expect(parseResult.isOk()).toBe(true);
     const parsed = parseResult._unsafeUnwrap();
 
@@ -402,7 +402,7 @@ describe('Binary token signing and verification', () => {
     const token = signResult._unsafeUnwrap();
 
     // Parse
-    const parseResult = parseTokenV1Binary(token, bech32m);
+    const parseResult = parseTokenV1Binary(token, bech32m, base32);
     const parsed = parseResult._unsafeUnwrap();
 
     // Tamper with signature

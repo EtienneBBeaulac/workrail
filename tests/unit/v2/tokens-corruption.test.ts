@@ -20,6 +20,7 @@ import { NodeBase64UrlV2 } from '../../../src/v2/infra/local/base64url/index.js'
 import { LocalKeyringV2 } from '../../../src/v2/infra/local/keyring/index.js';
 import { NodeRandomEntropyV2 } from '../../../src/v2/infra/local/random-entropy/index.js';
 import { Bech32mAdapterV2 } from '../../../src/v2/infra/local/bech32m/index.js';
+import { Base32AdapterV2 } from '../../../src/v2/infra/local/base32/index.js';
 
 import {
   signTokenV1Binary,
@@ -47,6 +48,7 @@ describe('Token corruption detection', () => {
     const fsPort = new NodeFileSystemV2();
     const hmac = new NodeHmacSha256V2();
     const base64url = new NodeBase64UrlV2();
+    const base32 = new Base32AdapterV2();
     const bech32m = new Bech32mAdapterV2();
     const entropy = new NodeRandomEntropyV2();
     const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url, entropy);
@@ -71,7 +73,7 @@ describe('Token corruption detection', () => {
       workflowHashRef: String(wfRef),
     });
 
-    const token = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m).match(
+    const token = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m, base32).match(
       (v) => v,
       (e) => { throw new Error(`sign failed: ${e.code}`); }
     );
@@ -79,7 +81,7 @@ describe('Token corruption detection', () => {
     // Corrupt HRP: st1 → xt1
     const corrupted = 'xt1' + token.slice(3);
 
-    const result = parseTokenV1Binary(corrupted, bech32m);
+    const result = parseTokenV1Binary(corrupted, bech32m, base32);
     expect(result.isErr()).toBe(true);
     if (result.isErr()) {
       expect(result.error.code).toBe('TOKEN_INVALID_FORMAT');
@@ -92,6 +94,7 @@ describe('Token corruption detection', () => {
     const fsPort = new NodeFileSystemV2();
     const hmac = new NodeHmacSha256V2();
     const base64url = new NodeBase64UrlV2();
+    const base32 = new Base32AdapterV2();
     const bech32m = new Bech32mAdapterV2();
     const entropy = new NodeRandomEntropyV2();
     const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url, entropy);
@@ -116,7 +119,7 @@ describe('Token corruption detection', () => {
       workflowHashRef: String(wfRef),
     });
 
-    const token = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m).match(
+    const token = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m, base32).match(
       (v) => v,
       (e) => { throw new Error(`sign failed: ${e.code}`); }
     );
@@ -126,7 +129,7 @@ describe('Token corruption detection', () => {
     chars[10] = chars[10] === 'q' ? 'p' : 'q';
     const corrupted = chars.join('');
 
-    const result = parseTokenV1Binary(corrupted, bech32m);
+    const result = parseTokenV1Binary(corrupted, bech32m, base32);
     expect(result.isErr()).toBe(true);
     if (result.isErr()) {
       expect(result.error.code).toBe('TOKEN_INVALID_FORMAT');
@@ -140,6 +143,7 @@ describe('Token corruption detection', () => {
     const fsPort = new NodeFileSystemV2();
     const hmac = new NodeHmacSha256V2();
     const base64url = new NodeBase64UrlV2();
+    const base32 = new Base32AdapterV2();
     const bech32m = new Bech32mAdapterV2();
     const entropy = new NodeRandomEntropyV2();
     const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url, entropy);
@@ -164,7 +168,7 @@ describe('Token corruption detection', () => {
       workflowHashRef: String(wfRef),
     });
 
-    const token = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m).match(
+    const token = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m, base32).match(
       (v) => v,
       (e) => { throw new Error(`sign failed: ${e.code}`); }
     );
@@ -174,7 +178,7 @@ describe('Token corruption detection', () => {
     chars[100] = chars[100] === 'a' ? 'b' : 'a';
     const corrupted = chars.join('');
 
-    const result = parseTokenV1Binary(corrupted, bech32m);
+    const result = parseTokenV1Binary(corrupted, bech32m, base32);
     expect(result.isErr()).toBe(true);
     if (result.isErr()) {
       expect(result.error.code).toBe('TOKEN_INVALID_FORMAT');
@@ -187,6 +191,7 @@ describe('Token corruption detection', () => {
     const fsPort = new NodeFileSystemV2();
     const hmac = new NodeHmacSha256V2();
     const base64url = new NodeBase64UrlV2();
+    const base32 = new Base32AdapterV2();
     const bech32m = new Bech32mAdapterV2();
     const entropy = new NodeRandomEntropyV2();
     const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url, entropy);
@@ -211,7 +216,7 @@ describe('Token corruption detection', () => {
       workflowHashRef: String(wfRef),
     });
 
-    const token = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m).match(
+    const token = signTokenV1Binary(payload, keyring, hmac, base64url, bech32m, base32).match(
       (v) => v,
       (e) => { throw new Error(`sign failed: ${e.code}`); }
     );
@@ -222,7 +227,7 @@ describe('Token corruption detection', () => {
     chars[pos] = chars[pos] === 'z' ? 'y' : 'z';
     const corrupted = chars.join('');
 
-    const result = parseTokenV1Binary(corrupted, bech32m);
+    const result = parseTokenV1Binary(corrupted, bech32m, base32);
     expect(result.isErr()).toBe(true);
     if (result.isErr()) {
       expect(result.error.code).toBe('TOKEN_INVALID_FORMAT');

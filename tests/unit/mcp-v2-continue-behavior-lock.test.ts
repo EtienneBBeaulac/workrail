@@ -40,6 +40,7 @@ import { NodeRandomEntropyV2 } from '../../src/v2/infra/local/random-entropy/ind
 import { NodeTimeClockV2 } from '../../src/v2/infra/local/time-clock/index.js';
 import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
 import { Bech32mAdapterV2 } from '../../src/v2/infra/local/bech32m/index.js';
+import { Base32AdapterV2 } from '../../src/v2/infra/local/base32/index.js';
 
 async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-continue-lock-'));
@@ -54,6 +55,7 @@ async function mkV2Deps() {
   const base64url = new NodeBase64UrlV2();
   const entropy = new NodeRandomEntropyV2();
   const idFactory = new IdFactoryV2(entropy);
+  const base32 = new Base32AdapterV2();
   const bech32m = new Bech32mAdapterV2();
   const clock = new NodeTimeClockV2();
   const sessionStore = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha256);
@@ -64,7 +66,7 @@ async function mkV2Deps() {
   const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url, entropy);
   const keyring = await keyringPort.loadOrCreate().match(v => v, e => { throw new Error(`keyring: ${e.code}`); });
 
-  return { gate, sessionStore, snapshotStore, pinnedStore, keyring, sha256, crypto, hmac, base64url, bech32m, idFactory };
+  return { gate, sessionStore, snapshotStore, pinnedStore, keyring, sha256, crypto, hmac, base64url, base32, bech32m, idFactory };
 }
 
 describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => {
@@ -158,7 +160,8 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     // Verify output was persisted
     const { parseTokenV1Binary } = await import('../../src/v2/durable-core/tokens/token-codec.js');
     const bech32m = new Bech32mAdapterV2();
-    const parsed = parseTokenV1Binary(start.data.stateToken, bech32m)._unsafeUnwrap();
+    const base32 = new Base32AdapterV2();
+    const parsed = parseTokenV1Binary(start.data.stateToken, bech32m, base32)._unsafeUnwrap();
     const sessionId = parsed.payload.sessionId;
 
     const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: root });
@@ -196,7 +199,8 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     // Verify no duplicate events
     const { parseTokenV1Binary } = await import('../../src/v2/durable-core/tokens/token-codec.js');
     const bech32m = new Bech32mAdapterV2();
-    const parsed = parseTokenV1Binary(start.data.stateToken, bech32m)._unsafeUnwrap();
+    const base32 = new Base32AdapterV2();
+    const parsed = parseTokenV1Binary(start.data.stateToken, bech32m, base32)._unsafeUnwrap();
     const sessionId = parsed.payload.sessionId;
 
     const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: root });
@@ -241,7 +245,8 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     // Verify fork edge exists
     const { parseTokenV1Binary } = await import('../../src/v2/durable-core/tokens/token-codec.js');
     const bech32m = new Bech32mAdapterV2();
-    const parsed = parseTokenV1Binary(start.data.stateToken, bech32m)._unsafeUnwrap();
+    const base32 = new Base32AdapterV2();
+    const parsed = parseTokenV1Binary(start.data.stateToken, bech32m, base32)._unsafeUnwrap();
     const sessionId = parsed.payload.sessionId;
 
     const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: root });
