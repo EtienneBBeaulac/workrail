@@ -25,6 +25,7 @@ import { NodeRandomEntropyV2 } from '../../src/v2/infra/local/random-entropy/ind
 import { NodeTimeClockV2 } from '../../src/v2/infra/local/time-clock/index.js';
 import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
 import { Bech32mAdapterV2 } from '../../src/v2/infra/local/bech32m/index.js';
+import { Base32AdapterV2 } from '../../src/v2/infra/local/base32/index.js';
 
 async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-exec-contract-'));
@@ -45,6 +46,7 @@ async function createV2Context(): Promise<ToolContext> {
   const base64url = new NodeBase64UrlV2();
   const entropy = new NodeRandomEntropyV2();
   const idFactory = new IdFactoryV2(entropy);
+  const base32 = new Base32AdapterV2();
   const bech32m = new Bech32mAdapterV2();
   const clock = new NodeTimeClockV2();
   const sessionStore = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha256);
@@ -70,6 +72,7 @@ async function createV2Context(): Promise<ToolContext> {
       crypto,
       hmac,
       base64url,
+      base32,
       bech32m,
       idFactory,
     },
