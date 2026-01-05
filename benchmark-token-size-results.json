@@ -1,0 +1,33 @@
+{
+  "timestamp": "2026-01-05T00:09:20.746Z",
+  "format": "binary+bech32m",
+  "tokens": {
+    "state": {
+      "length": 166,
+      "target": 170,
+      "pass": true
+    },
+    "ack": {
+      "length": 167,
+      "target": 170,
+      "pass": true
+    },
+    "checkpoint": {
+      "length": 167,
+      "target": 170,
+      "pass": true
+    }
+  },
+  "baseline": {
+    "state": 290,
+    "ack": 310,
+    "checkpoint": 310
+  },
+  "reductions": {
+    "state": "42.8",
+    "ack": "46.1",
+    "checkpoint": "46.1",
+    "average": "45.0"
+  },
+  "success": true
+}

@@ -12,6 +12,7 @@ import type {
   WorkflowDir,
 } from '../../src/config/app-config.js';
 import { createValidatedConfig } from '../../src/config/app-config.js';
+import { tmpPath } from '../helpers/platform.js';
 
 /**
  * Test container configuration.
@@ -49,7 +50,7 @@ export async function setupTest(config: TestConfig = {}): Promise<DependencyCont
   const defaultAppConfig: AppConfig = {
     cache: { ttlMs: 0 as CacheTtlMs },
     paths: {
-      workflowDir: '/tmp/test-workflows' as WorkflowDir,
+      workflowDir: tmpPath('workrail-test-workflows') as WorkflowDir,
       projectPath: process.cwd() as ProjectPath,
     },
     dashboard: {

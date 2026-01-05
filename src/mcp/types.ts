@@ -19,13 +19,11 @@ import type {
 } from '../v2/ports/session-event-log-store.port.js';
 import type { SnapshotStorePortV2 } from '../v2/ports/snapshot-store.port.js';
 import type { PinnedWorkflowStorePortV2 } from '../v2/ports/pinned-workflow-store.port.js';
-import type { KeyringV1 } from '../v2/ports/keyring.port.js';
 import type { Sha256PortV2 } from '../v2/ports/sha256.port.js';
 import type { CryptoPortV2 } from '../v2/durable-core/canonical/hashing.js';
-import type { HmacSha256PortV2 } from '../v2/ports/hmac-sha256.port.js';
-import type { Base64UrlPortV2 } from '../v2/ports/base64url.port.js';
 import type { IdFactoryV2 } from '../v2/infra/local/id-factory/index.js';
 import type { JsonValue } from './output-schemas.js';
+import type { TokenCodecPorts } from '../v2/durable-core/tokens/token-codec-ports.js';
 
 // Note: JsonValue type is imported from output-schemas.js above
 
@@ -201,12 +199,12 @@ export interface V2Dependencies {
   readonly sessionStore: SessionEventLogAppendStorePortV2 & SessionEventLogReadonlyStorePortV2;
   readonly snapshotStore: SnapshotStorePortV2;
   readonly pinnedStore: PinnedWorkflowStorePortV2;
-  readonly keyring: KeyringV1;
   readonly sha256: Sha256PortV2;
   readonly crypto: CryptoPortV2;
-  readonly hmac: HmacSha256PortV2;
-  readonly base64url: Base64UrlPortV2;
   readonly idFactory: IdFactoryV2;
+
+  // Grouped token dependencies (always complete)
+  readonly tokenCodecPorts: TokenCodecPorts;
 }
 
 // -----------------------------------------------------------------------------

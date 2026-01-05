@@ -108,7 +108,7 @@ describe('v2 Lock Coverage', () => {
   }
   
   const coveredLocks = [...annotationsByLock.keys()];
-  const uncoveredLocks = registry.locks.filter(l => !annotationsByLock.has(l.id));
+  const uncoveredLocks = registry.locks.filter(l => !annotationsByLock.has(l.id) && !(l as any).obsolete);
   
   it('all @enforces annotations reference valid lock IDs', () => {
     expect(unknownLocks).toEqual([]);

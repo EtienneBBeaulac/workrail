@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 
 import { handleV2ContinueWorkflow } from '../../src/mcp/handlers/v2-execution.js';
-import type { ToolContext } from '../../src/mcp/types.js';
+import type { ToolContext, V2Dependencies } from '../../src/mcp/types.js';
 
 import { ExecutionSessionGateV2 } from '../../src/v2/usecases/execution-session-gate.js';
 import { LocalDataDirV2 } from '../../src/v2/infra/local/data-dir/index.js';
@@ -24,8 +24,12 @@ import { NodeBase64UrlV2 } from '../../src/v2/infra/local/base64url/index.js';
 import { NodeRandomEntropyV2 } from '../../src/v2/infra/local/random-entropy/index.js';
 import { NodeTimeClockV2 } from '../../src/v2/infra/local/time-clock/index.js';
 import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
-import { encodeTokenPayloadV1, signTokenV1 } from '../../src/v2/durable-core/tokens/index.js';
+import { Bech32mAdapterV2 } from '../../src/v2/infra/local/bech32m/index.js';
+import { Base32AdapterV2 } from '../../src/v2/infra/local/base32/index.js';
+import { signTokenV1Binary, unsafeTokenCodecPorts } from '../../src/v2/durable-core/tokens/index.js';
 import { StateTokenPayloadV1Schema, AckTokenPayloadV1Schema } from '../../src/v2/durable-core/tokens/index.js';
+import { asWorkflowHash, asSha256Digest } from '../../src/v2/durable-core/ids/index.js';
+import { deriveWorkflowHashRef } from '../../src/v2/durable-core/ids/workflow-hash-ref.js';
 
 
 
@@ -45,10 +49,13 @@ async function mkV2Deps(dataDir: LocalDataDirV2): Promise<V2Dependencies> {
   const base64url = new NodeBase64UrlV2();
   const entropy = new NodeRandomEntropyV2();
   const idFactory = new IdFactoryV2(entropy);
+  const base32 = new Base32AdapterV2();
+  const bech32m = new Bech32mAdapterV2();
   const snapshotStore = new LocalSnapshotStoreV2(dataDir, fsPort, crypto);
   const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir, fsPort);
   const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url, entropy);
   const keyring = await keyringPort.loadOrCreate().match(v => v, e => { throw new Error(`keyring: ${e.code}`); });
+  const tokenCodecPorts = unsafeTokenCodecPorts({ keyring, hmac, base64url, base32, bech32m });
   
   return {
     // Handler structure (V2Dependencies):
@@ -56,11 +63,9 @@ async function mkV2Deps(dataDir: LocalDataDirV2): Promise<V2Dependencies> {
     sessionStore: sessionEventLogStore,
     snapshotStore,
     pinnedStore,
-    keyring,
     sha256,
     crypto,
-    hmac,
-    base64url,
+    tokenCodecPorts,
     idFactory,
     // Test convenience (aliases):
     sessionGate,
@@ -78,36 +83,10 @@ function dummyCtx(v2?: any): ToolContext {
   };
 }
 
-async function mkSignedToken(args: {
-  unsignedPrefix: 'st.v1.' | 'ack.v1.';
-  payload: unknown;
-}): Promise<string> {
-  const dataDir = new LocalDataDirV2(process.env);
-  const fsPort = new NodeFileSystemV2();
-  const hmac = new NodeHmacSha256V2();
-  const base64url = new NodeBase64UrlV2();
-  const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url);
-  const keyring = await keyringPort.loadOrCreate().match(
-    (v) => v,
-    (e) => {
-      throw new Error(`unexpected keyring error: ${e.code}`);
-    }
-  );
-
-  const payloadBytes = encodeTokenPayloadV1(args.payload as any).match(
-    (v) => v,
-    (e) => {
-      throw new Error(`unexpected token payload encode error: ${e.code}`);
-    }
-  );
-
-  const token = signTokenV1(args.unsignedPrefix, payloadBytes, keyring, hmac, base64url).match(
-    (v) => v,
-    (e) => {
-      throw new Error(`unexpected token sign error: ${e.code}`);
-    }
-  );
-  return String(token);
+async function mkSignedToken(args: { v2: any; payload: unknown }): Promise<string> {
+  const token = signTokenV1Binary(args.payload as any, args.v2.tokenCodecPorts);
+  if (token.isErr()) throw new Error(`unexpected token sign error: ${token.error.code}`);
+  return token.value;
 }
 
 describe('v2 continue_workflow (ack path) records advance_recorded idempotently', () => {
@@ -120,10 +99,13 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
       const localFsPort = new NodeFileSystemV2();
       const v2 = await mkV2Deps(dataDir);
 
-      const sessionId = 'sess_test';
-      const runId = 'run_1';
-      const nodeId = 'node_1';
-      const workflowHash = 'sha256:5b2d9fb885d0adc6565e1fd59e6abb3769b69e4dba5a02b6eea750137a5c0be2';
+      const sessionId = v2.idFactory.mintSessionId();
+      const runId = v2.idFactory.mintRunId();
+      const nodeId = v2.idFactory.mintNodeId();
+      const workflowHash = asWorkflowHash(
+        asSha256Digest('sha256:5b2d9fb885d0adc6565e1fd59e6abb3769b69e4dba5a02b6eea750137a5c0be2')
+      );
+      const workflowHashRef = deriveWorkflowHashRef(workflowHash)._unsafeUnwrap();
 
       // Pin a v1-backed compiled snapshot (schemaVersion=1, sourceKind=v1_pinned) so v2 execution can run deterministically.
       const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir, localFsPort);
@@ -213,13 +195,14 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
           }
         );
 
+      const attemptId = v2.idFactory.mintAttemptId();
       const statePayload = StateTokenPayloadV1Schema.parse({
         tokenVersion: 1,
         tokenKind: 'state',
         sessionId,
         runId,
         nodeId,
-        workflowHash,
+        workflowHashRef: String(workflowHashRef),
       });
       const ackPayload = AckTokenPayloadV1Schema.parse({
         tokenVersion: 1,
@@ -227,11 +210,11 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
         sessionId,
         runId,
         nodeId,
-        attemptId: 'attempt_1',
+        attemptId,
       });
 
-      const stateToken = await mkSignedToken({ unsignedPrefix: 'st.v1.', payload: statePayload });
-      const ackToken = await mkSignedToken({ unsignedPrefix: 'ack.v1.', payload: ackPayload });
+      const stateToken = await mkSignedToken({ v2, payload: statePayload });
+      const ackToken = await mkSignedToken({ v2, payload: ackPayload });
 
       const first = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx(v2));
       expect(first.type).toBe('success');
@@ -268,10 +251,13 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
       const localFsPort = new NodeFileSystemV2();
       const v2 = await mkV2Deps(dataDir);
 
-      const sessionId = 'sess_test_output';
-      const runId = 'run_2';
-      const nodeId = 'node_2';
-      const workflowHash = 'sha256:5b2d9fb885d0adc6565e1fd59e6abb3769b69e4dba5a02b6eea750137a5c0be2';
+      const sessionId = v2.idFactory.mintSessionId();
+      const runId = v2.idFactory.mintRunId();
+      const nodeId = v2.idFactory.mintNodeId();
+      const workflowHash = asWorkflowHash(
+        asSha256Digest('sha256:5b2d9fb885d0adc6565e1fd59e6abb3769b69e4dba5a02b6eea750137a5c0be2')
+      );
+      const workflowHashRef = deriveWorkflowHashRef(workflowHash)._unsafeUnwrap();
 
       // Pin a v1-backed compiled snapshot (schemaVersion=1, sourceKind=v1_pinned) so v2 execution can run deterministically.
       const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir, localFsPort);
@@ -361,13 +347,14 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
           }
         );
 
+      const attemptId = v2.idFactory.mintAttemptId();
       const statePayload = StateTokenPayloadV1Schema.parse({
         tokenVersion: 1,
         tokenKind: 'state',
         sessionId,
         runId,
         nodeId,
-        workflowHash,
+        workflowHashRef: String(workflowHashRef),
       });
       const ackPayload = AckTokenPayloadV1Schema.parse({
         tokenVersion: 1,
@@ -375,11 +362,11 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
         sessionId,
         runId,
         nodeId,
-        attemptId: 'attempt_2',
+        attemptId,
       });
 
-      const stateToken = await mkSignedToken({ unsignedPrefix: 'st.v1.', payload: statePayload });
-      const ackToken = await mkSignedToken({ unsignedPrefix: 'ack.v1.', payload: ackPayload });
+      const stateToken = await mkSignedToken({ v2, payload: statePayload });
+      const ackToken = await mkSignedToken({ v2, payload: ackPayload });
 
       const outputNotes = '## Triage Summary\n\nBug found in authentication module.';
 

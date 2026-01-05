@@ -4,10 +4,7 @@ import fs from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import os from 'os';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-
-const execAsync = promisify(exec);
+import { gitExec } from '../helpers/git-test-utils.js';
 
 /**
  * DIRECT PROOF - No environment variables, direct API calls
@@ -47,9 +44,9 @@ describe('🔥 DIRECT PROOF: Git Cloning Works', () => {
       JSON.stringify(workflow, null, 2)
     );
     
-    await execAsync('git add .', { cwd: sourceRepoDir });
-    await execAsync('git commit --no-gpg-sign -m "Add proof workflow"', { cwd: sourceRepoDir });
-    await execAsync('git branch -M main', { cwd: sourceRepoDir });
+    await gitExec(sourceRepoDir, ['add', '.']);
+    await gitExec(sourceRepoDir, ['commit', '--no-gpg-sign', '-m', 'Add proof workflow']);
+    await gitExec(sourceRepoDir, ['branch', '-M', 'main']);
     
     console.log('✅ Real Git repository created at:', sourceRepoDir);
   });
@@ -185,7 +182,8 @@ describe('🔥 DIRECT PROOF: Git Cloning Works', () => {
       path.join(sourceRepoDir, 'workflows', 'second-proof.json'),
       JSON.stringify(workflow2, null, 2)
     );
-    await execAsync('git add . && git commit --no-gpg-sign -m "Add second"', { cwd: sourceRepoDir });
+    await gitExec(sourceRepoDir, ['add', '.']);
+    await gitExec(sourceRepoDir, ['commit', '--no-gpg-sign', '-m', 'Add second']);
 
     const storage = new GitWorkflowStorage({
       repositoryUrl: sourceRepoDir,

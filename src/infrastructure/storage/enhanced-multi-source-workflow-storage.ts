@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import os from 'os';
+import { fileURLToPath } from 'url';
 import { ICompositeWorkflowStorage, IWorkflowStorage } from '../../types/storage';
 import { 
   Workflow, 
@@ -527,9 +528,18 @@ export function createEnhancedMultiSourceWorkflowStorage(
     // Separate local file:// URLs from actual Git URLs
     const localFileUrls: string[] = [];
     const actualGitUrls: string[] = [];
+
+    const isWindowsAbsolutePath = (p: string): boolean => {
+      // Drive path: C:\... or C:/...
+      if (/^[a-zA-Z]:[\\/]/.test(p)) return true;
+      // UNC path: \\server\share\...
+      if (p.startsWith('\\\\')) return true;
+      return false;
+    };
     
     for (const url of urls) {
-      if (url.startsWith('file://') || (!url.includes('://') && url.startsWith('/'))) {
+      const isLocalPath = !url.includes('://') && (url.startsWith('/') || isWindowsAbsolutePath(url));
+      if (url.startsWith('file://') || isLocalPath) {
         localFileUrls.push(url);
       } else {
         actualGitUrls.push(url);
@@ -540,11 +550,26 @@ export function createEnhancedMultiSourceWorkflowStorage(
     if (localFileUrls.length > 0) {
       config.customPaths = config.customPaths || [];
       for (const url of localFileUrls) {
-        const localPath = url.startsWith('file://') ? url.substring(7) : url;
+        const localPath = (() => {
+          if (!url.startsWith('file://')) return url;
+          try {
+            // Decode percent-encoded URLs (e.g., file:///C:/Program%20Files/...)
+            const decoded = decodeURIComponent(url);
+            return fileURLToPath(new URL(decoded));
+          } catch {
+            // Best-effort fallback for malformed file URLs.
+            try {
+              return fileURLToPath(new URL(url));
+            } catch {
+              // Last resort: naive stripping (already validated as local earlier)
+              return url.substring('file://'.length);
+            }
+          }
+        })();
         config.customPaths.push(localPath);
         logger.info('Using direct file access for local repository', { localPath });
       }
-    }
+}
     
     // Only add actual Git URLs to gitRepositories (these will be cloned)
     if (actualGitUrls.length > 0) {

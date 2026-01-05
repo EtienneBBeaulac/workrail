@@ -1,0 +1,13 @@
+{
+  "description": "State token with varied IDs (non-zero bytes)",
+  "payload": {
+    "tokenVersion": 1,
+    "tokenKind": "state",
+    "sessionId": "sess_aqcqmbyibefawdanb4fqzd4ojy",
+    "runId": "run_ciqdeibugaytemrtgq3tmmzyha",
+    "nodeId": "node_eaqduibsheydcmzwgy2tcnbyhe",
+    "workflowHashRef": "wf_gaytemzugu3doobzg44tanjqga"
+  },
+  "expectedPackedHex": "01000405060708090a0b0c0d0f0b0c8f8e4e1220322034303132323334373633383820203a2032393031333636353134383930313233343536373839373930353030",
+  "expectedTokenPrefix": "st1"
+}

@@ -8,12 +8,13 @@ import {
   toWorkflowSummary,
   createGitRepositorySource
 } from '../../types/workflow';
-import { exec } from 'child_process';
+import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs/promises';
 import { existsSync } from 'fs';
 import os from 'os';
+import { pathToFileURL } from 'url';
 import { 
   sanitizeId, 
   assertWithinBase, 
@@ -24,6 +25,7 @@ import { StorageError, InvalidWorkflowError, SecurityError } from '../../core/er
 import { createLogger } from '../../utils/logger';
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 const logger = createLogger('GitWorkflowStorage');
 
 export interface GitWorkflowConfig {
@@ -112,6 +114,9 @@ export class GitWorkflowStorage implements IWorkflowStorage {
   }
 
   private isValidGitUrl(url: string): boolean {
+    // Windows local paths: `C:\path` / `C:/path` or UNC `\\server\share`
+    if (/^[a-zA-Z]:[\\/]/.test(url) || url.startsWith('\\\\')) return true;
+
     const sshPattern = /^git@[\w.-]+:[\w\/-]+\.git$/;
     if (sshPattern.test(url)) return true;
     if (url.startsWith('ssh://')) return true;
@@ -297,32 +302,40 @@ export class GitWorkflowStorage implements IWorkflowStorage {
     await fs.mkdir(parentDir, { recursive: true });
     
     let cloneUrl = this.config.repositoryUrl;
-    if (cloneUrl.startsWith('/')) {
-      cloneUrl = `file://${cloneUrl}`;
+    // Local repositories should be cloned via file:// URL to avoid platform-specific path parsing.
+    // This also avoids shell-quoting issues when invoked on Windows runners.
+    if (!cloneUrl.includes('://')) {
+      const abs = path.resolve(cloneUrl);
+      cloneUrl = pathToFileURL(abs).href;
+    } else if (cloneUrl.startsWith('file://') && process.platform === 'win32') {
+      // Normalize `file://C:\...` into a proper file URL if any caller passes it in a Windows-native form.
+      // (Correct form is file:///C:/...)
+      try {
+        const raw = cloneUrl.substring('file://'.length);
+        if (/^[a-zA-Z]:[\\/]/.test(raw)) {
+          cloneUrl = pathToFileURL(path.resolve(raw)).href;
+        }
+      } catch {
+        // Leave as-is; git will surface any errors and tests will fail deterministically.
+      }
     }
     
     if (!this.isSshUrl(this.config.repositoryUrl) && this.config.authToken && cloneUrl.startsWith('https://')) {
       cloneUrl = cloneUrl.replace('https://', `https://${this.config.authToken}@`);
     }
     
-    const escapedUrl = this.escapeShellArg(cloneUrl);
-    const escapedBranch = this.escapeShellArg(this.config.branch);
-    const escapedPath = this.escapeShellArg(this.localPath);
-    
-    let command = `git clone --branch ${escapedBranch} ${escapedUrl} ${escapedPath}`;
-    
     try {
-      await execAsync(command, { timeout: 60000 });
+      const dest = process.platform === 'win32' ? this.localPath.replace(/\\/g, '/') : this.localPath;
+      await execFileAsync('git', ['clone', '--branch', this.config.branch, cloneUrl, dest], { timeout: 60000 });
       logger.info('Successfully cloned repository', { branch: this.config.branch });
     } catch (error) {
       const errorMsg = (error as Error).message;
       
       if (errorMsg.includes('Remote branch') && errorMsg.includes('not found')) {
-        command = `git clone ${escapedUrl} ${escapedPath}`;
-        
         try {
-          await execAsync(command, { timeout: 60000 });
-          const { stdout } = await execAsync('git rev-parse --abbrev-ref HEAD', { cwd: this.localPath });
+          const dest = process.platform === 'win32' ? this.localPath.replace(/\\/g, '/') : this.localPath;
+          await execFileAsync('git', ['clone', cloneUrl, dest], { timeout: 60000 });
+          const { stdout } = await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: this.localPath });
           this.config.branch = stdout.trim();
         } catch (fallbackError) {
           throw new StorageError(`Failed to clone workflow repository: ${(fallbackError as Error).message}`);
@@ -334,15 +347,12 @@ export class GitWorkflowStorage implements IWorkflowStorage {
   }
 
   private async pullRepository(): Promise<void> {
-    const escapedPath = this.escapeShellArg(this.localPath);
-    const escapedBranch = this.escapeShellArg(this.config.branch);
-    
     try {
-      await execAsync(`cd ${escapedPath} && git fetch origin ${escapedBranch}`, { timeout: 30000 });
-      await execAsync(`cd ${escapedPath} && git reset --hard origin/${escapedBranch}`, { timeout: 30000 });
+      await execFileAsync('git', ['fetch', 'origin', this.config.branch], { cwd: this.localPath, timeout: 30000 });
+      await execFileAsync('git', ['reset', '--hard', `origin/${this.config.branch}`], { cwd: this.localPath, timeout: 30000 });
     } catch {
       try {
-        await execAsync(`cd ${escapedPath} && git pull origin ${escapedBranch}`, { timeout: 30000 });
+        await execFileAsync('git', ['pull', 'origin', this.config.branch], { cwd: this.localPath, timeout: 30000 });
       } catch (pullError) {
         logger.warn('Git pull failed, using cached version', pullError);
       }
@@ -350,26 +360,12 @@ export class GitWorkflowStorage implements IWorkflowStorage {
   }
 
   private async gitCommitAndPush(definition: WorkflowDefinition): Promise<void> {
-    const escapedPath = this.escapeShellArg(this.localPath);
-    const escapedFilename = this.escapeShellArg(`workflows/${definition.id}.json`);
-    const escapedMessage = this.escapeShellArg(`Add/update workflow: ${definition.name}`);
-    const escapedBranch = this.escapeShellArg(this.config.branch);
-    
-    const command = [
-      `cd ${escapedPath}`,
-      `git add ${escapedFilename}`,
-      `git commit -m ${escapedMessage}`,
-      `git push origin ${escapedBranch}`
-    ].join(' && ');
-    
     try {
-      await execAsync(command, { timeout: 60000 });
+      await execFileAsync('git', ['add', `workflows/${definition.id}.json`], { cwd: this.localPath, timeout: 60000 });
+      await execFileAsync('git', ['commit', '-m', `Add/update workflow: ${definition.name}`], { cwd: this.localPath, timeout: 60000 });
+      await execFileAsync('git', ['push', 'origin', this.config.branch], { cwd: this.localPath, timeout: 60000 });
     } catch (error) {
       throw new StorageError(`Failed to push workflow to repository: ${(error as Error).message}`);
     }
-  }
-
-  private escapeShellArg(arg: string): string {
-    return `'${arg.replace(/'/g, "'\"'\"'")}'`;
   }
 }

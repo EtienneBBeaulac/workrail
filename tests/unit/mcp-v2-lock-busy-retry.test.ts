@@ -24,7 +24,7 @@ function mkCtxWithWorkflow(workflowId: string): ToolContext {
       version: '0.1.0',
       steps: [{ id: 'triage', title: 'Triage', prompt: 'Do triage' }],
     } as any,
-    createProjectDirectorySource('/tmp/project')
+    createProjectDirectorySource(path.join(os.tmpdir(), 'workrail-project'))
   );
 
   return {

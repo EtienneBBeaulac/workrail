@@ -133,18 +133,16 @@ export const V2BlockerReportSchema = z.object({
 
 const V2ContinueWorkflowOkSchema = z.object({
   kind: z.literal('ok'),
-  stateToken: z.string().min(1),
-  ackToken: z.string().min(1),
-  checkpointToken: z.string().min(1),
+  stateToken: z.string().regex(/^st1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid stateToken format'),
+  ackToken: z.string().regex(/^ack1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid ackToken format').optional(),
   isComplete: z.boolean(),
   pending: V2PendingStepSchema.nullable(),
 });
 
 const V2ContinueWorkflowBlockedSchema = z.object({
   kind: z.literal('blocked'),
-  stateToken: z.string().min(1),
-  ackToken: z.string().min(1),
-  checkpointToken: z.string().min(1),
+  stateToken: z.string().regex(/^st1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid stateToken format'),
+  ackToken: z.string().regex(/^ack1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid ackToken format').optional(),
   isComplete: z.boolean(),
   pending: V2PendingStepSchema.nullable(),
   blockers: V2BlockerReportSchema,
@@ -153,15 +151,20 @@ const V2ContinueWorkflowBlockedSchema = z.object({
 export const V2ContinueWorkflowOutputSchema = z.discriminatedUnion('kind', [
   V2ContinueWorkflowOkSchema,
   V2ContinueWorkflowBlockedSchema,
-]);
+]).refine(
+  (data) => (data.pending ? data.ackToken != null : true),
+  { message: 'ackToken is required when a pending step exists' }
+);
 
 export const V2StartWorkflowOutputSchema = z.object({
-  stateToken: z.string().min(1),
-  ackToken: z.string().min(1),
-  checkpointToken: z.string().min(1),
+  stateToken: z.string().regex(/^st1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid stateToken format'),
+  ackToken: z.string().regex(/^ack1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid ackToken format').optional(),
   isComplete: z.boolean(),
   pending: V2PendingStepSchema.nullable(),
-});
+}).refine(
+  (data) => (data.pending ? data.ackToken != null : true),
+  { message: 'ackToken is required when a pending step exists' }
+);
 
 // -----------------------------------------------------------------------------
 // Session tool outputs

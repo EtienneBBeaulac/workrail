@@ -1,0 +1,13 @@
+{
+  "description": "Minimal state token with deterministic IDs (all zeros)",
+  "payload": {
+    "tokenVersion": 1,
+    "tokenKind": "state",
+    "sessionId": "sess_aaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "runId": "run_aaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "nodeId": "node_aaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "workflowHashRef": "wf_aaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "expectedPackedHex": "010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+  "expectedTokenPrefix": "st1"
+}

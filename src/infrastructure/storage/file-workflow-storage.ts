@@ -17,6 +17,7 @@ import {
 } from '../../core/error-handler';
 import { IFeatureFlagProvider, EnvironmentFeatureFlagProvider } from '../../config/feature-flags';
 import { validateWorkflowIdForSave } from '../../domain/workflow-id-policy';
+import { assertWithinBase as assertWithinBaseSafe } from '../../utils/storage-security';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -38,9 +39,7 @@ function sanitizeId(id: string): string {
 }
 
 function assertWithinBase(resolvedPath: string, baseDir: string): void {
-  if (!resolvedPath.startsWith(baseDir + path.sep) && resolvedPath !== baseDir) {
-    throw new SecurityError('Path escapes storage sandbox', 'file-access');
-  }
+  assertWithinBaseSafe(resolvedPath, baseDir);
 }
 
 interface CacheEntry {
@@ -153,7 +152,8 @@ export class FileWorkflowStorage implements IWorkflowStorage {
       try {
         // Skip agentic routines if flag is disabled
         if (!this.featureFlags.isEnabled('agenticRoutines')) {
-          if (file.includes('routines/') || path.basename(file).startsWith('routine-')) {
+          const normalizedFile = file.replace(/\\/g, '/');
+          if (normalizedFile.includes('routines/') || path.basename(file).startsWith('routine-')) {
             continue;
           }
         }

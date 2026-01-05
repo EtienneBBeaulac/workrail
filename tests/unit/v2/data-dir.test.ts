@@ -15,7 +15,7 @@ describe('v2 data directory (Slice 2 locks)', () => {
     const cleanEnv: Record<string, string | undefined> = {};
 
     const dataDir = new LocalDataDirV2(cleanEnv);
-    const root = dataDir.sessionsDir().split('/sessions')[0];
+    const root = path.dirname(dataDir.sessionsDir());
 
     // Expected: ~/.workrail/data (or equivalent on this OS)
     const expectedRoot = path.join(os.homedir(), '.workrail', 'data');
@@ -24,17 +24,17 @@ describe('v2 data directory (Slice 2 locks)', () => {
   });
 
   it('data-dir-workrail-owned: respects WORKRAIL_DATA_DIR env override', () => {
-    const customRoot = '/tmp/custom-workrail-root';
+    const customRoot = path.join(os.tmpdir(), 'custom-workrail-root');
     const env = { WORKRAIL_DATA_DIR: customRoot };
 
     const dataDir = new LocalDataDirV2(env);
-    const root = dataDir.sessionsDir().split('/sessions')[0];
+    const root = path.dirname(dataDir.sessionsDir());
 
     expect(root).toBe(customRoot);
   });
 
   it('data-dir-workrail-owned: provides isolated sessions directory', () => {
-    const customRoot = '/tmp/workrail-test';
+    const customRoot = path.join(os.tmpdir(), 'workrail-test');
     const env = { WORKRAIL_DATA_DIR: customRoot };
 
     const dataDir = new LocalDataDirV2(env);
@@ -46,7 +46,7 @@ describe('v2 data directory (Slice 2 locks)', () => {
   });
 
   it('data-dir-workrail-owned: provides isolated snapshots directory', () => {
-    const customRoot = '/tmp/workrail-test';
+    const customRoot = path.join(os.tmpdir(), 'workrail-test');
     const env = { WORKRAIL_DATA_DIR: customRoot };
 
     const dataDir = new LocalDataDirV2(env);
@@ -57,7 +57,7 @@ describe('v2 data directory (Slice 2 locks)', () => {
   });
 
   it('data-dir-workrail-owned: provides isolated keyring directory', () => {
-    const customRoot = '/tmp/workrail-test';
+    const customRoot = path.join(os.tmpdir(), 'workrail-test');
     const env = { WORKRAIL_DATA_DIR: customRoot };
 
     const dataDir = new LocalDataDirV2(env);
@@ -68,7 +68,7 @@ describe('v2 data directory (Slice 2 locks)', () => {
   });
 
   it('data-dir-workrail-owned: provides isolated pinned workflows directory', () => {
-    const customRoot = '/tmp/workrail-test';
+    const customRoot = path.join(os.tmpdir(), 'workrail-test');
     const env = { WORKRAIL_DATA_DIR: customRoot };
 
     const dataDir = new LocalDataDirV2(env);

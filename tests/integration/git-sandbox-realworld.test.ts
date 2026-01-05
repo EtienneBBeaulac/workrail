@@ -4,10 +4,8 @@ import fs from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import os from 'os';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-
-const execAsync = promisify(exec);
+import { toFileUrl } from '../helpers/platform.js';
+import { gitExec } from '../helpers/git-test-utils.js';
 
 /**
  * Real-world integration test that simulates MCP environment
@@ -15,19 +13,21 @@ const execAsync = promisify(exec);
  */
 describe('GitWorkflowStorage - Real-world MCP Sandbox', () => {
   const testRepoDir = path.join(os.tmpdir(), 'workrail-realworld-test-' + Date.now());
+  const cacheDir = path.join(os.tmpdir(), 'workrail-cache-realworld-' + Date.now());
   let originalEnv: NodeJS.ProcessEnv;
 
   beforeAll(async () => {
     originalEnv = { ...process.env };
+    process.env['WORKRAIL_CACHE_DIR'] = cacheDir;
     
     // Create a test Git repository with a workflow
     await fs.mkdir(testRepoDir, { recursive: true });
     await fs.mkdir(path.join(testRepoDir, 'workflows'), { recursive: true });
     
     // Initialize Git repo
-    await execAsync('git init', { cwd: testRepoDir });
-    await execAsync('git config user.email "test@test.com"', { cwd: testRepoDir });
-    await execAsync('git config user.name "Test User"', { cwd: testRepoDir });
+    await gitExec(testRepoDir, ['init']);
+    await gitExec(testRepoDir, ['config', 'user.email', 'test@test.com']);
+    await gitExec(testRepoDir, ['config', 'user.name', 'Test User']);
     
     // Create a valid test workflow
     const testWorkflow = {
@@ -60,12 +60,12 @@ describe('GitWorkflowStorage - Real-world MCP Sandbox', () => {
     );
     
     // Commit the workflow
-    await execAsync('git add .', { cwd: testRepoDir });
-    await execAsync('git commit --no-gpg-sign -m "Add test workflow"', { cwd: testRepoDir });
+    await gitExec(testRepoDir, ['add', '.']);
+    await gitExec(testRepoDir, ['commit', '--no-gpg-sign', '-m', 'Add test workflow']);
     
     // Ensure we're on main branch (Git 2.28+ uses different default)
     try {
-      await execAsync('git branch -M main', { cwd: testRepoDir });
+      await gitExec(testRepoDir, ['branch', '-M', 'main']);
     } catch (e) {
       // Already on main
     }
@@ -74,26 +74,18 @@ describe('GitWorkflowStorage - Real-world MCP Sandbox', () => {
   afterAll(async () => {
     process.env = originalEnv;
     
-    // Clean up test repo
     if (existsSync(testRepoDir)) {
       await fs.rm(testRepoDir, { recursive: true, force: true });
     }
-    
-    // Clean up cache in home directory
-    const cacheDir = path.join(os.homedir(), '.workrail', 'cache');
+
     if (existsSync(cacheDir)) {
-      const entries = await fs.readdir(cacheDir);
-      for (const entry of entries) {
-        if (entry.startsWith('git-') && entry.includes('realworld')) {
-          await fs.rm(path.join(cacheDir, entry), { recursive: true, force: true });
-        }
-      }
+      await fs.rm(cacheDir, { recursive: true, force: true });
     }
   });
 
   it('should load workflows from file:// URL without skipSandboxCheck (real MCP scenario)', async () => {
     // Simulate MCP environment - set env var only
-    process.env['WORKFLOW_GIT_REPOS'] = `file://${testRepoDir}`;
+    process.env['WORKFLOW_GIT_REPOS'] = toFileUrl(testRepoDir);
     
     // Create storage WITHOUT skipSandboxCheck (this is what happens in real MCP)
     const storage = createEnhancedMultiSourceWorkflowStorage();
@@ -116,7 +108,7 @@ describe('GitWorkflowStorage - Real-world MCP Sandbox', () => {
     // so cache is NOT created for them. This is expected behavior.
     // The cache directory is only used for actual remote Git repos.
     
-    process.env['WORKFLOW_GIT_REPOS'] = `file://${testRepoDir}`;
+    process.env['WORKFLOW_GIT_REPOS'] = toFileUrl(testRepoDir);
     
     const storage = createEnhancedMultiSourceWorkflowStorage();
     

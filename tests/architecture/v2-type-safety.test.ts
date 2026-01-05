@@ -37,13 +37,15 @@ const ALLOWED_ESCAPES = [
  * Checks if a file path matches any of the allowed escape glob patterns.
  */
 function isAllowedEscape(filePath: string): boolean {
+  // Normalize paths for cross-platform matching (Windows uses backslashes).
+  const normalized = filePath.replace(/\\/g, '/');
   return ALLOWED_ESCAPES.some((pattern) => {
     // Convert glob pattern to regex: src/v2/read-only/** -> matches anything in that dir
     const regexPattern = pattern
       .replace(/[.+^${}()|[\]\\]/g, '\\$&') // escape special regex chars
       .replace(/\*\*/g, '.*'); // ** -> .* (any chars)
     const regex = new RegExp(`^.*${regexPattern}$`);
-    return regex.test(filePath);
+    return regex.test(normalized);
   });
 }
 

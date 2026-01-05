@@ -5,10 +5,7 @@ import fs from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import os from 'os';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-
-const execAsync = promisify(exec);
+import { gitExec } from '../helpers/git-test-utils.js';
 
 // Test-only storage factory (skips schema validation for test workflows)
 function createTestStorage() {
@@ -28,6 +25,7 @@ describe('🚀 END-TO-END: Complete External Workflows Feature', () => {
   const gitlabRepo = path.join(testDir, 'gitlab-repo');
   const selfHostedRepo = path.join(testDir, 'selfhosted-repo');
   const cacheDir = path.join(process.cwd(), '.workrail-cache-test-' + Date.now());
+  let originalEnv: NodeJS.ProcessEnv;
 
   async function createTestRepo(repoDir: string, workflowId: string, workflowName: string, service: string) {
     await fs.mkdir(path.join(repoDir, 'workflows'), { recursive: true });
@@ -60,13 +58,16 @@ describe('🚀 END-TO-END: Complete External Workflows Feature', () => {
       JSON.stringify(workflow, null, 2)
     );
     
-    await execAsync('git add .', { cwd: repoDir });
-    await execAsync('git commit --no-gpg-sign -m "Add workflow"', { cwd: repoDir });
-    await execAsync('git branch -M main', { cwd: repoDir });
+    await gitExec(repoDir, ['add', '.']);
+    await gitExec(repoDir, ['commit', '--no-gpg-sign', '-m', 'Add workflow']);
+    await gitExec(repoDir, ['branch', '-M', 'main']);
   }
 
   beforeAll(async () => {
     console.log('\n🔧 Setting up E2E test environment...');
+    
+    originalEnv = { ...process.env };
+    process.env['WORKRAIL_CACHE_DIR'] = cacheDir;
     
     // Clean up any existing test dirs
     if (existsSync(testDir)) {
@@ -74,7 +75,7 @@ describe('🚀 END-TO-END: Complete External Workflows Feature', () => {
     }
     
     await fs.mkdir(testDir, { recursive: true });
-    
+
     // Create 3 test repos simulating different Git services
     console.log(`Creating GitHub repo with workflow 'e2e-github' at ${githubRepo}`);
     await createTestRepo(githubRepo, 'e2e-github', 'GitHub E2E Workflow', 'GitHub');
@@ -89,16 +90,14 @@ describe('🚀 END-TO-END: Complete External Workflows Feature', () => {
   });
 
   afterAll(async () => {
-    // Keep directories for debugging
-    console.log(`\n🔍 Test artifacts kept at:`);
-    console.log(`   Repos: ${testDir}`);
-    console.log(`   Cache: ${cacheDir}`);
-    // if (existsSync(testDir)) {
-    //   await fs.rm(testDir, { recursive: true, force: true });
-    // }
-    // if (existsSync(cacheDir)) {
-    //   await fs.rm(cacheDir, { recursive: true, force: true });
-    // }
+    process.env = originalEnv;
+    
+    if (existsSync(testDir)) {
+      await fs.rm(testDir, { recursive: true, force: true });
+    }
+    if (existsSync(cacheDir)) {
+      await fs.rm(cacheDir, { recursive: true, force: true });
+    }
   });
 
   it('🚀 E2E: Complete flow with environment variables', async () => {
@@ -242,7 +241,8 @@ describe('🚀 END-TO-END: Complete External Workflows Feature', () => {
           steps: [{ id: 's1', title: 'Step', description: 'Desc', prompt: 'First', expectedOutput: 'out' }]
         }, null, 2)
       );
-      await execAsync('git add . && git commit --no-gpg-sign -m "Add conflict"', { cwd: githubRepo });
+      await gitExec(githubRepo, ['add', '.']);
+      await gitExec(githubRepo, ['commit', '--no-gpg-sign', '-m', 'Add conflict']);
 
       await fs.writeFile(
         path.join(gitlabRepo, 'workflows', `${conflictId}.json`),
@@ -255,7 +255,8 @@ describe('🚀 END-TO-END: Complete External Workflows Feature', () => {
           steps: [{ id: 's1', title: 'Step', description: 'Desc', prompt: 'Second', expectedOutput: 'out' }]
         }, null, 2)
       );
-      await execAsync('git add . && git commit --no-gpg-sign -m "Add conflict"', { cwd: gitlabRepo });
+      await gitExec(gitlabRepo, ['add', '.']);
+      await gitExec(gitlabRepo, ['commit', '--no-gpg-sign', '-m', 'Add conflict']);
 
       process.env = {
         ...originalEnv,

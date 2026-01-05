@@ -25,6 +25,7 @@ import type { ProcessTerminator } from '../runtime/ports/process-terminator.js';
 
 import type { ToolContext, ToolResult, ToolError, V2Dependencies } from './types.js';
 import { errNotRetryable } from './types.js';
+import { unsafeTokenCodecPorts } from '../v2/durable-core/tokens/token-codec-ports.js';
 import { createToolFactory, type ToolAnnotations, type ToolDefinition } from './tool-factory.js';
 import type { IToolDescriptionProvider } from './tool-description-provider.js';
 import { preValidateWorkflowNextArgs, type PreValidateResult } from './validation/workflow-next-prevalidate.js';
@@ -162,19 +163,28 @@ export async function createToolContext(): Promise<ToolContext> {
       const crypto = container.resolve<any>(DI.V2.Crypto);
       const hmac = container.resolve<any>(DI.V2.HmacSha256);
       const base64url = container.resolve<any>(DI.V2.Base64Url);
+      const base32 = container.resolve<any>(DI.V2.Base32);
+      const bech32m = container.resolve<any>(DI.V2.Bech32m);
       const idFactory = container.resolve<any>(DI.V2.IdFactory);
+
+      // Create grouped token codec ports (prevents "forgot base32" bugs)
+      const tokenCodecPorts = unsafeTokenCodecPorts({
+        keyring: keyringResult.value,
+        hmac,
+        base64url,
+        base32,
+        bech32m,
+      });
 
       v2 = {
         gate,
         sessionStore,
         snapshotStore,
         pinnedStore,
-        keyring: keyringResult.value,
         sha256,
         crypto,
-        hmac,
-        base64url,
         idFactory,
+        tokenCodecPorts,
       };
       console.error('[FeatureFlags] v2 tools enabled');
     }

@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import * as os from 'os';
+import * as path from 'path';
 
 import { InvalidWorkflowError } from '../../src/core/error-handler';
 import { InMemoryWorkflowStorage } from '../../src/infrastructure/storage/in-memory-storage';
@@ -40,7 +42,7 @@ describe('SchemaValidatingCompositeWorkflowStorage namespace enforcement', () =>
     const bundled = new InMemoryWorkflowStorage([def('wr.core', 'Bundled Core')], createBundledSource());
     const project = new InMemoryWorkflowStorage(
       [def('wr.sneaky', 'Shadow Attempt'), def('project.valid', 'Valid Project')],
-      createProjectDirectorySource('/tmp/workrail-project')
+      createProjectDirectorySource(path.join(os.tmpdir(), 'workrail-project'))
     );
 
     const base = new EnhancedMultiSourceWorkflowStorage({
@@ -69,7 +71,7 @@ describe('SchemaValidatingCompositeWorkflowStorage namespace enforcement', () =>
       includeProject: false,
     });
 
-    const project = new InMemoryWorkflowStorage([def('legacy-id')], createProjectDirectorySource('/tmp/proj'));
+    const project = new InMemoryWorkflowStorage([def('legacy-id')], createProjectDirectorySource(path.join(os.tmpdir(), 'workrail-proj')));
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (inner as any).storageInstances = [project];
 

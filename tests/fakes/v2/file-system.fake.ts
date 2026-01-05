@@ -38,13 +38,24 @@ export class InMemoryFileSystem implements FileSystemPortV2 {
   private nextFd = 1;
   private openFiles = new Map<number, { path: string; mode: 'read' | 'write' | 'append' | 'exclusive'; data?: Uint8Array }>();
 
+  private normalizePath(p: string): string {
+    return p.replace(/\\/g, '/');
+  }
+
   mkdirp(dirPath: string): ResultAsync<void, FsError> {
-    // Normalize path and ensure all parent directories exist
-    const parts = dirPath.split('/').filter((p) => p.length > 0);
+    const normalized = this.normalizePath(dirPath);
+    const isAbs = normalized.startsWith('/');
+
+    const parts = normalized.split('/').filter((p) => p.length > 0);
     let currentPath = '';
 
     for (const part of parts) {
-      currentPath += '/' + part;
+      if (currentPath === '') {
+        currentPath = isAbs ? `/${part}` : part;
+      } else {
+        currentPath = `${currentPath}/${part}`;
+      }
+
       if (!this.fs.has(currentPath)) {
         this.fs.set(currentPath, { kind: 'dir' });
       } else {
@@ -62,16 +73,17 @@ export class InMemoryFileSystem implements FileSystemPortV2 {
   }
 
   readFileUtf8(filePath: string): ResultAsync<string, FsError> {
-    const entry = this.fs.get(filePath);
+    const p = this.normalizePath(filePath);
+    const entry = this.fs.get(p);
 
     if (!entry) {
-      return errAsync({ code: 'FS_NOT_FOUND' as const, message: `File not found: ${filePath}` });
+      return errAsync({ code: 'FS_NOT_FOUND' as const, message: `File not found: ${p}` });
     }
 
     if (entry.kind !== 'file') {
       return errAsync({
         code: 'FS_IO_ERROR' as const,
-        message: `Path is not a file: ${filePath}`,
+        message: `Path is not a file: ${p}`,
       });
     }
 
@@ -87,16 +99,17 @@ export class InMemoryFileSystem implements FileSystemPortV2 {
   }
 
   readFileBytes(filePath: string): ResultAsync<Uint8Array, FsError> {
-    const entry = this.fs.get(filePath);
+    const p = this.normalizePath(filePath);
+    const entry = this.fs.get(p);
 
     if (!entry) {
-      return errAsync({ code: 'FS_NOT_FOUND' as const, message: `File not found: ${filePath}` });
+      return errAsync({ code: 'FS_NOT_FOUND' as const, message: `File not found: ${p}` });
     }
 
     if (entry.kind !== 'file') {
       return errAsync({
         code: 'FS_IO_ERROR' as const,
-        message: `Path is not a file: ${filePath}`,
+        message: `Path is not a file: ${p}`,
       });
     }
 
@@ -104,10 +117,12 @@ export class InMemoryFileSystem implements FileSystemPortV2 {
   }
 
   writeFileBytes(filePath: string, bytes: Uint8Array): ResultAsync<void, FsError> {
+    const p = this.normalizePath(filePath);
+
     // Ensure parent directory exists
-    const lastSlash = filePath.lastIndexOf('/');
+    const lastSlash = p.lastIndexOf('/');
     if (lastSlash > 0) {
-      const parentDir = filePath.substring(0, lastSlash);
+      const parentDir = p.substring(0, lastSlash);
       const parentEntry = this.fs.get(parentDir);
       if (!parentEntry || parentEntry.kind !== 'dir') {
         return errAsync({
@@ -117,22 +132,24 @@ export class InMemoryFileSystem implements FileSystemPortV2 {
       }
     }
 
-    this.fs.set(filePath, { kind: 'file', bytes: new Uint8Array(bytes) });
+    this.fs.set(p, { kind: 'file', bytes: new Uint8Array(bytes) });
     return okAsync(void 0);
   }
 
   openWriteTruncate(filePath: string): ResultAsync<{ readonly fd: number }, FsError> {
+    const p = this.normalizePath(filePath);
     const fd = this.nextFd++;
-    this.openFiles.set(fd, { path: filePath, mode: 'write', data: new Uint8Array() });
+    this.openFiles.set(fd, { path: p, mode: 'write', data: new Uint8Array() });
     return okAsync({ fd });
   }
 
   openAppend(filePath: string): ResultAsync<{ readonly fd: number }, FsError> {
+    const p = this.normalizePath(filePath);
     const fd = this.nextFd++;
-    const existingData = this.fs.get(filePath);
+    const existingData = this.fs.get(p);
     const initialData = existingData && existingData.kind === 'file' ? new Uint8Array(existingData.bytes) : new Uint8Array();
 
-    this.openFiles.set(fd, { path: filePath, mode: 'append', data: initialData });
+    this.openFiles.set(fd, { path: p, mode: 'append', data: initialData });
     return okAsync({ fd });
   }
 
@@ -157,18 +174,20 @@ export class InMemoryFileSystem implements FileSystemPortV2 {
   }
 
   openExclusive(filePath: string, bytes: Uint8Array): ResultAsync<{ readonly fd: number }, FsError> {
+    const p = this.normalizePath(filePath);
+
     // Exclusive: fail if file already exists
-    const entry = this.fs.get(filePath);
+    const entry = this.fs.get(p);
     if (entry) {
       return errAsync({
         code: 'FS_ALREADY_EXISTS' as const,
-        message: `File already exists: ${filePath}`,
+        message: `File already exists: ${p}`,
       });
     }
 
     const fd = this.nextFd++;
     const data = new Uint8Array(bytes);
-    this.openFiles.set(fd, { path: filePath, mode: 'exclusive', data });
+    this.openFiles.set(fd, { path: p, mode: 'exclusive', data });
 
     return okAsync({ fd });
   }
@@ -198,34 +217,39 @@ export class InMemoryFileSystem implements FileSystemPortV2 {
   }
 
   rename(fromPath: string, toPath: string): ResultAsync<void, FsError> {
-    const entry = this.fs.get(fromPath);
+    const from = this.normalizePath(fromPath);
+    const to = this.normalizePath(toPath);
+
+    const entry = this.fs.get(from);
 
     if (!entry) {
-      return errAsync({ code: 'FS_NOT_FOUND' as const, message: `Source not found: ${fromPath}` });
+      return errAsync({ code: 'FS_NOT_FOUND' as const, message: `Source not found: ${from}` });
     }
 
-    this.fs.set(toPath, entry);
-    this.fs.delete(fromPath);
+    this.fs.set(to, entry);
+    this.fs.delete(from);
 
     return okAsync(void 0);
   }
 
   unlink(filePath: string): ResultAsync<void, FsError> {
-    const entry = this.fs.get(filePath);
+    const p = this.normalizePath(filePath);
+    const entry = this.fs.get(p);
 
     if (!entry) {
-      return errAsync({ code: 'FS_NOT_FOUND' as const, message: `File not found: ${filePath}` });
+      return errAsync({ code: 'FS_NOT_FOUND' as const, message: `File not found: ${p}` });
     }
 
-    this.fs.delete(filePath);
+    this.fs.delete(p);
     return okAsync(void 0);
   }
 
   stat(filePath: string): ResultAsync<{ readonly sizeBytes: number }, FsError> {
-    const entry = this.fs.get(filePath);
+    const p = this.normalizePath(filePath);
+    const entry = this.fs.get(p);
 
     if (!entry) {
-      return errAsync({ code: 'FS_NOT_FOUND' as const, message: `Path not found: ${filePath}` });
+      return errAsync({ code: 'FS_NOT_FOUND' as const, message: `Path not found: ${p}` });
     }
 
     if (entry.kind === 'dir') {

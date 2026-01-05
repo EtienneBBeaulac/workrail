@@ -75,7 +75,8 @@ export class PluginWorkflowStorage implements IWorkflowStorage {
     for (const pluginPath of pluginPaths) {
       try {
         if (path.isAbsolute(pluginPath)) {
-          assertWithinBase(pluginPath, '/');
+          const baseCheck = process.platform === 'win32' ? path.parse(pluginPath).root : '/';
+          assertWithinBase(pluginPath, baseCheck);
         }
       } catch (error) {
         throw new SecurityError(`Unsafe plugin path: ${pluginPath}: ${(error as Error).message}`);
@@ -95,13 +96,18 @@ export class PluginWorkflowStorage implements IWorkflowStorage {
     const paths: string[] = [];
     
     try {
-      const globalPath = require.resolve('npm').replace(/\/npm\/.*$/, '');
-      const globalNodeModules = path.join(globalPath, 'node_modules');
-      if (existsSync(globalNodeModules)) {
-        paths.push(globalNodeModules);
+      const npmPath = require.resolve('npm');
+      const npmSegments = npmPath.split(path.sep);
+      const npmIdx = npmSegments.findIndex((s) => s === 'npm');
+      if (npmIdx > 0) {
+        const globalPath = npmSegments.slice(0, npmIdx).join(path.sep);
+        const globalNodeModules = path.join(globalPath, 'node_modules');
+        if (existsSync(globalNodeModules)) {
+          paths.push(globalNodeModules);
+        }
       }
     } catch {
-      const commonPaths = ['/usr/local/lib/node_modules', '/usr/lib/node_modules'];
+const commonPaths = ['/usr/local/lib/node_modules', '/usr/lib/node_modules'];
       for (const commonPath of commonPaths) {
         if (existsSync(commonPath)) {
           paths.push(commonPath);

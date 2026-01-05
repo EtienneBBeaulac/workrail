@@ -111,6 +111,13 @@ export class NodeFileSystemV2 implements FileSystemPortV2 {
   }
 
   fsyncDir(dirPath: string): ResultAsync<void, FsError> {
+    // Windows does not reliably support fsync-ing directory handles. The durable stores still do
+    // crash-safe file writes (fsync(file) + rename), but we must treat directory fsync as a no-op
+    // on win32 to avoid spurious IO failures.
+    if (process.platform === 'win32') {
+      return RA.fromPromise(Promise.resolve(undefined), (e) => mapFsError(e, dirPath));
+    }
+
     return RA.fromPromise(
       (async () => {
         // fsync a directory by opening it, then fsyncing the fd.
