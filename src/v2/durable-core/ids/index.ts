@@ -43,6 +43,20 @@ export type Sha256Digest = Brand<string, 'v2.Sha256Digest'>;
 export type WorkflowHash = Brand<Sha256Digest, 'v2.WorkflowHash'>;
 
 /**
+ * Branded type: WorkflowHashRef (short, deterministic reference to a workflow hash).
+ *
+ * Purpose:
+ * - Compactly carry workflow identity through tokens without embedding the full 32-byte hash
+ *
+ * Format (locked intent):
+ * - `wf_<base32lowernopad>` where the suffix encodes 16 bytes (128 bits) = first 16 bytes of the workflowHash digest.
+ *
+ * Note:
+ * - This is a reference, not a replacement for the full `WorkflowHash`. Resolution must be fail-closed.
+ */
+export type WorkflowHashRef = Brand<string, 'v2.WorkflowHashRef'>;
+
+/**
  * Opaque type: WorkflowId (workflow identifier).
  *
  * Note: intentionally not included in the branded-types checklist for Slice 2/3 locks.
@@ -272,6 +286,10 @@ export function asWorkflowHash(value: Sha256Digest): WorkflowHash {
   return value as WorkflowHash;
 }
 
+export function asWorkflowHashRef(value: string): WorkflowHashRef {
+  return value as WorkflowHashRef;
+}
+
 export function asCanonicalBytes(value: Uint8Array): CanonicalBytes {
   return value as CanonicalBytes;
 }
@@ -315,3 +333,7 @@ export function asOutputId(value: string): OutputId {
 export function asTokenStringV1(value: string): TokenStringV1 {
   return value as TokenStringV1;
 }
+
+// WorkflowHashRef derivation
+export { deriveWorkflowHashRef } from './workflow-hash-ref.js';
+export type { WorkflowHashRefError } from './workflow-hash-ref.js';

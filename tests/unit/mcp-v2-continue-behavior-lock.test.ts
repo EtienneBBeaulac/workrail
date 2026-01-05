@@ -39,6 +39,7 @@ import { LocalKeyringV2 } from '../../src/v2/infra/local/keyring/index.js';
 import { NodeRandomEntropyV2 } from '../../src/v2/infra/local/random-entropy/index.js';
 import { NodeTimeClockV2 } from '../../src/v2/infra/local/time-clock/index.js';
 import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
+import { Bech32mAdapterV2 } from '../../src/v2/infra/local/bech32m/index.js';
 
 async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-continue-lock-'));
@@ -53,6 +54,7 @@ async function mkV2Deps() {
   const base64url = new NodeBase64UrlV2();
   const entropy = new NodeRandomEntropyV2();
   const idFactory = new IdFactoryV2(entropy);
+  const bech32m = new Bech32mAdapterV2();
   const clock = new NodeTimeClockV2();
   const sessionStore = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha256);
   const lockPort = new LocalSessionLockV2(dataDir, fsPort, clock);
@@ -62,7 +64,7 @@ async function mkV2Deps() {
   const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url, entropy);
   const keyring = await keyringPort.loadOrCreate().match(v => v, e => { throw new Error(`keyring: ${e.code}`); });
 
-  return { gate, sessionStore, snapshotStore, pinnedStore, keyring, sha256, crypto, hmac, base64url, idFactory };
+  return { gate, sessionStore, snapshotStore, pinnedStore, keyring, sha256, crypto, hmac, base64url, bech32m, idFactory };
 }
 
 describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => {
@@ -154,9 +156,9 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     if (adv1.type !== 'success') return;
 
     // Verify output was persisted
-    const { parseTokenV1 } = await import('../../src/v2/durable-core/tokens/index.js');
-    const localBase64url = new NodeBase64UrlV2();
-    const parsed = parseTokenV1(start.data.stateToken, localBase64url)._unsafeUnwrap();
+    const { parseTokenV1Binary } = await import('../../src/v2/durable-core/tokens/token-codec.js');
+    const bech32m = new Bech32mAdapterV2();
+    const parsed = parseTokenV1Binary(start.data.stateToken, bech32m)._unsafeUnwrap();
     const sessionId = parsed.payload.sessionId;
 
     const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: root });
@@ -192,9 +194,9 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     expect(adv2).toEqual(adv1); // Exact same response
 
     // Verify no duplicate events
-    const { parseTokenV1 } = await import('../../src/v2/durable-core/tokens/index.js');
-    const localBase64url = new NodeBase64UrlV2();
-    const parsed = parseTokenV1(start.data.stateToken, localBase64url)._unsafeUnwrap();
+    const { parseTokenV1Binary } = await import('../../src/v2/durable-core/tokens/token-codec.js');
+    const bech32m = new Bech32mAdapterV2();
+    const parsed = parseTokenV1Binary(start.data.stateToken, bech32m)._unsafeUnwrap();
     const sessionId = parsed.payload.sessionId;
 
     const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: root });
@@ -237,9 +239,9 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     if (fork.type !== 'success') return;
 
     // Verify fork edge exists
-    const { parseTokenV1 } = await import('../../src/v2/durable-core/tokens/index.js');
-    const localBase64url = new NodeBase64UrlV2();
-    const parsed = parseTokenV1(start.data.stateToken, localBase64url)._unsafeUnwrap();
+    const { parseTokenV1Binary } = await import('../../src/v2/durable-core/tokens/token-codec.js');
+    const bech32m = new Bech32mAdapterV2();
+    const parsed = parseTokenV1Binary(start.data.stateToken, bech32m)._unsafeUnwrap();
     const sessionId = parsed.payload.sessionId;
 
     const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: root });
@@ -263,39 +265,32 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null, v2 };
 
     // Create a valid token for a non-existent session
-    const { encodeTokenPayloadV1, signTokenV1 } = await import('../../src/v2/durable-core/tokens/index.js');
-    const { NodeHmacSha256V2 } = await import('../../src/v2/infra/local/hmac-sha256/index.js');
-    const { LocalKeyringV2 } = await import('../../src/v2/infra/local/keyring/index.js');
+    const { signTokenV1Binary } = await import('../../src/v2/durable-core/tokens/index.js');
+    const { asWorkflowHash, asSha256Digest } = await import('../../src/v2/durable-core/ids/index.js');
+    const { deriveWorkflowHashRef } = await import('../../src/v2/durable-core/ids/workflow-hash-ref.js');
+    const { encodeBase32LowerNoPad } = await import('../../src/v2/durable-core/encoding/base32-lower.js');
 
-    const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: root });
-    const fsPort = new NodeFileSystemV2();
-    const base64url = new NodeBase64UrlV2();
-    const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url);
-  const keyring = await keyringPort.loadOrCreate().match(
-      (v) => v,
-      (e) => { throw new Error(`unexpected keyring error: ${e.code}`); }
-    );
+    function mkId(prefix: string, fill: number): string {
+      const bytes = new Uint8Array(16);
+      bytes.fill(fill);
+      return `${prefix}_${encodeBase32LowerNoPad(bytes)}`;
+    }
+
+    const wfHash = asWorkflowHash(asSha256Digest('sha256:0000000000000000000000000000000000000000000000000000000000000000'));
+    const wfRef = deriveWorkflowHashRef(wfHash)._unsafeUnwrap();
 
     const payload = {
       tokenVersion: 1,
       tokenKind: 'state' as const,
-      sessionId: 'sess_nonexistent',
-      runId: 'run_nonexistent',
-      nodeId: 'node_nonexistent',
-      workflowHash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+      sessionId: mkId('sess', 99),
+      runId: mkId('run', 99),
+      nodeId: mkId('node', 99),
+      workflowHashRef: String(wfRef),
     };
 
-    const payloadBytes = encodeTokenPayloadV1(payload).match(
-      (v) => v,
-      (e) => { throw new Error(`unexpected encode error: ${e.code}`); }
-    );
-    const hmac = new NodeHmacSha256V2();
-    const token = signTokenV1('st.v1.', payloadBytes, keyring, hmac, base64url).match(
-      (v) => v,
-      (e) => { throw new Error(`unexpected sign error: ${e.code}`); }
-    );
+    const token = signTokenV1Binary(payload, v2.keyring, v2.hmac, v2.base64url, v2.bech32m)._unsafeUnwrap();
 
-    const res = await handleV2ContinueWorkflow({ stateToken: String(token) } as any, ctx);
+    const res = await handleV2ContinueWorkflow({ stateToken: token } as any, ctx);
     expect(res.type).toBe('error');
     if (res.type !== 'error') return;
     expect(res.code).toBe('TOKEN_UNKNOWN_NODE');

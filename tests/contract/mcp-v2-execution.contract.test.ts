@@ -24,6 +24,7 @@ import { NodeBase64UrlV2 } from '../../src/v2/infra/local/base64url/index.js';
 import { NodeRandomEntropyV2 } from '../../src/v2/infra/local/random-entropy/index.js';
 import { NodeTimeClockV2 } from '../../src/v2/infra/local/time-clock/index.js';
 import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
+import { Bech32mAdapterV2 } from '../../src/v2/infra/local/bech32m/index.js';
 
 async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-exec-contract-'));
@@ -44,6 +45,7 @@ async function createV2Context(): Promise<ToolContext> {
   const base64url = new NodeBase64UrlV2();
   const entropy = new NodeRandomEntropyV2();
   const idFactory = new IdFactoryV2(entropy);
+  const bech32m = new Bech32mAdapterV2();
   const clock = new NodeTimeClockV2();
   const sessionStore = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha256);
   const lockPort = new LocalSessionLockV2(dataDir, fsPort, clock);
@@ -68,6 +70,7 @@ async function createV2Context(): Promise<ToolContext> {
       crypto,
       hmac,
       base64url,
+      bech32m,
       idFactory,
     },
   };
@@ -109,9 +112,11 @@ describe('MCP contract: v2 start_workflow / continue_workflow (Slice 3)', () => 
     if (start.type !== 'success') return;
 
     // Token size budget regression guard (prevents future payload bloat).
-    expect(start.data.stateToken.length).toBeLessThan(420);
-    expect(start.data.ackToken.length).toBeLessThan(420);
-    expect(start.data.checkpointToken.length).toBeLessThan(420);
+    expect(start.data.stateToken.length).toBeLessThan(170); // Binary tokens: ~166 chars
+    expect(start.data.ackToken).toBeDefined();
+    if (start.data.ackToken) {
+      expect(start.data.ackToken.length).toBeLessThan(170); // Binary tokens: ~167 chars
+    }
 
     expect(start.data.pending?.stepId).toBe('triage');
     expect(start.data.isComplete).toBe(false);

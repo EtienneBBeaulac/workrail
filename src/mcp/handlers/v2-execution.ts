@@ -7,19 +7,20 @@ import { deriveIsComplete, derivePendingStep } from '../../v2/durable-core/proje
 import type { ExecutionSnapshotFileV1, EngineStateV1, LoopPathFrameV1 } from '../../v2/durable-core/schemas/execution-snapshot/index.js';
 import { asDelimiterSafeIdV1, stepInstanceKeyFromParts } from '../../v2/durable-core/schemas/execution-snapshot/step-instance-key.js';
 import {
-  assertTokenScopeMatchesState,
-  parseTokenV1,
-  verifyTokenSignatureV1,
-  type ParsedTokenV1,
+  assertTokenScopeMatchesStateBinary,
+  parseTokenV1Binary,
+  verifyTokenSignatureV1Binary,
+  type ParsedTokenV1Binary,
   type TokenDecodeErrorV2,
   type TokenVerifyErrorV2,
+  type TokenSignErrorV2,
   type TokenPayloadV1,
   type AttemptId,
   type OutputId,
   asAttemptId,
   asOutputId,
 } from '../../v2/durable-core/tokens/index.js';
-import { encodeTokenPayloadV1, signTokenV1 } from '../../v2/durable-core/tokens/index.js';
+import { signTokenV1Binary } from '../../v2/durable-core/tokens/index.js';
 import { createWorkflow, getStepById } from '../../types/workflow.js';
 import type { DomainEventV1 } from '../../v2/durable-core/schemas/session/index.js';
 import {
@@ -27,13 +28,13 @@ import {
   asSessionId,
   asRunId,
   asNodeId,
-  asWorkflowHash,
-  asSha256Digest,
   type SessionId,
   type RunId,
   type NodeId,
   type WorkflowHash,
+  type WorkflowHashRef,
 } from '../../v2/durable-core/ids/index.js';
+import { deriveWorkflowHashRef } from '../../v2/durable-core/ids/workflow-hash-ref.js';
 import { deriveChildAttemptId } from '../../v2/durable-core/ids/attempt-id-derivation.js';
 import type { LoadedSessionTruthV2 } from '../../v2/ports/session-event-log-store.port.js';
 import type { WithHealthySessionLock } from '../../v2/durable-core/ids/with-healthy-session-lock.js';
@@ -91,7 +92,6 @@ function normalizeTokenErrorMessage(message: string): string {
 }
 
 type Bytes = number & { readonly __brand: 'Bytes' };
-type TokenPrefix = 'st.v1.' | 'ack.v1.' | 'chk.v1.';
 
 const MAX_CONTEXT_BYTES_V2 = MAX_CONTEXT_BYTES as Bytes;
 
@@ -397,6 +397,8 @@ function replayFromRecordedAdvance(args: {
   readonly sha256: Sha256PortV2;
   readonly hmac: HmacSha256PortV2;
   readonly base64url: Base64UrlPortV2;
+  readonly base32: import('../../v2/ports/base32.port.js').Base32PortV2;
+  readonly bech32m: import('../../v2/ports/bech32m.port.js').Bech32mPortV2;
 }): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, ContinueWorkflowError> {
   const {
     recordedEvent,
@@ -414,19 +416,9 @@ function replayFromRecordedAdvance(args: {
     sha256,
     hmac,
     base64url,
+    base32,
+    bech32m,
   } = args;
-
-  const checkpointTokenRes = signTokenOrErr({
-    unsignedPrefix: 'chk.v1.',
-    payload: { tokenVersion: 1, tokenKind: 'checkpoint', sessionId, runId, nodeId, attemptId },
-    keyring,
-    hmac,
-    base64url,
-  });
-  if (checkpointTokenRes.isErr()) {
-    return neErrorAsync({ kind: 'token_signing_failed' as const, cause: checkpointTokenRes.error });
-  }
-  const checkpointToken = checkpointTokenRes.value;
 
   if (recordedEvent.data.outcome.kind === 'blocked') {
     const blockers = recordedEvent.data.outcome.blockers;
@@ -447,7 +439,6 @@ function replayFromRecordedAdvance(args: {
         kind: 'blocked',
         stateToken: inputStateToken,
         ackToken: inputAckToken,
-        checkpointToken,
         isComplete: isCompleteNow,
         pending: pendingNow
           ? { stepId: String(pendingNow.stepId), title: String(pendingNow.stepId), prompt: `Pending step: ${String(pendingNow.stepId)}` }
@@ -487,34 +478,31 @@ function replayFromRecordedAdvance(args: {
       const isComplete = deriveIsComplete(snap.enginePayload.engineState);
 
       const nextAttemptId = attemptIdForNextNode(attemptId, sha256);
-      const nextAckTokenRes = signTokenOrErr({
-        unsignedPrefix: 'ack.v1.',
-        payload: { tokenVersion: 1, tokenKind: 'ack', sessionId, runId, nodeId: toNodeIdBranded, attemptId: nextAttemptId },
+      const nextAckTokenRes = pending
+        ? signTokenOrErr({
+            payload: { tokenVersion: 1, tokenKind: 'ack', sessionId, runId, nodeId: toNodeIdBranded, attemptId: nextAttemptId },
         keyring,
         hmac,
         base64url,
-      });
+        base32,
+        bech32m,
+          })
+        : ok(undefined);
       if (nextAckTokenRes.isErr()) {
         return neErrorAsync({ kind: 'token_signing_failed' as const, cause: nextAckTokenRes.error });
       }
 
-      const nextCheckpointTokenRes = signTokenOrErr({
-        unsignedPrefix: 'chk.v1.',
-        payload: { tokenVersion: 1, tokenKind: 'checkpoint', sessionId, runId, nodeId: toNodeIdBranded, attemptId: nextAttemptId },
-        keyring,
-        hmac,
-        base64url,
-      });
-      if (nextCheckpointTokenRes.isErr()) {
-        return neErrorAsync({ kind: 'token_signing_failed' as const, cause: nextCheckpointTokenRes.error });
+      const wfRefRes = deriveWorkflowHashRef(workflowHash);
+      if (wfRefRes.isErr()) {
+        return neErrorAsync({ kind: 'precondition_failed' as const, message: wfRefRes.error.message, suggestion: 'Ensure workflowHash is a valid sha256 digest.' });
       }
-
       const nextStateTokenRes = signTokenOrErr({
-        unsignedPrefix: 'st.v1.',
-        payload: { tokenVersion: 1, tokenKind: 'state', sessionId, runId, nodeId: toNodeIdBranded, workflowHash },
+        payload: { tokenVersion: 1, tokenKind: 'state', sessionId, runId, nodeId: toNodeIdBranded, workflowHashRef: wfRefRes.value },
         keyring,
         hmac,
         base64url,
+        base32,
+        bech32m,
       });
       if (nextStateTokenRes.isErr()) {
         return neErrorAsync({ kind: 'token_signing_failed' as const, cause: nextStateTokenRes.error });
@@ -526,8 +514,7 @@ function replayFromRecordedAdvance(args: {
         V2ContinueWorkflowOutputSchema.parse({
           kind: 'ok',
           stateToken: nextStateTokenRes.value,
-          ackToken: nextAckTokenRes.value,
-          checkpointToken: nextCheckpointTokenRes.value,
+          ackToken: pending ? nextAckTokenRes.value : undefined,
           isComplete,
           pending: stepId ? { stepId, title, prompt } : null,
         })
@@ -769,21 +756,23 @@ function pinnedWorkflowStoreErrorToToolError(e: PinnedWorkflowStoreError, sugges
 }
 
 // Branded token input types (compile-time guarantee of token kind)
-type StateTokenInput = ParsedTokenV1 & { readonly payload: import('../../v2/durable-core/tokens/payloads.js').StateTokenPayloadV1 };
-type AckTokenInput = ParsedTokenV1 & { readonly payload: import('../../v2/durable-core/tokens/payloads.js').AckTokenPayloadV1 };
+type StateTokenInput = ParsedTokenV1Binary & { readonly payload: import('../../v2/durable-core/tokens/payloads.js').StateTokenPayloadV1 };
+type AckTokenInput = ParsedTokenV1Binary & { readonly payload: import('../../v2/durable-core/tokens/payloads.js').AckTokenPayloadV1 };
 
 function parseStateTokenOrFail(
   raw: string,
   keyring: import('../../v2/ports/keyring.port.js').KeyringV1,
   hmac: HmacSha256PortV2,
-  base64url: Base64UrlPortV2
+  base64url: Base64UrlPortV2,
+  base32: import('../../v2/ports/base32.port.js').Base32PortV2,
+  bech32m: import('../../v2/ports/bech32m.port.js').Bech32mPortV2
 ): { ok: true; token: StateTokenInput } | { ok: false; failure: ToolFailure } {
-  const parsedRes = parseTokenV1(raw, base64url);
+  const parsedRes = parseTokenV1Binary(raw, bech32m, base32);
   if (parsedRes.isErr()) {
     return { ok: false, failure: mapTokenDecodeErrorToToolError(parsedRes.error) };
   }
 
-  const verified = verifyTokenSignatureV1(parsedRes.value, keyring, hmac, base64url);
+  const verified = verifyTokenSignatureV1Binary(parsedRes.value, keyring, hmac, base64url);
   if (verified.isErr()) {
     return { ok: false, failure: mapTokenVerifyErrorToToolError(verified.error) };
   }
@@ -791,7 +780,7 @@ function parseStateTokenOrFail(
   if (parsedRes.value.payload.tokenKind !== 'state') {
     return {
       ok: false,
-      failure: errNotRetryable('TOKEN_INVALID_FORMAT', 'Expected a state token (st.v1.*).', {
+      failure: errNotRetryable('TOKEN_INVALID_FORMAT', 'Expected a state token (st1...).', {
         suggestion: 'Use the stateToken returned by WorkRail.',
       }) as ToolFailure,
     };
@@ -804,14 +793,16 @@ function parseAckTokenOrFail(
   raw: string,
   keyring: import('../../v2/ports/keyring.port.js').KeyringV1,
   hmac: HmacSha256PortV2,
-  base64url: Base64UrlPortV2
+  base64url: Base64UrlPortV2,
+  base32: import('../../v2/ports/base32.port.js').Base32PortV2,
+  bech32m: import('../../v2/ports/bech32m.port.js').Bech32mPortV2
 ): { ok: true; token: AckTokenInput } | { ok: false; failure: ToolFailure } {
-  const parsedRes = parseTokenV1(raw, base64url);
+  const parsedRes = parseTokenV1Binary(raw, bech32m, base32);
   if (parsedRes.isErr()) {
     return { ok: false, failure: mapTokenDecodeErrorToToolError(parsedRes.error) };
   }
 
-  const verified = verifyTokenSignatureV1(parsedRes.value, keyring, hmac, base64url);
+  const verified = verifyTokenSignatureV1Binary(parsedRes.value, keyring, hmac, base64url);
   if (verified.isErr()) {
     return { ok: false, failure: mapTokenVerifyErrorToToolError(verified.error) };
   }
@@ -819,7 +810,7 @@ function parseAckTokenOrFail(
   if (parsedRes.value.payload.tokenKind !== 'ack') {
     return {
       ok: false,
-      failure: errNotRetryable('TOKEN_INVALID_FORMAT', 'Expected an ack token (ack.v1.*).', {
+      failure: errNotRetryable('TOKEN_INVALID_FORMAT', 'Expected an ack token (ack1...).', {
         suggestion: 'Use the ackToken returned by WorkRail.',
       }) as ToolFailure,
     };
@@ -838,19 +829,16 @@ function attemptIdForNextNode(parentAttemptId: AttemptId, sha256: Sha256PortV2):
 }
 
 function signTokenOrErr(args: {
-  unsignedPrefix: TokenPrefix;
   payload: TokenPayloadV1;
   keyring: import('../../v2/ports/keyring.port.js').KeyringV1;
   hmac: HmacSha256PortV2;
   base64url: Base64UrlPortV2;
-}): Result<string, TokenDecodeErrorV2 | TokenVerifyErrorV2> {
-  const bytes = encodeTokenPayloadV1(args.payload);
-  if (bytes.isErr()) return err(bytes.error);
-
-  const token = signTokenV1(args.unsignedPrefix, bytes.value, args.keyring, args.hmac, args.base64url);
+  base32: import('../../v2/ports/base32.port.js').Base32PortV2;
+  bech32m: import('../../v2/ports/bech32m.port.js').Bech32mPortV2;
+}): Result<string, TokenDecodeErrorV2 | TokenVerifyErrorV2 | TokenSignErrorV2> {
+  const token = signTokenV1Binary(args.payload, args.keyring, args.hmac, args.base64url, args.bech32m, args.base32);
   if (token.isErr()) return err(token.error);
-
-  return ok(String(token.value));
+  return ok(token.value);
 }
 
 function toV1ExecutionState(engineState: EngineStateV1): ExecutionState {
@@ -960,12 +948,19 @@ function executeStartWorkflow(
     return neErrorAsync({ kind: 'precondition_failed', message: 'v2 tools disabled', suggestion: 'Enable v2Tools flag' });
   }
 
-  const { gate, sessionStore, snapshotStore, pinnedStore, keyring, crypto, hmac, base64url, idFactory } = ctx.v2;
+  const { gate, sessionStore, snapshotStore, pinnedStore, keyring, crypto, hmac, base64url, base32, bech32m, idFactory } = ctx.v2;
   if (!idFactory) {
     return neErrorAsync({
       kind: 'precondition_failed',
       message: 'v2 context missing idFactory',
       suggestion: 'Reinitialize v2 tool context (idFactory must be provided when v2Tools are enabled).',
+    });
+  }
+  if (!bech32m) {
+    return neErrorAsync({
+      kind: 'precondition_failed',
+      message: 'v2 context missing bech32m dependency',
+      suggestion: 'Reinitialize v2 tool context (bech32m must be provided when v2Tools are enabled).',
     });
   }
 
@@ -1104,13 +1099,21 @@ function executeStartWorkflow(
         });
     })
     .andThen(({ pinnedWorkflow, firstStep, workflowHash, sessionId, runId, nodeId }) => {
+      const wfRefRes = deriveWorkflowHashRef(workflowHash);
+      if (wfRefRes.isErr()) {
+        return neErrorAsync({
+          kind: 'precondition_failed' as const,
+          message: wfRefRes.error.message,
+          suggestion: 'Ensure the pinned workflowHash is a valid sha256 digest.',
+        });
+      }
       const statePayload = {
         tokenVersion: 1 as const,
         tokenKind: 'state' as const,
         sessionId,
         runId,
         nodeId,
-        workflowHash,
+        workflowHashRef: wfRefRes.value,
       };
       const attemptId = newAttemptId(idFactory);
       const ackPayload = {
@@ -1121,23 +1124,11 @@ function executeStartWorkflow(
         nodeId,
         attemptId,
       };
-      const checkpointPayload = {
-        tokenVersion: 1 as const,
-        tokenKind: 'checkpoint' as const,
-        sessionId,
-        runId,
-        nodeId,
-        attemptId,
-      };
-
-      const stateToken = signTokenOrErr({ unsignedPrefix: 'st.v1.', payload: statePayload, keyring, hmac, base64url });
+      const stateToken = signTokenOrErr({ payload: statePayload, keyring, hmac, base64url, base32, bech32m });
       if (stateToken.isErr()) return neErrorAsync({ kind: 'token_signing_failed' as const, cause: stateToken.error });
       
-      const ackToken = signTokenOrErr({ unsignedPrefix: 'ack.v1.', payload: ackPayload, keyring, hmac, base64url });
+      const ackToken = signTokenOrErr({ payload: ackPayload, keyring, hmac, base64url, base32, bech32m });
       if (ackToken.isErr()) return neErrorAsync({ kind: 'token_signing_failed' as const, cause: ackToken.error });
-      
-      const checkpointToken = signTokenOrErr({ unsignedPrefix: 'chk.v1.', payload: checkpointPayload, keyring, hmac, base64url });
-      if (checkpointToken.isErr()) return neErrorAsync({ kind: 'token_signing_failed' as const, cause: checkpointToken.error });
 
       const { stepId, title, prompt } = extractStepMetadata(pinnedWorkflow, firstStep.id);
       const pending = { stepId, title, prompt };
@@ -1145,7 +1136,6 @@ function executeStartWorkflow(
       return okAsync(V2StartWorkflowOutputSchema.parse({
         stateToken: stateToken.value,
         ackToken: ackToken.value,
-        checkpointToken: checkpointToken.value,
         isComplete: false,
         pending,
       }));
@@ -1170,7 +1160,7 @@ function executeContinueWorkflow(
     return neErrorAsync({ kind: 'precondition_failed', message: 'v2 tools disabled', suggestion: 'Enable v2Tools flag' });
   }
 
-  const { gate, sessionStore, snapshotStore, pinnedStore, keyring, sha256, crypto, hmac, base64url, idFactory } = ctx.v2;
+  const { gate, sessionStore, snapshotStore, pinnedStore, keyring, sha256, crypto, hmac, base64url, base32, bech32m, idFactory } = ctx.v2;
   if (!sha256 || !idFactory) {
     return neErrorAsync({
       kind: 'precondition_failed',
@@ -1178,8 +1168,15 @@ function executeContinueWorkflow(
       suggestion: 'Reinitialize v2 tool context (sha256 and idFactory must be provided when v2Tools are enabled).',
     });
   }
+  if (!bech32m) {
+    return neErrorAsync({
+      kind: 'precondition_failed',
+      message: 'v2 context missing bech32m dependency',
+      suggestion: 'Reinitialize v2 tool context (bech32m must be provided when v2Tools are enabled).',
+    });
+  }
 
-  const stateRes = parseStateTokenOrFail(input.stateToken, keyring, hmac, base64url);
+  const stateRes = parseStateTokenOrFail(input.stateToken, keyring, hmac, base64url, base32, bech32m);
   if (!stateRes.ok) return neErrorAsync({ kind: 'validation_failed', failure: stateRes.failure });
   const state = stateRes.token;
 
@@ -1189,7 +1186,7 @@ function executeContinueWorkflow(
   const sessionId = asSessionId(state.payload.sessionId);
   const runId = asRunId(state.payload.runId);
   const nodeId = asNodeId(state.payload.nodeId);
-  const workflowHash = asWorkflowHash(asSha256Digest(state.payload.workflowHash));
+  const workflowHashRef = state.payload.workflowHashRef;
 
   if (!input.ackToken) {
     // REHYDRATE PATH
@@ -1207,7 +1204,16 @@ function executeContinueWorkflow(
             suggestion: 'Use start_workflow to mint a new run, or use a stateToken returned by WorkRail for an existing run.',
           });
         }
-        if (String(runStarted.data.workflowHash) !== String(workflowHash)) {
+        const workflowHash = runStarted.data.workflowHash;
+        const expectedRefRes = deriveWorkflowHashRef(workflowHash);
+        if (expectedRefRes.isErr()) {
+          return neErrorAsync({
+            kind: 'precondition_failed' as const,
+            message: expectedRefRes.error.message,
+            suggestion: 'Re-pin the workflow via start_workflow.',
+          });
+        }
+        if (String(expectedRefRes.value) !== String(workflowHashRef)) {
           return neErrorAsync({ kind: 'precondition_failed' as const, message: 'workflowHash mismatch for this run.', suggestion: 'Use the stateToken returned by WorkRail for this run.' });
         }
 
@@ -1222,7 +1228,15 @@ function executeContinueWorkflow(
             suggestion: 'Use a stateToken returned by WorkRail for an existing node.',
           });
         }
-        if (String(nodeCreated.data.workflowHash) !== String(workflowHash)) {
+        const expectedNodeRefRes = deriveWorkflowHashRef(nodeCreated.data.workflowHash);
+        if (expectedNodeRefRes.isErr()) {
+          return neErrorAsync({
+            kind: 'precondition_failed' as const,
+            message: expectedNodeRefRes.error.message,
+            suggestion: 'Re-pin the workflow via start_workflow.',
+          });
+        }
+        if (String(expectedNodeRefRes.value) !== String(workflowHashRef)) {
           return neErrorAsync({ kind: 'precondition_failed' as const, message: 'workflowHash mismatch for this node.', suggestion: 'Use the stateToken returned by WorkRail for this node.' });
         }
 
@@ -1241,40 +1255,30 @@ function executeContinueWorkflow(
             const pending = derivePendingStep(engineState);
             const isComplete = deriveIsComplete(engineState);
 
-            const attemptId = newAttemptId(idFactory);
-            const ackTokenRes = signTokenOrErr({
-              unsignedPrefix: 'ack.v1.',
-              payload: { tokenVersion: 1, tokenKind: 'ack', sessionId, runId, nodeId, attemptId },
-              keyring,
-              hmac,
-              base64url,
-            });
-            if (ackTokenRes.isErr()) return neErrorAsync({ kind: 'token_signing_failed' as const, cause: ackTokenRes.error });
-            
-            const checkpointTokenRes = signTokenOrErr({
-              unsignedPrefix: 'chk.v1.',
-              payload: { tokenVersion: 1, tokenKind: 'checkpoint', sessionId, runId, nodeId, attemptId },
-              keyring,
-              hmac,
-              base64url,
-            });
-            if (checkpointTokenRes.isErr()) return neErrorAsync({ kind: 'token_signing_failed' as const, cause: checkpointTokenRes.error });
-
             if (!pending) {
               return okAsync(V2ContinueWorkflowOutputSchema.parse({
                 kind: 'ok',
                 stateToken: input.stateToken,
-                ackToken: ackTokenRes.value,
-                checkpointToken: checkpointTokenRes.value,
                 isComplete,
                 pending: null,
               }));
             }
 
+            const attemptId = newAttemptId(idFactory);
+            const ackTokenRes = signTokenOrErr({
+              payload: { tokenVersion: 1, tokenKind: 'ack', sessionId, runId, nodeId, attemptId },
+              keyring,
+              hmac,
+              base64url,
+              base32,
+              bech32m,
+            });
+            if (ackTokenRes.isErr()) return neErrorAsync({ kind: 'token_signing_failed' as const, cause: ackTokenRes.error });
+
             return pinnedStore.get(workflowHash)
               .mapErr((cause) => ({ kind: 'pinned_workflow_store_failed' as const, cause }))
               .andThen((pinned) => {
-                if (!pinned) return neErrorAsync({ kind: 'pinned_workflow_missing' as const, workflowHash: asWorkflowHash(asSha256Digest(String(workflowHash))) });
+                if (!pinned) return neErrorAsync({ kind: 'pinned_workflow_missing' as const, workflowHash });
                 if (pinned.sourceKind !== 'v1_pinned') return neErrorAsync({ kind: 'precondition_failed' as const, message: 'Pinned workflow snapshot is read-only (v1_preview) and cannot be executed.' });
                 if (!hasWorkflowDefinitionShape(pinned.definition)) {
                   return neErrorAsync({
@@ -1291,7 +1295,6 @@ function executeContinueWorkflow(
                   kind: 'ok',
                   stateToken: input.stateToken,
                   ackToken: ackTokenRes.value,
-                  checkpointToken: checkpointTokenRes.value,
                   isComplete,
                   pending: { stepId, title, prompt },
                 }));
@@ -1301,11 +1304,11 @@ function executeContinueWorkflow(
   }
 
   // ADVANCE PATH
-  const ackRes = parseAckTokenOrFail(input.ackToken, keyring, hmac, base64url);
+  const ackRes = parseAckTokenOrFail(input.ackToken, keyring, hmac, base64url, base32, bech32m);
   if (!ackRes.ok) return neErrorAsync({ kind: 'validation_failed', failure: ackRes.failure });
   const ack = ackRes.token;
 
-  const scopeRes = assertTokenScopeMatchesState(state, ack);
+  const scopeRes = assertTokenScopeMatchesStateBinary(state, ack);
   if (scopeRes.isErr()) return neErrorAsync({ kind: 'validation_failed', failure: mapTokenDecodeErrorToToolError(scopeRes.error) });
 
   const attemptId = asAttemptId(ack.payload.attemptId);
@@ -1314,6 +1317,60 @@ function executeContinueWorkflow(
   return sessionStore.load(sessionId)
     .mapErr((cause) => ({ kind: 'session_load_failed' as const, cause }))
     .andThen((truth) => {
+      const runStarted = truth.events.find(
+        (e): e is Extract<DomainEventV1, { kind: 'run_started' }> => e.kind === 'run_started' && e.scope.runId === String(runId)
+      );
+      if (!runStarted) {
+        return neErrorAsync({
+          kind: 'token_unknown_node' as const,
+          message: 'No durable run state was found for this token (missing run_started).',
+          suggestion: 'Use start_workflow to mint a new run, or use tokens returned by WorkRail for an existing run.',
+        });
+      }
+      const workflowHash = runStarted.data.workflowHash;
+      const refRes = deriveWorkflowHashRef(workflowHash);
+      if (refRes.isErr()) {
+        return neErrorAsync({
+          kind: 'precondition_failed' as const,
+          message: refRes.error.message,
+          suggestion: 'Re-pin the workflow via start_workflow.',
+        });
+      }
+      if (String(refRes.value) !== String(workflowHashRef)) {
+        return neErrorAsync({
+          kind: 'precondition_failed' as const,
+          message: 'workflowHash mismatch for this run.',
+          suggestion: 'Use the stateToken returned by WorkRail for this run.',
+        });
+      }
+
+      const nodeCreated = truth.events.find(
+        (e): e is Extract<DomainEventV1, { kind: 'node_created' }> =>
+          e.kind === 'node_created' && e.scope.nodeId === String(nodeId) && e.scope.runId === String(runId)
+      );
+      if (!nodeCreated) {
+        return neErrorAsync({
+          kind: 'token_unknown_node' as const,
+          message: 'No durable node state was found for this token (missing node_created).',
+          suggestion: 'Use tokens returned by WorkRail for an existing node.',
+        });
+      }
+      const nodeRefRes = deriveWorkflowHashRef(nodeCreated.data.workflowHash);
+      if (nodeRefRes.isErr()) {
+        return neErrorAsync({
+          kind: 'precondition_failed' as const,
+          message: nodeRefRes.error.message,
+          suggestion: 'Re-pin the workflow via start_workflow.',
+        });
+      }
+      if (String(nodeRefRes.value) !== String(workflowHashRef)) {
+        return neErrorAsync({
+          kind: 'precondition_failed' as const,
+          message: 'workflowHash mismatch for this node.',
+          suggestion: 'Use the stateToken returned by WorkRail for this node.',
+        });
+      }
+
       const existing = truth.events.find(
         (e): e is Extract<DomainEventV1, { kind: 'advance_recorded' }> => e.kind === 'advance_recorded' && e.dedupeKey === dedupeKey
       );
@@ -1350,6 +1407,8 @@ function executeContinueWorkflow(
               sha256,
               hmac,
               base64url,
+              base32,
+              bech32m,
             });
           }
 
@@ -1436,10 +1495,12 @@ function executeContinueWorkflow(
                 inputAckToken: input.ackToken!,
                 pinnedWorkflow,
                 snapshotStore,
-              keyring,
-              sha256,
-              hmac,
+                keyring,
+                sha256,
+                hmac,
                 base64url,
+                base32,
+                bech32m,
               });
             });
         });

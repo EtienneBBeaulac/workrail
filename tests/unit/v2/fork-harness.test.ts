@@ -24,6 +24,8 @@ import { LocalKeyringV2 } from '../../../src/v2/infra/local/keyring/index.js';
 import { NodeRandomEntropyV2 } from '../../../src/v2/infra/local/random-entropy/index.js';
 import { NodeTimeClockV2 } from '../../../src/v2/infra/local/time-clock/index.js';
 import { IdFactoryV2 } from '../../../src/v2/infra/local/id-factory/index.js';
+import { Bech32mAdapterV2 } from '../../../src/v2/infra/local/bech32m/index.js';
+import { parseTokenV1Binary } from '../../../src/v2/durable-core/tokens/token-codec.js';
 
 import { projectRunDagV2 } from '../../../src/v2/projections/run-dag.js';
 import { asSessionId } from '../../../src/v2/durable-core/ids/index.js';
@@ -64,6 +66,7 @@ async function createV2Context(): Promise<ToolContext> {
   const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir, fsPort);
   const entropy = new NodeRandomEntropyV2();
   const idFactory = new IdFactoryV2(entropy);
+  const bech32m = new Bech32mAdapterV2();
   const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url, entropy);
   const keyring = await keyringPort.loadOrCreate().match(
     v => v,
@@ -75,19 +78,17 @@ async function createV2Context(): Promise<ToolContext> {
     featureFlags,
     sessionManager: null,
     httpServer: null,
-    v2: { gate, sessionStore, snapshotStore, pinnedStore, keyring, sha256, crypto, hmac, base64url, idFactory },
+    v2: { gate, sessionStore, snapshotStore, pinnedStore, keyring, sha256, crypto, hmac, base64url, bech32m, idFactory },
   };
 }
 
 function extractSessionIdFromToken(stateToken: string): string {
-  const parts = stateToken.split('.');
-  if (parts.length < 3) throw new Error('Invalid token format');
-  
-  const payloadB64 = parts[2]!;
-  const payloadJson = Buffer.from(payloadB64, 'base64url').toString('utf-8');
-  const payload = JSON.parse(payloadJson);
-  
-  return payload.sessionId;
+  const bech32m = new Bech32mAdapterV2();
+  const parsed = parseTokenV1Binary(stateToken, bech32m);
+  if (parsed.isErr()) {
+    throw new Error(`Invalid token format: ${parsed.error.code}`);
+  }
+  return String(parsed.value.payload.sessionId);
 }
 
 describe('v2 fork harness (branching stress test)', () => {

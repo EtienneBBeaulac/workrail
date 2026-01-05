@@ -45,3 +45,61 @@ export function encodeBase32LowerNoPad(bytes: Uint8Array): Base32LowerNoPad {
 
   return out as Base32LowerNoPad;
 }
+
+/**
+ * Decode RFC 4648 base32 (lowercase, no padding) back to bytes.
+ *
+ * NOTE: Uses BigInt to handle 130-bit inputs safely (26 chars × 5 bits = 130 bits).
+ * This matches the encoder's approach to avoid 32-bit truncation.
+ *
+ * Constraints:
+ * - Input chars must be only [a-z2-7]
+ * - No '=' padding expected
+ * - Deterministic
+ *
+ * @throws Error if input contains invalid characters or non-canonical encoding
+ */
+export function decodeBase32LowerNoPad(encoded: string): Uint8Array {
+  const lookup = new Map(
+    BASE32_LOWER_ALPHABET.split('').map((c, i) => [c, i] as const),
+  );
+
+  // Use BigInt to handle 130-bit inputs safely (26 chars * 5 bits)
+  // Matches the encoder's approach (src/v2/durable-core/encoding/base32-lower.ts uses BigInt)
+  let acc = 0n;
+  const totalBits = encoded.length * 5;
+
+  for (const char of encoded) {
+    const val = lookup.get(char);
+    if (val === undefined) {
+      throw new Error(`Invalid base32 character: '${char}'`);
+    }
+
+    acc = (acc << 5n) | BigInt(val);
+  }
+
+  // Calculate expected byte count and padding bits
+  const byteCount = Math.floor(totalBits / 8);
+  const paddingBits = totalBits - byteCount * 8;
+
+  // The encoder pads remaining bits with zeros on the RIGHT.
+  // So the padding zeros are in the LSB positions of acc.
+  // Validate that padding bits are zero (canonical encoding enforcement)
+  if (paddingBits > 0) {
+    const paddingMask = (1n << BigInt(paddingBits)) - 1n;
+    if ((acc & paddingMask) !== 0n) {
+      throw new Error('Non-canonical base32 encoding (padding bits non-zero)');
+    }
+    // Shift right to remove padding
+    acc >>= BigInt(paddingBits);
+  }
+
+  // Extract bytes from LSB to MSB (reverse order into array)
+  const bytes = new Uint8Array(byteCount);
+  for (let i = byteCount - 1; i >= 0; i--) {
+    bytes[i] = Number(acc & 0xffn);
+    acc >>= 8n;
+  }
+
+  return bytes;
+}

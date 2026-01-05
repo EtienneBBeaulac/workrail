@@ -74,6 +74,8 @@ export const DI = {
     Crypto: Symbol('V2.Crypto'),
     HmacSha256: Symbol('V2.HmacSha256'),
     Base64Url: Symbol('V2.Base64Url'),
+    Base32: Symbol('V2.Base32'),
+    Bech32m: Symbol('V2.Bech32m'),
     RandomEntropy: Symbol('V2.RandomEntropy'),
     TimeClock: Symbol('V2.TimeClock'),
     IdFactory: Symbol('V2.IdFactory'),

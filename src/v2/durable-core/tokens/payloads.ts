@@ -1,9 +1,11 @@
 import { z } from 'zod';
-import type { AttemptId, NodeId, RunId, SessionId, TokenStringV1, WorkflowHash } from '../ids/index.js';
-import { asAttemptId, asNodeId, asRunId, asSessionId, asSha256Digest, asTokenStringV1, asWorkflowHash } from '../ids/index.js';
+import type { AttemptId, NodeId, RunId, SessionId, TokenStringV1, WorkflowHashRef } from '../ids/index.js';
+import { asAttemptId, asNodeId, asRunId, asSessionId, asTokenStringV1, asWorkflowHashRef } from '../ids/index.js';
 
-const sha256DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/, 'Expected sha256:<64 hex chars>');
-const workflowHashSchema = sha256DigestSchema.transform((v) => asWorkflowHash(asSha256Digest(v)));
+const workflowHashRefSchema = z
+  .string()
+  .regex(/^wf_[a-z2-7]{26}$/, 'Expected wf_<26 base32 chars [a-z2-7]>')
+  .transform((v) => asWorkflowHashRef(v));
 
 const nonEmpty = z.string().min(1);
 
@@ -40,7 +42,7 @@ export const StateTokenPayloadV1Schema = z.object({
   sessionId: SessionIdSchema,
   runId: RunIdSchema,
   nodeId: NodeIdSchema,
-  workflowHash: workflowHashSchema,
+  workflowHashRef: workflowHashRefSchema,
 });
 export type StateTokenPayloadV1 = z.infer<typeof StateTokenPayloadV1Schema> & {
   readonly tokenVersion: TokenVersionV1;
@@ -48,7 +50,7 @@ export type StateTokenPayloadV1 = z.infer<typeof StateTokenPayloadV1Schema> & {
   readonly sessionId: SessionId;
   readonly runId: RunId;
   readonly nodeId: NodeId;
-  readonly workflowHash: WorkflowHash;
+  readonly workflowHashRef: WorkflowHashRef;
 };
 
 export const AckTokenPayloadV1Schema = z.object({

@@ -19,13 +19,14 @@ import { LocalSnapshotStoreV2 } from '../../src/v2/infra/local/snapshot-store/in
 import { LocalPinnedWorkflowStoreV2 } from '../../src/v2/infra/local/pinned-workflow-store/index.js';
 import { ExecutionSessionGateV2 } from '../../src/v2/usecases/execution-session-gate.js';
 
-import { parseTokenV1, verifyTokenSignatureV1 } from '../../src/v2/durable-core/tokens/index.js';
+import { parseTokenV1Binary, verifyTokenSignatureV1Binary } from '../../src/v2/durable-core/tokens/index.js';
 import { NodeHmacSha256V2 } from '../../src/v2/infra/local/hmac-sha256/index.js';
 import { NodeBase64UrlV2 } from '../../src/v2/infra/local/base64url/index.js';
 import { LocalKeyringV2 } from '../../src/v2/infra/local/keyring/index.js';
 import { NodeRandomEntropyV2 } from '../../src/v2/infra/local/random-entropy/index.js';
 import { NodeTimeClockV2 } from '../../src/v2/infra/local/time-clock/index.js';
 import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
+import { Bech32mAdapterV2 } from '../../src/v2/infra/local/bech32m/index.js';
 
 async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-start-'));
@@ -58,6 +59,7 @@ async function mkCtxWithWorkflow(workflowId: string): Promise<ToolContext> {
   const base64url = new NodeBase64UrlV2();
   const entropy = new NodeRandomEntropyV2();
   const idFactory = new IdFactoryV2(entropy);
+  const bech32m = new Bech32mAdapterV2();
   const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url, entropy);
   const keyringRes = await keyringPort.loadOrCreate();
   if (keyringRes.isErr()) throw new Error(`keyring load failed: ${keyringRes.error.code}`);
@@ -84,6 +86,7 @@ async function mkCtxWithWorkflow(workflowId: string): Promise<ToolContext> {
       crypto,
       hmac,
       base64url,
+      bech32m,
       idFactory,
     },
   };
@@ -192,7 +195,6 @@ describe('v2 start_workflow (Slice 3.5)', () => {
 
       expect(typeof res.data.stateToken).toBe('string');
       expect(typeof res.data.ackToken).toBe('string');
-      expect(typeof res.data.checkpointToken).toBe('string');
       expect(res.data.isComplete).toBe(false);
       expect(res.data.pending?.stepId).toBe('triage');
 
@@ -201,6 +203,7 @@ describe('v2 start_workflow (Slice 3.5)', () => {
       const fsPort = new NodeFileSystemV2();
       const hmac = new NodeHmacSha256V2();
       const localBase64url = new NodeBase64UrlV2();
+      const bech32m = new Bech32mAdapterV2();
       const keyring = await new LocalKeyringV2(dataDir, fsPort, localBase64url, new NodeRandomEntropyV2()).loadOrCreate().match(
         (v) => v,
         (e) => {
@@ -208,13 +211,11 @@ describe('v2 start_workflow (Slice 3.5)', () => {
         }
       );
 
-      const parsedState = parseTokenV1(res.data.stateToken, localBase64url)._unsafeUnwrap();
-      const parsedAck = parseTokenV1(res.data.ackToken, localBase64url)._unsafeUnwrap();
-      const parsedCheckpoint = parseTokenV1(res.data.checkpointToken, localBase64url)._unsafeUnwrap();
+      const parsedState = parseTokenV1Binary(res.data.stateToken, bech32m)._unsafeUnwrap();
+      const parsedAck = parseTokenV1Binary(res.data.ackToken, bech32m)._unsafeUnwrap();
 
-      expect(verifyTokenSignatureV1(parsedState, keyring, hmac, localBase64url).isOk()).toBe(true);
-      expect(verifyTokenSignatureV1(parsedAck, keyring, hmac, localBase64url).isOk()).toBe(true);
-      expect(verifyTokenSignatureV1(parsedCheckpoint, keyring, hmac, localBase64url).isOk()).toBe(true);
+      expect(verifyTokenSignatureV1Binary(parsedState, keyring, hmac, localBase64url).isOk()).toBe(true);
+      expect(verifyTokenSignatureV1Binary(parsedAck, keyring, hmac, localBase64url).isOk()).toBe(true);
 
       // Durable truth exists and is loadable via the session store.
       const sha256 = new NodeSha256V2();

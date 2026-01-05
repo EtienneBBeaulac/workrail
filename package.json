@@ -46,10 +46,18 @@
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
     "e2e:install": "playwright install",
-    "semantic-release": "semantic-release"
+    "semantic-release": "semantic-release",
+    "decode-token": "node scripts/decode-token.ts",
+    "validate-token": "node scripts/validate-token.ts",
+    "check-keyring": "node scripts/check-keyring.ts",
+    "diff-tokens": "node scripts/diff-tokens.ts",
+    "benchmark-token-size": "node scripts/benchmark-token-size.ts",
+    "generate-golden-tokens": "node scripts/generate-golden-tokens.ts",
+    "verify-endianness": "node scripts/verify-endianness.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.24.0",
+    "@scure/base": "1.1.9",
     "ajv": "^8.17.1",
     "chalk": "^5.3.0",
     "commander": "^14.0.0",
@@ -85,6 +93,7 @@
     "@types/semver": "^7.7.0",
     "@vitest/ui": "^3.2.4",
     "conventional-changelog-conventionalcommits": "^9.1.0",
+    "fast-check": "^3.15.0",
     "happy-dom": "^20.0.11",
     "jsdom": "^27.0.0",
     "lit": "^3.3.1",

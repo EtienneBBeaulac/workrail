@@ -10,7 +10,7 @@ import type { SessionHealthDetails } from '../../src/mcp/types.js';
 import { createWorkflow } from '../../src/types/workflow.js';
 import { createProjectDirectorySource } from '../../src/types/workflow-source.js';
 
-import { parseTokenV1 } from '../../src/v2/durable-core/tokens/index.js';
+import { parseTokenV1Binary } from '../../src/v2/durable-core/tokens/index.js';
 import { LocalDataDirV2 } from '../../src/v2/infra/local/data-dir/index.js';
 import { NodeFileSystemV2 } from '../../src/v2/infra/local/fs/index.js';
 import { NodeSha256V2 } from '../../src/v2/infra/local/sha256/index.js';
@@ -26,6 +26,7 @@ import { LocalKeyringV2 } from '../../src/v2/infra/local/keyring/index.js';
 import { NodeRandomEntropyV2 } from '../../src/v2/infra/local/random-entropy/index.js';
 import { NodeTimeClockV2 } from '../../src/v2/infra/local/time-clock/index.js';
 import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
+import { Bech32mAdapterV2 } from '../../src/v2/infra/local/bech32m/index.js';
 
 async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-health-'));
@@ -40,6 +41,7 @@ async function mkV2Deps() {
   const base64url = new NodeBase64UrlV2();
   const entropy = new NodeRandomEntropyV2();
   const idFactory = new IdFactoryV2(entropy);
+  const bech32m = new Bech32mAdapterV2();
   const clock = new NodeTimeClockV2();
   const sessionStore = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha256);
   const lockPort = new LocalSessionLockV2(dataDir, fsPort, clock);
@@ -49,7 +51,7 @@ async function mkV2Deps() {
   const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url, entropy);
   const keyring = await keyringPort.loadOrCreate().match(v => v, e => { throw new Error(`keyring: ${e.code}`); });
 
-  return { gate, sessionStore, snapshotStore, pinnedStore, keyring, sha256, crypto, hmac, base64url, idFactory };
+  return { gate, sessionStore, snapshotStore, pinnedStore, keyring, sha256, crypto, hmac, base64url, bech32m, idFactory };
 }
 
 async function mkCtxWithWorkflow(workflowId: string): Promise<ToolContext> {
@@ -97,8 +99,7 @@ describe('v2 execution: SESSION_NOT_HEALTHY error response', () => {
       if (started.type !== 'success') return;
 
       const stateToken = started.data.stateToken;
-      const localBase64url = new NodeBase64UrlV2();
-      const parsedState = parseTokenV1(stateToken, localBase64url)._unsafeUnwrap();
+      const parsedState = parseTokenV1Binary(stateToken, new Bech32mAdapterV2())._unsafeUnwrap();
       const sessionId = parsedState.payload.sessionId;
 
       // Corrupt the session manifest file by truncating it
@@ -165,8 +166,7 @@ describe('v2 execution: SESSION_NOT_HEALTHY error response', () => {
       if (started.type !== 'success') return;
 
       const stateToken = started.data.stateToken;
-      const localBase64url = new NodeBase64UrlV2();
-      const parsedState = parseTokenV1(stateToken, localBase64url)._unsafeUnwrap();
+      const parsedState = parseTokenV1Binary(stateToken, new Bech32mAdapterV2())._unsafeUnwrap();
       const sessionId = parsedState.payload.sessionId;
 
       // Corrupt manifest

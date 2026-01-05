@@ -206,6 +206,8 @@ export interface V2Dependencies {
   readonly crypto: CryptoPortV2;
   readonly hmac: HmacSha256PortV2;
   readonly base64url: Base64UrlPortV2;
+  readonly base32: import('../v2/ports/base32.port.js').Base32PortV2;
+  readonly bech32m: import('../v2/ports/bech32m.port.js').Bech32mPortV2;
   readonly idFactory: IdFactoryV2;
 }
 

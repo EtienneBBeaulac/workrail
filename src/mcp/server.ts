@@ -162,6 +162,8 @@ export async function createToolContext(): Promise<ToolContext> {
       const crypto = container.resolve<any>(DI.V2.Crypto);
       const hmac = container.resolve<any>(DI.V2.HmacSha256);
       const base64url = container.resolve<any>(DI.V2.Base64Url);
+      const base32 = container.resolve<any>(DI.V2.Base32);
+      const bech32m = container.resolve<any>(DI.V2.Bech32m);
       const idFactory = container.resolve<any>(DI.V2.IdFactory);
 
       v2 = {
@@ -174,6 +176,8 @@ export async function createToolContext(): Promise<ToolContext> {
         crypto,
         hmac,
         base64url,
+        base32,
+        bech32m,
         idFactory,
       };
       console.error('[FeatureFlags] v2 tools enabled');

@@ -24,6 +24,7 @@ import { NodeBase64UrlV2 } from '../../src/v2/infra/local/base64url/index.js';
 import { NodeRandomEntropyV2 } from '../../src/v2/infra/local/random-entropy/index.js';
 import { NodeTimeClockV2 } from '../../src/v2/infra/local/time-clock/index.js';
 import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
+import { Bech32mAdapterV2 } from '../../src/v2/infra/local/bech32m/index.js';
 
 async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-fork-'));
@@ -58,6 +59,7 @@ async function mkCtxWithWorkflow(workflowId: string, dataDir: string): Promise<T
   const pinnedStoreV2 = new LocalPinnedWorkflowStoreV2(dataDirV2, fsPortV2);
   const entropyV2 = new NodeRandomEntropyV2();
   const idFactoryV2 = new IdFactoryV2(entropyV2);
+  const bech32mV2 = new Bech32mAdapterV2();
   const keyringPortV2 = new LocalKeyringV2(dataDirV2, fsPortV2, base64urlV2, entropyV2);
   const keyringV2 = await keyringPortV2.loadOrCreate().match(v => v, e => { throw new Error(`keyring: ${e.code}`); });
 
@@ -83,6 +85,7 @@ async function mkCtxWithWorkflow(workflowId: string, dataDir: string): Promise<T
       crypto: cryptoV2,
       hmac: hmacV2,
       base64url: base64urlV2,
+      bech32m: bech32mV2,
       idFactory: idFactoryV2,
     },
   };
@@ -125,9 +128,8 @@ describe('v2 fork detection (Phase 5)', () => {
       // - 2 node_created events (root + 2 children)
       // - 2 edge_created events
       // - at least one edge has cause.kind=non_tip_advance
-      const { parseTokenV1 } = await import('../../src/v2/durable-core/tokens/index.js');
-      const localBase64url = new NodeBase64UrlV2();
-      const parsed = parseTokenV1(start.data.stateToken, localBase64url)._unsafeUnwrap();
+      const { parseTokenV1Binary } = await import('../../src/v2/durable-core/tokens/token-codec.js');
+      const parsed = parseTokenV1Binary(start.data.stateToken, new Bech32mAdapterV2())._unsafeUnwrap();
       const sid = parsed.payload.sessionId;
 
       const truth = await ctx.v2!.sessionStore.load(sid).match(
