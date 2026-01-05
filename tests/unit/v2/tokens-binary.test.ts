@@ -301,6 +301,9 @@ describe('Bech32m encoding', () => {
     }
   });
 
+  /**
+   * @enforces token-prefix-kind-match
+   */
   it('handles different HRPs for different token types', () => {
     const data = new Uint8Array(98);
     crypto.getRandomValues(data);
