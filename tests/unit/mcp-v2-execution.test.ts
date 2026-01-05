@@ -52,6 +52,7 @@ async function mkV2Deps(): Promise<V2Dependencies> {
   const base64url = new NodeBase64UrlV2();
   const entropy = new NodeRandomEntropyV2();
   const idFactory = new IdFactoryV2(entropy);
+  const base32 = new Base32AdapterV2();
   const bech32m = new Bech32mAdapterV2();
   const snapshotStore = new LocalSnapshotStoreV2(dataDir, fsPort, crypto);
   const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir, fsPort);
@@ -73,6 +74,7 @@ async function mkV2Deps(): Promise<V2Dependencies> {
     crypto,
     hmac,
     base64url,
+    base32,
     bech32m,
     idFactory,
   };

@@ -67,6 +67,7 @@ async function createV2Context(): Promise<ToolContext> {
   const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir, fsPort);
   const entropy = new NodeRandomEntropyV2();
   const idFactory = new IdFactoryV2(entropy);
+  const base32 = new Base32AdapterV2();
   const bech32m = new Bech32mAdapterV2();
   const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url, entropy);
   const keyring = await keyringPort.loadOrCreate().match(
@@ -79,7 +80,7 @@ async function createV2Context(): Promise<ToolContext> {
     featureFlags,
     sessionManager: null,
     httpServer: null,
-    v2: { gate, sessionStore, snapshotStore, pinnedStore, keyring, sha256, crypto, hmac, base64url, bech32m, idFactory },
+    v2: { gate, sessionStore, snapshotStore, pinnedStore, keyring, sha256, crypto, hmac, base64url, base32, bech32m, idFactory },
   };
 }
 
