@@ -101,7 +101,7 @@ describe('Property-based: binary token encoding', () => {
           expect(packed1.isOk()).toBe(true);
           if (packed1.isErr()) return;
 
-          const unpacked = unpackTokenPayload(packed1.value);
+          const unpacked = unpackTokenPayload(packed1.value, base32);
           expect(unpacked.isOk()).toBe(true);
           if (unpacked.isErr()) return;
 

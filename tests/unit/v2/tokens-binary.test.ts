@@ -157,7 +157,7 @@ describe('Binary payload serialization', () => {
     const packed = packStateTokenPayload(payload, base32);
     expect(packed.isOk()).toBe(true);
 
-    const unpacked = unpackTokenPayload(packed._unsafeUnwrap());
+    const unpacked = unpackTokenPayload(packed._unsafeUnwrap(), base32);
     expect(unpacked.isOk()).toBe(true);
 
     if (unpacked.isOk()) {
@@ -452,7 +452,7 @@ describe('Token corruption detection', () => {
     const pos = Math.floor(token.length / 2);
     const corrupted = token.slice(0, pos) + 'xxx' + token.slice(pos + 3);
 
-    const result = parseTokenV1Binary(corrupted, bech32m);
+    const result = parseTokenV1Binary(corrupted, bech32m, base32);
     expect(result.isErr()).toBe(true);
     if (result.isErr()) {
       expect(result.error.code).toBe('TOKEN_INVALID_FORMAT');
@@ -466,7 +466,7 @@ describe('Token corruption detection', () => {
     // Truncate token
     const truncated = token.slice(0, -10);
 
-    const result = parseTokenV1Binary(truncated, bech32m);
+    const result = parseTokenV1Binary(truncated, bech32m, base32);
     expect(result.isErr()).toBe(true);
   });
 
@@ -477,7 +477,7 @@ describe('Token corruption detection', () => {
     // Replace prefix
     const corrupted = 'ack' + token.slice(2); // Change st -> ack
 
-    const result = parseTokenV1Binary(corrupted, bech32m);
+    const result = parseTokenV1Binary(corrupted, bech32m, base32);
     expect(result.isErr()).toBe(true);
   });
 
@@ -488,12 +488,12 @@ describe('Token corruption detection', () => {
     // Insert extra characters
     const inserted = token.slice(0, 20) + 'xyz' + token.slice(20);
 
-    const result = parseTokenV1Binary(inserted, bech32m);
+    const result = parseTokenV1Binary(inserted, bech32m, base32);
     expect(result.isErr()).toBe(true);
   });
 
   it('rejects invalid prefix', () => {
-    const result = parseTokenV1Binary('invalid1qpzry9x8gf2tvdw0s3jn54khce6mua7l', bech32m);
+    const result = parseTokenV1Binary('invalid1qpzry9x8gf2tvdw0s3jn54khce6mua7l', bech32m, base32);
     expect(result.isErr()).toBe(true);
     if (result.isErr()) {
       expect(result.error.code).toBe('TOKEN_INVALID_FORMAT');
