@@ -370,6 +370,9 @@ describe('Binary token signing and verification', () => {
     }
   });
 
+  /**
+   * @enforces token-signature-input-canonical-only
+   */
   it('sign -> parse -> verify roundtrip succeeds', async () => {
     const payload = createTestStatePayload();
 

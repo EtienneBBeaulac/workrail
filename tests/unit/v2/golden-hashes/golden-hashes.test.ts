@@ -10,7 +10,6 @@
  * @enforces hash-format-sha256-hex
  * @enforces workflow-hash-jcs-sha256
  * @enforces snapshot-content-addressed
- * @enforces token-signature-input-canonical-only
  */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
@@ -18,7 +17,6 @@ import * as path from 'path';
 import { toCanonicalBytes } from '../../../../src/v2/durable-core/canonical/jcs.js';
 import { workflowHashForCompiledSnapshot, snapshotRefForExecutionSnapshotFileV1 } from '../../../../src/v2/durable-core/canonical/hashing.js';
 import { NodeCryptoV2 } from '../../../../src/v2/infra/local/crypto/index.js';
-import { encodeTokenPayloadV1 } from '../../../../src/v2/durable-core/tokens/index.js';
 import type { JsonValue } from '../../../../src/v2/durable-core/canonical/json-types.js';
 import type { ExecutionSnapshotFileV1 } from '../../../../src/v2/durable-core/schemas/execution-snapshot/index.js';
 
@@ -155,56 +153,7 @@ describe('Golden hash fixtures (determinism verification)', () => {
     });
   });
 
-  describe('Token payloads', () => {
-    it('state token payload: canonical bytes are stable', () => {
-      const fixture = loadFixture('token-payload-state.json');
-      
-      const encodedRes = encodeTokenPayloadV1(fixture.input);
-      expect(encodedRes.isOk()).toBe(true);
-      
-      const canonical = encodedRes._unsafeUnwrap();
-      const text = new TextDecoder().decode(canonical as unknown as Uint8Array);
-      
-      // Verify JCS ordering
-      const parsed = JSON.parse(text);
-      expect(parsed.tokenKind).toBe('state');
-      expect(parsed.workflowHash).toBeDefined();
-      
-      console.log(`[Golden] token-payload-state.json → ${text.length} bytes`);
-    });
-
-    it('ack token payload: canonical bytes are stable', () => {
-      const fixture = loadFixture('token-payload-ack.json');
-      
-      const encodedRes = encodeTokenPayloadV1(fixture.input);
-      expect(encodedRes.isOk()).toBe(true);
-      
-      const canonical = encodedRes._unsafeUnwrap();
-      const text = new TextDecoder().decode(canonical as unknown as Uint8Array);
-      
-      const parsed = JSON.parse(text);
-      expect(parsed.tokenKind).toBe('ack');
-      expect(parsed.attemptId).toBeDefined();
-      
-      console.log(`[Golden] token-payload-ack.json → ${text.length} bytes`);
-    });
-
-    it('checkpoint token payload: canonical bytes are stable', () => {
-      const fixture = loadFixture('token-payload-checkpoint.json');
-      
-      const encodedRes = encodeTokenPayloadV1(fixture.input);
-      expect(encodedRes.isOk()).toBe(true);
-      
-      const canonical = encodedRes._unsafeUnwrap();
-      const text = new TextDecoder().decode(canonical as unknown as Uint8Array);
-      
-      const parsed = JSON.parse(text);
-      expect(parsed.tokenKind).toBe('checkpoint');
-      expect(parsed.attemptId).toBeDefined();
-      
-      console.log(`[Golden] token-payload-checkpoint.json → ${text.length} bytes`);
-    });
-  });
+  // Token payloads: Removed (replaced by tests/unit/v2/golden-tokens/ for binary format)
 
   describe('Determinism under replay (100x stress test)', () => {
     it('workflowHash is byte-identical across 100 computations', () => {
@@ -243,23 +192,7 @@ describe('Golden hash fixtures (determinism verification)', () => {
       console.log(`[Determinism] 100x replay → stable ref: ${refs[0]}`);
     });
 
-    it('token payload encoding is byte-identical across 100 computations', () => {
-      const fixture = loadFixture('token-payload-state.json');
-      
-      const encodings: string[] = [];
-      for (let i = 0; i < 100; i++) {
-        const encodedRes = encodeTokenPayloadV1(fixture.input);
-        expect(encodedRes.isOk()).toBe(true);
-        const canonical = encodedRes._unsafeUnwrap();
-        const text = new TextDecoder().decode(canonical as unknown as Uint8Array);
-        encodings.push(text);
-      }
-      
-      const unique = new Set(encodings);
-      expect(unique.size).toBe(1);
-      
-      console.log(`[Determinism] 100x token encoding → ${encodings[0]!.length} bytes, stable`);
-    });
+    // Token payload encoding: Removed (replaced by tests/unit/v2/tokens-property-based.test.ts for binary format)
   });
 
   describe('JCS canonicalization properties', () => {
@@ -417,20 +350,6 @@ describe('Golden hash fixtures (determinism verification)', () => {
       console.log(`[Stress] 1000x snapshotRef → stable: ${Array.from(refs)[0]}`);
     });
 
-    it('1000x token payload encoding is byte-identical', () => {
-      const fixture = loadFixture('token-payload-state.json');
-      
-      const encodings = new Set<string>();
-      for (let i = 0; i < 1000; i++) {
-        const encRes = encodeTokenPayloadV1(fixture.input);
-        expect(encRes.isOk()).toBe(true);
-        const bytes = encRes._unsafeUnwrap();
-        const text = new TextDecoder().decode(bytes as unknown as Uint8Array);
-        encodings.add(text);
-      }
-      
-      expect(encodings.size).toBe(1);
-      console.log(`[Stress] 1000x token encoding → stable: ${encodings.size} unique out of 1000`);
-    });
+    // Token payload encoding: Removed (replaced by tests/unit/v2/tokens-property-based.test.ts for binary format)
   });
 });
