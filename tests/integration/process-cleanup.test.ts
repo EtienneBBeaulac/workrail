@@ -18,7 +18,7 @@ import path from 'path';
 import os from 'os';
 
 describe('Process Cleanup Mechanism', () => {
-  const lockFile = path.join(os.homedir(), '.workrail', 'dashboard.lock');
+  const lockFile = path.join(os.tmpdir(), `workrail-dashboard.${process.pid}.process-cleanup.lock`);
   let sessionManager: SessionManager;
   let httpServer: HttpServer;
   
@@ -37,7 +37,7 @@ describe('Process Cleanup Mechanism', () => {
     // Get instances from DI container
     sessionManager = container.resolve<SessionManager>(DI.Infra.SessionManager);
     httpServer = container.resolve<HttpServer>(DI.Infra.HttpServer);
-    httpServer.setConfig({ autoOpen: false });
+    httpServer.setConfig({ port: 3458, lockFilePath: lockFile, browserBehavior: { kind: 'manual' } });
   });
   
   afterEach(async () => {
@@ -106,7 +106,7 @@ describe('Process Cleanup Mechanism', () => {
       expect(lockData).toHaveProperty('startedAt');
       expect(lockData).toHaveProperty('lastHeartbeat');
       expect(lockData.pid).toBe(process.pid);
-      expect(lockData.port).toBe(3456);
+      expect(lockData.port).toBe(3458);
     }, 30000);
     
     it.skip('should update heartbeat periodically', async () => {
