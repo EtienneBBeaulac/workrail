@@ -38,7 +38,7 @@ describe('v2 workflow ID namespace locks (tests-first)', () => {
   describe('bundled wr.* no-shadow (lock)', () => {
     it('prefers bundled wr.* over higher-priority sources for loadAllWorkflows/listWorkflowSummaries/getWorkflowById', async () => {
       const bundled = new InMemoryWorkflowStorage([def('wr.core', 'Bundled Core')], createBundledSource());
-      const project = new InMemoryWorkflowStorage([def('wr.core', 'Shadow Attempt')], createProjectDirectorySource('/tmp/workrail-project'));
+      const project = new InMemoryWorkflowStorage([def('wr.core', 'Shadow Attempt')], createProjectDirectorySource(path.join(os.tmpdir(), 'workrail-project')));
 
       const storage = new EnhancedMultiSourceWorkflowStorage({
         includeBundled: false,
@@ -65,7 +65,7 @@ describe('v2 workflow ID namespace locks (tests-first)', () => {
 
   describe('schema validating storage: save rejects legacy IDs (no-dot) (lock)', () => {
     it('rejects saving a new legacy ID (no dot) even when schema accepts it', async () => {
-      const inner = new InMemoryWorkflowStorage([], createProjectDirectorySource('/tmp/workrail-project'));
+      const inner = new InMemoryWorkflowStorage([], createProjectDirectorySource(path.join(os.tmpdir(), 'workrail-project')));
       const storage = new SchemaValidatingWorkflowStorage(inner);
 
       // Uses '-' to satisfy current JSON schema id pattern, but is still legacy (no dot).
@@ -73,7 +73,7 @@ describe('v2 workflow ID namespace locks (tests-first)', () => {
     });
 
     it('allows loading legacy IDs (warn-only semantics)', async () => {
-      const inner = new InMemoryWorkflowStorage([def('legacy-id')], createProjectDirectorySource('/tmp/workrail-project'));
+      const inner = new InMemoryWorkflowStorage([def('legacy-id')], createProjectDirectorySource(path.join(os.tmpdir(), 'workrail-project')));
       const storage = new SchemaValidatingWorkflowStorage(inner);
 
       const all = await storage.loadAllWorkflows();

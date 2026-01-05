@@ -5,10 +5,7 @@ import fs from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import os from 'os';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-
-const execAsync = promisify(exec);
+import { gitExec } from '../helpers/git-test-utils.js';
 
 // Test-only storage factory (skips schema validation for test workflows)
 function createTestStorage() {
@@ -60,9 +57,9 @@ describe('🚀 END-TO-END: Complete External Workflows Feature', () => {
       JSON.stringify(workflow, null, 2)
     );
     
-    await execAsync('git add .', { cwd: repoDir });
-    await execAsync('git commit --no-gpg-sign -m "Add workflow"', { cwd: repoDir });
-    await execAsync('git branch -M main', { cwd: repoDir });
+    await gitExec(repoDir, ['add', '.']);
+    await gitExec(repoDir, ['commit', '--no-gpg-sign', '-m', 'Add workflow']);
+    await gitExec(repoDir, ['branch', '-M', 'main']);
   }
 
   beforeAll(async () => {
@@ -242,7 +239,8 @@ describe('🚀 END-TO-END: Complete External Workflows Feature', () => {
           steps: [{ id: 's1', title: 'Step', description: 'Desc', prompt: 'First', expectedOutput: 'out' }]
         }, null, 2)
       );
-      await execAsync('git add . && git commit --no-gpg-sign -m "Add conflict"', { cwd: githubRepo });
+      await gitExec(githubRepo, ['add', '.']);
+      await gitExec(githubRepo, ['commit', '--no-gpg-sign', '-m', 'Add conflict']);
 
       await fs.writeFile(
         path.join(gitlabRepo, 'workflows', `${conflictId}.json`),
@@ -255,7 +253,8 @@ describe('🚀 END-TO-END: Complete External Workflows Feature', () => {
           steps: [{ id: 's1', title: 'Step', description: 'Desc', prompt: 'Second', expectedOutput: 'out' }]
         }, null, 2)
       );
-      await execAsync('git add . && git commit --no-gpg-sign -m "Add conflict"', { cwd: gitlabRepo });
+      await gitExec(gitlabRepo, ['add', '.']);
+      await gitExec(gitlabRepo, ['commit', '--no-gpg-sign', '-m', 'Add conflict']);
 
       process.env = {
         ...originalEnv,

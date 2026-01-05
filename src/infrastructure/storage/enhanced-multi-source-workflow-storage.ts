@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import os from 'os';
+import { fileURLToPath } from 'url';
 import { ICompositeWorkflowStorage, IWorkflowStorage } from '../../types/storage';
 import { 
   Workflow, 
@@ -549,7 +550,15 @@ export function createEnhancedMultiSourceWorkflowStorage(
     if (localFileUrls.length > 0) {
       config.customPaths = config.customPaths || [];
       for (const url of localFileUrls) {
-        const localPath = url.startsWith('file://') ? url.substring(7) : url;
+        const localPath = (() => {
+          if (!url.startsWith('file://')) return url;
+          try {
+            return fileURLToPath(new URL(url));
+          } catch {
+            // Best-effort fallback for malformed file URLs.
+            return url.substring('file://'.length);
+          }
+        })();
         config.customPaths.push(localPath);
         logger.info('Using direct file access for local repository', { localPath });
       }

@@ -11,12 +11,12 @@ import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from
 import { initializeContainer, resetContainer, container } from '../../src/di/container';
 import { DI } from '../../src/di/tokens';
 import { SessionManager } from '../../src/infrastructure/session/SessionManager';
-import { execSync } from 'child_process';
 import fs from 'fs/promises';
 import fsSync from 'fs';
 import path from 'path';
 import os from 'os';
 import { createHash } from 'crypto';
+import { gitExecStdoutSync, gitExecSync } from '../helpers/git-test-utils.js';
 
 /**
  * Test utility: Generate project ID the same way SessionManager does
@@ -33,11 +33,7 @@ function hashProjectPath(projectPath: string): string {
  */
 function findGitRepoRoot(startPath: string): string | null {
   try {
-    const result = execSync('git rev-parse --show-toplevel', {
-      cwd: startPath,
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'ignore']
-    }).trim();
+    const result = gitExecStdoutSync(startPath, ['rev-parse', '--show-toplevel'], { silent: true }).trim();
     return result;
   } catch {
     return null;
@@ -79,21 +75,21 @@ describe('Git Worktree Detection Logic', () => {
     
     // Create initial commit
     await fs.writeFile(path.join(mainRepo, 'README.md'), '# Test');
-    execSync('git add .', { cwd: mainRepo, stdio: 'ignore' });
-    execSync('git commit --no-gpg-sign -m "Initial commit"', { cwd: mainRepo, stdio: 'ignore' });
+    gitExecSync(mainRepo, ['add', '.'], { silent: true });
+    gitExecSync(mainRepo, ['commit', '--no-gpg-sign', '-m', 'Initial commit'], { silent: true });
     
     // Create worktrees
-    execSync(`git worktree add ${worktree1} -b feature`, { cwd: mainRepo, stdio: 'ignore' });
-    execSync(`git worktree add ${worktree2} -b hotfix`, { cwd: mainRepo, stdio: 'ignore' });
+    gitExecSync(mainRepo, ['worktree', 'add', worktree1, '-b', 'feature'], { silent: true });
+    gitExecSync(mainRepo, ['worktree', 'add', worktree2, '-b', 'hotfix'], { silent: true });
   });
   
   afterEach(async () => {
     // Clean up
     try {
       // Remove worktrees first
-      execSync('git worktree remove --force ' + worktree1, { cwd: mainRepo, stdio: 'ignore' });
-      execSync('git worktree remove --force ' + worktree2, { cwd: mainRepo, stdio: 'ignore' });
-      execSync('git worktree prune', { cwd: mainRepo, stdio: 'ignore' });
+      gitExecSync(mainRepo, ['worktree', 'remove', '--force', worktree1], { silent: true });
+      gitExecSync(mainRepo, ['worktree', 'remove', '--force', worktree2], { silent: true });
+      gitExecSync(mainRepo, ['worktree', 'prune'], { silent: true });
     } catch {}
     
     try {
@@ -160,7 +156,7 @@ describe('Git Worktree Detection Logic', () => {
   it('should generate different project IDs for different repos', async () => {
     const otherRepo = path.join(tempDir, 'other-repo');
     await fs.mkdir(otherRepo, { recursive: true });
-    execSync('git init', { cwd: otherRepo, stdio: 'ignore' });
+    gitExecSync(otherRepo, ['init'], { silent: true });
     
     const id1 = hashProjectPath(mainRepo);
     const id2 = hashProjectPath(otherRepo);
@@ -183,7 +179,7 @@ describe('Project ID Generation', () => {
   });
   
   it('should normalize paths with trailing slashes', () => {
-    const testPath = '/tmp/test-project-normalize';
+    const testPath = path.join(os.tmpdir(), 'test-project-normalize');
     
     const id1 = hashProjectPath(testPath);
     const id2 = hashProjectPath(testPath + '/');
@@ -193,7 +189,7 @@ describe('Project ID Generation', () => {
   });
   
   it('should generate 12-character hex project IDs', () => {
-    const projectId = hashProjectPath('/tmp/test');
+    const projectId = hashProjectPath(path.join(os.tmpdir(), 'test'));
     
     expect(projectId).toMatch(/^[a-f0-9]{12}$/);
     expect(projectId.length).toBe(12);

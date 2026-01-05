@@ -42,7 +42,7 @@ async function mkCtxWithWorkflow(workflowId: string): Promise<ToolContext> {
       version: '0.1.0',
       steps: [{ id: 'triage', title: 'Triage', prompt: 'Do triage' }],
     } as any,
-    createProjectDirectorySource('/tmp/project')
+    createProjectDirectorySource(path.join(os.tmpdir(), 'workrail-project'))
   );
 
   // Create v2 dependencies using same pattern as production

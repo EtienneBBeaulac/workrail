@@ -10,6 +10,7 @@ import { runTokenCallsMod } from './mods/token-calls';
 import { runV2ContextsMod } from './mods/v2-contexts';
 import { runV2PruneMod } from './mods/v2-prune';
 import { runGuardMod } from './mods/guard';
+import { runTestPlatformGuardMod } from './mods/test-platform-guard';
 
 function parseArgs(argv: readonly string[]) {
   const args = argv.slice(2);
@@ -60,9 +61,12 @@ async function main() {
     case 'guard':
       await runGuardMod({ project });
       return;
-    default:
-      fatal(`Unknown --mod '${parsed.mod}'. Supported: report, token-calls, v2-contexts, v2-prune, guard`);
-  }
+    case 'test-platform-guard':
+      await runTestPlatformGuardMod({ project });
+      return;
+default:
+      fatal(`Unknown --mod '${parsed.mod}'. Supported: report, token-calls, v2-contexts, v2-prune, guard, test-platform-guard`);
+}
 }
 
 void main();

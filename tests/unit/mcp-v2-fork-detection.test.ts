@@ -44,7 +44,7 @@ async function mkCtxWithWorkflow(workflowId: string, dataDir: string): Promise<T
         { id: 'step2', title: 'Step 2', prompt: 'Do step 2' },
       ],
     } as any,
-    createProjectDirectorySource('/tmp/project')
+    createProjectDirectorySource(path.join(os.tmpdir(), 'workrail-project'))
   );
 
   const dataDirV2 = new LocalDataDirV2({ WORKRAIL_DATA_DIR: dataDir });

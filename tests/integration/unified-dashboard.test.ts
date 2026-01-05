@@ -70,7 +70,7 @@ describe('Unified Dashboard - Primary/Secondary Pattern', () => {
       startedAt: new Date(Date.now() - 3 * 60 * 1000).toISOString(), // 3 minutes ago
       lastHeartbeat: new Date(Date.now() - 3 * 60 * 1000).toISOString(),
       projectId: 'test',
-      projectPath: '/tmp/test'
+      projectPath: path.join(os.tmpdir(), 'workrail-test')
     };
     
     await fs.mkdir(path.dirname(lockFile), { recursive: true });

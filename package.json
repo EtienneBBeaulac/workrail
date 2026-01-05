@@ -61,7 +61,8 @@
     "codemod:token-calls": "npx ts-node scripts/codemods/run.ts --mod token-calls --tsconfig tsconfig.test.json --write",
     "codemod:v2-contexts": "npx ts-node scripts/codemods/run.ts --mod v2-contexts --tsconfig tsconfig.test.json --write",
     "codemod:v2-prune": "npx ts-node scripts/codemods/run.ts --mod v2-prune --tsconfig tsconfig.test.json --write",
-    "codemod:guard": "npx ts-node scripts/codemods/run.ts --mod guard --tsconfig tsconfig.test.json"
+    "codemod:guard": "npx ts-node scripts/codemods/run.ts --mod guard --tsconfig tsconfig.test.json",
+    "codemod:test-platform-guard": "npx ts-node scripts/codemods/run.ts --mod test-platform-guard --tsconfig tsconfig.test.json"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.24.0",

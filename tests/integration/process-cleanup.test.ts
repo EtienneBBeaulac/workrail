@@ -139,7 +139,7 @@ describe('Process Cleanup Mechanism', () => {
         startedAt: new Date(Date.now() - 3 * 60 * 1000).toISOString(), // 3 minutes ago
         lastHeartbeat: new Date(Date.now() - 3 * 60 * 1000).toISOString(),
         projectId: 'test-project',
-        projectPath: '/tmp/test'
+        projectPath: path.join(os.tmpdir(), 'workrail-test')
       };
       
       await fs.mkdir(path.dirname(lockFile), { recursive: true });

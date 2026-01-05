@@ -4,10 +4,7 @@ import fs from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import os from 'os';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-
-const execAsync = promisify(exec);
+import { gitExec } from '../helpers/git-test-utils.js';
 
 /**
  * End-to-end tests for external workflow feature
@@ -37,9 +34,9 @@ describe('External Workflows E2E', () => {
   async function createTestRepo(repoDir: string, workflowId: string, workflowName: string) {
     await fs.mkdir(path.join(repoDir, 'workflows'), { recursive: true });
     
-    await execAsync('git init', { cwd: repoDir });
-    await execAsync('git config user.email "test@test.com"', { cwd: repoDir });
-    await execAsync('git config user.name "Test"', { cwd: repoDir });
+    await gitExec(repoDir, ['init']);
+    await gitExec(repoDir, ['config', 'user.email', 'test@test.com']);
+    await gitExec(repoDir, ['config', 'user.name', 'Test']);
     
     const workflow = {
       id: workflowId,
@@ -60,9 +57,9 @@ describe('External Workflows E2E', () => {
       JSON.stringify(workflow, null, 2)
     );
     
-    await execAsync('git add .', { cwd: repoDir });
-    await execAsync('git commit --no-gpg-sign -m "Initial commit"', { cwd: repoDir });
-    await execAsync('git branch -M main', { cwd: repoDir });
+    await gitExec(repoDir, ['add', '.']);
+    await gitExec(repoDir, ['commit', '--no-gpg-sign', '-m', 'Initial commit']);
+    await gitExec(repoDir, ['branch', '-M', 'main']);
   }
 
   describe('Complete Workflow Flow', () => {
@@ -102,7 +99,8 @@ describe('External Workflows E2E', () => {
         path.join(repo1Dir, 'workflows', 'conflict-test.json'),
         JSON.stringify(conflictWorkflow, null, 2)
       );
-      await execAsync('git add . && git commit --no-gpg-sign -m "Add conflict"', { cwd: repo1Dir });
+      await gitExec(repo1Dir, ['add', '.']);
+      await gitExec(repo1Dir, ['commit', '--no-gpg-sign', '-m', 'Add conflict']);
 
       const conflictWorkflow2 = {
         ...conflictWorkflow,
@@ -114,7 +112,8 @@ describe('External Workflows E2E', () => {
         path.join(repo2Dir, 'workflows', 'conflict-test.json'),
         JSON.stringify(conflictWorkflow2, null, 2)
       );
-      await execAsync('git add . && git commit --no-gpg-sign -m "Add conflict"', { cwd: repo2Dir });
+      await gitExec(repo2Dir, ['add', '.']);
+      await gitExec(repo2Dir, ['commit', '--no-gpg-sign', '-m', 'Add conflict']);
 
       const originalEnv = process.env;
       process.env = {

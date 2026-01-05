@@ -4,10 +4,8 @@ import fs from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import os from 'os';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-
-const execAsync = promisify(exec);
+import { toFileUrl } from '../helpers/platform.js';
+import { gitExec } from '../helpers/git-test-utils.js';
 
 /**
  * Test that GitWorkflowStorage handles repos with 'master' branch (not 'main')
@@ -23,9 +21,9 @@ describe('GitWorkflowStorage - Master Branch Support', () => {
     await fs.mkdir(path.join(testRepoDir, 'workflows'), { recursive: true });
     
     // Initialize Git repo
-    await execAsync('git init', { cwd: testRepoDir });
-    await execAsync('git config user.email "test@test.com"', { cwd: testRepoDir });
-    await execAsync('git config user.name "Test User"', { cwd: testRepoDir });
+    await gitExec(testRepoDir, ['init']);
+    await gitExec(testRepoDir, ['config', 'user.email', 'test@test.com']);
+    await gitExec(testRepoDir, ['config', 'user.name', 'Test User']);
     
     // Create a workflow
     const testWorkflow = {
@@ -58,8 +56,8 @@ describe('GitWorkflowStorage - Master Branch Support', () => {
     );
     
     // Commit on master branch (Git's old default)
-    await execAsync('git add .', { cwd: testRepoDir });
-    await execAsync('git commit --no-gpg-sign -m "Add test workflow"', { cwd: testRepoDir });
+    await gitExec(testRepoDir, ['add', '.']);
+    await gitExec(testRepoDir, ['commit', '--no-gpg-sign', '-m', 'Add test workflow']);
     // Don't rename to main - keep it as master to test the fallback
   });
 
@@ -74,7 +72,7 @@ describe('GitWorkflowStorage - Master Branch Support', () => {
 
   it('should auto-detect and clone master branch when main is not found', async () => {
     const storage = new GitWorkflowStorage({
-      repositoryUrl: `file://${testRepoDir}`,
+      repositoryUrl: toFileUrl(testRepoDir),
       branch: 'main', // Request main, but repo only has master
       localPath: path.join(cacheDir, 'master-test'),
       skipSandboxCheck: true
@@ -89,7 +87,7 @@ describe('GitWorkflowStorage - Master Branch Support', () => {
 
   it('should work with explicit master branch specification', async () => {
     const storage = new GitWorkflowStorage({
-      repositoryUrl: `file://${testRepoDir}`,
+      repositoryUrl: toFileUrl(testRepoDir),
       branch: 'master', // Explicitly request master
       localPath: path.join(cacheDir, 'master-test-explicit'),
       skipSandboxCheck: true
