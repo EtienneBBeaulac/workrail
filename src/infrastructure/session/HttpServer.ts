@@ -1016,12 +1016,20 @@ export class HttpServer {
         
         return output.split('\n').filter(Boolean).map(line => {
           const parts = line.trim().split(/\s+/);
+          // Only consider listening sockets; other states can have pid=0 which is unsafe to kill.
+          const state = parts[3] || '';
           const address = parts[1] || '';
           const pid = parseInt(parts[4]);
           const portMatch = address.match(/:(\d+)$/);
           const port = portMatch ? parseInt(portMatch[1]) : 0;
-          return { port, pid };
-        }).filter(item => item.port >= 3456 && item.port < 3500 && !isNaN(item.pid));
+          return { port, pid, state };
+        }).filter(item =>
+          item.state === 'LISTENING' &&
+          item.port >= 3456 &&
+          item.port < 3500 &&
+          !isNaN(item.pid) &&
+          item.pid > 0
+        ).map(({ port, pid }) => ({ port, pid }));
       }
       
       return [];
