@@ -230,6 +230,7 @@ describe('v2 replay fail-closed: missing snapshot', () => {
 
       const localBase64url = new NodeBase64UrlV2();
       const entropy = new NodeRandomEntropyV2();
+      const base32 = new Base32AdapterV2();
       const bech32m = new Bech32mAdapterV2();
       const v2 = {
         gate,
@@ -246,6 +247,7 @@ describe('v2 replay fail-closed: missing snapshot', () => {
         crypto,
         hmac: new NodeHmacSha256V2(),
         base64url: localBase64url,
+        base32,
         bech32m,
         idFactory: new IdFactoryV2(entropy),
       };

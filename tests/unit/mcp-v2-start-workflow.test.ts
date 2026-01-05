@@ -88,6 +88,7 @@ async function mkCtxWithWorkflow(workflowId: string): Promise<ToolContext> {
       crypto,
       hmac,
       base64url,
+      base32,
       bech32m,
       idFactory,
     },
