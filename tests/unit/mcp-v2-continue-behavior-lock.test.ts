@@ -293,7 +293,7 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
       workflowHashRef: String(wfRef),
     };
 
-    const token = signTokenV1Binary(payload, v2.keyring, v2.hmac, v2.base64url, v2.bech32m)._unsafeUnwrap();
+    const token = signTokenV1Binary(payload, v2.keyring, v2.hmac, v2.base64url, v2.bech32m, v2.base32)._unsafeUnwrap();
 
     const res = await handleV2ContinueWorkflow({ stateToken: token } as any, ctx);
     expect(res.type).toBe('error');

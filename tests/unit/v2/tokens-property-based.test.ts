@@ -105,7 +105,7 @@ describe('Property-based: binary token encoding', () => {
           expect(unpacked.isOk()).toBe(true);
           if (unpacked.isErr()) return;
 
-          const packed2 = packStateTokenPayload(unpacked.value as StateTokenPayloadV1);
+          const packed2 = packStateTokenPayload(unpacked.value as StateTokenPayloadV1, base32);
           expect(packed2.isOk()).toBe(true);
           if (packed2.isErr()) return;
 
@@ -203,8 +203,8 @@ describe('Property-based: binary token encoding', () => {
             return;
           }
 
-          const packed1 = packStateTokenPayload(p1);
-          const packed2 = packStateTokenPayload(p2);
+          const packed1 = packStateTokenPayload(p1, base32);
+          const packed2 = packStateTokenPayload(p2, base32);
 
           expect(packed1.isOk()).toBe(true);
           expect(packed2.isOk()).toBe(true);

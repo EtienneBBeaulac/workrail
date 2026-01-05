@@ -130,7 +130,7 @@ describe('Binary payload serialization', () => {
 
   it('packs ack token payload to 66 bytes', () => {
     const payload = createTestAckPayload();
-    const result = packAckTokenPayload(payload);
+    const result = packAckTokenPayload(payload, base32);
 
     expect(result.isOk()).toBe(true);
     if (result.isOk()) {
@@ -142,7 +142,7 @@ describe('Binary payload serialization', () => {
 
   it('packs checkpoint token payload to 66 bytes', () => {
     const payload = createTestCheckpointPayload();
-    const result = packCheckpointTokenPayload(payload);
+    const result = packCheckpointTokenPayload(payload, base32);
 
     expect(result.isOk()).toBe(true);
     if (result.isOk()) {
@@ -172,10 +172,10 @@ describe('Binary payload serialization', () => {
 
   it('roundtrips pack -> unpack for ack token', () => {
     const payload = createTestAckPayload();
-    const packed = packAckTokenPayload(payload);
+    const packed = packAckTokenPayload(payload, base32);
     expect(packed.isOk()).toBe(true);
 
-    const unpacked = unpackTokenPayload(packed._unsafeUnwrap());
+    const unpacked = unpackTokenPayload(packed._unsafeUnwrap(), base32);
     expect(unpacked.isOk()).toBe(true);
 
     if (unpacked.isOk()) {
