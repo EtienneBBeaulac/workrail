@@ -14,6 +14,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { existsSync } from 'fs';
 import os from 'os';
+import { pathToFileURL } from 'url';
 import { 
   sanitizeId, 
   assertWithinBase, 
@@ -301,20 +302,39 @@ export class GitWorkflowStorage implements IWorkflowStorage {
     await fs.mkdir(parentDir, { recursive: true });
     
     let cloneUrl = this.config.repositoryUrl;
+    // Local repositories should be cloned via file:// URL to avoid platform-specific path parsing.
+    // This also avoids shell-quoting issues when invoked on Windows runners.
+    if (!cloneUrl.includes('://')) {
+      const abs = path.resolve(cloneUrl);
+      cloneUrl = pathToFileURL(abs).href;
+    } else if (cloneUrl.startsWith('file://') && process.platform === 'win32') {
+      // Normalize `file://C:\...` into a proper file URL if any caller passes it in a Windows-native form.
+      // (Correct form is file:///C:/...)
+      try {
+        const raw = cloneUrl.substring('file://'.length);
+        if (/^[a-zA-Z]:[\\/]/.test(raw)) {
+          cloneUrl = pathToFileURL(path.resolve(raw)).href;
+        }
+      } catch {
+        // Leave as-is; git will surface any errors and tests will fail deterministically.
+      }
+    }
     
     if (!this.isSshUrl(this.config.repositoryUrl) && this.config.authToken && cloneUrl.startsWith('https://')) {
       cloneUrl = cloneUrl.replace('https://', `https://${this.config.authToken}@`);
     }
     
     try {
-      await execFileAsync('git', ['clone', '--branch', this.config.branch, cloneUrl, this.localPath], { timeout: 60000 });
+      const dest = process.platform === 'win32' ? this.localPath.replace(/\\/g, '/') : this.localPath;
+      await execFileAsync('git', ['clone', '--branch', this.config.branch, cloneUrl, dest], { timeout: 60000 });
       logger.info('Successfully cloned repository', { branch: this.config.branch });
     } catch (error) {
       const errorMsg = (error as Error).message;
       
       if (errorMsg.includes('Remote branch') && errorMsg.includes('not found')) {
         try {
-          await execFileAsync('git', ['clone', cloneUrl, this.localPath], { timeout: 60000 });
+          const dest = process.platform === 'win32' ? this.localPath.replace(/\\/g, '/') : this.localPath;
+          await execFileAsync('git', ['clone', cloneUrl, dest], { timeout: 60000 });
           const { stdout } = await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: this.localPath });
           this.config.branch = stdout.trim();
         } catch (fallbackError) {
