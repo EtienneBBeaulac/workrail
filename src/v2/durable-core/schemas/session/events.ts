@@ -416,6 +416,15 @@ export const DomainEventV1Schema = z.discriminatedUnion('kind', [
     data: GapRecordedDataV1Schema,
   }),
   DomainEventEnvelopeV1Schema.extend({
+    kind: z.literal('context_set'),
+    scope: z.object({ runId: z.string().min(1) }),
+    data: z.object({
+      contextId: z.string().min(1),
+      context: JsonValueSchema,
+      source: z.enum(['initial', 'agent_delta']),
+    }),
+  }),
+  DomainEventEnvelopeV1Schema.extend({
     kind: z.literal('divergence_recorded'),
     scope: z.object({ runId: z.string().min(1), nodeId: z.string().min(1) }),
     data: z.object({

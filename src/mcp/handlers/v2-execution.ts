@@ -56,11 +56,21 @@ import {
 import { toNotesMarkdownV1 } from '../../v2/durable-core/domain/notes-markdown.js';
 import { normalizeOutputsForAppend } from '../../v2/durable-core/domain/outputs.js';
 import { buildAckAdvanceAppendPlanV1 } from '../../v2/durable-core/domain/ack-advance-append-plan.js';
+import { detectBlockingReasonsV1 } from '../../v2/durable-core/domain/blocking-decision.js';
+import { buildBlockerReport, shouldBlock, reasonToGap } from '../../v2/durable-core/domain/reason-model.js';
+import { getOutputRequirementStatusV1 } from '../../v2/durable-core/domain/validation-criteria-validator.js';
+import { projectPreferencesV2 } from '../../v2/projections/preferences.js';
+import { projectRunContextV2 } from '../../v2/projections/run-context.js';
+import { mergeContext } from '../../v2/durable-core/domain/context-merge.js';
+import { renderPendingPrompt } from '../../v2/durable-core/domain/prompt-renderer.js';
 import { createBundledSource } from '../../types/workflow-source.js';
 import type { WorkflowDefinition } from '../../types/workflow-definition.js';
 import { hasWorkflowDefinitionShape } from '../../types/workflow-definition.js';
 import { WorkflowCompiler } from '../../application/services/workflow-compiler.js';
 import { WorkflowInterpreter } from '../../application/services/workflow-interpreter.js';
+import { ValidationEngine } from '../../application/services/validation-engine.js';
+import { EnhancedLoopValidator } from '../../application/services/enhanced-loop-validator.js';
+import type { ValidationResult } from '../../types/validation.js';
 import type { ExecutionState, LoopFrame } from '../../domain/execution/state.js';
 import type { WorkflowEvent } from '../../domain/execution/event.js';
 import type { StepInstanceId } from '../../domain/execution/ids.js';
@@ -426,14 +436,35 @@ function replayFromRecordedAdvance(args: {
       const pendingNow = snap ? derivePendingStep(snap.enginePayload.engineState) : null;
       const isCompleteNow = snap ? deriveIsComplete(snap.enginePayload.engineState) : false;
 
+      // S9: Use renderPendingPrompt (no recovery for replay; fact-returning)
+      const meta = pendingNow
+        ? renderPendingPrompt({
+            workflow: pinnedWorkflow,
+            stepId: String(pendingNow.stepId),
+            loopPath: pendingNow.loopPath,
+            truth,
+            runId: asRunId(String(runId)),
+            nodeId: asNodeId(String(nodeId)),
+            rehydrateOnly: false,
+          }).unwrapOr({
+            stepId: String(pendingNow.stepId),
+            title: String(pendingNow.stepId),
+            prompt: `Pending step: ${String(pendingNow.stepId)}`,
+            requireConfirmation: false,
+          })
+        : null;
+
+      const preferences = derivePreferencesForNode({ truth, runId, nodeId });
+      const nextIntent = deriveNextIntent({ rehydrateOnly: false, isComplete: isCompleteNow, pending: meta });
+
       return V2ContinueWorkflowOutputSchema.parse({
         kind: 'blocked',
         stateToken: inputStateToken,
         ackToken: inputAckToken,
         isComplete: isCompleteNow,
-        pending: pendingNow
-          ? { stepId: String(pendingNow.stepId), title: String(pendingNow.stepId), prompt: `Pending step: ${String(pendingNow.stepId)}` }
-          : null,
+        pending: meta ? { stepId: meta.stepId, title: meta.title, prompt: meta.prompt } : null,
+        preferences,
+        nextIntent,
         blockers,
       });
     });
@@ -491,7 +522,26 @@ function replayFromRecordedAdvance(args: {
         return neErrorAsync({ kind: 'token_signing_failed' as const, cause: nextStateTokenRes.error });
       }
 
-      const { stepId, title, prompt } = extractStepMetadata(pinnedWorkflow, pending ? String(pending.stepId) : null);
+      // S9: Use renderPendingPrompt (no recovery for replay; fact-returning)
+      const meta = pending
+        ? renderPendingPrompt({
+            workflow: pinnedWorkflow,
+            stepId: String(pending.stepId),
+            loopPath: pending.loopPath,
+            truth,
+            runId: asRunId(String(runId)),
+            nodeId: asNodeId(String(toNodeIdBranded)),
+            rehydrateOnly: false,
+          }).unwrapOr({
+            stepId: String(pending.stepId),
+            title: String(pending.stepId),
+            prompt: `Pending step: ${String(pending.stepId)}`,
+            requireConfirmation: false,
+          })
+        : { stepId: '', title: '', prompt: '', requireConfirmation: false };
+
+      const preferences = derivePreferencesForNode({ truth, runId, nodeId: toNodeIdBranded });
+      const nextIntent = deriveNextIntent({ rehydrateOnly: false, isComplete, pending: pending ? meta : null });
 
       return okAsync(
         V2ContinueWorkflowOutputSchema.parse({
@@ -499,7 +549,9 @@ function replayFromRecordedAdvance(args: {
           stateToken: nextStateTokenRes.value,
           ackToken: pending ? nextAckTokenRes.value : undefined,
           isComplete,
-          pending: stepId ? { stepId, title, prompt } : null,
+          pending: pending ? { stepId: meta.stepId, title: meta.title, prompt: meta.prompt } : null,
+          preferences,
+          nextIntent,
         })
       );
     });
@@ -562,21 +614,152 @@ function advanceAndRecord(args: {
     if (!pendingStep) {
       return errAsync({ kind: 'no_pending_step' as const });
     }
-    const event: WorkflowEvent = { kind: 'step_completed', stepInstanceId: pendingStep };
-    const advanced = interpreter.applyEvent(currentState, event);
-    if (advanced.isErr()) {
-      return errAsync({ kind: 'advance_apply_failed', message: advanced.error.message } as const);
-    }
-    const ctxObj: Record<string, unknown> =
+    // S8: Auto-load stored context from context_set events, merge with input delta
+    const storedContextRes = projectRunContextV2(truth.events);
+    const storedContext = storedContextRes.isOk() ? storedContextRes.value.byRunId[String(runId)]?.context : undefined;
+    
+    const inputContextObj =
       inputContext && typeof inputContext === 'object' && inputContext !== null && !Array.isArray(inputContext)
-        ? (inputContext as unknown as Record<string, unknown>)
-        : {};
-    const nextRes = interpreter.next(compiledWf.value, advanced.value, ctxObj);
-    if (nextRes.isErr()) {
-      return errAsync({ kind: 'advance_next_failed', message: nextRes.error.message } as const);
+        ? (inputContext as JsonObject)
+        : undefined;
+    
+    const mergedContextRes = mergeContext(storedContext, inputContextObj);
+    if (mergedContextRes.isErr()) {
+      return errAsync({
+        kind: 'invariant_violation' as const,
+        message: `Context merge failed: ${mergedContextRes.error.message}`,
+      });
     }
+    
+    const ctxObj = mergedContextRes.value as Record<string, unknown>;
 
-    const out = nextRes.value;
+    const step = getStepById(pinnedWorkflow, String(pendingStep.stepId)) as unknown as Record<string, unknown> | null;
+    const validationCriteria = step && typeof step === 'object' && step !== null ? (step.validationCriteria as any) : undefined;
+
+    const notesMarkdown = inputOutput?.notesMarkdown;
+    const validator = validationCriteria ? new ValidationEngine(new EnhancedLoopValidator()) : null;
+
+    const validationRes: RA<ValidationResult | undefined, InternalError> =
+      validator && notesMarkdown
+        ? RA.fromPromise(
+            validator.validate(notesMarkdown, validationCriteria as any, ctxObj as any),
+            (cause) => ({ kind: 'advance_apply_failed' as const, message: String(cause) } as const)
+          )
+        : okAsync(undefined);
+
+    return validationRes.andThen((validation: ValidationResult | undefined) => {
+      const outputRequirement = getOutputRequirementStatusV1({
+        validationCriteria,
+        notesMarkdown,
+        validation,
+      });
+
+      const reasonsRes = detectBlockingReasonsV1({ outputRequirement });
+      if (reasonsRes.isErr()) {
+        return errAsync({ kind: 'invariant_violation' as const, message: reasonsRes.error.message } as const);
+      }
+
+      const reasons = reasonsRes.value;
+
+      // Derive autonomy from durable preferences snapshot (defaults to guided).
+      const parentByNodeId: Record<string, string | null> = {};
+      for (const e of truth.events) {
+        if (e.kind !== 'node_created') continue;
+        if (e.scope?.runId !== String(runId)) continue;
+        parentByNodeId[String(e.scope.nodeId)] = e.data.parentNodeId;
+      }
+
+      const prefs = projectPreferencesV2(truth.events, parentByNodeId);
+      const autonomy = prefs.isOk() ? prefs.value.byNodeId[String(nodeId)]?.effective.autonomy ?? 'guided' : 'guided';
+
+      // If there are any reasons that would block, either:
+      // - block (guided / stop-on-user-deps)
+      // - record gap(s) and continue (never-stop)
+      const shouldBlockNow = reasons.length > 0 && shouldBlock(autonomy, reasons);
+
+      if (shouldBlockNow) {
+        const blockersRes = buildBlockerReport(reasons);
+        if (blockersRes.isErr()) {
+          return errAsync({ kind: 'invariant_violation' as const, message: blockersRes.error.message } as const);
+        }
+
+        const nextEventIndex = truth.events.length === 0 ? 0 : truth.events[truth.events.length - 1]!.eventIndex + 1;
+        const evtAdvanceRecorded = idFactory.mintEventId();
+
+        const planRes = buildAckAdvanceAppendPlanV1({
+          sessionId: String(sessionId),
+          runId: String(runId),
+          fromNodeId: String(nodeId),
+          workflowHash,
+          attemptId: String(attemptId),
+          nextEventIndex,
+          outcome: { kind: 'blocked', blockers: blockersRes.value },
+          minted: { advanceRecordedEventId: evtAdvanceRecorded },
+        });
+        if (planRes.isErr()) return errAsync({ kind: 'invariant_violation' as const, message: planRes.error.message });
+
+        return sessionStore.append(lock, planRes.value);
+      }
+
+      const allowNotesAppend = validationCriteria
+        ? Boolean(notesMarkdown && validation && validation.valid)
+        : Boolean(notesMarkdown);
+
+      const gapEventsToAppend: readonly Omit<DomainEventV1, 'eventIndex' | 'sessionId'>[] =
+        autonomy === 'full_auto_never_stop' && reasons.length > 0
+          ? reasons.map((r, idx) => {
+              const g = reasonToGap(r);
+              const gapId = `gap_${String(attemptId)}_${idx}`;
+              return {
+                v: 1 as const,
+                eventId: idFactory.mintEventId(),
+                kind: 'gap_recorded' as const,
+                dedupeKey: `gap_recorded:${String(sessionId)}:${gapId}`,
+                scope: { runId: String(runId), nodeId: String(nodeId) },
+                data: {
+                  gapId,
+                  severity: g.severity,
+                  reason: g.reason,
+                  summary: g.summary,
+                  resolution: { kind: 'unresolved' as const },
+                },
+              };
+            })
+          : [];
+
+      // S8: Emit context_set if input delta provided
+      const contextSetEvents: readonly Omit<DomainEventV1, 'eventIndex' | 'sessionId'>[] =
+        inputContextObj
+          ? [
+              {
+                v: 1 as const,
+                eventId: idFactory.mintEventId(),
+                kind: 'context_set' as const,
+                dedupeKey: `context_set:${String(sessionId)}:${String(runId)}:${idFactory.mintEventId()}`,
+                scope: { runId: String(runId) },
+                data: {
+                  contextId: idFactory.mintEventId(),
+                  context: mergedContextRes.value as unknown as JsonValue,
+                  source: 'agent_delta' as const,
+                },
+              } as Omit<DomainEventV1, 'eventIndex' | 'sessionId'>,
+            ]
+          : [];
+
+      const extraEventsToAppend = [...gapEventsToAppend, ...contextSetEvents];
+
+      const event: WorkflowEvent = { kind: 'step_completed', stepInstanceId: pendingStep };
+      const advanced = interpreter.applyEvent(currentState, event);
+      if (advanced.isErr()) {
+        return errAsync({ kind: 'advance_apply_failed', message: advanced.error.message } as const);
+      }
+
+      const nextRes = interpreter.next(compiledWf.value, advanced.value, ctxObj);
+      if (nextRes.isErr()) {
+        return errAsync({ kind: 'advance_next_failed', message: nextRes.error.message } as const);
+      }
+
+      const out = nextRes.value;
     const newEngineState = fromV1ExecutionState(out.state);
     const snapshotFile: ExecutionSnapshotFileV1 = {
       v: 1,
@@ -600,7 +783,7 @@ function advanceAndRecord(args: {
 
       const outputId = asOutputId(`out_recap_${String(attemptId)}`);
       const outputsToAppend =
-        inputOutput?.notesMarkdown
+        allowNotesAppend && inputOutput?.notesMarkdown
           ? [
               {
                 outputId: String(outputId),
@@ -623,6 +806,7 @@ function advanceAndRecord(args: {
         workflowHash,
         attemptId: String(attemptId),
         nextEventIndex,
+        extraEventsToAppend,
         toNodeId,
         snapshotRef: newSnapshotRef,
         causeKind,
@@ -637,6 +821,7 @@ function advanceAndRecord(args: {
       if (planRes.isErr()) return errAsync({ kind: 'invariant_violation' as const, message: planRes.error.message });
 
       return sessionStore.append(lock, planRes.value);
+    });
     });
   });
 }
@@ -657,6 +842,7 @@ interface StepMetadata {
   readonly stepId: string;
   readonly title: string;
   readonly prompt: string;
+  readonly requireConfirmation: boolean;
 }
 
 function extractStepMetadata(
@@ -682,7 +868,46 @@ function extractStepMetadata(
     ? String((step as unknown as Record<string, unknown>).prompt)
     : options?.defaultPrompt ?? (stepId ? `Pending step: ${stepId}` : '');
 
-  return { stepId: resolvedStepId, title, prompt };
+  const requireConfirmation =
+    typeof step === 'object' && step !== null && 'requireConfirmation' in step
+      ? Boolean((step as unknown as Record<string, unknown>).requireConfirmation)
+      : false;
+
+  return { stepId: resolvedStepId, title, prompt, requireConfirmation };
+}
+
+type NextIntentV2 = 'perform_pending_then_continue' | 'await_user_confirmation' | 'rehydrate_only' | 'complete';
+
+type PreferencesV2 = { readonly autonomy: 'guided' | 'full_auto_stop_on_user_deps' | 'full_auto_never_stop'; readonly riskPolicy: 'conservative' | 'balanced' | 'aggressive' };
+
+const defaultPreferences: PreferencesV2 = { autonomy: 'guided', riskPolicy: 'conservative' };
+
+function derivePreferencesForNode(args: { readonly truth: LoadedSessionTruthV2; readonly runId: RunId; readonly nodeId: NodeId }): PreferencesV2 {
+  const parentByNodeId: Record<string, string | null> = {};
+  for (const e of args.truth.events) {
+    if (e.kind !== 'node_created') continue;
+    if (e.scope?.runId !== String(args.runId)) continue;
+    parentByNodeId[String(e.scope.nodeId)] = e.data.parentNodeId;
+  }
+
+  const prefs = projectPreferencesV2(args.truth.events, parentByNodeId);
+  if (prefs.isErr()) return defaultPreferences;
+
+  const p = prefs.value.byNodeId[String(args.nodeId)]?.effective;
+  if (!p) return defaultPreferences;
+
+  return { autonomy: p.autonomy, riskPolicy: p.riskPolicy };
+}
+
+function deriveNextIntent(args: {
+  readonly rehydrateOnly: boolean;
+  readonly isComplete: boolean;
+  readonly pending: StepMetadata | null;
+}): NextIntentV2 {
+  if (args.isComplete && !args.pending) return 'complete';
+  if (args.rehydrateOnly) return 'rehydrate_only';
+  if (!args.pending) return 'complete';
+  return args.pending.requireConfirmation ? 'await_user_confirmation' : 'perform_pending_then_continue';
 }
 
 function internalError(message: string, suggestion?: string): ToolFailure {
@@ -1010,7 +1235,12 @@ function executeStartWorkflow(
           const evtNodeCreated = idFactory.mintEventId();
 
           return gate.withHealthySessionLock(sessionId, (lock) => {
-            const eventsArray: readonly DomainEventV1[] = [
+            const evtPreferencesChanged = idFactory.mintEventId();
+            const changeId = idFactory.mintEventId();
+            const evtContextSet = idFactory.mintEventId();
+            const contextId = idFactory.mintEventId();
+
+            const baseEvents: DomainEventV1[] = [
               {
                 v: 1,
                 eventId: evtSessionCreated,
@@ -1059,7 +1289,50 @@ function executeStartWorkflow(
                   snapshotRef,
                 },
               },
+              {
+                v: 1,
+                eventId: evtPreferencesChanged,
+                eventIndex: 3,
+                sessionId,
+                kind: 'preferences_changed' as const,
+                dedupeKey: `preferences_changed:${sessionId}:${runId}:${nodeId}:${changeId}`,
+                scope: { runId, nodeId },
+                data: {
+                  changeId,
+                  source: 'system' as const,
+                  delta: [
+                    { key: 'autonomy' as const, value: defaultPreferences.autonomy },
+                    { key: 'riskPolicy' as const, value: defaultPreferences.riskPolicy },
+                  ],
+                  effective: {
+                    autonomy: defaultPreferences.autonomy,
+                    riskPolicy: defaultPreferences.riskPolicy,
+                  },
+                },
+              },
             ];
+
+            // Emit context_set if initial context provided (S8: context persistence)
+            const eventsArray: readonly DomainEventV1[] = input.context
+              ? [
+                  ...baseEvents,
+                  {
+                    v: 1,
+                    eventId: evtContextSet,
+                    eventIndex: 4,
+                    sessionId,
+                    kind: 'context_set' as const,
+                    dedupeKey: `context_set:${sessionId}:${runId}:${contextId}`,
+                    scope: { runId },
+                    data: {
+                      contextId,
+                      context: input.context as unknown as JsonValue,
+                      source: 'initial' as const,
+                    },
+                  } as DomainEventV1,
+                ]
+              : baseEvents;
+
             return sessionStore.append(lock, {
               events: eventsArray,
               snapshotPins: [{ snapshotRef, eventIndex: 2, createdByEventId: evtNodeCreated }],
@@ -1101,14 +1374,36 @@ function executeStartWorkflow(
       const ackToken = signTokenOrErr({ payload: ackPayload, ports: tokenCodecPorts });
       if (ackToken.isErr()) return neErrorAsync({ kind: 'token_signing_failed' as const, cause: ackToken.error });
 
-      const { stepId, title, prompt } = extractStepMetadata(pinnedWorkflow, firstStep.id);
-      const pending = { stepId, title, prompt };
+      // S9: Use renderPendingPrompt for consistency (no recovery for start)
+      const metaRes = renderPendingPrompt({
+        workflow: pinnedWorkflow,
+        stepId: firstStep.id,
+        loopPath: [],
+        truth: { events: [], manifest: [] }, // start has no prior events
+                    runId: asRunId(String(runId)),
+            nodeId: asNodeId(String(nodeId)),
+            rehydrateOnly: false,
+      });
+      
+      const meta = metaRes.isOk() ? metaRes.value : {
+        stepId: firstStep.id,
+        title: firstStep.title,
+        prompt: firstStep.prompt,
+        requireConfirmation: Boolean(firstStep.requireConfirmation),
+      };
+      
+      const pending = { stepId: meta.stepId, title: meta.title, prompt: meta.prompt };
+
+      const preferences = defaultPreferences;
+      const nextIntent = deriveNextIntent({ rehydrateOnly: false, isComplete: false, pending: meta });
 
       return okAsync(V2StartWorkflowOutputSchema.parse({
         stateToken: stateToken.value,
         ackToken: ackToken.value,
         isComplete: false,
         pending,
+        preferences,
+        nextIntent,
       }));
     });
 }
@@ -1227,11 +1522,16 @@ function executeContinueWorkflow(
             const isComplete = deriveIsComplete(engineState);
 
             if (!pending) {
+              const preferences = derivePreferencesForNode({ truth, runId, nodeId });
+              const nextIntent = deriveNextIntent({ rehydrateOnly: true, isComplete, pending: null });
+
               return okAsync(V2ContinueWorkflowOutputSchema.parse({
                 kind: 'ok',
                 stateToken: input.stateToken,
                 isComplete,
                 pending: null,
+                preferences,
+                nextIntent,
               }));
             }
 
@@ -1256,14 +1556,39 @@ function executeContinueWorkflow(
                 }
                 
                 const wf = createWorkflow(pinned.definition as WorkflowDefinition, createBundledSource());
-                const { stepId, title, prompt } = extractStepMetadata(wf, String(pending.stepId));
+                
+                // S9: Use renderPendingPrompt (includes recap recovery + function expansion)
+                const metaRes = renderPendingPrompt({
+                  workflow: wf,
+                  stepId: String(pending.stepId),
+                  loopPath: pending.loopPath,
+                  truth,
+                  runId: asRunId(String(runId)),
+                  nodeId: asNodeId(String(nodeId)),
+                  rehydrateOnly: true,
+                });
+                
+                if (metaRes.isErr()) {
+                  return neErrorAsync({
+                    kind: 'invariant_violation' as const,
+                    message: `Prompt rendering failed: ${metaRes.error.message}`,
+                    suggestion: 'Retry; if this persists, treat as invariant violation.',
+                  });
+                }
+                
+                const meta = metaRes.value;
+
+                const preferences = derivePreferencesForNode({ truth, runId, nodeId });
+                const nextIntent = deriveNextIntent({ rehydrateOnly: true, isComplete, pending: meta });
 
                 return okAsync(V2ContinueWorkflowOutputSchema.parse({
                   kind: 'ok',
                   stateToken: input.stateToken,
                   ackToken: ackTokenRes.value,
                   isComplete,
-                  pending: { stepId, title, prompt },
+                  pending: { stepId: meta.stepId, title: meta.title, prompt: meta.prompt },
+                  preferences,
+                  nextIntent,
                 }));
               });
           });
