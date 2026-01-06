@@ -513,8 +513,8 @@
     },
     {
       "id": "context-not-durable",
-      "source": "v2-core-design-locks.md §16.3.1",
-      "summary": "context is not persisted as durable truth",
+      "source": "v2-core-design-locks.md §16.3.1 (REVISED in §18.2)",
+      "summary": "context IS persisted as durable truth via run-scoped context_set events (lock revised in Slice 4a S8)",
       "category": "protocol"
     },
     {

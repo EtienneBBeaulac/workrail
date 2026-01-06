@@ -4,6 +4,7 @@ import { z } from 'zod';
 // Import schemas from output-schemas
 const V2BlockerPointerSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('context_key'), key: z.string().min(1) }),
+  z.object({ kind: z.literal('context_budget') }),
   z.object({ kind: z.literal('output_contract'), contractRef: z.string().min(1) }),
   z.object({ kind: z.literal('capability'), capability: z.enum(['delegation', 'web_browsing']) }),
   z.object({ kind: z.literal('workflow_step'), stepId: z.string().min(1) }),
@@ -77,5 +78,24 @@ describe('v2 bounded blockers enforcement', () => {
 
     const result = V2BlockerReportSchema.safeParse(valid);
     expect(result.success).toBe(true);
+  });
+
+  it('schema accepts context_budget pointer kind (S7: test gap)', () => {
+    const validWithContextBudget = {
+      blockers: [
+        {
+          code: 'INVARIANT_VIOLATION',
+          pointer: { kind: 'context_budget' },
+          message: 'Context exceeded budget',
+          suggestedFix: 'Remove large blobs from context',
+        },
+      ],
+    };
+
+    const result = V2BlockerReportSchema.safeParse(validWithContextBudget);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.blockers[0].pointer.kind).toBe('context_budget');
+    }
   });
 });

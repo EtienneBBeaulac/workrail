@@ -22,7 +22,7 @@ export const V2ContinueWorkflowInput = z.object({
   context: z.record(z.unknown()).optional().describe('External context inputs (conditions, parameters). Do not include workflow progress state.'),
   output: z
     .object({
-      notesMarkdown: z.string().min(1).optional().describe('Durable recap notes (short; WorkRail may truncate deterministically)'),
+      notesMarkdown: z.string().min(1).optional().describe('Durable recap notes for THIS step only (per-step fresh, not cumulative). Provide a short summary of work completed in this specific step. WorkRail aggregates notes across steps and may truncate deterministically when presenting recovery context.'),
       artifacts: z.array(z.unknown()).optional().describe('Optional structured artifacts (schema is workflow/contract-defined)'),
     })
     .optional()

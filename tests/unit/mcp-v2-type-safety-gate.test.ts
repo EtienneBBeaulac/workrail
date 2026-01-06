@@ -39,6 +39,7 @@ describe('v2-execution type-safety gate (philosophy enforcement)', () => {
           !line.includes('step as any') && 
           !line.includes('title') && 
           !line.includes('prompt') &&
+          !line.includes('validationCriteria') && // v1 workflow bridge property access
           !line.includes('?.kind') &&    // Type guard for kind discriminator
           !line.includes('.kind)') &&    // Type guard includes check
           !line.includes('_exhaustive') && // Exhaustive pattern check

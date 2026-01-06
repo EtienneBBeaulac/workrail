@@ -157,6 +157,19 @@ export const DEFAULT_RETRY_AFTER_MS = 1000;
 export const TRUNCATION_MARKER = '\n\n[TRUNCATED]';
 
 // =============================================================================
+// Recovery Budget (Slice 4a S9: Recap Recovery)
+// =============================================================================
+
+/**
+ * Recovery budget for rehydrate-only responses (recap + function definitions combined).
+ * 
+ * Lock: Midpoint of contract §340 guidance "8-16 KB" for deterministic budgeting.
+ * 
+ * Why 12 KB: Balances context recovery needs with token budget constraints.
+ */
+export const RECOVERY_BUDGET_BYTES = 12288; // 12 KB
+
+// =============================================================================
 // Regex Patterns
 // =============================================================================
 
