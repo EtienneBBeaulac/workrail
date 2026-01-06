@@ -26,7 +26,7 @@ In a new chat, tell the assistant:
 - **Soft YAGNI**: avoid scope creep but build proper foundations.
 - **Errors as data**: expected failures should be structured, not thrown.
 - **Side effects at the edges**: all non-pure operations (filesystem, locks, crypto, clocks) isolated behind ports/adapters; the functional core remains pure and immutable.
-- **Per-step outputs, not cumulative** (pending lock in Slice 4a): Each step's `notesMarkdown` should be a fresh summary of that step only, not appended to previous notes. WorkRail aggregates via recap projection.
+- **Per-step outputs, not cumulative** (LOCKED in Slice 4a, §18.1): Each step's `notesMarkdown` IS a fresh summary of that step only, not appended to previous notes. WorkRail aggregates via recap projection for recovery context.
 
 ## Operator preferences (conversation context)
 
@@ -526,3 +526,51 @@ cp docs/plans/workrail-v2-design-resumption-pack.md docs/plans/workrail-v2-desig
 - If an edit fails, don't keep retrying the same approach - use a different tool or method.
 - This file should focus on **operator voice, preferences, tradeoffs, and "feel"** - not duplicate the canonical specs.
 - Point to canonical docs rather than restating mechanics.
+
+---
+
+## Slice 4a Implementation Status (2026-01-06)
+
+**Status**: ✅ COMPLETE - Merged to main (PR #55)
+
+**What was implemented**:
+1. **Recap recovery** (S9):
+   - Tip detection via projectRunDagV2.tipNodeIds
+   - Tip recovery: ancestry recap + function definitions
+   - Non-tip recovery: child summaries + preferred-branch downstream recap + function definitions
+   - 12KB budget (RECOVERY_BUDGET_BYTES) with deterministic [TRUNCATED] marker
+   - O(1) UTF-8 boundary trimming (proven algorithm)
+   - Single renderPendingPrompt seam (4 call sites unified)
+   
+2. **Context persistence** (S8):
+   - Run-scoped context_set event (DomainEventV1Schema)
+   - projectRunContextV2 projection (latest event per runId)
+   - start_workflow emits context_set when initial context provided
+   - continue_workflow auto-loads + shallow merges with delta
+   - Null tombstones (delete keys), reserved key rejection
+   - Rehydrate purity preserved (zero writes on rehydrate-only path)
+
+3. **notesMarkdown semantics** (S6):
+   - Tool schema: per-step fresh description
+   - Contract: normative section added
+   - Design lock §18.1 CLOSED
+
+4. **Test coverage** (S7):
+   - context_budget blocker pointer test
+   - nextIntent exhaustive matrix test
+   - 21 new test files, 1846 tests total
+
+**Design decisions closed**:
+- §18.1: notesMarkdown accumulation → LOCKED as per-step fresh
+- §18.2: Context persistence → LOCKED as context_set event (run-scoped, shallow merge)
+
+**Philosophy alignment**:
+- All functions < 50 lines (decomposed 143-line function into 4 helpers)
+- Branded types (NodeId, RunId) throughout
+- Pure functional style (zero mutations, zero imperative loops)
+- Recursive traversals with cycle protection
+- Comprehensive docstrings on all public functions
+
+**Files**: 34 changed (+6266/-95 lines)
+
+**Next slices**: 4b (portability), 4c (resume_session + checkpoint_workflow)

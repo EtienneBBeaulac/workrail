@@ -33,7 +33,7 @@ Local data may also be rooted under a WorkRail-owned data dir, optionally overri
 2) **Pinned determinism**: every run pins to a `workflowHash` of the fully expanded compiled workflow (builtins/templates/features/contracts included).
 3) **Append-only truth**: durable state is an append-only session/run graph; all “latest” views are projections.
 4) **Rewinds are branches**: using a non-tip snapshot auto-forks and returns lost branch context (bounded downstream recap).
-5) **Single durable write path**: durable memory is written only via `output` (notes + optional artifacts); `context` is inputs only.
+5) **Output + context durability**: Durable memory is written via `output` (notes + artifacts) and `context` (persisted via context_set events in v2); context is inputs AND session state.
 6) **Bounded memory**: recaps/snippets are full when small, otherwise deterministically truncated with explicit markers.
 7) **Resumable portability**: export/import bundles are versioned + integrity-checked; imports re-mint tokens from stored snapshots.
 8) **Builtin authoring power + auditability**: workflows can reference builtin templates/features/contract packs; bounded decision traces exist for dashboard/logs/exports (not agent-facing by default).
@@ -58,14 +58,19 @@ Local data may also be rooted under a WorkRail-owned data dir, optionally overri
 - **Determinism**: v2 pins execution to hashed compiled workflow snapshots (including builtins); v1 behavior can drift with workflow changes.
 - **Authoring power**: v2 adds builtin templates/features/contract packs to speed up authoring and standardize behavior.
 
-## Current Status (2025-12-23)
+## Current Status (2026-01-06)
 
-- Slice 1 (read-only tools + pinning) merged
-- Slice 2 (append-only substrate + projections) merged
-- Slice 2.5 (gate+witness + execution safety) merged
-- Slice 3 prereqs (execution snapshots, CAS, token signing) shipped (`feature/etienneb/v2-slice3-prereqs`)
-- **Next**: Slice 3 (token orchestration: `start_workflow`, `continue_workflow`)
-- **After Slice 3**: Slice 4+ is executed as **4a (semantics lockdown)** → **4b (export/import Gate 4)** → **4c (resume + checkpoints)** (see `docs/design/v2-core-design-locks.md`).
+- Slice 1 (read-only tools + pinning) ✅ merged
+- Slice 2 (append-only substrate + projections) ✅ merged
+- Slice 2.5 (gate+witness + execution safety) ✅ merged
+- Slice 3 (token orchestration: start_workflow, continue_workflow) ✅ merged
+- **Slice 4a (semantics lockdown)** ✅ merged to main (PR #55, 2026-01-06)
+  - Recap recovery (tip + non-tip detection, function expansion)
+  - Context persistence (context_set event, auto-load, shallow merge)
+  - Per-step notesMarkdown semantics (§18.1 closed)
+  - Test coverage (context_budget, nextIntent matrix)
+- **Next**: Slice 4b (portability: export/import bundles)
+- **After 4b**: Slice 4c (resume_session + checkpoint_workflow)
 
 ## Epics
 
