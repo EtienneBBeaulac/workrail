@@ -2333,5 +2333,7 @@ DO NOT call Task tools sequentially - make all {N} calls in one response block.
 
 **Decision needed**: Approve this template and plan workflow updates, or propose alternative phrasing.
 
+---
+
 Important notes from the user:
-- Agents get confused if multiple worflows are started in the same chat due to the tokens. Need to investigate a way to fix this.
+- Agents get confused if multiple workflows are started in the same chat due to the tokens. Need to investigate a way to fix this.
