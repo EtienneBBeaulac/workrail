@@ -205,7 +205,7 @@ describe('External Workflows E2E', () => {
       expect(workflows.some(w => w.definition.id === 'community-workflow')).toBe(true);
 
       process.env = originalEnv;
-    });
+    }, 30000); // Increase timeout to 30s for Windows (git clone of nonexistent repo is slow)
   });
 
   describe('Configuration Validation', () => {
