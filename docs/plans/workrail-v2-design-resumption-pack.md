@@ -577,66 +577,47 @@ cp docs/plans/workrail-v2-design-resumption-pack.md docs/plans/workrail-v2-desig
 
 ---
 
+## Slice 4a+ Implementation Status (2026-01-06 onwards)
+
+### Agent Execution Guidance (✅ IMPLEMENTED - PR #57, 2026-01-09)
+
+**Status**: ✅ Complete - Layers 1-3 implemented and merged to main
+
+**What was implemented**:
+
+**Layer 1 - Tool Descriptions** (src/mcp/tool-descriptions.ts):
+- Rewrote v2 tool descriptions with behavioral guidance matching v1 clarity
+- Added "workflow = user speaking" mental model framing
+- Explained nextIntent values inline
+- Added context auto-loading clarity
+- Included WRONG/RIGHT examples for notesMarkdown
+
+**Layer 2 - Field Descriptions** (src/mcp/v2/tools.ts):
+- Enhanced Zod field descriptions with lifecycle clarity
+- Differentiated stateToken (session handle) vs ackToken (completion receipt)
+- Clarified context auto-loading behavior
+- Added per-step fresh examples
+
+**Layer 3 - Prompt-Based Requirement Injection** (NEW):
+- Created `validation-requirements-extractor.ts` - pure function extracting requirements from validationCriteria
+- Enhanced `prompt-renderer.ts` - appends requirements to pending.prompt
+- Agents see validation requirements BEFORE working (proactive vs reactive)
+- Covers contains (51%), regex (36%), length (13%) + and compositions
+
+**Validation Results**:
+- Baseline: 40% agent error rate with v2 tools
+- Post-L1+L2: 33% error rate (eliminated prediction behavior, context re-passing, notes accumulation)
+- Target: <10% with Layer 3 (validation requirements visible proactively in prompts)
+
+**Design Decision**: 
+Originally proposed `agentInstructions` field in responses (900 lines of parsing logic). After validation testing and 5 subagent reviews, pivoted to prompt-based injection (50 lines) as simpler and more philosophically aligned (fail fast = proactive, architectural fix not patch).
+
+**Related Design Locks**:
+- §18.3 in v2-core-design-locks.md (full implementation details)
+- §19 in v2-core-design-locks.md (evidence-based validation design - prevents gameable validation when requirements visible)
+
+---
+
 ## Open items (post-4a decisions)
 
-### Agent Execution Guidance in Responses
-
-**Problem**: Agents lose execution mechanics context on rewind/resume/new-chat. They must guess or rely on external docs for:
-- How to use stateToken/ackToken properly
-- Whether context persists (it doesn't)
-- What `notesMarkdown` means (per-step fresh, not cumulative)
-- How to recover from `blocked` outcomes
-- What `nextIntent` values mean
-
-**Observation**: Manual testing (Slice 4a validation) showed agents frequently:
-- Forget to re-pass context (causes `advance_next_failed`)
-- Provide cumulative notes (violates per-step fresh semantics)
-- Unsure how to interpret `nextIntent` values
-- Don't know how to retry after `blocked`
-
-**Proposed**: Add structured `agentInstructions` field to v2 tool responses:
-- **In `start_workflow`**: full execution guidance (mechanics, context discipline, output format, blocking recovery, nextIntent meanings)
-- **In rehydrate-only `continue_workflow`**: condensed reminder (resumption context + key rules)
-- **In normal `continue_workflow`**: omit (or minimal reminder if `kind='blocked'`)
-
-**Rationale**:
-- Self-documenting responses (no external doc dependency)
-- Rewind-resilient (rehydrate returns guidance)
-- Bounded payload (full guidance only at start + rehydrate)
-- Deterministic (same guidance for same state)
-
-**Trade-offs**:
-- Pro: Agents get onboarded at natural boundaries (start + resume)
-- Pro: Reduces support burden (fewer "how do I use this?" errors)
-- Con: Modest payload increase (~500 bytes at start, ~200 bytes on rehydrate)
-
-**Design questions**:
-1. Include in all responses or only start + rehydrate?
-2. Static text (same for all workflows) or workflow-customizable?
-3. Include example tool calls or keep abstract?
-
-**Slice ownership**: **Pre-4b** (needs design work before implementation; 4a already merged)
-
-**Why design work is needed**:
-1. **Content uncertainty**: Exactly what guidance text to include? Which mechanics? How detailed?
-2. **Scope boundaries**: All responses? Only start + rehydrate? Include in blocked responses?
-3. **Format decision**: Structured object vs plain text vs hybrid?
-4. **Payload budget**: What overhead is acceptable (500 bytes? 200 bytes? less)?
-5. **Normative vs optional**: Is this required for contract compliance or UX improvement?
-6. **Evolution strategy**: How to version/update guidance over time?
-
-**Empirical input from Slice 4a manual testing** (4 subagent test chats):
-- ✅ Agents successfully executed workflows when given explicit test instructions
-- ⚠️ Agents got confused about context persistence (expected it to auto-load)
-- ✅ Agents inferred `nextIntent` meanings from observed patterns
-- ⚠️ Agents didn't know how to retry after `blocked` without instructions
-
-**Next steps**:
-1. Design the exact `agentInstructions` schema + content (with examples)
-2. Decide: static vs workflow-customizable
-3. Decide: normative (always include) vs optional (UX sugar)
-4. Write spec for this feature (input for 4b or dedicated follow-up MR)
-
-**References**: See `docs/design/v2-core-design-locks.md` §18.3 for detailed proposal + design questions
-
-**Status**: Open item (design phase; implement post-4a in 4b or follow-up MR)
+None currently. Slice 4a semantics lockdown complete, agent execution guidance implemented.
