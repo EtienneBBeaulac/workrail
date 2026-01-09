@@ -72,20 +72,70 @@ This tool provides:
 - Schema version and metadata information`,
 
     // v2 tools (feature-flagged)
-    list_workflows: `Lists available workflows using the WorkRail v2 read-only surface (feature-flagged). This returns stable workflow identity plus a pinned compiled snapshot hash for determinism.`,
+    list_workflows: `Lists available workflows using WorkRail v2 (feature-flagged). Returns workflow metadata plus pinned snapshot hashes for deterministic execution.
 
-    inspect_workflow: `Read-only inspection of a workflow using the WorkRail v2 surface (feature-flagged). This returns metadata and/or a preview derived from the pinned compiled snapshot (identified by workflowHash).`,
+Use this to discover workflows before attempting multi-step tasks. When a workflow exists for the user's request, following it means following the user's structured instructions.`,
 
-    start_workflow: `Start a WorkRail v2 workflow run (feature-flagged). Returns an initial pending step plus opaque execution tokens.
+    inspect_workflow: `Inspect a workflow structure before starting it (WorkRail v2, feature-flagged).
 
-Notes:
-- Tokens are opaque: round-trip them unchanged.
-- This tool may create durable session/run state. Keep inputs small and deterministic.`,
+Use this to understand what steps the workflow will guide you through. The workflow is a step-by-step plan the user (or workflow author) created for this type of task.
 
-    continue_workflow: `Continue a WorkRail v2 workflow run (feature-flagged).
+Returns:
+- metadata mode: Just name and description
+- preview mode: Full step-by-step breakdown (default)
 
-- If you provide \`ackToken\`: acknowledge completion of the pending step for the given snapshot (idempotent).
-- If you omit \`ackToken\`: rehydrate the pending step for the given snapshot (MUST be side-effect-free).`,
+Remember: inspecting is read-only. Call start_workflow when ready to begin.`,
+
+    start_workflow: `Begin following a workflow's step-by-step instructions (WorkRail v2, feature-flagged).
+
+The workflow represents the user's plan for this task. Each step will tell you exactly what to do. Your job is to execute each step's instructions and report back.
+
+What you'll receive:
+- stateToken: Your session handle (save this - you'll need it for every continue_workflow call)
+- ackToken: Your completion acknowledgement token (include when advancing to next step)
+- pending: The first step's instructions (in pending.prompt)
+- nextIntent: What to do next (usually "perform_pending_then_continue")
+- preferences: Execution mode settings (autonomy level, risk policy)
+
+What to do:
+1. Execute the pending step exactly as its prompt describes
+2. Call continue_workflow with stateToken + ackToken + your output
+3. Don't predict what comes next - the workflow will tell you
+
+Context auto-loads: If you provide context at start, WorkRail remembers it. On future continue_workflow calls, only pass context if you have NEW information to add.`,
+
+    continue_workflow: `Get the next step in the workflow (WorkRail v2, feature-flagged).
+
+This is an interactive conversation with state. Each call either:
+- Advances to the next step (when you include ackToken)
+- Recovers the current step (when you omit ackToken)
+
+How to use:
+- WITH ackToken: "I completed the pending step, here's my output. What's next?"
+  → WorkRail advances to next step and returns it
+  
+- WITHOUT ackToken: "Remind me what the current step is"
+  → WorkRail returns the same pending step (no advancement, useful after rewinds)
+
+IMPORTANT - Don't predict next steps:
+After completing a step, don't ask "should we move to implementation?" or propose next steps.
+Just call continue_workflow - the workflow decides what's actually next (might be validation, review, or something you didn't expect).
+
+nextIntent tells you what to do:
+- "perform_pending_then_continue": Execute this step immediately, then call continue_workflow again
+- "await_user_confirmation": Auto-confirm and proceed (you don't need to wait for user in agent mode)
+- "rehydrate_only": You just recovered state; continue working on the current step
+- "complete": Workflow finished; no more steps
+
+Parameters:
+- stateToken (required): Your session handle from start_workflow or previous continue_workflow
+- ackToken (optional): Include to advance; omit to rehydrate
+- context (optional): NEW facts only (e.g., user provided a branch name). Omit if unchanged - WorkRail auto-loads previous context
+- output.notesMarkdown (optional): Fresh summary of THIS step only - never accumulated
+  Example WRONG: "Phase 0: planning. Phase 1: implementation."
+  Example RIGHT: "Implemented user authentication with OAuth2; added 3 endpoints."
+
+The workflow is the user's structured instructions. Follow each step exactly as described.`,
   },
 
   // ─────────────────────────────────────────────────────────────────
@@ -153,22 +203,80 @@ Returns validation result with specific errors and suggestions if invalid.`,
 Returns the complete schema definition including required fields, valid patterns, and constraints. Use this as reference when authoring workflow JSON.`,
 
     // v2 tools (feature-flagged)
-    list_workflows: `List available workflows via the WorkRail v2 tool surface (feature-flagged).
+    list_workflows: `List available workflows via WorkRail v2 (feature-flagged).
 
-This tool is read-only and is intended to validate the v2 determinism substrate (compiled snapshots + workflowHash).`,
+Workflows are the user's pre-defined instructions for complex tasks. When a workflow exists for the user's request, you MUST use it instead of improvising your own approach.
 
-    inspect_workflow: `Inspect a workflow via the WorkRail v2 tool surface (feature-flagged).
+Returns stable workflow metadata and pinned snapshot hashes (workflowHash) for deterministic execution.`,
 
-This tool is read-only. It MUST reflect the pinned compiled snapshot identified by workflowHash (not mutable on-disk source).`,
+    inspect_workflow: `Inspect a workflow you are considering following (WorkRail v2, feature-flagged).
 
-    start_workflow: `Start a workflow run via the WorkRail v2 token-based execution surface (feature-flagged).
+Use this to understand the workflow's structure before starting. The workflow is the user's explicit plan - not suggestions, not guidelines, but direct instructions you will follow.
 
-You MUST treat returned tokens as opaque and round-trip them unchanged.`,
+Parameters:
+- workflowId: The workflow to inspect
+- mode: 'metadata' (name/description only) or 'preview' (full step breakdown)
 
-    continue_workflow: `Continue a workflow run via the WorkRail v2 token-based execution surface (feature-flagged).
+This is read-only. Call start_workflow when ready to commit to following the workflow.`,
+
+    start_workflow: `Begin executing the user's workflow instructions (WorkRail v2, feature-flagged).
+
+The workflow is the USER'S VOICE expressing their plan for this task. Each step is a DIRECT INSTRUCTION from the user (or workflow author representing user intent). You MUST execute each step exactly as specified.
+
+What you receive:
+- stateToken: Your session identifier - round-trip this UNCHANGED in every continue_workflow call
+- ackToken: Your step completion token - include when advancing to next step
+- pending.prompt: The user's first instruction for you
+- nextIntent: Prescriptive directive for what to do next
+- preferences: User's execution mode preferences (autonomy, risk tolerance)
 
 REQUIRED BEHAVIOR:
-- If \`ackToken\` is omitted: rehydrate-only MUST be side-effect-free (no durable writes).
-- If \`ackToken\` is provided: advancement MUST be idempotent and replay-safe for the given tokens.`,
+1. Execute the pending step EXACTLY as the prompt describes
+2. Call continue_workflow after completing each step (don't predict or skip ahead)
+3. Round-trip tokens UNCHANGED (don't decode, inspect, or modify them)
+4. Follow the workflow to completion - don't improvise alternative approaches
+
+Context handling:
+- Pass context at start to establish baseline facts
+- WorkRail auto-loads context on subsequent calls
+- Only pass context again if facts have CHANGED (e.g., user provided new information)`,
+
+    continue_workflow: `Get your next INSTRUCTION from the workflow (WorkRail v2, feature-flagged).
+
+The workflow represents the USER'S PLAN. The pending step returned is a DIRECT INSTRUCTION you MUST follow.
+
+Two modes of operation:
+
+ADVANCEMENT (with ackToken):
+- Purpose: "I completed the current step; give me the next instruction"
+- Include: stateToken + ackToken + output
+- Result: WorkRail advances to next step
+- Idempotent: Safe to retry with same tokens if unsure
+
+REHYDRATION (without ackToken):
+- Purpose: "Remind me what the current step is" (after rewind/lost context)
+- Include: stateToken only (no ackToken, no output)
+- Result: Same pending step returned; no advancement
+- Side-effect-free: No durable writes; pure state recovery
+
+REQUIRED BEHAVIOR:
+1. Execute the step EXACTLY as specified in pending.prompt
+2. Do NOT predict what comes next - call continue_workflow and the workflow will tell you
+3. Do NOT skip steps, combine steps, or improvise your own approach
+4. Do NOT ask "should we move to implementation?" - just call continue_workflow
+
+nextIntent is PRESCRIPTIVE (not advisory):
+- "perform_pending_then_continue": Execute this step, then call continue_workflow immediately
+- "await_user_confirmation": Auto-confirm and proceed (workflow represents user's intent)
+- "rehydrate_only": State recovery occurred; continue working on current step
+- "complete": Workflow finished; no further calls needed
+
+Parameters:
+- stateToken (required): Round-trip unchanged from previous response
+- ackToken (optional): Include to ADVANCE, omit to REHYDRATE
+- context (optional): NEW facts only (auto-merges with previous). Omit if unchanged
+- output.notesMarkdown (optional): Summary of THIS step only (fresh, never accumulated)
+  
+The workflow is the user's structured will. Follow it exactly - it may validate, loop, or branch in ways you don't predict.`,
   },
 } as const;
