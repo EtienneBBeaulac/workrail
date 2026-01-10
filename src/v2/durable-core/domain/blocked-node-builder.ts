@@ -37,6 +37,8 @@ function toTerminalReason(reason: ReasonV1): TerminalReasonV1 | null {
       return { kind: 'invariant_violation' };
     case 'storage_corruption_detected':
       return { kind: 'storage_corruption_detected' };
+    case 'evaluation_error':
+      return { kind: 'evaluation_error' };
     default:
       return null;
   }
@@ -86,10 +88,12 @@ export function buildBlockedNodeSnapshot(args: {
   readonly sha256: Sha256PortV2;
 }): Result<ExecutionSnapshotFileV1, BlockedNodeBuildError> {
   const state = args.priorSnapshot.enginePayload.engineState as EngineStateV1;
-  if (state.kind !== 'running') {
+  
+  // Accept both running and blocked states (blocked state occurs when chaining retries)
+  if (state.kind !== 'running' && state.kind !== 'blocked') {
     return err({
       code: 'BLOCKED_NODE_UNSUPPORTED_STATE',
-      message: `Blocked nodes can only be created from running state (got: ${state.kind})`,
+      message: `Blocked nodes can only be created from running or blocked state (got: ${state.kind})`,
     });
   }
 

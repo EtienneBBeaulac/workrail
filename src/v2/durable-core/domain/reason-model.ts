@@ -21,7 +21,7 @@ export type GapReasonV1 =
   | { readonly category: 'user_only_dependency'; readonly detail: UserOnlyDependencyReasonV1 }
   | { readonly category: 'contract_violation'; readonly detail: 'missing_required_output' | 'invalid_required_output' }
   | { readonly category: 'capability_missing'; readonly detail: 'required_capability_unavailable' | 'required_capability_unknown' }
-  | { readonly category: 'unexpected'; readonly detail: 'invariant_violation' | 'storage_corruption_detected' };
+  | { readonly category: 'unexpected'; readonly detail: 'invariant_violation' | 'storage_corruption_detected' | 'evaluation_error' };
 
 export type BlockerCodeV1 =
   | 'USER_ONLY_DEPENDENCY'
@@ -59,7 +59,8 @@ export type ReasonV1 =
   | { readonly kind: 'required_capability_unavailable'; readonly capability: CapabilityV2 }
   | { readonly kind: 'user_only_dependency'; readonly detail: UserOnlyDependencyReasonV1; readonly stepId: string }
   | { readonly kind: 'invariant_violation' }
-  | { readonly kind: 'storage_corruption_detected' };
+  | { readonly kind: 'storage_corruption_detected' }
+  | { readonly kind: 'evaluation_error' };
 
 export type ReasonModelError =
   | { readonly code: 'INVALID_DELIMITER_SAFE_ID'; readonly message: string }
@@ -138,6 +139,12 @@ export function reasonToGap(reason: ReasonV1): { readonly severity: GapSeverityV
         severity: 'critical',
         reason: { category: 'unexpected', detail: 'storage_corruption_detected' },
         summary: 'Storage corruption detected',
+      };
+    case 'evaluation_error':
+      return {
+        severity: 'critical',
+        reason: { category: 'unexpected', detail: 'evaluation_error' },
+        summary: 'Validation evaluation failed',
       };
     case 'missing_context_key':
       return {
@@ -271,6 +278,14 @@ export function reasonToBlocker(reason: ReasonV1): Result<BlockerV1, ReasonModel
         pointer: { kind: 'context_budget' },
         message: 'Storage corruption detected: durable session data failed validation.',
         suggestedFix: 'Stop and investigate the session store; do not continue advancing this session.',
+      });
+
+    case 'evaluation_error':
+      return ensureBlockerTextBudgets({
+        code: 'INVARIANT_VIOLATION',
+        pointer: { kind: 'context_budget' },
+        message: 'Validation evaluation failed: ValidationEngine encountered an error.',
+        suggestedFix: 'Check validation criteria for malformed rules or circular references.',
       });
 
     default: {
