@@ -990,7 +990,7 @@ function advanceAndRecord(args: {
       const causeKind: 'non_tip_advance' | 'intentional_fork' = hasChildren ? 'non_tip_advance' : 'intentional_fork';
 
       const outputId = asOutputId(`out_recap_${String(attemptId)}`);
-      const outputsToAppend =
+      const notesOutputs =
         allowNotesAppend && inputOutput?.notesMarkdown
           ? [
               {
@@ -1003,6 +1003,44 @@ function advanceAndRecord(args: {
               },
             ]
           : [];
+
+      // Extract artifacts output (inlined, not blob refs)
+      // Pre-validate all artifacts can be canonicalized (fail fast)
+      const inputArtifacts = inputOutput?.artifacts ?? [];
+      const artifactOutputs: Array<{
+        outputId: OutputId;
+        outputChannel: 'artifact';
+        payload: {
+          payloadKind: 'artifact_ref';
+          sha256: import('../../v2/durable-core/ids/index.js').Sha256Digest;
+          contentType: string;
+          byteLength: number;
+          content: unknown;
+        };
+      }> = [];
+      
+      for (let idx = 0; idx < inputArtifacts.length; idx++) {
+        const artifact = inputArtifacts[idx];
+        const canonicalBytesRes = toCanonicalBytes(artifact as JsonValue);
+        if (canonicalBytesRes.isErr()) {
+          return errAsync({ kind: 'invariant_violation' as const, message: `Artifact canonicalization failed at index ${idx}: ${canonicalBytesRes.error.message}` });
+        }
+        const canonicalBytes = canonicalBytesRes.value;
+        artifactOutputs.push({
+          outputId: asOutputId(`out_artifact_${String(attemptId)}_${idx}`),
+          outputChannel: 'artifact' as const,
+          payload: {
+            payloadKind: 'artifact_ref' as const,
+            sha256: sha256.sha256(canonicalBytes),
+            contentType: 'application/json',
+            byteLength: canonicalBytes.length,
+            content: artifact, // Inline the actual data (small JSON)
+          },
+        });
+      }
+
+      // Combine both output types
+      const outputsToAppend = [...notesOutputs, ...artifactOutputs];
 
       const normalizedOutputs = normalizeOutputsForAppend(outputsToAppend);
       const outputEventIds = normalizedOutputs.map(() => idFactory.mintEventId());
@@ -1368,7 +1406,7 @@ function handleRetryAdvance(args: {
         : Boolean(notesMarkdown);
       
       const outputId = asOutputId(`out_recap_${String(retryAttemptId)}`);
-      const outputsToAppend =
+      const notesOutputs =
         allowNotesAppend && inputOutput?.notesMarkdown
           ? [
               {
@@ -1381,6 +1419,44 @@ function handleRetryAdvance(args: {
               },
             ]
           : [];
+      
+      // Extract artifacts output (inlined, not blob refs)
+      // Pre-validate all artifacts can be canonicalized (fail fast)
+      const inputArtifactsRetry = inputOutput?.artifacts ?? [];
+      const artifactOutputsRetry: Array<{
+        outputId: OutputId;
+        outputChannel: 'artifact';
+        payload: {
+          payloadKind: 'artifact_ref';
+          sha256: import('../../v2/durable-core/ids/index.js').Sha256Digest;
+          contentType: string;
+          byteLength: number;
+          content: unknown;
+        };
+      }> = [];
+      
+      for (let idx = 0; idx < inputArtifactsRetry.length; idx++) {
+        const artifact = inputArtifactsRetry[idx];
+        const canonicalBytesRes = toCanonicalBytes(artifact as JsonValue);
+        if (canonicalBytesRes.isErr()) {
+          return errAsync({ kind: 'invariant_violation' as const, message: `Artifact canonicalization failed at index ${idx}: ${canonicalBytesRes.error.message}` });
+        }
+        const canonicalBytes = canonicalBytesRes.value;
+        artifactOutputsRetry.push({
+          outputId: asOutputId(`out_artifact_${String(retryAttemptId)}_${idx}`),
+          outputChannel: 'artifact' as const,
+          payload: {
+            payloadKind: 'artifact_ref' as const,
+            sha256: sha256.sha256(canonicalBytes),
+            contentType: 'application/json',
+            byteLength: canonicalBytes.length,
+            content: artifact, // Inline the actual data (small JSON)
+          },
+        });
+      }
+
+      // Combine both output types
+      const outputsToAppend = [...notesOutputs, ...artifactOutputsRetry];
       
       const normalizedOutputs = normalizeOutputsForAppend(outputsToAppend);
       const outputEventIds = normalizedOutputs.map(() => idFactory.mintEventId());

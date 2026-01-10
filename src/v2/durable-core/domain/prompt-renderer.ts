@@ -13,6 +13,7 @@ import type { NodeOutputsProjectionV2 } from '../../projections/node-outputs.js'
 import { collectAncestryRecap, collectDownstreamRecap, buildChildSummary } from './recap-recovery.js';
 import { expandFunctionDefinitions, formatFunctionDef } from './function-definition-expander.js';
 import { RECOVERY_BUDGET_BYTES, TRUNCATION_MARKER } from '../constants.js';
+import { extractValidationRequirements } from './validation-requirements-extractor.js';
 
 export type PromptRenderError = {
   readonly code: 'RENDER_FAILED';
@@ -259,9 +260,17 @@ export function renderPendingPrompt(args: {
   const requireConfirmation = Boolean(step?.requireConfirmation);
   const functionReferences = step?.functionReferences ?? [];
 
-  // If not rehydrate-only, return base prompt (no recovery needed for advance/start)
+  // Extract validation requirements and append to prompt if present
+  const validationCriteria = step?.validationCriteria;
+  const requirements = extractValidationRequirements(validationCriteria);
+  const requirementsSection = requirements.length > 0
+    ? `\n\n**OUTPUT REQUIREMENTS:**\n${requirements.map(r => `- ${r}`).join('\n')}`
+    : '';
+  const enhancedPrompt = basePrompt + requirementsSection;
+
+  // If not rehydrate-only, return enhanced prompt (no recovery needed for advance/start)
   if (!args.rehydrateOnly) {
-    return ok({ stepId: args.stepId, title: baseTitle, prompt: basePrompt, requireConfirmation });
+    return ok({ stepId: args.stepId, title: baseTitle, prompt: enhancedPrompt, requireConfirmation });
   }
 
   // Rehydrate-only: load recovery projections (extracted helper)
@@ -270,7 +279,7 @@ export function renderPendingPrompt(args: {
     return ok({
       stepId: args.stepId,
       title: baseTitle,
-      prompt: basePrompt + '\n\n' + projectionsRes.error,
+      prompt: enhancedPrompt + '\n\n' + projectionsRes.error,
       requireConfirmation,
     });
   }
@@ -291,12 +300,12 @@ export function renderPendingPrompt(args: {
 
   // No recovery content
   if (sections.length === 0) {
-    return ok({ stepId: args.stepId, title: baseTitle, prompt: basePrompt, requireConfirmation });
+    return ok({ stepId: args.stepId, title: baseTitle, prompt: enhancedPrompt, requireConfirmation });
   }
 
   // Combine and apply budget (extracted helpers)
   const recoveryText = `## Recovery Context\n\n${sections.join('\n\n')}`;
-  const combinedPrompt = `${basePrompt}\n\n${recoveryText}`;
+  const combinedPrompt = `${enhancedPrompt}\n\n${recoveryText}`;
   const finalPrompt = applyPromptBudget(combinedPrompt);
 
   return ok({ stepId: args.stepId, title: baseTitle, prompt: finalPrompt, requireConfirmation });

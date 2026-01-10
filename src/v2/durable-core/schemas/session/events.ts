@@ -130,6 +130,9 @@ const ArtifactRefPayloadV1Schema = z.object({
   sha256: sha256DigestSchema,
   contentType: z.string().min(1),
   byteLength: z.number().int().nonnegative(),
+  // Optional inline artifact content (for small artifacts < 1KB)
+  // Large artifacts omit this and use external blob store
+  content: z.unknown().optional(),
 });
 
 const OutputPayloadV1Schema = z.discriminatedUnion('payloadKind', [NotesPayloadV1Schema, ArtifactRefPayloadV1Schema]);
