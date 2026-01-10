@@ -131,7 +131,7 @@ describe('Blocked node concurrent retries (idempotency + race safety)', () => {
 
       // Block
       const blockRes = await handleV2ContinueWorkflow(
-        { intent: 'advance', stateToken: startRes.data.stateToken, ackToken: startRes.data.ackToken!, output: { notesMarkdown: 'invalid' } } as V2ContinueWorkflowInput,
+        { stateToken: startRes.data.stateToken, ackToken: startRes.data.ackToken!, output: { notesMarkdown: 'invalid' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(blockRes.type).toBe('success');
@@ -145,11 +145,11 @@ describe('Blocked node concurrent retries (idempotency + race safety)', () => {
       // Parallel retries with Promise.all (simulates concurrent agent calls)
       const [retry1Res, retry2Res] = await Promise.all([
         handleV2ContinueWorkflow(
-          { intent: 'advance', stateToken: blockedState, ackToken: retryToken, output: { notesMarkdown: 'has status now' } } as V2ContinueWorkflowInput,
+          { stateToken: blockedState, ackToken: retryToken, output: { notesMarkdown: 'has status now' } } as V2ContinueWorkflowInput,
           ctx
         ),
         handleV2ContinueWorkflow(
-          { intent: 'advance', stateToken: blockedState, ackToken: retryToken, output: { notesMarkdown: 'also has status' } } as V2ContinueWorkflowInput,
+          { stateToken: blockedState, ackToken: retryToken, output: { notesMarkdown: 'also has status' } } as V2ContinueWorkflowInput,
           ctx
         ),
       ]);
@@ -225,7 +225,7 @@ describe('Blocked node concurrent retries (idempotency + race safety)', () => {
 
       // Block
       const blockRes = await handleV2ContinueWorkflow(
-        { intent: 'advance', stateToken: startRes.data.stateToken, ackToken: originalAck, output: { notesMarkdown: 'bad' } } as V2ContinueWorkflowInput,
+        { stateToken: startRes.data.stateToken, ackToken: originalAck, output: { notesMarkdown: 'bad' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(blockRes.type).toBe('success');
@@ -237,7 +237,7 @@ describe('Blocked node concurrent retries (idempotency + race safety)', () => {
 
       // Retry succeeds with retryAckToken
       const retryRes = await handleV2ContinueWorkflow(
-        { intent: 'advance', stateToken: blockRes.data.stateToken, ackToken: retryToken, output: { notesMarkdown: 'ok' } } as V2ContinueWorkflowInput,
+        { stateToken: blockRes.data.stateToken, ackToken: retryToken, output: { notesMarkdown: 'ok' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(retryRes.type).toBe('success');
@@ -246,7 +246,7 @@ describe('Blocked node concurrent retries (idempotency + race safety)', () => {
 
       // Now use original ackToken again → should replay blocked state (not advance)
       const replayOriginalRes = await handleV2ContinueWorkflow(
-        { intent: 'advance', stateToken: startRes.data.stateToken, ackToken: originalAck, output: { notesMarkdown: 'different' } } as V2ContinueWorkflowInput,
+        { stateToken: startRes.data.stateToken, ackToken: originalAck, output: { notesMarkdown: 'different' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(replayOriginalRes.type).toBe('success');
@@ -290,7 +290,7 @@ describe('Blocked node concurrent retries (idempotency + race safety)', () => {
       if (startRes.type !== 'success') return;
 
       const blockRes = await handleV2ContinueWorkflow(
-        { intent: 'advance', stateToken: startRes.data.stateToken, ackToken: startRes.data.ackToken!, output: { notesMarkdown: 'invalid' } } as V2ContinueWorkflowInput,
+        { stateToken: startRes.data.stateToken, ackToken: startRes.data.ackToken!, output: { notesMarkdown: 'invalid' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(blockRes.type).toBe('success');
@@ -302,7 +302,7 @@ describe('Blocked node concurrent retries (idempotency + race safety)', () => {
 
       // First retry (advances)
       const retry1Res = await handleV2ContinueWorkflow(
-        { intent: 'advance', stateToken: blockRes.data.stateToken, ackToken: retryToken, output: { notesMarkdown: 'has status A' } } as V2ContinueWorkflowInput,
+        { stateToken: blockRes.data.stateToken, ackToken: retryToken, output: { notesMarkdown: 'has status A' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(retry1Res.type).toBe('success');
@@ -311,7 +311,7 @@ describe('Blocked node concurrent retries (idempotency + race safety)', () => {
 
       // Second retry with same token (should replay, not create duplicate)
       const retry2Res = await handleV2ContinueWorkflow(
-        { intent: 'advance', stateToken: blockRes.data.stateToken, ackToken: retryToken, output: { notesMarkdown: 'has status B' } } as V2ContinueWorkflowInput,
+        { stateToken: blockRes.data.stateToken, ackToken: retryToken, output: { notesMarkdown: 'has status B' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(retry2Res.type).toBe('success');
