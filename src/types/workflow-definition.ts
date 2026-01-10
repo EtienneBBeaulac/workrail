@@ -15,6 +15,19 @@ import { ValidationCriteria } from './validation';
 // STEP TYPES
 // =============================================================================
 
+/**
+ * Output contract for typed artifact validation.
+ * When specified, step output must include artifacts matching the contract.
+ * 
+ * Lock: §19 Evidence-based validation - typed artifacts over prose validation
+ */
+export interface OutputContract {
+  /** Reference to the artifact contract (e.g., 'wr.contracts.loop_control') */
+  readonly contractRef: string;
+  /** Whether the artifact is required (default: true) */
+  readonly required?: boolean;
+}
+
 export interface WorkflowStepDefinition {
   readonly id: string;
   readonly title: string;
@@ -24,7 +37,16 @@ export interface WorkflowStepDefinition {
   readonly askForFiles?: boolean;
   readonly requireConfirmation?: boolean;
   readonly runCondition?: Readonly<Record<string, unknown>>;
+  /** 
+   * @deprecated Use outputContract for typed artifact validation instead.
+   * validationCriteria will be removed once workflows are migrated.
+   */
   readonly validationCriteria?: ValidationCriteria;
+  /** 
+   * Output contract for typed artifact validation.
+   * Replaces validationCriteria with machine-checkable artifacts.
+   */
+  readonly outputContract?: OutputContract;
   readonly functionDefinitions?: readonly FunctionDefinition[];
   readonly functionCalls?: readonly FunctionCall[];
   readonly functionReferences?: readonly string[];
