@@ -217,7 +217,7 @@ export function reasonToBlocker(reason: ReasonV1): Result<BlockerV1, ReasonModel
           code: 'MISSING_REQUIRED_OUTPUT' as const,
           pointer: { kind: 'output_contract' as const, contractRef },
           message: `Missing required output (contractRef=${contractRef}).`,
-          suggestedFix: 'Provide output.notesMarkdown that satisfies the step output requirements.',
+          suggestedFix: 'Call continue_workflow WITHOUT ackToken to rehydrate and receive a fresh ackToken, then retry with output.notesMarkdown that satisfies the step output requirements.',
         }))
         .andThen(ensureBlockerTextBudgets);
 
@@ -227,7 +227,7 @@ export function reasonToBlocker(reason: ReasonV1): Result<BlockerV1, ReasonModel
           code: 'INVALID_REQUIRED_OUTPUT' as const,
           pointer: { kind: 'output_contract' as const, contractRef },
           message: `Invalid output for contractRef=${contractRef}.`,
-          suggestedFix: 'Adjust output.notesMarkdown to satisfy validation and retry continue_workflow with the same ackToken.',
+          suggestedFix: 'Update output.notesMarkdown to satisfy validation. Then call continue_workflow WITHOUT ackToken (rehydrate) to receive a fresh ackToken, and retry advance with that new ackToken. Replaying the same ackToken is idempotent and will keep returning this blocked result.',
         }))
         .andThen(ensureBlockerTextBudgets);
 
@@ -280,6 +280,13 @@ export function reasonToBlocker(reason: ReasonV1): Result<BlockerV1, ReasonModel
   }
 }
 
+/**
+ * Build a blocker report from blocking reasons.
+ * 
+ * Note: With the blocked nodes architectural upgrade (ADR 008), blockers are now stored in
+ * blocked_attempt node snapshots rather than advance_recorded outcomes. This function is still
+ * used to build blocker reports, but they're attached to blocked snapshots instead.
+ */
 export function buildBlockerReport(reasons: readonly ReasonV1[]): Result<BlockerReportV1, ReasonModelError> {
   if (reasons.length === 0) {
     return err({ code: 'INVARIANT_VIOLATION', message: 'buildBlockerReport requires at least one reason' });
@@ -292,7 +299,7 @@ export function buildBlockerReport(reasons: readonly ReasonV1[]): Result<Blocker
     blockers.push(b.value);
   }
 
-  blockers.sort((a, b) => blockerSortKey(a).localeCompare(blockerSortKey(b)));
+  blockers.sort((a, b) => blockerSortKey(a).localeCompare(blockerSortKey(b), 'en-US'));
 
   return ok({ blockers: blockers.slice(0, MAX_BLOCKERS) });
 }

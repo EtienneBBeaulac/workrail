@@ -226,6 +226,15 @@ const V2ContinueWorkflowBlockedSchema = z.object({
   preferences: V2PreferencesSchema,
   nextIntent: V2NextIntentSchema,
   blockers: V2BlockerReportSchema,
+  // Additive (backward compatible): enables one-call retry for retryable blocks
+  retryable: z.boolean().optional(),
+  retryAckToken: z.string().optional(),
+  validation: z
+    .object({
+      issues: z.array(z.string()),
+      suggestions: z.array(z.string()),
+    })
+    .optional(),
 });
 
 export const V2ContinueWorkflowOutputSchema = z.discriminatedUnion('kind', [

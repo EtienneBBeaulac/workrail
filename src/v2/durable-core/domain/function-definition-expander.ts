@@ -110,7 +110,7 @@ export function expandFunctionDefinitions(args: {
     const aPri = scopePriority[aScope] ?? 2;
     const bPri = scopePriority[bScope] ?? 2;
     if (aPri !== bPri) return aPri - bPri;
-    return a.name.localeCompare(b.name);
+    return a.name.localeCompare(b.name, 'en-US');
   });
 
   return ok(sorted);

@@ -4,7 +4,6 @@ import type { DomainEventV1 } from '../durable-core/schemas/session/index.js';
 import type { AutonomyV2, RiskPolicyV2 } from '../durable-core/schemas/session/preferences.js';
 import { projectRunDagV2 } from './run-dag.js';
 import { projectGapsV2 } from './gaps.js';
-import { projectAdvanceOutcomesV2 } from './advance-outcomes.js';
 
 export type ProjectionError =
   | { readonly code: 'PROJECTION_INVARIANT_VIOLATION'; readonly message: string }
@@ -43,10 +42,6 @@ export function projectRunStatusSignalsV2(events: readonly DomainEventV1[]): Res
   if (gapsRes.isErr()) return err(gapsRes.error);
   const gaps = gapsRes.value;
 
-  const advanceRes = projectAdvanceOutcomesV2(events);
-  if (advanceRes.isErr()) return err(advanceRes.error);
-  const advances = advanceRes.value;
-
   // Latest effective preferences per nodeId ("effective snapshot after applying delta").
   const prefsByNodeId: Record<string, PreferencesSnapshotV2> = {};
   for (const e of events) {
@@ -75,10 +70,10 @@ export function projectRunStatusSignalsV2(events: readonly DomainEventV1[]): Res
         g.reason.category === 'capability_missing'
       );
 
-    const latestAdvance = tip ? advances.byNodeId[tip] : undefined;
-    const blockedByAdvance = latestAdvance?.outcome.kind === 'blocked';
+    const tipNodeKind = tip ? run.nodesById[tip]?.nodeKind : undefined;
+    const blockedByTopology = tipNodeKind === 'blocked_attempt';
 
-    const isBlocked = prefs.autonomy !== 'full_auto_never_stop' && (blockedByAdvance || hasBlockingCategoryGap);
+    const isBlocked = prefs.autonomy !== 'full_auto_never_stop' && (blockedByTopology || hasBlockingCategoryGap);
 
     byRunId[runId] = {
       runId,

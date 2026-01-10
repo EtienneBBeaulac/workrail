@@ -103,14 +103,20 @@ export class DefaultWorkflowService implements WorkflowService {
     if (!criteria) return { valid: true, issues: [], suggestions: [], warnings: undefined };
 
     const result = await this.validationEngine.validate(output, criteria);
-    
+    if (result.isErr()) {
+      return {
+        valid: false,
+        issues: [`Validation engine error: ${result.error.kind} (${result.error.message})`],
+        suggestions: ['Check validationCriteria for invalid schema/format, and retry.'],
+        warnings: undefined,
+      };
+    }
+
     // Add context to warnings for better debuggability
-    const contextualizedWarnings = result.warnings?.map(w => 
-      `Step '${workflowId}/${stepId}': ${w}`
-    );
+    const contextualizedWarnings = result.value.warnings?.map((w) => `Step '${workflowId}/${stepId}': ${w}`);
 
     return {
-      ...result,
+      ...result.value,
       warnings: contextualizedWarnings,
     };
   }

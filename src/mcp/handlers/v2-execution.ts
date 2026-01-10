@@ -59,6 +59,9 @@ import { buildAckAdvanceAppendPlanV1 } from '../../v2/durable-core/domain/ack-ad
 import { detectBlockingReasonsV1 } from '../../v2/durable-core/domain/blocking-decision.js';
 import { buildBlockerReport, shouldBlock, reasonToGap } from '../../v2/durable-core/domain/reason-model.js';
 import { getOutputRequirementStatusV1 } from '../../v2/durable-core/domain/validation-criteria-validator.js';
+import { buildValidationPerformedEvent } from '../../v2/durable-core/domain/validation-event-builder.js';
+import { buildBlockedNodeSnapshot } from '../../v2/durable-core/domain/blocked-node-builder.js';
+import { loadValidationResultV1 } from '../../v2/durable-core/domain/validation-loader.js';
 import { projectPreferencesV2 } from '../../v2/projections/preferences.js';
 import { projectRunContextV2 } from '../../v2/projections/run-context.js';
 import { mergeContext } from '../../v2/durable-core/domain/context-merge.js';
@@ -332,6 +335,7 @@ type InternalError =
   | { readonly kind: 'workflow_hash_mismatch' }
   | { readonly kind: 'missing_snapshot' }
   | { readonly kind: 'no_pending_step' }
+  | { readonly kind: 'token_scope_mismatch'; readonly message: string }
   | { readonly kind: 'invariant_violation'; readonly message: string }
   | { readonly kind: 'advance_apply_failed'; readonly message: string }
   | { readonly kind: 'advance_next_failed'; readonly message: string };
@@ -348,6 +352,7 @@ function isInternalError(e: unknown): e is InternalError {
     kind === 'workflow_hash_mismatch' ||
     kind === 'missing_snapshot' ||
     kind === 'no_pending_step' ||
+    kind === 'token_scope_mismatch' ||
     kind === 'invariant_violation' ||
     kind === 'advance_apply_failed' ||
     kind === 'advance_next_failed'
@@ -371,6 +376,12 @@ function mapInternalErrorToToolError(e: InternalError): ToolFailure {
         'TOKEN_WORKFLOW_HASH_MISMATCH',
         'workflowHash mismatch for this node.',
         { suggestion: 'Use the stateToken returned by WorkRail for this node.' }
+      ) as ToolFailure;
+    case 'token_scope_mismatch':
+      return errNotRetryable(
+        'TOKEN_SCOPE_MISMATCH',
+        normalizeTokenErrorMessage(e.message),
+        { suggestion: 'Use the correct token type for this operation.' }
       ) as ToolFailure;
     case 'missing_snapshot':
     case 'no_pending_step':
@@ -466,6 +477,9 @@ function replayFromRecordedAdvance(args: {
         preferences,
         nextIntent,
         blockers,
+        retryable: undefined,
+        retryAckToken: undefined,
+        validation: loadValidationResultV1(truth.events, `validation_${String(attemptId)}`).unwrapOr(null) ?? undefined,
       });
     });
   }
@@ -522,6 +536,66 @@ function replayFromRecordedAdvance(args: {
         return neErrorAsync({ kind: 'token_signing_failed' as const, cause: nextStateTokenRes.error });
       }
 
+      if (snap.enginePayload.engineState.kind === 'blocked') {
+        const blocked = snap.enginePayload.engineState.blocked;
+        const blockers = blocked.blockers;
+        const retryable = blocked.kind === 'retryable_block';
+        const retryAckTokenRes = retryable
+          ? signTokenOrErr({
+              payload: {
+                tokenVersion: 1,
+                tokenKind: 'ack',
+                sessionId,
+                runId,
+                nodeId: toNodeIdBranded,
+                attemptId: asAttemptId(String(blocked.retryAttemptId)),
+              },
+              ports: tokenCodecPorts,
+            })
+          : ok(undefined);
+        if (retryAckTokenRes.isErr()) {
+          return neErrorAsync({ kind: 'token_signing_failed' as const, cause: retryAckTokenRes.error });
+        }
+        const validation = loadValidationResultV1(truth.events, String(blocked.validationRef)).unwrapOr(null) ?? undefined;
+
+        // S9: Use renderPendingPrompt (no recovery for replay; fact-returning)
+        const meta = pending
+          ? renderPendingPrompt({
+              workflow: pinnedWorkflow,
+              stepId: String(pending.stepId),
+              loopPath: pending.loopPath,
+              truth,
+              runId: asRunId(String(runId)),
+              nodeId: asNodeId(String(toNodeIdBranded)),
+              rehydrateOnly: false,
+            }).unwrapOr({
+              stepId: String(pending.stepId),
+              title: String(pending.stepId),
+              prompt: `Pending step: ${String(pending.stepId)}`,
+              requireConfirmation: false,
+            })
+          : null;
+
+        const preferences = derivePreferencesForNode({ truth, runId, nodeId: toNodeIdBranded });
+        const nextIntent = deriveNextIntent({ rehydrateOnly: false, isComplete, pending: meta });
+
+        return okAsync(
+          V2ContinueWorkflowOutputSchema.parse({
+            kind: 'blocked',
+            stateToken: nextStateTokenRes.value,
+            ackToken: pending ? nextAckTokenRes.value : undefined,
+            isComplete,
+            pending: meta ? { stepId: meta.stepId, title: meta.title, prompt: meta.prompt } : null,
+            preferences,
+            nextIntent,
+            blockers,
+            retryable,
+            retryAckToken: retryAckTokenRes.value,
+            validation,
+          })
+        );
+      }
+
       // S9: Use renderPendingPrompt (no recovery for replay; fact-returning)
       const meta = pending
         ? renderPendingPrompt({
@@ -575,9 +649,10 @@ function advanceAndRecord(args: {
   readonly pinnedWorkflow: ReturnType<typeof createWorkflow>;
   readonly snapshotStore: import('../../v2/ports/snapshot-store.port.js').SnapshotStorePortV2;
   readonly sessionStore: import('../../v2/ports/session-event-log-store.port.js').SessionEventLogAppendStorePortV2;
+  readonly sha256: Sha256PortV2;
   readonly idFactory: { readonly mintNodeId: () => NodeId; readonly mintEventId: () => string };
 }): RA<void, InternalError | SessionEventLogStoreError | SnapshotStoreError> {
-  const { truth, sessionId, runId, nodeId, attemptId, workflowHash, dedupeKey, inputContext, inputOutput, lock, pinnedWorkflow, snapshotStore, sessionStore, idFactory } = args;
+  const { truth, sessionId, runId, nodeId, attemptId, workflowHash, dedupeKey, inputContext, inputOutput, lock, pinnedWorkflow, snapshotStore, sessionStore, sha256, idFactory } = args;
 
   // Enforce invariants: do not record advance attempts for unknown nodes.
   const hasRun = truth.events.some((e) => e.kind === 'run_started' && e.scope?.runId === String(runId));
@@ -609,7 +684,46 @@ function advanceAndRecord(args: {
 
   return snapshotStore.getExecutionSnapshotV1(nodeCreated.data.snapshotRef).andThen((snap) => {
     if (!snap) return errAsync({ kind: 'missing_snapshot' as const });
-    const currentState = toV1ExecutionState(snap.enginePayload.engineState);
+    const engineState = snap.enginePayload.engineState;
+    
+    // Blocked node retry path: nodeKind === 'blocked_attempt' signals a retry attempt.
+    if (nodeCreated.data.nodeKind === 'blocked_attempt') {
+      if (engineState.kind !== 'blocked') {
+        return errAsync({ kind: 'invariant_violation' as const, message: 'blocked_attempt node requires engineState.kind=blocked' });
+      }
+      
+      const blocked = engineState.blocked;
+      if (blocked.kind !== 'retryable_block') {
+        // Terminal blocks cannot be retried; reject with TOKEN_SCOPE_MISMATCH.
+        return errAsync({
+          kind: 'token_scope_mismatch' as const,
+          message: 'Cannot retry a terminal blocked_attempt node (blocked.kind=terminal_block).',
+        });
+      }
+      
+      // Retry advance logic: re-run validation with new output and either advance or chain another blocked node.
+      return handleRetryAdvance({
+        truth,
+        sessionId,
+        runId,
+        blockedNodeId: nodeId,
+        retryAttemptId: attemptId,
+        workflowHash,
+        dedupeKey,
+        inputContext,
+        inputOutput,
+        lock,
+        pinnedWorkflow,
+        blockedSnapshot: snap,
+        snapshotStore,
+        sessionStore,
+        sha256,
+        idFactory,
+      });
+    }
+    
+    // Normal advance path (not a retry).
+    const currentState = toV1ExecutionState(engineState);
     const pendingStep = (currentState.kind === 'running' && currentState.pendingStep) ? currentState.pendingStep : null;
     if (!pendingStep) {
       return errAsync({ kind: 'no_pending_step' as const });
@@ -639,12 +753,27 @@ function advanceAndRecord(args: {
     const notesMarkdown = inputOutput?.notesMarkdown;
     const validator = validationCriteria ? new ValidationEngine(new EnhancedLoopValidator()) : null;
 
+    const withTimeout = async <T>(operation: Promise<T>, timeoutMs: number, name: string): Promise<T> => {
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error(`${name} timed out after ${timeoutMs}ms`)), timeoutMs);
+      });
+      return Promise.race([operation, timeoutPromise]);
+    };
+
     const validationRes: RA<ValidationResult | undefined, InternalError> =
       validator && notesMarkdown
         ? RA.fromPromise(
-            validator.validate(notesMarkdown, validationCriteria as any, ctxObj as any),
+            withTimeout(validator.validate(notesMarkdown, validationCriteria as any, ctxObj as any), 30_000, 'ValidationEngine.validate'),
             (cause) => ({ kind: 'advance_apply_failed' as const, message: String(cause) } as const)
-          )
+          ).andThen((res) => {
+            if (res.isErr()) {
+              return neErrorAsync({
+                kind: 'advance_apply_failed' as const,
+                message: `ValidationEngineError: ${res.error.kind} (${res.error.message})`,
+              } as const);
+            }
+            return okAsync(res.value);
+          })
         : okAsync(undefined);
 
     return validationRes.andThen((validation: ValidationResult | undefined) => {
@@ -683,22 +812,101 @@ function advanceAndRecord(args: {
           return errAsync({ kind: 'invariant_violation' as const, message: blockersRes.error.message } as const);
         }
 
-        const nextEventIndex = truth.events.length === 0 ? 0 : truth.events[truth.events.length - 1]!.eventIndex + 1;
-        const evtAdvanceRecorded = idFactory.mintEventId();
+        const validationEventId = idFactory.mintEventId();
+        const validationId = `validation_${String(attemptId)}`;
+        const contractRefForEvent = outputRequirement.kind !== 'not_required' ? outputRequirement.contractRef : 'none';
+        const validationForEvent: ValidationResult =
+          validation ??
+          (outputRequirement.kind === 'missing'
+            ? {
+                valid: false,
+                issues: [`Missing required output for contractRef=${contractRefForEvent}`],
+                suggestions: [],
+                warnings: undefined,
+              }
+            : {
+                valid: false,
+                issues: ['Validation result missing'],
+                suggestions: [],
+                warnings: undefined,
+              });
 
-        const planRes = buildAckAdvanceAppendPlanV1({
+        const validationEventRes = buildValidationPerformedEvent({
           sessionId: String(sessionId),
-          runId: String(runId),
-          fromNodeId: String(nodeId),
-          workflowHash,
+          validationId,
           attemptId: String(attemptId),
-          nextEventIndex,
-          outcome: { kind: 'blocked', blockers: blockersRes.value },
-          minted: { advanceRecordedEventId: evtAdvanceRecorded },
+          contractRef: contractRefForEvent,
+          scope: { runId: String(runId), nodeId: String(nodeId) },
+          minted: { eventId: validationEventId },
+          result: validationForEvent,
         });
-        if (planRes.isErr()) return errAsync({ kind: 'invariant_violation' as const, message: planRes.error.message });
+        if (validationEventRes.isErr()) {
+          return errAsync({ kind: 'invariant_violation' as const, message: validationEventRes.error.message } as const);
+        }
 
-        return sessionStore.append(lock, planRes.value);
+        const extraEventsToAppend = [validationEventRes.value];
+        if (!extraEventsToAppend.some((e) => e.kind === 'validation_performed')) {
+          return errAsync({
+            kind: 'invariant_violation' as const,
+            message: 'Blocked outcomes require validation event',
+          });
+        }
+
+        const primaryReason = reasons[0];
+        if (!primaryReason) {
+          return errAsync({ kind: 'invariant_violation' as const, message: 'shouldBlockNow=true requires at least one reason' } as const);
+        }
+
+        const blockedSnapshotRes = buildBlockedNodeSnapshot({
+          priorSnapshot: snap,
+          primaryReason,
+          attemptId,
+          validationRef: validationId,
+          blockers: blockersRes.value,
+          sha256,
+        });
+        if (blockedSnapshotRes.isErr()) {
+          return errAsync({ kind: 'invariant_violation' as const, message: blockedSnapshotRes.error.message } as const);
+        }
+
+        return snapshotStore.putExecutionSnapshotV1(blockedSnapshotRes.value).andThen((blockedSnapshotRef) => {
+          const toNodeId = String(idFactory.mintNodeId());
+          const nextEventIndex = truth.events.length === 0 ? 0 : truth.events[truth.events.length - 1]!.eventIndex + 1;
+
+          const evtAdvanceRecorded = idFactory.mintEventId();
+          const evtNodeCreated = idFactory.mintEventId();
+          const evtEdgeCreated = idFactory.mintEventId();
+
+          const hasChildren = truth.events.some(
+            (e): e is Extract<DomainEventV1, { kind: 'edge_created' }> =>
+              e.kind === 'edge_created' && e.data.fromNodeId === String(nodeId)
+          );
+          const causeKind: 'non_tip_advance' | 'intentional_fork' = hasChildren ? 'non_tip_advance' : 'intentional_fork';
+
+          const planRes = buildAckAdvanceAppendPlanV1({
+            sessionId: String(sessionId),
+            runId: String(runId),
+            fromNodeId: String(nodeId),
+            workflowHash,
+            attemptId: String(attemptId),
+            nextEventIndex,
+            extraEventsToAppend,
+            toNodeId,
+            toNodeKind: 'blocked_attempt',
+            snapshotRef: blockedSnapshotRef,
+            causeKind,
+            minted: {
+              advanceRecordedEventId: evtAdvanceRecorded,
+              nodeCreatedEventId: evtNodeCreated,
+              edgeCreatedEventId: evtEdgeCreated,
+              outputEventIds: [],
+            },
+            outputsToAppend: [],
+          });
+          if (planRes.isErr()) return errAsync({ kind: 'invariant_violation' as const, message: planRes.error.message });
+
+          return sessionStore.append(lock, planRes.value);
+        });
       }
 
       const allowNotesAppend = validationCriteria
@@ -831,6 +1039,380 @@ function errAsync(e: InternalError): RA<never, InternalError> {
 }
 
 /**
+ * Handle retry advance from a blocked_attempt node.
+ * This runs validation again with new output and either creates the next step or chains another blocked node.
+ */
+function handleRetryAdvance(args: {
+  readonly truth: LoadedSessionTruthV2;
+  readonly sessionId: SessionId;
+  readonly runId: RunId;
+  readonly blockedNodeId: NodeId;
+  readonly retryAttemptId: AttemptId;
+  readonly workflowHash: WorkflowHash;
+  readonly dedupeKey: string;
+  readonly inputContext: JsonValue | undefined;
+  readonly inputOutput: V2ContinueWorkflowInput['output'];
+  readonly lock: WithHealthySessionLock;
+  readonly pinnedWorkflow: ReturnType<typeof createWorkflow>;
+  readonly blockedSnapshot: ExecutionSnapshotFileV1;
+  readonly snapshotStore: import('../../v2/ports/snapshot-store.port.js').SnapshotStorePortV2;
+  readonly sessionStore: import('../../v2/ports/session-event-log-store.port.js').SessionEventLogAppendStorePortV2;
+  readonly sha256: Sha256PortV2;
+  readonly idFactory: { readonly mintNodeId: () => NodeId; readonly mintEventId: () => string };
+}): RA<void, InternalError | SessionEventLogStoreError | SnapshotStoreError> {
+  const { truth, sessionId, runId, blockedNodeId, retryAttemptId, workflowHash, inputContext, inputOutput, lock, pinnedWorkflow, blockedSnapshot, snapshotStore, sessionStore, sha256, idFactory } = args;
+  
+  const engineState = blockedSnapshot.enginePayload.engineState;
+  if (engineState.kind !== 'blocked') {
+    return errAsync({ kind: 'invariant_violation' as const, message: 'blocked snapshot must have engineState.kind=blocked' });
+  }
+  
+  const pendingStep = derivePendingStep(engineState);
+  if (!pendingStep) {
+    return errAsync({ kind: 'no_pending_step' as const });
+  }
+  
+  const storedContextRes = projectRunContextV2(truth.events);
+  const storedContext = storedContextRes.isOk() ? storedContextRes.value.byRunId[String(runId)]?.context : undefined;
+  
+  const inputContextObj =
+    inputContext && typeof inputContext === 'object' && inputContext !== null && !Array.isArray(inputContext)
+      ? (inputContext as JsonObject)
+      : undefined;
+  
+  const mergedContextRes = mergeContext(storedContext, inputContextObj);
+  if (mergedContextRes.isErr()) {
+    return errAsync({
+      kind: 'invariant_violation' as const,
+      message: `Context merge failed: ${mergedContextRes.error.message}`,
+    });
+  }
+  
+  const ctxObj = mergedContextRes.value as Record<string, unknown>;
+  
+  const step = getStepById(pinnedWorkflow, String(pendingStep.stepId)) as unknown as Record<string, unknown> | null;
+  const validationCriteria = step && typeof step === 'object' && step !== null ? (step.validationCriteria as any) : undefined;
+  
+  const notesMarkdown = inputOutput?.notesMarkdown;
+  const validator = validationCriteria ? new ValidationEngine(new EnhancedLoopValidator()) : null;
+  
+  const withTimeout = async <T>(operation: Promise<T>, timeoutMs: number, name: string): Promise<T> => {
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error(`${name} timed out after ${timeoutMs}ms`)), timeoutMs);
+    });
+    return Promise.race([operation, timeoutPromise]);
+  };
+  
+  const validationRes: RA<ValidationResult | undefined, InternalError> =
+    validator && notesMarkdown
+      ? RA.fromPromise(
+          withTimeout(validator.validate(notesMarkdown, validationCriteria as any, ctxObj as any), 30_000, 'ValidationEngine.validate'),
+          (cause) => ({ kind: 'advance_apply_failed' as const, message: String(cause) } as const)
+        ).andThen((res) => {
+          if (res.isErr()) {
+            return neErrorAsync({
+              kind: 'advance_apply_failed' as const,
+              message: `ValidationEngineError: ${res.error.kind} (${res.error.message})`,
+            } as const);
+          }
+          return okAsync(res.value);
+        })
+      : okAsync(undefined);
+  
+  return validationRes.andThen((validation: ValidationResult | undefined) => {
+    const outputRequirement = getOutputRequirementStatusV1({
+      validationCriteria,
+      notesMarkdown,
+      validation,
+    });
+    
+    const reasonsRes = detectBlockingReasonsV1({ outputRequirement });
+    if (reasonsRes.isErr()) {
+      return errAsync({ kind: 'invariant_violation' as const, message: reasonsRes.error.message } as const);
+    }
+    
+    const reasons = reasonsRes.value;
+    
+    const parentByNodeId: Record<string, string | null> = {};
+    for (const e of truth.events) {
+      if (e.kind !== 'node_created') continue;
+      if (e.scope?.runId !== String(runId)) continue;
+      parentByNodeId[String(e.scope.nodeId)] = e.data.parentNodeId;
+    }
+    
+    const prefs = projectPreferencesV2(truth.events, parentByNodeId);
+    const autonomy = prefs.isOk() ? prefs.value.byNodeId[String(blockedNodeId)]?.effective.autonomy ?? 'guided' : 'guided';
+    
+    const shouldBlockNow = reasons.length > 0 && shouldBlock(autonomy, reasons);
+    
+    if (shouldBlockNow) {
+      // Retry failed validation → create chained blocked node (parent = previous blocked node).
+      const blockersRes = buildBlockerReport(reasons);
+      if (blockersRes.isErr()) {
+        return errAsync({ kind: 'invariant_violation' as const, message: blockersRes.error.message } as const);
+      }
+      
+      const validationEventId = idFactory.mintEventId();
+      const validationId = `validation_${String(retryAttemptId)}`;
+      const contractRefForEvent = outputRequirement.kind !== 'not_required' ? outputRequirement.contractRef : 'none';
+      const validationForEvent: ValidationResult =
+        validation ??
+        (outputRequirement.kind === 'missing'
+          ? {
+              valid: false,
+              issues: [`Missing required output for contractRef=${contractRefForEvent}`],
+              suggestions: [],
+              warnings: undefined,
+            }
+          : {
+              valid: false,
+              issues: ['Validation result missing'],
+              suggestions: [],
+              warnings: undefined,
+            });
+      
+      const validationEventRes = buildValidationPerformedEvent({
+        sessionId: String(sessionId),
+        validationId,
+        attemptId: String(retryAttemptId),
+        contractRef: contractRefForEvent,
+        scope: { runId: String(runId), nodeId: String(blockedNodeId) },
+        minted: { eventId: validationEventId },
+        result: validationForEvent,
+      });
+      if (validationEventRes.isErr()) {
+        return errAsync({ kind: 'invariant_violation' as const, message: validationEventRes.error.message } as const);
+      }
+      
+      const primaryReason = reasons[0];
+      if (!primaryReason) {
+        return errAsync({ kind: 'invariant_violation' as const, message: 'shouldBlockNow=true requires at least one reason' } as const);
+      }
+      
+      const chainedBlockedSnapshotRes = buildBlockedNodeSnapshot({
+        priorSnapshot: blockedSnapshot,
+        primaryReason,
+        attemptId: retryAttemptId,
+        validationRef: validationId,
+        blockers: blockersRes.value,
+        sha256,
+      });
+      if (chainedBlockedSnapshotRes.isErr()) {
+        return errAsync({ kind: 'invariant_violation' as const, message: chainedBlockedSnapshotRes.error.message } as const);
+      }
+      
+      return snapshotStore.putExecutionSnapshotV1(chainedBlockedSnapshotRes.value).andThen((chainedSnapshotRef) => {
+        const toNodeId = String(idFactory.mintNodeId());
+        const nextEventIndex = truth.events.length === 0 ? 0 : truth.events[truth.events.length - 1]!.eventIndex + 1;
+        
+        const evtAdvanceRecorded = idFactory.mintEventId();
+        const evtNodeCreated = idFactory.mintEventId();
+        const evtEdgeCreated = idFactory.mintEventId();
+        
+        const hasChildren = truth.events.some(
+          (e): e is Extract<DomainEventV1, { kind: 'edge_created' }> =>
+            e.kind === 'edge_created' && e.data.fromNodeId === String(blockedNodeId)
+        );
+        const causeKind: 'non_tip_advance' | 'intentional_fork' = hasChildren ? 'non_tip_advance' : 'intentional_fork';
+        
+        const planRes = buildAckAdvanceAppendPlanV1({
+          sessionId: String(sessionId),
+          runId: String(runId),
+          fromNodeId: String(blockedNodeId),
+          workflowHash,
+          attemptId: String(retryAttemptId),
+          nextEventIndex,
+          extraEventsToAppend: [validationEventRes.value],
+          toNodeId,
+          toNodeKind: 'blocked_attempt',
+          snapshotRef: chainedSnapshotRef,
+          causeKind,
+          minted: {
+            advanceRecordedEventId: evtAdvanceRecorded,
+            nodeCreatedEventId: evtNodeCreated,
+            edgeCreatedEventId: evtEdgeCreated,
+            outputEventIds: [],
+          },
+          outputsToAppend: [],
+        });
+        if (planRes.isErr()) return errAsync({ kind: 'invariant_violation' as const, message: planRes.error.message });
+        
+        return sessionStore.append(lock, planRes.value);
+      });
+    }
+    
+    // Retry succeeded → advance to next step.
+    const compiler = new WorkflowCompiler();
+    const interpreter = new WorkflowInterpreter();
+    const compiledWf = compiler.compile(pinnedWorkflow);
+    if (compiledWf.isErr()) {
+      return errAsync({ kind: 'advance_apply_failed', message: compiledWf.error.message } as const);
+    }
+    
+    const currentState = toV1ExecutionState(engineState);
+    const gapEventsToAppend: readonly Omit<DomainEventV1, 'eventIndex' | 'sessionId'>[] =
+      autonomy === 'full_auto_never_stop' && reasons.length > 0
+        ? reasons.map((r, idx) => {
+            const g = reasonToGap(r);
+            const gapId = `gap_${String(retryAttemptId)}_${idx}`;
+            return {
+              v: 1 as const,
+              eventId: idFactory.mintEventId(),
+              kind: 'gap_recorded' as const,
+              dedupeKey: `gap_recorded:${String(sessionId)}:${gapId}`,
+              scope: { runId: String(runId), nodeId: String(blockedNodeId) },
+              data: {
+                gapId,
+                severity: g.severity,
+                reason: g.reason,
+                summary: g.summary,
+                resolution: { kind: 'unresolved' as const },
+              },
+            };
+          })
+        : [];
+    
+    const contextSetEvents: readonly Omit<DomainEventV1, 'eventIndex' | 'sessionId'>[] =
+      inputContextObj
+        ? [
+            {
+              v: 1 as const,
+              eventId: idFactory.mintEventId(),
+              kind: 'context_set' as const,
+              dedupeKey: `context_set:${String(sessionId)}:${String(runId)}:${idFactory.mintEventId()}`,
+              scope: { runId: String(runId) },
+              data: {
+                contextId: idFactory.mintEventId(),
+                context: mergedContextRes.value as unknown as JsonValue,
+                source: 'agent_delta' as const,
+              },
+            } as Omit<DomainEventV1, 'eventIndex' | 'sessionId'>,
+          ]
+        : [];
+    
+    const validationEventId = idFactory.mintEventId();
+    const validationId = `validation_${String(retryAttemptId)}`;
+    const contractRefForEvent = outputRequirement.kind !== 'not_required' ? outputRequirement.contractRef : 'none';
+    const validationForEvent: ValidationResult =
+      validation ??
+      (outputRequirement.kind === 'missing'
+        ? {
+            valid: false,
+            issues: [`Missing required output for contractRef=${contractRefForEvent}`],
+            suggestions: [],
+            warnings: undefined,
+          }
+        : {
+            valid: true,
+            issues: [],
+            suggestions: [],
+            warnings: undefined,
+          });
+    
+    const validationEventRes = buildValidationPerformedEvent({
+      sessionId: String(sessionId),
+      validationId,
+      attemptId: String(retryAttemptId),
+      contractRef: contractRefForEvent,
+      scope: { runId: String(runId), nodeId: String(blockedNodeId) },
+      minted: { eventId: validationEventId },
+      result: validationForEvent,
+    });
+    if (validationEventRes.isErr()) {
+      return errAsync({ kind: 'invariant_violation' as const, message: validationEventRes.error.message } as const);
+    }
+    
+    const extraEventsToAppend = [validationEventRes.value, ...gapEventsToAppend, ...contextSetEvents];
+    
+    const event: WorkflowEvent = {
+      kind: 'step_completed',
+      stepInstanceId: {
+        stepId: String(pendingStep.stepId),
+        loopPath: pendingStep.loopPath.map((f) => ({ loopId: String(f.loopId), iteration: f.iteration })),
+      },
+    };
+    const advanced = interpreter.applyEvent(currentState, event);
+    if (advanced.isErr()) {
+      return errAsync({ kind: 'advance_apply_failed', message: advanced.error.message } as const);
+    }
+    
+    const nextRes = interpreter.next(compiledWf.value, advanced.value, ctxObj);
+    if (nextRes.isErr()) {
+      return errAsync({ kind: 'advance_next_failed', message: nextRes.error.message } as const);
+    }
+    
+    const out = nextRes.value;
+    const newEngineState = fromV1ExecutionState(out.state);
+    const snapshotFile: ExecutionSnapshotFileV1 = {
+      v: 1,
+      kind: 'execution_snapshot',
+      enginePayload: { v: 1, engineState: newEngineState },
+    };
+    
+    return snapshotStore.putExecutionSnapshotV1(snapshotFile).andThen((newSnapshotRef) => {
+      const toNodeId = String(idFactory.mintNodeId());
+      const nextEventIndex = truth.events.length === 0 ? 0 : truth.events[truth.events.length - 1]!.eventIndex + 1;
+      
+      const evtAdvanceRecorded = idFactory.mintEventId();
+      const evtNodeCreated = idFactory.mintEventId();
+      const evtEdgeCreated = idFactory.mintEventId();
+      
+      const hasChildren = truth.events.some(
+        (e): e is Extract<DomainEventV1, { kind: 'edge_created' }> =>
+          e.kind === 'edge_created' && e.data.fromNodeId === String(blockedNodeId)
+      );
+      const causeKind: 'non_tip_advance' | 'intentional_fork' = hasChildren ? 'non_tip_advance' : 'intentional_fork';
+      
+      const allowNotesAppend = validationCriteria
+        ? Boolean(notesMarkdown && validation && validation.valid)
+        : Boolean(notesMarkdown);
+      
+      const outputId = asOutputId(`out_recap_${String(retryAttemptId)}`);
+      const outputsToAppend =
+        allowNotesAppend && inputOutput?.notesMarkdown
+          ? [
+              {
+                outputId: String(outputId),
+                outputChannel: 'recap' as const,
+                payload: {
+                  payloadKind: 'notes' as const,
+                  notesMarkdown: toNotesMarkdownV1(inputOutput.notesMarkdown),
+                },
+              },
+            ]
+          : [];
+      
+      const normalizedOutputs = normalizeOutputsForAppend(outputsToAppend);
+      const outputEventIds = normalizedOutputs.map(() => idFactory.mintEventId());
+      
+      const planRes = buildAckAdvanceAppendPlanV1({
+        sessionId: String(sessionId),
+        runId: String(runId),
+        fromNodeId: String(blockedNodeId),
+        workflowHash,
+        attemptId: String(retryAttemptId),
+        nextEventIndex,
+        extraEventsToAppend,
+        toNodeId,
+        toNodeKind: 'step',
+        snapshotRef: newSnapshotRef,
+        causeKind,
+        minted: {
+          advanceRecordedEventId: evtAdvanceRecorded,
+          nodeCreatedEventId: evtNodeCreated,
+          edgeCreatedEventId: evtEdgeCreated,
+          outputEventIds,
+        },
+        outputsToAppend,
+      });
+      if (planRes.isErr()) return errAsync({ kind: 'invariant_violation' as const, message: planRes.error.message });
+      
+      return sessionStore.append(lock, planRes.value);
+    });
+  });
+}
+
+/**
  * Extract step metadata (title, prompt) from a workflow step with type-safe property access.
  * Returns sealed StepMetadata with guaranteed non-empty strings.
  *
@@ -944,8 +1526,13 @@ function gateErrorToToolError(e: ExecutionSessionGateErrorV2): ToolFailure {
       return errRetryAfterMs('TOKEN_SESSION_LOCKED', e.message, e.retry.afterMs, { suggestion: 'Retry in 1–3 seconds; if this persists >10s, ensure no other WorkRail process is running.' }) as ToolFailure;
     case 'SESSION_NOT_HEALTHY':
       return errNotRetryable('SESSION_NOT_HEALTHY', e.message, { suggestion: 'Execution requires healthy session.', details: detailsSessionHealth(e.health) as unknown as JsonValue }) as ToolFailure;
-    case 'SESSION_LOAD_FAILED':
     case 'SESSION_LOCK_REENTRANT':
+      // Concurrent execution detected (in-process or cross-process).
+      // This is retryable per design locks - agents can make parallel tool calls.
+      return errRetryAfterMs('TOKEN_SESSION_LOCKED', e.message, 1000, {
+        suggestion: 'Session is locked by concurrent execution. Retry in 1 second.',
+      }) as ToolFailure;
+    case 'SESSION_LOAD_FAILED':
     case 'LOCK_ACQUIRE_FAILED':
     case 'GATE_CALLBACK_FAILED':
       return internalError(e.message, 'Retry; if persists, treat as invariant violation.');
@@ -1725,6 +2312,7 @@ function executeContinueWorkflow(
                   pinnedWorkflow,
                   snapshotStore,
                   sessionStore,
+                  sha256,
                   idFactory,
                 }).andThen(() =>
                   sessionStore
