@@ -58,7 +58,8 @@ import { normalizeOutputsForAppend } from '../../v2/durable-core/domain/outputs.
 import { buildAckAdvanceAppendPlanV1 } from '../../v2/durable-core/domain/ack-advance-append-plan.js';
 import { detectBlockingReasonsV1 } from '../../v2/durable-core/domain/blocking-decision.js';
 import { buildBlockerReport, shouldBlock, reasonToGap } from '../../v2/durable-core/domain/reason-model.js';
-import { getOutputRequirementStatusV1 } from '../../v2/durable-core/domain/validation-criteria-validator.js';
+import { getOutputRequirementStatusWithArtifactsV1 } from '../../v2/durable-core/domain/validation-criteria-validator.js';
+import type { OutputContract } from '../../types/workflow-definition.js';
 import { buildValidationPerformedEvent } from '../../v2/durable-core/domain/validation-event-builder.js';
 import { buildBlockedNodeSnapshot } from '../../v2/durable-core/domain/blocked-node-builder.js';
 import { loadValidationResultV1 } from '../../v2/durable-core/domain/validation-loader.js';
@@ -751,6 +752,8 @@ function advanceAndRecord(args: {
     const validationCriteria = step && typeof step === 'object' && step !== null ? (step.validationCriteria as any) : undefined;
 
     const notesMarkdown = inputOutput?.notesMarkdown;
+    const artifacts = inputOutput?.artifacts ?? [];
+    const outputContract = step && typeof step === 'object' && step !== null ? (step.outputContract as OutputContract | undefined) : undefined;
     const validator = validationCriteria ? new ValidationEngine(new EnhancedLoopValidator()) : null;
 
     const withTimeout = async <T>(operation: Promise<T>, timeoutMs: number, name: string): Promise<T> => {
@@ -777,7 +780,9 @@ function advanceAndRecord(args: {
         : okAsync(undefined);
 
     return validationRes.andThen((validation: ValidationResult | undefined) => {
-      const outputRequirement = getOutputRequirementStatusV1({
+      const outputRequirement = getOutputRequirementStatusWithArtifactsV1({
+        outputContract,
+        artifacts,
         validationCriteria,
         notesMarkdown,
         validation,
@@ -1132,7 +1137,9 @@ function handleRetryAdvance(args: {
   const validationCriteria = step && typeof step === 'object' && step !== null ? (step.validationCriteria as any) : undefined;
   
   const notesMarkdown = inputOutput?.notesMarkdown;
-  const validator = validationCriteria ? new ValidationEngine(new EnhancedLoopValidator()) : null;
+    const artifacts = inputOutput?.artifacts ?? [];
+    const outputContract = step && typeof step === 'object' && step !== null ? (step.outputContract as OutputContract | undefined) : undefined;
+    const validator = validationCriteria ? new ValidationEngine(new EnhancedLoopValidator()) : null;
   
   const withTimeout = async <T>(operation: Promise<T>, timeoutMs: number, name: string): Promise<T> => {
     const timeoutPromise = new Promise<never>((_, reject) => {
@@ -1158,11 +1165,13 @@ function handleRetryAdvance(args: {
       : okAsync(undefined);
   
   return validationRes.andThen((validation: ValidationResult | undefined) => {
-    const outputRequirement = getOutputRequirementStatusV1({
-      validationCriteria,
-      notesMarkdown,
-      validation,
-    });
+    const outputRequirement = getOutputRequirementStatusWithArtifactsV1({
+        outputContract,
+        artifacts,
+        validationCriteria,
+        notesMarkdown,
+        validation,
+      });
     
     const reasonsRes = detectBlockingReasonsV1({ outputRequirement });
     if (reasonsRes.isErr()) {
