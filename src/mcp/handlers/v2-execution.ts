@@ -104,6 +104,28 @@ function normalizeTokenErrorMessage(message: string): string {
   return message.split(os.homedir()).join('~');
 }
 
+/**
+ * Collect artifact contents for loop evaluation.
+ * Deterministic order: event order, then current attempt artifacts.
+ */
+function collectArtifactsForEvaluation(args: {
+  readonly truthEvents: readonly DomainEventV1[];
+  readonly inputArtifacts: readonly unknown[];
+}): readonly unknown[] {
+  const collected: unknown[] = [];
+
+  for (const e of args.truthEvents) {
+    if (e.kind !== 'node_output_appended') continue;
+    if (e.data.outputChannel !== 'artifact') continue;
+    if (e.data.payload.payloadKind !== 'artifact_ref') continue;
+    const payload = e.data.payload as typeof e.data.payload & { content?: unknown };
+    if (payload.content === undefined) continue;
+    collected.push(payload.content);
+  }
+
+  return [...collected, ...args.inputArtifacts];
+}
+
 type Bytes = number & { readonly __brand: 'Bytes' };
 
 const MAX_CONTEXT_BYTES_V2 = MAX_CONTEXT_BYTES as Bytes;
@@ -967,7 +989,11 @@ function advanceAndRecord(args: {
         return errAsync({ kind: 'advance_apply_failed', message: advanced.error.message } as const);
       }
 
-      const nextRes = interpreter.next(compiledWf.value, advanced.value, ctxObj);
+      const artifactsForEval = collectArtifactsForEvaluation({
+        truthEvents: truth.events,
+        inputArtifacts: inputOutput?.artifacts ?? [],
+      });
+      const nextRes = interpreter.next(compiledWf.value, advanced.value, ctxObj, artifactsForEval);
       if (nextRes.isErr()) {
         return errAsync({ kind: 'advance_next_failed', message: nextRes.error.message } as const);
       }
@@ -1383,7 +1409,11 @@ function handleRetryAdvance(args: {
       return errAsync({ kind: 'advance_apply_failed', message: advanced.error.message } as const);
     }
     
-    const nextRes = interpreter.next(compiledWf.value, advanced.value, ctxObj);
+    const artifactsForEval = collectArtifactsForEvaluation({
+      truthEvents: truth.events,
+      inputArtifacts: inputOutput?.artifacts ?? [],
+    });
+    const nextRes = interpreter.next(compiledWf.value, advanced.value, ctxObj, artifactsForEval);
     if (nextRes.isErr()) {
       return errAsync({ kind: 'advance_next_failed', message: nextRes.error.message } as const);
     }

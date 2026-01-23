@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { renderPendingPrompt } from '../../../src/v2/durable-core/domain/prompt-renderer.js';
 import { createWorkflow } from '../../../src/types/workflow.js';
 import { createBundledSource } from '../../../src/types/workflow-source.js';
+import { LOOP_CONTROL_CONTRACT_REF } from '../../../src/v2/durable-core/schemas/artifacts/index.js';
 
 describe('renderPendingPrompt', () => {
   const simpleWorkflow = createWorkflow(
@@ -309,6 +310,64 @@ describe('renderPendingPrompt', () => {
         expect(result.value.prompt).toContain('Continue the work');
         expect(result.value.prompt).toContain('**OUTPUT REQUIREMENTS:**');
         expect(result.value.prompt).toContain('- Must contain: "complete"');
+      }
+    });
+  });
+
+  describe('output contract guidance (system-injected)', () => {
+    it('appends system OUTPUT REQUIREMENTS for outputContract', () => {
+      const workflowWithContract = createWorkflow(
+        {
+          id: 'test-output-contract',
+          name: 'Test Output Contract',
+          description: 'Test with outputContract',
+          version: '1.0.0',
+          steps: [{
+            id: 'contract-step',
+            title: 'Contract Step',
+            prompt: 'Provide output artifact',
+            requireConfirmation: false,
+            outputContract: {
+              contractRef: LOOP_CONTROL_CONTRACT_REF,
+            },
+          }],
+        } as any,
+        createBundledSource()
+      );
+
+      const result = renderPendingPrompt({
+        workflow: workflowWithContract,
+        stepId: 'contract-step',
+        loopPath: [],
+        truth: { events: [], manifest: [] },
+        runId: 'run_1',
+        nodeId: 'node_1',
+        rehydrateOnly: false,
+      });
+
+      expect(result.isOk()).toBe(true);
+      if (result.isOk()) {
+        expect(result.value.prompt).toContain('**OUTPUT REQUIREMENTS (System):**');
+        expect(result.value.prompt).toContain(`Artifact contract: ${LOOP_CONTROL_CONTRACT_REF}`);
+        expect(result.value.prompt).toContain('Provide an artifact with kind: "wr.loop_control"');
+        expect(result.value.prompt).toContain('decision ("continue" | "stop")');
+      }
+    });
+
+    it('does not add system OUTPUT REQUIREMENTS when no outputContract', () => {
+      const result = renderPendingPrompt({
+        workflow: simpleWorkflow,
+        stepId: 'step1',
+        loopPath: [],
+        truth: { events: [], manifest: [] },
+        runId: 'run_1',
+        nodeId: 'node_1',
+        rehydrateOnly: false,
+      });
+
+      expect(result.isOk()).toBe(true);
+      if (result.isOk()) {
+        expect(result.value.prompt).not.toContain('OUTPUT REQUIREMENTS (System)');
       }
     });
   });

@@ -223,6 +223,9 @@
                 "$ref": "#/$defs/validationComposition"
               }
             ]
+          },
+          "outputContract": {
+            "$ref": "#/$defs/outputContract"
           }
         },
         "required": [
@@ -388,6 +391,24 @@
           "$ref": "#/$defs/validationComposition"
         }
       ]
+    },
+    "outputContract": {
+      "type": "object",
+      "description": "Typed output contract declaring required artifact schema",
+      "properties": {
+        "contractRef": {
+          "type": "string",
+          "description": "Artifact contract reference (e.g. wr.contracts.loop_control)",
+          "minLength": 1
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Whether the artifact is required (default true)",
+          "default": true
+        }
+      },
+      "required": ["contractRef"],
+      "additionalProperties": false
     }
   }
 }

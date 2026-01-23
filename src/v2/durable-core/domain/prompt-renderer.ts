@@ -14,6 +14,7 @@ import { collectAncestryRecap, collectDownstreamRecap, buildChildSummary } from 
 import { expandFunctionDefinitions, formatFunctionDef } from './function-definition-expander.js';
 import { RECOVERY_BUDGET_BYTES, TRUNCATION_MARKER } from '../constants.js';
 import { extractValidationRequirements } from './validation-requirements-extractor.js';
+import { LOOP_CONTROL_CONTRACT_REF } from '../schemas/artifacts/index.js';
 
 export type PromptRenderError = {
   readonly code: 'RENDER_FAILED';
@@ -201,6 +202,31 @@ function applyPromptBudget(combinedPrompt: string): string {
   return decoder.decode(truncatedBytes) + markerText + omissionNote;
 }
 
+/**
+ * Format system-injected requirements for output contracts.
+ * These are generated from contract metadata, not authored prompts.
+ */
+function formatOutputContractRequirements(
+  outputContract: { readonly contractRef?: string } | undefined
+): readonly string[] {
+  const contractRef = outputContract?.contractRef;
+  if (!contractRef) return [];
+
+  switch (contractRef) {
+    case LOOP_CONTROL_CONTRACT_REF:
+      return [
+        `Artifact contract: ${LOOP_CONTROL_CONTRACT_REF}`,
+        `Provide an artifact with kind: "wr.loop_control"`,
+        `Fields: loopId (lowercase, delimiter-safe), decision ("continue" | "stop")`,
+      ];
+    default:
+      return [
+        `Artifact contract: ${contractRef}`,
+        `Provide an artifact matching the contract schema`,
+      ];
+  }
+}
+
 export interface StepMetadata {
   readonly stepId: string;
   readonly title: string;
@@ -266,7 +292,17 @@ export function renderPendingPrompt(args: {
   const requirementsSection = requirements.length > 0
     ? `\n\n**OUTPUT REQUIREMENTS:**\n${requirements.map(r => `- ${r}`).join('\n')}`
     : '';
-  const enhancedPrompt = basePrompt + requirementsSection;
+  
+  // Extract output contract requirements (system-injected, not prompt-authored)
+  const outputContract = step && typeof step === 'object' && 'outputContract' in step
+    ? (step as { outputContract?: { contractRef?: string } }).outputContract
+    : undefined;
+  const contractRequirements = formatOutputContractRequirements(outputContract);
+  const contractSection = contractRequirements.length > 0
+    ? `\n\n**OUTPUT REQUIREMENTS (System):**\n${contractRequirements.map(r => `- ${r}`).join('\n')}`
+    : '';
+  
+  const enhancedPrompt = basePrompt + requirementsSection + contractSection;
 
   // If not rehydrate-only, return enhanced prompt (no recovery needed for advance/start)
   if (!args.rehydrateOnly) {

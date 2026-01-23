@@ -9,6 +9,7 @@ import { ExecutionState, LoopFrame } from '../../domain/execution/state';
 import { WorkflowEvent } from '../../domain/execution/event';
 import { StepInstanceId, toStepInstanceKey } from '../../domain/execution/ids';
 import { computeLoopDecision, type LoopKernelError } from '../../v2/durable-core/domain/loop-runtime';
+import { evaluateLoopControlWithFallback } from '../../v2/durable-core/domain/loop-control-evaluator';
 
 export interface NextStep {
   readonly step: WorkflowStepDefinition;
@@ -58,7 +59,12 @@ export class WorkflowInterpreter {
     }
   }
 
-  next(compiled: CompiledWorkflow, state: ExecutionState, context: Record<string, unknown> = {}): Result<InterpreterOutput, DomainError> {
+  next(
+    compiled: CompiledWorkflow,
+    state: ExecutionState,
+    context: Record<string, unknown> = {},
+    artifacts: readonly unknown[] = []
+  ): Result<InterpreterOutput, DomainError> {
     if (state.kind === 'complete') {
       return ok({ state, next: null, isComplete: true });
     }
@@ -82,7 +88,7 @@ export class WorkflowInterpreter {
     for (let guard = 0; guard < 10_000; guard++) {
       // If inside a loop, drive it first.
       if (running.loopStack.length > 0) {
-        const inLoop = this.nextInCurrentLoop(compiled, running, context);
+        const inLoop = this.nextInCurrentLoop(compiled, running, context, artifacts);
         if (inLoop.isErr()) return err(inLoop.error);
         const result = inLoop.value;
         running = result.state;
@@ -170,7 +176,8 @@ export class WorkflowInterpreter {
   private nextInCurrentLoop(
     compiled: CompiledWorkflow,
     state: Extract<ExecutionState, { kind: 'running' }>,
-    context: Record<string, unknown>
+    context: Record<string, unknown>,
+    artifacts: readonly unknown[]
   ): Result<{ state: Extract<ExecutionState, { kind: 'running' }>; next: NextStep | null }, DomainError> {
     const frame = state.loopStack[state.loopStack.length - 1];
     const loopCompiled = compiled.compiledLoops.get(frame.loopId);
@@ -234,12 +241,12 @@ export class WorkflowInterpreter {
                 message: `while loop '${loopCompiled.loop.id}' missing condition`,
               });
             }
-            return ok(
-              evaluateCondition(
-                loopCompiled.loop.loop.condition as any,
-                this.projectLoopContextAtIteration(loopCompiled.loop, iteration, context) as any
-              )
+            const contextDecision = evaluateCondition(
+              loopCompiled.loop.loop.condition as any,
+              this.projectLoopContextAtIteration(loopCompiled.loop, iteration, context) as any
             );
+            const shouldEnter = evaluateLoopControlWithFallback(artifacts, frame.loopId, contextDecision);
+            return ok(shouldEnter);
           }
           case 'until': {
             if (!loopCompiled.loop.loop.condition) {
@@ -249,12 +256,12 @@ export class WorkflowInterpreter {
                 message: `until loop '${loopCompiled.loop.id}' missing condition`,
               });
             }
-            return ok(
-              !evaluateCondition(
-                loopCompiled.loop.loop.condition as any,
-                this.projectLoopContextAtIteration(loopCompiled.loop, iteration, context) as any
-              )
+            const contextShouldEnter = !evaluateCondition(
+              loopCompiled.loop.loop.condition as any,
+              this.projectLoopContextAtIteration(loopCompiled.loop, iteration, context) as any
             );
+            const shouldEnter = evaluateLoopControlWithFallback(artifacts, frame.loopId, contextShouldEnter);
+            return ok(shouldEnter);
           }
           default:
             return err({
