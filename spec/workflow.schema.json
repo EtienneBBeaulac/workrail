@@ -107,6 +107,23 @@
         "additionalProperties": false
       },
       "uniqueItems": true
+    },
+    "recommendedPreferences": {
+      "type": "object",
+      "description": "Workflow-level preference recommendations. When effective preferences exceed these, structured warnings are emitted. Never hard-blocks user choice.",
+      "properties": {
+        "recommendedAutonomy": {
+          "type": "string",
+          "enum": ["guided", "full_auto_stop_on_user_deps", "full_auto_never_stop"],
+          "description": "Recommended autonomy level for this workflow"
+        },
+        "recommendedRiskPolicy": {
+          "type": "string",
+          "enum": ["conservative", "balanced", "aggressive"],
+          "description": "Recommended risk policy for this workflow"
+        }
+      },
+      "additionalProperties": false
     }
   },
   "required": [

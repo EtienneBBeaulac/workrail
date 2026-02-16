@@ -131,6 +131,21 @@ export interface FunctionCall {
  * - Defined entirely by its fields
  * - Can be serialized/deserialized without loss
  */
+/**
+ * Workflow-level preference recommendations.
+ * 
+ * Lock: §5 "closed-set recommendation targets"
+ * These are optional hints from the workflow author about what autonomy/risk
+ * levels are appropriate. They never hard-block user choice, but emit
+ * structured warnings (gap_recorded) when effective preferences exceed them.
+ */
+export interface WorkflowRecommendedPreferences {
+  /** Recommended autonomy level. If user's effective autonomy exceeds this, a warning gap is emitted. */
+  readonly recommendedAutonomy?: 'guided' | 'full_auto_stop_on_user_deps' | 'full_auto_never_stop';
+  /** Recommended risk policy. If user's effective risk policy exceeds this, a warning gap is emitted. */
+  readonly recommendedRiskPolicy?: 'conservative' | 'balanced' | 'aggressive';
+}
+
 export interface WorkflowDefinition {
   readonly id: string;
   readonly name: string;
@@ -141,6 +156,12 @@ export interface WorkflowDefinition {
   readonly clarificationPrompts?: readonly string[];
   readonly metaGuidance?: readonly string[];
   readonly functionDefinitions?: readonly FunctionDefinition[];
+  /**
+   * Workflow-level preference recommendations.
+   * When effective preferences exceed these recommendations, structured
+   * warnings are emitted as gap_recorded events (severity: warning).
+   */
+  readonly recommendedPreferences?: WorkflowRecommendedPreferences;
 }
 
 // =============================================================================

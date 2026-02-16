@@ -1,8 +1,12 @@
 {
   "id": "coding-task-workflow-agentic",
   "name": "Agentic Task Dev Workflow (Invariants • Architecture • Vertical Slices • PR Sizing • Audits • Resumable)",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Coding workflow that explores multiple approaches before committing—avoids anchoring on the first idea. Flow: constraints → approaches → compare → decide → slices → verify. Use when getting it right matters.",
+  "recommendedPreferences": {
+    "recommendedAutonomy": "guided",
+    "recommendedRiskPolicy": "conservative"
+  },
   "preconditions": [
     "User provides a task description (ticket text or equivalent) and success criteria (even if partial).",
     "Agent has read access to the codebase and can use tools (search/read/edit/terminal).",

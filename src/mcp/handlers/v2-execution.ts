@@ -59,6 +59,7 @@ import { buildAckAdvanceAppendPlanV1 } from '../../v2/durable-core/domain/ack-ad
 import { detectBlockingReasonsV1 } from '../../v2/durable-core/domain/blocking-decision.js';
 import { buildBlockerReport, shouldBlock, reasonToGap } from '../../v2/durable-core/domain/reason-model.js';
 import { applyGuardrails } from '../../v2/durable-core/domain/risk-policy-guardrails.js';
+import { checkRecommendationExceedance } from '../../v2/durable-core/domain/recommendation-warnings.js';
 import { getOutputRequirementStatusWithArtifactsV1 } from '../../v2/durable-core/domain/validation-criteria-validator.js';
 import type { OutputContract } from '../../types/workflow-definition.js';
 import { buildValidationPerformedEvent } from '../../v2/durable-core/domain/validation-event-builder.js';
@@ -990,7 +991,36 @@ function advanceAndRecord(args: {
             ]
           : [];
 
-      const extraEventsToAppend = [...gapEventsToAppend, ...contextSetEvents];
+      // Lock: §5 recommendation exceedance warnings — emit gap_recorded with severity: warning
+      // when effective preferences exceed workflow-declared recommendations.
+      // Deduped per node to avoid noisy repetition.
+      const recommendationWarningEvents: Omit<DomainEventV1, 'eventIndex' | 'sessionId'>[] = [];
+      const workflowRecommendations = pinnedWorkflow.definition.recommendedPreferences;
+      if (workflowRecommendations && effectivePrefs) {
+        const warnings = checkRecommendationExceedance(
+          { autonomy, riskPolicy },
+          workflowRecommendations,
+        );
+        for (const [idx, w] of warnings.entries()) {
+          const gapId = `rec_warn_${String(nodeId)}_${idx}`;
+          recommendationWarningEvents.push({
+            v: 1 as const,
+            eventId: idFactory.mintEventId(),
+            kind: 'gap_recorded' as const,
+            dedupeKey: `gap_recorded:${String(sessionId)}:${gapId}`,
+            scope: { runId: String(runId), nodeId: String(nodeId) },
+            data: {
+              gapId,
+              severity: 'warning',
+              reason: w.kind,
+              summary: w.summary,
+              resolution: { kind: 'unresolved' as const },
+            },
+          } as Omit<DomainEventV1, 'eventIndex' | 'sessionId'>);
+        }
+      }
+
+      const extraEventsToAppend = [...gapEventsToAppend, ...recommendationWarningEvents, ...contextSetEvents];
 
       const event: WorkflowEvent = { kind: 'step_completed', stepInstanceId: pendingStep };
       const advanced = interpreter.applyEvent(currentState, event);
@@ -1428,7 +1458,34 @@ function handleRetryAdvance(args: {
       return errAsync({ kind: 'invariant_violation' as const, message: validationEventRes.error.message } as const);
     }
     
-    const extraEventsToAppend = [validationEventRes.value, ...gapEventsToAppend, ...contextSetEvents];
+    // Lock: §5 recommendation exceedance warnings (blocked retry path)
+    const recommendationWarningEvents: Omit<DomainEventV1, 'eventIndex' | 'sessionId'>[] = [];
+    const workflowRecommendations = pinnedWorkflow.definition.recommendedPreferences;
+    if (workflowRecommendations && effectivePrefs) {
+      const warnings = checkRecommendationExceedance(
+        { autonomy, riskPolicy },
+        workflowRecommendations,
+      );
+      for (const [idx, w] of warnings.entries()) {
+        const gapId = `rec_warn_${String(blockedNodeId)}_${idx}`;
+        recommendationWarningEvents.push({
+          v: 1 as const,
+          eventId: idFactory.mintEventId(),
+          kind: 'gap_recorded' as const,
+          dedupeKey: `gap_recorded:${String(sessionId)}:${gapId}`,
+          scope: { runId: String(runId), nodeId: String(blockedNodeId) },
+          data: {
+            gapId,
+            severity: 'warning',
+            reason: w.kind,
+            summary: w.summary,
+            resolution: { kind: 'unresolved' as const },
+          },
+        } as Omit<DomainEventV1, 'eventIndex' | 'sessionId'>);
+      }
+    }
+
+    const extraEventsToAppend = [validationEventRes.value, ...gapEventsToAppend, ...recommendationWarningEvents, ...contextSetEvents];
     
     const event: WorkflowEvent = {
       kind: 'step_completed',
