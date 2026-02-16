@@ -58,6 +58,7 @@ import { normalizeOutputsForAppend } from '../../v2/durable-core/domain/outputs.
 import { buildAckAdvanceAppendPlanV1 } from '../../v2/durable-core/domain/ack-advance-append-plan.js';
 import { detectBlockingReasonsV1 } from '../../v2/durable-core/domain/blocking-decision.js';
 import { buildBlockerReport, shouldBlock, reasonToGap } from '../../v2/durable-core/domain/reason-model.js';
+import { applyGuardrails } from '../../v2/durable-core/domain/risk-policy-guardrails.js';
 import { getOutputRequirementStatusWithArtifactsV1 } from '../../v2/durable-core/domain/validation-criteria-validator.js';
 import type { OutputContract } from '../../types/workflow-definition.js';
 import { buildValidationPerformedEvent } from '../../v2/durable-core/domain/validation-event-builder.js';
@@ -68,6 +69,7 @@ import { projectRunContextV2 } from '../../v2/projections/run-context.js';
 import { mergeContext } from '../../v2/durable-core/domain/context-merge.js';
 import { renderPendingPrompt } from '../../v2/durable-core/domain/prompt-renderer.js';
 import { buildDecisionTraceEventData, type DecisionTraceEntry } from '../../v2/durable-core/domain/decision-trace-builder.js';
+import { anchorsToObservations, type ObservationEventData } from '../../v2/durable-core/domain/observation-builder.js';
 import { createBundledSource } from '../../types/workflow-source.js';
 import type { WorkflowDefinition } from '../../types/workflow-definition.js';
 import { hasWorkflowDefinitionShape } from '../../types/workflow-definition.js';
@@ -827,15 +829,21 @@ function advanceAndRecord(args: {
       }
 
       const prefs = projectPreferencesV2(truth.events, parentByNodeId);
-      const autonomy = prefs.isOk() ? prefs.value.byNodeId[String(nodeId)]?.effective.autonomy ?? 'guided' : 'guided';
+      const effectivePrefs = prefs.isOk() ? prefs.value.byNodeId[String(nodeId)]?.effective : undefined;
+      const autonomy = effectivePrefs?.autonomy ?? 'guided';
+      const riskPolicy = effectivePrefs?.riskPolicy ?? 'conservative';
+
+      // Apply risk policy guardrails: some reasons may be downgraded to warnings
+      // Lock: §4 riskPolicy guardrails (table-driven, never bypasses contracts/user-deps)
+      const { blocking: effectiveReasons, downgraded: _downgradedWarnings } = applyGuardrails(riskPolicy, reasons);
 
       // If there are any reasons that would block, either:
       // - block (guided / stop-on-user-deps)
       // - record gap(s) and continue (never-stop)
-      const shouldBlockNow = reasons.length > 0 && shouldBlock(autonomy, reasons);
+      const shouldBlockNow = effectiveReasons.length > 0 && shouldBlock(autonomy, effectiveReasons);
 
       if (shouldBlockNow) {
-        const blockersRes = buildBlockerReport(reasons);
+        const blockersRes = buildBlockerReport(effectiveReasons);
         if (blockersRes.isErr()) {
           return errAsync({ kind: 'invariant_violation' as const, message: blockersRes.error.message } as const);
         }
@@ -942,8 +950,8 @@ function advanceAndRecord(args: {
         : Boolean(notesMarkdown);
 
       const gapEventsToAppend: readonly Omit<DomainEventV1, 'eventIndex' | 'sessionId'>[] =
-        autonomy === 'full_auto_never_stop' && reasons.length > 0
-          ? reasons.map((r, idx) => {
+        autonomy === 'full_auto_never_stop' && effectiveReasons.length > 0
+          ? effectiveReasons.map((r, idx) => {
               const g = reasonToGap(r);
               const gapId = `gap_${String(attemptId)}_${idx}`;
               return {
@@ -1234,13 +1242,18 @@ function handleRetryAdvance(args: {
     }
     
     const prefs = projectPreferencesV2(truth.events, parentByNodeId);
-    const autonomy = prefs.isOk() ? prefs.value.byNodeId[String(blockedNodeId)]?.effective.autonomy ?? 'guided' : 'guided';
+    const effectivePrefs = prefs.isOk() ? prefs.value.byNodeId[String(blockedNodeId)]?.effective : undefined;
+    const autonomy = effectivePrefs?.autonomy ?? 'guided';
+    const riskPolicy = effectivePrefs?.riskPolicy ?? 'conservative';
+
+    // Apply risk policy guardrails (same as main path)
+    const { blocking: effectiveReasons, downgraded: _downgradedWarnings } = applyGuardrails(riskPolicy, reasons);
     
-    const shouldBlockNow = reasons.length > 0 && shouldBlock(autonomy, reasons);
+    const shouldBlockNow = effectiveReasons.length > 0 && shouldBlock(autonomy, effectiveReasons);
     
     if (shouldBlockNow) {
       // Retry failed validation → create chained blocked node (parent = previous blocked node).
-      const blockersRes = buildBlockerReport(reasons);
+      const blockersRes = buildBlockerReport(effectiveReasons);
       if (blockersRes.isErr()) {
         return errAsync({ kind: 'invariant_violation' as const, message: blockersRes.error.message } as const);
       }
@@ -1344,8 +1357,8 @@ function handleRetryAdvance(args: {
     
     const currentState = toV1ExecutionState(engineState);
     const gapEventsToAppend: readonly Omit<DomainEventV1, 'eventIndex' | 'sessionId'>[] =
-      autonomy === 'full_auto_never_stop' && reasons.length > 0
-        ? reasons.map((r, idx) => {
+      autonomy === 'full_auto_never_stop' && effectiveReasons.length > 0
+        ? effectiveReasons.map((r, idx) => {
             const g = reasonToGap(r);
             const gapId = `gap_${String(retryAttemptId)}_${idx}`;
             return {
@@ -1949,6 +1962,15 @@ function executeStartWorkflow(
         });
     })
     .andThen(({ workflow, firstStep, workflowHash, pinnedWorkflow }) => {
+      // Resolve workspace anchors for observation events (graceful: empty on failure)
+      const workspaceAnchor = ctx.v2?.workspaceAnchor;
+      const anchorsRA: RA<readonly ObservationEventData[], never> = workspaceAnchor
+        ? workspaceAnchor.resolveAnchors()
+            .map((anchors) => anchorsToObservations(anchors))
+            .orElse(() => okAsync([] as readonly ObservationEventData[]))
+        : okAsync([] as readonly ObservationEventData[]);
+
+      return anchorsRA.andThen((observations) => {
       const sessionId = idFactory.mintSessionId();
       const runId = idFactory.mintRunId();
       const nodeId = idFactory.mintNodeId();
@@ -2052,26 +2074,47 @@ function executeStartWorkflow(
               },
             ];
 
+            // Build events array with dynamic indexing (base + context + observations)
+            const mutableEvents: DomainEventV1[] = [...baseEvents];
+
             // Emit context_set if initial context provided (S8: context persistence)
-            const eventsArray: readonly DomainEventV1[] = input.context
-              ? [
-                  ...baseEvents,
-                  {
-                    v: 1,
-                    eventId: evtContextSet,
-                    eventIndex: 4,
-                    sessionId,
-                    kind: 'context_set' as const,
-                    dedupeKey: `context_set:${sessionId}:${runId}:${contextId}`,
-                    scope: { runId },
-                    data: {
-                      contextId,
-                      context: input.context as unknown as JsonValue,
-                      source: 'initial' as const,
-                    },
-                  } as DomainEventV1,
-                ]
-              : baseEvents;
+            if (input.context) {
+              mutableEvents.push({
+                v: 1,
+                eventId: evtContextSet,
+                eventIndex: mutableEvents.length,
+                sessionId,
+                kind: 'context_set' as const,
+                dedupeKey: `context_set:${sessionId}:${runId}:${contextId}`,
+                scope: { runId },
+                data: {
+                  contextId,
+                  context: input.context as unknown as JsonValue,
+                  source: 'initial' as const,
+                },
+              } as DomainEventV1);
+            }
+
+            // Emit observation_recorded events for workspace anchors (WU2: observability)
+            for (const obs of observations) {
+              const obsEventId = idFactory.mintEventId();
+              mutableEvents.push({
+                v: 1,
+                eventId: obsEventId,
+                eventIndex: mutableEvents.length,
+                sessionId,
+                kind: 'observation_recorded' as const,
+                dedupeKey: `observation_recorded:${sessionId}:${obs.key}`,
+                scope: undefined,
+                data: {
+                  key: obs.key,
+                  value: obs.value,
+                  confidence: obs.confidence,
+                },
+              } as DomainEventV1);
+            }
+
+            const eventsArray: readonly DomainEventV1[] = mutableEvents;
 
             return sessionStore.append(lock, {
               events: eventsArray,
@@ -2081,6 +2124,7 @@ function executeStartWorkflow(
             .mapErr((cause) => ({ kind: 'session_append_failed' as const, cause }))
             .map(() => ({ workflow, firstStep, workflowHash, pinnedWorkflow, sessionId, runId, nodeId }));
         });
+      }); // close anchorsRA.andThen
     })
     .andThen(({ pinnedWorkflow, firstStep, workflowHash, sessionId, runId, nodeId }) => {
       const wfRefRes = deriveWorkflowHashRef(workflowHash);
