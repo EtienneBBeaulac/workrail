@@ -11,6 +11,13 @@ import { StepInstanceId, toStepInstanceKey } from '../../domain/execution/ids';
 import { computeLoopDecision, type LoopKernelError } from '../../v2/durable-core/domain/loop-runtime';
 import { evaluateLoopControlFromArtifacts } from '../../v2/durable-core/domain/loop-control-evaluator';
 import type { LoopConditionSource } from '../../types/workflow-definition';
+import {
+  type DecisionTraceEntry,
+  traceEnteredLoop,
+  traceEvaluatedCondition,
+  traceExitedLoop,
+  traceSelectedNextStep,
+} from '../../v2/durable-core/domain/decision-trace-builder';
 
 export interface NextStep {
   readonly step: WorkflowStepDefinition;
@@ -22,6 +29,8 @@ export interface InterpreterOutput {
   readonly state: ExecutionState;
   readonly next: NextStep | null;
   readonly isComplete: boolean;
+  /** Decision trace entries accumulated during this next() call. Empty when no loops involved. */
+  readonly trace: readonly DecisionTraceEntry[];
 }
 
 @singleton()
@@ -67,12 +76,15 @@ export class WorkflowInterpreter {
     artifacts: readonly unknown[] = []
   ): Result<InterpreterOutput, DomainError> {
     if (state.kind === 'complete') {
-      return ok({ state, next: null, isComplete: true });
+      return ok({ state, next: null, isComplete: true, trace: [] });
     }
 
     const runningRes = this.ensureRunning(state);
     if (runningRes.isErr()) return err(runningRes.error);
     let running = runningRes.value;
+
+    // Trace accumulator: collects entries as the interpreter evaluates conditions
+    const trace: DecisionTraceEntry[] = [];
 
     // If a step is pending, return it again (idempotent "what should I do now?")
     if (running.pendingStep) {
@@ -82,6 +94,7 @@ export class WorkflowInterpreter {
         state: running,
         next: step.value,
         isComplete: false,
+        trace,
       });
     }
 
@@ -89,12 +102,13 @@ export class WorkflowInterpreter {
     for (let guard = 0; guard < 10_000; guard++) {
       // If inside a loop, drive it first.
       if (running.loopStack.length > 0) {
-        const inLoop = this.nextInCurrentLoop(compiled, running, context, artifacts);
+        const inLoop = this.nextInCurrentLoop(compiled, running, context, artifacts, trace);
         if (inLoop.isErr()) return err(inLoop.error);
         const result = inLoop.value;
         running = result.state;
         if (result.next) {
-          return ok({ state: running, next: result.next, isComplete: false });
+          trace.push(traceSelectedNextStep(result.next.stepInstanceId.stepId));
+          return ok({ state: running, next: result.next, isComplete: false, trace });
         }
         // No next means either:
         // - the loop frame was popped (exited), OR
@@ -110,7 +124,8 @@ export class WorkflowInterpreter {
       const out = top.value;
       running = out.state;
       if (out.next) {
-        return ok({ state: running, next: out.next, isComplete: false });
+        trace.push(traceSelectedNextStep(out.next.stepInstanceId.stepId));
+        return ok({ state: running, next: out.next, isComplete: false, trace });
       }
 
       // If we entered a loop (or otherwise changed state), continue selection.
@@ -119,7 +134,7 @@ export class WorkflowInterpreter {
         continue;
       }
 
-      return ok({ state: { kind: 'complete' }, next: null, isComplete: true });
+      return ok({ state: { kind: 'complete' }, next: null, isComplete: true, trace });
     }
 
     return err(Err.invalidState('Interpreter exceeded guard iterations (possible infinite loop)'));
@@ -178,7 +193,8 @@ export class WorkflowInterpreter {
     compiled: CompiledWorkflow,
     state: Extract<ExecutionState, { kind: 'running' }>,
     context: Record<string, unknown>,
-    artifacts: readonly unknown[]
+    artifacts: readonly unknown[],
+    trace: DecisionTraceEntry[]
   ): Result<{ state: Extract<ExecutionState, { kind: 'running' }>; next: NextStep | null }, DomainError> {
     const frame = state.loopStack[state.loopStack.length - 1];
     const loopCompiled = compiled.compiledLoops.get(frame.loopId);
@@ -196,7 +212,9 @@ export class WorkflowInterpreter {
           case 'for': {
             const count = loopCompiled.loop.loop.count;
             if (typeof count === 'number') {
-              return ok(iteration < count);
+              const shouldEnter = iteration < count;
+              if (shouldEnter && iteration === 0) trace.push(traceEnteredLoop(frame.loopId, iteration));
+              return ok(shouldEnter);
             }
             if (typeof count === 'string') {
               const raw = (context as any)[count];
@@ -207,7 +225,9 @@ export class WorkflowInterpreter {
                   message: `for loop '${loopCompiled.loop.id}' requires numeric context['${count}']`,
                 });
               }
-              return ok(iteration < raw);
+              const shouldEnter = iteration < raw;
+              if (shouldEnter && iteration === 0) trace.push(traceEnteredLoop(frame.loopId, iteration));
+              return ok(shouldEnter);
             }
             return err({
               code: 'LOOP_INVALID_CONFIG',
@@ -232,13 +252,31 @@ export class WorkflowInterpreter {
                 message: `forEach loop '${loopCompiled.loop.id}' requires array context['${itemsVar}']`,
               });
             }
-            return ok(iteration < raw.length);
+            const shouldEnter = iteration < raw.length;
+            if (shouldEnter && iteration === 0) trace.push(traceEnteredLoop(frame.loopId, iteration));
+            return ok(shouldEnter);
           }
           case 'while': {
-            return this.evaluateWhileUntilCondition(loopCompiled, iteration, context, artifacts, frame, false);
+            const res = this.evaluateWhileUntilCondition(loopCompiled, iteration, context, artifacts, frame, false);
+            if (res.isOk()) {
+              const source = loopCompiled.conditionSource?.kind === 'artifact_contract' ? 'artifact'
+                : loopCompiled.conditionSource?.kind === 'context_variable' ? 'context'
+                : 'legacy';
+              trace.push(traceEvaluatedCondition(frame.loopId, iteration, res.value, source));
+              if (res.value && iteration === 0) trace.push(traceEnteredLoop(frame.loopId, iteration));
+            }
+            return res;
           }
           case 'until': {
-            return this.evaluateWhileUntilCondition(loopCompiled, iteration, context, artifacts, frame, true);
+            const res = this.evaluateWhileUntilCondition(loopCompiled, iteration, context, artifacts, frame, true);
+            if (res.isOk()) {
+              const source = loopCompiled.conditionSource?.kind === 'artifact_contract' ? 'artifact'
+                : loopCompiled.conditionSource?.kind === 'context_variable' ? 'context'
+                : 'legacy';
+              trace.push(traceEvaluatedCondition(frame.loopId, iteration, res.value, source));
+              if (res.value && iteration === 0) trace.push(traceEnteredLoop(frame.loopId, iteration));
+            }
+            return res;
           }
           default:
             return err({
@@ -292,6 +330,7 @@ export class WorkflowInterpreter {
     switch (decision.value.kind) {
       case 'exit_loop': {
         // Exit loop: mark loop step completed as top-level instance and pop frame.
+        trace.push(traceExitedLoop(frame.loopId, `Condition no longer met after ${frame.iteration} iteration(s)`));
         const popped = state.loopStack.slice(0, -1);
         return ok({
           state: {

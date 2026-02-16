@@ -67,6 +67,7 @@ import { projectPreferencesV2 } from '../../v2/projections/preferences.js';
 import { projectRunContextV2 } from '../../v2/projections/run-context.js';
 import { mergeContext } from '../../v2/durable-core/domain/context-merge.js';
 import { renderPendingPrompt } from '../../v2/durable-core/domain/prompt-renderer.js';
+import { buildDecisionTraceEventData, type DecisionTraceEntry } from '../../v2/durable-core/domain/decision-trace-builder.js';
 import { createBundledSource } from '../../types/workflow-source.js';
 import type { WorkflowDefinition } from '../../types/workflow-definition.js';
 import { hasWorkflowDefinitionShape } from '../../types/workflow-definition.js';
@@ -986,6 +987,7 @@ function advanceAndRecord(args: {
       const event: WorkflowEvent = { kind: 'step_completed', stepInstanceId: pendingStep };
       const advanced = interpreter.applyEvent(currentState, event);
       if (advanced.isErr()) {
+
         return errAsync({ kind: 'advance_apply_failed', message: advanced.error.message } as const);
       }
 
@@ -999,6 +1001,24 @@ function advanceAndRecord(args: {
       }
 
       const out = nextRes.value;
+
+    // Build decision trace event from interpreter output (only when trace is non-empty)
+    if (out.trace.length > 0) {
+      const traceId = idFactory.mintEventId();
+      const traceDataRes = buildDecisionTraceEventData(traceId, out.trace);
+      if (traceDataRes.isOk()) {
+        extraEventsToAppend.push({
+          v: 1 as const,
+          eventId: idFactory.mintEventId(),
+          kind: 'decision_trace_appended' as const,
+          dedupeKey: `decision_trace_appended:${String(sessionId)}:${traceId}`,
+          scope: { runId: String(runId), nodeId: String(nodeId) },
+          data: traceDataRes.value,
+        } as Omit<DomainEventV1, 'eventIndex' | 'sessionId'>);
+      }
+      // Budget failure: degrade gracefully (don't block advance)
+    }
+
     const newEngineState = fromV1ExecutionState(out.state);
     const snapshotFile: ExecutionSnapshotFileV1 = {
       v: 1,
@@ -1419,6 +1439,24 @@ function handleRetryAdvance(args: {
     }
     
     const out = nextRes.value;
+
+    // Build decision trace event from interpreter output (only when trace is non-empty)
+    if (out.trace.length > 0) {
+      const traceId = idFactory.mintEventId();
+      const traceDataRes = buildDecisionTraceEventData(traceId, out.trace);
+      if (traceDataRes.isOk()) {
+        extraEventsToAppend.push({
+          v: 1 as const,
+          eventId: idFactory.mintEventId(),
+          kind: 'decision_trace_appended' as const,
+          dedupeKey: `decision_trace_appended:${String(sessionId)}:${traceId}`,
+          scope: { runId: String(runId), nodeId: String(blockedNodeId) },
+          data: traceDataRes.value,
+        } as Omit<DomainEventV1, 'eventIndex' | 'sessionId'>);
+      }
+      // Budget failure: degrade gracefully (don't block advance)
+    }
+
     const newEngineState = fromV1ExecutionState(out.state);
     const snapshotFile: ExecutionSnapshotFileV1 = {
       v: 1,

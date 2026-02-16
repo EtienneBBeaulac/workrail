@@ -253,6 +253,101 @@ describe('Interpreter: artifact_contract loops', () => {
   });
 });
 
+describe('Interpreter: decision trace output', () => {
+  const interpreter = new WorkflowInterpreter();
+
+  it('produces trace entries for artifact-based loop entry and step selection', () => {
+    const compiled = compileWorkflow(buildArtifactContractWorkflow());
+    const artifacts = [
+      { kind: 'wr.loop_control', loopId: 'loop-step', decision: 'continue' },
+    ];
+    const result = interpreter.next(compiled, baseState, {}, artifacts);
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      const { trace } = result.value;
+      expect(trace.length).toBeGreaterThan(0);
+      // Should have: evaluated_condition, entered_loop, selected_next_step
+      const kinds = trace.map((t) => t.kind);
+      expect(kinds).toContain('evaluated_condition');
+      expect(kinds).toContain('entered_loop');
+      expect(kinds).toContain('selected_next_step');
+    }
+  });
+
+  it('produces trace for loop exit (stop artifact)', () => {
+    const compiled = compileWorkflow(buildArtifactContractWorkflow());
+    const artifacts = [
+      { kind: 'wr.loop_control', loopId: 'loop-step', decision: 'stop' },
+    ];
+    const result = interpreter.next(compiled, baseState, {}, artifacts);
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      const { trace } = result.value;
+      const kinds = trace.map((t) => t.kind);
+      expect(kinds).toContain('evaluated_condition');
+      expect(kinds).toContain('exited_loop');
+    }
+  });
+
+  it('produces trace with artifact source for artifact_contract loops', () => {
+    const compiled = compileWorkflow(buildArtifactContractWorkflow());
+    const artifacts = [
+      { kind: 'wr.loop_control', loopId: 'loop-step', decision: 'continue' },
+    ];
+    const result = interpreter.next(compiled, baseState, {}, artifacts);
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      const condEntry = result.value.trace.find((t) => t.kind === 'evaluated_condition');
+      expect(condEntry).toBeDefined();
+      expect(condEntry!.summary).toContain('artifact');
+    }
+  });
+
+  it('produces trace with context source for context_variable loops', () => {
+    const compiled = compileWorkflow(buildContextVariableWorkflow());
+    const result = interpreter.next(compiled, baseState, { continuePlanning: true }, []);
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      const condEntry = result.value.trace.find((t) => t.kind === 'evaluated_condition');
+      expect(condEntry).toBeDefined();
+      expect(condEntry!.summary).toContain('context');
+    }
+  });
+
+  it('returns empty trace for non-loop workflows', () => {
+    const simpleDef: WorkflowDefinition = {
+      id: 'no-loop-test',
+      name: 'No Loop',
+      description: 'Simple linear flow',
+      version: '1.0.0',
+      steps: [
+        { id: 'step-1', title: 'Step 1', prompt: 'Do thing', requireConfirmation: false },
+      ],
+    };
+    const compiled = compileWorkflow(simpleDef);
+    const result = interpreter.next(compiled, baseState, {}, []);
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      // selected_next_step is the only trace entry for a simple selection
+      const nonSelectTrace = result.value.trace.filter((t) => t.kind !== 'selected_next_step');
+      expect(nonSelectTrace).toHaveLength(0);
+    }
+  });
+
+  it('complete workflow returns empty trace', () => {
+    const result = interpreter.next(
+      compileWorkflow(buildContextVariableWorkflow()),
+      { kind: 'complete' },
+      {},
+      []
+    );
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.trace).toEqual([]);
+    }
+  });
+});
+
 describe('Interpreter: explicit conditionSource', () => {
   const interpreter = new WorkflowInterpreter();
   const compiled = compileWorkflow(buildExplicitArtifactSourceWorkflow());
