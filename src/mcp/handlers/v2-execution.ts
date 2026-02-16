@@ -52,7 +52,7 @@ import { parseStateTokenOrFail, parseAckTokenOrFail, newAttemptId, attemptIdForN
 import { type InternalError, isInternalError } from './v2-error-mapping.js';
 import { toV1ExecutionState, convertRunningExecutionStateToEngineState, fromV1ExecutionState, mapWorkflowSourceKind, extractStepMetadata, type StepMetadata, type PreferencesV2, defaultPreferences, derivePreferencesForNode, type NextIntentV2, deriveNextIntent } from './v2-state-conversion.js';
 import { checkContextBudget } from './v2-context-budget.js';
-import { executeAdvanceCore, type AdvanceMode } from './v2-advance-core.js';
+import { executeAdvanceCore } from './v2-advance-core.js';
 
 /**
  * v2 Slice 3: token orchestration (`start_workflow` / `continue_workflow`).

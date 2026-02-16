@@ -15,7 +15,7 @@
  * on the success path.
  */
 
-import { ResultAsync as RA, okAsync, errAsync as neErrorAsync, ok, err } from 'neverthrow';
+import { ResultAsync as RA, okAsync, errAsync as neErrorAsync } from 'neverthrow';
 import type { DomainEventV1 } from '../../v2/durable-core/schemas/session/index.js';
 import type { ExecutionSnapshotFileV1, EngineStateV1 } from '../../v2/durable-core/schemas/execution-snapshot/index.js';
 import type { SessionId, RunId, NodeId, WorkflowHash } from '../../v2/durable-core/ids/index.js';
@@ -57,6 +57,7 @@ import { WorkflowInterpreter } from '../../application/services/workflow-interpr
 import type { InternalError } from './v2-error-mapping.js';
 import { toV1ExecutionState, fromV1ExecutionState } from './v2-state-conversion.js';
 import { collectArtifactsForEvaluation } from './v2-context-budget.js';
+import { withTimeout } from './shared/with-timeout.js';
 
 // ── AdvanceMode: the single branching discriminant ────────────────────
 
@@ -138,6 +139,39 @@ export interface AdvanceCorePorts {
     readonly mintNodeId: () => NodeId;
     readonly mintEventId: () => string;
   };
+}
+
+// ── Partial event type (eventIndex + sessionId added by append plan) ──
+
+type PartialEvent = Omit<DomainEventV1, 'eventIndex' | 'sessionId'>;
+
+/** Type-safe constructor for partial events — avoids `as` casts at call sites. */
+function partialEvent(fields: PartialEvent): PartialEvent {
+  return fields;
+}
+
+// ── Grouped parameter interfaces (reduce arg-bag in outcome builders) ─
+
+/** Execution identity + workflow state shared by both outcome paths. */
+interface AdvanceContext {
+  readonly truth: LoadedSessionTruthV2;
+  readonly sessionId: SessionId;
+  readonly runId: RunId;
+  readonly currentNodeId: NodeId;
+  readonly attemptId: AttemptId;
+  readonly workflowHash: WorkflowHash;
+  readonly inputOutput: V2ContinueWorkflowInput['output'];
+  readonly pinnedWorkflow: ReturnType<typeof createWorkflow>;
+  readonly engineState: EngineStateV1;
+  readonly pendingStep: ValidatedAdvanceInputs['pendingStep'];
+}
+
+/** Computed blocking/validation results from the advance evaluation phase. */
+interface ComputedAdvanceResults {
+  readonly reasons: readonly ReasonV1[];
+  readonly effectiveReasons: readonly ReasonV1[];
+  readonly outputRequirement: ReturnType<typeof getOutputRequirementStatusWithArtifactsV1>;
+  readonly validation: ValidationResult | undefined;
 }
 
 // ── Core function ─────────────────────────────────────────────────────
@@ -228,24 +262,19 @@ export function executeAdvanceCore(args: {
     const { blocking: effectiveReasons } = applyGuardrails(v.riskPolicy, reasons);
     const shouldBlockNow = effectiveReasons.length > 0 && shouldBlock(v.autonomy, effectiveReasons);
 
+    const ctx: AdvanceContext = { truth, sessionId, runId, currentNodeId, attemptId, workflowHash, inputOutput, pinnedWorkflow, engineState, pendingStep };
+    const computed: ComputedAdvanceResults = { reasons, effectiveReasons, outputRequirement, validation };
+    const ports: AdvanceCorePorts = { snapshotStore, sessionStore, sha256, idFactory };
+
     // ── 5. Blocked path ─────────────────────────────────────────────────
 
     if (shouldBlockNow) {
-      return buildBlockedOutcome({
-        mode, snap, truth, sessionId, runId, currentNodeId, attemptId, workflowHash,
-        reasons, effectiveReasons, outputRequirement, validation,
-        lock, snapshotStore, sessionStore, sha256, idFactory,
-      });
+      return buildBlockedOutcome({ mode, snap, ctx, computed, lock, ports });
     }
 
     // ── 6. Success path ─────────────────────────────────────────────────
 
-    return buildSuccessOutcome({
-      mode, truth, sessionId, runId, currentNodeId, attemptId, workflowHash,
-      inputOutput, pinnedWorkflow, engineState, pendingStep,
-      effectiveReasons, outputRequirement, validation, v,
-      lock, snapshotStore, sessionStore, sha256, idFactory,
-    });
+    return buildSuccessOutcome({ mode, ctx, computed, v, lock, ports });
   });
 }
 
@@ -312,8 +341,22 @@ function validateAdvanceInputs(args: {
   }
   const prefs = projectPreferencesV2(truth.events, parentByNodeId);
   const effectivePrefs = prefs.isOk() ? prefs.value.byNodeId[String(currentNodeId)]?.effective : undefined;
-  const autonomy = effectivePrefs?.autonomy ?? 'guided';
-  const riskPolicy = effectivePrefs?.riskPolicy ?? 'conservative';
+  const rawAutonomy = effectivePrefs?.autonomy ?? 'guided';
+  const rawRiskPolicy = effectivePrefs?.riskPolicy ?? 'conservative';
+
+  // Validate at boundary — narrow from string to literal union, fail fast on unknown values
+  const VALID_AUTONOMY = ['guided', 'full_auto_stop_on_user_deps', 'full_auto_never_stop'] as const;
+  const VALID_RISK_POLICY = ['conservative', 'balanced', 'aggressive'] as const;
+
+  if (!VALID_AUTONOMY.includes(rawAutonomy as typeof VALID_AUTONOMY[number])) {
+    return { ok: false, error: { kind: 'invariant_violation' as const, message: `Unknown autonomy mode: ${rawAutonomy}` } };
+  }
+  if (!VALID_RISK_POLICY.includes(rawRiskPolicy as typeof VALID_RISK_POLICY[number])) {
+    return { ok: false, error: { kind: 'invariant_violation' as const, message: `Unknown risk policy: ${rawRiskPolicy}` } };
+  }
+
+  const autonomy = rawAutonomy as typeof VALID_AUTONOMY[number];
+  const riskPolicy = rawRiskPolicy as typeof VALID_RISK_POLICY[number];
 
   return {
     ok: true,
@@ -325,8 +368,8 @@ function validateAdvanceInputs(args: {
       outputContract,
       notesMarkdown: inputOutput?.notesMarkdown,
       artifacts: inputOutput?.artifacts ?? [],
-      autonomy: autonomy as ValidatedAdvanceInputs['autonomy'],
-      riskPolicy: riskPolicy as ValidatedAdvanceInputs['riskPolicy'],
+      autonomy,
+      riskPolicy,
       effectivePrefs,
     },
   };
@@ -337,23 +380,15 @@ function validateAdvanceInputs(args: {
 function buildBlockedOutcome(args: {
   readonly mode: AdvanceMode;
   readonly snap: ExecutionSnapshotFileV1;
-  readonly truth: LoadedSessionTruthV2;
-  readonly sessionId: SessionId;
-  readonly runId: RunId;
-  readonly currentNodeId: NodeId;
-  readonly attemptId: AttemptId;
-  readonly workflowHash: WorkflowHash;
-  readonly reasons: readonly ReasonV1[];
-  readonly effectiveReasons: readonly ReasonV1[];
-  readonly outputRequirement: ReturnType<typeof getOutputRequirementStatusWithArtifactsV1>;
-  readonly validation: ValidationResult | undefined;
+  readonly ctx: AdvanceContext;
+  readonly computed: ComputedAdvanceResults;
   readonly lock: WithHealthySessionLock;
-  readonly snapshotStore: import('../../v2/ports/snapshot-store.port.js').SnapshotStorePortV2;
-  readonly sessionStore: import('../../v2/ports/session-event-log-store.port.js').SessionEventLogAppendStorePortV2;
-  readonly sha256: Sha256PortV2;
-  readonly idFactory: AdvanceCorePorts['idFactory'];
+  readonly ports: AdvanceCorePorts;
 }): RA<void, InternalError | SessionEventLogStoreError | SnapshotStoreError> {
-  const { mode, snap, truth, sessionId, runId, currentNodeId, attemptId, workflowHash, reasons, effectiveReasons, outputRequirement, validation, lock, snapshotStore, sessionStore, sha256, idFactory } = args;
+  const { mode, snap, lock, ports } = args;
+  const { truth, sessionId, runId, currentNodeId, attemptId, workflowHash } = args.ctx;
+  const { reasons, effectiveReasons, outputRequirement, validation } = args.computed;
+  const { snapshotStore, sessionStore, sha256, idFactory } = ports;
 
   const blockersRes = buildBlockerReport(effectiveReasons);
   if (blockersRes.isErr()) {
@@ -414,27 +449,16 @@ function buildBlockedOutcome(args: {
 
 function buildSuccessOutcome(args: {
   readonly mode: AdvanceMode;
-  readonly truth: LoadedSessionTruthV2;
-  readonly sessionId: SessionId;
-  readonly runId: RunId;
-  readonly currentNodeId: NodeId;
-  readonly attemptId: AttemptId;
-  readonly workflowHash: WorkflowHash;
-  readonly inputOutput: V2ContinueWorkflowInput['output'];
-  readonly pinnedWorkflow: ReturnType<typeof createWorkflow>;
-  readonly engineState: EngineStateV1;
-  readonly pendingStep: { readonly stepId: string; readonly loopPath: readonly { readonly loopId: string; readonly iteration: number }[] };
-  readonly effectiveReasons: readonly ReasonV1[];
-  readonly outputRequirement: ReturnType<typeof getOutputRequirementStatusWithArtifactsV1>;
-  readonly validation: ValidationResult | undefined;
+  readonly ctx: AdvanceContext;
+  readonly computed: ComputedAdvanceResults;
   readonly v: ValidatedAdvanceInputs;
   readonly lock: WithHealthySessionLock;
-  readonly snapshotStore: import('../../v2/ports/snapshot-store.port.js').SnapshotStorePortV2;
-  readonly sessionStore: import('../../v2/ports/session-event-log-store.port.js').SessionEventLogAppendStorePortV2;
-  readonly sha256: Sha256PortV2;
-  readonly idFactory: AdvanceCorePorts['idFactory'];
+  readonly ports: AdvanceCorePorts;
 }): RA<void, InternalError | SessionEventLogStoreError | SnapshotStoreError> {
-  const { mode, truth, sessionId, runId, currentNodeId, attemptId, workflowHash, inputOutput, pinnedWorkflow, engineState, pendingStep, effectiveReasons, outputRequirement, validation, v, lock, snapshotStore, sessionStore, sha256, idFactory } = args;
+  const { mode, v, lock, ports } = args;
+  const { truth, sessionId, runId, currentNodeId, attemptId, workflowHash, inputOutput, pinnedWorkflow, engineState, pendingStep } = args.ctx;
+  const { effectiveReasons, outputRequirement, validation } = args.computed;
+  const { snapshotStore, sessionStore, sha256, idFactory } = ports;
 
   // Compile + interpret
   const compiler = new WorkflowCompiler();
@@ -470,7 +494,7 @@ function buildSuccessOutcome(args: {
 
   // ── Build extra events ──────────────────────────────────────────────
 
-  const extraEventsToAppend: Omit<DomainEventV1, 'eventIndex' | 'sessionId'>[] = [];
+  const extraEventsToAppend: PartialEvent[] = [];
 
   // Gap events (never-stop mode)
   if (v.autonomy === 'full_auto_never_stop' && effectiveReasons.length > 0) {
@@ -497,23 +521,24 @@ function buildSuccessOutcome(args: {
     );
     for (const [idx, w] of warnings.entries()) {
       const gapId = `rec_warn_${String(currentNodeId)}_${idx}`;
-      extraEventsToAppend.push({
+      extraEventsToAppend.push(partialEvent({
         v: 1 as const,
         eventId: idFactory.mintEventId(),
         kind: 'gap_recorded' as const,
         dedupeKey: `gap_recorded:${String(sessionId)}:${gapId}`,
         scope: { runId: String(runId), nodeId: String(currentNodeId) },
         data: { gapId, severity: 'warning', reason: w.kind, summary: w.summary, resolution: { kind: 'unresolved' as const } },
-      } as Omit<DomainEventV1, 'eventIndex' | 'sessionId'>);
+      }));
     }
   }
 
   // Context set events
   if (v.inputContextObj) {
-    extraEventsToAppend.push({
+    extraEventsToAppend.push(partialEvent({
       v: 1 as const,
       eventId: idFactory.mintEventId(),
       kind: 'context_set' as const,
+      // Intentionally unique per emission — context_set events should never deduplicate
       dedupeKey: `context_set:${String(sessionId)}:${String(runId)}:${idFactory.mintEventId()}`,
       scope: { runId: String(runId) },
       data: {
@@ -521,7 +546,7 @@ function buildSuccessOutcome(args: {
         context: v.mergedContext as unknown as JsonValue,
         source: 'agent_delta' as const,
       },
-    } as Omit<DomainEventV1, 'eventIndex' | 'sessionId'>);
+    }));
   }
 
   // Validation event — mode-driven: retry always emits, fresh never emits on success
@@ -553,14 +578,14 @@ function buildSuccessOutcome(args: {
     const traceId = idFactory.mintEventId();
     const traceDataRes = buildDecisionTraceEventData(traceId, out.trace);
     if (traceDataRes.isOk()) {
-      extraEventsToAppend.push({
+      extraEventsToAppend.push(partialEvent({
         v: 1 as const,
         eventId: idFactory.mintEventId(),
         kind: 'decision_trace_appended' as const,
         dedupeKey: `decision_trace_appended:${String(sessionId)}:${traceId}`,
         scope: { runId: String(runId), nodeId: String(currentNodeId) },
         data: traceDataRes.value,
-      } as Omit<DomainEventV1, 'eventIndex' | 'sessionId'>);
+      }));
     }
   }
 
@@ -710,9 +735,4 @@ function errAsync(e: InternalError): RA<never, InternalError> {
   return neErrorAsync(e);
 }
 
-async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, name: string): Promise<T> {
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    setTimeout(() => reject(new Error(`${name} timed out after ${timeoutMs}ms`)), timeoutMs);
-  });
-  return Promise.race([operation, timeoutPromise]);
-}
+
