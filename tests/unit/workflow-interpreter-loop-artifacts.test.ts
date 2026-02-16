@@ -1,3 +1,14 @@
+/**
+ * Loop condition source tests.
+ * 
+ * Verifies the exhaustive branching on LoopConditionSource:
+ * - artifact_contract: ONLY uses artifacts (missing = error, not fallback)
+ * - context_variable: ONLY uses context (no artifact awareness)
+ * - undefined (legacy): falls back to raw condition field
+ * 
+ * Lock: §9 "while loop continuation MUST NOT be controlled by mutable ad-hoc
+ * context keys" — new workflows use artifact_contract; legacy get context_variable.
+ */
 import { describe, it, expect } from 'vitest';
 import { WorkflowInterpreter } from '../../src/application/services/workflow-interpreter';
 import { WorkflowCompiler } from '../../src/application/services/workflow-compiler';
@@ -5,12 +16,26 @@ import { createWorkflow } from '../../src/types/workflow';
 import { createBundledSource } from '../../src/types/workflow-source';
 import type { WorkflowDefinition } from '../../src/types/workflow-definition';
 import type { ExecutionState } from '../../src/domain/execution/state';
+import { LOOP_CONTROL_CONTRACT_REF } from '../../src/v2/durable-core/schemas/artifacts/index';
 
-function buildLoopWorkflow(): WorkflowDefinition {
+const baseState: ExecutionState = { kind: 'init' };
+
+function compileWorkflow(def: WorkflowDefinition) {
+  const compiler = new WorkflowCompiler();
+  const workflow = createWorkflow(def, createBundledSource());
+  const compiled = compiler.compile(workflow);
+  if (compiled.isErr()) throw new Error(`Compile failed: ${compiled.error.message}`);
+  return compiled.value;
+}
+
+// --- Workflow definitions ---
+
+/** Legacy workflow: while loop with context-based condition, no outputContract */
+function buildContextVariableWorkflow(): WorkflowDefinition {
   return {
-    id: 'loop-artifact-test',
-    name: 'Loop Artifact Test',
-    description: 'Test artifact-based loop control',
+    id: 'context-loop-test',
+    name: 'Context Loop Test',
+    description: 'Legacy context-based loop',
     version: '1.0.0',
     steps: [
       {
@@ -23,11 +48,37 @@ function buildLoopWorkflow(): WorkflowDefinition {
           maxIterations: 3,
         },
         body: [
+          { id: 'body-step', title: 'Body Step', prompt: 'Do work', requireConfirmation: false },
+        ],
+      },
+    ],
+  };
+}
+
+/** New workflow: while loop with artifact-based condition via outputContract */
+function buildArtifactContractWorkflow(): WorkflowDefinition {
+  return {
+    id: 'artifact-loop-test',
+    name: 'Artifact Loop Test',
+    description: 'Artifact-based loop control',
+    version: '1.0.0',
+    steps: [
+      {
+        id: 'loop-step',
+        type: 'loop',
+        title: 'Loop Step',
+        loop: {
+          type: 'while',
+          condition: { var: 'unused', equals: true }, // present for schema compat but ignored
+          maxIterations: 3,
+        },
+        body: [
           {
             id: 'body-step',
             title: 'Body Step',
-            prompt: 'Do work',
+            prompt: 'Provide loop control artifact',
             requireConfirmation: false,
+            outputContract: { contractRef: LOOP_CONTROL_CONTRACT_REF },
           },
         ],
       },
@@ -35,67 +86,190 @@ function buildLoopWorkflow(): WorkflowDefinition {
   };
 }
 
-describe('WorkflowInterpreter loop artifact evaluation', () => {
-  const compiler = new WorkflowCompiler();
+/** Workflow with explicit conditionSource: artifact_contract */
+function buildExplicitArtifactSourceWorkflow(): WorkflowDefinition {
+  return {
+    id: 'explicit-artifact-test',
+    name: 'Explicit Artifact Test',
+    description: 'Explicit conditionSource',
+    version: '1.0.0',
+    steps: [
+      {
+        id: 'loop-step',
+        type: 'loop',
+        title: 'Loop Step',
+        loop: {
+          type: 'while',
+          maxIterations: 3,
+          conditionSource: {
+            kind: 'artifact_contract',
+            contractRef: LOOP_CONTROL_CONTRACT_REF,
+            loopId: 'loop-step',
+          },
+        },
+        body: [
+          { id: 'body-step', title: 'Body Step', prompt: 'Do work', requireConfirmation: false },
+        ],
+      },
+    ],
+  };
+}
+
+describe('Compiler: conditionSource derivation', () => {
+  it('derives context_variable for legacy while loop', () => {
+    const compiled = compileWorkflow(buildContextVariableWorkflow());
+    const loop = compiled.compiledLoops.get('loop-step');
+    expect(loop).toBeDefined();
+    expect(loop!.conditionSource).toBeDefined();
+    expect(loop!.conditionSource!.kind).toBe('context_variable');
+  });
+
+  it('derives artifact_contract when body step has outputContract', () => {
+    const compiled = compileWorkflow(buildArtifactContractWorkflow());
+    const loop = compiled.compiledLoops.get('loop-step');
+    expect(loop).toBeDefined();
+    expect(loop!.conditionSource).toBeDefined();
+    expect(loop!.conditionSource!.kind).toBe('artifact_contract');
+    if (loop!.conditionSource!.kind === 'artifact_contract') {
+      expect(loop!.conditionSource!.contractRef).toBe(LOOP_CONTROL_CONTRACT_REF);
+      expect(loop!.conditionSource!.loopId).toBe('loop-step');
+    }
+  });
+
+  it('uses explicit conditionSource when provided', () => {
+    const compiled = compileWorkflow(buildExplicitArtifactSourceWorkflow());
+    const loop = compiled.compiledLoops.get('loop-step');
+    expect(loop).toBeDefined();
+    expect(loop!.conditionSource).toBeDefined();
+    expect(loop!.conditionSource!.kind).toBe('artifact_contract');
+  });
+
+  it('returns undefined conditionSource for for/forEach loops', () => {
+    const def: WorkflowDefinition = {
+      id: 'for-loop-test',
+      name: 'For Loop Test',
+      description: 'For loop',
+      version: '1.0.0',
+      steps: [
+        {
+          id: 'loop-step',
+          type: 'loop',
+          title: 'Loop Step',
+          loop: { type: 'for', count: 3, maxIterations: 5 },
+          body: [
+            { id: 'body-step', title: 'Body Step', prompt: 'Do', requireConfirmation: false },
+          ],
+        },
+      ],
+    };
+    const compiled = compileWorkflow(def);
+    const loop = compiled.compiledLoops.get('loop-step');
+    expect(loop!.conditionSource).toBeUndefined();
+  });
+});
+
+describe('Interpreter: context_variable loops (legacy)', () => {
   const interpreter = new WorkflowInterpreter();
+  const compiled = compileWorkflow(buildContextVariableWorkflow());
 
-  const workflow = createWorkflow(buildLoopWorkflow(), createBundledSource());
-  const compiled = compiler.compile(workflow);
+  it('enters loop when context condition is true', () => {
+    const result = interpreter.next(compiled, baseState, { continuePlanning: true }, []);
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.next?.stepInstanceId.stepId).toBe('body-step');
+    }
+  });
 
-  if (compiled.isErr()) {
-    throw new Error(`Failed to compile test workflow: ${compiled.error.message}`);
-  }
+  it('does NOT enter loop when context condition is false', () => {
+    const result = interpreter.next(compiled, baseState, { continuePlanning: false }, []);
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.isComplete).toBe(true);
+    }
+  });
 
-  const baseState: ExecutionState = { kind: 'init' };
-
-  it('uses artifact decision to override context (continue)', () => {
-    const context = { continuePlanning: false };
+  it('ignores artifacts entirely (no override)', () => {
+    // Artifact says continue, but context says stop → loop should NOT enter
     const artifacts = [
       { kind: 'wr.loop_control', loopId: 'loop-step', decision: 'continue' },
     ];
+    const result = interpreter.next(compiled, baseState, { continuePlanning: false }, artifacts);
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.isComplete).toBe(true);
+    }
+  });
+});
 
-    const nextRes = interpreter.next(compiled.value, baseState, context, artifacts);
-    expect(nextRes.isOk()).toBe(true);
-    if (nextRes.isOk()) {
-      expect(nextRes.value.next?.stepInstanceId.stepId).toBe('body-step');
-      expect(nextRes.value.isComplete).toBe(false);
+describe('Interpreter: artifact_contract loops', () => {
+  const interpreter = new WorkflowInterpreter();
+  const compiled = compileWorkflow(buildArtifactContractWorkflow());
+
+  it('enters loop when artifact says continue', () => {
+    const artifacts = [
+      { kind: 'wr.loop_control', loopId: 'loop-step', decision: 'continue' },
+    ];
+    const result = interpreter.next(compiled, baseState, {}, artifacts);
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.next?.stepInstanceId.stepId).toBe('body-step');
     }
   });
 
-  it('uses artifact decision to override context (stop)', () => {
-    const context = { continuePlanning: true };
+  it('exits loop when artifact says stop', () => {
     const artifacts = [
       { kind: 'wr.loop_control', loopId: 'loop-step', decision: 'stop' },
     ];
-
-    const nextRes = interpreter.next(compiled.value, baseState, context, artifacts);
-    expect(nextRes.isOk()).toBe(true);
-    if (nextRes.isOk()) {
-      expect(nextRes.value.next).toBeNull();
-      expect(nextRes.value.isComplete).toBe(true);
+    const result = interpreter.next(compiled, baseState, {}, artifacts);
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.isComplete).toBe(true);
     }
   });
 
-  it('falls back to context when no artifact', () => {
-    const context = { continuePlanning: true };
-
-    const nextRes = interpreter.next(compiled.value, baseState, context, []);
-    expect(nextRes.isOk()).toBe(true);
-    if (nextRes.isOk()) {
-      expect(nextRes.value.next?.stepInstanceId.stepId).toBe('body-step');
+  it('returns error when artifact is missing (no fallback)', () => {
+    const result = interpreter.next(compiled, baseState, { continuePlanning: true }, []);
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      expect(result.error.message).toContain('requires a wr.loop_control artifact');
     }
   });
 
-  it('falls back to context when loopId does not match', () => {
-    const context = { continuePlanning: true };
+  it('returns error when artifact loopId does not match', () => {
     const artifacts = [
-      { kind: 'wr.loop_control', loopId: 'other-loop', decision: 'stop' },
+      { kind: 'wr.loop_control', loopId: 'other-loop', decision: 'continue' },
     ];
-
-    const nextRes = interpreter.next(compiled.value, baseState, context, artifacts);
-    expect(nextRes.isOk()).toBe(true);
-    if (nextRes.isOk()) {
-      expect(nextRes.value.next?.stepInstanceId.stepId).toBe('body-step');
+    const result = interpreter.next(compiled, baseState, {}, artifacts);
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      expect(result.error.message).toContain('requires a wr.loop_control artifact');
     }
+  });
+
+  it('ignores context entirely (no fallback to context)', () => {
+    // Context says continue, but no artifact → error
+    const result = interpreter.next(compiled, baseState, { continuePlanning: true }, []);
+    expect(result.isErr()).toBe(true);
+  });
+});
+
+describe('Interpreter: explicit conditionSource', () => {
+  const interpreter = new WorkflowInterpreter();
+  const compiled = compileWorkflow(buildExplicitArtifactSourceWorkflow());
+
+  it('uses artifact when explicit conditionSource is artifact_contract', () => {
+    const artifacts = [
+      { kind: 'wr.loop_control', loopId: 'loop-step', decision: 'continue' },
+    ];
+    const result = interpreter.next(compiled, baseState, {}, artifacts);
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.next?.stepInstanceId.stepId).toBe('body-step');
+    }
+  });
+
+  it('errors when artifact missing with explicit artifact_contract source', () => {
+    const result = interpreter.next(compiled, baseState, {}, []);
+    expect(result.isErr()).toBe(true);
   });
 });

@@ -287,6 +287,30 @@
           "type": "string",
           "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
           "description": "Custom variable name for current index (forEach loops)"
+        },
+        "conditionSource": {
+          "description": "Explicit condition source for while/until loops. Auto-derived by compiler when absent.",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "const": "artifact_contract" },
+                "contractRef": { "type": "string", "minLength": 1 },
+                "loopId": { "type": "string", "minLength": 1 }
+              },
+              "required": ["kind", "contractRef", "loopId"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "const": "context_variable" },
+                "condition": { "$ref": "#/$defs/condition" }
+              },
+              "required": ["kind", "condition"],
+              "additionalProperties": false
+            }
+          ]
         }
       },
       "required": ["type", "maxIterations"],

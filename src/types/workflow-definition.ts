@@ -58,9 +58,33 @@ export interface LoopStepDefinition extends WorkflowStepDefinition {
   readonly body: string | readonly WorkflowStepDefinition[];
 }
 
+/**
+ * Loop condition source: discriminated union controlling how loop
+ * continuation is determined.
+ * 
+ * Lock: §9 Loops authoring — "while loop continuation MUST NOT be controlled
+ * by mutable ad-hoc context keys." New workflows MUST use 'artifact_contract'.
+ * Legacy workflows auto-derive 'context_variable' during compilation.
+ * 
+ * Why closed: exhaustive switch in interpreter prevents silent fallback chains.
+ */
+export type LoopConditionSource =
+  | { readonly kind: 'artifact_contract'; readonly contractRef: string; readonly loopId: string }
+  | { readonly kind: 'context_variable'; readonly condition: Readonly<Record<string, unknown>> };
+
 export interface LoopConfigDefinition {
   readonly type: 'while' | 'until' | 'for' | 'forEach';
   readonly condition?: Readonly<Record<string, unknown>>;
+  /**
+   * Explicit condition source for while/until loops.
+   * When present, the interpreter uses this instead of the implicit
+   * condition + context fallback chain.
+   * 
+   * Derived automatically by the compiler when absent:
+   * - Step has outputContract → artifact_contract
+   * - Step has condition only → context_variable (deprecated)
+   */
+  readonly conditionSource?: LoopConditionSource;
   readonly items?: string;
   readonly count?: number | string;
   readonly maxIterations: number;

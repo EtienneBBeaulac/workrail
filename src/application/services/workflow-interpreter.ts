@@ -9,7 +9,8 @@ import { ExecutionState, LoopFrame } from '../../domain/execution/state';
 import { WorkflowEvent } from '../../domain/execution/event';
 import { StepInstanceId, toStepInstanceKey } from '../../domain/execution/ids';
 import { computeLoopDecision, type LoopKernelError } from '../../v2/durable-core/domain/loop-runtime';
-import { evaluateLoopControlWithFallback } from '../../v2/durable-core/domain/loop-control-evaluator';
+import { evaluateLoopControlFromArtifacts } from '../../v2/durable-core/domain/loop-control-evaluator';
+import type { LoopConditionSource } from '../../types/workflow-definition';
 
 export interface NextStep {
   readonly step: WorkflowStepDefinition;
@@ -234,34 +235,10 @@ export class WorkflowInterpreter {
             return ok(iteration < raw.length);
           }
           case 'while': {
-            if (!loopCompiled.loop.loop.condition) {
-              return err({
-                code: 'LOOP_INVALID_CONFIG',
-                loopId: loopCompiled.loop.id,
-                message: `while loop '${loopCompiled.loop.id}' missing condition`,
-              });
-            }
-            const contextDecision = evaluateCondition(
-              loopCompiled.loop.loop.condition as any,
-              this.projectLoopContextAtIteration(loopCompiled.loop, iteration, context) as any
-            );
-            const shouldEnter = evaluateLoopControlWithFallback(artifacts, frame.loopId, contextDecision);
-            return ok(shouldEnter);
+            return this.evaluateWhileUntilCondition(loopCompiled, iteration, context, artifacts, frame, false);
           }
           case 'until': {
-            if (!loopCompiled.loop.loop.condition) {
-              return err({
-                code: 'LOOP_INVALID_CONFIG',
-                loopId: loopCompiled.loop.id,
-                message: `until loop '${loopCompiled.loop.id}' missing condition`,
-              });
-            }
-            const contextShouldEnter = !evaluateCondition(
-              loopCompiled.loop.loop.condition as any,
-              this.projectLoopContextAtIteration(loopCompiled.loop, iteration, context) as any
-            );
-            const shouldEnter = evaluateLoopControlWithFallback(artifacts, frame.loopId, contextShouldEnter);
-            return ok(shouldEnter);
+            return this.evaluateWhileUntilCondition(loopCompiled, iteration, context, artifacts, frame, true);
           }
           default:
             return err({
@@ -354,7 +331,81 @@ export class WorkflowInterpreter {
     }
   }
 
-private projectLoopContextAtIteration(
+/**
+   * Evaluate while/until loop condition by branching exhaustively on conditionSource.
+   * 
+   * No fallback chain: each source kind is handled independently.
+   * - artifact_contract: ONLY checks artifacts. Missing artifact = error.
+   * - context_variable: ONLY checks context. No artifact awareness.
+   * - undefined (no source): falls back to raw condition field for backward compat.
+   * 
+   * @param invertForUntil - true for 'until' loops (inverts context-based evaluation)
+   */
+  private evaluateWhileUntilCondition(
+    loopCompiled: CompiledLoop,
+    iteration: number,
+    context: Record<string, unknown>,
+    artifacts: readonly unknown[],
+    frame: LoopFrame,
+    invertForUntil: boolean
+  ): Result<boolean, LoopKernelError> {
+    const source: LoopConditionSource | undefined = loopCompiled.conditionSource;
+
+    if (!source) {
+      // Legacy: no conditionSource derived (pre-compilation workflows)
+      // Fall back to raw condition field
+      if (!loopCompiled.loop.loop.condition) {
+        return err({
+          code: 'LOOP_INVALID_CONFIG',
+          loopId: loopCompiled.loop.id,
+          message: `${loopCompiled.loop.loop.type} loop '${loopCompiled.loop.id}' missing condition and conditionSource`,
+        });
+      }
+      const raw = evaluateCondition(
+        loopCompiled.loop.loop.condition as any,
+        this.projectLoopContextAtIteration(loopCompiled.loop, iteration, context) as any
+      );
+      return ok(invertForUntil ? !raw : raw);
+    }
+
+    // Exhaustive switch on conditionSource.kind
+    switch (source.kind) {
+      case 'artifact_contract': {
+        // ONLY artifacts. No context fallback.
+        const result = evaluateLoopControlFromArtifacts(artifacts, source.loopId);
+        if (result.kind === 'found') {
+          return ok(result.decision === 'continue');
+        }
+        // Missing or invalid artifact = error (not silent exit)
+        return err({
+          code: 'LOOP_MISSING_CONTEXT',
+          loopId: loopCompiled.loop.id,
+          message: result.kind === 'not_found'
+            ? `Loop '${source.loopId}' requires a wr.loop_control artifact but none was provided`
+            : `Loop '${source.loopId}' has an invalid loop control artifact: ${result.reason}`,
+        });
+      }
+      case 'context_variable': {
+        // ONLY context. No artifact awareness.
+        const raw = evaluateCondition(
+          source.condition as any,
+          this.projectLoopContextAtIteration(loopCompiled.loop, iteration, context) as any
+        );
+        return ok(invertForUntil ? !raw : raw);
+      }
+      default: {
+        // Exhaustiveness check
+        const _exhaustive: never = source;
+        return err({
+          code: 'LOOP_INVALID_CONFIG',
+          loopId: loopCompiled.loop.id,
+          message: `Unknown conditionSource kind: ${(_exhaustive as any).kind}`,
+        });
+      }
+    }
+  }
+
+  private projectLoopContextAtIteration(
     loop: LoopStepDefinition,
     iteration: number,
     base: Record<string, unknown>
