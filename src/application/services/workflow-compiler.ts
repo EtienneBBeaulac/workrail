@@ -107,6 +107,9 @@ export class WorkflowCompiler {
     }
 
     // 2. Check if any body step declares loop_control output contract
+    // TODO: When additional contract types are added, this heuristic should be replaced
+    // with explicit conditionSource in the workflow JSON. Currently safe because only
+    // wr.contracts.loop_control exists, so the match is unambiguous.
     const hasLoopControlContract = bodySteps.some(
       (s) => s.outputContract?.contractRef === LOOP_CONTROL_CONTRACT_REF
     );

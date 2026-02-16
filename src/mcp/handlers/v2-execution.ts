@@ -50,7 +50,7 @@ import {
 import * as z from 'zod';
 import { parseStateTokenOrFail, parseAckTokenOrFail, newAttemptId, attemptIdForNextNode, signTokenOrErr } from './v2-token-ops.js';
 import { type InternalError, isInternalError } from './v2-error-mapping.js';
-import { toV1ExecutionState, convertRunningExecutionStateToEngineState, fromV1ExecutionState, mapWorkflowSourceKind, extractStepMetadata, type StepMetadata, type PreferencesV2, defaultPreferences, derivePreferencesForNode, type NextIntentV2, deriveNextIntent } from './v2-state-conversion.js';
+import { mapWorkflowSourceKind, defaultPreferences, derivePreferencesForNode, deriveNextIntent } from './v2-state-conversion.js';
 import { checkContextBudget } from './v2-context-budget.js';
 import { executeAdvanceCore } from './v2-advance-core.js';
 
@@ -882,7 +882,10 @@ function executeContinueWorkflow(
       });
   }
 
-  // ADVANCE PATH
+  // ADVANCE PATH — ackToken is guaranteed present by Zod superRefine (intent === 'advance')
+  if (!input.ackToken) {
+    return neErrorAsync({ kind: 'validation_failed', failure: error('VALIDATION_ERROR', 'ackToken is required for advance intent') });
+  }
   const ackRes = parseAckTokenOrFail(input.ackToken, tokenCodecPorts);
   if (!ackRes.ok) return neErrorAsync({ kind: 'validation_failed', failure: ackRes.failure });
   const ack = ackRes.token;

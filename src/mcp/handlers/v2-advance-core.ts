@@ -15,7 +15,7 @@
  * on the success path.
  */
 
-import { ResultAsync as RA, okAsync, errAsync as neErrorAsync } from 'neverthrow';
+import { ResultAsync as RA, okAsync, errAsync as neErrorAsync, ok, err, type Result } from 'neverthrow';
 import type { DomainEventV1 } from '../../v2/durable-core/schemas/session/index.js';
 import type { ExecutionSnapshotFileV1, EngineStateV1 } from '../../v2/durable-core/schemas/execution-snapshot/index.js';
 import type { SessionId, RunId, NodeId, WorkflowHash } from '../../v2/durable-core/ids/index.js';
@@ -185,6 +185,11 @@ interface ComputedAdvanceResults {
  * 3. Detect blocking reasons + apply guardrails
  * 4. If blocked → build blocked snapshot + append
  * 5. If success → compile/interpret → build outputs + append
+ *
+ * Note: compilation (WorkflowCompiler.compile) only runs on the success path,
+ * not before the blocked check. This is intentional — there's no point compiling
+ * if the advance will be blocked. The original code compiled eagerly before
+ * checking blocking reasons; this is a deliberate lazy improvement.
  */
 export function executeAdvanceCore(args: {
   readonly mode: AdvanceMode;
@@ -218,7 +223,7 @@ export function executeAdvanceCore(args: {
   const validatedRes = validateAdvanceInputs({
     truth, runId, currentNodeId, inputContext, inputOutput, pinnedWorkflow, pendingStep,
   });
-  if (!validatedRes.ok) return errAsync(validatedRes.error);
+  if (validatedRes.isErr()) return errAsync(validatedRes.error);
   const v = validatedRes.value;
 
   // ── 3. Run validation engine (async boundary) ───────────────────────
@@ -310,7 +315,7 @@ function validateAdvanceInputs(args: {
   readonly inputOutput: V2ContinueWorkflowInput['output'];
   readonly pinnedWorkflow: ReturnType<typeof createWorkflow>;
   readonly pendingStep: { readonly stepId: string; readonly loopPath: readonly { readonly loopId: string; readonly iteration: number }[] };
-}): { ok: true; value: ValidatedAdvanceInputs } | { ok: false; error: InternalError } {
+}): Result<ValidatedAdvanceInputs, InternalError> {
   const { truth, runId, currentNodeId, inputContext, inputOutput, pinnedWorkflow, pendingStep } = args;
 
   // Context merge
@@ -324,13 +329,14 @@ function validateAdvanceInputs(args: {
 
   const mergedContextRes = mergeContext(storedContext, inputContextObj);
   if (mergedContextRes.isErr()) {
-    return { ok: false, error: { kind: 'invariant_violation' as const, message: `Context merge failed: ${mergedContextRes.error.message}` } };
+    return err({ kind: 'invariant_violation' as const, message: `Context merge failed: ${mergedContextRes.error.message}` });
   }
 
-  // Step metadata
-  const step = getStepById(pinnedWorkflow, pendingStep.stepId) as unknown as Record<string, unknown> | null;
-  const validationCriteria = step && typeof step === 'object' && step !== null ? (step.validationCriteria as ValidationCriteria | undefined) : undefined;
-  const outputContract = step && typeof step === 'object' && step !== null ? (step.outputContract as OutputContract | undefined) : undefined;
+  // Step metadata — getStepById returns WorkflowStepDefinition | LoopStepDefinition | null,
+  // both of which carry validationCriteria? and outputContract? as typed fields.
+  const step = getStepById(pinnedWorkflow, pendingStep.stepId);
+  const validationCriteria = step?.validationCriteria;
+  const outputContract = step?.outputContract;
 
   // Preferences
   const parentByNodeId: Record<string, string | null> = {};
@@ -349,30 +355,27 @@ function validateAdvanceInputs(args: {
   const VALID_RISK_POLICY = ['conservative', 'balanced', 'aggressive'] as const;
 
   if (!VALID_AUTONOMY.includes(rawAutonomy as typeof VALID_AUTONOMY[number])) {
-    return { ok: false, error: { kind: 'invariant_violation' as const, message: `Unknown autonomy mode: ${rawAutonomy}` } };
+    return err({ kind: 'invariant_violation' as const, message: `Unknown autonomy mode: ${rawAutonomy}` });
   }
   if (!VALID_RISK_POLICY.includes(rawRiskPolicy as typeof VALID_RISK_POLICY[number])) {
-    return { ok: false, error: { kind: 'invariant_violation' as const, message: `Unknown risk policy: ${rawRiskPolicy}` } };
+    return err({ kind: 'invariant_violation' as const, message: `Unknown risk policy: ${rawRiskPolicy}` });
   }
 
   const autonomy = rawAutonomy as typeof VALID_AUTONOMY[number];
   const riskPolicy = rawRiskPolicy as typeof VALID_RISK_POLICY[number];
 
-  return {
-    ok: true,
-    value: {
-      pendingStep,
-      mergedContext: mergedContextRes.value as Record<string, unknown>,
-      inputContextObj,
-      validationCriteria,
-      outputContract,
-      notesMarkdown: inputOutput?.notesMarkdown,
-      artifacts: inputOutput?.artifacts ?? [],
-      autonomy,
-      riskPolicy,
-      effectivePrefs,
-    },
-  };
+  return ok({
+    pendingStep,
+    mergedContext: mergedContextRes.value as Record<string, unknown>,
+    inputContextObj,
+    validationCriteria,
+    outputContract,
+    notesMarkdown: inputOutput?.notesMarkdown,
+    artifacts: inputOutput?.artifacts ?? [],
+    autonomy,
+    riskPolicy,
+    effectivePrefs,
+  });
 }
 
 // ── Blocked outcome builder ───────────────────────────────────────────
@@ -605,7 +608,7 @@ function buildSuccessOutcome(args: {
 
     const notesOutputs = buildNotesOutputs(allowNotesAppend, attemptId, inputOutput);
     const artifactOutputsRes = buildArtifactOutputs(inputOutput?.artifacts ?? [], attemptId, sha256);
-    if (!artifactOutputsRes.ok) {
+    if (artifactOutputsRes.isErr()) {
       return errAsync(artifactOutputsRes.error);
     }
 
@@ -705,13 +708,13 @@ function buildArtifactOutputs(
   inputArtifacts: readonly unknown[],
   attemptId: AttemptId,
   sha256: Sha256PortV2,
-): { ok: true; value: readonly OutputToAppend[] } | { ok: false; error: InternalError } {
+): Result<readonly OutputToAppend[], InternalError> {
   const outputs: OutputToAppend[] = [];
   for (let idx = 0; idx < inputArtifacts.length; idx++) {
     const artifact = inputArtifacts[idx];
     const canonicalBytesRes = toCanonicalBytes(artifact as JsonValue);
     if (canonicalBytesRes.isErr()) {
-      return { ok: false, error: { kind: 'invariant_violation' as const, message: `Artifact canonicalization failed at index ${idx}: ${canonicalBytesRes.error.message}` } };
+      return err({ kind: 'invariant_violation' as const, message: `Artifact canonicalization failed at index ${idx}: ${canonicalBytesRes.error.message}` });
     }
     const canonicalBytes = canonicalBytesRes.value;
     outputs.push({
@@ -726,7 +729,7 @@ function buildArtifactOutputs(
       },
     });
   }
-  return { ok: true, value: outputs };
+  return ok(outputs);
 }
 
 // ── Utility ───────────────────────────────────────────────────────────
