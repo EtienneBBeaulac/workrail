@@ -135,7 +135,7 @@ export function evaluateLoopControlWithFallback(
 /**
  * Source of loop control decision for diagnostics.
  */
-export type LoopControlSource = 'artifact' | 'context_fallback';
+export type LoopControlDecisionSource = 'artifact' | 'context_fallback';
 
 /**
  * Detailed result of loop control evaluation with source tracking.
@@ -144,7 +144,7 @@ export interface LoopControlEvaluationDetails {
   /** Whether the loop should continue */
   readonly shouldContinue: boolean;
   /** Source of the decision */
-  readonly source: LoopControlSource;
+  readonly source: LoopControlDecisionSource;
   /** The artifact used (if source is 'artifact') */
   readonly artifact?: LoopControlArtifactV1;
   /** Diagnostic reason (for debugging) */

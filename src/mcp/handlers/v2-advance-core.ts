@@ -29,6 +29,7 @@ import type { JsonObject, JsonValue } from '../../v2/durable-core/canonical/json
 import type { V2ContinueWorkflowInput } from '../v2/tools.js';
 import type { OutputContract } from '../../types/workflow-definition.js';
 import type { ValidationCriteria, ValidationResult } from '../../types/validation.js';
+import type { ConditionContext } from '../../utils/condition-evaluator.js';
 import type { WorkflowEvent } from '../../domain/execution/event.js';
 
 import { createWorkflow, getStepById } from '../../types/workflow.js';
@@ -38,7 +39,7 @@ import { projectPreferencesV2 } from '../../v2/projections/preferences.js';
 import { mergeContext } from '../../v2/durable-core/domain/context-merge.js';
 import { toCanonicalBytes } from '../../v2/durable-core/canonical/jcs.js';
 import { toNotesMarkdownV1 } from '../../v2/durable-core/domain/notes-markdown.js';
-import { normalizeOutputsForAppend } from '../../v2/durable-core/domain/outputs.js';
+import { normalizeOutputsForAppend, type OutputToAppend } from '../../v2/durable-core/domain/outputs.js';
 import { buildAckAdvanceAppendPlanV1 } from '../../v2/durable-core/domain/ack-advance-append-plan.js';
 import { detectBlockingReasonsV1 } from '../../v2/durable-core/domain/blocking-decision.js';
 import { type ReasonV1, buildBlockerReport, shouldBlock, reasonToGap } from '../../v2/durable-core/domain/reason-model.js';
@@ -192,7 +193,8 @@ export function executeAdvanceCore(args: {
   const validationRes: RA<ValidationResult | undefined, InternalError> =
     validator && v.notesMarkdown
       ? RA.fromPromise(
-          withTimeout(validator.validate(v.notesMarkdown, v.validationCriteria as any, v.mergedContext as any), 30_000, 'ValidationEngine.validate'),
+          // validationCriteria is guaranteed non-undefined here: validator is only non-null when v.validationCriteria is truthy (line 192)
+          withTimeout(validator.validate(v.notesMarkdown, v.validationCriteria!, v.mergedContext as ConditionContext), 30_000, 'ValidationEngine.validate'),
           (cause) => ({ kind: 'advance_apply_failed' as const, message: String(cause) } as const)
         ).andThen((res) => {
           if (res.isErr()) {
@@ -605,7 +607,7 @@ function buildAndAppendPlan(args: {
   readonly extraEventsToAppend: readonly Omit<DomainEventV1, 'eventIndex' | 'sessionId'>[];
   readonly toNodeKind: 'step' | 'blocked_attempt' | undefined;
   readonly snapshotRef: import('../../v2/durable-core/ids/index.js').SnapshotRef;
-  readonly outputsToAppend: readonly { outputId: string; outputChannel: string; payload: any }[];
+  readonly outputsToAppend: readonly OutputToAppend[];
   readonly sessionStore: import('../../v2/ports/session-event-log-store.port.js').SessionEventLogAppendStorePortV2;
   readonly idFactory: AdvanceCorePorts['idFactory'];
   readonly lock: WithHealthySessionLock;
@@ -624,7 +626,7 @@ function buildAndAppendPlan(args: {
   );
   const causeKind: 'non_tip_advance' | 'intentional_fork' = hasChildren ? 'non_tip_advance' : 'intentional_fork';
 
-  const normalizedOutputs = normalizeOutputsForAppend(outputsToAppend as any);
+  const normalizedOutputs = normalizeOutputsForAppend(outputsToAppend);
   const outputEventIds = normalizedOutputs.map(() => idFactory.mintEventId());
 
   const planRes = buildAckAdvanceAppendPlanV1({
@@ -645,7 +647,7 @@ function buildAndAppendPlan(args: {
       edgeCreatedEventId: evtEdgeCreated,
       outputEventIds,
     },
-    outputsToAppend: outputsToAppend as any,
+    outputsToAppend: [...outputsToAppend],
   });
   if (planRes.isErr()) return neErrorAsync({ kind: 'invariant_violation' as const, message: planRes.error.message });
 
@@ -658,7 +660,7 @@ function buildNotesOutputs(
   allowNotesAppend: boolean,
   attemptId: AttemptId,
   inputOutput: V2ContinueWorkflowInput['output'],
-): readonly { outputId: string; outputChannel: 'recap'; payload: { payloadKind: 'notes'; notesMarkdown: string } }[] {
+): readonly OutputToAppend[] {
   if (!allowNotesAppend || !inputOutput?.notesMarkdown) return [];
   return [{
     outputId: String(asOutputId(`out_recap_${String(attemptId)}`)),
@@ -678,8 +680,8 @@ function buildArtifactOutputs(
   inputArtifacts: readonly unknown[],
   attemptId: AttemptId,
   sha256: Sha256PortV2,
-): { ok: true; value: readonly { outputId: OutputId; outputChannel: 'artifact'; payload: any }[] } | { ok: false; error: InternalError } {
-  const outputs: { outputId: OutputId; outputChannel: 'artifact'; payload: any }[] = [];
+): { ok: true; value: readonly OutputToAppend[] } | { ok: false; error: InternalError } {
+  const outputs: OutputToAppend[] = [];
   for (let idx = 0; idx < inputArtifacts.length; idx++) {
     const artifact = inputArtifacts[idx];
     const canonicalBytesRes = toCanonicalBytes(artifact as JsonValue);

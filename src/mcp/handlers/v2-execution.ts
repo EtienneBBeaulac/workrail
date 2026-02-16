@@ -1,20 +1,14 @@
 import type { ToolContext, ToolResult } from '../types.js';
-import { error, success, errNotRetryable, errRetryAfterMs, detailsSessionHealth } from '../types.js';
+import { error, success } from '../types.js';
 import type { V2ContinueWorkflowInput, V2StartWorkflowInput } from '../v2/tools.js';
 import { V2ContinueWorkflowOutputSchema, V2StartWorkflowOutputSchema } from '../output-schemas.js';
 import { deriveIsComplete, derivePendingStep } from '../../v2/durable-core/projections/snapshot-state.js';
-import type { ExecutionSnapshotFileV1, EngineStateV1 } from '../../v2/durable-core/schemas/execution-snapshot/index.js';
+import type { ExecutionSnapshotFileV1 } from '../../v2/durable-core/schemas/execution-snapshot/index.js';
 import { asDelimiterSafeIdV1 } from '../../v2/durable-core/schemas/execution-snapshot/step-instance-key.js';
 import {
   assertTokenScopeMatchesStateBinary,
-  type TokenDecodeErrorV2,
-  type TokenVerifyErrorV2,
-  type TokenSignErrorV2,
-  type TokenPayloadV1,
   type AttemptId,
-  type OutputId,
   asAttemptId,
-  asOutputId,
 } from '../../v2/durable-core/tokens/index.js';
 import { createWorkflow } from '../../types/workflow.js';
 import type { DomainEventV1 } from '../../v2/durable-core/schemas/session/index.js';
@@ -27,7 +21,6 @@ import {
   type RunId,
   type NodeId,
   type WorkflowHash,
-  type WorkflowHashRef,
 } from '../../v2/durable-core/ids/index.js';
 import { deriveWorkflowHashRef } from '../../v2/durable-core/ids/workflow-hash-ref.js';
 import type { LoadedSessionTruthV2 } from '../../v2/ports/session-event-log-store.port.js';
@@ -35,58 +28,30 @@ import type { WithHealthySessionLock } from '../../v2/durable-core/ids/with-heal
 import type { ExecutionSessionGateErrorV2 } from '../../v2/usecases/execution-session-gate.js';
 import type { SessionEventLogStoreError } from '../../v2/ports/session-event-log-store.port.js';
 import type { SnapshotStoreError } from '../../v2/ports/snapshot-store.port.js';
-import type { PinnedWorkflowStoreError } from '../../v2/ports/pinned-workflow-store.port.js';
 import type { Sha256PortV2 } from '../../v2/ports/sha256.port.js';
 import type { TokenCodecPorts } from '../../v2/durable-core/tokens/token-codec-ports.js';
-import { ResultAsync as RA, okAsync, errAsync as neErrorAsync, ok, err, type Result } from 'neverthrow';
+import { ResultAsync as RA, okAsync, errAsync as neErrorAsync, ok } from 'neverthrow';
 import { compileV1WorkflowToPinnedSnapshot } from '../../v2/read-only/v1-to-v2-shim.js';
 import { workflowHashForCompiledSnapshot } from '../../v2/durable-core/canonical/hashing.js';
-import type { JsonObject, JsonValue } from '../../v2/durable-core/canonical/json-types.js';
-import { toCanonicalBytes } from '../../v2/durable-core/canonical/jcs.js';
-import { toNotesMarkdownV1 } from '../../v2/durable-core/domain/notes-markdown.js';
-import { normalizeOutputsForAppend } from '../../v2/durable-core/domain/outputs.js';
-import { buildAckAdvanceAppendPlanV1 } from '../../v2/durable-core/domain/ack-advance-append-plan.js';
-import { detectBlockingReasonsV1 } from '../../v2/durable-core/domain/blocking-decision.js';
-import { buildBlockerReport, shouldBlock, reasonToGap } from '../../v2/durable-core/domain/reason-model.js';
-import { applyGuardrails } from '../../v2/durable-core/domain/risk-policy-guardrails.js';
-import { checkRecommendationExceedance } from '../../v2/durable-core/domain/recommendation-warnings.js';
-import { getOutputRequirementStatusWithArtifactsV1 } from '../../v2/durable-core/domain/validation-criteria-validator.js';
-import type { OutputContract } from '../../types/workflow-definition.js';
-import { buildValidationPerformedEvent } from '../../v2/durable-core/domain/validation-event-builder.js';
-import { buildBlockedNodeSnapshot } from '../../v2/durable-core/domain/blocked-node-builder.js';
+import type { JsonValue } from '../../v2/durable-core/canonical/json-types.js';
 import { loadValidationResultV1 } from '../../v2/durable-core/domain/validation-loader.js';
-import { projectPreferencesV2 } from '../../v2/projections/preferences.js';
-import { projectRunContextV2 } from '../../v2/projections/run-context.js';
-import { mergeContext } from '../../v2/durable-core/domain/context-merge.js';
 import { renderPendingPrompt } from '../../v2/durable-core/domain/prompt-renderer.js';
-import { buildDecisionTraceEventData, type DecisionTraceEntry } from '../../v2/durable-core/domain/decision-trace-builder.js';
 import { anchorsToObservations, type ObservationEventData } from '../../v2/durable-core/domain/observation-builder.js';
 import { createBundledSource } from '../../types/workflow-source.js';
 import type { WorkflowDefinition } from '../../types/workflow-definition.js';
 import { hasWorkflowDefinitionShape } from '../../types/workflow-definition.js';
-import { WorkflowCompiler } from '../../application/services/workflow-compiler.js';
-import { WorkflowInterpreter } from '../../application/services/workflow-interpreter.js';
-import { ValidationEngine } from '../../application/services/validation-engine.js';
-import { EnhancedLoopValidator } from '../../application/services/enhanced-loop-validator.js';
-import type { ValidationResult } from '../../types/validation.js';
-import type { ExecutionState } from '../../domain/execution/state.js';
-import type { WorkflowEvent } from '../../domain/execution/event.js';
-import type { StepInstanceId } from '../../domain/execution/ids.js';
 import {
   mapStartWorkflowErrorToToolError,
   mapContinueWorkflowErrorToToolError,
   mapTokenDecodeErrorToToolError,
   type StartWorkflowError,
   type ContinueWorkflowError,
-  type ToolFailure,
 } from './v2-execution-helpers.js';
 import * as z from 'zod';
-
-// Extracted modules (v2-execution decomposition)
-import { parseStateTokenOrFail, parseAckTokenOrFail, newAttemptId, attemptIdForNextNode, signTokenOrErr, type StateTokenInput, type AckTokenInput } from './v2-token-ops.js';
-import { type InternalError, isInternalError, normalizeTokenErrorMessage, internalError, sessionStoreErrorToToolError, gateErrorToToolError, snapshotStoreErrorToToolError, pinnedWorkflowStoreErrorToToolError, mapInternalErrorToToolError } from './v2-error-mapping.js';
+import { parseStateTokenOrFail, parseAckTokenOrFail, newAttemptId, attemptIdForNextNode, signTokenOrErr } from './v2-token-ops.js';
+import { type InternalError, isInternalError } from './v2-error-mapping.js';
 import { toV1ExecutionState, convertRunningExecutionStateToEngineState, fromV1ExecutionState, mapWorkflowSourceKind, extractStepMetadata, type StepMetadata, type PreferencesV2, defaultPreferences, derivePreferencesForNode, type NextIntentV2, deriveNextIntent } from './v2-state-conversion.js';
-import { checkContextBudget, collectArtifactsForEvaluation, type ContextBudgetCheck } from './v2-context-budget.js';
+import { checkContextBudget } from './v2-context-budget.js';
 import { executeAdvanceCore, type AdvanceMode } from './v2-advance-core.js';
 
 /**
