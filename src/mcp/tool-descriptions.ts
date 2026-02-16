@@ -99,27 +99,30 @@ What you'll receive:
 
 What to do:
 1. Execute the pending step exactly as its prompt describes
-2. Call continue_workflow with stateToken + ackToken + your output
+2. Call continue_workflow with intent "advance", stateToken, ackToken, and your output
 3. Don't predict what comes next - the workflow will tell you
 
 Context auto-loads: If you provide context at start, WorkRail remembers it. On future continue_workflow calls, only pass context if you have NEW information to add.`,
 
     continue_workflow: `Get the next step in the workflow (WorkRail v2, feature-flagged).
 
-This is an interactive conversation with state. Each call either:
-- Advances to the next step (when you include ackToken)
-- Recovers the current step (when you omit ackToken)
+Two modes — set intent explicitly:
 
-How to use:
-- WITH ackToken: "I completed the pending step, here's my output. What's next?"
-  → WorkRail advances to next step and returns it
-  
-- WITHOUT ackToken: "Remind me what the current step is"
-  → WorkRail returns the same pending step (no advancement, useful after rewinds)
+ADVANCE (intent: "advance"):
+- "I completed the current step; give me the next one"
+- Requires: intent + stateToken + ackToken
+- Optional: output (your work summary), context (if facts changed)
+- Result: WorkRail advances to next step and returns it
+
+REHYDRATE (intent: "rehydrate"):
+- "Remind me what the current step is" (after rewind or lost context)
+- Requires: intent + stateToken
+- Do NOT include ackToken or output
+- Result: Same pending step returned; no advancement; side-effect-free
 
 IMPORTANT - Don't predict next steps:
 After completing a step, don't ask "should we move to implementation?" or propose next steps.
-Just call continue_workflow - the workflow decides what's actually next (might be validation, review, or something you didn't expect).
+Just call continue_workflow with intent "advance" - the workflow decides what's actually next.
 
 nextIntent tells you what to do:
 - "perform_pending_then_continue": Execute this step immediately, then call continue_workflow again
@@ -128,12 +131,11 @@ nextIntent tells you what to do:
 - "complete": Workflow finished; no more steps
 
 Parameters:
+- intent (required): "advance" or "rehydrate"
 - stateToken (required): Your session handle from start_workflow or previous continue_workflow
-- ackToken (optional): Include to advance; omit to rehydrate
-- context (optional): NEW facts only (e.g., user provided a branch name). Omit if unchanged - WorkRail auto-loads previous context
-- output.notesMarkdown (optional): Fresh summary of THIS step only - never accumulated
-  Example WRONG: "Phase 0: planning. Phase 1: implementation."
-  Example RIGHT: "Implemented user authentication with OAuth2; added 3 endpoints."
+- ackToken (required for advance): Your step completion receipt from the previous response
+- context (optional): NEW facts only. Omit if unchanged - WorkRail auto-loads previous context
+- output.notesMarkdown (optional, advance only): Fresh summary of THIS step only - never accumulated
 
 The workflow is the user's structured instructions. Follow each step exactly as described.`,
   },
@@ -232,7 +234,7 @@ What you receive:
 
 REQUIRED BEHAVIOR:
 1. Execute the pending step EXACTLY as the prompt describes
-2. Call continue_workflow after completing each step (don't predict or skip ahead)
+2. Call continue_workflow with intent "advance", stateToken, ackToken, and output after completing each step
 3. Round-trip tokens UNCHANGED (don't decode, inspect, or modify them)
 4. Follow the workflow to completion - don't improvise alternative approaches
 
@@ -245,17 +247,19 @@ Context handling:
 
 The workflow represents the USER'S PLAN. The pending step returned is a DIRECT INSTRUCTION you MUST follow.
 
-Two modes of operation:
+Two modes — set intent explicitly:
 
-ADVANCEMENT (with ackToken):
+ADVANCE (intent: "advance"):
 - Purpose: "I completed the current step; give me the next instruction"
-- Include: stateToken + ackToken + output
+- Requires: intent + stateToken + ackToken
+- Optional: output (your work summary), context (if facts changed)
 - Result: WorkRail advances to next step
 - Idempotent: Safe to retry with same tokens if unsure
 
-REHYDRATION (without ackToken):
+REHYDRATE (intent: "rehydrate"):
 - Purpose: "Remind me what the current step is" (after rewind/lost context)
-- Include: stateToken only (no ackToken, no output)
+- Requires: intent + stateToken only
+- Do NOT include ackToken or output
 - Result: Same pending step returned; no advancement
 - Side-effect-free: No durable writes; pure state recovery
 
@@ -272,11 +276,12 @@ nextIntent is PRESCRIPTIVE (not advisory):
 - "complete": Workflow finished; no further calls needed
 
 Parameters:
+- intent (required): "advance" or "rehydrate"
 - stateToken (required): Round-trip unchanged from previous response
-- ackToken (optional): Include to ADVANCE, omit to REHYDRATE
+- ackToken (required for advance): Your step completion receipt from the previous response
 - context (optional): NEW facts only (auto-merges with previous). Omit if unchanged
-- output.notesMarkdown (optional): Summary of THIS step only (fresh, never accumulated)
+- output.notesMarkdown (optional, advance only): Summary of THIS step only (fresh, never accumulated)
   
-The workflow is the user's structured will. Follow it exactly - it may validate, loop, or branch in ways you don't predict.`,
+The workflow is the user's structured will. Follow it exactly — it may validate, loop, or branch in ways you don't predict.`,
   },
 } as const;

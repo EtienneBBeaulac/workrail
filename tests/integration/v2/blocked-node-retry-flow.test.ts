@@ -138,7 +138,7 @@ describe('Blocked node retry flow (end-to-end)', () => {
 
       // 2. Advance with invalid output (missing "status") → should block
       const blockRes = await handleV2ContinueWorkflow(
-        { stateToken, ackToken: ackToken!, output: { notesMarkdown: 'invalid output' } } as V2ContinueWorkflowInput,
+        { intent: 'advance', stateToken, ackToken: ackToken!, output: { notesMarkdown: 'invalid output' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(blockRes.type).toBe('success');
@@ -173,7 +173,7 @@ describe('Blocked node retry flow (end-to-end)', () => {
 
       // 4. Replay original ackToken → should return same blocked response (idempotency).
       const replayRes = await handleV2ContinueWorkflow(
-        { stateToken, ackToken: ackToken! } as V2ContinueWorkflowInput,
+        { intent: 'advance', stateToken, ackToken: ackToken! } as V2ContinueWorkflowInput,
         ctx
       );
       expect(replayRes.type).toBe('success');
@@ -185,7 +185,7 @@ describe('Blocked node retry flow (end-to-end)', () => {
 
       // 5. Retry with retryAckToken + valid output → should advance successfully.
       const retryRes = await handleV2ContinueWorkflow(
-        { stateToken: blockedStateToken, ackToken: retryAckToken, output: { notesMarkdown: 'valid with status' } } as V2ContinueWorkflowInput,
+        { intent: 'advance', stateToken: blockedStateToken, ackToken: retryAckToken, output: { notesMarkdown: 'valid with status' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(retryRes.type).toBe('success');
@@ -242,7 +242,7 @@ describe('Blocked node retry flow (end-to-end)', () => {
 
       // Advance with any output → ValidationEngine throws on bad schema → should create terminal block
       const blockRes = await handleV2ContinueWorkflow(
-        { stateToken: startRes.data.stateToken, ackToken: startRes.data.ackToken!, output: { notesMarkdown: '{"test": true}' } } as V2ContinueWorkflowInput,
+        { intent: 'advance', stateToken: startRes.data.stateToken, ackToken: startRes.data.ackToken!, output: { notesMarkdown: '{"test": true}' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(blockRes.type).toBe('success');
@@ -321,7 +321,7 @@ describe('Blocked node retry flow (end-to-end)', () => {
 
       // Block 1: missing both status and code.
       const block1Res = await handleV2ContinueWorkflow(
-        { stateToken: st1, ackToken: ack1!, output: { notesMarkdown: 'invalid' } } as V2ContinueWorkflowInput,
+        { intent: 'advance', stateToken: st1, ackToken: ack1!, output: { notesMarkdown: 'invalid' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(block1Res.type).toBe('success');
@@ -334,7 +334,7 @@ describe('Blocked node retry flow (end-to-end)', () => {
 
       // Retry 1: has "status" but still missing "code" → should block again (chained).
       const block2Res = await handleV2ContinueWorkflow(
-        { stateToken: block1Res.data.stateToken, ackToken: retry1Token, output: { notesMarkdown: 'has status' } } as V2ContinueWorkflowInput,
+        { intent: 'advance', stateToken: block1Res.data.stateToken, ackToken: retry1Token, output: { notesMarkdown: 'has status' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(block2Res.type).toBe('success');
@@ -362,7 +362,7 @@ describe('Blocked node retry flow (end-to-end)', () => {
 
       // Retry 2: has both "status" and "code" → should advance.
       const retrySuccessRes = await handleV2ContinueWorkflow(
-        { stateToken: block2Res.data.stateToken, ackToken: retry2Token, output: { notesMarkdown: 'has status and code' } } as V2ContinueWorkflowInput,
+        { intent: 'advance', stateToken: block2Res.data.stateToken, ackToken: retry2Token, output: { notesMarkdown: 'has status and code' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(retrySuccessRes.type).toBe('success');

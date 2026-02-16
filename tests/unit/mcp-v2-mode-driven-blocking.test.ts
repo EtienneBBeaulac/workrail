@@ -226,7 +226,7 @@ describe('v2 continue_workflow: validationCriteria enforcement (mode-driven)', (
         }),
       });
 
-      const res = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx(v2));
+      const res = await handleV2ContinueWorkflow({ intent: 'advance', stateToken, ackToken } as any, dummyCtx(v2));
       expect(res.type).toBe('success');
       if (res.type !== 'success') return;
 
@@ -400,7 +400,7 @@ describe('v2 continue_workflow: validationCriteria enforcement (mode-driven)', (
         }),
       });
 
-      const res = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx(v2));
+      const res = await handleV2ContinueWorkflow({ intent: 'advance', stateToken, ackToken } as any, dummyCtx(v2));
       expect(res.type).toBe('success');
       if (res.type !== 'success') return;
 

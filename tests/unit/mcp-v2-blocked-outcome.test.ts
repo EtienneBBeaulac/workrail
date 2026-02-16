@@ -241,7 +241,7 @@ describe('v2 continue_workflow: blocked outcome replay idempotency', () => {
       const ackToken = await mkSignedToken({ v2, payload: ackPayload });
 
       // First call - expect blocked outcome with blockers
-      const first = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx(v2));
+      const first = await handleV2ContinueWorkflow({ intent: 'advance', stateToken, ackToken } as any, dummyCtx(v2));
       expect(first.type).toBe('success');
       if (first.type !== 'success') return;
       expect(first.data.kind).toBe('blocked');
@@ -253,7 +253,7 @@ describe('v2 continue_workflow: blocked outcome replay idempotency', () => {
       expect(first.data.blockers.blockers[0].pointer.contractRef).toBe('wr.contracts.test');
 
       // Second call with same tokens - must return exact same response
-      const second = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx(v2));
+      const second = await handleV2ContinueWorkflow({ intent: 'advance', stateToken, ackToken } as any, dummyCtx(v2));
       expect(second.type).toBe('success');
       if (second.type !== 'success') return;
       expect(second.data.kind).toBe('blocked');
@@ -436,16 +436,16 @@ describe('v2 continue_workflow: blocked outcome replay idempotency', () => {
       const ackToken = await mkSignedToken({ v2, payload: ackPayload });
 
       // Call three times - all must be identical
-      const response1 = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx(v2));
+      const response1 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken, ackToken } as any, dummyCtx(v2));
       expect(response1.type).toBe('success');
       if (response1.type !== 'success') return;
       expect(response1.data.kind).toBe('blocked');
       expect(response1.data.blockers.blockers.length).toBe(2);
 
-      const response2 = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx(v2));
+      const response2 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken, ackToken } as any, dummyCtx(v2));
       expect(response2).toEqual(response1);
 
-      const response3 = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx(v2));
+      const response3 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken, ackToken } as any, dummyCtx(v2));
       expect(response3).toEqual(response1);
 
       // Verify only one advance_recorded exists

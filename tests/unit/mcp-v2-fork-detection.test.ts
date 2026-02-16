@@ -106,7 +106,7 @@ describe('v2 fork detection (Phase 5)', () => {
       expect(start.type).toBe('success');
       if (start.type !== 'success') return;
 
-      const first = await handleV2ContinueWorkflow({ stateToken: start.data.stateToken, ackToken: start.data.ackToken } as any, ctx);
+      const first = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: start.data.stateToken, ackToken: start.data.ackToken } as any, ctx);
       expect(first.type).toBe('success');
       if (first.type !== 'success') return;
       expect(first.data.kind).toBe('ok');
@@ -114,13 +114,13 @@ describe('v2 fork detection (Phase 5)', () => {
 
       // To simulate a rewind/fork, we need to call rehydrate on the ORIGINAL stateToken to get a fresh ackToken.
       // (Reusing the same ackToken would be an idempotent replay, not a fork.)
-      const rehydrate = await handleV2ContinueWorkflow({ stateToken: start.data.stateToken } as any, ctx);
+      const rehydrate = await handleV2ContinueWorkflow({ intent: 'rehydrate', stateToken: start.data.stateToken } as any, ctx);
       expect(rehydrate.type).toBe('success');
       if (rehydrate.type !== 'success') return;
 
       // Now advance from the root node again with the NEW ackToken.
       // This should detect that root node already has a child and create a fork.
-      const fork = await handleV2ContinueWorkflow({ stateToken: start.data.stateToken, ackToken: rehydrate.data.ackToken } as any, ctx);
+      const fork = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: start.data.stateToken, ackToken: rehydrate.data.ackToken } as any, ctx);
       expect(fork.type).toBe('success');
       if (fork.type !== 'success') return;
       expect(fork.data.kind).toBe('ok');

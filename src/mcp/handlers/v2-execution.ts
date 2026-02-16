@@ -741,7 +741,7 @@ function executeContinueWorkflow(
   const nodeId = asNodeId(state.payload.nodeId);
   const workflowHashRef = state.payload.workflowHashRef;
 
-  if (!input.ackToken) {
+  if (input.intent === 'rehydrate') {
     // REHYDRATE PATH
     return sessionStore.load(sessionId)
       .mapErr((cause) => ({ kind: 'session_load_failed' as const, cause }))

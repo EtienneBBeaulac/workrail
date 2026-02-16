@@ -100,7 +100,7 @@ describe('Blocked node idempotency (dedupeKey enforcement)', () => {
       if (startRes.type !== 'success') return;
 
       const blockRes = await handleV2ContinueWorkflow(
-        { stateToken: startRes.data.stateToken, ackToken: startRes.data.ackToken!, output: { notesMarkdown: 'invalid' } } as V2ContinueWorkflowInput,
+        { intent: 'advance', stateToken: startRes.data.stateToken, ackToken: startRes.data.ackToken!, output: { notesMarkdown: 'invalid' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(blockRes.type).toBe('success');
@@ -112,7 +112,7 @@ describe('Blocked node idempotency (dedupeKey enforcement)', () => {
 
       // First retry (advances)
       const retry1Res = await handleV2ContinueWorkflow(
-        { stateToken: blockRes.data.stateToken, ackToken: retryToken, output: { notesMarkdown: 'result A' } } as V2ContinueWorkflowInput,
+        { intent: 'advance', stateToken: blockRes.data.stateToken, ackToken: retryToken, output: { notesMarkdown: 'result A' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(retry1Res.type).toBe('success');
@@ -121,7 +121,7 @@ describe('Blocked node idempotency (dedupeKey enforcement)', () => {
 
       // Second retry with same token (should replay)
       const retry2Res = await handleV2ContinueWorkflow(
-        { stateToken: blockRes.data.stateToken, ackToken: retryToken, output: { notesMarkdown: 'result B' } } as V2ContinueWorkflowInput,
+        { intent: 'advance', stateToken: blockRes.data.stateToken, ackToken: retryToken, output: { notesMarkdown: 'result B' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(retry2Res.type).toBe('success');
@@ -174,7 +174,7 @@ describe('Blocked node idempotency (dedupeKey enforcement)', () => {
 
       // Block
       const blockRes = await handleV2ContinueWorkflow(
-        { stateToken: startRes.data.stateToken, ackToken: originalAck, output: { notesMarkdown: 'bad' } } as V2ContinueWorkflowInput,
+        { intent: 'advance', stateToken: startRes.data.stateToken, ackToken: originalAck, output: { notesMarkdown: 'bad' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(blockRes.type).toBe('success');
@@ -184,7 +184,7 @@ describe('Blocked node idempotency (dedupeKey enforcement)', () => {
 
       // Retry successfully
       const retryRes = await handleV2ContinueWorkflow(
-        { stateToken: blockRes.data.stateToken, ackToken: blockRes.data.retryAckToken!, output: { notesMarkdown: 'done' } } as V2ContinueWorkflowInput,
+        { intent: 'advance', stateToken: blockRes.data.stateToken, ackToken: blockRes.data.retryAckToken!, output: { notesMarkdown: 'done' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(retryRes.type).toBe('success');
@@ -193,7 +193,7 @@ describe('Blocked node idempotency (dedupeKey enforcement)', () => {
 
       // Use original ackToken again (should replay blocked state, not advance)
       const replayOriginalRes = await handleV2ContinueWorkflow(
-        { stateToken: startRes.data.stateToken, ackToken: originalAck, output: { notesMarkdown: 'different' } } as V2ContinueWorkflowInput,
+        { intent: 'advance', stateToken: startRes.data.stateToken, ackToken: originalAck, output: { notesMarkdown: 'different' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(replayOriginalRes.type).toBe('success');

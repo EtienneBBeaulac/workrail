@@ -17,16 +17,52 @@ export const V2StartWorkflowInput = z.object({
 export type V2StartWorkflowInput = z.infer<typeof V2StartWorkflowInput>;
 
 export const V2ContinueWorkflowInput = z.object({
-  stateToken: z.string().min(1).describe('Your session handle from start_workflow or previous continue_workflow. Pass this in EVERY continue_workflow call to identify your session. Round-trip exactly as received - never decode, inspect, or modify it. This is different from ackToken (which is your completion receipt).'),
-  ackToken: z.string().min(1).optional().describe('Your step completion receipt. Include this to ADVANCE to the next step. OMIT this entirely to REHYDRATE (recover current step after rewind/lost context). Pattern: stateToken identifies WHERE you are; ackToken says "I finished here, next step please."'),
+  intent: z.enum(['advance', 'rehydrate']).describe(
+    'What you want to do. ' +
+    '"advance": I completed the current step — requires ackToken. ' +
+    '"rehydrate": Remind me what the current step is (state recovery after rewind/lost context) — do NOT include ackToken or output.'
+  ),
+  stateToken: z.string().min(1).describe('Your session handle from start_workflow or previous continue_workflow. Pass this in EVERY continue_workflow call to identify your session. Round-trip exactly as received — never decode, inspect, or modify it.'),
+  ackToken: z.string().min(1).optional().describe('Your step completion receipt. Required when intent is "advance". Must be omitted when intent is "rehydrate".'),
   context: z.record(z.unknown()).optional().describe('External facts (only if CHANGED since last call). Omit this entirely if no facts changed. WorkRail auto-merges with previous context. Example: if context={branch:"main"} at start, do NOT re-pass it unless branch changed. Pass only NEW or OVERRIDDEN values.'),
   output: z
     .object({
-      notesMarkdown: z.string().min(1).optional().describe('Summary of work completed in THIS step only - fresh and specific to this step. Do NOT append previous step notes. WorkRail concatenates notes across steps automatically. WRONG: "Phase 0: planning. Phase 1: implemented." RIGHT: "Implemented OAuth2 with 3 endpoints; added token validation middleware." Aim for ≤10 lines.'),
+      notesMarkdown: z.string().min(1).optional().describe('Summary of work completed in THIS step only — fresh and specific to this step. Do NOT append previous step notes. WorkRail concatenates notes across steps automatically. WRONG: "Phase 0: planning. Phase 1: implemented." RIGHT: "Implemented OAuth2 with 3 endpoints; added token validation middleware." Aim for ≤10 lines.'),
       artifacts: z.array(z.unknown()).optional().describe('Optional structured artifacts (schema is workflow/contract-defined)'),
     })
     .optional()
-    .describe('Optional durable output to attach to the current node'),
+    .describe('Durable output to attach to the current node. Only valid when intent is "advance".'),
+}).strict().superRefine((data, ctx) => {
+  if (data.intent === 'advance' && !data.ackToken) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['ackToken'],
+      message:
+        'intent is "advance" but ackToken is missing. ' +
+        'To advance to the next step, include the ackToken from the previous start_workflow or continue_workflow response. ' +
+        'If you don\'t have an ackToken, set intent to "rehydrate" to recover the current step.',
+    });
+  }
+  if (data.intent === 'rehydrate' && data.ackToken) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['ackToken'],
+      message:
+        'intent is "rehydrate" but ackToken was provided. ' +
+        'Rehydration recovers the current step without advancing — it does not accept ackToken. ' +
+        'To advance, set intent to "advance". To rehydrate, remove ackToken.',
+    });
+  }
+  if (data.intent === 'rehydrate' && data.output) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['output'],
+      message:
+        'intent is "rehydrate" but output was provided. ' +
+        'Rehydration is read-only state recovery — it does not accept output. ' +
+        'To submit output and advance, set intent to "advance" and include ackToken.',
+    });
+  }
 });
 export type V2ContinueWorkflowInput = z.infer<typeof V2ContinueWorkflowInput>;
 
