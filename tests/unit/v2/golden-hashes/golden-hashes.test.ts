@@ -38,7 +38,7 @@ const crypto = new NodeCryptoV2();
 
 describe('Golden hash fixtures (determinism verification)', () => {
   describe('Compiled workflow snapshots', () => {
-    it('minimal v1_preview: canonical bytes and hash are stable', () => {
+    it('minimal v1_preview: hash matches pinned golden value', () => {
       const fixture = loadFixture('compiled-workflow-v1-minimal.json');
       
       const canonicalRes = toCanonicalBytes(fixture.input);
@@ -52,104 +52,53 @@ describe('Golden hash fixtures (determinism verification)', () => {
       expect(text).toContain('"name":"Minimal Test Workflow"');
       expect(text).not.toContain('  '); // no whitespace
       
-      // Compute hash
-      const hashRes = workflowHashForCompiledSnapshot(fixture.input, crypto);
-      expect(hashRes.isOk()).toBe(true);
-      
-      const hash = hashRes._unsafeUnwrap();
-      expect(hash).toMatch(/^sha256:[0-9a-f]{64}$/);
-      
-      // Store for regression testing (printed on first run)
-      console.log(`[Golden] compiled-workflow-v1-minimal.json → ${hash}`);
+      // Compute hash and assert exact pinned value
+      const hash = workflowHashForCompiledSnapshot(fixture.input, crypto)._unsafeUnwrap();
+      expect(String(hash)).toBe(fixture.expectedSha256);
     });
 
-    it('v1_pinned with definition: canonical bytes and hash are stable', () => {
+    it('v1_pinned with definition: hash matches pinned golden value', () => {
       const fixture = loadFixture('compiled-workflow-v1-pinned.json');
       
       const canonicalRes = toCanonicalBytes(fixture.input);
       expect(canonicalRes.isOk()).toBe(true);
       
-      const hashRes = workflowHashForCompiledSnapshot(fixture.input, crypto);
-      expect(hashRes.isOk()).toBe(true);
-      
-      const hash = hashRes._unsafeUnwrap();
-      expect(hash).toMatch(/^sha256:[0-9a-f]{64}$/);
-      
-      console.log(`[Golden] compiled-workflow-v1-pinned.json → ${hash}`);
+      const hash = workflowHashForCompiledSnapshot(fixture.input, crypto)._unsafeUnwrap();
+      expect(String(hash)).toBe(fixture.expectedSha256);
     });
   });
 
   describe('Execution snapshots', () => {
-    it('init state: canonical bytes and hash are stable', () => {
+    it('init state: hash matches pinned golden value', () => {
       const fixture = loadFixture('execution-snapshot-v1-init.json');
+      expect(toCanonicalBytes(fixture.input).isOk()).toBe(true);
       
-      const canonicalRes = toCanonicalBytes(fixture.input);
-      expect(canonicalRes.isOk()).toBe(true);
-      
-      const snapshotRefRes = snapshotRefForExecutionSnapshotFileV1(
-        fixture.input as ExecutionSnapshotFileV1,
-        crypto
-      );
-      expect(snapshotRefRes.isOk()).toBe(true);
-      
-      const ref = snapshotRefRes._unsafeUnwrap();
-      expect(ref).toMatch(/^sha256:[0-9a-f]{64}$/);
-      
-      console.log(`[Golden] execution-snapshot-v1-init.json → ${ref}`);
+      const ref = snapshotRefForExecutionSnapshotFileV1(fixture.input as ExecutionSnapshotFileV1, crypto)._unsafeUnwrap();
+      expect(String(ref)).toBe(fixture.expectedSha256);
     });
 
-    it('running state: canonical bytes and hash are stable', () => {
+    it('running state: hash matches pinned golden value', () => {
       const fixture = loadFixture('execution-snapshot-v1-running.json');
+      expect(toCanonicalBytes(fixture.input).isOk()).toBe(true);
       
-      const canonicalRes = toCanonicalBytes(fixture.input);
-      expect(canonicalRes.isOk()).toBe(true);
-      
-      const snapshotRefRes = snapshotRefForExecutionSnapshotFileV1(
-        fixture.input as ExecutionSnapshotFileV1,
-        crypto
-      );
-      expect(snapshotRefRes.isOk()).toBe(true);
-      
-      const ref = snapshotRefRes._unsafeUnwrap();
-      expect(ref).toMatch(/^sha256:[0-9a-f]{64}$/);
-      
-      console.log(`[Golden] execution-snapshot-v1-running.json → ${ref}`);
+      const ref = snapshotRefForExecutionSnapshotFileV1(fixture.input as ExecutionSnapshotFileV1, crypto)._unsafeUnwrap();
+      expect(String(ref)).toBe(fixture.expectedSha256);
     });
 
-    it('complete state: canonical bytes and hash are stable', () => {
+    it('complete state: hash matches pinned golden value', () => {
       const fixture = loadFixture('execution-snapshot-v1-complete.json');
+      expect(toCanonicalBytes(fixture.input).isOk()).toBe(true);
       
-      const canonicalRes = toCanonicalBytes(fixture.input);
-      expect(canonicalRes.isOk()).toBe(true);
-      
-      const snapshotRefRes = snapshotRefForExecutionSnapshotFileV1(
-        fixture.input as ExecutionSnapshotFileV1,
-        crypto
-      );
-      expect(snapshotRefRes.isOk()).toBe(true);
-      
-      const ref = snapshotRefRes._unsafeUnwrap();
-      expect(ref).toMatch(/^sha256:[0-9a-f]{64}$/);
-      
-      console.log(`[Golden] execution-snapshot-v1-complete.json → ${ref}`);
+      const ref = snapshotRefForExecutionSnapshotFileV1(fixture.input as ExecutionSnapshotFileV1, crypto)._unsafeUnwrap();
+      expect(String(ref)).toBe(fixture.expectedSha256);
     });
 
-    it('with loop: canonical bytes and hash are stable', () => {
+    it('with loop: hash matches pinned golden value', () => {
       const fixture = loadFixture('execution-snapshot-v1-with-loop.json');
+      expect(toCanonicalBytes(fixture.input).isOk()).toBe(true);
       
-      const canonicalRes = toCanonicalBytes(fixture.input);
-      expect(canonicalRes.isOk()).toBe(true);
-      
-      const snapshotRefRes = snapshotRefForExecutionSnapshotFileV1(
-        fixture.input as ExecutionSnapshotFileV1,
-        crypto
-      );
-      expect(snapshotRefRes.isOk()).toBe(true);
-      
-      const ref = snapshotRefRes._unsafeUnwrap();
-      expect(ref).toMatch(/^sha256:[0-9a-f]{64}$/);
-      
-      console.log(`[Golden] execution-snapshot-v1-with-loop.json → ${ref}`);
+      const ref = snapshotRefForExecutionSnapshotFileV1(fixture.input as ExecutionSnapshotFileV1, crypto)._unsafeUnwrap();
+      expect(String(ref)).toBe(fixture.expectedSha256);
     });
   });
 

@@ -99,6 +99,18 @@ export class DefaultWorkflowService implements WorkflowService {
       return { valid: false, issues: [`Step '${stepId}' not found in workflow '${workflowId}'`], suggestions: [], warnings: undefined };
     }
 
+    // Fail-fast: steps using outputContract must be validated via v2 execution path,
+    // not this v1 prose validator. Prevents silent contract bypass.
+    const outputContract = (step as any).outputContract;
+    if (outputContract) {
+      return {
+        valid: false,
+        issues: [`Step '${stepId}' uses outputContract (artifact validation); validate via v2 continue_workflow path, not v1 validateStepOutput`],
+        suggestions: ['Use the v2 continue_workflow tool with output.artifacts[] to validate against the artifact contract.'],
+        warnings: undefined,
+      };
+    }
+
     const criteria = (step as any).validationCriteria;
     if (!criteria) return { valid: true, issues: [], suggestions: [], warnings: undefined };
 
