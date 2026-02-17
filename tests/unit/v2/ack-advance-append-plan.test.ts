@@ -33,7 +33,7 @@ describe('ack-advance-append-plan', () => {
     expect(plan.snapshotPins.length).toBe(1);
   });
 
-  it('blocked path emits advance_recorded only (plus extras) and no snapshotPins', () => {
+  it('blocked_attempt path creates node + edge with nodeKind=blocked_attempt', () => {
     const res = buildAckAdvanceAppendPlanV1({
       sessionId: 'sess_01jh_test',
       runId: 'run_01jh_test',
@@ -41,28 +41,30 @@ describe('ack-advance-append-plan', () => {
       workflowHash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000' as any,
       attemptId: 'att_01jh_test',
       nextEventIndex: 10,
-      outcome: {
-        kind: 'blocked',
-        blockers: {
-          blockers: [
-            {
-              code: 'MISSING_REQUIRED_OUTPUT',
-              pointer: { kind: 'output_contract', contractRef: 'wr.validationCriteria' },
-              message: 'Missing required output.',
-            },
-          ],
-        },
+      outcome: { kind: 'advanced', toNodeId: 'node_01jh_blocked' },
+      toNodeId: 'node_01jh_blocked',
+      toNodeKind: 'blocked_attempt',
+      snapshotRef: 'sha256:2222222222222222222222222222222222222222222222222222222222222222' as any,
+      causeKind: 'intentional_fork',
+      minted: {
+        advanceRecordedEventId: 'evt_01jh_adv',
+        nodeCreatedEventId: 'evt_01jh_node',
+        edgeCreatedEventId: 'evt_01jh_edge',
+        outputEventIds: [],
       },
-      minted: { advanceRecordedEventId: 'evt_01jh_adv' },
+      outputsToAppend: [],
     });
 
     expect(res.isOk()).toBe(true);
 
     const plan = res._unsafeUnwrap();
-    expect(plan.events.length).toBe(1);
-    expect(plan.events[0]!.kind).toBe('advance_recorded');
-    expect(() => DomainEventV1Schema.parse(plan.events[0]!)).not.toThrow();
-    expect(plan.snapshotPins.length).toBe(0);
+    expect(plan.events.map((e) => e.kind)).toEqual(['advance_recorded', 'node_created', 'edge_created']);
+    for (const e of plan.events) expect(() => DomainEventV1Schema.parse(e)).not.toThrow();
+
+    // blocked_attempt node has correct nodeKind
+    const nodeCreated = plan.events.find((e) => e.kind === 'node_created') as any;
+    expect(nodeCreated.data.nodeKind).toBe('blocked_attempt');
+    expect(plan.snapshotPins.length).toBe(1);
   });
 
   it('extraEventsToAppend are assigned sessionId + sequential eventIndex', () => {
@@ -73,18 +75,11 @@ describe('ack-advance-append-plan', () => {
       workflowHash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000' as any,
       attemptId: 'att_01jh_test',
       nextEventIndex: 10,
-      outcome: {
-        kind: 'blocked',
-        blockers: {
-          blockers: [
-            {
-              code: 'INVARIANT_VIOLATION',
-              pointer: { kind: 'context_key', key: 'slices' },
-              message: 'Missing required context key.',
-            },
-          ],
-        },
-      },
+      outcome: { kind: 'advanced', toNodeId: 'node_01jh_to' },
+      toNodeId: 'node_01jh_to',
+      toNodeKind: 'step',
+      snapshotRef: 'sha256:3333333333333333333333333333333333333333333333333333333333333333' as any,
+      causeKind: 'intentional_fork',
       extraEventsToAppend: [
         {
           v: 1,
@@ -101,13 +96,20 @@ describe('ack-advance-append-plan', () => {
           },
         },
       ],
-      minted: { advanceRecordedEventId: 'evt_01jh_adv' },
+      minted: {
+        advanceRecordedEventId: 'evt_01jh_adv',
+        nodeCreatedEventId: 'evt_01jh_node',
+        edgeCreatedEventId: 'evt_01jh_edge',
+        outputEventIds: [],
+      },
+      outputsToAppend: [],
     });
 
     expect(res.isOk()).toBe(true);
 
     const plan = res._unsafeUnwrap();
-    expect(plan.events.map((e) => e.kind)).toEqual(['advance_recorded', 'gap_recorded']);
+    // advance_recorded, gap_recorded (extra), node_created, edge_created
+    expect(plan.events.map((e) => e.kind)).toEqual(['advance_recorded', 'gap_recorded', 'node_created', 'edge_created']);
     expect(plan.events[0]!.eventIndex).toBe(10);
     expect(plan.events[1]!.eventIndex).toBe(11);
     expect(plan.events[1]!.sessionId).toBe('sess_01jh_test');

@@ -11,8 +11,8 @@
 import type { z } from 'zod';
 import type { ResultAsync as RA } from 'neverthrow';
 import { okAsync, errAsync } from 'neverthrow';
-import type { ToolContext, ToolResult } from '../types.js';
-import { success, errNotRetryable } from '../types.js';
+import type { ToolContext, ToolResult, V2ToolContext } from '../types.js';
+import { success, errNotRetryable, requireV2Context } from '../types.js';
 import type { V2CheckpointWorkflowInput } from '../v2/tools.js';
 import { V2CheckpointWorkflowOutputSchema } from '../output-schemas.js';
 import { parseCheckpointTokenOrFail, signTokenOrErr } from './v2-token-ops.js';
@@ -61,7 +61,7 @@ function mintStateTokenForNode(
   sessionId: SessionId,
   runId: RunId,
   nodeId: NodeId,
-  tokenCodecPorts: NonNullable<NonNullable<ToolContext['v2']>['tokenCodecPorts']>,
+  tokenCodecPorts: V2ToolContext['v2']['tokenCodecPorts'],
 ): { ok: true; value: string } | { ok: false; error: CheckpointError } {
   const wfRefRes = deriveWorkflowHashRef(originalNode.data.workflowHash);
   if (wfRefRes.isErr()) {
@@ -105,7 +105,10 @@ export async function handleV2CheckpointWorkflow(
   input: V2CheckpointWorkflowInput,
   ctx: ToolContext,
 ): Promise<ToolResult<unknown>> {
-  return executeCheckpoint(input, ctx).match(
+  const guard = requireV2Context(ctx);
+  if (!guard.ok) return guard.error;
+
+  return executeCheckpoint(input, guard.ctx).match(
     (payload) => success(payload),
     (e) => mapCheckpointErrorToToolError(e),
   );
@@ -117,19 +120,9 @@ export async function handleV2CheckpointWorkflow(
 
 function executeCheckpoint(
   input: V2CheckpointWorkflowInput,
-  ctx: ToolContext,
+  ctx: V2ToolContext,
 ): RA<CheckpointOutput, CheckpointError> {
-  if (!ctx.v2) {
-    return errAsync({ kind: 'precondition_failed', message: 'v2 tools disabled' });
-  }
-
   const { gate, sessionStore, tokenCodecPorts, idFactory } = ctx.v2;
-  if (!tokenCodecPorts) {
-    return errAsync({ kind: 'precondition_failed', message: 'v2 context missing tokenCodecPorts' });
-  }
-  if (!idFactory) {
-    return errAsync({ kind: 'precondition_failed', message: 'v2 context missing idFactory' });
-  }
 
   // Parse and verify checkpoint token
   const tokenRes = parseCheckpointTokenOrFail(input.checkpointToken, tokenCodecPorts);
@@ -187,7 +180,7 @@ function replayCheckpoint(
   sessionId: SessionId,
   runId: RunId,
   nodeId: NodeId,
-  tokenCodecPorts: NonNullable<NonNullable<ToolContext['v2']>['tokenCodecPorts']>,
+  tokenCodecPorts: V2ToolContext['v2']['tokenCodecPorts'],
 ): RA<CheckpointOutput, CheckpointError> {
   const existingCheckpointNode = events.find(
     (e): e is Extract<DomainEventV1, { kind: 'node_created' }> =>
@@ -221,8 +214,8 @@ function writeCheckpoint(
   checkpointNodeId: NodeId,
   mintEventId: () => string,
   lock: Parameters<Parameters<ExecutionSessionGateV2['withHealthySessionLock']>[1]>[0],
-  sessionStore: NonNullable<ToolContext['v2']>['sessionStore'],
-  tokenCodecPorts: NonNullable<NonNullable<ToolContext['v2']>['tokenCodecPorts']>,
+  sessionStore: V2ToolContext['v2']['sessionStore'],
+  tokenCodecPorts: V2ToolContext['v2']['tokenCodecPorts'],
 ): RA<CheckpointOutput, CheckpointError> {
 
   // Mint event IDs upfront so edge_created can reference node_created's eventId

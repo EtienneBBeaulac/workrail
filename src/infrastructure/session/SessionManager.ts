@@ -6,9 +6,14 @@ import { execSync } from 'child_process';
 import os from 'os';
 import { EventEmitter } from 'events';
 import { singleton, inject } from 'tsyringe';
+import { ok, err, type Result } from 'neverthrow';
 import { DI } from '../../di/tokens.js';
 import { SessionDataNormalizer } from './SessionDataNormalizer';
 import { SessionDataValidator, ValidationResult } from './SessionDataValidator';
+
+export type SessionManagerError =
+  | { readonly code: 'SESSION_NOT_FOUND'; readonly message: string }
+  | { readonly code: 'IO_ERROR'; readonly message: string };
 
 export interface Session {
   id: string;
@@ -138,11 +143,15 @@ export class SessionManager extends EventEmitter {
     workflowId: string,
     sessionId: string,
     initialData: Record<string, any> = {}
-  ): Promise<Session> {
+  ): Promise<Result<Session, SessionManagerError>> {
     const sessionPath = this.getSessionPath(workflowId, sessionId);
     
     // Ensure directory exists
-    await fs.mkdir(path.dirname(sessionPath), { recursive: true });
+    try {
+      await fs.mkdir(path.dirname(sessionPath), { recursive: true });
+    } catch (e) {
+      return err({ code: 'IO_ERROR', message: `Failed to create session directory: ${e instanceof Error ? e.message : String(e)}` });
+    }
     
     const session: Session = {
       id: sessionId,
@@ -155,12 +164,16 @@ export class SessionManager extends EventEmitter {
     };
     
     // Atomic write
-    await this.atomicWrite(sessionPath, session);
+    try {
+      await this.atomicWrite(sessionPath, session);
+    } catch (e) {
+      return err({ code: 'IO_ERROR', message: `Failed to write session: ${e instanceof Error ? e.message : String(e)}` });
+    }
     
     // Update project metadata
     await this.updateProjectMetadata();
     
-    return session;
+    return ok(session);
   }
   
   /**
@@ -170,14 +183,14 @@ export class SessionManager extends EventEmitter {
     workflowId: string,
     sessionId: string,
     updates: Record<string, any>
-  ): Promise<Session> {
+  ): Promise<Result<Session, SessionManagerError>> {
     const sessionPath = this.getSessionPath(workflowId, sessionId);
     
     // Read existing session
     const session = await this.getSession(workflowId, sessionId);
     
     if (!session) {
-      throw new Error(`Session not found: ${workflowId}/${sessionId}`);
+      return err({ code: 'SESSION_NOT_FOUND', message: `Session not found: ${workflowId}/${sessionId}` });
     }
     
     // Deep merge updates
@@ -199,9 +212,13 @@ export class SessionManager extends EventEmitter {
     session.updatedAt = new Date().toISOString();
     
     // Atomic write
-    await this.atomicWrite(sessionPath, session);
+    try {
+      await this.atomicWrite(sessionPath, session);
+    } catch (e) {
+      return err({ code: 'IO_ERROR', message: `Failed to write session: ${e instanceof Error ? e.message : String(e)}` });
+    }
     
-    return session;
+    return ok(session);
   }
   
   /**
@@ -211,19 +228,19 @@ export class SessionManager extends EventEmitter {
     workflowId: string,
     sessionId: string,
     queryPath?: string
-  ): Promise<any> {
+  ): Promise<Result<unknown, SessionManagerError>> {
     const session = await this.getSession(workflowId, sessionId);
     
     if (!session) {
-      throw new Error(`Session not found: ${workflowId}/${sessionId}`);
+      return err({ code: 'SESSION_NOT_FOUND', message: `Session not found: ${workflowId}/${sessionId}` });
     }
     
     if (!queryPath) {
-      return session.data;
+      return ok(session.data);
     }
     
     // Support JSONPath-like queries
-    return this.getPath(session.data, queryPath);
+    return ok(this.getPath(session.data, queryPath));
   }
   
   /**
@@ -232,14 +249,14 @@ export class SessionManager extends EventEmitter {
   async deleteSession(
     workflowId: string,
     sessionId: string
-  ): Promise<void> {
+  ): Promise<Result<void, SessionManagerError>> {
     const sessionPath = this.getSessionPath(workflowId, sessionId);
     
     // Check if session exists
     const exists = await fs.access(sessionPath).then(() => true).catch(() => false);
     
     if (!exists) {
-      throw new Error(`Session not found: ${workflowId}/${sessionId}`);
+      return err({ code: 'SESSION_NOT_FOUND', message: `Session not found: ${workflowId}/${sessionId}` });
     }
     
     // Stop watching if active
@@ -250,6 +267,8 @@ export class SessionManager extends EventEmitter {
     
     // Update project metadata
     await this.updateProjectMetadata();
+    
+    return ok(undefined);
   }
   
   /**
@@ -257,11 +276,10 @@ export class SessionManager extends EventEmitter {
    */
   async deleteSessions(sessions: Array<{workflowId: string; sessionId: string}>): Promise<void> {
     for (const { workflowId, sessionId } of sessions) {
-      try {
-        await this.deleteSession(workflowId, sessionId);
-      } catch (error) {
+      const res = await this.deleteSession(workflowId, sessionId);
+      if (res.isErr()) {
         // Continue deleting others even if one fails
-        console.error(`Failed to delete ${workflowId}/${sessionId}:`, error);
+        console.error(`Failed to delete ${workflowId}/${sessionId}:`, res.error.message);
       }
     }
   }

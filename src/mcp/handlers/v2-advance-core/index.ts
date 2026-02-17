@@ -170,26 +170,62 @@ export function executeAdvanceCore(args: {
   const v = validatedRes.value;
 
   // ── 3. Run validation engine (async boundary) ───────────────────────
+  //
+  // ValidationEngine errors (bad schema, invalid criteria format, evaluation threw)
+  // are routed to terminal_block instead of propagating as InternalError.
+  // Rationale: a broken validation rule is a workflow authoring defect, not a system
+  // error — the agent can't fix it by retrying, so we create a terminal blocked node
+  // that's visible in the DAG and Studio.
+
+  type ValidationPhaseResult =
+    | { readonly kind: 'completed'; readonly validation: ValidationResult | undefined }
+    | { readonly kind: 'evaluation_error'; readonly message: string };
 
   const validator = v.validationCriteria ? new ValidationEngine(new EnhancedLoopValidator()) : null;
-  const validationRes: RA<ValidationResult | undefined, InternalError> =
+  const validationPhase: RA<ValidationPhaseResult, InternalError> =
     validator && v.notesMarkdown
       ? RA.fromPromise(
-          // validationCriteria is guaranteed non-undefined here: validator is only non-null when v.validationCriteria is truthy (line 192)
+          // validationCriteria is guaranteed non-undefined here: validator is only non-null when v.validationCriteria is truthy
           withTimeout(validator.validate(v.notesMarkdown, v.validationCriteria!, v.mergedContext as ConditionContext), 30_000, 'ValidationEngine.validate'),
           (cause) => ({ kind: 'advance_apply_failed' as const, message: String(cause) } as const)
-        ).andThen((res) => {
+        ).andThen((res): RA<ValidationPhaseResult, InternalError> => {
           if (res.isErr()) {
-            return neErrorAsync({
-              kind: 'advance_apply_failed' as const,
-              message: `ValidationEngineError: ${res.error.kind} (${res.error.message})`,
-            } as const);
+            // ValidationEngine returned a structured error → terminal block (not application error)
+            return okAsync({ kind: 'evaluation_error' as const, message: `${res.error.kind}: ${res.error.message}` });
           }
-          return okAsync(res.value);
+          return okAsync({ kind: 'completed' as const, validation: res.value as ValidationResult | undefined });
+        }).orElse((e): RA<ValidationPhaseResult, InternalError> => {
+          // ValidationEngine threw unexpectedly → terminal block
+          if (e.kind === 'advance_apply_failed') {
+            return okAsync({ kind: 'evaluation_error' as const, message: e.message });
+          }
+          return neErrorAsync(e);
         })
-      : okAsync(undefined);
+      : okAsync({ kind: 'completed' as const, validation: undefined } as ValidationPhaseResult);
 
-  return validationRes.andThen((validation: ValidationResult | undefined) => {
+  return validationPhase.andThen((phase) => {
+
+    // ── 3b. Evaluation error → force terminal block ───────────────────
+
+    if (phase.kind === 'evaluation_error') {
+      const evalReason: ReasonV1 = { kind: 'evaluation_error' };
+      const reasons: readonly ReasonV1[] = [evalReason];
+      const effectiveReasons: readonly ReasonV1[] = [evalReason];
+      const outputRequirement = { kind: 'not_required' as const };
+      const evalValidation: ValidationResult = {
+        valid: false,
+        issues: [`Validation evaluation failed: ${phase.message}`],
+        suggestions: ['Check validation criteria for malformed rules or invalid schemas.'],
+      };
+
+      const ctx: AdvanceContext = { truth, sessionId, runId, currentNodeId, attemptId, workflowHash, inputOutput, pinnedWorkflow, engineState, pendingStep };
+      const computed: ComputedAdvanceResults = { reasons, effectiveReasons, outputRequirement, validation: evalValidation };
+      const portsLocal: AdvanceCorePorts = { snapshotStore, sessionStore, sha256, idFactory };
+
+      return buildBlockedOutcome({ mode, snap, ctx, computed, lock, ports: portsLocal });
+    }
+
+    const validation = phase.validation;
 
     // ── 4. Detect blocking reasons + guardrails ─────────────────────────
 

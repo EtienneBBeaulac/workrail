@@ -278,7 +278,9 @@ export function replayFromRecordedAdvance(args: {
     tokenCodecPorts,
   } = args;
 
-  // Route based on outcome kind
+  // Backward-compat: replay old sessions that used advance_recorded.outcome.kind='blocked'
+  // (deprecated by ADR 008 — new advances create blocked_attempt nodes instead).
+  // Keep until all persisted sessions have been migrated or expired.
   if (recordedEvent.data.outcome.kind === 'blocked') {
     const blockers = recordedEvent.data.outcome.blockers;
     const snapNode = truth.events.find(

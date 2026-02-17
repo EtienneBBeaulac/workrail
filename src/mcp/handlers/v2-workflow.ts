@@ -1,6 +1,6 @@
 import { ResultAsync, okAsync, errAsync } from 'neverthrow';
 import type { ToolContext, ToolResult } from '../types.js';
-import { success, errNotRetryable } from '../types.js';
+import { success, errNotRetryable, requireV2Context } from '../types.js';
 import { mapUnknownErrorToToolError } from '../error-mapper.js';
 import type { V2InspectWorkflowInput, V2ListWorkflowsInput } from '../v2/tools.js';
 import { V2WorkflowInspectOutputSchema, V2WorkflowListOutputSchema } from '../output-schemas.js';
@@ -13,24 +13,13 @@ const TIMEOUT_MS = 30_000;
 
 import { withTimeout } from './shared/with-timeout.js';
 
-/**
- * Require v2 context to be available.
- * Returns PRECONDITION_FAILED if v2 tools are not enabled.
- */
-function requireV2(ctx: ToolContext): ToolResult<NonNullable<typeof ctx.v2>> | null {
-  if (!ctx.v2) {
-    return errNotRetryable('PRECONDITION_FAILED', 'v2 tools are not enabled');
-  }
-  return null;
-}
-
 export async function handleV2ListWorkflows(
   _input: V2ListWorkflowsInput,
   ctx: ToolContext
 ): Promise<ToolResult<unknown>> {
-  const v2Err = requireV2(ctx);
-  if (v2Err) return v2Err;
-  const { crypto, pinnedStore } = ctx.v2!;
+  const guard = requireV2Context(ctx);
+  if (!guard.ok) return guard.error;
+  const { crypto, pinnedStore } = guard.ctx.v2;
 
   return ResultAsync.fromPromise(
     withTimeout(ctx.workflowService.listWorkflowSummaries(), TIMEOUT_MS, 'list_workflows'),
@@ -114,9 +103,9 @@ export async function handleV2InspectWorkflow(
   input: V2InspectWorkflowInput,
   ctx: ToolContext
 ): Promise<ToolResult<unknown>> {
-  const v2Err = requireV2(ctx);
-  if (v2Err) return v2Err;
-  const { crypto, pinnedStore } = ctx.v2!;
+  const guard = requireV2Context(ctx);
+  if (!guard.ok) return guard.error;
+  const { crypto, pinnedStore } = guard.ctx.v2;
 
   return ResultAsync.fromPromise(
     withTimeout(ctx.workflowService.getWorkflowById(input.workflowId), TIMEOUT_MS, 'inspect_workflow'),

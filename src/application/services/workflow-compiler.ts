@@ -6,7 +6,7 @@ import {
   isLoopStepDefinition,
 } from '../../types/workflow';
 import type { LoopConditionSource } from '../../types/workflow-definition';
-import { LOOP_CONTROL_CONTRACT_REF } from '../../v2/durable-core/schemas/artifacts/index';
+import { LOOP_CONTROL_CONTRACT_REF, isValidContractRef } from '../../v2/durable-core/schemas/artifacts/index';
 import type { Result } from 'neverthrow';
 import { ok, err } from 'neverthrow';
 import { type DomainError, Err } from '../../domain/execution/error';
@@ -51,6 +51,17 @@ export class WorkflowCompiler {
       stepById.set(step.id, step);
     }
 
+    // Validate outputContract refs at compile time (fail fast on unknown contracts)
+    for (const step of steps) {
+      const contractRef = (step as WorkflowStepDefinition).outputContract?.contractRef;
+      if (contractRef && !isValidContractRef(contractRef)) {
+        return err(Err.invalidState(
+          `Step '${step.id}' declares unknown outputContract.contractRef '${contractRef}'. ` +
+          `Known contracts: ${LOOP_CONTROL_CONTRACT_REF}`
+        ));
+      }
+    }
+
     const compiledLoops = new Map<string, CompiledLoop>();
     const loopBodyStepIds = new Set<string>();
 
@@ -63,6 +74,14 @@ export class WorkflowCompiler {
 
       for (const bodyStep of bodyResolved.value) {
         loopBodyStepIds.add(bodyStep.id);
+        // Validate outputContract refs on inline body steps
+        const ref = bodyStep.outputContract?.contractRef;
+        if (ref && !isValidContractRef(ref)) {
+          return err(Err.invalidState(
+            `Loop body step '${bodyStep.id}' in loop '${loop.id}' declares unknown outputContract.contractRef '${ref}'. ` +
+            `Known contracts: ${LOOP_CONTROL_CONTRACT_REF}`
+          ));
+        }
       }
 
       const conditionSource = this.deriveConditionSource(loop, bodyResolved.value);
@@ -106,14 +125,14 @@ export class WorkflowCompiler {
       return loop.loop.conditionSource;
     }
 
-    // 2. Check if any body step declares loop_control output contract
-    // TODO: When additional contract types are added, this heuristic should be replaced
-    // with explicit conditionSource in the workflow JSON. Currently safe because only
-    // wr.contracts.loop_control exists, so the match is unambiguous.
-    const hasLoopControlContract = bodySteps.some(
+    // 2. Auto-derive from body steps: only loop_control contracts imply condition source.
+    // This is safe with any number of contract types because we match the specific
+    // LOOP_CONTROL_CONTRACT_REF — other contracts (e.g. evidence_validation) don't
+    // imply loop condition derivation and correctly fall through to the legacy path.
+    const loopControlStep = bodySteps.find(
       (s) => s.outputContract?.contractRef === LOOP_CONTROL_CONTRACT_REF
     );
-    if (hasLoopControlContract) {
+    if (loopControlStep) {
       return {
         kind: 'artifact_contract',
         contractRef: LOOP_CONTROL_CONTRACT_REF,
