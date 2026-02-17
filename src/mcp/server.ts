@@ -27,6 +27,8 @@ import type { ToolContext, V2Dependencies } from './types.js';
 import { assertNever } from '../runtime/assert-never.js';
 import { unsafeTokenCodecPorts } from '../v2/durable-core/tokens/token-codec-ports.js';
 import { LocalWorkspaceAnchorV2 } from '../v2/infra/local/workspace-anchor/index.js';
+import { LocalDirectoryListingV2 } from '../v2/infra/local/directory-listing/index.js';
+import { LocalSessionSummaryProviderV2 } from '../v2/infra/local/session-summary-provider/index.js';
 import { createToolFactory, type ToolAnnotations, type ToolDefinition } from './tool-factory.js';
 import type { IToolDescriptionProvider } from './tool-description-provider.js';
 import { createHandler } from './handler-factory.js';
@@ -116,6 +118,10 @@ export async function createToolContext(): Promise<ToolContext> {
         bech32m,
       });
 
+      const dataDir = container.resolve<any>(DI.V2.DataDir);
+      const fsPort = container.resolve<any>(DI.V2.FileSystem);
+      const directoryListing = new LocalDirectoryListingV2(fsPort);
+
       v2 = {
         gate,
         sessionStore,
@@ -126,6 +132,13 @@ export async function createToolContext(): Promise<ToolContext> {
         idFactory,
         tokenCodecPorts,
         workspaceAnchor: new LocalWorkspaceAnchorV2(process.cwd()),
+        dataDir,
+        directoryListing,
+        sessionSummaryProvider: new LocalSessionSummaryProviderV2({
+          directoryListing,
+          dataDir,
+          sessionStore,
+        }),
       };
       console.error('[FeatureFlags] v2 tools enabled');
     }

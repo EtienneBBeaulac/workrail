@@ -19,6 +19,7 @@ import {
   V2StartWorkflowOutputSchema,
   V2ContinueWorkflowOutputSchema,
   V2CheckpointWorkflowOutputSchema,
+  V2ResumeSessionOutputSchema,
   V2PendingStepSchema,
   V2PreferencesSchema,
   V2NextIntentSchema,
@@ -444,5 +445,106 @@ describe('checkpointToken in response contracts', () => {
       nextCall: { tool: 'continue_workflow', params: { intent: 'advance', stateToken: VALID_STATE_TOKEN, ackToken: VALID_ACK_TOKEN } },
     };
     expect(V2ContinueWorkflowOutputSchema.safeParse(response).success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resume_session output contract
+// ---------------------------------------------------------------------------
+
+describe('V2ResumeSessionOutputSchema', () => {
+  it('accepts valid resume response with candidates', () => {
+    const response = {
+      candidates: [
+        {
+          sessionId: 'sess_abc123',
+          runId: 'run_001',
+          stateToken: VALID_STATE_TOKEN,
+          snippet: 'Working on feature X...',
+          whyMatched: ['matched_branch'],
+        },
+      ],
+      totalEligible: 3,
+    };
+    expect(V2ResumeSessionOutputSchema.safeParse(response).success).toBe(true);
+  });
+
+  it('accepts empty candidates list', () => {
+    const response = { candidates: [], totalEligible: 0 };
+    expect(V2ResumeSessionOutputSchema.safeParse(response).success).toBe(true);
+  });
+
+  it('accepts multiple whyMatched reasons', () => {
+    const response = {
+      candidates: [
+        {
+          sessionId: 'sess_abc123',
+          runId: 'run_001',
+          stateToken: VALID_STATE_TOKEN,
+          snippet: 'Some recap text',
+          whyMatched: ['matched_head_sha', 'matched_branch'],
+        },
+      ],
+      totalEligible: 1,
+    };
+    expect(V2ResumeSessionOutputSchema.safeParse(response).success).toBe(true);
+  });
+
+  it('accepts all valid whyMatched values', () => {
+    const LOCKED_WHY_MATCHED = [
+      'matched_head_sha',
+      'matched_branch',
+      'matched_notes',
+      'matched_workflow_id',
+      'recency_fallback',
+    ];
+    for (const reason of LOCKED_WHY_MATCHED) {
+      const response = {
+        candidates: [
+          {
+            sessionId: 'sess_abc',
+            runId: 'run_001',
+            stateToken: VALID_STATE_TOKEN,
+            snippet: '',
+            whyMatched: [reason],
+          },
+        ],
+        totalEligible: 1,
+      };
+      expect(V2ResumeSessionOutputSchema.safeParse(response).success).toBe(true);
+    }
+  });
+
+  it('rejects invalid whyMatched value', () => {
+    const response = {
+      candidates: [
+        {
+          sessionId: 'sess_abc',
+          runId: 'run_001',
+          stateToken: VALID_STATE_TOKEN,
+          snippet: '',
+          whyMatched: ['invalid_reason'],
+        },
+      ],
+      totalEligible: 1,
+    };
+    expect(V2ResumeSessionOutputSchema.safeParse(response).success).toBe(false);
+  });
+
+  it('enforces max 5 candidates', () => {
+    const sixCandidates = Array.from({ length: 6 }, (_, i) => ({
+      sessionId: `sess_${String(i)}`,
+      runId: `run_${String(i)}`,
+      stateToken: VALID_STATE_TOKEN,
+      snippet: '',
+      whyMatched: ['recency_fallback' as const],
+    }));
+    const response = { candidates: sixCandidates, totalEligible: 6 };
+    expect(V2ResumeSessionOutputSchema.safeParse(response).success).toBe(false);
+  });
+
+  it('rejects negative totalEligible', () => {
+    const response = { candidates: [], totalEligible: -1 };
+    expect(V2ResumeSessionOutputSchema.safeParse(response).success).toBe(false);
   });
 });

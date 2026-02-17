@@ -263,6 +263,23 @@ export const V2ContinueWorkflowOutputSchema = z.discriminatedUnion('kind', [
   { message: 'ackToken is required when a pending step exists' }
 );
 
+export const V2ResumeSessionOutputSchema = z.object({
+  candidates: z.array(z.object({
+    sessionId: z.string().min(1),
+    runId: z.string().min(1),
+    stateToken: z.string().regex(/^st1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid stateToken format'),
+    snippet: z.string().max(1024),
+    whyMatched: z.array(z.enum([
+      'matched_head_sha',
+      'matched_branch',
+      'matched_notes',
+      'matched_workflow_id',
+      'recency_fallback',
+    ])),
+  })).max(5),
+  totalEligible: z.number().int().min(0),
+});
+
 export const V2CheckpointWorkflowOutputSchema = z.object({
   checkpointNodeId: z.string().min(1),
   stateToken: z.string().regex(/^st1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid stateToken format'),

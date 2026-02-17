@@ -25,6 +25,9 @@ import type { IdFactoryV2 } from '../v2/infra/local/id-factory/index.js';
 import type { JsonValue } from './output-schemas.js';
 import type { TokenCodecPorts } from '../v2/durable-core/tokens/token-codec-ports.js';
 import type { WorkspaceAnchorPortV2 } from '../v2/ports/workspace-anchor.port.js';
+import type { DataDirPortV2 } from '../v2/ports/data-dir.port.js';
+import type { DirectoryListingPortV2 } from '../v2/ports/directory-listing.port.js';
+import type { SessionSummaryProviderPortV2 } from '../v2/ports/session-summary-provider.port.js';
 
 // Note: JsonValue type is imported from output-schemas.js above
 
@@ -209,6 +212,13 @@ export interface V2Dependencies {
 
   // Workspace identity observation (optional, graceful degradation)
   readonly workspaceAnchor?: WorkspaceAnchorPortV2;
+
+  // Directory-level operations (resume session needs session enumeration)
+  readonly dataDir?: DataDirPortV2;
+  readonly directoryListing?: DirectoryListingPortV2;
+
+  // Session summary provider (resume session)
+  readonly sessionSummaryProvider?: SessionSummaryProviderPortV2;
 }
 
 // -----------------------------------------------------------------------------

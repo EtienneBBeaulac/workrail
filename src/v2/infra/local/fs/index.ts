@@ -162,4 +162,8 @@ export class NodeFileSystemV2 implements FileSystemPortV2 {
   stat(filePath: string): ResultAsync<{ readonly sizeBytes: number }, FsError> {
     return RA.fromPromise(fs.stat(filePath), (e) => mapFsError(e, filePath)).map((s) => ({ sizeBytes: s.size }));
   }
+
+  readdir(dirPath: string): ResultAsync<readonly string[], FsError> {
+    return RA.fromPromise(fs.readdir(dirPath), (e) => mapFsError(e, dirPath));
+  }
 }
