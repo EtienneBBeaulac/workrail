@@ -20,9 +20,21 @@ import { LocalPinnedWorkflowStoreV2 } from '../../src/v2/infra/local/pinned-work
 import { ExecutionSessionGateV2 } from '../../src/v2/usecases/execution-session-gate.js';
 import { NodeRandomEntropyV2 } from '../../src/v2/infra/local/random-entropy/index.js';
 import { NodeTimeClockV2 } from '../../src/v2/infra/local/time-clock/index.js';
+import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
+import { Bech32mAdapterV2 } from '../../src/v2/infra/local/bech32m/index.js';
+import { Base32AdapterV2 } from '../../src/v2/infra/local/base32/index.js';
 
-import { encodeTokenPayloadV1, signTokenV1 } from '../../src/v2/durable-core/tokens/index.js';
+import { signTokenV1Binary, unsafeTokenCodecPorts } from '../../src/v2/durable-core/tokens/index.js';
 import { StateTokenPayloadV1Schema, AckTokenPayloadV1Schema } from '../../src/v2/durable-core/tokens/index.js';
+import { asWorkflowHash, asSha256Digest } from '../../src/v2/durable-core/ids/index.js';
+import { deriveWorkflowHashRef } from '../../src/v2/durable-core/ids/workflow-hash-ref.js';
+import { encodeBase32LowerNoPad } from '../../src/v2/durable-core/encoding/base32-lower.js';
+
+function mkId(prefix: string, fill: number): string {
+  const bytes = new Uint8Array(16);
+  bytes.fill(fill);
+  return `${prefix}_${encodeBase32LowerNoPad(bytes)}`;
+}
 
 async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-exec-'));
@@ -39,6 +51,9 @@ async function mkV2Deps(): Promise<V2Dependencies> {
   const hmac = new NodeHmacSha256V2();
   const base64url = new NodeBase64UrlV2();
   const entropy = new NodeRandomEntropyV2();
+  const idFactory = new IdFactoryV2(entropy);
+  const base32 = new Base32AdapterV2();
+  const bech32m = new Bech32mAdapterV2();
   const snapshotStore = new LocalSnapshotStoreV2(dataDir, fsPort, crypto);
   const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir, fsPort);
   const keyring = await new LocalKeyringV2(dataDir, fsPort, base64url, entropy).loadOrCreate().match(
@@ -49,15 +64,17 @@ async function mkV2Deps(): Promise<V2Dependencies> {
   );
   const gate = new ExecutionSessionGateV2(lockPort, sessionStore);
 
+  const tokenCodecPorts = unsafeTokenCodecPorts({ keyring, hmac, base64url, base32, bech32m });
+
   return {
     gate,
     sessionStore,
     snapshotStore,
     pinnedStore,
-    keyring,
+    sha256: sha256Port,
     crypto,
-    hmac,
-    base64url,
+    idFactory,
+    tokenCodecPorts,
   };
 }
 
@@ -72,16 +89,14 @@ async function dummyCtx(): Promise<ToolContext> {
   };
 }
 
-async function mkSignedToken(args: {
-  root: string;
-  unsignedPrefix: 'st.v1.' | 'ack.v1.';
-  payload: unknown;
-}): Promise<string> {
+async function mkSignedToken(args: { root: string; payload: unknown }): Promise<string> {
   const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: args.root });
   const fsPort = new NodeFileSystemV2();
   const hmac = new NodeHmacSha256V2();
   const base64url = new NodeBase64UrlV2();
   const entropy = new NodeRandomEntropyV2();
+  const base32 = new Base32AdapterV2();
+  const bech32m = new Bech32mAdapterV2();
   const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url, entropy);
   const keyring = await keyringPort.loadOrCreate().match(
     (v) => v,
@@ -90,25 +105,15 @@ async function mkSignedToken(args: {
     }
   );
 
-  const payloadBytes = encodeTokenPayloadV1(args.payload as any).match(
-    (v) => v,
-    (e) => {
-      throw new Error(`unexpected token payload encode error: ${e.code}`);
-    }
-  );
-
-  const token = signTokenV1(args.unsignedPrefix, payloadBytes, keyring, hmac, base64url).match(
-    (v) => v,
-    (e) => {
-      throw new Error(`unexpected token sign error: ${e.code}`);
-    }
-  );
-  return String(token);
+  const ports = unsafeTokenCodecPorts({ keyring, hmac, base64url, base32, bech32m });
+  const token = signTokenV1Binary(args.payload as any, ports);
+  if (token.isErr()) throw new Error(`unexpected token sign error: ${token.error.code}`);
+  return token.value;
 }
 
 describe('v2 execution placeholder handlers (Slice 3.2 boundary validation)', () => {
   it('returns VALIDATION_ERROR for an invalid stateToken', async () => {
-    const res = await handleV2ContinueWorkflow({ stateToken: 'not-a-token' } as any, await dummyCtx());
+    const res = await handleV2ContinueWorkflow({ intent: 'rehydrate', stateToken: 'not-a-token' } as any, await dummyCtx());
     expect(res.type).toBe('error');
     if (res.type !== 'error') return;
     expect(res.code).toBe('TOKEN_INVALID_FORMAT');
@@ -120,17 +125,21 @@ describe('v2 execution placeholder handlers (Slice 3.2 boundary validation)', ()
     process.env.WORKRAIL_DATA_DIR = root;
     try {
 
+      const wfRef = deriveWorkflowHashRef(
+        asWorkflowHash(asSha256Digest('sha256:5b2d9fb885d0adc6565e1fd59e6abb3769b69e4dba5a02b6eea750137a5c0be2'))
+      )._unsafeUnwrap();
+
       const payload = StateTokenPayloadV1Schema.parse({
         tokenVersion: 1,
         tokenKind: 'state',
-        sessionId: 'sess_1',
-        runId: 'run_1',
-        nodeId: 'node_1',
-        workflowHash: 'sha256:5b2d9fb885d0adc6565e1fd59e6abb3769b69e4dba5a02b6eea750137a5c0be2',
+        sessionId: mkId('sess', 1),
+        runId: mkId('run', 2),
+        nodeId: mkId('node', 3),
+        workflowHashRef: String(wfRef),
       });
 
-      const token = await mkSignedToken({ root, unsignedPrefix: 'st.v1.', payload });
-      const res = await handleV2ContinueWorkflow({ stateToken: token } as any, await dummyCtx());
+      const token = await mkSignedToken({ root, payload });
+      const res = await handleV2ContinueWorkflow({ intent: 'rehydrate', stateToken: token } as any, await dummyCtx());
 
       expect(res.type).toBe('error');
       if (res.type !== 'error') return;
@@ -146,28 +155,32 @@ describe('v2 execution placeholder handlers (Slice 3.2 boundary validation)', ()
     process.env.WORKRAIL_DATA_DIR = root;
     try {
 
+      const wfRef = deriveWorkflowHashRef(
+        asWorkflowHash(asSha256Digest('sha256:5b2d9fb885d0adc6565e1fd59e6abb3769b69e4dba5a02b6eea750137a5c0be2'))
+      )._unsafeUnwrap();
+
       const statePayload = StateTokenPayloadV1Schema.parse({
         tokenVersion: 1,
         tokenKind: 'state',
-        sessionId: 'sess_1',
-        runId: 'run_1',
-        nodeId: 'node_A',
-        workflowHash: 'sha256:5b2d9fb885d0adc6565e1fd59e6abb3769b69e4dba5a02b6eea750137a5c0be2',
+        sessionId: mkId('sess', 1),
+        runId: mkId('run', 2),
+        nodeId: mkId('node', 3),
+        workflowHashRef: String(wfRef),
       });
 
       const ackPayload = AckTokenPayloadV1Schema.parse({
         tokenVersion: 1,
         tokenKind: 'ack',
-        sessionId: 'sess_1',
-        runId: 'run_1',
-        nodeId: 'node_B', // mismatch
-        attemptId: 'attempt_1',
+        sessionId: mkId('sess', 1),
+        runId: mkId('run', 2),
+        nodeId: mkId('node', 4), // mismatch
+        attemptId: mkId('attempt', 5),
       });
 
-      const stateToken = await mkSignedToken({ root, unsignedPrefix: 'st.v1.', payload: statePayload });
-      const ackToken = await mkSignedToken({ root, unsignedPrefix: 'ack.v1.', payload: ackPayload });
+      const stateToken = await mkSignedToken({ root, payload: statePayload });
+      const ackToken = await mkSignedToken({ root, payload: ackPayload });
 
-      const res = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, await dummyCtx());
+      const res = await handleV2ContinueWorkflow({ intent: 'advance', stateToken, ackToken } as any, await dummyCtx());
       expect(res.type).toBe('error');
       if (res.type !== 'error') return;
       expect(res.code).toBe('TOKEN_SCOPE_MISMATCH');

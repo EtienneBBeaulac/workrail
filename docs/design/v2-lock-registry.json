@@ -131,12 +131,7 @@
       "summary": "StepInstanceKey format: stepId or loopPath::stepId",
       "category": "schema"
     },
-    {
-      "id": "token-format-prefix-version-payload-sig",
-      "source": "v2-core-design-locks.md §1.2",
-      "summary": "Token format: <prefix>.v1.<payload>.<sig>",
-      "category": "tokens"
-    },
+
     {
       "id": "token-prefix-closed-set",
       "source": "v2-core-design-locks.md §1.2",
@@ -192,9 +187,51 @@
       "category": "tokens"
     },
     {
+      "id": "token-binary-wire-format",
+      "source": "v2-core-design-locks.md §1.2 Amendment 1",
+      "summary": "Binary token wire format: <hrp>1<bech32m-data> where hrp is st|ack|chk",
+      "category": "tokens"
+    },
+    {
+      "id": "token-binary-payload-layout",
+      "source": "v2-core-design-locks.md §1.2 Amendment 3",
+      "summary": "Binary payload is 66 bytes, little-endian, fixed offsets",
+      "category": "tokens"
+    },
+    {
+      "id": "token-bech32m-encoding",
+      "source": "v2-core-design-locks.md §1.2 Amendment 1",
+      "summary": "Bech32m encoding (BIP 350) with built-in checksum for corruption detection",
+      "category": "tokens"
+    },
+    {
+      "id": "token-binary-roundtrip",
+      "source": "v2-core-design-locks.md §1.2 Amendment 3",
+      "summary": "Binary pack/unpack must be deterministic roundtrip (pack → unpack → pack is idempotent)",
+      "category": "tokens"
+    },
+    {
+      "id": "binary-payload-deterministic",
+      "source": "v2-core-design-locks.md §1.2 Amendment 3",
+      "summary": "Binary payload packing is deterministic (same input → same bytes, little-endian)",
+      "category": "tokens"
+    },
+    {
+      "id": "token-corruption-detection",
+      "source": "v2-core-design-locks.md §1.2 Amendment 1",
+      "summary": "Bech32m checksum detects single-character corruption before signature verification",
+      "category": "tokens"
+    },
+    {
+      "id": "bech32m-checksum-validation",
+      "source": "v2-core-design-locks.md §1.2 Amendment 1",
+      "summary": "Bech32m checksum validated before payload unpacking",
+      "category": "tokens"
+    },
+    {
       "id": "state-token-payload-fields",
       "source": "v2-core-design-locks.md §1.2",
-      "summary": "stateToken payload: tokenVersion, tokenKind, sessionId, runId, nodeId, workflowHash",
+      "summary": "stateToken payload: tokenVersion, tokenKind, sessionId, runId, nodeId, workflowHashRef",
       "category": "tokens"
     },
     {
@@ -221,12 +258,7 @@
       "summary": "Replaying same ackToken is idempotent no-op",
       "category": "tokens"
     },
-    {
-      "id": "checkpoint-idempotency",
-      "source": "v2-core-design-locks.md §1.2",
-      "summary": "Replaying same checkpointToken is idempotent no-op",
-      "category": "tokens"
-    },
+
     {
       "id": "rehydrate-pure-no-writes",
       "source": "v2-core-design-locks.md §1.2",
@@ -481,8 +513,8 @@
     },
     {
       "id": "context-not-durable",
-      "source": "v2-core-design-locks.md §16.3.1",
-      "summary": "context is not persisted as durable truth",
+      "source": "v2-core-design-locks.md §16.3.1 (REVISED in §18.2)",
+      "summary": "context IS persisted as durable truth via run-scoped context_set events (lock revised in Slice 4a S8)",
       "category": "protocol"
     },
     {

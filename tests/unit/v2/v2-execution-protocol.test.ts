@@ -180,9 +180,9 @@ describe('Context Locks', () => {
       // We verify the schema doesn't have a context field.
       const responseExample = {
         kind: 'ok',
-        stateToken: 'st.v1.xxx.yyy',
-        ackToken: 'ack.v1.aaa.bbb',
-        checkpointToken: 'chk.v1.ccc.ddd',
+        stateToken: 'st1invalid',
+        ackToken: 'ack1invalid',
+        checkpointToken: 'chk1invalid',
         isComplete: false,
         pending: { stepId: 'step1', title: 'Title', prompt: 'Prompt' },
       };
@@ -191,30 +191,35 @@ describe('Context Locks', () => {
     });
   });
 
-  describe('context-not-durable: Context is not persisted', () => {
+  describe('context-not-durable (REVISED): Context IS persisted via context_set', () => {
     /**
      * @enforces context-not-durable
      *
-     * Call continue_workflow with context.
-     * Inspect the session store after: context should NOT appear in any durable event.
+     * Lock revision (Slice 4a S8): The lock ID remains but semantics are REVISED.
+     * Original lock (§16.3.1): "context is not persisted as durable truth"
+     * Revised lock (§18.2): "context IS persisted via run-scoped context_set events"
+     *
+     * This test now verifies the REVISED semantics: schema supports context_set.
      */
-    it('should not persist context in durable events', () => {
-      // The domain events (DomainEventV1) do not include context fields.
-      // They only record facts: scope, outcome, outputs, etc.
-      
-      // Verify schema: events should not have context.
+    it('DomainEventV1 schema includes context_set event kind (revised lock)', () => {
+      // context_set event added in S8
       const exampleEvent: DomainEventV1 = {
         v: 1,
-        eventId: 'evt_1',
-        eventIndex: 0,
-        eventTimestampMs: Date.now(),
-        scope: { sessionId: 'sess_1', runId: 'run_1', nodeId: 'node_1' },
-        kind: 'node_created',
-        dedupeKey: 'node_created:sess_1:run_1:node_1',
-        data: { workflowHash: 'sha256:abc', snapshotRef: 'sha256:def' },
-      };
+        eventId: 'evt_ctx',
+        eventIndex: 4,
+        sessionId: 'sess_1',
+        kind: 'context_set',
+        dedupeKey: 'context_set:sess_1:run_1:ctx_1',
+        scope: { runId: 'run_1' },
+        data: {
+          contextId: 'ctx_1',
+          context: { ticketId: 'AUTH-123' },
+          source: 'initial',
+        },
+      } as DomainEventV1;
 
-      expect(exampleEvent).not.toHaveProperty('context');
+      expect(exampleEvent.kind).toBe('context_set');
+      expect(exampleEvent.scope).toEqual({ runId: 'run_1' });
     });
   });
 });

@@ -23,6 +23,10 @@ import { LocalPinnedWorkflowStoreV2 } from '../../../src/v2/infra/local/pinned-w
 import { LocalKeyringV2 } from '../../../src/v2/infra/local/keyring/index.js';
 import { NodeRandomEntropyV2 } from '../../../src/v2/infra/local/random-entropy/index.js';
 import { NodeTimeClockV2 } from '../../../src/v2/infra/local/time-clock/index.js';
+import { IdFactoryV2 } from '../../../src/v2/infra/local/id-factory/index.js';
+import { Bech32mAdapterV2 } from '../../../src/v2/infra/local/bech32m/index.js';
+import { Base32AdapterV2 } from '../../../src/v2/infra/local/base32/index.js';
+import { parseTokenV1Binary, unsafeTokenCodecPorts } from '../../../src/v2/durable-core/tokens/index.js';
 
 import { projectRunDagV2 } from '../../../src/v2/projections/run-dag.js';
 import { asSessionId } from '../../../src/v2/durable-core/ids/index.js';
@@ -62,30 +66,35 @@ async function createV2Context(): Promise<ToolContext> {
   const snapshotStore = new LocalSnapshotStoreV2(dataDir, fsPort, crypto);
   const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir, fsPort);
   const entropy = new NodeRandomEntropyV2();
+  const idFactory = new IdFactoryV2(entropy);
+  const base32 = new Base32AdapterV2();
+  const bech32m = new Bech32mAdapterV2();
   const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url, entropy);
   const keyring = await keyringPort.loadOrCreate().match(
     v => v,
     e => { throw new Error(`keyring: ${e.code}`); }
   );
 
+  // Create grouped token codec ports
+  const tokenCodecPorts = unsafeTokenCodecPorts({ keyring, hmac, base64url, base32, bech32m });
+
   return {
     workflowService,
     featureFlags,
     sessionManager: null,
     httpServer: null,
-    v2: { gate, sessionStore, snapshotStore, pinnedStore, keyring, crypto, hmac, base64url },
+    v2: { gate, sessionStore, snapshotStore, pinnedStore, sha256, crypto, tokenCodecPorts, idFactory },
   };
 }
 
 function extractSessionIdFromToken(stateToken: string): string {
-  const parts = stateToken.split('.');
-  if (parts.length < 3) throw new Error('Invalid token format');
-  
-  const payloadB64 = parts[2]!;
-  const payloadJson = Buffer.from(payloadB64, 'base64url').toString('utf-8');
-  const payload = JSON.parse(payloadJson);
-  
-  return payload.sessionId;
+  const bech32m = new Bech32mAdapterV2();
+  const base32 = new Base32AdapterV2();
+  const parsed = parseTokenV1Binary(stateToken, { bech32m, base32 });
+  if (parsed.isErr()) {
+    throw new Error(`Invalid token format: ${parsed.error.code}`);
+  }
+  return String(parsed.value.payload.sessionId);
 }
 
 describe('v2 fork harness (branching stress test)', () => {
@@ -132,6 +141,7 @@ describe('v2 fork harness (branching stress test)', () => {
     const nodeA_ackToken_1 = start.data.ackToken;
 
     const ack1 = await handleV2ContinueWorkflow({
+      intent: 'advance',
       stateToken: nodeA_stateToken,
       ackToken: nodeA_ackToken_1,
       output: { notesMarkdown: 'Branch 1' },
@@ -142,6 +152,7 @@ describe('v2 fork harness (branching stress test)', () => {
     expect(ack1.data.pending?.stepId).toBe('step2');
 
     const rehydrate2 = await handleV2ContinueWorkflow({
+      intent: 'rehydrate',
       stateToken: nodeA_stateToken,
     } as any, ctx);
     expect(rehydrate2.type).toBe('success');
@@ -149,6 +160,7 @@ describe('v2 fork harness (branching stress test)', () => {
     const nodeA_ackToken_2 = rehydrate2.data.ackToken;
 
     const ack2 = await handleV2ContinueWorkflow({
+      intent: 'advance',
       stateToken: nodeA_stateToken,
       ackToken: nodeA_ackToken_2,
       output: { notesMarkdown: 'Branch 2' },
@@ -158,6 +170,7 @@ describe('v2 fork harness (branching stress test)', () => {
     expect(ack2.data.kind).toBe('ok');
 
     const rehydrate3 = await handleV2ContinueWorkflow({
+      intent: 'rehydrate',
       stateToken: nodeA_stateToken,
     } as any, ctx);
     expect(rehydrate3.type).toBe('success');
@@ -165,6 +178,7 @@ describe('v2 fork harness (branching stress test)', () => {
     const nodeA_ackToken_3 = rehydrate3.data.ackToken;
 
     const ack3 = await handleV2ContinueWorkflow({
+      intent: 'advance',
       stateToken: nodeA_stateToken,
       ackToken: nodeA_ackToken_3,
       output: { notesMarkdown: 'Branch 3' },
@@ -220,12 +234,14 @@ describe('v2 fork harness (branching stress test)', () => {
 
     for (let i = 0; i < 10; i++) {
       const rehydrate = await handleV2ContinueWorkflow({
+        intent: 'rehydrate',
         stateToken: nodeA_stateToken,
       } as any, ctx);
       expect(rehydrate.type).toBe('success');
       if (rehydrate.type !== 'success') return;
 
       const ack = await handleV2ContinueWorkflow({
+        intent: 'advance',
         stateToken: nodeA_stateToken,
         ackToken: rehydrate.data.ackToken,
         output: { notesMarkdown: `Branch ${i + 1}` },
@@ -261,18 +277,21 @@ describe('v2 fork harness (branching stress test)', () => {
     if (start.type !== 'success') return;
 
     const ack1 = await handleV2ContinueWorkflow({
+      intent: 'advance',
       stateToken: start.data.stateToken,
       ackToken: start.data.ackToken,
     } as any, ctx);
     expect(ack1.type).toBe('success');
 
     const rehydrate = await handleV2ContinueWorkflow({
+      intent: 'rehydrate',
       stateToken: start.data.stateToken,
     } as any, ctx);
     expect(rehydrate.type).toBe('success');
     if (rehydrate.type !== 'success') return;
 
     const ack2 = await handleV2ContinueWorkflow({
+      intent: 'advance',
       stateToken: start.data.stateToken,
       ackToken: rehydrate.data.ackToken,
     } as any, ctx);
@@ -304,6 +323,7 @@ describe('v2 fork harness (branching stress test)', () => {
     const nodeA_state = start.data.stateToken;
 
     const ack1 = await handleV2ContinueWorkflow({
+      intent: 'advance',
       stateToken: nodeA_state,
       ackToken: start.data.ackToken,
       output: { notesMarkdown: 'BRANCH_1_OUTPUT' },
@@ -311,11 +331,12 @@ describe('v2 fork harness (branching stress test)', () => {
     expect(ack1.type).toBe('success');
     if (ack1.type !== 'success') return;
 
-    const rehydrate = await handleV2ContinueWorkflow({ stateToken: nodeA_state } as any, ctx);
+    const rehydrate = await handleV2ContinueWorkflow({ intent: 'rehydrate', stateToken: nodeA_state } as any, ctx);
     expect(rehydrate.type).toBe('success');
     if (rehydrate.type !== 'success') return;
 
     const ack2 = await handleV2ContinueWorkflow({
+      intent: 'advance',
       stateToken: nodeA_state,
       ackToken: rehydrate.data.ackToken,
       output: { notesMarkdown: 'BRANCH_2_OUTPUT' },
@@ -351,6 +372,7 @@ describe('v2 fork harness (branching stress test)', () => {
     if (start.type !== 'success') return;
 
     const ack1 = await handleV2ContinueWorkflow({
+      intent: 'advance',
       stateToken: start.data.stateToken,
       ackToken: start.data.ackToken,
       output: { notesMarkdown: 'First ack' },
@@ -358,6 +380,7 @@ describe('v2 fork harness (branching stress test)', () => {
     expect(ack1.type).toBe('success');
 
     const ack2 = await handleV2ContinueWorkflow({
+      intent: 'advance',
       stateToken: start.data.stateToken,
       ackToken: start.data.ackToken,
       output: { notesMarkdown: 'Replay ack (should be ignored)' },

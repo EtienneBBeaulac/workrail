@@ -16,7 +16,7 @@ import path from 'path';
 import os from 'os';
 
 describe('Unified Dashboard - Primary/Secondary Pattern', () => {
-  const lockFile = path.join(os.homedir(), '.workrail', 'dashboard.lock');
+  const lockFile = path.join(os.tmpdir(), `workrail-dashboard.${process.pid}.unified-dashboard.lock`);
   let httpServer: HttpServer;
   
   beforeAll(async () => {
@@ -29,7 +29,7 @@ describe('Unified Dashboard - Primary/Secondary Pattern', () => {
     
     // Get fresh instance from DI
     httpServer = container.resolve<HttpServer>(DI.Infra.HttpServer);
-    httpServer.setConfig({ browserBehavior: { kind: 'manual' } });
+    httpServer.setConfig({ port: 3456, lockFilePath: lockFile, browserBehavior: { kind: 'manual' } });
   });
   
   afterEach(async () => {
@@ -70,7 +70,7 @@ describe('Unified Dashboard - Primary/Secondary Pattern', () => {
       startedAt: new Date(Date.now() - 3 * 60 * 1000).toISOString(), // 3 minutes ago
       lastHeartbeat: new Date(Date.now() - 3 * 60 * 1000).toISOString(),
       projectId: 'test',
-      projectPath: '/tmp/test'
+      projectPath: path.join(os.tmpdir(), 'workrail-test')
     };
     
     await fs.mkdir(path.dirname(lockFile), { recursive: true });
@@ -102,7 +102,7 @@ describe('Unified Dashboard - Primary/Secondary Pattern', () => {
 });
 
 describe('Unified Dashboard - API Endpoints', () => {
-  const lockFile = path.join(os.homedir(), '.workrail', 'dashboard.lock');
+  const lockFile = path.join(os.tmpdir(), `workrail-dashboard.${process.pid}.unified-dashboard-api.lock`);
   let httpServer: HttpServer;
   
   beforeAll(async () => {
@@ -114,7 +114,7 @@ describe('Unified Dashboard - API Endpoints', () => {
     await fs.unlink(lockFile).catch(() => {});
     
     httpServer = container.resolve<HttpServer>(DI.Infra.HttpServer);
-    httpServer.setConfig({ browserBehavior: { kind: 'manual' } });
+    httpServer.setConfig({ port: 3456, lockFilePath: lockFile, browserBehavior: { kind: 'manual' } });
     await httpServer.start();
   });
   

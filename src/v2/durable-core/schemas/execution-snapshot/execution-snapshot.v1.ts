@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { Result } from 'neverthrow';
 import { err, ok } from 'neverthrow';
 import type { Brand } from '../../../../runtime/brand.js';
+import { BlockedSnapshotV1Schema } from './blocked-snapshot.js';
 import {
   DelimiterSafeIdV1Schema,
   StepInstanceKeyV1Schema,
@@ -87,12 +88,22 @@ const EngineStateRunningV1Schema = z.object({
   pending: PendingV1Schema,
 }).strict();
 
+const EngineStateBlockedV1Schema = z
+  .object({
+    kind: z.literal('blocked'),
+    completed: CompletedStepInstancesV1Schema,
+    loopStack: z.array(LoopFrameV1Schema),
+    pending: PendingV1Schema,
+    blocked: BlockedSnapshotV1Schema,
+  })
+  .strict();
+
 const EngineStateCompleteV1Schema = z.object({ kind: z.literal('complete') }).strict();
 
 export const EngineStateV1Schema = z
-  .discriminatedUnion('kind', [EngineStateInitV1Schema, EngineStateRunningV1Schema, EngineStateCompleteV1Schema])
+  .discriminatedUnion('kind', [EngineStateInitV1Schema, EngineStateRunningV1Schema, EngineStateBlockedV1Schema, EngineStateCompleteV1Schema])
   .superRefine((s, ctx) => {
-    if (s.kind !== 'running') return;
+    if (s.kind !== 'running' && s.kind !== 'blocked') return;
 
     // Lock: loop IDs unique within loopStack.
     const seen = new Set<string>();

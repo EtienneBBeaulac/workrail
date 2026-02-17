@@ -4,11 +4,26 @@
  * Helpers for setting up test git repositories with proper identity.
  */
 
-import { execSync } from 'child_process';
+import { execFile, execFileSync } from 'child_process';
 import { promisify } from 'util';
-import { exec } from 'child_process';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
+
+export async function gitExec(cwd: string, args: readonly string[]): Promise<{ readonly stdout: string; readonly stderr: string }> {
+  const res = await execFileAsync('git', [...args], { cwd });
+  return { stdout: String(res.stdout ?? ''), stderr: String(res.stderr ?? '') };
+}
+
+export function gitExecSync(cwd: string, args: readonly string[], options: { silent?: boolean } = {}): void {
+  const stdio = options.silent ? 'ignore' : 'pipe';
+  execFileSync('git', [...args], { cwd, stdio });
+}
+
+export function gitExecStdoutSync(cwd: string, args: readonly string[], options: { silent?: boolean } = {}): string {
+  const stdio: any = options.silent ? ['ignore', 'pipe', 'ignore'] : ['pipe', 'pipe', 'pipe'];
+  const res = execFileSync('git', [...args], { cwd, stdio, encoding: 'utf8' });
+  return String(res ?? '');
+}
 
 /**
  * Initialize a git repository with test identity (sync version).
@@ -17,11 +32,9 @@ const execAsync = promisify(exec);
  * @param options - Additional options
  */
 export function initGitRepoSync(cwd: string, options: { silent?: boolean } = {}): void {
-  const stdio = options.silent ? 'ignore' : 'pipe';
-  
-  execSync('git init', { cwd, stdio });
-  execSync('git config user.name "Test User"', { cwd, stdio });
-  execSync('git config user.email "test@test.com"', { cwd, stdio });
+  gitExecSync(cwd, ['init'], options);
+  gitExecSync(cwd, ['config', 'user.name', 'Test User'], options);
+  gitExecSync(cwd, ['config', 'user.email', 'test@test.com'], options);
 }
 
 /**
@@ -30,9 +43,9 @@ export function initGitRepoSync(cwd: string, options: { silent?: boolean } = {})
  * @param cwd - Directory to initialize
  */
 export async function initGitRepo(cwd: string): Promise<void> {
-  await execAsync('git init', { cwd });
-  await execAsync('git config user.name "Test User"', { cwd });
-  await execAsync('git config user.email "test@test.com"', { cwd });
+  await gitExec(cwd, ['init']);
+  await gitExec(cwd, ['config', 'user.name', 'Test User']);
+  await gitExec(cwd, ['config', 'user.email', 'test@test.com']);
 }
 
 /**
@@ -41,8 +54,8 @@ export async function initGitRepo(cwd: string): Promise<void> {
  * @param cwd - Repository directory
  */
 export async function configureGitIdentity(cwd: string): Promise<void> {
-  await execAsync('git config user.name "Test User"', { cwd });
-  await execAsync('git config user.email "test@test.com"', { cwd });
+  await gitExec(cwd, ['config', 'user.name', 'Test User']);
+  await gitExec(cwd, ['config', 'user.email', 'test@test.com']);
 }
 
 /**
@@ -52,8 +65,6 @@ export async function configureGitIdentity(cwd: string): Promise<void> {
  * @param options - Additional options
  */
 export function configureGitIdentitySync(cwd: string, options: { silent?: boolean } = {}): void {
-  const stdio = options.silent ? 'ignore' : 'pipe';
-  
-  execSync('git config user.name "Test User"', { cwd, stdio });
-  execSync('git config user.email "test@test.com"', { cwd, stdio });
+  gitExecSync(cwd, ['config', 'user.name', 'Test User'], options);
+  gitExecSync(cwd, ['config', 'user.email', 'test@test.com'], options);
 }

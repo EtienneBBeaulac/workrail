@@ -20,7 +20,7 @@ import type { SessionEventLogStoreError } from '../../v2/ports/session-event-log
 import type { SnapshotStoreError } from '../../v2/ports/snapshot-store.port.js';
 import type { PinnedWorkflowStoreError } from '../../v2/ports/pinned-workflow-store.port.js';
 import type { KeyringError } from '../../v2/ports/keyring.port.js';
-import type { TokenDecodeErrorV2, TokenVerifyErrorV2 } from '../../v2/durable-core/tokens/index.js';
+import type { TokenDecodeErrorV2, TokenVerifyErrorV2, TokenSignErrorV2 } from '../../v2/durable-core/tokens/index.js';
 import { detailsSessionHealth } from '../types.js';
 
 /**
@@ -46,7 +46,7 @@ export type StartWorkflowError =
   | { readonly kind: 'pinned_workflow_store_failed'; readonly cause: PinnedWorkflowStoreError }
   | { readonly kind: 'snapshot_creation_failed'; readonly cause: SnapshotStoreError }
   | { readonly kind: 'session_append_failed'; readonly cause: ExecutionSessionGateErrorV2 | SessionEventLogStoreError }
-  | { readonly kind: 'token_signing_failed'; readonly cause: TokenDecodeErrorV2 | TokenVerifyErrorV2 };
+  | { readonly kind: 'token_signing_failed'; readonly cause: TokenDecodeErrorV2 | TokenVerifyErrorV2 | TokenSignErrorV2 };
 
 /**
  * Typed error union for continue_workflow handler.
@@ -66,7 +66,7 @@ export type ContinueWorkflowError =
   | { readonly kind: 'snapshot_load_failed'; readonly cause: SnapshotStoreError }
   | { readonly kind: 'pinned_workflow_store_failed'; readonly cause: PinnedWorkflowStoreError }
   | { readonly kind: 'pinned_workflow_missing'; readonly workflowHash: WorkflowHash }
-  | { readonly kind: 'token_signing_failed'; readonly cause: TokenDecodeErrorV2 | TokenVerifyErrorV2 }
+  | { readonly kind: 'token_signing_failed'; readonly cause: TokenDecodeErrorV2 | TokenVerifyErrorV2 | TokenSignErrorV2 }
   | { readonly kind: 'advance_execution_failed'; readonly cause: ExecutionSessionGateErrorV2 | SessionEventLogStoreError };
 
 /**
@@ -191,6 +191,39 @@ export function mapContinueWorkflowErrorToToolError(e: ContinueWorkflowError): T
  * @returns ToolFailure with user-facing guidance
  */
 export function mapTokenDecodeErrorToToolError(e: TokenDecodeErrorV2): ToolFailure {
+  // Bech32m-specific error enrichment
+  if (e.code === 'TOKEN_INVALID_FORMAT' && (e as any).details?.bech32mError) {
+    const bech32mErr = (e as any).details.bech32mError;
+    
+    if (bech32mErr.code === 'BECH32M_CHECKSUM_FAILED') {
+      return errNotRetryable(
+        'TOKEN_INVALID_FORMAT',
+        'Token corrupted (bech32m checksum failed). Likely copy/paste error.',
+        {
+          suggestion: 'Copy the entire token string exactly as returned. Use triple-click to select the complete line.',
+          details: {
+            errorType: 'corruption_detected',
+            estimatedPosition: bech32mErr.position,
+            tokenFormat: 'binary+bech32m',
+          },
+        }
+      );
+    }
+    
+    if (bech32mErr.code === 'BECH32M_HRP_MISMATCH') {
+      return errNotRetryable(
+        'TOKEN_INVALID_FORMAT',
+        `Wrong token type. ${e.message}`,
+        {
+          suggestion: 'Ensure you are using the correct token (stateToken vs ackToken) for this operation.',
+          details: {
+            errorType: 'hrp_mismatch',
+          },
+        }
+      );
+    }
+  }
+  
   switch (e.code) {
     case 'TOKEN_INVALID_FORMAT':
       return errNotRetryable('TOKEN_INVALID_FORMAT', e.message, {
@@ -253,7 +286,7 @@ export function mapTokenVerifyErrorToToolError(e: TokenVerifyErrorV2): ToolFailu
  * @param e - Token error (decode or verify)
  * @returns ToolFailure with user-facing guidance
  */
-export function mapTokenSigningErrorToToolError(e: TokenDecodeErrorV2 | TokenVerifyErrorV2): ToolFailure {
+export function mapTokenSigningErrorToToolError(e: TokenDecodeErrorV2 | TokenVerifyErrorV2 | TokenSignErrorV2): ToolFailure {
   switch (e.code) {
     // Decode-specific codes
     case 'TOKEN_UNSUPPORTED_VERSION':
@@ -269,6 +302,17 @@ export function mapTokenSigningErrorToToolError(e: TokenDecodeErrorV2 | TokenVer
     case 'TOKEN_PAYLOAD_INVALID':
       return errNotRetryable('TOKEN_INVALID_FORMAT', e.message, {
         suggestion: 'Use the exact tokens returned by WorkRail.',
+      });
+
+    // Signing-specific codes
+    case 'TOKEN_ENCODE_FAILED':
+      return errNotRetryable('INTERNAL_ERROR', `Token encoding failed: ${e.message}`, {
+        suggestion: 'Retry; if this persists, treat as invariant violation.',
+      });
+
+    case 'KEYRING_INVALID':
+      return errNotRetryable('INTERNAL_ERROR', `Keyring invalid: ${e.message}`, {
+        suggestion: 'Regenerate v2 keyring by deleting the v2 data directory and retrying.',
       });
 
     // Verify-specific code
@@ -380,8 +424,14 @@ export function mapExecutionSessionGateErrorToToolError(e: ExecutionSessionGateE
         details: detailsSessionHealth(e.health) as unknown as JsonValue,
       });
 
-    case 'SESSION_LOAD_FAILED':
     case 'SESSION_LOCK_REENTRANT':
+      // Concurrent execution detected (in-process or cross-process).
+      // This is a retryable condition per design locks (agents can make parallel tool calls).
+      return errRetryAfterMs('TOKEN_SESSION_LOCKED', e.message, 1000, {
+        suggestion: 'Session is currently locked by concurrent execution. Retry in 1 second.',
+      });
+
+    case 'SESSION_LOAD_FAILED':
     case 'LOCK_ACQUIRE_FAILED':
     case 'GATE_CALLBACK_FAILED':
       return errNotRetryable('INTERNAL_ERROR', e.message, {

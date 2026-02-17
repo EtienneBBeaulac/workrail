@@ -22,6 +22,12 @@ export interface ServerConfig {
   port?: number;
   browserBehavior?: BrowserBehavior;
   dashboardMode?: DashboardMode;
+  /**
+   * Override the dashboard lock file location.
+   *
+   * WHY: tests may run in parallel and must not share a single global lock file.
+   */
+  lockFilePath?: string;
 }
 
 interface DashboardLock {
@@ -61,7 +67,7 @@ export class HttpServer {
   private baseUrl: string = '';
   private isPrimary: boolean = false;
   private lockFile: string;
-  private readonly heartbeat: DashboardHeartbeat;
+  private heartbeat: DashboardHeartbeat;
   
   constructor(
     @inject(SessionManager) private sessionManager: SessionManager,
@@ -95,6 +101,10 @@ export class HttpServer {
     this.config = config;
     if (config.port) {
       this.port = config.port;
+    }
+    if (config.lockFilePath) {
+      this.lockFile = config.lockFilePath;
+      this.heartbeat = new DashboardHeartbeat(this.lockFile, () => this.isPrimary);
     }
     return this;
   }
@@ -483,7 +493,7 @@ export class HttpServer {
       } catch (error: any) {
         if (error.code === 'EADDRINUSE') {
           // Port busy even though we have lock - cleanup and fall back
-          console.error('[Dashboard] Port 3456 busy despite lock, falling back to legacy mode');
+          console.error(`[Dashboard] Port ${this.port} busy despite lock, falling back to legacy mode`);
           await fs.unlink(this.lockFile).catch(() => {});
           return await this.startLegacyMode();
         }
@@ -491,7 +501,7 @@ export class HttpServer {
       }
     } else {
       // Secondary mode - dashboard already running
-      console.error('[Dashboard] ✅ Unified dashboard at http://localhost:3456');
+      console.error(`[Dashboard] ✅ Unified dashboard at http://localhost:${this.port}`);
       return null;
     }
   }
@@ -507,7 +517,7 @@ export class HttpServer {
       // Try to create lock file atomically
       const lockData: DashboardLock = {
         pid: process.pid,
-        port: 3456,
+        port: this.port,
         startedAt: new Date().toISOString(),
         lastHeartbeat: new Date().toISOString(),
         projectId: this.sessionManager.getProjectId(),
@@ -608,7 +618,7 @@ export class HttpServer {
       const tempPath = `${this.lockFile}.${process.pid}.${Date.now()}`;
       const newLockData: DashboardLock = {
         pid: process.pid,
-        port: 3456,
+        port: this.port,
         startedAt: new Date().toISOString(),
         lastHeartbeat: new Date().toISOString(),
         projectId: this.sessionManager.getProjectId(),
@@ -619,11 +629,25 @@ export class HttpServer {
         // Write to temp file first
         await fs.writeFile(tempPath, JSON.stringify(newLockData, null, 2));
         
-        // Atomic rename (POSIX guarantees atomicity)
-        await fs.rename(tempPath, this.lockFile);
+        // Rename (atomic on POSIX; best-effort on Windows with retry)
+        let retries = 3;
+        let renamed = false;
+        while (retries > 0 && !renamed) {
+          try {
+            await fs.rename(tempPath, this.lockFile);
+            renamed = true;
+          } catch (err: any) {
+            if (err.code === 'EPERM' && process.platform === 'win32' && retries > 1) {
+              await new Promise(resolve => setTimeout(resolve, 10));
+              retries--;
+              continue;
+            }
+            throw err;
+          }
+        }
         
         console.error('[Dashboard] Lock reclaimed successfully');
-        this.isPrimary = true;
+this.isPrimary = true;
         this.setupPrimaryCleanup();
         this.heartbeat.start();
         return true;
@@ -759,9 +783,9 @@ export class HttpServer {
         reject(error);
       });
       
-      this.server.listen(3456, () => {
-        this.port = 3456;
-        this.baseUrl = 'http://localhost:3456';
+      const listenPort = this.port;
+      this.server.listen(listenPort, () => {
+        this.baseUrl = `http://localhost:${listenPort}`;
         this.printBanner();
         resolve();
       });
@@ -1006,12 +1030,20 @@ export class HttpServer {
         
         return output.split('\n').filter(Boolean).map(line => {
           const parts = line.trim().split(/\s+/);
+          // Only consider listening sockets; other states can have pid=0 which is unsafe to kill.
+          const state = parts[3] || '';
           const address = parts[1] || '';
           const pid = parseInt(parts[4]);
           const portMatch = address.match(/:(\d+)$/);
           const port = portMatch ? parseInt(portMatch[1]) : 0;
-          return { port, pid };
-        }).filter(item => item.port >= 3456 && item.port < 3500 && !isNaN(item.pid));
+          return { port, pid, state };
+        }).filter(item =>
+          item.state === 'LISTENING' &&
+          item.port >= 3456 &&
+          item.port < 3500 &&
+          !isNaN(item.pid) &&
+          item.pid > 0
+        ).map(({ port, pid }) => ({ port, pid }));
       }
       
       return [];

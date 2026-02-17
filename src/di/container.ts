@@ -240,8 +240,11 @@ async function registerV2Services(): Promise<void> {
   const { NodeCryptoV2 } = await import('../v2/infra/local/crypto/index.js');
   const { NodeHmacSha256V2 } = await import('../v2/infra/local/hmac-sha256/index.js');
   const { NodeBase64UrlV2 } = await import('../v2/infra/local/base64url/index.js');
+  const { Base32AdapterV2 } = await import('../v2/infra/local/base32/index.js');
+  const { Bech32mAdapterV2 } = await import('../v2/infra/local/bech32m/index.js');
   const { NodeRandomEntropyV2 } = await import('../v2/infra/local/random-entropy/index.js');
   const { NodeTimeClockV2 } = await import('../v2/infra/local/time-clock/index.js');
+  const { IdFactoryV2 } = await import('../v2/infra/local/id-factory/index.js');
 
   container.register(DI.V2.DataDir, {
     useFactory: instanceCachingFactory(() => new LocalDataDirV2(process.env)),
@@ -261,11 +264,23 @@ async function registerV2Services(): Promise<void> {
   container.register(DI.V2.Base64Url, {
     useFactory: instanceCachingFactory(() => new NodeBase64UrlV2()),
   });
+  container.register(DI.V2.Base32, {
+    useFactory: instanceCachingFactory(() => new Base32AdapterV2()),
+  });
+  container.register(DI.V2.Bech32m, {
+    useFactory: instanceCachingFactory(() => new Bech32mAdapterV2()),
+  });
   container.register(DI.V2.RandomEntropy, {
     useFactory: instanceCachingFactory(() => new NodeRandomEntropyV2()),
   });
   container.register(DI.V2.TimeClock, {
     useFactory: instanceCachingFactory(() => new NodeTimeClockV2()),
+  });
+  container.register(DI.V2.IdFactory, {
+    useFactory: instanceCachingFactory((c: DependencyContainer) => {
+      const entropy = c.resolve<any>(DI.V2.RandomEntropy);
+      return new IdFactoryV2(entropy);
+    }),
   });
 
   // Level 2: Stores (depend on Level 1 primitives)

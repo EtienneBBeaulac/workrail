@@ -71,8 +71,8 @@ describe('v2 output: blocker validation fail-fast at runtime', () => {
     
     if (!result.success) {
       const errorMessage = result.error.toString();
-      // Verify error indicates string size constraint
-      expect(errorMessage.toLowerCase()).toMatch(/max|length|string/i);
+      // Verify error indicates byte budget constraint
+      expect(errorMessage.toLowerCase()).toMatch(/bytes|utf-8|exceeds|max|length/i);
     }
   });
 
@@ -94,8 +94,8 @@ describe('v2 output: blocker validation fail-fast at runtime', () => {
     
     if (!result.success) {
       const errorMessage = result.error.toString();
-      // Verify error indicates string size constraint
-      expect(errorMessage.toLowerCase()).toMatch(/max|length|string/i);
+      // Verify error indicates byte budget constraint
+      expect(errorMessage.toLowerCase()).toMatch(/bytes|utf-8|exceeds|max|length/i);
     }
   });
 

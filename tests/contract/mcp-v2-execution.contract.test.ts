@@ -23,6 +23,10 @@ import { NodeHmacSha256V2 } from '../../src/v2/infra/local/hmac-sha256/index.js'
 import { NodeBase64UrlV2 } from '../../src/v2/infra/local/base64url/index.js';
 import { NodeRandomEntropyV2 } from '../../src/v2/infra/local/random-entropy/index.js';
 import { NodeTimeClockV2 } from '../../src/v2/infra/local/time-clock/index.js';
+import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
+import { Bech32mAdapterV2 } from '../../src/v2/infra/local/bech32m/index.js';
+import { Base32AdapterV2 } from '../../src/v2/infra/local/base32/index.js';
+import { unsafeTokenCodecPorts } from '../../src/v2/durable-core/tokens/index.js';
 
 async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-exec-contract-'));
@@ -42,6 +46,9 @@ async function createV2Context(): Promise<ToolContext> {
   const hmac = new NodeHmacSha256V2();
   const base64url = new NodeBase64UrlV2();
   const entropy = new NodeRandomEntropyV2();
+  const idFactory = new IdFactoryV2(entropy);
+  const base32 = new Base32AdapterV2();
+  const bech32m = new Bech32mAdapterV2();
   const clock = new NodeTimeClockV2();
   const sessionStore = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha256);
   const lockPort = new LocalSessionLockV2(dataDir, fsPort, clock);
@@ -50,6 +57,7 @@ async function createV2Context(): Promise<ToolContext> {
   const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir, fsPort);
   const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url, entropy);
   const keyring = await keyringPort.loadOrCreate().match(v => v, e => { throw new Error(`keyring: ${e.code}`); });
+  const tokenCodecPorts = unsafeTokenCodecPorts({ keyring, hmac, base64url, base32, bech32m });
 
   return {
     workflowService,
@@ -61,10 +69,10 @@ async function createV2Context(): Promise<ToolContext> {
       sessionStore,
       snapshotStore,
       pinnedStore,
-      keyring,
+      sha256,
       crypto,
-      hmac,
-      base64url,
+      tokenCodecPorts,
+      idFactory,
     },
   };
 }
@@ -104,16 +112,23 @@ describe('MCP contract: v2 start_workflow / continue_workflow (Slice 3)', () => 
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
 
+    // Token size budget regression guard (prevents future payload bloat).
+    expect(start.data.stateToken.length).toBeLessThan(170); // Binary tokens: ~166 chars
+    expect(start.data.ackToken).toBeDefined();
+    if (start.data.ackToken) {
+      expect(start.data.ackToken.length).toBeLessThan(170); // Binary tokens: ~167 chars
+    }
+
     expect(start.data.pending?.stepId).toBe('triage');
     expect(start.data.isComplete).toBe(false);
 
-    const rehydrate1 = await handleV2ContinueWorkflow({ stateToken: start.data.stateToken } as any, ctx);
+    const rehydrate1 = await handleV2ContinueWorkflow({ intent: 'rehydrate', stateToken: start.data.stateToken } as any, ctx);
     expect(rehydrate1.type).toBe('success');
     if (rehydrate1.type !== 'success') return;
     expect(rehydrate1.data.kind).toBe('ok');
     expect(rehydrate1.data.pending?.stepId).toBe('triage');
 
-    const rehydrate2 = await handleV2ContinueWorkflow({ stateToken: start.data.stateToken } as any, ctx);
+    const rehydrate2 = await handleV2ContinueWorkflow({ intent: 'rehydrate', stateToken: start.data.stateToken } as any, ctx);
     expect(rehydrate2.type).toBe('success');
     if (rehydrate2.type !== 'success') return;
     // Rehydrate is side-effect-free and deterministic in content, but may mint fresh ack/checkpoint tokens.
@@ -122,7 +137,7 @@ describe('MCP contract: v2 start_workflow / continue_workflow (Slice 3)', () => 
     expect(rehydrate2.data.isComplete).toBe(rehydrate1.data.isComplete);
     expect(rehydrate2.data.pending).toEqual(rehydrate1.data.pending);
 
-    const ack1 = await handleV2ContinueWorkflow({ stateToken: start.data.stateToken, ackToken: start.data.ackToken } as any, ctx);
+    const ack1 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: start.data.stateToken, ackToken: start.data.ackToken } as any, ctx);
     expect(ack1.type).toBe('success');
     if (ack1.type !== 'success') return;
     // This workflow has a single step; after acknowledging it we should complete.
@@ -130,7 +145,7 @@ describe('MCP contract: v2 start_workflow / continue_workflow (Slice 3)', () => 
     expect(ack1.data.isComplete).toBe(true);
     expect(ack1.data.pending).toBeNull();
 
-    const ack2 = await handleV2ContinueWorkflow({ stateToken: start.data.stateToken, ackToken: start.data.ackToken } as any, ctx);
+    const ack2 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: start.data.stateToken, ackToken: start.data.ackToken } as any, ctx);
     expect(ack2).toEqual(ack1); // idempotent replay
 
     // Verify v2 context is properly initialized
@@ -139,8 +154,8 @@ describe('MCP contract: v2 start_workflow / continue_workflow (Slice 3)', () => 
     expect(ctx.v2.sessionStore).toBeDefined();
     expect(ctx.v2.snapshotStore).toBeDefined();
     expect(ctx.v2.pinnedStore).toBeDefined();
-    expect(ctx.v2.keyring).toBeDefined();
+    expect(ctx.v2.tokenCodecPorts).toBeDefined();
     expect(ctx.v2.crypto).toBeDefined();
-    expect(ctx.v2.hmac).toBeDefined();
+    expect(ctx.v2.idFactory).toBeDefined();
   });
 });

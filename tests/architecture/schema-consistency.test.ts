@@ -87,8 +87,13 @@ const ALL_SCHEMAS = [...WORKFLOW_SCHEMAS, ...SESSION_SCHEMAS];
 
 /** Extract parameter names from a Zod object schema */
 function getParameterNames(schema: z.ZodType): string[] {
-  if (schema instanceof z.ZodObject) {
-    return Object.keys(schema._def.shape());
+  // Unwrap ZodEffects layers (from .strict(), .superRefine(), .refine(), etc.)
+  let current: z.ZodType = schema;
+  while (current instanceof z.ZodEffects) {
+    current = current._def.schema;
+  }
+  if (current instanceof z.ZodObject) {
+    return Object.keys(current._def.shape());
   }
   return [];
 }
@@ -97,8 +102,13 @@ function getParameterNames(schema: z.ZodType): string[] {
 function getParameterInfo(schema: z.ZodType): Map<string, { description?: string; type: string }> {
   const result = new Map<string, { description?: string; type: string }>();
   
-  if (schema instanceof z.ZodObject) {
-    const shape = schema._def.shape();
+  // Unwrap ZodEffects layers (from .strict(), .superRefine(), .refine(), etc.)
+  let current: z.ZodType = schema;
+  while (current instanceof z.ZodEffects) {
+    current = current._def.schema;
+  }
+  if (current instanceof z.ZodObject) {
+    const shape = current._def.shape();
     for (const [key, value] of Object.entries(shape)) {
       const zodValue = value as z.ZodType;
       result.set(key, {
@@ -517,13 +527,15 @@ describe('Token parameter consistency (Section 1.2)', () => {
    * Design Lock Reference: docs/design/v2-core-design-locks.md Section 1.2
    * 
    * V2ContinueWorkflowInput must have:
+   * - intent (explicit discriminant: "advance" | "rehydrate")
    * - stateToken (opaque, required)
-   * - ackToken (opaque, optional for rehydrate-only)
+   * - ackToken (opaque, required for advance, forbidden for rehydrate)
    */
   
-  it('V2ContinueWorkflowInput must have stateToken and ackToken parameters', () => {
+  it('V2ContinueWorkflowInput must have intent, stateToken, and ackToken parameters', () => {
     const params = getParameterNames(V2ContinueWorkflowInput);
     
+    expect(params, 'V2ContinueWorkflowInput must have intent').toContain('intent');
     expect(params, 'V2ContinueWorkflowInput must have stateToken').toContain('stateToken');
     expect(params, 'V2ContinueWorkflowInput must have ackToken').toContain('ackToken');
   });

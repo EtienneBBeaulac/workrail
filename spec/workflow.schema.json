@@ -107,6 +107,23 @@
         "additionalProperties": false
       },
       "uniqueItems": true
+    },
+    "recommendedPreferences": {
+      "type": "object",
+      "description": "Workflow-level preference recommendations. When effective preferences exceed these, structured warnings are emitted. Never hard-blocks user choice.",
+      "properties": {
+        "recommendedAutonomy": {
+          "type": "string",
+          "enum": ["guided", "full_auto_stop_on_user_deps", "full_auto_never_stop"],
+          "description": "Recommended autonomy level for this workflow"
+        },
+        "recommendedRiskPolicy": {
+          "type": "string",
+          "enum": ["conservative", "balanced", "aggressive"],
+          "description": "Recommended risk policy for this workflow"
+        }
+      },
+      "additionalProperties": false
     }
   },
   "required": [
@@ -169,6 +186,7 @@
         "requireConfirmation": { "$ref": "#/$defs/confirmationRule" },
         "runCondition": { "$ref": "#/$defs/condition" },
         "validationCriteria": { "oneOf": [ { "type": "array", "items": { "$ref": "#/$defs/validationRule" } }, { "$ref": "#/$defs/validationComposition" } ] },
+        "outputContract": { "$ref": "#/$defs/outputContract" },
         "functionDefinitions": { "type": "array", "items": { "$ref": "#/$defs/functionDefinition" } },
         "functionCalls": { "type": "array", "items": { "$ref": "#/$defs/functionCall" } },
         "functionReferences": { "type": "array", "items": { "type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*\\(\\)$" } }
@@ -286,6 +304,30 @@
           "type": "string",
           "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
           "description": "Custom variable name for current index (forEach loops)"
+        },
+        "conditionSource": {
+          "description": "Explicit condition source for while/until loops. Auto-derived by compiler when absent.",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "const": "artifact_contract" },
+                "contractRef": { "type": "string", "minLength": 1 },
+                "loopId": { "type": "string", "minLength": 1 }
+              },
+              "required": ["kind", "contractRef", "loopId"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "const": "context_variable" },
+                "condition": { "$ref": "#/$defs/condition" }
+              },
+              "required": ["kind", "condition"],
+              "additionalProperties": false
+            }
+          ]
         }
       },
       "required": ["type", "maxIterations"],
@@ -515,6 +557,24 @@
           "$ref": "#/$defs/validationComposition"
         }
       ]
+    },
+    "outputContract": {
+      "type": "object",
+      "description": "Typed output contract declaring required artifact schema",
+      "properties": {
+        "contractRef": {
+          "type": "string",
+          "description": "Artifact contract reference (e.g. wr.contracts.loop_control)",
+          "minLength": 1
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Whether the artifact is required (default true)",
+          "default": true
+        }
+      },
+      "required": ["contractRef"],
+      "additionalProperties": false
     },
     "functionCall": {
       "type": "object",

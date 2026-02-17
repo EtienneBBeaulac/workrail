@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 
 import { handleV2ContinueWorkflow } from '../../src/mcp/handlers/v2-execution.js';
-import type { ToolContext } from '../../src/mcp/types.js';
+import type { ToolContext, V2Dependencies } from '../../src/mcp/types.js';
 
 import { ExecutionSessionGateV2 } from '../../src/v2/usecases/execution-session-gate.js';
 import { LocalDataDirV2 } from '../../src/v2/infra/local/data-dir/index.js';
@@ -23,8 +23,13 @@ import { LocalKeyringV2 } from '../../src/v2/infra/local/keyring/index.js';
 import { NodeBase64UrlV2 } from '../../src/v2/infra/local/base64url/index.js';
 import { NodeRandomEntropyV2 } from '../../src/v2/infra/local/random-entropy/index.js';
 import { NodeTimeClockV2 } from '../../src/v2/infra/local/time-clock/index.js';
-import { encodeTokenPayloadV1, signTokenV1 } from '../../src/v2/durable-core/tokens/index.js';
+import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
+import { Bech32mAdapterV2 } from '../../src/v2/infra/local/bech32m/index.js';
+import { Base32AdapterV2 } from '../../src/v2/infra/local/base32/index.js';
+import { signTokenV1Binary, unsafeTokenCodecPorts } from '../../src/v2/durable-core/tokens/index.js';
 import { StateTokenPayloadV1Schema, AckTokenPayloadV1Schema } from '../../src/v2/durable-core/tokens/index.js';
+import { asWorkflowHash, asSha256Digest } from '../../src/v2/durable-core/ids/index.js';
+import { deriveWorkflowHashRef } from '../../src/v2/durable-core/ids/workflow-hash-ref.js';
 
 async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-blocked-'));
@@ -41,21 +46,25 @@ async function mkV2Deps(dataDir: LocalDataDirV2): Promise<V2Dependencies> {
   const hmac = new NodeHmacSha256V2();
   const base64url = new NodeBase64UrlV2();
   const entropy = new NodeRandomEntropyV2();
+  const idFactory = new IdFactoryV2(entropy);
+  const base32 = new Base32AdapterV2();
+  const bech32m = new Bech32mAdapterV2();
   const snapshotStore = new LocalSnapshotStoreV2(dataDir, fsPort, crypto);
   const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir, fsPort);
   const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url, entropy);
   const keyring = await keyringPort.loadOrCreate().match(v => v, e => { throw new Error(`keyring: ${e.code}`); });
+  const tokenCodecPorts = unsafeTokenCodecPorts({ keyring, hmac, base64url, base32, bech32m });
   
   return {
     // Handler structure (V2Dependencies):
     gate: sessionGate,
     sessionStore: sessionEventLogStore,
-    keyring,
-    crypto,
-    hmac,
-    base64url,
     snapshotStore,
     pinnedStore,
+    sha256,
+    crypto,
+    tokenCodecPorts,
+    idFactory,
     // Test convenience (aliases):
     sessionGate,
     sessionEventLogStore,
@@ -72,36 +81,10 @@ function dummyCtx(v2?: any): ToolContext {
   };
 }
 
-async function mkSignedToken(args: {
-  unsignedPrefix: 'st.v1.' | 'ack.v1.';
-  payload: unknown;
-}): Promise<string> {
-  const dataDir = new LocalDataDirV2(process.env);
-  const fsPort = new NodeFileSystemV2();
-  const hmac = new NodeHmacSha256V2();
-  const base64url = new NodeBase64UrlV2();
-  const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url);
-  const keyring = await keyringPort.loadOrCreate().match(
-    (v) => v,
-    (e) => {
-      throw new Error(`unexpected keyring error: ${e.code}`);
-    }
-  );
-
-  const payloadBytes = encodeTokenPayloadV1(args.payload as any).match(
-    (v) => v,
-    (e) => {
-      throw new Error(`unexpected token payload encode error: ${e.code}`);
-    }
-  );
-
-  const token = signTokenV1(args.unsignedPrefix, payloadBytes, keyring, hmac, base64url).match(
-    (v) => v,
-    (e) => {
-      throw new Error(`unexpected token sign error: ${e.code}`);
-    }
-  );
-  return String(token);
+async function mkSignedToken(args: { v2: any; payload: unknown }): Promise<string> {
+  const token = signTokenV1Binary(args.payload as any, args.v2.tokenCodecPorts);
+  if (token.isErr()) throw new Error(`unexpected token sign error: ${token.error.code}`);
+  return token.value;
 }
 
 describe('v2 continue_workflow: blocked outcome replay idempotency', () => {
@@ -114,11 +97,14 @@ describe('v2 continue_workflow: blocked outcome replay idempotency', () => {
       const localFsPort = new NodeFileSystemV2();
       const v2 = await mkV2Deps(dataDir);
 
-      const sessionId = 'sess_blocked_test';
-      const runId = 'run_blocked_1';
-      const nodeId = 'node_blocked_1';
-      const attemptId = 'attempt_blocked_1';
-      const workflowHash = 'sha256:5b2d9fb885d0adc6565e1fd59e6abb3769b69e4dba5a02b6eea750137a5c0be2';
+      const sessionId = v2.idFactory.mintSessionId();
+      const runId = v2.idFactory.mintRunId();
+      const nodeId = v2.idFactory.mintNodeId();
+      const attemptId = v2.idFactory.mintAttemptId();
+      const workflowHash = asWorkflowHash(
+        asSha256Digest('sha256:5b2d9fb885d0adc6565e1fd59e6abb3769b69e4dba5a02b6eea750137a5c0be2')
+      );
+      const workflowHashRef = deriveWorkflowHashRef(workflowHash)._unsafeUnwrap();
 
       // Pin a v1-backed compiled snapshot (schemaVersion=1, sourceKind=v1_pinned) so v2 execution can run deterministically.
       const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir, localFsPort);
@@ -240,7 +226,7 @@ describe('v2 continue_workflow: blocked outcome replay idempotency', () => {
         sessionId,
         runId,
         nodeId,
-        workflowHash,
+        workflowHashRef: String(workflowHashRef),
       });
       const ackPayload = AckTokenPayloadV1Schema.parse({
         tokenVersion: 1,
@@ -251,11 +237,11 @@ describe('v2 continue_workflow: blocked outcome replay idempotency', () => {
         attemptId,
       });
 
-      const stateToken = await mkSignedToken({ unsignedPrefix: 'st.v1.', payload: statePayload });
-      const ackToken = await mkSignedToken({ unsignedPrefix: 'ack.v1.', payload: ackPayload });
+      const stateToken = await mkSignedToken({ v2, payload: statePayload });
+      const ackToken = await mkSignedToken({ v2, payload: ackPayload });
 
       // First call - expect blocked outcome with blockers
-      const first = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx(v2));
+      const first = await handleV2ContinueWorkflow({ intent: 'advance', stateToken, ackToken } as any, dummyCtx(v2));
       expect(first.type).toBe('success');
       if (first.type !== 'success') return;
       expect(first.data.kind).toBe('blocked');
@@ -267,7 +253,7 @@ describe('v2 continue_workflow: blocked outcome replay idempotency', () => {
       expect(first.data.blockers.blockers[0].pointer.contractRef).toBe('wr.contracts.test');
 
       // Second call with same tokens - must return exact same response
-      const second = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx(v2));
+      const second = await handleV2ContinueWorkflow({ intent: 'advance', stateToken, ackToken } as any, dummyCtx(v2));
       expect(second.type).toBe('success');
       if (second.type !== 'success') return;
       expect(second.data.kind).toBe('blocked');
@@ -299,11 +285,14 @@ describe('v2 continue_workflow: blocked outcome replay idempotency', () => {
       const localFsPort = new NodeFileSystemV2();
       const v2 = await mkV2Deps(dataDir);
 
-      const sessionId = 'sess_blocked_multi';
-      const runId = 'run_blocked_2';
-      const nodeId = 'node_blocked_2';
-      const attemptId = 'attempt_blocked_multi';
-      const workflowHash = 'sha256:5b2d9fb885d0adc6565e1fd59e6abb3769b69e4dba5a02b6eea750137a5c0be2';
+      const sessionId = v2.idFactory.mintSessionId();
+      const runId = v2.idFactory.mintRunId();
+      const nodeId = v2.idFactory.mintNodeId();
+      const attemptId = v2.idFactory.mintAttemptId();
+      const workflowHash = asWorkflowHash(
+        asSha256Digest('sha256:5b2d9fb885d0adc6565e1fd59e6abb3769b69e4dba5a02b6eea750137a5c0be2')
+      );
+      const workflowHashRef = deriveWorkflowHashRef(workflowHash)._unsafeUnwrap();
 
       // Pin workflow
       const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir, localFsPort);
@@ -432,7 +421,7 @@ describe('v2 continue_workflow: blocked outcome replay idempotency', () => {
         sessionId,
         runId,
         nodeId,
-        workflowHash,
+        workflowHashRef: String(workflowHashRef),
       });
       const ackPayload = AckTokenPayloadV1Schema.parse({
         tokenVersion: 1,
@@ -443,20 +432,20 @@ describe('v2 continue_workflow: blocked outcome replay idempotency', () => {
         attemptId,
       });
 
-      const stateToken = await mkSignedToken({ unsignedPrefix: 'st.v1.', payload: statePayload });
-      const ackToken = await mkSignedToken({ unsignedPrefix: 'ack.v1.', payload: ackPayload });
+      const stateToken = await mkSignedToken({ v2, payload: statePayload });
+      const ackToken = await mkSignedToken({ v2, payload: ackPayload });
 
       // Call three times - all must be identical
-      const response1 = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx(v2));
+      const response1 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken, ackToken } as any, dummyCtx(v2));
       expect(response1.type).toBe('success');
       if (response1.type !== 'success') return;
       expect(response1.data.kind).toBe('blocked');
       expect(response1.data.blockers.blockers.length).toBe(2);
 
-      const response2 = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx(v2));
+      const response2 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken, ackToken } as any, dummyCtx(v2));
       expect(response2).toEqual(response1);
 
-      const response3 = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx(v2));
+      const response3 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken, ackToken } as any, dummyCtx(v2));
       expect(response3).toEqual(response1);
 
       // Verify only one advance_recorded exists

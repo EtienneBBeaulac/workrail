@@ -1,0 +1,88 @@
+import { err, ok, type Result } from 'neverthrow';
+import type { ValidationResult } from '../../../types/validation.js';
+import { DELIMITER_SAFE_ID_PATTERN } from '../constants.js';
+import type { ReasonV1 } from './reason-model.js';
+
+export type BlockingDecisionError = {
+  readonly code: 'INVALID_DELIMITER_SAFE_ID';
+  readonly message: string;
+};
+
+export type OutputRequirementStatus =
+  | { readonly kind: 'not_required' }
+  | { readonly kind: 'missing'; readonly contractRef: string }
+  | { readonly kind: 'invalid'; readonly contractRef: string; readonly validation: ValidationResult };
+
+export type CapabilityRequirementStatus =
+  | { readonly kind: 'not_required' }
+  | { readonly kind: 'unknown'; readonly capability: 'delegation' | 'web_browsing' }
+  | { readonly kind: 'unavailable'; readonly capability: 'delegation' | 'web_browsing' };
+
+/**
+ * Detect blocking reasons from current execution state.
+ * 
+ * Analyzes missing context, budget violations, output requirements, and capability
+ * requirements to determine what's preventing execution from continuing.
+ * 
+ * Lock: §9 Blocking reason detection (mode-driven behavior)
+ * 
+ * Returns discriminated union of blocking reasons:
+ * - context_budget_exceeded: Context too large
+ * - missing_context_key: Required context field missing
+ * - missing_required_output: Step requires output that's not provided
+ * - invalid_required_output: Output provided but validation failed
+ * - missing_capability: Required capability not available
+ * 
+ * @param args.missingContextKeys - Context keys referenced but not provided
+ * @param args.contextBudgetExceeded - Whether context exceeds MAX_CONTEXT_BYTES
+ * @param args.outputRequirement - Output requirement status from validator
+ * @param args.capabilityRequirement - Capability requirement status
+ * @returns Array of blocking reasons, or error if context key invalid
+ */
+export function detectBlockingReasonsV1(args: {
+  readonly missingContextKeys?: readonly string[];
+  readonly contextBudgetExceeded?: boolean;
+  readonly outputRequirement?: OutputRequirementStatus;
+  readonly capabilityRequirement?: CapabilityRequirementStatus;
+}): Result<readonly ReasonV1[], BlockingDecisionError> {
+  const reasons: ReasonV1[] = [];
+
+  if (args.contextBudgetExceeded) {
+    reasons.push({ kind: 'context_budget_exceeded' });
+  }
+
+  if (args.missingContextKeys) {
+    for (const key of args.missingContextKeys) {
+      if (!DELIMITER_SAFE_ID_PATTERN.test(key)) {
+        return err({
+          code: 'INVALID_DELIMITER_SAFE_ID',
+          message: `context key must be delimiter-safe: [a-z0-9_-]+ (got: ${key})`,
+        });
+      }
+      reasons.push({ kind: 'missing_context_key', key });
+    }
+  }
+
+  const outReq = args.outputRequirement;
+  if (outReq && outReq.kind !== 'not_required') {
+    if (outReq.kind === 'missing') {
+      reasons.push({ kind: 'missing_required_output', contractRef: outReq.contractRef });
+    }
+    if (outReq.kind === 'invalid') {
+      // We do not embed the full validator output in the durable reason; we only persist the closed-set code.
+      reasons.push({ kind: 'invalid_required_output', contractRef: outReq.contractRef });
+    }
+  }
+
+  const capReq = args.capabilityRequirement;
+  if (capReq && capReq.kind !== 'not_required') {
+    if (capReq.kind === 'unknown') {
+      reasons.push({ kind: 'required_capability_unknown', capability: capReq.capability });
+    }
+    if (capReq.kind === 'unavailable') {
+      reasons.push({ kind: 'required_capability_unavailable', capability: capReq.capability });
+    }
+  }
+
+  return ok(reasons);
+}

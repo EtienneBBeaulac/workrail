@@ -38,6 +38,10 @@ import { ExecutionSessionGateV2 } from '../../src/v2/usecases/execution-session-
 import { LocalKeyringV2 } from '../../src/v2/infra/local/keyring/index.js';
 import { NodeRandomEntropyV2 } from '../../src/v2/infra/local/random-entropy/index.js';
 import { NodeTimeClockV2 } from '../../src/v2/infra/local/time-clock/index.js';
+import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
+import { Bech32mAdapterV2 } from '../../src/v2/infra/local/bech32m/index.js';
+import { Base32AdapterV2 } from '../../src/v2/infra/local/base32/index.js';
+import { unsafeTokenCodecPorts } from '../../src/v2/durable-core/tokens/index.js';
 
 async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-continue-lock-'));
@@ -51,6 +55,9 @@ async function mkV2Deps() {
   const hmac = new NodeHmacSha256V2();
   const base64url = new NodeBase64UrlV2();
   const entropy = new NodeRandomEntropyV2();
+  const idFactory = new IdFactoryV2(entropy);
+  const base32 = new Base32AdapterV2();
+  const bech32m = new Bech32mAdapterV2();
   const clock = new NodeTimeClockV2();
   const sessionStore = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha256);
   const lockPort = new LocalSessionLockV2(dataDir, fsPort, clock);
@@ -60,7 +67,8 @@ async function mkV2Deps() {
   const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url, entropy);
   const keyring = await keyringPort.loadOrCreate().match(v => v, e => { throw new Error(`keyring: ${e.code}`); });
 
-  return { gate, sessionStore, snapshotStore, pinnedStore, keyring, crypto, hmac, base64url };
+  const tokenCodecPorts = unsafeTokenCodecPorts({ keyring, hmac, base64url, base32, bech32m });
+  return { gate, sessionStore, snapshotStore, pinnedStore, keyring, sha256, crypto, idFactory, tokenCodecPorts, hmac, base64url, base32, bech32m };
 }
 
 describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => {
@@ -109,7 +117,7 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     expect(start.data.isComplete).toBe(false);
 
     // Advance step 1 → step 2
-    const adv1 = await handleV2ContinueWorkflow({ stateToken: start.data.stateToken, ackToken: start.data.ackToken } as any, ctx);
+    const adv1 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: start.data.stateToken, ackToken: start.data.ackToken } as any, ctx);
     expect(adv1.type).toBe('success');
     if (adv1.type !== 'success') return;
     expect(adv1.data.kind).toBe('ok');
@@ -117,7 +125,7 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     expect(adv1.data.isComplete).toBe(false);
 
     // Advance step 2 → step 3
-    const adv2 = await handleV2ContinueWorkflow({ stateToken: adv1.data.stateToken, ackToken: adv1.data.ackToken } as any, ctx);
+    const adv2 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: adv1.data.stateToken, ackToken: adv1.data.ackToken } as any, ctx);
     expect(adv2.type).toBe('success');
     if (adv2.type !== 'success') return;
     expect(adv2.data.kind).toBe('ok');
@@ -125,7 +133,7 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     expect(adv2.data.isComplete).toBe(false);
 
     // Advance step 3 → complete
-    const adv3 = await handleV2ContinueWorkflow({ stateToken: adv2.data.stateToken, ackToken: adv2.data.ackToken } as any, ctx);
+    const adv3 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: adv2.data.stateToken, ackToken: adv2.data.ackToken } as any, ctx);
     expect(adv3.type).toBe('success');
     if (adv3.type !== 'success') return;
     expect(adv3.data.kind).toBe('ok');
@@ -144,6 +152,7 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     if (start.type !== 'success') return;
 
     const adv1 = await handleV2ContinueWorkflow({
+      intent: 'advance',
       stateToken: start.data.stateToken,
       ackToken: start.data.ackToken,
       output: { notesMarkdown: 'Completed step 1 successfully.' },
@@ -152,9 +161,10 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     if (adv1.type !== 'success') return;
 
     // Verify output was persisted
-    const { parseTokenV1 } = await import('../../src/v2/durable-core/tokens/index.js');
-    const localBase64url = new NodeBase64UrlV2();
-    const parsed = parseTokenV1(start.data.stateToken, localBase64url)._unsafeUnwrap();
+    const { parseTokenV1Binary } = await import('../../src/v2/durable-core/tokens/token-codec.js');
+    const bech32m = new Bech32mAdapterV2();
+    const base32 = new Base32AdapterV2();
+    const parsed = parseTokenV1Binary(start.data.stateToken, { bech32m, base32 })._unsafeUnwrap();
     const sessionId = parsed.payload.sessionId;
 
     const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: root });
@@ -182,17 +192,18 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
 
-    const adv1 = await handleV2ContinueWorkflow({ stateToken: start.data.stateToken, ackToken: start.data.ackToken } as any, ctx);
+    const adv1 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: start.data.stateToken, ackToken: start.data.ackToken } as any, ctx);
     expect(adv1.type).toBe('success');
     if (adv1.type !== 'success') return;
 
-    const adv2 = await handleV2ContinueWorkflow({ stateToken: start.data.stateToken, ackToken: start.data.ackToken } as any, ctx);
+    const adv2 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: start.data.stateToken, ackToken: start.data.ackToken } as any, ctx);
     expect(adv2).toEqual(adv1); // Exact same response
 
     // Verify no duplicate events
-    const { parseTokenV1 } = await import('../../src/v2/durable-core/tokens/index.js');
-    const localBase64url = new NodeBase64UrlV2();
-    const parsed = parseTokenV1(start.data.stateToken, localBase64url)._unsafeUnwrap();
+    const { parseTokenV1Binary } = await import('../../src/v2/durable-core/tokens/token-codec.js');
+    const bech32m = new Bech32mAdapterV2();
+    const base32 = new Base32AdapterV2();
+    const parsed = parseTokenV1Binary(start.data.stateToken, { bech32m, base32 })._unsafeUnwrap();
     const sessionId = parsed.payload.sessionId;
 
     const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: root });
@@ -220,24 +231,25 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     if (start.type !== 'success') return;
 
     // Advance once (creates child node)
-    const adv1 = await handleV2ContinueWorkflow({ stateToken: start.data.stateToken, ackToken: start.data.ackToken } as any, ctx);
+    const adv1 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: start.data.stateToken, ackToken: start.data.ackToken } as any, ctx);
     expect(adv1.type).toBe('success');
     if (adv1.type !== 'success') return;
 
     // Rehydrate root to get fresh ackToken
-    const rehydrate = await handleV2ContinueWorkflow({ stateToken: start.data.stateToken } as any, ctx);
+    const rehydrate = await handleV2ContinueWorkflow({ intent: 'rehydrate', stateToken: start.data.stateToken } as any, ctx);
     expect(rehydrate.type).toBe('success');
     if (rehydrate.type !== 'success') return;
 
     // Advance from root again (fork)
-    const fork = await handleV2ContinueWorkflow({ stateToken: start.data.stateToken, ackToken: rehydrate.data.ackToken } as any, ctx);
+    const fork = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: start.data.stateToken, ackToken: rehydrate.data.ackToken } as any, ctx);
     expect(fork.type).toBe('success');
     if (fork.type !== 'success') return;
 
     // Verify fork edge exists
-    const { parseTokenV1 } = await import('../../src/v2/durable-core/tokens/index.js');
-    const localBase64url = new NodeBase64UrlV2();
-    const parsed = parseTokenV1(start.data.stateToken, localBase64url)._unsafeUnwrap();
+    const { parseTokenV1Binary } = await import('../../src/v2/durable-core/tokens/token-codec.js');
+    const bech32m = new Bech32mAdapterV2();
+    const base32 = new Base32AdapterV2();
+    const parsed = parseTokenV1Binary(start.data.stateToken, { bech32m, base32 })._unsafeUnwrap();
     const sessionId = parsed.payload.sessionId;
 
     const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: root });
@@ -261,39 +273,32 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null, v2 };
 
     // Create a valid token for a non-existent session
-    const { encodeTokenPayloadV1, signTokenV1 } = await import('../../src/v2/durable-core/tokens/index.js');
-    const { NodeHmacSha256V2 } = await import('../../src/v2/infra/local/hmac-sha256/index.js');
-    const { LocalKeyringV2 } = await import('../../src/v2/infra/local/keyring/index.js');
+    const { signTokenV1Binary } = await import('../../src/v2/durable-core/tokens/index.js');
+    const { asWorkflowHash, asSha256Digest } = await import('../../src/v2/durable-core/ids/index.js');
+    const { deriveWorkflowHashRef } = await import('../../src/v2/durable-core/ids/workflow-hash-ref.js');
+    const { encodeBase32LowerNoPad } = await import('../../src/v2/durable-core/encoding/base32-lower.js');
 
-    const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: root });
-    const fsPort = new NodeFileSystemV2();
-    const base64url = new NodeBase64UrlV2();
-    const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url);
-  const keyring = await keyringPort.loadOrCreate().match(
-      (v) => v,
-      (e) => { throw new Error(`unexpected keyring error: ${e.code}`); }
-    );
+    function mkId(prefix: string, fill: number): string {
+      const bytes = new Uint8Array(16);
+      bytes.fill(fill);
+      return `${prefix}_${encodeBase32LowerNoPad(bytes)}`;
+    }
+
+    const wfHash = asWorkflowHash(asSha256Digest('sha256:0000000000000000000000000000000000000000000000000000000000000000'));
+    const wfRef = deriveWorkflowHashRef(wfHash)._unsafeUnwrap();
 
     const payload = {
       tokenVersion: 1,
       tokenKind: 'state' as const,
-      sessionId: 'sess_nonexistent',
-      runId: 'run_nonexistent',
-      nodeId: 'node_nonexistent',
-      workflowHash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+      sessionId: mkId('sess', 99),
+      runId: mkId('run', 99),
+      nodeId: mkId('node', 99),
+      workflowHashRef: String(wfRef),
     };
 
-    const payloadBytes = encodeTokenPayloadV1(payload).match(
-      (v) => v,
-      (e) => { throw new Error(`unexpected encode error: ${e.code}`); }
-    );
-    const hmac = new NodeHmacSha256V2();
-    const token = signTokenV1('st.v1.', payloadBytes, keyring, hmac, base64url).match(
-      (v) => v,
-      (e) => { throw new Error(`unexpected sign error: ${e.code}`); }
-    );
+    const token = signTokenV1Binary(payload, v2.tokenCodecPorts)._unsafeUnwrap();
 
-    const res = await handleV2ContinueWorkflow({ stateToken: String(token) } as any, ctx);
+    const res = await handleV2ContinueWorkflow({ intent: 'rehydrate', stateToken: token } as any, ctx);
     expect(res.type).toBe('error');
     if (res.type !== 'error') return;
     expect(res.code).toBe('TOKEN_UNKNOWN_NODE');

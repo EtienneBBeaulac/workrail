@@ -5,6 +5,8 @@ import { ValidationEngine } from '../../src/application/services/validation-engi
 import { EnhancedLoopValidator } from '../../src/application/services/enhanced-loop-validator.js';
 import { createWorkflow } from '../../src/types/workflow.js';
 import { createProjectDirectorySource } from '../../src/types/workflow-source.js';
+import * as os from 'os';
+import * as path from 'path';
 
 describe('WorkflowService.validateStepOutput warnings plumbing', () => {
   it('surfaces schema coercion warnings from ValidationEngine to the service consumer', async () => {
@@ -33,7 +35,7 @@ describe('WorkflowService.validateStepOutput warnings plumbing', () => {
           },
         ],
       } as any,
-      createProjectDirectorySource('/tmp/project')
+      createProjectDirectorySource(path.join(os.tmpdir(), 'workrail-project'))
     );
 
     const storage = {

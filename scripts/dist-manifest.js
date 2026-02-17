@@ -64,6 +64,7 @@ function buildManifest(distDir, manifestPath) {
   const files = listFilesRecursive(absDist)
     .filter((p) => path.resolve(p) !== absManifest)
     .map((p) => path.relative(absDist, p))
+    .map((p) => p.replace(/\\/g, '/')) // Normalize to forward slashes (cross-platform)
     .sort();
 
   /** @type {Record<string, {sha256: string, bytes: number}>} */

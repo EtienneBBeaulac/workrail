@@ -37,7 +37,28 @@ export function sanitizeId(id: string): string {
  * @throws SecurityError if path escapes the base directory
  */
 export function assertWithinBase(resolvedPath: string, baseDir: string): void {
-  if (!resolvedPath.startsWith(baseDir + path.sep) && resolvedPath !== baseDir) {
+  const platform = process.platform;
+  const baseResolved = (platform === 'win32' ? path.win32.resolve(baseDir) : path.resolve(baseDir));
+  const targetResolved = (platform === 'win32' ? path.win32.resolve(resolvedPath) : path.resolve(resolvedPath));
+
+  // Windows paths are case-insensitive. Normalize for comparison.
+  const base = platform === 'win32' ? baseResolved.toLowerCase() : baseResolved;
+  const target = platform === 'win32' ? targetResolved.toLowerCase() : targetResolved;
+
+  // UNC paths on Windows: ensure both are on same UNC share or both are drive paths
+  if (platform === 'win32') {
+    const baseIsUnc = base.startsWith('\\\\');
+    const targetIsUnc = target.startsWith('\\\\');
+    if (baseIsUnc !== targetIsUnc) {
+      throw new SecurityError('Path escapes storage sandbox (UNC vs drive mismatch)', 'file-access');
+    }
+  }
+
+  const rel = platform === 'win32' ? path.win32.relative(base, target) : path.relative(base, target);
+  // Check both separators on Windows (forward and back slash traversal)
+  const escapes = rel === '..' || rel.startsWith(`..${path.sep}`) || rel.startsWith('../') || path.isAbsolute(rel);
+
+  if (escapes) {
     throw new SecurityError('Path escapes storage sandbox', 'file-access');
   }
 }

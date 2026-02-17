@@ -90,6 +90,24 @@ export const MAX_DECISION_TRACE_TOTAL_BYTES = 8192;
 export const MAX_OUTPUT_NOTES_MARKDOWN_BYTES = 4096;
 
 // =============================================================================
+// Validation Limits (Blocked retry UX)
+// =============================================================================
+
+/**
+ * Maximum UTF-8 bytes across all validation issues stored in a single `validation_performed` event.
+ *
+ * Why: Validation can be verbose; we bound durable truth to keep the event log and tool responses predictable.
+ */
+export const MAX_VALIDATION_ISSUES_BYTES = 4096;
+
+/**
+ * Maximum UTF-8 bytes across all validation suggestions stored in a single `validation_performed` event.
+ *
+ * Why: Suggestions often include examples; we bound them separately from issues for clarity and budgeting.
+ */
+export const MAX_VALIDATION_SUGGESTIONS_BYTES = 4096;
+
+// =============================================================================
 // Context Limits (Section 16.3.1: Context budget)
 // =============================================================================
 
@@ -155,6 +173,19 @@ export const DEFAULT_RETRY_AFTER_MS = 1000;
  * Why this exact string: Deterministic, visually distinct, searchable.
  */
 export const TRUNCATION_MARKER = '\n\n[TRUNCATED]';
+
+// =============================================================================
+// Recovery Budget (Slice 4a S9: Recap Recovery)
+// =============================================================================
+
+/**
+ * Recovery budget for rehydrate-only responses (recap + function definitions combined).
+ * 
+ * Lock: Midpoint of contract §340 guidance "8-16 KB" for deterministic budgeting.
+ * 
+ * Why 12 KB: Balances context recovery needs with token budget constraints.
+ */
+export const RECOVERY_BUDGET_BYTES = 12288; // 12 KB
 
 // =============================================================================
 // Regex Patterns

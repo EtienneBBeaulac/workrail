@@ -5,10 +5,7 @@ import fs from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import os from 'os';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-
-const execAsync = promisify(exec);
+import { gitExec } from '../helpers/git-test-utils.js';
 
 /**
  * REAL INTEGRATION TESTS - No mocking, no excuses
@@ -21,14 +18,15 @@ describe('External Workflows - REAL Integration Tests', () => {
   const repo2Dir = path.join(testRootDir, 'repo2');
   const repo3Dir = path.join(testRootDir, 'repo3-self-hosted');
   const cacheDir = path.join(testRootDir, 'cache');
+  let originalEnv: NodeJS.ProcessEnv;
 
   async function createRealGitRepo(repoDir: string, workflowId: string, workflowName: string) {
     await fs.mkdir(path.join(repoDir, 'workflows'), { recursive: true });
     
     // Create actual Git repo
-    await execAsync('git init', { cwd: repoDir });
-    await execAsync('git config user.email "test@test.com"', { cwd: repoDir });
-    await execAsync('git config user.name "Test User"', { cwd: repoDir });
+    await gitExec(repoDir, ['init']);
+    await gitExec(repoDir, ['config', 'user.email', 'test@test.com']);
+    await gitExec(repoDir, ['config', 'user.name', 'Test User']);
     
     // Create real workflow file
     const workflow = {
@@ -51,13 +49,17 @@ describe('External Workflows - REAL Integration Tests', () => {
     );
     
     // Commit it
-    await execAsync('git add .', { cwd: repoDir });
-    await execAsync('git commit --no-gpg-sign -m "Add workflow"', { cwd: repoDir });
-    await execAsync('git branch -M main', { cwd: repoDir });
+    await gitExec(repoDir, ['add', '.']);
+    await gitExec(repoDir, ['commit', '--no-gpg-sign', '-m', 'Add workflow']);
+    await gitExec(repoDir, ['branch', '-M', 'main']);
   }
 
   beforeAll(async () => {
     console.log('🔧 Setting up REAL Git repositories...');
+    
+    originalEnv = { ...process.env };
+    process.env['WORKRAIL_CACHE_DIR'] = cacheDir;
+    
     await fs.mkdir(testRootDir, { recursive: true });
     
     // Create 3 real Git repos
@@ -69,6 +71,8 @@ describe('External Workflows - REAL Integration Tests', () => {
   });
 
   afterAll(async () => {
+    process.env = originalEnv;
+    
     if (existsSync(testRootDir)) {
       await fs.rm(testRootDir, { recursive: true, force: true });
     }
@@ -164,7 +168,8 @@ describe('External Workflows - REAL Integration Tests', () => {
         path.join(repo1Dir, 'workflows', 'conflict-test.json'),
         JSON.stringify(conflictWorkflow, null, 2)
       );
-      await execAsync('git add . && git commit --no-gpg-sign -m "Add conflict"', { cwd: repo1Dir });
+      await gitExec(repo1Dir, ['add', '.']);
+      await gitExec(repo1Dir, ['commit', '--no-gpg-sign', '-m', 'Add conflict']);
 
       const conflictWorkflow2 = {
         ...conflictWorkflow,
@@ -176,7 +181,8 @@ describe('External Workflows - REAL Integration Tests', () => {
         path.join(repo2Dir, 'workflows', 'conflict-test.json'),
         JSON.stringify(conflictWorkflow2, null, 2)
       );
-      await execAsync('git add . && git commit --no-gpg-sign -m "Add conflict"', { cwd: repo2Dir });
+      await gitExec(repo2Dir, ['add', '.']);
+      await gitExec(repo2Dir, ['commit', '--no-gpg-sign', '-m', 'Add conflict']);
 
       const originalEnv = process.env;
       try {

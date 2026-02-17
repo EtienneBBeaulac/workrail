@@ -1,0 +1,13 @@
+{
+  "description": "Minimal ack token with deterministic IDs (all zeros)",
+  "payload": {
+    "tokenVersion": 1,
+    "tokenKind": "ack",
+    "sessionId": "sess_aaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "runId": "run_aaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "nodeId": "node_aaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "attemptId": "attempt_aaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "expectedPackedHex": "010100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+  "expectedTokenPrefix": "ack1"
+}

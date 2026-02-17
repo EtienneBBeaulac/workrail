@@ -105,11 +105,51 @@ export const V2PendingStepSchema = z.object({
   prompt: z.string().min(1),
 });
 
+export const V2PreferencesSchema = z.object({
+  autonomy: z.enum(['guided', 'full_auto_stop_on_user_deps', 'full_auto_never_stop']),
+  riskPolicy: z.enum(['conservative', 'balanced', 'aggressive']),
+});
+
+export const V2NextIntentSchema = z.enum([
+  'perform_pending_then_continue',
+  'await_user_confirmation',
+  'rehydrate_only',
+  'complete',
+]);
+
+// Pre-built continuation template: tells the agent exactly what to call when done.
+// null when workflow is complete or blocked non-retryable (nothing to call).
+export const V2NextCallSchema = z.object({
+  tool: z.literal('continue_workflow'),
+  params: z.object({
+    intent: z.literal('advance'),
+    stateToken: z.string().min(1),
+    ackToken: z.string().min(1),
+  }),
+}).nullable();
+
+function utf8ByteLength(s: string): number {
+  return new TextEncoder().encode(s).length;
+}
+
+const MAX_BLOCKER_MESSAGE_BYTES = 512;
+const MAX_BLOCKER_SUGGESTED_FIX_BYTES = 1024;
+const MAX_BLOCKERS = 10;
+
+const DELIMITER_SAFE_ID_PATTERN = /^[a-z0-9_-]+$/;
+
 const V2BlockerPointerSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('context_key'), key: z.string().min(1) }),
+  z.object({
+    kind: z.literal('context_key'),
+    key: z.string().min(1).regex(DELIMITER_SAFE_ID_PATTERN, 'context_key must be delimiter-safe: [a-z0-9_-]+'),
+  }),
+  z.object({ kind: z.literal('context_budget') }),
   z.object({ kind: z.literal('output_contract'), contractRef: z.string().min(1) }),
   z.object({ kind: z.literal('capability'), capability: z.enum(['delegation', 'web_browsing']) }),
-  z.object({ kind: z.literal('workflow_step'), stepId: z.string().min(1) }),
+  z.object({
+    kind: z.literal('workflow_step'),
+    stepId: z.string().min(1).regex(DELIMITER_SAFE_ID_PATTERN, 'stepId must be delimiter-safe: [a-z0-9_-]+'),
+  }),
 ]);
 
 const V2BlockerSchema = z.object({
@@ -123,45 +163,113 @@ const V2BlockerSchema = z.object({
     'STORAGE_CORRUPTION_DETECTED',
   ]),
   pointer: V2BlockerPointerSchema,
-  message: z.string().min(1).max(512),
-  suggestedFix: z.string().min(1).max(1024).optional(),
+  message: z
+    .string()
+    .min(1)
+    .refine((s) => utf8ByteLength(s) <= MAX_BLOCKER_MESSAGE_BYTES, {
+      message: `Blocker message exceeds ${MAX_BLOCKER_MESSAGE_BYTES} bytes (UTF-8)`,
+    }),
+  suggestedFix: z
+    .string()
+    .min(1)
+    .refine((s) => utf8ByteLength(s) <= MAX_BLOCKER_SUGGESTED_FIX_BYTES, {
+      message: `Blocker suggestedFix exceeds ${MAX_BLOCKER_SUGGESTED_FIX_BYTES} bytes (UTF-8)`,
+    })
+    .optional(),
 });
 
-export const V2BlockerReportSchema = z.object({
-  blockers: z.array(V2BlockerSchema).min(1).max(10),
-});
+export const V2BlockerReportSchema = z
+  .object({
+    blockers: z.array(V2BlockerSchema).min(1).max(MAX_BLOCKERS).readonly(),
+  })
+  .superRefine((v, ctx) => {
+    const keyFor = (b: z.infer<typeof V2BlockerSchema>): string => {
+      const p = b.pointer;
+      let ptrStable: string;
+      switch (p.kind) {
+        case 'context_key':
+          ptrStable = p.key;
+          break;
+        case 'output_contract':
+          ptrStable = p.contractRef;
+          break;
+        case 'capability':
+          ptrStable = p.capability;
+          break;
+        case 'workflow_step':
+          ptrStable = p.stepId;
+          break;
+        case 'context_budget':
+          ptrStable = '';
+          break;
+        default: {
+          const _exhaustive: never = p;
+          ptrStable = _exhaustive;
+        }
+      }
+      return `${b.code}|${p.kind}|${String(ptrStable)}`;
+    };
+
+    for (let i = 1; i < v.blockers.length; i++) {
+      if (keyFor(v.blockers[i - 1]!) > keyFor(v.blockers[i]!)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'blockers must be deterministically sorted', path: ['blockers'] });
+        break;
+      }
+    }
+  });
 
 const V2ContinueWorkflowOkSchema = z.object({
   kind: z.literal('ok'),
-  stateToken: z.string().min(1),
-  ackToken: z.string().min(1),
-  checkpointToken: z.string().min(1),
+  stateToken: z.string().regex(/^st1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid stateToken format'),
+  ackToken: z.string().regex(/^ack1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid ackToken format').optional(),
   isComplete: z.boolean(),
   pending: V2PendingStepSchema.nullable(),
+  preferences: V2PreferencesSchema,
+  nextIntent: V2NextIntentSchema,
+  nextCall: V2NextCallSchema,
 });
 
 const V2ContinueWorkflowBlockedSchema = z.object({
   kind: z.literal('blocked'),
-  stateToken: z.string().min(1),
-  ackToken: z.string().min(1),
-  checkpointToken: z.string().min(1),
+  stateToken: z.string().regex(/^st1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid stateToken format'),
+  ackToken: z.string().regex(/^ack1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid ackToken format').optional(),
   isComplete: z.boolean(),
   pending: V2PendingStepSchema.nullable(),
+  preferences: V2PreferencesSchema,
+  nextIntent: V2NextIntentSchema,
+  nextCall: V2NextCallSchema,
   blockers: V2BlockerReportSchema,
+  // Additive (backward compatible): enables one-call retry for retryable blocks
+  retryable: z.boolean().optional(),
+  retryAckToken: z.string().optional(),
+  validation: z
+    .object({
+      issues: z.array(z.string()),
+      suggestions: z.array(z.string()),
+    })
+    .optional(),
 });
 
 export const V2ContinueWorkflowOutputSchema = z.discriminatedUnion('kind', [
   V2ContinueWorkflowOkSchema,
   V2ContinueWorkflowBlockedSchema,
-]);
+]).refine(
+  (data) => (data.pending ? data.ackToken != null : true),
+  { message: 'ackToken is required when a pending step exists' }
+);
 
 export const V2StartWorkflowOutputSchema = z.object({
-  stateToken: z.string().min(1),
-  ackToken: z.string().min(1),
-  checkpointToken: z.string().min(1),
+  stateToken: z.string().regex(/^st1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid stateToken format'),
+  ackToken: z.string().regex(/^ack1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid ackToken format').optional(),
   isComplete: z.boolean(),
   pending: V2PendingStepSchema.nullable(),
-});
+  preferences: V2PreferencesSchema,
+  nextIntent: V2NextIntentSchema,
+  nextCall: V2NextCallSchema,
+}).refine(
+  (data) => (data.pending ? data.ackToken != null : true),
+  { message: 'ackToken is required when a pending step exists' }
+);
 
 // -----------------------------------------------------------------------------
 // Session tool outputs

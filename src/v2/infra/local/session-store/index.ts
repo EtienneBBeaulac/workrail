@@ -18,6 +18,7 @@ import type { JsonValue } from '../../../durable-core/canonical/json-types.js';
 import { DomainEventV1Schema, ManifestRecordV1Schema, type DomainEventV1, type ManifestRecordV1 } from '../../../durable-core/schemas/session/index.js';
 import type { WithHealthySessionLock } from '../../../durable-core/ids/with-healthy-session-lock.js';
 import type { CorruptionReasonV2 } from '../../../durable-core/schemas/session/session-health.js';
+import * as path from 'path';
 
 export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStorePortV2, SessionEventLogAppendStorePortV2 {
   constructor(
@@ -81,7 +82,7 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStore
         const last = plan.events[plan.events.length - 1]!.eventIndex;
 
         const segmentRelPath = segmentRelPathFor(first, last);
-        const segmentPath = `${sessionDir}/${segmentRelPath}`;
+        const segmentPath = path.join(sessionDir, segmentRelPath);
         const tmpPath = `${segmentPath}.tmp`;
 
         // Encode the segment deterministically (canonical JSONL).
@@ -153,10 +154,10 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStore
         const loadSegments = (segs: typeof segments): ResultAsync<DomainEventV1[], SessionEventLogStoreError> => {
           if (segs.length === 0) return okAsync([]);
           const [head, ...tail] = segs;
-          const segmentPath = `${sessionDir}/${head.segmentRelPath}`;
+          const segmentPath = path.join(sessionDir, head.segmentRelPath);
           
           return this.fs.readFileBytes(segmentPath)
-            .mapErr((e) => {
+.mapErr((e) => {
               if (e.code === 'FS_NOT_FOUND') {
                 return {
                   code: 'SESSION_STORE_CORRUPTION_DETECTED' as const,
@@ -333,10 +334,10 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStore
         ): ResultAsync<SalvageState, SessionEventLogStoreError> => {
           if (state.done) return okAsync(state);
 
-          const segmentPath = `${sessionDir}/${seg.segmentRelPath}`;
+          const segmentPath = path.join(sessionDir, seg.segmentRelPath);
           return this.fs
             .readFileBytes(segmentPath)
-            .map((bytes) => ({ kind: 'present' as const, bytes }))
+.map((bytes) => ({ kind: 'present' as const, bytes }))
             .orElse((e) => (e.code === 'FS_NOT_FOUND' ? okAsync({ kind: 'missing' as const }) : errAsync(mapFsToStoreError(e))))
             .andThen((res) => {
               if (res.kind === 'missing') {
@@ -430,9 +431,9 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStore
         const loadSegments = (segs: typeof segments): ResultAsync<DomainEventV1[], SessionEventLogStoreError> => {
           if (segs.length === 0) return okAsync([]);
           const [head, ...tail] = segs;
-          const segmentPath = `${sessionDir}/${head.segmentRelPath}`;
+          const segmentPath = path.join(sessionDir, head.segmentRelPath);
           return this.fs.readFileBytes(segmentPath)
-            .mapErr(mapFsToStoreError)
+.mapErr(mapFsToStoreError)
             .andThen((bytes) => {
               const parsedRes = parseJsonlLines(bytes, DomainEventV1Schema);
               if (parsedRes.isErr()) return errAsync(parsedRes.error);

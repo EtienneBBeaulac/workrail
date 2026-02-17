@@ -15,6 +15,8 @@ import type { SessionId } from '../../../src/v2/durable-core/ids/index.js';
 import type { CorruptionReasonV2 } from '../../../src/v2/durable-core/schemas/session/session-health.js';
 import type { SessionEventLogReadonlyStorePortV2, SessionEventLogStoreError } from '../../../src/v2/ports/session-event-log-store.port.js';
 import type { SessionLockHandleV2, SessionLockPortV2, SessionLockError } from '../../../src/v2/ports/session-lock.port.js';
+import * as os from 'os';
+import * as path from 'path';
 
 function okHandle(sessionId: SessionId): SessionLockHandleV2 {
   return { kind: 'v2_session_lock_handle', sessionId };
@@ -57,7 +59,7 @@ describe('ExecutionSessionGateV2', () => {
       code: 'SESSION_LOCK_BUSY',
       message: 'busy',
       retry: { kind: 'retryable', afterMs: 250 },
-      lockPath: '/tmp/lock',
+      lockPath: path.join(os.tmpdir(), 'workrail-lock'),
     };
 
     const lock: SessionLockPortV2 = {
