@@ -103,7 +103,7 @@ describe('Blocked node projection consistency (status transitions)', () => {
     delete process.env.WORKRAIL_DATA_DIR;
   });
 
-  it.skip('after block: projectRunStatusV2 returns isBlocked=true, tip.nodeKind=blocked_attempt (TODO: mock validation)', async () => {
+  it('after block: projectRunStatusV2 returns isBlocked=true, tip.nodeKind=blocked_attempt', async () => {
     const root = await mkTempDataDir();
     const prev = process.env.WORKRAIL_DATA_DIR;
     process.env.WORKRAIL_DATA_DIR = root;
@@ -131,7 +131,7 @@ describe('Blocked node projection consistency (status transitions)', () => {
 
       // Block
       const blockRes = await handleV2ContinueWorkflow(
-        { stateToken: startRes.data.stateToken, ackToken: startRes.data.ackToken!, output: { notesMarkdown: 'invalid' } } as V2ContinueWorkflowInput,
+        { stateToken: startRes.data.stateToken, ackToken: startRes.data.ackToken!, output: { notesMarkdown: 'bad output' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(blockRes.type).toBe('success');

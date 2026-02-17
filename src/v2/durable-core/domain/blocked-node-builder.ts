@@ -37,6 +37,8 @@ function toTerminalReason(reason: ReasonV1): TerminalReasonV1 | null {
       return { kind: 'invariant_violation' };
     case 'storage_corruption_detected':
       return { kind: 'storage_corruption_detected' };
+    case 'evaluation_error':
+      return { kind: 'evaluation_error' };
     default:
       return null;
   }

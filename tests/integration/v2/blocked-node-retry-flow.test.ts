@@ -208,7 +208,7 @@ describe('Blocked node retry flow (end-to-end)', () => {
     }
   });
 
-  it.skip('terminal block (from evaluation error) has no retryAckToken - TODO: ValidationEngine errors need terminal block path', async () => {
+  it('terminal block (from evaluation error) has no retryAckToken', async () => {
     const root = await mkTempDataDir();
     const prev = process.env.WORKRAIL_DATA_DIR;
     process.env.WORKRAIL_DATA_DIR = root;

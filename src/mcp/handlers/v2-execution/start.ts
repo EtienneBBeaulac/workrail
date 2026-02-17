@@ -1,4 +1,4 @@
-import type { ToolContext } from '../../types.js';
+import type { V2ToolContext } from '../../types.js';
 import { V2StartWorkflowOutputSchema } from '../../output-schemas.js';
 import { deriveIsComplete, derivePendingStep } from '../../../v2/durable-core/projections/snapshot-state.js';
 import type { ExecutionSnapshotFileV1 } from '../../../v2/durable-core/schemas/execution-snapshot/index.js';
@@ -313,28 +313,9 @@ export function mintStartTokens(args: {
 
 export function executeStartWorkflow(
   input: import('../../v2/tools.js').V2StartWorkflowInput,
-  ctx: ToolContext
+  ctx: V2ToolContext
 ): RA<z.infer<typeof V2StartWorkflowOutputSchema>, StartWorkflowError> {
-  // Validate v2 context and dependencies
-  if (!ctx.v2) {
-    return neErrorAsync({ kind: 'precondition_failed', message: 'v2 tools disabled', suggestion: 'Enable v2Tools flag' });
-  }
-
   const { gate, sessionStore, snapshotStore, pinnedStore, crypto, tokenCodecPorts, idFactory } = ctx.v2;
-  if (!idFactory) {
-    return neErrorAsync({
-      kind: 'precondition_failed',
-      message: 'v2 context missing idFactory',
-      suggestion: 'Reinitialize v2 tool context (idFactory must be provided when v2Tools are enabled).',
-    });
-  }
-  if (!tokenCodecPorts) {
-    return neErrorAsync({
-      kind: 'precondition_failed',
-      message: 'v2 context missing tokenCodecPorts dependency',
-      suggestion: 'Reinitialize v2 tool context (tokenCodecPorts must be provided when v2Tools are enabled).',
-    });
-  }
 
   const ctxCheck = checkContextBudget({ tool: 'start_workflow', context: input.context });
   if (!ctxCheck.ok) return neErrorAsync({ kind: 'validation_failed', failure: ctxCheck.error });

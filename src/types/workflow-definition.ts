@@ -10,6 +10,7 @@
  */
 
 import { ValidationCriteria } from './validation';
+import type { ArtifactContractRef } from '../v2/durable-core/schemas/artifacts/index';
 
 // =============================================================================
 // STEP TYPES
@@ -22,8 +23,8 @@ import { ValidationCriteria } from './validation';
  * Lock: §19 Evidence-based validation - typed artifacts over prose validation
  */
 export interface OutputContract {
-  /** Reference to the artifact contract (e.g., 'wr.contracts.loop_control') */
-  readonly contractRef: string;
+  /** Reference to the artifact contract — must be a registered contract ref */
+  readonly contractRef: ArtifactContractRef;
   /** Whether the artifact is required (default: true) */
   readonly required?: boolean;
 }
@@ -69,7 +70,7 @@ export interface LoopStepDefinition extends WorkflowStepDefinition {
  * Why closed: exhaustive switch in interpreter prevents silent fallback chains.
  */
 export type LoopConditionSource =
-  | { readonly kind: 'artifact_contract'; readonly contractRef: string; readonly loopId: string }
+  | { readonly kind: 'artifact_contract'; readonly contractRef: ArtifactContractRef; readonly loopId: string }
   | { readonly kind: 'context_variable'; readonly condition: Readonly<Record<string, unknown>> };
 
 export interface LoopConfigDefinition {

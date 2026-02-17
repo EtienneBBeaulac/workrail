@@ -14,7 +14,6 @@ import {
   ReadSessionSchemaOutputSchema,
   UpdateSessionOutputSchema,
 } from '../output-schemas.js';
-import { mapUnknownErrorToToolError } from '../error-mapper.js';
 import type {
   CreateSessionInput,
   UpdateSessionInput,
@@ -128,32 +127,31 @@ export async function handleCreateSession(
   const guardError = requireSessionTools(ctx);
   if (guardError) return guardError;
 
-  // TypeScript now knows these are not null
   const sessionManager = ctx.sessionManager!;
   const httpServer = ctx.httpServer!;
 
-  try {
-    const session = await sessionManager.createSession(
-      input.workflowId,
-      input.sessionId,
-      input.initialData
-    );
+  const res = await sessionManager.createSession(
+    input.workflowId,
+    input.sessionId,
+    input.initialData
+  );
 
-    const baseUrl = httpServer.getBaseUrl();
-    const dashboardUrl = baseUrl ? `${baseUrl}?session=${input.sessionId}` : null;
-
-    const payload = CreateSessionOutputSchema.parse({
-      sessionId: session.id,
-      workflowId: session.workflowId,
-      path: sessionManager.getSessionPath(input.workflowId, input.sessionId),
-      dashboardUrl,
-      createdAt: session.createdAt,
-    });
-    return success(payload);
-  } catch (err) {
-    const mapped = mapUnknownErrorToToolError(err);
-    return mapped;
+  if (res.isErr()) {
+    return errNotRetryable('INTERNAL_ERROR', res.error.message);
   }
+
+  const session = res.value;
+  const baseUrl = httpServer.getBaseUrl();
+  const dashboardUrl = baseUrl ? `${baseUrl}?session=${input.sessionId}` : null;
+
+  const payload = CreateSessionOutputSchema.parse({
+    sessionId: session.id,
+    workflowId: session.workflowId,
+    path: sessionManager.getSessionPath(input.workflowId, input.sessionId),
+    dashboardUrl,
+    createdAt: session.createdAt,
+  });
+  return success(payload);
 }
 
 export async function handleUpdateSession(
@@ -165,35 +163,23 @@ export async function handleUpdateSession(
 
   const sessionManager = ctx.sessionManager!;
 
-  try {
-    await sessionManager.updateSession(
-      input.workflowId,
-      input.sessionId,
-      input.updates
-    );
+  const res = await sessionManager.updateSession(
+    input.workflowId,
+    input.sessionId,
+    input.updates
+  );
 
-    const payload = UpdateSessionOutputSchema.parse({ updatedAt: new Date().toISOString() });
-    return success(payload);
-  } catch (err) {
-    // Check for SessionManager "not found" errors via error name/type (preferred) or message fallback
-    // TODO: SessionManager should return typed Result errors instead of throwing
-    if (err instanceof Error && (
-      err.name === 'SessionNotFoundError' ||
-      err.message.toLowerCase().includes('not found') ||
-      err.message.toLowerCase().includes('does not exist')
-    )) {
-      return {
-        type: 'error',
-        code: 'NOT_FOUND',
-        message: err.message,
-        retry: { kind: 'not_retryable' },
-        details: { suggestion: 'Make sure the session exists. Use workrail_create_session() first.' },
-      };
+  if (res.isErr()) {
+    if (res.error.code === 'SESSION_NOT_FOUND') {
+      return errNotRetryable('NOT_FOUND', res.error.message, {
+        suggestion: 'Make sure the session exists. Use workrail_create_session() first.',
+      });
     }
-
-    const mapped = mapUnknownErrorToToolError(err);
-    return mapped;
+    return errNotRetryable('INTERNAL_ERROR', res.error.message);
   }
+
+  const payload = UpdateSessionOutputSchema.parse({ updatedAt: new Date().toISOString() });
+  return success(payload);
 }
 
 export async function handleReadSession(
@@ -214,38 +200,26 @@ export async function handleReadSession(
     return success(payload);
   }
 
-  try {
-    const data = await sessionManager.readSession(
-      input.workflowId,
-      input.sessionId,
-      input.path
-    );
+  const res = await sessionManager.readSession(
+    input.workflowId,
+    input.sessionId,
+    input.path
+  );
 
-    const payload = ReadSessionOutputSchema.parse({
-      query: input.path ?? '(full session)',
-      data,
-    });
-    return success(payload);
-  } catch (err) {
-    // Check for SessionManager "not found" errors via error name/type (preferred) or message fallback
-    // TODO: SessionManager should return typed Result errors instead of throwing
-    if (err instanceof Error && (
-      err.name === 'SessionNotFoundError' ||
-      err.message.toLowerCase().includes('not found') ||
-      err.message.toLowerCase().includes('does not exist')
-    )) {
-      return {
-        type: 'error',
-        code: 'NOT_FOUND',
-        message: err.message,
-        retry: { kind: 'not_retryable' },
-        details: { suggestion: 'Make sure the session exists. Use workrail_create_session() first.' },
-      };
+  if (res.isErr()) {
+    if (res.error.code === 'SESSION_NOT_FOUND') {
+      return errNotRetryable('NOT_FOUND', res.error.message, {
+        suggestion: 'Make sure the session exists. Use workrail_create_session() first.',
+      });
     }
-
-    const mapped = mapUnknownErrorToToolError(err);
-    return mapped;
+    return errNotRetryable('INTERNAL_ERROR', res.error.message);
   }
+
+  const payload = ReadSessionOutputSchema.parse({
+    query: input.path ?? '(full session)',
+    data: res.value,
+  });
+  return success(payload);
 }
 
 export async function handleOpenDashboard(
@@ -259,11 +233,12 @@ export async function handleOpenDashboard(
 
   try {
     const url = await httpServer.openDashboard(input.sessionId);
-
     const payload = OpenDashboardOutputSchema.parse({ url });
     return success(payload);
   } catch (err) {
-    const mapped = mapUnknownErrorToToolError(err);
-    return mapped;
+    return errNotRetryable(
+      'INTERNAL_ERROR',
+      err instanceof Error ? err.message : 'Failed to open dashboard'
+    );
   }
 }

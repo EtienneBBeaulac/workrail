@@ -241,6 +241,28 @@ export interface ToolContext {
   readonly v2: V2Dependencies | null;
 }
 
+/**
+ * Narrowed context for v2 tool handlers where v2 dependencies are guaranteed present.
+ * Use `requireV2Context()` to narrow from ToolContext at the handler boundary.
+ */
+export interface V2ToolContext extends ToolContext {
+  readonly v2: V2Dependencies;
+}
+
+/**
+ * Boundary guard that narrows ToolContext to V2ToolContext.
+ * Returns the narrowed context or a precondition_failed error.
+ */
+export function requireV2Context(ctx: ToolContext): { ok: true; ctx: V2ToolContext } | { ok: false; error: ToolError } {
+  if (!ctx.v2) {
+    return {
+      ok: false,
+      error: errNotRetryable('PRECONDITION_FAILED', 'v2 tools disabled', { suggestion: 'Enable v2Tools flag (WORKRAIL_ENABLE_V2_TOOLS=true)' }),
+    };
+  }
+  return { ok: true, ctx: ctx as V2ToolContext };
+}
+
 // -----------------------------------------------------------------------------
 // Handler Type
 // -----------------------------------------------------------------------------
