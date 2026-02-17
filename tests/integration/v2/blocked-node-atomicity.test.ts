@@ -129,7 +129,7 @@ describe('Blocked node atomicity (validation + node + edge atomic)', () => {
 
       // Advance with invalid output → should create validation + blocked node + edge
       const blockRes = await handleV2ContinueWorkflow(
-        { intent: 'advance', stateToken: startRes.data.stateToken, ackToken: startRes.data.ackToken!, output: { notesMarkdown: 'invalid' } } as V2ContinueWorkflowInput,
+        { stateToken: startRes.data.stateToken, ackToken: startRes.data.ackToken!, output: { notesMarkdown: 'invalid' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(blockRes.type).toBe('success');
@@ -202,7 +202,7 @@ describe('Blocked node atomicity (validation + node + edge atomic)', () => {
 
       // Block
       const blockRes = await handleV2ContinueWorkflow(
-        { intent: 'advance', stateToken: startRes.data.stateToken, ackToken: startRes.data.ackToken!, output: { notesMarkdown: 'bad' } } as V2ContinueWorkflowInput,
+        { stateToken: startRes.data.stateToken, ackToken: startRes.data.ackToken!, output: { notesMarkdown: 'bad' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(blockRes.type).toBe('success');
@@ -214,7 +214,7 @@ describe('Blocked node atomicity (validation + node + edge atomic)', () => {
 
       // Retry successfully
       const retryRes = await handleV2ContinueWorkflow(
-        { intent: 'advance', stateToken: blockRes.data.stateToken, ackToken: retryToken, output: { notesMarkdown: 'done' } } as V2ContinueWorkflowInput,
+        { stateToken: blockRes.data.stateToken, ackToken: retryToken, output: { notesMarkdown: 'done' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(retryRes.type).toBe('success');
@@ -286,7 +286,7 @@ describe('Blocked node atomicity (validation + node + edge atomic)', () => {
 
       // Block
       const blockRes = await handleV2ContinueWorkflow(
-        { intent: 'advance', stateToken: startRes.data.stateToken, ackToken: startRes.data.ackToken!, output: { notesMarkdown: 'fail' } } as V2ContinueWorkflowInput,
+        { stateToken: startRes.data.stateToken, ackToken: startRes.data.ackToken!, output: { notesMarkdown: 'fail' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(blockRes.type).toBe('success');

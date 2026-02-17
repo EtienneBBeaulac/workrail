@@ -26,7 +26,7 @@ Loops in Workrail allow workflows to iterate over steps, enabling common pattern
 ### Key Features
 - **Four loop types**: `while`, `until`, `for`, and `forEach`
 - **Safety limits**: Configurable `maxIterations` to prevent infinite loops
-- **Stateless execution**: Loop state managed through context, not persisted
+- **Context-based state**: Loop state managed through context (v1: ephemeral, v2: persisted via context_set events)
 - **Flexible body**: Reference existing steps or define inline steps
 - **Custom variables**: Control iteration and item variable names
 
