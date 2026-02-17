@@ -117,6 +117,17 @@ export const V2NextIntentSchema = z.enum([
   'complete',
 ]);
 
+// Pre-built continuation template: tells the agent exactly what to call when done.
+// null when workflow is complete or blocked non-retryable (nothing to call).
+export const V2NextCallSchema = z.object({
+  tool: z.literal('continue_workflow'),
+  params: z.object({
+    intent: z.literal('advance'),
+    stateToken: z.string().min(1),
+    ackToken: z.string().min(1),
+  }),
+}).nullable();
+
 function utf8ByteLength(s: string): number {
   return new TextEncoder().encode(s).length;
 }
@@ -215,6 +226,7 @@ const V2ContinueWorkflowOkSchema = z.object({
   pending: V2PendingStepSchema.nullable(),
   preferences: V2PreferencesSchema,
   nextIntent: V2NextIntentSchema,
+  nextCall: V2NextCallSchema,
 });
 
 const V2ContinueWorkflowBlockedSchema = z.object({
@@ -225,6 +237,7 @@ const V2ContinueWorkflowBlockedSchema = z.object({
   pending: V2PendingStepSchema.nullable(),
   preferences: V2PreferencesSchema,
   nextIntent: V2NextIntentSchema,
+  nextCall: V2NextCallSchema,
   blockers: V2BlockerReportSchema,
   // Additive (backward compatible): enables one-call retry for retryable blocks
   retryable: z.boolean().optional(),
@@ -252,6 +265,7 @@ export const V2StartWorkflowOutputSchema = z.object({
   pending: V2PendingStepSchema.nullable(),
   preferences: V2PreferencesSchema,
   nextIntent: V2NextIntentSchema,
+  nextCall: V2NextCallSchema,
 }).refine(
   (data) => (data.pending ? data.ackToken != null : true),
   { message: 'ackToken is required when a pending step exists' }

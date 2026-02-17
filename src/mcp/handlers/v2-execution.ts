@@ -64,6 +64,48 @@ import { executeAdvanceCore } from './v2-advance-core.js';
  * - Replay is fact-returning (no recompute) and fail-closed on missing recorded facts.
  */
 
+// ── nextCall builder ─────────────────────────────────────────────────
+// Pure function: derives the pre-built continuation template from response values.
+// Tells the agent exactly what to call when done — no memory of tool descriptions needed.
+
+type NextCallTemplate = {
+  readonly tool: 'continue_workflow';
+  readonly params: {
+    readonly intent: 'advance';
+    readonly stateToken: string;
+    readonly ackToken: string;
+  };
+};
+
+export function buildNextCall(args: {
+  readonly stateToken: string;
+  readonly ackToken: string | undefined;
+  readonly isComplete: boolean;
+  readonly pending: { readonly stepId: string } | null;
+  readonly retryable?: boolean;
+  readonly retryAckToken?: string;
+}): NextCallTemplate | null {
+  // Workflow complete, nothing to call
+  if (args.isComplete && !args.pending) return null;
+
+  // Blocked retryable: use retryAckToken so agent retries with corrected output
+  if (args.retryable && args.retryAckToken) {
+    return {
+      tool: 'continue_workflow',
+      params: { intent: 'advance', stateToken: args.stateToken, ackToken: args.retryAckToken },
+    };
+  }
+
+  // Blocked non-retryable: agent can't proceed without user intervention
+  if (!args.ackToken) return null;
+
+  // Normal: advance with the ackToken from this response
+  return {
+    tool: 'continue_workflow',
+    params: { intent: 'advance', stateToken: args.stateToken, ackToken: args.ackToken },
+  };
+}
+
 /**
  * Replay response from recorded advance facts (idempotent path).
  * Fact-returning response: load recorded outcome and return from durable facts without recompute.
@@ -143,6 +185,7 @@ function replayFromRecordedAdvance(args: {
         pending: meta ? { stepId: meta.stepId, title: meta.title, prompt: meta.prompt } : null,
         preferences,
         nextIntent,
+        nextCall: buildNextCall({ stateToken: inputStateToken, ackToken: inputAckToken, isComplete: isCompleteNow, pending: meta }),
         blockers,
         retryable: undefined,
         retryAckToken: undefined,
@@ -255,6 +298,7 @@ function replayFromRecordedAdvance(args: {
             pending: meta ? { stepId: meta.stepId, title: meta.title, prompt: meta.prompt } : null,
             preferences,
             nextIntent,
+            nextCall: buildNextCall({ stateToken: nextStateTokenRes.value, ackToken: pending ? nextAckTokenRes.value : undefined, isComplete, pending: meta, retryable, retryAckToken: retryAckTokenRes.value }),
             blockers,
             retryable,
             retryAckToken: retryAckTokenRes.value,
@@ -293,6 +337,7 @@ function replayFromRecordedAdvance(args: {
           pending: pending ? { stepId: meta.stepId, title: meta.title, prompt: meta.prompt } : null,
           preferences,
           nextIntent,
+          nextCall: buildNextCall({ stateToken: nextStateTokenRes.value, ackToken: pending ? nextAckTokenRes.value : undefined, isComplete, pending: pending ? meta : null }),
         })
       );
     });
@@ -691,6 +736,7 @@ function executeStartWorkflow(
         pending,
         preferences,
         nextIntent,
+        nextCall: buildNextCall({ stateToken: stateToken.value, ackToken: ackToken.value, isComplete: false, pending }),
       }));
     });
 }
@@ -819,6 +865,7 @@ function executeContinueWorkflow(
                 pending: null,
                 preferences,
                 nextIntent,
+                nextCall: buildNextCall({ stateToken: input.stateToken, ackToken: undefined, isComplete, pending: null }),
               }));
             }
 
@@ -876,6 +923,7 @@ function executeContinueWorkflow(
                   pending: { stepId: meta.stepId, title: meta.title, prompt: meta.prompt },
                   preferences,
                   nextIntent,
+                  nextCall: buildNextCall({ stateToken: input.stateToken, ackToken: ackTokenRes.value, isComplete, pending: meta }),
                 }));
               });
           });

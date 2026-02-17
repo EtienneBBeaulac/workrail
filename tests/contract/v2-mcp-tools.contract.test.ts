@@ -123,6 +123,7 @@ describe('start_workflow response contract', () => {
       pending: validPendingStep(),
       preferences: validPreferences(),
       nextIntent: 'perform_pending_then_continue',
+      nextCall: { tool: 'continue_workflow' as const, params: { intent: 'advance' as const, stateToken: VALID_STATE_TOKEN, ackToken: VALID_ACK_TOKEN } },
     };
     expect(V2StartWorkflowOutputSchema.safeParse(response).success).toBe(true);
   });
@@ -134,6 +135,7 @@ describe('start_workflow response contract', () => {
       pending: null,
       preferences: validPreferences(),
       nextIntent: 'complete',
+      nextCall: null,
     };
     expect(V2StartWorkflowOutputSchema.safeParse(response).success).toBe(true);
   });
@@ -145,6 +147,7 @@ describe('start_workflow response contract', () => {
       pending: validPendingStep(),
       preferences: validPreferences(),
       nextIntent: 'perform_pending_then_continue',
+      nextCall: null,
     };
     // ackToken is required when pending exists (refine rule)
     expect(V2StartWorkflowOutputSchema.safeParse(response).success).toBe(false);
@@ -158,6 +161,7 @@ describe('start_workflow response contract', () => {
       pending: validPendingStep(),
       preferences: validPreferences(),
       nextIntent: 'perform_pending_then_continue',
+      nextCall: { tool: 'continue_workflow' as const, params: { intent: 'advance' as const, stateToken: 'not-a-valid-token', ackToken: VALID_ACK_TOKEN } },
     };
     expect(V2StartWorkflowOutputSchema.safeParse(response).success).toBe(false);
   });
@@ -177,6 +181,7 @@ describe('continue_workflow response contract', () => {
       pending: validPendingStep(),
       preferences: validPreferences(),
       nextIntent: 'perform_pending_then_continue',
+      nextCall: { tool: 'continue_workflow' as const, params: { intent: 'advance' as const, stateToken: VALID_STATE_TOKEN, ackToken: VALID_ACK_TOKEN } },
     };
     expect(V2ContinueWorkflowOutputSchema.safeParse(response).success).toBe(true);
   });
@@ -190,6 +195,7 @@ describe('continue_workflow response contract', () => {
       pending: validPendingStep(),
       preferences: validPreferences(),
       nextIntent: 'perform_pending_then_continue',
+      nextCall: null,
       blockers: {
         blockers: [
           {
@@ -212,6 +218,7 @@ describe('continue_workflow response contract', () => {
       pending: null,
       preferences: validPreferences(),
       nextIntent: 'complete',
+      nextCall: null,
     };
     expect(V2ContinueWorkflowOutputSchema.safeParse(response).success).toBe(true);
   });
@@ -224,6 +231,7 @@ describe('continue_workflow response contract', () => {
       pending: null,
       preferences: validPreferences(),
       nextIntent: 'rehydrate_only',
+      nextCall: null,
     };
     expect(V2ContinueWorkflowOutputSchema.safeParse(response).success).toBe(false);
   });
