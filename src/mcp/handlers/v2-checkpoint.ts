@@ -118,7 +118,7 @@ function executeCheckpoint(
             ? String(existingCheckpointNode.scope?.nodeId ?? 'unknown')
             : 'unknown';
 
-          // Find workflowHash from the original node to re-mint stateToken
+          // Re-mint stateToken pointing at the ORIGINAL node (checkpoint does not advance).
           const originalNode = truth.events.find(
             (e): e is Extract<DomainEventV1, { kind: 'node_created' }> =>
               e.kind === 'node_created' && e.scope?.nodeId === String(nodeId),
@@ -162,10 +162,14 @@ function executeCheckpoint(
           return neErrorAsync<z.infer<typeof V2CheckpointWorkflowOutputSchema>>({ kind: 'missing_node_or_run' });
         }
 
+        // Mint event IDs upfront so edge_created can reference node_created's eventId
+        const nodeCreatedEventId = idFactory.mintEventId();
+        const edgeCreatedEventId = idFactory.mintEventId();
+
         const newEvents = [
           {
             v: 1,
-            eventId: idFactory.mintEventId(),
+            eventId: nodeCreatedEventId,
             eventIndex: truth.events.length,
             kind: 'node_created' as const,
             dedupeKey: `checkpoint_node:${dedupeKey}`,
@@ -179,7 +183,7 @@ function executeCheckpoint(
           },
           {
             v: 1,
-            eventId: idFactory.mintEventId(),
+            eventId: edgeCreatedEventId,
             eventIndex: truth.events.length + 1,
             kind: 'edge_created' as const,
             dedupeKey,
@@ -190,7 +194,7 @@ function executeCheckpoint(
               toNodeId: String(checkpointNodeId),
               cause: {
                 kind: 'checkpoint_created' as const,
-                eventId: String(truth.events.length),
+                eventId: String(nodeCreatedEventId),
               },
             },
           },
@@ -199,7 +203,9 @@ function executeCheckpoint(
         return sessionStore.append(lock, { events: newEvents as unknown as readonly DomainEventV1[], snapshotPins: [] })
           .mapErr((cause): CheckpointError => ({ kind: 'store_failed', cause }))
           .andThen(() => {
-            // Mint fresh stateToken for the checkpoint node
+            // Mint fresh stateToken pointing at the ORIGINAL node (not the checkpoint node).
+            // Checkpoint marks progress but does NOT advance — the agent continues from the same step.
+            // The checkpoint node exists in the DAG for observability/export but is not a resumption point.
             const wfRefRes = deriveWorkflowHashRef(originalNode.data.workflowHash);
             if (wfRefRes.isErr()) {
               return neErrorAsync<z.infer<typeof V2CheckpointWorkflowOutputSchema>>({
