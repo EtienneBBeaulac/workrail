@@ -33,6 +33,9 @@ export type StateTokenInput = ParsedTokenV1Binary & {
 export type AckTokenInput = ParsedTokenV1Binary & {
   readonly payload: import('../../v2/durable-core/tokens/payloads.js').AckTokenPayloadV1;
 };
+export type CheckpointTokenInput = ParsedTokenV1Binary & {
+  readonly payload: import('../../v2/durable-core/tokens/payloads.js').CheckpointTokenPayloadV1;
+};
 
 /**
  * Parse and verify a raw state token string.
@@ -92,6 +95,36 @@ export function parseAckTokenOrFail(
   }
 
   return { ok: true, token: parsedRes.value as AckTokenInput };
+}
+
+/**
+ * Parse and verify a raw checkpoint token string.
+ * Returns a branded CheckpointTokenInput or a ToolFailure.
+ */
+export function parseCheckpointTokenOrFail(
+  raw: string,
+  ports: TokenCodecPorts,
+): { ok: true; token: CheckpointTokenInput } | { ok: false; failure: ToolFailure } {
+  const parsedRes = parseTokenV1Binary(raw, ports);
+  if (parsedRes.isErr()) {
+    return { ok: false, failure: mapTokenDecodeErrorToToolError(parsedRes.error) };
+  }
+
+  const verified = verifyTokenSignatureV1Binary(parsedRes.value, ports);
+  if (verified.isErr()) {
+    return { ok: false, failure: mapTokenVerifyErrorToToolError(verified.error) };
+  }
+
+  if (parsedRes.value.payload.tokenKind !== 'checkpoint') {
+    return {
+      ok: false,
+      failure: errNotRetryable('TOKEN_INVALID_FORMAT', 'Expected a checkpoint token (chk1...).', {
+        suggestion: 'Use the checkpointToken returned by WorkRail.',
+      }) as ToolFailure,
+    };
+  }
+
+  return { ok: true, token: parsedRes.value as CheckpointTokenInput };
 }
 
 /**

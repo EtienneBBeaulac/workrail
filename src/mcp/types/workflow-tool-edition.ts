@@ -40,7 +40,8 @@ export type V2WorkflowToolName =
   | 'list_workflows'
   | 'inspect_workflow'
   | 'start_workflow'
-  | 'continue_workflow';
+  | 'continue_workflow'
+  | 'checkpoint_workflow';
 
 // -----------------------------------------------------------------------------
 // Wrapped Handler Type
