@@ -39,6 +39,7 @@ export const WORKFLOW_TOOL_NAMES = [
   'inspect_workflow',
   'start_workflow',
   'continue_workflow',
+  'checkpoint_workflow',
 ] as const;
 
 export type WorkflowToolName = typeof WORKFLOW_TOOL_NAMES[number];

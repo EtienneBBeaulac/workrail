@@ -218,10 +218,14 @@ export const V2BlockerReportSchema = z
     }
   });
 
+// Checkpoint token format: chk1<bech32m chars>
+const checkpointTokenSchema = z.string().regex(/^chk1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid checkpointToken format').optional();
+
 const V2ContinueWorkflowOkSchema = z.object({
   kind: z.literal('ok'),
   stateToken: z.string().regex(/^st1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid stateToken format'),
   ackToken: z.string().regex(/^ack1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid ackToken format').optional(),
+  checkpointToken: checkpointTokenSchema,
   isComplete: z.boolean(),
   pending: V2PendingStepSchema.nullable(),
   preferences: V2PreferencesSchema,
@@ -233,6 +237,7 @@ const V2ContinueWorkflowBlockedSchema = z.object({
   kind: z.literal('blocked'),
   stateToken: z.string().regex(/^st1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid stateToken format'),
   ackToken: z.string().regex(/^ack1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid ackToken format').optional(),
+  checkpointToken: checkpointTokenSchema,
   isComplete: z.boolean(),
   pending: V2PendingStepSchema.nullable(),
   preferences: V2PreferencesSchema,
@@ -258,9 +263,15 @@ export const V2ContinueWorkflowOutputSchema = z.discriminatedUnion('kind', [
   { message: 'ackToken is required when a pending step exists' }
 );
 
+export const V2CheckpointWorkflowOutputSchema = z.object({
+  checkpointNodeId: z.string().min(1),
+  stateToken: z.string().regex(/^st1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid stateToken format'),
+});
+
 export const V2StartWorkflowOutputSchema = z.object({
   stateToken: z.string().regex(/^st1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid stateToken format'),
   ackToken: z.string().regex(/^ack1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid ackToken format').optional(),
+  checkpointToken: checkpointTokenSchema,
   isComplete: z.boolean(),
   pending: V2PendingStepSchema.nullable(),
   preferences: V2PreferencesSchema,

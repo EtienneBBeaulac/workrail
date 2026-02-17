@@ -14,6 +14,7 @@ import type { ToolBuilder, ToolDefinition } from '../tool-factory.js';
 import type { V2WorkflowHandlers } from '../types/workflow-tool-edition.js';
 import { createHandler } from '../handler-factory.js';
 import {
+  V2CheckpointWorkflowInput,
   V2ContinueWorkflowInput,
   V2InspectWorkflowInput,
   V2ListWorkflowsInput,
@@ -23,6 +24,7 @@ import {
 } from './tools.js';
 import { handleV2ContinueWorkflow, handleV2StartWorkflow } from '../handlers/v2-execution.js';
 import { handleV2InspectWorkflow, handleV2ListWorkflows } from '../handlers/v2-workflow.js';
+import { handleV2CheckpointWorkflow } from '../handlers/v2-checkpoint.js';
 
 // -----------------------------------------------------------------------------
 // V2 Tool Registration
@@ -70,6 +72,12 @@ export function buildV2ToolRegistry(buildTool: ToolBuilder): V2ToolRegistration 
       inputSchema: V2ContinueWorkflowInput,
       annotations: V2_TOOL_ANNOTATIONS.continue_workflow,
     }),
+    buildTool({
+      name: 'checkpoint_workflow',
+      title: V2_TOOL_TITLES.checkpoint_workflow,
+      inputSchema: V2CheckpointWorkflowInput,
+      annotations: V2_TOOL_ANNOTATIONS.checkpoint_workflow,
+    }),
   ];
 
   // Build wrapped handlers (validation at boundary)
@@ -78,6 +86,7 @@ export function buildV2ToolRegistry(buildTool: ToolBuilder): V2ToolRegistration 
     inspect_workflow: createHandler(V2InspectWorkflowInput, handleV2InspectWorkflow),
     start_workflow: createHandler(V2StartWorkflowInput, handleV2StartWorkflow),
     continue_workflow: createHandler(V2ContinueWorkflowInput, handleV2ContinueWorkflow),
+    checkpoint_workflow: createHandler(V2CheckpointWorkflowInput, handleV2CheckpointWorkflow),
   };
 
   return { tools, handlers };

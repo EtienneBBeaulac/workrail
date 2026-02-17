@@ -38,6 +38,7 @@ describe('selectWorkflowToolEdition', () => {
     'inspect_workflow',
     'start_workflow',
     'continue_workflow',
+    'checkpoint_workflow',
   ] as const;
 
   it('returns v1 edition when v2Tools flag is disabled', () => {

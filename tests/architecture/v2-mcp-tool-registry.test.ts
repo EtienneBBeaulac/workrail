@@ -26,6 +26,7 @@ const LOCKED_V2_CORE_TOOLS = [
   'inspect_workflow',
   'start_workflow',
   'continue_workflow',
+  'checkpoint_workflow',
 ] as const;
 
 /**
@@ -35,7 +36,6 @@ const LOCKED_V2_CORE_TOOLS = [
  */
 const LOCKED_V2_FLAGGED_TOOLS = [
   'resume_session',
-  'checkpoint_workflow',
   'start_session',
 ] as const;
 

@@ -66,11 +66,20 @@ export const V2ContinueWorkflowInput = z.object({
 });
 export type V2ContinueWorkflowInput = z.infer<typeof V2ContinueWorkflowInput>;
 
+export const V2CheckpointWorkflowInput = z.object({
+  checkpointToken: z.string().min(1).describe(
+    'The checkpoint token from the most recent start_workflow or continue_workflow response. ' +
+    'Creates a checkpoint on the current step without advancing. Idempotent — calling with the same token is safe.'
+  ),
+}).strict();
+export type V2CheckpointWorkflowInput = z.infer<typeof V2CheckpointWorkflowInput>;
+
 export const V2_TOOL_TITLES = {
   list_workflows: 'List Workflows (v2)',
   inspect_workflow: 'Inspect Workflow (v2)',
   start_workflow: 'Start Workflow (v2)',
   continue_workflow: 'Continue Workflow (v2)',
+  checkpoint_workflow: 'Checkpoint Workflow (v2)',
 } as const;
 
 export const V2_TOOL_ANNOTATIONS: Readonly<Record<keyof typeof V2_TOOL_TITLES, ToolAnnotations>> = {
@@ -78,4 +87,5 @@ export const V2_TOOL_ANNOTATIONS: Readonly<Record<keyof typeof V2_TOOL_TITLES, T
   inspect_workflow: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   start_workflow: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
   continue_workflow: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+  checkpoint_workflow: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
 } as const;

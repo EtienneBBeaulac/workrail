@@ -142,6 +142,16 @@ Parameters:
 - output.notesMarkdown (optional, advance only): Fresh summary of THIS step only - never accumulated
 
 The workflow is the user's structured instructions. Follow each step exactly as described.`,
+
+    checkpoint_workflow: `Save a checkpoint on the current workflow step (WorkRail v2, feature-flagged).
+
+Creates a durable checkpoint on your current step without advancing. Useful for saving progress on long-running steps.
+
+Requires: checkpointToken (from the most recent start_workflow or continue_workflow response).
+
+Idempotent: calling with the same checkpointToken multiple times is safe and returns the same result.
+
+Returns: checkpointNodeId + a fresh stateToken.`,
   },
 
   // ─────────────────────────────────────────────────────────────────
@@ -294,5 +304,13 @@ Parameters:
 - output.notesMarkdown (optional, advance only): Summary of THIS step only (fresh, never accumulated)
   
 The workflow is the user's structured will. Follow it exactly — it may validate, loop, or branch in ways you don't predict.`,
+
+    checkpoint_workflow: `Save a checkpoint on the current workflow step (WorkRail v2, feature-flagged).
+
+Creates a durable checkpoint without advancing. Use for long-running steps to save progress.
+
+Requires: checkpointToken from the most recent response. Idempotent.
+
+Returns: checkpointNodeId + fresh stateToken.`,
   },
 } as const;

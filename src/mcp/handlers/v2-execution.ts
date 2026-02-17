@@ -177,10 +177,19 @@ function replayFromRecordedAdvance(args: {
       const preferences = derivePreferencesForNode({ truth, runId, nodeId });
       const nextIntent = deriveNextIntent({ rehydrateOnly: false, isComplete: isCompleteNow, pending: meta });
 
+      // Mint checkpoint token for replay (idempotent — same inputs produce same token)
+      const replayCheckpointTokenRes = pendingNow
+        ? signTokenOrErr({
+            payload: { tokenVersion: 1, tokenKind: 'checkpoint', sessionId, runId, nodeId, attemptId },
+            ports: tokenCodecPorts,
+          })
+        : ok(undefined);
+
       return V2ContinueWorkflowOutputSchema.parse({
         kind: 'blocked',
         stateToken: inputStateToken,
         ackToken: inputAckToken,
+        checkpointToken: replayCheckpointTokenRes.isOk() ? replayCheckpointTokenRes.value : undefined,
         isComplete: isCompleteNow,
         pending: meta ? { stepId: meta.stepId, title: meta.title, prompt: meta.prompt } : null,
         preferences,
@@ -232,6 +241,17 @@ function replayFromRecordedAdvance(args: {
         : ok(undefined);
       if (nextAckTokenRes.isErr()) {
         return neErrorAsync({ kind: 'token_signing_failed' as const, cause: nextAckTokenRes.error });
+      }
+
+      // Mint checkpoint token (available when there's a pending step)
+      const nextCheckpointTokenRes = pending
+        ? signTokenOrErr({
+            payload: { tokenVersion: 1, tokenKind: 'checkpoint', sessionId, runId, nodeId: toNodeIdBranded, attemptId: nextAttemptId },
+            ports: tokenCodecPorts,
+          })
+        : ok(undefined);
+      if (nextCheckpointTokenRes.isErr()) {
+        return neErrorAsync({ kind: 'token_signing_failed' as const, cause: nextCheckpointTokenRes.error });
       }
 
       const wfRefRes = deriveWorkflowHashRef(workflowHash);
@@ -294,6 +314,7 @@ function replayFromRecordedAdvance(args: {
             kind: 'blocked',
             stateToken: nextStateTokenRes.value,
             ackToken: pending ? nextAckTokenRes.value : undefined,
+            checkpointToken: pending ? nextCheckpointTokenRes.value : undefined,
             isComplete,
             pending: meta ? { stepId: meta.stepId, title: meta.title, prompt: meta.prompt } : null,
             preferences,
@@ -333,6 +354,7 @@ function replayFromRecordedAdvance(args: {
           kind: 'ok',
           stateToken: nextStateTokenRes.value,
           ackToken: pending ? nextAckTokenRes.value : undefined,
+          checkpointToken: pending ? nextCheckpointTokenRes.value : undefined,
           isComplete,
           pending: pending ? { stepId: meta.stepId, title: meta.title, prompt: meta.prompt } : null,
           preferences,
@@ -706,6 +728,13 @@ function executeStartWorkflow(
       const ackToken = signTokenOrErr({ payload: ackPayload, ports: tokenCodecPorts });
       if (ackToken.isErr()) return neErrorAsync({ kind: 'token_signing_failed' as const, cause: ackToken.error });
 
+      // Mint checkpoint token (available from first step)
+      const checkpointToken = signTokenOrErr({
+        payload: { tokenVersion: 1, tokenKind: 'checkpoint', sessionId, runId, nodeId, attemptId },
+        ports: tokenCodecPorts,
+      });
+      if (checkpointToken.isErr()) return neErrorAsync({ kind: 'token_signing_failed' as const, cause: checkpointToken.error });
+
       // S9: Use renderPendingPrompt for consistency (no recovery for start)
       const metaRes = renderPendingPrompt({
         workflow: pinnedWorkflow,
@@ -732,6 +761,7 @@ function executeStartWorkflow(
       return okAsync(V2StartWorkflowOutputSchema.parse({
         stateToken: stateToken.value,
         ackToken: ackToken.value,
+        checkpointToken: checkpointToken.value,
         isComplete: false,
         pending,
         preferences,
@@ -876,6 +906,13 @@ function executeContinueWorkflow(
             });
             if (ackTokenRes.isErr()) return neErrorAsync({ kind: 'token_signing_failed' as const, cause: ackTokenRes.error });
 
+            // Mint checkpoint token for rehydrate (available when pending step exists)
+            const checkpointTokenRes = signTokenOrErr({
+              payload: { tokenVersion: 1, tokenKind: 'checkpoint', sessionId, runId, nodeId, attemptId },
+              ports: tokenCodecPorts,
+            });
+            if (checkpointTokenRes.isErr()) return neErrorAsync({ kind: 'token_signing_failed' as const, cause: checkpointTokenRes.error });
+
             return pinnedStore.get(workflowHash)
               .mapErr((cause) => ({ kind: 'pinned_workflow_store_failed' as const, cause }))
               .andThen((pinned) => {
@@ -919,6 +956,7 @@ function executeContinueWorkflow(
                   kind: 'ok',
                   stateToken: input.stateToken,
                   ackToken: ackTokenRes.value,
+                  checkpointToken: checkpointTokenRes.value,
                   isComplete,
                   pending: { stepId: meta.stepId, title: meta.title, prompt: meta.prompt },
                   preferences,
