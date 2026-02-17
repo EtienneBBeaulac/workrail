@@ -75,7 +75,7 @@
                 {
                     "id": "discovery-analysis",
                     "title": "Analyzing Discovery Progress",
-                    "prompt": "analyzeGaps() to identify what's still needed.\n\n**AI-Powered Analysis:**\n- Pattern recognition: Based on similar workflows, what requirements are commonly missed?\n- Implicit needs: What hasn't been stated but is likely needed?\n- Optimization opportunities: Where could this workflow benefit from advanced features?\n\nReview the discovery data collected so far and determine:\n1. What critical information is still missing?\n2. Which area should we explore next?\n3. Are we ready to proceed to synthesis?\n\ncheckConvergence() to determine if we have enough information.\n\nAgent: Use pattern recognition to suggest unexplored areas. Set context.questionFocus for next iteration OR set context.discoveryComplete=true if ready. Increment context.discoveryIteration.",
+                    "prompt": "analyzeGaps() to identify what's still needed.\n\n**AI-Powered Analysis:**\n- Pattern recognition: Based on similar workflows, what requirements are commonly missed?\n- Implicit needs: What hasn't been stated but is likely needed?\n- Optimization opportunities: Where could this workflow benefit from advanced features?\n\nReview the discovery data collected so far and determine:\n1. What critical information is still missing?\n2. Which area should we explore next?\n3. Are we ready to proceed to synthesis?\n\ncheckConvergence() to determine if we have enough information.\n\nAgent: Use pattern recognition to suggest unexplored areas. Set context.questionFocus for next iteration. Increment context.discoveryIteration.",
                     "agentRole": "You are a discovery analyst. Review all collected data, identify critical gaps, and determine the next area to explore. Common follow-up areas: integration points, error handling, decision branches, constraints, scale/frequency, evolution needs.",
                     "guidance": [
                         "CHECK COMPLETENESS: Problem clarity, user needs, success criteria, basic constraints",
@@ -85,6 +85,16 @@
                         "KNOW WHEN TO STOP: Don't over-analyze; 80% complete is often enough"
                     ],
                     "requireConfirmation": false
+                },
+                {
+                    "id": "discovery-loop-decision",
+                    "title": "Discovery Loop Decision",
+                    "prompt": "**Provide a loop control decision artifact.**\n\nBased on the discovery analysis above, decide whether to continue gathering requirements or proceed to synthesis.\n\n**Decision logic:**\n- If critical information is still missing (problem unclear, user needs undefined, success criteria absent): decision = 'continue'\n- If discovery is 80%+ complete (clear problem, user needs, success criteria, basic constraints): decision = 'stop'\n\n**Output (exact format):**\nProvide a loop control artifact:\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"loopId\": \"phase-0-discovery-loop\",\n    \"decision\": \"continue\",\n    \"metadata\": {\n      \"reason\": \"One sentence explaining why continuing or stopping\"\n    }\n  }]\n}\n```",
+                    "agentRole": "You are a discovery analyst making an explicit go/no-go decision on whether enough requirements have been gathered.",
+                    "requireConfirmation": false,
+                    "outputContract": {
+                        "contractRef": "wr.contracts.loop_control"
+                    }
                 }
             ]
         },
@@ -407,10 +417,13 @@
         },
         {
             "id": "satisfaction-check",
-            "title": "Iteration Satisfaction Check",
-            "prompt": "Let's assess your satisfaction with the workflow so far.\n\n**Rate your satisfaction (1-10):**\n- 10: Perfect! Ready to deploy\n- 8-9: Very good, minor tweaks only\n- 6-7: Good foundation, needs refinement\n- 4-5: Major improvements needed\n- 1-3: Significant rework required\n\nBased on your rating:\n- Score 9+: We'll proceed to completion\n- Score 7-8: For advanced users, checkAutomation(auto-continue)\n- Score <7: We'll iterate again (up to 3 times total)\n\nAgent: Set context.satisfactionScore and increment context.iterationCount",
-            "agentRole": "You are a quality assessment specialist. Guide the user through evaluating their workflow objectively. Store the score in context for loop control.",
-            "requireConfirmation": false
+            "title": "Iteration Satisfaction Check & Loop Decision",
+            "prompt": "Let's assess your satisfaction with the workflow so far.\n\n**Rate your satisfaction (1-10):**\n- 10: Perfect! Ready to deploy\n- 8-9: Very good, minor tweaks only\n- 6-7: Good foundation, needs refinement\n- 4-5: Major improvements needed\n- 1-3: Significant rework required\n\n**Decision logic:**\n- Score 9+: decision = 'stop' (proceed to completion)\n- Score <9: decision = 'continue' (iterate again, up to 3 times total)\n\nAgent: Set context.satisfactionScore and increment context.iterationCount.\n\n**Provide a loop control artifact:**\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"loopId\": \"phase-3-4-refinement-loop\",\n    \"decision\": \"continue\",\n    \"metadata\": {\n      \"reason\": \"Satisfaction score X/10 - [brief reason]\"\n    }\n  }]\n}\n```",
+            "agentRole": "You are a quality assessment specialist. Guide the user through evaluating their workflow objectively. Provide a loop control artifact with the decision.",
+            "requireConfirmation": false,
+            "outputContract": {
+                "contractRef": "wr.contracts.loop_control"
+            }
         }
             ]
         },

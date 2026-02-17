@@ -343,15 +343,6 @@
           "requireConfirmation": true,
           "outputContract": {
             "contractRef": "wr.contracts.loop_control"
-          },
-          "validationCriteria": {
-            "and": [
-              {
-                "type": "contains",
-                "value": "reason:",
-                "message": "Must provide one-sentence reason for decision"
-              }
-            ]
           }
         }
       ]
