@@ -279,20 +279,22 @@ See the canonical docs for full mechanics:
 This section tracks remaining work. Most design locks are now complete; the focus is implementation.
 
 - **v2 core design is locked**: see `docs/design/v2-core-design-locks.md` for the comprehensive implementation locks (durable model, projections, authoring, ops envelope, architecture map, module layout, and ports).
-- **Implementation status** (verified against `origin/main` @ `v0.13.0`):
-  - ✅ **Slice 1 shipped**: v2 bounded context (`src/v2/`), JCS canonicalization, `workflowHash` pinning, compiled workflow snapshots, pinned workflow store.
-  - ✅ **Slice 2 shipped**: append-only session event log substrate (segments + `manifest.jsonl` + single-writer lock + corruption gating), typed closed-set event schemas for all 12 locked event kinds, idempotency enforcement, and pure deterministic projections (run DAG, session health, node outputs, capabilities, gaps, advance outcomes, run status signals, preferences propagation).
+- **Implementation status** (verified against `origin/main` @ `v1.2.0`, 2026-02-17):
+  - ✅ **Slice 1 shipped**: v2 bounded context (`src/v2/`), JCS canonicalization, `workflowHash` pinning, compiled workflow snapshots, pinned workflow store. Golden hashes pinned with exact SHA-256 assertions.
+  - ✅ **Slice 2 shipped**: append-only session event log substrate (segments + `manifest.jsonl` + single-writer lock + corruption gating), typed closed-set event schemas for all 13 locked event kinds, idempotency enforcement, and pure deterministic projections (run DAG, session health, node outputs, capabilities, gaps, advance outcomes, run status signals, preferences propagation).
   - ✅ **Slice 2.5 shipped**: `ExecutionSessionGateV2` (lock+health+witness choke-point); `WithHealthySessionLock` (opaque branded witness; append requires proof); readonly/append port split; `SessionHealthV2` union with manifest-attested corruption reasons; typed snapshot pin enforcement (no `any`).
-  - ✅ **Slice 3 prereqs shipped**: execution snapshot schemas with locked invariants, snapshot CAS store (port + local adapter), token payload codec + HMAC-SHA256 signing/verification, crash-safe keyring (current/previous keys), snapshot-state helpers; golden fixtures + full unit test coverage.
-  - ✅ **Slice 3 orchestration shipped** (`v0.12.0`): token-based execution via `start_workflow` / `continue_workflow` (rehydrate/advance/replay).
-  - ✅ **Hardening shipped** (`v0.13.0`): lock registry + lock coverage CI, loop/runtime semantics hardening, validation feedback hardening.
-  - The locked type-first sequencing remains:
+  - ✅ **Slice 3 shipped**: token-based execution via `start_workflow` / `continue_workflow` (rehydrate/advance/replay). Binary token format with bech32m encoding, HMAC-SHA256 signing, crash-safe keyring.
+  - ✅ **Slice 4a shipped** (PR #55): Semantics lockdown — blockers, gaps, preferences, context persistence, recap recovery, notesMarkdown per-step semantics. 34 files changed, 1846 tests.
+  - ✅ **Agent execution guidance shipped** (PR #57): Layers 1-3 — tool descriptions, field descriptions, prompt-based requirement injection.
+  - ✅ **Typed artifact validation shipped** (PR #61, `v1.2.0`): `outputContract` replacing `validationCriteria`, `LoopControlArtifactV1` schema, artifact-based loop evaluation, blocked retry UX with first-class blocked nodes, handler decomposition, system-injected contract guidance, golden hash pinning, v2 MCP contract tests, projection timing hooks, v1 fail-fast guard. 112 files changed, 2326 tests passing.
+  - The locked type-first sequencing is complete through protocol orchestration:
     1. ✅ Canonical models + hashing (no I/O)
     2. ✅ Pure projections
     3. ✅ Storage substrate (ports + adapters)
     4. ✅ Execution safety boundaries (gate+witness; Slice 2.5)
     5. ✅ Protocol orchestration (Slice 3)
-    6. Determinism suite
+    6. ✅ Semantics lockdown (Slice 4a)
+    7. Remaining: export/import (4b), resume/checkpoints (4c), polish (sub-phases A-H)
 - **Authoring is finalized**:
   - Initial contract packs are locked: `capability_observation`, `workflow_divergence`, `loop_control` (and gaps integrated into event model).
   - Builtins metadata schema defined (code-canonical + generated).
@@ -404,87 +406,39 @@ This is a concise record of what we did in this chat, for resumption continuity 
 - Verified doc consistency via repo-wide grep and a final "thorough check".
 - **v1 usability fix (shipped)**: improved `workflow_next` error UX with pre-validation + copy-pasteable templates (agents were failing until they guessed the right `state` shape; now errors are self-correcting without schema changes).
 
-### What's next (current status as of 2025-12-23)
+### What's next (current status as of 2026-02-17)
 
-**Design is locked.** Slice 2.5 (execution safety boundaries) merged. **Slice 3 prerequisites** (execution snapshots, snapshot CAS, token codec/signing/keyring) shipped on `feature/etienneb/v2-slice3-prereqs` (2025-12-23).
+**Core execution loop is complete and released as v1.2.0.** Slices 1 through 4a are shipped, plus the typed artifact validation architectural fix and blocked retry UX.
 
-#### Slice 3 prerequisites (complete; PR ready for review)
+#### Remaining work
 
-Implemented on `feature/etienneb/v2-slice3-prereqs`:
-- Execution snapshot schema + golden JCS fixture
-- Snapshot CAS port + local adapter
-- Token payload codec + HMAC signing + keyring (current/previous keys)
-- Snapshot-state helpers (pure)
-- Event union audit (all 12 kinds present)
+**Slice 4b: Export/Import Bundles** (~2-3 days):
+- Bundle integrity (SHA-256 manifest)
+- Import validation + token re-minting
+- Export→import equivalence tests
+- Schema exists (`schemas/export-bundle/index.ts`) but no handlers yet
 
-**Implementation details** (reference):
-- **Execution snapshot schema** (`src/v2/durable-core/schemas/execution-snapshot/`):
-  - `ExecutionSnapshotFileV1` + `EnginePayloadV1` Zod schemas
-  - `EngineStateV1` union (`init | running | complete`)
-  - `StepInstanceKey` canonical format + validation (delimiter-safe: `[a-z0-9_-]+`)
-  - `PendingStep`, `LoopFrame` typed structures
-  - Golden fixture: snapshot → JCS bytes → sha256 (proves canonicalization)
-- **Token payload codec + signing**:
-  - `src/v2/durable-core/tokens/` (encode/decode for `stateToken`, `ackToken`, `checkpointToken` payloads)
-  - JCS canonical bytes → base64url encoding
-  - HMAC-SHA256 signing with keyring (current/previous keys, deterministic verify order)
-  - Payloads locked in v2-core-design-locks.md (tokenVersion, tokenKind, sessionId, runId, nodeId, workflowHash/attemptId)
-  - Tests: encode/decode roundtrip, sign/verify, rotation, tamper detection
-- **Snapshot CAS port + adapter**:
-  - `SnapshotStorePortV2` (`put(snapshot) -> SnapshotRef`, `get(ref) -> snapshot`)
-  - `src/v2/infra/local/snapshot-store/` with crash-safe writes
-  - Test: put → get yields byte-identical snapshot
-- **Snapshot-state helpers** (projection stubs):
-  - `src/v2/durable-core/projections/snapshot-state.ts`
-  - `deriveIsComplete(state: EngineStateV1): boolean`
-  - `derivePendingStep(state: EngineStateV1): PendingStep | null`
-  - Tests: unit tests for pure helpers
-- **Event union**: all 12 locked event kinds present in `DomainEventV1Schema`
+**Slice 4c: Resume + Checkpoints** (~2-3 days):
+- `resume_session` tool (deterministic ranking by git branch/SHA/notes)
+- `checkpoint_workflow` tool (idempotent via checkpointToken)
+- Both feature-flagged with explicit unflag gates
 
-#### Recent lock tightening (sessions 2025-12-21, 2025-12-23)
-We audited the v2 locks + docs for gaps/inconsistencies and applied architectural fixes:
-- **Durability semantics**: added `advance_recorded` event (durable ack outcomes); made rehydrate side-effect-free.
-- **Idempotency**: unified `attemptId` naming; tightened dedupe rules (no `eventId` in dedupe keys; stable IDs only); `advance_recorded` dedupe is node-scoped (`<sessionId>:<nodeId>:<attemptId>`); capability observations are "latest wins by projection."
-- **Append transaction**: locked pin-after-close ordering (segment → `segment_closed` → `snapshot_pinned`) to prevent "pins without committed truth" states.
-- **Blocked/gaps unification**: locked a single `ReasonCode` semantic model + `BlockerReport` schema with deterministic mapping by autonomy.
-- **Fork modeling simplified**: removed `edgeKind=forked_from_non_tip`; fork-ness is now `edge_created.cause.kind=non_tip_advance` only.
-- **Token crypto locked**: HMAC-SHA256, 32-byte keys, current/previous keyring, deterministic verification order.
-- **Checkpointing semantics locked**: checkpoints are first-class DAG lineage via `edgeKind=checkpoint` with `cause.kind=checkpoint_created`; checkpointing is idempotent via `checkpointToken`.
-- **Resume matching locked**: NFKC + lowercase + tokenized matching (not raw substring).
-- **Embedded schema canonicalization locked**: schemas in compiled snapshots are typed canonical data, not JSON blobs.
-- **Prompt refs introduced**: workflows can inject canonical snippets inline (`wr.refs.*`) at compile time; resolved text is embedded and hashed into `workflowHash`.
-- **Error envelope locked**: unified error envelope uses a closed-set `retry` union (no stringly retry semantics); token vs storage error domains are separated.
-- **Corruption gating locked**: `SessionHealth` closed set (expanded to `healthy | corrupt_tail | corrupt_head | unknown_version` with manifest-attested reasons only); execution requires `healthy`, salvage is read-only (validated prefix + explicit banner).
-- **Rehydrate/advance/replay separation locked** (2025-12-23):
-  - Rehydrate (`continue_workflow` without `ackToken`) is pure (no durable writes).
-  - Advance (`continue_workflow` with `ackToken`) is the only append-capable correctness path.
-  - Replay is fact-returning (keyed by `attemptId`; no recompute).
-  - Implementation lock (TypeScript): append requires non-forgeable capability witness (`WithHealthySessionLock`) minted only by `ExecutionSessionGateV2`.
-  - Witness misuse-after-release must fail-fast before any I/O.
+**Production workflow migration** (~1 day):
+- Migrate existing workflows from `validationCriteria` to `outputContract`
+- Test workflow exists as reference pattern (`test-artifact-loop-control.json`)
 
-All v1-era docs (`workflow_next`, `completedSteps`, expression-based loops) now have v1/v2 boundary banners to prevent confusion.
-
-#### Implementation readiness
-The full v2 blueprint is recorded in `v2-core-design-locks.md` section 16.1 (which docs to use as authority).
-
-**Before starting Slice 3**, run the **Slice N+1 readiness audit** (now locked in playbook):
-- Execution snapshot schema exists + has golden JCS fixtures.
-- Snapshot CAS port + minimal adapter skeleton exists.
-- Token payload codec exists (pure encode/decode; signer is later).
-- Event union is audited (covers all locked kinds for Slice 3).
-- Snapshot-state helpers exist (minimal: `deriveIsComplete`, `derivePendingStep`).
-
-**Prereq invariants enforced** (must continue to hold in orchestration):
-- Execution snapshots are JCS-canonicalizable; `SnapshotRef = sha256(JCS(snapshot))` is deterministic.
-- Token payloads use JCS canonical bytes as HMAC input (no alternate canonicalization paths).
-- `StepInstanceKey` format is delimiter-safe and locked; impossible states (pending in completed, duplicate loop IDs) are schema-rejected.
-- Token error codes aligned with locked set; no throwing across codec/signing boundaries.
-- Keyring uses crash-safe writes (tmp+rename+fsync) and canonical JSON storage.
+**Polish & Hardening (Sub-phases A-H)** (~3-5 days):
+- See `v2-core-design-locks.md` section 16.5
+- Some items partially done: projection timing hooks (G), import boundary tests (H), v1 fail-fast guard (H)
+- Remaining: anti-drift enforcement (A-B), property-based determinism tests (D-E), error ergonomics (F)
 
 **Next agent should**:
-- Read `v2-core-design-locks.md` sections 16.1–16.5 (implementation blueprint + playbook + readiness audit + polish phase).
-- Implement Slice 3 (token orchestration: `start_workflow`, `continue_workflow`, rehydrate/advance/replay use-cases).
-- After all functional slices (1–6+): run the Polish & Hardening Phase (see `v2-core-design-locks.md` section 16.5) before unflagging v2.
+- Read `v2-core-design-locks.md` sections 16.1–16.5 (implementation blueprint + playbook + polish phase).
+- Implement Slice 4b (export/import bundles) or Slice 4c (resume + checkpoints).
+- After all functional slices: run the remaining Polish & Hardening sub-phases before unflagging v2.
+
+#### Historical reference: lock tightening sessions (2025-12-21 to 2025-12-23)
+All design locks were audited and tightened across these sessions. Key decisions include: rehydrate/advance/replay separation, append transaction protocol, fork modeling, token crypto, checkpointing semantics, resume matching, corruption gating, and error envelope. These are now all implemented and tested. See `v2-core-design-locks.md` for the full locked mechanics.
 
 ### Conversation style & collaboration patterns
 
@@ -618,6 +572,69 @@ Originally proposed `agentInstructions` field in responses (900 lines of parsing
 
 ---
 
-## Open items (post-4a decisions)
+### Typed Artifact Validation + Blocked Retry UX (✅ IMPLEMENTED - PR #61, 2026-02-16)
 
-None currently. Slice 4a semantics lockdown complete, agent execution guidance implemented.
+**Status**: ✅ Complete - Squash-merged to main as `v1.2.0`
+
+**What was implemented**:
+
+**Phase 1 - Validation Requirements + Artifact Wiring**:
+- `prompt-renderer.ts`: Wired `extractValidationRequirements` to append `**OUTPUT REQUIREMENTS:**` section to prompts when `validationCriteria` is present
+- `events.ts`: Extended `ArtifactRefPayloadV1Schema` with `content: z.unknown().optional()` for inlined artifacts
+- `v2-execution.ts`: Artifacts from `output.artifacts[]` are canonicalized, hashed, and stored as events at both advance paths
+
+**Phase 3 - Architectural Fix (typed artifacts replacing substring validation)**:
+- **Slice A1**: `LoopControlArtifactV1Schema` — typed artifact with `decision: 'continue' | 'stop'`, replacing brittle `contains("continuePlanning = true")` prose checks
+- **Slice A2**: Artifact projection (`projectArtifactsV2`) + loop control evaluator (`evaluateLoopControlFromArtifacts` / `evaluateLoopControlWithFallback`)
+- **Slice A3**: `OutputContract` type on `WorkflowStepDefinition`, `validateArtifactContract()` pure validator, handler integration via `getOutputRequirementStatusWithArtifactsV1()` — validates `outputContract` first, falls back to `validationCriteria`
+- **Slice A4**: Test workflow (`test-artifact-loop-control.json`) demonstrating new pattern
+
+**Loop Condition Integration**:
+- `workflow-interpreter.ts`: `while`/`until` loop conditions now use `evaluateLoopControlWithFallback(artifacts, loopId, contextDecision)` — artifacts override context when present, with legacy fallback
+- `v2-execution.ts`: Builds `artifactsForEval = truthArtifacts + input.output.artifacts` and passes into both `interpreter.next(...)` calls
+- System-injected contract guidance: `formatOutputContractRequirements()` renders canonical guidance from contract metadata (not from authored prompts)
+
+**Workflow Schema Updates**:
+- `workflow.schema.json` + `workflow.schema.v0.0.1.json`: Added `outputContract` to `standardStep`
+- Both `validationCriteria` (legacy) and `outputContract` (preferred) supported simultaneously
+
+**Quality & Hardening**:
+- Golden hash fixtures now contain pinned `expectedSha256` values — tests assert exact match (catches canonicalization drift between releases)
+- v1 `validateStepOutput()` fail-fast guard: returns error if step uses `outputContract` (prevents silent bypass through legacy path)
+- `withProjectionTiming()` — pure higher-order wrapper for measuring projection performance before optimizing
+- New `tests/contract/v2-mcp-tools.contract.test.ts` — 38 boundary tests covering all v2 MCP response shapes and closed sets
+
+**Handler Decomposition**:
+- Extracted focused modules from the v2-execution handler (blocked-node builder, validation criteria validator extensions)
+
+**Test Coverage**: 2326 tests passing across 179 test files
+
+**Design Decisions**:
+- `outputContract` takes priority over `validationCriteria` when both present (no dual validation)
+- Artifact-based loop evaluation uses `frame.loopId` as the artifact `loopId` (simplest mapping, no schema change needed)
+- System-injected guidance is contract-driven (contract registry → canonical instructions), not prompt-dependent
+- v1 compatibility maintained: `WorkflowInterpreter.next()` accepts optional `artifacts` param (defaults to `[]`)
+
+---
+
+## Open items (remaining v2 work)
+
+**Slice 4b: Export/Import Bundles** (~2-3 days):
+- Bundle integrity (SHA-256 manifest)
+- Import validation + token re-minting
+- Export→import equivalence tests
+- Schema exists (`schemas/export-bundle/index.ts`) but no handlers yet
+
+**Slice 4c: Resume + Checkpoints** (~2-3 days):
+- `resume_session` tool (deterministic ranking by git branch/SHA/notes)
+- `checkpoint_workflow` tool (idempotent via checkpointToken)
+- Both feature-flagged with explicit unflag gates
+
+**Production workflow migration** (~1 day):
+- Migrate existing workflows from `validationCriteria` to `outputContract`
+- Reference pattern: `test-artifact-loop-control.json`
+
+**Polish & Hardening** (sub-phases A-H, ~3-5 days):
+- See `v2-core-design-locks.md` section 16.5
+- Partially done: projection timing hooks (G), import boundary tests (H), v1 fail-fast guard (H)
+- Remaining: anti-drift enforcement (A-B), property-based determinism tests (D-E), error ergonomics (F), dead code removal
