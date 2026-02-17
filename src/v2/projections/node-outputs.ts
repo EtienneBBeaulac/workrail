@@ -2,10 +2,7 @@ import type { Result } from 'neverthrow';
 import { err, ok } from 'neverthrow';
 import type { DomainEventV1 } from '../durable-core/schemas/session/index.js';
 import { EVENT_KIND, OUTPUT_CHANNEL } from '../durable-core/constants.js';
-
-export type ProjectionError =
-  | { readonly code: 'PROJECTION_INVARIANT_VIOLATION'; readonly message: string }
-  | { readonly code: 'PROJECTION_CORRUPTION_DETECTED'; readonly message: string };
+import type { ProjectionError } from './projection-error.js';
 
 /**
  * Closed set: OutputChannel (recap | artifact).

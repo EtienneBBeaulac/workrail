@@ -13,7 +13,6 @@ import type { ExecutionState, LoopFrame } from '../../domain/execution/state.js'
 import type { RunId, NodeId } from '../../v2/durable-core/ids/index.js';
 import type { LoadedSessionTruthV2 } from '../../v2/ports/session-event-log-store.port.js';
 import { projectPreferencesV2 } from '../../v2/projections/preferences.js';
-import { createWorkflow, getStepById } from '../../types/workflow.js';
 import { EVENT_KIND } from '../../v2/durable-core/constants.js';
 
 // ── State Conversion ──────────────────────────────────────────────────
@@ -120,40 +119,6 @@ export interface StepMetadata {
   readonly title: string;
   readonly prompt: string;
   readonly requireConfirmation: boolean;
-}
-
-/**
- * Extract step metadata (title, prompt) from a workflow step with type-safe property access.
- * Returns sealed StepMetadata with guaranteed non-empty strings.
- */
-export function extractStepMetadata(
-  workflow: ReturnType<typeof createWorkflow>,
-  stepId: string | null,
-  options?: { defaultTitle?: string; defaultPrompt?: string }
-): StepMetadata {
-  const resolvedStepId = stepId ?? '';
-  const step = stepId ? getStepById(workflow, stepId) : null;
-
-  const hasStringProp = (obj: unknown, prop: string): boolean =>
-    typeof obj === 'object' &&
-    obj !== null &&
-    prop in obj &&
-    typeof (obj as unknown as Record<string, unknown>)[prop] === 'string';
-
-  const title = hasStringProp(step, 'title')
-    ? String((step as unknown as Record<string, unknown>).title)
-    : options?.defaultTitle ?? resolvedStepId;
-
-  const prompt = hasStringProp(step, 'prompt')
-    ? String((step as unknown as Record<string, unknown>).prompt)
-    : options?.defaultPrompt ?? (stepId ? `Pending step: ${stepId}` : '');
-
-  const requireConfirmation =
-    typeof step === 'object' && step !== null && 'requireConfirmation' in step
-      ? Boolean((step as unknown as Record<string, unknown>).requireConfirmation)
-      : false;
-
-  return { stepId: resolvedStepId, title, prompt, requireConfirmation };
 }
 
 // ── Preferences ───────────────────────────────────────────────────────

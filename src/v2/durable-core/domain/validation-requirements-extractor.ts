@@ -86,8 +86,9 @@ function formatRule(rule: ValidationRule): string | null {
       // Schema validation is complex - skip for now (0% usage empirically)
       return null;
       
-    default:
-      // Unknown type - skip
-      return null;
+    default: {
+      const _exhaustive: never = rule;
+      return _exhaustive;
+    }
   }
 }

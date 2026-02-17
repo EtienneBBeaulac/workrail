@@ -5,10 +5,7 @@ import { EVENT_KIND } from '../durable-core/constants.js';
 import type { JsonObject } from '../durable-core/canonical/json-types.js';
 import type { RunId } from '../durable-core/ids/index.js';
 import { asRunId } from '../durable-core/ids/index.js';
-
-export type ProjectionError =
-  | { readonly code: 'PROJECTION_INVARIANT_VIOLATION'; readonly message: string }
-  | { readonly code: 'PROJECTION_CORRUPTION_DETECTED'; readonly message: string };
+import type { ProjectionError } from './projection-error.js';
 
 type ContextSetEventV1 = Extract<DomainEventV1, { kind: 'context_set' }>;
 
@@ -48,7 +45,7 @@ export function projectRunContextV2(events: readonly DomainEventV1[]): Result<Ru
     const runId = e.scope.runId;
     const context = e.data.context;
 
-    // Validate context is a plain object (not null/array/primitive)
+    // Projection boundary: validate context is a plain object (event schema uses JsonValue which includes arrays/null)
     if (!context || typeof context !== 'object' || Array.isArray(context)) {
       return err({
         code: 'PROJECTION_CORRUPTION_DETECTED',
@@ -56,10 +53,12 @@ export function projectRunContextV2(events: readonly DomainEventV1[]): Result<Ru
       });
     }
 
+    const contextObj = context as JsonObject;
+
     // Latest event wins (overwrite previous)
     byRunId[runId] = {
       runId: asRunId(runId),
-      context: context as JsonObject,
+      context: contextObj,
       contextId: e.data.contextId,
       source: e.data.source,
       setAtEventIndex: e.eventIndex,

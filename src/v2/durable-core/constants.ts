@@ -280,6 +280,7 @@ export type OutputChannelV1 = typeof OUTPUT_CHANNEL[keyof typeof OUTPUT_CHANNEL]
  */
 export const EDGE_KIND = {
   ACKED_STEP: 'acked_step',
+  CHECKPOINT: 'checkpoint',
 } as const;
 
 export type EdgeKindV1 = typeof EDGE_KIND[keyof typeof EDGE_KIND];
@@ -292,6 +293,7 @@ export type EdgeKindV1 = typeof EDGE_KIND[keyof typeof EDGE_KIND];
  * Closed set of engine states in execution snapshots.
  */
 export const ENGINE_STATE = {
+  INIT: 'init',
   RUNNING: 'running',
   BLOCKED: 'blocked',
   COMPLETE: 'complete',
@@ -321,6 +323,8 @@ export const ADVANCE_OUTCOME = {
 export const EDGE_CAUSE = {
   INTENTIONAL_FORK: 'intentional_fork',
   NON_TIP_ADVANCE: 'non_tip_advance',
+  IDEMPOTENT_REPLAY: 'idempotent_replay',
+  CHECKPOINT_CREATED: 'checkpoint_created',
 } as const;
 
 export type EdgeCauseKindV1 = typeof EDGE_CAUSE[keyof typeof EDGE_CAUSE];
@@ -333,7 +337,6 @@ export type EdgeCauseKindV1 = typeof EDGE_CAUSE[keyof typeof EDGE_CAUSE];
  * Closed set of manifest record kinds.
  */
 export const MANIFEST_KIND = {
-  SEGMENT_OPENED: 'segment_opened',
   SEGMENT_CLOSED: 'segment_closed',
   SNAPSHOT_PINNED: 'snapshot_pinned',
 } as const;

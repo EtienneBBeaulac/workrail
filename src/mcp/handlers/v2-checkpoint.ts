@@ -23,7 +23,7 @@ import type { ExecutionSessionGateErrorV2 } from '../../v2/usecases/execution-se
 import type { SessionEventLogStoreError } from '../../v2/ports/session-event-log-store.port.js';
 import { deriveWorkflowHashRef } from '../../v2/durable-core/ids/workflow-hash-ref.js';
 import { DomainEventV1Schema, type DomainEventV1 } from '../../v2/durable-core/schemas/session/index.js';
-import { EVENT_KIND, EDGE_KIND } from '../../v2/durable-core/constants.js';
+import { EVENT_KIND } from '../../v2/durable-core/constants.js';
 
 // ---------------------------------------------------------------------------
 // Types

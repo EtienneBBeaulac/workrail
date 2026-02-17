@@ -145,6 +145,7 @@ export function exportSession(
             snapshots,
             pinnedWorkflows,
             producer: args.producer,
+            exportedAt: new Date().toISOString(),
             sha256: ports.sha256,
           });
 

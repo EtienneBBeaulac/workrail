@@ -200,6 +200,10 @@ function extractObservations(events: readonly DomainEventV1[]): SessionObservati
       case 'repo_root_hash':
         repoRootHash = data.value.value;
         break;
+      default: {
+        const _exhaustive: never = data.key;
+        return _exhaustive;
+      }
     }
   }
 

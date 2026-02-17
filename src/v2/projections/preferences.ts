@@ -3,10 +3,7 @@ import { err, ok } from 'neverthrow';
 import type { DomainEventV1 } from '../durable-core/schemas/session/index.js';
 import { EVENT_KIND } from '../durable-core/constants.js';
 import type { AutonomyV2, RiskPolicyV2 } from '../durable-core/schemas/session/preferences.js';
-
-export type ProjectionError =
-  | { readonly code: 'PROJECTION_INVARIANT_VIOLATION'; readonly message: string }
-  | { readonly code: 'PROJECTION_CORRUPTION_DETECTED'; readonly message: string };
+import type { ProjectionError } from './projection-error.js';
 
 type PreferencesChangedEventV1 = Extract<DomainEventV1, { kind: 'preferences_changed' }>;
 

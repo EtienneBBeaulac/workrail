@@ -15,6 +15,7 @@ import type { JsonObject, JsonValue } from '../../v2/durable-core/canonical/json
 import { toCanonicalBytes } from '../../v2/durable-core/canonical/jcs.js';
 import {
   EVENT_KIND,
+  OUTPUT_CHANNEL,
   MAX_CONTEXT_BYTES,
   MAX_CONTEXT_DEPTH,
 } from '../../v2/durable-core/constants.js';
@@ -242,7 +243,7 @@ export function collectArtifactsForEvaluation(args: {
 
   for (const e of args.truthEvents) {
     if (e.kind !== EVENT_KIND.NODE_OUTPUT_APPENDED) continue;
-    if (e.data.outputChannel !== 'artifact') continue;
+    if (e.data.outputChannel !== OUTPUT_CHANNEL.ARTIFACT) continue;
     if (e.data.payload.payloadKind !== 'artifact_ref') continue;
     const payload = e.data.payload as typeof e.data.payload & { content?: unknown };
     if (payload.content === undefined) continue;

@@ -10,6 +10,7 @@ export type BlockingDecisionError = {
 
 export type OutputRequirementStatus =
   | { readonly kind: 'not_required' }
+  | { readonly kind: 'satisfied' }
   | { readonly kind: 'missing'; readonly contractRef: string }
   | { readonly kind: 'invalid'; readonly contractRef: string; readonly validation: ValidationResult };
 
@@ -64,23 +65,40 @@ export function detectBlockingReasonsV1(args: {
   }
 
   const outReq = args.outputRequirement;
-  if (outReq && outReq.kind !== 'not_required') {
-    if (outReq.kind === 'missing') {
-      reasons.push({ kind: 'missing_required_output', contractRef: outReq.contractRef });
-    }
-    if (outReq.kind === 'invalid') {
-      // We do not embed the full validator output in the durable reason; we only persist the closed-set code.
-      reasons.push({ kind: 'invalid_required_output', contractRef: outReq.contractRef });
+  if (outReq) {
+    switch (outReq.kind) {
+      case 'not_required':
+      case 'satisfied':
+        break;
+      case 'missing':
+        reasons.push({ kind: 'missing_required_output', contractRef: outReq.contractRef });
+        break;
+      case 'invalid':
+        // We do not embed the full validator output in the durable reason; we only persist the closed-set code.
+        reasons.push({ kind: 'invalid_required_output', contractRef: outReq.contractRef });
+        break;
+      default: {
+        const _exhaustive: never = outReq;
+        return _exhaustive;
+      }
     }
   }
 
   const capReq = args.capabilityRequirement;
-  if (capReq && capReq.kind !== 'not_required') {
-    if (capReq.kind === 'unknown') {
-      reasons.push({ kind: 'required_capability_unknown', capability: capReq.capability });
-    }
-    if (capReq.kind === 'unavailable') {
-      reasons.push({ kind: 'required_capability_unavailable', capability: capReq.capability });
+  if (capReq) {
+    switch (capReq.kind) {
+      case 'not_required':
+        break;
+      case 'unknown':
+        reasons.push({ kind: 'required_capability_unknown', capability: capReq.capability });
+        break;
+      case 'unavailable':
+        reasons.push({ kind: 'required_capability_unavailable', capability: capReq.capability });
+        break;
+      default: {
+        const _exhaustive: never = capReq;
+        return _exhaustive;
+      }
     }
   }
 

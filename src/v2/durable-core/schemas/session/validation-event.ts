@@ -6,10 +6,7 @@ import {
   MAX_VALIDATION_SUGGESTIONS_BYTES,
 } from '../../constants.js';
 import { utf8BoundedString } from '../lib/utf8-bounded-string.js';
-
-function utf8ByteLength(s: string): number {
-  return new TextEncoder().encode(s).length;
-}
+import { utf8ByteLength } from '../lib/utf8-byte-length.js';
 
 const ValidationIssueV1Schema = utf8BoundedString({
   label: 'validation issue',

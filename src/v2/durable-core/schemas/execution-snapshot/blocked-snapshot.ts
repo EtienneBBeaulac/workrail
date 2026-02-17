@@ -5,6 +5,7 @@ import {
   MAX_BLOCKER_MESSAGE_BYTES,
   MAX_BLOCKER_SUGGESTED_FIX_BYTES,
 } from '../../constants.js';
+import { utf8ByteLength } from '../lib/utf8-byte-length.js';
 
 const DelimiterSafeIdSchema = z
   .string()
@@ -12,10 +13,6 @@ const DelimiterSafeIdSchema = z
   .regex(DELIMITER_SAFE_ID_PATTERN, 'Expected delimiter-safe identifier: [a-z0-9_-]+');
 
 const CapabilityV2Schema = z.enum(['delegation', 'web_browsing']);
-
-function utf8ByteLength(s: string): number {
-  return new TextEncoder().encode(s).length;
-}
 
 const BlockerCodeSchema = z.enum([
   'USER_ONLY_DEPENDENCY',

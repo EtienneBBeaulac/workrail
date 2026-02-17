@@ -1,31 +1,23 @@
 import { z } from 'zod';
 import { JsonValueSchema } from '../../canonical/json-zod.js';
-import { asSha256Digest, asSnapshotRef, asWorkflowHash } from '../../ids/index.js';
+import { asSha256Digest, asWorkflowHash } from '../../ids/index.js';
 import { AutonomyV2Schema, RiskPolicyV2Schema } from './preferences.js';
 import {
-  MAX_BLOCKERS,
-  MAX_BLOCKER_MESSAGE_BYTES,
-  MAX_BLOCKER_SUGGESTED_FIX_BYTES,
   MAX_DECISION_TRACE_ENTRIES,
   MAX_DECISION_TRACE_ENTRY_SUMMARY_BYTES,
   MAX_DECISION_TRACE_TOTAL_BYTES,
   MAX_OBSERVATION_SHORT_STRING_LENGTH,
-  MAX_OUTPUT_NOTES_MARKDOWN_BYTES,
   SHA256_DIGEST_PATTERN,
-  DELIMITER_SAFE_ID_PATTERN,
 } from '../../constants.js';
 import { DecisionTraceRefsV1Schema } from '../lib/decision-trace-ref.js';
 import { DedupeKeyV1Schema } from '../lib/dedupe-key.js';
 import { utf8BoundedString } from '../lib/utf8-bounded-string.js';
+import { utf8ByteLength } from '../lib/utf8-byte-length.js';
 import { ValidationPerformedDataV1Schema } from './validation-event.js';
-
-/**
- * Helper to measure UTF-8 byte length (not code units).
- * Uses TextEncoder for runtime neutrality.
- */
-function utf8ByteLength(s: string): number {
-  return new TextEncoder().encode(s).length;
-}
+import { BlockerReportV1Schema } from './blockers.js';
+import { NodeOutputAppendedDataV1Schema } from './outputs.js';
+import { GapRecordedDataV1Schema } from './gaps.js';
+import { NodeCreatedDataV1Schema, EdgeCreatedDataV1Schema } from './dag-topology.js';
 
 const sha256DigestSchema = z
   .string()
@@ -35,10 +27,6 @@ const sha256DigestSchema = z
 const workflowHashSchema = sha256DigestSchema
   .transform((v) => asWorkflowHash(asSha256Digest(v)))
   .describe('WorkflowHash (sha256 digest of workflow definition)');
-
-const snapshotRefSchema = sha256DigestSchema
-  .transform((v) => asSnapshotRef(asSha256Digest(v)))
-  .describe('SnapshotRef (content-addressed sha256 ref)');
 
 /**
  * Minimal domain event envelope (initial v2 schema, locked)
@@ -75,168 +63,6 @@ const RunStartedDataV1Schema = z.object({
   workflowSourceKind: WorkflowSourceKindSchema,
   workflowSourceRef: z.string().min(1),
 });
-
-const NodeKindSchema = z.enum(['step', 'checkpoint', 'blocked_attempt']);
-
-const NodeCreatedDataV1Schema = z.object({
-  nodeKind: NodeKindSchema,
-  parentNodeId: z.string().min(1).nullable(),
-  workflowHash: workflowHashSchema,
-  snapshotRef: snapshotRefSchema,
-});
-
-const EdgeKindSchema = z.enum(['acked_step', 'checkpoint']);
-const EdgeCauseKindSchema = z.enum(['idempotent_replay', 'intentional_fork', 'non_tip_advance', 'checkpoint_created']);
-const EdgeCauseSchema = z.object({
-  kind: EdgeCauseKindSchema,
-  eventId: z.string().min(1),
-});
-
-const EdgeCreatedDataV1Schema = z
-  .object({
-    edgeKind: EdgeKindSchema,
-    fromNodeId: z.string().min(1),
-    toNodeId: z.string().min(1),
-    cause: EdgeCauseSchema,
-  })
-  .superRefine((v, ctx) => {
-    // Lock: for checkpoint edges, cause.kind must be checkpoint_created.
-    if (v.edgeKind === 'checkpoint' && v.cause.kind !== 'checkpoint_created') {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'edgeKind=checkpoint requires cause.kind=checkpoint_created',
-        path: ['cause', 'kind'],
-      });
-    }
-  });
-
-const OutputChannelSchema = z.enum(['recap', 'artifact']);
-
-const NotesPayloadV1Schema = z.object({
-  payloadKind: z.literal('notes'),
-  // Locked: notesMarkdown is bounded by UTF-8 bytes (not code units).
-  // NOTE: Keep the discriminator branch as a ZodObject (discriminatedUnion requires it),
-  // so we refine the string field instead of wrapping the object in effects.
-  notesMarkdown: z
-    .string()
-    .min(1)
-    .refine((s) => utf8ByteLength(s) <= MAX_OUTPUT_NOTES_MARKDOWN_BYTES, {
-      message: `notesMarkdown exceeds max ${MAX_OUTPUT_NOTES_MARKDOWN_BYTES} UTF-8 bytes`,
-    }),
-});
-
-const ArtifactRefPayloadV1Schema = z.object({
-  payloadKind: z.literal('artifact_ref'),
-  sha256: sha256DigestSchema,
-  contentType: z.string().min(1),
-  byteLength: z.number().int().nonnegative(),
-  // Optional inline artifact content (for small artifacts < 1KB)
-  // Large artifacts omit this and use external blob store
-  content: z.unknown().optional(),
-});
-
-const OutputPayloadV1Schema = z.discriminatedUnion('payloadKind', [NotesPayloadV1Schema, ArtifactRefPayloadV1Schema]);
-
-const NodeOutputAppendedDataV1Schema = z
-  .object({
-    outputId: z.string().min(1),
-    supersedesOutputId: z.string().min(1).optional(),
-    outputChannel: OutputChannelSchema,
-    payload: OutputPayloadV1Schema,
-  })
-  .superRefine((v, ctx) => {
-    // Locked: recap channel must use notes payload.
-    if (v.outputChannel === 'recap' && v.payload.payloadKind !== 'notes') {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'outputChannel=recap requires payloadKind=notes',
-        path: ['payload', 'payloadKind'],
-      });
-    }
-  });
-
-const BlockerCodeSchema = z.enum([
-  'USER_ONLY_DEPENDENCY',
-  'MISSING_REQUIRED_OUTPUT',
-  'INVALID_REQUIRED_OUTPUT',
-  'REQUIRED_CAPABILITY_UNKNOWN',
-  'REQUIRED_CAPABILITY_UNAVAILABLE',
-  'INVARIANT_VIOLATION',
-  'STORAGE_CORRUPTION_DETECTED',
-]);
-
-// Lock: blocker pointer identifiers must be delimiter-safe where applicable
-const BlockerPointerSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('context_key'), key: z.string().min(1).regex(DELIMITER_SAFE_ID_PATTERN, 'context_key must be delimiter-safe: [a-z0-9_-]+') }),
-  z.object({ kind: z.literal('context_budget') }),
-  z.object({ kind: z.literal('output_contract'), contractRef: z.string().min(1) }),
-  z.object({ kind: z.literal('capability'), capability: z.enum(['delegation', 'web_browsing']) }),
-  z.object({ kind: z.literal('workflow_step'), stepId: z.string().min(1).regex(DELIMITER_SAFE_ID_PATTERN, 'stepId must be delimiter-safe: [a-z0-9_-]+') }),
-]);
-
-const BlockerSchema = z.object({
-  code: BlockerCodeSchema,
-  pointer: BlockerPointerSchema,
-  // Locked: message is bounded by UTF-8 bytes (not code units).
-  message: z
-    .string()
-    .min(1)
-    .refine((s) => utf8ByteLength(s) <= MAX_BLOCKER_MESSAGE_BYTES, {
-      message: `Blocker message exceeds ${MAX_BLOCKER_MESSAGE_BYTES} bytes (UTF-8)`,
-    }),
-  // Locked: suggestedFix is bounded by UTF-8 bytes (not code units).
-  suggestedFix: z
-    .string()
-    .min(1)
-    .refine((s) => utf8ByteLength(s) <= MAX_BLOCKER_SUGGESTED_FIX_BYTES, {
-      message: `Blocker suggestedFix exceeds ${MAX_BLOCKER_SUGGESTED_FIX_BYTES} bytes (UTF-8)`,
-    })
-    .optional(),
-});
-
-const BlockerReportV1Schema = z
-  .object({
-    blockers: z.array(BlockerSchema).min(1).max(MAX_BLOCKERS).readonly(),
-  })
-  .superRefine((v, ctx) => {
-    // Deterministic ordering lock: (code, pointer.kind, pointer.* stable fields) ascending.
-    const keyFor = (b: z.infer<typeof BlockerSchema>): string => {
-      const p = b.pointer;
-      let ptrStable: string;
-      switch (p.kind) {
-        case 'context_key':
-          ptrStable = p.key;
-          break;
-        case 'output_contract':
-          ptrStable = p.contractRef;
-          break;
-        case 'capability':
-          ptrStable = p.capability;
-          break;
-        case 'workflow_step':
-          ptrStable = p.stepId;
-          break;
-        case 'context_budget':
-          ptrStable = '';
-          break;
-        default:
-          const _exhaustive: never = p;
-          ptrStable = _exhaustive;
-      }
-      return `${b.code}|${p.kind}|${String(ptrStable)}`;
-    };
-
-    for (let i = 1; i < v.blockers.length; i++) {
-      if (keyFor(v.blockers[i - 1]!) > keyFor(v.blockers[i]!)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'blockers must be deterministically sorted',
-          path: ['blockers'],
-        });
-        break;
-      }
-    }
-  });
 
 /**
  * @deprecated The blocked outcome variant is deprecated as of the blocked nodes architectural upgrade (ADR 008).
@@ -284,49 +110,11 @@ const PreferencesChangedDataV1Schema = z
     }
   });
 
-const UserOnlyDependencyReasonSchema = z.enum([
-  'needs_user_secret_or_token',
-  'needs_user_account_access',
-  'needs_user_artifact',
-  'needs_user_choice',
-  'needs_user_approval',
-  'needs_user_environment_action',
-]);
-
-const GapReasonSchema = z.discriminatedUnion('category', [
-  z.object({ category: z.literal('user_only_dependency'), detail: UserOnlyDependencyReasonSchema }),
-  z.object({ category: z.literal('contract_violation'), detail: z.enum(['missing_required_output', 'invalid_required_output']) }),
-  z.object({
-    category: z.literal('capability_missing'),
-    detail: z.enum(['required_capability_unavailable', 'required_capability_unknown']),
-  }),
-  z.object({ category: z.literal('unexpected'), detail: z.enum(['invariant_violation', 'storage_corruption_detected']) }),
-]);
-
-const GapResolutionSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('unresolved') }),
-  z.object({ kind: z.literal('resolves'), resolvesGapId: z.string().min(1) }),
-]);
-
-const GapEvidenceRefSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('event'), eventId: z.string().min(1) }),
-  z.object({ kind: z.literal('output'), outputId: z.string().min(1) }),
-]);
-
-const GapRecordedDataV1Schema = z.object({
-  gapId: z.string().min(1),
-  severity: z.enum(['info', 'warning', 'critical']),
-  reason: GapReasonSchema,
-  summary: z.string().min(1),
-  resolution: GapResolutionSchema,
-  evidenceRefs: z.array(GapEvidenceRefSchema).optional(),
-});
-
 /**
  * Closed-set domain event kinds (initial v2 union, locked).
  *
  * Slice 2 does not need full per-kind schemas yet, but it does need the kind set
- * to be closed so projections and storage don’t drift under “stringly kinds”.
+ * to be closed so projections and storage don't drift under "stringly kinds".
  */
 export const DomainEventV1Schema = z.discriminatedUnion('kind', [
   DomainEventEnvelopeV1Schema.extend({ kind: z.literal('session_created'), data: z.object({}) }),

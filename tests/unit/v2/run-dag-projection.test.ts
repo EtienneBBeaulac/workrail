@@ -82,7 +82,10 @@ describe('v2 run DAG projection', () => {
     expect(res.isOk()).toBe(true);
     const dag = res._unsafeUnwrap();
     const run = dag.runsById['run_1']!;
-    expect(run.workflowId).toBe('project.example');
+    expect(run.workflow.kind).toBe('with_workflow');
+    if (run.workflow.kind === 'with_workflow') {
+      expect(run.workflow.workflowId).toBe('project.example');
+    }
     expect(Object.keys(run.nodesById).sort()).toEqual(['node_a', 'node_b']);
     expect(run.edges.length).toBe(1);
     expect(run.tipNodeIds).toEqual(['node_b']);
@@ -286,8 +289,16 @@ describe('v2 run DAG projection', () => {
     expect(res.isOk()).toBe(true);
     const dag = res._unsafeUnwrap();
     expect(Object.keys(dag.runsById).sort()).toEqual(['run_1', 'run_2']);
-    expect(dag.runsById['run_1']!.workflowId).toBe('wf_a');
-    expect(dag.runsById['run_2']!.workflowId).toBe('wf_b');
+    const run1 = dag.runsById['run_1']!;
+    const run2 = dag.runsById['run_2']!;
+    expect(run1.workflow.kind).toBe('with_workflow');
+    expect(run2.workflow.kind).toBe('with_workflow');
+    if (run1.workflow.kind === 'with_workflow') {
+      expect(run1.workflow.workflowId).toBe('wf_a');
+    }
+    if (run2.workflow.kind === 'with_workflow') {
+      expect(run2.workflow.workflowId).toBe('wf_b');
+    }
   });
 
   it('preferred tip tie-breaker: node_created eventIndex', () => {

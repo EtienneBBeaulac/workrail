@@ -42,11 +42,9 @@ export interface LoadedSessionTruthV2 {
   readonly events: readonly DomainEventV1[];
 }
 
-export type LoadedValidatedPrefixV2 = {
-  readonly truth: LoadedSessionTruthV2;
-  readonly isComplete: boolean;
-  readonly tailReason: CorruptionReasonV2 | null;
-};
+export type LoadedValidatedPrefixV2 =
+  | { readonly kind: 'complete'; readonly truth: LoadedSessionTruthV2 }
+  | { readonly kind: 'truncated'; readonly truth: LoadedSessionTruthV2; readonly tailReason: CorruptionReasonV2 };
 
 /**
  * Port: Session event log storage (append-only truth substrate).
@@ -99,9 +97,8 @@ export interface SessionEventLogReadonlyStorePortV2 {
    * Slice 2.5 lock: used for inspection/export only; execution requires SessionHealth=healthy.
    * 
    * Returns:
-   * - truth: validated prefix up to corruption point
-   * - isComplete: false if tail corrupted
-   * - tailReason: corruption reason if truncated
+   * - kind='complete': fully validated session
+   * - kind='truncated': validated prefix with corruption reason
    */
   loadValidatedPrefix(sessionId: SessionId): ResultAsync<LoadedValidatedPrefixV2, SessionEventLogStoreError>;
 }
