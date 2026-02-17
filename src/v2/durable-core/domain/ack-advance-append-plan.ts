@@ -69,15 +69,13 @@ export function buildAckAdvanceAppendPlanV1(args: {
     extraEventsToAppend,
   } = args;
 
+  // Derive outcome: explicit outcome takes priority, then infer from toNodeId.
+  // Fail-fast if neither is provided — prevents silently producing a partial append plan.
+  if (!args.outcome && !args.toNodeId) {
+    return err({ code: 'INVARIANT_VIOLATION', message: 'buildAckAdvanceAppendPlanV1 requires outcome or toNodeId' });
+  }
   const outcome: AdvanceOutcomeV1 =
-    args.outcome ??
-    (args.toNodeId
-      ? ({ kind: 'advanced', toNodeId: args.toNodeId } as const)
-      : // If no explicit outcome is provided, we require advanced inputs.
-        // This is fail-fast to avoid silently producing a partial append plan.
-        (() => {
-          throw new Error('INVARIANT: buildAckAdvanceAppendPlanV1 requires toNodeId when outcome is omitted');
-        })());
+    args.outcome ?? ({ kind: 'advanced', toNodeId: args.toNodeId! } as const);
 
   // Locked dedupe key recipe: advance_recorded:<sessionId>:<nodeId>:<attemptId>
   const advanceDedupeKey = `advance_recorded:${sessionId}:${fromNodeId}:${attemptId}`;
@@ -120,19 +118,8 @@ export function buildAckAdvanceAppendPlanV1(args: {
   const nextIndexAfterExtra = nextEventIndex + 1 + extra.length;
 
   if (outcome.kind === 'blocked') {
-    // @deprecated This code path is deprecated (ADR 008). Use blocked_attempt nodes instead.
-    // This path remains for backward compatibility during 2-release buffer period.
-    // Will be removed after v0.10.0.
-    
-    // Runtime warning when deprecated path is used
-    if (typeof console !== 'undefined' && console.warn) {
-      console.warn(
-        '[DEPRECATED] Creating advance_recorded with blocked outcome. ' +
-        'Use blocked_attempt nodes instead (see ADR 008). ' +
-        'This path will be removed in 2 releases. ' +
-        'Set USE_BLOCKED_NODES=true to use the new model.'
-      );
-    }
+    // @deprecated (ADR 008): Use blocked_attempt nodes instead.
+    // Backward-compat path retained for 2-release buffer; remove after v0.10.0.
     
     if (outputsToAppend && outputsToAppend.length > 0) {
       return err({

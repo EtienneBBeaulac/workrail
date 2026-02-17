@@ -54,8 +54,8 @@ const BlockerV1Schema = z.object({
 });
 
 const BlockerReportV1Schema = z.object({
-  blockers: z.array(BlockerV1Schema).min(1).max(MAX_BLOCKERS),
-});
+  blockers: z.array(BlockerV1Schema).min(1).max(MAX_BLOCKERS).readonly(),
+}).readonly();
 
 export const ContractViolationReasonV1Schema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('invalid_required_output'), contractRef: z.string().min(1) }).strict(),

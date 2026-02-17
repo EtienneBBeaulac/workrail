@@ -196,7 +196,7 @@ const BlockerSchema = z.object({
 
 const BlockerReportV1Schema = z
   .object({
-    blockers: z.array(BlockerSchema).min(1).max(MAX_BLOCKERS),
+    blockers: z.array(BlockerSchema).min(1).max(MAX_BLOCKERS).readonly(),
   })
   .superRefine((v, ctx) => {
     // Deterministic ordering lock: (code, pointer.kind, pointer.* stable fields) ascending.

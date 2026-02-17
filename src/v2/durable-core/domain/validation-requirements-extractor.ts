@@ -37,23 +37,18 @@ export function extractValidationRequirements(
  * Recursive extraction helper (handles compositions).
  * Not exported - internal implementation detail.
  */
-function extractRequirementsRecursive(criteria: ValidationCriteria): string[] {
-  const requirements: string[] = [];
-  
+function extractRequirementsRecursive(criteria: ValidationCriteria): readonly string[] {
   // Handle single rule
   if (isValidationRule(criteria)) {
     const formatted = formatRule(criteria);
-    if (formatted) requirements.push(formatted);
-    return requirements;
+    return formatted ? [formatted] : [];
   }
   
   // Handle compositions
   if (isValidationComposition(criteria)) {
     // and: flatten all sub-requirements
     if (criteria.and) {
-      for (const sub of criteria.and) {
-        requirements.push(...extractRequirementsRecursive(sub));
-      }
+      return criteria.and.flatMap(extractRequirementsRecursive);
     }
     
     // or: currently skip (complex to explain in prompt)
@@ -61,7 +56,7 @@ function extractRequirementsRecursive(criteria: ValidationCriteria): string[] {
     // Future: could add support with clear phrasing like "Must NOT contain X"
   }
   
-  return requirements;
+  return [];
 }
 
 /**
@@ -73,17 +68,19 @@ function formatRule(rule: ValidationRule): string | null {
       if (!rule.value) return null;
       return `Must contain: "${rule.value}"`;
       
-    case 'regex':
+    case 'regex': {
       if (!rule.pattern) return null;
       const flags = rule.flags ? ` (flags: ${rule.flags})` : '';
       return `Must match pattern: ${rule.pattern}${flags}`;
+    }
       
-    case 'length':
-      const parts: string[] = [];
-      if (rule.min !== undefined) parts.push(`≥${rule.min} chars`);
-      if (rule.max !== undefined) parts.push(`≤${rule.max} chars`);
-      if (parts.length === 0) return null;
-      return `Length: ${parts.join(', ')}`;
+    case 'length': {
+      const constraints = [
+        rule.min !== undefined ? `≥${rule.min} chars` : null,
+        rule.max !== undefined ? `≤${rule.max} chars` : null,
+      ].filter((c): c is string => c !== null);
+      return constraints.length > 0 ? `Length: ${constraints.join(', ')}` : null;
+    }
       
     case 'schema':
       // Schema validation is complex - skip for now (0% usage empirically)

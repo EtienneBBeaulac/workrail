@@ -47,7 +47,7 @@ export type BlockerV1 = {
 };
 
 export type BlockerReportV1 = {
-  blockers: BlockerV1[];
+  readonly blockers: readonly BlockerV1[];
 };
 
 export type ReasonV1 =
