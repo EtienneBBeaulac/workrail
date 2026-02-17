@@ -1,17 +1,14 @@
 import { err, ok, type Result } from 'neverthrow';
 import type { ValidationResult } from '../../../types/validation.js';
 import type { DomainEventV1 } from '../schemas/session/index.js';
-import { MAX_VALIDATION_ISSUES_BYTES, MAX_VALIDATION_SUGGESTIONS_BYTES } from '../constants.js';
+import { EVENT_KIND, MAX_VALIDATION_ISSUES_BYTES, MAX_VALIDATION_SUGGESTIONS_BYTES } from '../constants.js';
+import { utf8ByteLength } from '../schemas/lib/utf8-byte-length.js';
 
 type EventToAppendV1 = Omit<DomainEventV1, 'eventIndex' | 'sessionId'>;
 
 export type ValidationEventError =
   | { readonly code: 'VALIDATION_EVENT_INVARIANT_VIOLATION'; readonly message: string }
   | { readonly code: 'VALIDATION_EVENT_TEXT_TOO_LARGE'; readonly message: string };
-
-function utf8ByteLength(s: string): number {
-  return new TextEncoder().encode(s).length;
-}
 
 function uniqueSorted(values: readonly string[]): readonly string[] {
   const sorted = [...values].filter((v) => v.length > 0).sort((a, b) => a.localeCompare(b, 'en-US'));
@@ -110,7 +107,7 @@ export function buildValidationPerformedEvent(args: {
   const event: EventToAppendV1 = {
     v: 1,
     eventId: args.minted.eventId,
-    kind: 'validation_performed',
+    kind: EVENT_KIND.VALIDATION_PERFORMED,
     dedupeKey: dedupeKey as unknown as DomainEventV1['dedupeKey'],
     scope: { runId: args.scope.runId, nodeId: args.scope.nodeId },
     data: {

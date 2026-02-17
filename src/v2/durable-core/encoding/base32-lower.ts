@@ -1,6 +1,14 @@
+import type { Result } from 'neverthrow';
+import { ok, err } from 'neverthrow';
+
 const BASE32_LOWER_ALPHABET = 'abcdefghijklmnopqrstuvwxyz234567' as const;
 
 export type Base32LowerNoPad = string & { readonly __brand: 'v2.Base32LowerNoPad' };
+
+export type Base32DecodeError =
+  | { readonly code: 'BASE32_INVALID_CHARACTERS'; readonly message: string; readonly position?: number }
+  | { readonly code: 'BASE32_INVALID_LENGTH'; readonly message: string }
+  | { readonly code: 'BASE32_NON_CANONICAL'; readonly message: string };
 
 /**
  * Encode bytes to RFC 4648 base32 without padding, lowercase alphabet.
@@ -57,9 +65,9 @@ export function encodeBase32LowerNoPad(bytes: Uint8Array): Base32LowerNoPad {
  * - No '=' padding expected
  * - Deterministic
  *
- * @throws Error if input contains invalid characters or non-canonical encoding
+ * Returns Result with error if input contains invalid characters or non-canonical encoding
  */
-export function decodeBase32LowerNoPad(encoded: string): Uint8Array {
+export function decodeBase32LowerNoPad(encoded: string): Result<Uint8Array, Base32DecodeError> {
   const lookup = new Map(
     BASE32_LOWER_ALPHABET.split('').map((c, i) => [c, i] as const),
   );
@@ -69,13 +77,19 @@ export function decodeBase32LowerNoPad(encoded: string): Uint8Array {
   let acc = 0n;
   const totalBits = encoded.length * 5;
 
+  let position = 0;
   for (const char of encoded) {
     const val = lookup.get(char);
     if (val === undefined) {
-      throw new Error(`Invalid base32 character: '${char}'`);
+      return err({
+        code: 'BASE32_INVALID_CHARACTERS',
+        message: `Invalid base32 character: '${char}'`,
+        position,
+      });
     }
 
     acc = (acc << 5n) | BigInt(val);
+    position++;
   }
 
   // Calculate expected byte count and padding bits
@@ -88,7 +102,10 @@ export function decodeBase32LowerNoPad(encoded: string): Uint8Array {
   if (paddingBits > 0) {
     const paddingMask = (1n << BigInt(paddingBits)) - 1n;
     if ((acc & paddingMask) !== 0n) {
-      throw new Error('Non-canonical base32 encoding (padding bits non-zero)');
+      return err({
+        code: 'BASE32_NON_CANONICAL',
+        message: 'Non-canonical base32 encoding (padding bits non-zero)',
+      });
     }
     // Shift right to remove padding
     acc >>= BigInt(paddingBits);
@@ -101,5 +118,5 @@ export function decodeBase32LowerNoPad(encoded: string): Uint8Array {
     acc >>= 8n;
   }
 
-  return bytes;
+  return ok(bytes);
 }

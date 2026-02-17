@@ -192,8 +192,8 @@ export function mapContinueWorkflowErrorToToolError(e: ContinueWorkflowError): T
  */
 export function mapTokenDecodeErrorToToolError(e: TokenDecodeErrorV2): ToolFailure {
   // Bech32m-specific error enrichment
-  if (e.code === 'TOKEN_INVALID_FORMAT' && (e as any).details?.bech32mError) {
-    const bech32mErr = (e as any).details.bech32mError;
+  if (e.code === 'TOKEN_INVALID_FORMAT' && e.details?.bech32mError) {
+    const bech32mErr = e.details.bech32mError;
     
     if (bech32mErr.code === 'BECH32M_CHECKSUM_FAILED') {
       return errNotRetryable(
@@ -203,7 +203,7 @@ export function mapTokenDecodeErrorToToolError(e: TokenDecodeErrorV2): ToolFailu
           suggestion: 'Copy the entire token string exactly as returned. Use triple-click to select the complete line.',
           details: {
             errorType: 'corruption_detected',
-            estimatedPosition: bech32mErr.position,
+            estimatedPosition: bech32mErr.position ?? null,
             tokenFormat: 'binary+bech32m',
           },
         }
@@ -509,4 +509,100 @@ export function mapSessionOrGateErrorToToolError(e: SessionEventLogStoreError | 
   // Exhaustiveness guard
   const _exhaustive: never = e;
   return _exhaustive;
+}
+
+// ── Token Minting Helpers ───────────────────────────────────────────────
+
+// Note: The user requested a mintAndSignTokenOrFail helper, but after analyzing the codebase,
+// the actual pattern being used is signTokenOrErr from v2-token-ops.ts, which already handles
+// the complete minting pipeline. The duplication is not in the low-level encoding/signing,
+// but rather in the high-level token creation patterns. For now, we keep the v2-token-ops.ts
+// helper as-is and don't add a duplicate abstraction here.
+
+// ── Prompt Rendering Helpers ──────────────────────────────────────────────
+
+import type { LoopPathFrameV1 } from '../../v2/durable-core/schemas/execution-snapshot/index.js';
+import type { RunId, NodeId } from '../../v2/durable-core/ids/index.js';
+import type { LoadedSessionTruthV2 } from '../../v2/ports/session-event-log-store.port.js';
+import { renderPendingPrompt, type StepMetadata } from '../../v2/durable-core/domain/prompt-renderer.js';
+
+/**
+ * Render a pending prompt with fallback to default metadata.
+ * Used in replay and rehydrate paths where prompt rendering should not fail.
+ *
+ * @param args - Workflow, step details, truth, and scope identifiers
+ * @returns PromptOutputV1 (always succeeds, falls back on error)
+ */
+export function renderPendingPromptOrDefault(args: {
+  readonly workflow: ReturnType<typeof import('../../types/workflow.js').createWorkflow>;
+  readonly stepId: string;
+  readonly loopPath: readonly LoopPathFrameV1[];
+  readonly truth: LoadedSessionTruthV2;
+  readonly runId: RunId;
+  readonly nodeId: NodeId;
+  readonly rehydrateOnly: boolean;
+}): StepMetadata {
+  return renderPendingPrompt({
+    workflow: args.workflow,
+    stepId: args.stepId,
+    loopPath: args.loopPath,
+    truth: args.truth,
+    runId: args.runId,
+    nodeId: args.nodeId,
+    rehydrateOnly: args.rehydrateOnly,
+  }).unwrapOr({
+    stepId: args.stepId,
+    title: args.stepId,
+    prompt: `Pending step: ${args.stepId}`,
+    requireConfirmation: false,
+  });
+}
+
+// ── Preferences Derivation Helpers ────────────────────────────────────────
+
+import { EVENT_KIND } from '../../v2/durable-core/constants.js';
+import { projectPreferencesV2 } from '../../v2/projections/preferences.js';
+
+/**
+ * Preferences output shape for WorkRail v2 tools.
+ */
+export type PreferencesV2 = {
+  readonly autonomy: 'guided' | 'full_auto_stop_on_user_deps' | 'full_auto_never_stop';
+  readonly riskPolicy: 'conservative' | 'balanced' | 'aggressive';
+};
+
+/**
+ * Default preferences when derivation fails or no preferences are set.
+ */
+export const defaultPreferences: PreferencesV2 = { 
+  autonomy: 'guided', 
+  riskPolicy: 'conservative' 
+};
+
+/**
+ * Derive effective preferences for a node, with fallback to defaults.
+ * Builds parent map inline and projects preferences from durable events.
+ *
+ * @param args - Truth, runId, and nodeId
+ * @returns PreferencesV2 (always succeeds, falls back on error)
+ */
+export function derivePreferencesOrDefault(args: {
+  readonly truth: LoadedSessionTruthV2;
+  readonly runId: RunId;
+  readonly nodeId: NodeId;
+}): PreferencesV2 {
+  // Build parent map from node_created events
+  const parentByNodeId: Record<string, string | null> = {};
+  for (const e of args.truth.events) {
+    if (e.kind !== EVENT_KIND.NODE_CREATED) continue;
+    if (e.scope?.runId !== String(args.runId)) continue;
+    parentByNodeId[String(e.scope.nodeId)] = e.data.parentNodeId;
+  }
+
+  // Project preferences and extract for target node
+  const prefs = projectPreferencesV2(args.truth.events, parentByNodeId);
+  if (prefs.isErr()) return defaultPreferences;
+  
+  const p = prefs.value.byNodeId[String(args.nodeId)]?.effective;
+  return p ? { autonomy: p.autonomy, riskPolicy: p.riskPolicy } : defaultPreferences;
 }

@@ -138,7 +138,7 @@ export function newAttemptId(idFactory: { readonly mintAttemptId: () => AttemptI
  * Derive a deterministic child attempt ID for the next node.
  * Deterministic so replay can re-mint the same next-node tokens.
  */
-export function attemptIdForNextNode(parentAttemptId: AttemptId, sha256: Sha256PortV2): AttemptId {
+export function attemptIdForNextNode(parentAttemptId: AttemptId, sha256: Sha256PortV2): Result<AttemptId, import('../../v2/durable-core/ids/attempt-id-derivation.js').AttemptIdDerivationError> {
   return deriveChildAttemptId(parentAttemptId, sha256);
 }
 

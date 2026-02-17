@@ -75,17 +75,14 @@ export class ExecutionSessionGateV2 {
         .andThen((pre) => {
           if (pre === null) return okAsync(undefined);
 
-          if (!pre.isComplete) {
+          if (pre.kind === 'truncated') {
             return errAsync({
               code: 'SESSION_NOT_HEALTHY' as const,
               message: 'Session is not healthy (validated prefix indicates corrupt tail)',
               sessionId,
               health: {
                 kind: 'corrupt_tail' as const,
-                reason: pre.tailReason ?? {
-                  code: 'non_contiguous_indices',
-                  message: 'Validated prefix stopped early (corrupt tail)',
-                },
+                reason: pre.tailReason,
               },
             });
           }

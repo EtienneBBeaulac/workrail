@@ -1,13 +1,11 @@
 import type { Result } from 'neverthrow';
 import { err, ok } from 'neverthrow';
 import type { DomainEventV1 } from '../durable-core/schemas/session/index.js';
+import { AUTONOMY_MODE, EVENT_KIND } from '../durable-core/constants.js';
 import type { AutonomyV2, RiskPolicyV2 } from '../durable-core/schemas/session/preferences.js';
 import { projectRunDagV2 } from './run-dag.js';
 import { projectGapsV2 } from './gaps.js';
-
-export type ProjectionError =
-  | { readonly code: 'PROJECTION_INVARIANT_VIOLATION'; readonly message: string }
-  | { readonly code: 'PROJECTION_CORRUPTION_DETECTED'; readonly message: string };
+import type { ProjectionError } from './projection-error.js';
 
 export interface PreferencesSnapshotV2 {
   readonly autonomy: AutonomyV2;
@@ -43,9 +41,13 @@ export function projectRunStatusSignalsV2(events: readonly DomainEventV1[]): Res
   const gaps = gapsRes.value;
 
   // Latest effective preferences per nodeId ("effective snapshot after applying delta").
+  // NOTE: This intentionally re-derives preferences inline for run-level signals instead of
+  // using projectPreferencesV2. This simplified derivation is sufficient for run-level status,
+  // but component-level preference queries should use projectPreferencesV2 directly, which
+  // requires building parentByNodeId from the DAG for full context-aware preference resolution.
   const prefsByNodeId: Record<string, PreferencesSnapshotV2> = {};
   for (const e of events) {
-    if (e.kind !== 'preferences_changed') continue;
+    if (e.kind !== EVENT_KIND.PREFERENCES_CHANGED) continue;
     prefsByNodeId[e.scope.nodeId] = e.data.effective;
   }
 
@@ -73,7 +75,7 @@ export function projectRunStatusSignalsV2(events: readonly DomainEventV1[]): Res
     const tipNodeKind = tip ? run.nodesById[tip]?.nodeKind : undefined;
     const blockedByTopology = tipNodeKind === 'blocked_attempt';
 
-    const isBlocked = prefs.autonomy !== 'full_auto_never_stop' && (blockedByTopology || hasBlockingCategoryGap);
+    const isBlocked = prefs.autonomy !== AUTONOMY_MODE.FULL_AUTO_NEVER_STOP && (blockedByTopology || hasBlockingCategoryGap);
 
     byRunId[runId] = {
       runId,

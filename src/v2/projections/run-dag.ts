@@ -1,6 +1,7 @@
 import type { Result } from 'neverthrow';
 import { err, ok } from 'neverthrow';
 import type { DomainEventV1 } from '../durable-core/schemas/session/index.js';
+import { EVENT_KIND } from '../durable-core/constants.js';
 
 /**
  * Safely extract nodeId from an event's scope (if present).
@@ -61,9 +62,7 @@ export type NodeKindV2 = 'step' | 'checkpoint' | 'blocked_attempt';
  */
 export type EdgeKindV2 = 'acked_step' | 'checkpoint';
 
-export type ProjectionError =
-  | { readonly code: 'PROJECTION_INVARIANT_VIOLATION'; readonly message: string }
-  | { readonly code: 'PROJECTION_CORRUPTION_DETECTED'; readonly message: string };
+import type { ProjectionError } from './projection-error.js';
 
 export interface RunDagNodeV2 {
   readonly nodeId: string;
@@ -82,10 +81,13 @@ export interface RunDagEdgeV2 {
   readonly createdAtEventIndex: number;
 }
 
+export type WorkflowIdentity =
+  | { readonly kind: 'no_workflow' }
+  | { readonly kind: 'with_workflow'; readonly workflowId: string; readonly workflowHash: string };
+
 export interface RunDagRunV2 {
   readonly runId: string;
-  readonly workflowId: string | null;
-  readonly workflowHash: string | null;
+  readonly workflow: WorkflowIdentity;
   readonly nodesById: Readonly<Record<string, RunDagNodeV2>>;
   readonly edges: readonly RunDagEdgeV2[];
   readonly tipNodeIds: readonly string[];
@@ -94,6 +96,159 @@ export interface RunDagRunV2 {
 
 export interface RunDagProjectionV2 {
   readonly runsById: Readonly<Record<string, RunDagRunV2>>;
+}
+
+/**
+ * Precompute last activity timestamp (eventIndex) for each node in the DAG.
+ *
+ * Algorithm:
+ * 1. Initialize with node creation timestamps
+ * 2. Update with edge creation events (touches both fromNode and toNode)
+ * 3. Update with any event that has nodeId in scope
+ *
+ * @param run - The run containing nodes to compute activity for
+ * @param events - All events in the session
+ * @returns Map from nodeId to max eventIndex touching that node
+ */
+function computeLastActivityByNodeId(
+  run: { readonly nodesById: Record<string, RunDagNodeV2> },
+  events: readonly DomainEventV1[]
+): Record<string, number> {
+  const lastActivityByNodeId: Record<string, number> = {};
+  
+  // Initialize with node creation timestamps
+  for (const n of Object.values(run.nodesById)) {
+    lastActivityByNodeId[n.nodeId] = n.createdAtEventIndex;
+  }
+
+  // Update with events touching nodes
+  for (const e of events) {
+    if (e.kind === EVENT_KIND.EDGE_CREATED) {
+      const activity = Math.max(
+        lastActivityByNodeId[e.data.fromNodeId] ?? -1,
+        lastActivityByNodeId[e.data.toNodeId] ?? -1,
+        e.eventIndex
+      );
+      lastActivityByNodeId[e.data.fromNodeId] = activity;
+      lastActivityByNodeId[e.data.toNodeId] = activity;
+      continue;
+    }
+    const nodeId = extractNodeIdFromEvent(e);
+    if (nodeId && nodeId in run.nodesById) {
+      lastActivityByNodeId[nodeId] = Math.max(lastActivityByNodeId[nodeId] ?? -1, e.eventIndex);
+    }
+  }
+
+  return lastActivityByNodeId;
+}
+
+/**
+ * Select the preferred tip from multiple tips using a 4-phase algorithm.
+ *
+ * Locked algorithm phases:
+ * 1. **Max activity to root**: Choose tip(s) with highest ancestor activity
+ * 2. **Tie-breaker: creation eventIndex**: Among tied tips, prefer latest created
+ * 3. **Tie-breaker: lexicographic nodeId**: Among still-tied tips, prefer smallest nodeId
+ *
+ * The activity-to-root is computed with caching to ensure O(T*D) complexity
+ * where T = tip count, D = DAG depth.
+ *
+ * @param tips - Array of tip nodeIds (nodes with no outgoing edges)
+ * @param nodesById - Map of all nodes in the run
+ * @param lastActivityByNodeId - Precomputed activity timestamps per node
+ * @returns The nodeId of the preferred tip
+ */
+function selectPreferredTip(
+  tips: readonly string[],
+  nodesById: Record<string, RunDagNodeV2>,
+  lastActivityByNodeId: Record<string, number>
+): string {
+  // Build parent lookup for traversal
+  const parentById: Record<string, string | null> = {};
+  for (const n of Object.values(nodesById)) {
+    parentById[n.nodeId] = n.parentNodeId;
+  }
+
+  // Cache for max activity from node to root
+  const maxActivityToRootCache: Record<string, number> = {};
+
+  const maxActivityToRoot = (nodeId: string): number => {
+    if (nodeId in maxActivityToRootCache) {
+      return maxActivityToRootCache[nodeId]!;
+    }
+
+    let max = lastActivityByNodeId[nodeId] ?? -1;
+    const parentId = parentById[nodeId];
+    if (parentId) {
+      max = Math.max(max, maxActivityToRoot(parentId));
+    }
+
+    maxActivityToRootCache[nodeId] = max;
+    return max;
+  };
+
+  // Phase 1: Find tip(s) with max activity
+  let bestTip = tips[0]!;
+  let bestActivity = maxActivityToRoot(bestTip);
+
+  for (let i = 1; i < tips.length; i++) {
+    const tip = tips[i]!;
+    const activity = maxActivityToRoot(tip);
+    if (activity > bestActivity) {
+      bestTip = tip;
+      bestActivity = activity;
+    } else if (activity === bestActivity) {
+      // Phase 2: Tie-breaker by node creation eventIndex
+      const bestCreated = nodesById[bestTip]!.createdAtEventIndex;
+      const tipCreated = nodesById[tip]!.createdAtEventIndex;
+      if (tipCreated > bestCreated) {
+        bestTip = tip;
+      } else if (tipCreated === bestCreated) {
+        // Phase 3: Tie-breaker by lexicographic nodeId
+        if (tip < bestTip) {
+          bestTip = tip;
+        }
+      }
+    }
+  }
+
+  return bestTip;
+}
+
+/**
+ * Derive tip nodes and select the preferred tip for a run.
+ *
+ * A "tip" is a node with no outgoing edges (a leaf in the DAG).
+ * The "preferred tip" is the single tip chosen by the selection algorithm.
+ *
+ * @param run - Mutable run to derive tips for
+ * @param events - All events in the session
+ * @returns Object with tipNodeIds array and preferredTipNodeId (or null if no tips)
+ */
+function deriveTipsAndPreferredTip(
+  run: {
+    readonly nodesById: Record<string, RunDagNodeV2>;
+    readonly edges: readonly RunDagEdgeV2[];
+  },
+  events: readonly DomainEventV1[]
+): { tipNodeIds: string[]; preferredTipNodeId: string | null } {
+  // Find all tips: nodes with no outgoing edges
+  const hasOutgoing = new Set(run.edges.map((e) => e.fromNodeId));
+  const tips = Object.keys(run.nodesById).filter((id) => !hasOutgoing.has(id)).sort();
+
+  if (tips.length === 0) {
+    return { tipNodeIds: [], preferredTipNodeId: null };
+  }
+
+  if (tips.length === 1) {
+    return { tipNodeIds: tips, preferredTipNodeId: tips[0]! };
+  }
+
+  // Multiple tips: use selection algorithm
+  const lastActivity = computeLastActivityByNodeId(run, events);
+  const preferred = selectPreferredTip(tips, run.nodesById, lastActivity);
+
+  return { tipNodeIds: tips, preferredTipNodeId: preferred };
 }
 
 /**
@@ -126,6 +281,13 @@ export function projectRunDagV2(events: readonly DomainEventV1[]): Result<RunDag
     preferredTipNodeId: string | null;
   };
 
+  const toWorkflowIdentity = (run: MutableRun): WorkflowIdentity => {
+    if (run.workflowId !== null && run.workflowHash !== null) {
+      return { kind: 'with_workflow', workflowId: run.workflowId, workflowHash: run.workflowHash };
+    }
+    return { kind: 'no_workflow' };
+  };
+
   const runs: Record<string, MutableRun> = {};
 
   const ensureRun = (runId: string): MutableRun => {
@@ -146,7 +308,7 @@ export function projectRunDagV2(events: readonly DomainEventV1[]): Result<RunDag
 
   for (const e of events) {
     switch (e.kind) {
-      case 'run_started': {
+      case EVENT_KIND.RUN_STARTED: {
         const runId = e.scope.runId;
         const run = ensureRun(runId);
         // Idempotent-ish: first wins, later must match or it's corruption.
@@ -160,7 +322,7 @@ export function projectRunDagV2(events: readonly DomainEventV1[]): Result<RunDag
         run.workflowHash = e.data.workflowHash;
         break;
       }
-      case 'node_created': {
+      case EVENT_KIND.NODE_CREATED: {
         const runId = e.scope.runId;
         const nodeId = e.scope.nodeId;
         const run = ensureRun(runId);
@@ -195,7 +357,7 @@ export function projectRunDagV2(events: readonly DomainEventV1[]): Result<RunDag
         }
         break;
       }
-      case 'edge_created': {
+      case EVENT_KIND.EDGE_CREATED: {
         const runId = e.scope.runId;
         const run = ensureRun(runId);
 
@@ -239,103 +401,16 @@ export function projectRunDagV2(events: readonly DomainEventV1[]): Result<RunDag
   // Derive tips + preferred tip deterministically.
   for (const runId of Object.keys(runs)) {
     const run = runs[runId]!;
-    const hasOutgoing = new Set(run.edges.map((e) => e.fromNodeId));
-    const tips = Object.keys(run.nodesById).filter((id) => !hasOutgoing.has(id)).sort();
-    run.tipNodeIds = tips;
-
-    if (tips.length === 0) {
-      run.preferredTipNodeId = null;
-      continue;
-    }
-
-    // Preferred tip policy (locked): choose leaf with highest "last activity" across its reachable history.
-    // Reachable history is approximated as the node's ancestor chain (including itself).
-    // lastActivity is max EventIndex among events touching any ancestor nodeId, plus edges that touch those nodes.
-    //
-    // OPTIMIZATION (O(n) guarantee): We precompute lastActivityByNodeId in a single pass,
-    // then compute max-to-root with caching. This is O(E + T*D) instead of O(T*E).
-    // - E = event count
-    // - T = tip count
-    // - D = DAG depth (typically small)
-    //
-    // Algorithm:
-    // 1. First pass: build lastActivityByNodeId[nodeId] = max eventIndex for events touching that node
-    // 2. Second phase: for each tip, walk to root computing max(node activities) with caching
-
-    // Step 1: Precompute lastActivityByNodeId in one pass over events.
-    const lastActivityByNodeId: Record<string, number> = {};
-    for (const n of Object.values(run.nodesById)) {
-      lastActivityByNodeId[n.nodeId] = n.createdAtEventIndex;
-    }
-
-    for (const e of events) {
-      if (e.kind === 'edge_created') {
-        const activity = Math.max(
-          lastActivityByNodeId[e.data.fromNodeId] ?? -1,
-          lastActivityByNodeId[e.data.toNodeId] ?? -1,
-          e.eventIndex
-        );
-        lastActivityByNodeId[e.data.fromNodeId] = activity;
-        lastActivityByNodeId[e.data.toNodeId] = activity;
-        continue;
-      }
-      const nodeId = extractNodeIdFromEvent(e);
-      if (nodeId && nodeId in run.nodesById) {
-        lastActivityByNodeId[nodeId] = Math.max(lastActivityByNodeId[nodeId] ?? -1, e.eventIndex);
-      }
-    }
-
-    // Step 2: For each tip, compute max activity to root with caching.
-    const parentById: Record<string, string | null> = {};
-    for (const n of Object.values(run.nodesById)) parentById[n.nodeId] = n.parentNodeId;
-
-    const maxActivityToRootCache: Record<string, number> = {};
-
-    const maxActivityToRoot = (nodeId: string): number => {
-      if (nodeId in maxActivityToRootCache) {
-        return maxActivityToRootCache[nodeId]!;
-      }
-
-      let max = lastActivityByNodeId[nodeId] ?? -1;
-      const parentId = parentById[nodeId];
-      if (parentId) {
-        max = Math.max(max, maxActivityToRoot(parentId));
-      }
-
-      maxActivityToRootCache[nodeId] = max;
-      return max;
-    };
-
-    let bestTip = tips[0]!;
-    let bestActivity = maxActivityToRoot(bestTip);
-
-    for (let i = 1; i < tips.length; i++) {
-      const tip = tips[i]!;
-      const activity = maxActivityToRoot(tip);
-      if (activity > bestActivity) {
-        bestTip = tip;
-        bestActivity = activity;
-      } else if (activity === bestActivity) {
-        // Tie-breakers (locked): node_created index, then lexical nodeId.
-        const bestCreated = run.nodesById[bestTip]!.createdAtEventIndex;
-        const tipCreated = run.nodesById[tip]!.createdAtEventIndex;
-        if (tipCreated > bestCreated) {
-          bestTip = tip;
-        } else if (tipCreated === bestCreated && tip < bestTip) {
-          bestTip = tip;
-        }
-      }
-    }
-
-    run.preferredTipNodeId = bestTip;
+    const derived = deriveTipsAndPreferredTip(run, events);
+    run.tipNodeIds = derived.tipNodeIds;
+    run.preferredTipNodeId = derived.preferredTipNodeId;
   }
 
   const runsById: Record<string, RunDagRunV2> = {};
   for (const [runId, run] of Object.entries(runs)) {
     runsById[runId] = {
       runId,
-      workflowId: run.workflowId,
-      workflowHash: run.workflowHash,
+      workflow: toWorkflowIdentity(run),
       nodesById: run.nodesById,
       edges: run.edges,
       tipNodeIds: run.tipNodeIds,

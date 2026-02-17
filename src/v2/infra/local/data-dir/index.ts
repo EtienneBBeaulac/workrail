@@ -1,6 +1,7 @@
 import * as os from 'os';
 import * as path from 'path';
 import type { DataDirPortV2 } from '../../../ports/data-dir.port.js';
+import type { SessionId, WorkflowHash, SnapshotRef } from '../../../durable-core/ids/index.js';
 
 export class LocalDataDirV2 implements DataDirPortV2 {
   constructor(private readonly env: Record<string, string | undefined>) {}
@@ -25,8 +26,8 @@ export class LocalDataDirV2 implements DataDirPortV2 {
     return path.join(this.root(), 'snapshots');
   }
 
-  snapshotPath(snapshotRef: string): string {
-    return path.join(this.snapshotsDir(), `${this.safeFileSegment(snapshotRef)}.json`);
+  snapshotPath(snapshotRef: SnapshotRef): string {
+    return path.join(this.snapshotsDir(), `${this.safeFileSegment(String(snapshotRef))}.json`);
   }
 
   keysDir(): string {
@@ -41,27 +42,27 @@ export class LocalDataDirV2 implements DataDirPortV2 {
     return path.join(this.root(), 'workflows', 'pinned');
   }
 
-  pinnedWorkflowPath(workflowHash: string): string {
-    return path.join(this.pinnedWorkflowsDir(), `${this.safeFileSegment(workflowHash)}.json`);
+  pinnedWorkflowPath(workflowHash: WorkflowHash): string {
+    return path.join(this.pinnedWorkflowsDir(), `${this.safeFileSegment(String(workflowHash))}.json`);
   }
 
   sessionsDir(): string {
     return path.join(this.root(), 'sessions');
   }
 
-  sessionDir(sessionId: string): string {
-    return path.join(this.sessionsDir(), sessionId);
+  sessionDir(sessionId: SessionId): string {
+    return path.join(this.sessionsDir(), String(sessionId));
   }
 
-  sessionEventsDir(sessionId: string): string {
+  sessionEventsDir(sessionId: SessionId): string {
     return path.join(this.sessionDir(sessionId), 'events');
   }
 
-  sessionManifestPath(sessionId: string): string {
+  sessionManifestPath(sessionId: SessionId): string {
     return path.join(this.sessionDir(sessionId), 'manifest.jsonl');
   }
 
-  sessionLockPath(sessionId: string): string {
+  sessionLockPath(sessionId: SessionId): string {
     return path.join(this.sessionDir(sessionId), '.lock');
   }
 }

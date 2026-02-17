@@ -1,10 +1,7 @@
 import type { AutonomyV2 } from '../schemas/session/preferences.js';
-import { DELIMITER_SAFE_ID_PATTERN, MAX_BLOCKERS, MAX_BLOCKER_MESSAGE_BYTES, MAX_BLOCKER_SUGGESTED_FIX_BYTES } from '../constants.js';
+import { AUTONOMY_MODE, DELIMITER_SAFE_ID_PATTERN, MAX_BLOCKERS, MAX_BLOCKER_MESSAGE_BYTES, MAX_BLOCKER_SUGGESTED_FIX_BYTES } from '../constants.js';
 import { err, ok, type Result } from 'neverthrow';
-
-function utf8ByteLength(s: string): number {
-  return new TextEncoder().encode(s).length;
-}
+import { utf8ByteLength } from '../schemas/lib/utf8-byte-length.js';
 
 export type CapabilityV2 = 'delegation' | 'web_browsing';
 export type GapSeverityV1 = 'info' | 'warning' | 'critical';
@@ -47,7 +44,7 @@ export type BlockerV1 = {
 };
 
 export type BlockerReportV1 = {
-  blockers: BlockerV1[];
+  readonly blockers: readonly BlockerV1[];
 };
 
 export type ReasonV1 =
@@ -80,6 +77,9 @@ function ensureDelimiterSafeId(label: string, value: string): Result<string, Rea
 }
 
 function ensureContractRef(contractRef: string): Result<string, ReasonModelError> {
+  // Boundary validation: reasonToBlocker is a public API that can be called with arbitrary reasons.
+  // While OutputRequirementStatus guarantees non-empty contractRef, this function validates
+  // at its own boundary since it's exported and testable independently.
   if (contractRef.trim().length === 0) {
     return err({ code: 'INVALID_CONTRACT_REF', message: 'contractRef must be non-empty' });
   }
@@ -303,10 +303,6 @@ export function reasonToBlocker(reason: ReasonV1): Result<BlockerV1, ReasonModel
  * used to build blocker reports, but they're attached to blocked snapshots instead.
  */
 export function buildBlockerReport(reasons: readonly ReasonV1[]): Result<BlockerReportV1, ReasonModelError> {
-  if (reasons.length === 0) {
-    return err({ code: 'INVARIANT_VIOLATION', message: 'buildBlockerReport requires at least one reason' });
-  }
-
   const blockers: BlockerV1[] = [];
   for (const reason of reasons) {
     const b = reasonToBlocker(reason);
@@ -339,5 +335,5 @@ export function buildBlockerReport(reasons: readonly ReasonV1[]): Result<Blocker
  */
 export function shouldBlock(autonomy: AutonomyV2, reasons: readonly ReasonV1[]): boolean {
   if (reasons.length === 0) return false;
-  return autonomy !== 'full_auto_never_stop';
+  return autonomy !== AUTONOMY_MODE.FULL_AUTO_NEVER_STOP;
 }
