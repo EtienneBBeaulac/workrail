@@ -3,6 +3,7 @@ import type { JsonValue } from '../canonical/json-types.js';
 import { normalizeOutputsForAppend, type OutputToAppend } from './outputs.js';
 import { err, ok, type Result } from 'neverthrow';
 import type { SnapshotRef, WorkflowHash } from '../ids/index.js';
+import { EVENT_KIND, EDGE_KIND } from '../constants.js';
 
 type AdvanceOutcomeV1 = Extract<DomainEventV1, { kind: 'advance_recorded' }>['data']['outcome'];
 
@@ -85,7 +86,7 @@ export function buildAckAdvanceAppendPlanV1(args: {
     eventId: minted.advanceRecordedEventId,
     eventIndex: nextEventIndex,
     sessionId,
-    kind: 'advance_recorded',
+    kind: EVENT_KIND.ADVANCE_RECORDED,
     dedupeKey: advanceDedupeKey,
     scope: { runId, nodeId: fromNodeId },
     data: {
@@ -166,7 +167,7 @@ export function buildAckAdvanceAppendPlanV1(args: {
       eventId: minted.nodeCreatedEventId,
       eventIndex: nodeCreatedEventIndex,
       sessionId,
-      kind: 'node_created',
+      kind: EVENT_KIND.NODE_CREATED,
       dedupeKey: `node_created:${sessionId}:${runId}:${toNodeId}`,
       scope: { runId, nodeId: toNodeId },
       data: {
@@ -181,11 +182,11 @@ export function buildAckAdvanceAppendPlanV1(args: {
       eventId: minted.edgeCreatedEventId,
       eventIndex: edgeCreatedEventIndex,
       sessionId,
-      kind: 'edge_created',
+      kind: EVENT_KIND.EDGE_CREATED,
       dedupeKey: `edge_created:${sessionId}:${runId}:${fromNodeId}->${toNodeId}:acked_step`,
       scope: { runId },
       data: {
-        edgeKind: 'acked_step',
+        edgeKind: EDGE_KIND.ACKED_STEP,
         fromNodeId,
         toNodeId,
         cause: { kind: causeKind, eventId: minted.advanceRecordedEventId },
@@ -208,7 +209,7 @@ export function buildAckAdvanceAppendPlanV1(args: {
       eventId: outputEventIds[idx]!,
       eventIndex: nextIndexAfterExtra + 2 + idx,
       sessionId,
-      kind: 'node_output_appended' as const,
+      kind: EVENT_KIND.NODE_OUTPUT_APPENDED,
       dedupeKey: `node_output_appended:${sessionId}:${o.outputId}`,
       scope: { runId, nodeId: fromNodeId },
       data: {

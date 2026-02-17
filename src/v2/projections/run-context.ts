@@ -1,6 +1,7 @@
 import type { Result } from 'neverthrow';
 import { err, ok } from 'neverthrow';
 import type { DomainEventV1 } from '../durable-core/schemas/session/index.js';
+import { EVENT_KIND } from '../durable-core/constants.js';
 import type { JsonObject } from '../durable-core/canonical/json-types.js';
 import type { RunId } from '../durable-core/ids/index.js';
 import { asRunId } from '../durable-core/ids/index.js';
@@ -42,7 +43,7 @@ export function projectRunContextV2(events: readonly DomainEventV1[]): Result<Ru
   const byRunId: Record<string, RunContextV2> = {};
 
   for (const e of events) {
-    if (e.kind !== 'context_set') continue;
+    if (e.kind !== EVENT_KIND.CONTEXT_SET) continue;
 
     const runId = e.scope.runId;
     const context = e.data.context;

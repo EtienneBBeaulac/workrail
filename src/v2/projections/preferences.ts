@@ -1,6 +1,7 @@
 import type { Result } from 'neverthrow';
 import { err, ok } from 'neverthrow';
 import type { DomainEventV1 } from '../durable-core/schemas/session/index.js';
+import { EVENT_KIND } from '../durable-core/constants.js';
 import type { AutonomyV2, RiskPolicyV2 } from '../durable-core/schemas/session/preferences.js';
 
 export type ProjectionError =
@@ -46,7 +47,7 @@ export function projectPreferencesV2(
 
   const changesByNodeId: Record<string, PreferencesChangedEventV1[]> = {};
   for (const e of events) {
-    if (e.kind !== 'preferences_changed') continue;
+    if (e.kind !== EVENT_KIND.PREFERENCES_CHANGED) continue;
     const list = changesByNodeId[e.scope.nodeId] ?? [];
     list.push(e);
     changesByNodeId[e.scope.nodeId] = list;

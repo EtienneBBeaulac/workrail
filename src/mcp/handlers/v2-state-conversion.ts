@@ -14,6 +14,7 @@ import type { RunId, NodeId } from '../../v2/durable-core/ids/index.js';
 import type { LoadedSessionTruthV2 } from '../../v2/ports/session-event-log-store.port.js';
 import { projectPreferencesV2 } from '../../v2/projections/preferences.js';
 import { createWorkflow, getStepById } from '../../types/workflow.js';
+import { EVENT_KIND } from '../../v2/durable-core/constants.js';
 
 // ── State Conversion ──────────────────────────────────────────────────
 
@@ -172,7 +173,7 @@ export function derivePreferencesForNode(args: {
 }): PreferencesV2 {
   const parentByNodeId: Record<string, string | null> = {};
   for (const e of args.truth.events) {
-    if (e.kind !== 'node_created') continue;
+    if (e.kind !== EVENT_KIND.NODE_CREATED) continue;
     if (e.scope?.runId !== String(args.runId)) continue;
     parentByNodeId[String(e.scope.nodeId)] = e.data.parentNodeId;
   }

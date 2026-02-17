@@ -58,6 +58,7 @@ import type { InternalError } from './v2-error-mapping.js';
 import { toV1ExecutionState, fromV1ExecutionState } from './v2-state-conversion.js';
 import { collectArtifactsForEvaluation } from './v2-context-budget.js';
 import { withTimeout } from './shared/with-timeout.js';
+import { AUTONOMY_MODE, EVENT_KIND, OUTPUT_CHANNEL } from '../../v2/durable-core/constants.js';
 
 // ── AdvanceMode: the single branching discriminant ────────────────────
 
@@ -341,7 +342,7 @@ function validateAdvanceInputs(args: {
   // Preferences
   const parentByNodeId: Record<string, string | null> = {};
   for (const e of truth.events) {
-    if (e.kind !== 'node_created') continue;
+    if (e.kind !== EVENT_KIND.NODE_CREATED) continue;
     if (e.scope?.runId !== String(runId)) continue;
     parentByNodeId[String(e.scope.nodeId)] = e.data.parentNodeId;
   }
@@ -507,7 +508,7 @@ function buildSuccessOutcome(args: {
       extraEventsToAppend.push({
         v: 1 as const,
         eventId: idFactory.mintEventId(),
-        kind: 'gap_recorded' as const,
+        kind: EVENT_KIND.GAP_RECORDED,
         dedupeKey: `gap_recorded:${String(sessionId)}:${gapId}`,
         scope: { runId: String(runId), nodeId: String(currentNodeId) },
         data: { gapId, severity: g.severity, reason: g.reason, summary: g.summary, resolution: { kind: 'unresolved' as const } },
@@ -527,7 +528,7 @@ function buildSuccessOutcome(args: {
       extraEventsToAppend.push(partialEvent({
         v: 1 as const,
         eventId: idFactory.mintEventId(),
-        kind: 'gap_recorded' as const,
+        kind: EVENT_KIND.GAP_RECORDED,
         dedupeKey: `gap_recorded:${String(sessionId)}:${gapId}`,
         scope: { runId: String(runId), nodeId: String(currentNodeId) },
         data: { gapId, severity: 'warning', reason: w.kind, summary: w.summary, resolution: { kind: 'unresolved' as const } },
@@ -540,7 +541,7 @@ function buildSuccessOutcome(args: {
     extraEventsToAppend.push(partialEvent({
       v: 1 as const,
       eventId: idFactory.mintEventId(),
-      kind: 'context_set' as const,
+      kind: EVENT_KIND.CONTEXT_SET,
       // Intentionally unique per emission — context_set events should never deduplicate
       dedupeKey: `context_set:${String(sessionId)}:${String(runId)}:${idFactory.mintEventId()}`,
       scope: { runId: String(runId) },
@@ -584,7 +585,7 @@ function buildSuccessOutcome(args: {
       extraEventsToAppend.push(partialEvent({
         v: 1 as const,
         eventId: idFactory.mintEventId(),
-        kind: 'decision_trace_appended' as const,
+        kind: EVENT_KIND.DECISION_TRACE_APPENDED,
         dedupeKey: `decision_trace_appended:${String(sessionId)}:${traceId}`,
         scope: { runId: String(runId), nodeId: String(currentNodeId) },
         data: traceDataRes.value,
@@ -650,7 +651,7 @@ function buildAndAppendPlan(args: {
 
   const hasChildren = truth.events.some(
     (e): e is Extract<DomainEventV1, { kind: 'edge_created' }> =>
-      e.kind === 'edge_created' && e.data.fromNodeId === String(currentNodeId)
+      e.kind === EVENT_KIND.EDGE_CREATED && e.data.fromNodeId === String(currentNodeId)
   );
   const causeKind: 'non_tip_advance' | 'intentional_fork' = hasChildren ? 'non_tip_advance' : 'intentional_fork';
 
@@ -692,7 +693,7 @@ function buildNotesOutputs(
   if (!allowNotesAppend || !inputOutput?.notesMarkdown) return [];
   return [{
     outputId: String(asOutputId(`out_recap_${String(attemptId)}`)),
-    outputChannel: 'recap' as const,
+    outputChannel: OUTPUT_CHANNEL.RECAP,
     payload: {
       payloadKind: 'notes' as const,
       notesMarkdown: toNotesMarkdownV1(inputOutput.notesMarkdown),
@@ -719,7 +720,7 @@ function buildArtifactOutputs(
     const canonicalBytes = canonicalBytesRes.value;
     outputs.push({
       outputId: asOutputId(`out_artifact_${String(attemptId)}_${idx}`),
-      outputChannel: 'artifact' as const,
+      outputChannel: OUTPUT_CHANNEL.ARTIFACT,
       payload: {
         payloadKind: 'artifact_ref' as const,
         sha256: sha256.sha256(canonicalBytes),

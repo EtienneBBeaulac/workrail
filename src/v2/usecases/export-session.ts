@@ -8,6 +8,7 @@ import type { ExportBundleV1 } from '../durable-core/schemas/export-bundle/index
 import type { ExecutionSnapshotFileV1 } from '../durable-core/schemas/execution-snapshot/index.js';
 import type { WorkflowHash } from '../durable-core/ids/index.js';
 import { buildExportBundle, type BundleBuilderError } from '../durable-core/domain/bundle-builder.js';
+import { EVENT_KIND } from '../durable-core/constants.js';
 
 // =============================================================================
 // Types
@@ -67,11 +68,11 @@ export function exportSession(
 
       for (const event of truth.events) {
         const evt = event as unknown as { kind: string; data: Record<string, unknown> };
-        if (evt.kind === 'node_created') {
+        if (evt.kind === EVENT_KIND.NODE_CREATED) {
           if (typeof evt.data.snapshotRef === 'string') snapshotRefs.add(evt.data.snapshotRef);
           if (typeof evt.data.workflowHash === 'string') workflowHashes.add(evt.data.workflowHash);
         }
-        if (evt.kind === 'run_started' && typeof evt.data.workflowHash === 'string') {
+        if (evt.kind === EVENT_KIND.RUN_STARTED && typeof evt.data.workflowHash === 'string') {
           workflowHashes.add(evt.data.workflowHash);
         }
       }

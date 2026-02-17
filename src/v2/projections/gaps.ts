@@ -1,6 +1,7 @@
 import type { Result } from 'neverthrow';
 import { err, ok } from 'neverthrow';
 import type { DomainEventV1 } from '../durable-core/schemas/session/index.js';
+import { EVENT_KIND } from '../durable-core/constants.js';
 
 export type ProjectionError =
   | { readonly code: 'PROJECTION_INVARIANT_VIOLATION'; readonly message: string }
@@ -43,7 +44,7 @@ export function projectGapsV2(events: readonly DomainEventV1[]): Result<GapsProj
   const resolved = new Set<string>();
 
   for (const e of events) {
-    if (e.kind !== 'gap_recorded') continue;
+    if (e.kind !== EVENT_KIND.GAP_RECORDED) continue;
 
     const gap: GapV2 = {
       gapId: e.data.gapId,

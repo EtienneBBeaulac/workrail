@@ -1,6 +1,7 @@
 import type { Result } from 'neverthrow';
 import { err, ok } from 'neverthrow';
 import type { DomainEventV1 } from '../durable-core/schemas/session/index.js';
+import { EVENT_KIND, OUTPUT_CHANNEL } from '../durable-core/constants.js';
 
 export type ProjectionError =
   | { readonly code: 'PROJECTION_INVARIANT_VIOLATION'; readonly message: string }
@@ -72,7 +73,7 @@ export function projectNodeOutputsV2(events: readonly DomainEventV1[]): Result<N
   }
 
   for (const e of events) {
-    if (e.kind !== 'node_output_appended') continue;
+    if (e.kind !== EVENT_KIND.NODE_OUTPUT_APPENDED) continue;
 
     const nodeId = e.scope.nodeId;
     const out: NodeOutputV2 = {
@@ -99,7 +100,7 @@ export function projectNodeOutputsV2(events: readonly DomainEventV1[]): Result<N
       artifact: [],
     };
 
-    for (const channel of ['recap', 'artifact'] as const) {
+    for (const channel of [OUTPUT_CHANNEL.RECAP, OUTPUT_CHANNEL.ARTIFACT] as const) {
       const history = historyByChannel[channel];
 
       // Build supersession graph: outputId → what supersedes it
@@ -146,7 +147,7 @@ export function projectNodeOutputsV2(events: readonly DomainEventV1[]): Result<N
       const current = history.filter((o) => !transitivelySuperseded.has(o.outputId));
 
       // Additional invariant: recap channel should have at most one current output.
-      if (channel === 'recap' && current.length > 1) {
+      if (channel === OUTPUT_CHANNEL.RECAP && current.length > 1) {
         return err({
           code: 'PROJECTION_CORRUPTION_DETECTED',
           message: `Multiple current recap outputs detected for nodeId=${nodeId}`,

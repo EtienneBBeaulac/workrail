@@ -1,6 +1,7 @@
 import type { Result } from 'neverthrow';
 import { err, ok } from 'neverthrow';
 import type { DomainEventV1 } from '../durable-core/schemas/session/index.js';
+import { EVENT_KIND, EDGE_KIND } from '../durable-core/constants.js';
 
 /**
  * Safely extract nodeId from an event's scope (if present).
@@ -146,7 +147,7 @@ export function projectRunDagV2(events: readonly DomainEventV1[]): Result<RunDag
 
   for (const e of events) {
     switch (e.kind) {
-      case 'run_started': {
+      case EVENT_KIND.RUN_STARTED: {
         const runId = e.scope.runId;
         const run = ensureRun(runId);
         // Idempotent-ish: first wins, later must match or it's corruption.
@@ -160,7 +161,7 @@ export function projectRunDagV2(events: readonly DomainEventV1[]): Result<RunDag
         run.workflowHash = e.data.workflowHash;
         break;
       }
-      case 'node_created': {
+      case EVENT_KIND.NODE_CREATED: {
         const runId = e.scope.runId;
         const nodeId = e.scope.nodeId;
         const run = ensureRun(runId);
@@ -195,7 +196,7 @@ export function projectRunDagV2(events: readonly DomainEventV1[]): Result<RunDag
         }
         break;
       }
-      case 'edge_created': {
+      case EVENT_KIND.EDGE_CREATED: {
         const runId = e.scope.runId;
         const run = ensureRun(runId);
 
@@ -269,7 +270,7 @@ export function projectRunDagV2(events: readonly DomainEventV1[]): Result<RunDag
     }
 
     for (const e of events) {
-      if (e.kind === 'edge_created') {
+      if (e.kind === EVENT_KIND.EDGE_CREATED) {
         const activity = Math.max(
           lastActivityByNodeId[e.data.fromNodeId] ?? -1,
           lastActivityByNodeId[e.data.toNodeId] ?? -1,

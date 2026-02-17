@@ -223,3 +223,145 @@ export const SHA256_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
  * Forbidden characters: @, /, ::
  */
 export const DELIMITER_SAFE_ID_PATTERN = /^[a-z0-9_-]+$/;
+
+// =============================================================================
+// Domain Event Kinds (Section 1: Durable truth substrate)
+// =============================================================================
+
+/**
+ * Closed set of v2 domain event kinds.
+ *
+ * Why a const object: eliminates scattered string literals across projections,
+ * handlers, and builders. Typos become compile errors instead of silent bugs.
+ *
+ * Lock: Adding a new event kind requires updating the DomainEventV1Schema union.
+ */
+export const EVENT_KIND = {
+  SESSION_CREATED: 'session_created',
+  OBSERVATION_RECORDED: 'observation_recorded',
+  RUN_STARTED: 'run_started',
+  NODE_CREATED: 'node_created',
+  EDGE_CREATED: 'edge_created',
+  ADVANCE_RECORDED: 'advance_recorded',
+  VALIDATION_PERFORMED: 'validation_performed',
+  NODE_OUTPUT_APPENDED: 'node_output_appended',
+  PREFERENCES_CHANGED: 'preferences_changed',
+  CAPABILITY_OBSERVED: 'capability_observed',
+  GAP_RECORDED: 'gap_recorded',
+  CONTEXT_SET: 'context_set',
+  DIVERGENCE_RECORDED: 'divergence_recorded',
+  DECISION_TRACE_APPENDED: 'decision_trace_appended',
+} as const;
+
+export type EventKindV1 = typeof EVENT_KIND[keyof typeof EVENT_KIND];
+
+// =============================================================================
+// Output Channels (Section 1.2: node_output_appended)
+// =============================================================================
+
+/**
+ * Closed set of output channels for node_output_appended events.
+ *
+ * Why: prevents typos in channel filtering and ensures exhaustive handling.
+ */
+export const OUTPUT_CHANNEL = {
+  RECAP: 'recap',
+  ARTIFACT: 'artifact',
+} as const;
+
+export type OutputChannelV1 = typeof OUTPUT_CHANNEL[keyof typeof OUTPUT_CHANNEL];
+
+// =============================================================================
+// Edge Kinds (Section 1.2: edge_created)
+// =============================================================================
+
+/**
+ * Closed set of edge kinds for edge_created events.
+ */
+export const EDGE_KIND = {
+  ACKED_STEP: 'acked_step',
+} as const;
+
+export type EdgeKindV1 = typeof EDGE_KIND[keyof typeof EDGE_KIND];
+
+// =============================================================================
+// Engine States (Execution snapshot)
+// =============================================================================
+
+/**
+ * Closed set of engine states in execution snapshots.
+ */
+export const ENGINE_STATE = {
+  RUNNING: 'running',
+  BLOCKED: 'blocked',
+  COMPLETE: 'complete',
+} as const;
+
+export type EngineStateKindV1 = typeof ENGINE_STATE[keyof typeof ENGINE_STATE];
+
+// =============================================================================
+// Advance Outcome Kinds (Section 1.2: advance_recorded)
+// =============================================================================
+
+/**
+ * Closed set of advance outcome kinds.
+ */
+export const ADVANCE_OUTCOME = {
+  ADVANCED: 'advanced',
+  BLOCKED: 'blocked',
+} as const;
+
+// =============================================================================
+// Edge Cause Kinds (Section 1.2: edge_created)
+// =============================================================================
+
+/**
+ * Closed set of edge cause kinds (why an edge was created).
+ */
+export const EDGE_CAUSE = {
+  INTENTIONAL_FORK: 'intentional_fork',
+  NON_TIP_ADVANCE: 'non_tip_advance',
+} as const;
+
+export type EdgeCauseKindV1 = typeof EDGE_CAUSE[keyof typeof EDGE_CAUSE];
+
+// =============================================================================
+// Manifest Record Kinds (Section 1: Manifest control stream)
+// =============================================================================
+
+/**
+ * Closed set of manifest record kinds.
+ */
+export const MANIFEST_KIND = {
+  SEGMENT_OPENED: 'segment_opened',
+  SEGMENT_CLOSED: 'segment_closed',
+  SNAPSHOT_PINNED: 'snapshot_pinned',
+} as const;
+
+// =============================================================================
+// Advance Intent (Section 1.2: advance_recorded)
+// =============================================================================
+
+/**
+ * Closed set of advance intents.
+ */
+export const ADVANCE_INTENT = {
+  ACK_PENDING: 'ack_pending',
+} as const;
+
+// =============================================================================
+// Autonomy Modes (Section 1.3: preferences)
+// =============================================================================
+
+/**
+ * Closed set of agent autonomy modes.
+ *
+ * Why: prevents typos in mode comparison and ensures exhaustive handling.
+ */
+export const AUTONOMY_MODE = {
+  GUIDED: 'guided',
+  FULL_AUTO_NEVER_STOP: 'full_auto_never_stop',
+  FULL_AUTO_STOP_ON_USER_DEPS: 'full_auto_stop_on_user_deps',
+} as const;
+
+export type AutonomyModeV1 = typeof AUTONOMY_MODE[keyof typeof AUTONOMY_MODE];

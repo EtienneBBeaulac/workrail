@@ -53,6 +53,7 @@ import { type InternalError, isInternalError } from './v2-error-mapping.js';
 import { mapWorkflowSourceKind, defaultPreferences, derivePreferencesForNode, deriveNextIntent } from './v2-state-conversion.js';
 import { checkContextBudget } from './v2-context-budget.js';
 import { executeAdvanceCore } from './v2-advance-core.js';
+import { EVENT_KIND, OUTPUT_CHANNEL } from '../../v2/durable-core/constants.js';
 
 /**
  * v2 Slice 3: token orchestration (`start_workflow` / `continue_workflow`).
@@ -145,7 +146,7 @@ function replayFromRecordedAdvance(args: {
     const blockers = recordedEvent.data.outcome.blockers;
     const snapNode = truth.events.find(
       (e): e is Extract<DomainEventV1, { kind: 'node_created' }> =>
-        e.kind === 'node_created' && e.scope?.nodeId === String(nodeId)
+        e.kind === EVENT_KIND.NODE_CREATED && e.scope?.nodeId === String(nodeId)
     );
 
     const snapRA = snapNode
@@ -207,7 +208,7 @@ function replayFromRecordedAdvance(args: {
   const toNodeIdBranded = asNodeId(String(toNodeId));
   const toNode = truth.events.find(
     (e): e is Extract<DomainEventV1, { kind: 'node_created' }> =>
-      e.kind === 'node_created' && e.scope?.nodeId === String(toNodeId)
+      e.kind === EVENT_KIND.NODE_CREATED && e.scope?.nodeId === String(toNodeId)
   );
   if (!toNode) {
     return neErrorAsync({
@@ -395,9 +396,9 @@ function advanceAndRecord(args: {
   const { truth, sessionId, runId, nodeId, attemptId, workflowHash, dedupeKey, inputContext, inputOutput, lock, pinnedWorkflow, snapshotStore, sessionStore, sha256, idFactory } = args;
 
   // Enforce invariants: do not record advance attempts for unknown nodes.
-  const hasRun = truth.events.some((e) => e.kind === 'run_started' && e.scope?.runId === String(runId));
+  const hasRun = truth.events.some((e) => e.kind === EVENT_KIND.RUN_STARTED && e.scope?.runId === String(runId));
   const hasNode = truth.events.some(
-    (e) => e.kind === 'node_created' && e.scope?.runId === String(runId) && e.scope?.nodeId === String(nodeId)
+    (e) => e.kind === EVENT_KIND.NODE_CREATED && e.scope?.runId === String(runId) && e.scope?.nodeId === String(nodeId)
   );
   if (!hasRun || !hasNode) {
     return neErrorAsync({ kind: 'missing_node_or_run' as const });
@@ -405,7 +406,7 @@ function advanceAndRecord(args: {
 
   // Load current node snapshot to compute next state.
   const nodeCreated = truth.events.find(
-    (e): e is Extract<DomainEventV1, { kind: 'node_created' }> => e.kind === 'node_created' && e.scope?.nodeId === String(nodeId)
+    (e): e is Extract<DomainEventV1, { kind: 'node_created' }> => e.kind === EVENT_KIND.NODE_CREATED && e.scope?.nodeId === String(nodeId)
   );
   if (!nodeCreated) {
     return neErrorAsync({ kind: 'missing_node_or_run' as const });
@@ -578,7 +579,7 @@ function executeStartWorkflow(
                 eventId: evtSessionCreated,
                 eventIndex: 0,
                 sessionId,
-                kind: 'session_created' as const,
+                kind: EVENT_KIND.SESSION_CREATED,
                 dedupeKey: `session_created:${sessionId}`,
                 data: {},
               },
@@ -587,7 +588,7 @@ function executeStartWorkflow(
                 eventId: evtRunStarted,
                 eventIndex: 1,
                 sessionId,
-                kind: 'run_started' as const,
+                kind: EVENT_KIND.RUN_STARTED,
                 dedupeKey: `run_started:${sessionId}:${runId}`,
                 scope: { runId },
                 data: {
@@ -611,7 +612,7 @@ function executeStartWorkflow(
                 eventId: evtNodeCreated,
                 eventIndex: 2,
                 sessionId,
-                kind: 'node_created' as const,
+                kind: EVENT_KIND.NODE_CREATED,
                 dedupeKey: `node_created:${sessionId}:${runId}:${nodeId}`,
                 scope: { runId, nodeId },
                 data: {
@@ -626,7 +627,7 @@ function executeStartWorkflow(
                 eventId: evtPreferencesChanged,
                 eventIndex: 3,
                 sessionId,
-                kind: 'preferences_changed' as const,
+                kind: EVENT_KIND.PREFERENCES_CHANGED,
                 dedupeKey: `preferences_changed:${sessionId}:${runId}:${nodeId}:${changeId}`,
                 scope: { runId, nodeId },
                 data: {
@@ -654,7 +655,7 @@ function executeStartWorkflow(
                 eventId: evtContextSet,
                 eventIndex: mutableEvents.length,
                 sessionId,
-                kind: 'context_set' as const,
+                kind: EVENT_KIND.CONTEXT_SET,
                 dedupeKey: `context_set:${sessionId}:${runId}:${contextId}`,
                 scope: { runId },
                 data: {
@@ -673,7 +674,7 @@ function executeStartWorkflow(
                 eventId: obsEventId,
                 eventIndex: mutableEvents.length,
                 sessionId,
-                kind: 'observation_recorded' as const,
+                kind: EVENT_KIND.OBSERVATION_RECORDED,
                 dedupeKey: `observation_recorded:${sessionId}:${obs.key}`,
                 scope: undefined,
                 data: {
@@ -823,7 +824,7 @@ function executeContinueWorkflow(
       .mapErr((cause) => ({ kind: 'session_load_failed' as const, cause }))
       .andThen((truth) => {
         const runStarted = truth.events.find(
-          (e): e is Extract<DomainEventV1, { kind: 'run_started' }> => e.kind === 'run_started' && e.scope.runId === String(runId)
+          (e): e is Extract<DomainEventV1, { kind: 'run_started' }> => e.kind === EVENT_KIND.RUN_STARTED && e.scope.runId === String(runId)
         );
         const workflowId = runStarted?.data.workflowId;
         if (!runStarted || typeof workflowId !== 'string' || workflowId.trim() === '') {
@@ -848,7 +849,7 @@ function executeContinueWorkflow(
 
         const nodeCreated = truth.events.find(
           (e): e is Extract<DomainEventV1, { kind: 'node_created' }> =>
-            e.kind === 'node_created' && e.scope.nodeId === String(nodeId) && e.scope.runId === String(runId)
+            e.kind === EVENT_KIND.NODE_CREATED && e.scope.nodeId === String(nodeId) && e.scope.runId === String(runId)
         );
         if (!nodeCreated) {
           return neErrorAsync({
@@ -986,7 +987,7 @@ function executeContinueWorkflow(
     .mapErr((cause) => ({ kind: 'session_load_failed' as const, cause }))
     .andThen((truth) => {
       const runStarted = truth.events.find(
-        (e): e is Extract<DomainEventV1, { kind: 'run_started' }> => e.kind === 'run_started' && e.scope.runId === String(runId)
+        (e): e is Extract<DomainEventV1, { kind: 'run_started' }> => e.kind === EVENT_KIND.RUN_STARTED && e.scope.runId === String(runId)
       );
       if (!runStarted) {
         return neErrorAsync({
@@ -1014,7 +1015,7 @@ function executeContinueWorkflow(
 
       const nodeCreated = truth.events.find(
         (e): e is Extract<DomainEventV1, { kind: 'node_created' }> =>
-          e.kind === 'node_created' && e.scope.nodeId === String(nodeId) && e.scope.runId === String(runId)
+          e.kind === EVENT_KIND.NODE_CREATED && e.scope.nodeId === String(nodeId) && e.scope.runId === String(runId)
       );
       if (!nodeCreated) {
         return neErrorAsync({
@@ -1040,7 +1041,7 @@ function executeContinueWorkflow(
       }
 
       const existing = truth.events.find(
-        (e): e is Extract<DomainEventV1, { kind: 'advance_recorded' }> => e.kind === 'advance_recorded' && e.dedupeKey === dedupeKey
+        (e): e is Extract<DomainEventV1, { kind: 'advance_recorded' }> => e.kind === EVENT_KIND.ADVANCE_RECORDED && e.dedupeKey === dedupeKey
       );
 
       return pinnedStore.get(workflowHash)
@@ -1083,7 +1084,7 @@ function executeContinueWorkflow(
               sessionStore.load(sessionId).andThen((truthLocked) => {
                 const existingLocked = truthLocked.events.find(
                   (e): e is Extract<DomainEventV1, { kind: 'advance_recorded' }> =>
-                    e.kind === 'advance_recorded' && e.dedupeKey === dedupeKey
+                    e.kind === EVENT_KIND.ADVANCE_RECORDED && e.dedupeKey === dedupeKey
                 );
                 if (existingLocked) return okAsync({ kind: 'replay' as const, truth: truthLocked, recordedEvent: existingLocked });
 
@@ -1137,7 +1138,7 @@ function executeContinueWorkflow(
                 res.recordedEvent ??
                 truth2.events.find(
                   (e): e is Extract<DomainEventV1, { kind: 'advance_recorded' }> =>
-                    e.kind === 'advance_recorded' && e.dedupeKey === dedupeKey
+                    e.kind === EVENT_KIND.ADVANCE_RECORDED && e.dedupeKey === dedupeKey
                 );
 
               if (!recordedEvent) {

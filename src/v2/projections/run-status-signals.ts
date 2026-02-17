@@ -1,6 +1,7 @@
 import type { Result } from 'neverthrow';
 import { err, ok } from 'neverthrow';
 import type { DomainEventV1 } from '../durable-core/schemas/session/index.js';
+import { EVENT_KIND } from '../durable-core/constants.js';
 import type { AutonomyV2, RiskPolicyV2 } from '../durable-core/schemas/session/preferences.js';
 import { projectRunDagV2 } from './run-dag.js';
 import { projectGapsV2 } from './gaps.js';
@@ -45,7 +46,7 @@ export function projectRunStatusSignalsV2(events: readonly DomainEventV1[]): Res
   // Latest effective preferences per nodeId ("effective snapshot after applying delta").
   const prefsByNodeId: Record<string, PreferencesSnapshotV2> = {};
   for (const e of events) {
-    if (e.kind !== 'preferences_changed') continue;
+    if (e.kind !== EVENT_KIND.PREFERENCES_CHANGED) continue;
     prefsByNodeId[e.scope.nodeId] = e.data.effective;
   }
 

@@ -18,6 +18,7 @@ import type { JsonValue } from '../../../durable-core/canonical/json-types.js';
 import { DomainEventV1Schema, ManifestRecordV1Schema, type DomainEventV1, type ManifestRecordV1 } from '../../../durable-core/schemas/session/index.js';
 import type { WithHealthySessionLock } from '../../../durable-core/ids/with-healthy-session-lock.js';
 import type { CorruptionReasonV2 } from '../../../durable-core/schemas/session/session-health.js';
+import { EVENT_KIND, MANIFEST_KIND } from '../../../durable-core/constants.js';
 import * as path from 'path';
 
 export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStorePortV2, SessionEventLogAppendStorePortV2 {
@@ -108,7 +109,7 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStore
               v: 1,
               manifestIndex: nextManifestIndex(manifest),
               sessionId,
-              kind: 'segment_closed',
+              kind: MANIFEST_KIND.SEGMENT_CLOSED,
               firstEventIndex: first,
               lastEventIndex: last,
               segmentRelPath,
@@ -127,7 +128,7 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStore
                   v: 1,
                   manifestIndex: startIndex + i,
                   sessionId,
-                  kind: 'snapshot_pinned',
+                  kind: MANIFEST_KIND.SNAPSHOT_PINNED,
                   eventIndex: p.eventIndex,
                   snapshotRef: p.snapshotRef,
                   createdByEventId: p.createdByEventId,
@@ -149,7 +150,7 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStore
         const segRes = validateSegmentClosedContiguity(manifest);
         if (segRes.isErr()) return errAsync(segRes.error);
 
-        const segments = manifest.filter((m): m is Extract<ManifestRecordV1, { kind: 'segment_closed' }> => m.kind === 'segment_closed');
+        const segments = manifest.filter((m): m is Extract<ManifestRecordV1, { kind: 'segment_closed' }> => m.kind === MANIFEST_KIND.SEGMENT_CLOSED);
 
         const loadSegments = (segs: typeof segments): ResultAsync<DomainEventV1[], SessionEventLogStoreError> => {
           if (segs.length === 0) return okAsync([]);
@@ -220,7 +221,7 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStore
           const expectedPins = extractSnapshotPinsFromEvents(events);
           const actualPins = new Set(
             manifest
-              .filter((m): m is Extract<ManifestRecordV1, { kind: 'snapshot_pinned' }> => m.kind === 'snapshot_pinned')
+              .filter((m): m is Extract<ManifestRecordV1, { kind: 'snapshot_pinned' }> => m.kind === MANIFEST_KIND.SNAPSHOT_PINNED)
               .map((p) => `${p.eventIndex}:${p.createdByEventId}:${p.snapshotRef}`)
           );
           for (const ep of expectedPins) {
@@ -316,7 +317,7 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStore
         }
 
         const segments = manifest.filter(
-          (m): m is Extract<ManifestRecordV1, { kind: 'segment_closed' }> => m.kind === 'segment_closed'
+          (m): m is Extract<ManifestRecordV1, { kind: 'segment_closed' }> => m.kind === MANIFEST_KIND.SEGMENT_CLOSED
         );
 
         type SalvageState = {
@@ -425,7 +426,7 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStore
       .andThen((manifest) => {
         if (manifest.length === 0) return okAsync({ manifest: [], events: [] });
 
-        const segments = manifest.filter((m): m is Extract<ManifestRecordV1, { kind: 'segment_closed' }> => m.kind === 'segment_closed');
+        const segments = manifest.filter((m): m is Extract<ManifestRecordV1, { kind: 'segment_closed' }> => m.kind === MANIFEST_KIND.SEGMENT_CLOSED);
         const sessionDir = this.dataDir.sessionDir(sessionId);
         
         const loadSegments = (segs: typeof segments): ResultAsync<DomainEventV1[], SessionEventLogStoreError> => {
@@ -480,7 +481,7 @@ function nextManifestIndex(manifest: readonly ManifestRecordV1[]): number {
 }
 
 function nextEventIndexFromManifest(manifest: readonly ManifestRecordV1[]): number {
-  const segments = manifest.filter((m): m is Extract<ManifestRecordV1, { kind: 'segment_closed' }> => m.kind === 'segment_closed');
+  const segments = manifest.filter((m): m is Extract<ManifestRecordV1, { kind: 'segment_closed' }> => m.kind === MANIFEST_KIND.SEGMENT_CLOSED);
   if (segments.length === 0) return 0;
   return segments[segments.length - 1]!.lastEventIndex + 1;
 }
@@ -504,7 +505,7 @@ function validateManifestContiguity(manifest: readonly ManifestRecordV1[]): Resu
 }
 
 function validateSegmentClosedContiguity(manifest: readonly ManifestRecordV1[]): Result<void, SessionEventLogStoreError> {
-  const segments = manifest.filter((m): m is Extract<ManifestRecordV1, { kind: 'segment_closed' }> => m.kind === 'segment_closed');
+  const segments = manifest.filter((m): m is Extract<ManifestRecordV1, { kind: 'segment_closed' }> => m.kind === MANIFEST_KIND.SEGMENT_CLOSED);
   for (let i = 1; i < segments.length; i++) {
     const prev = segments[i - 1]!;
     const cur = segments[i]!;
@@ -658,7 +659,7 @@ function extractSnapshotPinsFromEvents(events: readonly DomainEventV1[]): Array<
   // Slice 2.5 lock: snapshot pin enforcement is typed (no `any` casts).
   const out: Array<{ snapshotRef: SnapshotRef; eventIndex: number; createdByEventId: string }> = [];
   for (const e of events) {
-    if (e.kind !== 'node_created') continue;
+    if (e.kind !== EVENT_KIND.NODE_CREATED) continue;
     out.push({ snapshotRef: e.data.snapshotRef, eventIndex: e.eventIndex, createdByEventId: e.eventId });
   }
   return out;
