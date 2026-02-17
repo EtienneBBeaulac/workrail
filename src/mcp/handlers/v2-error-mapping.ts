@@ -42,7 +42,12 @@ export function isInternalError(e: unknown): e is InternalError {
 
 import * as os from 'os';
 
-/** Normalize token error messages (strip sensitive internal details). */
+/** 
+ * Normalize token error messages (strip sensitive internal details).
+ * 
+ * NOTE: The os.homedir() call here is intentional I/O for error formatting, not domain logic.
+ * This is error presentation code that sanitizes file paths in error messages for security/consistency.
+ */
 export function normalizeTokenErrorMessage(message: string): string {
   // Keep errors deterministic and compact; avoid leaking environment-specific file paths.
   return message.split(os.homedir()).join('~');

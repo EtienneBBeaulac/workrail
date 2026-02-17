@@ -1,10 +1,8 @@
 import type { Result } from 'neverthrow';
 import { err, ok } from 'neverthrow';
 import type { DomainEventV1 } from '../durable-core/schemas/session/index.js';
-
-export type ProjectionError =
-  | { readonly code: 'PROJECTION_INVARIANT_VIOLATION'; readonly message: string }
-  | { readonly code: 'PROJECTION_CORRUPTION_DETECTED'; readonly message: string };
+import { EVENT_KIND } from '../durable-core/constants.js';
+import type { ProjectionError } from './projection-error.js';
 
 /**
  * Closed set: Capability (delegation | web_browsing).
@@ -78,7 +76,7 @@ export function projectCapabilitiesV2(events: readonly DomainEventV1[]): Result<
   };
 
   for (const e of events) {
-    if (e.kind !== 'capability_observed') continue;
+    if (e.kind !== EVENT_KIND.CAPABILITY_OBSERVED) continue;
 
     const nodeId = e.scope.nodeId;
     const cap = e.data.capability as CapabilityV2;

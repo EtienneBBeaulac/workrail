@@ -36,6 +36,8 @@ export interface BuildExportBundleArgs {
   };
   /** SHA-256 over canonical bytes — injected for testability. */
   readonly sha256: (bytes: Uint8Array) => Sha256Digest;
+  /** ISO 8601 timestamp when the bundle was exported — injected for purity. */
+  readonly exportedAt: string;
 }
 
 export type BundleBuilderError =
@@ -89,7 +91,7 @@ export function buildExportBundle(
   const bundle: ExportBundleV1 = {
     bundleSchemaVersion: 1,
     bundleId: args.bundleId,
-    exportedAt: new Date().toISOString(),
+    exportedAt: args.exportedAt,
     producer: {
       appVersion: args.producer.appVersion,
       ...(args.producer.appliedConfigHash != null

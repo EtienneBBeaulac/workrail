@@ -1,4 +1,3 @@
-import * as path from 'path';
 import type { ResultAsync } from 'neverthrow';
 import { ResultAsync as RA, okAsync, errAsync } from 'neverthrow';
 import type { PinnedWorkflowStorePortV2, PinnedWorkflowStoreError } from '../../../ports/pinned-workflow-store.port.js';

@@ -12,6 +12,7 @@ import { projectRunDagV2 } from '../../../projections/run-dag.js';
 import { projectNodeOutputsV2 } from '../../../projections/node-outputs.js';
 import type { DomainEventV1 } from '../../../durable-core/schemas/session/index.js';
 import type { SessionId } from '../../../durable-core/ids/index.js';
+import { EVENT_KIND } from '../../../durable-core/constants.js';
 
 /**
  * Max sessions to scan (explicit bound to prevent unbounded enumeration).
@@ -182,7 +183,7 @@ function extractObservations(events: readonly DomainEventV1[]): SessionObservati
   let repoRootHash: string | null = null;
 
   for (const event of events) {
-    if (event.kind !== 'observation_recorded') continue;
+    if (event.kind !== EVENT_KIND.OBSERVATION_RECORDED) continue;
 
     const data = event.data as {
       readonly key: string;
@@ -199,6 +200,9 @@ function extractObservations(events: readonly DomainEventV1[]): SessionObservati
       case 'repo_root_hash':
         repoRootHash = data.value.value;
         break;
+      default:
+        // Exhaustiveness: all observation keys handled above
+        break;
     }
   }
 
@@ -210,7 +214,7 @@ function extractObservations(events: readonly DomainEventV1[]): SessionObservati
  */
 function extractWorkflowIdentity(events: readonly DomainEventV1[], runId: string): WorkflowIdentity {
   for (const event of events) {
-    if (event.kind !== 'run_started') continue;
+    if (event.kind !== EVENT_KIND.RUN_STARTED) continue;
     const scope = event.scope as { readonly runId?: string } | undefined;
     if (scope?.runId !== runId) continue;
 

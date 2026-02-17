@@ -13,7 +13,8 @@ import { buildExportBundle, type BuildExportBundleArgs } from '../../../src/v2/d
 import { validateBundle } from '../../../src/v2/durable-core/domain/bundle-validator.js';
 import { importSession, type ImportSessionPorts } from '../../../src/v2/usecases/import-session.js';
 import { createHash } from 'crypto';
-import type { Sha256Digest } from '../../../src/v2/durable-core/ids/index.js';
+import type { Sha256Digest, SessionId } from '../../../src/v2/durable-core/ids/index.js';
+import { asSessionId } from '../../../src/v2/durable-core/ids/index.js';
 import type { SnapshotRef } from '../../../src/v2/durable-core/ids/index.js';
 import type { ExecutionSnapshotFileV1 } from '../../../src/v2/durable-core/schemas/execution-snapshot/index.js';
 import type { CompiledWorkflowSnapshot } from '../../../src/v2/durable-core/schemas/compiled-workflow/index.js';
@@ -119,6 +120,7 @@ function buildTestBundle(overrides: Partial<BuildExportBundleArgs> = {}) {
     snapshots: new Map([['sha256:' + 'b'.repeat(64), minimalSnapshot()]]),
     pinnedWorkflows: new Map([['sha256:' + 'c'.repeat(64), { kind: 'v1_preview', compiled: {} } as any]]),
     producer: { appVersion: '1.2.0' },
+    exportedAt: new Date().toISOString(),
     sha256: testSha256,
     ...overrides,
   });
@@ -154,7 +156,7 @@ describe('export → import roundtrip', () => {
     const ports: ImportSessionPorts = {
       snapshotStore,
       pinnedWorkflowStore,
-      generateSessionId: () => `sess_imported_${String(++generatedId)}`,
+      generateSessionId: () => asSessionId(`sess_imported_${String(++generatedId)}`),
       sha256: testSha256,
     };
 
@@ -173,7 +175,7 @@ describe('export → import roundtrip', () => {
     const ports: ImportSessionPorts = {
       snapshotStore: new FakeSnapshotStore(),
       pinnedWorkflowStore: new FakePinnedWorkflowStore(),
-      generateSessionId: () => 'sess_brand_new',
+      generateSessionId: () => asSessionId('sess_brand_new'),
       sha256: testSha256,
     };
 
@@ -189,7 +191,7 @@ describe('export → import roundtrip', () => {
     const ports: ImportSessionPorts = {
       snapshotStore: new FakeSnapshotStore(),
       pinnedWorkflowStore: new FakePinnedWorkflowStore(),
-      generateSessionId: () => 'sess_new',
+      generateSessionId: () => asSessionId('sess_new'),
       sha256: testSha256,
     };
 
@@ -210,7 +212,7 @@ describe('export → import roundtrip', () => {
     const ports: ImportSessionPorts = {
       snapshotStore: new FakeSnapshotStore(),
       pinnedWorkflowStore: new FakePinnedWorkflowStore(),
-      generateSessionId: () => 'should_not_be_used',
+      generateSessionId: () => asSessionId('should_not_be_used'),
       sha256: testSha256,
     };
 
@@ -240,7 +242,7 @@ describe('export → import roundtrip', () => {
     const ports: ImportSessionPorts = {
       snapshotStore: new FakeSnapshotStore(),
       pinnedWorkflowStore: new FakePinnedWorkflowStore(),
-      generateSessionId: () => `sess_${String(++counter)}`,
+      generateSessionId: () => asSessionId(`sess_${String(++counter)}`),
       sha256: testSha256,
     };
 

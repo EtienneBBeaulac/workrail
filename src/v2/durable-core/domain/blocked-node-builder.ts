@@ -53,11 +53,17 @@ function buildBlockedPayload(args: {
 }): Result<BlockedSnapshotV1, BlockedNodeBuildError> {
   const retryable = toContractViolationReason(args.primaryReason);
   if (retryable) {
-    const retryAttemptId = deriveChildAttemptId(args.attemptId, args.sha256);
+    const retryAttemptIdRes = deriveChildAttemptId(args.attemptId, args.sha256);
+    if (retryAttemptIdRes.isErr()) {
+      return err({
+        code: 'BLOCKED_NODE_INVARIANT_VIOLATION',
+        message: `Failed to derive retry attemptId: ${retryAttemptIdRes.error.message}`,
+      });
+    }
     return ok({
       kind: 'retryable_block',
       reason: retryable,
-      retryAttemptId: String(retryAttemptId),
+      retryAttemptId: String(retryAttemptIdRes.value),
       validationRef: args.validationRef,
       blockers: args.blockers,
     });

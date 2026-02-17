@@ -1,4 +1,5 @@
 import type { SessionId } from '../durable-core/ids/index.js';
+import { TRUNCATION_MARKER } from '../durable-core/constants.js';
 
 // ---------------------------------------------------------------------------
 // Domain types — make illegal states unrepresentable
@@ -12,9 +13,6 @@ export type RecapSnippet = string & { readonly __brand: 'RecapSnippet' };
 
 /** Max bytes per snippet (locked §2.3). */
 const MAX_SNIPPET_BYTES = 1024;
-
-/** Canonical truncation marker (locked §2.3). */
-const TRUNCATION_MARKER = '\n\n[TRUNCATED]';
 
 /**
  * Construct a RecapSnippet from raw text.

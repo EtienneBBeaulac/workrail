@@ -1,18 +1,18 @@
 import type { ResultAsync } from 'neverthrow';
 import { okAsync, errAsync } from 'neverthrow';
-import type { FsError, FileSystemPortV2 } from '../../../ports/fs.port.js';
+import type { FsError, DirectoryListingOpsPortV2 } from '../../../ports/fs.port.js';
 import type { DirectoryListingPortV2 } from '../../../ports/directory-listing.port.js';
 
 /**
  * Local filesystem directory listing adapter.
  *
- * Delegates to FileSystemPortV2 (does NOT import fs/promises directly).
+ * Delegates to DirectoryListingOpsPortV2 (minimal interface).
  * Returns entry names (not full paths). Returns empty array if directory does not exist.
  */
 export class LocalDirectoryListingV2 implements DirectoryListingPortV2 {
-  private readonly fs: FileSystemPortV2;
+  private readonly fs: DirectoryListingOpsPortV2;
 
-  constructor(fs: FileSystemPortV2) {
+  constructor(fs: DirectoryListingOpsPortV2) {
     this.fs = fs;
   }
 

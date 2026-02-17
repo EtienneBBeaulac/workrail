@@ -9,6 +9,8 @@
  * - Then artifacts sorted by (sha256, contentType) ascending
  */
 
+import { OUTPUT_CHANNEL, type OutputChannelV1 } from '../constants.js';
+
 export type OutputPayload = {
   readonly sha256?: string;
   readonly contentType?: string;
@@ -17,7 +19,7 @@ export type OutputPayload = {
 
 export type OutputToAppend = {
   readonly outputId: string;
-  readonly outputChannel: 'recap' | 'artifact';
+  readonly outputChannel: OutputChannelV1;
   readonly payload: OutputPayload;
   readonly supersedesOutputId?: string;
 };
@@ -35,8 +37,8 @@ export type OutputToAppend = {
  * @returns Normalized array with deterministic ordering
  */
 export function normalizeOutputsForAppend(outputs: readonly OutputToAppend[]): OutputToAppend[] {
-  const recap = outputs.filter((o) => o.outputChannel === 'recap');
-  const artifacts = outputs.filter((o) => o.outputChannel === 'artifact');
+  const recap = outputs.filter((o) => o.outputChannel === OUTPUT_CHANNEL.RECAP);
+  const artifacts = outputs.filter((o) => o.outputChannel === OUTPUT_CHANNEL.ARTIFACT);
 
   // At most one recap (take first if multiple exist, but this shouldn't happen in normal operation)
   const recapFirst = recap.length > 0 ? [recap[0]!] : [];

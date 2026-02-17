@@ -89,12 +89,10 @@ export function expandFunctionDefinitions(args: {
     ...getStepScopeDefs({ workflow: args.workflow, stepId: args.stepId }),
   ];
 
-  // Deduplication via Map (scope priority: later additions override earlier)
+  // Deduplication via Map: last-write-wins so step (closest) overrides workflow (furthest)
   const deduped = new Map<string, FunctionDefinition>();
   for (const def of allDefs) {
-    if (!deduped.has(def.name)) {
-      deduped.set(def.name, def);
-    }
+    deduped.set(def.name, def);
   }
 
   // Filter to referenced functions (or all if no filter)

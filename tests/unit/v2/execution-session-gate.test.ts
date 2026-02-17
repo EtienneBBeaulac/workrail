@@ -103,7 +103,7 @@ describe('ExecutionSessionGateV2', () => {
     const tailReason: CorruptionReasonV2 = { code: 'missing_attested_segment', message: 'missing seg' };
 
     const store: SessionEventLogReadonlyStorePortV2 = {
-      loadValidatedPrefix: () => okAsync({ truth: { manifest: [], events: [] }, isComplete: false, tailReason }),
+      loadValidatedPrefix: () => okAsync({ kind: 'truncated', truth: { manifest: [], events: [] }, tailReason }),
       load: () => okAsync({ manifest: [], events: [] }),
     };
 

@@ -2,6 +2,13 @@ import { z } from 'zod';
 import { DELIMITER_SAFE_ID_PATTERN } from '../../constants.js';
 
 /**
+ * Maximum length for artifact metadata reason strings.
+ *
+ * Why 1024: Allows meaningful context without becoming verbose.
+ */
+const MAX_ARTIFACT_METADATA_REASON_LENGTH = 1024;
+
+/**
  * Loop Control Artifact Schema (v1)
  * 
  * Typed artifact for controlling workflow loop iteration.
@@ -57,8 +64,8 @@ export type LoopControlDecision = z.infer<typeof LoopControlDecisionSchema>;
  */
 export const LoopControlMetadataV1Schema = z
   .object({
-    /** Human-readable reason for the decision */
-    reason: z.string().max(1024).optional(),
+    /** Human-readable reason for the decision (max 1024 chars) */
+    reason: z.string().max(MAX_ARTIFACT_METADATA_REASON_LENGTH).optional(),
     /** Number of issues/gaps found this iteration */
     issuesFound: z.number().int().nonnegative().optional(),
     /** Current iteration number (0-indexed) */

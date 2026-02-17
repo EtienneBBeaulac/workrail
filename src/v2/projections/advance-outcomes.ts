@@ -1,10 +1,8 @@
 import type { Result } from 'neverthrow';
 import { err, ok } from 'neverthrow';
 import type { DomainEventV1 } from '../durable-core/schemas/session/index.js';
-
-export type ProjectionError =
-  | { readonly code: 'PROJECTION_INVARIANT_VIOLATION'; readonly message: string }
-  | { readonly code: 'PROJECTION_CORRUPTION_DETECTED'; readonly message: string };
+import { EVENT_KIND } from '../durable-core/constants.js';
+import type { ProjectionError } from './projection-error.js';
 
 type AdvanceRecordedEventV1 = Extract<DomainEventV1, { kind: 'advance_recorded' }>;
 
@@ -32,7 +30,7 @@ export function projectAdvanceOutcomesV2(events: readonly DomainEventV1[]): Resu
   const byNodeId: Record<string, NodeAdvanceOutcomeV2> = {};
 
   for (const e of events) {
-    if (e.kind !== 'advance_recorded') continue;
+    if (e.kind !== EVENT_KIND.ADVANCE_RECORDED) continue;
     byNodeId[e.scope.nodeId] = {
       nodeId: e.scope.nodeId,
       latestAttemptId: e.data.attemptId,

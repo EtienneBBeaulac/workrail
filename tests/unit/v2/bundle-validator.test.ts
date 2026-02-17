@@ -70,6 +70,7 @@ function buildValidBundle(overrides: Partial<BuildExportBundleArgs> = {}) {
     snapshots: new Map(),
     pinnedWorkflows: new Map(),
     producer: { appVersion: '1.0.0' },
+    exportedAt: new Date().toISOString(),
     sha256: testSha256,
     ...overrides,
   };

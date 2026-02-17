@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import type { Result } from 'neverthrow';
+import { ok, err } from 'neverthrow';
 import type { Brand } from '../../../../runtime/brand.js';
 
 /**
@@ -53,6 +55,10 @@ export const DedupeKeyV1Schema = z
   .max(MAX_DEDUPE_KEY_LENGTH)
   .regex(DEDUPE_KEY_PATTERN, 'dedupeKey must be ASCII-safe: [a-z0-9_:->]+');
 
+export type DedupeKeyError =
+  | { readonly code: 'DEDUPE_KEY_INVALID_PATTERN'; readonly message: string }
+  | { readonly code: 'DEDUPE_KEY_TOO_LONG'; readonly message: string };
+
 /**
  * Builds a dedupeKey from a kind and parts.
  *
@@ -60,25 +66,23 @@ export const DedupeKeyV1Schema = z
  *
  * @param kind Event kind (e.g., 'session_created', 'node_created')
  * @param parts Stable identifier parts (e.g., sessionId, runId, nodeId)
- * @returns DedupeKey
+ * @returns Result with DedupeKey or structured error
  *
  * @example
- * buildDedupeKey('session_created', ['sess_01JH']) // 'session_created:sess_01JH'
- * buildDedupeKey('node_created', ['sess_01JH', 'run_01JH', 'node_01JH']) // 'node_created:sess_01JH:run_01JH:node_01JH'
- * buildDedupeKey('edge_created', ['sess_01JH', 'run_01JH', 'nodeA->nodeB', 'acked_step']) // 'edge_created:sess_01JH:run_01JH:nodeA->nodeB:acked_step'
+ * buildDedupeKey('session_created', ['sess_01JH']) // ok('session_created:sess_01JH')
+ * buildDedupeKey('node_created', ['sess_01JH', 'run_01JH', 'node_01JH']) // ok('node_created:...')
  */
-export function buildDedupeKey(kind: string, parts: readonly string[]): DedupeKeyV1 {
+export function buildDedupeKey(kind: string, parts: readonly string[]): Result<DedupeKeyV1, DedupeKeyError> {
   const key = [kind, ...parts].join(':');
   
-  // Validate at construction time (fail-fast)
   if (!DEDUPE_KEY_PATTERN.test(key)) {
-    throw new Error(`Invalid dedupeKey: "${key}" does not match pattern ${DEDUPE_KEY_PATTERN}`);
+    return err({ code: 'DEDUPE_KEY_INVALID_PATTERN', message: `dedupeKey "${key}" does not match pattern ${DEDUPE_KEY_PATTERN}` });
   }
   if (key.length > MAX_DEDUPE_KEY_LENGTH) {
-    throw new Error(`Invalid dedupeKey: "${key}" exceeds max length ${MAX_DEDUPE_KEY_LENGTH}`);
+    return err({ code: 'DEDUPE_KEY_TOO_LONG', message: `dedupeKey "${key}" exceeds max length ${MAX_DEDUPE_KEY_LENGTH}` });
   }
   
-  return key as DedupeKeyV1;
+  return ok(key as DedupeKeyV1);
 }
 
 /**

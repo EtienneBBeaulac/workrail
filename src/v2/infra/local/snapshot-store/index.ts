@@ -29,7 +29,7 @@ export class LocalSnapshotStoreV2 implements SnapshotStorePortV2 {
     const ref = asSnapshotRef(this.crypto.sha256(canonical.value));
 
     const dir = this.dataDir.snapshotsDir();
-    const filePath = this.dataDir.snapshotPath(String(ref));
+    const filePath = this.dataDir.snapshotPath(ref);
     const tmpPath = `${filePath}.tmp`;
 
     return this.fs
@@ -48,7 +48,7 @@ export class LocalSnapshotStoreV2 implements SnapshotStorePortV2 {
   }
 
   getExecutionSnapshotV1(snapshotRef: SnapshotRef): ResultAsync<ExecutionSnapshotFileV1 | null, SnapshotStoreError> {
-    const filePath = this.dataDir.snapshotPath(String(snapshotRef));
+    const filePath = this.dataDir.snapshotPath(snapshotRef);
     return this.fs
       .readFileBytes(filePath)
       .andThen((bytes) => {

@@ -1,4 +1,5 @@
 import type { DomainEventV1 } from '../schemas/session/index.js';
+import { EVENT_KIND } from '../constants.js';
 import type { ReasonV1 } from './reason-model.js';
 import { reasonToGap } from './reason-model.js';
 
@@ -42,7 +43,7 @@ export function buildGapRecordedEventV1(args: {
     eventId: args.eventId,
     eventIndex: args.eventIndex,
     sessionId: args.sessionId,
-    kind: 'gap_recorded',
+    kind: EVENT_KIND.GAP_RECORDED,
     dedupeKey: `gap_recorded:${args.sessionId}:${args.gapId}`,
     scope: { runId: args.runId, nodeId: args.nodeId },
     data: {

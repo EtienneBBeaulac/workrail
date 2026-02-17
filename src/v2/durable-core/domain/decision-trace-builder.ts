@@ -6,6 +6,7 @@ import {
   MAX_DECISION_TRACE_TOTAL_BYTES,
   TRUNCATION_MARKER,
 } from '../constants.js';
+import { utf8ByteLength } from '../schemas/lib/utf8-byte-length.js';
 
 /**
  * Decision trace entry kinds (closed set matching lock §1 decision_trace_appended).
@@ -82,11 +83,6 @@ export function traceSelectedNextStep(stepId: string): DecisionTraceEntry {
 
 // --- Budget enforcement (pure) ---
 
-const textEncoder = new TextEncoder();
-function utf8ByteLength(s: string): number {
-  return textEncoder.encode(s).length;
-}
-
 /**
  * Apply byte budgets to trace entries (lock: max 25 entries, 512 bytes/summary, 8192 total).
  *
@@ -136,7 +132,8 @@ function truncateToUtf8Budget(s: string, maxBytes: number): string {
   if (targetBytes <= 0) return TRUNCATION_MARKER;
 
   // Binary search for the longest prefix that fits
-  const encoded = textEncoder.encode(s);
+  const encoder = new TextEncoder();
+  const encoded = encoder.encode(s);
   if (encoded.length <= maxBytes) return s;
 
   // Find a safe UTF-8 boundary

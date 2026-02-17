@@ -42,7 +42,7 @@ export class Bech32mAdapterV2 implements Bech32mPortV2 {
       const msg = e instanceof Error ? e.message : String(e);
 
       // Detect checksum failures
-      if (/checksum/i.test(msg) || /invalid/i.test(msg)) {
+      if (/checksum/i.test(msg)) {
         return err({
           code: 'BECH32M_CHECKSUM_FAILED',
           message: `Bech32m checksum validation failed (likely corruption): ${msg}`,

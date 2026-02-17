@@ -258,4 +258,42 @@ export class InMemoryFileSystem implements FileSystemPortV2 {
 
     return okAsync({ sizeBytes: entry.bytes.length });
   }
+
+  readdir(dirPath: string): ResultAsync<readonly string[], FsError> {
+    const p = this.normalizePath(dirPath);
+    const entry = this.fs.get(p);
+
+    if (!entry) {
+      return errAsync({ code: 'FS_NOT_FOUND' as const, message: `Directory not found: ${p}` });
+    }
+
+    if (entry.kind !== 'dir') {
+      return errAsync({
+        code: 'FS_IO_ERROR' as const,
+        message: `Path is not a directory: ${p}`,
+      });
+    }
+
+    // Find all direct children of this directory
+    const prefix = p === '/' ? '/' : `${p}/`;
+    const entries: string[] = [];
+    const allPaths = Array.from(this.fs.keys());
+
+    for (const path of allPaths) {
+      if (path === p) continue; // Skip the directory itself
+      if (path.startsWith(prefix)) {
+        // Extract the direct child name (first segment after prefix)
+        const relativePath = path.substring(prefix.length);
+        const slashIndex = relativePath.indexOf('/');
+        const entryName = slashIndex === -1 ? relativePath : relativePath.substring(0, slashIndex);
+        
+        // Add only if not already in list (avoid duplicates from nested paths)
+        if (entryName && !entries.includes(entryName)) {
+          entries.push(entryName);
+        }
+      }
+    }
+
+    return okAsync(entries);
+  }
 }

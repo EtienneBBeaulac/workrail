@@ -3,9 +3,11 @@ import { err, ok } from 'neverthrow';
 import type { WorkflowHash, WorkflowHashRef } from './index.js';
 import { asWorkflowHashRef } from './index.js';
 import { encodeBase32LowerNoPad } from '../encoding/base32-lower.js';
+import { hexToBytes } from '../encoding/hex-to-bytes.js';
 
 export type WorkflowHashRefError =
-  | { readonly code: 'WORKFLOW_HASH_INVALID_FORMAT'; readonly message: string };
+  | { readonly code: 'WORKFLOW_HASH_INVALID_FORMAT'; readonly message: string }
+  | { readonly code: 'INVALID_HEX'; readonly message: string };
 
 /**
  * Derive a deterministic 128-bit workflowHashRef from a full workflowHash.
@@ -30,11 +32,11 @@ export function deriveWorkflowHashRef(workflowHash: WorkflowHash): Result<Workfl
   const hexDigest = match[1]!;
   const first32Hex = hexDigest.slice(0, 32);
 
-  const bytes = new Uint8Array(16);
-  for (let i = 0; i < 16; i++) {
-    bytes[i] = parseInt(first32Hex.slice(i * 2, i * 2 + 2), 16);
+  const bytesResult = hexToBytes(first32Hex);
+  if (bytesResult.isErr()) {
+    return err(bytesResult.error);
   }
 
-  const suffix = encodeBase32LowerNoPad(bytes);
+  const suffix = encodeBase32LowerNoPad(bytesResult.value);
   return ok(asWorkflowHashRef(`wf_${suffix}`));
 }

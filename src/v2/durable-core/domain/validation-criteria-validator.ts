@@ -20,6 +20,7 @@ export const VALIDATION_CRITERIA_CONTRACT_REF = 'wr.validationCriteria' as const
  * 
  * Returns discriminated union status:
  * - not_required: Step has no validationCriteria
+ * - satisfied: Validation criteria met and validation passed
  * - missing: Step requires output but notesMarkdown not provided
  * - invalid: Output provided but validation failed (issues present)
  * 
@@ -43,7 +44,7 @@ export function getOutputRequirementStatusV1(args: {
     return { kind: 'invalid', contractRef: VALIDATION_CRITERIA_CONTRACT_REF, validation: args.validation };
   }
 
-  return { kind: 'not_required' };
+  return { kind: 'satisfied' };
 }
 
 /**
@@ -101,8 +102,8 @@ export function getOutputRequirementStatusWithArtifactsV1(args: {
       }
     }
     
-    // Artifact validation passed (or not required)
-    return { kind: 'not_required' };
+    // Artifact validation passed
+    return { kind: 'satisfied' };
   }
   
   // Priority 2: Prose validation (legacy, deprecated)

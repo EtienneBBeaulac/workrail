@@ -1,4 +1,5 @@
 import type { WorkspaceAnchor } from '../../ports/workspace-anchor.port.js';
+import { MAX_OBSERVATION_SHORT_STRING_LENGTH } from '../constants.js';
 
 /**
  * Observation event data shape (matches DomainEventV1 observation_recorded payload).
@@ -34,7 +35,7 @@ export function anchorsToObservations(anchors: readonly WorkspaceAnchor[]): read
     switch (anchor.key) {
       case 'git_branch':
         // Lock: short_string max 80 chars
-        if (anchor.value.length > 80) break;
+        if (anchor.value.length > MAX_OBSERVATION_SHORT_STRING_LENGTH) break;
         observations.push({
           key: 'git_branch',
           value: { type: 'short_string', value: anchor.value },

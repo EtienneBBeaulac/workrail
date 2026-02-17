@@ -1,3 +1,4 @@
+import { ResultAsync, okAsync, errAsync } from 'neverthrow';
 import type { ToolContext, ToolResult } from '../types.js';
 import { success, errNotRetryable } from '../types.js';
 import { mapUnknownErrorToToolError } from '../error-mapper.js';
@@ -31,61 +32,82 @@ export async function handleV2ListWorkflows(
   if (v2Err) return v2Err;
   const { crypto, pinnedStore } = ctx.v2!;
 
-  try {
-    const summaries = await withTimeout(ctx.workflowService.listWorkflowSummaries(), TIMEOUT_MS, 'list_workflows');
+  return ResultAsync.fromPromise(
+    withTimeout(ctx.workflowService.listWorkflowSummaries(), TIMEOUT_MS, 'list_workflows'),
+    (err) => mapUnknownErrorToToolError(err)
+  )
+    .andThen((summaries) =>
+      ResultAsync.combine(
+        summaries.map((s) =>
+          ResultAsync.fromPromise(
+            ctx.workflowService.getWorkflowById(s.id),
+            (err) => mapUnknownErrorToToolError(err)
+          ).andThen((wf) => {
+            if (!wf) {
+              return okAsync({
+                workflowId: s.id,
+                name: s.name,
+                description: s.description,
+                version: s.version,
+                workflowHash: null,
+                kind: 'workflow' as const,
+              });
+            }
 
-    const compiled = await Promise.all(
-      summaries.map(async (s) => {
-        const wf = await ctx.workflowService.getWorkflowById(s.id);
-        if (!wf) {
-          return {
-            workflowId: s.id,
-            name: s.name,
-            description: s.description,
-            version: s.version,
-            workflowHash: null,
-            kind: 'workflow' as const,
-          };
-        }
+            const snapshot = compileV1WorkflowToV2PreviewSnapshot(wf);
+            const hashRes = workflowHashForCompiledSnapshot(snapshot as unknown as JsonValue, crypto);
+            if (hashRes.isErr()) {
+              return okAsync({
+                workflowId: s.id,
+                name: s.name,
+                description: s.description,
+                version: s.version,
+                workflowHash: null,
+                kind: 'workflow' as const,
+              });
+            }
 
-        const snapshot = compileV1WorkflowToV2PreviewSnapshot(wf);
-        const hashRes = workflowHashForCompiledSnapshot(snapshot as unknown as JsonValue, crypto);
-        if (hashRes.isErr()) {
-          return {
-            workflowId: s.id,
-            name: s.name,
-            description: s.description,
-            version: s.version,
-            workflowHash: null,
-            kind: 'workflow' as const,
-          };
-        }
-
-        const hash = hashRes.value;
-        const existing = await pinnedStore.get(hash).match((v) => v, () => null);
-        if (!existing) {
-          await pinnedStore.put(hash, snapshot).match(() => undefined, () => undefined);
-        }
-
-        return {
-          workflowId: s.id,
-          name: s.name,
-          description: s.description,
-          version: s.version,
-          workflowHash: hash,
-          kind: 'workflow' as const,
-        };
-      })
+            const hash = hashRes.value;
+            return pinnedStore
+              .get(hash)
+              .andThen((existing) => {
+                if (!existing) {
+                  return pinnedStore.put(hash, snapshot).map(() => undefined);
+                }
+                return okAsync(undefined);
+              })
+              .map(() => ({
+                workflowId: s.id,
+                name: s.name,
+                description: s.description,
+                version: s.version,
+                workflowHash: hash,
+                kind: 'workflow' as const,
+              }))
+              .orElse(() =>
+                okAsync({
+                  workflowId: s.id,
+                  name: s.name,
+                  description: s.description,
+                  version: s.version,
+                  workflowHash: hash,
+                  kind: 'workflow' as const,
+                })
+              );
+          })
+        )
+      )
+    )
+    .map((compiled) => {
+      const payload = V2WorkflowListOutputSchema.parse({
+        workflows: compiled.sort((a, b) => a.workflowId.localeCompare(b.workflowId)),
+      });
+      return success(payload) as ToolResult<unknown>;
+    })
+    .match(
+      (result) => Promise.resolve(result),
+      (err) => Promise.resolve(err as ToolResult<unknown>)
     );
-
-    const payload = V2WorkflowListOutputSchema.parse({
-      workflows: compiled.sort((a, b) => a.workflowId.localeCompare(b.workflowId)),
-    });
-    return success(payload);
-  } catch (err) {
-    const mapped = mapUnknownErrorToToolError(err);
-    return mapped;
-  }
 }
 
 export async function handleV2InspectWorkflow(
@@ -96,45 +118,51 @@ export async function handleV2InspectWorkflow(
   if (v2Err) return v2Err;
   const { crypto, pinnedStore } = ctx.v2!;
 
-  try {
-    const workflow = await withTimeout(ctx.workflowService.getWorkflowById(input.workflowId), TIMEOUT_MS, 'inspect_workflow');
-    if (!workflow) {
-      return errNotRetryable('NOT_FOUND', `Workflow not found: ${input.workflowId}`);
-    }
-
-    const snapshot = compileV1WorkflowToV2PreviewSnapshot(workflow);
-    const hashRes = workflowHashForCompiledSnapshot(snapshot as unknown as JsonValue, crypto);
-    if (hashRes.isErr()) {
-      return errNotRetryable('INTERNAL_ERROR', hashRes.error.message);
-    }
-
-    const workflowHash = hashRes.value;
-    const existing = await pinnedStore.get(workflowHash).match((v) => v, () => null);
-    if (!existing) {
-      const wrote = await pinnedStore.put(workflowHash, snapshot).match(
-        () => ({ ok: true as const }),
-        (e) => ({ ok: false as const, error: e })
-      );
-      if (!wrote.ok) {
-        return errNotRetryable('INTERNAL_ERROR', wrote.error.message);
+  return ResultAsync.fromPromise(
+    withTimeout(ctx.workflowService.getWorkflowById(input.workflowId), TIMEOUT_MS, 'inspect_workflow'),
+    (err) => mapUnknownErrorToToolError(err)
+  )
+    .andThen((workflow) => {
+      if (!workflow) {
+        return errAsync(errNotRetryable('NOT_FOUND', `Workflow not found: ${input.workflowId}`));
       }
-    }
 
-    const compiled = (await pinnedStore.get(workflowHash).match((v) => v, () => null)) ?? snapshot;
-    const body =
-      input.mode === 'metadata'
-        ? { schemaVersion: compiled.schemaVersion, sourceKind: compiled.sourceKind, workflowId: compiled.workflowId }
-        : compiled;
+      const snapshot = compileV1WorkflowToV2PreviewSnapshot(workflow);
+      const hashRes = workflowHashForCompiledSnapshot(snapshot as unknown as JsonValue, crypto);
+      if (hashRes.isErr()) {
+        return errAsync(errNotRetryable('INTERNAL_ERROR', hashRes.error.message));
+      }
 
-    const payload = V2WorkflowInspectOutputSchema.parse({
-      workflowId: input.workflowId,
-      workflowHash,
-      mode: input.mode,
-      compiled: body,
-    });
-    return success(payload);
-  } catch (err) {
-    const mapped = mapUnknownErrorToToolError(err);
-    return mapped;
-  }
+      const workflowHash = hashRes.value;
+      return pinnedStore
+        .get(workflowHash)
+        .andThen((existing) => {
+          if (!existing) {
+            return pinnedStore.put(workflowHash, snapshot).map(() => snapshot);
+          }
+          return okAsync(existing);
+        })
+        .orElse(() => okAsync(snapshot))
+        .map((compiled) => {
+          if (!compiled) {
+            throw new Error('Compiled workflow unexpectedly null');
+          }
+          const body =
+            input.mode === 'metadata'
+              ? { schemaVersion: compiled.schemaVersion, sourceKind: compiled.sourceKind, workflowId: compiled.workflowId }
+              : compiled;
+
+          const payload = V2WorkflowInspectOutputSchema.parse({
+            workflowId: input.workflowId,
+            workflowHash,
+            mode: input.mode,
+            compiled: body,
+          });
+          return success(payload) as ToolResult<unknown>;
+        });
+    })
+    .match(
+      (result) => Promise.resolve(result),
+      (err) => Promise.resolve(err as ToolResult<unknown>)
+    );
 }

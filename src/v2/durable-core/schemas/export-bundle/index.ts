@@ -213,51 +213,6 @@ export const BundleImportErrorSchema = z.object({
 
 export type BundleImportError = z.infer<typeof BundleImportErrorSchema>;
 
-// =============================================================================
-// Bundle Import Policy (pure functions, testable without full implementation)
-// =============================================================================
-
-/**
- * Collision policy for bundle import.
- *
- * Lock: bundle-import-as-new (docs/design/v2-core-design-locks.md §1.3)
- *
- * When importing a bundle whose sessionId already exists in the store,
- * default behavior is to create a new session (import-as-new) rather than
- * attempting to merge.
- *
- * This is a pure function that can be tested independently of full
- * import/export implementation.
- */
-export function importCollisionPolicy(args: {
-  incomingSessionId: string;
-  existingSessionIds: string[];
-}): 'import_as_new' | 'reject' {
-  // For now, always import-as-new per the lock.
-  // Future options: 'reject' (fail on collision), 'merge' (advanced).
-  return 'import_as_new';
-}
-
-/**
- * Import validation order policy.
- *
- * Lock: bundle-import-validates-first (docs/design/v2-core-design-locks.md §1.3)
- *
- * Validation must happen before any durable writes. This function documents
- * the validation order for testing and audit.
- *
- * Validation order (in sequence):
- * 1. Schema validation (format/version check)
- * 2. Integrity validation (JCS + SHA-256 comparison)
- * 3. Ordering validation (eventIndex and manifestIndex monotonicity)
- * 4. Reference validation (snapshots and pinned workflows exist)
- *
- * Only after ALL validations pass is the store modified.
- */
-export function importValidationOrder(): readonly string[] {
-  return ['schema', 'integrity', 'ordering', 'references'] as const;
-}
-
 export { ExecutionSnapshotFileV1Schema } from '../execution-snapshot/index.js';
 export { DomainEventV1Schema } from '../session/events.js';
 export { ManifestRecordV1Schema } from '../session/index.js';
