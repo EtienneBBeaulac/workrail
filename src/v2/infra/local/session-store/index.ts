@@ -648,10 +648,13 @@ function processSegmentForSalvage(args: {
 
       const boundsResult = validateSegmentBounds(parsed, args.segment);
       if (boundsResult.isErr()) {
+        const reason = boundsResult.error.code === 'SESSION_STORE_CORRUPTION_DETECTED' 
+          ? boundsResult.error.reason 
+          : { code: 'non_contiguous_indices' as const, message: boundsResult.error.message };
         return okAsync({
           ...args.state,
           isComplete: false,
-          tailReason: args.state.tailReason ?? boundsResult.error.reason,
+          tailReason: args.state.tailReason ?? reason,
           done: true,
         });
       }

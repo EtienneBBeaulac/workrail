@@ -279,19 +279,26 @@ export function buildAckAdvanceAppendPlanV1(args: AckAdvanceAppendPlanArgs): Res
     });
   }
 
-  // Advanced outcome - use type narrowing via explicit check
+  // Advanced outcome - narrow by checking outcome.kind and ensuring args type
   if (outcome.kind !== 'advanced') {
     // Exhaustiveness check - should never reach here
     const _exhaustive: never = outcome;
     return err({ code: 'INVARIANT_VIOLATION', message: `Unknown outcome kind` });
   }
 
-  // TypeScript now knows args is the 'advanced' variant
-  const toNodeId = args.toNodeId;
-  const snapshotRef = args.snapshotRef;
-  const causeKind = args.causeKind;
-  const toNodeKind = args.toNodeKind;
-  const outputsToAppend = args.outputsToAppend;
+  // Narrow args to the advanced variant by checking the presence of required fields
+  if (!('toNodeId' in args) || !('snapshotRef' in args) || !('causeKind' in args) || !('toNodeKind' in args) || !('minted' in args) || !('nodeCreatedEventId' in args.minted)) {
+    return err({ code: 'INVARIANT_VIOLATION', message: 'Advanced outcome requires toNodeId, snapshotRef, causeKind, toNodeKind, and minted event IDs' });
+  }
+
+  // Extract fields from the advanced variant (TypeScript needs help with narrowing)
+  const advancedArgs = args as Extract<typeof args, { outcome: { kind: 'advanced' } }>;
+  const toNodeId = advancedArgs.toNodeId;
+  const snapshotRef = advancedArgs.snapshotRef;
+  const causeKind = advancedArgs.causeKind;
+  const toNodeKind = advancedArgs.toNodeKind;
+  const outputsToAppend = advancedArgs.outputsToAppend;
+  const advancedMinted = advancedArgs.minted;
 
   if (toNodeKind !== 'step' && toNodeKind !== 'blocked_attempt') {
     return err({ code: 'INVARIANT_VIOLATION', message: 'toNodeKind must be step|blocked_attempt' });
@@ -309,7 +316,7 @@ export function buildAckAdvanceAppendPlanV1(args: AckAdvanceAppendPlanArgs): Res
     toNodeKind,
     workflowHash,
     snapshotRef,
-    eventId: minted.nodeCreatedEventId,
+    eventId: advancedMinted.nodeCreatedEventId,
     eventIndex: nodeCreatedEventIndex,
   });
 
@@ -320,14 +327,14 @@ export function buildAckAdvanceAppendPlanV1(args: AckAdvanceAppendPlanArgs): Res
     toNodeId,
     causeKind,
     causeEventId: minted.advanceRecordedEventId,
-    eventId: minted.edgeCreatedEventId,
+    eventId: advancedMinted.edgeCreatedEventId,
     eventIndex: edgeCreatedEventIndex,
   });
 
   // Build output events
   const outputEventsResult = buildOutputEvents({
     outputs: outputsToAppend ?? [],
-    outputEventIds: minted.outputEventIds ?? [],
+    outputEventIds: advancedMinted.outputEventIds,
     sessionId,
     runId,
     fromNodeId,
@@ -351,7 +358,7 @@ export function buildAckAdvanceAppendPlanV1(args: AckAdvanceAppendPlanArgs): Res
       {
         snapshotRef,
         eventIndex: nodeCreatedEventIndex,
-        createdByEventId: minted.nodeCreatedEventId,
+        createdByEventId: advancedMinted.nodeCreatedEventId,
       },
     ],
   });

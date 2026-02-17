@@ -31,15 +31,11 @@ function partialEvent(fields: PartialEvent): PartialEvent {
   return fields;
 }
 
+import type { OutputRequirementStatus } from '../../v2/durable-core/domain/blocking-decision.js';
+
 export type AdvanceMode =
   | { readonly kind: 'fresh'; readonly sourceNodeId: NodeId; readonly snapshot: unknown }
   | { readonly kind: 'retry'; readonly blockedNodeId: NodeId; readonly blockedSnapshot: unknown };
-
-export type OutputRequirementStatus =
-  | { readonly kind: 'not_required' }
-  | { readonly kind: 'satisfied'; readonly contractRef: string }
-  | { readonly kind: 'missing'; readonly contractRef: string }
-  | { readonly kind: 'invalid'; readonly contractRef: string };
 
 // ── Gap events builder ────────────────────────────────────────────────
 
