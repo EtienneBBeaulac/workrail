@@ -1961,24 +1961,34 @@ All non-pure operations MUST be isolated behind ports/adapters and kept out of t
 - `KeyRingPort`: current/previous keys + rotation
 
 ### Directory/package layout (Phase 0–2, locked)
-Concrete structure under `src/v2/` bounded context:
+Concrete structure under `src/v2/` bounded context (updated v1.5.1):
 
 ```
 src/
   v2/
     durable-core/
       ids/
-        index.ts                    # exports branded types (SessionId, RunId, NodeId, EventId, etc.)
+        index.ts                    # barrel: re-exports all ID modules
+        session-ids.ts              # SessionId, RunId, NodeId, AttemptId (v1.5.1)
+        workflow-ids.ts             # WorkflowId, WorkflowHash, WorkflowHashRef, Sha256Digest (v1.5.1)
+        event-ids.ts                # EventId, EventIndex, ManifestIndex, OutputId (v1.5.1)
+        snapshot-ids.ts             # SnapshotRef, CanonicalBytes (v1.5.1)
+        token-ids.ts                # TokenStringV1 (v1.5.1)
+      lib/
+        utf8-byte-length.ts         # shared UTF-8 byte measurement utility (v1.5.1)
       errors/
         index.ts                    # exports unified error envelope + closed code unions
       canonical/
         jcs.ts                      # RFC 8785 canonicalizer (uses CryptoPort)
         hashing.ts                  # sha256 wrapper + typed hash helpers
       schemas/
-        session-event/
-          index.ts                  # SessionEvent Zod + types
-        session-manifest/
-          index.ts                  # SessionManifestRecord Zod + types
+        session/
+          events.ts                 # DomainEventV1 discriminated union (v1.5.1)
+          blockers.ts               # Blocker schemas (extracted v1.5.1)
+          outputs.ts                # Output payload schemas (extracted v1.5.1)
+          gaps.ts                   # Gap schemas (extracted v1.5.1)
+          dag-topology.ts           # Node/edge schemas (extracted v1.5.1)
+          index.ts                  # barrel re-exports
         execution-snapshot/
           index.ts                  # ExecutionSnapshotFile + enginePayload.v1 Zod + types
         compiled-workflow/
@@ -1986,37 +1996,71 @@ src/
         export-bundle/
           index.ts                  # Bundle Zod + types
       projections/
-        session.ts                  # projectSessionSummary, projectSessionHealth
-        run.ts                      # projectRunStatus, projectPreferredTip
-        node.ts                     # projectNodeCurrentOutputs, projectNodeGaps
+        projection-error.ts         # shared ProjectionError type (v1.5.1)
+        run-dag.ts                  # projectRunDagV2 with extracted tip algorithm (v1.5.1)
+        node-outputs.ts             # projectNodeOutputsV2
+        capabilities.ts             # projectCapabilitiesV2
+        gaps.ts                     # projectGapsV2
+        preferences.ts              # projectPreferencesV2
+        artifacts.ts                # projectArtifactsV2
+        run-status-signals.ts       # projectRunStatusSignalsV2
         resume-ranking.ts           # deterministic resume ranking logic
-        policies/
-          preferred-tip.ts          # preferred tip policy (pure)
-          run-status.ts             # run status derivation (pure)
+        session-health.ts           # projectSessionHealthV2
+      domain/
+        # Pure domain logic extracted from handlers (v1.5.1)
+        ack-advance-append-plan.ts  # event builders (decomposed v1.5.1)
+        blocking-decision.ts
+        reason-model.ts
+        bundle-builder.ts
+        bundle-validator.ts
+        prompt-renderer.ts
+        # ... other domain modules
     ports/
-      crypto.port.ts
-      data-dir.port.ts
-      file-lock.port.ts
-      session-store.port.ts
+      fs.port.ts                    # segregated into 5 sub-interfaces (v1.5.1)
+      data-dir.port.ts              # uses branded types (v1.5.1)
+      session-event-log-store.port.ts
       snapshot-store.port.ts
       pinned-workflow-store.port.ts
-      projection-cache.port.ts
+      directory-listing.port.ts     # segregated from fs.port (v1.5.1)
     infra/
       local/
         data-dir/
           index.ts                  # DataDirPort file implementation
-        file-lock/
-          index.ts                  # FileLockPort OS-level lock implementation
+        session-lock/
+          index.ts                  # SessionLockPort OS-level lock implementation
         session-store/
           index.ts                  # SessionStorePort file implementation (segments + manifest)
         snapshot-store/
           index.ts                  # SnapshotStorePort CAS file implementation
         pinned-workflow-store/
           index.ts                  # PinnedWorkflowStorePort file implementation
-        projection-cache/
-          index.ts                  # ProjectionCachePort file implementation
-        crypto/
-          index.ts                  # CryptoPort implementation (Node crypto)
+        directory-listing/
+          index.ts                  # DirectoryListingPort implementation (v1.5.1)
+        session-summary-provider/
+          index.ts                  # SessionSummaryProviderPort implementation
+  mcp/
+    handlers/
+      v2-execution/                 # modularized (v1.5.1)
+        index.ts                    # public API exports
+        start.ts                    # executeStartWorkflow + helpers
+        continue-rehydrate.ts       # handleRehydrateIntent
+        continue-advance.ts         # handleAdvanceIntent
+        replay.ts                   # replayFromRecordedAdvance + helpers
+        advance.ts                  # advanceAndRecord
+      v2-advance-core/              # modularized (v1.5.1)
+        index.ts                    # executeAdvanceCore orchestrator
+        input-validation.ts         # validateAdvanceInputs
+        outcome-blocked.ts          # buildBlockedOutcome
+        outcome-success.ts          # buildSuccessOutcome
+        event-builders.ts           # buildAndAppendPlan + output builders
+      v2-advance-events.ts          # extracted event builders (v1.5.1)
+      v2-execution.ts               # barrel: re-exports from v2-execution/
+      v2-advance-core.ts            # barrel: re-exports from v2-advance-core/
+      v2-checkpoint.ts
+      v2-resume.ts
+      v2-workflow.ts
+      v2-token-ops.ts
+      v2-execution-helpers.ts
 ```
 
 Lock:
@@ -2280,13 +2324,15 @@ Context durability rules (revised):
 
 ### 18.3 Agent Execution Guidance (locked - implemented)
 
-**Status**: ✅ Implemented across Layers 1-3
+**Status**: ✅ Implemented across Layers 1-3 + outputContract guidance (PR #61)
 
 **Layer 1**: Tool descriptions rewritten (v1 behavioral clarity, nextIntent explanations)
 **Layer 2**: Field descriptions enhanced (lifecycle clarity, WRONG/RIGHT examples)
-**Layer 3**: Prompt-based requirement injection (validation requirements in prompt text)
+**Layer 3**: Prompt-based requirement injection — two paths:
+- **validationCriteria path** (legacy): Extracts requirements from contains/regex/length rules
+- **outputContract path** (preferred): System-injected contract guidance from contract registry (e.g., loop control → required fields + enum values). Guidance is system-generated, not from authored prompts.
 
-**Historical context**: Initial proposal was `agentInstructions` field in responses. After validation testing and subagent review, pivoted to prompt-based injection as simpler and more philosophically aligned.
+**Historical context**: Initial proposal was `agentInstructions` field in responses. After validation testing and subagent review, pivoted to prompt-based injection as simpler and more philosophically aligned. Extended in PR #61 to support `outputContract` with typed artifact guidance.
 
 ---
 
@@ -2333,9 +2379,13 @@ Context durability rules (revised):
 
 **Lock Decision** (implemented):
 
-Validation requirements are injected into `pending.prompt` text via `renderPendingPrompt()` enhancement.
+Validation requirements are injected into `pending.prompt` text via `renderPendingPrompt()` enhancement. Two injection paths exist:
 
-**Example output**:
+**Path 1 — validationCriteria (legacy)**: Extracts requirements from `validationCriteria` (contains/regex/length rules) and appends as bulleted OUTPUT REQUIREMENTS section.
+
+**Path 2 — outputContract (preferred, added in PR #61)**: System-injected contract guidance from `outputContract.contractRef`. Uses a contract registry to render canonical instructions (e.g., loop control contract → required fields + enum values). This guidance is generated by the system, not from the authored prompt.
+
+**Example output (validationCriteria path)**:
 ```typescript
 {
   stateToken: "st1...",
@@ -2350,52 +2400,27 @@ Validation requirements are injected into `pending.prompt` text via `renderPendi
 }
 ```
 
+**Example output (outputContract path)**:
+```typescript
+{
+  pending: {
+    prompt: "Provide a loop control artifact...\n\n---\n**OUTPUT REQUIREMENTS (System):**\n- Artifact contract: wr.contracts.loop_control\n- Provide artifact with fields:\n  - kind: \"wr.loop_control\"\n  - loopId: <lowercase id>\n  - decision: \"continue\" | \"stop\""
+  }
+}
+```
+
 **How it works**:
 1. `renderPendingPrompt()` calls `getStepById()` to access step definition
-2. If step has `validationCriteria`, calls `extractValidationRequirements(criteria)`
-3. Formats requirements as bulleted list
-4. Appends to prompt text with clear delimiter ("---\nOUTPUT REQUIREMENTS:")
+2. If step has `outputContract`, calls `formatOutputContractRequirements(contract)` — system-generated, contract-driven guidance
+3. Else if step has `validationCriteria`, calls `extractValidationRequirements(criteria)` — requirement extraction from rules
+4. Formats requirements as bulleted list and appends to prompt text
 5. Caps at top 5 requirements to prevent prompt bloat
 
-**Coverage**: Handles contains (51%), regex (36%), length (13%) rules + and compositions = 100% of empirical validation usage
-5. **Clarifies nextIntent**: Agents understand the 4 values without guessing
+**Coverage**: validationCriteria handles contains (51%), regex (36%), length (13%) rules + and compositions = 100% of empirical validation usage. outputContract handles typed artifact contracts (loop control, extensible to future contracts).
 
-**Alternative Approaches Considered**:
+**Priority**: `outputContract` takes precedence over `validationCriteria` when both are present on a step. This is the preferred path going forward.
 
-**Alt A: Append guidance to `pending.prompt` footer**
-- Pro: No new response field
-- Con: Increases prompt size on every step; mixes workflow content with meta-instructions
-
-**Alt B: Add `workflowExecutionGuide` URL/ref field**
-- Pro: Tiny payload (just a URL)
-- Con: Requires external doc fetch; defeats "everything in response" principle
-
-**Alt C: Rely on tool descriptions only**
-- Pro: No response bloat
-- Con: Agents forget or misinterpret; already proven insufficient
-
-**Implementation Requirements**:
-1. Add `agentInstructions` schema to `V2StartWorkflowOutputSchema` and rehydrate-only response schemas
-2. Populate in `start_workflow` handler (static/deterministic text)
-3. Populate in rehydrate-only path (condensed version)
-4. Update `docs/reference/workflow-execution-contract.md` to document the field (normative)
-
-**Slice Ownership**: **Pre-4b** (needs design work before implementation)
-
-**Design Work Required**:
-1. **Content design**: What exactly should `agentInstructions` say?
-   - Which mechanics to explain (context, output, blocking, rehydration)?
-   - How detailed (bullet points vs prose vs examples)?
-   - Static text vs workflow-customizable?
-
-2. **Scope boundaries**: Where to include it?
-   - All responses vs start + rehydrate only?
-   - Include in blocked responses?
-   - Omit from normal advancement (to reduce payload)?
-
-3. **Format**: Structured object vs plain text?
-   - Structured (field per topic) allows agents to parse selectively
-   - Plain text (single markdown block) is simpler but less parseable
+**Historical note**: The `agentInstructions` response field approach was considered and rejected in favor of prompt-based injection (50 lines vs 900 lines, more philosophically aligned). See PR #57 discussion for details.
    - Hybrid (structured with markdown values)?
 
 4. **Payload budget**: What's acceptable overhead?
@@ -2663,25 +2688,45 @@ When validation requirements become visible to agents (via prompt injection, _gu
 - "Validate at boundaries": Checking for evidence IS boundary validation
 - "Errors as data": Can return structured "missing finding N" errors
 
+### Evolution: outputContract (Typed Artifacts, PR #61)
+
+**Status**: ✅ Implemented — `outputContract` is the preferred approach going forward.
+
+The `validationCriteria` evidence-based approach (above) reduces gameability but is still fundamentally **prose-based** — agents can construct text that matches patterns without genuine work. The architectural fix is **typed artifacts via `outputContract`**.
+
+**How it works**:
+- Steps declare `outputContract: { contractRef: "wr.contracts.loop_control" }` instead of `validationCriteria`
+- Agents must provide structured JSON artifacts (e.g., `{ kind: "wr.loop_control", decision: "continue" }`)
+- Validation is schema-based (Zod), not substring/regex
+- System-injected guidance tells agents exactly what's required (from contract metadata, not authored prompts)
+
+**Why this is better**:
+- **Not gameable**: Can't fake a typed artifact with prose
+- **Machine-checkable**: Schema validation is deterministic
+- **Clear contract**: The interface between agent and engine is explicit
+- **Extensible**: New artifact types can be added without changing the validation framework
+
+**Backward compatibility**: Both `validationCriteria` (legacy) and `outputContract` (preferred) are supported. `outputContract` takes priority when both are present.
+
+**For new workflows**: Use `outputContract` with typed artifact schemas. Fall back to `validationCriteria` only when evidence-based prose validation is genuinely the right tool.
+
 ### Migration Path
 
-**Not a breaking change** - this is authoring guidance, not protocol change.
+**Phase 1** (done): `outputContract` implemented alongside `validationCriteria`
+**Phase 2** (pending): Migrate production workflows from `validationCriteria` to `outputContract`
+**Phase 3** (future): Deprecate `validationCriteria` once all workflows migrated
 
 **For existing workflows**:
-1. Audit validation criteria for flag-only patterns
-2. Enhance with evidence checks where appropriate
-3. Document anti-patterns in authoring guide
-
-**For new workflows**:
-- Include this principle in workflow authoring documentation
-- Provide templates/examples of evidence-based validation
-- Code review workflows for gameable validation patterns
+1. Identify steps where typed artifacts can replace prose validation
+2. Add `outputContract` with appropriate contract reference
+3. Remove `validationCriteria` once artifact path is validated
+4. For steps where prose validation is genuinely appropriate, keep `validationCriteria` with evidence-based patterns
 
 ### Related Design Locks
 
 - §18.1: notesMarkdown semantics (per-step fresh)
 - §18.2: Context persistence (context_set event)
-- §18.3: Agent execution guidance (Layer 3 - prompt-based requirement injection)
+- §18.3: Agent execution guidance (Layer 3 - prompt-based requirement injection + system-injected contract guidance)
 
 ---
 

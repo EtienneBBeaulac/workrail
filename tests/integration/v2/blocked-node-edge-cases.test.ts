@@ -101,7 +101,7 @@ describe('Blocked node edge cases', () => {
       if (startRes.type !== 'success') return;
 
       const blockRes = await handleV2ContinueWorkflow(
-        { intent: 'advance', stateToken: startRes.data.stateToken, ackToken: startRes.data.ackToken!, output: { notesMarkdown: 'missing keyword' } } as V2ContinueWorkflowInput,
+        { stateToken: startRes.data.stateToken, ackToken: startRes.data.ackToken!, output: { notesMarkdown: 'missing keyword' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(blockRes.type).toBe('success');
@@ -140,7 +140,7 @@ describe('Blocked node edge cases', () => {
       if (startRes.type !== 'success') return;
 
       const blockRes = await handleV2ContinueWorkflow(
-        { intent: 'advance', stateToken: startRes.data.stateToken, ackToken: startRes.data.ackToken!, output: { notesMarkdown: 'fail' } } as V2ContinueWorkflowInput,
+        { stateToken: startRes.data.stateToken, ackToken: startRes.data.ackToken!, output: { notesMarkdown: 'fail' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(blockRes.type).toBe('success');
@@ -168,7 +168,7 @@ describe('Blocked node edge cases', () => {
 
       // Retry successfully
       const retryRes = await handleV2ContinueWorkflow(
-        { intent: 'advance', stateToken: blockRes.data.stateToken, ackToken: blockRes.data.retryAckToken!, output: { notesMarkdown: 'pass' } } as V2ContinueWorkflowInput,
+        { stateToken: blockRes.data.stateToken, ackToken: blockRes.data.retryAckToken!, output: { notesMarkdown: 'pass' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(retryRes.type).toBe('success');
