@@ -167,7 +167,7 @@ describe('v2 start_workflow (Slice 3.5)', () => {
       if (start.type !== 'success') return;
 
       const big = 'a'.repeat(262_200);
-      const res = await handleV2ContinueWorkflow({ stateToken: start.data.stateToken, context: { big } } as any, ctx);
+      const res = await handleV2ContinueWorkflow({ intent: 'rehydrate', stateToken: start.data.stateToken, context: { big } } as any, ctx);
       expect(res.type).toBe('error');
       if (res.type !== 'error') return;
 

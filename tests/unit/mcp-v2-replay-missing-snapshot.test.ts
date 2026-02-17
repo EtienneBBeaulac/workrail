@@ -256,7 +256,7 @@ describe('v2 replay fail-closed: missing snapshot', () => {
         bech32m,
         idFactory: new IdFactoryV2(entropy),
       };
-      const res = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx(v2));
+      const res = await handleV2ContinueWorkflow({ intent: 'advance', stateToken, ackToken } as any, dummyCtx(v2));
       expect(res.type).toBe('error');
       if (res.type !== 'error') return;
       expect(['INTERNAL_ERROR', 'SESSION_NOT_HEALTHY']).toContain(res.code);

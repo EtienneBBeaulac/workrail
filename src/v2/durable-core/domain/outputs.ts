@@ -41,15 +41,15 @@ export function normalizeOutputsForAppend(outputs: readonly OutputToAppend[]): O
   // At most one recap (take first if multiple exist, but this shouldn't happen in normal operation)
   const recapFirst = recap.length > 0 ? [recap[0]!] : [];
 
-  // Artifacts sorted by (sha256, contentType) ascending
+  // Artifacts sorted by (sha256, contentType) ascending (deterministic with en-US locale)
   const sortedArtifacts = [...artifacts].sort((a, b) => {
     const aSha = a.payload.sha256 ?? '';
     const bSha = b.payload.sha256 ?? '';
-    if (aSha !== bSha) return aSha.localeCompare(bSha);
+    if (aSha !== bSha) return aSha.localeCompare(bSha, 'en-US');
 
     const aType = a.payload.contentType ?? '';
     const bType = b.payload.contentType ?? '';
-    return aType.localeCompare(bType);
+    return aType.localeCompare(bType, 'en-US');
   });
 
   return [...recapFirst, ...sortedArtifacts];

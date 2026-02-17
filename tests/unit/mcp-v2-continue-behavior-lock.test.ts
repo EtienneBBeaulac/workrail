@@ -117,7 +117,7 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     expect(start.data.isComplete).toBe(false);
 
     // Advance step 1 → step 2
-    const adv1 = await handleV2ContinueWorkflow({ stateToken: start.data.stateToken, ackToken: start.data.ackToken } as any, ctx);
+    const adv1 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: start.data.stateToken, ackToken: start.data.ackToken } as any, ctx);
     expect(adv1.type).toBe('success');
     if (adv1.type !== 'success') return;
     expect(adv1.data.kind).toBe('ok');
@@ -125,7 +125,7 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     expect(adv1.data.isComplete).toBe(false);
 
     // Advance step 2 → step 3
-    const adv2 = await handleV2ContinueWorkflow({ stateToken: adv1.data.stateToken, ackToken: adv1.data.ackToken } as any, ctx);
+    const adv2 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: adv1.data.stateToken, ackToken: adv1.data.ackToken } as any, ctx);
     expect(adv2.type).toBe('success');
     if (adv2.type !== 'success') return;
     expect(adv2.data.kind).toBe('ok');
@@ -133,7 +133,7 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     expect(adv2.data.isComplete).toBe(false);
 
     // Advance step 3 → complete
-    const adv3 = await handleV2ContinueWorkflow({ stateToken: adv2.data.stateToken, ackToken: adv2.data.ackToken } as any, ctx);
+    const adv3 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: adv2.data.stateToken, ackToken: adv2.data.ackToken } as any, ctx);
     expect(adv3.type).toBe('success');
     if (adv3.type !== 'success') return;
     expect(adv3.data.kind).toBe('ok');
@@ -152,6 +152,7 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     if (start.type !== 'success') return;
 
     const adv1 = await handleV2ContinueWorkflow({
+      intent: 'advance',
       stateToken: start.data.stateToken,
       ackToken: start.data.ackToken,
       output: { notesMarkdown: 'Completed step 1 successfully.' },
@@ -191,11 +192,11 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
 
-    const adv1 = await handleV2ContinueWorkflow({ stateToken: start.data.stateToken, ackToken: start.data.ackToken } as any, ctx);
+    const adv1 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: start.data.stateToken, ackToken: start.data.ackToken } as any, ctx);
     expect(adv1.type).toBe('success');
     if (adv1.type !== 'success') return;
 
-    const adv2 = await handleV2ContinueWorkflow({ stateToken: start.data.stateToken, ackToken: start.data.ackToken } as any, ctx);
+    const adv2 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: start.data.stateToken, ackToken: start.data.ackToken } as any, ctx);
     expect(adv2).toEqual(adv1); // Exact same response
 
     // Verify no duplicate events
@@ -230,17 +231,17 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     if (start.type !== 'success') return;
 
     // Advance once (creates child node)
-    const adv1 = await handleV2ContinueWorkflow({ stateToken: start.data.stateToken, ackToken: start.data.ackToken } as any, ctx);
+    const adv1 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: start.data.stateToken, ackToken: start.data.ackToken } as any, ctx);
     expect(adv1.type).toBe('success');
     if (adv1.type !== 'success') return;
 
     // Rehydrate root to get fresh ackToken
-    const rehydrate = await handleV2ContinueWorkflow({ stateToken: start.data.stateToken } as any, ctx);
+    const rehydrate = await handleV2ContinueWorkflow({ intent: 'rehydrate', stateToken: start.data.stateToken } as any, ctx);
     expect(rehydrate.type).toBe('success');
     if (rehydrate.type !== 'success') return;
 
     // Advance from root again (fork)
-    const fork = await handleV2ContinueWorkflow({ stateToken: start.data.stateToken, ackToken: rehydrate.data.ackToken } as any, ctx);
+    const fork = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: start.data.stateToken, ackToken: rehydrate.data.ackToken } as any, ctx);
     expect(fork.type).toBe('success');
     if (fork.type !== 'success') return;
 
@@ -297,7 +298,7 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
 
     const token = signTokenV1Binary(payload, v2.tokenCodecPorts)._unsafeUnwrap();
 
-    const res = await handleV2ContinueWorkflow({ stateToken: token } as any, ctx);
+    const res = await handleV2ContinueWorkflow({ intent: 'rehydrate', stateToken: token } as any, ctx);
     expect(res.type).toBe('error');
     if (res.type !== 'error') return;
     expect(res.code).toBe('TOKEN_UNKNOWN_NODE');

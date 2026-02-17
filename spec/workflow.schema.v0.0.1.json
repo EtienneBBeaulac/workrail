@@ -223,6 +223,9 @@
                 "$ref": "#/$defs/validationComposition"
               }
             ]
+          },
+          "outputContract": {
+            "$ref": "#/$defs/outputContract"
           }
         },
         "required": [
@@ -243,6 +246,23 @@
         "maxLength": 256
       },
       "uniqueItems": true
+    },
+    "recommendedPreferences": {
+      "type": "object",
+      "description": "Workflow-level preference recommendations. When effective preferences exceed these, structured warnings are emitted. Never hard-blocks user choice.",
+      "properties": {
+        "recommendedAutonomy": {
+          "type": "string",
+          "enum": ["guided", "full_auto_stop_on_user_deps", "full_auto_never_stop"],
+          "description": "Recommended autonomy level for this workflow"
+        },
+        "recommendedRiskPolicy": {
+          "type": "string",
+          "enum": ["conservative", "balanced", "aggressive"],
+          "description": "Recommended risk policy for this workflow"
+        }
+      },
+      "additionalProperties": false
     }
   },
   "required": [
@@ -388,6 +408,24 @@
           "$ref": "#/$defs/validationComposition"
         }
       ]
+    },
+    "outputContract": {
+      "type": "object",
+      "description": "Typed output contract declaring required artifact schema",
+      "properties": {
+        "contractRef": {
+          "type": "string",
+          "description": "Artifact contract reference (e.g. wr.contracts.loop_control)",
+          "minLength": 1
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Whether the artifact is required (default true)",
+          "default": true
+        }
+      },
+      "required": ["contractRef"],
+      "additionalProperties": false
     }
   }
 }

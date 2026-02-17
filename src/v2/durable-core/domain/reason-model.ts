@@ -21,7 +21,7 @@ export type GapReasonV1 =
   | { readonly category: 'user_only_dependency'; readonly detail: UserOnlyDependencyReasonV1 }
   | { readonly category: 'contract_violation'; readonly detail: 'missing_required_output' | 'invalid_required_output' }
   | { readonly category: 'capability_missing'; readonly detail: 'required_capability_unavailable' | 'required_capability_unknown' }
-  | { readonly category: 'unexpected'; readonly detail: 'invariant_violation' | 'storage_corruption_detected' };
+  | { readonly category: 'unexpected'; readonly detail: 'invariant_violation' | 'storage_corruption_detected' | 'evaluation_error' };
 
 export type BlockerCodeV1 =
   | 'USER_ONLY_DEPENDENCY'
@@ -59,7 +59,8 @@ export type ReasonV1 =
   | { readonly kind: 'required_capability_unavailable'; readonly capability: CapabilityV2 }
   | { readonly kind: 'user_only_dependency'; readonly detail: UserOnlyDependencyReasonV1; readonly stepId: string }
   | { readonly kind: 'invariant_violation' }
-  | { readonly kind: 'storage_corruption_detected' };
+  | { readonly kind: 'storage_corruption_detected' }
+  | { readonly kind: 'evaluation_error' };
 
 export type ReasonModelError =
   | { readonly code: 'INVALID_DELIMITER_SAFE_ID'; readonly message: string }
@@ -139,6 +140,12 @@ export function reasonToGap(reason: ReasonV1): { readonly severity: GapSeverityV
         reason: { category: 'unexpected', detail: 'storage_corruption_detected' },
         summary: 'Storage corruption detected',
       };
+    case 'evaluation_error':
+      return {
+        severity: 'critical',
+        reason: { category: 'unexpected', detail: 'evaluation_error' },
+        summary: 'Validation evaluation failed',
+      };
     case 'missing_context_key':
       return {
         severity: 'critical',
@@ -217,7 +224,7 @@ export function reasonToBlocker(reason: ReasonV1): Result<BlockerV1, ReasonModel
           code: 'MISSING_REQUIRED_OUTPUT' as const,
           pointer: { kind: 'output_contract' as const, contractRef },
           message: `Missing required output (contractRef=${contractRef}).`,
-          suggestedFix: 'Provide output.notesMarkdown that satisfies the step output requirements.',
+          suggestedFix: 'Call continue_workflow WITHOUT ackToken to rehydrate and receive a fresh ackToken, then retry with output.notesMarkdown that satisfies the step output requirements.',
         }))
         .andThen(ensureBlockerTextBudgets);
 
@@ -227,7 +234,7 @@ export function reasonToBlocker(reason: ReasonV1): Result<BlockerV1, ReasonModel
           code: 'INVALID_REQUIRED_OUTPUT' as const,
           pointer: { kind: 'output_contract' as const, contractRef },
           message: `Invalid output for contractRef=${contractRef}.`,
-          suggestedFix: 'Adjust output.notesMarkdown to satisfy validation and retry continue_workflow with the same ackToken.',
+          suggestedFix: 'Update output.notesMarkdown to satisfy validation. Then call continue_workflow WITHOUT ackToken (rehydrate) to receive a fresh ackToken, and retry advance with that new ackToken. Replaying the same ackToken is idempotent and will keep returning this blocked result.',
         }))
         .andThen(ensureBlockerTextBudgets);
 
@@ -273,6 +280,14 @@ export function reasonToBlocker(reason: ReasonV1): Result<BlockerV1, ReasonModel
         suggestedFix: 'Stop and investigate the session store; do not continue advancing this session.',
       });
 
+    case 'evaluation_error':
+      return ensureBlockerTextBudgets({
+        code: 'INVARIANT_VIOLATION',
+        pointer: { kind: 'context_budget' },
+        message: 'Validation evaluation failed: ValidationEngine encountered an error.',
+        suggestedFix: 'Check validation criteria for malformed rules or circular references.',
+      });
+
     default: {
       const _exhaustive: never = reason;
       return _exhaustive;
@@ -280,6 +295,13 @@ export function reasonToBlocker(reason: ReasonV1): Result<BlockerV1, ReasonModel
   }
 }
 
+/**
+ * Build a blocker report from blocking reasons.
+ * 
+ * Note: With the blocked nodes architectural upgrade (ADR 008), blockers are now stored in
+ * blocked_attempt node snapshots rather than advance_recorded outcomes. This function is still
+ * used to build blocker reports, but they're attached to blocked snapshots instead.
+ */
 export function buildBlockerReport(reasons: readonly ReasonV1[]): Result<BlockerReportV1, ReasonModelError> {
   if (reasons.length === 0) {
     return err({ code: 'INVARIANT_VIOLATION', message: 'buildBlockerReport requires at least one reason' });
@@ -292,7 +314,7 @@ export function buildBlockerReport(reasons: readonly ReasonV1[]): Result<Blocker
     blockers.push(b.value);
   }
 
-  blockers.sort((a, b) => blockerSortKey(a).localeCompare(blockerSortKey(b)));
+  blockers.sort((a, b) => blockerSortKey(a).localeCompare(blockerSortKey(b), 'en-US'));
 
   return ok({ blockers: blockers.slice(0, MAX_BLOCKERS) });
 }

@@ -226,7 +226,7 @@ describe('v2 continue_workflow: validationCriteria enforcement (mode-driven)', (
         }),
       });
 
-      const res = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx(v2));
+      const res = await handleV2ContinueWorkflow({ intent: 'advance', stateToken, ackToken } as any, dummyCtx(v2));
       expect(res.type).toBe('success');
       if (res.type !== 'success') return;
 
@@ -238,7 +238,9 @@ describe('v2 continue_workflow: validationCriteria enforcement (mode-driven)', (
       const truth = await v2.sessionEventLogStore.load(sessionId as any).match((v) => v, (e) => {
         throw new Error(`unexpected load error: ${e.code}`);
       });
-      expect(truth.events.filter((e) => e.kind === 'node_created').length).toBe(1);
+      const nodes = truth.events.filter((e) => e.kind === 'node_created');
+      expect(nodes.length).toBe(2);
+      expect(nodes.some((e) => e.data.nodeKind === 'blocked_attempt')).toBe(true);
       expect(truth.events.filter((e) => e.kind === 'advance_recorded').length).toBe(1);
     } finally {
       process.env.WORKRAIL_DATA_DIR = prev;
@@ -398,7 +400,7 @@ describe('v2 continue_workflow: validationCriteria enforcement (mode-driven)', (
         }),
       });
 
-      const res = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx(v2));
+      const res = await handleV2ContinueWorkflow({ intent: 'advance', stateToken, ackToken } as any, dummyCtx(v2));
       expect(res.type).toBe('success');
       if (res.type !== 'success') return;
 

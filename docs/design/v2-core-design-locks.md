@@ -130,7 +130,7 @@ Closed event kinds:
 - `session_created`
 - `observation_recorded` (session-first, node-scoped allowed but rare/high-signal)
 - `run_started` (pins `workflowId` + `workflowHash`)
-- `node_created` (`nodeKind`: `step|checkpoint`, references typed snapshot)
+- `node_created` (`nodeKind`: `step|checkpoint|blocked_attempt`, references typed snapshot)
 - `edge_created` (`edgeKind`: `acked_step|checkpoint`)
 - `advance_recorded` (**durable result of an attempted advance (ack attempt)**, see below)
 - `node_output_appended` (append-only durable write path; optional `supersedesOutputId?` for corrections without mutation)
@@ -230,7 +230,7 @@ Envelope requirements:
 - `scope.nodeId` must be present.
 
 Payload fields:
-- `nodeKind`: `step | checkpoint`
+- `nodeKind`: `step | checkpoint | blocked_attempt`
 - `parentNodeId` (nullable only for the run root node; otherwise required)
 - `workflowHash` (must match the run’s pinned `workflowHash`)
 - `snapshotRef`
