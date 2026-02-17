@@ -24,6 +24,7 @@ import type { CryptoPortV2 } from '../v2/durable-core/canonical/hashing.js';
 import type { IdFactoryV2 } from '../v2/infra/local/id-factory/index.js';
 import type { JsonValue } from './output-schemas.js';
 import type { TokenCodecPorts } from '../v2/durable-core/tokens/token-codec-ports.js';
+import type { WorkspaceAnchorPortV2 } from '../v2/ports/workspace-anchor.port.js';
 
 // Note: JsonValue type is imported from output-schemas.js above
 
@@ -205,6 +206,9 @@ export interface V2Dependencies {
 
   // Grouped token dependencies (always complete)
   readonly tokenCodecPorts: TokenCodecPorts;
+
+  // Workspace identity observation (optional, graceful degradation)
+  readonly workspaceAnchor?: WorkspaceAnchorPortV2;
 }
 
 // -----------------------------------------------------------------------------

@@ -26,6 +26,7 @@ import type { ProcessTerminator } from '../runtime/ports/process-terminator.js';
 import type { ToolContext, V2Dependencies } from './types.js';
 import { assertNever } from '../runtime/assert-never.js';
 import { unsafeTokenCodecPorts } from '../v2/durable-core/tokens/token-codec-ports.js';
+import { LocalWorkspaceAnchorV2 } from '../v2/infra/local/workspace-anchor/index.js';
 import { createToolFactory, type ToolAnnotations, type ToolDefinition } from './tool-factory.js';
 import type { IToolDescriptionProvider } from './tool-description-provider.js';
 import { createHandler } from './handler-factory.js';
@@ -124,6 +125,7 @@ export async function createToolContext(): Promise<ToolContext> {
         crypto,
         idFactory,
         tokenCodecPorts,
+        workspaceAnchor: new LocalWorkspaceAnchorV2(process.cwd()),
       };
       console.error('[FeatureFlags] v2 tools enabled');
     }

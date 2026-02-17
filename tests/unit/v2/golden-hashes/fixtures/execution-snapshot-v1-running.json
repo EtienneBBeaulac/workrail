@@ -1,5 +1,6 @@
 {
   "description": "Execution snapshot in running state with pending step and completed steps",
+  "expectedSha256": "sha256:dc2fbb18647cd555cad6c705b07d10e8a14973745cc82dd4d0d77820c1ff72e3",
   "input": {
     "v": 1,
     "kind": "execution_snapshot",

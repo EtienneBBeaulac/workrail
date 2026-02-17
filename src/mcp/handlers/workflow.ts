@@ -78,22 +78,7 @@ const TIMEOUT_MS = 30_000;
 // Helpers
 // -----------------------------------------------------------------------------
 
-/**
- * Run an async operation with a timeout.
- */
-async function withTimeout<T>(
-  operation: Promise<T>,
-  timeoutMs: number,
-  operationName: string
-): Promise<T> {
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    setTimeout(() => {
-      reject(new Error(`${operationName} timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-  });
-
-  return Promise.race([operation, timeoutPromise]);
-}
+import { withTimeout } from './shared/with-timeout.js';
 
 // -----------------------------------------------------------------------------
 // Handlers

@@ -1,7 +1,7 @@
 import { singleton, inject } from 'tsyringe';
-import { ValidationError } from '../../core/error-handler';
 import { evaluateCondition, ConditionContext } from '../../utils/condition-evaluator';
 import Ajv from 'ajv';
+import { err, ok, type Result } from 'neverthrow';
 import type {
   WorkflowStepDefinition,
   LoopStepDefinition,
@@ -18,6 +18,11 @@ import {
 } from '../../types/validation';
 import { EnhancedLoopValidator } from './enhanced-loop-validator';
 import { decodeForSchemaValidation } from './step-output-decoder';
+
+export type ValidationEngineError =
+  | { readonly kind: 'schema_compilation_failed'; readonly message: string; readonly details?: unknown }
+  | { readonly kind: 'invalid_criteria_format'; readonly message: string; readonly details?: unknown }
+  | { readonly kind: 'evaluation_threw'; readonly message: string; readonly details?: unknown };
 
 /**
  * ValidationEngine handles step output validation with support for
@@ -46,19 +51,23 @@ export class ValidationEngine {
    * @param schema - The JSON schema to compile
    * @returns Compiled schema validator function
    */
-  private compileSchema(schema: Record<string, any>): any {
+  private compileSchema(schema: Record<string, any>): Result<any, ValidationEngineError> {
     const schemaKey = JSON.stringify(schema);
     
     if (this.schemaCache.has(schemaKey)) {
-      return this.schemaCache.get(schemaKey);
+      return ok(this.schemaCache.get(schemaKey));
     }
     
     try {
       const compiledSchema = this.ajv.compile(schema);
       this.schemaCache.set(schemaKey, compiledSchema);
-      return compiledSchema;
+      return ok(compiledSchema);
     } catch (error) {
-      throw new ValidationError(`Invalid JSON schema: ${error}`);
+      return err({
+        kind: 'schema_compilation_failed',
+        message: 'Invalid JSON schema',
+        details: { error: String(error) },
+      });
     }
   }
 
@@ -74,7 +83,7 @@ export class ValidationEngine {
     output: string,
     criteria: ValidationCriteria,
     context: ConditionContext
-  ): ValidationResult {
+  ): Result<ValidationResult, ValidationEngineError> {
     try {
       // Handle array format (backward compatibility)
       if (Array.isArray(criteria)) {
@@ -84,21 +93,18 @@ export class ValidationEngine {
       // Handle composition format
       if (this.isValidationComposition(criteria)) {
         const compositionResult = this.evaluateComposition(output, criteria, context);
-        return {
-          valid: compositionResult,
-          issues: compositionResult ? [] : ['Validation composition failed'],
-          suggestions: compositionResult ? [] : ['Review validation criteria and adjust output accordingly.'],
+        return compositionResult.map((okRes) => ({
+          valid: okRes,
+          issues: okRes ? [] : ['Validation composition failed'],
+          suggestions: okRes ? [] : ['Review validation criteria and adjust output accordingly.'],
           warnings: undefined,
-        };
+        }));
       }
 
       // Invalid criteria format
-      throw new ValidationError('Invalid validation criteria format');
+      return err({ kind: 'invalid_criteria_format', message: 'Invalid validation criteria format' });
     } catch (error) {
-      if (error instanceof ValidationError) {
-        throw error;
-      }
-      throw new ValidationError(`Error evaluating validation criteria: ${error}`);
+      return err({ kind: 'evaluation_threw', message: 'Error evaluating validation criteria', details: { error: String(error) } });
     }
   }
 
@@ -114,35 +120,30 @@ export class ValidationEngine {
     output: string,
     rules: readonly ValidationRule[],
     context: ConditionContext
-  ): ValidationResult {
+  ): Result<ValidationResult, ValidationEngineError> {
     const issues: string[] = [];
     const suggestions: string[] = [];
     const warnings: string[] = [];
 
     // Process each validation rule
     for (const rule of rules) {
-      try {
-        // Check if rule condition is met (if condition exists)
-        if (rule.condition && !evaluateCondition(rule.condition, context)) {
-          // Skip this rule if condition is not met
+      // Check if rule condition is met (if condition exists)
+      if (typeof rule === 'object' && rule && 'condition' in rule) {
+        if ((rule as any).condition && !evaluateCondition((rule as any).condition, context)) {
           continue;
         }
-        
-        this.evaluateRule(output, rule, issues, suggestions, warnings);
-      } catch (error) {
-        if (error instanceof ValidationError) {
-          throw error;
-        }
-        throw new ValidationError(`Error evaluating validation rule: ${error}`);
       }
+
+      const ruleRes = this.evaluateRule(output, rule, issues, suggestions, warnings);
+      if (ruleRes.isErr()) return err(ruleRes.error);
     }
 
-    return {
+    return ok({
       valid: issues.length === 0,
       issues,
       suggestions: issues.length > 0 ? this.uniqueSuggestions([...suggestions, ValidationEngine.DEFAULT_FAILURE_SUGGESTION]) : [],
       warnings: warnings.length > 0 ? this.uniqueSuggestions(warnings) : undefined,
-    };
+    });
   }
 
   /**
@@ -157,28 +158,39 @@ export class ValidationEngine {
     output: string,
     composition: ValidationComposition,
     context: ConditionContext
-  ): boolean {
+  ): Result<boolean, ValidationEngineError> {
     // Handle AND operator
     if (composition.and) {
-      return composition.and.every(criteria => 
-        this.evaluateSingleCriteria(output, criteria, context)
-      );
+      for (const criteria of composition.and) {
+        const res = this.evaluateSingleCriteria(output, criteria, context);
+        if (res.isErr()) return err(res.error);
+        if (!res.value) return ok(false);
+      }
+      return ok(true);
     }
 
     // Handle OR operator
     if (composition.or) {
-      return composition.or.some(criteria => 
-        this.evaluateSingleCriteria(output, criteria, context)
-      );
+      let sawTrue = false;
+      for (const criteria of composition.or) {
+        const res = this.evaluateSingleCriteria(output, criteria, context);
+        if (res.isErr()) return err(res.error);
+        if (res.value) {
+          sawTrue = true;
+          break;
+        }
+      }
+      return ok(sawTrue);
     }
 
     // Handle NOT operator
     if (composition.not) {
-      return !this.evaluateSingleCriteria(output, composition.not, context);
+      const res = this.evaluateSingleCriteria(output, composition.not, context);
+      return res.map((v) => !v);
     }
 
     // Empty composition is considered valid
-    return true;
+    return ok(true);
   }
 
   /**
@@ -193,26 +205,27 @@ export class ValidationEngine {
     output: string,
     criteria: ValidationCriteria,
     context: ConditionContext
-  ): boolean {
+  ): Result<boolean, ValidationEngineError> {
     if (this.isValidationRule(criteria)) {
       // Check if rule condition is met (if condition exists)
       if (criteria.condition && !evaluateCondition(criteria.condition, context)) {
         // Skip this rule if condition is not met (consider as valid)
-        return true;
+        return ok(true);
       }
 
       const issues: string[] = [];
       const suggestions: string[] = [];
       const warnings: string[] = [];
-      this.evaluateRule(output, criteria, issues, suggestions, warnings);
-      return issues.length === 0;
+      const res = this.evaluateRule(output, criteria, issues, suggestions, warnings);
+      if (res.isErr()) return err(res.error);
+      return ok(issues.length === 0);
     }
 
     if (this.isValidationComposition(criteria)) {
       return this.evaluateComposition(output, criteria, context);
     }
 
-    throw new ValidationError('Invalid validation criteria type');
+    return err({ kind: 'invalid_criteria_format', message: 'Invalid validation criteria type' });
   }
 
   /**
@@ -244,7 +257,7 @@ export class ValidationEngine {
     output: string,
     criteria: ValidationCriteria,
     context?: ConditionContext
-  ): Promise<ValidationResult> {
+  ): Promise<Result<ValidationResult, ValidationEngineError>> {
     const issues: string[] = [];
 
     // Handle empty or invalid criteria
@@ -253,27 +266,28 @@ export class ValidationEngine {
       if (typeof output !== 'string' || output.trim().length === 0) {
         issues.push('Output is empty or invalid.');
       }
-      return {
+      return ok({
         valid: issues.length === 0,
         issues,
         suggestions: issues.length > 0 ? ['Provide valid output content.'] : []
-      };
+      });
     }
 
     // Evaluate criteria (either array format or composition format)
     const evaluation = this.evaluateCriteria(output, criteria, context || {});
-    
-    if (!evaluation.valid) {
-      issues.push(...evaluation.issues);
+    if (evaluation.isErr()) return err(evaluation.error);
+
+    if (!evaluation.value.valid) {
+      issues.push(...evaluation.value.issues);
     }
 
     const valid = issues.length === 0;
-    return {
+    return ok({
       valid,
       issues,
-      suggestions: valid ? [] : this.uniqueSuggestions([...evaluation.suggestions, ValidationEngine.DEFAULT_FAILURE_SUGGESTION]),
-      warnings: evaluation.warnings,
-    };
+      suggestions: valid ? [] : this.uniqueSuggestions([...evaluation.value.suggestions, ValidationEngine.DEFAULT_FAILURE_SUGGESTION]),
+      warnings: evaluation.value.warnings,
+    });
   }
 
   /**
@@ -283,14 +297,20 @@ export class ValidationEngine {
    * @param rule - The validation rule to apply
    * @param issues - Array to collect validation issues
    */
-  private evaluateRule(output: string, rule: ValidationRule, issues: string[], suggestions: string[], warnings: string[]): void {
+  private evaluateRule(
+    output: string,
+    rule: ValidationRule,
+    issues: string[],
+    suggestions: string[],
+    warnings: string[]
+  ): Result<void, ValidationEngineError> {
     // Handle legacy string-based rules for backward compatibility
     if (typeof rule === 'string') {
       const re = new RegExp(rule);
       if (!re.test(output)) {
         issues.push(`Output does not match pattern: ${rule}`);
       }
-      return;
+      return ok(undefined);
     }
 
     // Handle object-based rules
@@ -315,8 +335,12 @@ export class ValidationEngine {
                 this.maybePushJsonObjectNotStringSuggestion(suggestions);
               }
             }
-          } catch {
-            throw new ValidationError(`Invalid regex pattern in validationCriteria: ${rule.pattern}`);
+          } catch (error) {
+            return err({
+              kind: 'invalid_criteria_format',
+              message: 'Invalid regex pattern in validationCriteria',
+              details: { pattern: rule.pattern, error: String(error) },
+            });
           }
           break;
         }
@@ -364,7 +388,9 @@ export class ValidationEngine {
             }
             
             // Compile and validate against the schema
-            const validate = this.compileSchema(rule.schema);
+            const validateRes = this.compileSchema(rule.schema);
+            if (validateRes.isErr()) return err(validateRes.error);
+            const validate = validateRes.value;
             const isValid = validate(decoded.value);
             
             if (!isValid) {
@@ -379,22 +405,25 @@ export class ValidationEngine {
               }
             }
           } catch (error: any) {
-            // Handle schema compilation errors
-            if (error instanceof ValidationError) {
-              throw error;
-            }
-            throw new ValidationError(`Schema validation error: ${error}`);
+            return err({
+              kind: 'evaluation_threw',
+              message: 'Schema validation error',
+              details: { error: String(error) },
+            });
           }
           break;
         }
         default:
-          throw new ValidationError(`Unsupported validation rule type: ${(rule as any).type}`);
+          return err({
+            kind: 'invalid_criteria_format',
+            message: `Unsupported validation rule type: ${(rule as any).type}`,
+          });
       }
-      return;
+      return ok(undefined);
     }
 
     // Unknown rule format
-    throw new ValidationError('Invalid validationCriteria format.');
+    return err({ kind: 'invalid_criteria_format', message: 'Invalid validationCriteria format.' });
   }
 
   private looksLikeQuotedJsonSnippet(message: unknown): boolean {
