@@ -11,10 +11,8 @@ Core tools:
 - `inspect_workflow`
 - `start_workflow`
 - `continue_workflow`
-
-Rollout-only flagged (become core):
-- `resume_session` (unflag earlier)
-- `checkpoint_workflow` (unflag later)
+- `checkpoint_workflow` (shipped v1.4.0, currently feature-flagged)
+- `resume_session` (shipped v1.4.0, currently feature-flagged)
 
 Advanced (flagged longer):
 - `start_session` (enables checkpoint-only sessions; not required for core v2 value)
@@ -58,19 +56,22 @@ Local data may also be rooted under a WorkRail-owned data dir, optionally overri
 - **Determinism**: v2 pins execution to hashed compiled workflow snapshots (including builtins); v1 behavior can drift with workflow changes.
 - **Authoring power**: v2 adds builtin templates/features/contract packs to speed up authoring and standardize behavior.
 
-## Current Status (2026-01-06)
+## Current Status (2026-02-17)
 
 - Slice 1 (read-only tools + pinning) ✅ merged
 - Slice 2 (append-only substrate + projections) ✅ merged
 - Slice 2.5 (gate+witness + execution safety) ✅ merged
 - Slice 3 (token orchestration: start_workflow, continue_workflow) ✅ merged
-- **Slice 4a (semantics lockdown)** ✅ merged to main (PR #55, 2026-01-06)
-  - Recap recovery (tip + non-tip detection, function expansion)
-  - Context persistence (context_set event, auto-load, shallow merge)
-  - Per-step notesMarkdown semantics (§18.1 closed)
-  - Test coverage (context_budget, nextIntent matrix)
-- **Next**: Slice 4b (portability: export/import bundles)
-- **After 4b**: Slice 4c (resume_session + checkpoint_workflow)
+- Slice 4a (semantics lockdown) ✅ merged (PR #55)
+- Agent execution guidance (Layers 1-3) ✅ merged (PR #57)
+- Typed artifact validation + blocked retry UX ✅ merged (v1.2.0)
+- **Slice 4b (export/import bundles)** ✅ merged (v1.3.0)
+- **Slice 4c-i (checkpoint_workflow)** ✅ merged (v1.4.0)
+- **Slice 4c-ii (resume_session)** ✅ merged (v1.4.0)
+  - 5-tier deterministic ranking (git SHA, branch, notes, workflow ID, recency)
+  - DirectoryListingPortV2 + SessionSummaryProviderPortV2 ports
+  - Up to 5 ranked candidates with fresh stateTokens
+- **All functional slices complete.** Remaining: production workflow migration + polish & hardening (sub-phases A-H)
 
 ## Epics
 

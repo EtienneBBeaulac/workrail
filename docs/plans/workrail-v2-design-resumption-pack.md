@@ -279,7 +279,7 @@ See the canonical docs for full mechanics:
 This section tracks remaining work. Most design locks are now complete; the focus is implementation.
 
 - **v2 core design is locked**: see `docs/design/v2-core-design-locks.md` for the comprehensive implementation locks (durable model, projections, authoring, ops envelope, architecture map, module layout, and ports).
-- **Implementation status** (verified against `origin/main` @ `v1.2.0`, 2026-02-17):
+- **Implementation status** (verified against `origin/main` @ `v1.4.0`, 2026-02-17):
   - ✅ **Slice 1 shipped**: v2 bounded context (`src/v2/`), JCS canonicalization, `workflowHash` pinning, compiled workflow snapshots, pinned workflow store. Golden hashes pinned with exact SHA-256 assertions.
   - ✅ **Slice 2 shipped**: append-only session event log substrate (segments + `manifest.jsonl` + single-writer lock + corruption gating), typed closed-set event schemas for all 13 locked event kinds, idempotency enforcement, and pure deterministic projections (run DAG, session health, node outputs, capabilities, gaps, advance outcomes, run status signals, preferences propagation).
   - ✅ **Slice 2.5 shipped**: `ExecutionSessionGateV2` (lock+health+witness choke-point); `WithHealthySessionLock` (opaque branded witness; append requires proof); readonly/append port split; `SessionHealthV2` union with manifest-attested corruption reasons; typed snapshot pin enforcement (no `any`).
@@ -287,14 +287,19 @@ This section tracks remaining work. Most design locks are now complete; the focu
   - ✅ **Slice 4a shipped** (PR #55): Semantics lockdown — blockers, gaps, preferences, context persistence, recap recovery, notesMarkdown per-step semantics. 34 files changed, 1846 tests.
   - ✅ **Agent execution guidance shipped** (PR #57): Layers 1-3 — tool descriptions, field descriptions, prompt-based requirement injection.
   - ✅ **Typed artifact validation shipped** (PR #61, `v1.2.0`): `outputContract` replacing `validationCriteria`, `LoopControlArtifactV1` schema, artifact-based loop evaluation, blocked retry UX with first-class blocked nodes, handler decomposition, system-injected contract guidance, golden hash pinning, v2 MCP contract tests, projection timing hooks, v1 fail-fast guard. 112 files changed, 2326 tests passing.
-  - The locked type-first sequencing is complete through protocol orchestration:
+  - ✅ **Slice 4b shipped** (`v1.3.0`): Export/import bundle domain logic — session export, bundle integrity (SHA-256 manifest), import validation + token re-minting, export-import equivalence tests.
+  - ✅ **Slice 4c-i shipped** (`v1.4.0`): `checkpoint_workflow` tool — idempotent via opaque `checkpointToken`, creates checkpoint node + edge in run DAG, token minting and replay-safe.
+  - ✅ **Slice 4c-ii shipped** (`v1.4.0`, PR #66): `resume_session` tool — 5-tier deterministic ranking (git HEAD SHA, branch, recap notes, workflow ID, recency fallback), `DirectoryListingPortV2` + `SessionSummaryProviderPortV2` ports, up to 5 ranked candidates with fresh stateTokens, 24 ranking tests + 4 enumeration tests + 6 contract tests.
+  - **All functional slices are complete.** The locked type-first sequencing is done:
     1. ✅ Canonical models + hashing (no I/O)
     2. ✅ Pure projections
     3. ✅ Storage substrate (ports + adapters)
     4. ✅ Execution safety boundaries (gate+witness; Slice 2.5)
     5. ✅ Protocol orchestration (Slice 3)
     6. ✅ Semantics lockdown (Slice 4a)
-    7. Remaining: export/import (4b), resume/checkpoints (4c), polish (sub-phases A-H)
+    7. ✅ Portability (Slice 4b)
+    8. ✅ Checkpoints + Resume (Slice 4c)
+    9. Remaining: production workflow migration, polish & hardening (sub-phases A-H)
 - **Authoring is finalized**:
   - Initial contract packs are locked: `capability_observation`, `workflow_divergence`, `loop_control` (and gaps integrated into event model).
   - Builtins metadata schema defined (code-canonical + generated).
@@ -408,20 +413,15 @@ This is a concise record of what we did in this chat, for resumption continuity 
 
 ### What's next (current status as of 2026-02-17)
 
-**Core execution loop is complete and released as v1.2.0.** Slices 1 through 4a are shipped, plus the typed artifact validation architectural fix and blocked retry UX.
+**All functional slices are complete and released as v1.4.0.** The full v2 MCP tool surface (`list_workflows`, `inspect_workflow`, `start_workflow`, `continue_workflow`, `checkpoint_workflow`, `resume_session`) is implemented and passing CI. All tools are currently feature-flagged behind `WORKRAIL_ENABLE_V2_TOOLS=true`.
+
+#### Recently shipped (since last update)
+
+- ✅ **Slice 4b** (`v1.3.0`): Export/import bundle domain logic with SHA-256 manifest integrity, import validation + token re-minting, export-import equivalence tests.
+- ✅ **Slice 4c-i** (`v1.4.0`): `checkpoint_workflow` tool with idempotent replay via `checkpointToken`, checkpoint node + edge in run DAG.
+- ✅ **Slice 4c-ii** (`v1.4.0`, PR #66): `resume_session` tool with 5-tier deterministic ranking (git HEAD SHA, branch match, recap notes, workflow ID, recency fallback). Segregated `DirectoryListingPortV2` + `SessionSummaryProviderPortV2` ports. Returns up to 5 ranked candidates with fresh stateTokens.
 
 #### Remaining work
-
-**Slice 4b: Export/Import Bundles** (~2-3 days):
-- Bundle integrity (SHA-256 manifest)
-- Import validation + token re-minting
-- Export→import equivalence tests
-- Schema exists (`schemas/export-bundle/index.ts`) but no handlers yet
-
-**Slice 4c: Resume + Checkpoints** (~2-3 days):
-- `resume_session` tool (deterministic ranking by git branch/SHA/notes)
-- `checkpoint_workflow` tool (idempotent via checkpointToken)
-- Both feature-flagged with explicit unflag gates
 
 **Production workflow migration** (~1 day):
 - Migrate existing workflows from `validationCriteria` to `outputContract`
@@ -432,10 +432,14 @@ This is a concise record of what we did in this chat, for resumption continuity 
 - Some items partially done: projection timing hooks (G), import boundary tests (H), v1 fail-fast guard (H)
 - Remaining: anti-drift enforcement (A-B), property-based determinism tests (D-E), error ergonomics (F)
 
+**Unflag v2 tools** (after polish):
+- Remove `WORKRAIL_ENABLE_V2_TOOLS` gate
+- `resume_session` and `checkpoint_workflow` may retain separate unflag gates if needed
+
 **Next agent should**:
-- Read `v2-core-design-locks.md` sections 16.1–16.5 (implementation blueprint + playbook + polish phase).
-- Implement Slice 4b (export/import bundles) or Slice 4c (resume + checkpoints).
-- After all functional slices: run the remaining Polish & Hardening sub-phases before unflagging v2.
+- Read `v2-core-design-locks.md` sections 16.1-16.5 (implementation blueprint + playbook + polish phase).
+- Run the remaining Polish & Hardening sub-phases (A-H) before unflagging v2.
+- Migrate production workflows from `validationCriteria` to `outputContract`.
 
 #### Historical reference: lock tightening sessions (2025-12-21 to 2025-12-23)
 All design locks were audited and tightened across these sessions. Key decisions include: rehydrate/advance/replay separation, append transaction protocol, fork modeling, token crypto, checkpointing semantics, resume matching, corruption gating, and error envelope. These are now all implemented and tested. See `v2-core-design-locks.md` for the full locked mechanics.
@@ -619,16 +623,7 @@ Originally proposed `agentInstructions` field in responses (900 lines of parsing
 
 ## Open items (remaining v2 work)
 
-**Slice 4b: Export/Import Bundles** (~2-3 days):
-- Bundle integrity (SHA-256 manifest)
-- Import validation + token re-minting
-- Export→import equivalence tests
-- Schema exists (`schemas/export-bundle/index.ts`) but no handlers yet
-
-**Slice 4c: Resume + Checkpoints** (~2-3 days):
-- `resume_session` tool (deterministic ranking by git branch/SHA/notes)
-- `checkpoint_workflow` tool (idempotent via checkpointToken)
-- Both feature-flagged with explicit unflag gates
+**All functional slices shipped** (v1.4.0). Remaining work is migration + hardening.
 
 **Production workflow migration** (~1 day):
 - Migrate existing workflows from `validationCriteria` to `outputContract`
@@ -638,3 +633,7 @@ Originally proposed `agentInstructions` field in responses (900 lines of parsing
 - See `v2-core-design-locks.md` section 16.5
 - Partially done: projection timing hooks (G), import boundary tests (H), v1 fail-fast guard (H)
 - Remaining: anti-drift enforcement (A-B), property-based determinism tests (D-E), error ergonomics (F), dead code removal
+
+**Unflag v2 tools** (after polish):
+- Remove `WORKRAIL_ENABLE_V2_TOOLS` gate so v2 tools are available by default
+- `resume_session` and `checkpoint_workflow` may retain separate unflag gates if gradual rollout is preferred
