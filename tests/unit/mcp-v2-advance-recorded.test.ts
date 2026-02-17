@@ -216,14 +216,14 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
       const stateToken = await mkSignedToken({ v2, payload: statePayload });
       const ackToken = await mkSignedToken({ v2, payload: ackPayload });
 
-      const first = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx(v2));
+      const first = await handleV2ContinueWorkflow({ intent: 'advance', stateToken, ackToken } as any, dummyCtx(v2));
       expect(first.type).toBe('success');
       if (first.type !== 'success') return;
       expect(first.data.kind).toBe('ok');
       expect(first.data.isComplete).toBe(true);
       expect(first.data.pending).toBeNull();
 
-      const second = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx(v2));
+      const second = await handleV2ContinueWorkflow({ intent: 'advance', stateToken, ackToken } as any, dummyCtx(v2));
       expect(second).toEqual(first);
 
       const truth = await v2.sessionEventLogStore.load(sessionId as any).match(
@@ -372,7 +372,7 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
 
       // First call with output
       const first = await handleV2ContinueWorkflow(
-        { stateToken, ackToken, output: { notesMarkdown: outputNotes } } as any,
+        { intent: 'advance', stateToken, ackToken, output: { notesMarkdown: outputNotes } } as any,
         dummyCtx(v2)
       );
       expect(first.type).toBe('success');
@@ -383,7 +383,7 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
 
       // Replay same ackToken + output
       const second = await handleV2ContinueWorkflow(
-        { stateToken, ackToken, output: { notesMarkdown: outputNotes } } as any,
+        { intent: 'advance', stateToken, ackToken, output: { notesMarkdown: outputNotes } } as any,
         dummyCtx(v2)
       );
       expect(second).toEqual(first);

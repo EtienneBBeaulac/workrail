@@ -116,7 +116,7 @@ describe('v2 continue_workflow rehydrate-only is pure (no durable writes)', () =
         }
       );
 
-      const res = await handleV2ContinueWorkflow({ stateToken: start.data.stateToken } as any, ctx);
+      const res = await handleV2ContinueWorkflow({ intent: 'rehydrate', stateToken: start.data.stateToken } as any, ctx);
       expect(res.type).toBe('success');
 
       const after = await (ctx.v2 as any).sessionStore.load(sessionId).match(

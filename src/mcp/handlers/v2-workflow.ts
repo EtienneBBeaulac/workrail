@@ -10,12 +10,7 @@ import type { JsonValue } from '../../v2/durable-core/canonical/json-types.js';
 
 const TIMEOUT_MS = 30_000;
 
-async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, name: string): Promise<T> {
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    setTimeout(() => reject(new Error(`${name} timed out after ${timeoutMs}ms`)), timeoutMs);
-  });
-  return Promise.race([operation, timeoutPromise]);
-}
+import { withTimeout } from './shared/with-timeout.js';
 
 /**
  * Require v2 context to be available.

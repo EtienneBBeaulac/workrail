@@ -424,8 +424,14 @@ export function mapExecutionSessionGateErrorToToolError(e: ExecutionSessionGateE
         details: detailsSessionHealth(e.health) as unknown as JsonValue,
       });
 
-    case 'SESSION_LOAD_FAILED':
     case 'SESSION_LOCK_REENTRANT':
+      // Concurrent execution detected (in-process or cross-process).
+      // This is a retryable condition per design locks (agents can make parallel tool calls).
+      return errRetryAfterMs('TOKEN_SESSION_LOCKED', e.message, 1000, {
+        suggestion: 'Session is currently locked by concurrent execution. Retry in 1 second.',
+      });
+
+    case 'SESSION_LOAD_FAILED':
     case 'LOCK_ACQUIRE_FAILED':
     case 'GATE_CALLBACK_FAILED':
       return errNotRetryable('INTERNAL_ERROR', e.message, {

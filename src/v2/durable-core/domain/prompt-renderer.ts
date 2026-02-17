@@ -13,6 +13,8 @@ import type { NodeOutputsProjectionV2 } from '../../projections/node-outputs.js'
 import { collectAncestryRecap, collectDownstreamRecap, buildChildSummary } from './recap-recovery.js';
 import { expandFunctionDefinitions, formatFunctionDef } from './function-definition-expander.js';
 import { RECOVERY_BUDGET_BYTES, TRUNCATION_MARKER } from '../constants.js';
+import { extractValidationRequirements } from './validation-requirements-extractor.js';
+import { LOOP_CONTROL_CONTRACT_REF } from '../schemas/artifacts/index.js';
 
 export type PromptRenderError = {
   readonly code: 'RENDER_FAILED';
@@ -200,6 +202,31 @@ function applyPromptBudget(combinedPrompt: string): string {
   return decoder.decode(truncatedBytes) + markerText + omissionNote;
 }
 
+/**
+ * Format system-injected requirements for output contracts.
+ * These are generated from contract metadata, not authored prompts.
+ */
+function formatOutputContractRequirements(
+  outputContract: { readonly contractRef?: string } | undefined
+): readonly string[] {
+  const contractRef = outputContract?.contractRef;
+  if (!contractRef) return [];
+
+  switch (contractRef) {
+    case LOOP_CONTROL_CONTRACT_REF:
+      return [
+        `Artifact contract: ${LOOP_CONTROL_CONTRACT_REF}`,
+        `Provide an artifact with kind: "wr.loop_control"`,
+        `Fields: loopId (lowercase, delimiter-safe), decision ("continue" | "stop")`,
+      ];
+    default:
+      return [
+        `Artifact contract: ${contractRef}`,
+        `Provide an artifact matching the contract schema`,
+      ];
+  }
+}
+
 export interface StepMetadata {
   readonly stepId: string;
   readonly title: string;
@@ -259,9 +286,27 @@ export function renderPendingPrompt(args: {
   const requireConfirmation = Boolean(step?.requireConfirmation);
   const functionReferences = step?.functionReferences ?? [];
 
-  // If not rehydrate-only, return base prompt (no recovery needed for advance/start)
+  // Extract validation requirements and append to prompt if present
+  const validationCriteria = step?.validationCriteria;
+  const requirements = extractValidationRequirements(validationCriteria);
+  const requirementsSection = requirements.length > 0
+    ? `\n\n**OUTPUT REQUIREMENTS:**\n${requirements.map(r => `- ${r}`).join('\n')}`
+    : '';
+  
+  // Extract output contract requirements (system-injected, not prompt-authored)
+  const outputContract = step && typeof step === 'object' && 'outputContract' in step
+    ? (step as { outputContract?: { contractRef?: string } }).outputContract
+    : undefined;
+  const contractRequirements = formatOutputContractRequirements(outputContract);
+  const contractSection = contractRequirements.length > 0
+    ? `\n\n**OUTPUT REQUIREMENTS (System):**\n${contractRequirements.map(r => `- ${r}`).join('\n')}`
+    : '';
+  
+  const enhancedPrompt = basePrompt + requirementsSection + contractSection;
+
+  // If not rehydrate-only, return enhanced prompt (no recovery needed for advance/start)
   if (!args.rehydrateOnly) {
-    return ok({ stepId: args.stepId, title: baseTitle, prompt: basePrompt, requireConfirmation });
+    return ok({ stepId: args.stepId, title: baseTitle, prompt: enhancedPrompt, requireConfirmation });
   }
 
   // Rehydrate-only: load recovery projections (extracted helper)
@@ -270,7 +315,7 @@ export function renderPendingPrompt(args: {
     return ok({
       stepId: args.stepId,
       title: baseTitle,
-      prompt: basePrompt + '\n\n' + projectionsRes.error,
+      prompt: enhancedPrompt + '\n\n' + projectionsRes.error,
       requireConfirmation,
     });
   }
@@ -291,12 +336,12 @@ export function renderPendingPrompt(args: {
 
   // No recovery content
   if (sections.length === 0) {
-    return ok({ stepId: args.stepId, title: baseTitle, prompt: basePrompt, requireConfirmation });
+    return ok({ stepId: args.stepId, title: baseTitle, prompt: enhancedPrompt, requireConfirmation });
   }
 
   // Combine and apply budget (extracted helpers)
   const recoveryText = `## Recovery Context\n\n${sections.join('\n\n')}`;
-  const combinedPrompt = `${basePrompt}\n\n${recoveryText}`;
+  const combinedPrompt = `${enhancedPrompt}\n\n${recoveryText}`;
   const finalPrompt = applyPromptBudget(combinedPrompt);
 
   return ok({ stepId: args.stepId, title: baseTitle, prompt: finalPrompt, requireConfirmation });

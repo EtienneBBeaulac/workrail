@@ -39,7 +39,7 @@ function extractNodeIdFromEvent(e: unknown): string | undefined {
  * Usage:
  * - node_created.data.nodeKind
  */
-export type NodeKindV2 = 'step' | 'checkpoint';
+export type NodeKindV2 = 'step' | 'checkpoint' | 'blocked_attempt';
 
 /**
  * Closed set: EdgeKind (acked_step | checkpoint).

@@ -17,6 +17,7 @@ import {
 import { DecisionTraceRefsV1Schema } from '../lib/decision-trace-ref.js';
 import { DedupeKeyV1Schema } from '../lib/dedupe-key.js';
 import { utf8BoundedString } from '../lib/utf8-bounded-string.js';
+import { ValidationPerformedDataV1Schema } from './validation-event.js';
 
 /**
  * Helper to measure UTF-8 byte length (not code units).
@@ -75,7 +76,7 @@ const RunStartedDataV1Schema = z.object({
   workflowSourceRef: z.string().min(1),
 });
 
-const NodeKindSchema = z.enum(['step', 'checkpoint']);
+const NodeKindSchema = z.enum(['step', 'checkpoint', 'blocked_attempt']);
 
 const NodeCreatedDataV1Schema = z.object({
   nodeKind: NodeKindSchema,
@@ -129,6 +130,9 @@ const ArtifactRefPayloadV1Schema = z.object({
   sha256: sha256DigestSchema,
   contentType: z.string().min(1),
   byteLength: z.number().int().nonnegative(),
+  // Optional inline artifact content (for small artifacts < 1KB)
+  // Large artifacts omit this and use external blob store
+  content: z.unknown().optional(),
 });
 
 const OutputPayloadV1Schema = z.discriminatedUnion('payloadKind', [NotesPayloadV1Schema, ArtifactRefPayloadV1Schema]);
@@ -234,6 +238,16 @@ const BlockerReportV1Schema = z
     }
   });
 
+/**
+ * @deprecated The blocked outcome variant is deprecated as of the blocked nodes architectural upgrade (ADR 008).
+ * Use blocked_attempt nodes (nodeKind=blocked_attempt) instead.
+ * This variant will be removed in 2 releases to allow for backward compatibility during migration.
+ * 
+ * Migration path:
+ * - Query blocked attempts via DAG topology: `projectRunDagV2(events)` and filter nodes by `nodeKind === 'blocked_attempt'`
+ * - Load validation details from `validation_performed` events
+ * - Load blockers from the blocked snapshot (engineState.blocked.blockers)
+ */
 const AdvanceRecordedOutcomeV1Schema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('blocked'), blockers: BlockerReportV1Schema }),
   z.object({ kind: z.literal('advanced'), toNodeId: z.string().min(1) }),
@@ -348,6 +362,11 @@ export const DomainEventV1Schema = z.discriminatedUnion('kind', [
     kind: z.literal('advance_recorded'),
     scope: z.object({ runId: z.string().min(1), nodeId: z.string().min(1) }),
     data: AdvanceRecordedDataV1Schema,
+  }),
+  DomainEventEnvelopeV1Schema.extend({
+    kind: z.literal('validation_performed'),
+    scope: z.object({ runId: z.string().min(1), nodeId: z.string().min(1) }),
+    data: ValidationPerformedDataV1Schema,
   }),
   DomainEventEnvelopeV1Schema.extend({
     kind: z.literal('node_output_appended'),

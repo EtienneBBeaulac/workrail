@@ -40,6 +40,7 @@ export function buildAckAdvanceAppendPlanV1(args: {
 
   // Advanced-only inputs (required when outcome.kind === 'advanced' OR outcome omitted)
   readonly toNodeId?: string;
+  readonly toNodeKind?: 'step' | 'blocked_attempt';
   readonly snapshotRef?: SnapshotRef;
   readonly causeKind?: 'intentional_fork' | 'non_tip_advance';
   readonly minted: {
@@ -119,6 +120,20 @@ export function buildAckAdvanceAppendPlanV1(args: {
   const nextIndexAfterExtra = nextEventIndex + 1 + extra.length;
 
   if (outcome.kind === 'blocked') {
+    // @deprecated This code path is deprecated (ADR 008). Use blocked_attempt nodes instead.
+    // This path remains for backward compatibility during 2-release buffer period.
+    // Will be removed after v0.10.0.
+    
+    // Runtime warning when deprecated path is used
+    if (typeof console !== 'undefined' && console.warn) {
+      console.warn(
+        '[DEPRECATED] Creating advance_recorded with blocked outcome. ' +
+        'Use blocked_attempt nodes instead (see ADR 008). ' +
+        'This path will be removed in 2 releases. ' +
+        'Set USE_BLOCKED_NODES=true to use the new model.'
+      );
+    }
+    
     if (outputsToAppend && outputsToAppend.length > 0) {
       return err({
         code: 'INVARIANT_VIOLATION',
@@ -149,9 +164,14 @@ export function buildAckAdvanceAppendPlanV1(args: {
   const toNodeId = args.toNodeId;
   const snapshotRef = args.snapshotRef;
   const causeKind = args.causeKind;
+  const toNodeKind = args.toNodeKind ?? 'step';
 
   const nodeCreatedEventIndex = nextIndexAfterExtra;
   const edgeCreatedEventIndex = nextIndexAfterExtra + 1;
+
+  if (toNodeKind !== 'step' && toNodeKind !== 'blocked_attempt') {
+    return err({ code: 'INVARIANT_VIOLATION', message: 'toNodeKind must be step|blocked_attempt' });
+  }
 
   const advancedEvents: readonly DomainEventV1[] = [
     {
@@ -163,7 +183,7 @@ export function buildAckAdvanceAppendPlanV1(args: {
       dedupeKey: `node_created:${sessionId}:${runId}:${toNodeId}`,
       scope: { runId, nodeId: toNodeId },
       data: {
-        nodeKind: 'step',
+        nodeKind: toNodeKind,
         parentNodeId: fromNodeId,
         workflowHash,
         snapshotRef,

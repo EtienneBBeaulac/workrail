@@ -1,5 +1,6 @@
 {
   "description": "Execution snapshot in init state (before first step)",
+  "expectedSha256": "sha256:5deaac6d12e2072728219b84f5bd468f4a2e94fe826725f02febe4fcb13d5d48",
   "input": {
     "v": 1,
     "kind": "execution_snapshot",
