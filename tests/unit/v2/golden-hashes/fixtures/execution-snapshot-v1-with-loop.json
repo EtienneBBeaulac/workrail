@@ -1,5 +1,6 @@
 {
   "description": "Execution snapshot with active loop stack and pending step inside loop",
+  "expectedSha256": "sha256:94267c27fb95689668ee5f8c15658f12d33dbd7864dc3e33bfbe928c97a1b4ed",
   "input": {
     "v": 1,
     "kind": "execution_snapshot",

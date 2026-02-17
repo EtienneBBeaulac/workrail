@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { renderPendingPrompt } from '../../../src/v2/durable-core/domain/prompt-renderer.js';
 import { createWorkflow } from '../../../src/types/workflow.js';
 import { createBundledSource } from '../../../src/types/workflow-source.js';
+import { LOOP_CONTROL_CONTRACT_REF } from '../../../src/v2/durable-core/schemas/artifacts/index.js';
 
 describe('renderPendingPrompt', () => {
   const simpleWorkflow = createWorkflow(
@@ -121,6 +122,253 @@ describe('renderPendingPrompt', () => {
       // - Valid UTF-8 (returns unchanged)
       // Full integration test would require large recovery context setup
       expect(renderPendingPrompt).toBeDefined();
+    });
+  });
+
+  describe('validation requirements integration (Layer 3)', () => {
+    it('appends OUTPUT REQUIREMENTS section when validationCriteria present (contains)', () => {
+      const workflowWithValidation = createWorkflow(
+        {
+          id: 'test-validation',
+          name: 'Test Validation',
+          description: 'Test with validation',
+          version: '1.0.0',
+          steps: [{
+            id: 'validated-step',
+            title: 'Validated Step',
+            prompt: 'Complete this step properly',
+            requireConfirmation: false,
+            validationCriteria: {
+              type: 'contains',
+              value: 'done',
+              message: 'Must include done',
+            },
+          }],
+        } as any,
+        createBundledSource()
+      );
+
+      const result = renderPendingPrompt({
+        workflow: workflowWithValidation,
+        stepId: 'validated-step',
+        loopPath: [],
+        truth: { events: [], manifest: [] },
+        runId: 'run_1',
+        nodeId: 'node_1',
+        rehydrateOnly: false,
+      });
+
+      expect(result.isOk()).toBe(true);
+      if (result.isOk()) {
+        expect(result.value.prompt).toContain('Complete this step properly');
+        expect(result.value.prompt).toContain('**OUTPUT REQUIREMENTS:**');
+        expect(result.value.prompt).toContain('- Must contain: "done"');
+      }
+    });
+
+    it('appends OUTPUT REQUIREMENTS section when validationCriteria present (regex)', () => {
+      const workflowWithRegex = createWorkflow(
+        {
+          id: 'test-regex',
+          name: 'Test Regex',
+          description: 'Test with regex validation',
+          version: '1.0.0',
+          steps: [{
+            id: 'regex-step',
+            title: 'Regex Step',
+            prompt: 'Provide output matching pattern',
+            requireConfirmation: false,
+            validationCriteria: {
+              type: 'regex',
+              pattern: '^[A-Z]+$',
+              message: 'Must be uppercase',
+            },
+          }],
+        } as any,
+        createBundledSource()
+      );
+
+      const result = renderPendingPrompt({
+        workflow: workflowWithRegex,
+        stepId: 'regex-step',
+        loopPath: [],
+        truth: { events: [], manifest: [] },
+        runId: 'run_1',
+        nodeId: 'node_1',
+        rehydrateOnly: false,
+      });
+
+      expect(result.isOk()).toBe(true);
+      if (result.isOk()) {
+        expect(result.value.prompt).toContain('**OUTPUT REQUIREMENTS:**');
+        expect(result.value.prompt).toContain('- Must match pattern: ^[A-Z]+$');
+      }
+    });
+
+    it('appends multiple requirements for and composition', () => {
+      const workflowWithComposite = createWorkflow(
+        {
+          id: 'test-composite',
+          name: 'Test Composite',
+          description: 'Test with composite validation',
+          version: '1.0.0',
+          steps: [{
+            id: 'composite-step',
+            title: 'Composite Step',
+            prompt: 'Complete multiple requirements',
+            requireConfirmation: false,
+            validationCriteria: {
+              and: [
+                { type: 'contains', value: 'first', message: 'Must contain first' },
+                { type: 'contains', value: 'second', message: 'Must contain second' },
+              ],
+            },
+          }],
+        } as any,
+        createBundledSource()
+      );
+
+      const result = renderPendingPrompt({
+        workflow: workflowWithComposite,
+        stepId: 'composite-step',
+        loopPath: [],
+        truth: { events: [], manifest: [] },
+        runId: 'run_1',
+        nodeId: 'node_1',
+        rehydrateOnly: false,
+      });
+
+      expect(result.isOk()).toBe(true);
+      if (result.isOk()) {
+        expect(result.value.prompt).toContain('**OUTPUT REQUIREMENTS:**');
+        expect(result.value.prompt).toContain('- Must contain: "first"');
+        expect(result.value.prompt).toContain('- Must contain: "second"');
+      }
+    });
+
+    it('does not add OUTPUT REQUIREMENTS when no validationCriteria', () => {
+      const result = renderPendingPrompt({
+        workflow: simpleWorkflow,
+        stepId: 'step1',
+        loopPath: [],
+        truth: { events: [], manifest: [] },
+        runId: 'run_1',
+        nodeId: 'node_1',
+        rehydrateOnly: false,
+      });
+
+      expect(result.isOk()).toBe(true);
+      if (result.isOk()) {
+        expect(result.value.prompt).toBe('Do step 1');
+        expect(result.value.prompt).not.toContain('OUTPUT REQUIREMENTS');
+      }
+    });
+
+    it('includes OUTPUT REQUIREMENTS in rehydrate-only mode with no recovery', () => {
+      const workflowWithValidation = createWorkflow(
+        {
+          id: 'test-rehydrate',
+          name: 'Test Rehydrate',
+          description: 'Test rehydrate with validation',
+          version: '1.0.0',
+          steps: [{
+            id: 'rehydrate-step',
+            title: 'Rehydrate Step',
+            prompt: 'Continue the work',
+            requireConfirmation: false,
+            validationCriteria: {
+              type: 'contains',
+              value: 'complete',
+              message: 'Must mark as complete',
+            },
+          }],
+        } as any,
+        createBundledSource()
+      );
+
+      const truth = {
+        events: [
+          { v: 1, eventId: 'e0', eventIndex: 0, sessionId: 's1', kind: 'session_created', dedupeKey: 'session_created:s1', data: {} },
+          { v: 1, eventId: 'e1', eventIndex: 1, sessionId: 's1', kind: 'run_started', dedupeKey: 'run_started:s1:run_1', scope: { runId: 'run_1' }, data: { workflowId: 'test', workflowHash: 'sha256:abc123' + '0'.repeat(58), workflowSourceKind: 'bundled', workflowSourceRef: '(bundled)' } },
+          { v: 1, eventId: 'e2', eventIndex: 2, sessionId: 's1', kind: 'node_created', dedupeKey: 'node_created:s1:run_1:node_1', scope: { runId: 'run_1', nodeId: 'node_1' }, data: { nodeKind: 'step', parentNodeId: null, workflowHash: 'sha256:abc123' + '0'.repeat(58), snapshotRef: 'sha256:def456' + '0'.repeat(58) } },
+        ] as any,
+        manifest: [],
+      };
+
+      const result = renderPendingPrompt({
+        workflow: workflowWithValidation,
+        stepId: 'rehydrate-step',
+        loopPath: [],
+        truth,
+        runId: 'run_1',
+        nodeId: 'node_1',
+        rehydrateOnly: true,
+      });
+
+      expect(result.isOk()).toBe(true);
+      if (result.isOk()) {
+        expect(result.value.prompt).toContain('Continue the work');
+        expect(result.value.prompt).toContain('**OUTPUT REQUIREMENTS:**');
+        expect(result.value.prompt).toContain('- Must contain: "complete"');
+      }
+    });
+  });
+
+  describe('output contract guidance (system-injected)', () => {
+    it('appends system OUTPUT REQUIREMENTS for outputContract', () => {
+      const workflowWithContract = createWorkflow(
+        {
+          id: 'test-output-contract',
+          name: 'Test Output Contract',
+          description: 'Test with outputContract',
+          version: '1.0.0',
+          steps: [{
+            id: 'contract-step',
+            title: 'Contract Step',
+            prompt: 'Provide output artifact',
+            requireConfirmation: false,
+            outputContract: {
+              contractRef: LOOP_CONTROL_CONTRACT_REF,
+            },
+          }],
+        } as any,
+        createBundledSource()
+      );
+
+      const result = renderPendingPrompt({
+        workflow: workflowWithContract,
+        stepId: 'contract-step',
+        loopPath: [],
+        truth: { events: [], manifest: [] },
+        runId: 'run_1',
+        nodeId: 'node_1',
+        rehydrateOnly: false,
+      });
+
+      expect(result.isOk()).toBe(true);
+      if (result.isOk()) {
+        expect(result.value.prompt).toContain('**OUTPUT REQUIREMENTS (System):**');
+        expect(result.value.prompt).toContain(`Artifact contract: ${LOOP_CONTROL_CONTRACT_REF}`);
+        expect(result.value.prompt).toContain('Provide an artifact with kind: "wr.loop_control"');
+        expect(result.value.prompt).toContain('decision ("continue" | "stop")');
+      }
+    });
+
+    it('does not add system OUTPUT REQUIREMENTS when no outputContract', () => {
+      const result = renderPendingPrompt({
+        workflow: simpleWorkflow,
+        stepId: 'step1',
+        loopPath: [],
+        truth: { events: [], manifest: [] },
+        runId: 'run_1',
+        nodeId: 'node_1',
+        rehydrateOnly: false,
+      });
+
+      expect(result.isOk()).toBe(true);
+      if (result.isOk()) {
+        expect(result.value.prompt).not.toContain('OUTPUT REQUIREMENTS (System)');
+      }
     });
   });
 });

@@ -32,7 +32,7 @@ describe('v2 execution preconditions (dependency completeness)', () => {
 
   it('fails fast when ctx.v2 is missing sha256/idFactory (continue_workflow)', async () => {
     const ctx = ctxWithV2({});
-    const res = await handleV2ContinueWorkflow({ stateToken: 'invalid-token' } as any, ctx);
+    const res = await handleV2ContinueWorkflow({ intent: 'rehydrate', stateToken: 'invalid-token' } as any, ctx);
 
     expect(res.type).toBe('error');
     if (res.type !== 'error') return;

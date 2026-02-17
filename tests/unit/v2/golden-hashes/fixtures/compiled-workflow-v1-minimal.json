@@ -1,5 +1,6 @@
 {
   "description": "Minimal v1_preview compiled workflow snapshot (Slice 1 baseline)",
+  "expectedSha256": "sha256:9a895227c318a19990daa70c62df81543ef6e7e411a1067041dc8e47af1273ec",
   "input": {
     "schemaVersion": 1,
     "sourceKind": "v1_preview",

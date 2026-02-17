@@ -233,7 +233,7 @@ describe('v2 replay is fact-returning and fail-closed (Phase 3)', () => {
       const ackToken = await mkSignedToken({ v2: v2Ctx, payload: ackPayload });
 
       const v2Ctx2 = await createV2Context();
-      const res = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx(v2Ctx2));
+      const res = await handleV2ContinueWorkflow({ intent: 'advance', stateToken, ackToken } as any, dummyCtx(v2Ctx2));
       expect(res.type).toBe('error');
       if (res.type !== 'error') return;
       expect(res.code).toBe('INTERNAL_ERROR');
@@ -395,7 +395,7 @@ describe('v2 replay is fact-returning and fail-closed (Phase 3)', () => {
       const ackToken = await mkSignedToken({ v2: v2Ctx, payload: ackPayload });
 
       const v2Ctx2 = await createV2Context();
-      const res = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, dummyCtx(v2Ctx2));
+      const res = await handleV2ContinueWorkflow({ intent: 'advance', stateToken, ackToken } as any, dummyCtx(v2Ctx2));
       expect(res.type).toBe('error');
       if (res.type !== 'error') return;
       expect(['INTERNAL_ERROR', 'SESSION_NOT_HEALTHY']).toContain(res.code);

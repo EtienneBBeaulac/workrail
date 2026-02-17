@@ -141,6 +141,7 @@ describe('v2 fork harness (branching stress test)', () => {
     const nodeA_ackToken_1 = start.data.ackToken;
 
     const ack1 = await handleV2ContinueWorkflow({
+      intent: 'advance',
       stateToken: nodeA_stateToken,
       ackToken: nodeA_ackToken_1,
       output: { notesMarkdown: 'Branch 1' },
@@ -151,6 +152,7 @@ describe('v2 fork harness (branching stress test)', () => {
     expect(ack1.data.pending?.stepId).toBe('step2');
 
     const rehydrate2 = await handleV2ContinueWorkflow({
+      intent: 'rehydrate',
       stateToken: nodeA_stateToken,
     } as any, ctx);
     expect(rehydrate2.type).toBe('success');
@@ -158,6 +160,7 @@ describe('v2 fork harness (branching stress test)', () => {
     const nodeA_ackToken_2 = rehydrate2.data.ackToken;
 
     const ack2 = await handleV2ContinueWorkflow({
+      intent: 'advance',
       stateToken: nodeA_stateToken,
       ackToken: nodeA_ackToken_2,
       output: { notesMarkdown: 'Branch 2' },
@@ -167,6 +170,7 @@ describe('v2 fork harness (branching stress test)', () => {
     expect(ack2.data.kind).toBe('ok');
 
     const rehydrate3 = await handleV2ContinueWorkflow({
+      intent: 'rehydrate',
       stateToken: nodeA_stateToken,
     } as any, ctx);
     expect(rehydrate3.type).toBe('success');
@@ -174,6 +178,7 @@ describe('v2 fork harness (branching stress test)', () => {
     const nodeA_ackToken_3 = rehydrate3.data.ackToken;
 
     const ack3 = await handleV2ContinueWorkflow({
+      intent: 'advance',
       stateToken: nodeA_stateToken,
       ackToken: nodeA_ackToken_3,
       output: { notesMarkdown: 'Branch 3' },
@@ -229,12 +234,14 @@ describe('v2 fork harness (branching stress test)', () => {
 
     for (let i = 0; i < 10; i++) {
       const rehydrate = await handleV2ContinueWorkflow({
+        intent: 'rehydrate',
         stateToken: nodeA_stateToken,
       } as any, ctx);
       expect(rehydrate.type).toBe('success');
       if (rehydrate.type !== 'success') return;
 
       const ack = await handleV2ContinueWorkflow({
+        intent: 'advance',
         stateToken: nodeA_stateToken,
         ackToken: rehydrate.data.ackToken,
         output: { notesMarkdown: `Branch ${i + 1}` },
@@ -270,18 +277,21 @@ describe('v2 fork harness (branching stress test)', () => {
     if (start.type !== 'success') return;
 
     const ack1 = await handleV2ContinueWorkflow({
+      intent: 'advance',
       stateToken: start.data.stateToken,
       ackToken: start.data.ackToken,
     } as any, ctx);
     expect(ack1.type).toBe('success');
 
     const rehydrate = await handleV2ContinueWorkflow({
+      intent: 'rehydrate',
       stateToken: start.data.stateToken,
     } as any, ctx);
     expect(rehydrate.type).toBe('success');
     if (rehydrate.type !== 'success') return;
 
     const ack2 = await handleV2ContinueWorkflow({
+      intent: 'advance',
       stateToken: start.data.stateToken,
       ackToken: rehydrate.data.ackToken,
     } as any, ctx);
@@ -313,6 +323,7 @@ describe('v2 fork harness (branching stress test)', () => {
     const nodeA_state = start.data.stateToken;
 
     const ack1 = await handleV2ContinueWorkflow({
+      intent: 'advance',
       stateToken: nodeA_state,
       ackToken: start.data.ackToken,
       output: { notesMarkdown: 'BRANCH_1_OUTPUT' },
@@ -320,11 +331,12 @@ describe('v2 fork harness (branching stress test)', () => {
     expect(ack1.type).toBe('success');
     if (ack1.type !== 'success') return;
 
-    const rehydrate = await handleV2ContinueWorkflow({ stateToken: nodeA_state } as any, ctx);
+    const rehydrate = await handleV2ContinueWorkflow({ intent: 'rehydrate', stateToken: nodeA_state } as any, ctx);
     expect(rehydrate.type).toBe('success');
     if (rehydrate.type !== 'success') return;
 
     const ack2 = await handleV2ContinueWorkflow({
+      intent: 'advance',
       stateToken: nodeA_state,
       ackToken: rehydrate.data.ackToken,
       output: { notesMarkdown: 'BRANCH_2_OUTPUT' },
@@ -360,6 +372,7 @@ describe('v2 fork harness (branching stress test)', () => {
     if (start.type !== 'success') return;
 
     const ack1 = await handleV2ContinueWorkflow({
+      intent: 'advance',
       stateToken: start.data.stateToken,
       ackToken: start.data.ackToken,
       output: { notesMarkdown: 'First ack' },
@@ -367,6 +380,7 @@ describe('v2 fork harness (branching stress test)', () => {
     expect(ack1.type).toBe('success');
 
     const ack2 = await handleV2ContinueWorkflow({
+      intent: 'advance',
       stateToken: start.data.stateToken,
       ackToken: start.data.ackToken,
       output: { notesMarkdown: 'Replay ack (should be ignored)' },

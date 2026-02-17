@@ -1,8 +1,12 @@
 {
   "id": "coding-task-workflow-agentic",
   "name": "Agentic Task Dev Workflow (Invariants • Architecture • Vertical Slices • PR Sizing • Audits • Resumable)",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Coding workflow that explores multiple approaches before committing—avoids anchoring on the first idea. Flow: constraints → approaches → compare → decide → slices → verify. Use when getting it right matters.",
+  "recommendedPreferences": {
+    "recommendedAutonomy": "guided",
+    "recommendedRiskPolicy": "conservative"
+  },
   "preconditions": [
     "User provides a task description (ticket text or equivalent) and success criteria (even if partial).",
     "Agent has read access to the codebase and can use tools (search/read/edit/terminal).",
@@ -283,17 +287,8 @@
         "var": "taskComplexity",
         "not_equals": "Small"
       },
-      "prompt": "Initialize a bounded plan-iteration loop.\n\n**Set (required):** `continuePlanning = true`.\n\nRule: max 5 iterations. Continue while issues are found; stop when a pass is clean (no findings).",
-      "requireConfirmation": false,
-      "validationCriteria": {
-        "and": [
-          {
-            "type": "contains",
-            "value": "continuePlanning = true",
-            "message": "Must explicitly set: continuePlanning = true (otherwise the planning loop may not run)"
-          }
-        ]
-      }
+      "prompt": "Initialize a bounded plan-iteration loop.\n\nRule: max 5 iterations. Continue while issues are found; stop when a pass is clean (no findings).\n\nThe loop will enter automatically. The exit decision step inside the loop will use a typed artifact to control continuation.",
+      "requireConfirmation": false
     },
     {
       "id": "phase-5-plan-iterations",
@@ -344,15 +339,13 @@
         {
           "id": "phase-5d-loop-exit-decision",
           "title": "Loop Exit Decision (Fail-Safe)",
-          "prompt": "**Non-optional:** prevent forgotten `continuePlanning` updates.\n\n**Output (exact format):**\n- `continuePlanning`: true|false\n- `reason`: one sentence\n- `whatChangedSinceLastIteration`: 1–3 bullets\n\n**Loop continuation logic (continue while issues found):**\n\n- If `planFindings` is **NON-EMPTY** (issues found this pass):\n  → Set `continuePlanning = true`\n  → Rationale: Amendments need verification; may have introduced new issues\n\n- If `planFindings` is **EMPTY** (clean pass):\n  → Set `continuePlanning = false`\n  → Rationale: Plan is stable, no more issues to find\n\n**Max iterations (5) still applies** — if you've hit 5 iterations and still finding issues, exit anyway and note remaining concerns.\n\n**Override to exit early:**\n- User explicitly requests to proceed\n- All findings are Minor AND `planConfidence >= 8`\n\nIf continuing, name what was found + what changes next iteration.\n\n**CONTEXT LOGGING:** Update CONTEXT.md Decision Log (follow format from metaGuidance) and update Machine State Checkpoint (keep last 3).\n\n**Set:** `continuePlanning`",
+          "prompt": "**Non-optional:** Provide a loop control decision artifact.\n\n**Output (exact format):**\n- Loop control artifact with decision: continue or stop\n- `reason`: one sentence\n- `whatChangedSinceLastIteration`: 1–3 bullets\n\n**Loop continuation logic (continue while issues found):**\n\n- If `planFindings` is **NON-EMPTY** (issues found this pass):\n  → decision: continue\n  → Rationale: Amendments need verification; may have introduced new issues\n\n- If `planFindings` is **EMPTY** (clean pass):\n  → decision: stop\n  → Rationale: Plan is stable, no more issues to find\n\n**Max iterations (5) still applies** — if you've hit 5 iterations and still finding issues, exit anyway and note remaining concerns.\n\n**Override to exit early:**\n- User explicitly requests to proceed\n- All findings are Minor AND `planConfidence >= 8`\n\nIf continuing, name what was found + what changes next iteration.\n\n**CONTEXT LOGGING:** Update CONTEXT.md Decision Log (follow format from metaGuidance) and update Machine State Checkpoint (keep last 3).",
           "requireConfirmation": true,
+          "outputContract": {
+            "contractRef": "wr.contracts.loop_control"
+          },
           "validationCriteria": {
             "and": [
-              {
-                "type": "contains",
-                "value": "continuePlanning",
-                "message": "Must explicitly set: continuePlanning = true or false"
-              },
               {
                 "type": "contains",
                 "value": "reason:",

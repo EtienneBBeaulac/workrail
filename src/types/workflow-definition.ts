@@ -15,6 +15,19 @@ import { ValidationCriteria } from './validation';
 // STEP TYPES
 // =============================================================================
 
+/**
+ * Output contract for typed artifact validation.
+ * When specified, step output must include artifacts matching the contract.
+ * 
+ * Lock: §19 Evidence-based validation - typed artifacts over prose validation
+ */
+export interface OutputContract {
+  /** Reference to the artifact contract (e.g., 'wr.contracts.loop_control') */
+  readonly contractRef: string;
+  /** Whether the artifact is required (default: true) */
+  readonly required?: boolean;
+}
+
 export interface WorkflowStepDefinition {
   readonly id: string;
   readonly title: string;
@@ -24,7 +37,16 @@ export interface WorkflowStepDefinition {
   readonly askForFiles?: boolean;
   readonly requireConfirmation?: boolean;
   readonly runCondition?: Readonly<Record<string, unknown>>;
+  /** 
+   * @deprecated Use outputContract for typed artifact validation instead.
+   * validationCriteria will be removed once workflows are migrated.
+   */
   readonly validationCriteria?: ValidationCriteria;
+  /** 
+   * Output contract for typed artifact validation.
+   * Replaces validationCriteria with machine-checkable artifacts.
+   */
+  readonly outputContract?: OutputContract;
   readonly functionDefinitions?: readonly FunctionDefinition[];
   readonly functionCalls?: readonly FunctionCall[];
   readonly functionReferences?: readonly string[];
@@ -36,9 +58,33 @@ export interface LoopStepDefinition extends WorkflowStepDefinition {
   readonly body: string | readonly WorkflowStepDefinition[];
 }
 
+/**
+ * Loop condition source: discriminated union controlling how loop
+ * continuation is determined.
+ * 
+ * Lock: §9 Loops authoring — "while loop continuation MUST NOT be controlled
+ * by mutable ad-hoc context keys." New workflows MUST use 'artifact_contract'.
+ * Legacy workflows auto-derive 'context_variable' during compilation.
+ * 
+ * Why closed: exhaustive switch in interpreter prevents silent fallback chains.
+ */
+export type LoopConditionSource =
+  | { readonly kind: 'artifact_contract'; readonly contractRef: string; readonly loopId: string }
+  | { readonly kind: 'context_variable'; readonly condition: Readonly<Record<string, unknown>> };
+
 export interface LoopConfigDefinition {
   readonly type: 'while' | 'until' | 'for' | 'forEach';
   readonly condition?: Readonly<Record<string, unknown>>;
+  /**
+   * Explicit condition source for while/until loops.
+   * When present, the interpreter uses this instead of the implicit
+   * condition + context fallback chain.
+   * 
+   * Derived automatically by the compiler when absent:
+   * - Step has outputContract → artifact_contract
+   * - Step has condition only → context_variable (deprecated)
+   */
+  readonly conditionSource?: LoopConditionSource;
   readonly items?: string;
   readonly count?: number | string;
   readonly maxIterations: number;
@@ -85,6 +131,21 @@ export interface FunctionCall {
  * - Defined entirely by its fields
  * - Can be serialized/deserialized without loss
  */
+/**
+ * Workflow-level preference recommendations.
+ * 
+ * Lock: §5 "closed-set recommendation targets"
+ * These are optional hints from the workflow author about what autonomy/risk
+ * levels are appropriate. They never hard-block user choice, but emit
+ * structured warnings (gap_recorded) when effective preferences exceed them.
+ */
+export interface WorkflowRecommendedPreferences {
+  /** Recommended autonomy level. If user's effective autonomy exceeds this, a warning gap is emitted. */
+  readonly recommendedAutonomy?: 'guided' | 'full_auto_stop_on_user_deps' | 'full_auto_never_stop';
+  /** Recommended risk policy. If user's effective risk policy exceeds this, a warning gap is emitted. */
+  readonly recommendedRiskPolicy?: 'conservative' | 'balanced' | 'aggressive';
+}
+
 export interface WorkflowDefinition {
   readonly id: string;
   readonly name: string;
@@ -95,6 +156,12 @@ export interface WorkflowDefinition {
   readonly clarificationPrompts?: readonly string[];
   readonly metaGuidance?: readonly string[];
   readonly functionDefinitions?: readonly FunctionDefinition[];
+  /**
+   * Workflow-level preference recommendations.
+   * When effective preferences exceed these recommendations, structured
+   * warnings are emitted as gap_recorded events (severity: warning).
+   */
+  readonly recommendedPreferences?: WorkflowRecommendedPreferences;
 }
 
 // =============================================================================

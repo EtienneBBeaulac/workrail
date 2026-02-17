@@ -9,6 +9,8 @@ export {
   completedSetFromSorted,
 } from './execution-snapshot.v1.js';
 
+export { BlockedSnapshotV1Schema } from './blocked-snapshot.js';
+
 export {
   DelimiterSafeIdV1Schema,
   StepInstanceKeyV1Schema,
@@ -25,5 +27,7 @@ export type {
   PendingV1,
   CompletedStepInstancesV1,
 } from './execution-snapshot.v1.js';
+
+export type { BlockedSnapshotV1, ContractViolationReasonV1, TerminalReasonV1 } from './blocked-snapshot.js';
 
 export type { DelimiterSafeIdV1, StepInstanceKeyV1, LoopPathFrameV1 } from './step-instance-key.js';

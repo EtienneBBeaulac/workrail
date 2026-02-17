@@ -3,16 +3,31 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { container } from 'tsyringe';
 import { ValidationEngine, ValidationRule, ValidationComposition } from '../../src/application/services/validation-engine';
 import { EnhancedLoopValidator } from '../../src/application/services/enhanced-loop-validator';
-import { ValidationError } from '../../src/core/error-handler';
 import { ConditionContext } from '../../src/utils/condition-evaluator';
 
 describe('ValidationEngine', () => {
   let engine: ValidationEngine;
+  let validateResult: ValidationEngine['validate'];
 
   beforeEach(() => {
     container.clearInstances();
     const enhancedLoopValidator = container.resolve(EnhancedLoopValidator);
     engine = new ValidationEngine(enhancedLoopValidator);
+
+    // Adapter for this legacy test suite: keep most tests asserting on ValidationResult behavior,
+    // while Result-based error behavior is covered by dedicated v2 unit tests.
+    validateResult = engine.validate.bind(engine);
+    (engine as unknown as { validate: (...args: any[]) => Promise<any> }).validate = async (...args: any[]) => {
+      const res = await validateResult(...args);
+      return res.isOk()
+        ? res.value
+        : {
+            valid: false,
+            issues: [`Validation engine error: ${res.error.kind} (${res.error.message})`],
+            suggestions: [],
+            warnings: undefined,
+          };
+    };
   });
 
   afterEach(() => {
@@ -138,7 +153,9 @@ describe('ValidationEngine', () => {
       const rules: ValidationRule[] = [
         { type: 'regex', pattern: '[invalid', message: 'Invalid regex' }
       ];
-      await expect(engine.validate('hello world', rules)).rejects.toThrow(ValidationError);
+      const res = await validateResult('hello world', rules as any, {});
+      expect(res.isErr()).toBe(true);
+      if (res.isErr()) expect(res.error.kind).toBe('invalid_criteria_format');
     });
   });
 
@@ -265,12 +282,16 @@ describe('ValidationEngine', () => {
       const rules: any[] = [
         { type: 'unsupported', message: 'Unsupported rule' }
       ];
-      await expect(engine.validate('hello world', rules)).rejects.toThrow(ValidationError);
+      const res = await validateResult('hello world', rules as any, {});
+      expect(res.isErr()).toBe(true);
+      if (res.isErr()) expect(res.error.kind).toBe('invalid_criteria_format');
     });
 
     it('should throw ValidationError for invalid rule format', async () => {
       const rules: any[] = [42]; // Invalid rule format
-      await expect(engine.validate('hello world', rules)).rejects.toThrow(ValidationError);
+      const res = await validateResult('hello world', rules as any, {});
+      expect(res.isErr()).toBe(true);
+      if (res.isErr()) expect(res.error.kind).toBe('invalid_criteria_format');
     });
 
     it('should provide appropriate suggestions for failed validation', async () => {
@@ -438,8 +459,9 @@ describe('ValidationEngine', () => {
         }
       ];
       
-      await expect(engine.validate('{"test": "value"}', rules))
-        .rejects.toThrow('Invalid JSON schema');
+      const res = await validateResult('{"test": "value"}', rules as any, {});
+      expect(res.isErr()).toBe(true);
+      if (res.isErr()) expect(res.error.kind).toBe('schema_compilation_failed');
     });
 
     it('should handle multiple schema validations', async () => {

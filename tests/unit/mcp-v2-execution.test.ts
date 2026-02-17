@@ -113,7 +113,7 @@ async function mkSignedToken(args: { root: string; payload: unknown }): Promise<
 
 describe('v2 execution placeholder handlers (Slice 3.2 boundary validation)', () => {
   it('returns VALIDATION_ERROR for an invalid stateToken', async () => {
-    const res = await handleV2ContinueWorkflow({ stateToken: 'not-a-token' } as any, await dummyCtx());
+    const res = await handleV2ContinueWorkflow({ intent: 'rehydrate', stateToken: 'not-a-token' } as any, await dummyCtx());
     expect(res.type).toBe('error');
     if (res.type !== 'error') return;
     expect(res.code).toBe('TOKEN_INVALID_FORMAT');
@@ -139,7 +139,7 @@ describe('v2 execution placeholder handlers (Slice 3.2 boundary validation)', ()
       });
 
       const token = await mkSignedToken({ root, payload });
-      const res = await handleV2ContinueWorkflow({ stateToken: token } as any, await dummyCtx());
+      const res = await handleV2ContinueWorkflow({ intent: 'rehydrate', stateToken: token } as any, await dummyCtx());
 
       expect(res.type).toBe('error');
       if (res.type !== 'error') return;
@@ -180,7 +180,7 @@ describe('v2 execution placeholder handlers (Slice 3.2 boundary validation)', ()
       const stateToken = await mkSignedToken({ root, payload: statePayload });
       const ackToken = await mkSignedToken({ root, payload: ackPayload });
 
-      const res = await handleV2ContinueWorkflow({ stateToken, ackToken } as any, await dummyCtx());
+      const res = await handleV2ContinueWorkflow({ intent: 'advance', stateToken, ackToken } as any, await dummyCtx());
       expect(res.type).toBe('error');
       if (res.type !== 'error') return;
       expect(res.code).toBe('TOKEN_SCOPE_MISMATCH');

@@ -1,5 +1,6 @@
 {
   "description": "v1_pinned compiled workflow snapshot with full definition",
+  "expectedSha256": "sha256:038d308fe13f5999a2c048389327c3381eb209fcfced8b95c82ddefb1310741b",
   "input": {
     "schemaVersion": 1,
     "sourceKind": "v1_pinned",
