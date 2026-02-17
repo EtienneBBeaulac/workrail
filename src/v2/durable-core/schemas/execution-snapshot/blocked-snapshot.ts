@@ -5,6 +5,7 @@ import {
   MAX_BLOCKER_MESSAGE_BYTES,
   MAX_BLOCKER_SUGGESTED_FIX_BYTES,
 } from '../../constants.js';
+import { utf8ByteLength } from '../lib/utf8-byte-length.js';
 
 const DelimiterSafeIdSchema = z
   .string()
@@ -12,10 +13,6 @@ const DelimiterSafeIdSchema = z
   .regex(DELIMITER_SAFE_ID_PATTERN, 'Expected delimiter-safe identifier: [a-z0-9_-]+');
 
 const CapabilityV2Schema = z.enum(['delegation', 'web_browsing']);
-
-function utf8ByteLength(s: string): number {
-  return new TextEncoder().encode(s).length;
-}
 
 const BlockerCodeSchema = z.enum([
   'USER_ONLY_DEPENDENCY',
@@ -54,8 +51,8 @@ const BlockerV1Schema = z.object({
 });
 
 const BlockerReportV1Schema = z.object({
-  blockers: z.array(BlockerV1Schema).min(1).max(MAX_BLOCKERS),
-});
+  blockers: z.array(BlockerV1Schema).min(1).max(MAX_BLOCKERS).readonly(),
+}).readonly();
 
 export const ContractViolationReasonV1Schema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('invalid_required_output'), contractRef: z.string().min(1) }).strict(),

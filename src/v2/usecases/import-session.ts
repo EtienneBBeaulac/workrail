@@ -1,6 +1,6 @@
 import type { ResultAsync } from 'neverthrow';
 import { okAsync, errAsync } from 'neverthrow';
-import type { Sha256Digest } from '../durable-core/ids/index.js';
+import type { Sha256Digest, SessionId } from '../durable-core/ids/index.js';
 import { asSha256Digest, asWorkflowHash } from '../durable-core/ids/index.js';
 import type { SnapshotStorePortV2, SnapshotStoreError } from '../ports/snapshot-store.port.js';
 import type { PinnedWorkflowStorePortV2, PinnedWorkflowStoreError } from '../ports/pinned-workflow-store.port.js';
@@ -17,12 +17,12 @@ export interface ImportSessionPorts {
   readonly snapshotStore: SnapshotStorePortV2;
   readonly pinnedWorkflowStore: PinnedWorkflowStorePortV2;
   /** Generate a new unique session ID for the imported session. */
-  readonly generateSessionId: () => string;
+  readonly generateSessionId: () => SessionId;
   readonly sha256: (bytes: Uint8Array) => Sha256Digest;
 }
 
 export interface ImportResult {
-  readonly sessionId: string;
+  readonly sessionId: SessionId;
   readonly eventCount: number;
   readonly snapshotCount: number;
   readonly pinnedWorkflowCount: number;

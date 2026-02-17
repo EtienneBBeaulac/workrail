@@ -9,6 +9,7 @@ import {
 import type { JsonValue } from '../canonical/json-types.js';
 import { toCanonicalBytes } from '../canonical/jcs.js';
 import type { Sha256Digest } from '../ids/index.js';
+import { EVENT_KIND } from '../constants.js';
 
 // =============================================================================
 // Validator
@@ -201,7 +202,7 @@ function validateReferences(bundle: ExportBundleV1): Result<void, BundleImportEr
     const evt = event as unknown as { kind: string; data: Record<string, unknown> };
 
     // node_created events reference both snapshotRef and workflowHash
-    if (evt.kind === 'node_created') {
+    if (evt.kind === EVENT_KIND.NODE_CREATED) {
       if (typeof evt.data.snapshotRef === 'string') {
         referencedSnapshots.add(evt.data.snapshotRef);
       }
@@ -211,7 +212,7 @@ function validateReferences(bundle: ExportBundleV1): Result<void, BundleImportEr
     }
 
     // run_started events reference workflowHash
-    if (evt.kind === 'run_started' && typeof evt.data.workflowHash === 'string') {
+    if (evt.kind === EVENT_KIND.RUN_STARTED && typeof evt.data.workflowHash === 'string') {
       referencedWorkflows.add(evt.data.workflowHash);
     }
   }

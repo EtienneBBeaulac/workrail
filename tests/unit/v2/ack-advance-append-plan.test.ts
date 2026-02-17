@@ -3,7 +3,7 @@ import { DomainEventV1Schema } from '../../../src/v2/durable-core/schemas/sessio
 import { buildAckAdvanceAppendPlanV1 } from '../../../src/v2/durable-core/domain/ack-advance-append-plan.js';
 
 describe('ack-advance-append-plan', () => {
-  it('advanced path remains compatible (outcome omitted)', () => {
+  it('advanced path remains compatible (explicit outcome)', () => {
     const res = buildAckAdvanceAppendPlanV1({
       sessionId: 'sess_01jh_test',
       runId: 'run_01jh_test',
@@ -11,7 +11,9 @@ describe('ack-advance-append-plan', () => {
       workflowHash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000' as any,
       attemptId: 'att_01jh_test',
       nextEventIndex: 10,
+      outcome: { kind: 'advanced', toNodeId: 'node_01jh_to' },
       toNodeId: 'node_01jh_to',
+      toNodeKind: 'step',
       snapshotRef: 'sha256:1111111111111111111111111111111111111111111111111111111111111111' as any,
       causeKind: 'intentional_fork',
       minted: {

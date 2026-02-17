@@ -16,16 +16,22 @@ describe('deriveChildAttemptId', () => {
     };
 
     let cur = asAttemptId('attempt_seed');
-    const first = deriveChildAttemptId(cur, sha256);
+    const firstRes = deriveChildAttemptId(cur, sha256);
+    expect(firstRes.isOk()).toBe(true);
+    const first = firstRes._unsafeUnwrap();
 
     // Derive deep chain
     for (let i = 0; i < 50; i++) {
-      cur = deriveChildAttemptId(cur, sha256);
+      const nextRes = deriveChildAttemptId(cur, sha256);
+      expect(nextRes.isOk()).toBe(true);
+      cur = nextRes._unsafeUnwrap();
       expect(String(cur)).toMatch(/^attempt_[a-z2-7]{26}$/);
       expect(String(cur).length).toBe('attempt_'.length + 26);
     }
 
     // Determinism check
-    expect(deriveChildAttemptId(asAttemptId('attempt_seed'), sha256)).toBe(first);
+    const firstCheckRes = deriveChildAttemptId(asAttemptId('attempt_seed'), sha256);
+    expect(firstCheckRes.isOk()).toBe(true);
+    expect(firstCheckRes._unsafeUnwrap()).toBe(first);
   });
 });

@@ -18,6 +18,7 @@ import type { JsonValue } from '../../../durable-core/canonical/json-types.js';
 import { DomainEventV1Schema, ManifestRecordV1Schema, type DomainEventV1, type ManifestRecordV1 } from '../../../durable-core/schemas/session/index.js';
 import type { WithHealthySessionLock } from '../../../durable-core/ids/with-healthy-session-lock.js';
 import type { CorruptionReasonV2 } from '../../../durable-core/schemas/session/session-health.js';
+import { EVENT_KIND, MANIFEST_KIND } from '../../../durable-core/constants.js';
 import * as path from 'path';
 
 export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStorePortV2, SessionEventLogAppendStorePortV2 {
@@ -108,7 +109,7 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStore
               v: 1,
               manifestIndex: nextManifestIndex(manifest),
               sessionId,
-              kind: 'segment_closed',
+              kind: MANIFEST_KIND.SEGMENT_CLOSED,
               firstEventIndex: first,
               lastEventIndex: last,
               segmentRelPath,
@@ -127,7 +128,7 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStore
                   v: 1,
                   manifestIndex: startIndex + i,
                   sessionId,
-                  kind: 'snapshot_pinned',
+                  kind: MANIFEST_KIND.SNAPSHOT_PINNED,
                   eventIndex: p.eventIndex,
                   snapshotRef: p.snapshotRef,
                   createdByEventId: p.createdByEventId,
@@ -149,78 +150,19 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStore
         const segRes = validateSegmentClosedContiguity(manifest);
         if (segRes.isErr()) return errAsync(segRes.error);
 
-        const segments = manifest.filter((m): m is Extract<ManifestRecordV1, { kind: 'segment_closed' }> => m.kind === 'segment_closed');
+        const segments = manifest.filter((m): m is Extract<ManifestRecordV1, { kind: 'segment_closed' }> => m.kind === MANIFEST_KIND.SEGMENT_CLOSED);
 
-        const loadSegments = (segs: typeof segments): ResultAsync<DomainEventV1[], SessionEventLogStoreError> => {
-          if (segs.length === 0) return okAsync([]);
-          const [head, ...tail] = segs;
-          const segmentPath = path.join(sessionDir, head.segmentRelPath);
-          
-          return this.fs.readFileBytes(segmentPath)
-.mapErr((e) => {
-              if (e.code === 'FS_NOT_FOUND') {
-                return {
-                  code: 'SESSION_STORE_CORRUPTION_DETECTED' as const,
-                  location: 'tail' as const,
-                  reason: { code: 'missing_attested_segment' as const, message: `Missing attested segment: ${head.segmentRelPath}` },
-                  message: `Missing attested segment: ${head.segmentRelPath}`,
-                };
-              }
-              return mapFsToStoreError(e);
-            })
-            .andThen((bytes) => {
-              const actual = this.sha256.sha256(bytes);
-              if (actual !== head.sha256) {
-                return errAsync({
-                  code: 'SESSION_STORE_CORRUPTION_DETECTED' as const,
-                  location: 'tail' as const,
-                  reason: { code: 'digest_mismatch' as const, message: `Segment digest mismatch: ${head.segmentRelPath}` },
-                  message: `Segment digest mismatch: ${head.segmentRelPath}`,
-                });
-              }
-              const parsedRes = parseJsonlLines(bytes, DomainEventV1Schema);
-              if (parsedRes.isErr()) return errAsync(parsedRes.error);
-              const parsed = parsedRes.value;
-
-              // Validate bounds for this segment.
-              if (parsed.length === 0) {
-                return errAsync({
-                  code: 'SESSION_STORE_CORRUPTION_DETECTED' as const,
-                  location: 'tail' as const,
-                  reason: { code: 'non_contiguous_indices' as const, message: `Empty segment referenced by manifest: ${head.segmentRelPath}` },
-                  message: `Empty segment referenced by manifest: ${head.segmentRelPath}`,
-                });
-              }
-              if (parsed[0]!.eventIndex !== head.firstEventIndex || parsed[parsed.length - 1]!.eventIndex !== head.lastEventIndex) {
-                return errAsync({
-                  code: 'SESSION_STORE_CORRUPTION_DETECTED' as const,
-                  location: 'tail' as const,
-                  reason: { code: 'non_contiguous_indices' as const, message: `Segment bounds mismatch: ${head.segmentRelPath}` },
-                  message: `Segment bounds mismatch: ${head.segmentRelPath}`,
-                });
-              }
-              // Contiguity within segment
-              for (let i = 1; i < parsed.length; i++) {
-                if (parsed[i]!.eventIndex !== parsed[i - 1]!.eventIndex + 1) {
-                  return errAsync({
-                    code: 'SESSION_STORE_CORRUPTION_DETECTED' as const,
-                    location: 'tail' as const,
-                    reason: { code: 'non_contiguous_indices' as const, message: `Non-contiguous eventIndex inside segment: ${head.segmentRelPath}` },
-                    message: `Non-contiguous eventIndex inside segment: ${head.segmentRelPath}`,
-                  });
-                }
-              }
-              return okAsync(parsed);
-            })
-            .andThen((events) => loadSegments(tail).map((rest) => [...events, ...rest]));
-        };
-
-        return loadSegments(segments).andThen((events) => {
+        return loadSegmentsRecursive({
+          segments,
+          sessionDir,
+          sha256: this.sha256,
+          fs: this.fs,
+        }).andThen((events) => {
           // Pin-after-close corruption gating: any introduced snapshotRef must be pinned.
           const expectedPins = extractSnapshotPinsFromEvents(events);
           const actualPins = new Set(
             manifest
-              .filter((m): m is Extract<ManifestRecordV1, { kind: 'snapshot_pinned' }> => m.kind === 'snapshot_pinned')
+              .filter((m): m is Extract<ManifestRecordV1, { kind: 'snapshot_pinned' }> => m.kind === MANIFEST_KIND.SNAPSHOT_PINNED)
               .map((p) => `${p.eventIndex}:${p.createdByEventId}:${p.snapshotRef}`)
           );
           for (const ep of expectedPins) {
@@ -260,51 +202,12 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStore
       .orElse((e) => (e.code === 'FS_NOT_FOUND' ? okAsync('') : errAsync(mapFsToStoreError(e))))
       .andThen((raw) => {
         if (raw.trim() === '') {
-          return okAsync({ truth: { manifest: [], events: [] }, isComplete: true, tailReason: null });
+          return okAsync({ kind: 'complete' as const, truth: { manifest: [], events: [] } });
         }
 
         // Validate manifest prefix line-by-line; stop at first invalid record.
         const lines = raw.split('\n').filter((l) => l.trim() !== '');
-        const manifest: ManifestRecordV1[] = [];
-        let isComplete = true;
-        let tailReason: CorruptionReasonV2 | null = null;
-
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i]!;
-          let parsed: unknown;
-          try {
-            parsed = JSON.parse(line);
-          } catch {
-            isComplete = false;
-            tailReason ??= { code: 'non_contiguous_indices', message: 'Invalid JSON in manifest (corrupt tail)' };
-            break;
-          }
-
-          const validated = ManifestRecordV1Schema.safeParse(parsed);
-          if (!validated.success) {
-            isComplete = false;
-            // Check if this is a version mismatch or a schema validation failure
-            // Safely extract version field by checking if it exists and is a number
-            const rawVersion = (typeof parsed === 'object' && parsed !== null && 'v' in parsed) 
-              ? (parsed as { v?: unknown }).v 
-              : undefined;
-            if (rawVersion !== 1) {
-              tailReason ??= { code: 'unknown_schema_version', message: `Expected v=1, got v=${rawVersion}` };
-            } else {
-              // Not a version mismatch—it's a schema validation failure
-              tailReason ??= { code: 'schema_validation_failed', message: 'Manifest record schema validation failed (corrupt tail)' };
-            }
-            break;
-          }
-
-          if (validated.data.manifestIndex !== i) {
-            isComplete = false;
-            tailReason ??= { code: 'non_contiguous_indices', message: 'Non-contiguous manifestIndex in prefix (corrupt tail)' };
-            break;
-          }
-
-          manifest.push(validated.data);
-        }
+        const { manifest, isComplete, tailReason } = parseManifestPrefix(lines);
 
         if (manifest.length === 0) {
           return errAsync({
@@ -316,7 +219,7 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStore
         }
 
         const segments = manifest.filter(
-          (m): m is Extract<ManifestRecordV1, { kind: 'segment_closed' }> => m.kind === 'segment_closed'
+          (m): m is Extract<ManifestRecordV1, { kind: 'segment_closed' }> => m.kind === MANIFEST_KIND.SEGMENT_CLOSED
         );
 
         type SalvageState = {
@@ -328,95 +231,30 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStore
 
         const initial: SalvageState = { events: [], isComplete, tailReason, done: false };
 
-        const processSegment = (
-          seg: Extract<ManifestRecordV1, { kind: 'segment_closed' }>,
-          state: SalvageState
-        ): ResultAsync<SalvageState, SessionEventLogStoreError> => {
-          if (state.done) return okAsync(state);
-
-          const segmentPath = path.join(sessionDir, seg.segmentRelPath);
-          return this.fs
-            .readFileBytes(segmentPath)
-.map((bytes) => ({ kind: 'present' as const, bytes }))
-            .orElse((e) => (e.code === 'FS_NOT_FOUND' ? okAsync({ kind: 'missing' as const }) : errAsync(mapFsToStoreError(e))))
-            .andThen((res) => {
-              if (res.kind === 'missing') {
-                return okAsync({
-                  ...state,
-                  isComplete: false,
-                  tailReason: state.tailReason ?? { code: 'missing_attested_segment', message: `Missing attested segment: ${seg.segmentRelPath}` },
-                  done: true,
-                });
-              }
-
-              const bytes = res.bytes;
-              const actual = this.sha256.sha256(bytes);
-              if (actual !== seg.sha256) {
-                return okAsync({
-                  ...state,
-                  isComplete: false,
-                  tailReason: state.tailReason ?? { code: 'digest_mismatch', message: `Segment digest mismatch: ${seg.segmentRelPath}` },
-                  done: true,
-                });
-              }
-
-              const parsedRes = parseJsonlLines(bytes, DomainEventV1Schema);
-              if (parsedRes.isErr()) {
-                return okAsync({
-                  ...state,
-                  isComplete: false,
-                  tailReason: state.tailReason ?? { code: 'non_contiguous_indices', message: `Invalid JSONL inside segment: ${seg.segmentRelPath}` },
-                  done: true,
-                });
-              }
-              const parsed = parsedRes.value;
-
-              if (parsed.length === 0) {
-                return okAsync({
-                  ...state,
-                  isComplete: false,
-                  tailReason: state.tailReason ?? { code: 'non_contiguous_indices', message: `Empty segment referenced by manifest: ${seg.segmentRelPath}` },
-                  done: true,
-                });
-              }
-
-              if (parsed[0]!.eventIndex !== seg.firstEventIndex || parsed[parsed.length - 1]!.eventIndex !== seg.lastEventIndex) {
-                return okAsync({
-                  ...state,
-                  isComplete: false,
-                  tailReason: state.tailReason ?? { code: 'non_contiguous_indices', message: `Segment bounds mismatch: ${seg.segmentRelPath}` },
-                  done: true,
-                });
-              }
-
-              for (let i = 1; i < parsed.length; i++) {
-                if (parsed[i]!.eventIndex !== parsed[i - 1]!.eventIndex + 1) {
-                  return okAsync({
-                    ...state,
-                    isComplete: false,
-                    tailReason: state.tailReason ?? { code: 'non_contiguous_indices', message: `Non-contiguous eventIndex inside segment: ${seg.segmentRelPath}` },
-                    done: true,
-                  });
-                }
-              }
-
-              return okAsync({
-                ...state,
-                events: [...state.events, ...parsed],
-              });
-            });
-        };
-
         return segments
           .reduce<ResultAsync<SalvageState, SessionEventLogStoreError>>(
-            (acc, seg) => acc.andThen((s) => processSegment(seg, s)),
+            (acc, seg) => acc.andThen((s) => processSegmentForSalvage({
+              segment: seg,
+              sessionDir,
+              sha256: this.sha256,
+              fs: this.fs,
+              state: s,
+            })),
             okAsync(initial)
           )
-          .map((final) => ({
-            truth: { manifest, events: final.events },
-            isComplete: final.isComplete,
-            tailReason: final.tailReason,
-          }));
+          .map((final): LoadedValidatedPrefixV2 => {
+            if (final.isComplete) {
+              return { kind: 'complete', truth: { manifest, events: final.events } };
+            }
+            return {
+              kind: 'truncated',
+              truth: { manifest, events: final.events },
+              tailReason: final.tailReason ?? {
+                code: 'non_contiguous_indices',
+                message: 'Unknown truncation reason',
+              },
+            };
+          });
       });
   }
 
@@ -425,7 +263,7 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStore
       .andThen((manifest) => {
         if (manifest.length === 0) return okAsync({ manifest: [], events: [] });
 
-        const segments = manifest.filter((m): m is Extract<ManifestRecordV1, { kind: 'segment_closed' }> => m.kind === 'segment_closed');
+        const segments = manifest.filter((m): m is Extract<ManifestRecordV1, { kind: 'segment_closed' }> => m.kind === MANIFEST_KIND.SEGMENT_CLOSED);
         const sessionDir = this.dataDir.sessionDir(sessionId);
         
         const loadSegments = (segs: typeof segments): ResultAsync<DomainEventV1[], SessionEventLogStoreError> => {
@@ -480,7 +318,7 @@ function nextManifestIndex(manifest: readonly ManifestRecordV1[]): number {
 }
 
 function nextEventIndexFromManifest(manifest: readonly ManifestRecordV1[]): number {
-  const segments = manifest.filter((m): m is Extract<ManifestRecordV1, { kind: 'segment_closed' }> => m.kind === 'segment_closed');
+  const segments = manifest.filter((m): m is Extract<ManifestRecordV1, { kind: 'segment_closed' }> => m.kind === MANIFEST_KIND.SEGMENT_CLOSED);
   if (segments.length === 0) return 0;
   return segments[segments.length - 1]!.lastEventIndex + 1;
 }
@@ -504,7 +342,7 @@ function validateManifestContiguity(manifest: readonly ManifestRecordV1[]): Resu
 }
 
 function validateSegmentClosedContiguity(manifest: readonly ManifestRecordV1[]): Result<void, SessionEventLogStoreError> {
-  const segments = manifest.filter((m): m is Extract<ManifestRecordV1, { kind: 'segment_closed' }> => m.kind === 'segment_closed');
+  const segments = manifest.filter((m): m is Extract<ManifestRecordV1, { kind: 'segment_closed' }> => m.kind === MANIFEST_KIND.SEGMENT_CLOSED);
   for (let i = 1; i < segments.length; i++) {
     const prev = segments[i - 1]!;
     const cur = segments[i]!;
@@ -658,8 +496,220 @@ function extractSnapshotPinsFromEvents(events: readonly DomainEventV1[]): Array<
   // Slice 2.5 lock: snapshot pin enforcement is typed (no `any` casts).
   const out: Array<{ snapshotRef: SnapshotRef; eventIndex: number; createdByEventId: string }> = [];
   for (const e of events) {
-    if (e.kind !== 'node_created') continue;
+    if (e.kind !== EVENT_KIND.NODE_CREATED) continue;
     out.push({ snapshotRef: e.data.snapshotRef, eventIndex: e.eventIndex, createdByEventId: e.eventId });
   }
   return out;
+}
+
+// Extracted from loadImpl and loadValidatedPrefixImpl: validate segment bounds and contiguity
+function validateSegmentBounds(
+  parsed: readonly DomainEventV1[],
+  segment: { firstEventIndex: number; lastEventIndex: number; segmentRelPath: string }
+): Result<void, SessionEventLogStoreError> {
+  if (parsed.length === 0) {
+    return err({
+      code: 'SESSION_STORE_CORRUPTION_DETECTED' as const,
+      location: 'tail' as const,
+      reason: { code: 'non_contiguous_indices' as const, message: `Empty segment referenced by manifest: ${segment.segmentRelPath}` },
+      message: `Empty segment referenced by manifest: ${segment.segmentRelPath}`,
+    });
+  }
+  if (parsed[0]!.eventIndex !== segment.firstEventIndex || parsed[parsed.length - 1]!.eventIndex !== segment.lastEventIndex) {
+    return err({
+      code: 'SESSION_STORE_CORRUPTION_DETECTED' as const,
+      location: 'tail' as const,
+      reason: { code: 'non_contiguous_indices' as const, message: `Segment bounds mismatch: ${segment.segmentRelPath}` },
+      message: `Segment bounds mismatch: ${segment.segmentRelPath}`,
+    });
+  }
+  // Contiguity within segment
+  for (let i = 1; i < parsed.length; i++) {
+    if (parsed[i]!.eventIndex !== parsed[i - 1]!.eventIndex + 1) {
+      return err({
+        code: 'SESSION_STORE_CORRUPTION_DETECTED' as const,
+        location: 'tail' as const,
+        reason: { code: 'non_contiguous_indices' as const, message: `Non-contiguous eventIndex inside segment: ${segment.segmentRelPath}` },
+        message: `Non-contiguous eventIndex inside segment: ${segment.segmentRelPath}`,
+      });
+    }
+  }
+  return ok(undefined);
+}
+
+// Extracted from loadValidatedPrefixImpl: parse manifest prefix line-by-line
+function parseManifestPrefix(
+  lines: readonly string[]
+): {
+  manifest: ManifestRecordV1[];
+  isComplete: boolean;
+  tailReason: CorruptionReasonV2 | null;
+} {
+  const manifest: ManifestRecordV1[] = [];
+  let isComplete = true;
+  let tailReason: CorruptionReasonV2 | null = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      isComplete = false;
+      tailReason ??= { code: 'non_contiguous_indices', message: 'Invalid JSON in manifest (corrupt tail)' };
+      break;
+    }
+
+    const validated = ManifestRecordV1Schema.safeParse(parsed);
+    if (!validated.success) {
+      isComplete = false;
+      // Check if this is a version mismatch or a schema validation failure
+      // Safely extract version field by checking if it exists and is a number
+      const rawVersion = (typeof parsed === 'object' && parsed !== null && 'v' in parsed) 
+        ? (parsed as { v?: unknown }).v 
+        : undefined;
+      if (rawVersion !== 1) {
+        tailReason ??= { code: 'unknown_schema_version', message: `Expected v=1, got v=${rawVersion}` };
+      } else {
+        // Not a version mismatch—it's a schema validation failure
+        tailReason ??= { code: 'schema_validation_failed', message: 'Manifest record schema validation failed (corrupt tail)' };
+      }
+      break;
+    }
+
+    if (validated.data.manifestIndex !== i) {
+      isComplete = false;
+      tailReason ??= { code: 'non_contiguous_indices', message: 'Non-contiguous manifestIndex in prefix (corrupt tail)' };
+      break;
+    }
+
+    manifest.push(validated.data);
+  }
+
+  return { manifest, isComplete, tailReason };
+}
+
+// Extracted from loadValidatedPrefixImpl: process a single segment for salvage operation
+function processSegmentForSalvage(args: {
+  segment: Extract<ManifestRecordV1, { kind: 'segment_closed' }>;
+  sessionDir: string;
+  sha256: Sha256PortV2;
+  fs: CrashSafeFileOpsPortV2;
+  state: {
+    readonly events: DomainEventV1[];
+    readonly isComplete: boolean;
+    readonly tailReason: CorruptionReasonV2 | null;
+    readonly done: boolean;
+  };
+}): ResultAsync<{
+  readonly events: DomainEventV1[];
+  readonly isComplete: boolean;
+  readonly tailReason: CorruptionReasonV2 | null;
+  readonly done: boolean;
+}, SessionEventLogStoreError> {
+  if (args.state.done) return okAsync(args.state);
+
+  const segmentPath = path.join(args.sessionDir, args.segment.segmentRelPath);
+  return args.fs
+    .readFileBytes(segmentPath)
+    .map((bytes) => ({ kind: 'present' as const, bytes }))
+    .orElse((e) => (e.code === 'FS_NOT_FOUND' ? okAsync({ kind: 'missing' as const }) : errAsync(mapFsToStoreError(e))))
+    .andThen((res) => {
+      if (res.kind === 'missing') {
+        return okAsync({
+          ...args.state,
+          isComplete: false,
+          tailReason: args.state.tailReason ?? { code: 'missing_attested_segment', message: `Missing attested segment: ${args.segment.segmentRelPath}` },
+          done: true,
+        });
+      }
+
+      const bytes = res.bytes;
+      const actual = args.sha256.sha256(bytes);
+      if (actual !== args.segment.sha256) {
+        return okAsync({
+          ...args.state,
+          isComplete: false,
+          tailReason: args.state.tailReason ?? { code: 'digest_mismatch', message: `Segment digest mismatch: ${args.segment.segmentRelPath}` },
+          done: true,
+        });
+      }
+
+      const parsedRes = parseJsonlLines(bytes, DomainEventV1Schema);
+      if (parsedRes.isErr()) {
+        return okAsync({
+          ...args.state,
+          isComplete: false,
+          tailReason: args.state.tailReason ?? { code: 'non_contiguous_indices', message: `Invalid JSONL inside segment: ${args.segment.segmentRelPath}` },
+          done: true,
+        });
+      }
+      const parsed = parsedRes.value;
+
+      const boundsResult = validateSegmentBounds(parsed, args.segment);
+      if (boundsResult.isErr()) {
+        const reason = boundsResult.error.code === 'SESSION_STORE_CORRUPTION_DETECTED' 
+          ? boundsResult.error.reason 
+          : { code: 'non_contiguous_indices' as const, message: boundsResult.error.message };
+        return okAsync({
+          ...args.state,
+          isComplete: false,
+          tailReason: args.state.tailReason ?? reason,
+          done: true,
+        });
+      }
+
+      return okAsync({
+        ...args.state,
+        events: [...args.state.events, ...parsed],
+      });
+    });
+}
+
+// Type alias for CrashSafeFileOpsPortV2 to match the required interface
+type CrashSafeFileOpsPortV2 = Pick<FileSystemPortV2, 'readFileBytes'>;
+
+// Extracted from loadImpl: recursive segment loading with full validation
+function loadSegmentsRecursive(args: {
+  segments: readonly Extract<ManifestRecordV1, { kind: 'segment_closed' }>[];
+  sessionDir: string;
+  sha256: Sha256PortV2;
+  fs: CrashSafeFileOpsPortV2;
+}): ResultAsync<readonly DomainEventV1[], SessionEventLogStoreError> {
+  if (args.segments.length === 0) return okAsync([]);
+  const [head, ...tail] = args.segments;
+  const segmentPath = path.join(args.sessionDir, head.segmentRelPath);
+  
+  return args.fs.readFileBytes(segmentPath)
+    .mapErr((e) => {
+      if (e.code === 'FS_NOT_FOUND') {
+        return {
+          code: 'SESSION_STORE_CORRUPTION_DETECTED' as const,
+          location: 'tail' as const,
+          reason: { code: 'missing_attested_segment' as const, message: `Missing attested segment: ${head.segmentRelPath}` },
+          message: `Missing attested segment: ${head.segmentRelPath}`,
+        };
+      }
+      return mapFsToStoreError(e);
+    })
+    .andThen((bytes) => {
+      const actual = args.sha256.sha256(bytes);
+      if (actual !== head.sha256) {
+        return errAsync({
+          code: 'SESSION_STORE_CORRUPTION_DETECTED' as const,
+          location: 'tail' as const,
+          reason: { code: 'digest_mismatch' as const, message: `Segment digest mismatch: ${head.segmentRelPath}` },
+          message: `Segment digest mismatch: ${head.segmentRelPath}`,
+        });
+      }
+      const parsedRes = parseJsonlLines(bytes, DomainEventV1Schema);
+      if (parsedRes.isErr()) return errAsync(parsedRes.error);
+      const parsed = parsedRes.value;
+
+      const boundsResult = validateSegmentBounds(parsed, head);
+      if (boundsResult.isErr()) return errAsync(boundsResult.error);
+
+      return okAsync(parsed);
+    })
+    .andThen((events) => loadSegmentsRecursive({ ...args, segments: tail }).map((rest) => [...events, ...rest]));
 }

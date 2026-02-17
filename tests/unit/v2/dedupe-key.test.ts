@@ -59,27 +59,34 @@ describe('dedupe-key', () => {
 
   describe('buildDedupeKey', () => {
     it('builds valid dedupeKey from kind and parts', () => {
-      const key = buildDedupeKey('session_created', ['sess_01jh']);
-      expect(key).toBe('session_created:sess_01jh');
+      const res = buildDedupeKey('session_created', ['sess_01jh']);
+      expect(res.isOk()).toBe(true);
+      if (res.isOk()) expect(res.value).toBe('session_created:sess_01jh');
     });
 
     it('builds dedupeKey with multiple parts', () => {
-      const key = buildDedupeKey('node_created', ['sess_01jh', 'run_01jh', 'node_01jh']);
-      expect(key).toBe('node_created:sess_01jh:run_01jh:node_01jh');
+      const res = buildDedupeKey('node_created', ['sess_01jh', 'run_01jh', 'node_01jh']);
+      expect(res.isOk()).toBe(true);
+      if (res.isOk()) expect(res.value).toBe('node_created:sess_01jh:run_01jh:node_01jh');
     });
 
     it('builds dedupeKey with arrow in parts', () => {
-      const key = buildDedupeKey('edge_created', ['sess_01jh', 'run_01jh', 'nodea->nodeb', 'acked_step']);
-      expect(key).toBe('edge_created:sess_01jh:run_01jh:nodea->nodeb:acked_step');
+      const res = buildDedupeKey('edge_created', ['sess_01jh', 'run_01jh', 'nodea->nodeb', 'acked_step']);
+      expect(res.isOk()).toBe(true);
+      if (res.isOk()) expect(res.value).toBe('edge_created:sess_01jh:run_01jh:nodea->nodeb:acked_step');
     });
 
-    it('throws on invalid characters', () => {
-      expect(() => buildDedupeKey('invalid', ['has spaces'])).toThrow();
+    it('returns DEDUPE_KEY_INVALID_PATTERN on invalid characters', () => {
+      const res = buildDedupeKey('invalid', ['has spaces']);
+      expect(res.isErr()).toBe(true);
+      if (res.isErr()) expect(res.error.code).toBe('DEDUPE_KEY_INVALID_PATTERN');
     });
 
-    it('throws on too long key', () => {
+    it('returns DEDUPE_KEY_TOO_LONG on too long key', () => {
       const longPart = 'a'.repeat(MAX_DEDUPE_KEY_LENGTH);
-      expect(() => buildDedupeKey('kind', [longPart])).toThrow();
+      const res = buildDedupeKey('kind', [longPart]);
+      expect(res.isErr()).toBe(true);
+      if (res.isErr()) expect(res.error.code).toBe('DEDUPE_KEY_TOO_LONG');
     });
   });
 

@@ -24,33 +24,7 @@ export class Base32AdapterV2 implements Base32PortV2 {
       });
     }
 
-    // Decode using internal function
-    try {
-      const bytes = decodeBase32LowerNoPad(encoded);
-      return ok(bytes);
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
-      
-      // Categorize error based on message content
-      if (/padding|non-canonical/i.test(message)) {
-        return err({
-          code: 'BASE32_NON_CANONICAL',
-          message: `Non-canonical base32 encoding: ${message}`,
-        });
-      }
-      
-      if (/length/i.test(message)) {
-        return err({
-          code: 'BASE32_INVALID_LENGTH',
-          message: `Invalid base32 length: ${message}`,
-        });
-      }
-      
-      // Default to invalid characters
-      return err({
-        code: 'BASE32_INVALID_CHARACTERS',
-        message: `Base32 decode failed: ${message}`,
-      });
-    }
+    // Decode using internal function (now returns Result)
+    return decodeBase32LowerNoPad(encoded);
   }
 }

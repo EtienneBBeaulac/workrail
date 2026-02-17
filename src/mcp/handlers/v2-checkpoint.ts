@@ -23,6 +23,7 @@ import type { ExecutionSessionGateErrorV2 } from '../../v2/usecases/execution-se
 import type { SessionEventLogStoreError } from '../../v2/ports/session-event-log-store.port.js';
 import { deriveWorkflowHashRef } from '../../v2/durable-core/ids/workflow-hash-ref.js';
 import { DomainEventV1Schema, type DomainEventV1 } from '../../v2/durable-core/schemas/session/index.js';
+import { EVENT_KIND } from '../../v2/durable-core/constants.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -50,7 +51,7 @@ function findNodeCreated(
 ): Extract<DomainEventV1, { kind: 'node_created' }> | undefined {
   return events.find(
     (e): e is Extract<DomainEventV1, { kind: 'node_created' }> =>
-      e.kind === 'node_created' && e.scope?.nodeId === String(nodeId),
+      e.kind === EVENT_KIND.NODE_CREATED && e.scope?.nodeId === String(nodeId),
   );
 }
 
@@ -190,7 +191,7 @@ function replayCheckpoint(
 ): RA<CheckpointOutput, CheckpointError> {
   const existingCheckpointNode = events.find(
     (e): e is Extract<DomainEventV1, { kind: 'node_created' }> =>
-      e.kind === 'node_created' && e.dedupeKey === `checkpoint_node:${dedupeKey}`,
+      e.kind === EVENT_KIND.NODE_CREATED && e.dedupeKey === `checkpoint_node:${dedupeKey}`,
   );
   const checkpointNodeId = existingCheckpointNode
     ? String(existingCheckpointNode.scope?.nodeId ?? 'unknown')
@@ -234,7 +235,7 @@ function writeCheckpoint(
       eventId: nodeCreatedEventId,
       eventIndex: truth.events.length,
       sessionId: String(sessionId),
-      kind: 'node_created' as const,
+      kind: EVENT_KIND.NODE_CREATED,
       dedupeKey: `checkpoint_node:${dedupeKey}`,
       scope: { runId: String(runId), nodeId: String(checkpointNodeId) },
       data: {
@@ -249,7 +250,7 @@ function writeCheckpoint(
       eventId: edgeCreatedEventId,
       eventIndex: truth.events.length + 1,
       sessionId: String(sessionId),
-      kind: 'edge_created' as const,
+      kind: EVENT_KIND.EDGE_CREATED,
       dedupeKey,
       scope: { runId: String(runId) },
       data: {
