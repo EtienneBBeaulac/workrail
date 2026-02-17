@@ -46,4 +46,10 @@ export interface FileSystemPortV2 {
   unlink(filePath: string): ResultAsync<void, FsError>;
 
   stat(filePath: string): ResultAsync<{ readonly sizeBytes: number }, FsError>;
+
+  /**
+   * List directory entries (file and subdirectory names, not full paths).
+   * Used for session enumeration and future Console features.
+   */
+  readdir(dirPath: string): ResultAsync<readonly string[], FsError>;
 }

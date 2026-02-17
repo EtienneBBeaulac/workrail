@@ -152,6 +152,19 @@ Requires: checkpointToken (from the most recent start_workflow or continue_workf
 Idempotent: calling with the same checkpointToken multiple times is safe and returns the same result.
 
 Returns: checkpointNodeId + a fresh stateToken.`,
+
+    resume_session: `Find and reconnect to an existing workflow session (WorkRail v2, feature-flagged).
+
+Use this when you need to resume a previously started workflow but don't have the stateToken (e.g., new chat, lost context).
+
+WorkRail ranks sessions using a 5-tier matching algorithm:
+1. Exact git HEAD SHA match
+2. Git branch match (exact or prefix)
+3. Free text match against session notes
+4. Free text match against workflow ID
+5. Recency fallback
+
+Returns: Up to 5 ranked candidates, each with a stateToken you can use with continue_workflow.`,
   },
 
   // ─────────────────────────────────────────────────────────────────
@@ -312,5 +325,16 @@ Creates a durable checkpoint without advancing. Use for long-running steps to sa
 Requires: checkpointToken from the most recent response. Idempotent.
 
 Returns: checkpointNodeId + fresh stateToken.`,
+
+    resume_session: `Find and reconnect to an existing workflow session (WorkRail v2, feature-flagged).
+
+Call this when resuming a workflow without a stateToken. WorkRail ranks sessions deterministically:
+1. Exact git HEAD SHA match (tier 1)
+2. Git branch match (tier 2)
+3. Notes content match (tier 3)
+4. Workflow ID match (tier 4)
+5. Recency (tier 5)
+
+Returns: Up to 5 candidates with stateTokens. Use the best match's stateToken with continue_workflow.`,
   },
 } as const;

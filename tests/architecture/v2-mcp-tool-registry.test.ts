@@ -27,6 +27,7 @@ const LOCKED_V2_CORE_TOOLS = [
   'start_workflow',
   'continue_workflow',
   'checkpoint_workflow',
+  'resume_session',
 ] as const;
 
 /**
@@ -35,7 +36,6 @@ const LOCKED_V2_CORE_TOOLS = [
  * Note: These are NOT part of core and must not appear in core registry.
  */
 const LOCKED_V2_FLAGGED_TOOLS = [
-  'resume_session',
   'start_session',
 ] as const;
 

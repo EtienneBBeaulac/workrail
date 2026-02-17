@@ -66,6 +66,19 @@ export const V2ContinueWorkflowInput = z.object({
 });
 export type V2ContinueWorkflowInput = z.infer<typeof V2ContinueWorkflowInput>;
 
+export const V2ResumeSessionInput = z.object({
+  query: z.string().max(256).optional().describe(
+    'Free text search to find a relevant session. Matches against recap notes and workflow IDs.'
+  ),
+  gitBranch: z.string().max(256).optional().describe(
+    'Git branch name to match against session observations. Overrides auto-detected branch.'
+  ),
+  gitHeadSha: z.string().regex(/^[0-9a-f]{40}$/).optional().describe(
+    'Git HEAD SHA to match against session observations. Overrides auto-detected HEAD.'
+  ),
+}).strict();
+export type V2ResumeSessionInput = z.infer<typeof V2ResumeSessionInput>;
+
 export const V2CheckpointWorkflowInput = z.object({
   checkpointToken: z.string().min(1).describe(
     'The checkpoint token from the most recent start_workflow or continue_workflow response. ' +
@@ -80,6 +93,7 @@ export const V2_TOOL_TITLES = {
   start_workflow: 'Start Workflow (v2)',
   continue_workflow: 'Continue Workflow (v2)',
   checkpoint_workflow: 'Checkpoint Workflow (v2)',
+  resume_session: 'Resume Session (v2)',
 } as const;
 
 export const V2_TOOL_ANNOTATIONS: Readonly<Record<keyof typeof V2_TOOL_TITLES, ToolAnnotations>> = {
@@ -88,4 +102,5 @@ export const V2_TOOL_ANNOTATIONS: Readonly<Record<keyof typeof V2_TOOL_TITLES, T
   start_workflow: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
   continue_workflow: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
   checkpoint_workflow: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+  resume_session: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
 } as const;
