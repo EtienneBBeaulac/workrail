@@ -1961,24 +1961,34 @@ All non-pure operations MUST be isolated behind ports/adapters and kept out of t
 - `KeyRingPort`: current/previous keys + rotation
 
 ### Directory/package layout (Phase 0–2, locked)
-Concrete structure under `src/v2/` bounded context:
+Concrete structure under `src/v2/` bounded context (updated v1.5.1):
 
 ```
 src/
   v2/
     durable-core/
       ids/
-        index.ts                    # exports branded types (SessionId, RunId, NodeId, EventId, etc.)
+        index.ts                    # barrel: re-exports all ID modules
+        session-ids.ts              # SessionId, RunId, NodeId, AttemptId (v1.5.1)
+        workflow-ids.ts             # WorkflowId, WorkflowHash, WorkflowHashRef, Sha256Digest (v1.5.1)
+        event-ids.ts                # EventId, EventIndex, ManifestIndex, OutputId (v1.5.1)
+        snapshot-ids.ts             # SnapshotRef, CanonicalBytes (v1.5.1)
+        token-ids.ts                # TokenStringV1 (v1.5.1)
+      lib/
+        utf8-byte-length.ts         # shared UTF-8 byte measurement utility (v1.5.1)
       errors/
         index.ts                    # exports unified error envelope + closed code unions
       canonical/
         jcs.ts                      # RFC 8785 canonicalizer (uses CryptoPort)
         hashing.ts                  # sha256 wrapper + typed hash helpers
       schemas/
-        session-event/
-          index.ts                  # SessionEvent Zod + types
-        session-manifest/
-          index.ts                  # SessionManifestRecord Zod + types
+        session/
+          events.ts                 # DomainEventV1 discriminated union (v1.5.1)
+          blockers.ts               # Blocker schemas (extracted v1.5.1)
+          outputs.ts                # Output payload schemas (extracted v1.5.1)
+          gaps.ts                   # Gap schemas (extracted v1.5.1)
+          dag-topology.ts           # Node/edge schemas (extracted v1.5.1)
+          index.ts                  # barrel re-exports
         execution-snapshot/
           index.ts                  # ExecutionSnapshotFile + enginePayload.v1 Zod + types
         compiled-workflow/
@@ -1986,37 +1996,71 @@ src/
         export-bundle/
           index.ts                  # Bundle Zod + types
       projections/
-        session.ts                  # projectSessionSummary, projectSessionHealth
-        run.ts                      # projectRunStatus, projectPreferredTip
-        node.ts                     # projectNodeCurrentOutputs, projectNodeGaps
+        projection-error.ts         # shared ProjectionError type (v1.5.1)
+        run-dag.ts                  # projectRunDagV2 with extracted tip algorithm (v1.5.1)
+        node-outputs.ts             # projectNodeOutputsV2
+        capabilities.ts             # projectCapabilitiesV2
+        gaps.ts                     # projectGapsV2
+        preferences.ts              # projectPreferencesV2
+        artifacts.ts                # projectArtifactsV2
+        run-status-signals.ts       # projectRunStatusSignalsV2
         resume-ranking.ts           # deterministic resume ranking logic
-        policies/
-          preferred-tip.ts          # preferred tip policy (pure)
-          run-status.ts             # run status derivation (pure)
+        session-health.ts           # projectSessionHealthV2
+      domain/
+        # Pure domain logic extracted from handlers (v1.5.1)
+        ack-advance-append-plan.ts  # event builders (decomposed v1.5.1)
+        blocking-decision.ts
+        reason-model.ts
+        bundle-builder.ts
+        bundle-validator.ts
+        prompt-renderer.ts
+        # ... other domain modules
     ports/
-      crypto.port.ts
-      data-dir.port.ts
-      file-lock.port.ts
-      session-store.port.ts
+      fs.port.ts                    # segregated into 5 sub-interfaces (v1.5.1)
+      data-dir.port.ts              # uses branded types (v1.5.1)
+      session-event-log-store.port.ts
       snapshot-store.port.ts
       pinned-workflow-store.port.ts
-      projection-cache.port.ts
+      directory-listing.port.ts     # segregated from fs.port (v1.5.1)
     infra/
       local/
         data-dir/
           index.ts                  # DataDirPort file implementation
-        file-lock/
-          index.ts                  # FileLockPort OS-level lock implementation
+        session-lock/
+          index.ts                  # SessionLockPort OS-level lock implementation
         session-store/
           index.ts                  # SessionStorePort file implementation (segments + manifest)
         snapshot-store/
           index.ts                  # SnapshotStorePort CAS file implementation
         pinned-workflow-store/
           index.ts                  # PinnedWorkflowStorePort file implementation
-        projection-cache/
-          index.ts                  # ProjectionCachePort file implementation
-        crypto/
-          index.ts                  # CryptoPort implementation (Node crypto)
+        directory-listing/
+          index.ts                  # DirectoryListingPort implementation (v1.5.1)
+        session-summary-provider/
+          index.ts                  # SessionSummaryProviderPort implementation
+  mcp/
+    handlers/
+      v2-execution/                 # modularized (v1.5.1)
+        index.ts                    # public API exports
+        start.ts                    # executeStartWorkflow + helpers
+        continue-rehydrate.ts       # handleRehydrateIntent
+        continue-advance.ts         # handleAdvanceIntent
+        replay.ts                   # replayFromRecordedAdvance + helpers
+        advance.ts                  # advanceAndRecord
+      v2-advance-core/              # modularized (v1.5.1)
+        index.ts                    # executeAdvanceCore orchestrator
+        input-validation.ts         # validateAdvanceInputs
+        outcome-blocked.ts          # buildBlockedOutcome
+        outcome-success.ts          # buildSuccessOutcome
+        event-builders.ts           # buildAndAppendPlan + output builders
+      v2-advance-events.ts          # extracted event builders (v1.5.1)
+      v2-execution.ts               # barrel: re-exports from v2-execution/
+      v2-advance-core.ts            # barrel: re-exports from v2-advance-core/
+      v2-checkpoint.ts
+      v2-resume.ts
+      v2-workflow.ts
+      v2-token-ops.ts
+      v2-execution-helpers.ts
 ```
 
 Lock:

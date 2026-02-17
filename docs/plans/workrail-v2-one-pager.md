@@ -71,7 +71,12 @@ Local data may also be rooted under a WorkRail-owned data dir, optionally overri
   - 5-tier deterministic ranking (git SHA, branch, notes, workflow ID, recency)
   - DirectoryListingPortV2 + SessionSummaryProviderPortV2 ports
   - Up to 5 ranked candidates with fresh stateTokens
-- **All functional slices complete.** Remaining: production workflow migration + polish & hardening (sub-phases A-H)
+- **Polish & Hardening (sub-phases A-H)** ✅ shipped (v1.5.1, PRs #67-68)
+  - Philosophy alignment: eliminated functions >200 LOC, 58% max function reduction
+  - Modularization: 30 new focused modules, 4 large files split
+  - Type safety: branded types in ports, exhaustive switches, discriminated unions
+  - Code quality: removed duplication, dead code, standardized error handling
+- **All functional slices and hardening complete.** Remaining: production workflow migration + unflagging
 
 ## Epics
 

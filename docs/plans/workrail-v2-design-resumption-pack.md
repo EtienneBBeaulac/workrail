@@ -279,7 +279,7 @@ See the canonical docs for full mechanics:
 This section tracks remaining work. Most design locks are now complete; the focus is implementation.
 
 - **v2 core design is locked**: see `docs/design/v2-core-design-locks.md` for the comprehensive implementation locks (durable model, projections, authoring, ops envelope, architecture map, module layout, and ports).
-- **Implementation status** (verified against `origin/main` @ `v1.4.0`, 2026-02-17):
+- **Implementation status** (verified against `origin/main` @ `v1.5.1`, 2026-02-17):
   - ✅ **Slice 1 shipped**: v2 bounded context (`src/v2/`), JCS canonicalization, `workflowHash` pinning, compiled workflow snapshots, pinned workflow store. Golden hashes pinned with exact SHA-256 assertions.
   - ✅ **Slice 2 shipped**: append-only session event log substrate (segments + `manifest.jsonl` + single-writer lock + corruption gating), typed closed-set event schemas for all 13 locked event kinds, idempotency enforcement, and pure deterministic projections (run DAG, session health, node outputs, capabilities, gaps, advance outcomes, run status signals, preferences propagation).
   - ✅ **Slice 2.5 shipped**: `ExecutionSessionGateV2` (lock+health+witness choke-point); `WithHealthySessionLock` (opaque branded witness; append requires proof); readonly/append port split; `SessionHealthV2` union with manifest-attested corruption reasons; typed snapshot pin enforcement (no `any`).
@@ -299,7 +299,7 @@ This section tracks remaining work. Most design locks are now complete; the focu
     6. ✅ Semantics lockdown (Slice 4a)
     7. ✅ Portability (Slice 4b)
     8. ✅ Checkpoints + Resume (Slice 4c)
-    9. Remaining: production workflow migration, polish & hardening (sub-phases A-H)
+    9. ✅ Polish & hardening (sub-phases A-H) — complete
 - **Authoring is finalized**:
   - Initial contract packs are locked: `capability_observation`, `workflow_divergence`, `loop_control` (and gaps integrated into event model).
   - Builtins metadata schema defined (code-canonical + generated).
@@ -413,13 +413,28 @@ This is a concise record of what we did in this chat, for resumption continuity 
 
 ### What's next (current status as of 2026-02-17)
 
-**All functional slices are complete and released as v1.4.0.** The full v2 MCP tool surface (`list_workflows`, `inspect_workflow`, `start_workflow`, `continue_workflow`, `checkpoint_workflow`, `resume_session`) is implemented and passing CI. All tools are currently feature-flagged behind `WORKRAIL_ENABLE_V2_TOOLS=true`.
+**All functional slices complete and polish/hardening shipped as v1.5.1.** The full v2 MCP tool surface (`list_workflows`, `inspect_workflow`, `start_workflow`, `continue_workflow`, `checkpoint_workflow`, `resume_session`) is implemented and passing CI. All tools are currently feature-flagged behind `WORKRAIL_ENABLE_V2_TOOLS=true`.
 
 #### Recently shipped (since last update)
 
 - ✅ **Slice 4b** (`v1.3.0`): Export/import bundle domain logic with SHA-256 manifest integrity, import validation + token re-minting, export-import equivalence tests.
 - ✅ **Slice 4c-i** (`v1.4.0`): `checkpoint_workflow` tool with idempotent replay via `checkpointToken`, checkpoint node + edge in run DAG.
 - ✅ **Slice 4c-ii** (`v1.4.0`, PR #66): `resume_session` tool with 5-tier deterministic ranking (git HEAD SHA, branch match, recap notes, workflow ID, recency fallback). Segregated `DirectoryListingPortV2` + `SessionSummaryProviderPortV2` ports. Returns up to 5 ranked candidates with fresh stateTokens.
+- ✅ **Polish & Hardening** (`v1.5.1`, PRs #67-68): Comprehensive cleanup completing all sub-phases A-H:
+  - Fixed 3 compilation errors, scope priority bug, bech32m error classification
+  - Added exhaustive discriminated union handling (4 instances with default:never)
+  - Eliminated all functions >200 LOC (was 5)
+  - Decomposed 7 major functions (1,646 → 939 LOC in orchestrators)
+  - Split 4 monolithic files into 30 focused modules
+  - Consolidated duplicated code (utf8ByteLength 6→1, ProjectionError 8→1)
+  - Removed ~179 LOC dead V1 token code
+  - Standardized error handling (throw→Result)
+  - Updated ports to use branded types (DataDirPortV2, ImportSessionPorts)
+  - Segregated FileSystemPortV2 (15→5 focused interfaces)
+  - Fixed 3 illegal state patterns via discriminated unions
+  - Max function size: 385→161 LOC (58% reduction)
+  - Max nesting depth: 7→5 levels (29% reduction)
+  - 2,618/2,621 tests passing (99.9%)
 
 #### Remaining work
 
@@ -427,19 +442,13 @@ This is a concise record of what we did in this chat, for resumption continuity 
 - Migrate existing workflows from `validationCriteria` to `outputContract`
 - Test workflow exists as reference pattern (`test-artifact-loop-control.json`)
 
-**Polish & Hardening (Sub-phases A-H)** (~3-5 days):
-- See `v2-core-design-locks.md` section 16.5
-- Some items partially done: projection timing hooks (G), import boundary tests (H), v1 fail-fast guard (H)
-- Remaining: anti-drift enforcement (A-B), property-based determinism tests (D-E), error ergonomics (F)
-
-**Unflag v2 tools** (after polish):
+**Unflag v2 tools** (ready after workflow migration):
 - Remove `WORKRAIL_ENABLE_V2_TOOLS` gate
 - `resume_session` and `checkpoint_workflow` may retain separate unflag gates if needed
 
 **Next agent should**:
-- Read `v2-core-design-locks.md` sections 16.1-16.5 (implementation blueprint + playbook + polish phase).
-- Run the remaining Polish & Hardening sub-phases (A-H) before unflagging v2.
-- Migrate production workflows from `validationCriteria` to `outputContract`.
+- Migrate production workflows from `validationCriteria` to `outputContract`
+- Consider unflagging v2 tools for general availability
 
 #### Historical reference: lock tightening sessions (2025-12-21 to 2025-12-23)
 All design locks were audited and tightened across these sessions. Key decisions include: rehydrate/advance/replay separation, append transaction protocol, fork modeling, token crypto, checkpointing semantics, resume matching, corruption gating, and error envelope. These are now all implemented and tested. See `v2-core-design-locks.md` for the full locked mechanics.
@@ -623,17 +632,12 @@ Originally proposed `agentInstructions` field in responses (900 lines of parsing
 
 ## Open items (remaining v2 work)
 
-**All functional slices shipped** (v1.4.0). Remaining work is migration + hardening.
+**All functional slices and polish/hardening complete** (v1.5.1). Remaining work is workflow migration + unflagging.
 
 **Production workflow migration** (~1 day):
 - Migrate existing workflows from `validationCriteria` to `outputContract`
 - Reference pattern: `test-artifact-loop-control.json`
 
-**Polish & Hardening** (sub-phases A-H, ~3-5 days):
-- See `v2-core-design-locks.md` section 16.5
-- Partially done: projection timing hooks (G), import boundary tests (H), v1 fail-fast guard (H)
-- Remaining: anti-drift enforcement (A-B), property-based determinism tests (D-E), error ergonomics (F), dead code removal
-
-**Unflag v2 tools** (after polish):
+**Unflag v2 tools** (ready after migration):
 - Remove `WORKRAIL_ENABLE_V2_TOOLS` gate so v2 tools are available by default
 - `resume_session` and `checkpoint_workflow` may retain separate unflag gates if gradual rollout is preferred
