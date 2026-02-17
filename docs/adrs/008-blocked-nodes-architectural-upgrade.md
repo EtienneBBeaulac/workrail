@@ -1,7 +1,8 @@
 # ADR 008: Blocked Nodes as First-Class DAG Nodes (Architectural Upgrade)
 
-**Status:** Proposed (requires sign-off before implementation)  
-**Date:** 2026-01-10
+**Status:** Accepted and Implemented  
+**Date:** 2026-01-10  
+**Implemented:** 2026-02-17
 
 ## Context
 

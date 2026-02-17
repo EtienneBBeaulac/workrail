@@ -5,7 +5,9 @@ import { err, ok, type Result } from 'neverthrow';
 import type { SnapshotRef, WorkflowHash } from '../ids/index.js';
 import { EVENT_KIND, EDGE_KIND, ADVANCE_INTENT } from '../constants.js';
 
-type AdvanceOutcomeV1 = Extract<DomainEventV1, { kind: 'advance_recorded' }>['data']['outcome'];
+// Write-only: new advance events always use 'advanced' outcome (ADR 008).
+// The Zod schema retains the deprecated 'blocked' variant for deserializing old events.
+type AdvanceOutcomeWriteV1 = { readonly kind: 'advanced'; readonly toNodeId: string };
 
 type EventToAppendV1 = Omit<DomainEventV1, 'eventIndex' | 'sessionId'>;
 
@@ -19,7 +21,7 @@ function buildAdvanceRecordedEvent(args: {
   attemptId: string;
   eventIndex: number;
   eventId: string;
-  outcome: AdvanceOutcomeV1;
+  outcome: AdvanceOutcomeWriteV1;
 }): DomainEventV1 {
   const advanceDedupeKey = `advance_recorded:${args.sessionId}:${args.fromNodeId}:${args.attemptId}`;
   
@@ -193,28 +195,19 @@ export type AckAdvanceAppendPlanArgs = {
   readonly attemptId: string;
   readonly nextEventIndex: number;
   readonly extraEventsToAppend?: readonly EventToAppendV1[];
-} & (
-  | {
-      readonly outcome: { kind: 'blocked'; blockers: import('./reason-model.js').BlockerReportV1 };
-      readonly minted: {
-        readonly advanceRecordedEventId: string;
-      };
-    }
-  | {
-      readonly outcome: { kind: 'advanced'; toNodeId: string };
-      readonly toNodeKind: 'step' | 'blocked_attempt';
-      readonly toNodeId: string;
-      readonly snapshotRef: SnapshotRef;
-      readonly causeKind: 'intentional_fork' | 'non_tip_advance';
-      readonly minted: {
-        readonly advanceRecordedEventId: string;
-        readonly nodeCreatedEventId: string;
-        readonly edgeCreatedEventId: string;
-        readonly outputEventIds: readonly string[];
-      };
-      readonly outputsToAppend?: readonly OutputToAppend[];
-    }
-);
+  readonly outcome: { kind: 'advanced'; toNodeId: string };
+  readonly toNodeKind: 'step' | 'blocked_attempt';
+  readonly toNodeId: string;
+  readonly snapshotRef: SnapshotRef;
+  readonly causeKind: 'intentional_fork' | 'non_tip_advance';
+  readonly minted: {
+    readonly advanceRecordedEventId: string;
+    readonly nodeCreatedEventId: string;
+    readonly edgeCreatedEventId: string;
+    readonly outputEventIds: readonly string[];
+  };
+  readonly outputsToAppend?: readonly OutputToAppend[];
+};
 
 /**
  * Build the append plan for an ack-based advance.
@@ -248,7 +241,16 @@ export function buildAckAdvanceAppendPlanV1(args: AckAdvanceAppendPlanArgs): Res
     minted,
     extraEventsToAppend,
     outcome,
+    toNodeId,
+    snapshotRef,
+    causeKind,
+    toNodeKind,
+    outputsToAppend,
   } = args;
+
+  if (toNodeKind !== 'step' && toNodeKind !== 'blocked_attempt') {
+    return err({ code: 'INVARIANT_VIOLATION', message: 'toNodeKind must be step|blocked_attempt' });
+  }
 
   // Build advance_recorded event
   const advanceRecorded = buildAdvanceRecordedEvent({
@@ -269,41 +271,6 @@ export function buildAckAdvanceAppendPlanV1(args: AckAdvanceAppendPlanArgs): Res
   const extra = extraResult.value;
 
   const nextIndexAfterExtra = nextEventIndex + 1 + extra.length;
-
-  if (outcome.kind === 'blocked') {
-    // @deprecated (ADR 008): Use blocked_attempt nodes instead.
-    // Backward-compat path retained for 2-release buffer; remove after v0.10.0.
-    return ok({
-      events: [advanceRecorded, ...extra],
-      snapshotPins: [],
-    });
-  }
-
-  // Advanced outcome - narrow by checking outcome.kind and ensuring args type
-  if (outcome.kind !== 'advanced') {
-    // Exhaustiveness check - should never reach here
-    const _exhaustive: never = outcome;
-    return err({ code: 'INVARIANT_VIOLATION', message: `Unknown outcome kind` });
-  }
-
-  // Narrow args to the advanced variant by checking the presence of required fields
-  if (!('toNodeId' in args) || !('snapshotRef' in args) || !('causeKind' in args) || !('toNodeKind' in args) || !('minted' in args) || !('nodeCreatedEventId' in args.minted)) {
-    return err({ code: 'INVARIANT_VIOLATION', message: 'Advanced outcome requires toNodeId, snapshotRef, causeKind, toNodeKind, and minted event IDs' });
-  }
-
-  // Extract fields from the advanced variant (TypeScript needs help with narrowing)
-  const advancedArgs = args as Extract<typeof args, { outcome: { kind: 'advanced' } }>;
-  const toNodeId = advancedArgs.toNodeId;
-  const snapshotRef = advancedArgs.snapshotRef;
-  const causeKind = advancedArgs.causeKind;
-  const toNodeKind = advancedArgs.toNodeKind;
-  const outputsToAppend = advancedArgs.outputsToAppend;
-  const advancedMinted = advancedArgs.minted;
-
-  if (toNodeKind !== 'step' && toNodeKind !== 'blocked_attempt') {
-    return err({ code: 'INVARIANT_VIOLATION', message: 'toNodeKind must be step|blocked_attempt' });
-  }
-
   const nodeCreatedEventIndex = nextIndexAfterExtra;
   const edgeCreatedEventIndex = nextIndexAfterExtra + 1;
 
@@ -316,7 +283,7 @@ export function buildAckAdvanceAppendPlanV1(args: AckAdvanceAppendPlanArgs): Res
     toNodeKind,
     workflowHash,
     snapshotRef,
-    eventId: advancedMinted.nodeCreatedEventId,
+    eventId: minted.nodeCreatedEventId,
     eventIndex: nodeCreatedEventIndex,
   });
 
@@ -327,14 +294,14 @@ export function buildAckAdvanceAppendPlanV1(args: AckAdvanceAppendPlanArgs): Res
     toNodeId,
     causeKind,
     causeEventId: minted.advanceRecordedEventId,
-    eventId: advancedMinted.edgeCreatedEventId,
+    eventId: minted.edgeCreatedEventId,
     eventIndex: edgeCreatedEventIndex,
   });
 
   // Build output events
   const outputEventsResult = buildOutputEvents({
     outputs: outputsToAppend ?? [],
-    outputEventIds: advancedMinted.outputEventIds,
+    outputEventIds: minted.outputEventIds,
     sessionId,
     runId,
     fromNodeId,
@@ -358,7 +325,7 @@ export function buildAckAdvanceAppendPlanV1(args: AckAdvanceAppendPlanArgs): Res
       {
         snapshotRef,
         eventIndex: nodeCreatedEventIndex,
-        createdByEventId: advancedMinted.nodeCreatedEventId,
+        createdByEventId: minted.nodeCreatedEventId,
       },
     ],
   });

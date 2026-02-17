@@ -1,5 +1,5 @@
-import type { ToolContext, ToolResult } from '../../types.js';
-import { error, success } from '../../types.js';
+import type { ToolContext, ToolResult, V2ToolContext } from '../../types.js';
+import { error, success, requireV2Context } from '../../types.js';
 import type { V2ContinueWorkflowInput, V2StartWorkflowInput } from '../../v2/tools.js';
 import { V2ContinueWorkflowOutputSchema } from '../../output-schemas.js';
 import {
@@ -81,7 +81,10 @@ export async function handleV2StartWorkflow(
   input: V2StartWorkflowInput,
   ctx: ToolContext
 ): Promise<ToolResult<unknown>> {
-  return executeStartWorkflow(input, ctx).match(
+  const guard = requireV2Context(ctx);
+  if (!guard.ok) return guard.error;
+
+  return executeStartWorkflow(input, guard.ctx).match(
     (payload) => success(payload),
     (e) => mapStartWorkflowErrorToToolError(e)
   );
@@ -91,7 +94,10 @@ export async function handleV2ContinueWorkflow(
   input: V2ContinueWorkflowInput,
   ctx: ToolContext
 ): Promise<ToolResult<unknown>> {
-  return executeContinueWorkflow(input, ctx).match(
+  const guard = requireV2Context(ctx);
+  if (!guard.ok) return guard.error;
+
+  return executeContinueWorkflow(input, guard.ctx).match(
     (payload) => success(payload),
     (e) => mapContinueWorkflowErrorToToolError(e)
   );
@@ -99,28 +105,9 @@ export async function handleV2ContinueWorkflow(
 
 function executeContinueWorkflow(
   input: V2ContinueWorkflowInput,
-  ctx: ToolContext
+  ctx: V2ToolContext
 ): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, ContinueWorkflowError> {
-  // Preconditions: validate context and dependencies
-  if (!ctx.v2) {
-    return neErrorAsync({ kind: 'precondition_failed', message: 'v2 tools disabled', suggestion: 'Enable v2Tools flag' });
-  }
-
   const { gate, sessionStore, snapshotStore, pinnedStore, sha256, tokenCodecPorts, idFactory } = ctx.v2;
-  if (!sha256 || !idFactory) {
-    return neErrorAsync({
-      kind: 'precondition_failed',
-      message: 'v2 context missing required dependencies',
-      suggestion: 'Reinitialize v2 tool context (sha256 and idFactory must be provided when v2Tools are enabled).',
-    });
-  }
-  if (!tokenCodecPorts) {
-    return neErrorAsync({
-      kind: 'precondition_failed',
-      message: 'v2 context missing tokenCodecPorts dependency',
-      suggestion: 'Reinitialize v2 tool context (tokenCodecPorts must be provided when v2Tools are enabled).',
-    });
-  }
 
   // Parse and validate state token
   const stateRes = parseStateTokenOrFail(input.stateToken, tokenCodecPorts);

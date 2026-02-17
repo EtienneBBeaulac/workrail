@@ -404,7 +404,13 @@ export class HttpServer {
       try {
         const { workflow, id } = req.params;
         
-        await this.sessionManager.deleteSession(workflow, id);
+        const result = await this.sessionManager.deleteSession(workflow, id);
+        
+        if (result.isErr()) {
+          const status = result.error.code === 'SESSION_NOT_FOUND' ? 404 : 500;
+          res.status(status).json({ success: false, error: result.error.message });
+          return;
+        }
         
         res.json({
           success: true,
@@ -412,7 +418,7 @@ export class HttpServer {
         });
       } catch (error: any) {
         console.error('[HttpServer] Delete session error:', error);
-        res.status(error.message?.includes('not found') ? 404 : 500).json({
+        res.status(500).json({
           success: false,
           error: error.message || 'Failed to delete session'
         });
