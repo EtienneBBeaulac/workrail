@@ -57,6 +57,17 @@ export function buildAndAppendPlan(args: BuildAppendPlanArgs): RA<void, Internal
   const evtAdvanceRecorded = idFactory.mintEventId();
 
   if (args.kind === 'blocked') {
+    // Blocked advances create a blocked_attempt node (ADR 008)
+    const toNodeId = String(idFactory.mintNodeId());
+    const evtNodeCreated = idFactory.mintEventId();
+    const evtEdgeCreated = idFactory.mintEventId();
+
+    const hasChildren = truth.events.some(
+      (e): e is Extract<DomainEventV1, { kind: 'edge_created' }> =>
+        e.kind === EVENT_KIND.EDGE_CREATED && e.data.fromNodeId === String(currentNodeId)
+    );
+    const causeKind: 'non_tip_advance' | 'intentional_fork' = hasChildren ? EDGE_CAUSE.NON_TIP_ADVANCE : EDGE_CAUSE.INTENTIONAL_FORK;
+
     const planRes = buildAckAdvanceAppendPlanV1({
       sessionId: String(sessionId),
       runId: String(runId),
@@ -65,10 +76,18 @@ export function buildAndAppendPlan(args: BuildAppendPlanArgs): RA<void, Internal
       attemptId: String(attemptId),
       nextEventIndex,
       extraEventsToAppend,
-      outcome: { kind: 'blocked', blockers: args.blockers },
+      outcome: { kind: 'advanced', toNodeId },
+      toNodeKind: 'blocked_attempt',
+      toNodeId,
+      snapshotRef: args.snapshotRef,
+      causeKind,
       minted: {
         advanceRecordedEventId: evtAdvanceRecorded,
+        nodeCreatedEventId: evtNodeCreated,
+        edgeCreatedEventId: evtEdgeCreated,
+        outputEventIds: [],
       },
+      outputsToAppend: [],
     });
     if (planRes.isErr()) return neErrorAsync({ kind: 'invariant_violation' as const, message: planRes.error.message });
     return sessionStore.append(lock, planRes.value);
