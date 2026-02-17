@@ -121,6 +121,11 @@ export const WORKFLOW_TOOL_ANNOTATIONS: Readonly<Record<WorkflowToolName, ToolAn
     // The v2 contract is replay-safe; hint that retries are OK.
     idempotentHint: true,
   },
+  checkpoint_workflow: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+  },
 } as const;
 
 // -----------------------------------------------------------------------------
@@ -139,6 +144,7 @@ export const WORKFLOW_TOOL_TITLES: Readonly<Record<WorkflowToolName, string>> = 
   inspect_workflow: 'Inspect Workflow (v2)',
   start_workflow: 'Start Workflow (v2)',
   continue_workflow: 'Continue Workflow (v2)',
+  checkpoint_workflow: 'Checkpoint Workflow (v2)',
 } as const;
 
 // -----------------------------------------------------------------------------

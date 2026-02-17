@@ -18,6 +18,7 @@ import {
   V2WorkflowInspectOutputSchema,
   V2StartWorkflowOutputSchema,
   V2ContinueWorkflowOutputSchema,
+  V2CheckpointWorkflowOutputSchema,
   V2PendingStepSchema,
   V2PreferencesSchema,
   V2NextIntentSchema,
@@ -30,6 +31,7 @@ import {
 
 const VALID_STATE_TOKEN = 'st1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq';
 const VALID_ACK_TOKEN = 'ack1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq';
+const VALID_CHECKPOINT_TOKEN = 'chk1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq';
 
 function validPendingStep() {
   return { stepId: 'step-1', title: 'Step 1', prompt: 'Do the thing' };
@@ -349,5 +351,98 @@ describe('closed set contracts', () => {
       };
       expect(V2BlockerReportSchema.safeParse(report).success).toBe(true);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// checkpoint_workflow response contract
+// ---------------------------------------------------------------------------
+
+describe('checkpoint_workflow response contract', () => {
+  it('accepts valid checkpoint output', () => {
+    const response = {
+      checkpointNodeId: 'node_abc123',
+      stateToken: VALID_STATE_TOKEN,
+    };
+    expect(V2CheckpointWorkflowOutputSchema.safeParse(response).success).toBe(true);
+  });
+
+  it('rejects missing checkpointNodeId', () => {
+    const response = { stateToken: VALID_STATE_TOKEN };
+    expect(V2CheckpointWorkflowOutputSchema.safeParse(response).success).toBe(false);
+  });
+
+  it('rejects missing stateToken', () => {
+    const response = { checkpointNodeId: 'node_abc123' };
+    expect(V2CheckpointWorkflowOutputSchema.safeParse(response).success).toBe(false);
+  });
+
+  it('rejects invalid stateToken format', () => {
+    const response = { checkpointNodeId: 'node_abc123', stateToken: 'not-a-token' };
+    expect(V2CheckpointWorkflowOutputSchema.safeParse(response).success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// checkpointToken in continue_workflow / start_workflow contracts
+// ---------------------------------------------------------------------------
+
+describe('checkpointToken in response contracts', () => {
+  it('continue_workflow accepts checkpointToken', () => {
+    const response = {
+      kind: 'ok',
+      stateToken: VALID_STATE_TOKEN,
+      ackToken: VALID_ACK_TOKEN,
+      checkpointToken: VALID_CHECKPOINT_TOKEN,
+      isComplete: false,
+      pending: validPendingStep(),
+      preferences: validPreferences(),
+      nextIntent: 'perform_pending_then_continue',
+      nextCall: { tool: 'continue_workflow', params: { intent: 'advance', stateToken: VALID_STATE_TOKEN, ackToken: VALID_ACK_TOKEN } },
+    };
+    expect(V2ContinueWorkflowOutputSchema.safeParse(response).success).toBe(true);
+  });
+
+  it('continue_workflow accepts response without checkpointToken (backward compatible)', () => {
+    const response = {
+      kind: 'ok',
+      stateToken: VALID_STATE_TOKEN,
+      ackToken: VALID_ACK_TOKEN,
+      isComplete: false,
+      pending: validPendingStep(),
+      preferences: validPreferences(),
+      nextIntent: 'perform_pending_then_continue',
+      nextCall: { tool: 'continue_workflow', params: { intent: 'advance', stateToken: VALID_STATE_TOKEN, ackToken: VALID_ACK_TOKEN } },
+    };
+    expect(V2ContinueWorkflowOutputSchema.safeParse(response).success).toBe(true);
+  });
+
+  it('start_workflow accepts checkpointToken', () => {
+    const response = {
+      stateToken: VALID_STATE_TOKEN,
+      ackToken: VALID_ACK_TOKEN,
+      checkpointToken: VALID_CHECKPOINT_TOKEN,
+      isComplete: false,
+      pending: validPendingStep(),
+      preferences: validPreferences(),
+      nextIntent: 'perform_pending_then_continue',
+      nextCall: { tool: 'continue_workflow', params: { intent: 'advance', stateToken: VALID_STATE_TOKEN, ackToken: VALID_ACK_TOKEN } },
+    };
+    expect(V2StartWorkflowOutputSchema.safeParse(response).success).toBe(true);
+  });
+
+  it('rejects invalid checkpointToken format', () => {
+    const response = {
+      kind: 'ok',
+      stateToken: VALID_STATE_TOKEN,
+      ackToken: VALID_ACK_TOKEN,
+      checkpointToken: 'invalid-format',
+      isComplete: false,
+      pending: validPendingStep(),
+      preferences: validPreferences(),
+      nextIntent: 'perform_pending_then_continue',
+      nextCall: { tool: 'continue_workflow', params: { intent: 'advance', stateToken: VALID_STATE_TOKEN, ackToken: VALID_ACK_TOKEN } },
+    };
+    expect(V2ContinueWorkflowOutputSchema.safeParse(response).success).toBe(false);
   });
 });
