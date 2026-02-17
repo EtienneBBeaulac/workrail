@@ -94,6 +94,20 @@ export const MAX_OUTPUT_NOTES_MARKDOWN_BYTES = 4096;
 // =============================================================================
 
 /**
+ * Maximum UTF-8 bytes for a single validation issue string.
+ *
+ * Why 512: Forces concise issue descriptions. Full context belongs in suggestedFix.
+ */
+export const MAX_VALIDATION_ISSUE_ITEM_BYTES = 512;
+
+/**
+ * Maximum UTF-8 bytes for a single validation suggestion string.
+ *
+ * Why 1024: Allows actionable guidance with examples without becoming verbose.
+ */
+export const MAX_VALIDATION_SUGGESTION_ITEM_BYTES = 1024;
+
+/**
  * Maximum UTF-8 bytes across all validation issues stored in a single `validation_performed` event.
  *
  * Why: Validation can be verbose; we bound durable truth to keep the event log and tool responses predictable.

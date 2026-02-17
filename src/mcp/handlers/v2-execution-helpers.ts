@@ -192,8 +192,8 @@ export function mapContinueWorkflowErrorToToolError(e: ContinueWorkflowError): T
  */
 export function mapTokenDecodeErrorToToolError(e: TokenDecodeErrorV2): ToolFailure {
   // Bech32m-specific error enrichment
-  if (e.code === 'TOKEN_INVALID_FORMAT' && (e as any).details?.bech32mError) {
-    const bech32mErr = (e as any).details.bech32mError;
+  if (e.code === 'TOKEN_INVALID_FORMAT' && e.details?.bech32mError) {
+    const bech32mErr = e.details.bech32mError;
     
     if (bech32mErr.code === 'BECH32M_CHECKSUM_FAILED') {
       return errNotRetryable(
@@ -203,7 +203,7 @@ export function mapTokenDecodeErrorToToolError(e: TokenDecodeErrorV2): ToolFailu
           suggestion: 'Copy the entire token string exactly as returned. Use triple-click to select the complete line.',
           details: {
             errorType: 'corruption_detected',
-            estimatedPosition: bech32mErr.position,
+            estimatedPosition: bech32mErr.position ?? null,
             tokenFormat: 'binary+bech32m',
           },
         }

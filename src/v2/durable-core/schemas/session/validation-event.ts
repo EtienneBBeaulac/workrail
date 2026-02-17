@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { MAX_VALIDATION_ISSUES_BYTES, MAX_VALIDATION_SUGGESTIONS_BYTES } from '../../constants.js';
+import {
+  MAX_VALIDATION_ISSUE_ITEM_BYTES,
+  MAX_VALIDATION_SUGGESTION_ITEM_BYTES,
+  MAX_VALIDATION_ISSUES_BYTES,
+  MAX_VALIDATION_SUGGESTIONS_BYTES,
+} from '../../constants.js';
 import { utf8BoundedString } from '../lib/utf8-bounded-string.js';
 
 function utf8ByteLength(s: string): number {
@@ -9,13 +14,13 @@ function utf8ByteLength(s: string): number {
 const ValidationIssueV1Schema = utf8BoundedString({
   label: 'validation issue',
   minLength: 1,
-  maxBytes: 512,
+  maxBytes: MAX_VALIDATION_ISSUE_ITEM_BYTES,
 });
 
 const ValidationSuggestionV1Schema = utf8BoundedString({
   label: 'validation suggestion',
   minLength: 1,
-  maxBytes: 1024,
+  maxBytes: MAX_VALIDATION_SUGGESTION_ITEM_BYTES,
 });
 
 export const ValidationPerformedResultV1Schema = z
