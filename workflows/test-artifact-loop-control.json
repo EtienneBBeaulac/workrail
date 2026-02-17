@@ -26,12 +26,8 @@
       "loop": {
         "type": "while",
         "condition": {
-          "artifact": {
-            "contractRef": "wr.contracts.loop_control",
-            "loopId": "test-iteration",
-            "field": "decision",
-            "equals": "continue"
-          }
+          "var": "loopShouldContinue",
+          "equals": true
         },
         "maxIterations": 3
       },
