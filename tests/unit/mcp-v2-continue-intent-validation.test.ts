@@ -89,17 +89,26 @@ describe('V2ContinueWorkflowInput boundary validation', () => {
     expect(result.success).toBe(false);
   });
 
-  // ── Missing intent ───────────────────────────────────────────────
+  // ── Intent auto-inference ───────────────────────────────────────
 
-  it('rejects input without intent field', () => {
+  it('auto-infers advance when intent omitted and ackToken present', () => {
     const result = V2ContinueWorkflowInput.safeParse({
       stateToken: 'st1abc',
       ackToken: 'ack1abc',
     });
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      const intentError = result.error.errors.find((e) => e.path.includes('intent'));
-      expect(intentError).toBeDefined();
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.intent).toBe('advance');
+    }
+  });
+
+  it('auto-infers rehydrate when intent omitted and ackToken absent', () => {
+    const result = V2ContinueWorkflowInput.safeParse({
+      stateToken: 'st1abc',
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.intent).toBe('rehydrate');
     }
   });
 

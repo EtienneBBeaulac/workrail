@@ -102,18 +102,38 @@ describe('V2NextCallSchema', () => {
     expect(result.success).toBe(false);
   });
 
-  it('rejects wrong intent', () => {
+  it('accepts rehydrate intent without ackToken (used by checkpoint_workflow)', () => {
     const result = V2NextCallSchema.safeParse({
       tool: 'continue_workflow',
-      params: { intent: 'rehydrate', stateToken: 'st1abc', ackToken: 'ack1xyz' },
+      params: { intent: 'rehydrate', stateToken: 'st1abc' },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects advance without ackToken (discriminated union enforces pairing)', () => {
+    const result = V2NextCallSchema.safeParse({
+      tool: 'continue_workflow',
+      params: { intent: 'advance', stateToken: 'st1abc' },
     });
     expect(result.success).toBe(false);
   });
 
-  it('rejects missing ackToken', () => {
+  it('rehydrate with extra ackToken parses but ackToken is stripped', () => {
     const result = V2NextCallSchema.safeParse({
       tool: 'continue_workflow',
-      params: { intent: 'advance', stateToken: 'st1abc' },
+      params: { intent: 'rehydrate', stateToken: 'st1abc', ackToken: 'ack1xyz' },
+    });
+    // Zod discriminated union matches rehydrate variant; extra ackToken is silently dropped
+    expect(result.success).toBe(true);
+    if (result.success && result.data) {
+      expect(result.data.params).not.toHaveProperty('ackToken');
+    }
+  });
+
+  it('rejects wrong intent value', () => {
+    const result = V2NextCallSchema.safeParse({
+      tool: 'continue_workflow',
+      params: { intent: 'probe', stateToken: 'st1abc' },
     });
     expect(result.success).toBe(false);
   });

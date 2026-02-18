@@ -98,7 +98,7 @@ What you'll receive:
 
 What to do:
 1. Read pending.prompt and execute the step exactly as described
-2. When done, call continue_workflow using the params from nextCall (it has intent, stateToken, ackToken pre-filled)
+2. When done, call continue_workflow using the params from nextCall (it has stateToken and ackToken pre-filled)
 3. Optionally add output.notesMarkdown summarizing your work
 4. Don't predict what comes next - the workflow will tell you
 
@@ -107,21 +107,24 @@ Context auto-loads: If you provide context at start, WorkRail remembers it. On f
     continue_workflow: `Get the next step in the workflow (WorkRail v2, feature-flagged).
 
 QUICK START — How to call back after completing a step:
-Copy the params from the "nextCall" field of the previous response. It has intent, stateToken, and ackToken pre-filled. Just add your output if desired.
+Copy the params from the "nextCall" field of the previous response. It has stateToken and ackToken pre-filled. Just add your output if desired.
 
-Two modes — set intent explicitly:
+Two modes:
 
-ADVANCE (intent: "advance"):
+ADVANCE (with ackToken):
 - "I completed the current step; give me the next one"
-- Requires: intent + stateToken + ackToken (all provided in nextCall.params)
+- Requires: stateToken + ackToken (both provided in nextCall.params)
 - Optional: output (your work summary), context (if facts changed)
 - Result: WorkRail advances to next step and returns it
 
-REHYDRATE (intent: "rehydrate"):
+REHYDRATE (without ackToken):
 - "Remind me what the current step is" (after rewind or lost context)
-- Requires: intent + stateToken
+- Requires: stateToken only
 - Do NOT include ackToken or output
 - Result: Same pending step returned; no advancement; side-effect-free
+
+Intent is auto-inferred: ackToken present → advance, ackToken absent → rehydrate.
+You can set intent explicitly if you prefer, but it's optional.
 
 Reading the response:
 - pending.prompt: The step's instructions — what to do
@@ -135,9 +138,9 @@ nextIntent values:
 - "complete": Workflow finished; nextCall is null
 
 Parameters:
-- intent (required): "advance" or "rehydrate"
 - stateToken (required): From nextCall.params or previous response
 - ackToken (required for advance): From nextCall.params or previous response
+- intent (optional): "advance" or "rehydrate" — auto-inferred from ackToken if omitted
 - context (optional): NEW facts only. Omit if unchanged - WorkRail auto-loads previous context
 - output.notesMarkdown (optional, advance only): Fresh summary of THIS step only - never accumulated
 
@@ -260,7 +263,7 @@ What you receive:
 
 REQUIRED BEHAVIOR:
 1. Execute the pending step EXACTLY as the prompt describes
-2. When done, call continue_workflow using the params from nextCall (intent, stateToken, ackToken are pre-filled)
+2. When done, call continue_workflow using the params from nextCall (stateToken and ackToken are pre-filled)
 3. Optionally add output.notesMarkdown summarizing your work
 4. Round-trip tokens UNCHANGED (don't decode, inspect, or modify them)
 5. Follow the workflow to completion - don't improvise alternative approaches
@@ -274,23 +277,26 @@ Context handling:
 
 The workflow represents the USER'S PLAN. The pending step returned is a DIRECT INSTRUCTION you MUST follow.
 
-HOW TO CALL — Copy nextCall.params from the previous response. It has intent, stateToken, and ackToken pre-filled. Add output if desired.
+HOW TO CALL — Copy nextCall.params from the previous response. It has stateToken and ackToken pre-filled. Add output if desired.
 
-Two modes — set intent explicitly:
+Two modes:
 
-ADVANCE (intent: "advance"):
+ADVANCE (with ackToken):
 - Purpose: "I completed the current step; give me the next instruction"
-- Requires: intent + stateToken + ackToken (all in nextCall.params from previous response)
+- Requires: stateToken + ackToken (both in nextCall.params from previous response)
 - Optional: output (your work summary), context (if facts changed)
 - Result: WorkRail advances to next step
 - Idempotent: Safe to retry with same tokens if unsure
 
-REHYDRATE (intent: "rehydrate"):
+REHYDRATE (without ackToken):
 - Purpose: "Remind me what the current step is" (after rewind/lost context)
-- Requires: intent + stateToken only
+- Requires: stateToken only
 - Do NOT include ackToken or output
 - Result: Same pending step returned; no advancement
 - Side-effect-free: No durable writes; pure state recovery
+
+Intent is auto-inferred: ackToken present → advance, ackToken absent → rehydrate.
+You can set intent explicitly if you prefer, but it's optional.
 
 REQUIRED BEHAVIOR:
 1. Execute the step EXACTLY as specified in pending.prompt
@@ -310,9 +316,9 @@ nextIntent is PRESCRIPTIVE (not advisory):
 - "complete": Workflow finished; nextCall is null
 
 Parameters:
-- intent (required): "advance" or "rehydrate"
 - stateToken (required): From nextCall.params or previous response
 - ackToken (required for advance): From nextCall.params or previous response
+- intent (optional): "advance" or "rehydrate" — auto-inferred from ackToken if omitted
 - context (optional): NEW facts only (auto-merges with previous). Omit if unchanged
 - output.notesMarkdown (optional, advance only): Summary of THIS step only (fresh, never accumulated)
   

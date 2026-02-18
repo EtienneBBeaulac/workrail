@@ -17,8 +17,9 @@ export const V2StartWorkflowInput = z.object({
 export type V2StartWorkflowInput = z.infer<typeof V2StartWorkflowInput>;
 
 export const V2ContinueWorkflowInput = z.object({
-  intent: z.enum(['advance', 'rehydrate']).describe(
-    'What you want to do. ' +
+  intent: z.enum(['advance', 'rehydrate']).optional().describe(
+    'What you want to do. Auto-inferred from ackToken if omitted: ' +
+    'ackToken present → "advance", ackToken absent → "rehydrate". ' +
     '"advance": I completed the current step — requires ackToken. ' +
     '"rehydrate": Remind me what the current step is (state recovery after rewind/lost context) — do NOT include ackToken or output.'
   ),
@@ -32,7 +33,12 @@ export const V2ContinueWorkflowInput = z.object({
     })
     .optional()
     .describe('Durable output to attach to the current node. Only valid when intent is "advance".'),
-}).strict().superRefine((data, ctx) => {
+}).strict().transform((data) => {
+  // Auto-infer intent from ackToken presence when not explicitly provided.
+  // ackToken present → advance, ackToken absent → rehydrate.
+  const intent = data.intent ?? (data.ackToken ? 'advance' : 'rehydrate');
+  return { ...data, intent } as typeof data & { intent: 'advance' | 'rehydrate' };
+}).pipe(z.custom<{ intent: 'advance' | 'rehydrate'; stateToken: string; ackToken?: string; context?: Record<string, unknown>; output?: { notesMarkdown?: string; artifacts?: unknown[] } }>().superRefine((data, ctx) => {
   if (data.intent === 'advance' && !data.ackToken) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
@@ -63,7 +69,7 @@ export const V2ContinueWorkflowInput = z.object({
         'To submit output and advance, set intent to "advance" and include ackToken.',
     });
   }
-});
+}));
 export type V2ContinueWorkflowInput = z.infer<typeof V2ContinueWorkflowInput>;
 
 export const V2ResumeSessionInput = z.object({

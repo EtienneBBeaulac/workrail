@@ -39,14 +39,15 @@ import { handleAdvanceIntent } from './continue-advance.js';
 // Pure function: derives the pre-built continuation template from response values.
 // Tells the agent exactly what to call when done — no memory of tool descriptions needed.
 
-type NextCallTemplate = {
+type NextCallAdvance = {
   readonly tool: 'continue_workflow';
-  readonly params: {
-    readonly intent: 'advance';
-    readonly stateToken: string;
-    readonly ackToken: string;
-  };
+  readonly params: { readonly intent: 'advance'; readonly stateToken: string; readonly ackToken: string };
 };
+type NextCallRehydrate = {
+  readonly tool: 'continue_workflow';
+  readonly params: { readonly intent: 'rehydrate'; readonly stateToken: string };
+};
+type NextCallTemplate = NextCallAdvance | NextCallRehydrate;
 
 export function buildNextCall(args: {
   readonly stateToken: string;

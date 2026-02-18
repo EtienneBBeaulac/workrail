@@ -364,6 +364,7 @@ describe('checkpoint_workflow response contract', () => {
     const response = {
       checkpointNodeId: 'node_abc123',
       stateToken: VALID_STATE_TOKEN,
+      nextCall: { tool: 'continue_workflow', params: { intent: 'rehydrate', stateToken: VALID_STATE_TOKEN } },
     };
     expect(V2CheckpointWorkflowOutputSchema.safeParse(response).success).toBe(true);
   });

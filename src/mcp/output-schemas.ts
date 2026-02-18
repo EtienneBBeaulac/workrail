@@ -119,13 +119,19 @@ export const V2NextIntentSchema = z.enum([
 
 // Pre-built continuation template: tells the agent exactly what to call when done.
 // null when workflow is complete or blocked non-retryable (nothing to call).
+// Discriminated union: advance always has ackToken, rehydrate never does.
+const V2NextCallAdvanceParams = z.object({
+  intent: z.literal('advance'),
+  stateToken: z.string().min(1),
+  ackToken: z.string().min(1),
+});
+const V2NextCallRehydrateParams = z.object({
+  intent: z.literal('rehydrate'),
+  stateToken: z.string().min(1),
+});
 export const V2NextCallSchema = z.object({
   tool: z.literal('continue_workflow'),
-  params: z.object({
-    intent: z.literal('advance'),
-    stateToken: z.string().min(1),
-    ackToken: z.string().min(1),
-  }),
+  params: z.discriminatedUnion('intent', [V2NextCallAdvanceParams, V2NextCallRehydrateParams]),
 }).nullable();
 
 function utf8ByteLength(s: string): number {
@@ -283,6 +289,10 @@ export const V2ResumeSessionOutputSchema = z.object({
 export const V2CheckpointWorkflowOutputSchema = z.object({
   checkpointNodeId: z.string().min(1),
   stateToken: z.string().regex(/^st1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid stateToken format'),
+  nextCall: V2NextCallSchema.describe(
+    'Pre-built template for your next continue_workflow call. ' +
+    'After checkpoint, use this to rehydrate and continue working on the current step.'
+  ),
 });
 
 export const V2StartWorkflowOutputSchema = z.object({

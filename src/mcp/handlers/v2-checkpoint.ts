@@ -197,6 +197,7 @@ function replayCheckpoint(
   return okAsync(V2CheckpointWorkflowOutputSchema.parse({
     checkpointNodeId,
     stateToken: tokenResult.value,
+    nextCall: { tool: 'continue_workflow', params: { intent: 'rehydrate', stateToken: tokenResult.value } },
   }));
 }
 
@@ -283,6 +284,7 @@ function writeCheckpoint(
       return okAsync(V2CheckpointWorkflowOutputSchema.parse({
         checkpointNodeId: String(checkpointNodeId),
         stateToken: tokenResult.value,
+        nextCall: { tool: 'continue_workflow', params: { intent: 'rehydrate', stateToken: tokenResult.value } },
       }));
     });
 }
