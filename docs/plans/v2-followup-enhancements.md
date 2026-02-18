@@ -1,7 +1,8 @@
 # WorkRail v2 Follow-up Enhancements
 
-**Status**: Planning / Not Yet Implemented  
+**Status**: In Progress — P1 implemented, P2–P6 planning  
 **Date**: 2026-02-17  
+**Updated**: 2026-02-18  
 **Context**: Post-v2 core completion. All functional slices shipped, 2628 tests passing. This doc captures enhancement opportunities discovered during manual testing and production usage.
 
 ---
@@ -45,30 +46,37 @@ Server → resume_session → matches sessions by stored git observations
 
 **File**: `src/mcp/workspace-roots-manager.ts`
 
-```typescript
-import type { Root } from '@modelcontextprotocol/sdk/types.js';
+Split read and write capabilities at the type level so handler code can only read — no
+mutation surface leaks into consumers via `V2Dependencies`.
 
-export class WorkspaceRootsManager {
-  private roots: readonly Root[] = [];
-  
-  updateRoots(newRoots: readonly Root[]): void {
-    this.roots = Object.freeze([...newRoots]);
+```typescript
+/** Read-only view — passed into V2Dependencies. */
+export interface RootsReader {
+  getCurrentRootUris(): readonly string[];
+}
+
+/** Write capability — only the MCP notification handler holds this. */
+export interface RootsWriter {
+  updateRootUris(uris: readonly string[]): void;
+}
+
+export class WorkspaceRootsManager implements RootsReader, RootsWriter {
+  private rootUris: readonly string[] = Object.freeze([]);
+
+  updateRootUris(uris: readonly string[]): void {
+    this.rootUris = Object.freeze([...uris]);
   }
-  
-  getCurrentRoots(): readonly Root[] {
-    return this.roots;
-  }
-  
-  getPrimaryRoot(): Root | null {
-    return this.roots[0] ?? null;
+
+  getCurrentRootUris(): readonly string[] {
+    return this.rootUris;
   }
 }
 ```
 
 **Philosophy alignment**:
-- Mutable cell is minimal and encapsulated
-- API is read-only (immutable snapshots)
-- Single-writer (MCP notification handler on event loop)
+- Mutable cell is minimal, confined behind an explicit `RootsWriter` interface
+- Handlers receive `RootsReader` — cannot call `updateRootUris`
+- Single-writer (MCP notification handler on Node.js event loop)
 
 ---
 
@@ -76,21 +84,39 @@ export class WorkspaceRootsManager {
 
 **File**: `src/mcp/server.ts`
 
-**Changes**:
+Two important protocol details:
+
+1. `notifications/roots/list_changed` is a **signal only** — it carries no roots payload. After
+   receiving it, the server must call `server.listRoots()` (which sends a `roots/list` request
+   to the client) to get the updated list.
+2. Initial roots must be fetched **after** `server.connect(transport)`. Some clients don't support
+   `roots/list`; wrap in try/catch and degrade gracefully to CWD fallback.
+
 ```typescript
 const rootsManager = new WorkspaceRootsManager();
+// rootsWriter stays local — never passed to handlers
+const rootsWriter: RootsWriter = rootsManager;
 
-// Handle client workspace root changes
-server.setNotificationHandler(RootsListChangedNotificationSchema, async (notification) => {
-  const roots = notification.params?.roots ?? [];
-  rootsManager.updateRoots(roots);
-  console.error(`[Roots] Updated workspace roots: ${roots.map(r => r.uri).join(', ')}`);
+// Register before connect. Notification is signal-only; re-fetch via listRoots().
+server.setNotificationHandler(RootsListChangedNotificationSchema, async () => {
+  try {
+    const result = await server.listRoots();
+    rootsWriter.updateRootUris(result.roots.map((r) => r.uri));
+    console.error(`[Roots] Updated: ${result.roots.map((r) => r.uri).join(', ') || '(none)'}`);
+  } catch {
+    console.error('[Roots] Failed to fetch updated roots after change notification');
+  }
 });
 
-// Optionally: request roots on connect (client may not send until workspace changes)
-server.onConnect(() => {
-  server.request({ method: 'roots/list' }, ListRootsRequestSchema);
-});
+// After server.connect(transport): fetch initial roots.
+// Graceful: clients that don't support roots/list will throw; fall back to CWD.
+try {
+  const result = await server.listRoots();
+  rootsWriter.updateRootUris(result.roots.map((r) => r.uri));
+  console.error(`[Roots] Initial: ${result.roots.map((r) => r.uri).join(', ') || '(none)'}`);
+} catch {
+  console.error('[Roots] Client does not support roots/list; CWD fallback active');
+}
 ```
 
 ---
@@ -133,7 +159,9 @@ export class LocalWorkspaceAnchorV2 implements WorkspaceContextResolverPortV2 {
   
   private uriToPath(uri: string): string | null {
     if (!uri.startsWith('file://')) return null;
-    return decodeURIComponent(uri.slice(7));
+    // Use fileURLToPath (node:url) — handles Windows drive letters and percent-encoding correctly.
+    // decodeURIComponent(slice(7)) is wrong on Windows: file:///C:/foo → /C:/foo (leading slash).
+    try { return fileURLToPath(uri); } catch { return null; }
   }
 }
 ```
@@ -146,19 +174,31 @@ export class LocalWorkspaceAnchorV2 implements WorkspaceContextResolverPortV2 {
 
 **File**: `src/mcp/types.ts`
 
-**Changes**:
 ```typescript
 export interface V2Dependencies {
   readonly gate: ExecutionSessionGateV2;
   readonly sessionStore: ...;
-  // Remove: readonly workspaceAnchor: WorkspaceAnchorPortV2;
+  // Remove: readonly workspaceAnchor?: WorkspaceAnchorPortV2;
   // Add:
-  readonly workspaceResolver: WorkspaceContextResolverPortV2;
-  readonly getCurrentRoots: () => readonly Root[];
+  readonly workspaceResolver?: WorkspaceContextResolverPortV2;
+  // Per-request snapshot of client root URIs, injected at the CallTool boundary.
+  // Optional: absent when client doesn't support roots/list (degrades to CWD).
+  readonly resolvedRootUris?: readonly string[];
 }
 ```
 
-**Why**: Handlers get resolver (function) + current roots snapshot (immutable), not a singleton anchor.
+At the `CallToolRequestSchema` handler, snapshot roots once and spread into `V2Dependencies`:
+```typescript
+const requestCtx: ToolContext = ctx.v2
+  ? { ...ctx, v2: { ...ctx.v2, resolvedRootUris: rootsManager.getCurrentRootUris() } }
+  : ctx;
+return handler(args ?? {}, requestCtx);
+```
+
+**Why `resolvedRootUris` as a value, not a `getCurrentRoots` thunk**: a function that reads
+ambient state at call-time is not deterministic from the handler's perspective — the roots could
+change between calls. Snapshotting at the request boundary gives handlers an immutable value for
+their entire duration, consistent with the determinism-over-cleverness principle.
 
 ---
 
@@ -176,47 +216,46 @@ const anchorsRA = workspaceAnchor
 
 **After**:
 ```typescript
-const resolver = ctx.v2.workspaceResolver;
-const primaryRoot = ctx.v2.getCurrentRoots()[0];
-const anchorsRA = primaryRoot
-  ? resolver.resolveFromUri(primaryRoot.uri)
-      .orElse(() => okAsync([])) // Graceful: invalid URI → empty
-  : resolver.resolveFromCwd()
-      .orElse(() => okAsync([])); // Fallback: no roots → server CWD
+const workspaceResolver = ctx.v2.workspaceResolver;
+const primaryRootUri = ctx.v2.resolvedRootUris?.[0]; // snapshotted at CallTool boundary
+const anchorsRA = workspaceResolver
+  ? (primaryRootUri
+      ? workspaceResolver.resolveFromUri(primaryRootUri)
+      : workspaceResolver.resolveFromCwd()
+    ).orElse(() => okAsync([]))
+  : okAsync([]);
 ```
 
-**Why**: Uses client's workspace if roots available, falls back to server CWD (backward compat with old clients).
+**Why**: Uses client's workspace URI if available (snapshotted at request boundary — deterministic
+for this call), falls back to server CWD for clients that don't support roots/list.
 
 ---
 
-#### 6. Tests
+#### 6. Tests (pending)
 
 **Unit tests** (`tests/unit/v2/workspace-roots-manager.test.ts`):
-- `updateRoots` stores immutable copy
-- `getCurrentRoots` returns frozen array
-- `getPrimaryRoot` returns first or null
+- `updateRootUris` stores immutable copy; subsequent mutations don't affect the returned slice
+- `getCurrentRootUris` returns frozen array
+- `RootsWriter` interface is separate from `RootsReader` — consumers cannot call `updateRootUris`
 
 **Unit tests** (`tests/unit/v2/workspace-anchor-resolver.test.ts`):
-- `resolveFromUri` with valid file:// URI
-- `resolveFromUri` with invalid URI (http://, malformed) → empty
-- `resolveFromCwd` falls back to process.cwd()
-- URI decoding (spaces, special chars)
+- `resolveFromUri` with valid `file://` URI
+- `resolveFromUri` with non-`file://` URI (e.g., `http://`, `vscode-vfs://`) → returns empty (graceful)
+- `resolveFromUri` with malformed URI → returns empty (graceful)
+- `resolveFromCwd` uses the adapter's default CWD
+- Windows path handling: `file:///C:/foo` → `C:\foo` (via `fileURLToPath`)
 
 **Integration test** (`tests/integration/v2/resume-session-workspace-filtering.test.ts`):
-- Create session with workspace A git context (mock roots)
-- Create session with workspace B git context (mock roots)
-- `resume_session` from workspace A → finds only workspace A session via git match
-- `resume_session` with no query → finds both via recency fallback
+- Create session in workspace A (mock `resolvedRootUris` pointing at a temp git repo on branch `feat-a`)
+- Create session in workspace B (mock pointing at a different temp git repo)
+- `resume_session` from workspace A → finds only workspace A session via git branch/SHA match
+- `resume_session` with no roots → finds both via recency fallback
 
 ---
 
-### Rollout
+### Status
 
-1. Implement + test locally
-2. Verify manual test E1+E2 works cross-workspace
-3. Ship behind `WORKRAIL_ENABLE_V2_TOOLS` (already gated)
-4. Monitor for roots support in MCP clients (Firebender supports it, others may not)
-5. After 1-2 releases, consider making roots required (fail fast if client doesn't support it)
+✅ **Implemented** (2026-02-18). Core implementation shipped; integration + unit tests for resolver remain pending.
 
 ---
 
@@ -252,26 +291,46 @@ When a `continue_workflow` advance completes, send a progress notification to th
 
 **After** successful append, before returning:
 ```typescript
-// Send progress notification if client requested it
-if (request._meta?.progressToken) {
+// Send progress notification if client requested it.
+// progressToken must be threaded from CallToolRequestSchema handler
+// through ToolContext (or via a server reference passed to V2Dependencies).
+if (progressToken) {
   const dag = projectRunDagV2(truthAfter.events);
   if (dag.isOk()) {
     const run = dag.value.runsById[runId];
-    const totalSteps = Object.keys(run?.nodesById ?? {}).length;
-    const completedSteps = run?.completedSteps ?? 0;
-    
-    server.notification({
+    // Count only 'step' nodes — not 'blocked_attempt' or 'checkpoint' nodes.
+    // Post-ADR 008, nodesById includes blocked_attempt nodes; counting all of them
+    // would inflate 'total' and make progress percentages wrong.
+    const stepNodes = Object.values(run?.nodesById ?? {}).filter(n => n.nodeKind === 'step');
+    const totalSteps = stepNodes.length;
+    const completedSteps = stepNodes.filter(n => n.isComplete).length;
+
+    // Correct SDK API is sendNotification, not notification.
+    await server.sendNotification({
       method: 'notifications/progress',
       params: {
-        progressToken: request._meta.progressToken,
+        progressToken,
         progress: completedSteps,
         total: totalSteps,
-        message: `Completed step ${completedSteps}/${totalSteps}: ${currentStep.title}`
-      }
+        message: `Completed step ${completedSteps}/${totalSteps}: ${currentStep.title}`,
+      },
     });
   }
 }
 ```
+
+**Three implementation details to resolve before building**:
+
+1. **`progressToken` plumbing**: `request._meta?.progressToken` is available in the raw
+   `CallToolRequestSchema` handler, not in `executeAdvance`. Thread it through `ToolContext`
+   (or a dedicated `RequestMeta` field) before calling the advance logic.
+
+2. **`server` reference**: `advance.ts` has no access to the MCP `Server` instance today.
+   Pass it via `V2Dependencies` or a `NotificationSender` port (interface segregation — expose
+   only `sendNotification`, not the full server).
+
+3. **`completedSteps` count**: See inline note above — filter by `nodeKind === 'step'` to
+   exclude `blocked_attempt` and `checkpoint` nodes, which are in the same DAG post-ADR 008.
 
 **Philosophy**:
 - ✅ Pure projection (DAG → progress count)
@@ -427,12 +486,12 @@ Long workflows block the agent's tool call. A 50-step workflow might take 10+ mi
 
 | Enhancement | Priority | Status | Blocks | Philosophy Aligned |
 |-------------|----------|--------|--------|-------------------|
-| MCP Roots Protocol | P1 (bug fix) | ❌ Not implemented | Cross-workspace resume | ✅ Pure functions, immutable |
-| Progress Notifications | P2 | ❌ Not implemented | Agent UX for long workflows | ✅ Side effects at edges |
-| Resource Update Notifications | P3 | ❌ Deferred (no UI) | Console auto-refresh | ✅ Event-driven |
-| Logging Notifications | P4 | ❌ Deferred | Operator visibility | ✅ Errors as data |
-| Tool List Change Notifications | P5 | ❌ Deferred | Runtime flag changes | ⚠️ Requires mutable flags |
-| Async Workflows via Tasks | P6 | ❌ Deferred (YAGNI) | 10min+ workflows | ⚠️ Requires background threads |
+| MCP Roots Protocol | P1 (bug fix) | ✅ Implemented (2026-02-18) | Cross-workspace resume | ✅ Pure functions, immutable |
+| Progress Notifications | P2 | 🔲 Planned (3 open design issues) | Agent UX for long workflows | ✅ Side effects at edges |
+| Resource Update Notifications | P3 | ⏸ Deferred (no UI) | Console auto-refresh | ✅ Event-driven |
+| Logging Notifications | P4 | ⏸ Deferred | Operator visibility | ✅ Errors as data |
+| Tool List Change Notifications | P5 | ⏸ Deferred | Runtime flag changes | ⚠️ Requires mutable flags |
+| Async Workflows via Tasks | P6 | ⏸ Deferred (YAGNI) | 10min+ workflows | ⚠️ Requires background threads |
 
 ---
 
@@ -442,6 +501,7 @@ From the "unfleshed v2 ideas" inventory:
 
 ### Already Addressed This Session
 
+- ✅ **MCP Roots Protocol** — Per-request workspace anchor resolution; `RootsReader`/`RootsWriter` capability split; `fileURLToPath` URI handling; `resolvedRootUris` snapshot at CallTool boundary (2026-02-18)
 - ✅ **Workflow migration** — All while-loops migrated to `wr.contracts.loop_control` (PR #69)
 - ✅ **ADR 008 completion** — Terminal block path + projection query (this session)
 - ✅ **Deprecated path removal** — `advance_recorded.outcome.kind='blocked'` removed from builder (this session, PR #70)
@@ -466,33 +526,37 @@ From the "unfleshed v2 ideas" inventory:
 
 ## Decision: What to Do Next
 
-### Option A: Fix MCP Roots (High Impact, Low Risk)
+### ✅ Done: MCP Roots Protocol
 
-- **Impact**: Fixes cross-workspace resume (production bug)
-- **Effort**: ~2-3 hours (roots manager + handler + tests)
-- **Risk**: Low (backward compat via CWD fallback)
-- **Philosophy**: ✅ Strongly aligned
+Implemented 2026-02-18. Per-request workspace anchor resolution, correct `listRoots()` flow,
+`fileURLToPath` URI handling, `resolvedRootUris` snapshot at CallTool boundary.
 
-### Option B: Add Progress Notifications (UX Improvement)
+### Next: Complete manual test plan validation
 
-- **Impact**: Better agent feedback for long workflows
-- **Effort**: ~1-2 hours (progress projection + notification send)
-- **Risk**: Low (opt-in via progressToken)
-- **Philosophy**: ✅ Aligned
+Run all 23 scenarios from `docs/testing/v2-slices-4b-4c-adr008-loops-manual-test-plan.md` with
+the roots fix in place. Specifically verify E1+E2 (cross-workspace resume) now work correctly.
 
-### Option C: Unflag v2 Tools (Production Readiness)
+### Then: Unflag v2 tools (Production Readiness)
 
 - **Impact**: Makes v2 default for all users
 - **Effort**: 1 line change + documentation
-- **Risk**: Medium (needs more manual testing first)
-- **Philosophy**: ✅ Aligned (soft YAGNI: don't gate working features)
+- **Risk**: Medium (needs manual test sign-off first)
+
+### Later: Progress Notifications (UX Improvement)
+
+- **Impact**: Better agent feedback for long workflows
+- **Effort**: Moderate — three design issues must be resolved first (see P2 above):
+  1. `progressToken` threading through `ToolContext`
+  2. `NotificationSender` port to give advance handler access to `sendNotification`
+  3. Node counting: filter `step` nodes only, exclude `blocked_attempt` + `checkpoint`
+- **Risk**: Low (opt-in via progressToken)
 
 ### Recommended Sequence
 
-1. **MCP Roots** (fixes the resume bug blocking manual tests)
+1. ~~**MCP Roots**~~ ✅ Done
 2. **Complete manual test plan validation** (run all 23 scenarios with roots fix)
 3. **Unflag v2 tools** (make default)
-4. **Progress notifications** (nice-to-have UX improvement)
+4. **Resolve P2 design issues** then implement progress notifications
 
 ---
 

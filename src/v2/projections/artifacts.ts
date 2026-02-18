@@ -1,7 +1,7 @@
 import type { Result } from 'neverthrow';
 import { err, ok } from 'neverthrow';
 import type { DomainEventV1 } from '../durable-core/schemas/session/index.js';
-import { EVENT_KIND, OUTPUT_CHANNEL } from '../durable-core/constants.js';
+import { EVENT_KIND, OUTPUT_CHANNEL, PAYLOAD_KIND } from '../durable-core/constants.js';
 
 export type ArtifactProjectionError =
   | { readonly code: 'PROJECTION_INVARIANT_VIOLATION'; readonly message: string };
@@ -76,7 +76,7 @@ export function projectArtifactsV2(events: readonly DomainEventV1[]): Result<Art
 
     // Only process artifact_ref payloads
     const payload = e.data.payload;
-    if (payload.payloadKind !== 'artifact_ref') continue;
+    if (payload.payloadKind !== PAYLOAD_KIND.ARTIFACT_REF) continue;
 
     // Only process if content is inlined (small artifacts)
     // Type assertion needed because schema has optional content field

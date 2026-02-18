@@ -271,6 +271,19 @@ export const OUTPUT_CHANNEL = {
 
 export type OutputChannelV1 = typeof OUTPUT_CHANNEL[keyof typeof OUTPUT_CHANNEL];
 
+/**
+ * Closed set of output payload kinds for node_output_appended events.
+ *
+ * Why: mirrors OUTPUT_CHANNEL — prevents scattered string literals and
+ * ensures all payload-kind checks are refactor-safe.
+ */
+export const PAYLOAD_KIND = {
+  NOTES: 'notes',
+  ARTIFACT_REF: 'artifact_ref',
+} as const;
+
+export type PayloadKindV1 = typeof PAYLOAD_KIND[keyof typeof PAYLOAD_KIND];
+
 // =============================================================================
 // Edge Kinds (Section 1.2: edge_created)
 // =============================================================================

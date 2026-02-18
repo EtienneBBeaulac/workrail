@@ -3,6 +3,7 @@ import { ok } from 'neverthrow';
 import type { RunDagRunV2, RunDagNodeV2 } from '../../../v2/projections/run-dag.js';
 import type { NodeOutputsProjectionV2 } from '../../../v2/projections/node-outputs.js';
 import type { NodeId } from '../ids/index.js';
+import { PAYLOAD_KIND } from '../constants.js';
 
 export type RecapRecoveryError = {
   readonly code: 'RECAP_RECOVERY_FAILED';
@@ -42,9 +43,9 @@ export function collectAncestryRecap(args: {
     const nodeOutputs = args.outputs.nodesById[nodeId];
     if (!nodeOutputs) return [];
     return nodeOutputs.currentByChannel.recap
-      .filter(r => r.payload.payloadKind === 'notes')
+      .filter(r => r.payload.payloadKind === PAYLOAD_KIND.NOTES)
       .map(r => {
-        if (r.payload.payloadKind === 'notes') {
+        if (r.payload.payloadKind === PAYLOAD_KIND.NOTES) {
           return r.payload.notesMarkdown;
         }
         return ''; // Type guard fallback
@@ -85,9 +86,9 @@ export function collectDownstreamRecap(args: {
     const nodeOutputs = args.outputs.nodesById[nodeId];
     if (!nodeOutputs) return [];
     return nodeOutputs.currentByChannel.recap
-      .filter(r => r.payload.payloadKind === 'notes')
+      .filter(r => r.payload.payloadKind === PAYLOAD_KIND.NOTES)
       .map(r => {
-        if (r.payload.payloadKind === 'notes') {
+        if (r.payload.payloadKind === PAYLOAD_KIND.NOTES) {
           return r.payload.notesMarkdown;
         }
         return ''; // Type guard fallback

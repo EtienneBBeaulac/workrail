@@ -2,7 +2,7 @@ import type { ResultAsync } from 'neverthrow';
 import { okAsync } from 'neverthrow';
 import type { DirectoryListingPortV2 } from '../../../ports/directory-listing.port.js';
 import type { DataDirPortV2 } from '../../../ports/data-dir.port.js';
-import type { SessionEventLogReadonlyStorePortV2 } from '../../../ports/session-event-log-store.port.js';
+import type { SessionEventLogReadonlyStorePortV2, LoadedSessionTruthV2 } from '../../../ports/session-event-log-store.port.js';
 import type { SessionSummaryProviderPortV2, SessionSummaryError } from '../../../ports/session-summary-provider.port.js';
 import type { HealthySessionSummary, SessionObservations, WorkflowIdentity, RecapSnippet } from '../../../projections/resume-ranking.js';
 import { asRecapSnippet } from '../../../projections/resume-ranking.js';
@@ -13,13 +13,76 @@ import { projectRunDagV2 } from '../../../projections/run-dag.js';
 import { projectNodeOutputsV2, type NodeOutputsProjectionV2 } from '../../../projections/node-outputs.js';
 import type { DomainEventV1 } from '../../../durable-core/schemas/session/index.js';
 import type { SessionId } from '../../../durable-core/ids/index.js';
-import { EVENT_KIND } from '../../../durable-core/constants.js';
+import { EVENT_KIND, OUTPUT_CHANNEL, PAYLOAD_KIND } from '../../../durable-core/constants.js';
+
+// ---------------------------------------------------------------------------
+// Narrowed event types
+//
+// Why: DomainEventV1 is a discriminated union. Extracting named variants lets
+// the type system enforce that downstream code only touches fields that exist
+// on that specific variant — no `as` casts required.
+// ---------------------------------------------------------------------------
+
+/** A session event that recorded a workspace observation (git sha, branch, etc.). */
+type ObservationEventV1 = Extract<DomainEventV1, { kind: 'observation_recorded' }>;
+
+/** A session event that started a new workflow run. */
+type RunStartedEventV1 = Extract<DomainEventV1, { kind: 'run_started' }>;
+
+// ---------------------------------------------------------------------------
+// Domain types
+// ---------------------------------------------------------------------------
+
+/**
+ * A run confirmed to have a non-null preferred tip.
+ *
+ * Why: RunDagRunV2.preferredTipNodeId is string | null, but once we select a
+ * run for summarization we know the tip exists. Encoding that as a type
+ * eliminates all downstream `!` assertions and makes the invariant explicit.
+ */
+interface RunWithTip {
+  readonly run: RunDagRunV2;
+  readonly tipNodeId: string;
+  readonly lastActivityEventIndex: number;
+}
+
+// ---------------------------------------------------------------------------
+// Bounds
+// ---------------------------------------------------------------------------
 
 /**
  * Max sessions to scan (explicit bound to prevent unbounded enumeration).
  * Locked: prevents runaway scanning on large workspaces.
  */
 const MAX_SESSIONS_TO_SCAN = 50;
+
+/**
+ * Max ancestor depth for recap aggregation.
+ *
+ * Locked: WorkRail workflows are bounded by their step count; no real workflow
+ * approaches 100 steps. This cap prevents pathological traversal if the DAG
+ * ever has a corrupt parent chain (defensive, not a workflow design limit).
+ */
+const MAX_RECAP_ANCESTOR_DEPTH = 100;
+
+// ---------------------------------------------------------------------------
+// Empty sentinels (named, not inlined)
+// ---------------------------------------------------------------------------
+
+const EMPTY_OBSERVATIONS: SessionObservations = {
+  gitHeadSha: null,
+  gitBranch: null,
+  repoRootHash: null,
+};
+
+const UNKNOWN_WORKFLOW: WorkflowIdentity = {
+  workflowId: null,
+  workflowName: null,
+};
+
+// ---------------------------------------------------------------------------
+// Ports
+// ---------------------------------------------------------------------------
 
 /**
  * Ports required by the session summary provider.
@@ -30,20 +93,21 @@ export interface LocalSessionSummaryProviderPorts {
   readonly sessionStore: SessionEventLogReadonlyStorePortV2;
 }
 
+// ---------------------------------------------------------------------------
+// DI shell — thin boundary between I/O and pure logic
+// ---------------------------------------------------------------------------
+
 /**
  * Local session summary provider.
  *
  * Enumerates sessions from disk, loads + health-checks + projects each one,
  * and returns only healthy sessions with projectable runs.
  *
- * Individual session failures are skipped gracefully (graceful degradation).
+ * Individual session failures are skipped gracefully so partial results
+ * remain useful even if some sessions are corrupt or unreadable.
  */
 export class LocalSessionSummaryProviderV2 implements SessionSummaryProviderPortV2 {
-  private readonly ports: LocalSessionSummaryProviderPorts;
-
-  constructor(ports: LocalSessionSummaryProviderPorts) {
-    this.ports = ports;
-  }
+  constructor(private readonly ports: LocalSessionSummaryProviderPorts) {}
 
   loadHealthySummaries(): ResultAsync<readonly HealthySessionSummary[], SessionSummaryError> {
     return enumerateSessions({
@@ -54,112 +118,179 @@ export class LocalSessionSummaryProviderV2 implements SessionSummaryProviderPort
         code: 'SESSION_SUMMARY_ENUMERATION_FAILED',
         message: `Failed to enumerate sessions: ${fsErr.message}`,
       }))
-      .andThen((sessionIds) => {
-        // Cap at MAX_SESSIONS_TO_SCAN
-        const capped = sessionIds.slice(0, MAX_SESSIONS_TO_SCAN);
-        return this.collectHealthySummaries(capped);
-      });
-  }
-
-  /**
-   * Collect healthy summaries from session IDs, skipping failures gracefully.
-   */
-  private collectHealthySummaries(
-    sessionIds: readonly SessionId[],
-  ): ResultAsync<readonly HealthySessionSummary[], SessionSummaryError> {
-    const summaries: HealthySessionSummary[] = [];
-
-    let chain: ResultAsync<void, SessionSummaryError> = okAsync(undefined);
-
-    for (const sessionId of sessionIds) {
-      chain = chain.andThen(() =>
-        this.tryLoadSummary(sessionId).map((summary) => {
-          if (summary !== null) {
-            summaries.push(summary);
-          }
-        })
+      .andThen((sessionIds) =>
+        collectHealthySummaries(
+          sessionIds.slice(0, MAX_SESSIONS_TO_SCAN),
+          this.ports.sessionStore,
+        )
       );
-    }
-
-    return chain.map(() => summaries);
-  }
-
-  /**
-   * Try to load a single session summary. Returns null on any failure (graceful skip).
-   */
-  private tryLoadSummary(sessionId: SessionId): ResultAsync<HealthySessionSummary | null, never> {
-    return this.ports.sessionStore
-      .load(sessionId)
-      .map((truth) => {
-        // Health check — skip unhealthy sessions
-        const healthRes = projectSessionHealthV2(truth);
-        if (healthRes.isErr()) return null;
-        if (healthRes.value.kind !== 'healthy') return null;
-
-        // Project run DAG
-        const dagRes = projectRunDagV2(truth.events);
-        if (dagRes.isErr()) return null;
-
-        // Find the most recent run with a preferred tip
-        const runs = Object.values(dagRes.value.runsById);
-        if (runs.length === 0) return null;
-
-        // Sort runs by latest activity (highest createdAtEventIndex in their tip nodes)
-        const runsWithActivity = runs
-          .filter((r) => r.preferredTipNodeId !== null)
-          .map((r) => {
-            const tipNode = r.nodesById[r.preferredTipNodeId!];
-            const maxEventIndex = tipNode ? tipNode.createdAtEventIndex : 0;
-            return { run: r, lastActivityEventIndex: maxEventIndex };
-          })
-          .sort((a, b) => b.lastActivityEventIndex - a.lastActivityEventIndex);
-
-        if (runsWithActivity.length === 0) return null;
-
-        const bestRun = runsWithActivity[0]!;
-        const run = bestRun.run;
-
-        // Project node outputs for recap.
-        // Walk ancestors from tip so completed-but-not-yet-advanced steps are searchable.
-        const outputsRes = projectNodeOutputsV2(truth.events);
-        const recapSnippet = outputsRes.isOk() && run.preferredTipNodeId
-          ? extractAggregateRecap(outputsRes.value, run, run.preferredTipNodeId)
-          : null;
-
-        // Extract observations from events
-        const observations = extractObservations(truth.events);
-
-        // Extract workflow identity
-        const workflow = extractWorkflowIdentity(truth.events, run.runId);
-
-        return {
-          sessionId,
-          runId: run.runId,
-          preferredTip: {
-            nodeId: run.preferredTipNodeId!,
-            lastActivityEventIndex: bestRun.lastActivityEventIndex,
-          },
-          recapSnippet,
-          observations,
-          workflow,
-        } satisfies HealthySessionSummary;
-      })
-      .orElse(() => okAsync(null)); // Graceful skip on store errors
   }
 }
 
 // ---------------------------------------------------------------------------
-// Pure extraction helpers
+// I/O layer — sequential loading, graceful degradation
 // ---------------------------------------------------------------------------
 
 /**
- * Max ancestor depth for recap aggregation.
+ * Load healthy summaries for the given session IDs sequentially, skipping failures.
  *
- * Locked: WorkRail workflows are bounded by their step count; no real workflow
- * approaches 100 steps. This cap prevents pathological traversal if the DAG
- * ever has a corrupt parent chain (defensive, not a workflow design limit).
+ * Sequential (not parallel) to avoid hammering the file system.
+ * Each failed session is gracefully skipped — partial results are still useful.
+ *
+ * Uses a functional reduce so the accumulator is immutable at each step.
  */
-const MAX_RECAP_ANCESTOR_DEPTH = 100;
+function collectHealthySummaries(
+  sessionIds: readonly SessionId[],
+  sessionStore: SessionEventLogReadonlyStorePortV2,
+): ResultAsync<readonly HealthySessionSummary[], SessionSummaryError> {
+  return sessionIds.reduce(
+    (acc, sessionId) =>
+      acc.andThen((summaries) =>
+        loadSessionSummary(sessionId, sessionStore).map((summary) =>
+          summary !== null ? [...summaries, summary] : summaries,
+        )
+      ),
+    okAsync([] as readonly HealthySessionSummary[]),
+  );
+}
+
+/**
+ * Load and project a single session summary.
+ * Returns null on any failure — graceful degradation for individual sessions.
+ */
+function loadSessionSummary(
+  sessionId: SessionId,
+  sessionStore: SessionEventLogReadonlyStorePortV2,
+): ResultAsync<HealthySessionSummary | null, never> {
+  return sessionStore
+    .load(sessionId)
+    .map((truth) => projectSessionSummary(sessionId, truth))
+    .orElse(() => okAsync(null)); // Graceful skip: individual store failures don't abort enumeration
+}
+
+// ---------------------------------------------------------------------------
+// Pure projection — no I/O; testable independently
+// ---------------------------------------------------------------------------
+
+/**
+ * Project a healthy session summary from loaded truth.
+ * Returns null if the session cannot be summarized (unhealthy, no runs, DAG error).
+ *
+ * Why separate from the I/O layer: pure functions are testable without a real
+ * store, and separating concerns keeps each function's responsibility clear.
+ */
+function projectSessionSummary(
+  sessionId: SessionId,
+  truth: LoadedSessionTruthV2,
+): HealthySessionSummary | null {
+  // Gate: unhealthy sessions cannot be summarized
+  const health = projectSessionHealthV2(truth);
+  if (health.isErr() || health.value.kind !== 'healthy') return null;
+
+  // Gate: DAG must be projectable (corrupt event streams are skipped gracefully)
+  const dag = projectRunDagV2(truth.events);
+  if (dag.isErr()) return null;
+
+  const bestRun = selectBestRun(Object.values(dag.value.runsById));
+  if (!bestRun) return null;
+
+  // Recap projection is best-effort: a failed output projection yields no snippet
+  // rather than failing the whole summary.
+  const outputsRes = projectNodeOutputsV2(truth.events);
+  const recapSnippet = outputsRes.isOk()
+    ? extractAggregateRecap(outputsRes.value, bestRun.run, bestRun.tipNodeId)
+    : null;
+
+  return {
+    sessionId,
+    runId: bestRun.run.runId,
+    preferredTip: {
+      nodeId: bestRun.tipNodeId,
+      lastActivityEventIndex: bestRun.lastActivityEventIndex,
+    },
+    recapSnippet,
+    observations: extractObservations(truth.events),
+    workflow: extractWorkflowIdentity(truth.events, bestRun.run.runId),
+  } satisfies HealthySessionSummary;
+}
+
+// ---------------------------------------------------------------------------
+// Run selection
+// ---------------------------------------------------------------------------
+
+/**
+ * Select the most recently active run that has a confirmed preferred tip.
+ * Returns null if no such run exists (e.g. freshly-created session with no nodes).
+ */
+function selectBestRun(runs: readonly RunDagRunV2[]): RunWithTip | null {
+  // flatMap narrows: runs without a tip produce [], runs with a tip produce [RunWithTip].
+  // No `!` assertions downstream — the tip is encoded in the type.
+  const runsWithTip = runs.flatMap((r): RunWithTip[] => {
+    const tipNodeId = r.preferredTipNodeId;
+    if (!tipNodeId) return [];
+    const tipNode = r.nodesById[tipNodeId];
+    return [{ run: r, tipNodeId, lastActivityEventIndex: tipNode?.createdAtEventIndex ?? 0 }];
+  });
+
+  if (runsWithTip.length === 0) return null;
+
+  // Linear scan for max activity — O(n), no sort allocation needed.
+  return runsWithTip.reduce((best, r) =>
+    r.lastActivityEventIndex > best.lastActivityEventIndex ? r : best,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Event extraction — type-safe, no `as` casts
+//
+// Why no `as` casts: DomainEventV1 is a discriminated union. After a type-guard
+// filter (e.g. `e.kind === EVENT_KIND.OBSERVATION_RECORDED`), TypeScript narrows
+// the event to the specific variant and gives us fully-typed `data` and `scope`
+// for free. Casting would suppress that guarantee.
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract workspace observations from session events.
+ *
+ * Takes the last recorded value for each observation key — later events
+ * supersede earlier ones, matching the "latest value wins" semantics in the
+ * observation_recorded event spec.
+ */
+function extractObservations(events: readonly DomainEventV1[]): SessionObservations {
+  return events
+    .filter((e): e is ObservationEventV1 => e.kind === EVENT_KIND.OBSERVATION_RECORDED)
+    .reduce((acc, e): SessionObservations => {
+      // e.data.key is 'git_branch' | 'git_head_sha' | 'repo_root_hash' — exhaustive switch,
+      // no default needed. TypeScript enforces all variants are handled.
+      switch (e.data.key) {
+        case 'git_head_sha': return { ...acc, gitHeadSha: e.data.value.value };
+        case 'git_branch':   return { ...acc, gitBranch: e.data.value.value };
+        case 'repo_root_hash': return { ...acc, repoRootHash: e.data.value.value };
+      }
+    }, EMPTY_OBSERVATIONS);
+}
+
+/**
+ * Extract workflow identity for a specific run from session events.
+ */
+function extractWorkflowIdentity(events: readonly DomainEventV1[], runId: string): WorkflowIdentity {
+  // After filtering to RunStartedEventV1, scope.runId is `string` (non-optional)
+  // and data.workflowId is `string` — both are fully typed by the discriminant.
+  const event = events
+    .filter((e): e is RunStartedEventV1 => e.kind === EVENT_KIND.RUN_STARTED)
+    .find((e) => e.scope.runId === runId);
+
+  if (!event) return UNKNOWN_WORKFLOW;
+
+  return {
+    workflowId: event.data.workflowId,
+    workflowName: null, // Not stored in events; resolved from pinned workflow store when needed
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Recap aggregation
+// ---------------------------------------------------------------------------
 
 /**
  * Collect ancestor nodeIds from tip to root, depth-first, newest-first.
@@ -180,7 +311,8 @@ function collectAncestorNodeIds(
 }
 
 /**
- * Extract a single node's current recap markdown (null if none).
+ * Extract a single node's current recap markdown.
+ * Returns null if the node has no current notes output.
  */
 function extractNodeRecapMarkdown(
   outputs: NodeOutputsProjectionV2,
@@ -189,23 +321,25 @@ function extractNodeRecapMarkdown(
   const nodeView = outputs.nodesById[nodeId];
   if (!nodeView) return null;
 
-  const recapOutputs = nodeView.currentByChannel['recap'];
+  const recapOutputs = nodeView.currentByChannel[OUTPUT_CHANNEL.RECAP];
   if (!recapOutputs || recapOutputs.length === 0) return null;
 
-  const latest = recapOutputs[recapOutputs.length - 1]!;
-  if (latest.payload.payloadKind !== 'notes') return null;
+  // .at(-1) returns T | undefined; the length check above ensures this is non-null,
+  // but using .at() avoids the index-based ! assertion.
+  const latest = recapOutputs.at(-1);
+  if (!latest || latest.payload.payloadKind !== PAYLOAD_KIND.NOTES) return null;
 
-  const markdown = (latest.payload as { readonly payloadKind: 'notes'; readonly notesMarkdown: string }).notesMarkdown;
-  return (markdown && typeof markdown === 'string') ? markdown : null;
+  // Discriminant narrows payload to { payloadKind: 'notes'; notesMarkdown: string } — no cast needed.
+  return latest.payload.notesMarkdown;
 }
 
 /**
  * Build an aggregate recap snippet by collecting recap outputs from the tip
  * back through all ancestor nodes (newest to oldest).
  *
- * This ensures sessions are searchable by completed work even when the current
- * pending step (the tip) has no output yet — the typical state of an in-progress
- * session paused between steps.
+ * Why walk ancestors: sessions stopped mid-workflow have a pending tip with no
+ * output yet — the completed work lives on ancestor nodes. Walking ancestors
+ * ensures the session is discoverable by its prior outputs via resume_session.
  *
  * Pipeline: unfold ancestor nodeIds → map to markdown → filter nulls → join → brand.
  */
@@ -222,59 +356,4 @@ function extractAggregateRecap(
 
   // Join newest-to-oldest; asRecapSnippet truncates to MAX_SNIPPET_BYTES
   return asRecapSnippet(parts.join('\n\n'));
-}
-
-/**
- * Extract the latest workspace observations from session events.
- * Scans all observation_recorded events and takes the latest value for each key.
- */
-function extractObservations(events: readonly DomainEventV1[]): SessionObservations {
-  let gitHeadSha: string | null = null;
-  let gitBranch: string | null = null;
-  let repoRootHash: string | null = null;
-
-  for (const event of events) {
-    if (event.kind !== EVENT_KIND.OBSERVATION_RECORDED) continue;
-
-    const data = event.data as {
-      readonly key: string;
-      readonly value: { readonly type: string; readonly value: string };
-    };
-
-    switch (data.key) {
-      case 'git_head_sha':
-        gitHeadSha = data.value.value;
-        break;
-      case 'git_branch':
-        gitBranch = data.value.value;
-        break;
-      case 'repo_root_hash':
-        repoRootHash = data.value.value;
-        break;
-      default:
-        // Exhaustiveness: all observation keys handled above
-        break;
-    }
-  }
-
-  return { gitHeadSha, gitBranch, repoRootHash };
-}
-
-/**
- * Extract workflow identity from run_started events for a specific run.
- */
-function extractWorkflowIdentity(events: readonly DomainEventV1[], runId: string): WorkflowIdentity {
-  for (const event of events) {
-    if (event.kind !== EVENT_KIND.RUN_STARTED) continue;
-    const scope = event.scope as { readonly runId?: string } | undefined;
-    if (scope?.runId !== runId) continue;
-
-    const data = event.data as { readonly workflowId?: string };
-    return {
-      workflowId: data.workflowId ?? null,
-      workflowName: null, // Not in events; resolve from pinned workflow store later
-    };
-  }
-
-  return { workflowId: null, workflowName: null };
 }
