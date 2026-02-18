@@ -102,6 +102,8 @@ What to do:
 3. Optionally add output.notesMarkdown summarizing your work
 4. Don't predict what comes next - the workflow will tell you
 
+Workspace anchoring: Pass workspacePath (the "Workspace:" path from your system parameters) so this session can be found by resume_session in future chats. Without it, session discovery may not work.
+
 Context auto-loads: If you provide context at start, WorkRail remembers it. On future continue_workflow calls, only pass context if you have NEW information to add.`,
 
     continue_workflow: `Get the next step in the workflow (WorkRail v2, feature-flagged).
@@ -159,6 +161,8 @@ Returns: checkpointNodeId + a fresh stateToken.`,
     resume_session: `Find and reconnect to an existing workflow session (WorkRail v2, feature-flagged).
 
 Use this when you need to resume a previously started workflow but don't have the stateToken (e.g., new chat, lost context).
+
+Pass workspacePath (the "Workspace:" path from your system parameters) to match sessions anchored to your current workspace. Without it, git-based tier matching won't work.
 
 WorkRail ranks sessions using a 5-tier matching algorithm:
 1. Exact git HEAD SHA match
@@ -268,6 +272,11 @@ REQUIRED BEHAVIOR:
 4. Round-trip tokens UNCHANGED (don't decode, inspect, or modify them)
 5. Follow the workflow to completion - don't improvise alternative approaches
 
+Workspace anchoring (IMPORTANT):
+- Pass workspacePath set to the "Workspace:" value from your system parameters
+- This anchors the session to your workspace so resume_session can find it in future chats
+- Example: workspacePath: "/Users/you/git/my-project"
+
 Context handling:
 - Pass context at start to establish baseline facts
 - WorkRail auto-loads context on subsequent calls
@@ -340,6 +349,10 @@ Call this when resuming a workflow without a stateToken. WorkRail ranks sessions
 3. Notes content match (tier 3)
 4. Workflow ID match (tier 4)
 5. Recency (tier 5)
+
+IMPORTANT: Pass workspacePath set to the "Workspace:" value from your system parameters.
+Without it, tier 1 and tier 2 matching won't work (git context defaults to server directory, not yours).
+Example: workspacePath: "/Users/you/git/my-project"
 
 Returns: Up to 5 candidates with stateTokens. Use the best match's stateToken with continue_workflow.`,
   },

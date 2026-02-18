@@ -30,6 +30,7 @@ import {
   renderPendingPromptOrDefault,
   type StartWorkflowError,
 } from '../v2-execution-helpers.js';
+import { resolveWorkspaceAnchors } from '../v2-workspace-resolution.js';
 import * as z from 'zod';
 import { newAttemptId, signTokenOrErr } from '../v2-token-ops.js';
 import { mapWorkflowSourceKind, deriveNextIntent } from '../v2-state-conversion.js';
@@ -329,18 +330,10 @@ export function executeStartWorkflow(
   })
     .andThen(({ workflow, firstStep, workflowHash, pinnedWorkflow }) => {
       // 2. Resolve workspace anchors for observation events (graceful: empty on failure).
-      // Use the client's primary root URI when available (snapshotted at CallTool boundary),
-      // falling back to process.cwd() for clients that don't report MCP roots.
-      const workspaceResolver = ctx.v2.workspaceResolver;
-      const primaryRootUri = ctx.v2.resolvedRootUris?.[0];
-      const anchorsRA: RA<readonly ObservationEventData[], never> = workspaceResolver
-        ? (primaryRootUri
-            ? workspaceResolver.resolveFromUri(primaryRootUri)
-            : workspaceResolver.resolveFromCwd()
-          )
-            .map((anchors) => anchorsToObservations(anchors))
-            .orElse(() => okAsync([] as readonly ObservationEventData[]))
-        : okAsync([] as readonly ObservationEventData[]);
+      // Priority: explicit workspacePath input > MCP roots URI > server process CWD.
+      const anchorsRA: RA<readonly ObservationEventData[], never> =
+        resolveWorkspaceAnchors(ctx.v2, input.workspacePath)
+          .map((anchors) => anchorsToObservations(anchors));
 
       return anchorsRA.andThen((observations) => {
         // 3. Mint IDs and create initial snapshot

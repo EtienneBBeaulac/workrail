@@ -1,7 +1,7 @@
 import { ResultAsync as RA, okAsync } from 'neverthrow';
 import type {
-  WorkspaceAnchorPortV2,
   WorkspaceContextResolverPortV2,
+  WorkspaceSource,
   WorkspaceAnchor,
   WorkspaceAnchorError,
 } from '../../../ports/workspace-anchor.port.js';
@@ -15,35 +15,43 @@ const execAsync = promisify(exec);
  * Local workspace anchor adapter.
  *
  * Resolves git identity signals (branch, HEAD SHA) for workspace resume ranking.
- * Implements both the legacy WorkspaceAnchorPortV2 (resolves from constructor CWD)
- * and WorkspaceContextResolverPortV2 (resolves from an explicit URI or CWD fallback).
+ * Implements WorkspaceContextResolverPortV2 via a single resolve(source) method
+ * that exhaustively handles all WorkspaceSource variants.
  *
- * Graceful degradation: returns empty list on non-git dirs or command failures.
+ * Why a single method over multiple method overloads:
+ * - Exhaustive switch catches unhandled variants at compile time
+ * - Source selection (which variant to use) stays in the handler layer
+ * - Adapter is purely about resolution mechanics, not priority decisions
+ *
+ * Graceful degradation: all paths return empty list on non-git dirs,
+ * missing git binary, permission errors, or command failures.
  * Observation emission must never block workflow start.
+ *
+ * Lock: §DI — side effects at the edges only.
  */
-export class LocalWorkspaceAnchorV2 implements WorkspaceAnchorPortV2, WorkspaceContextResolverPortV2 {
+export class LocalWorkspaceAnchorV2 implements WorkspaceContextResolverPortV2 {
   constructor(private readonly defaultCwd: string) {}
 
-  // WorkspaceAnchorPortV2 — delegates to defaultCwd for backward compat
-  resolveAnchors(): RA<readonly WorkspaceAnchor[], WorkspaceAnchorError> {
-    return this.resolveFromPath(this.defaultCwd);
+  resolve(source: WorkspaceSource): RA<readonly WorkspaceAnchor[], WorkspaceAnchorError> {
+    switch (source.kind) {
+      case 'explicit_path':
+        return this.resolveGitIdentityAt(source.path);
+
+      case 'mcp_root_uri': {
+        const fsPath = uriToFsPath(source.uri);
+        // Non-file:// URIs (http://, etc.) produce no anchors — graceful, not an error.
+        if (fsPath === null) return okAsync([]);
+        return this.resolveGitIdentityAt(fsPath);
+      }
+
+      case 'server_cwd':
+        return this.resolveGitIdentityAt(this.defaultCwd);
+    }
   }
 
-  // WorkspaceContextResolverPortV2
-  resolveFromUri(rootUri: string): RA<readonly WorkspaceAnchor[], WorkspaceAnchorError> {
-    const fsPath = uriToFsPath(rootUri);
-    // Non-file:// URIs (http://, etc.) return empty — graceful, not an error.
-    if (fsPath === null) return okAsync([]);
-    return this.resolveFromPath(fsPath);
-  }
-
-  resolveFromCwd(): RA<readonly WorkspaceAnchor[], WorkspaceAnchorError> {
-    return this.resolveFromPath(this.defaultCwd);
-  }
-
-  private resolveFromPath(cwd: string): RA<readonly WorkspaceAnchor[], WorkspaceAnchorError> {
+  private resolveGitIdentityAt(cwd: string): RA<readonly WorkspaceAnchor[], WorkspaceAnchorError> {
     return RA.fromPromise(
-      this.resolve(cwd),
+      this.runGitCommands(cwd),
       (cause): WorkspaceAnchorError => ({
         code: 'ANCHOR_RESOLVE_FAILED',
         message: `Failed to resolve workspace anchors: ${String(cause)}`,
@@ -51,7 +59,7 @@ export class LocalWorkspaceAnchorV2 implements WorkspaceAnchorPortV2, WorkspaceC
     );
   }
 
-  private async resolve(cwd: string): Promise<readonly WorkspaceAnchor[]> {
+  private async runGitCommands(cwd: string): Promise<readonly WorkspaceAnchor[]> {
     const anchors: WorkspaceAnchor[] = [];
 
     // git branch: read symbolic ref (graceful: empty on detached HEAD or non-git)
