@@ -4,12 +4,13 @@ import type { DirectoryListingPortV2 } from '../../../ports/directory-listing.po
 import type { DataDirPortV2 } from '../../../ports/data-dir.port.js';
 import type { SessionEventLogReadonlyStorePortV2 } from '../../../ports/session-event-log-store.port.js';
 import type { SessionSummaryProviderPortV2, SessionSummaryError } from '../../../ports/session-summary-provider.port.js';
-import type { HealthySessionSummary, SessionObservations, WorkflowIdentity } from '../../../projections/resume-ranking.js';
+import type { HealthySessionSummary, SessionObservations, WorkflowIdentity, RecapSnippet } from '../../../projections/resume-ranking.js';
 import { asRecapSnippet } from '../../../projections/resume-ranking.js';
+import type { RunDagRunV2, RunDagNodeV2 } from '../../../projections/run-dag.js';
 import { enumerateSessions } from '../../../usecases/enumerate-sessions.js';
 import { projectSessionHealthV2 } from '../../../projections/session-health.js';
 import { projectRunDagV2 } from '../../../projections/run-dag.js';
-import { projectNodeOutputsV2 } from '../../../projections/node-outputs.js';
+import { projectNodeOutputsV2, type NodeOutputsProjectionV2 } from '../../../projections/node-outputs.js';
 import type { DomainEventV1 } from '../../../durable-core/schemas/session/index.js';
 import type { SessionId } from '../../../durable-core/ids/index.js';
 import { EVENT_KIND } from '../../../durable-core/constants.js';
@@ -118,10 +119,11 @@ export class LocalSessionSummaryProviderV2 implements SessionSummaryProviderPort
         const bestRun = runsWithActivity[0]!;
         const run = bestRun.run;
 
-        // Project node outputs for recap
+        // Project node outputs for recap.
+        // Walk ancestors from tip so completed-but-not-yet-advanced steps are searchable.
         const outputsRes = projectNodeOutputsV2(truth.events);
         const recapSnippet = outputsRes.isOk() && run.preferredTipNodeId
-          ? extractRecapFromOutputs(outputsRes.value, run.preferredTipNodeId)
+          ? extractAggregateRecap(outputsRes.value, run, run.preferredTipNodeId)
           : null;
 
         // Extract observations from events
@@ -151,26 +153,75 @@ export class LocalSessionSummaryProviderV2 implements SessionSummaryProviderPort
 // ---------------------------------------------------------------------------
 
 /**
- * Extract the latest recap notes from node outputs at a given node.
+ * Max ancestor depth for recap aggregation.
+ *
+ * Locked: WorkRail workflows are bounded by their step count; no real workflow
+ * approaches 100 steps. This cap prevents pathological traversal if the DAG
+ * ever has a corrupt parent chain (defensive, not a workflow design limit).
  */
-function extractRecapFromOutputs(
-  outputs: import('../../../projections/node-outputs.js').NodeOutputsProjectionV2,
+const MAX_RECAP_ANCESTOR_DEPTH = 100;
+
+/**
+ * Collect ancestor nodeIds from tip to root, depth-first, newest-first.
+ * Pure recursive unfold — no mutable state.
+ */
+function collectAncestorNodeIds(
+  nodesById: Readonly<Record<string, RunDagNodeV2>>,
   nodeId: string,
-): import('../../../projections/resume-ranking.js').RecapSnippet | null {
+  remainingDepth: number,
+): readonly string[] {
+  if (remainingDepth === 0) return [nodeId];
+  const node = nodesById[nodeId];
+  if (!node) return [nodeId];
+  const parentIds = node.parentNodeId
+    ? collectAncestorNodeIds(nodesById, node.parentNodeId, remainingDepth - 1)
+    : [];
+  return [nodeId, ...parentIds];
+}
+
+/**
+ * Extract a single node's current recap markdown (null if none).
+ */
+function extractNodeRecapMarkdown(
+  outputs: NodeOutputsProjectionV2,
+  nodeId: string,
+): string | null {
   const nodeView = outputs.nodesById[nodeId];
   if (!nodeView) return null;
 
-  // Get the current recap outputs (not superseded)
   const recapOutputs = nodeView.currentByChannel['recap'];
   if (!recapOutputs || recapOutputs.length === 0) return null;
 
-  // Take the most recent recap output
   const latest = recapOutputs[recapOutputs.length - 1]!;
   if (latest.payload.payloadKind !== 'notes') return null;
 
   const markdown = (latest.payload as { readonly payloadKind: 'notes'; readonly notesMarkdown: string }).notesMarkdown;
-  if (!markdown || typeof markdown !== 'string') return null;
-  return asRecapSnippet(markdown);
+  return (markdown && typeof markdown === 'string') ? markdown : null;
+}
+
+/**
+ * Build an aggregate recap snippet by collecting recap outputs from the tip
+ * back through all ancestor nodes (newest to oldest).
+ *
+ * This ensures sessions are searchable by completed work even when the current
+ * pending step (the tip) has no output yet — the typical state of an in-progress
+ * session paused between steps.
+ *
+ * Pipeline: unfold ancestor nodeIds → map to markdown → filter nulls → join → brand.
+ */
+function extractAggregateRecap(
+  outputs: NodeOutputsProjectionV2,
+  run: RunDagRunV2,
+  tipNodeId: string,
+): RecapSnippet | null {
+  const parts = collectAncestorNodeIds(run.nodesById, tipNodeId, MAX_RECAP_ANCESTOR_DEPTH)
+    .map((nodeId) => extractNodeRecapMarkdown(outputs, nodeId))
+    .filter((md): md is string => md !== null);
+
+  if (parts.length === 0) return null;
+
+  // Join newest-to-oldest; asRecapSnippet truncates to MAX_SNIPPET_BYTES
+  return asRecapSnippet(parts.join('\n\n'));
 }
 
 /**
