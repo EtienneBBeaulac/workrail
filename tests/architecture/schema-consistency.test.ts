@@ -87,10 +87,14 @@ const ALL_SCHEMAS = [...WORKFLOW_SCHEMAS, ...SESSION_SCHEMAS];
 
 /** Extract parameter names from a Zod object schema */
 function getParameterNames(schema: z.ZodType): string[] {
-  // Unwrap ZodEffects layers (from .strict(), .superRefine(), .refine(), etc.)
+  // Unwrap ZodEffects (.strict(), .superRefine(), .transform()) and ZodPipeline (.pipe())
   let current: z.ZodType = schema;
   while (current instanceof z.ZodEffects) {
     current = current._def.schema;
+  }
+  // ZodPipeline wraps the input schema as `in`
+  if ((current as any)._def?.typeName === 'ZodPipeline') {
+    return getParameterNames((current as any)._def.in);
   }
   if (current instanceof z.ZodObject) {
     return Object.keys(current._def.shape());

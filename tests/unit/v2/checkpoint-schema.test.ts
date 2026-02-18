@@ -24,6 +24,7 @@ describe('V2CheckpointWorkflowOutputSchema', () => {
     const result = V2CheckpointWorkflowOutputSchema.safeParse({
       checkpointNodeId: 'chk-node-001',
       stateToken: VALID_STATE,
+      nextCall: { tool: 'continue_workflow', params: { intent: 'rehydrate', stateToken: VALID_STATE } },
     });
     expect(result.success).toBe(true);
   });
