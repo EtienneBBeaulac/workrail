@@ -16,6 +16,7 @@ import { createHandler } from '../handler-factory.js';
 import {
   V2CheckpointWorkflowInput,
   V2ContinueWorkflowInput,
+  V2ContinueWorkflowInputShape,
   V2InspectWorkflowInput,
   V2ListWorkflowsInput,
   V2ResumeSessionInput,
@@ -93,7 +94,8 @@ export function buildV2ToolRegistry(buildTool: ToolBuilder): V2ToolRegistration 
     list_workflows: createHandler(V2ListWorkflowsInput, handleV2ListWorkflows),
     inspect_workflow: createHandler(V2InspectWorkflowInput, handleV2InspectWorkflow),
     start_workflow: createHandler(V2StartWorkflowInput, handleV2StartWorkflow),
-    continue_workflow: createHandler(V2ContinueWorkflowInput, handleV2ContinueWorkflow),
+    // continue_workflow uses separate shape schema for introspection (canonical source)
+    continue_workflow: createHandler(V2ContinueWorkflowInput, handleV2ContinueWorkflow, V2ContinueWorkflowInputShape),
     checkpoint_workflow: createHandler(V2CheckpointWorkflowInput, handleV2CheckpointWorkflow),
     resume_session: createHandler(V2ResumeSessionInput, handleV2ResumeSession),
   };

@@ -38,6 +38,16 @@ export interface SuggestionConfig {
    * Prevents unbounded recursion in deeply nested schemas.
    */
   readonly maxTemplateDepth: number;
+
+  /**
+   * Whether to include optional fields in the correctTemplate.
+   *
+   * Set true for error-guidance contexts: agents need to see the FULL valid
+   * structure when they've used wrong field names, not just the required-field
+   * skeleton. For example, continue_workflow's correctTemplate should show
+   * output.notesMarkdown even though output is optional.
+   */
+  readonly includeOptionalInTemplate: boolean;
 }
 
 /**
@@ -53,6 +63,9 @@ export const DEFAULT_SUGGESTION_CONFIG: SuggestionConfig = {
   maxSuggestions: 3,
   includeTemplate: true,
   maxTemplateDepth: 3,
+  // Show optional fields in error templates — agents need the full structure
+  // to self-correct, not just the required-field skeleton.
+  includeOptionalInTemplate: true,
 } as const;
 
 /**
@@ -64,4 +77,5 @@ export const MINIMAL_SUGGESTION_CONFIG: SuggestionConfig = {
   maxSuggestions: 1,
   includeTemplate: false,
   maxTemplateDepth: 1,
+  includeOptionalInTemplate: false,
 } as const;

@@ -68,19 +68,28 @@ export function toMcpResult<T>(result: ToolResult<T>): McpCallToolResult {
  * When validation fails, generates "did you mean?" suggestions to help
  * agents self-correct parameter naming and structure mistakes.
  *
- * @param schema - Zod schema for input validation
+ * For schemas with transforms/refinements, provide the separate shape schema
+ * (canonical source) for introspection. The validation schema handles runtime
+ * validation; the shape schema provides the structural contract for error guidance.
+ *
+ * @param schema - Zod schema for input validation (may include transforms/pipes)
  * @param handler - Raw handler function (takes typed input)
+ * @param shapeSchema - Optional bare ZodObject for introspection (defaults to schema)
  * @returns Wrapped handler ready for MCP dispatch
  */
 export function createHandler<TInput extends z.ZodType, TOutput>(
   schema: TInput,
-  handler: (input: z.infer<TInput>, ctx: ToolContext) => Promise<ToolResult<TOutput>>
+  handler: (input: z.infer<TInput>, ctx: ToolContext) => Promise<ToolResult<TOutput>>,
+  shapeSchema?: z.ZodObject<z.ZodRawShape>,
 ): WrappedToolHandler {
   return async (args: unknown, ctx: ToolContext): Promise<McpCallToolResult> => {
     const parseResult = schema.safeParse(args);
     if (!parseResult.success) {
+      // Use shape schema for introspection (interface segregation), validation schema as fallback
+      const introspectionSchema = shapeSchema ?? schema;
+
       // Generate suggestions for self-correction (pure, deterministic)
-      const suggestionResult = generateSuggestions(args, schema, DEFAULT_SUGGESTION_CONFIG);
+      const suggestionResult = generateSuggestions(args, introspectionSchema, DEFAULT_SUGGESTION_CONFIG);
       const suggestionDetails = formatSuggestionDetails(suggestionResult);
 
       // Restore optional fields that the agent provided with the wrong type.
@@ -90,7 +99,7 @@ export function createHandler<TInput extends z.ZodType, TOutput>(
         (suggestionDetails.correctTemplate as Readonly<Record<string, unknown>> | null) ?? null,
         args,
         parseResult.error.errors,
-        schema,
+        introspectionSchema,
         DEFAULT_SUGGESTION_CONFIG.maxTemplateDepth,
       );
       const patchedDetails = patchedTemplate !== suggestionDetails.correctTemplate

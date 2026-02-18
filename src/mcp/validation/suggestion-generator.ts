@@ -148,7 +148,7 @@ export function generateSuggestions(
 
   // Generate template if configured
   const correctTemplate = config.includeTemplate
-    ? generateTemplate(schema, config.maxTemplateDepth)
+    ? generateTemplate(schema, config.maxTemplateDepth, config.includeOptionalInTemplate)
     : null;
 
   return {

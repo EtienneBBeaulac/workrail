@@ -24,6 +24,7 @@ import {
   DEFAULT_SUGGESTION_CONFIG,
   EMPTY_SUGGESTION_RESULT,
 } from '../../src/mcp/validation/index.js';
+import { V2ContinueWorkflowInputShape } from '../../src/mcp/v2/tools.js';
 
 // -----------------------------------------------------------------------------
 // Test Schemas (use REAL Zod schemas, not mocks)
@@ -366,6 +367,85 @@ describe('hasSuggestions', () => {
 
   it('returns false for empty result', () => {
     expect(hasSuggestions(EMPTY_SUGGESTION_RESULT)).toBe(false);
+  });
+});
+
+describe('V2ContinueWorkflowInputShape suggestion behaviour (regression)', () => {
+  // These are the exact errors from the agent session that triggered this fix.
+  // Tests use the SHAPE schema (canonical) not the validation schema (wrapped).
+
+  it('correctTemplate is non-null when agent passes unknown key "content"', () => {
+    const result = generateSuggestions(
+      { stateToken: 'st1...', ackToken: 'ack1...', intent: 'advance', content: 'my notes' },
+      V2ContinueWorkflowInputShape,
+      DEFAULT_SUGGESTION_CONFIG,
+    );
+    expect(result.correctTemplate).not.toBeNull();
+  });
+
+  it('correctTemplate includes output.notesMarkdown when agent passes unknown key "deliverable"', () => {
+    const result = generateSuggestions(
+      { stateToken: 'st1...', ackToken: 'ack1...', intent: 'advance', deliverable: 'my notes' },
+      V2ContinueWorkflowInputShape,
+      DEFAULT_SUGGESTION_CONFIG,
+    );
+    expect(result.correctTemplate).not.toBeNull();
+    expect(result.correctTemplate).toHaveProperty('output');
+    const output = result.correctTemplate!.output as Record<string, unknown>;
+    expect(output).toHaveProperty('notesMarkdown');
+  });
+
+  it('correctTemplate is non-null when agent passes unknown key "content" (no didYouMean needed)', () => {
+    // "content" is close to "context" — agent should at least see the template
+    const result = generateSuggestions(
+      { stateToken: 'st1...', ackToken: 'ack1...', content: 'my notes' },
+      V2ContinueWorkflowInputShape,
+      DEFAULT_SUGGESTION_CONFIG,
+    );
+    expect(result.correctTemplate).not.toBeNull();
+    // stateToken must appear (it's required)
+    expect(result.correctTemplate).toHaveProperty('stateToken');
+  });
+
+  it('extractExpectedKeys returns all V2ContinueWorkflowInputShape fields', () => {
+    const keys = extractExpectedKeys(V2ContinueWorkflowInputShape);
+    expect(keys).toContain('stateToken');
+    expect(keys).toContain('ackToken');
+    expect(keys).toContain('intent');
+    expect(keys).toContain('context');
+    expect(keys).toContain('output');
+  });
+});
+
+// -----------------------------------------------------------------------------
+// includeOptional template tests
+// -----------------------------------------------------------------------------
+
+describe('generateTemplate includeOptional', () => {
+  const SchemaWithOptionals = z.object({
+    required: z.string().describe('required field'),
+    optional: z.string().optional().describe('optional field'),
+  });
+
+  it('excludes optional fields by default (backward compat)', () => {
+    const template = generateTemplate(SchemaWithOptionals);
+    expect(template).toHaveProperty('required');
+    expect(template).not.toHaveProperty('optional');
+  });
+
+  it('includes optional fields when includeOptional=true', () => {
+    const template = generateTemplate(SchemaWithOptionals, 3, true);
+    expect(template).toHaveProperty('required');
+    expect(template).toHaveProperty('optional');
+  });
+
+  it('DEFAULT_SUGGESTION_CONFIG produces templates with optional fields', () => {
+    const result = generateSuggestions(
+      { wrong_key: 'value' },
+      SchemaWithOptionals,
+      DEFAULT_SUGGESTION_CONFIG,
+    );
+    expect(result.correctTemplate).toHaveProperty('optional');
   });
 });
 
