@@ -1,4 +1,4 @@
-import type { SessionId } from '../durable-core/ids/index.js';
+import type { SessionId, WorkflowHash, WorkflowId } from '../durable-core/ids/index.js';
 import { TRUNCATION_MARKER } from '../durable-core/constants.js';
 
 // ---------------------------------------------------------------------------
@@ -42,15 +42,28 @@ export interface SessionObservations {
   readonly repoRootHash: string | null;
 }
 
-/** Workflow identity from run_started events. */
-export interface WorkflowIdentity {
-  readonly workflowId: string | null;
-  readonly workflowName: string | null;
-}
+/**
+ * Workflow identity from run_started events.
+ *
+ * Why discriminated union: a session either has a known workflow (with all
+ * required fields) or doesn't. Three nullable fields create 8 combinations,
+ * most of which are nonsensical. This makes the two real states explicit
+ * and forces exhaustive handling.
+ */
+export type WorkflowIdentity =
+  | { readonly kind: 'unknown' }
+  | { readonly kind: 'identified'; readonly workflowId: WorkflowId; readonly workflowHash: WorkflowHash };
+
+/** The identified variant of WorkflowIdentity, for use in types that guarantee workflow presence. */
+export type IdentifiedWorkflow = Extract<WorkflowIdentity, { kind: 'identified' }>;
 
 /**
  * Healthy session summary — only constructable after health check + projection.
  * Ranking function accepts only this type, preventing unhealthy sessions from entering.
+ *
+ * Why IdentifiedWorkflow (not WorkflowIdentity): a healthy session with a run always
+ * has a run_started event, which always carries workflowHash. Enforcing this at the
+ * type level eliminates null checks in all downstream code.
  */
 export interface HealthySessionSummary {
   readonly sessionId: SessionId;
@@ -61,7 +74,7 @@ export interface HealthySessionSummary {
   };
   readonly recapSnippet: RecapSnippet | null;
   readonly observations: SessionObservations;
-  readonly workflow: WorkflowIdentity;
+  readonly workflow: IdentifiedWorkflow;
 }
 
 // ---------------------------------------------------------------------------
@@ -164,14 +177,10 @@ export function assignTier(summary: HealthySessionSummary, query: ResumeQuery): 
     }
   }
 
-  // Tier 4: token match on workflow id/name
-  if (query.freeTextQuery) {
+  // Tier 4: token match on workflow id
+  if (query.freeTextQuery && summary.workflow.kind === 'identified') {
     const queryTokens = normalizeToTokens(query.freeTextQuery);
-    const workflowText = [
-      summary.workflow.workflowId ?? '',
-      summary.workflow.workflowName ?? '',
-    ].join(' ');
-    const workflowTokens = normalizeToTokens(workflowText);
+    const workflowTokens = normalizeToTokens(String(summary.workflow.workflowId));
     if (allQueryTokensMatch(queryTokens, workflowTokens)) {
       return { tier: 4, kind: 'matched_workflow_id' };
     }
@@ -206,6 +215,8 @@ export interface RankedResumeCandidate {
   readonly whyMatched: readonly WhyMatched[];
   readonly tierAssignment: TierAssignment;
   readonly lastActivityEventIndex: number;
+  /** Non-nullable: HealthySessionSummary guarantees a known workflow with a pinned hash. */
+  readonly workflowHash: WorkflowHash;
 }
 
 /** Max candidates returned (locked §2.3). */
@@ -254,5 +265,6 @@ export function rankResumeCandidates(
     whyMatched: [tierToWhyMatched(tier)],
     tierAssignment: tier,
     lastActivityEventIndex: summary.preferredTip.lastActivityEventIndex,
+    workflowHash: summary.workflow.workflowHash,
   }));
 }

@@ -4,7 +4,7 @@ import type { DirectoryListingPortV2 } from '../../../ports/directory-listing.po
 import type { DataDirPortV2 } from '../../../ports/data-dir.port.js';
 import type { SessionEventLogReadonlyStorePortV2, LoadedSessionTruthV2 } from '../../../ports/session-event-log-store.port.js';
 import type { SessionSummaryProviderPortV2, SessionSummaryError } from '../../../ports/session-summary-provider.port.js';
-import type { HealthySessionSummary, SessionObservations, WorkflowIdentity, RecapSnippet } from '../../../projections/resume-ranking.js';
+import type { HealthySessionSummary, SessionObservations, IdentifiedWorkflow, RecapSnippet } from '../../../projections/resume-ranking.js';
 import { asRecapSnippet } from '../../../projections/resume-ranking.js';
 import type { RunDagRunV2, RunDagNodeV2 } from '../../../projections/run-dag.js';
 import { enumerateSessions } from '../../../usecases/enumerate-sessions.js';
@@ -13,7 +13,8 @@ import { projectRunDagV2 } from '../../../projections/run-dag.js';
 import { projectNodeOutputsV2, type NodeOutputsProjectionV2 } from '../../../projections/node-outputs.js';
 import type { DomainEventV1 } from '../../../durable-core/schemas/session/index.js';
 import type { SessionId } from '../../../durable-core/ids/index.js';
-import { EVENT_KIND, OUTPUT_CHANNEL, PAYLOAD_KIND } from '../../../durable-core/constants.js';
+import { asWorkflowId, asWorkflowHash, asSha256Digest } from '../../../durable-core/ids/index.js';
+import { EVENT_KIND, OUTPUT_CHANNEL, PAYLOAD_KIND, SHA256_DIGEST_PATTERN } from '../../../durable-core/constants.js';
 
 // ---------------------------------------------------------------------------
 // Narrowed event types
@@ -75,10 +76,7 @@ const EMPTY_OBSERVATIONS: SessionObservations = {
   repoRootHash: null,
 };
 
-const UNKNOWN_WORKFLOW: WorkflowIdentity = {
-  workflowId: null,
-  workflowName: null,
-};
+
 
 // ---------------------------------------------------------------------------
 // Ports
@@ -194,6 +192,10 @@ function projectSessionSummary(
   const bestRun = selectBestRun(Object.values(dag.value.runsById));
   if (!bestRun) return null;
 
+  // Gate: workflow identity must be resolvable (run_started event with valid hash)
+  const workflow = extractWorkflowIdentity(truth.events, bestRun.run.runId);
+  if (!workflow) return null;
+
   // Recap projection is best-effort: a failed output projection yields no snippet
   // rather than failing the whole summary.
   const outputsRes = projectNodeOutputsV2(truth.events);
@@ -210,7 +212,7 @@ function projectSessionSummary(
     },
     recapSnippet,
     observations: extractObservations(truth.events),
-    workflow: extractWorkflowIdentity(truth.events, bestRun.run.runId),
+    workflow,
   } satisfies HealthySessionSummary;
 }
 
@@ -272,19 +274,25 @@ function extractObservations(events: readonly DomainEventV1[]): SessionObservati
 
 /**
  * Extract workflow identity for a specific run from session events.
+ *
+ * Returns null if the run_started event is missing or workflowHash is malformed.
+ * This enforces the invariant at the boundary: only valid workflow identities
+ * enter the summary pipeline.
  */
-function extractWorkflowIdentity(events: readonly DomainEventV1[], runId: string): WorkflowIdentity {
-  // After filtering to RunStartedEventV1, scope.runId is `string` (non-optional)
-  // and data.workflowId is `string` — both are fully typed by the discriminant.
+function extractWorkflowIdentity(events: readonly DomainEventV1[], runId: string): IdentifiedWorkflow | null {
   const event = events
     .filter((e): e is RunStartedEventV1 => e.kind === EVENT_KIND.RUN_STARTED)
     .find((e) => e.scope.runId === runId);
 
-  if (!event) return UNKNOWN_WORKFLOW;
+  if (!event) return null;
+
+  // Validate workflowHash format at the boundary (trust inside after this)
+  if (!SHA256_DIGEST_PATTERN.test(event.data.workflowHash)) return null;
 
   return {
-    workflowId: event.data.workflowId,
-    workflowName: null, // Not stored in events; resolved from pinned workflow store when needed
+    kind: 'identified',
+    workflowId: asWorkflowId(event.data.workflowId),
+    workflowHash: asWorkflowHash(asSha256Digest(event.data.workflowHash)),
   };
 }
 

@@ -17,9 +17,10 @@ import type { ToolContext, ToolResult } from '../types.js';
 import { errNotRetryable } from '../types.js';
 import { V2ResumeSessionOutputSchema } from '../output-schemas.js';
 import { signTokenOrErr } from './v2-token-ops.js';
-import type { ResumeQuery } from '../../v2/projections/resume-ranking.js';
+import type { ResumeQuery, RankedResumeCandidate } from '../../v2/projections/resume-ranking.js';
 import type { WorkspaceAnchor } from '../../v2/ports/workspace-anchor.port.js';
-import { asRunId, asNodeId, asWorkflowHashRef } from '../../v2/durable-core/ids/index.js';
+import { asRunId, asNodeId, deriveWorkflowHashRef } from '../../v2/durable-core/ids/index.js';
+import type { TokenCodecPorts } from '../../v2/durable-core/tokens/index.js';
 import { resumeSession } from '../../v2/usecases/resume-session.js';
 import { resolveWorkspaceAnchors } from './v2-workspace-resolution.js';
 
@@ -84,17 +85,60 @@ export async function handleV2ResumeSession(
 
   const candidates = resumeResult.value;
 
-  // Mint fresh stateTokens for each candidate
-  const outputCandidates: Array<{
-    sessionId: string;
-    runId: string;
-    stateToken: string;
-    snippet: string;
-    whyMatched: string[];
-  }> = [];
+  // Mint fresh stateTokens for each candidate.
+  // workflowHash is guaranteed non-null by HealthySessionSummary (validated at boundary).
+  const { outputCandidates, skipped } = mintCandidateTokens(candidates, v2.tokenCodecPorts);
+
+  if (skipped > 0) {
+    console.error(`[workrail:resume] ${skipped}/${candidates.length} candidate(s) skipped: token minting failed (workflowHashRef derivation or signing error)`);
+  }
+
+  const output = V2ResumeSessionOutputSchema.parse({
+    candidates: outputCandidates,
+    totalEligible: candidates.length,
+  });
+
+  return {
+    type: 'success' as const,
+    data: output,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Token minting — pure, no I/O
+// ---------------------------------------------------------------------------
+
+interface MintedCandidate {
+  readonly sessionId: string;
+  readonly runId: string;
+  readonly stateToken: string;
+  readonly snippet: string;
+  readonly whyMatched: string[];
+}
+
+/**
+ * Mint stateTokens for ranked candidates.
+ *
+ * Why separate function: isolates the token-minting concern from the handler
+ * orchestration. Pure (no I/O), testable independently.
+ *
+ * workflowHash is branded WorkflowHash (non-nullable) — guaranteed by
+ * HealthySessionSummary construction. No defensive null checks needed here.
+ */
+function mintCandidateTokens(
+  candidates: readonly RankedResumeCandidate[],
+  ports: TokenCodecPorts,
+): { readonly outputCandidates: readonly MintedCandidate[]; readonly skipped: number } {
+  const outputCandidates: MintedCandidate[] = [];
+  let skipped = 0;
 
   for (const candidate of candidates) {
-    // Mint stateToken pointing at the preferred tip node
+    const wfRefRes = deriveWorkflowHashRef(candidate.workflowHash);
+    if (wfRefRes.isErr()) {
+      skipped++;
+      continue;
+    }
+
     const stateTokenRes = signTokenOrErr({
       payload: {
         tokenVersion: 1 as const,
@@ -102,13 +146,13 @@ export async function handleV2ResumeSession(
         sessionId: candidate.sessionId,
         runId: asRunId(candidate.runId),
         nodeId: asNodeId(candidate.preferredTipNodeId),
-        workflowHashRef: asWorkflowHashRef(''), // Resolved on continue_workflow
+        workflowHashRef: wfRefRes.value,
       },
-      ports: v2.tokenCodecPorts,
+      ports,
     });
 
     if (stateTokenRes.isErr()) {
-      // Skip candidate if token minting fails (graceful degradation)
+      skipped++;
       continue;
     }
 
@@ -121,13 +165,5 @@ export async function handleV2ResumeSession(
     });
   }
 
-  const output = V2ResumeSessionOutputSchema.parse({
-    candidates: outputCandidates,
-    totalEligible: candidates.length,
-  });
-
-  return {
-    type: 'success' as const,
-    data: output,
-  };
+  return { outputCandidates, skipped };
 }
