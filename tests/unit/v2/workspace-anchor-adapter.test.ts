@@ -16,6 +16,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { pathToFileURL } from 'url';
 import { LocalWorkspaceAnchorV2 } from '../../../src/v2/infra/local/workspace-anchor/index.js';
 import type { WorkspaceSource } from '../../../src/v2/ports/workspace-anchor.port.js';
 
@@ -83,7 +84,7 @@ describe('explicit_path source', () => {
 describe('mcp_root_uri source', () => {
   it('resolves git identity from a file:// URI pointing to a real git repo', async () => {
     const adapter = new LocalWorkspaceAnchorV2(process.cwd());
-    const uri = `file://${process.cwd()}`;
+    const uri = pathToFileURL(process.cwd()).href;
     const result = await adapter.resolve(mcpRootSource(uri));
 
     expect(result.isOk()).toBe(true);
