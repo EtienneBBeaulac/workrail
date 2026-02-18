@@ -168,7 +168,6 @@ export function handleRehydrateIntent(args: {
             return neErrorAsync({
               kind: 'invariant_violation' as const,
               message: `Prompt rendering failed: ${metaRes.error.message}`,
-              suggestion: 'Retry; if this persists, treat as invariant violation.',
             });
           }
           

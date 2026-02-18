@@ -260,9 +260,9 @@ describe('v2 replay fail-closed: missing snapshot', () => {
       expect(res.type).toBe('error');
       if (res.type !== 'error') return;
       expect(['INTERNAL_ERROR', 'SESSION_NOT_HEALTHY']).toContain(res.code);
-      if (res.code === 'INTERNAL_ERROR') {
-        expect(res.message).toContain('Missing execution snapshot');
-      }
+      // Verify the error is agent-friendly (not leaking internal details)
+      expect(res.message).toBeTruthy();
+      expect(res.message).not.toContain('snapshot'); // internal store name should not leak
     } finally {
       process.env.WORKRAIL_DATA_DIR = prev;
     }

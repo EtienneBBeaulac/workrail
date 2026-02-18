@@ -2,6 +2,7 @@ import { ResultAsync, okAsync, errAsync } from 'neverthrow';
 import type { ToolContext, ToolResult } from '../types.js';
 import { success, errNotRetryable, requireV2Context } from '../types.js';
 import { mapUnknownErrorToToolError } from '../error-mapper.js';
+import { internalSuggestion } from './v2-execution-helpers.js';
 import type { V2InspectWorkflowInput, V2ListWorkflowsInput } from '../v2/tools.js';
 import { V2WorkflowInspectOutputSchema, V2WorkflowListOutputSchema } from '../output-schemas.js';
 
@@ -119,7 +120,10 @@ export async function handleV2InspectWorkflow(
       const snapshot = compileV1WorkflowToV2PreviewSnapshot(workflow);
       const hashRes = workflowHashForCompiledSnapshot(snapshot as unknown as JsonValue, crypto);
       if (hashRes.isErr()) {
-        return errAsync(errNotRetryable('INTERNAL_ERROR', hashRes.error.message));
+        return errAsync(errNotRetryable('INTERNAL_ERROR',
+          'WorkRail could not compute a content hash for the workflow definition. This is not caused by your input.',
+          { suggestion: internalSuggestion('Retry inspect_workflow.', 'WorkRail has an internal error computing workflow hashes.') },
+        ));
       }
 
       const workflowHash = hashRes.value;
@@ -132,9 +136,12 @@ export async function handleV2InspectWorkflow(
           return okAsync(existing);
         })
         .orElse(() => okAsync(snapshot))
-        .map((compiled) => {
+        .andThen((compiled) => {
           if (!compiled) {
-            throw new Error('Compiled workflow unexpectedly null');
+            return errAsync(errNotRetryable('INTERNAL_ERROR',
+              'WorkRail could not produce a compiled workflow snapshot. This is not caused by your input.',
+              { suggestion: internalSuggestion('Retry inspect_workflow.', 'WorkRail has an internal error.') },
+            ));
           }
           const body =
             input.mode === 'metadata'
@@ -147,7 +154,7 @@ export async function handleV2InspectWorkflow(
             mode: input.mode,
             compiled: body,
           });
-          return success(payload) as ToolResult<unknown>;
+          return okAsync(success(payload) as ToolResult<unknown>);
         });
     })
     .match(

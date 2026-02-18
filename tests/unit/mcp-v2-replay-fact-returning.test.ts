@@ -237,7 +237,9 @@ describe('v2 replay is fact-returning and fail-closed (Phase 3)', () => {
       expect(res.type).toBe('error');
       if (res.type !== 'error') return;
       expect(res.code).toBe('INTERNAL_ERROR');
-      expect(res.message).toContain('Missing node_created for advanced toNodeId');
+      // Verify the error is agent-friendly (not leaking internal details)
+      expect(res.message).toBeTruthy();
+      expect(res.message).not.toContain('node_created'); // internal event name should not leak
     } finally {
       process.env.WORKRAIL_DATA_DIR = prev;
     }
@@ -399,9 +401,9 @@ describe('v2 replay is fact-returning and fail-closed (Phase 3)', () => {
       expect(res.type).toBe('error');
       if (res.type !== 'error') return;
       expect(['INTERNAL_ERROR', 'SESSION_NOT_HEALTHY']).toContain(res.code);
-      if (res.code === 'INTERNAL_ERROR') {
-        expect(res.message).toContain('Missing execution snapshot');
-      }
+      // Verify the error is agent-friendly (not leaking internal details)
+      expect(res.message).toBeTruthy();
+      expect(res.message).not.toContain('snapshot'); // internal store name should not leak
     } finally {
       process.env.WORKRAIL_DATA_DIR = prev;
     }

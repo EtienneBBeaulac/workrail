@@ -64,6 +64,11 @@ function renderNumber(value: number): Result<string, CanonicalJsonError> {
 function renderArray(values: readonly JsonValue[]): Result<string, CanonicalJsonError> {
   const parts: string[] = [];
   for (const v of values) {
+    // undefined in arrays becomes null (matching JSON.stringify behavior)
+    if (v === undefined) {
+      parts.push('null');
+      continue;
+    }
     const r = render(v);
     if (r.isErr()) return err(r.error);
     parts.push(r.value);
@@ -76,8 +81,11 @@ function renderObject(obj: JsonObject): Result<string, CanonicalJsonError> {
   const parts: string[] = [];
 
   for (const key of keys) {
+    const value = obj[key];
+    // Skip undefined values (matching JSON.stringify behavior -- undefined is not valid JSON)
+    if (value === undefined) continue;
     const keyJson = JSON.stringify(key);
-    const valueJson = render(obj[key]!);
+    const valueJson = render(value);
     if (valueJson.isErr()) return err(valueJson.error);
     parts.push(`${keyJson}:${valueJson.value}`);
   }

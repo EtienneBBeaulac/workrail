@@ -183,8 +183,7 @@ export function handleAdvanceIntent(args: {
           if (isInternalError(cause)) {
             return {
               kind: 'invariant_violation' as const,
-              message: `Advance failed due to internal invariant violation: ${cause.kind}`,
-              suggestion: 'Retry; if this persists, treat as invariant violation.',
+              message: `Advance failed due to internal error: ${cause.kind}`,
             };
           }
           if (typeof cause === 'object' && cause !== null && 'code' in cause) {
@@ -196,8 +195,7 @@ export function handleAdvanceIntent(args: {
           }
           return {
             kind: 'invariant_violation' as const,
-            message: 'Advance failed with an unknown error shape (invariant violation).',
-            suggestion: 'Retry; if this persists, treat as invariant violation.',
+            message: 'Advance failed with an unknown error shape.',
           };
         })
         .andThen((res) => {
@@ -212,8 +210,7 @@ export function handleAdvanceIntent(args: {
           if (!recordedEvent) {
             return neErrorAsync({
               kind: 'invariant_violation' as const,
-              message: 'Missing recorded advance outcome after successful append (invariant violation).',
-              suggestion: 'Retry; if this persists, treat as invariant violation.',
+              message: 'Missing recorded advance outcome after successful append.',
             });
           }
 

@@ -92,7 +92,6 @@ export function loadAndPinWorkflow(args: {
             return neErrorAsync({
               kind: 'invariant_violation' as const,
               message: 'Failed to pin executable workflow snapshot (missing or invalid pinned workflow).',
-              suggestion: 'Retry start_workflow; if this persists, treat as invariant violation.',
             });
           }
           const pinnedWorkflow = createWorkflow(pinned.definition as WorkflowDefinition, createBundledSource());
@@ -224,6 +223,8 @@ export function buildInitialEvents(args: {
   }
 
   // Emit observation_recorded events for workspace anchors (WU2: observability)
+  // Note: observation_recorded has no scope (session-level, not run/node-level).
+  // Omit the scope field entirely rather than setting to undefined -- JCS rejects undefined.
   for (const obs of observations) {
     const obsEventId = idFactory.mintEventId();
     mutableEvents.push({
@@ -233,7 +234,6 @@ export function buildInitialEvents(args: {
       sessionId,
       kind: EVENT_KIND.OBSERVATION_RECORDED,
       dedupeKey: `observation_recorded:${sessionId}:${obs.key}`,
-      scope: undefined,
       data: {
         key: obs.key,
         value: obs.value,

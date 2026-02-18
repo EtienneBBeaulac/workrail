@@ -30,6 +30,22 @@ import { detailsSessionHealth } from '../types.js';
 export type ToolFailure = ReturnType<typeof errNotRetryable> | ReturnType<typeof errRetryAfterMs>;
 
 /**
+ * Standard escalation suffix for internal error suggestions.
+ * Tells the agent exactly what to provide when the user needs to report the issue.
+ */
+const ESCALATION_SUFFIX =
+  ' To report this, share the name of the tool you called, the input you provided, and this error message with the user so they can forward it to the WorkRail developer.';
+
+/**
+ * Build an internal error suggestion with standard escalation guidance.
+ * @param retryAdvice - What the agent should try first (e.g. "Retry the call.")
+ * @param userMessage - What to tell the user if the retry doesn't work
+ */
+export function internalSuggestion(retryAdvice: string, userMessage: string): string {
+  return `${retryAdvice} If the error persists, tell the user: "${userMessage}"${ESCALATION_SUFFIX}`;
+}
+
+/**
  * Typed error union for start_workflow handler.
  *
  * Philosophy: explicit closed set; exhaustive switching required at compile time.
@@ -84,28 +100,32 @@ export function mapStartWorkflowErrorToToolError(e: StartWorkflowError): ToolFai
       return errNotRetryable('PRECONDITION_FAILED', e.message, e.suggestion ? { suggestion: e.suggestion } : undefined);
 
     case 'invariant_violation':
-      return errNotRetryable('INTERNAL_ERROR', e.message, e.suggestion ? { suggestion: e.suggestion } : undefined);
+      return errNotRetryable('INTERNAL_ERROR',
+        'WorkRail encountered an unexpected error while starting the workflow. This is not caused by your input.',
+        { suggestion: internalSuggestion('Retry start_workflow.', 'WorkRail has an internal error.') },
+      );
 
     case 'validation_failed':
       return e.failure;
 
     case 'workflow_not_found':
       return errNotRetryable('NOT_FOUND', `Workflow not found: ${e.workflowId}`, {
-        suggestion: 'Use list_workflows to discover available workflows.',
+        suggestion: 'Call list_workflows to see available workflows and verify the workflowId.',
       });
 
     case 'workflow_has_no_steps':
-      return errNotRetryable('PRECONDITION_FAILED', 'Workflow has no steps and cannot be started.', {
-        suggestion: 'Fix the workflow definition (must contain at least one step).',
+      return errNotRetryable('PRECONDITION_FAILED', `Workflow "${e.workflowId}" has no steps and cannot be started.`, {
+        suggestion: 'Tell the user: "This workflow definition is empty (no steps). The workflow JSON file needs to be fixed."',
       });
 
     case 'keyring_load_failed':
       return mapKeyringErrorToToolError(e.cause);
 
     case 'hash_computation_failed':
-      return errNotRetryable('INTERNAL_ERROR', `Failed to compute workflow hash: ${e.message}`, {
-        suggestion: 'Retry start_workflow; if this persists, treat as invariant violation.',
-      });
+      return errNotRetryable('INTERNAL_ERROR',
+        'WorkRail could not compute a content hash for the workflow definition. This is not caused by your input.',
+        { suggestion: internalSuggestion('Retry start_workflow.', 'WorkRail has an internal error computing workflow hashes.') },
+      );
 
     case 'pinned_workflow_store_failed':
       return mapPinnedWorkflowStoreErrorToToolError(e.cause);
@@ -143,7 +163,10 @@ export function mapContinueWorkflowErrorToToolError(e: ContinueWorkflowError): T
       return errNotRetryable('TOKEN_UNKNOWN_NODE', e.message, e.suggestion ? { suggestion: e.suggestion } : undefined);
 
     case 'invariant_violation':
-      return errNotRetryable('INTERNAL_ERROR', e.message, e.suggestion ? { suggestion: e.suggestion } : undefined);
+      return errNotRetryable('INTERNAL_ERROR',
+        'WorkRail encountered an unexpected error while continuing the workflow. This is not caused by your input.',
+        { suggestion: internalSuggestion('Retry continue_workflow.', 'WorkRail has an internal error.') },
+      );
 
     case 'validation_failed':
       return e.failure;
@@ -167,9 +190,10 @@ export function mapContinueWorkflowErrorToToolError(e: ContinueWorkflowError): T
       return mapPinnedWorkflowStoreErrorToToolError(e.cause);
 
     case 'pinned_workflow_missing':
-      return errNotRetryable('PRECONDITION_FAILED', `Pinned workflow snapshot is missing for hash: ${e.workflowHash}`, {
-        suggestion: 'Re-run start_workflow or re-pin the workflow via inspect_workflow.',
-      });
+      return errNotRetryable('PRECONDITION_FAILED',
+        'The stored workflow definition for this session is missing. The session may have been created with a different WorkRail data directory.',
+        { suggestion: 'Call start_workflow again to create a fresh session for this workflow.' },
+      );
 
     case 'token_signing_failed':
       return mapTokenSigningErrorToToolError(e.cause);
@@ -306,14 +330,16 @@ export function mapTokenSigningErrorToToolError(e: TokenDecodeErrorV2 | TokenVer
 
     // Signing-specific codes
     case 'TOKEN_ENCODE_FAILED':
-      return errNotRetryable('INTERNAL_ERROR', `Token encoding failed: ${e.message}`, {
-        suggestion: 'Retry; if this persists, treat as invariant violation.',
-      });
+      return errNotRetryable('INTERNAL_ERROR',
+        'WorkRail could not create a security token for this operation. This is not caused by your input.',
+        { suggestion: internalSuggestion('Retry the call.', 'WorkRail has an internal error creating tokens.') },
+      );
 
     case 'KEYRING_INVALID':
-      return errNotRetryable('INTERNAL_ERROR', `Keyring invalid: ${e.message}`, {
-        suggestion: 'Regenerate v2 keyring by deleting the v2 data directory and retrying.',
-      });
+      return errNotRetryable('INTERNAL_ERROR',
+        'WorkRail\'s security keys are in an invalid state and cannot sign tokens.',
+        { suggestion: internalSuggestion('', 'WorkRail\'s security keys need to be regenerated. Delete the .workrail/v2 data directory and restart.') },
+      );
 
     // Verify-specific code
     case 'TOKEN_BAD_SIGNATURE':
@@ -343,19 +369,22 @@ export function mapTokenSigningErrorToToolError(e: TokenDecodeErrorV2 | TokenVer
 export function mapKeyringErrorToToolError(e: KeyringError): ToolFailure {
   switch (e.code) {
     case 'KEYRING_IO_ERROR':
-      return errNotRetryable('INTERNAL_ERROR', `Keyring I/O error: ${e.message}`, {
-        suggestion: 'Retry; check filesystem permissions. If this persists, treat as invariant violation.',
-      });
+      return errNotRetryable('INTERNAL_ERROR',
+        'WorkRail could not read its security keys from disk.',
+        { suggestion: internalSuggestion('Retry the call.', 'WorkRail cannot access its security keys. Check that the ~/.workrail directory is readable.') },
+      );
 
     case 'KEYRING_CORRUPTION_DETECTED':
-      return errNotRetryable('INTERNAL_ERROR', `Keyring corruption detected: ${e.message}`, {
-        suggestion: 'Delete the WorkRail v2 data directory for this repo and retry.',
-      });
+      return errNotRetryable('INTERNAL_ERROR',
+        'WorkRail\'s security keys are corrupted and cannot be used.',
+        { suggestion: internalSuggestion('', 'WorkRail\'s security keys are corrupted. Delete the .workrail/v2 directory and restart WorkRail to regenerate them.') },
+      );
 
     case 'KEYRING_INVARIANT_VIOLATION':
-      return errNotRetryable('INTERNAL_ERROR', `Keyring invariant violation: ${e.message}`, {
-        suggestion: 'Treat as invariant violation.',
-      });
+      return errNotRetryable('INTERNAL_ERROR',
+        'WorkRail\'s security key system encountered an unexpected error. This is not caused by your input.',
+        { suggestion: internalSuggestion('', 'WorkRail has an internal error with its security keys.') },
+      );
 
     default:
       const _exhaustive: never = e;
@@ -373,25 +402,32 @@ export function mapKeyringErrorToToolError(e: KeyringError): ToolFailure {
 export function mapSessionEventLogStoreErrorToToolError(e: SessionEventLogStoreError): ToolFailure {
   switch (e.code) {
     case 'SESSION_STORE_LOCK_BUSY':
-      return errRetryAfterMs('INTERNAL_ERROR', e.message, e.retry.afterMs, {
-        suggestion: 'Another WorkRail process may be writing to this session; retry.',
-      });
+      return errRetryAfterMs('INTERNAL_ERROR',
+        'The session is temporarily busy (another operation is in progress).',
+        e.retry.afterMs,
+        { suggestion: internalSuggestion('Retry this call in a few seconds.', 'Another WorkRail process may be accessing this session.') },
+      );
 
     case 'SESSION_STORE_CORRUPTION_DETECTED':
-      return errNotRetryable('SESSION_NOT_HEALTHY', `Session corruption detected: ${e.reason.code}`, {
-        suggestion: 'Execution requires a healthy session. Export salvage view, then recreate.',
-        details: detailsSessionHealth({ kind: e.location === 'head' ? 'corrupt_head' : 'corrupt_tail', reason: e.reason }) as unknown as JsonValue,
-      });
+      return errNotRetryable('SESSION_NOT_HEALTHY',
+        'This session\'s data is corrupted and cannot be used.',
+        {
+          suggestion: `This session cannot be recovered. Call start_workflow to create a new session for this workflow.${ESCALATION_SUFFIX}`,
+          details: detailsSessionHealth({ kind: e.location === 'head' ? 'corrupt_head' : 'corrupt_tail', reason: e.reason }) as unknown as JsonValue,
+        },
+      );
 
     case 'SESSION_STORE_IO_ERROR':
-      return errNotRetryable('INTERNAL_ERROR', e.message, {
-        suggestion: 'Retry; check filesystem permissions.',
-      });
+      return errNotRetryable('INTERNAL_ERROR',
+        'WorkRail could not read or write session data to disk.',
+        { suggestion: internalSuggestion('Retry the call.', 'WorkRail cannot access its data files. Check that the ~/.workrail directory exists and is writable.') },
+      );
 
     case 'SESSION_STORE_INVARIANT_VIOLATION':
-      return errNotRetryable('INTERNAL_ERROR', e.message, {
-        suggestion: 'Treat as invariant violation.',
-      });
+      return errNotRetryable('INTERNAL_ERROR',
+        'WorkRail encountered an unexpected error with session storage. This is not caused by your input.',
+        { suggestion: internalSuggestion('Retry the call.', 'WorkRail has an internal storage error.') },
+      );
 
     default:
       const _exhaustive: never = e;
@@ -409,34 +445,52 @@ export function mapSessionEventLogStoreErrorToToolError(e: SessionEventLogStoreE
 export function mapExecutionSessionGateErrorToToolError(e: ExecutionSessionGateErrorV2): ToolFailure {
   switch (e.code) {
     case 'SESSION_LOCKED':
-      return errRetryAfterMs('TOKEN_SESSION_LOCKED', e.message, e.retry.afterMs, {
-        suggestion: 'Retry in 1–3 seconds; if this persists >10s, ensure no other WorkRail process is running.',
-      });
+      return errRetryAfterMs('TOKEN_SESSION_LOCKED',
+        'This session is currently being modified by another operation.',
+        e.retry.afterMs,
+        { suggestion: internalSuggestion('Wait a moment and retry this call.', 'Another WorkRail process may be accessing this session.') },
+      );
 
     case 'LOCK_RELEASE_FAILED':
-      return errRetryAfterMs('TOKEN_SESSION_LOCKED', e.message, e.retry.afterMs, {
-        suggestion: 'Retry in 1–3 seconds; if this persists >10s, ensure no other WorkRail process is running.',
-      });
+      return errRetryAfterMs('TOKEN_SESSION_LOCKED',
+        'A previous operation on this session did not release cleanly.',
+        e.retry.afterMs,
+        { suggestion: 'Wait a moment and retry this call. The lock will auto-expire shortly.' },
+      );
 
     case 'SESSION_NOT_HEALTHY':
-      return errNotRetryable('SESSION_NOT_HEALTHY', e.message, {
-        suggestion: 'Execution requires healthy session.',
-        details: detailsSessionHealth(e.health) as unknown as JsonValue,
-      });
+      return errNotRetryable('SESSION_NOT_HEALTHY',
+        'This session is in an unhealthy state and cannot accept new operations.',
+        {
+          suggestion: `This session cannot be used. Call start_workflow to create a new session.${ESCALATION_SUFFIX}`,
+          details: detailsSessionHealth(e.health) as unknown as JsonValue,
+        },
+      );
 
     case 'SESSION_LOCK_REENTRANT':
-      // Concurrent execution detected (in-process or cross-process).
-      // This is a retryable condition per design locks (agents can make parallel tool calls).
-      return errRetryAfterMs('TOKEN_SESSION_LOCKED', e.message, 1000, {
-        suggestion: 'Session is currently locked by concurrent execution. Retry in 1 second.',
-      });
+      return errRetryAfterMs('TOKEN_SESSION_LOCKED',
+        'This session is already being modified by a concurrent call you made. Only one operation at a time is allowed per session.',
+        1000,
+        { suggestion: 'Wait for your other call to complete, then retry this one.' },
+      );
 
     case 'SESSION_LOAD_FAILED':
+      return errNotRetryable('INTERNAL_ERROR',
+        'WorkRail could not load the session data for this operation.',
+        { suggestion: internalSuggestion('Retry the call.', 'WorkRail cannot load session data.') },
+      );
+
     case 'LOCK_ACQUIRE_FAILED':
+      return errNotRetryable('INTERNAL_ERROR',
+        'WorkRail could not acquire a lock on this session.',
+        { suggestion: internalSuggestion('Retry the call.', 'WorkRail is having trouble with session locking — check if another WorkRail process is running.') },
+      );
+
     case 'GATE_CALLBACK_FAILED':
-      return errNotRetryable('INTERNAL_ERROR', e.message, {
-        suggestion: 'Retry; if this persists, treat as invariant violation.',
-      });
+      return errNotRetryable('INTERNAL_ERROR',
+        'WorkRail encountered an error while processing this session operation. This is not caused by your input.',
+        { suggestion: internalSuggestion('Retry the call.', 'WorkRail has an internal error.') },
+      );
 
     default:
       const _exhaustive: never = e;
@@ -447,29 +501,23 @@ export function mapExecutionSessionGateErrorToToolError(e: ExecutionSessionGateE
 /**
  * Map SnapshotStoreError to ToolFailure.
  * Snapshot errors are internal and non-recoverable.
- *
- * @param e - Snapshot store error
- * @param suggestion - Optional custom suggestion
- * @returns ToolFailure
  */
-export function mapSnapshotStoreErrorToToolError(e: SnapshotStoreError, suggestion?: string): ToolFailure {
-  return errNotRetryable('INTERNAL_ERROR', `Snapshot store error: ${e.message}`, {
-    suggestion: suggestion ?? 'Retry; if this persists, treat as invariant violation.',
-  });
+export function mapSnapshotStoreErrorToToolError(e: SnapshotStoreError, _suggestion?: string): ToolFailure {
+  return errNotRetryable('INTERNAL_ERROR',
+    'WorkRail could not access its execution state data. This is not caused by your input.',
+    { suggestion: internalSuggestion('Retry the call.', 'WorkRail has an internal storage error.') },
+  );
 }
 
 /**
  * Map PinnedWorkflowStoreError to ToolFailure.
  * Pinned workflow store errors are internal and non-recoverable.
- *
- * @param e - Pinned workflow store error
- * @param suggestion - Optional custom suggestion
- * @returns ToolFailure
  */
-export function mapPinnedWorkflowStoreErrorToToolError(e: PinnedWorkflowStoreError, suggestion?: string): ToolFailure {
-  return errNotRetryable('INTERNAL_ERROR', `Pinned workflow store error: ${e.message}`, {
-    suggestion: suggestion ?? 'Retry; if this persists, treat as invariant violation.',
-  });
+export function mapPinnedWorkflowStoreErrorToToolError(e: PinnedWorkflowStoreError, _suggestion?: string): ToolFailure {
+  return errNotRetryable('INTERNAL_ERROR',
+    'WorkRail could not access the stored workflow definition. This is not caused by your input.',
+    { suggestion: internalSuggestion('Retry the call.', 'WorkRail has an internal storage error.') },
+  );
 }
 
 /**
