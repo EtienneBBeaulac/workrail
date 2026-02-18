@@ -101,6 +101,13 @@ export class ValidationEngine {
         }));
       }
 
+      // Handle single rule object (e.g. { type: 'contains', value: 'OK' }) —
+      // authors often write a bare rule instead of a single-element array.
+      // Treat it identically to [criteria] rather than rejecting as invalid.
+      if (this.isValidationRule(criteria)) {
+        return this.evaluateRuleArray(output, [criteria], context);
+      }
+
       // Invalid criteria format
       return err({ kind: 'invalid_criteria_format', message: 'Invalid validation criteria format' });
     } catch (error) {

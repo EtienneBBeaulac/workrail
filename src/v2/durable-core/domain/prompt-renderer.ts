@@ -301,8 +301,18 @@ export function renderPendingPrompt(args: {
   const contractSection = contractRequirements.length > 0
     ? `\n\n**OUTPUT REQUIREMENTS (System):**\n${contractRequirements.map(r => `- ${r}`).join('\n')}`
     : '';
-  
-  const enhancedPrompt = basePrompt + requirementsSection + contractSection;
+
+  // Notes requirement (system-injected): all steps require notes unless the step declares
+  // notesOptional, or has an outputContract (artifact is the primary evidence).
+  // This makes the enforcement visible to the agent before they submit.
+  const isNotesOptional =
+    outputContract !== undefined ||
+    (step !== null && step !== undefined && 'notesOptional' in step && (step as { notesOptional?: boolean }).notesOptional === true);
+  const notesSection = isNotesOptional
+    ? ''
+    : '\n\n**NOTES REQUIRED (System):** You must include `output.notesMarkdown` documenting what you did and why. Omitting notes will block this step — use the `retryAckToken` to fix and retry.';
+
+  const enhancedPrompt = basePrompt + requirementsSection + contractSection + notesSection;
 
   // If not rehydrate-only, return enhanced prompt (no recovery needed for advance/start)
   if (!args.rehydrateOnly) {

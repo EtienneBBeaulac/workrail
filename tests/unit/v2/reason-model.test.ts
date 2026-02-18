@@ -13,12 +13,12 @@ describe('reason-model (table-driven mapping)', () => {
   const cases: ReadonlyArray<{ reason: ReasonV1; expectBlockerCode: string; expectPointerKind: string }> = [
     {
       reason: { kind: 'missing_context_key', key: 'slices' },
-      expectBlockerCode: 'INVARIANT_VIOLATION',
+      expectBlockerCode: 'MISSING_CONTEXT_KEY',
       expectPointerKind: 'context_key',
     },
     {
       reason: { kind: 'context_budget_exceeded' },
-      expectBlockerCode: 'INVARIANT_VIOLATION',
+      expectBlockerCode: 'CONTEXT_BUDGET_EXCEEDED',
       expectPointerKind: 'context_budget',
     },
     {
@@ -50,6 +50,11 @@ describe('reason-model (table-driven mapping)', () => {
       reason: { kind: 'storage_corruption_detected' },
       expectBlockerCode: 'STORAGE_CORRUPTION_DETECTED',
       expectPointerKind: 'context_budget',
+    },
+    {
+      reason: { kind: 'missing_notes', stepId: 'phase-1-explore' },
+      expectBlockerCode: 'MISSING_REQUIRED_NOTES',
+      expectPointerKind: 'workflow_step',
     },
   ];
 

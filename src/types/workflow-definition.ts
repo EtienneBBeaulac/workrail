@@ -48,6 +48,20 @@ export interface WorkflowStepDefinition {
    * Replaces validationCriteria with machine-checkable artifacts.
    */
   readonly outputContract?: OutputContract;
+  /**
+   * When true, notes (output.notesMarkdown) are NOT required for this step.
+   *
+   * By default, all steps require notes — the agent must document what it did.
+   * This is enforced at the blocking layer: omitting notes blocks the advance.
+   *
+   * Set to true only for mechanical steps where notes would be pure noise (e.g.
+   * a confirmation gate with no substantive work). Steps with `outputContract`
+   * are automatically exempt (the typed artifact IS the evidence).
+   *
+   * Prefer leaving this unset unless the step genuinely produces no value in
+   * the session history.
+   */
+  readonly notesOptional?: boolean;
   readonly functionDefinitions?: readonly FunctionDefinition[];
   readonly functionCalls?: readonly FunctionCall[];
   readonly functionReferences?: readonly string[];

@@ -16,7 +16,7 @@ export type UserOnlyDependencyReasonV1 =
 
 export type GapReasonV1 =
   | { readonly category: 'user_only_dependency'; readonly detail: UserOnlyDependencyReasonV1 }
-  | { readonly category: 'contract_violation'; readonly detail: 'missing_required_output' | 'invalid_required_output' }
+  | { readonly category: 'contract_violation'; readonly detail: 'missing_required_output' | 'invalid_required_output' | 'missing_required_notes' }
   | { readonly category: 'capability_missing'; readonly detail: 'required_capability_unavailable' | 'required_capability_unknown' }
   | { readonly category: 'unexpected'; readonly detail: 'invariant_violation' | 'storage_corruption_detected' | 'evaluation_error' };
 
@@ -24,6 +24,9 @@ export type BlockerCodeV1 =
   | 'USER_ONLY_DEPENDENCY'
   | 'MISSING_REQUIRED_OUTPUT'
   | 'INVALID_REQUIRED_OUTPUT'
+  | 'MISSING_REQUIRED_NOTES'
+  | 'MISSING_CONTEXT_KEY'
+  | 'CONTEXT_BUDGET_EXCEEDED'
   | 'REQUIRED_CAPABILITY_UNKNOWN'
   | 'REQUIRED_CAPABILITY_UNAVAILABLE'
   | 'INVARIANT_VIOLATION'
@@ -52,6 +55,7 @@ export type ReasonV1 =
   | { readonly kind: 'context_budget_exceeded' }
   | { readonly kind: 'missing_required_output'; readonly contractRef: string }
   | { readonly kind: 'invalid_required_output'; readonly contractRef: string }
+  | { readonly kind: 'missing_notes'; readonly stepId: string }
   | { readonly kind: 'required_capability_unknown'; readonly capability: CapabilityV2 }
   | { readonly kind: 'required_capability_unavailable'; readonly capability: CapabilityV2 }
   | { readonly kind: 'user_only_dependency'; readonly detail: UserOnlyDependencyReasonV1; readonly stepId: string }
@@ -121,6 +125,12 @@ export function reasonToGap(reason: ReasonV1): { readonly severity: GapSeverityV
         severity: 'critical',
         reason: { category: 'contract_violation', detail: 'invalid_required_output' },
         summary: `Invalid required output for contractRef=${reason.contractRef}`,
+      };
+    case 'missing_notes':
+      return {
+        severity: 'critical',
+        reason: { category: 'contract_violation', detail: 'missing_required_notes' },
+        summary: `Missing required notes for stepId=${reason.stepId}`,
       };
     case 'required_capability_unknown':
       return {
@@ -203,7 +213,7 @@ export function reasonToBlocker(reason: ReasonV1): Result<BlockerV1, ReasonModel
     case 'missing_context_key':
       return ensureDelimiterSafeId('context_key.key', reason.key)
         .map((key) => ({
-          code: 'INVARIANT_VIOLATION' as const,
+          code: 'MISSING_CONTEXT_KEY' as const,
           pointer: { kind: 'context_key' as const, key },
           message: `Missing required context key: ${key}`,
           suggestedFix: `Include context.${key} (delimiter-safe key) in the next continue_workflow call.`,
@@ -212,7 +222,7 @@ export function reasonToBlocker(reason: ReasonV1): Result<BlockerV1, ReasonModel
 
     case 'context_budget_exceeded':
       return ensureBlockerTextBudgets({
-        code: 'INVARIANT_VIOLATION',
+        code: 'CONTEXT_BUDGET_EXCEEDED',
         pointer: { kind: 'context_budget' },
         message: 'Context exceeded the allowed budget or was non-serializable.',
         suggestedFix: 'Remove large blobs from context and pass only small external inputs (IDs, paths, parameters).',
@@ -235,6 +245,16 @@ export function reasonToBlocker(reason: ReasonV1): Result<BlockerV1, ReasonModel
           pointer: { kind: 'output_contract' as const, contractRef },
           message: `Invalid output for contractRef=${contractRef}.`,
           suggestedFix: 'Update output.notesMarkdown to satisfy validation. Then call continue_workflow WITHOUT ackToken (rehydrate) to receive a fresh ackToken, and retry advance with that new ackToken. Replaying the same ackToken is idempotent and will keep returning this blocked result.',
+        }))
+        .andThen(ensureBlockerTextBudgets);
+
+    case 'missing_notes':
+      return ensureDelimiterSafeId('workflow_step.stepId', reason.stepId)
+        .map((stepId) => ({
+          code: 'MISSING_REQUIRED_NOTES' as const,
+          pointer: { kind: 'workflow_step' as const, stepId },
+          message: `Step "${stepId}" requires notes documenting your work (output.notesMarkdown).`,
+          suggestedFix: 'Add output.notesMarkdown with meaningful documentation of what you did and why. Use the retryAckToken to retry without rehydrating.',
         }))
         .andThen(ensureBlockerTextBudgets);
 

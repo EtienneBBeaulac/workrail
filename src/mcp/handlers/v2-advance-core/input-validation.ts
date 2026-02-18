@@ -33,6 +33,15 @@ export interface ValidatedAdvanceInputs {
   readonly autonomy: 'guided' | 'full_auto_stop_on_user_deps' | 'full_auto_never_stop';
   readonly riskPolicy: 'conservative' | 'balanced' | 'aggressive';
   readonly effectivePrefs: { readonly autonomy: string; readonly riskPolicy: string } | undefined;
+  /**
+   * When true, notes are NOT required for this step.
+   *
+   * Auto-derived from step definition:
+   * - `outputContract` present → true (artifact IS the evidence; notes are supplemental)
+   * - `notesOptional: true` explicitly set → true
+   * - Otherwise → false (notes are required; omitting them blocks the advance)
+   */
+  readonly notesOptional: boolean;
 }
 
 export function validateAdvanceInputs(args: {
@@ -65,6 +74,14 @@ export function validateAdvanceInputs(args: {
   const step = getStepById(pinnedWorkflow, pendingStep.stepId);
   const validationCriteria = step?.validationCriteria;
   const outputContract = step?.outputContract;
+
+  // Auto-derive notesOptional.
+  // outputContract steps: artifact is primary evidence → notes are supplemental (no enforcement).
+  // notesOptional: true explicitly set: author opted out for mechanical steps.
+  // Everything else: notes are required; omitting them blocks the advance.
+  const notesOptional =
+    outputContract !== undefined ||
+    (step !== null && step !== undefined && 'notesOptional' in step && step.notesOptional === true);
 
   // Preferences
   const parentByNodeId: Record<string, string | null> = {};
@@ -103,5 +120,6 @@ export function validateAdvanceInputs(args: {
     autonomy,
     riskPolicy,
     effectivePrefs,
+    notesOptional,
   });
 }

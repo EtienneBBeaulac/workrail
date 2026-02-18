@@ -106,7 +106,7 @@ describe('v2 fork detection (Phase 5)', () => {
       expect(start.type).toBe('success');
       if (start.type !== 'success') return;
 
-      const first = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: start.data.stateToken, ackToken: start.data.ackToken } as any, ctx);
+      const first = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: start.data.stateToken, ackToken: start.data.ackToken, output: { notesMarkdown: 'Step 1 done.' } } as any, ctx);
       expect(first.type).toBe('success');
       if (first.type !== 'success') return;
       expect(first.data.kind).toBe('ok');
@@ -120,7 +120,7 @@ describe('v2 fork detection (Phase 5)', () => {
 
       // Now advance from the root node again with the NEW ackToken.
       // This should detect that root node already has a child and create a fork.
-      const fork = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: start.data.stateToken, ackToken: rehydrate.data.ackToken } as any, ctx);
+      const fork = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: start.data.stateToken, ackToken: rehydrate.data.ackToken, output: { notesMarkdown: 'Step 1 fork.' } } as any, ctx);
       expect(fork.type).toBe('success');
       if (fork.type !== 'success') return;
       expect(fork.data.kind).toBe('ok');

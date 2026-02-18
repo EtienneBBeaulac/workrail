@@ -45,6 +45,13 @@ export function detectBlockingReasonsV1(args: {
   readonly contextBudgetExceeded?: boolean;
   readonly outputRequirement?: OutputRequirementStatus;
   readonly capabilityRequirement?: CapabilityRequirementStatus;
+  /**
+   * When present, notes are required but were not provided.
+   * The stepId is included for the blocker pointer (workflow_step kind).
+   *
+   * Absent when notes are optional (outputContract steps, or notesOptional: true).
+   */
+  readonly missingNotes?: { readonly stepId: string };
 }): Result<readonly ReasonV1[], BlockingDecisionError> {
   const reasons: ReasonV1[] = [];
 
@@ -100,6 +107,16 @@ export function detectBlockingReasonsV1(args: {
         return _exhaustive;
       }
     }
+  }
+
+  if (args.missingNotes) {
+    if (!DELIMITER_SAFE_ID_PATTERN.test(args.missingNotes.stepId)) {
+      return err({
+        code: 'INVALID_DELIMITER_SAFE_ID',
+        message: `step ID must be delimiter-safe: [a-z0-9_-]+ (got: ${args.missingNotes.stepId})`,
+      });
+    }
+    reasons.push({ kind: 'missing_notes', stepId: args.missingNotes.stepId });
   }
 
   return ok(reasons);

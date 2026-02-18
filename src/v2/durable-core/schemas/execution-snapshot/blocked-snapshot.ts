@@ -18,6 +18,9 @@ const BlockerCodeSchema = z.enum([
   'USER_ONLY_DEPENDENCY',
   'MISSING_REQUIRED_OUTPUT',
   'INVALID_REQUIRED_OUTPUT',
+  'MISSING_REQUIRED_NOTES',
+  'MISSING_CONTEXT_KEY',
+  'CONTEXT_BUDGET_EXCEEDED',
   'REQUIRED_CAPABILITY_UNKNOWN',
   'REQUIRED_CAPABILITY_UNAVAILABLE',
   'INVARIANT_VIOLATION',
@@ -59,6 +62,7 @@ export const ContractViolationReasonV1Schema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('missing_required_output'), contractRef: z.string().min(1) }).strict(),
   z.object({ kind: z.literal('missing_context_key'), key: DelimiterSafeIdSchema }).strict(),
   z.object({ kind: z.literal('context_budget_exceeded') }).strict(),
+  z.object({ kind: z.literal('missing_notes'), stepId: DelimiterSafeIdSchema }).strict(),
 ]);
 
 export const TerminalReasonV1Schema = z.discriminatedUnion('kind', [

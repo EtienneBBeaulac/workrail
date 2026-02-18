@@ -56,6 +56,34 @@ describe('ValidationEngine', () => {
     });
   });
 
+  describe('single rule object (not wrapped in array)', () => {
+    // Authors sometimes write validationCriteria: { type: 'contains', ... } instead of
+    // [{ type: 'contains', ... }]. Both forms must behave identically.
+    it('passes when output satisfies a bare rule object', async () => {
+      const rule = { type: 'contains', value: 'OK', message: 'Must contain OK' } as any;
+      const res = await validateResult('All looks OK here', rule, {});
+      expect(res.isOk()).toBe(true);
+      if (res.isOk()) expect(res.value.valid).toBe(true);
+    });
+
+    it('fails when output does not satisfy a bare rule object', async () => {
+      const rule = { type: 'contains', value: 'OK', message: 'Must contain OK' } as any;
+      const res = await validateResult('Attempted the step.', rule, {});
+      expect(res.isOk()).toBe(true);
+      if (res.isOk()) {
+        expect(res.value.valid).toBe(false);
+        expect(res.value.issues).toContain('Must contain OK');
+      }
+    });
+
+    it('does NOT return invalid_criteria_format for a bare rule object', async () => {
+      const rule = { type: 'contains', value: 'OK', message: 'Must contain OK' } as any;
+      const res = await validateResult('Attempted the step.', rule, {});
+      // Must be Ok (validation ran), not Err (format rejected)
+      expect(res.isOk()).toBe(true);
+    });
+  });
+
   describe('contains validation', () => {
     it('should pass when output contains required value', async () => {
       const rules: ValidationRule[] = [
