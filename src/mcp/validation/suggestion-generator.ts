@@ -30,6 +30,9 @@ import {
   generateExampleValue,
 } from './schema-introspection.js';
 
+// Re-export ZodIssue type for callers
+export type { ZodIssue } from 'zod';
+
 /**
  * Generate unknown key suggestions by matching against expected keys.
  *
@@ -210,4 +213,62 @@ export function formatSuggestionDetails(
  */
 export function hasSuggestions(result: SuggestionResult): boolean {
   return result.suggestions.length > 0 || result.correctTemplate !== null;
+}
+
+/**
+ * Patch a correctTemplate to restore optional fields that were provided with
+ * the wrong type.
+ *
+ * The default template omits all optional fields to keep it concise. But when
+ * an agent provides an optional field with the wrong type (e.g., context: "string"
+ * instead of context: {}), that field is absent from the template. Agents
+ * misread the absence as "this field should be removed," causing valid context
+ * to be silently dropped on retry.
+ *
+ * This function adds back those fields as correctly-typed examples, guiding the
+ * agent to fix the format rather than drop the field.
+ *
+ * @param correctTemplate - Base template from generateSuggestions (null = no-op)
+ * @param args - The raw input the agent provided
+ * @param zodErrors - Zod validation issues from schema.safeParse()
+ * @param schema - The Zod schema being validated against
+ * @param maxDepth - Max depth for example generation (matches suggestion config)
+ * @returns Patched template, or the original if no patching was needed
+ */
+export function patchTemplateForFailedOptionals(
+  correctTemplate: Readonly<Record<string, unknown>> | null,
+  args: unknown,
+  zodErrors: readonly z.ZodIssue[],
+  schema: z.ZodType,
+  maxDepth: number,
+): Readonly<Record<string, unknown>> | null {
+  if (correctTemplate === null) return null;
+  if (!(schema instanceof z.ZodObject)) return correctTemplate;
+  if (args === null || typeof args !== 'object' || Array.isArray(args)) return correctTemplate;
+
+  const argsObj = args as Record<string, unknown>;
+  const shape = schema._def.shape() as Record<string, z.ZodType>;
+  const patched: Record<string, unknown> = { ...correctTemplate };
+  let changed = false;
+
+  for (const error of zodErrors) {
+    if (error.path.length !== 1) continue; // Only top-level fields
+    const field = error.path[0] as string;
+
+    // Only patch when: (1) agent provided the field, (2) it's in the schema,
+    // (3) it's not already in the template (was skipped as optional)
+    if (!(field in argsObj)) continue;
+    if (!(field in shape)) continue;
+    if (field in patched) continue;
+
+    const fieldSchema = shape[field];
+    // Only restore optional fields — required fields are never skipped
+    if (!(fieldSchema instanceof z.ZodOptional)) continue;
+
+    // Show the correct type for this field so the agent knows how to fix it
+    patched[field] = generateExampleValue(fieldSchema._def.innerType, 0, maxDepth);
+    changed = true;
+  }
+
+  return changed ? Object.freeze(patched) : correctTemplate;
 }
