@@ -20,15 +20,34 @@ import {
 } from '../../src/mcp/v2/tools.js';
 
 /**
+ * Navigate through Zod wrapper types to find the inner ZodObject shape.
+ * Used for field-level inspection (descriptions, types).
+ */
+function extractShapeFromSchema(schema: any): Record<string, any> {
+  const typeName = schema._def?.typeName;
+  if (typeName === 'ZodEffects') return extractShapeFromSchema(schema._def.schema);
+  if (typeName === 'ZodPipeline') return extractShapeFromSchema(schema._def.in);
+  if (typeName === 'ZodObject') return schema._def.shape();
+  return {};
+}
+
+/**
  * Extract top-level field names from a Zod object schema.
  * Returns sorted array for deterministic comparison.
+ * Traverses ZodEffects (.strict(), .superRefine(), .transform()),
+ * ZodPipeline (.pipe()), and ZodObject layers.
  */
 function extractFieldNames(schema: any): string[] {
-  if (schema._def?.typeName === 'ZodEffects') {
-    // .strict() and .superRefine() wrap the inner schema
+  const typeName = schema._def?.typeName;
+  if (typeName === 'ZodEffects') {
+    // .strict(), .superRefine(), .transform() wrap the inner schema
     return extractFieldNames(schema._def.schema);
   }
-  if (schema._def?.typeName === 'ZodObject') {
+  if (typeName === 'ZodPipeline') {
+    // .pipe() wraps the input schema as `in`
+    return extractFieldNames(schema._def.in);
+  }
+  if (typeName === 'ZodObject') {
     return Object.keys(schema._def.shape()).sort();
   }
   return [];
@@ -88,10 +107,15 @@ describe('v2 tool schema field snapshots (anti-drift)', () => {
     ]);
   });
 
-  it('continue_workflow intent enum is exactly [advance, rehydrate]', () => {
-    const shape = V2ContinueWorkflowInput._def.schema._def.shape();
+  it('continue_workflow intent enum is exactly [advance, rehydrate] (optional with auto-inference)', () => {
+    // Schema is: ZodPipeline(ZodEffects(transform, ZodEffects(strict, ZodObject)))
+    // Navigate to the inner ZodObject to get the shape
+    const innerObject = V2ContinueWorkflowInput._def.in._def.schema;
+    const shape = innerObject._def.shape();
     const intentDef = shape.intent._def;
-    expect(intentDef.values).toEqual(['advance', 'rehydrate']);
+    // intent is now z.enum([...]).optional(), so unwrap the optional
+    const innerEnum = intentDef.innerType._def;
+    expect(innerEnum.values).toEqual(['advance', 'rehydrate']);
   });
 
   it('inspect_workflow mode enum is exactly [metadata, preview]', () => {
@@ -114,14 +138,8 @@ describe('v2 tool schema field snapshots (anti-drift)', () => {
     const fieldsWithoutDescription: string[] = [];
 
     for (const { name, schema } of schemas) {
-      let shapeFn: any;
-      if (schema._def?.typeName === 'ZodEffects') {
-        shapeFn = schema._def.schema._def.shape;
-      } else {
-        shapeFn = schema._def.shape;
-      }
-
-      const shape = shapeFn();
+      // Navigate through ZodEffects/ZodPipeline to find the inner ZodObject shape
+      const shape = extractShapeFromSchema(schema);
       for (const [fieldName, fieldSchema] of Object.entries(shape)) {
         const desc = (fieldSchema as any)?.description ?? (fieldSchema as any)?._def?.description;
         if (!desc) {
