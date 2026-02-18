@@ -24,7 +24,7 @@ import type { CryptoPortV2 } from '../v2/durable-core/canonical/hashing.js';
 import type { IdFactoryV2 } from '../v2/infra/local/id-factory/index.js';
 import type { JsonValue } from './output-schemas.js';
 import type { TokenCodecPorts } from '../v2/durable-core/tokens/token-codec-ports.js';
-import type { WorkspaceAnchorPortV2 } from '../v2/ports/workspace-anchor.port.js';
+import type { WorkspaceContextResolverPortV2 } from '../v2/ports/workspace-anchor.port.js';
 import type { DataDirPortV2 } from '../v2/ports/data-dir.port.js';
 import type { DirectoryListingPortV2 } from '../v2/ports/directory-listing.port.js';
 import type { SessionSummaryProviderPortV2 } from '../v2/ports/session-summary-provider.port.js';
@@ -210,8 +210,13 @@ export interface V2Dependencies {
   // Grouped token dependencies (always complete)
   readonly tokenCodecPorts: TokenCodecPorts;
 
-  // Workspace identity observation (optional, graceful degradation)
-  readonly workspaceAnchor?: WorkspaceAnchorPortV2;
+  // Per-request workspace root URIs snapshotted from MCP client roots at the CallTool boundary.
+  // Absent or empty when the client does not support the MCP roots protocol.
+  readonly resolvedRootUris?: readonly string[];
+
+  // Workspace identity resolver (optional, graceful degradation).
+  // Uses resolvedRootUris[0] when available, falls back to process.cwd().
+  readonly workspaceResolver?: WorkspaceContextResolverPortV2;
 
   // Directory-level operations (resume session needs session enumeration)
   readonly dataDir?: DataDirPortV2;

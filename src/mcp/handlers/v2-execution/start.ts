@@ -328,10 +328,16 @@ export function executeStartWorkflow(
     pinnedStore,
   })
     .andThen(({ workflow, firstStep, workflowHash, pinnedWorkflow }) => {
-      // 2. Resolve workspace anchors for observation events (graceful: empty on failure)
-      const workspaceAnchor = ctx.v2?.workspaceAnchor;
-      const anchorsRA: RA<readonly ObservationEventData[], never> = workspaceAnchor
-        ? workspaceAnchor.resolveAnchors()
+      // 2. Resolve workspace anchors for observation events (graceful: empty on failure).
+      // Use the client's primary root URI when available (snapshotted at CallTool boundary),
+      // falling back to process.cwd() for clients that don't report MCP roots.
+      const workspaceResolver = ctx.v2.workspaceResolver;
+      const primaryRootUri = ctx.v2.resolvedRootUris?.[0];
+      const anchorsRA: RA<readonly ObservationEventData[], never> = workspaceResolver
+        ? (primaryRootUri
+            ? workspaceResolver.resolveFromUri(primaryRootUri)
+            : workspaceResolver.resolveFromCwd()
+          )
             .map((anchors) => anchorsToObservations(anchors))
             .orElse(() => okAsync([] as readonly ObservationEventData[]))
         : okAsync([] as readonly ObservationEventData[]);
