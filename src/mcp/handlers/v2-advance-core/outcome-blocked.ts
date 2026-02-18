@@ -63,9 +63,15 @@ export function buildBlockedOutcome(args: {
   }
 
   const extraEventsToAppend = [validationEventRes.value];
-  const primaryReason = reasons[0];
+  // Use effectiveReasons (post-guardrails), not reasons (pre-guardrails).
+  // Guardrails may downgrade reasons, and the primaryReason drives the block type
+  // (retryable vs terminal). Using reasons[0] could select a downgraded reason
+  // that doesn't match effectiveReasons, causing an invariant violation.
+  const primaryReason = effectiveReasons[0];
   if (!primaryReason) {
-    return errAsync({ kind: 'invariant_violation' as const, message: 'shouldBlockNow=true requires at least one reason' } as const);
+    // Invariant: shouldBlockNow=true requires effectiveReasons.length > 0.
+    // If this fires, the shouldBlock logic is broken.
+    return errAsync({ kind: 'invariant_violation' as const, message: 'shouldBlockNow=true requires at least one effective reason (post-guardrails)' } as const);
   }
 
   const blockedSnapshotRes = buildBlockedNodeSnapshot({
