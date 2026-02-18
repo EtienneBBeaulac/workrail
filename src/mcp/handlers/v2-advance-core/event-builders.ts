@@ -20,7 +20,7 @@ import { toNotesMarkdownV1 } from '../../../v2/durable-core/domain/notes-markdow
 import { normalizeOutputsForAppend, type OutputToAppend } from '../../../v2/durable-core/domain/outputs.js';
 import { buildAckAdvanceAppendPlanV1 } from '../../../v2/durable-core/domain/ack-advance-append-plan.js';
 import type { InternalError } from '../v2-error-mapping.js';
-import { EVENT_KIND, OUTPUT_CHANNEL, EDGE_CAUSE } from '../../../v2/durable-core/constants.js';
+import { EVENT_KIND, OUTPUT_CHANNEL, PAYLOAD_KIND, EDGE_CAUSE } from '../../../v2/durable-core/constants.js';
 import type { AdvanceCorePorts } from './index.js';
 
 // ── buildAndAppendPlan ────────────────────────────────────────────────
@@ -145,7 +145,7 @@ export function buildNotesOutputs(
     outputId: String(asOutputId(`out_recap_${String(attemptId)}`)),
     outputChannel: OUTPUT_CHANNEL.RECAP,
     payload: {
-      payloadKind: 'notes' as const,
+      payloadKind: PAYLOAD_KIND.NOTES,
       notesMarkdown: toNotesMarkdownV1(inputOutput.notesMarkdown),
     },
   }];
@@ -172,7 +172,7 @@ export function buildArtifactOutputs(
       outputId: asOutputId(`out_artifact_${String(attemptId)}_${idx}`),
       outputChannel: OUTPUT_CHANNEL.ARTIFACT,
       payload: {
-        payloadKind: 'artifact_ref' as const,
+        payloadKind: PAYLOAD_KIND.ARTIFACT_REF,
         sha256: sha256.sha256(canonicalBytes),
         contentType: 'application/json',
         byteLength: canonicalBytes.length,

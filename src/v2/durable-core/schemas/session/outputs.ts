@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { MAX_OUTPUT_NOTES_MARKDOWN_BYTES, SHA256_DIGEST_PATTERN } from '../../constants.js';
+import { MAX_OUTPUT_NOTES_MARKDOWN_BYTES, SHA256_DIGEST_PATTERN, OUTPUT_CHANNEL, PAYLOAD_KIND } from '../../constants.js';
 import { utf8ByteLength } from '../lib/utf8-byte-length.js';
 
 const sha256DigestSchema = z
@@ -10,7 +10,7 @@ const sha256DigestSchema = z
 export const OutputChannelSchema = z.enum(['recap', 'artifact']);
 
 export const NotesPayloadV1Schema = z.object({
-  payloadKind: z.literal('notes'),
+  payloadKind: z.literal(PAYLOAD_KIND.NOTES),
   // Locked: notesMarkdown is bounded by UTF-8 bytes (not code units).
   // NOTE: Keep the discriminator branch as a ZodObject (discriminatedUnion requires it),
   // so we refine the string field instead of wrapping the object in effects.
@@ -23,7 +23,7 @@ export const NotesPayloadV1Schema = z.object({
 });
 
 export const ArtifactRefPayloadV1Schema = z.object({
-  payloadKind: z.literal('artifact_ref'),
+  payloadKind: z.literal(PAYLOAD_KIND.ARTIFACT_REF),
   sha256: sha256DigestSchema,
   contentType: z.string().min(1),
   byteLength: z.number().int().nonnegative(),
@@ -43,7 +43,7 @@ export const NodeOutputAppendedDataV1Schema = z
   })
   .superRefine((v, ctx) => {
     // Locked: recap channel must use notes payload.
-    if (v.outputChannel === 'recap' && v.payload.payloadKind !== 'notes') {
+    if (v.outputChannel === OUTPUT_CHANNEL.RECAP && v.payload.payloadKind !== PAYLOAD_KIND.NOTES) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'outputChannel=recap requires payloadKind=notes',
