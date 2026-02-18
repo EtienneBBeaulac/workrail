@@ -23,6 +23,7 @@ import {
 import { toBoundedJsonValue } from './validation/bounded-json.js';
 import type { PreValidateResult } from './validation/workflow-next-prevalidate.js';
 import type { WrappedToolHandler, McpCallToolResult } from './types/workflow-tool-edition.js';
+import { internalSuggestion } from './handlers/v2-execution-helpers.js';
 
 // -----------------------------------------------------------------------------
 // Result Conversion
@@ -91,7 +92,21 @@ export function createHandler<TInput extends z.ZodType, TOutput>(
         })
       );
     }
-    return toMcpResult(await handler(parseResult.data, ctx));
+    // Boundary safety net: if a handler throws instead of returning ToolResult,
+    // catch the exception and convert it to a structured error envelope.
+    // This prevents raw Error objects from leaking to the MCP SDK.
+    try {
+      return toMcpResult(await handler(parseResult.data, ctx));
+    } catch (err) {
+      // Log the raw error for server-side debugging (stderr, not agent-facing)
+      console.error('[WorkRail] Unhandled exception in tool handler:', err);
+      return toMcpResult(
+        errNotRetryable('INTERNAL_ERROR',
+          'WorkRail encountered an unexpected error. This is not caused by your input.',
+          { suggestion: internalSuggestion('Retry the call.', 'WorkRail has an internal error.') },
+        )
+      );
+    }
   };
 }
 

@@ -316,8 +316,7 @@ export function replayFromRecordedAdvance(args: {
   if (!toNode) {
     return neErrorAsync({
       kind: 'invariant_violation' as const,
-      message: 'Missing node_created for advanced toNodeId (invariant violation).',
-      suggestion: 'Retry; if this persists, treat as invariant violation.',
+      message: 'Missing node_created for advanced toNodeId.',
     });
   }
 
@@ -328,8 +327,7 @@ export function replayFromRecordedAdvance(args: {
       if (!toSnapshot) {
         return neErrorAsync({
           kind: 'invariant_violation' as const,
-          message: 'Missing execution snapshot for advanced node (invariant violation).',
-          suggestion: 'Retry; if this persists, treat as invariant violation.',
+          message: 'Missing execution snapshot for advanced node.',
         });
       }
 

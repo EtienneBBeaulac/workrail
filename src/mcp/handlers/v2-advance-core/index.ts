@@ -41,6 +41,7 @@ import { EnhancedLoopValidator } from '../../../application/services/enhanced-lo
 
 import type { InternalError } from '../v2-error-mapping.js';
 import { toV1ExecutionState } from '../v2-state-conversion.js';
+import { internalSuggestion } from '../v2-execution-helpers.js';
 import { withTimeout } from '../shared/with-timeout.js';
 import { validateAdvanceInputs, type ValidatedAdvanceInputs } from './input-validation.js';
 import { buildBlockedOutcome } from './outcome-blocked.js';
@@ -214,8 +215,8 @@ export function executeAdvanceCore(args: {
       const outputRequirement = { kind: 'not_required' as const };
       const evalValidation: ValidationResult = {
         valid: false,
-        issues: [`Validation evaluation failed: ${phase.message}`],
-        suggestions: ['Check validation criteria for malformed rules or invalid schemas.'],
+        issues: ['WorkRail could not evaluate the validation criteria for this step. This is not caused by your output.'],
+        suggestions: [internalSuggestion('Retry your submission with the same output.', 'The validation criteria for this step may be misconfigured.')],
       };
 
       const ctx: AdvanceContext = { truth, sessionId, runId, currentNodeId, attemptId, workflowHash, inputOutput, pinnedWorkflow, engineState, pendingStep };
