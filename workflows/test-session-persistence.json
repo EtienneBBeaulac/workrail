@@ -1,0 +1,33 @@
+{
+  "id": "test-session-persistence",
+  "name": "Session Persistence Test",
+  "description": "Purpose-built workflow for testing v2 session persistence, cross-chat resume, and checkpoint mechanics. Has 5 simple steps that agents can complete quickly with unique marker outputs.",
+  "version": "1.0.0",
+  "steps": [
+    {
+      "id": "step-1-alpha",
+      "title": "Step 1: Alpha Marker",
+      "prompt": "You are testing WorkRail v2 session persistence.\n\nYour task is simple: provide output containing the unique marker **ALPHA**.\n\nInclude in your output:\n- The marker string exactly as shown above\n- A brief note that you completed this step\n\nThis marker will be used in a future test to verify cross-chat session resumption works correctly."
+    },
+    {
+      "id": "step-2-beta",
+      "title": "Step 2: Beta Marker",
+      "prompt": "You are testing WorkRail v2 session persistence.\n\nYour task is simple: provide output containing the unique marker **BETA**.\n\nInclude in your output:\n- The marker string exactly as shown above\n- A brief note that you completed this step\n\nThis marker will be used in a future test to verify cross-chat session resumption works correctly."
+    },
+    {
+      "id": "step-3-gamma",
+      "title": "Step 3: Gamma Marker",
+      "prompt": "You are testing WorkRail v2 session persistence.\n\nYour task is simple: provide output containing the unique marker **GAMMA**.\n\nInclude in your output:\n- The marker string exactly as shown above\n- A brief note that you completed this step\n\nThis marker will be used in a future test to verify cross-chat session resumption works correctly."
+    },
+    {
+      "id": "step-4-delta",
+      "title": "Step 4: Delta Marker",
+      "prompt": "You are testing WorkRail v2 session persistence.\n\nYour task is simple: provide output containing the unique marker **DELTA**.\n\nInclude in your output:\n- The marker string exactly as shown above\n- A brief note that you completed this step\n\nThis is the penultimate step."
+    },
+    {
+      "id": "step-5-final",
+      "title": "Step 5: Final Step",
+      "prompt": "You are testing WorkRail v2 session persistence.\n\nThis is the **final step**. Provide a summary:\n- How many unique markers did you write? (Should be 4: ALPHA, BETA, GAMMA, DELTA)\n- Did the workflow progress smoothly through all steps?\n- What CHAT_ID were you using?\n\nAfter you provide this output, the workflow will complete."
+    }
+  ]
+}

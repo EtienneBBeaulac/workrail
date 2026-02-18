@@ -1039,25 +1039,30 @@ OUTPUT TAGGING:
 - When providing output, use: {"output": {"notesMarkdown": "[CHAT_ID=chat-4b-persistence] ...
 
 STEPS:
-1. Call start_workflow with workflowId: "workflow-diagnose-environment"
+1. Call start_workflow with workflowId: "test-session-persistence"
 
-2. For each step, provide UNIQUE, identifiable output:
-   - Step 1: {"output": {"notesMarkdown": "[CHAT_ID=chat-4b-persistence] UNIQUE_MARKER_ALPHA: Diagnosed network configuration"}}
-   - Step 2: {"output": {"notesMarkdown": "[CHAT_ID=chat-4b-persistence] UNIQUE_MARKER_BETA: Found DNS resolution issue"}}
-   - Step 3: {"output": {"notesMarkdown": "[CHAT_ID=chat-4b-persistence] UNIQUE_MARKER_GAMMA: Applied firewall rules"}}
+2. Advance through the first 3 steps, providing the requested unique markers:
+   - Step 1: {"output": {"notesMarkdown": "[CHAT_ID=chat-4b-persistence] UNIQUE_MARKER_ALPHA completed"}}
+   - Step 2: {"output": {"notesMarkdown": "[CHAT_ID=chat-4b-persistence] UNIQUE_MARKER_BETA completed"}}
+   - Step 3: {"output": {"notesMarkdown": "[CHAT_ID=chat-4b-persistence] UNIQUE_MARKER_GAMMA completed"}}
 
-3. After 3+ steps, call continue_workflow with ONLY stateToken (no ackToken)
-   to rehydrate. What step is pending?
+3. After completing step 3, call continue_workflow with ONLY stateToken (no ackToken)
+   to rehydrate. What step is pending (should be step 4)?
+
+4. STOP. Do NOT complete the workflow. Leave it at step 4 pending.
+   The operator will use this session for test E2.
 
 ANALYSIS:
 - Do step outputs appear to persist between calls?
 - Does the workflow remember where you were?
+- After rehydrate, is the pending step correct (step 4)?
 ```
 
 **Expected Outcomes** (operator-only):
-- All outputs accepted
-- Rehydrate shows correct next pending step
+- All 3 outputs accepted
+- Rehydrate shows correct next pending step (step-4-delta)
 - Workflow state is durable
+- Session left incomplete for E2 to resume
 
 ---
 
@@ -1087,16 +1092,23 @@ STEPS:
 3. Did both queries find the same session?
 
 4. If a session was found, use its stateToken to rehydrate with
-   continue_workflow (no ackToken). What step is pending?
+   continue_workflow (no ackToken). What step is pending (should be step-4-delta)?
+
+5. If you can advance, complete the remaining steps:
+   - Step 4: {"output": {"notesMarkdown": "[CHAT_ID=chat-4b-cross-chat] Resumed and continuing with UNIQUE_MARKER_DELTA"}}
+   - Step 5: {"output": {"notesMarkdown": "[CHAT_ID=chat-4b-cross-chat] Final step - session resumed successfully from previous chat"}}
 
 ANALYSIS:
 - Are step output notes searchable in future chats?
 - Does the workflow pick up where the previous chat left off?
+- Could you complete the workflow from the resumed state?
 ```
 
 **Expected Outcomes** (operator-only):
 - Both queries find the same session via `matched_notes`
-- Rehydrate shows correct pending step
+- Rehydrate shows correct pending step (step-4-delta)
+- Agent completes the workflow from the resumed state
+- Proves cross-chat session continuity works end-to-end
 
 ---
 

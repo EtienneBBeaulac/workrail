@@ -27,6 +27,7 @@ import type { ToolContext, V2Dependencies } from './types.js';
 import { assertNever } from '../runtime/assert-never.js';
 import { unsafeTokenCodecPorts } from '../v2/durable-core/tokens/token-codec-ports.js';
 import { LocalWorkspaceAnchorV2 } from '../v2/infra/local/workspace-anchor/index.js';
+import { WorkspaceRootsManager } from './workspace-roots-manager.js';
 import { LocalDirectoryListingV2 } from '../v2/infra/local/directory-listing/index.js';
 import { LocalSessionSummaryProviderV2 } from '../v2/infra/local/session-summary-provider/index.js';
 import { createToolFactory, type ToolAnnotations, type ToolDefinition } from './tool-factory.js';
@@ -131,7 +132,10 @@ export async function createToolContext(): Promise<ToolContext> {
         crypto,
         idFactory,
         tokenCodecPorts,
-        workspaceAnchor: new LocalWorkspaceAnchorV2(process.cwd()),
+        // resolvedRootUris starts empty; overridden per-request at the CallTool boundary
+        // with a snapshot of the current MCP client roots (see startServer).
+        resolvedRootUris: [],
+        workspaceResolver: new LocalWorkspaceAnchorV2(process.cwd()),
         dataDir,
         directoryListing,
         sessionSummaryProvider: new LocalSessionSummaryProviderV2({
@@ -216,12 +220,16 @@ export async function startServer(): Promise<void> {
       assertNever(workflowEdition);
   }
 
+  // Mutable roots cell — write surface held locally, read surface passed to handlers.
+  const rootsManager = new WorkspaceRootsManager();
+
   // Dynamically import SDK modules (ESM-only)
   const { Server } = await import('@modelcontextprotocol/sdk/server/index.js');
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
   const {
     CallToolRequestSchema,
     ListToolsRequestSchema,
+    RootsListChangedNotificationSchema,
   } = await import('@modelcontextprotocol/sdk/types.js');
 
   // Create server
@@ -266,7 +274,9 @@ export async function startServer(): Promise<void> {
     tools,
   }));
 
-  // Register CallTool handler
+  // Register CallTool handler.
+  // Snapshots workspace root URIs once at the request boundary so handlers
+  // receive deterministic, immutable input for their duration.
   server.setRequestHandler(CallToolRequestSchema, async (request: any): Promise<any> => {
     const { name, arguments: args } = request.params;
 
@@ -278,12 +288,39 @@ export async function startServer(): Promise<void> {
       };
     }
 
-    return handler(args ?? {}, ctx);
+    const requestCtx: ToolContext = ctx.v2
+      ? { ...ctx, v2: { ...ctx.v2, resolvedRootUris: rootsManager.getCurrentRootUris() } }
+      : ctx;
+
+    return handler(args ?? {}, requestCtx);
+  });
+
+  // Handle root change notifications from the client.
+  // Re-fetches the root list via roots/list after each notification.
+  // Graceful: some clients don't support roots/list; failures are logged and ignored.
+  server.setNotificationHandler(RootsListChangedNotificationSchema, async () => {
+    try {
+      const result = await server.listRoots();
+      rootsManager.updateRootUris(result.roots.map((r: { uri: string }) => r.uri));
+      console.error(`[Roots] Updated workspace roots: ${result.roots.map((r: { uri: string }) => r.uri).join(', ') || '(none)'}`);
+    } catch {
+      console.error('[Roots] Failed to fetch updated roots after change notification');
+    }
   });
 
   // Connect transport
   const transport = new StdioServerTransport();
   await server.connect(transport);
+
+  // Fetch initial workspace roots from the client.
+  // Graceful: clients that don't support roots/list will cause this to fail or return nothing.
+  try {
+    const result = await server.listRoots();
+    rootsManager.updateRootUris(result.roots.map((r: { uri: string }) => r.uri));
+    console.error(`[Roots] Initial workspace roots: ${result.roots.map((r: { uri: string }) => r.uri).join(', ') || '(none)'}`);
+  } catch {
+    console.error('[Roots] Client does not support roots/list; workspace context will use server CWD fallback');
+  }
 
   console.error('WorkRail MCP Server running on stdio');
 

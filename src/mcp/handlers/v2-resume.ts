@@ -62,10 +62,16 @@ export async function handleV2ResumeSession(
     return errNotRetryable('INTERNAL_ERROR', 'resume_session requires sessionSummaryProvider port');
   }
 
-  // Resolve workspace anchors (graceful: empty on failure)
+  // Resolve workspace anchors (graceful: empty on failure).
+  // Use the client's primary root URI when available (snapshotted at CallTool boundary),
+  // falling back to process.cwd() for clients that don't report MCP roots.
   let anchors: readonly WorkspaceAnchor[] = [];
-  if (v2.workspaceAnchor) {
-    const anchorRes = await v2.workspaceAnchor.resolveAnchors();
+  if (v2.workspaceResolver) {
+    const primaryRootUri = v2.resolvedRootUris?.[0];
+    const anchorRes = await (primaryRootUri
+      ? v2.workspaceResolver.resolveFromUri(primaryRootUri)
+      : v2.workspaceResolver.resolveFromCwd()
+    );
     if (anchorRes.isOk()) {
       anchors = anchorRes.value;
     }
