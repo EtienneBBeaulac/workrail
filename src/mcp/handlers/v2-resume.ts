@@ -21,6 +21,7 @@ import type { ResumeQuery } from '../../v2/projections/resume-ranking.js';
 import type { WorkspaceAnchor } from '../../v2/ports/workspace-anchor.port.js';
 import { asRunId, asNodeId, asWorkflowHashRef } from '../../v2/durable-core/ids/index.js';
 import { resumeSession } from '../../v2/usecases/resume-session.js';
+import { resolveWorkspaceAnchors } from './v2-workspace-resolution.js';
 
 type ResumeInput = z.infer<typeof V2ResumeSessionInput>;
 type ResumeOutput = z.infer<typeof V2ResumeSessionOutputSchema>;
@@ -63,19 +64,9 @@ export async function handleV2ResumeSession(
   }
 
   // Resolve workspace anchors (graceful: empty on failure).
-  // Use the client's primary root URI when available (snapshotted at CallTool boundary),
-  // falling back to process.cwd() for clients that don't report MCP roots.
-  let anchors: readonly WorkspaceAnchor[] = [];
-  if (v2.workspaceResolver) {
-    const primaryRootUri = v2.resolvedRootUris?.[0];
-    const anchorRes = await (primaryRootUri
-      ? v2.workspaceResolver.resolveFromUri(primaryRootUri)
-      : v2.workspaceResolver.resolveFromCwd()
-    );
-    if (anchorRes.isOk()) {
-      anchors = anchorRes.value;
-    }
-  }
+  // Priority: explicit workspacePath input > MCP roots URI > server process CWD.
+  const anchorsResult = await resolveWorkspaceAnchors(v2, input.workspacePath);
+  const anchors: readonly WorkspaceAnchor[] = anchorsResult.isOk() ? anchorsResult.value : [];
 
   // Build resume query from input overrides + workspace anchors
   const query: ResumeQuery = {

@@ -69,6 +69,7 @@ describe('v2 tool schema field snapshots (anti-drift)', () => {
     expect(extractFieldNames(V2StartWorkflowInput)).toEqual([
       'context',
       'workflowId',
+      'workspacePath',
     ]);
   });
 
@@ -93,6 +94,7 @@ describe('v2 tool schema field snapshots (anti-drift)', () => {
       'gitBranch',
       'gitHeadSha',
       'query',
+      'workspacePath',
     ]);
   });
 
