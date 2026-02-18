@@ -29,6 +29,9 @@ import { asSessionId } from '../../../src/v2/durable-core/ids/index.js';
  * First entry is the root (parentNodeId must be null).
  * Last entry is the tip (the pending step).
  */
+/** Valid SHA256 digest for test events. */
+const TEST_WORKFLOW_HASH = 'sha256:' + 'a'.repeat(64);
+
 function buildLinearChain(
   sessionId: string,
   runId: string,
@@ -50,13 +53,13 @@ function buildLinearChain(
   });
 
   events.push(mk('session_created', {}, {}, `session_created:${sessionId}`));
-  events.push(mk('run_started', { runId }, { workflowId, workflowHash: 'hash_abc' }, `run_started:${sessionId}:${runId}`));
+  events.push(mk('run_started', { runId }, { workflowId, workflowHash: TEST_WORKFLOW_HASH }, `run_started:${sessionId}:${runId}`));
 
   for (const entry of chain) {
     events.push(mk(
       'node_created',
       { runId, nodeId: entry.nodeId },
-      { nodeKind: 'step', parentNodeId: entry.parentNodeId, workflowHash: 'hash_abc', snapshotRef: 'snap_1' },
+      { nodeKind: 'step', parentNodeId: entry.parentNodeId, workflowHash: TEST_WORKFLOW_HASH, snapshotRef: 'snap_1' },
       `node_created:${sessionId}:${entry.nodeId}`,
     ));
 

@@ -13,14 +13,21 @@ import {
   asRecapSnippet,
   MAX_RESUME_CANDIDATES,
   type HealthySessionSummary,
+  type IdentifiedWorkflow,
   type ResumeQuery,
   type TierAssignment,
 } from '../../../src/v2/projections/resume-ranking.js';
-import { asSessionId } from '../../../src/v2/durable-core/ids/index.js';
+import { asSessionId, asWorkflowId, asWorkflowHash, asSha256Digest } from '../../../src/v2/durable-core/ids/index.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+const DEFAULT_WORKFLOW: IdentifiedWorkflow = {
+  kind: 'identified',
+  workflowId: asWorkflowId('test-workflow'),
+  workflowHash: asWorkflowHash(asSha256Digest('sha256:' + 'a'.repeat(64))),
+};
 
 function mkSummary(overrides: Partial<HealthySessionSummary> & { sessionId: string; runId: string }): HealthySessionSummary {
   return {
@@ -29,7 +36,7 @@ function mkSummary(overrides: Partial<HealthySessionSummary> & { sessionId: stri
     preferredTip: overrides.preferredTip ?? { nodeId: 'node_1', lastActivityEventIndex: 10 },
     recapSnippet: overrides.recapSnippet ?? null,
     observations: overrides.observations ?? { gitHeadSha: null, gitBranch: null, repoRootHash: null },
-    workflow: overrides.workflow ?? { workflowId: null, workflowName: null },
+    workflow: overrides.workflow ?? DEFAULT_WORKFLOW,
   };
 }
 
@@ -151,7 +158,11 @@ describe('assignTier', () => {
     const summary = mkSummary({
       sessionId: 'sess_1',
       runId: 'run_1',
-      workflow: { workflowId: 'coding-task-agentic', workflowName: null },
+      workflow: {
+        kind: 'identified',
+        workflowId: asWorkflowId('coding-task-agentic'),
+        workflowHash: asWorkflowHash(asSha256Digest('sha256:' + 'b'.repeat(64))),
+      },
     });
     const tier = assignTier(summary, { freeTextQuery: 'coding-task-agentic' });
     expect(tier).toEqual({ tier: 4, kind: 'matched_workflow_id' });
