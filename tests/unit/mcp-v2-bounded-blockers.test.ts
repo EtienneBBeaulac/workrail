@@ -15,6 +15,9 @@ const V2BlockerSchema = z.object({
     'USER_ONLY_DEPENDENCY',
     'MISSING_REQUIRED_OUTPUT',
     'INVALID_REQUIRED_OUTPUT',
+    'MISSING_REQUIRED_NOTES',
+    'MISSING_CONTEXT_KEY',
+    'CONTEXT_BUDGET_EXCEEDED',
     'REQUIRED_CAPABILITY_UNKNOWN',
     'REQUIRED_CAPABILITY_UNAVAILABLE',
     'INVARIANT_VIOLATION',
@@ -80,11 +83,11 @@ describe('v2 bounded blockers enforcement', () => {
     expect(result.success).toBe(true);
   });
 
-  it('schema accepts context_budget pointer kind (S7: test gap)', () => {
+  it('schema accepts context_budget pointer kind with CONTEXT_BUDGET_EXCEEDED code', () => {
     const validWithContextBudget = {
       blockers: [
         {
-          code: 'INVARIANT_VIOLATION',
+          code: 'CONTEXT_BUDGET_EXCEEDED',
           pointer: { kind: 'context_budget' },
           message: 'Context exceeded budget',
           suggestedFix: 'Remove large blobs from context',
@@ -96,6 +99,7 @@ describe('v2 bounded blockers enforcement', () => {
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.blockers[0].pointer.kind).toBe('context_budget');
+      expect(result.data.blockers[0].code).toBe('CONTEXT_BUDGET_EXCEEDED');
     }
   });
 });

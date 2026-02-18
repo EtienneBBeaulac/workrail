@@ -20,6 +20,8 @@ function toContractViolationReason(reason: ReasonV1): ContractViolationReasonV1 
       return { kind: 'missing_context_key', key: reason.key };
     case 'context_budget_exceeded':
       return { kind: 'context_budget_exceeded' };
+    case 'missing_notes':
+      return { kind: 'missing_notes', stepId: reason.stepId };
     default:
       return null;
   }

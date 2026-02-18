@@ -238,7 +238,15 @@ export function executeAdvanceCore(args: {
       validation,
     });
 
-    const reasonsRes = detectBlockingReasonsV1({ outputRequirement });
+    // Missing notes: required unless the step declares notesOptional (outputContract steps
+    // are auto-exempt — the typed artifact IS the evidence). A whitespace-only string is
+    // treated as absent since it carries no information value.
+    const missingNotes =
+      !v.notesOptional && !v.notesMarkdown?.trim()
+        ? { stepId: v.pendingStep.stepId }
+        : undefined;
+
+    const reasonsRes = detectBlockingReasonsV1({ outputRequirement, missingNotes });
     if (reasonsRes.isErr()) {
       return errAsync({ kind: 'invariant_violation' as const, message: reasonsRes.error.message } as const);
     }

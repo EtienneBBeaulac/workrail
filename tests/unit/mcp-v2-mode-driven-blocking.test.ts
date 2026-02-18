@@ -226,14 +226,17 @@ describe('v2 continue_workflow: validationCriteria enforcement (mode-driven)', (
         }),
       });
 
+      // Advance without output — both MISSING_REQUIRED_OUTPUT (validationCriteria) and
+      // MISSING_REQUIRED_NOTES (notes enforcement) fire. Verify the output-contract blocker is present.
       const res = await handleV2ContinueWorkflow({ intent: 'advance', stateToken, ackToken } as any, dummyCtx(v2));
       expect(res.type).toBe('success');
       if (res.type !== 'success') return;
 
       expect(res.data.kind).toBe('blocked');
-      expect(res.data.blockers.blockers[0]!.code).toBe('MISSING_REQUIRED_OUTPUT');
-      expect(res.data.blockers.blockers[0]!.pointer.kind).toBe('output_contract');
-      expect(res.data.blockers.blockers[0]!.pointer.contractRef).toBe('wr.validationCriteria');
+      const outputBlocker = res.data.blockers.blockers.find((b: any) => b.code === 'MISSING_REQUIRED_OUTPUT');
+      expect(outputBlocker).toBeDefined();
+      expect(outputBlocker!.pointer.kind).toBe('output_contract');
+      expect(outputBlocker!.pointer.contractRef).toBe('wr.validationCriteria');
 
       const truth = await v2.sessionEventLogStore.load(sessionId as any).match((v) => v, (e) => {
         throw new Error(`unexpected load error: ${e.code}`);

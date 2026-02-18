@@ -32,8 +32,10 @@ describe('renderPendingPrompt', () => {
       if (result.isOk()) {
         expect(result.value.stepId).toBe('step1');
         expect(result.value.title).toBe('Step 1');
-        expect(result.value.prompt).toBe('Do step 1');
+        expect(result.value.prompt).toContain('Do step 1');
         expect(result.value.prompt).not.toContain('Recovery Context');
+        // Notes enforcement: system-injected notes requirement appears for all steps without notesOptional
+        expect(result.value.prompt).toContain('NOTES REQUIRED');
       }
     });
 
@@ -96,8 +98,9 @@ describe('renderPendingPrompt', () => {
 
       expect(result.isOk()).toBe(true);
       if (result.isOk()) {
-        // Tip node with no ancestry and no outputs = base prompt only
-        expect(result.value.prompt).toBe('Do step 1');
+        // Tip node with no ancestry and no outputs = base prompt + notes requirement
+        expect(result.value.prompt).toContain('Do step 1');
+        expect(result.value.prompt).toContain('NOTES REQUIRED');
       }
     });
   });
@@ -246,7 +249,7 @@ describe('renderPendingPrompt', () => {
       }
     });
 
-    it('does not add OUTPUT REQUIREMENTS when no validationCriteria', () => {
+    it('does not add validationCriteria OUTPUT REQUIREMENTS section when no validationCriteria', () => {
       const result = renderPendingPrompt({
         workflow: simpleWorkflow,
         stepId: 'step1',
@@ -259,8 +262,39 @@ describe('renderPendingPrompt', () => {
 
       expect(result.isOk()).toBe(true);
       if (result.isOk()) {
+        expect(result.value.prompt).toContain('Do step 1');
+        // Validation-criteria OUTPUT REQUIREMENTS section should be absent (no validationCriteria on step)
+        expect(result.value.prompt).not.toContain('**OUTPUT REQUIREMENTS:**');
+        // But NOTES REQUIRED section IS injected by the system for all non-optional steps
+        expect(result.value.prompt).toContain('NOTES REQUIRED');
+      }
+    });
+
+    it('does not add NOTES REQUIRED section when step has notesOptional=true', () => {
+      const workflowWithOptionalNotes = createWorkflow(
+        {
+          id: 'test-optional',
+          name: 'Test',
+          description: 'Test',
+          version: '1.0.0',
+          steps: [{ id: 'step1', title: 'Step 1', prompt: 'Do step 1', requireConfirmation: false, notesOptional: true }],
+        } as any,
+        createBundledSource()
+      );
+      const result = renderPendingPrompt({
+        workflow: workflowWithOptionalNotes,
+        stepId: 'step1',
+        loopPath: [],
+        truth: { events: [], manifest: [] },
+        runId: 'run_1',
+        nodeId: 'node_1',
+        rehydrateOnly: false,
+      });
+
+      expect(result.isOk()).toBe(true);
+      if (result.isOk()) {
         expect(result.value.prompt).toBe('Do step 1');
-        expect(result.value.prompt).not.toContain('OUTPUT REQUIREMENTS');
+        expect(result.value.prompt).not.toContain('NOTES REQUIRED');
       }
     });
 

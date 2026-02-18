@@ -276,12 +276,12 @@ describe('nextCall in live execution responses', () => {
     if (start.type !== 'success') return;
 
     const adv1 = await handleV2ContinueWorkflow(
-      { intent: 'advance', stateToken: start.data.stateToken, ackToken: start.data.ackToken } as any, ctx
+      { intent: 'advance', stateToken: start.data.stateToken, ackToken: start.data.ackToken, output: { notesMarkdown: 'Step A done.' } } as any, ctx
     );
     expect(adv1.type).toBe('success');
     if (adv1.type !== 'success') return;
 
-    // Should have step-b pending with a nextCall template
+// Should have step-b pending with a nextCall template
     expect(adv1.data.pending?.stepId).toBe('step-b');
     expect(adv1.data.nextCall).not.toBeNull();
     expect(adv1.data.nextCall!.params.stateToken).toBe(adv1.data.stateToken);
@@ -295,13 +295,13 @@ describe('nextCall in live execution responses', () => {
 
     // Advance through step-a
     const adv1 = await handleV2ContinueWorkflow(
-      { intent: 'advance', stateToken: start.data.stateToken, ackToken: start.data.ackToken } as any, ctx
+      { intent: 'advance', stateToken: start.data.stateToken, ackToken: start.data.ackToken, output: { notesMarkdown: 'Step A done.' } } as any, ctx
     );
     if (adv1.type !== 'success') return;
 
     // Advance through step-b (last step) → complete
     const adv2 = await handleV2ContinueWorkflow(
-      { intent: 'advance', stateToken: adv1.data.stateToken, ackToken: adv1.data.ackToken } as any, ctx
+      { intent: 'advance', stateToken: adv1.data.stateToken, ackToken: adv1.data.ackToken, output: { notesMarkdown: 'Step B done.' } } as any, ctx
     );
     expect(adv2.type).toBe('success');
     if (adv2.type !== 'success') return;
@@ -316,10 +316,10 @@ describe('nextCall in live execution responses', () => {
     const start = await handleV2StartWorkflow({ workflowId: 'two-step' } as any, ctx);
     if (start.type !== 'success') return;
 
-    // Use nextCall.params directly as the input (the whole point of the feature)
+    // Use nextCall.params directly as the input (the whole point of the feature), adding notes
     const nextCallParams = start.data.nextCall!.params;
     const adv1 = await handleV2ContinueWorkflow(
-      { ...nextCallParams } as any, ctx
+      { ...nextCallParams, output: { notesMarkdown: 'Step A done via nextCall.' } } as any, ctx
     );
     expect(adv1.type).toBe('success');
     if (adv1.type !== 'success') return;

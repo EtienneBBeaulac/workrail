@@ -11,12 +11,12 @@ export const UserOnlyDependencyReasonSchema = z.enum([
 
 export const GapReasonSchema = z.discriminatedUnion('category', [
   z.object({ category: z.literal('user_only_dependency'), detail: UserOnlyDependencyReasonSchema }),
-  z.object({ category: z.literal('contract_violation'), detail: z.enum(['missing_required_output', 'invalid_required_output']) }),
+  z.object({ category: z.literal('contract_violation'), detail: z.enum(['missing_required_output', 'invalid_required_output', 'missing_required_notes']) }),
   z.object({
     category: z.literal('capability_missing'),
     detail: z.enum(['required_capability_unavailable', 'required_capability_unknown']),
   }),
-  z.object({ category: z.literal('unexpected'), detail: z.enum(['invariant_violation', 'storage_corruption_detected']) }),
+  z.object({ category: z.literal('unexpected'), detail: z.enum(['invariant_violation', 'storage_corruption_detected', 'evaluation_error']) }),
 ]);
 
 export const GapResolutionSchema = z.discriminatedUnion('kind', [

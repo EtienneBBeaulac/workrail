@@ -30,6 +30,39 @@ describe('blocking-decision', () => {
     expect(shouldBlock('guided', [])).toBe(false);
   });
 
+  it('emits missing_notes when missingNotes is provided', () => {
+    const res = detectBlockingReasonsV1({
+      missingNotes: { stepId: 'phase-2-execute' },
+    });
+    expect(res.isOk()).toBe(true);
+    expect(res._unsafeUnwrap()).toEqual([
+      { kind: 'missing_notes', stepId: 'phase-2-execute' },
+    ]);
+  });
+
+  it('does NOT emit missing_notes when missingNotes is absent', () => {
+    const res = detectBlockingReasonsV1({});
+    expect(res.isOk()).toBe(true);
+    expect(res._unsafeUnwrap()).toEqual([]);
+  });
+
+  it('fails fast on non-delimiter-safe missingNotes stepId', () => {
+    const res = detectBlockingReasonsV1({ missingNotes: { stepId: 'NotSafe/Step' } });
+    expect(res.isErr()).toBe(true);
+  });
+
+  it('combines missing_notes with other reasons', () => {
+    const res = detectBlockingReasonsV1({
+      missingNotes: { stepId: 'phase-3-report' },
+      outputRequirement: { kind: 'missing', contractRef: 'wr.validationCriteria' },
+    });
+    expect(res.isOk()).toBe(true);
+    const reasons = res._unsafeUnwrap();
+    expect(reasons).toHaveLength(2);
+    expect(reasons.some(r => r.kind === 'missing_required_output')).toBe(true);
+    expect(reasons.some(r => r.kind === 'missing_notes')).toBe(true);
+  });
+
   it('buildBlockerReport is bounded to MAX_BLOCKERS', () => {
     const reasons: ReasonV1[] = [];
     for (let i = 0; i < 25; i++) {

@@ -187,6 +187,7 @@
         "runCondition": { "$ref": "#/$defs/condition" },
         "validationCriteria": { "oneOf": [ { "type": "array", "items": { "$ref": "#/$defs/validationRule" } }, { "$ref": "#/$defs/validationComposition" } ] },
         "outputContract": { "$ref": "#/$defs/outputContract" },
+        "notesOptional": { "type": "boolean", "description": "When true, output.notesMarkdown is not required for this step. Steps with outputContract are automatically exempt. Use sparingly for mechanical steps with no substantive work to document." },
         "functionDefinitions": { "type": "array", "items": { "$ref": "#/$defs/functionDefinition" } },
         "functionCalls": { "type": "array", "items": { "$ref": "#/$defs/functionCall" } },
         "functionReferences": { "type": "array", "items": { "type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*\\(\\)$" } }
@@ -242,6 +243,10 @@
         },
         "runCondition": {
           "$ref": "#/$defs/condition"
+        },
+        "notesOptional": {
+          "type": "boolean",
+          "description": "When true, output.notesMarkdown is not required for this step. Steps with outputContract are automatically exempt."
         }
       },
       "required": [

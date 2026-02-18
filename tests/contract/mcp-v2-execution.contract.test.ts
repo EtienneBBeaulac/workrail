@@ -137,7 +137,7 @@ describe('MCP contract: v2 start_workflow / continue_workflow (Slice 3)', () => 
     expect(rehydrate2.data.isComplete).toBe(rehydrate1.data.isComplete);
     expect(rehydrate2.data.pending).toEqual(rehydrate1.data.pending);
 
-    const ack1 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: start.data.stateToken, ackToken: start.data.ackToken } as any, ctx);
+    const ack1 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: start.data.stateToken, ackToken: start.data.ackToken, output: { notesMarkdown: 'Step completed.' } } as any, ctx);
     expect(ack1.type).toBe('success');
     if (ack1.type !== 'success') return;
     // This workflow has a single step; after acknowledging it we should complete.
@@ -145,7 +145,7 @@ describe('MCP contract: v2 start_workflow / continue_workflow (Slice 3)', () => 
     expect(ack1.data.isComplete).toBe(true);
     expect(ack1.data.pending).toBeNull();
 
-    const ack2 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: start.data.stateToken, ackToken: start.data.ackToken } as any, ctx);
+    const ack2 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: start.data.stateToken, ackToken: start.data.ackToken, output: { notesMarkdown: 'Step completed.' } } as any, ctx);
     expect(ack2).toEqual(ack1); // idempotent replay
 
     // Verify v2 context is properly initialized

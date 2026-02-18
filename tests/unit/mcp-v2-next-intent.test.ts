@@ -218,7 +218,7 @@ describe('v2 execution: nextIntent', () => {
         }),
       });
 
-      const res = await handleV2ContinueWorkflow({ intent: 'advance', stateToken, ackToken } as any, dummyCtx(v2));
+      const res = await handleV2ContinueWorkflow({ intent: 'advance', stateToken, ackToken, output: { notesMarkdown: 'Step 1 completed.' } } as any, dummyCtx(v2));
       expect(res.type).toBe('success');
       if (res.type !== 'success') return;
 
