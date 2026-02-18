@@ -19,6 +19,7 @@ import {
   generateSuggestions,
   formatSuggestionDetails,
   DEFAULT_SUGGESTION_CONFIG,
+  patchTemplateForFailedOptionals,
 } from './validation/index.js';
 import { toBoundedJsonValue } from './validation/bounded-json.js';
 import type { PreValidateResult } from './validation/workflow-next-prevalidate.js';
@@ -82,13 +83,27 @@ export function createHandler<TInput extends z.ZodType, TOutput>(
       const suggestionResult = generateSuggestions(args, schema, DEFAULT_SUGGESTION_CONFIG);
       const suggestionDetails = formatSuggestionDetails(suggestionResult);
 
+      // Restore optional fields that the agent provided with the wrong type.
+      // Without this, agents see a template that omits their field (e.g., context)
+      // and infer they should drop it entirely on retry — exactly the wrong move.
+      const patchedTemplate = patchTemplateForFailedOptionals(
+        (suggestionDetails.correctTemplate as Readonly<Record<string, unknown>> | null) ?? null,
+        args,
+        parseResult.error.errors,
+        schema,
+        DEFAULT_SUGGESTION_CONFIG.maxTemplateDepth,
+      );
+      const patchedDetails = patchedTemplate !== suggestionDetails.correctTemplate
+        ? { ...suggestionDetails, correctTemplate: patchedTemplate }
+        : suggestionDetails;
+
       return toMcpResult(
         errNotRetryable('VALIDATION_ERROR', 'Invalid input', {
           validationErrors: parseResult.error.errors.map(e => ({
             path: e.path.join('.'),
             message: e.message,
           })),
-          ...suggestionDetails,
+          ...patchedDetails,
         })
       );
     }

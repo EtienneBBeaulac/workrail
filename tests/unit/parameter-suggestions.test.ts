@@ -20,6 +20,7 @@ import {
   generateSuggestions,
   formatSuggestionDetails,
   hasSuggestions,
+  patchTemplateForFailedOptionals,
   DEFAULT_SUGGESTION_CONFIG,
   EMPTY_SUGGESTION_RESULT,
 } from '../../src/mcp/validation/index.js';
@@ -413,5 +414,115 @@ describe('Real-world agent error scenarios', () => {
     // Template should show correct structure
     expect(result.correctTemplate).not.toBeNull();
     expect(result.correctTemplate).toHaveProperty('workflowId');
+  });
+});
+
+// -----------------------------------------------------------------------------
+// patchTemplateForFailedOptionals Tests
+// -----------------------------------------------------------------------------
+
+describe('patchTemplateForFailedOptionals', () => {
+  const SchemaWithOptionals = z.object({
+    workflowId: z.string().describe('required'),
+    context: z.record(z.unknown()).optional().describe('optional context object'),
+    workspacePath: z.string().optional().describe('optional path'),
+  });
+
+  it('restores optional field that was provided as wrong type (string instead of object)', () => {
+    // Simulate: agent passed context: "some problem description"
+    const args = { workflowId: 'my-workflow', context: 'some problem description' };
+    const parseResult = SchemaWithOptionals.safeParse(args);
+    expect(parseResult.success).toBe(false);
+
+    const baseTemplate = generateTemplate(SchemaWithOptionals)!;
+    // Base template should NOT include context (it's optional and was skipped)
+    expect(baseTemplate).not.toHaveProperty('context');
+
+    const patched = patchTemplateForFailedOptionals(
+      baseTemplate,
+      args,
+      parseResult.success ? [] : parseResult.error.errors,
+      SchemaWithOptionals,
+      DEFAULT_SUGGESTION_CONFIG.maxTemplateDepth,
+    );
+
+    // Patched template SHOULD include context as an example object
+    expect(patched).not.toBeNull();
+    expect(patched).toHaveProperty('context');
+    expect(typeof patched!.context).toBe('object');
+    // workflowId should still be there
+    expect(patched).toHaveProperty('workflowId');
+  });
+
+  it('does not add fields that were not provided by the agent', () => {
+    // Agent omitted context entirely — no need to patch it
+    const args = { workflowId: 'my-workflow', context: 'oops-a-string' };
+    const parseResult = SchemaWithOptionals.safeParse(args);
+    const baseTemplate = generateTemplate(SchemaWithOptionals)!;
+
+    const patched = patchTemplateForFailedOptionals(
+      baseTemplate,
+      { workflowId: 'my-workflow' }, // no context provided
+      parseResult.success ? [] : parseResult.error.errors,
+      SchemaWithOptionals,
+      DEFAULT_SUGGESTION_CONFIG.maxTemplateDepth,
+    );
+
+    // workspacePath was not provided — should NOT appear in template
+    expect(patched).not.toHaveProperty('workspacePath');
+  });
+
+  it('does not overwrite fields already in the template', () => {
+    const args = { workflowId: 'my-workflow', context: 'wrong' };
+    const parseResult = SchemaWithOptionals.safeParse(args);
+    const baseTemplateWithContext: Readonly<Record<string, unknown>> = {
+      workflowId: '<The workflow ID>',
+      context: { alreadyPresent: 'yes' }, // Already in template
+    };
+
+    const patched = patchTemplateForFailedOptionals(
+      baseTemplateWithContext,
+      args,
+      parseResult.success ? [] : parseResult.error.errors,
+      SchemaWithOptionals,
+      DEFAULT_SUGGESTION_CONFIG.maxTemplateDepth,
+    );
+
+    // Should not overwrite the already-present context value
+    expect(patched).toHaveProperty('context');
+    expect((patched!.context as Record<string, unknown>).alreadyPresent).toBe('yes');
+  });
+
+  it('returns null when correctTemplate is null', () => {
+    const args = { workflowId: 'my-workflow', context: 'wrong' };
+    const parseResult = SchemaWithOptionals.safeParse(args);
+
+    const result = patchTemplateForFailedOptionals(
+      null,
+      args,
+      parseResult.success ? [] : parseResult.error.errors,
+      SchemaWithOptionals,
+      DEFAULT_SUGGESTION_CONFIG.maxTemplateDepth,
+    );
+
+    expect(result).toBeNull();
+  });
+
+  it('returns same reference when no patching was needed', () => {
+    // No optional fields failed — template should be returned as-is
+    const args = { workflowId: 'my-workflow' }; // workflowId is wrong type but that's required
+    const parseResult = SchemaWithOptionals.safeParse(args);
+    const baseTemplate = generateTemplate(SchemaWithOptionals)!;
+
+    const patched = patchTemplateForFailedOptionals(
+      baseTemplate,
+      args,
+      parseResult.success ? [] : parseResult.error.errors,
+      SchemaWithOptionals,
+      DEFAULT_SUGGESTION_CONFIG.maxTemplateDepth,
+    );
+
+    // No optional fields failed — same reference returned
+    expect(patched).toBe(baseTemplate);
   });
 });

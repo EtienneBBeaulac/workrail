@@ -54,4 +54,6 @@ export {
   generateSuggestions,
   formatSuggestionDetails,
   hasSuggestions,
+  patchTemplateForFailedOptionals,
 } from './suggestion-generator.js';
+export type { ZodIssue } from './suggestion-generator.js';
