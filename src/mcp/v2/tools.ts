@@ -13,6 +13,10 @@ export type V2InspectWorkflowInput = z.infer<typeof V2InspectWorkflowInput>;
 export const V2StartWorkflowInput = z.object({
   workflowId: z.string().min(1).regex(/^[A-Za-z0-9_-]+$/, 'Workflow ID must contain only letters, numbers, hyphens, and underscores').describe('The workflow ID to start'),
   context: z.record(z.unknown()).optional().describe('External facts influencing execution (ticketId, branch, constraints). Pass once at start to establish baseline. WorkRail auto-loads context on subsequent continue_workflow calls. Only pass context again if facts have CHANGED (e.g., user provided new information). Do NOT re-pass unchanged values.'),
+  workspacePath: z.string()
+    .refine((p) => p.startsWith('/'), 'workspacePath must be an absolute path (starting with /)')
+    .optional()
+    .describe('Absolute path to your current workspace directory (e.g. the "Workspace:" value from your system parameters). Used to anchor this session to your workspace for future resume_session discovery. Pass this on every start_workflow call. If omitted, WorkRail uses the server process directory which may not match your workspace.'),
 });
 export type V2StartWorkflowInput = z.infer<typeof V2StartWorkflowInput>;
 
@@ -82,6 +86,10 @@ export const V2ResumeSessionInput = z.object({
   gitHeadSha: z.string().regex(/^[0-9a-f]{40}$/).optional().describe(
     'Git HEAD SHA to match against session observations. Overrides auto-detected HEAD.'
   ),
+  workspacePath: z.string()
+    .refine((p) => p.startsWith('/'), 'workspacePath must be an absolute path (starting with /)')
+    .optional()
+    .describe('Absolute path to your current workspace directory (e.g. the "Workspace:" value from your system parameters). Used to resolve your git branch and HEAD SHA for workspace-aware session matching. Pass the same path used in the original start_workflow call. If omitted, WorkRail uses the server process directory which may not match your workspace.'),
 }).strict();
 export type V2ResumeSessionInput = z.infer<typeof V2ResumeSessionInput>;
 

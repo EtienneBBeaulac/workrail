@@ -1039,7 +1039,9 @@ OUTPUT TAGGING:
 - When providing output, use: {"output": {"notesMarkdown": "[CHAT_ID=chat-4b-persistence] ...
 
 STEPS:
-1. Call start_workflow with workflowId: "test-session-persistence"
+1. Call start_workflow with:
+   - workflowId: "test-session-persistence"
+   - workspacePath: <the "Workspace:" path from your system parameters>
 
 2. Advance through the first 3 steps, providing the requested unique markers:
    - Step 1: {"output": {"notesMarkdown": "[CHAT_ID=chat-4b-persistence] UNIQUE_MARKER_ALPHA completed"}}
@@ -1085,9 +1087,13 @@ TOOLING:
 - Use ONLY v2 tools: resume_session, continue_workflow
 
 STEPS:
-1. Call resume_session with query: "UNIQUE_MARKER_ALPHA"
+1. Call resume_session with:
+   - query: "UNIQUE_MARKER_ALPHA"
+   - workspacePath: <the "Workspace:" path from your system parameters — SAME path used in E1>
 
-2. Call resume_session with query: "UNIQUE_MARKER_BETA"
+2. Call resume_session with:
+   - query: "UNIQUE_MARKER_BETA"
+   - workspacePath: <same workspacePath as above>
 
 3. Did both queries find the same session?
 
@@ -1105,7 +1111,7 @@ ANALYSIS:
 ```
 
 **Expected Outcomes** (operator-only):
-- Both queries find the same session via `matched_notes`
+- Both queries find the same session via `matched_notes` (or tier 1/2 if git matches)
 - Rehydrate shows correct pending step (step-4-delta)
 - Agent completes the workflow from the resumed state
 - Proves cross-chat session continuity works end-to-end
@@ -1142,11 +1148,22 @@ After running E1 and E2, verify the session data on disk:
 4. Verify output notes contain UNIQUE_MARKER strings:
    grep -r "UNIQUE_MARKER" ~/.workrail/data/sessions/
 
+5. Verify workspace observations are correct for the E1 session:
+   Find the E1 session (most recent with UNIQUE_MARKER_ALPHA) and check:
+   grep -A2 '"key": "git_branch"' ~/.workrail/data/sessions/sess_*/events/*.jsonl
+   grep -A2 '"key": "git_head_sha"' ~/.workrail/data/sessions/sess_*/events/*.jsonl
+
+   The git_branch and git_head_sha values should match the workspace where E1 was run
+   (the actual zillow/workrail/etc. workspace — NOT the workrail server repo at
+   /Users/etienneb/git/personal/workrail which was the previous bug).
+
 EXPECTED:
 - All event files valid JSONL
 - Event indices monotonically increasing
 - Output notes persisted verbatim
 - Manifest records reference correct segment files
+- git_branch observation matches the workspace's actual branch (not "main" from workrail repo)
+- git_head_sha observation matches the workspace's actual HEAD SHA
 ```
 
 ---
