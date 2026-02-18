@@ -7,7 +7,8 @@
  * Philosophy:
  * - Pure functions (deterministic, no side effects)
  * - Validate at boundaries, trust inside
- * - Defensive handling of unknown Zod types
+ * - Schemas with transforms/refinements provide a separate "shape schema"
+ *   for introspection (interface segregation)
  *
  * @module mcp/validation/schema-introspection
  */
@@ -17,8 +18,11 @@ import { z } from 'zod';
 /**
  * Extract all expected keys from a Zod object schema.
  *
- * @param schema - A Zod schema (must be ZodObject for meaningful results)
- * @returns Array of expected key names (empty if not an object schema)
+ * For schemas with transforms/refinements, pass the separate shape schema
+ * (the canonical source) rather than the wrapped validation schema.
+ *
+ * @param schema - A bare ZodObject schema (introspection contract)
+ * @returns Array of expected key names (empty if not a ZodObject)
  */
 export function extractExpectedKeys(schema: z.ZodType): readonly string[] {
   if (schema instanceof z.ZodObject) {
@@ -31,8 +35,9 @@ export function extractExpectedKeys(schema: z.ZodType): readonly string[] {
  * Extract required keys from a Zod object schema.
  *
  * A key is required if it's not optional and has no default.
+ * For schemas with transforms, pass the shape schema (canonical source).
  *
- * @param schema - A Zod schema
+ * @param schema - A bare ZodObject schema
  * @returns Array of required key names
  */
 export function extractRequiredKeys(schema: z.ZodType): readonly string[] {
@@ -98,12 +103,16 @@ export function findMissingRequiredKeys(args: unknown, schema: z.ZodType): reado
  * @param schema - A Zod schema
  * @param depth - Current recursion depth (for limiting nested objects)
  * @param maxDepth - Maximum recursion depth
+ * @param includeOptional - When true, optional object fields are included in
+ *   the output. Use true for error-guidance templates so agents see the full
+ *   valid structure rather than a minimal required-only skeleton.
  * @returns Example value or placeholder string
  */
 export function generateExampleValue(
   schema: z.ZodType,
   depth: number = 0,
-  maxDepth: number = 3
+  maxDepth: number = 3,
+  includeOptional: boolean = false,
 ): unknown {
   // Prevent infinite recursion
   if (depth > maxDepth) {
@@ -117,7 +126,7 @@ export function generateExampleValue(
 
   // Handle ZodOptional - unwrap and generate
   if (schema instanceof z.ZodOptional) {
-    return generateExampleValue(schema._def.innerType, depth, maxDepth);
+    return generateExampleValue(schema._def.innerType, depth, maxDepth, includeOptional);
   }
 
   // Handle ZodObject
@@ -127,9 +136,11 @@ export function generateExampleValue(
 
     for (const [key, value] of Object.entries(shape)) {
       const field = value as z.ZodType;
-      // Skip optional fields in examples to keep them concise
-      if (field instanceof z.ZodOptional) continue;
-      result[key] = generateExampleValue(field, depth + 1, maxDepth);
+      // When includeOptional is false, skip optional fields to keep templates
+      // concise (e.g. for required-field examples). When true (error guidance),
+      // include them so agents can see the full valid input structure.
+      if (!includeOptional && field instanceof z.ZodOptional) continue;
+      result[key] = generateExampleValue(field, depth + 1, maxDepth, includeOptional);
     }
 
     return result;
@@ -139,7 +150,7 @@ export function generateExampleValue(
   if (schema instanceof z.ZodDiscriminatedUnion) {
     const options = schema._def.options as Array<z.ZodType>;
     if (options.length > 0) {
-      return generateExampleValue(options[0], depth + 1, maxDepth);
+      return generateExampleValue(options[0], depth + 1, maxDepth, includeOptional);
     }
     return {};
   }
@@ -192,9 +203,9 @@ export function generateExampleValue(
     return '<any>';
   }
 
-  // Handle ZodEffects (transforms, refinements)
+  // Handle ZodEffects (transforms, refinements) — unwrap to inner schema
   if (schema instanceof z.ZodEffects) {
-    return generateExampleValue(schema._def.schema, depth, maxDepth);
+    return generateExampleValue(schema._def.schema, depth, maxDepth, includeOptional);
   }
 
   // Fallback
@@ -204,21 +215,26 @@ export function generateExampleValue(
 /**
  * Generate a complete template showing expected input structure.
  *
- * Only includes required fields to keep the template concise.
+ * For schemas with transforms/refinements, pass the shape schema (canonical
+ * source) not the wrapped validation schema. This follows interface segregation:
+ * introspection reads structure, validation enforces constraints.
  *
- * @param schema - A Zod schema
+ * @param schema - A bare ZodObject schema (introspection contract)
  * @param maxDepth - Maximum recursion depth
- * @returns Template object or null if schema is not an object
+ * @param includeOptional - When true, optional fields are included. Use true
+ *   for error-guidance templates so agents see the full valid structure.
+ * @returns Template object or null if not a ZodObject
  */
 export function generateTemplate(
   schema: z.ZodType,
-  maxDepth: number = 3
+  maxDepth: number = 3,
+  includeOptional: boolean = false,
 ): Readonly<Record<string, unknown>> | null {
   if (!(schema instanceof z.ZodObject)) {
     return null;
   }
 
-  const example = generateExampleValue(schema, 0, maxDepth);
+  const example = generateExampleValue(schema, 0, maxDepth, includeOptional);
   if (typeof example === 'object' && example !== null) {
     return example as Readonly<Record<string, unknown>>;
   }

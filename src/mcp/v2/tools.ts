@@ -20,7 +20,18 @@ export const V2StartWorkflowInput = z.object({
 });
 export type V2StartWorkflowInput = z.infer<typeof V2StartWorkflowInput>;
 
-export const V2ContinueWorkflowInput = z.object({
+/**
+ * Canonical shape schema for continue_workflow input (introspection contract).
+ *
+ * This is the single source of truth for field names, types, and descriptions.
+ * The validation schema (V2ContinueWorkflowInput) derives from this via transforms.
+ *
+ * Introspection functions (extractExpectedKeys, generateTemplate, patchTemplateForFailedOptionals)
+ * read THIS schema, not the wrapped validation schema.
+ *
+ * @canonical
+ */
+export const V2ContinueWorkflowInputShape = z.object({
   intent: z.enum(['advance', 'rehydrate']).optional().describe(
     'What you want to do. Auto-inferred from ackToken if omitted: ' +
     'ackToken present → "advance", ackToken absent → "rehydrate". ' +
@@ -37,43 +48,55 @@ export const V2ContinueWorkflowInput = z.object({
     })
     .optional()
     .describe('Durable output to attach to the current node. Only valid when intent is "advance".'),
-}).strict().transform((data) => {
-  // Auto-infer intent from ackToken presence when not explicitly provided.
-  // ackToken present → advance, ackToken absent → rehydrate.
-  const intent = data.intent ?? (data.ackToken ? 'advance' : 'rehydrate');
-  return { ...data, intent } as typeof data & { intent: 'advance' | 'rehydrate' };
-}).pipe(z.custom<{ intent: 'advance' | 'rehydrate'; stateToken: string; ackToken?: string; context?: Record<string, unknown>; output?: { notesMarkdown?: string; artifacts?: unknown[] } }>().superRefine((data, ctx) => {
-  if (data.intent === 'advance' && !data.ackToken) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['ackToken'],
-      message:
-        'intent is "advance" but ackToken is missing. ' +
-        'To advance to the next step, include the ackToken from the previous start_workflow or continue_workflow response. ' +
-        'If you don\'t have an ackToken, set intent to "rehydrate" to recover the current step.',
-    });
-  }
-  if (data.intent === 'rehydrate' && data.ackToken) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['ackToken'],
-      message:
-        'intent is "rehydrate" but ackToken was provided. ' +
-        'Rehydration recovers the current step without advancing — it does not accept ackToken. ' +
-        'To advance, set intent to "advance". To rehydrate, remove ackToken.',
-    });
-  }
-  if (data.intent === 'rehydrate' && data.output) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['output'],
-      message:
-        'intent is "rehydrate" but output was provided. ' +
-        'Rehydration is read-only state recovery — it does not accept output. ' +
-        'To submit output and advance, set intent to "advance" and include ackToken.',
-    });
-  }
-}));
+}).strict();
+
+/**
+ * Validation schema for continue_workflow (runtime contract).
+ *
+ * Derives from V2ContinueWorkflowInputShape and adds:
+ * - Auto-infer intent from ackToken presence
+ * - Cross-field validation (intent vs ackToken/output)
+ *
+ * Handlers use THIS schema for validation. Introspection uses the shape schema.
+ */
+export const V2ContinueWorkflowInput = V2ContinueWorkflowInputShape
+  .transform((data) => {
+    // Auto-infer intent from ackToken presence when not explicitly provided.
+    const intent = data.intent ?? (data.ackToken ? 'advance' : 'rehydrate');
+    return { ...data, intent } as typeof data & { intent: 'advance' | 'rehydrate' };
+  })
+  .pipe(z.custom<{ intent: 'advance' | 'rehydrate'; stateToken: string; ackToken?: string; context?: Record<string, unknown>; output?: { notesMarkdown?: string; artifacts?: unknown[] } }>().superRefine((data, ctx) => {
+    if (data.intent === 'advance' && !data.ackToken) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['ackToken'],
+        message:
+          'intent is "advance" but ackToken is missing. ' +
+          'To advance to the next step, include the ackToken from the previous start_workflow or continue_workflow response. ' +
+          'If you don\'t have an ackToken, set intent to "rehydrate" to recover the current step.',
+      });
+    }
+    if (data.intent === 'rehydrate' && data.ackToken) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['ackToken'],
+        message:
+          'intent is "rehydrate" but ackToken was provided. ' +
+          'Rehydration recovers the current step without advancing — it does not accept ackToken. ' +
+          'To advance, set intent to "advance". To rehydrate, remove ackToken.',
+      });
+    }
+    if (data.intent === 'rehydrate' && data.output) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['output'],
+        message:
+          'intent is "rehydrate" but output was provided. ' +
+          'Rehydration is read-only state recovery — it does not accept output. ' +
+          'To submit output and advance, set intent to "advance" and include ackToken.',
+      });
+    }
+  }));
 export type V2ContinueWorkflowInput = z.infer<typeof V2ContinueWorkflowInput>;
 
 export const V2ResumeSessionInput = z.object({
