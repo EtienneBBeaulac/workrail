@@ -31,10 +31,12 @@ export function buildBlockedOutcome(args: {
 }): RA<void, InternalError | SessionEventLogStoreError | SnapshotStoreError> {
   const { mode, snap, lock, ports } = args;
   const { truth, sessionId, runId, currentNodeId, attemptId, workflowHash } = args.ctx;
-  const { reasons, effectiveReasons, outputRequirement, validation } = args.computed;
+  const { reasons, outputRequirement, validation } = args.computed;
   const { snapshotStore, sessionStore, sha256, idFactory } = ports;
 
-  const blockersRes = buildBlockerReport(effectiveReasons);
+  // Single source of truth: reasons = post-guardrail blocking reasons.
+  // Use the same array for both blockers and primaryReason (architectural fix).
+  const blockersRes = buildBlockerReport(reasons);
   if (blockersRes.isErr()) {
     return errAsync({ kind: 'invariant_violation' as const, message: blockersRes.error.message } as const);
   }
@@ -65,7 +67,9 @@ export function buildBlockedOutcome(args: {
   const extraEventsToAppend = [validationEventRes.value];
   const primaryReason = reasons[0];
   if (!primaryReason) {
-    return errAsync({ kind: 'invariant_violation' as const, message: 'shouldBlockNow=true requires at least one reason' } as const);
+    // Invariant: shouldBlockNow=true requires reasons.length > 0 (checked at call site).
+    // If this fires, the shouldBlock logic is broken.
+    return errAsync({ kind: 'invariant_violation' as const, message: 'shouldBlockNow=true requires at least one effective reason (post-guardrails)' } as const);
   }
 
   const blockedSnapshotRes = buildBlockedNodeSnapshot({

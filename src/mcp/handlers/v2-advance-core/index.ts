@@ -110,10 +110,17 @@ export interface AdvanceContext {
   readonly pendingStep: ValidatedAdvanceInputs['pendingStep'];
 }
 
-/** Computed blocking/validation results from the advance evaluation phase. */
+/**
+ * Computed blocking/validation results from the advance evaluation phase.
+ *
+ * `reasons` = post-guardrail blocking reasons (what actually triggered the block).
+ * This is the single source of truth for all blocking decisions and blocker construction.
+ *
+ * Philosophy: removed pre-guardrail reasons array to enforce single source of truth.
+ * Using post-guardrail reasons everywhere prevents array-selection bugs.
+ */
 export interface ComputedAdvanceResults {
   readonly reasons: readonly ReasonV1[];
-  readonly effectiveReasons: readonly ReasonV1[];
   readonly outputRequirement: ReturnType<typeof getOutputRequirementStatusWithArtifactsV1>;
   readonly validation: ValidationResult | undefined;
 }
@@ -220,7 +227,9 @@ export function executeAdvanceCore(args: {
       };
 
       const ctx: AdvanceContext = { truth, sessionId, runId, currentNodeId, attemptId, workflowHash, inputOutput, pinnedWorkflow, engineState, pendingStep };
-      const computed: ComputedAdvanceResults = { reasons, effectiveReasons, outputRequirement, validation: evalValidation };
+      // Use effectiveReasons (post-guardrail) as the single source of truth.
+      // Note: evaluation_error is never-downgradable, so reasons = effectiveReasons here.
+      const computed: ComputedAdvanceResults = { reasons: effectiveReasons, outputRequirement, validation: evalValidation };
       const portsLocal: AdvanceCorePorts = { snapshotStore, sessionStore, sha256, idFactory };
 
       return buildBlockedOutcome({ mode, snap, ctx, computed, lock, ports: portsLocal });
@@ -246,17 +255,20 @@ export function executeAdvanceCore(args: {
         ? { stepId: v.pendingStep.stepId }
         : undefined;
 
-    const reasonsRes = detectBlockingReasonsV1({ outputRequirement, missingNotes });
-    if (reasonsRes.isErr()) {
-      return errAsync({ kind: 'invariant_violation' as const, message: reasonsRes.error.message } as const);
+    const rawReasonsRes = detectBlockingReasonsV1({ outputRequirement, missingNotes });
+    if (rawReasonsRes.isErr()) {
+      return errAsync({ kind: 'invariant_violation' as const, message: rawReasonsRes.error.message } as const);
     }
-    const reasons = reasonsRes.value;
+    const rawReasons = rawReasonsRes.value;
 
-    const { blocking: effectiveReasons } = applyGuardrails(v.riskPolicy, reasons);
-    const shouldBlockNow = effectiveReasons.length > 0 && shouldBlock(v.autonomy, effectiveReasons);
+    // Apply guardrails: post-guardrail reasons are the single source of truth for all
+    // blocking decisions. Using effectiveReasons everywhere (not rawReasons) prevents
+    // array-selection bugs. Rename to `reasons` since it's THE canonical reasons array.
+    const { blocking: reasons } = applyGuardrails(v.riskPolicy, rawReasons);
+    const shouldBlockNow = reasons.length > 0 && shouldBlock(v.autonomy, reasons);
 
     const ctx: AdvanceContext = { truth, sessionId, runId, currentNodeId, attemptId, workflowHash, inputOutput, pinnedWorkflow, engineState, pendingStep };
-    const computed: ComputedAdvanceResults = { reasons, effectiveReasons, outputRequirement, validation };
+    const computed: ComputedAdvanceResults = { reasons, outputRequirement, validation };
     const ports: AdvanceCorePorts = { snapshotStore, sessionStore, sha256, idFactory };
 
     // ── 5. Blocked path ─────────────────────────────────────────────────
