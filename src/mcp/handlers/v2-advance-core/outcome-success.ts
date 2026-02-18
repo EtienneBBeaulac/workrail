@@ -52,7 +52,7 @@ export function buildSuccessOutcome(args: {
 }): RA<void, InternalError | SessionEventLogStoreError | SnapshotStoreError> {
   const { mode, v, lock, ports } = args;
   const { truth, sessionId, runId, currentNodeId, attemptId, workflowHash, inputOutput, pinnedWorkflow, engineState, pendingStep } = args.ctx;
-  const { effectiveReasons, outputRequirement, validation } = args.computed;
+  const { reasons, outputRequirement, validation } = args.computed;
   const { snapshotStore, sessionStore, sha256, idFactory } = ports;
 
   // Compile + interpret
@@ -92,10 +92,10 @@ export function buildSuccessOutcome(args: {
   const extraEventsToAppend: PartialEvent[] = [];
 
   // Gap events (never-stop mode)
-  if (v.autonomy === 'full_auto_never_stop' && effectiveReasons.length > 0) {
+  if (v.autonomy === 'full_auto_never_stop' && reasons.length > 0) {
     extraEventsToAppend.push(
       ...buildGapEvents({
-        gaps: effectiveReasons,
+        gaps: reasons,
         sessionId: String(sessionId),
         runId,
         nodeId: currentNodeId,
