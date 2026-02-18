@@ -105,7 +105,8 @@ TOOLING:
 - Never use v1 tools
 
 OUTPUT TAGGING:
-- Prefix every notesMarkdown with: [CHAT_ID=chat-4c-checkpoint-basic]
+- When providing output via continue_workflow, use: {"output": {"notesMarkdown": "[CHAT_ID=chat-4c-checkpoint-basic] ..."}}
+- The CHAT_ID prefix helps the operator track which test chat produced which session data
 
 STEPS:
 1. Call start_workflow with workflowId: "workflow-diagnose-environment"
@@ -118,7 +119,7 @@ STEPS:
 
 4. Now actually advance the workflow:
    Call continue_workflow with the stateToken and ackToken from step 1
-   Output: {"notesMarkdown": "[CHAT_ID=chat-4c-checkpoint-basic] Step 1 complete"}
+   Provide output: {"output": {"notesMarkdown": "[CHAT_ID=chat-4c-checkpoint-basic] Step 1 complete"}}
 
 ANALYSIS:
 - What does checkpoint_workflow seem to do?
@@ -152,7 +153,7 @@ TOOLING:
 - Use ONLY v2 tools
 
 OUTPUT TAGGING:
-- Prefix: [CHAT_ID=chat-4c-checkpoint-repeat]
+- When providing output, use: {"output": {"notesMarkdown": "[CHAT_ID=chat-4c-checkpoint-repeat] ..."}}
 
 STEPS:
 1. Call start_workflow with workflowId: "workflow-diagnose-environment"
@@ -197,7 +198,7 @@ TOOLING:
 - Use ONLY v2 tools
 
 OUTPUT TAGGING:
-- Prefix: [CHAT_ID=chat-4c-checkpoint-errors]
+- When providing output, use: {"output": {"notesMarkdown": "[CHAT_ID=chat-4c-checkpoint-errors] ...
 
 STEPS:
 1. Call start_workflow with workflowId: "workflow-diagnose-environment"
@@ -239,7 +240,7 @@ TOOLING:
 - Use ONLY v2 tools
 
 OUTPUT TAGGING:
-- Prefix: [CHAT_ID=chat-4c-checkpoint-lifecycle]
+- When providing output, use: {"output": {"notesMarkdown": "[CHAT_ID=chat-4c-checkpoint-lifecycle] ...
 
 STEPS:
 1. Call start_workflow with workflowId: "bug-investigation"
@@ -248,7 +249,7 @@ STEPS:
 2. Call checkpoint_workflow with checkpointToken_step0
 
 3. Advance step 1: continue_workflow with stateToken + ackToken
-   Output: {"notesMarkdown": "[CHAT_ID=chat-4c-checkpoint-lifecycle] Step 1"}
+   Provide output: {"output": {"notesMarkdown": "[CHAT_ID=chat-4c-checkpoint-lifecycle] Step 1"}}
    Note the new checkpointToken (call it checkpointToken_step1)
 
 4. Compare checkpointToken_step0 and checkpointToken_step1 -- same or different?
@@ -286,7 +287,7 @@ TOOLING:
 - Use ONLY v2 tools
 
 OUTPUT TAGGING:
-- Prefix: [CHAT_ID=chat-4c-checkpoint-in-loop]
+- When providing output, use: {"output": {"notesMarkdown": "[CHAT_ID=chat-4c-checkpoint-in-loop] ...
 
 STEPS:
 1. Call start_workflow with workflowId: "test-artifact-loop-control"
@@ -341,14 +342,14 @@ TOOLING:
 - Use ONLY v2 tools
 
 OUTPUT TAGGING:
-- Prefix: [CHAT_ID=chat-4c-resume-setup]
+- When providing output, use: {"output": {"notesMarkdown": "[CHAT_ID=chat-4c-resume-setup] ...
 
 STEPS:
 1. Call start_workflow with workflowId: "bug-investigation"
 
 2. Advance through 2 steps:
-   - Step 1 output: {"notesMarkdown": "[CHAT_ID=chat-4c-resume-setup] Investigating memory leak in UserService"}
-   - Step 2 output: {"notesMarkdown": "[CHAT_ID=chat-4c-resume-setup] Found root cause: unbounded cache in UserService.getProfile()"}
+   - Step 1 output: {"output": {"notesMarkdown": "[CHAT_ID=chat-4c-resume-setup] Investigating memory leak in UserService"}}
+   - Step 2 output: {"output": {"notesMarkdown": "[CHAT_ID=chat-4c-resume-setup] Found root cause: unbounded cache in UserService.getProfile()"}}
 
 3. STOP. Do NOT complete the workflow. The operator will start Chat B1b.
 ```
@@ -377,7 +378,7 @@ STEPS:
    What step is pending? Does it make sense as a continuation?
 
 4. If you can advance, call continue_workflow with stateToken + ackToken
-   Output: {"notesMarkdown": "[CHAT_ID=chat-4c-resume-discover] Resuming and continuing"}
+   Provide output: {"output": {"notesMarkdown": "[CHAT_ID=chat-4c-resume-discover] Resuming and continuing"}}
 
 ANALYSIS:
 - Was the resume_session response sufficient to choose the right session?
@@ -557,7 +558,7 @@ TOOLING:
 - Use ONLY v2 tools
 
 OUTPUT TAGGING:
-- Prefix: [CHAT_ID=chat-adr008-retry-basic]
+- When providing output, use: {"output": {"notesMarkdown": "[CHAT_ID=chat-adr008-retry-basic] ...
 
 STEPS:
 1. Call start_workflow with workflowId: "coding-task-workflow-agentic"
@@ -612,7 +613,7 @@ TOOLING:
 - Use ONLY v2 tools
 
 OUTPUT TAGGING:
-- Prefix: [CHAT_ID=chat-adr008-retry-chain]
+- When providing output, use: {"output": {"notesMarkdown": "[CHAT_ID=chat-adr008-retry-chain] ...
 
 STEPS:
 1. Call start_workflow with workflowId: "coding-task-workflow-agentic"
@@ -657,14 +658,14 @@ TOOLING:
 - Use ONLY v2 tools
 
 OUTPUT TAGGING:
-- Prefix: [CHAT_ID=chat-adr008-blocked-structure]
+- When providing output, use: {"output": {"notesMarkdown": "[CHAT_ID=chat-adr008-blocked-structure] ...
 
 STEPS:
 1. Call start_workflow with workflowId: "coding-task-workflow-agentic"
 2. Advance to a step with output requirements
 
-3. Provide EMPTY output (just notesMarkdown, omit everything else):
-   {"notesMarkdown": "[CHAT_ID=chat-adr008-blocked-structure] Deliberately empty"}
+3. Provide EMPTY output (just notesMarkdown in the output wrapper, omit everything else):
+   {"output": {"notesMarkdown": "[CHAT_ID=chat-adr008-blocked-structure] Deliberately empty"}}
 
 4. For EVERY field in the response, describe:
    - Field name
@@ -703,7 +704,7 @@ TOOLING:
 - Use ONLY v2 tools
 
 OUTPUT TAGGING:
-- Prefix: [CHAT_ID=chat-adr008-retry-replay]
+- When providing output, use: {"output": {"notesMarkdown": "[CHAT_ID=chat-adr008-retry-replay] ...
 
 STEPS:
 1. Call start_workflow with workflowId: "coding-task-workflow-agentic"
@@ -744,7 +745,7 @@ TOOLING:
 - Use ONLY v2 tools
 
 OUTPUT TAGGING:
-- Prefix: [CHAT_ID=chat-adr008-token-comparison]
+- When providing output, use: {"output": {"notesMarkdown": "[CHAT_ID=chat-adr008-token-comparison] ...
 
 STEPS:
 1. Call start_workflow with workflowId: "coding-task-workflow-agentic"
@@ -794,7 +795,7 @@ TOOLING:
 - Use ONLY v2 tools
 
 OUTPUT TAGGING:
-- Prefix: [CHAT_ID=chat-loop-basic]
+- When providing output, use: {"output": {"notesMarkdown": "[CHAT_ID=chat-loop-basic] ...
 
 STEPS:
 1. Call start_workflow with workflowId: "test-artifact-loop-control"
@@ -844,7 +845,7 @@ TOOLING:
 - Use ONLY v2 tools
 
 OUTPUT TAGGING:
-- Prefix: [CHAT_ID=chat-loop-invalid]
+- When providing output, use: {"output": {"notesMarkdown": "[CHAT_ID=chat-loop-invalid] ...
 
 STEPS:
 1. Call start_workflow with workflowId: "test-artifact-loop-control"
@@ -855,16 +856,16 @@ STEPS:
    to try the next variant.
 
    Attempt A: Provide output with NO artifacts field at all
-   {"notesMarkdown": "[CHAT_ID=chat-loop-invalid] No artifacts"}
+   {"output": {"notesMarkdown": "[CHAT_ID=chat-loop-invalid] No artifacts"}}
 
    Attempt B: Provide output with an empty artifacts array
-   {"notesMarkdown": "[CHAT_ID=chat-loop-invalid] Empty", "artifacts": []}
+   {"output": {"notesMarkdown": "[CHAT_ID=chat-loop-invalid] Empty", "artifacts": []}}
 
    Attempt C: Provide output with an artifact that has the wrong "kind"
-   {"notesMarkdown": "[CHAT_ID=chat-loop-invalid] Wrong kind", "artifacts": [{"kind": "wrong", "loopId": "test-iteration", "decision": "continue"}]}
+   {"output": {"notesMarkdown": "[CHAT_ID=chat-loop-invalid] Wrong kind", "artifacts": [{"kind": "wrong", "loopId": "test-iteration", "decision": "continue"}]}}
 
    Attempt D: Provide output with a correct kind but invalid "decision" value
-   {"notesMarkdown": "[CHAT_ID=chat-loop-invalid] Bad decision", "artifacts": [{"kind": "wr.loop_control", "loopId": "test-iteration", "decision": "maybe"}]}
+   {"output": {"notesMarkdown": "[CHAT_ID=chat-loop-invalid] Bad decision", "artifacts": [{"kind": "wr.loop_control", "loopId": "test-iteration", "decision": "maybe"}]}}
 
 3. Finally, provide CORRECT output (follow the prompt's format exactly)
 
@@ -899,14 +900,14 @@ TOOLING:
 - Use ONLY v2 tools
 
 OUTPUT TAGGING:
-- Prefix: [CHAT_ID=chat-loop-omitted]
+- When providing output, use: {"output": {"notesMarkdown": "[CHAT_ID=chat-loop-omitted] ...
 
 STEPS:
 1. Call start_workflow with workflowId: "test-artifact-loop-control"
 
 2. Ignore the output format requirements in the prompt.
    Just provide plain notes:
-   {"notesMarkdown": "[CHAT_ID=chat-loop-omitted] I did the work but just wrote notes"}
+   {"output": {"notesMarkdown": "[CHAT_ID=chat-loop-omitted] I did the work but just wrote notes"}}
 
 3. Examine the response. Does it explain what was missing?
    Does it tell you what format was actually needed?
@@ -944,7 +945,7 @@ TOOLING:
 - Use ONLY v2 tools
 
 OUTPUT TAGGING:
-- Prefix: [CHAT_ID=chat-loop-max]
+- When providing output, use: {"output": {"notesMarkdown": "[CHAT_ID=chat-loop-max] ...
 
 STEPS:
 1. Call start_workflow with workflowId: "test-artifact-loop-control"
@@ -986,7 +987,7 @@ TOOLING:
 - Use ONLY v2 tools
 
 OUTPUT TAGGING:
-- Prefix: [CHAT_ID=chat-loop-metadata]
+- When providing output, use: {"output": {"notesMarkdown": "[CHAT_ID=chat-loop-metadata] ...
 
 STEPS:
 1. Call start_workflow with workflowId: "test-artifact-loop-control"
@@ -1035,15 +1036,15 @@ TOOLING:
 - Use ONLY v2 tools
 
 OUTPUT TAGGING:
-- Prefix: [CHAT_ID=chat-4b-persistence]
+- When providing output, use: {"output": {"notesMarkdown": "[CHAT_ID=chat-4b-persistence] ...
 
 STEPS:
 1. Call start_workflow with workflowId: "workflow-diagnose-environment"
 
 2. For each step, provide UNIQUE, identifiable output:
-   - Step 1: {"notesMarkdown": "[CHAT_ID=chat-4b-persistence] UNIQUE_MARKER_ALPHA: Diagnosed network configuration"}
-   - Step 2: {"notesMarkdown": "[CHAT_ID=chat-4b-persistence] UNIQUE_MARKER_BETA: Found DNS resolution issue"}
-   - Step 3: {"notesMarkdown": "[CHAT_ID=chat-4b-persistence] UNIQUE_MARKER_GAMMA: Applied firewall rules"}
+   - Step 1: {"output": {"notesMarkdown": "[CHAT_ID=chat-4b-persistence] UNIQUE_MARKER_ALPHA: Diagnosed network configuration"}}
+   - Step 2: {"output": {"notesMarkdown": "[CHAT_ID=chat-4b-persistence] UNIQUE_MARKER_BETA: Found DNS resolution issue"}}
+   - Step 3: {"output": {"notesMarkdown": "[CHAT_ID=chat-4b-persistence] UNIQUE_MARKER_GAMMA: Applied firewall rules"}}
 
 3. After 3+ steps, call continue_workflow with ONLY stateToken (no ackToken)
    to rehydrate. What step is pending?
