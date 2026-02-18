@@ -16,7 +16,7 @@ import { success, errNotRetryable, requireV2Context } from '../types.js';
 import type { V2CheckpointWorkflowInput } from '../v2/tools.js';
 import { V2CheckpointWorkflowOutputSchema } from '../output-schemas.js';
 import { parseCheckpointTokenOrFail, signTokenOrErr } from './v2-token-ops.js';
-import type { ToolFailure } from './v2-execution-helpers.js';
+import { type ToolFailure, mapExecutionSessionGateErrorToToolError } from './v2-execution-helpers.js';
 import type { SessionId, NodeId, RunId, AttemptId } from '../../v2/durable-core/ids/index.js';
 import { asSessionId, asRunId, asNodeId, asAttemptId } from '../../v2/durable-core/ids/index.js';
 import type { ExecutionSessionGateErrorV2 } from '../../v2/usecases/execution-session-gate.js';
@@ -139,34 +139,53 @@ function executeCheckpoint(
   // Unique per checkpoint token — guarantees idempotent replay
   const dedupeKey = `checkpoint:${String(sessionId)}:${String(runId)}:${String(nodeId)}:${String(attemptId)}`;
 
-  return gate.withHealthySessionLock(sessionId, (lock) => {
-    return sessionStore.load(sessionId)
-      .mapErr((cause): CheckpointError => ({ kind: 'store_failed', cause }))
-      .andThen((truth) => {
-        // Verify the node referenced by the token exists
-        const originalNode = findNodeCreated(truth.events, nodeId);
-        if (!originalNode) {
-          return errAsync<CheckpointOutput, CheckpointError>({ kind: 'missing_node_or_run' });
-        }
+  // Optimistic pre-lock read (v2-core-design-locks.md: "Optimistic replay without lock").
+  // Events are append-only and dedupeKeys are immutable once committed, so a pre-lock
+  // dedup hit is always correct. Misses fall through to the locked first-write path.
+  return sessionStore.load(sessionId)
+    .mapErr((cause): CheckpointError => ({ kind: 'store_failed', cause }))
+    .andThen((truth) => {
+      const originalNode = findNodeCreated(truth.events, nodeId);
+      if (!originalNode) {
+        return errAsync<CheckpointOutput, CheckpointError>({ kind: 'missing_node_or_run' });
+      }
 
-        // Idempotent replay: if dedupeKey already exists, return cached result
-        const alreadyRecorded = truth.events.some((e) => e.dedupeKey === dedupeKey);
-        if (alreadyRecorded) {
-          return replayCheckpoint(truth.events, dedupeKey, originalNode, sessionId, runId, nodeId, tokenCodecPorts);
-        }
+      // Idempotent replay: dedupeKey found → pure read, no lock needed
+      const alreadyRecorded = truth.events.some((e) => e.dedupeKey === dedupeKey);
+      if (alreadyRecorded) {
+        return replayCheckpoint(truth.events, dedupeKey, originalNode, sessionId, runId, nodeId, tokenCodecPorts);
+      }
 
-        // First-write path: create checkpoint node + edge
-        return writeCheckpoint(
-          truth, dedupeKey, originalNode, sessionId, runId, nodeId,
-          idFactory.mintNodeId(), () => idFactory.mintEventId(), lock, sessionStore, tokenCodecPorts,
-        );
+      // First-write path: acquire lock, re-check under lock (double-checked locking),
+      // then write if still not recorded.
+      return gate.withHealthySessionLock(sessionId, (lock) => {
+        return sessionStore.load(sessionId)
+          .mapErr((cause): CheckpointError => ({ kind: 'store_failed', cause }))
+          .andThen((truthLocked) => {
+            const originalNodeLocked = findNodeCreated(truthLocked.events, nodeId);
+            if (!originalNodeLocked) {
+              return errAsync<CheckpointOutput, CheckpointError>({ kind: 'missing_node_or_run' });
+            }
+
+            // Re-check under lock: another writer may have completed between our
+            // pre-lock read and lock acquisition.
+            const alreadyRecordedLocked = truthLocked.events.some((e) => e.dedupeKey === dedupeKey);
+            if (alreadyRecordedLocked) {
+              return replayCheckpoint(truthLocked.events, dedupeKey, originalNodeLocked, sessionId, runId, nodeId, tokenCodecPorts);
+            }
+
+            return writeCheckpoint(
+              truthLocked, dedupeKey, originalNodeLocked, sessionId, runId, nodeId,
+              idFactory.mintNodeId(), () => idFactory.mintEventId(), lock, sessionStore, tokenCodecPorts,
+            );
+          });
+      }).mapErr((gateErr): CheckpointError => {
+        if (isGateError(gateErr)) {
+          return { kind: 'gate_failed', cause: gateErr };
+        }
+        return gateErr as CheckpointError;
       });
-  }).mapErr((gateErr): CheckpointError => {
-    if (isGateError(gateErr)) {
-      return { kind: 'gate_failed', cause: gateErr };
-    }
-    return gateErr as CheckpointError;
-  });
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -305,16 +324,8 @@ function mapCheckpointErrorToToolError(e: CheckpointError): ToolResult<never> {
       return errNotRetryable('TOKEN_UNKNOWN_NODE', 'No durable node state found for this checkpointToken. Use a checkpointToken returned by WorkRail.') as ToolResult<never>;
     case 'event_schema_invalid':
       return errNotRetryable('INTERNAL_ERROR', `Checkpoint events failed schema validation: ${e.issues}`) as ToolResult<never>;
-    case 'gate_failed': {
-      const code = e.cause.code;
-      if (code === 'SESSION_LOCKED' || code === 'SESSION_LOCK_REENTRANT') {
-        return errNotRetryable('TOKEN_SESSION_LOCKED', `Session is locked: ${code}`) as ToolResult<never>;
-      }
-      if (code === 'SESSION_NOT_HEALTHY') {
-        return errNotRetryable('SESSION_NOT_HEALTHY', 'Session is not healthy.') as ToolResult<never>;
-      }
-      return errNotRetryable('INTERNAL_ERROR', `Session gate error: ${code}`) as ToolResult<never>;
-    }
+    case 'gate_failed':
+      return mapExecutionSessionGateErrorToToolError(e.cause) as ToolResult<never>;
     case 'store_failed':
       return errNotRetryable('INTERNAL_ERROR', `Session store error: ${e.cause.code}`) as ToolResult<never>;
   }
