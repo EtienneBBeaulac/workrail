@@ -131,7 +131,8 @@ describe('v2 execution: SESSION_NOT_HEALTHY error response', () => {
       expect(result.details).toBeDefined();
       const envelope = result.details as any;
       expect(envelope.suggestion).toBeTruthy();
-      expect(envelope.suggestion).toContain('healthy session');
+      // Verify the suggestion is agent-actionable (tells agent what to do)
+      expect(envelope.suggestion).toContain('start_workflow');
       expect(envelope.details).toBeDefined();
       
       const details = envelope.details as SessionHealthDetails;

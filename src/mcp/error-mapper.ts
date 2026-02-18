@@ -2,16 +2,17 @@ import type { DomainError } from '../domain/execution/error.js';
 import type { ToolError } from './types.js';
 import type { JsonValue } from './output-schemas.js';
 import { toBoundedJsonString } from './validation/bounded-json.js';
+import { internalSuggestion } from './handlers/v2-execution-helpers.js';
 
-function assertNever(x: never): ToolError {
+function assertNever(_x: never): ToolError {
   // This should never execute at runtime if all cases are handled.
   // Return a fail-closed error instead of throwing.
   return {
     type: 'error',
     code: 'INTERNAL_ERROR',
-    message: `Unhandled DomainError variant: ${JSON.stringify(x)}`,
+    message: 'WorkRail encountered an unexpected error. This is not caused by your input.',
     retry: { kind: 'not_retryable' },
-    details: { invariantViolation: 'exhaustiveness_check_failed' },
+    details: { suggestion: internalSuggestion('', 'WorkRail has an internal error.') },
   };
 }
 
@@ -95,9 +96,12 @@ export function mapDomainErrorToToolError(err: DomainError): ToolError {
   }
 }
 
-export function mapUnknownErrorToToolError(err: unknown): ToolError {
-  if (err instanceof Error) {
-    return { type: 'error', code: 'INTERNAL_ERROR', message: err.message, retry: { kind: 'not_retryable' } };
-  }
-  return { type: 'error', code: 'INTERNAL_ERROR', message: String(err), retry: { kind: 'not_retryable' } };
+export function mapUnknownErrorToToolError(_err: unknown): ToolError {
+  return {
+    type: 'error',
+    code: 'INTERNAL_ERROR',
+    message: 'WorkRail encountered an unexpected error. This is not caused by your input.',
+    retry: { kind: 'not_retryable' },
+    details: { suggestion: internalSuggestion('Retry the call.', 'WorkRail has an internal error.') },
+  };
 }
