@@ -797,6 +797,13 @@ Implementation lock (TypeScript / structural typing):
 - Append-capable APIs MUST require a non-forgeable **capability witness** (e.g., `WithHealthySessionLock` / `CanAppend`) minted only by the session health + lock gate. This prevents accidental writes by “structural” interface matching and makes illegal calls unrepresentable without deliberate construction.
 - Witness misuse-after-release MUST fail-fast: if a witness is used outside the lexical lifetime of the gate callback that minted it, append-capable APIs MUST reject the call before any durable I/O. (This prevents “stash-and-reuse” of an old witness, including after a subsequent re-lock of the same session.)
 
+Optimistic replay without lock (locked clarification):
+- Because the event log is append-only and `dedupeKey` values are immutable once committed, a handler MAY perform an optimistic pre-lock read to check for an existing `dedupeKey`.
+- If the `dedupeKey` is found in committed truth, the handler MUST return from recorded facts without acquiring the session lock (fact-returning replay is a pure read).
+- If the `dedupeKey` is NOT found, the handler MUST acquire the lock and re-check under the lock before writing (double-checked locking pattern).
+- Safety invariant: append-only events + `dedupeKey` immutability → pre-lock dedup hits are always correct; misses are caught by the lock re-check.
+- This applies to: `advance_recorded` replay, `checkpoint` replay, and any future idempotent handler replay.
+
 ### Token validation errors (errors as data, initial closed set)
 - `TOKEN_INVALID_FORMAT`
 - `TOKEN_UNSUPPORTED_VERSION`

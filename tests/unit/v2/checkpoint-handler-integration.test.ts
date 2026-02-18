@@ -8,7 +8,7 @@
  * Follows the same pattern as mcp-v2-continue-behavior-lock.test.ts.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
@@ -241,5 +241,27 @@ describe('handleV2CheckpointWorkflow (integration)', () => {
     // Only ONE checkpoint node + edge, not two
     expect(cpNodes).toHaveLength(1);
     expect(cpEdges).toHaveLength(1);
+  });
+
+  it('idempotent replay skips the session lock gate (optimistic pre-lock dedup)', async () => {
+    const ctx = await buildCtx();
+    const start = await startWorkflow(ctx);
+
+    // First call: writes checkpoint (acquires lock)
+    const r1 = await handleV2CheckpointWorkflow({ checkpointToken: start.checkpointToken }, ctx);
+    expect(r1.type).toBe('success');
+
+    // Spy on gate AFTER first write — replay should NOT call it
+    const gateSpy = vi.spyOn(ctx.v2!.gate, 'withHealthySessionLock');
+
+    // Second call: idempotent replay (should skip lock via optimistic pre-lock dedup)
+    const r2 = await handleV2CheckpointWorkflow({ checkpointToken: start.checkpointToken }, ctx);
+    expect(r2.type).toBe('success');
+    if (r1.type !== 'success' || r2.type !== 'success') return;
+
+    expect(r2.data.checkpointNodeId).toBe(r1.data.checkpointNodeId);
+    expect(gateSpy).not.toHaveBeenCalled();
+
+    gateSpy.mockRestore();
   });
 });
