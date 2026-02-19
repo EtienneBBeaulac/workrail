@@ -10,6 +10,7 @@ import { LOOP_CONTROL_CONTRACT_REF, isValidContractRef } from '../../v2/durable-
 import type { Result } from 'neverthrow';
 import { ok, err } from 'neverthrow';
 import { type DomainError, Err } from '../../domain/execution/error';
+import { resolvePromptBlocksPass } from './compiler/prompt-blocks';
 
 export interface CompiledLoop {
   readonly loop: LoopStepDefinition;
@@ -41,7 +42,16 @@ export interface CompiledWorkflow {
 @singleton()
 export class WorkflowCompiler {
   compile(workflow: Workflow): Result<CompiledWorkflow, DomainError> {
-    const steps = workflow.definition.steps;
+    // Phase 1: Resolve promptBlocks into prompt strings (compile-time rendering)
+    const blocksResult = resolvePromptBlocksPass(workflow.definition.steps);
+    if (blocksResult.isErr()) {
+      const e = blocksResult.error;
+      const message = e.code === 'PROMPT_AND_BLOCKS_BOTH_SET'
+        ? e.message
+        : `Step '${e.stepId}': promptBlocks error — ${e.cause.message}`;
+      return err(Err.invalidState(message));
+    }
+    const steps = blocksResult.value;
 
     const stepById = new Map<string, WorkflowStepDefinition | LoopStepDefinition>();
     for (const step of steps) {

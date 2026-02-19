@@ -498,7 +498,7 @@ export class WorkflowInterpreter {
     if (step.guidance && step.guidance.length > 0) {
       promptParts.push(`## Step Guidance\n${step.guidance.map((g) => `- ${g}`).join('\n')}\n`);
     }
-    promptParts.push(step.prompt);
+    promptParts.push(step.prompt ?? '');
 
     // Minimal loop info for UX (derived from instance.loopPath)
     if (instance.loopPath.length > 0) {

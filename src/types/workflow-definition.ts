@@ -11,6 +11,7 @@
 
 import { ValidationCriteria } from './validation';
 import type { ArtifactContractRef } from '../v2/durable-core/schemas/artifacts/index';
+import type { PromptBlocks } from '../application/services/compiler/prompt-blocks.js';
 
 // =============================================================================
 // STEP TYPES
@@ -32,7 +33,18 @@ export interface OutputContract {
 export interface WorkflowStepDefinition {
   readonly id: string;
   readonly title: string;
-  readonly prompt: string;
+  /**
+   * Raw prompt string. Required for text-prompt steps.
+   * Optional when promptBlocks is used — the compiler renders blocks into
+   * this field during compilation, so it is always present after compilation.
+   */
+  readonly prompt?: string;
+  /**
+   * Structured prompt blocks. Alternative to raw prompt string.
+   * Rendered into prompt during compilation (deterministic, locked order).
+   * A step must declare exactly one of prompt or promptBlocks.
+   */
+  readonly promptBlocks?: PromptBlocks;
   readonly agentRole?: string;
   readonly guidance?: readonly string[];
   readonly askForFiles?: boolean;
