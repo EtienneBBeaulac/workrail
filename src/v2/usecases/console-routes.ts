@@ -61,7 +61,7 @@ export function mountConsoleRoutes(app: Application, consoleService: ConsoleServ
 
     // SPA catch-all: any /console/* route serves index.html
     // (lets React handle client-side routing)
-    app.get('/console/*', (_req: Request, res: Response) => {
+    app.get('/console/*path', (_req: Request, res: Response) => {
       res.sendFile(path.join(consoleDist, 'index.html'));
     });
 
