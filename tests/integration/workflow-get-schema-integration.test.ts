@@ -91,7 +91,9 @@ describe('Workflow Get Schema Integration', () => {
       expect(schema.$defs.standardStep.properties.prompt).toBeDefined();
       expect(schema.$defs.standardStep.required).toContain('id');
       expect(schema.$defs.standardStep.required).toContain('title');
-      expect(schema.$defs.standardStep.required).toContain('prompt');
+      // prompt is optional (promptBlocks can be used instead); validated by compiler
+      expect(schema.$defs.standardStep.properties.prompt).toBeDefined();
+      expect(schema.$defs.standardStep.properties.promptBlocks).toBeDefined();
     });
 
     it('should provide schema compatible with enhanced error messages', async () => {
