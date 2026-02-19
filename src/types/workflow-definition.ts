@@ -74,9 +74,24 @@ export interface WorkflowStepDefinition {
    * the session history.
    */
   readonly notesOptional?: boolean;
+  /**
+   * Template call: expands this step into one or more steps at compile time.
+   * When present, prompt/promptBlocks are ignored — the template provides them.
+   * The step's id becomes a prefix for expanded step IDs (e.g. "phase-0" ->
+   * "phase-0.investigate", "phase-0.plan").
+   */
+  readonly templateCall?: TemplateCall;
   readonly functionDefinitions?: readonly FunctionDefinition[];
   readonly functionCalls?: readonly FunctionCall[];
   readonly functionReferences?: readonly string[];
+}
+
+/** A compile-time template invocation. */
+export interface TemplateCall {
+  /** Template ID from the closed-set registry (wr.templates.*). */
+  readonly templateId: string;
+  /** Optional arguments passed to the template expansion function. */
+  readonly args?: Readonly<Record<string, unknown>>;
 }
 
 export interface LoopStepDefinition extends WorkflowStepDefinition {
