@@ -2,7 +2,7 @@
  * Loop condition source tests.
  * 
  * Verifies the exhaustive branching on LoopConditionSource:
- * - artifact_contract: ONLY uses artifacts (missing = error, not fallback)
+ * - artifact_contract: ONLY uses artifacts (missing = enter loop by default; only 'stop' exits)
  * - context_variable: ONLY uses context (no artifact awareness)
  * - undefined (legacy): falls back to raw condition field
  * 
@@ -16,7 +16,7 @@ import { createWorkflow } from '../../src/types/workflow';
 import { createBundledSource } from '../../src/types/workflow-source';
 import type { WorkflowDefinition } from '../../src/types/workflow-definition';
 import type { ExecutionState } from '../../src/domain/execution/state';
-import { LOOP_CONTROL_CONTRACT_REF } from '../../src/v2/durable-core/schemas/artifacts/index';
+import { LOOP_CONTROL_CONTRACT_REF, findLoopControlArtifact } from '../../src/v2/durable-core/schemas/artifacts/index';
 
 const baseState: ExecutionState = { kind: 'init' };
 
@@ -227,29 +227,35 @@ describe('Interpreter: artifact_contract loops', () => {
     }
   });
 
-  it('returns error when artifact is missing (no fallback)', () => {
-    const result = interpreter.next(compiled, baseState, { continuePlanning: true }, []);
-    expect(result.isErr()).toBe(true);
-    if (result.isErr()) {
-      expect(result.error.message).toContain('requires a wr.loop_control artifact');
+  it('enters loop when no artifact exists (first-iteration default)', () => {
+    // No artifact yet at iteration 0 — loop must still be entered.
+    // The exit-decision body step hasn't run yet, so no artifact can exist.
+    const result = interpreter.next(compiled, baseState, {}, []);
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.next?.stepInstanceId.stepId).toBe('body-step');
     }
   });
 
-  it('returns error when artifact loopId does not match', () => {
+  it('enters loop when artifact loopId does not match (no decision for this loop yet)', () => {
+    // Artifact for a different loop doesn't count — treat as no artifact for this loop.
     const artifacts = [
       { kind: 'wr.loop_control', loopId: 'other-loop', decision: 'continue' },
     ];
     const result = interpreter.next(compiled, baseState, {}, artifacts);
-    expect(result.isErr()).toBe(true);
-    if (result.isErr()) {
-      expect(result.error.message).toContain('requires a wr.loop_control artifact');
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.next?.stepInstanceId.stepId).toBe('body-step');
     }
   });
 
-  it('ignores context entirely (no fallback to context)', () => {
-    // Context says continue, but no artifact → error
+  it('enters loop when context present but no artifact (context is ignored for artifact_contract loops)', () => {
+    // artifact_contract loops ignore context variables entirely.
     const result = interpreter.next(compiled, baseState, { continuePlanning: true }, []);
-    expect(result.isErr()).toBe(true);
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.next?.stepInstanceId.stepId).toBe('body-step');
+    }
   });
 });
 
@@ -348,6 +354,31 @@ describe('Interpreter: decision trace output', () => {
   });
 });
 
+describe('findLoopControlArtifact: latest artifact wins', () => {
+  it('uses the most recent artifact when multiple artifacts exist for the same loopId', () => {
+    // Simulates: iteration 0 produced 'continue', iteration 1 produced 'stop'.
+    // The newest artifact (stop) must win over the oldest (continue).
+    const artifacts = [
+      { kind: 'wr.loop_control', loopId: 'loop-step', decision: 'continue' },
+      { kind: 'wr.loop_control', loopId: 'loop-step', decision: 'stop' },
+    ];
+    const found = findLoopControlArtifact(artifacts, 'loop-step');
+    expect(found).not.toBeNull();
+    expect(found?.decision).toBe('stop');
+  });
+
+  it('uses the most recent continue artifact when stop is older', () => {
+    // Iteration 0 said stop, iteration 1 said continue — newest (continue) wins.
+    const artifacts = [
+      { kind: 'wr.loop_control', loopId: 'loop-step', decision: 'stop' },
+      { kind: 'wr.loop_control', loopId: 'loop-step', decision: 'continue' },
+    ];
+    const found = findLoopControlArtifact(artifacts, 'loop-step');
+    expect(found).not.toBeNull();
+    expect(found?.decision).toBe('continue');
+  });
+});
+
 describe('Interpreter: explicit conditionSource', () => {
   const interpreter = new WorkflowInterpreter();
   const compiled = compileWorkflow(buildExplicitArtifactSourceWorkflow());
@@ -363,8 +394,11 @@ describe('Interpreter: explicit conditionSource', () => {
     }
   });
 
-  it('errors when artifact missing with explicit artifact_contract source', () => {
+  it('enters loop when artifact missing with explicit artifact_contract source (first-iteration default)', () => {
     const result = interpreter.next(compiled, baseState, {}, []);
-    expect(result.isErr()).toBe(true);
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.next?.stepInstanceId.stepId).toBe('body-step');
+    }
   });
 });
