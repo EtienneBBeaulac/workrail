@@ -181,6 +181,15 @@ export function handleAdvanceIntent(args: {
         )
         .mapErr((cause) => {
           if (isInternalError(cause)) {
+            // Missing context is a recoverable agent-facing error, not an internal failure.
+            // Surface it as precondition_failed so the agent gets an actionable message.
+            if (cause.kind === 'advance_next_missing_context') {
+              return {
+                kind: 'precondition_failed' as const,
+                message: cause.message,
+                suggestion: 'Set the required context variable in the `context` field of your continue_workflow output. The variable must be a JSON array.',
+              };
+            }
             return {
               kind: 'invariant_violation' as const,
               message: `Advance failed due to internal error: ${cause.kind}`,
