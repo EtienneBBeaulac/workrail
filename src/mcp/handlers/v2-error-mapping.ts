@@ -24,6 +24,7 @@ export type InternalError =
   | { readonly kind: 'invariant_violation'; readonly message: string }
   | { readonly kind: 'advance_apply_failed'; readonly message: string }
   | { readonly kind: 'advance_next_failed'; readonly message: string }
+  | { readonly kind: 'advance_next_missing_context'; readonly message: string }
   | { readonly kind: 'missing_node_or_run' }
   | { readonly kind: 'workflow_hash_mismatch' }
   | { readonly kind: 'missing_snapshot' }
@@ -209,6 +210,12 @@ export function mapInternalErrorToToolError(e: InternalError): ToolFailure {
         'WorkRail could not compute the next workflow step. This is not caused by your input.',
         internalSuggestion('Retry the call.', 'WorkRail could not compute the next step.'),
       );
+    case 'advance_next_missing_context':
+      return errNotRetryable(
+        'PRECONDITION_FAILED',
+        e.message,
+        { suggestion: 'Set the required context variable in the `context` field of your continue_workflow output. The variable must be a JSON array.' },
+      ) as ToolFailure;
     default:
       const _exhaustive: never = e;
       return internalError(

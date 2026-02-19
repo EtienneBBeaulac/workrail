@@ -82,6 +82,11 @@ export function buildSuccessOutcome(args: {
   });
   const nextRes = interpreter.next(compiledWf.value, advanced.value, v.mergedContext, artifactsForEval);
   if (nextRes.isErr()) {
+    // Distinguish missing context (recoverable, agent can fix) from other errors (system failures).
+    // MissingContext means a loop requires a context variable the agent hasn't set yet.
+    if (nextRes.error._tag === 'MissingContext') {
+      return errAsync({ kind: 'advance_next_missing_context', message: nextRes.error.message } as const);
+    }
     return errAsync({ kind: 'advance_next_failed', message: nextRes.error.message } as const);
   }
 
