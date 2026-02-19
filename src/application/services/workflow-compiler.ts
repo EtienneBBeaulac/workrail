@@ -15,6 +15,8 @@ import { resolveRefsPass } from './compiler/resolve-refs';
 import { createRefRegistry } from './compiler/ref-registry';
 import { resolveFeaturesPass } from './compiler/resolve-features';
 import { createFeatureRegistry } from './compiler/feature-registry';
+import { resolveTemplatesPass } from './compiler/resolve-templates';
+import { createTemplateRegistry } from './compiler/template-registry';
 
 export interface CompiledLoop {
   readonly loop: LoopStepDefinition;
@@ -47,11 +49,22 @@ export interface CompiledWorkflow {
 export class WorkflowCompiler {
   private readonly refRegistry = createRefRegistry();
   private readonly featureRegistry = createFeatureRegistry();
+  private readonly templateRegistry = createTemplateRegistry();
 
   compile(workflow: Workflow): Result<CompiledWorkflow, DomainError> {
+    // Phase 0: Expand template_call steps into real steps (must run first)
+    const templatesResult = resolveTemplatesPass(workflow.definition.steps, this.templateRegistry);
+    if (templatesResult.isErr()) {
+      const e = templatesResult.error;
+      const message = e.code === 'TEMPLATE_RESOLVE_ERROR'
+        ? `Step '${e.stepId}': template error — ${e.cause.message}`
+        : `Step '${e.stepId}': template expansion error — ${e.cause.message}`;
+      return err(Err.invalidState(message));
+    }
+
     // Phase 1a: Apply declared features to promptBlocks (may inject refs)
     const featuresResult = resolveFeaturesPass(
-      workflow.definition.steps,
+      templatesResult.value,
       workflow.definition.features ?? [],
       this.featureRegistry,
     );
