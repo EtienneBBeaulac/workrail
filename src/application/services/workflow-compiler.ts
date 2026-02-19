@@ -45,56 +45,86 @@ export interface CompiledWorkflow {
   readonly loopBodyStepIds: ReadonlySet<string>;
 }
 
+// ---------------------------------------------------------------------------
+// Shared resolution pipeline — pure function, no I/O
+// ---------------------------------------------------------------------------
+
+const _refRegistry = createRefRegistry();
+const _featureRegistry = createFeatureRegistry();
+const _templateRegistry = createTemplateRegistry();
+
+/**
+ * Run the full authoring-layer resolution pipeline on definition steps.
+ *
+ * Order: templates → features → refs → promptBlocks rendering.
+ *
+ * Pure function — deterministic, no I/O. Used by both the compiler and
+ * the pinning boundary to ensure stored definitions have all promptBlocks
+ * resolved into prompt strings.
+ */
+export function resolveDefinitionSteps(
+  steps: readonly (WorkflowStepDefinition | LoopStepDefinition)[],
+  features: readonly string[],
+): Result<readonly (WorkflowStepDefinition | LoopStepDefinition)[], DomainError> {
+  // Phase 0: Expand template_call steps into real steps (must run first)
+  const templatesResult = resolveTemplatesPass(steps, _templateRegistry);
+  if (templatesResult.isErr()) {
+    const e = templatesResult.error;
+    const message = e.code === 'TEMPLATE_RESOLVE_ERROR'
+      ? `Step '${e.stepId}': template error — ${e.cause.message}`
+      : `Step '${e.stepId}': template expansion error — ${e.cause.message}`;
+    return err(Err.invalidState(message));
+  }
+
+  // Phase 1a: Apply declared features to promptBlocks (may inject refs)
+  const featuresResult = resolveFeaturesPass(
+    templatesResult.value,
+    features,
+    _featureRegistry,
+  );
+  if (featuresResult.isErr()) {
+    const e = featuresResult.error;
+    const message = e.code === 'FEATURE_RESOLVE_ERROR'
+      ? `Feature error — ${e.cause.message}`
+      : e.message;
+    return err(Err.invalidState(message));
+  }
+
+  // Phase 1b: Resolve wr.refs.* in promptBlocks (must run before rendering)
+  const refsResult = resolveRefsPass(featuresResult.value, _refRegistry);
+  if (refsResult.isErr()) {
+    const e = refsResult.error;
+    return err(Err.invalidState(
+      `Step '${e.stepId}': ref resolution error — ${e.cause.message}`
+    ));
+  }
+
+  // Phase 1c: Resolve promptBlocks into prompt strings (compile-time rendering)
+  const blocksResult = resolvePromptBlocksPass(refsResult.value);
+  if (blocksResult.isErr()) {
+    const e = blocksResult.error;
+    const message = e.code === 'PROMPT_AND_BLOCKS_BOTH_SET'
+      ? e.message
+      : `Step '${e.stepId}': promptBlocks error — ${e.cause.message}`;
+    return err(Err.invalidState(message));
+  }
+
+  return ok(blocksResult.value);
+}
+
+// ---------------------------------------------------------------------------
+// WorkflowCompiler
+// ---------------------------------------------------------------------------
+
 @singleton()
 export class WorkflowCompiler {
-  private readonly refRegistry = createRefRegistry();
-  private readonly featureRegistry = createFeatureRegistry();
-  private readonly templateRegistry = createTemplateRegistry();
-
   compile(workflow: Workflow): Result<CompiledWorkflow, DomainError> {
-    // Phase 0: Expand template_call steps into real steps (must run first)
-    const templatesResult = resolveTemplatesPass(workflow.definition.steps, this.templateRegistry);
-    if (templatesResult.isErr()) {
-      const e = templatesResult.error;
-      const message = e.code === 'TEMPLATE_RESOLVE_ERROR'
-        ? `Step '${e.stepId}': template error — ${e.cause.message}`
-        : `Step '${e.stepId}': template expansion error — ${e.cause.message}`;
-      return err(Err.invalidState(message));
-    }
-
-    // Phase 1a: Apply declared features to promptBlocks (may inject refs)
-    const featuresResult = resolveFeaturesPass(
-      templatesResult.value,
+    const resolvedResult = resolveDefinitionSteps(
+      workflow.definition.steps,
       workflow.definition.features ?? [],
-      this.featureRegistry,
     );
-    if (featuresResult.isErr()) {
-      const e = featuresResult.error;
-      const message = e.code === 'FEATURE_RESOLVE_ERROR'
-        ? `Feature error — ${e.cause.message}`
-        : e.message;
-      return err(Err.invalidState(message));
-    }
-
-    // Phase 1b: Resolve wr.refs.* in promptBlocks (must run before rendering)
-    const refsResult = resolveRefsPass(featuresResult.value, this.refRegistry);
-    if (refsResult.isErr()) {
-      const e = refsResult.error;
-      return err(Err.invalidState(
-        `Step '${e.stepId}': ref resolution error — ${e.cause.message}`
-      ));
-    }
-
-    // Phase 1b: Resolve promptBlocks into prompt strings (compile-time rendering)
-    const blocksResult = resolvePromptBlocksPass(refsResult.value);
-    if (blocksResult.isErr()) {
-      const e = blocksResult.error;
-      const message = e.code === 'PROMPT_AND_BLOCKS_BOTH_SET'
-        ? e.message
-        : `Step '${e.stepId}': promptBlocks error — ${e.cause.message}`;
-      return err(Err.invalidState(message));
-    }
-    const steps = blocksResult.value;
+    if (resolvedResult.isErr()) return err(resolvedResult.error);
+    const steps = resolvedResult.value;
 
     const stepById = new Map<string, WorkflowStepDefinition | LoopStepDefinition>();
     for (const step of steps) {

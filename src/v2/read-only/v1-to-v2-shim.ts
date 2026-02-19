@@ -1,5 +1,6 @@
 import type { Workflow } from '../../types/workflow.js';
 import type { CompiledWorkflowSnapshotV1 } from '../durable-core/schemas/compiled-workflow/index.js';
+import { resolveDefinitionSteps } from '../../application/services/workflow-compiler.js';
 
 /**
  * Slice 1: compile a v1 Workflow into a read-only preview snapshot.
@@ -29,13 +30,25 @@ export function compileV1WorkflowToV2PreviewSnapshot(workflow: Workflow): Extrac
   }
 
   // Best-effort preview:
-  // - normal step: use prompt directly
+  // - normal step with prompt: use prompt directly
+  // - normal step with promptBlocks: resolve via compiler pipeline
   // - loop step: provide a deterministic placeholder (Slice 1 does not implement loops)
   const isLoop = (firstStep as any).type === 'loop';
-  const prompt =
-    !isLoop && typeof (firstStep as any).prompt === 'string'
-      ? ((firstStep as any).prompt as string)
-      : `Loop step '${firstStep.id}' cannot be previewed in v2 Slice 1 (loop execution/compilation not implemented yet).`;
+  let prompt: string;
+  if (isLoop) {
+    prompt = `Loop step '${firstStep.id}' cannot be previewed in v2 Slice 1 (loop execution/compilation not implemented yet).`;
+  } else if (typeof (firstStep as any).prompt === 'string') {
+    prompt = (firstStep as any).prompt as string;
+  } else {
+    // promptBlocks-only step: resolve to get prompt string
+    const resolved = resolveDefinitionSteps(
+      [firstStep as any],
+      workflow.definition.features ?? [],
+    );
+    prompt = resolved.isOk() && (resolved.value[0] as any)?.prompt
+      ? (resolved.value[0] as any).prompt as string
+      : `Step '${firstStep.id}' has no prompt (promptBlocks resolution failed).`;
+  }
 
   return {
     schemaVersion: 1,
@@ -55,10 +68,28 @@ export function compileV1WorkflowToV2PreviewSnapshot(workflow: Workflow): Extrac
 /**
  * Slice 3: pin the full v1 workflow definition as durable truth for deterministic v2 execution.
  *
- * This is still a v1-backed execution strategy (not v2 authoring). It exists so `workflowHash`
- * reflects the full workflow definition and remains stable even if on-disk sources change.
+ * Boundary invariant: the pinned definition has all promptBlocks resolved
+ * into prompt strings. This ensures `renderPendingPrompt` — which reads
+ * `step.prompt` directly — always finds a compiled prompt, never an absent
+ * one from a promptBlocks-only step.
+ *
+ * Why here: this is the boundary between authored and durable. Validate
+ * at boundaries, trust inside. Everything downstream trusts that prompt
+ * exists on every step.
  */
 export function compileV1WorkflowToPinnedSnapshot(workflow: Workflow): Extract<CompiledWorkflowSnapshotV1, { sourceKind: 'v1_pinned' }> {
+  // Resolve authoring-layer constructs (templates, features, refs, promptBlocks)
+  // before pinning. If resolution fails, pin the raw definition as fallback
+  // (existing workflows with only `prompt` strings are unaffected).
+  const resolved = resolveDefinitionSteps(
+    workflow.definition.steps,
+    workflow.definition.features ?? [],
+  );
+
+  const resolvedDefinition = resolved.isOk()
+    ? { ...workflow.definition, steps: resolved.value }
+    : workflow.definition;
+
   return {
     schemaVersion: 1,
     sourceKind: 'v1_pinned',
@@ -66,6 +97,6 @@ export function compileV1WorkflowToPinnedSnapshot(workflow: Workflow): Extract<C
     name: workflow.definition.name,
     description: workflow.definition.description,
     version: workflow.definition.version,
-    definition: workflow.definition as unknown,
+    definition: resolvedDefinition as unknown,
   };
 }
