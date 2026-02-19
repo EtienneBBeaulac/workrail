@@ -285,7 +285,7 @@ describe('Validate Workflow JSON Use Case', () => {
       expect(result.suggestions).toContain('Provide a clear, descriptive name for the workflow.');
       expect(result.suggestions).toContain('Add a meaningful description explaining what the workflow accomplishes.');
       expect(result.suggestions).toContain('Use semantic versioning format (e.g., "0.0.1", "1.0.0").');
-      expect(result.suggestions).toContain('Ensure the workflow has at least one step with id, title, and prompt fields.');
+      expect(result.suggestions).toContain('Ensure the workflow has at least one step with id, title, and either prompt or promptBlocks.');
     });
   });
 

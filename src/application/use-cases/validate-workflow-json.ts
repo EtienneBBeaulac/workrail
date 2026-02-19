@@ -104,11 +104,11 @@ function generateSuggestions(errors: string[]): string[] {
   }
 
   if (errorText.includes('steps')) {
-    suggestions.push('Ensure the workflow has at least one step with id, title, and prompt fields.');
+    suggestions.push('Ensure the workflow has at least one step with id, title, and either prompt or promptBlocks.');
   }
 
   if (errorText.includes('step')) {
-    suggestions.push('Check that all steps have required fields: id, title, and prompt.');
+    suggestions.push('Check that all steps have required fields: id, title, and either prompt or promptBlocks.');
   }
 
   if (errorText.includes('pattern')) {

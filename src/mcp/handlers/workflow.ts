@@ -251,8 +251,9 @@ export async function handleWorkflowGetSchema(
         stepStructure: {
           id: 'string (required): Unique step identifier',
           title: 'string (required): Human-readable step title',
-          prompt: 'string (required): Instructions for the step',
-          agentRole: 'string (required): Role description for the agent',
+          prompt: 'string (optional): Instructions for the step (use prompt OR promptBlocks)',
+          promptBlocks: 'object (optional): Structured prompt blocks (goal, constraints, procedure, outputRequired, verify)',
+          agentRole: 'string (optional): Role description for the agent',
           validationCriteria: 'array (optional): Validation rules for step output',
         },
       },
