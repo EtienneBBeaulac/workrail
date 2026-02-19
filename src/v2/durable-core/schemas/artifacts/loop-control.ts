@@ -129,17 +129,23 @@ export function parseLoopControlArtifact(artifact: unknown): LoopControlArtifact
 }
 
 /**
- * Find a loop control artifact for a specific loopId in an artifacts array.
- * 
- * @param artifacts - Array of unknown artifacts
+ * Find the most recent loop control artifact for a specific loopId.
+ *
+ * Iterates in reverse so the last (newest) matching artifact wins.
+ * Artifacts are collected in chronological order by the engine, so the last
+ * one is the most recent exit-decision — the only one that matters for
+ * deciding whether to continue or stop.
+ *
+ * @param artifacts - Array of unknown artifacts (chronological order)
  * @param loopId - The loop ID to find
- * @returns The matching loop control artifact or null
+ * @returns The most recent matching loop control artifact or null
  */
 export function findLoopControlArtifact(
   artifacts: readonly unknown[],
   loopId: string
 ): LoopControlArtifactV1 | null {
-  for (const artifact of artifacts) {
+  for (let i = artifacts.length - 1; i >= 0; i--) {
+    const artifact = artifacts[i];
     if (!isLoopControlArtifact(artifact)) continue;
     const parsed = parseLoopControlArtifact(artifact);
     if (parsed && parsed.loopId === loopId) {

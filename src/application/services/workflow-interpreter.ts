@@ -415,14 +415,11 @@ export class WorkflowInterpreter {
         if (result.kind === 'found') {
           return ok(result.decision === 'continue');
         }
-        // Missing or invalid artifact = error (not silent exit)
-        return err({
-          code: 'LOOP_MISSING_CONTEXT',
-          loopId: loopCompiled.loop.id,
-          message: result.kind === 'not_found'
-            ? `Loop '${source.loopId}' requires a wr.loop_control artifact but none was provided`
-            : `Loop '${source.loopId}' has an invalid loop control artifact: ${result.reason}`,
-        });
+        // not_found: no artifact yet — default to continue (enter the loop).
+        // The loop_control artifact is produced inside the body (exit-decision step);
+        // it cannot exist before the first iteration runs. Only an explicit 'stop'
+        // decision exits the loop; absence of the artifact is not a stop signal.
+        return ok(true);
       }
       case 'context_variable': {
         // ONLY context. No artifact awareness.
