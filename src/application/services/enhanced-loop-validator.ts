@@ -90,14 +90,34 @@ export class EnhancedLoopValidator {
     }
   }
 
+  /** Extract searchable prompt text from either prompt string or promptBlocks. */
+  private getPromptText(step: WorkflowStepDefinition): string | undefined {
+    if (step.prompt) return step.prompt;
+    if (!step.promptBlocks) return undefined;
+    const parts: string[] = [];
+    const b = step.promptBlocks;
+    if (typeof b.goal === 'string') parts.push(b.goal);
+    if (Array.isArray(b.constraints)) {
+      for (const c of b.constraints) { if (typeof c === 'string') parts.push(c); }
+    }
+    if (Array.isArray(b.procedure)) {
+      for (const p of b.procedure) { if (typeof p === 'string') parts.push(p); }
+    }
+    if (Array.isArray(b.verify)) {
+      for (const v of b.verify) { if (typeof v === 'string') parts.push(v); }
+    }
+    return parts.length > 0 ? parts.join('\n') : undefined;
+  }
+
   private validatePromptLength(
     step: WorkflowStepDefinition,
     warnings: string[],
     suggestions: string[]
   ): void {
-    if (!step.prompt) return;
+    const promptText = this.getPromptText(step);
+    if (!promptText) return;
 
-    const promptLength = step.prompt.length;
+    const promptLength = promptText.length;
 
     // Check raw prompt length
     if (promptLength > this.PROMPT_ERROR_THRESHOLD) {
@@ -116,8 +136,8 @@ export class EnhancedLoopValidator {
       );
     }
 
-    // Check for conditional expansion
-    const conditionalMatches = step.prompt.match(/\{\{[^}]*\?[^}]*\}\}/g);
+    // Check for conditional expansion (only in raw prompt strings, not promptBlocks)
+    const conditionalMatches = step.prompt?.match(/\{\{[^}]*\?[^}]*\}\}/g);
     if (conditionalMatches) {
       // Estimate total content size when all branches are included
       let totalConditionalContent = 0;
@@ -200,10 +220,11 @@ export class EnhancedLoopValidator {
     // Progressive analysis pattern
     if (step.loop.type === 'for' && bodySteps.length > 0) {
       const firstStep = bodySteps[0];
-      if (firstStep.prompt?.includes('analysis') || 
+      const firstPrompt = this.getPromptText(firstStep);
+      if (firstPrompt?.includes('analysis') || 
           firstStep.title?.toLowerCase().includes('analysis') ||
-          firstStep.prompt?.includes('Step 1') ||
-          firstStep.prompt?.includes('Structure')) {
+          firstPrompt?.includes('Step 1') ||
+          firstPrompt?.includes('Structure')) {
         info.push('Progressive analysis pattern detected.');
         suggestions.push(
           'Consider using the multi-step pattern with separate steps and runCondition for clearer structure.'
@@ -212,7 +233,7 @@ export class EnhancedLoopValidator {
     }
 
     // Multi-conditional pattern
-    if (bodySteps.some(s => s.prompt?.includes('===') && s.prompt?.includes('?'))) {
+    if (bodySteps.some(s => { const p = this.getPromptText(s); return p?.includes('===') && p?.includes('?'); })) {
       info.push('Multi-conditional loop pattern detected.');
       suggestions.push(
         'For loops with multiple conditional paths, the separate steps pattern is more maintainable than inline conditionals.'
