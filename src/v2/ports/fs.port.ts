@@ -68,6 +68,15 @@ export interface FileManipulationPortV2 {
 }
 
 /**
+ * A directory entry with modification time.
+ * Used for recency-based ordering.
+ */
+export interface FsDirEntryWithMtime {
+  readonly name: string;
+  readonly mtimeMs: number;
+}
+
+/**
  * Port: Directory listing.
  * Used by: directory-listing adapter (for session enumeration).
  */
@@ -77,6 +86,13 @@ export interface DirectoryListingOpsPortV2 {
    * Used for session enumeration and future Console features.
    */
   readdir(dirPath: string): ResultAsync<readonly string[], FsError>;
+
+  /**
+   * List directory entries with modification time.
+   * Used for recency-based session enumeration.
+   * Graceful: entries that fail stat are skipped.
+   */
+  readdirWithMtime(dirPath: string): ResultAsync<readonly FsDirEntryWithMtime[], FsError>;
 }
 
 /**

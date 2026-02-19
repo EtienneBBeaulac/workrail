@@ -7,7 +7,7 @@ import type { SessionSummaryProviderPortV2, SessionSummaryError } from '../../..
 import type { HealthySessionSummary, SessionObservations, IdentifiedWorkflow, RecapSnippet } from '../../../projections/resume-ranking.js';
 import { asRecapSnippet } from '../../../projections/resume-ranking.js';
 import type { RunDagRunV2, RunDagNodeV2 } from '../../../projections/run-dag.js';
-import { enumerateSessions } from '../../../usecases/enumerate-sessions.js';
+import { enumerateSessionsByRecency } from '../../../usecases/enumerate-sessions.js';
 import { projectSessionHealthV2 } from '../../../projections/session-health.js';
 import { projectRunDagV2 } from '../../../projections/run-dag.js';
 import { projectNodeOutputsV2, type NodeOutputsProjectionV2 } from '../../../projections/node-outputs.js';
@@ -108,7 +108,7 @@ export class LocalSessionSummaryProviderV2 implements SessionSummaryProviderPort
   constructor(private readonly ports: LocalSessionSummaryProviderPorts) {}
 
   loadHealthySummaries(): ResultAsync<readonly HealthySessionSummary[], SessionSummaryError> {
-    return enumerateSessions({
+    return enumerateSessionsByRecency({
       directoryListing: this.ports.directoryListing,
       dataDir: this.ports.dataDir,
     })

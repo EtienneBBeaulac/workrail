@@ -100,9 +100,10 @@ function buildProvider(sessionId: string, events: unknown[]) {
     load: (_id: SessionId) => okAsync({ sessionId: asSessionId(sessionId), events: events as any } as LoadedSessionTruthV2),
   };
 
-  // DirectoryListingPortV2 has readdir(dirPath) — return the sessionId as a directory entry
+  // DirectoryListingPortV2 has readdir(dirPath) and readdirWithMtime(dirPath)
   const mockDirectoryListing: DirectoryListingPortV2 = {
     readdir: (_dirPath: string) => okAsync([sessionId]),
+    readdirWithMtime: (_dirPath: string) => okAsync([{ name: sessionId, mtimeMs: Date.now() }]),
   };
 
   // DataDirPortV2 — only sessionsDir() and sessionDir() are needed for enumeration
