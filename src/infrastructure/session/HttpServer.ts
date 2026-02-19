@@ -466,14 +466,7 @@ export class HttpServer {
       });
     });
     
-    // 404 handler
-    this.app.use((req: Request, res: Response) => {
-      res.status(404).json({
-        success: false,
-        error: 'Not found',
-        path: req.path
-      });
-    });
+    // NOTE: 404 handler is installed by finalize() after all mountRoutes() calls.
   }
   
   /**
@@ -919,6 +912,33 @@ this.isPrimary = true;
   /**
    * Get the base URL
    */
+  /**
+   * Mount additional routes on the Express app.
+   * Used by Console and other extensions that need to add routes
+   * without coupling to the HttpServer class.
+   *
+   * Must be called before finalize().
+   */
+  mountRoutes(installer: (app: Application) => void): void {
+    installer(this.app);
+  }
+
+  /**
+   * Install the 404 catch-all handler.
+   * Must be called AFTER all mountRoutes() calls so that
+   * dynamically added middleware (e.g. express.static for Console)
+   * is evaluated before the 404 handler.
+   */
+  finalize(): void {
+    this.app.use((req: Request, res: Response) => {
+      res.status(404).json({
+        success: false,
+        error: 'Not found',
+        path: req.path,
+      });
+    });
+  }
+
   getBaseUrl(): string {
     return this.baseUrl;
   }

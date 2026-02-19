@@ -192,6 +192,22 @@ export async function startServer(): Promise<void> {
   // Create tool context with all dependencies
   const ctx = await createToolContext();
 
+  // Mount v2 Console API routes (read-only, if v2 + httpServer available)
+  if (ctx.v2 && ctx.httpServer && ctx.v2.dataDir && ctx.v2.directoryListing) {
+    const { ConsoleService } = await import('../v2/usecases/console-service.js');
+    const { mountConsoleRoutes } = await import('../v2/usecases/console-routes.js');
+    const consoleService = new ConsoleService({
+      directoryListing: ctx.v2.directoryListing,
+      dataDir: ctx.v2.dataDir,
+      sessionStore: ctx.v2.sessionStore,
+    });
+    ctx.httpServer.mountRoutes((app) => mountConsoleRoutes(app, consoleService));
+    console.error('[Console] v2 Console API routes mounted at /api/v2/');
+  }
+
+  // Finalize HTTP server (install 404 handler after all routes are mounted)
+  ctx.httpServer?.finalize();
+
   // Resolve description provider from DI
   const descriptionProvider = container.resolve<IToolDescriptionProvider>(
     DI.Mcp.DescriptionProvider
