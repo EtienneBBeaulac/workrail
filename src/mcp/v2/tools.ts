@@ -12,7 +12,6 @@ export type V2InspectWorkflowInput = z.infer<typeof V2InspectWorkflowInput>;
 
 export const V2StartWorkflowInput = z.object({
   workflowId: z.string().min(1).regex(/^[A-Za-z0-9_-]+$/, 'Workflow ID must contain only letters, numbers, hyphens, and underscores').describe('The workflow ID to start'),
-  context: z.record(z.unknown()).optional().describe('Structured context for this workflow — must be a JSON OBJECT with string keys, NOT a string. For design/analysis workflows: {"problem":"describe the problem","constraints":"...","goals":"..."}. For coding workflows: {"ticketId":"ACEI-1234","branch":"main"}. WorkRail injects these into step prompts. Pass once at start; re-pass only values that have CHANGED.'),
   workspacePath: z.string()
     .refine((p) => p.startsWith('/'), 'workspacePath must be an absolute path (starting with /)')
     .optional()
