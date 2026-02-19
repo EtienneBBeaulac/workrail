@@ -100,60 +100,6 @@ async function mkCtxWithWorkflow(workflowId: string): Promise<ToolContext> {
 }
 
 describe('v2 start_workflow (Slice 3.5)', () => {
-  it('returns VALIDATION_ERROR with actionable details for oversized context', async () => {
-    const root = await mkTempDataDir();
-    const prev = process.env.WORKRAIL_DATA_DIR;
-    process.env.WORKRAIL_DATA_DIR = root;
-    try {
-      const workflowId = 'test-workflow';
-      const ctx = await mkCtxWithWorkflow(workflowId);
-
-      const big = 'a'.repeat(262_200);
-      const res = await handleV2StartWorkflow({ workflowId, context: { big } } as any, ctx);
-      expect(res.type).toBe('error');
-      if (res.type !== 'error') return;
-
-      expect(res.code).toBe('VALIDATION_ERROR');
-      expect(res.message).toContain('context is too large');
-      expect(res.message).toContain('JCS');
-      expect(res.retry).toEqual({ kind: 'not_retryable' });
-
-      const details = res.details as any;
-      expect(details.suggestion).toBeTruthy();
-      expect(details.details.kind).toBe('context_budget_exceeded');
-      expect(details.details.tool).toBe('start_workflow');
-      expect(details.details.maxBytes).toBe(262144);
-      expect(details.details.measuredBytes).toBeGreaterThan(262144);
-    } finally {
-      process.env.WORKRAIL_DATA_DIR = prev;
-    }
-  });
-
-  it('returns VALIDATION_ERROR for non-finite numbers in context (agent-actionable)', async () => {
-    const root = await mkTempDataDir();
-    const prev = process.env.WORKRAIL_DATA_DIR;
-    process.env.WORKRAIL_DATA_DIR = root;
-    try {
-      const workflowId = 'test-workflow';
-      const ctx = await mkCtxWithWorkflow(workflowId);
-
-      const res = await handleV2StartWorkflow({ workflowId, context: { bad: Infinity } } as any, ctx);
-      expect(res.type).toBe('error');
-      if (res.type !== 'error') return;
-
-      expect(res.code).toBe('VALIDATION_ERROR');
-      expect(res.retry).toEqual({ kind: 'not_retryable' });
-
-      const details = res.details as any;
-      expect(details.suggestion).toBeTruthy();
-      expect(details.details.kind).toBe('context_non_finite_number');
-      expect(details.details.tool).toBe('start_workflow');
-      expect(details.details.path).toBe('$.bad');
-    } finally {
-      process.env.WORKRAIL_DATA_DIR = prev;
-    }
-  });
-
   it('returns VALIDATION_ERROR for oversized context on continue_workflow (rehydrate-only path)', async () => {
     const root = await mkTempDataDir();
     const prev = process.env.WORKRAIL_DATA_DIR;

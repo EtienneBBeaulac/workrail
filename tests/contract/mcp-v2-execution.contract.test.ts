@@ -108,7 +108,7 @@ describe('MCP contract: v2 start_workflow / continue_workflow (Slice 3)', () => 
   it('start -> rehydrate -> ack replay is deterministic and idempotent', async () => {
     const ctx = await createV2Context();
 
-    const start = await handleV2StartWorkflow({ workflowId: 'v2-exec-contract', context: {} } as any, ctx);
+    const start = await handleV2StartWorkflow({ workflowId: 'v2-exec-contract' } as any, ctx);
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
 

@@ -97,48 +97,7 @@ async function mkCtxWithWorkflow(workflowId: string): Promise<ToolContext> {
 }
 
 describe('v2 context persistence (S8)', () => {
-  it('start_workflow emits context_set when context provided', async () => {
-    const root = await mkTempDataDir();
-    const prev = process.env.WORKRAIL_DATA_DIR;
-    process.env.WORKRAIL_DATA_DIR = root;
-    try {
-      const workflowId = 'bug-investigation';
-      const ctx = await mkCtxWithWorkflow(workflowId);
-
-      const result = await handleV2StartWorkflow(
-        { workflowId, context: { ticketId: 'AUTH-123', complexity: 'Standard' } } as any,
-        ctx
-      );
-
-      expect(result.type).toBe('success');
-      if (result.type !== 'success') return;
-
-      const stateToken = (result.data as any).stateToken;
-      const parsed = parseTokenV1Binary(stateToken, ctx.v2.tokenCodecPorts);
-      expect(parsed.isOk()).toBe(true);
-      if (parsed.isErr()) return;
-
-      const sessionId = parsed.value.payload.sessionId;
-      const runId = parsed.value.payload.runId;
-
-      const truth = await ctx.v2.sessionStore.load(sessionId as any).match(
-        (v) => v,
-        (e) => {
-          throw new Error(`load error: ${e.code}`);
-        }
-      );
-
-      const contextSetEvents = truth.events.filter((e) => e.kind === 'context_set');
-      expect(contextSetEvents.length).toBe(1);
-      expect(contextSetEvents[0].scope.runId).toBe(runId);
-      expect(contextSetEvents[0].data.context).toEqual({ ticketId: 'AUTH-123', complexity: 'Standard' });
-      expect(contextSetEvents[0].data.source).toBe('initial');
-    } finally {
-      process.env.WORKRAIL_DATA_DIR = prev;
-    }
-  });
-
-  it('start_workflow does NOT emit context_set when no context', async () => {
+  it('start_workflow does not emit context_set (context is only accepted on continue_workflow)', async () => {
     const root = await mkTempDataDir();
     const prev = process.env.WORKRAIL_DATA_DIR;
     process.env.WORKRAIL_DATA_DIR = root;

@@ -35,7 +35,6 @@ import * as z from 'zod';
 import { newAttemptId, signTokenOrErr } from '../v2-token-ops.js';
 import { mapWorkflowSourceKind, deriveNextIntent } from '../v2-state-conversion.js';
 import { defaultPreferences } from '../v2-execution-helpers.js';
-import { checkContextBudget } from '../v2-context-budget.js';
 import { EVENT_KIND } from '../../../v2/durable-core/constants.js';
 import { buildNextCall } from './index.js';
 
@@ -114,7 +113,6 @@ export function buildInitialEvents(args: {
   readonly workflowSourceKind: 'bundled' | 'user' | 'project' | 'remote' | 'plugin';
   readonly workflowSourceRef: string;
   readonly snapshotRef: import('../../../v2/durable-core/ids/index.js').SnapshotRef;
-  readonly context: import('../../../v2/durable-core/canonical/json-types.js').JsonObject | undefined;
   readonly observations: readonly ObservationEventData[];
   readonly idFactory: { readonly mintEventId: () => string };
 }): readonly DomainEventV1[] {
@@ -127,7 +125,6 @@ export function buildInitialEvents(args: {
     workflowSourceKind,
     workflowSourceRef,
     snapshotRef,
-    context,
     observations,
     idFactory,
   } = args;
@@ -202,26 +199,6 @@ export function buildInitialEvents(args: {
   ];
 
   const mutableEvents: DomainEventV1[] = [...baseEvents];
-
-  // Emit context_set if initial context provided (S8: context persistence)
-  if (context) {
-    const evtContextSet = idFactory.mintEventId();
-    const contextId = idFactory.mintEventId();
-    mutableEvents.push({
-      v: 1,
-      eventId: evtContextSet,
-      eventIndex: mutableEvents.length,
-      sessionId,
-      kind: EVENT_KIND.CONTEXT_SET,
-      dedupeKey: `context_set:${sessionId}:${runId}:${contextId}`,
-      scope: { runId },
-      data: {
-        contextId,
-        context: context as unknown as JsonValue,
-        source: 'initial' as const,
-      },
-    } as DomainEventV1);
-  }
 
   // Emit observation_recorded events for workspace anchors (WU2: observability)
   // Note: observation_recorded has no scope (session-level, not run/node-level).
@@ -318,9 +295,6 @@ export function executeStartWorkflow(
 ): RA<z.infer<typeof V2StartWorkflowOutputSchema>, StartWorkflowError> {
   const { gate, sessionStore, snapshotStore, pinnedStore, crypto, tokenCodecPorts, idFactory } = ctx.v2;
 
-  const ctxCheck = checkContextBudget({ tool: 'start_workflow', context: input.context });
-  if (!ctxCheck.ok) return neErrorAsync({ kind: 'validation_failed', failure: ctxCheck.error });
-
   // 1. Load and pin workflow
   return loadAndPinWorkflow({
     workflowId: input.workflowId,
@@ -379,7 +353,6 @@ export function executeStartWorkflow(
               workflowSourceKind: mapWorkflowSourceKind(workflow.source.kind),
               workflowSourceRef,
               snapshotRef,
-              context: input.context as import('../../../v2/durable-core/canonical/json-types.js').JsonObject | undefined,
               observations,
               idFactory,
             });
