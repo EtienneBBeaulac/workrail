@@ -228,6 +228,22 @@ export function isWorkflowStepDefinition(
   return !isLoopStepDefinition(step);
 }
 
+/**
+ * Whether a step declares at least one prompt source.
+ *
+ * Valid prompt sources (exactly one required):
+ * - prompt: raw string (backward compat)
+ * - promptBlocks: structured blocks (compiled to prompt)
+ * - templateCall: expands to steps that have their own prompt source
+ *
+ * This is the single source of truth for "does this step have content?"
+ * Used by both the validation engine (pre-compilation) and can be reused
+ * anywhere that needs this check.
+ */
+export function stepHasPromptSource(step: WorkflowStepDefinition): boolean {
+  return Boolean(step.prompt || step.promptBlocks || step.templateCall);
+}
+
 // =============================================================================
 // VALIDATION HELPERS
 // =============================================================================

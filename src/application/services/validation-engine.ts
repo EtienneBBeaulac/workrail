@@ -8,7 +8,7 @@ import type {
   FunctionDefinition,
   FunctionParameter,
 } from '../../types/workflow-definition';
-import { isLoopStepDefinition } from '../../types/workflow-definition';
+import { isLoopStepDefinition, stepHasPromptSource } from '../../types/workflow-definition';
 import type { Workflow } from '../../types/workflow';
 import { 
   ValidationRule, 
@@ -587,9 +587,9 @@ export class ValidationEngine {
             suggestions.push('Add a title to all inline steps');
           }
           
-          if (!inlineStep.prompt) {
-            issues.push(`Inline step '${inlineStep.id || 'unknown'}' must have a prompt`);
-            suggestions.push('Add a prompt to all inline steps');
+          if (!stepHasPromptSource(inlineStep as WorkflowStepDefinition)) {
+            issues.push(`Inline step '${inlineStep.id || 'unknown'}' must have prompt, promptBlocks, or templateCall`);
+            suggestions.push('Add a prompt string, structured promptBlocks, or a templateCall to all inline steps');
           }
           
           // Check for nested loops
@@ -686,8 +686,9 @@ export class ValidationEngine {
         if (!step.title) {
           issues.push(`Step '${step.id}' missing required title`);
         }
-        if (!step.prompt) {
-          issues.push(`Step '${step.id}' missing required prompt`);
+        if (!stepHasPromptSource(step as WorkflowStepDefinition)) {
+          issues.push(`Step '${step.id}' must have prompt, promptBlocks, or templateCall`);
+          suggestions.push('Add a prompt string, structured promptBlocks, or a templateCall to each step');
         }
 
         this.collectQuotedJsonValidationMessageWarnings(step as any, `Step '${step.id}'`, warnings);
