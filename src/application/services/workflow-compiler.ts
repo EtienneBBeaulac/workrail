@@ -11,6 +11,8 @@ import type { Result } from 'neverthrow';
 import { ok, err } from 'neverthrow';
 import { type DomainError, Err } from '../../domain/execution/error';
 import { resolvePromptBlocksPass } from './compiler/prompt-blocks';
+import { resolveRefsPass } from './compiler/resolve-refs';
+import { createRefRegistry } from './compiler/ref-registry';
 
 export interface CompiledLoop {
   readonly loop: LoopStepDefinition;
@@ -41,9 +43,20 @@ export interface CompiledWorkflow {
 
 @singleton()
 export class WorkflowCompiler {
+  private readonly refRegistry = createRefRegistry();
+
   compile(workflow: Workflow): Result<CompiledWorkflow, DomainError> {
-    // Phase 1: Resolve promptBlocks into prompt strings (compile-time rendering)
-    const blocksResult = resolvePromptBlocksPass(workflow.definition.steps);
+    // Phase 1a: Resolve wr.refs.* in promptBlocks (must run before rendering)
+    const refsResult = resolveRefsPass(workflow.definition.steps, this.refRegistry);
+    if (refsResult.isErr()) {
+      const e = refsResult.error;
+      return err(Err.invalidState(
+        `Step '${e.stepId}': ref resolution error — ${e.cause.message}`
+      ));
+    }
+
+    // Phase 1b: Resolve promptBlocks into prompt strings (compile-time rendering)
+    const blocksResult = resolvePromptBlocksPass(refsResult.value);
     if (blocksResult.isErr()) {
       const e = blocksResult.error;
       const message = e.code === 'PROMPT_AND_BLOCKS_BOTH_SET'
