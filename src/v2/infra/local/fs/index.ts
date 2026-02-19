@@ -3,7 +3,8 @@ import * as fsCb from 'fs';
 import { constants as fsConstants } from 'fs';
 import type { ResultAsync } from 'neverthrow';
 import { ResultAsync as RA } from 'neverthrow';
-import type { FileSystemPortV2, FsError } from '../../../ports/fs.port.js';
+import type { FileSystemPortV2, FsError, FsDirEntryWithMtime } from '../../../ports/fs.port.js';
+import * as path from 'path';
 
 function nodeErrorCode(e: unknown): string | undefined {
   if (typeof e !== 'object' || e === null) return undefined;
@@ -165,5 +166,38 @@ export class NodeFileSystemV2 implements FileSystemPortV2 {
 
   readdir(dirPath: string): ResultAsync<readonly string[], FsError> {
     return RA.fromPromise(fs.readdir(dirPath), (e) => mapFsError(e, dirPath));
+  }
+
+  readdirWithMtime(dirPath: string): ResultAsync<readonly FsDirEntryWithMtime[], FsError> {
+    return RA.fromPromise(
+      (async (): Promise<readonly FsDirEntryWithMtime[]> => {
+        const entries = await fs.readdir(dirPath);
+        const withMtime: FsDirEntryWithMtime[] = [];
+        let skipped = 0;
+
+        for (const name of entries) {
+          try {
+            const stats = await fs.stat(path.join(dirPath, name));
+            withMtime.push({ name, mtimeMs: stats.mtimeMs });
+          } catch (e) {
+            // Graceful degradation: individual stat failures don't abort enumeration,
+            // but we must observe what's being skipped for debugging.
+            const code = nodeErrorCode(e);
+            skipped++;
+            console.error(
+              `[workrail:session-enum] Skipping ${name}: stat failed (${code ?? 'unknown'}: ${e instanceof Error ? e.message : String(e)})`
+            );
+            continue;
+          }
+        }
+
+        if (skipped > 0) {
+          console.error(`[workrail:session-enum] Enumerated ${withMtime.length} sessions, skipped ${skipped} (stat failures)`);
+        }
+
+        return withMtime;
+      })(),
+      (e) => mapFsError(e, dirPath),
+    );
   }
 }

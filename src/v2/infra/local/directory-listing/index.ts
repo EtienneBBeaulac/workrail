@@ -1,7 +1,7 @@
 import type { ResultAsync } from 'neverthrow';
 import { okAsync, errAsync } from 'neverthrow';
 import type { FsError, DirectoryListingOpsPortV2 } from '../../../ports/fs.port.js';
-import type { DirectoryListingPortV2 } from '../../../ports/directory-listing.port.js';
+import type { DirectoryListingPortV2, DirEntryWithMtime } from '../../../ports/directory-listing.port.js';
 
 /**
  * Local filesystem directory listing adapter.
@@ -21,6 +21,16 @@ export class LocalDirectoryListingV2 implements DirectoryListingPortV2 {
       // Graceful: missing directory → empty list (not an error)
       if (e.code === 'FS_NOT_FOUND') {
         return okAsync([] as readonly string[]);
+      }
+      return errAsync(e);
+    });
+  }
+
+  readdirWithMtime(dirPath: string): ResultAsync<readonly DirEntryWithMtime[], FsError> {
+    return this.fs.readdirWithMtime(dirPath).orElse((e) => {
+      // Graceful: missing directory → empty list (not an error)
+      if (e.code === 'FS_NOT_FOUND') {
+        return okAsync([] as readonly DirEntryWithMtime[]);
       }
       return errAsync(e);
     });
