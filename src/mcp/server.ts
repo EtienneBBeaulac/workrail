@@ -351,6 +351,16 @@ export async function startServer(): Promise<void> {
   processSignals.on('SIGTERM', () => shutdownEvents.emit({ kind: 'shutdown_requested', signal: 'SIGTERM' }));
   processSignals.on('SIGHUP', () => shutdownEvents.emit({ kind: 'shutdown_requested', signal: 'SIGHUP' }));
 
+  // Shut down when the MCP client disconnects (e.g. IDE reconfigure).
+  // The MCP SDK's StdioServerTransport does not listen for stdin 'end',
+  // so server.onclose never fires on disconnect. Without this, the HTTP
+  // server keeps the process alive after stdin EOF, blocking the
+  // client-side close and preventing server restart.
+  process.stdin.on('end', () => {
+    console.error('[MCP] stdin closed, initiating shutdown');
+    shutdownEvents.emit({ kind: 'shutdown_requested', signal: 'SIGHUP' });
+  });
+
   let shutdownStarted = false;
   shutdownEvents.onShutdown((event: ShutdownEvent) => {
     if (shutdownStarted) return;
