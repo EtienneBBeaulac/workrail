@@ -21,10 +21,10 @@
     "web"
   ],
   "scripts": {
-    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true});\" && tsc -p tsconfig.build.json",
+    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true});\" && tsc -p tsconfig.build.json && npm run console:build",
     "console:build": "cd console && npm install && npm run build",
     "console:dev": "cd console && npm run dev",
-    "build:all": "npm run build && npm run console:build",
+    "build:all": "npm run build",
     "docs:workflows": "node scripts/generate-workflow-docs.js",
     "generate:locks": "npx ts-node scripts/generate-lock-coverage.ts && npx ts-node scripts/generate-lock-coverage.ts --json",
     "verify:generated": "npm run generate:locks && git diff --exit-code -- docs/generated/v2-lock-coverage.json docs/generated/v2-lock-coverage.md docs/generated/v2-lock-closure-plan.md",
