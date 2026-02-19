@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://workflowlookup.io/schemas/workflow/v0.2.0",
+  "$id": "https://workflowlookup.io/schemas/workflow/v0.3.0",
   "title": "Workflow Schema",
   "description": "Schema for defining workflows in the Workflow Orchestration System",
   "type": "object",
@@ -124,6 +124,16 @@
         }
       },
       "additionalProperties": false
+    },
+    "features": {
+      "type": "array",
+      "description": "Compiler features to apply to this workflow (e.g. wr.features.memory_context). Features inject content into promptBlocks at compile time.",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "uniqueItems": true
     }
   },
   "required": [
@@ -179,6 +189,7 @@
         "id": { "$ref": "#/$defs/stepId", "description": "Unique identifier for the step" },
         "title": { "type": "string", "minLength": 1, "maxLength": 128 },
         "prompt": { "type": "string", "minLength": 1, "maxLength": 8192 },
+        "promptBlocks": { "$ref": "#/$defs/promptBlocks" },
         "agentRole": { "type": "string", "minLength": 10, "maxLength": 1024 },
         "guidance": { "type": "array", "items": { "type": "string" } },
         "askForFiles": { "type": "boolean", "default": false },
@@ -190,9 +201,10 @@
         "notesOptional": { "type": "boolean", "description": "When true, output.notesMarkdown is not required for this step. Steps with outputContract are automatically exempt. Use sparingly for mechanical steps with no substantive work to document." },
         "functionDefinitions": { "type": "array", "items": { "$ref": "#/$defs/functionDefinition" } },
         "functionCalls": { "type": "array", "items": { "$ref": "#/$defs/functionCall" } },
-        "functionReferences": { "type": "array", "items": { "type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*\\(\\)$" } }
+        "functionReferences": { "type": "array", "items": { "type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*\\(\\)$" } },
+        "templateCall": { "$ref": "#/$defs/templateCall" }
       },
-      "required": ["id", "title", "prompt"],
+      "required": ["id", "title"],
       "additionalProperties": false
     },
     "loopStep": {
@@ -588,6 +600,83 @@
         "args": { "type": "object", "additionalProperties": true }
       },
       "required": ["name", "args"],
+      "additionalProperties": false
+    },
+    "promptBlocks": {
+      "type": "object",
+      "description": "Structured prompt blocks. Alternative to raw prompt string. Rendered into prompt during compilation in deterministic order: goal, constraints, procedure, outputRequired, verify.",
+      "properties": {
+        "goal": { "$ref": "#/$defs/promptValue" },
+        "constraints": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/promptValue" }
+        },
+        "procedure": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/promptValue" }
+        },
+        "outputRequired": {
+          "type": "object",
+          "description": "Key-value pairs describing required outputs",
+          "additionalProperties": { "type": "string" }
+        },
+        "verify": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/promptValue" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "promptValue": {
+      "description": "A prompt value: either a plain string or an array of prompt parts (text and refs).",
+      "oneOf": [
+        { "type": "string" },
+        {
+          "type": "array",
+          "items": { "$ref": "#/$defs/promptPart" }
+        }
+      ]
+    },
+    "promptPart": {
+      "description": "A single part of a prompt value: literal text or a reference to a canonical WorkRail snippet.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "text" },
+            "text": { "type": "string" }
+          },
+          "required": ["kind", "text"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "ref" },
+            "refId": { "type": "string", "minLength": 1 }
+          },
+          "required": ["kind", "refId"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "templateCall": {
+      "type": "object",
+      "description": "Template call: expands this step into one or more steps at compile time.",
+      "properties": {
+        "templateId": {
+          "type": "string",
+          "description": "The template ID to expand (e.g. wr.templates.capability_probe)",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "args": {
+          "type": "object",
+          "description": "Arguments to pass to the template",
+          "additionalProperties": true
+        }
+      },
+      "required": ["templateId"],
       "additionalProperties": false
     }
   }
