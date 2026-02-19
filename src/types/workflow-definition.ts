@@ -189,6 +189,12 @@ export interface WorkflowDefinition {
    * warnings are emitted as gap_recorded events (severity: warning).
    */
   readonly recommendedPreferences?: WorkflowRecommendedPreferences;
+  /**
+   * Workflow-level feature declarations (closed-set, wr.features.*).
+   * Features are compiler middleware that inject content into promptBlocks.
+   * Resolved at compile time — unknown feature IDs fail fast.
+   */
+  readonly features?: readonly string[];
 }
 
 // =============================================================================
