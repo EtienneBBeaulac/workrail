@@ -13,6 +13,8 @@ import { type DomainError, Err } from '../../domain/execution/error';
 import { resolvePromptBlocksPass } from './compiler/prompt-blocks';
 import { resolveRefsPass } from './compiler/resolve-refs';
 import { createRefRegistry } from './compiler/ref-registry';
+import { resolveFeaturesPass } from './compiler/resolve-features';
+import { createFeatureRegistry } from './compiler/feature-registry';
 
 export interface CompiledLoop {
   readonly loop: LoopStepDefinition;
@@ -44,10 +46,25 @@ export interface CompiledWorkflow {
 @singleton()
 export class WorkflowCompiler {
   private readonly refRegistry = createRefRegistry();
+  private readonly featureRegistry = createFeatureRegistry();
 
   compile(workflow: Workflow): Result<CompiledWorkflow, DomainError> {
-    // Phase 1a: Resolve wr.refs.* in promptBlocks (must run before rendering)
-    const refsResult = resolveRefsPass(workflow.definition.steps, this.refRegistry);
+    // Phase 1a: Apply declared features to promptBlocks (may inject refs)
+    const featuresResult = resolveFeaturesPass(
+      workflow.definition.steps,
+      workflow.definition.features ?? [],
+      this.featureRegistry,
+    );
+    if (featuresResult.isErr()) {
+      const e = featuresResult.error;
+      const message = e.code === 'FEATURE_RESOLVE_ERROR'
+        ? `Feature error — ${e.cause.message}`
+        : e.message;
+      return err(Err.invalidState(message));
+    }
+
+    // Phase 1b: Resolve wr.refs.* in promptBlocks (must run before rendering)
+    const refsResult = resolveRefsPass(featuresResult.value, this.refRegistry);
     if (refsResult.isErr()) {
       const e = refsResult.error;
       return err(Err.invalidState(
