@@ -52,6 +52,21 @@ export function mountConsoleRoutes(app: Application, consoleService: ConsoleServ
     );
   });
 
+  // Get node detail within a session
+  app.get('/api/v2/sessions/:sessionId/nodes/:nodeId', async (req: Request, res: Response) => {
+    const { sessionId, nodeId } = req.params;
+    const result = await consoleService.getNodeDetail(sessionId, nodeId);
+    result.match(
+      (data) => res.json({ success: true, data }),
+      (error) => {
+        const status = error.code === 'NODE_NOT_FOUND' ? 404
+          : error.code === 'SESSION_LOAD_FAILED' ? 404
+          : 500;
+        res.status(status).json({ success: false, error: error.message });
+      },
+    );
+  });
+
   // --- Static file serving for Console UI ---
 
   const consoleDist = resolveConsoleDist();

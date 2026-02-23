@@ -42,7 +42,15 @@ export const V2ContinueWorkflowInputShape = z.object({
   context: z.record(z.unknown()).optional().describe('External facts (only if CHANGED since last call). Omit this entirely if no facts changed. WorkRail auto-merges with previous context. Example: if context={branch:"main"} at start, do NOT re-pass it unless branch changed. Pass only NEW or OVERRIDDEN values.'),
   output: z
     .object({
-      notesMarkdown: z.string().min(1).optional().describe('Summary of work completed in THIS step only — fresh and specific to this step. Do NOT append previous step notes. WorkRail concatenates notes across steps automatically. WRONG: "Phase 0: planning. Phase 1: implemented." RIGHT: "Implemented OAuth2 with 3 endpoints; added token validation middleware." Aim for ≤10 lines.'),
+      notesMarkdown: z.string().min(1).optional().describe(
+        'Recap of THIS step only (WorkRail concatenates across steps automatically — never repeat earlier notes). ' +
+        'Write for a human reader who will review your work later. Include: ' +
+        '(1) What you did and the key decisions/trade-offs made, ' +
+        '(2) What you found or produced (files changed, endpoints added, test results, etc.), ' +
+        '(3) Anything the reader should know (risks, open questions, things you chose NOT to do and why). ' +
+        'Use markdown: headings, bullet lists, bold for emphasis. Be specific — names, paths, numbers, not vague summaries. ' +
+        'Good length: 10–30 lines. Too short is worse than too long.'
+      ),
       artifacts: z.array(z.unknown()).optional().describe('Optional structured artifacts (schema is workflow/contract-defined)'),
     })
     .optional()

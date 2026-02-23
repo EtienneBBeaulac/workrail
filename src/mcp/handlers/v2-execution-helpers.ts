@@ -224,7 +224,7 @@ export function mapTokenDecodeErrorToToolError(e: TokenDecodeErrorV2): ToolFailu
         'TOKEN_INVALID_FORMAT',
         'Token corrupted (bech32m checksum failed). Likely copy/paste error.',
         {
-          suggestion: 'Copy the entire token string exactly as returned. Use triple-click to select the complete line.',
+          suggestion: 'Use the exact token string as returned. Do not truncate or modify it.',
           details: {
             errorType: 'corruption_detected',
             estimatedPosition: bech32mErr.position ?? null,

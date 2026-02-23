@@ -300,9 +300,10 @@
       },
       "loop": {
         "type": "while",
-        "condition": {
-          "var": "continuePlanning",
-          "equals": true
+        "conditionSource": {
+          "kind": "artifact_contract",
+          "contractRef": "wr.contracts.loop_control",
+          "loopId": "plan-iteration"
         },
         "maxIterations": 5
       },
@@ -339,7 +340,7 @@
         {
           "id": "phase-5d-loop-exit-decision",
           "title": "Loop Exit Decision (Fail-Safe)",
-          "prompt": "**Non-optional:** Provide a loop control decision artifact.\n\n**Output (exact format):**\n- Loop control artifact with decision: continue or stop\n- `reason`: one sentence\n- `whatChangedSinceLastIteration`: 1–3 bullets\n\n**Loop continuation logic (continue while issues found):**\n\n- If `planFindings` is **NON-EMPTY** (issues found this pass):\n  → decision: continue\n  → Rationale: Amendments need verification; may have introduced new issues\n\n- If `planFindings` is **EMPTY** (clean pass):\n  → decision: stop\n  → Rationale: Plan is stable, no more issues to find\n\n**Max iterations (5) still applies** — if you've hit 5 iterations and still finding issues, exit anyway and note remaining concerns.\n\n**Override to exit early:**\n- User explicitly requests to proceed\n- All findings are Minor AND `planConfidence >= 8`\n\nIf continuing, name what was found + what changes next iteration.\n\n**CONTEXT LOGGING:** Update CONTEXT.md Decision Log (follow format from metaGuidance) and update Machine State Checkpoint (keep last 3).",
+          "prompt": "**Non-optional:** Provide a loop control decision artifact.\n\n**Required output format:**\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue\"\n  }]\n}\n```\n`loopId` is optional — the engine infers the active loop automatically.\n\n**Decision rules (no exceptions):**\n\n- If `planFindings` is **NON-EMPTY** (any finding this pass, regardless of severity):\n  → `decision: \"continue\"`\n  → Rationale: Amendments need a verification pass; changes may have introduced new issues.\n\n- If `planFindings` is **EMPTY** (zero findings this pass):\n  → `decision: \"stop\"` — but you **must demonstrate** the empty pass:\n  → List each area you audited and explicitly confirm nothing was found in each.\n  → Example: \"Checked invariant coverage ✓, data-flow correctness ✓, slice boundary alignment ✓ — zero findings.\"\n  → Claiming `planFindings: []` without enumerated evidence is not sufficient.\n\n**Max iterations (5) still applies** — if you've hit 5 iterations and still finding issues, exit with `decision: \"stop\"` and document remaining concerns.\n\nIf continuing, name what was found + what changes next iteration.\n\n**CONTEXT LOGGING:** Update CONTEXT.md Decision Log (follow format from metaGuidance) and update Machine State Checkpoint (keep last 3).",
           "requireConfirmation": true,
           "outputContract": {
             "contractRef": "wr.contracts.loop_control"

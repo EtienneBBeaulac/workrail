@@ -430,7 +430,7 @@ Results should be **tip-only** and deterministically ranked.
 
 ### Minimal `output` shape (recommended)
 
-- `output.notesMarkdown` (optional but strongly encouraged): short recap (≤10 lines) of what happened and what’s next.
+- `output.notesMarkdown` (strongly encouraged): detailed recap of this step’s work (see quality guidance below).
 - `output.artifacts[]` (optional): small structured payloads, used only when you have concrete structured results.
 
 ### Per-step notes semantics (normative)
@@ -446,6 +446,16 @@ Results should be **tip-only** and deterministically ranked.
 - Enforces byte budget compliance (cumulative notes would violate the 4096-byte limit by construction)
 - Preserves rewind safety (each step's notes are independent; no need to read chat history)
 - Allows projections to aggregate, filter, and budget notes deterministically
+
+**Notes quality guidance**:
+
+These notes are displayed to the user in a markdown viewer and serve as the durable record of the agent's work. They should be written for a human reader. Include:
+
+1. **What you did** and the key decisions or trade-offs made
+2. **What you produced** — files changed, functions added, test results, specific numbers
+3. **Anything notable** — risks, open questions, things deliberately NOT done and why
+
+Use markdown formatting: headings, bullet lists, `code references`, **bold** for emphasis. Be specific — file paths, function names, counts, not vague summaries. 10–30 lines is a good target; too short is worse than too long.
 
 Artifact kinds should be from a closed set (examples):
 

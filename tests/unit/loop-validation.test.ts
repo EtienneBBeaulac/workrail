@@ -87,7 +87,7 @@ describe('Loop Validation', () => {
       expect(result.issues[0]).toContain('exceeds safety limit');
     });
 
-    it('should reject while loop without condition', () => {
+    it('should reject while loop with neither condition nor conditionSource', () => {
       const invalidLoop: LoopStep = {
         ...baseLoopStep,
         loop: {
@@ -97,7 +97,24 @@ describe('Loop Validation', () => {
       };
       const result = engine.validateLoopStep(invalidLoop, baseWorkflow);
       expect(result.valid).toBe(false);
-      expect(result.issues[0]).toContain('while loop requires a condition');
+      expect(result.issues[0]).toContain('while loop requires a condition or conditionSource');
+    });
+
+    it('should accept while loop with conditionSource and no condition field', () => {
+      const loopWithConditionSource: LoopStep = {
+        ...baseLoopStep,
+        loop: {
+          type: 'while',
+          conditionSource: {
+            kind: 'artifact_contract',
+            contractRef: 'wr.contracts.loop_control',
+            loopId: 'my-loop',
+          },
+          maxIterations: 5,
+        }
+      };
+      const result = engine.validateLoopStep(loopWithConditionSource, baseWorkflow);
+      expect(result.valid).toBe(true);
     });
 
     it('should validate for loop with count', () => {
