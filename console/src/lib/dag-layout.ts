@@ -1,8 +1,8 @@
 import type { ConsoleDagNode, ConsoleDagEdge } from '../api/types';
 
-const NODE_WIDTH = 140;
+const NODE_WIDTH = 200;
 const NODE_HEIGHT = 60;
-const HORIZONTAL_GAP = 60;
+const HORIZONTAL_GAP = 40;
 const VERTICAL_GAP = 40;
 
 interface Position {

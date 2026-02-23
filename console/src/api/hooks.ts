@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import type { ApiResponse, ConsoleSessionListResponse, ConsoleSessionDetail } from './types';
+import type { ApiResponse, ConsoleSessionListResponse, ConsoleSessionDetail, ConsoleNodeDetail } from './types';
 
 async function fetchApi<T>(url: string): Promise<T> {
   const res = await fetch(url);
@@ -21,5 +21,13 @@ export function useSessionDetail(sessionId: string) {
     queryKey: ['session', sessionId],
     queryFn: () => fetchApi<ConsoleSessionDetail>(`/api/v2/sessions/${sessionId}`),
     enabled: !!sessionId,
+  });
+}
+
+export function useNodeDetail(sessionId: string, nodeId: string | null) {
+  return useQuery({
+    queryKey: ['node', sessionId, nodeId],
+    queryFn: () => fetchApi<ConsoleNodeDetail>(`/api/v2/sessions/${sessionId}/nodes/${nodeId}`),
+    enabled: !!nodeId,
   });
 }

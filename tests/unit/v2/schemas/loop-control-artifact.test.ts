@@ -124,14 +124,18 @@ describe('LoopControlArtifactV1Schema', () => {
       expect(result.success).toBe(false);
     });
 
-    it('rejects artifact with missing loopId', () => {
+    it('accepts artifact with missing loopId (anonymous — engine infers from active loop)', () => {
       const artifact = {
         kind: 'wr.loop_control',
         decision: 'continue',
       };
 
       const result = LoopControlArtifactV1Schema.safeParse(artifact);
-      expect(result.success).toBe(false);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.loopId).toBeUndefined();
+        expect(result.data.decision).toBe('continue');
+      }
     });
 
     it('rejects artifact with missing decision', () => {
@@ -335,5 +339,38 @@ describe('findLoopControlArtifact', () => {
     const result = findLoopControlArtifact(badArtifacts, 'valid-loop');
     expect(result).not.toBeNull();
     expect(result?.loopId).toBe('valid-loop');
+  });
+
+  it('matches anonymous artifact (no loopId) for any expectedLoopId', () => {
+    const artifacts = [
+      { kind: 'wr.loop_control', decision: 'stop' }, // no loopId
+    ];
+
+    const result = findLoopControlArtifact(artifacts, 'plan-iteration');
+    expect(result).not.toBeNull();
+    expect(result?.decision).toBe('stop');
+    expect(result?.loopId).toBeUndefined();
+  });
+
+  it('prefers the most recent artifact — anonymous stop wins over older named continue', () => {
+    const artifacts = [
+      { kind: 'wr.loop_control', loopId: 'plan-iteration', decision: 'continue' },
+      { kind: 'wr.loop_control', decision: 'stop' }, // anonymous, most recent
+    ];
+
+    const result = findLoopControlArtifact(artifacts, 'plan-iteration');
+    expect(result).not.toBeNull();
+    expect(result?.decision).toBe('stop');
+  });
+
+  it('skips anonymous artifact when a named match appears later', () => {
+    const artifacts = [
+      { kind: 'wr.loop_control', decision: 'stop' }, // anonymous, older
+      { kind: 'wr.loop_control', loopId: 'plan-iteration', decision: 'continue' }, // named, most recent
+    ];
+
+    const result = findLoopControlArtifact(artifacts, 'plan-iteration');
+    expect(result).not.toBeNull();
+    expect(result?.decision).toBe('continue');
   });
 });

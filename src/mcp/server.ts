@@ -200,6 +200,8 @@ export async function startServer(): Promise<void> {
       directoryListing: ctx.v2.directoryListing,
       dataDir: ctx.v2.dataDir,
       sessionStore: ctx.v2.sessionStore,
+      snapshotStore: ctx.v2.snapshotStore,
+      pinnedWorkflowStore: ctx.v2.pinnedStore,
     });
     ctx.httpServer.mountRoutes((app) => mountConsoleRoutes(app, consoleService));
     console.error('[Console] v2 Console API routes mounted at /api/v2/');

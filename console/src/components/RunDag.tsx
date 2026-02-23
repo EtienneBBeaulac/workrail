@@ -1,10 +1,11 @@
-import { useMemo } from 'react';
+import { useMemo, useCallback } from 'react';
 import {
   ReactFlow,
   Background,
   Controls,
   type Node,
   type Edge,
+  type NodeMouseHandler,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import type { ConsoleDagRun, ConsoleDagNode } from '../api/types';
@@ -12,6 +13,7 @@ import { layoutDag } from '../lib/dag-layout';
 
 interface Props {
   run: ConsoleDagRun;
+  onNodeClick?: (nodeId: string) => void;
 }
 
 const NODE_KIND_STYLES: Record<ConsoleDagNode['nodeKind'], { bg: string; border: string }> = {
@@ -20,13 +22,14 @@ const NODE_KIND_STYLES: Record<ConsoleDagNode['nodeKind'], { bg: string; border:
   blocked_attempt: { bg: '#3d1a1a', border: '#ef4444' },
 };
 
-export function RunDag({ run }: Props) {
+export function RunDag({ run, onNodeClick }: Props) {
   const { nodes, edges } = useMemo(() => {
     const positions = layoutDag(run.nodes, run.edges);
 
     const flowNodes: Node[] = run.nodes.map((node) => {
       const style = NODE_KIND_STYLES[node.nodeKind];
       const pos = positions[node.nodeId] ?? { x: 0, y: 0 };
+      const hasLabel = !!node.stepLabel;
       return {
         id: node.nodeId,
         position: pos,
@@ -38,15 +41,23 @@ export function RunDag({ run }: Props) {
           border: `2px solid ${node.isPreferredTip ? '#fbbf24' : style.border}`,
           borderRadius: node.nodeKind === 'checkpoint' ? '50%' : '8px',
           color: '#fafafa',
-          padding: '8px 12px',
-          fontSize: '11px',
-          fontFamily: 'monospace',
+          padding: hasLabel ? '6px 10px' : '8px 12px',
+          fontSize: hasLabel ? '10px' : '11px',
+          fontFamily: hasLabel ? 'system-ui, sans-serif' : 'monospace',
           width: node.nodeKind === 'checkpoint' ? 40 : undefined,
+          maxWidth: hasLabel ? 180 : undefined,
           height: node.nodeKind === 'checkpoint' ? 40 : undefined,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
+          textAlign: 'center' as const,
           boxShadow: node.isPreferredTip ? '0 0 12px rgba(251, 191, 36, 0.4)' : 'none',
+          cursor: 'pointer',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'normal' as const,
+          lineHeight: '1.3',
+          wordBreak: 'break-word' as const,
         },
       };
     });
@@ -65,6 +76,11 @@ export function RunDag({ run }: Props) {
     return { nodes: flowNodes, edges: flowEdges };
   }, [run]);
 
+  const handleNodeClick: NodeMouseHandler = useCallback(
+    (_event, node) => onNodeClick?.(node.id),
+    [onNodeClick],
+  );
+
   return (
     <ReactFlow
       nodes={nodes}
@@ -74,6 +90,7 @@ export function RunDag({ run }: Props) {
       nodesDraggable={false}
       nodesConnectable={false}
       colorMode="dark"
+      onNodeClick={handleNodeClick}
     >
       <Background color="#333" gap={20} />
       <Controls />
@@ -82,8 +99,8 @@ export function RunDag({ run }: Props) {
 }
 
 function formatNodeLabel(node: ConsoleDagNode): string {
-  const short = node.nodeId.slice(-8);
-  if (node.isPreferredTip) return `* ${short}`;
-  if (node.isTip) return `> ${short}`;
-  return short;
+  const label = node.stepLabel ?? node.nodeId.slice(-8);
+  if (node.isPreferredTip) return `* ${label}`;
+  if (node.isTip) return `> ${label}`;
+  return label;
 }
