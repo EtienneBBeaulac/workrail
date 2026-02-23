@@ -25,6 +25,7 @@ import { toBoundedJsonValue } from './validation/bounded-json.js';
 import type { PreValidateResult } from './validation/workflow-next-prevalidate.js';
 import type { WrappedToolHandler, McpCallToolResult } from './types/workflow-tool-edition.js';
 import { internalSuggestion } from './handlers/v2-execution-helpers.js';
+import { formatV2ExecutionResponse } from './v2-response-formatter.js';
 
 // -----------------------------------------------------------------------------
 // Result Conversion
@@ -36,12 +37,21 @@ import { internalSuggestion } from './handlers/v2-execution-helpers.js';
  * For error results, serializes the unified envelope:
  * { code, message, retry, details? }
  */
+const jsonResponsesOverride = process.env.WORKRAIL_JSON_RESPONSES === 'true';
+
 export function toMcpResult<T>(result: ToolResult<T>): McpCallToolResult {
   switch (result.type) {
-    case 'success':
+    case 'success': {
+      if (!jsonResponsesOverride) {
+        const nl = formatV2ExecutionResponse(result.data);
+        if (nl !== null) {
+          return { content: [{ type: 'text', text: nl }] };
+        }
+      }
       return {
         content: [{ type: 'text', text: JSON.stringify(result.data, null, 2) }],
       };
+    }
     case 'error':
       return {
         content: [{

@@ -519,9 +519,9 @@ export class ValidationEngine {
     switch (step.loop.type) {
       case 'while':
       case 'until':
-        if (!step.loop.condition) {
-          issues.push(`${step.loop.type} loop requires a condition`);
-          suggestions.push(`Add a condition that evaluates to false (for while) or true (for until) to exit the loop`);
+        if (!step.loop.condition && !step.loop.conditionSource) {
+          issues.push(`${step.loop.type} loop requires a condition or conditionSource`);
+          suggestions.push(`Add a conditionSource (preferred) or a condition field to control loop exit`);
         }
         break;
 

@@ -26,6 +26,19 @@ describe('evaluateLoopControlFromArtifacts', () => {
       }
     });
 
+    it('returns found for anonymous artifact (no loopId)', () => {
+      const artifacts = [
+        { kind: 'wr.loop_control', decision: 'stop' },
+      ];
+
+      const result = evaluateLoopControlFromArtifacts(artifacts, 'plan-iteration');
+      expect(result.kind).toBe('found');
+      if (result.kind === 'found') {
+        expect(result.decision).toBe('stop');
+        expect(result.artifact.loopId).toBeUndefined();
+      }
+    });
+
     it('returns found with stop decision', () => {
       const artifacts = [
         { kind: 'wr.loop_control', loopId: 'test-loop', decision: 'stop' },

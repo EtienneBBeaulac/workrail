@@ -25,9 +25,10 @@
       "title": "Iteration Loop",
       "loop": {
         "type": "while",
-        "condition": {
-          "var": "loopShouldContinue",
-          "equals": true
+        "conditionSource": {
+          "kind": "artifact_contract",
+          "contractRef": "wr.contracts.loop_control",
+          "loopId": "test-iteration"
         },
         "maxIterations": 3
       },

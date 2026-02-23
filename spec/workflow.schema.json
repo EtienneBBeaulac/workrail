@@ -332,7 +332,7 @@
                 "contractRef": { "type": "string", "minLength": 1 },
                 "loopId": { "type": "string", "minLength": 1 }
               },
-              "required": ["kind", "contractRef", "loopId"],
+              "required": ["kind", "contractRef"],
               "additionalProperties": false
             },
             {
@@ -351,10 +351,14 @@
       "allOf": [
         {
           "if": {
-            "properties": { "type": { "enum": ["while", "until"] } }
+            "properties": { "type": { "enum": ["while", "until"] } },
+            "required": ["type"]
           },
           "then": {
-            "required": ["condition"]
+            "anyOf": [
+              { "required": ["condition"] },
+              { "required": ["conditionSource"] }
+            ]
           }
         },
         {

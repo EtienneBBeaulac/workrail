@@ -1,7 +1,9 @@
+import { useState, useCallback } from 'react';
 import { useSessionDetail } from '../api/hooks';
 import { RunDag } from '../components/RunDag';
 import { StatusBadge } from '../components/StatusBadge';
 import { HealthBadge } from '../components/HealthBadge';
+import { NodeDetailPanel } from '../components/NodeDetailPanel';
 
 interface Props {
   sessionId: string;
@@ -9,6 +11,13 @@ interface Props {
 
 export function SessionDetail({ sessionId }: Props) {
   const { data, isLoading, error } = useSessionDetail(sessionId);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+
+  const handleNodeClick = useCallback((nodeId: string) => {
+    setSelectedNodeId((prev) => (prev === nodeId ? null : nodeId));
+  }, []);
+
+  const handleClosePanel = useCallback(() => setSelectedNodeId(null), []);
 
   if (isLoading) {
     return <div className="text-[var(--text-secondary)]">Loading session...</div>;
@@ -25,7 +34,12 @@ export function SessionDetail({ sessionId }: Props) {
   if (!data) return null;
 
   return (
-    <div>
+    <div className={selectedNodeId ? 'mr-[420px] transition-[margin] duration-200' : 'transition-[margin] duration-200'}>
+      {data.sessionTitle && (
+        <h2 className="text-base font-medium text-[var(--text-primary)] mb-2">
+          {data.sessionTitle}
+        </h2>
+      )}
       <div className="flex items-center gap-3 mb-6">
         <HealthBadge health={data.health} />
         <span className="text-sm text-[var(--text-muted)]">
@@ -43,14 +57,12 @@ export function SessionDetail({ sessionId }: Props) {
             <div key={run.runId} className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
               <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
                 <div className="flex items-center gap-3">
-                  <span className="font-mono text-sm text-[var(--text-primary)]">
-                    Run: {run.runId}
+                  <span className="text-sm font-medium text-[var(--text-primary)]">
+                    {run.workflowName ?? run.workflowId ?? 'Run'}
                   </span>
-                  {run.workflowId && (
-                    <span className="text-xs text-[var(--text-muted)]">
-                      {run.workflowId}
-                    </span>
-                  )}
+                  <span className="font-mono text-xs text-[var(--text-muted)]">
+                    {run.runId}
+                  </span>
                 </div>
                 <div className="flex items-center gap-2">
                   {run.hasUnresolvedCriticalGaps && (
@@ -60,11 +72,19 @@ export function SessionDetail({ sessionId }: Props) {
                 </div>
               </div>
               <div className="h-[500px]">
-                <RunDag run={run} />
+                <RunDag run={run} onNodeClick={handleNodeClick} />
               </div>
             </div>
           ))}
         </div>
+      )}
+
+      {selectedNodeId && (
+        <NodeDetailPanel
+          sessionId={sessionId}
+          nodeId={selectedNodeId}
+          onClose={handleClosePanel}
+        />
       )}
     </div>
   );

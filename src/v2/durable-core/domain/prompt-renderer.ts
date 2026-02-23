@@ -203,6 +203,38 @@ function applyPromptBudget(combinedPrompt: string): string {
 }
 
 /**
+ * Build a loop context banner injected before the step's authored prompt.
+ * Helps agents understand they are intentionally re-entering a loop body step,
+ * not looping due to an error.
+ *
+ * Only injected for non-exit body steps (exit steps have explicit instructions
+ * in their own prompt and the output-contract requirements section).
+ */
+function buildLoopContextBanner(args: {
+  readonly loopPath: readonly LoopPathFrameV1[];
+  readonly isExitStep: boolean;
+}): string {
+  if (args.loopPath.length === 0 || args.isExitStep) return '';
+
+  const current = args.loopPath[args.loopPath.length - 1]!;
+  const iterationLabel = `Iteration ${current.iteration + 1}`;
+
+  return [
+    `---`,
+    `**LOOP: ${current.loopId} | ${iterationLabel}** — This step repeats intentionally; the workflow is not stuck or broken.`,
+    ``,
+    `Choose the instruction that matches your current task:`,
+    `- **Drafting / updating**: incorporate amendments discovered in previous iterations before writing.`,
+    `- **Auditing / reviewing**: look for what previous passes *missed*, not what they already caught.`,
+    `- **Applying changes**: follow prior findings precisely; don't re-debate settled decisions.`,
+    ``,
+    `Prior iteration work is visible in the **Ancestry Recap** section below (if present).`,
+    `---`,
+    ``,
+  ].join('\n');
+}
+
+/**
  * Format system-injected requirements for output contracts.
  * These are generated from contract metadata, not authored prompts.
  */
@@ -217,7 +249,8 @@ function formatOutputContractRequirements(
       return [
         `Artifact contract: ${LOOP_CONTROL_CONTRACT_REF}`,
         `Provide an artifact with kind: "wr.loop_control"`,
-        `Fields: loopId (lowercase, delimiter-safe), decision ("continue" | "stop")`,
+        `Required field: decision ("continue" | "stop")`,
+        `Optional field: loopId — omit unless targeting a specific named loop`,
       ];
     default:
       return [
@@ -286,6 +319,16 @@ export function renderPendingPrompt(args: {
   const requireConfirmation = Boolean(step?.requireConfirmation);
   const functionReferences = step?.functionReferences ?? [];
 
+  // Extract output contract requirements (system-injected, not prompt-authored)
+  const outputContract = step && typeof step === 'object' && 'outputContract' in step
+    ? (step as { outputContract?: { contractRef?: string } }).outputContract
+    : undefined;
+  const isExitStep = outputContract?.contractRef === LOOP_CONTROL_CONTRACT_REF;
+
+  // Loop context banner — prepended before the authored prompt so the agent
+  // understands it is intentionally re-entering a loop body step.
+  const loopBanner = buildLoopContextBanner({ loopPath: args.loopPath, isExitStep });
+
   // Extract validation requirements and append to prompt if present
   const validationCriteria = step?.validationCriteria;
   const requirements = extractValidationRequirements(validationCriteria);
@@ -293,10 +336,6 @@ export function renderPendingPrompt(args: {
     ? `\n\n**OUTPUT REQUIREMENTS:**\n${requirements.map(r => `- ${r}`).join('\n')}`
     : '';
   
-  // Extract output contract requirements (system-injected, not prompt-authored)
-  const outputContract = step && typeof step === 'object' && 'outputContract' in step
-    ? (step as { outputContract?: { contractRef?: string } }).outputContract
-    : undefined;
   const contractRequirements = formatOutputContractRequirements(outputContract);
   const contractSection = contractRequirements.length > 0
     ? `\n\n**OUTPUT REQUIREMENTS (System):**\n${contractRequirements.map(r => `- ${r}`).join('\n')}`
@@ -310,9 +349,36 @@ export function renderPendingPrompt(args: {
     (step !== null && step !== undefined && 'notesOptional' in step && (step as { notesOptional?: boolean }).notesOptional === true);
   const notesSection = isNotesOptional
     ? ''
-    : '\n\n**NOTES REQUIRED (System):** You must include `output.notesMarkdown` documenting what you did and why. Omitting notes will block this step — use the `retryAckToken` to fix and retry.';
+    : '\n\n**NOTES REQUIRED (System):** You must include `output.notesMarkdown` when advancing. ' +
+      'These notes are displayed to the user in a markdown viewer and serve as the durable record of your work. Write them for a human reader.\n\n' +
+      'Include:\n' +
+      '- **What you did** and the key decisions or trade-offs you made\n' +
+      '- **What you produced** — files changed, functions added, test results, specific numbers\n' +
+      '- **Anything notable** — risks, open questions, things you deliberately chose NOT to do and why\n\n' +
+      'Formatting: Use markdown headings, bullet lists, `code references`, and **bold** for emphasis. ' +
+      'Be specific — file paths, function names, counts, not vague summaries. ' +
+      '10–30 lines is ideal. Too short is worse than too long.\n\n' +
+      'Scope: THIS step only — WorkRail concatenates notes across steps automatically. Never repeat previous step notes.\n\n' +
+      'Example of BAD notes:\n' +
+      '> Reviewed the code and found some issues. Made improvements to error handling.\n\n' +
+      'Example of GOOD notes:\n' +
+      '> ## Review: Authentication Module\n' +
+      '> **Files examined:** `src/auth/oauth2.ts`, `src/auth/middleware.ts`, `tests/auth.test.ts`\n' +
+      '>\n' +
+      '> ### Key findings\n' +
+      '> - Token refresh logic in `refreshAccessToken()` silently swallows network errors — changed to propagate as `AuthRefreshError`\n' +
+      '> - Added missing `audience` validation in JWT verification (was accepting any audience)\n' +
+      '> - **3 Critical**, 2 Major, 4 Minor findings total\n' +
+      '>\n' +
+      '> ### Decisions\n' +
+      '> - Did NOT flag the deprecated `passport` import — it\'s used only in the legacy path scheduled for removal in Q2\n' +
+      '> - Recommended extracting token storage into a `TokenStore` interface for testability\n' +
+      '>\n' +
+      '> ### Open questions\n' +
+      '> - Should refresh tokens be rotated on every use? Current impl reuses until expiry.\n\n' +
+      'Omitting notes will block this step — use the `retryAckToken` to fix and retry.';
 
-  const enhancedPrompt = basePrompt + requirementsSection + contractSection + notesSection;
+  const enhancedPrompt = loopBanner + basePrompt + requirementsSection + contractSection + notesSection;
 
   // If not rehydrate-only, return enhanced prompt (no recovery needed for advance/start)
   if (!args.rehydrateOnly) {

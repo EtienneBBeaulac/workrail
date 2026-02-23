@@ -92,9 +92,11 @@ export const LoopControlArtifactV1Schema = z
     
     /** 
      * Loop identifier matching the workflow's loop definition.
-     * Must be delimiter-safe for deterministic key generation.
+     * Optional: when omitted the engine matches the first wr.loop_control artifact
+     * it finds for the active loop, so the agent does not need to know the loop's id.
+     * When provided it must be delimiter-safe and is verified against the expected loopId.
      */
-    loopId: z.string().min(1).max(64).regex(DELIMITER_SAFE_ID_PATTERN, 'loopId must be delimiter-safe: [a-z0-9_-]+'),
+    loopId: z.string().min(1).max(64).regex(DELIMITER_SAFE_ID_PATTERN, 'loopId must be delimiter-safe: [a-z0-9_-]+').optional(),
     
     /** The loop control decision: continue or stop */
     decision: LoopControlDecisionSchema,
@@ -136,19 +138,26 @@ export function parseLoopControlArtifact(artifact: unknown): LoopControlArtifact
  * one is the most recent exit-decision — the only one that matters for
  * deciding whether to continue or stop.
  *
+ * Matching rules (agent-friendly):
+ * - If the artifact has a loopId: it must equal `expectedLoopId` (explicit routing).
+ * - If the artifact omits loopId: it matches any active loop — nested loops are not
+ *   supported, so there is always at most one active loop in scope.
+ *
  * @param artifacts - Array of unknown artifacts (chronological order)
- * @param loopId - The loop ID to find
+ * @param expectedLoopId - The loop ID derived from the compiled conditionSource
  * @returns The most recent matching loop control artifact or null
  */
 export function findLoopControlArtifact(
   artifacts: readonly unknown[],
-  loopId: string
+  expectedLoopId: string
 ): LoopControlArtifactV1 | null {
   for (let i = artifacts.length - 1; i >= 0; i--) {
     const artifact = artifacts[i];
     if (!isLoopControlArtifact(artifact)) continue;
     const parsed = parseLoopControlArtifact(artifact);
-    if (parsed && parsed.loopId === loopId) {
+    if (!parsed) continue;
+    // Match when: loopId absent (anonymous — matches the active loop) or exact match.
+    if (parsed.loopId === undefined || parsed.loopId === expectedLoopId) {
       return parsed;
     }
   }

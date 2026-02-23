@@ -51,4 +51,7 @@ sessions/
 temp/
 
 # Git worktrees
-.worktrees/ 
+.worktrees/
+
+# Memory MCP artifacts
+.memory/ 

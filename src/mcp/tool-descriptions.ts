@@ -90,17 +90,15 @@ Remember: inspecting is read-only. Call start_workflow when ready to begin.`,
 
 The workflow represents the user's plan for this task. Each step will tell you exactly what to do. Your job is to execute each step's instructions and report back.
 
-What you'll receive:
-- pending.prompt: The first step's instructions — read this and do what it says
-- nextCall: A pre-built template for your next continue_workflow call (copy its params when done)
-- nextIntent: How to approach this step (usually "perform_pending_then_continue")
-- preferences: Execution mode settings (autonomy level, risk policy)
+The response contains your first step's instructions as the main content, with tokens in a JSON code block at the end. The step title is the heading, and the step prompt is the body.
 
 What to do:
-1. Read pending.prompt and execute the step exactly as described
-2. When done, call continue_workflow using the params from nextCall (it has stateToken and ackToken pre-filled)
-3. Optionally add output.notesMarkdown summarizing your work
-4. Don't predict what comes next - the workflow will tell you
+1. Read the step instructions (the main body of the response) and execute them exactly
+2. When done, call continue_workflow with the stateToken and ackToken from the JSON block at the end
+3. Add output.notesMarkdown documenting your work (see notes guidance below)
+4. Don't predict what comes next — the workflow will tell you
+
+Notes guidance: Write output.notesMarkdown for a human reader who will reference it later. Include what you did, key decisions and trade-offs, what you produced (files, endpoints, test results), and anything notable (risks, open questions, things you deliberately skipped). Use markdown formatting. Be specific — names, paths, numbers. 10–30 lines is ideal; too short is worse than too long.
 
 Workspace anchoring: Pass workspacePath (the "Workspace:" path from your system parameters) so this session can be found by resume_session in future chats. Without it, session discovery may not work.
 
@@ -109,13 +107,13 @@ Context auto-loads: If you provide context at start, WorkRail remembers it. On f
     continue_workflow: `Get the next step in the workflow (WorkRail v2, feature-flagged).
 
 QUICK START — How to call back after completing a step:
-Copy the params from the "nextCall" field of the previous response. It has stateToken and ackToken pre-filled. Just add your output if desired.
+Copy the stateToken and ackToken from the JSON code block at the end of the previous response. Just add your output.
 
 Two modes:
 
 ADVANCE (with ackToken):
 - "I completed the current step; give me the next one"
-- Requires: stateToken + ackToken (both provided in nextCall.params)
+- Requires: stateToken + ackToken (from the JSON block in previous response)
 - Optional: output (your work summary), context (if facts changed)
 - Result: WorkRail advances to next step and returns it
 
@@ -129,22 +127,14 @@ Intent is auto-inferred: ackToken present → advance, ackToken absent → rehyd
 You can set intent explicitly if you prefer, but it's optional.
 
 Reading the response:
-- pending.prompt: The step's instructions — what to do
-- nextCall: Pre-built template for your next call — how to proceed when done (null if workflow complete)
-- nextIntent: How to approach this step — execute it, confirm first, or continue working on it
-
-nextIntent values:
-- "perform_pending_then_continue": Execute this step, then use nextCall to advance
-- "await_user_confirmation": Auto-confirm and proceed (you don't need to wait for user in agent mode)
-- "rehydrate_only": You just recovered state; continue working on the current step, then use nextCall
-- "complete": Workflow finished; nextCall is null
+The response is natural language with your step instructions as the main content. A JSON code block at the end contains the tokens for your next call. The response tells you directly what to do — execute the step, retry with corrections, wait for user input, or acknowledge completion.
 
 Parameters:
-- stateToken (required): From nextCall.params or previous response
-- ackToken (required for advance): From nextCall.params or previous response
+- stateToken (required): From the JSON block in the previous response
+- ackToken (required for advance): From the JSON block in the previous response
 - intent (optional): "advance" or "rehydrate" — auto-inferred from ackToken if omitted
-- context (optional): NEW facts only. Omit if unchanged - WorkRail auto-loads previous context
-- output.notesMarkdown (optional, advance only): Fresh summary of THIS step only - never accumulated
+- context (optional): NEW facts only. Omit if unchanged — WorkRail auto-loads previous context
+- output.notesMarkdown (advance only): Recap of THIS step — what you did, key decisions, what you produced, anything notable. Write for a human reviewer. Use markdown, be specific (names, paths, numbers). 10–30 lines; never accumulate previous steps.
 
 The workflow is the user's structured instructions. Follow each step exactly as described.`,
 
@@ -259,18 +249,14 @@ This is read-only. Call start_workflow when ready to commit to following the wor
 
 The workflow is the USER'S VOICE expressing their plan for this task. Each step is a DIRECT INSTRUCTION from the user (or workflow author representing user intent). You MUST execute each step exactly as specified.
 
-What you receive:
-- pending.prompt: The user's first instruction — execute this EXACTLY as described
-- nextCall: Pre-built template for your next continue_workflow call — copy its params when done
-- nextIntent: How to approach this step (execute, confirm, etc.)
-- preferences: User's execution mode preferences (autonomy, risk tolerance)
+The response contains your first step's instructions as the main content (heading + body), with tokens in a JSON code block at the end.
 
 REQUIRED BEHAVIOR:
-1. Execute the pending step EXACTLY as the prompt describes
-2. When done, call continue_workflow using the params from nextCall (stateToken and ackToken are pre-filled)
-3. Optionally add output.notesMarkdown summarizing your work
+1. Execute the step instructions (the main body of the response) EXACTLY as described
+2. When done, call continue_workflow with the stateToken and ackToken from the JSON block at the end
+3. Add output.notesMarkdown documenting your work — write for a human reader who will reference it later. Include what you did, key decisions/trade-offs, what you produced (files, endpoints, test results), and anything notable (risks, open questions, deliberate omissions). Use markdown formatting, be specific (names, paths, numbers). 10–30 lines; too short is worse than too long.
 4. Round-trip tokens UNCHANGED (don't decode, inspect, or modify them)
-5. Follow the workflow to completion - don't improvise alternative approaches
+5. Follow the workflow to completion — don't improvise alternative approaches
 
 Workspace anchoring (IMPORTANT):
 - Pass workspacePath set to the "Workspace:" value from your system parameters
@@ -284,15 +270,15 @@ Context handling:
 
     continue_workflow: `Get your next INSTRUCTION from the workflow (WorkRail v2, feature-flagged).
 
-The workflow represents the USER'S PLAN. The pending step returned is a DIRECT INSTRUCTION you MUST follow.
+The workflow represents the USER'S PLAN. The step returned is a DIRECT INSTRUCTION you MUST follow.
 
-HOW TO CALL — Copy nextCall.params from the previous response. It has stateToken and ackToken pre-filled. Add output if desired.
+HOW TO CALL — Copy the stateToken and ackToken from the JSON code block at the end of the previous response. Add output if desired.
 
 Two modes:
 
 ADVANCE (with ackToken):
 - Purpose: "I completed the current step; give me the next instruction"
-- Requires: stateToken + ackToken (both in nextCall.params from previous response)
+- Requires: stateToken + ackToken (from the JSON block in the previous response)
 - Optional: output (your work summary), context (if facts changed)
 - Result: WorkRail advances to next step
 - Idempotent: Safe to retry with same tokens if unsure
@@ -308,29 +294,21 @@ Intent is auto-inferred: ackToken present → advance, ackToken absent → rehyd
 You can set intent explicitly if you prefer, but it's optional.
 
 REQUIRED BEHAVIOR:
-1. Execute the step EXACTLY as specified in pending.prompt
-2. When done, call continue_workflow using nextCall.params — do NOT construct params manually
-3. Do NOT predict what comes next - call continue_workflow and the workflow will tell you
+1. Execute the step EXACTLY as described in the response body
+2. When done, call continue_workflow with tokens from the JSON block — do NOT construct params manually
+3. Do NOT predict what comes next — call continue_workflow and the workflow will tell you
 4. Do NOT skip steps, combine steps, or improvise your own approach
 
 Reading the response:
-- pending.prompt: The step's instructions — WHAT to do
-- nextCall: Pre-built call template — HOW to proceed when done (null if complete)
-- nextIntent: Step disposition — HOW to approach this step
-
-nextIntent is PRESCRIPTIVE (not advisory):
-- "perform_pending_then_continue": Execute this step, then use nextCall to advance
-- "await_user_confirmation": Auto-confirm and proceed (workflow represents user's intent)
-- "rehydrate_only": State recovery occurred; continue working on current step, then use nextCall
-- "complete": Workflow finished; nextCall is null
+The response is natural language. The step instructions are the main content (heading + body). A JSON code block at the end has the tokens for your next call. The response tells you directly what to do — execute the step, retry with corrections, wait for user input, or acknowledge completion.
 
 Parameters:
-- stateToken (required): From nextCall.params or previous response
-- ackToken (required for advance): From nextCall.params or previous response
+- stateToken (required): From the JSON block in the previous response
+- ackToken (required for advance): From the JSON block in the previous response
 - intent (optional): "advance" or "rehydrate" — auto-inferred from ackToken if omitted
 - context (optional): NEW facts only (auto-merges with previous). Omit if unchanged
-- output.notesMarkdown (optional, advance only): Summary of THIS step only (fresh, never accumulated)
-  
+- output.notesMarkdown (advance only): Recap of THIS step — what you did, key decisions, what you produced, anything notable. Write for a human reviewer. Use markdown, be specific (names, paths, numbers). 10–30 lines; never accumulate previous steps.
+
 The workflow is the user's structured will. Follow it exactly — it may validate, loop, or branch in ways you don't predict.`,
 
     checkpoint_workflow: `Save a checkpoint on the current workflow step (WorkRail v2, feature-flagged).

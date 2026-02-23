@@ -2183,6 +2183,8 @@ Locks:
 - Contract updated: `docs/reference/workflow-execution-contract.md` (normative section added)
 - Implementation: Slice 4a S6 (schema + docs)
 
+**Quality expectations** (added post-lock): Notes are displayed to the user in a markdown viewer in the Console UI and serve as the durable record of agent work. Agent-facing instructions (tool schema, tool descriptions, system-injected prompt) guide agents to write 10–30 line recaps including: what they did and key decisions, what they produced (files, paths, numbers), and anything notable (risks, open questions, deliberate omissions). Markdown formatting is expected.
+
 ### 18.2 Context Persistence and Auto-Loading
 
 **Issue**: Current design lock Section 16.3.1 states "context is not persisted as durable truth," but Slice 3 implementation reveals this creates fragility:
