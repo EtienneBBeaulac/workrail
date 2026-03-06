@@ -1,0 +1,63 @@
+{
+  "id": "routine-plan-generation",
+  "name": "Plan Generation Routine",
+  "version": "1.0.0",
+  "description": "Generates a complete candidate implementation plan from a neutral fact packet. Designed for parallel use across multiple perspectives so the main agent can compare or synthesize plans.",
+  "clarificationPrompts": [
+    "What problem should this plan solve?",
+    "What acceptance criteria, invariants, and constraints must it respect?",
+    "What perspective should this plan optimize for? (simplicity, maintainability, architecture-first, rollback-safe, pragmatic, performance)",
+    "What artifact name should I produce?"
+  ],
+  "preconditions": [
+    "Problem statement is available",
+    "Acceptance criteria and non-goals are available",
+    "Invariants and constraints are available",
+    "Relevant files, patterns, or references are available",
+    "Agent has read access to the provided context"
+  ],
+  "metaGuidance": [
+    "PURPOSE: generate one complete implementation plan from a factual packet.",
+    "ROLE: you are a generator, not an auditor or implementer.",
+    "PERSPECTIVE: optimize for the requested lens without pretending other trade-offs do not exist.",
+    "OUTPUT: produce a coherent plan another engineer could evaluate or implement.",
+    "SELF-CRITIQUE: include why your plan might be wrong or where another plan may be better."
+  ],
+  "steps": [
+    {
+      "id": "step-understand-problem",
+      "title": "Step 1: Understand the Planning Problem",
+      "prompt": "Understand the task before proposing a plan.\n\nRead and summarize:\n- problem statement\n- acceptance criteria\n- non-goals\n- invariants\n- constraints\n- user rules / coding philosophy\n- relevant files and pattern examples\n\nIdentify:\n- the core architectural decision points\n- the main risk areas\n- the trade-off space implied by the requested perspective\n\nWorking notes:\n- Problem summary\n- Hard constraints\n- Architecture decision points\n- Risks to plan around\n- Perspective lens to optimize for",
+      "agentRole": "You are understanding the planning problem deeply before proposing a solution.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-choose-plan-strategy",
+      "title": "Step 2: Choose a Plan Strategy",
+      "prompt": "Choose a plan strategy for the requested perspective.\n\nDecide:\n- what this plan optimizes for\n- what trade-offs it accepts\n- what the overall implementation shape should be\n- how work should be sliced for reviewability and verification\n\nWorking notes:\n- Optimization target\n- Accepted trade-offs\n- Overall plan shape\n- Slicing strategy\n- Verification posture",
+      "agentRole": "You are selecting the planning strategy that best fits the requested perspective.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-generate-plan",
+      "title": "Step 3: Generate the Candidate Plan",
+      "prompt": "Generate a complete candidate implementation plan.\n\nThe plan must include:\n1. Problem statement\n2. Acceptance criteria\n3. Non-goals\n4. Applied constraints and user rules\n5. Invariants\n6. Proposed approach\n7. Slice plan\n8. Verification / test strategy\n9. Risk register\n10. PR packaging strategy\n11. Philosophy alignment highlights\n\nRules:\n- be concrete enough that another engineer could implement it without guessing\n- make real sequencing and scoping choices\n- avoid vague \"investigate later\" placeholders unless explicitly justified\n- cite relevant files or examples when they materially shape the plan",
+      "agentRole": "You are generating a complete and concrete candidate implementation plan.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-self-critique",
+      "title": "Step 4: Self-Critique the Plan",
+      "prompt": "Critique your own plan before delivering it.\n\nAssess:\n- what this plan is strongest at\n- where it is weak\n- which invariants are hardest to preserve\n- where implementation drift is most likely\n- what a rival plan might do better\n\nWorking notes:\n- Strengths\n- Weaknesses\n- Highest-risk assumptions\n- Most likely failure modes\n- Better rival-plan scenarios",
+      "agentRole": "You are honestly critiquing your own generated plan to make it useful for comparison.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-deliver",
+      "title": "Step 5: Deliver the Candidate Plan",
+      "prompt": "Create `{deliverableName}`.\n\nRequired structure:\n- Executive Summary\n- Perspective / Optimization Target\n- Candidate Implementation Plan\n- Slice Plan\n- Verification Strategy\n- Risk Register\n- Philosophy Alignment Highlights\n- Why This Plan Might Be Wrong\n- Recommended Questions for the Main Agent to Resolve\n\nThe main agent will compare this plan against other candidate plans, so optimize for clarity, completeness, and honest trade-off documentation rather than persuasion.",
+      "agentRole": "You are delivering a complete candidate plan for the main agent to compare or synthesize.",
+      "requireConfirmation": false
+    }
+  ]
+}
