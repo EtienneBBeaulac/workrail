@@ -1,0 +1,62 @@
+{
+  "id": "routine-philosophy-alignment",
+  "name": "Philosophy Alignment Routine",
+  "version": "1.0.0",
+  "description": "Independently evaluates a plan or implementation artifact against the user's coding philosophy. Produces findings by principle name and distinguishes blocking violations from acceptable tensions.",
+  "clarificationPrompts": [
+    "What artifact should I review? (plan, architecture summary, implementation diff, files)",
+    "What philosophy principles or user rules should I apply?",
+    "What mode is this review in? (plan, architecture, implementation)",
+    "What artifact name should I produce?"
+  ],
+  "preconditions": [
+    "A review artifact is available",
+    "Philosophy principles or user rules are available",
+    "Relevant files or references are available if needed for evidence",
+    "Agent has read access to the supplied artifact and supporting files"
+  ],
+  "metaGuidance": [
+    "PURPOSE: evaluate design quality against named philosophy principles.",
+    "ROLE: you are an auditor, not a generator or implementer.",
+    "FINDINGS: report by principle name, never as generic style feedback.",
+    "SEVERITY: distinguish Red violations, Orange issues, and Yellow tensions.",
+    "TENSIONS: if principles conflict, surface the conflict explicitly instead of silently choosing."
+  ],
+  "steps": [
+    {
+      "id": "step-understand-scope",
+      "title": "Step 1: Understand the Artifact and Scope",
+      "prompt": "Understand what you are reviewing.\n\nRead and summarize:\n- the artifact under review\n- the review mode (plan, architecture, implementation)\n- the relevant philosophy principles / user rules\n- any supporting files or repo patterns needed for evidence\n\nIdentify:\n- which principles are actually touched by this artifact\n- where violations are most likely to appear\n- where principle tensions may naturally arise\n\nWorking notes:\n- Review scope\n- Applicable principles\n- Likely risk areas\n- Possible tension zones",
+      "agentRole": "You are understanding the review scope before judging the design quality.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-select-principles",
+      "title": "Step 2: Select the Relevant Principles",
+      "prompt": "Select the subset of principles that materially apply.\n\nRules:\n- do not pretend every principle matters equally for every artifact\n- prioritize the principles actually implicated by the design or implementation\n- note any principles that are out of scope for this review\n\nWorking notes:\n- High-priority principles\n- Secondary principles\n- Out-of-scope principles",
+      "agentRole": "You are focusing the review on the principles that actually matter for this artifact.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-evaluate-artifact",
+      "title": "Step 3: Evaluate Principle-by-Principle",
+      "prompt": "Evaluate the artifact against each relevant principle.\n\nFor each principle, determine:\n- what the artifact does well\n- what violates the principle, if anything\n- whether this is a Red violation, Orange issue, or Yellow tension\n- what change or justification would resolve it\n\nSeverity guide:\n- Red = blocking violation of a key philosophy principle\n- Orange = meaningful design quality issue that should be fixed or justified\n- Yellow = principle tension or trade-off that may be acceptable if explicit\n\nWorking notes:\n- Findings by principle\n- Evidence / citations\n- Severity\n- Recommended action or required justification",
+      "agentRole": "You are performing a principle-by-principle review with specific, evidence-based findings.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-identify-tensions",
+      "title": "Step 4: Identify Principle Tensions",
+      "prompt": "Identify where principles conflict.\n\nLook for cases like:\n- simplicity vs extensibility\n- YAGNI vs architecture cleanliness\n- explicitness vs verbosity\n- atomicity vs implementation complexity\n\nFor each tension:\n- name the principles involved\n- explain the trade-off\n- say what decision still needs to be made or documented\n\nWorking notes:\n- Principle tensions\n- Why they exist\n- What decision or explicit acceptance is needed",
+      "agentRole": "You are surfacing real trade-offs instead of flattening them into fake certainty.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-deliver",
+      "title": "Step 5: Deliver the Philosophy Review",
+      "prompt": "Create `{deliverableName}`.\n\nRequired structure:\n- Executive Summary\n- Findings by Principle\n- Red Violations\n- Orange Issues\n- Yellow Tensions\n- Missing Justifications\n- Overall Verdict (Aligned / Revise / Blocked)\n- Recommended Next Actions\n\nRules:\n- use principle names directly\n- avoid generic wording like \"clean this up\" without tying it to a principle\n- be explicit about what is a tension versus a true violation",
+      "agentRole": "You are delivering a clear philosophy review that the main agent can act on directly.",
+      "requireConfirmation": false
+    }
+  ]
+}

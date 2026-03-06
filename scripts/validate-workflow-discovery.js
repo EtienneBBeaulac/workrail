@@ -119,7 +119,7 @@ function restoreEnvSnapshot(snapshot) {
   }
 }
 
-function shouldSkipWorkflowFile(relativePath, isAgenticEnabled) {
+function shouldSkipWorkflowFile(relativePath, isAgenticEnabled, isV2Enabled) {
   // Mirror FileWorkflowStorage behavior
   if (relativePath.split(path.sep).includes('examples')) {
     return true;
@@ -129,6 +129,9 @@ function shouldSkipWorkflowFile(relativePath, isAgenticEnabled) {
     if (relativePath.includes(`routines${path.sep}`) || path.basename(relativePath).startsWith('routine-')) {
       return true;
     }
+  }
+  if (!isV2Enabled && relativePath.includes('.v2.')) {
+    return true;
   }
 
   return false;
@@ -157,7 +160,7 @@ function collectWorkflowFiles(dir) {
   return results;
 }
 
-function buildExpectedIdsFromRepoWorkflowsDir({ workflowsDir, isAgenticEnabled }) {
+function buildExpectedIdsFromRepoWorkflowsDir({ workflowsDir, isAgenticEnabled, isV2Enabled }) {
   const allFiles = collectWorkflowFiles(workflowsDir);
 
   /** @type {Map<string, Array<{file: string, isAgentic: boolean}>>} */
@@ -166,7 +169,7 @@ function buildExpectedIdsFromRepoWorkflowsDir({ workflowsDir, isAgenticEnabled }
   for (const filePath of allFiles) {
     const relative = path.relative(workflowsDir, filePath);
 
-    if (shouldSkipWorkflowFile(relative, isAgenticEnabled)) {
+    if (shouldSkipWorkflowFile(relative, isAgenticEnabled, isV2Enabled)) {
       continue;
     }
 
@@ -183,7 +186,11 @@ function buildExpectedIdsFromRepoWorkflowsDir({ workflowsDir, isAgenticEnabled }
     }
 
     const list = byId.get(id) ?? [];
-    list.push({ file: relative, isAgentic: relative.includes('.agentic.') });
+    list.push({
+      file: relative,
+      isAgentic: relative.includes('.agentic.'),
+      isV2: relative.includes('.v2.'),
+    });
     byId.set(id, list);
   }
 
@@ -191,15 +198,18 @@ function buildExpectedIdsFromRepoWorkflowsDir({ workflowsDir, isAgenticEnabled }
   const chosenFileById = new Map();
 
   for (const [id, files] of byId.entries()) {
-    // Mirror FileWorkflowStorage "Agentic Override Logic"
+    // Mirror FileWorkflowStorage variant precedence: .v2. > .agentic. > standard
     let selected = files[0];
+    const v2 = files.find((f) => f.isV2);
+    const agentic = files.find((f) => f.isAgentic);
+    const standard = files.find((f) => !f.isAgentic && !f.isV2);
 
-    if (isAgenticEnabled) {
-      const agentic = files.find((f) => f.isAgentic);
-      if (agentic) selected = agentic;
-    } else {
-      const standard = files.find((f) => !f.isAgentic);
-      if (standard) selected = standard;
+    if (isV2Enabled && v2) {
+      selected = v2;
+    } else if (isAgenticEnabled && agentic) {
+      selected = agentic;
+    } else if (standard) {
+      selected = standard;
     }
 
     chosenFileById.set(id, selected.file);
@@ -216,6 +226,8 @@ async function validateVariant(variant) {
 
     const isAgenticEnabled = (process.env.WORKRAIL_ENABLE_AGENTIC_ROUTINES ?? '').toLowerCase() === 'true' ||
       process.env.WORKRAIL_ENABLE_AGENTIC_ROUTINES === '1';
+    const isV2Enabled = (process.env.WORKRAIL_ENABLE_V2_TOOLS ?? '').toLowerCase() === 'true' ||
+      process.env.WORKRAIL_ENABLE_V2_TOOLS === '1';
 
     const { resetContainer, initializeContainer, container } = requireDistModule('dist/di/container.js');
     const { DI } = requireDistModule('dist/di/tokens.js');
@@ -248,6 +260,7 @@ async function validateVariant(variant) {
       const expected = buildExpectedIdsFromRepoWorkflowsDir({
         workflowsDir: repoWorkflowsDir,
         isAgenticEnabled,
+        isV2Enabled,
       });
 
       const listed = new Set(ids);

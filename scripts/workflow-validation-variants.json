@@ -9,6 +9,19 @@
       "env": {
         "WORKRAIL_ENABLE_AGENTIC_ROUTINES": "true"
       }
+    },
+    {
+      "name": "v2-tools-enabled",
+      "env": {
+        "WORKRAIL_ENABLE_V2_TOOLS": "true"
+      }
+    },
+    {
+      "name": "agentic-and-v2-enabled",
+      "env": {
+        "WORKRAIL_ENABLE_AGENTIC_ROUTINES": "true",
+        "WORKRAIL_ENABLE_V2_TOOLS": "true"
+      }
     }
   ]
 }

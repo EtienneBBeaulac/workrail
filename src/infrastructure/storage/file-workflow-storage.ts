@@ -150,12 +150,16 @@ export class FileWorkflowStorage implements IWorkflowStorage {
     // Scan all files first to map IDs
     for (const file of relativeFiles) {
       try {
-        // Skip agentic routines if flag is disabled
+        // Skip routines if agentic features are disabled
         if (!this.featureFlags.isEnabled('agenticRoutines')) {
           const normalizedFile = file.replace(/\\/g, '/');
           if (normalizedFile.includes('routines/') || path.basename(file).startsWith('routine-')) {
             continue;
           }
+        }
+        // Skip v2-only workflow variants unless v2 tools are enabled.
+        if (!this.featureFlags.isEnabled('v2Tools') && file.includes('.v2.')) {
+          continue;
         }
 
         const filePathRaw = path.resolve(this.baseDirReal, file);
@@ -180,18 +184,21 @@ export class FileWorkflowStorage implements IWorkflowStorage {
     for (const [id, files] of idToFiles) {
       let selected = files[0]!;
 
-      // Agentic Override Logic
-      if (this.featureFlags.isEnabled('agenticRoutines')) {
-        const agenticEntry = files.find(f => f.file.includes('.agentic.'));
-        if (agenticEntry) {
-          selected = agenticEntry;
-        }
-      } else {
-        // Ensure we DON'T pick the agentic file if flag is off
-        const standardEntry = files.find(f => !f.file.includes('.agentic.'));
-        if (standardEntry) {
-          selected = standardEntry;
-        }
+      const isV2Enabled = this.featureFlags.isEnabled('v2Tools');
+      const isAgenticEnabled = this.featureFlags.isEnabled('agenticRoutines');
+      const v2Entry = files.find(f => f.file.includes('.v2.'));
+      const agenticEntry = files.find(f => f.file.includes('.agentic.'));
+      const standardEntry = files.find(f => !f.file.includes('.agentic.') && !f.file.includes('.v2.'));
+      // Variant precedence:
+      // 1. .v2. when v2 tools are enabled
+      // 2. .agentic. when agentic routines are enabled
+      // 3. standard workflow otherwise
+      if (isV2Enabled && v2Entry) {
+        selected = v2Entry;
+      } else if (isAgenticEnabled && agenticEntry) {
+        selected = agenticEntry;
+      } else if (standardEntry) {
+        selected = standardEntry;
       }
 
       // Add to index

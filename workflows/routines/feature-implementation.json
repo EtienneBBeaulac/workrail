@@ -2,7 +2,7 @@
   "id": "routine-feature-implementation",
   "name": "Feature Implementation Routine",
   "version": "1.0.0",
-  "description": "Implements code precisely according to detailed plans and specifications. Follows existing patterns, writes tests, and maintains code quality. Designed for delegation to Builder subagent or manual execution by main agent.",
+  "description": "Implements code precisely according to a detailed approved plan within a bounded scope. Follows existing patterns, writes tests, and maintains code quality. Intended as an optional execution utility, not the default strategy for the main coding workflow.",
   "clarificationPrompts": [
     "What plan file should I implement? (e.g., implementation-plan.md)",
     "What files should I modify or create?",
@@ -18,9 +18,9 @@
   ],
   "metaGuidance": [
     "**ROUTINE PURPOSE:**",
-    "This routine implements code following a detailed plan. It emphasizes precision, pattern adherence, incremental progress, and thorough testing.",
+    "This routine implements code following a detailed plan within a tightly bounded scope. It emphasizes precision, pattern adherence, incremental progress, and thorough testing.",
     "**CORE PRINCIPLES:**",
-    "- FOLLOW THE PLAN: Implement exactly as specified, don't improvise",
+    "- FOLLOW THE PLAN: Implement exactly as specified, don't improvise architecture",
     "- MATCH PATTERNS: Follow existing codebase conventions",
     "- TEST AS YOU GO: Write tests for each step before moving on",
     "- FLAG AMBIGUITIES: Don't guess, ask for clarification",
@@ -32,7 +32,8 @@
     "**IMPLEMENTATION STRATEGY:**",
     "Read-Implement-Test: For each step, read the plan, implement the code, write tests, verify tests pass, then move to next step",
     "Incremental Verification: After each step, check compilation, tests, and pattern adherence",
-    "Flag Early: If you encounter ambiguity, missing patterns, or conflicts, stop and flag immediately"
+    "Flag Early: If you encounter ambiguity, missing patterns, or conflicts, stop and flag immediately",
+    "INTENDED USE: best for approved, low-ambiguity, bounded work where the main agent wants execution help rather than fresh strategic thinking"
   ],
   "steps": [
     {
