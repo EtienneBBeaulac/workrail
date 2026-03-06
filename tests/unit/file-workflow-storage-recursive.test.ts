@@ -10,9 +10,13 @@ describe('FileWorkflowStorage (Recursive & Flags)', () => {
   let tempDir: string;
   
   // Mock feature flag provider
-  const createMockFlags = (enabled: boolean): IFeatureFlagProvider => ({
+  const createMockFlags = (
+    agenticEnabled: boolean,
+    v2Enabled: boolean = false,
+  ): IFeatureFlagProvider => ({
     isEnabled: (flag: string) => {
-      if (flag === 'agenticRoutines') return enabled;
+      if (flag === 'agenticRoutines') return agenticEnabled;
+      if (flag === 'v2Tools') return v2Enabled;
       return false;
     },
     getAll: () => ({}) as any,
@@ -50,6 +54,28 @@ describe('FileWorkflowStorage (Recursive & Flags)', () => {
     
     // 5. Routine file at root (starts with routine-)
     await fs.writeFile(path.join(tempDir, 'routine-root.json'), workflowTemplate('routine-root'));
+    // 6. Standard / agentic / v2 precedence fixtures
+    await fs.writeFile(path.join(tempDir, 'same.json'), JSON.stringify({
+      id: 'same',
+      name: 'Workflow same standard',
+      description: 'Standard variant',
+      version: '1.0.0',
+      steps: []
+    }));
+    await fs.writeFile(path.join(tempDir, 'same.agentic.json'), JSON.stringify({
+      id: 'same',
+      name: 'Workflow same agentic',
+      description: 'Agentic variant',
+      version: '1.1.0',
+      steps: []
+    }));
+    await fs.writeFile(path.join(tempDir, 'same.v2.json'), JSON.stringify({
+      id: 'same',
+      name: 'Workflow same v2',
+      description: 'V2 variant',
+      version: '2.0.0',
+      steps: []
+    }));
   });
 
   afterEach(async () => {
@@ -74,7 +100,8 @@ describe('FileWorkflowStorage (Recursive & Flags)', () => {
     expect(ids).toContain('deep');
     expect(ids).toContain('routine-test');
     expect(ids).toContain('routine-root');
-    expect(ids.length).toBe(5);
+    expect(ids).toContain('same');
+    expect(ids.length).toBe(6);
   });
 
   it('should hide routines when agenticRoutines flag is disabled', async () => {
@@ -97,7 +124,8 @@ describe('FileWorkflowStorage (Recursive & Flags)', () => {
     // Should filter out routines
     expect(ids).not.toContain('routine-test'); // In routines/ dir
     expect(ids).not.toContain('routine-root'); // Starts with routine-
-    expect(ids.length).toBe(3);
+    expect(ids).toContain('same');
+    expect(ids.length).toBe(4);
   });
 
   it('should show routines when agenticRoutines flag is enabled', async () => {
@@ -115,7 +143,37 @@ describe('FileWorkflowStorage (Recursive & Flags)', () => {
     // Should show everything
     expect(ids).toContain('routine-test');
     expect(ids).toContain('routine-root');
-    expect(ids.length).toBe(5);
+    expect(ids.length).toBe(6);
+  });
+  it('prefers .v2. override when v2Tools is enabled', async () => {
+    const storage = new FileWorkflowStorage(
+      tempDir,
+      createCustomDirectorySource(tempDir, 'Test'),
+      createMockFlags(true, true),
+      {}
+    );
+    const workflow = await storage.getWorkflowById('same');
+    expect(workflow?.definition.name).toBe('Workflow same v2');
+  });
+  it('prefers .agentic. override over standard when agenticRoutines is enabled and v2Tools is disabled', async () => {
+    const storage = new FileWorkflowStorage(
+      tempDir,
+      createCustomDirectorySource(tempDir, 'Test'),
+      createMockFlags(true, false),
+      {}
+    );
+    const workflow = await storage.getWorkflowById('same');
+    expect(workflow?.definition.name).toBe('Workflow same agentic');
+  });
+  it('prefers standard workflow when both v2Tools and agenticRoutines are disabled', async () => {
+    const storage = new FileWorkflowStorage(
+      tempDir,
+      createCustomDirectorySource(tempDir, 'Test'),
+      createMockFlags(false, false),
+      {}
+    );
+    const workflow = await storage.getWorkflowById('same');
+    expect(workflow?.definition.name).toBe('Workflow same standard');
   });
 });
 

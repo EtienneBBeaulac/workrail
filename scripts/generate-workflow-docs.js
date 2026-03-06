@@ -7,6 +7,7 @@
  * 
  * Filters out:
  * - .agentic.json variants (feature-flagged)
+ * - .v2.json variants (feature-flagged)
  * - routines/ subdirectory (internal)
  * - examples/ subdirectory (not production workflows)
  */
@@ -98,8 +99,8 @@ function loadWorkflows() {
       continue;
     }
     
-    // Skip agentic variants (feature-flagged)
-    if (file.includes('.agentic.')) {
+    // Skip feature-flagged variants
+    if (file.includes('.agentic.') || file.includes('.v2.')) {
       continue;
     }
     
