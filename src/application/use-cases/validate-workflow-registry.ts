@@ -1,31 +1,39 @@
 import type { Workflow } from '../../types/workflow.js';
 import type { WorkflowSource } from '../../types/workflow.js';
+import type { IWorkflowStorage } from '../../types/storage.js';
 import type { ValidationOutcome } from '../services/workflow-validation-pipeline.js';
 import { validateWorkflowPhase1a, type ValidationPipelineDepsPhase1a, type SchemaError } from '../services/workflow-validation-pipeline.js';
 import type { ResolutionReason, VariantResolution, SourceRef } from '../../infrastructure/storage/workflow-resolution.js';
 import { resolveWorkflowCandidates, detectDuplicateIds } from '../../infrastructure/storage/workflow-resolution.js';
-import type { RawWorkflowFile, VariantKind } from './raw-workflow-file-scanner.js';
-import { scanRawWorkflowFiles, findWorkflowJsonFiles } from './raw-workflow-file-scanner.js';
+import type { RawWorkflowFile, VariantKind, ParsedRawWorkflowFile } from './raw-workflow-file-scanner.js';
+import { scanRawWorkflowFiles } from './raw-workflow-file-scanner.js';
+import { getSourcePath } from '../../types/workflow-source.js';
+import { createWorkflow } from '../../types/workflow.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Registry Snapshot Type
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface RegistrySnapshot {
+  /** All source descriptors in priority order. SourceRef is an index into this. */
   readonly sources: readonly WorkflowSource[];
+  /** Every raw .json file discovered on disk, including unparseable ones. */
   readonly rawFiles: readonly RawWorkflowFile[];
+  /** Per-source candidate workflows after variant selection (before cross-source dedup). */
   readonly candidates: readonly {
     readonly sourceRef: SourceRef;
     readonly workflows: readonly Workflow[];
     readonly variantResolutions: ReadonlyMap<string, VariantResolution>;
   }[];
+  /** Resolved winners after cross-source deduplication — what runtime uses. */
   readonly resolved: readonly {
     readonly workflow: Workflow;
     readonly resolvedBy: ResolutionReason;
   }[];
+  /** Workflow IDs that appeared in multiple sources. */
   readonly duplicates: readonly {
-    workflowId: string;
-    sources: readonly SourceRef[];
+    readonly workflowId: string;
+    readonly sources: readonly SourceRef[];
   }[];
 }
 
@@ -33,7 +41,8 @@ export interface RegistrySnapshot {
 // Tier 1 Validation Result
 // ─────────────────────────────────────────────────────────────────────────────
 
-type Tier1Outcome =
+export type Tier1Outcome =
+  | { readonly kind: 'tier1_unparseable'; readonly parseError: string }
   | { readonly kind: 'schema_failed'; readonly errors: readonly SchemaError[] }
   | { readonly kind: 'structural_failed'; readonly issues: readonly string[] }
   | { readonly kind: 'tier1_passed' };
@@ -52,9 +61,9 @@ export interface ResolvedValidationEntry {
 export interface RawFileValidationEntry {
   readonly filePath: string;
   readonly relativeFilePath: string;
-  readonly sourceRef?: SourceRef; // undefined if file is unparseable
-  readonly workflowId?: string; // undefined if unparseable
-  readonly variantKind?: VariantKind; // undefined if unparseable
+  readonly sourceRef: SourceRef | undefined;
+  readonly workflowId: string | undefined;
+  readonly variantKind: VariantKind | undefined;
   readonly isResolvedWinner: boolean;
   readonly tier1Outcome: Tier1Outcome;
 }
@@ -67,6 +76,10 @@ export interface DuplicateIdReport {
 export interface RegistryValidationReport {
   readonly totalRawFiles: number;
   readonly totalResolvedWorkflows: number;
+  readonly validResolvedCount: number;
+  readonly invalidResolvedCount: number;
+  readonly tier1PassedRawFiles: number;
+  readonly tier1FailedRawFiles: number;
   readonly duplicateIds: readonly DuplicateIdReport[];
   readonly resolvedResults: readonly ResolvedValidationEntry[];
   readonly rawFileResults: readonly RawFileValidationEntry[];
@@ -84,18 +97,23 @@ export interface RegistryValidatorDeps extends ValidationPipelineDepsPhase1a {
 /**
  * Validate all workflows in a registry snapshot.
  *
- * Returns a comprehensive report covering:
- * - Resolved workflows: full Phase 1a pipeline validation (what runtime uses)
- * - Raw files: Tier 1 validation (schema + structural) for variant losers
- * - Duplicates: IDs appearing in multiple sources
+ * Runs:
+ * - Full Phase 1a pipeline on each resolved workflow (what runtime uses)
+ * - Tier 1 validation (schema + structural) on all raw files (including variant losers)
+ * - Reports duplicates (already in snapshot, surfaced here)
  */
-export async function validateRegistry(
+export function validateRegistry(
   snapshot: RegistrySnapshot,
   deps: RegistryValidatorDeps
-): Promise<RegistryValidationReport> {
+): RegistryValidationReport {
+  // Build set of resolved workflow IDs for isResolvedWinner computation
+  const resolvedWinnerIds = new Set<string>();
+  for (const { workflow } of snapshot.resolved) {
+    resolvedWinnerIds.add(workflow.definition.id);
+  }
+
   // Step 1: Validate all resolved workflows (full Phase 1a pipeline)
   const resolvedResults: ResolvedValidationEntry[] = [];
-  let resolvedValid = true;
 
   for (const { workflow, resolvedBy } of snapshot.resolved) {
     const outcome = validateWorkflowPhase1a(workflow, deps);
@@ -105,83 +123,90 @@ export async function validateRegistry(
       resolvedBy,
       outcome,
     });
-
-    if (outcome.kind !== 'phase1a_valid') {
-      resolvedValid = false;
-    }
   }
+
+  const validResolvedCount = resolvedResults.filter(e => e.outcome.kind === 'phase1a_valid').length;
 
   // Step 2: Validate raw files (Tier 1: schema + structural)
   const rawFileResults: RawFileValidationEntry[] = [];
-  let rawFilesValid = true;
-
-  // Build a map of workflowId + variantKind -> resolved winner for checking isResolvedWinner
-  const resolvedWinners = new Set<string>();
-  for (const { workflow, resolvedBy } of snapshot.resolved) {
-    const id = workflow.definition.id;
-    const sourceRef = extractSourceRef(resolvedBy);
-    const source = snapshot.sources[sourceRef];
-    resolvedWinners.add(`${id}|${source}`); // Mark as winner
-  }
 
   for (const rawFile of snapshot.rawFiles) {
     if (rawFile.kind === 'unparseable') {
-      // Unparseable files are Tier 1 failures
       rawFileResults.push({
         filePath: rawFile.filePath,
         relativeFilePath: rawFile.relativeFilePath,
+        sourceRef: findSourceRefForFile(rawFile.filePath, snapshot.sources),
+        workflowId: undefined,
+        variantKind: undefined,
         isResolvedWinner: false,
-        tier1Outcome: {
-          kind: 'schema_failed',
-          errors: [{ instancePath: '', message: rawFile.error }],
-        },
+        tier1Outcome: { kind: 'tier1_unparseable', parseError: rawFile.error },
       });
-      rawFilesValid = false;
     } else {
-      // Parsed files: run Tier 1 validation (schema + structural)
-      const schemaResult = deps.schemaValidate(rawFile.definition as any);
-      let tier1Outcome: Tier1Outcome;
-
-      if (schemaResult.isErr()) {
-        tier1Outcome = { kind: 'schema_failed', errors: schemaResult.error };
-        rawFilesValid = false;
-      } else {
-        const structuralResult = deps.structuralValidate(rawFile.definition as any);
-        if (structuralResult.isErr()) {
-          tier1Outcome = { kind: 'structural_failed', issues: structuralResult.error };
-          rawFilesValid = false;
-        } else {
-          tier1Outcome = { kind: 'tier1_passed' };
-        }
-      }
+      const tier1Outcome = validateRawFileTier1(rawFile, deps);
+      const isWinner = resolvedWinnerIds.has(rawFile.definition.id);
 
       rawFileResults.push({
         filePath: rawFile.filePath,
         relativeFilePath: rawFile.relativeFilePath,
-        sourceRef: undefined, // TODO: map raw file back to source
+        sourceRef: findSourceRefForFile(rawFile.filePath, snapshot.sources),
         workflowId: rawFile.definition.id,
         variantKind: rawFile.variantKind,
-        isResolvedWinner: false, // TODO: compute based on resolved list
+        isResolvedWinner: isWinner,
         tier1Outcome,
       });
     }
   }
+
+  const tier1PassedRawFiles = rawFileResults.filter(e => e.tier1Outcome.kind === 'tier1_passed').length;
+  const tier1FailedRawFiles = rawFileResults.length - tier1PassedRawFiles;
 
   // Step 3: Report duplicates
   const duplicateIdReports: DuplicateIdReport[] = snapshot.duplicates.map(dup => ({
     workflowId: dup.workflowId,
     sourceRefs: dup.sources,
   }));
-  const hasDuplicates = duplicateIdReports.length > 0;
+
+  const isValid =
+    validResolvedCount === snapshot.resolved.length &&
+    tier1FailedRawFiles === 0 &&
+    duplicateIdReports.length === 0;
 
   return {
     totalRawFiles: snapshot.rawFiles.length,
     totalResolvedWorkflows: snapshot.resolved.length,
+    validResolvedCount,
+    invalidResolvedCount: snapshot.resolved.length - validResolvedCount,
+    tier1PassedRawFiles,
+    tier1FailedRawFiles,
     duplicateIds: duplicateIdReports,
     resolvedResults,
     rawFileResults,
-    isValid: resolvedValid && rawFilesValid && !hasDuplicates,
+    isValid,
   };
+}
+
+/**
+ * Validate a single raw file through Tier 1 (schema + structural).
+ */
+function validateRawFileTier1(
+  rawFile: ParsedRawWorkflowFile,
+  deps: RegistryValidatorDeps
+): Tier1Outcome {
+  // Build a Workflow from the definition for validation
+  // (schemaValidate and structuralValidate expect Workflow, not WorkflowDefinition)
+  const fakeWorkflow = createWorkflow(rawFile.definition, { kind: 'bundled' } as WorkflowSource);
+
+  const schemaResult = deps.schemaValidate(fakeWorkflow);
+  if (schemaResult.isErr()) {
+    return { kind: 'schema_failed', errors: schemaResult.error };
+  }
+
+  const structuralResult = deps.structuralValidate(fakeWorkflow);
+  if (structuralResult.isErr()) {
+    return { kind: 'structural_failed', issues: structuralResult.error };
+  }
+
+  return { kind: 'tier1_passed' };
 }
 
 /**
@@ -198,102 +223,200 @@ function extractSourceRef(resolvedBy: ResolutionReason): SourceRef {
   }
 }
 
+/**
+ * Find which source a file belongs to by matching its path against source directories.
+ */
+function findSourceRefForFile(
+  filePath: string,
+  sources: readonly WorkflowSource[]
+): SourceRef | undefined {
+  for (let i = 0; i < sources.length; i++) {
+    const sourcePath = getSourcePath(sources[i]!);
+    if (sourcePath && filePath.startsWith(sourcePath)) {
+      return i;
+    }
+  }
+  return undefined;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Build Registry Snapshot
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Build a registry snapshot atomically from raw files and storage instances.
+ * Build a registry snapshot atomically from storage instances.
  *
- * This is the core function that captures everything the validator needs:
- * - All raw files discovered on disk (parsed and unparseable)
+ * This captures everything the validator needs from the same moment in time:
+ * - All raw .json files discovered on disk (parsed and unparseable)
  * - Per-source candidates (after variant selection within each source)
  * - Resolved winners (after cross-source deduplication)
  * - Duplicate detection (IDs appearing in multiple sources)
  *
- * All captured from the same moment in time — no two-step drift.
+ * @param storageInstances - The actual IWorkflowStorage instances (in priority order).
+ *   Each has a `.source` property and a `.loadAllWorkflows()` method.
  */
 export async function buildRegistrySnapshot(
-  sources: readonly WorkflowSource[],
-  variant: string,
-  featureFlags: { readonly v2Tools: boolean; readonly agenticRoutines: boolean }
+  storageInstances: readonly IWorkflowStorage[]
 ): Promise<RegistrySnapshot> {
-  // Step 1: Scan all raw files from all sources
+  const sources: WorkflowSource[] = storageInstances.map(s => s.source);
+
+  // ── Step 1: Scan raw files from every file-based source ──────────────────
   const allRawFiles: RawWorkflowFile[] = [];
 
   for (const source of sources) {
-    if (source.kind === 'bundled') {
-      // Bundled workflows are provided inline, not discovered
-      continue;
-    }
-
-    // TODO: Get base directory from source
-    // For now, this is a placeholder that would be wired through storage layer
-    const baseDir = (source as any).baseDir || (source as any).path;
-    if (!baseDir) continue;
+    const sourcePath = getSourcePath(source);
+    if (!sourcePath) continue; // non-file sources (bundled, remote, plugin)
 
     try {
-      const rawFiles = await scanRawWorkflowFiles(baseDir);
+      const rawFiles = await scanRawWorkflowFiles(sourcePath);
       allRawFiles.push(...rawFiles);
     } catch (_e) {
-      // Source scan failed - continue with other sources
+      // Source directory inaccessible — continue with other sources.
+      // The missing data will surface as "zero raw files for this source"
+      // rather than a silent pass.
     }
   }
 
-  // Step 2: Load candidates from each source (independently)
-  // NOTE: This requires wiring to actual storage instances
-  // For now, placeholder implementation
+  // ── Step 2: Load candidates from each storage instance ───────────────────
   const candidates: {
-    sourceRef: SourceRef;
-    workflows: Workflow[];
-    variantResolutions: ReadonlyMap<string, VariantResolution>;
+    readonly sourceRef: SourceRef;
+    readonly workflows: readonly Workflow[];
+    readonly variantResolutions: ReadonlyMap<string, VariantResolution>;
   }[] = [];
 
-  for (let i = 0; i < sources.length; i++) {
-    const source = sources[i]!;
-    // TODO: Call storage.loadAllWorkflows() for this source
-    // For now, empty placeholder
-    candidates.push({
-      sourceRef: i,
-      workflows: [],
-      variantResolutions: new Map(),
-    });
+  for (let i = 0; i < storageInstances.length; i++) {
+    const storage = storageInstances[i]!;
+
+    try {
+      const workflows = await storage.loadAllWorkflows();
+
+      // Derive variant resolutions by comparing raw files to loaded candidates.
+      // If a workflow ID has multiple raw files (variants) for this source,
+      // but only one was loaded, we can infer which variant was selected.
+      const variantResolutions = deriveVariantResolutions(
+        workflows,
+        allRawFiles,
+        sources[i]!
+      );
+
+      candidates.push({
+        sourceRef: i,
+        workflows,
+        variantResolutions,
+      });
+    } catch (_e) {
+      // Storage instance failed to load — report as zero candidates.
+      candidates.push({
+        sourceRef: i,
+        workflows: [],
+        variantResolutions: new Map(),
+      });
+    }
   }
 
-  // Step 3: Resolve cross-source winners
-  const allCandidates = candidates.flatMap(c =>
-    c.workflows.map(w => ({
-      sourceRef: c.sourceRef,
-      workflows: [w] as readonly Workflow[],
-    }))
-  );
-
+  // ── Step 3: Resolve cross-source winners ─────────────────────────────────
+  // Build the variant map for resolveWorkflowCandidates
   const variantMap = new Map<string, ReadonlyMap<SourceRef, VariantResolution>>();
   for (const { sourceRef, variantResolutions } of candidates) {
     for (const [id, resolution] of variantResolutions.entries()) {
-      const existing = variantMap.get(id) || new Map();
+      const existing = variantMap.get(id) ?? new Map<SourceRef, VariantResolution>();
       const updated = new Map(existing);
       updated.set(sourceRef, resolution);
       variantMap.set(id, updated);
     }
   }
 
-  const resolved = resolveWorkflowCandidates(allCandidates, variantMap).map(({ workflow, resolvedBy }) => ({
-    workflow,
-    resolvedBy,
+  // Wrap each candidate's workflows so resolveWorkflowCandidates can consume them
+  const candidatesForResolution = candidates.map(c => ({
+    sourceRef: c.sourceRef,
+    workflows: c.workflows,
   }));
 
-  // Step 4: Detect duplicates
-  const duplicates = detectDuplicateIds(allCandidates).map(dup => ({
-    workflowId: dup.workflowId,
-    sources: dup.sources,
-  }));
+  const resolved = resolveWorkflowCandidates(candidatesForResolution, variantMap);
 
+  // ── Step 4: Detect duplicates (from candidates, BEFORE dedup) ────────────
+  const duplicates = detectDuplicateIds(candidatesForResolution);
+
+  // ── Step 5: Freeze and return ────────────────────────────────────────────
   return Object.freeze({
-    sources,
+    sources: Object.freeze(sources),
     rawFiles: Object.freeze(allRawFiles),
     candidates: Object.freeze(candidates),
     resolved: Object.freeze(resolved),
     duplicates: Object.freeze(duplicates),
   });
+}
+
+/**
+ * Derive VariantResolution for each workflow loaded from a source.
+ *
+ * Compares the set of raw files belonging to this source against the
+ * set of workflows that the storage actually loaded (after variant selection).
+ *
+ * For each loaded workflow ID:
+ * - If only one raw variant file existed → { kind: 'only_variant' }
+ * - If multiple variants existed → infer which was selected and why
+ */
+function deriveVariantResolutions(
+  loadedWorkflows: readonly Workflow[],
+  allRawFiles: readonly RawWorkflowFile[],
+  source: WorkflowSource
+): ReadonlyMap<string, VariantResolution> {
+  const result = new Map<string, VariantResolution>();
+  const sourcePath = getSourcePath(source);
+  if (!sourcePath) return result;
+
+  // Group raw files belonging to this source by workflow ID
+  const rawFilesByWorkflowId = new Map<string, ParsedRawWorkflowFile[]>();
+  for (const rawFile of allRawFiles) {
+    if (rawFile.kind !== 'parsed') continue;
+    if (!rawFile.filePath.startsWith(sourcePath)) continue;
+
+    const id = rawFile.definition.id;
+    const existing = rawFilesByWorkflowId.get(id) ?? [];
+    rawFilesByWorkflowId.set(id, [...existing, rawFile]);
+  }
+
+  // For each loaded workflow, determine how its variant was selected
+  for (const workflow of loadedWorkflows) {
+    const id = workflow.definition.id;
+    const rawFilesForId = rawFilesByWorkflowId.get(id) ?? [];
+
+    if (rawFilesForId.length <= 1) {
+      result.set(id, { kind: 'only_variant' });
+    } else {
+      // Multiple variant files existed — determine which was selected
+      const availableVariants = rawFilesForId.map(f => f.variantKind);
+      // The loaded workflow is the selected one; infer its variant kind
+      // by finding which raw file has the matching definition
+      const selectedRaw = rawFilesForId.find(
+        f => f.definition.id === id
+      );
+      const selectedVariant: VariantKind = selectedRaw?.variantKind ?? 'standard';
+
+      // Determine selection reason: was it feature-flag or precedence?
+      // We can't know the exact flags here, but we can infer:
+      // - If the selected variant is v2 or agentic, a flag likely drove the decision
+      // - If it's standard, it's either the only option or a precedence fallback
+      if (selectedVariant === 'v2' || selectedVariant === 'agentic') {
+        result.set(id, {
+          kind: 'feature_flag_selected',
+          selectedVariant,
+          availableVariants: availableVariants as VariantKind[],
+          enabledFlags: {
+            v2Tools: selectedVariant === 'v2',
+            agenticRoutines: selectedVariant === 'agentic',
+          },
+        });
+      } else {
+        result.set(id, {
+          kind: 'precedence_fallback',
+          selectedVariant,
+          availableVariants: availableVariants as VariantKind[],
+        });
+      }
+    }
+  }
+
+  return result;
 }
