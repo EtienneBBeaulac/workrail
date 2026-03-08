@@ -5,7 +5,7 @@ import { validateWorkflowPhase1a, type ValidationPipelineDepsPhase1a, type Schem
 import type { ResolutionReason, VariantResolution, SourceRef } from '../../infrastructure/storage/workflow-resolution.js';
 import { resolveWorkflowCandidates, detectDuplicateIds } from '../../infrastructure/storage/workflow-resolution.js';
 import type { RawWorkflowFile, VariantKind } from './raw-workflow-file-scanner.js';
-import { scanRawWorkflowFiles } from './raw-workflow-file-scanner.js';
+import { scanRawWorkflowFiles, findWorkflowJsonFiles } from './raw-workflow-file-scanner.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Registry Snapshot Type
@@ -196,4 +196,104 @@ function extractSourceRef(resolvedBy: ResolutionReason): SourceRef {
     case 'bundled_protected':
       return resolvedBy.bundledSourceRef;
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Build Registry Snapshot
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Build a registry snapshot atomically from raw files and storage instances.
+ *
+ * This is the core function that captures everything the validator needs:
+ * - All raw files discovered on disk (parsed and unparseable)
+ * - Per-source candidates (after variant selection within each source)
+ * - Resolved winners (after cross-source deduplication)
+ * - Duplicate detection (IDs appearing in multiple sources)
+ *
+ * All captured from the same moment in time — no two-step drift.
+ */
+export async function buildRegistrySnapshot(
+  sources: readonly WorkflowSource[],
+  variant: string,
+  featureFlags: { readonly v2Tools: boolean; readonly agenticRoutines: boolean }
+): Promise<RegistrySnapshot> {
+  // Step 1: Scan all raw files from all sources
+  const allRawFiles: RawWorkflowFile[] = [];
+
+  for (const source of sources) {
+    if (source.kind === 'bundled') {
+      // Bundled workflows are provided inline, not discovered
+      continue;
+    }
+
+    // TODO: Get base directory from source
+    // For now, this is a placeholder that would be wired through storage layer
+    const baseDir = (source as any).baseDir || (source as any).path;
+    if (!baseDir) continue;
+
+    try {
+      const rawFiles = await scanRawWorkflowFiles(baseDir);
+      allRawFiles.push(...rawFiles);
+    } catch (_e) {
+      // Source scan failed - continue with other sources
+    }
+  }
+
+  // Step 2: Load candidates from each source (independently)
+  // NOTE: This requires wiring to actual storage instances
+  // For now, placeholder implementation
+  const candidates: {
+    sourceRef: SourceRef;
+    workflows: Workflow[];
+    variantResolutions: ReadonlyMap<string, VariantResolution>;
+  }[] = [];
+
+  for (let i = 0; i < sources.length; i++) {
+    const source = sources[i]!;
+    // TODO: Call storage.loadAllWorkflows() for this source
+    // For now, empty placeholder
+    candidates.push({
+      sourceRef: i,
+      workflows: [],
+      variantResolutions: new Map(),
+    });
+  }
+
+  // Step 3: Resolve cross-source winners
+  const allCandidates = candidates.flatMap(c =>
+    c.workflows.map(w => ({
+      sourceRef: c.sourceRef,
+      workflows: [w] as readonly Workflow[],
+    }))
+  );
+
+  const variantMap = new Map<string, ReadonlyMap<SourceRef, VariantResolution>>();
+  for (const { sourceRef, variantResolutions } of candidates) {
+    for (const [id, resolution] of variantResolutions.entries()) {
+      const existing = variantMap.get(id) || new Map();
+      const updated = new Map(existing);
+      updated.set(sourceRef, resolution);
+      variantMap.set(id, updated);
+    }
+  }
+
+  const resolved = resolveWorkflowCandidates(allCandidates, variantMap).map(({ workflow, resolvedBy }) => ({
+    workflow,
+    resolvedBy,
+  }));
+
+  // Step 4: Detect duplicates
+  const duplicates = detectDuplicateIds(allCandidates).map(dup => ({
+    workflowId: dup.workflowId,
+    sources: dup.sources,
+  }));
+
+  return Object.freeze({
+    sources,
+    rawFiles: Object.freeze(allRawFiles),
+    candidates: Object.freeze(candidates),
+    resolved: Object.freeze(resolved),
+    duplicates: Object.freeze(duplicates),
+  });
 }
