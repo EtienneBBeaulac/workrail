@@ -37,6 +37,7 @@ import { mapWorkflowSourceKind, deriveNextIntent } from '../v2-state-conversion.
 import { defaultPreferences } from '../v2-execution-helpers.js';
 import { EVENT_KIND } from '../../../v2/durable-core/constants.js';
 import { buildNextCall } from './index.js';
+import { resolveFirstStep } from '../../../v2/durable-core/domain/start-construction.js';
 
 /**
  * Load workflow, compile it, hash it, and pin to store for deterministic execution.
@@ -58,17 +59,17 @@ export function loadAndPinWorkflow(args: {
     kind: 'precondition_failed' as const,
     message: e instanceof Error ? e.message : String(e),
   }))
-    .andThen((workflow): RA<{ workflow: import('../../../types/workflow.js').Workflow; firstStep: { readonly id: string } }, StartWorkflowError> => {
+    .andThen((workflow): RA<{ workflow: import('../../../types/workflow.js').Workflow }, StartWorkflowError> => {
       if (!workflow) {
         return neErrorAsync({ kind: 'workflow_not_found' as const, workflowId: asWorkflowId(workflowId) });
       }
-      const firstStep = workflow.definition.steps[0];
-      if (!firstStep) {
+      // Cheap pre-check: workflow has steps (avoids expensive pinning for zero-step workflows)
+      if (workflow.definition.steps.length === 0) {
         return neErrorAsync({ kind: 'workflow_has_no_steps' as const, workflowId: asWorkflowId(workflowId) });
       }
-      return okAsync({ workflow, firstStep });
+      return okAsync({ workflow });
     })
-    .andThen(({ workflow, firstStep }) => {
+    .andThen(({ workflow }) => {
       // Pin the full v1 workflow definition for determinism.
       const compiled = compileV1WorkflowToPinnedSnapshot(workflow);
       const workflowHashRes = workflowHashForCompiledSnapshot(compiled as unknown as JsonValue, crypto);
@@ -95,6 +96,19 @@ export function loadAndPinWorkflow(args: {
             });
           }
           const pinnedWorkflow = createWorkflow(pinned.definition as WorkflowDefinition, createBundledSource());
+          
+          // Resolve and validate first step using the shared pure function
+          const resolution = resolveFirstStep(workflow, pinned);
+          
+          if (resolution.isErr()) {
+            // Map domain outcome to runtime error
+            const error: StartWorkflowError = resolution.error.reason === 'no_steps'
+              ? { kind: 'workflow_has_no_steps' as const, workflowId: asWorkflowId(resolution.error.detail) }
+              : { kind: 'invariant_violation' as const, message: resolution.error.detail };
+            return neErrorAsync(error);
+          }
+          
+          const firstStep = resolution.value;
           return okAsync({ workflow, firstStep, workflowHash, pinnedWorkflow });
         });
     });
