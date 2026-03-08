@@ -82,6 +82,18 @@ export function executeValidateCommand(
         suggestions: result.suggestions ? [...result.suggestions] : undefined,
       });
 
+    case 'v1_compilation_failed':
+      return failure(`V1 compilation failed: ${filePath}`, {
+        details: [result.message],
+        suggestions: ['Review the workflow definition and try again'],
+      });
+
+    case 'normalization_failed':
+      return failure(`Normalization failed: ${filePath}`, {
+        details: [result.message],
+        suggestions: ['Review template/feature/ref definitions and try again'],
+      });
+
     default:
       return assertNever(result);
   }

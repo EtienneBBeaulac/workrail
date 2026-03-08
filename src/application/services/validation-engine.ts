@@ -736,6 +736,21 @@ export class ValidationEngine {
     };
   }
 
+  /**
+   * Validate workflow structure (no normalization).
+   * Returns Result<Workflow, string[]> for pipeline integration.
+   *
+   * This is used by the Phase 1a validation pipeline to perform structural checks
+   * without triggering normalization (which is handled separately in the pipeline).
+   */
+  validateWorkflowStructureOnly(workflow: Workflow): Result<Workflow, readonly string[]> {
+    const result = this.validateWorkflow(workflow);
+    if (result.valid) {
+      return ok(workflow);
+    }
+    return err(result.issues);
+  }
+
   private collectQuotedJsonValidationMessageWarnings(
     stepLike: { readonly validationCriteria?: ValidationCriteria } | undefined,
     prefix: string,
