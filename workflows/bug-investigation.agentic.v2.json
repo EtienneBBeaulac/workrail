@@ -1,0 +1,134 @@
+{
+  "id": "bug-investigation-agentic",
+  "name": "Bug Investigation (v2 • Notes-First • WorkRail Executor)",
+  "version": "2.0.0",
+  "description": "A v2-first bug investigation workflow focused on moving from theory to proof with notes-first durability, explicit trigger fields, de-anchored fresh-eye review, and investigation-only handoff boundaries.",
+  "recommendedPreferences": {
+    "recommendedAutonomy": "guided",
+    "recommendedRiskPolicy": "conservative"
+  },
+  "preconditions": [
+    "User has a specific bug report, failing test, or unexpected behavior to investigate.",
+    "Agent has codebase access and can run tests, commands, or other deterministic evidence-gathering steps.",
+    "Some reproduction information or observable symptom is available, even if incomplete."
+  ],
+  "clarificationPrompts": [
+    "What are the repro steps, observed symptoms, and expected behavior?",
+    "How reproducible is this issue? (always, intermittent, unknown)",
+    "What environment, logs, failing tests, or constraints are already known?"
+  ],
+  "metaGuidance": [
+    "DEFAULT BEHAVIOR: self-execute with tools. Only ask the user for missing external facts, permissions, or business decisions you cannot resolve yourself.",
+    "V2 DURABILITY: use output.notesMarkdown and explicit context variables as the durable investigation state. Do NOT rely on BUG_investigation.md, BUG_hypotheses.md, or other markdown artifacts as required workflow memory.",
+    "ARTIFACT STRATEGY: markdown artifacts are optional human-facing outputs only. If created, they should be derived from notes/context state, not serve as the source of truth.",
+    "MAIN AGENT OWNS INVESTIGATION: the main agent owns truth, synthesis, evidence gathering, diagnosis, and final handoff.",
+    "SUBAGENT MODEL: use the WorkRail Executor only. Do not refer to Builder/Researcher identities.",
+    "AUDITOR MODEL: prefer delegation for context auditing, alternate hypothesis generation, adversarial challenge, and execution simulation. Do not hand off investigation ownership.",
+    "PARALLELISM: parallelize independent cognition; serialize synthesis, instrumentation changes, evidence interpretation, and final diagnosis.",
+    "PROOF OVER THEORY: code reading creates theories, not proof. A diagnosis is only strong when evidence separates it from the strongest alternatives.",
+    "ANTI-ANCHORING: in STANDARD and THOROUGH, at least one hypothesis-generation pass must be de-anchored from the main agent's preferred explanation.",
+    "DIAGNOSIS MODEL: allow `single_cause`, `multi_factor`, `root_plus_downstream`, `working_as_designed`, and `inconclusive_but_narrowed` outcomes. Do not force every investigation into a single-cause winner.",
+    "TRIGGERS: WorkRail can only react to explicit outputs. Use structural fields like `contextUnknownCount`, `hypothesesConsideredCount`, `hasStrongAlternative`, `contradictionCount`, `unresolvedEvidenceGapCount`, and `diagnosisConfidenceBand`.",
+    "BOUNDARY: this workflow investigates and proves root cause. It may describe high-level fix direction and likely files, but must not create implementation plans, patch sequencing, PR plans, or code-writing momentum."
+  ],
+  "steps": [
+    {
+      "id": "phase-0-triage-and-intake",
+      "title": "Phase 0: Triage (Bug Intake • Risk • Mode)",
+      "prompt": "Understand the bug report and choose the right rigor.\n\nCapture:\n- `bugSummary`: concise statement of the issue\n- `reproSummary`: repro steps, symptoms, expected behavior, environment notes\n- `investigationComplexity`: Small / Medium / Large\n- `riskLevel`: Low / Medium / High\n- `rigorMode`: QUICK / STANDARD / THOROUGH\n- `automationLevel`: High / Medium / Low\n- `maxParallelism`: 0 / 2 / 3\n\nDecision guidance:\n- QUICK: clear repro, narrow surface area, low ambiguity\n- STANDARD: moderate ambiguity, moderate system breadth, or meaningful risk\n- THOROUGH: high ambiguity, high-risk production impact, broad surface area, or multiple plausible causes\n\nSet context variables:\n- `bugSummary`\n- `reproSummary`\n- `investigationComplexity`\n- `riskLevel`\n- `rigorMode`\n- `automationLevel`\n- `maxParallelism`\n- `reproducibilityConfidence` (High / Medium / Low)\n\nAsk for confirmation only if the chosen rigor materially affects expectations or if critical repro details are still missing.",
+      "requireConfirmation": true
+    },
+    {
+      "id": "phase-0b-minimum-inputs-gate",
+      "title": "Phase 0b: Minimum Inputs Gate",
+      "prompt": "If critical inputs are missing, ask only for the minimum needed to investigate.\n\nPossible asks:\n- missing repro steps or failing test command\n- missing expected behavior\n- missing environment constraints or permissions\n- missing logs or stack traces when the codebase alone cannot answer the gap\n\nDo NOT ask for information you can discover with tools.",
+      "requireConfirmation": {
+        "or": [
+          { "var": "automationLevel", "equals": "Low" },
+          { "var": "automationLevel", "equals": "Medium" }
+        ]
+      }
+    },
+    {
+      "id": "phase-1-context-and-execution-understanding",
+      "title": "Phase 1: Context + Execution Understanding",
+      "prompt": "Build the minimum complete understanding needed to investigate correctly.\n\nDo the main investigation yourself using tools.\n\nDeliverable:\n- relevant files, modules, entry points, and call chain sketch\n- execution summary from trigger to failure or surprising behavior\n- suspicious points and explicit unknowns\n- whether the issue might plausibly be `working_as_designed`\n\nSet context variables:\n- `contextSummary`\n- `executionSummary`\n- `candidateFiles`\n- `contextUnknownCount`\n- `executionPathCount`\n- `suspiciousPointCount`\n- `workingAsDesignedStillPlausible`\n- `retriageNeeded`\n\nComputation rules:\n- `contextUnknownCount` = number of unresolved technical unknowns that materially affect hypothesis quality or evidence design\n- `executionPathCount` = number of materially distinct execution paths currently in play\n- `suspiciousPointCount` = count of concrete suspicious locations or transitions worth explaining\n- set `retriageNeeded = true` if the real surface area or risk is clearly larger than Phase 0 assumed\n\nMode-adaptive context audit:\n- QUICK: self-check only\n- STANDARD: if `contextUnknownCount > 0` and delegation is available, spawn TWO WorkRail Executors SIMULTANEOUSLY running `routine-context-gathering` with focus=COMPLETENESS and focus=DEPTH, then synthesize both outputs\n- THOROUGH: if delegation is available, spawn TWO WorkRail Executors SIMULTANEOUSLY running `routine-context-gathering` with focus=COMPLETENESS and focus=DEPTH, then synthesize both outputs",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-1b-retriage-after-context",
+      "title": "Phase 1b: Re-Triage After Context",
+      "runCondition": {
+        "var": "retriageNeeded",
+        "equals": true
+      },
+      "prompt": "Reassess investigation scope after real context is known.\n\nReview:\n- `contextUnknownCount`\n- `executionPathCount`\n- `suspiciousPointCount`\n- actual systems/components involved\n- whether risk or ambiguity is larger than originally assessed\n\nDo:\n- confirm or adjust `investigationComplexity`\n- confirm or adjust `riskLevel`\n- confirm or adjust `rigorMode`\n- confirm or adjust `maxParallelism`\n\nSet context variables:\n- `investigationComplexity`\n- `riskLevel`\n- `rigorMode`\n- `maxParallelism`\n- `retriageChanged`\n\nRule:\n- upgrade rigor when the real investigation surface is broader or riskier than expected",
+      "requireConfirmation": {
+        "or": [
+          { "var": "retriageChanged", "equals": true },
+          { "var": "automationLevel", "equals": "Low" }
+        ]
+      }
+    },
+    {
+      "id": "phase-2-hypothesis-generation-and-shortlist",
+      "title": "Phase 2: Hypothesis Generation + Shortlist",
+      "prompt": "Generate and rank plausible explanations without over-committing early.\n\nRequired candidate types:\n- normal code/logic explanation(s)\n- state/data explanation(s) where applicable\n- integration/environment explanation(s) where applicable\n- `working_as_designed` when still plausible\n- multi-factor explanation if interacting causes plausibly explain the symptoms better than any single cause\n\nMode-adaptive generation:\n- QUICK: self-generate at least 3 materially distinct hypotheses\n- STANDARD: if delegation is available, spawn TWO or THREE WorkRail Executors SIMULTANEOUSLY for hypothesis generation from different lenses; at least one pass must be de-anchored from your current leading theory\n- THOROUGH: if delegation is available, spawn THREE WorkRail Executors SIMULTANEOUSLY for logic, data/state, and integration/environment lenses; at least one pass must be de-anchored from your current leading theory\n\nDe-anchored packet rule:\n- include the bug report, repro summary, symptoms, candidate files, and key references\n- do NOT frame the work package around your preferred explanation as the only story\n- if you already have a favorite theory, pass it separately as `currentLeadingTheory`\n\nAfter generation:\n- merge duplicates\n- rank hypotheses\n- explicitly decide whether a strong alternative remains\n- force one more generation pass if all candidates cluster in the same pattern family\n\nSet context variables:\n- `candidateHypotheses`\n- `hypothesesConsideredCount`\n- `hasStrongAlternative`\n- `leadingHypothesisConfidenceBand`\n- `currentLeadingTheory`\n\nComputation rules:\n- `hypothesesConsideredCount` = number of materially distinct viable explanations after merging duplicates\n- minimums: QUICK >= 3; STANDARD/THOROUGH >= 4 when `workingAsDesignedStillPlausible = true`, otherwise >= 3\n- `hasStrongAlternative = true` when a non-leading hypothesis still explains most symptoms with medium-or-better evidence fit\n\nRules:\n- if `hypothesesConsideredCount` is below the mode minimum, this phase cannot close\n- if `hasStrongAlternative = true`, challenge before the evidence loop can close",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-3-evidence-strategy-and-instrumentation",
+      "title": "Phase 3: Evidence Strategy + Instrumentation",
+      "prompt": "Design the minimum evidence plan needed to separate the strongest remaining explanations.\n\nDo:\n- define what evidence would prove or disprove each top explanation\n- identify the minimum instrumentation, tests, commands, or observations needed\n- optionally use simulation to find the most informative observation points\n- make instrumentation changes or test additions only as needed for evidence collection\n\nMode-adaptive simulation:\n- QUICK: self-design the evidence plan\n- STANDARD: optionally spawn ONE WorkRail Executor running `routine-execution-simulation` when runtime/state-flow uncertainty is still meaningful\n- THOROUGH: if delegation is available, spawn ONE WorkRail Executor running `routine-execution-simulation` to improve evidence leverage before finalizing the plan\n\nSet context variables:\n- `evidenceStrategy`\n- `instrumentationCoverageScore`\n- `unresolvedEvidenceGapCount`\n- `evidenceRounds`\n\nComputation rules:\n- `instrumentationCoverageScore` = rough 1-10 score for how well the evidence plan can separate the top explanations\n- `unresolvedEvidenceGapCount` = number of still-missing observations needed to separate top remaining explanations\n- initialize `evidenceRounds = 0`\n\nRule:\n- this workflow may add instrumentation or tests to gather proof, but it must not drift into implementation planning or fix sequencing",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-4-evidence-loop",
+      "type": "loop",
+      "title": "Phase 4: Evidence Collection Loop",
+      "loop": {
+        "type": "while",
+        "conditionSource": {
+          "kind": "artifact_contract",
+          "contractRef": "wr.contracts.loop_control",
+          "loopId": "bug_evidence_loop"
+        },
+        "maxIterations": 5
+      },
+      "body": [
+        {
+          "id": "phase-4a-collect-and-synthesize-evidence",
+          "title": "Collect and Synthesize Evidence",
+          "prompt": "Run the planned experiments, repros, tests, or commands and synthesize what they imply.\n\nAlways:\n- collect evidence against the leading theory and the strongest alternative(s)\n- update which explanations remain viable\n- identify contradictions explicitly\n- keep the investigation-only boundary intact\n\nSet context variables:\n- `evidenceRounds`\n- `evidenceStrengthByHypothesis`\n- `contradictionCount`\n- `unresolvedEvidenceGapCount`\n- `diagnosisType`\n- `residualUncertainty`\n\nComputation rules:\n- increment `evidenceRounds` once per completed pass\n- `contradictionCount` = number of material observations that directly conflict with the current leading diagnosis\n- `diagnosisType` must be one of: `single_cause`, `multi_factor`, `root_plus_downstream`, `working_as_designed`, `inconclusive_but_narrowed`\n\nStop / reopen guidance:\n- continue if `unresolvedEvidenceGapCount > 0`\n- continue if `contradictionCount > 0`\n- reopen the shortlist if the challenger breaks the leader or new evidence materially contradicts the current top two\n- allow bounded inconclusive status only when further evidence is not realistically available and the field has been meaningfully narrowed",
+          "requireConfirmation": false
+        },
+        {
+          "id": "phase-4b-loop-decision",
+          "title": "Evidence Loop Decision",
+          "prompt": "Decide whether the evidence loop should continue.\n\nDecision rules:\n- if `contradictionCount > 0` → continue\n- else if `unresolvedEvidenceGapCount > 0` → continue\n- else if `hasStrongAlternative = true` and the alternative is not meaningfully weaker → continue\n- else if `diagnosisType = inconclusive_but_narrowed` and further evidence is not realistically available → stop with bounded uncertainty\n- else → stop\n\nOutput exactly:\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"loopId\": \"bug_evidence_loop\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
+          "requireConfirmation": true,
+          "outputContract": {
+            "contractRef": "wr.contracts.loop_control"
+          }
+        }
+      ]
+    },
+    {
+      "id": "phase-5-diagnosis-validation",
+      "title": "Phase 5: Diagnosis Validation Bundle",
+      "prompt": "Stress-test the current diagnosis before handoff.\n\nSet `diagnosisConfidenceBand` using these rules:\n- High = all symptoms explained, no material contradictions, no unresolved evidence gaps\n- Medium = likely diagnosis, but one bounded uncertainty remains\n- Low = multiple viable explanations remain or contradictions are unresolved\n\nMode-adaptive validation:\n- QUICK: self-challenge; if `diagnosisConfidenceBand != High` or contradictions remain, optionally spawn ONE WorkRail Executor running `routine-hypothesis-challenge`\n- STANDARD: if delegation is available, spawn TWO WorkRail Executors SIMULTANEOUSLY running `routine-hypothesis-challenge` and `routine-execution-simulation`\n- THOROUGH: if delegation is available, spawn THREE WorkRail Executors SIMULTANEOUSLY running `routine-hypothesis-challenge`, `routine-execution-simulation`, and an additional `routine-hypothesis-challenge` pass focused on breaking the current diagnosis from a different angle\n\nParallel-output synthesis rules:\n- if 2+ validators raise serious concerns, reopen evidence or shortlist work\n- if exactly one validator raises a concern, investigate it before escalating\n- if no validator can materially break the diagnosis and `contradictionCount = 0`, proceed to handoff\n\nSet context variables:\n- `diagnosisConfidenceBand`\n- `validationFindingsCountBySeverity`\n- `validationSummary`\n\nBoundary rule:\n- allowed: high-level fix direction, likely files involved, verification recommendations\n- not allowed: implementation plan, patch sequencing, PR plan, or code-writing momentum",
+      "requireConfirmation": {
+        "or": [
+          { "var": "diagnosisConfidenceBand", "equals": "Low" },
+          { "var": "contradictionCount", "not_equals": 0 }
+        ]
+      }
+    },
+    {
+      "id": "phase-6-final-handoff",
+      "title": "Phase 6: Final Handoff",
+      "prompt": "Provide the final investigation handoff.\n\nInclude:\n- concise bug summary and repro summary\n- diagnosis type (`single_cause`, `multi_factor`, `root_plus_downstream`, `working_as_designed`, or `inconclusive_but_narrowed`)\n- proof summary and why the conclusion is justified\n- strongest alternative(s) that were ruled out\n- residual uncertainty, if any\n- high-level fix direction only\n- likely files or areas involved\n- verification recommendations for whoever implements the fix\n\nOptional artifact:\n- create `bug_handoff.md` only if it materially improves human handoff; it must be derived from the notes/context state, not treated as required workflow memory\n\nRule:\n- do not implement the fix, create a PR plan, or hand off a patch sequence",
+      "requireConfirmation": true
+    }
+  ]
+}
