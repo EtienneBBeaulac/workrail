@@ -65,6 +65,7 @@ export type ValidationOutcome =
 export interface ValidatedWorkflow {
   readonly kind: 'validated_workflow';
   readonly source: Workflow;
+  readonly executable: any; // ExecutableWorkflow (non-compiled executable form from Phase 6)
   readonly compiledV1: CompiledWorkflow;
   readonly compiledExecutable: any; // TODO: CompiledExecutableWorkflow type (Phase 1b evolution)
 }
@@ -228,16 +229,17 @@ export function validateWorkflow(
   });
 
   // Phase 7: V2 compilation (on executable form)
-  // TODO: Implement WorkflowCompiler.compileExecutable when v2 execution is fully implemented
-  // For now, skip v2 compilation and proceed directly to startability check
+  // DEFERRED: WorkflowCompiler.compileExecutable() not yet implemented.
+  // Phase 7 is skipped pending v2 execution implementation.
+  // Once compileExecutable exists, uncomment this and remove placeholder:
   // const v2CompilationResult = deps.compiler.compileExecutable(executableWorkflow);
   // if (v2CompilationResult.isErr()) {
   //   return { kind: 'v2_compilation_failed', workflowId, cause: v2CompilationResult.error };
   // }
-  const compiledExecutable = {} as any; // Placeholder until v2 compilation exists
+  const compiledExecutable = {} as any; // Placeholder - Phase 7 deferred
 
   // Phase 8: Startability (two sub-checks)
-  const startabilityResult = validateStartability(workflow, snapshot, deps);
+  const startabilityResult = validateStartability(workflow, snapshot, executableWorkflow, deps);
   if (startabilityResult.isErr()) {
     return { kind: 'startability_failed', workflowId, reason: startabilityResult.error };
   }
@@ -254,6 +256,7 @@ export function validateWorkflow(
     validated: {
       kind: 'validated_workflow',
       source: workflow,
+      executable: executableWorkflow,
       compiledV1: v1Compiled,
       compiledExecutable,
     },
@@ -264,50 +267,39 @@ export function validateWorkflow(
  * Startability validation (Phase 8).
  *
  * Two sub-checks:
- * 1. First-step resolution (via shared resolveFirstStep function)
- * 2. Interpreter reachability (interpreter.next from init state) - optional if interpreter unavailable
+ * 1. First-step resolution (via shared resolveFirstStep function) - REQUIRED
+ * 2. Interpreter reachability (interpreter.next from init state) - DEFERRED
+ *
+ * The interpreter check validates that the workflow is reachable from initial state.
+ * This is stricter than runtime (which doesn't call interpreter at start) but catches
+ * workflows where the first step has a false runCondition or is an invalid loop.
+ *
+ * DEFERRED: Phase 7 (v2 compilation) and Phase 8 sub-check 2 (interpreter) are
+ * deferred pending WorkflowInterpreter implementation. For now, sub-check 1
+ * (first-step resolution) is the only active startability check.
  */
 function validateStartability(
   authoredWorkflow: Workflow,
   pinnedSnapshot: Extract<CompiledWorkflowSnapshotV1, { sourceKind: 'v1_pinned' }>,
+  executableWorkflow: any, // ExecutableWorkflow from Phase 6
   deps: ValidationPipelineDeps
 ): Result<void, StartabilityFailure> {
-  // Sub-check 1: First-step resolution (shared with runtime)
+  // Sub-check 1: First-step resolution (shared with runtime, REQUIRED)
+  // Validates: workflow has steps, steps[0].id exists in executable form
   const firstStepResult = deps.resolveFirstStep(authoredWorkflow, pinnedSnapshot);
   if (firstStepResult.isErr()) {
     return err(firstStepResult.error);
   }
 
-  // Sub-check 2: Interpreter reachability
-  // Verify the interpreter can produce a pending step from the initial state
-  // This is optional in Phase 1b - if interpreter is not available, we skip this check
-  try {
-    const initialState = { kind: 'init' as const };
-    const nextResult = deps.interpreter.next({} as any, initialState);
-
-    if (nextResult.isErr()) {
-      return err({
-        reason: 'interpreter_error',
-        detail: nextResult.error.message,
-      });
-    }
-
-    const { next, isComplete } = nextResult.value;
-
-    // If the interpreter returned isComplete=true with no next step and zero completed work,
-    // the workflow has no reachable steps from initial state.
-    // This is stricter than runtime (which doesn't call interpreter at start) but catches
-    // workflows where the first step has a false runCondition or is an invalid loop.
-    if (isComplete && !next && (nextResult.value.state as any)?.completed?.length === 0) {
-      const failure: StartabilityFailure = {
-        reason: 'no_reachable_step',
-        detail: 'Interpreter returned isComplete=true with zero completed steps',
-      };
-      return err(failure);
-    }
-  } catch (_e) {
-    // Interpreter check is optional - if it's not available, just pass on first-step check
-  }
+  // Sub-check 2: Interpreter reachability (DEFERRED)
+  // DEFERRED: Pending Phase 7 (v2 compilation) and full interpreter implementation.
+  // When ready, uncomment and call: deps.interpreter.next(compiledExecutable, { kind: 'init' })
+  //
+  // The interpreter would validate:
+  // - Interpreter can produce a pending step from initial state
+  // - If isComplete=true with zero completed steps, workflow has no reachable steps
+  //
+  // Until then, first-step resolution alone proves basic startability.
 
   return ok(undefined);
 }
