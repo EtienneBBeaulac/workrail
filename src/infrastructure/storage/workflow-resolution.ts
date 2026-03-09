@@ -175,11 +175,17 @@ export function resolveWorkflowCandidates(
 }
 
 /**
- * Check if a workflow is from the bundled source (starts with 'wr.').
+ * Check if a workflow qualifies for bundled protection.
+ *
+ * Both conditions must be true:
+ * - ID starts with 'wr.' (the namespace convention)
+ * - Source kind is 'bundled' (actually from the bundled storage)
+ *
+ * A wr.* ID from a non-bundled source does NOT get protection —
+ * it's a user-created workflow that happens to use the wr. prefix.
  */
 function isBundledWorkflow(workflow: Workflow): boolean {
-  const id = workflow.definition.id;
-  return id.startsWith('wr.');
+  return workflow.definition.id.startsWith('wr.') && workflow.source.kind === 'bundled';
 }
 
 /**

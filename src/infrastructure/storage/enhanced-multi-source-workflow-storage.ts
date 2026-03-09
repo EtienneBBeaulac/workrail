@@ -21,6 +21,7 @@ import { PluginWorkflowStorage, PluginWorkflowConfig } from './plugin-workflow-s
 import type { IFeatureFlagProvider } from '../../config/feature-flags';
 import { EnvironmentFeatureFlagProvider } from '../../config/feature-flags';
 import { createLogger } from '../../utils/logger';
+import { resolveWorkflowCandidates } from './workflow-resolution';
 
 const logger = createLogger('EnhancedMultiSourceWorkflowStorage');
 
@@ -273,45 +274,24 @@ export class EnhancedMultiSourceWorkflowStorage implements ICompositeWorkflowSto
   }
 
   async loadAllWorkflows(): Promise<readonly Workflow[]> {
-    const allWorkflows: Workflow[] = [];
-    const seenIds = new Set<string>();
+    // Load candidates from each source independently.
+    const candidates: { readonly sourceRef: number; readonly workflows: readonly Workflow[] }[] = [];
 
-    // Load from all sources, with later sources taking precedence
     for (let i = 0; i < this.storageInstances.length; i++) {
       const storage = this.storageInstances[i]!;
-
       try {
         const workflows = await storage.loadAllWorkflows();
-
-        // Add workflows, with later ones overriding earlier ones with same ID.
-        // v2 lock: bundled `wr.*` workflows cannot be shadowed by higher-priority sources.
-        for (const workflow of workflows) {
-          const id = workflow.definition.id;
-
-          if (seenIds.has(id)) {
-            const existingIndex = allWorkflows.findIndex((wf) => wf.definition.id === id);
-            if (existingIndex >= 0) {
-              const existing = allWorkflows[existingIndex]!;
-
-              const isWr = id.startsWith('wr.');
-              if (isWr && existing.source.kind === 'bundled') {
-                // Keep bundled `wr.*` authoritative; ignore shadow attempts.
-                continue;
-              }
-
-              allWorkflows[existingIndex] = workflow;
-            }
-          } else {
-            allWorkflows.push(workflow);
-            seenIds.add(id);
-          }
-        }
+        candidates.push({ sourceRef: i, workflows });
       } catch (error) {
         this.handleSourceError(`source-${i}`, error as Error);
       }
     }
 
-    return allWorkflows;
+    // Resolve cross-source competition using the shared pure function.
+    // This is the SAME function the registry validator uses — single source of truth.
+    // Handles: unique (one source), source_priority (later wins), bundled_protected (wr.* kept).
+    const resolved = resolveWorkflowCandidates(candidates, new Map());
+    return resolved.map(r => r.workflow);
   }
 
   async getWorkflowById(id: string): Promise<Workflow | null> {

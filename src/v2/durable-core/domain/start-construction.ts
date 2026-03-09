@@ -58,11 +58,20 @@ export function resolveFirstStep(
 
   // Check: first step ID exists in executable form
   // (Catches normalization bugs where step IDs change or are dropped)
-  // The pinned snapshot definition is a generic JSON value at this level,
-  // but at runtime it's been validated to be an ExecutableWorkflowDefinition
-  const definition = (pinnedSnapshot.definition as any);
-  const steps = definition?.steps ?? [];
-  const executableStep = steps.find((s: any) => s?.id === firstStepId);
+  // The pinned snapshot definition is typed as JsonValue (generic JSON).
+  // We narrow structurally: definition must be an object with a `steps` array.
+  const definition = pinnedSnapshot.definition;
+  const steps: unknown[] =
+    typeof definition === 'object' &&
+    definition !== null &&
+    !Array.isArray(definition) &&
+    'steps' in definition &&
+    Array.isArray((definition as Record<string, unknown>).steps)
+      ? ((definition as Record<string, unknown>).steps as unknown[])
+      : [];
+  const executableStep = steps.find(
+    (s) => typeof s === 'object' && s !== null && 'id' in s && (s as Record<string, unknown>).id === firstStepId
+  );
   if (!executableStep) {
     return err({
       reason: 'first_step_not_in_executable',
