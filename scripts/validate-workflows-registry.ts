@@ -160,7 +160,9 @@ async function withTimeout<T>(
  * The snapshot includes the full workflow definition (all steps, all prompts),
  * making JSON output megabytes. We only need the outcome kind.
  */
-function sanitizeOutcomeForJson(outcome: any): any {
+function sanitizeOutcomeForJson(
+  outcome: ValidationOutcomePhase1a
+): Omit<ValidationOutcomePhase1a, 'snapshot'> {
   if (outcome.kind === 'phase1a_valid') {
     return {
       kind: outcome.kind,
