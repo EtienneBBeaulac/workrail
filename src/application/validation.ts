@@ -27,18 +27,17 @@ export function validateWorkflow(workflow: unknown): WorkflowValidationResult {
 /**
  * Validate workflow against JSON schema (for pipeline integration).
  *
- * This is the pipeline-compatible wrapper around the AJV validator.
+ * The AJV schema validates the WorkflowDefinition shape (id, name, steps, etc.),
+ * not the Workflow wrapper. We pass workflow.definition to the validator.
+ *
  * Returns Result<Workflow, SchemaError[]> where SchemaError is the
  * discriminated union type for schema validation failures.
  */
 export function validateWorkflowSchema(workflow: Workflow): Result<Workflow, readonly SchemaError[]> {
-  const result = validateWorkflow(workflow);
+  const result = validateWorkflow(workflow.definition);
   if (result.valid) {
     return ok(workflow);
   }
-  // Map AJV errors to SchemaError[]
-  // Note: the AJV schema is already compiled and validated, so we trust
-  // that validate.errors is an array of StandardSchemaObject errors
   const ajvErrors = validate.errors || [];
   const errors: SchemaError[] = ajvErrors.map(e => ({
     instancePath: e.instancePath ?? '',

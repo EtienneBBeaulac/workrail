@@ -155,6 +155,10 @@ export class EnhancedMultiSourceWorkflowStorage implements ICompositeWorkflowSto
     return this.storageInstances.map(storage => storage.source);
   }
 
+  getStorageInstances(): readonly IWorkflowStorage[] {
+    return this.storageInstances;
+  }
+
   private initializeStorageSources(config: EnhancedMultiSourceConfig): IWorkflowStorage[] {
     const instances: IWorkflowStorage[] = [];
 

@@ -77,6 +77,12 @@ export interface ICompositeWorkflowStorage extends IWorkflowReader {
    * Get information about all configured sources.
    */
   getSources(): readonly WorkflowSource[];
+
+  /**
+   * Get the underlying storage instances in priority order.
+   * Used by the registry validator to build a snapshot from each source independently.
+   */
+  getStorageInstances(): readonly IWorkflowStorage[];
 }
 
 /**

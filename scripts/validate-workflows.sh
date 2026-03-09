@@ -1,5 +1,9 @@
 #!/bin/bash
-# Validate all workflows in the workflows directory
+# DEPRECATED: This script validates files individually, not through the runtime registry.
+# Use `npm run validate:registry` (scripts/validate-workflows-registry.ts) instead.
+# This script does not test cross-source resolution, variant selection, or duplicate detection.
+#
+# Original description: Validate all workflows in the workflows directory
 
 set -e
 
