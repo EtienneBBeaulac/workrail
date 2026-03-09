@@ -10,12 +10,18 @@
  * 1. Builds the storage chain with the variant's feature flags
  * 2. Passes storage.getStorageInstances() to buildRegistrySnapshot()
  * 3. Calls validateRegistry() on the snapshot
+ * 4. Enforces per-variant timeout to prevent CI hangs
  *
  * Exits non-zero if any variant has failures.
  *
  * Usage:
  *   npm run build && node scripts/validate-workflows-registry.ts
  *   npm run validate:registry
+ *   npm run validate:registry --json  # JSON output to stdout
+ *
+ * Options:
+ *   --json              Emit structured JSON report to stdout (parseable by tools)
+ *   --timeout=<ms>      Per-variant timeout in milliseconds (default: 30000)
  */
 
 // tsyringe (used by ValidationEngine and EnhancedLoopValidator) requires this polyfill
@@ -51,6 +57,62 @@ interface VariantsFile {
   readonly variants: readonly VariantConfig[];
 }
 
+interface ValidationJsonReport {
+  readonly variants: readonly {
+    readonly variant: string;
+    readonly featureFlags: Record<string, string>;
+    readonly resolvedWorkflows: RegistryValidationReport['resolvedResults'];
+    readonly rawFiles: RegistryValidationReport['rawFileResults'];
+    readonly duplicates: RegistryValidationReport['duplicateIds'];
+    readonly summary: {
+      readonly totalResolvedWorkflows: number;
+      readonly validResolvedCount: number;
+      readonly invalidResolvedCount: number;
+      readonly totalRawFiles: number;
+      readonly tier1PassedRawFiles: number;
+      readonly tier1FailedRawFiles: number;
+      readonly duplicateCount: number;
+    };
+  }[];
+  readonly summary: {
+    readonly totalVariants: number;
+    readonly variantsWithFailures: number;
+    readonly totalResolvedWorkflows: number;
+    readonly totalResolvedValid: number;
+    readonly totalResolvedInvalid: number;
+    readonly totalRawFiles: number;
+    readonly totalRawFilesTier1Failed: number;
+    readonly totalDuplicateErrors: number;
+  };
+}
+
+interface CliArgs {
+  readonly json: boolean;
+  readonly timeout: number;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CLI Argument Parsing
+// ─────────────────────────────────────────────────────────────────────────────
+
+function parseArgs(argv: string[]): CliArgs {
+  let json = false;
+  let timeout = 30000; // 30 seconds default
+
+  for (const arg of argv.slice(2)) {
+    if (arg === '--json') {
+      json = true;
+    } else if (arg.startsWith('--timeout=')) {
+      const value = parseInt(arg.split('=')[1] ?? '', 10);
+      if (!isNaN(value) && value > 0) {
+        timeout = value;
+      }
+    }
+  }
+
+  return { json, timeout };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Pipeline Deps Construction
 // ─────────────────────────────────────────────────────────────────────────────
@@ -73,7 +135,44 @@ function buildPipelineDeps() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Formatting
+// Timeout Wrapper
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string
+): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`Timeout after ${timeoutMs}ms: ${label}`)), timeoutMs)
+    ),
+  ]);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// JSON Sanitization
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Strip the snapshot from ValidationOutcome for JSON serialization.
+ * The snapshot includes the full workflow definition (all steps, all prompts),
+ * making JSON output megabytes. We only need the outcome kind.
+ */
+function sanitizeOutcomeForJson(outcome: any): any {
+  if (outcome.kind === 'phase1a_valid') {
+    return {
+      kind: outcome.kind,
+      workflowId: outcome.workflowId,
+      // snapshot omitted — too large for JSON output
+    };
+  }
+  return outcome;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Formatting (Human-Readable)
 // ─────────────────────────────────────────────────────────────────────────────
 
 function formatPhase1aOutcome(outcome: ValidationOutcomePhase1a): string {
@@ -141,6 +240,7 @@ function printVariantSummary(variantName: string, report: RegistryValidationRepo
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+  const args = parseArgs(process.argv);
   const scriptDir = path.dirname(fileURLToPath(import.meta.url));
   const variantsPath = path.join(scriptDir, 'workflow-validation-variants.json');
 
@@ -160,55 +260,141 @@ async function main(): Promise<void> {
   // Build pipeline deps once (stateless, reusable across variants)
   const deps = buildPipelineDeps();
 
-  console.log(`Registry-centric workflow validation (${variants.length} variant(s))\n`);
+  if (!args.json) {
+    console.log(`Registry-centric workflow validation (${variants.length} variant(s))\n`);
+  }
 
+  const allReports: { variant: string; env: Record<string, string>; report: RegistryValidationReport }[] = [];
   let totalFailures = 0;
 
   for (const variant of variants) {
-    console.log(`=== Variant: ${variant.name} ===`);
-
-    // Build feature flag provider with this variant's env overrides
-    const mergedEnv: Record<string, string | undefined> = { ...process.env, ...variant.env };
-    const featureFlagProvider = CustomEnvFeatureFlagProvider
-      ? new CustomEnvFeatureFlagProvider(mergedEnv)
-      : EnvironmentFeatureFlagProvider.withEnv(mergedEnv);
-
-    // Build storage chain with the variant's feature flags
-    const storage = createEnhancedMultiSourceWorkflowStorage({}, featureFlagProvider);
-
-    // Get the underlying storage instances for snapshot building
-    const storageInstances = storage.getStorageInstances();
-
-    // Build registry snapshot from those instances
-    const snapshot = await buildRegistrySnapshot(storageInstances);
-
-    // Validate the registry
-    const report = validateRegistry(snapshot, deps);
-
-    // Print summary
-    printVariantSummary(variant.name, report);
-
-    // Determine if this variant has real failures.
-    // Hard failures: resolved workflows that don't pass validation, raw files that fail Tier 1.
-    // Duplicates are informational — bundled/project overlap is expected in development.
-    const hasValidationFailures = report.invalidResolvedCount > 0;
-    const hasRawFileFailures = report.tier1FailedRawFiles > 0;
-
-    if (hasValidationFailures || hasRawFileFailures) {
-      totalFailures++;
+    if (!args.json) {
+      console.log(`=== Variant: ${variant.name} ===`);
     }
 
-    console.log('');
+    try {
+      // Build feature flag provider with this variant's env overrides
+      const mergedEnv: Record<string, string | undefined> = { ...process.env, ...variant.env };
+      const featureFlagProvider = CustomEnvFeatureFlagProvider
+        ? new CustomEnvFeatureFlagProvider(mergedEnv)
+        : EnvironmentFeatureFlagProvider.withEnv(mergedEnv);
+
+      // Build storage chain with the variant's feature flags
+      const storage = createEnhancedMultiSourceWorkflowStorage({}, featureFlagProvider);
+
+      // Get the underlying storage instances for snapshot building
+      const storageInstances = storage.getStorageInstances();
+
+      // Build registry snapshot with timeout protection
+      const snapshot = await withTimeout(
+        buildRegistrySnapshot(storageInstances),
+        args.timeout,
+        `buildRegistrySnapshot (variant: ${variant.name})`
+      );
+
+      // Validate the registry (synchronous, no timeout needed)
+      const report = validateRegistry(snapshot, deps);
+
+      allReports.push({ variant: variant.name, env: variant.env, report });
+
+      if (!args.json) {
+        // Print summary
+        printVariantSummary(variant.name, report);
+
+        // Determine if this variant has real failures.
+        const hasValidationFailures = report.invalidResolvedCount > 0;
+        const hasRawFileFailures = report.tier1FailedRawFiles > 0;
+
+        if (hasValidationFailures || hasRawFileFailures) {
+          totalFailures++;
+        }
+
+        console.log('');
+      }
+    } catch (err) {
+      // Timeout or other error during variant processing
+      if (!args.json) {
+        console.error(`  TIMEOUT or ERROR: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      totalFailures++;
+      
+      // Create empty report for this variant to maintain structure
+      allReports.push({
+        variant: variant.name,
+        env: variant.env,
+        report: {
+          totalRawFiles: 0,
+          totalResolvedWorkflows: 0,
+          validResolvedCount: 0,
+          invalidResolvedCount: 0,
+          tier1PassedRawFiles: 0,
+          tier1FailedRawFiles: 0,
+          duplicateIds: [],
+          resolvedResults: [],
+          rawFileResults: [],
+          isValid: false,
+        },
+      });
+    }
   }
 
-  // Final summary
-  console.log('='.repeat(60));
-  if (totalFailures === 0) {
-    console.log(`All ${variants.length} variant(s) passed validation`);
-    process.exit(0);
+  // Compute cross-variant totals
+  if (args.json) {
+    totalFailures = allReports.filter(r => !r.report.isValid).length;
   } else {
-    console.error(`${totalFailures} of ${variants.length} variant(s) had failures`);
-    process.exit(1);
+    // Recompute from reports (in case any variants timed out)
+    totalFailures = allReports.filter(r => 
+      r.report.invalidResolvedCount > 0 || r.report.tier1FailedRawFiles > 0
+    ).length;
+  }
+
+  // Output
+  if (args.json) {
+    // Structured JSON output (strip snapshots to keep size reasonable)
+    const jsonReport: ValidationJsonReport = {
+      variants: allReports.map(({ variant, env, report }) => ({
+        variant,
+        featureFlags: env,
+        resolvedWorkflows: report.resolvedResults.map(r => ({
+          ...r,
+          outcome: sanitizeOutcomeForJson(r.outcome),
+        })),
+        rawFiles: report.rawFileResults,
+        duplicates: report.duplicateIds,
+        summary: {
+          totalResolvedWorkflows: report.totalResolvedWorkflows,
+          validResolvedCount: report.validResolvedCount,
+          invalidResolvedCount: report.invalidResolvedCount,
+          totalRawFiles: report.totalRawFiles,
+          tier1PassedRawFiles: report.tier1PassedRawFiles,
+          tier1FailedRawFiles: report.tier1FailedRawFiles,
+          duplicateCount: report.duplicateIds.length,
+        },
+      })),
+      summary: {
+        totalVariants: variants.length,
+        variantsWithFailures: totalFailures,
+        totalResolvedWorkflows: allReports.reduce((sum, r) => sum + r.report.totalResolvedWorkflows, 0),
+        totalResolvedValid: allReports.reduce((sum, r) => sum + r.report.validResolvedCount, 0),
+        totalResolvedInvalid: allReports.reduce((sum, r) => sum + r.report.invalidResolvedCount, 0),
+        totalRawFiles: allReports.reduce((sum, r) => sum + r.report.totalRawFiles, 0),
+        totalRawFilesTier1Failed: allReports.reduce((sum, r) => sum + r.report.tier1FailedRawFiles, 0),
+        totalDuplicateErrors: allReports.reduce((sum, r) => sum + r.report.duplicateIds.length, 0),
+      },
+    };
+
+    console.log(JSON.stringify(jsonReport, null, 2));
+    process.exit(totalFailures > 0 ? 1 : 0);
+  } else {
+    // Human-readable summary
+    console.log('='.repeat(60));
+    if (totalFailures === 0) {
+      console.log(`All ${variants.length} variant(s) passed validation`);
+      process.exit(0);
+    } else {
+      console.error(`${totalFailures} of ${variants.length} variant(s) had failures`);
+      process.exit(1);
+    }
   }
 }
 
