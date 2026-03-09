@@ -71,6 +71,15 @@ export interface RawFileValidationEntry {
 export interface DuplicateIdReport {
   readonly workflowId: string;
   readonly sourceRefs: readonly SourceRef[];
+  /**
+   * True when this is a wr.* workflow from a bundled source being shadowed
+   * by non-bundled sources. This is expected behavior (bundled protection),
+   * not a hard error — the bundled version wins.
+   *
+   * false = hard error (ambiguous, no protection applies)
+   * true = warning (bundled protection resolved it, not an error)
+   */
+  readonly isBundledProtection: boolean;
 }
 
 export interface RegistryValidationReport {
@@ -160,16 +169,28 @@ export function validateRegistry(
   const tier1PassedRawFiles = rawFileResults.filter(e => e.tier1Outcome.kind === 'tier1_passed').length;
   const tier1FailedRawFiles = rawFileResults.length - tier1PassedRawFiles;
 
-  // Step 3: Report duplicates
+  // Step 3: Report duplicates with bundled protection classification
+  // A duplicate is "bundled protection" (warning, not error) when the resolved
+  // workflow was kept via bundled_protected resolution. All other duplicates
+  // are hard errors (ambiguous, no protection applies).
+  const resolvedByKindMap = new Map<string, ResolutionReason>();
+  for (const { workflow, resolvedBy } of snapshot.resolved) {
+    resolvedByKindMap.set(workflow.definition.id, resolvedBy);
+  }
+
   const duplicateIdReports: DuplicateIdReport[] = snapshot.duplicates.map(dup => ({
     workflowId: dup.workflowId,
     sourceRefs: dup.sources,
+    isBundledProtection: resolvedByKindMap.get(dup.workflowId)?.kind === 'bundled_protected',
   }));
+
+  // Hard-error duplicates are those without bundled protection
+  const hardErrorDuplicates = duplicateIdReports.filter(d => !d.isBundledProtection);
 
   const isValid =
     validResolvedCount === snapshot.resolved.length &&
     tier1FailedRawFiles === 0 &&
-    duplicateIdReports.length === 0;
+    hardErrorDuplicates.length === 0;
 
   return {
     totalRawFiles: snapshot.rawFiles.length,

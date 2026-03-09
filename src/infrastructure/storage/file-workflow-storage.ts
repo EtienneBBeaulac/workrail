@@ -18,6 +18,7 @@ import {
 import { IFeatureFlagProvider, EnvironmentFeatureFlagProvider } from '../../config/feature-flags';
 import { validateWorkflowIdForSave } from '../../domain/workflow-id-policy';
 import { assertWithinBase as assertWithinBaseSafe } from '../../utils/storage-security';
+import { selectVariant, type VariantCandidate } from './workflow-resolution';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -180,26 +181,24 @@ export class FileWorkflowStorage implements IWorkflowStorage {
       }
     }
 
-    // Second pass: Select correct file for each ID
-    for (const [id, files] of idToFiles) {
-      let selected = files[0]!;
+    // Second pass: Select correct variant for each ID using the shared pure function.
+    // This is the SAME function the registry validator uses — single source of truth.
+    const flags = {
+      v2Tools: this.featureFlags.isEnabled('v2Tools'),
+      agenticRoutines: this.featureFlags.isEnabled('agenticRoutines'),
+    };
 
-      const isV2Enabled = this.featureFlags.isEnabled('v2Tools');
-      const isAgenticEnabled = this.featureFlags.isEnabled('agenticRoutines');
-      const v2Entry = files.find(f => f.file.includes('.v2.'));
-      const agenticEntry = files.find(f => f.file.includes('.agentic.'));
-      const standardEntry = files.find(f => !f.file.includes('.agentic.') && !f.file.includes('.v2.'));
-      // Variant precedence:
-      // 1. .v2. when v2 tools are enabled
-      // 2. .agentic. when agentic routines are enabled
-      // 3. standard workflow otherwise
-      if (isV2Enabled && v2Entry) {
-        selected = v2Entry;
-      } else if (isAgenticEnabled && agenticEntry) {
-        selected = agenticEntry;
-      } else if (standardEntry) {
-        selected = standardEntry;
-      }
+    for (const [id, files] of idToFiles) {
+      // Build variant candidates from file entries
+      const candidates: VariantCandidate[] = files.map(f => ({
+        variantKind: f.file.includes('.v2.') ? 'v2' as const
+                   : f.file.includes('.agentic.') ? 'agentic' as const
+                   : 'standard' as const,
+        identifier: f.file,
+      }));
+
+      const selection = selectVariant(candidates, flags);
+      const selected = files.find(f => f.file === selection.selectedIdentifier) ?? files[0]!;
 
       // Add to index
       const filePath = path.resolve(this.baseDirReal, selected.file);

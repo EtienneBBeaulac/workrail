@@ -24,8 +24,10 @@ import type { ProcessTerminator } from './runtime/ports/process-terminator.js';
 import { startServer } from './mcp/server.js';
 import type { WorkflowDefinition } from './types/workflow.js';
 import { createWorkflow, createCustomDirectorySource } from './types/workflow.js';
-import { validateWorkflow as schemaValidate } from './application/validation.js';
-import { createValidateWorkflowFileUseCase } from './application/use-cases/validate-workflow-file.js';
+import { validateWorkflow as schemaValidate, validateWorkflowSchema } from './application/validation.js';
+import { createValidateWorkflowFileUseCasePipeline } from './application/use-cases/validate-workflow-file.js';
+import { WorkflowCompiler } from './application/services/workflow-compiler.js';
+import { normalizeV1WorkflowToPinnedSnapshot } from './v2/read-only/v1-to-v2-shim.js';
 
 import { interpretCliResult, interpretCliResultWithoutDI } from './cli/interpret-result.js';
 import { printResult } from './cli/output-formatter.js';
@@ -118,7 +120,8 @@ program
     const terminator = container.resolve<ProcessTerminator>(DI.Runtime.ProcessTerminator);
     const validationEngine = container.resolve<ValidationEngine>(DI.Infra.ValidationEngine);
 
-    const validateWorkflowFile = createValidateWorkflowFileUseCase({
+    const compiler = new WorkflowCompiler();
+    const validateWorkflowFile = createValidateWorkflowFileUseCasePipeline({
       resolvePath: path.resolve,
       existsSync: fs.existsSync,
       readFileSyncUtf8: (resolvedPath: string) => fs.readFileSync(resolvedPath, 'utf-8'),
@@ -127,6 +130,12 @@ program
       makeRuntimeWorkflow: (definition: WorkflowDefinition, resolvedPath: string) =>
         createWorkflow(definition, createCustomDirectorySource(path.dirname(resolvedPath), 'CLI Validate')),
       validateRuntimeWorkflow: (workflow) => validationEngine.validateWorkflow(workflow),
+      validationPipelineDeps: {
+        schemaValidate: validateWorkflowSchema,
+        structuralValidate: validationEngine.validateWorkflowStructureOnly.bind(validationEngine),
+        compiler,
+        normalizeToExecutable: normalizeV1WorkflowToPinnedSnapshot,
+      },
     });
 
     const result = executeValidateCommand(filePath, { validateWorkflowFile });

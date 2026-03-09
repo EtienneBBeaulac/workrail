@@ -228,11 +228,13 @@ function printVariantSummary(variantName: string, report: RegistryValidationRepo
     }
   }
 
-  // Print duplicates
+  // Print duplicates (distinguish bundled protection warnings from hard errors)
   if (report.duplicateIds.length > 0) {
     console.log(`  Duplicate IDs:`);
     for (const dup of report.duplicateIds) {
-      console.log(`    [-] ${dup.workflowId} (sources: ${dup.sourceRefs.join(', ')})`);
+      const mark = dup.isBundledProtection ? '~' : '-';
+      const suffix = dup.isBundledProtection ? ' (bundled protection, not error)' : '';
+      console.log(`    [${mark}] ${dup.workflowId} (sources: ${dup.sourceRefs.join(', ')})${suffix}`);
     }
   }
 }
@@ -381,7 +383,7 @@ async function main(): Promise<void> {
         totalResolvedInvalid: allReports.reduce((sum, r) => sum + r.report.invalidResolvedCount, 0),
         totalRawFiles: allReports.reduce((sum, r) => sum + r.report.totalRawFiles, 0),
         totalRawFilesTier1Failed: allReports.reduce((sum, r) => sum + r.report.tier1FailedRawFiles, 0),
-        totalDuplicateErrors: allReports.reduce((sum, r) => sum + r.report.duplicateIds.length, 0),
+        totalDuplicateErrors: allReports.reduce((sum, r) => sum + r.report.duplicateIds.filter(d => !d.isBundledProtection).length, 0),
       },
     };
 

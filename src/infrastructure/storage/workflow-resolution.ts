@@ -188,6 +188,130 @@ function isBundledWorkflow(workflow: Workflow): boolean {
   return workflow.definition.id.startsWith('wr.') && workflow.source.kind === 'bundled';
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Variant Selection (Intra-Source)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Variant candidate for a single workflow within one source.
+ */
+export interface VariantCandidate {
+  readonly variantKind: 'v2' | 'agentic' | 'standard';
+  readonly identifier: string; // filename or other identifier for traceability
+}
+
+/**
+ * Feature flags relevant to variant selection.
+ */
+export interface VariantSelectionFlags {
+  readonly v2Tools: boolean;
+  readonly agenticRoutines: boolean;
+}
+
+/**
+ * Result of variant selection for a single workflow ID within one source.
+ */
+export interface VariantSelectionResult {
+  readonly selectedVariant: 'v2' | 'agentic' | 'standard';
+  readonly selectedIdentifier: string;
+  readonly resolution: VariantResolution;
+}
+
+/**
+ * Select the appropriate variant file for a workflow when multiple variants exist.
+ *
+ * Pure function — same logic as FileWorkflowStorage.buildWorkflowIndex (lines 184-202).
+ * Shared so that both runtime and validation use the same selection rules.
+ *
+ * Precedence:
+ * 1. .v2. variant when v2 tools are enabled
+ * 2. .agentic. variant when agentic routines are enabled
+ * 3. standard variant otherwise
+ *
+ * If no matching variant is found for the enabled flags, falls back to the
+ * first available variant (same behavior as FileWorkflowStorage).
+ */
+export function selectVariant(
+  candidates: readonly VariantCandidate[],
+  flags: VariantSelectionFlags
+): VariantSelectionResult {
+  if (candidates.length === 0) {
+    throw new Error('selectVariant called with empty candidates');
+  }
+
+  if (candidates.length === 1) {
+    const only = candidates[0]!;
+    return {
+      selectedVariant: only.variantKind,
+      selectedIdentifier: only.identifier,
+      resolution: { kind: 'only_variant' },
+    };
+  }
+
+  // Multiple variants — apply precedence rules
+  const availableVariants = candidates.map(c => c.variantKind);
+
+  const v2Candidate = candidates.find(c => c.variantKind === 'v2');
+  const agenticCandidate = candidates.find(c => c.variantKind === 'agentic');
+  const standardCandidate = candidates.find(c => c.variantKind === 'standard');
+
+  // Feature-flag-driven selection
+  if (flags.v2Tools && v2Candidate) {
+    return {
+      selectedVariant: 'v2',
+      selectedIdentifier: v2Candidate.identifier,
+      resolution: {
+        kind: 'feature_flag_selected',
+        selectedVariant: 'v2',
+        availableVariants,
+        enabledFlags: flags,
+      },
+    };
+  }
+
+  if (flags.agenticRoutines && agenticCandidate) {
+    return {
+      selectedVariant: 'agentic',
+      selectedIdentifier: agenticCandidate.identifier,
+      resolution: {
+        kind: 'feature_flag_selected',
+        selectedVariant: 'agentic',
+        availableVariants,
+        enabledFlags: flags,
+      },
+    };
+  }
+
+  // No flags matched — standard gets priority, otherwise precedence fallback
+  if (standardCandidate) {
+    return {
+      selectedVariant: 'standard',
+      selectedIdentifier: standardCandidate.identifier,
+      resolution: {
+        kind: 'precedence_fallback',
+        selectedVariant: 'standard',
+        availableVariants,
+      },
+    };
+  }
+
+  // No standard variant; fall back to first available (v2 > agentic by precedence)
+  const fallback = v2Candidate ?? agenticCandidate ?? candidates[0]!;
+  return {
+    selectedVariant: fallback.variantKind,
+    selectedIdentifier: fallback.identifier,
+    resolution: {
+      kind: 'precedence_fallback',
+      selectedVariant: fallback.variantKind,
+      availableVariants,
+    },
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Duplicate Detection
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
  * Find and return all duplicate workflow IDs (IDs appearing in multiple sources).
  */
