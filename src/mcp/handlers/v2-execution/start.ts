@@ -27,9 +27,9 @@ import { createBundledSource } from '../../../types/workflow-source.js';
 import type { WorkflowDefinition } from '../../../types/workflow-definition.js';
 import { hasWorkflowDefinitionShape } from '../../../types/workflow-definition.js';
 import {
-  renderPendingPromptOrDefault,
   type StartWorkflowError,
 } from '../v2-execution-helpers.js';
+import { renderPendingPrompt } from '../../../v2/durable-core/domain/prompt-renderer.js';
 import { resolveWorkspaceAnchors } from '../v2-workspace-resolution.js';
 import * as z from 'zod';
 import { newAttemptId, signTokenOrErr } from '../v2-token-ops.js';
@@ -404,7 +404,7 @@ export function executeStartWorkflow(
         ports: tokenCodecPorts,
       }).andThen((tokens) => {
         // 7. Render pending step and build response
-        const meta = renderPendingPromptOrDefault({
+        const metaResult = renderPendingPrompt({
           workflow: pinnedWorkflow,
           stepId: firstStep.id,
           loopPath: [],
@@ -414,6 +414,14 @@ export function executeStartWorkflow(
           rehydrateOnly: false,
         });
 
+        if (metaResult.isErr()) {
+          return neErrorAsync({
+            kind: 'prompt_render_failed' as const,
+            message: metaResult.error.message,
+          });
+        }
+
+        const meta = metaResult.value;
         const pending = { stepId: meta.stepId, title: meta.title, prompt: meta.prompt };
         const preferences = defaultPreferences;
         const nextIntent = deriveNextIntent({ rehydrateOnly: false, isComplete: false, pending: meta });
