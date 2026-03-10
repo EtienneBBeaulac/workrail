@@ -238,8 +238,8 @@ jobs:
       - name: Verify dist manifest
         run: node scripts/dist-manifest.js --dist dist --verify dist/manifest.json
 
-      - name: Validate all workflows
-        run: npm run validate:workflows
+      - name: Validate all workflows (registry-centric, all feature-flag variants)
+        run: npm run validate:registry
 
       - name: Validate workflow discovery (workflow_list/workflow_get)
         run: npm run validate:workflow-discovery

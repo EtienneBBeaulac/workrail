@@ -187,8 +187,10 @@ function formatPhase1aOutcome(outcome: ValidationOutcomePhase1a): string {
       return `v1-compile: FAIL (${outcome.cause.message})`;
     case 'normalization_failed':
       return `normalize: FAIL (${outcome.cause.message})`;
+    case 'executable_compilation_failed':
+      return `exec-compile: FAIL (${outcome.cause.message})`;
     case 'phase1a_valid':
-      return 'schema:ok structural:ok v1-compile:ok normalize:ok';
+      return 'schema:ok structural:ok v1-compile:ok normalize:ok exec-compile:ok';
   }
 }
 

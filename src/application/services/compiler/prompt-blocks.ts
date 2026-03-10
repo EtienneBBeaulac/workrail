@@ -207,9 +207,12 @@ function resolveStepPromptBlocks(
   }
 
   // Produce a new step with prompt filled from rendered blocks.
-  // promptBlocks is preserved for introspection (Studio, export).
+  // Strip promptBlocks from the resolved step: the rendered prompt is the
+  // executable truth. Keeping both causes the compiler's own XOR check to
+  // reject the pinned snapshot when it is recompiled at advance time.
+  const { promptBlocks: _stripped, ...rest } = step;
   return ok({
-    ...step,
+    ...rest,
     prompt: renderResult.value,
   });
 }

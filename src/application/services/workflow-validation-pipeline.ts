@@ -1,4 +1,7 @@
 import type { Workflow } from '../../types/workflow.js';
+import { createWorkflow } from '../../types/workflow.js';
+import { createBundledSource } from '../../types/workflow-source.js';
+import { hasWorkflowDefinitionShape } from '../../types/workflow-definition.js';
 import type { DomainError } from '../../domain/execution/error.js';
 import type { WorkflowCompiler, CompiledWorkflow } from './workflow-compiler.js';
 import type { ValidationEngine } from './validation-engine.js';
@@ -38,6 +41,7 @@ export type ValidationOutcomePhase1a =
   | { readonly kind: 'structural_failed'; readonly workflowId: string; readonly issues: readonly string[] }
   | { readonly kind: 'v1_compilation_failed'; readonly workflowId: string; readonly cause: DomainError }
   | { readonly kind: 'normalization_failed'; readonly workflowId: string; readonly cause: DomainError }
+  | { readonly kind: 'executable_compilation_failed'; readonly workflowId: string; readonly cause: DomainError }
   | { readonly kind: 'phase1a_valid'; readonly workflowId: string; readonly snapshot: ExecutableCompiledWorkflowSnapshot };
 
 /**
@@ -160,7 +164,24 @@ export function validateWorkflowPhase1a(
     return { kind: 'normalization_failed', workflowId, cause: normalizationResult.error };
   }
 
-  return { kind: 'phase1a_valid', workflowId, snapshot: normalizationResult.value };
+  // Phase 4b: Recompile the normalized executable snapshot.
+  // Runtime recompiles the pinned snapshot at advance time. If the normalized
+  // form introduces invariant violations (e.g. resolver leaves both prompt and
+  // promptBlocks on a step), this catches it at validation time instead of
+  // at continue_workflow time after the user has already done work.
+  const snapshot = normalizationResult.value;
+  if (hasWorkflowDefinitionShape(snapshot.definition)) {
+    const executableWorkflow = createWorkflow(
+      snapshot.definition as import('../../types/workflow-definition.js').WorkflowDefinition,
+      createBundledSource(),
+    );
+    const execCompileResult = deps.compiler.compile(executableWorkflow);
+    if (execCompileResult.isErr()) {
+      return { kind: 'executable_compilation_failed', workflowId, cause: execCompileResult.error };
+    }
+  }
+
+  return { kind: 'phase1a_valid', workflowId, snapshot };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

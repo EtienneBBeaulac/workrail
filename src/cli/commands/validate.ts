@@ -94,6 +94,12 @@ export function executeValidateCommand(
         suggestions: ['Review template/feature/ref definitions and try again'],
       });
 
+    case 'executable_compilation_failed':
+      return failure(`Executable compilation failed: ${filePath}`, {
+        details: [result.message],
+        suggestions: ['The normalized workflow has an internal conflict — ensure steps use exactly one prompt source'],
+      });
+
     default:
       return assertNever(result);
   }

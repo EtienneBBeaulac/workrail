@@ -57,6 +57,7 @@ export type StartWorkflowError =
   | { readonly kind: 'validation_failed'; readonly failure: ToolFailure }
   | { readonly kind: 'workflow_not_found'; readonly workflowId: WorkflowId }
   | { readonly kind: 'workflow_has_no_steps'; readonly workflowId: WorkflowId }
+  | { readonly kind: 'workflow_compile_failed'; readonly message: string }
   | { readonly kind: 'keyring_load_failed'; readonly cause: KeyringError }
   | { readonly kind: 'hash_computation_failed'; readonly message: string }
   | { readonly kind: 'pinned_workflow_store_failed'; readonly cause: PinnedWorkflowStoreError }
@@ -119,6 +120,12 @@ export function mapStartWorkflowErrorToToolError(e: StartWorkflowError): ToolFai
       return errNotRetryable('PRECONDITION_FAILED', `Workflow "${e.workflowId}" has no steps and cannot be started.`, {
         suggestion: 'Tell the user: "This workflow definition is empty (no steps). The workflow JSON file needs to be fixed."',
       });
+
+    case 'workflow_compile_failed':
+      return errNotRetryable('PRECONDITION_FAILED',
+        `Workflow definition is invalid and cannot be started: ${e.message}`,
+        { suggestion: 'Tell the user: "The workflow definition has an authoring error that prevents execution. Fix the workflow JSON file and try again."' },
+      );
 
     case 'keyring_load_failed':
       return mapKeyringErrorToToolError(e.cause);

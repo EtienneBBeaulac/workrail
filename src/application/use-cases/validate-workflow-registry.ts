@@ -1,7 +1,7 @@
 import type { Workflow } from '../../types/workflow.js';
 import type { WorkflowSource } from '../../types/workflow.js';
 import type { IWorkflowStorage } from '../../types/storage.js';
-import type { ValidationOutcome } from '../services/workflow-validation-pipeline.js';
+import type { ValidationOutcome, ValidationOutcomePhase1a } from '../services/workflow-validation-pipeline.js';
 import { validateWorkflowPhase1a, type ValidationPipelineDepsPhase1a, type SchemaError } from '../services/workflow-validation-pipeline.js';
 import type { ResolutionReason, VariantResolution, SourceRef } from '../../infrastructure/storage/workflow-resolution.js';
 import { resolveWorkflowCandidates, detectDuplicateIds } from '../../infrastructure/storage/workflow-resolution.js';
@@ -55,7 +55,7 @@ export interface ResolvedValidationEntry {
   readonly workflowId: string;
   readonly sourceRef: SourceRef;
   readonly resolvedBy: ResolutionReason;
-  readonly outcome: ValidationOutcome | { readonly kind: 'phase1a_valid'; readonly workflowId: string };
+  readonly outcome: ValidationOutcome | ValidationOutcomePhase1a;
 }
 
 export interface RawFileValidationEntry {

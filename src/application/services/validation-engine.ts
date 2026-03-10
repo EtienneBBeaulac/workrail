@@ -691,6 +691,16 @@ export class ValidationEngine {
           suggestions.push('Add a prompt string, structured promptBlocks, or a templateCall to each step');
         }
 
+        // Enforce prompt-source XOR: exactly one of prompt, promptBlocks, templateCall
+        const typedStep = step as WorkflowStepDefinition;
+        const promptSourceCount =
+          (typedStep.prompt ? 1 : 0) +
+          ((typedStep as any).promptBlocks ? 1 : 0) +
+          ((typedStep as any).templateCall ? 1 : 0);
+        if (promptSourceCount > 1) {
+          issues.push(`Step '${step.id}' declares multiple prompt sources (prompt, promptBlocks, templateCall) — use exactly one`);
+        }
+
         this.collectQuotedJsonValidationMessageWarnings(step as any, `Step '${step.id}'`, warnings);
 
         // Validate function calls for standard steps using workflow + step scopes

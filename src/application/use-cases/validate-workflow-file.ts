@@ -37,6 +37,11 @@ export type ValidateWorkflowFileResult =
       kind: 'normalization_failed';
       filePath: string;
       message: string;
+    }
+  | {
+      kind: 'executable_compilation_failed';
+      filePath: string;
+      message: string;
     };
 
 export interface ValidateWorkflowFileDeps {
@@ -182,6 +187,13 @@ export function createValidateWorkflowFileUseCasePipeline(deps: ValidateWorkflow
         case 'normalization_failed':
           return {
             kind: 'normalization_failed',
+            filePath,
+            message: outcome.cause.message,
+          };
+
+        case 'executable_compilation_failed':
+          return {
+            kind: 'executable_compilation_failed',
             filePath,
             message: outcome.cause.message,
           };

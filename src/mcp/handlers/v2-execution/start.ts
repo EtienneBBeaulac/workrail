@@ -19,7 +19,7 @@ import { deriveWorkflowHashRef } from '../../../v2/durable-core/ids/workflow-has
 import type { Sha256PortV2 } from '../../../v2/ports/sha256.port.js';
 import type { TokenCodecPorts } from '../../../v2/durable-core/tokens/token-codec-ports.js';
 import { ResultAsync as RA, okAsync, errAsync as neErrorAsync } from 'neverthrow';
-import { compileV1WorkflowToPinnedSnapshot } from '../../../v2/read-only/v1-to-v2-shim.js';
+import { normalizeV1WorkflowToPinnedSnapshot } from '../../../v2/read-only/v1-to-v2-shim.js';
 import { workflowHashForCompiledSnapshot } from '../../../v2/durable-core/canonical/hashing.js';
 import type { JsonValue } from '../../../v2/durable-core/canonical/json-types.js';
 import { anchorsToObservations, type ObservationEventData } from '../../../v2/durable-core/domain/observation-builder.js';
@@ -71,7 +71,16 @@ export function loadAndPinWorkflow(args: {
     })
     .andThen(({ workflow }) => {
       // Pin the full v1 workflow definition for determinism.
-      const compiled = compileV1WorkflowToPinnedSnapshot(workflow);
+      // Strict: if normalization fails (e.g. prompt+promptBlocks XOR, bad templateCall),
+      // reject before session creation — never pin an invalid executable snapshot.
+      const normalizeResult = normalizeV1WorkflowToPinnedSnapshot(workflow);
+      if (normalizeResult.isErr()) {
+        return neErrorAsync({
+          kind: 'workflow_compile_failed' as const,
+          message: normalizeResult.error.message,
+        });
+      }
+      const compiled = normalizeResult.value;
       const workflowHashRes = workflowHashForCompiledSnapshot(compiled as unknown as JsonValue, crypto);
       if (workflowHashRes.isErr()) {
         return neErrorAsync({ kind: 'hash_computation_failed' as const, message: workflowHashRes.error.message });

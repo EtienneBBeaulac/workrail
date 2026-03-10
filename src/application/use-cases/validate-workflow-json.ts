@@ -64,6 +64,12 @@ function mapOutcomeToResult(outcome: ValidationOutcomePhase1a): WorkflowJsonVali
         issues: [`Normalization error: ${outcome.cause.message}`],
         suggestions: ['Check templateCall references, promptBlocks, and step definitions.'],
       };
+    case 'executable_compilation_failed':
+      return {
+        valid: false,
+        issues: [`Executable compilation error: ${outcome.cause.message}`],
+        suggestions: ['The normalized workflow has an internal conflict. Check that steps use exactly one of prompt, promptBlocks, or templateCall.'],
+      };
     case 'phase1a_valid':
       return { valid: true, issues: [], suggestions: [] };
   }
