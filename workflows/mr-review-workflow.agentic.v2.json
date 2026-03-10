@@ -188,7 +188,7 @@
         {
           "id": "phase-4c-loop-decision",
           "title": "Synthesis Loop Decision",
-          "prompt": "Decide whether the synthesis loop should continue.\n\nDecision rules:\n- if `contradictionCount > 0` → continue\n- else if `coverageUncertainCount > 0` and the uncertainty materially affects the recommendation → continue\n- else if `falsePositiveRiskCount > 0` → continue\n- else if `recommendationDriftDetected = true` → continue\n- else → stop\n\nOutput exactly:\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"loopId\": \"mr_review_synthesis_loop\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
+          "prompt": "Decide whether the synthesis loop should continue.\n\nDecision rules:\n- if `contradictionCount > 0` → continue\n- else if `coverageUncertainCount > 0` and the uncertainty materially affects the recommendation → continue\n- else if `falsePositiveRiskCount > 0` → continue\n- else if `recommendationDriftDetected = true` → continue\n- else → stop\n\nOutput exactly:\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
           "requireConfirmation": true,
           "outputContract": {
             "contractRef": "wr.contracts.loop_control"

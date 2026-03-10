@@ -7,6 +7,7 @@ import {
   TRUNCATION_MARKER,
 } from '../constants.js';
 import { utf8ByteLength } from '../schemas/lib/utf8-byte-length.js';
+import type { LoopControlEvaluationResult } from './loop-control-evaluator.js';
 
 /**
  * Decision trace entry kinds (closed set matching lock §1 decision_trace_appended).
@@ -78,6 +79,30 @@ export function traceSelectedNextStep(stepId: string): DecisionTraceEntry {
     kind: 'selected_next_step',
     summary: `Selected next step '${stepId}'.`,
     refs: [{ kind: 'step_id', stepId }],
+  };
+}
+
+/**
+ * Trace an artifact match result during loop control evaluation.
+ * Accepts the domain LoopControlEvaluationResult directly so the trace
+ * derives its summary from structured data, not caller-assembled strings.
+ */
+export function traceArtifactMatchResult(
+  loopId: string,
+  iteration: number,
+  result: LoopControlEvaluationResult,
+): DecisionTraceEntry {
+  const detail = (() => {
+    switch (result.kind) {
+      case 'found':    return `decision="${result.decision}"`;
+      case 'not_found': return result.reason;
+      case 'invalid':  return result.reason;
+    }
+  })();
+  return {
+    kind: 'evaluated_condition',
+    summary: `Loop '${loopId}' iteration ${iteration}: artifact match=${result.kind} — ${detail}`,
+    refs: [{ kind: 'loop_id', loopId }, { kind: 'iteration', value: iteration }],
   };
 }
 

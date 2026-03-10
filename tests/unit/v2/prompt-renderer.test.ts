@@ -404,5 +404,163 @@ describe('renderPendingPrompt', () => {
         expect(result.value.prompt).not.toContain('OUTPUT REQUIREMENTS (System)');
       }
     });
+
+    it('includes canonical JSON format in loop_control contract guidance', () => {
+      const workflowWithContract = createWorkflow(
+        {
+          id: 'test-canonical',
+          name: 'Test Canonical',
+          description: 'Test canonical format',
+          version: '1.0.0',
+          steps: [{
+            id: 'exit-step',
+            title: 'Exit Step',
+            prompt: 'Should we stop?',
+            requireConfirmation: false,
+            outputContract: {
+              contractRef: LOOP_CONTROL_CONTRACT_REF,
+            },
+          }],
+        } as any,
+        createBundledSource()
+      );
+
+      const result = renderPendingPrompt({
+        workflow: workflowWithContract,
+        stepId: 'exit-step',
+        loopPath: [],
+        truth: { events: [], manifest: [] },
+        runId: 'run_1',
+        nodeId: 'node_1',
+        rehydrateOnly: false,
+      });
+
+      expect(result.isOk()).toBe(true);
+      if (result.isOk()) {
+        expect(result.value.prompt).toContain('"wr.loop_control"');
+        expect(result.value.prompt).toContain('"stop"');
+        expect(result.value.prompt).toContain('Canonical format');
+      }
+    });
+  });
+
+  describe('loop context banner hardening', () => {
+    const loopWorkflow = createWorkflow(
+      {
+        id: 'test-loop',
+        name: 'Test Loop',
+        description: 'Test loop workflow',
+        version: '1.0.0',
+        steps: [{
+          id: 'loop-step',
+          type: 'loop',
+          title: 'Loop',
+          prompt: 'Loop prompt',
+          requireConfirmation: false,
+          loop: {
+            type: 'while',
+            maxIterations: 5,
+          },
+          body: [
+            { id: 'body-step', title: 'Body', prompt: 'Do work', requireConfirmation: false },
+            { id: 'exit-step', title: 'Exit', prompt: 'Stop?', requireConfirmation: false, outputContract: { contractRef: LOOP_CONTROL_CONTRACT_REF } },
+          ],
+        }],
+      } as any,
+      createBundledSource()
+    );
+
+    it('first iteration shows soft orientation with maxIterations bound', () => {
+      const result = renderPendingPrompt({
+        workflow: loopWorkflow,
+        stepId: 'body-step',
+        loopPath: [{ loopId: 'loop-step', iteration: 0 }],
+        truth: { events: [], manifest: [] },
+        runId: 'run_1',
+        nodeId: 'node_1',
+        rehydrateOnly: false,
+      });
+
+      expect(result.isOk()).toBe(true);
+      if (result.isOk()) {
+        expect(result.value.prompt).toContain('iterative loop');
+        expect(result.value.prompt).toContain('up to 5 passes');
+      }
+    });
+
+    it('subsequent iterations show progress bar and scope narrowing', () => {
+      const result = renderPendingPrompt({
+        workflow: loopWorkflow,
+        stepId: 'body-step',
+        loopPath: [{ loopId: 'loop-step', iteration: 2 }],
+        truth: { events: [], manifest: [] },
+        runId: 'run_1',
+        nodeId: 'node_1',
+        rehydrateOnly: false,
+      });
+
+      expect(result.isOk()).toBe(true);
+      if (result.isOk()) {
+        expect(result.value.prompt).toContain('Pass 3');
+        expect(result.value.prompt).toContain('of 5');
+        expect(result.value.prompt).toContain('Scope');
+        expect(result.value.prompt).toContain('Ancestry Recap');
+      }
+    });
+
+    it('final pass shows FINAL PASS instruction', () => {
+      const result = renderPendingPrompt({
+        workflow: loopWorkflow,
+        stepId: 'body-step',
+        loopPath: [{ loopId: 'loop-step', iteration: 4 }],
+        truth: { events: [], manifest: [] },
+        runId: 'run_1',
+        nodeId: 'node_1',
+        rehydrateOnly: false,
+      });
+
+      expect(result.isOk()).toBe(true);
+      if (result.isOk()) {
+        expect(result.value.prompt).toContain('FINAL PASS');
+      }
+    });
+
+    it('exit step does not get a loop banner', () => {
+      const result = renderPendingPrompt({
+        workflow: loopWorkflow,
+        stepId: 'exit-step',
+        loopPath: [{ loopId: 'loop-step', iteration: 2 }],
+        truth: { events: [], manifest: [] },
+        runId: 'run_1',
+        nodeId: 'node_1',
+        rehydrateOnly: false,
+      });
+
+      expect(result.isOk()).toBe(true);
+      if (result.isOk()) {
+        // No banner, just the authored prompt + contract guidance
+        expect(result.value.prompt).not.toContain('Pass 3');
+        expect(result.value.prompt).toContain('Stop?');
+        expect(result.value.prompt).toContain('OUTPUT REQUIREMENTS (System)');
+      }
+    });
+
+    it('non-loop step outside workflow body gets no banner', () => {
+      const result = renderPendingPrompt({
+        workflow: simpleWorkflow,
+        stepId: 'step1',
+        loopPath: [],
+        truth: { events: [], manifest: [] },
+        runId: 'run_1',
+        nodeId: 'node_1',
+        rehydrateOnly: false,
+      });
+
+      expect(result.isOk()).toBe(true);
+      if (result.isOk()) {
+        expect(result.value.prompt).not.toContain('iterative loop');
+        expect(result.value.prompt).not.toContain('Progress');
+      }
+    });
   });
 });
