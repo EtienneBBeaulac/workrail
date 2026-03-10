@@ -32,7 +32,7 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 
 // All imports come from the built output (same pattern as other scripts)
-import { EnvironmentFeatureFlagProvider, CustomEnvFeatureFlagProvider } from '../dist/config/feature-flags.js';
+import { CustomEnvFeatureFlagProvider } from '../dist/config/feature-flags.js';
 import { createEnhancedMultiSourceWorkflowStorage } from '../dist/infrastructure/storage/enhanced-multi-source-workflow-storage.js';
 import { buildRegistrySnapshot, validateRegistry } from '../dist/application/use-cases/validate-workflow-registry.js';
 import { validateWorkflowSchema } from '../dist/application/validation.js';
@@ -279,9 +279,7 @@ async function main(): Promise<void> {
     try {
       // Build feature flag provider with this variant's env overrides
       const mergedEnv: Record<string, string | undefined> = { ...process.env, ...variant.env };
-      const featureFlagProvider = CustomEnvFeatureFlagProvider
-        ? new CustomEnvFeatureFlagProvider(mergedEnv)
-        : EnvironmentFeatureFlagProvider.withEnv(mergedEnv);
+      const featureFlagProvider = new CustomEnvFeatureFlagProvider(mergedEnv);
 
       // Build storage chain with the variant's feature flags
       const storage = createEnhancedMultiSourceWorkflowStorage({}, featureFlagProvider);

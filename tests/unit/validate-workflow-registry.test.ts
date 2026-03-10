@@ -310,6 +310,64 @@ describe('Phase 5: God-Tier Validation Regression Tests', () => {
       expect(result.selectedVariant).toBe('standard');
       expect(result.resolution.kind).toBe('precedence_fallback');
     });
+
+    it('5b. Invalid v2 variant selected → registry reports failure (integration)', () => {
+      // v2 variant is what runtime selects when v2Tools is enabled.
+      // If the v2 variant is invalid, the registry must report it as a failure.
+      const invalidV2Wf = wf(def('my-workflow'), createBundledSource());
+
+      const snapshot = fakeSnapshot({
+        sources: [createBundledSource()],
+        resolved: [{ workflow: invalidV2Wf, resolvedBy: { kind: 'unique', sourceRef: 0, variantResolution: { kind: 'feature_flag_selected', selectedVariant: 'v2', availableVariants: ['v2', 'standard'], enabledFlags: { v2Tools: true, agenticRoutines: false } } } }],
+      });
+
+      // Schema validation fails for the resolved workflow (simulating invalid v2 variant)
+      const deps = fakePipelineDeps({
+        schemaValidate: () => err([{ instancePath: '/steps/0', message: 'v2 step missing required field', keyword: 'required' }]),
+      });
+
+      const report = validateRegistry(snapshot, deps);
+
+      expect(report.isValid).toBe(false);
+      expect(report.invalidResolvedCount).toBe(1);
+      expect(report.resolvedResults[0]!.outcome.kind).toBe('schema_failed');
+    });
+
+    it('6b. Invalid agentic variant selected → registry reports failure (integration)', () => {
+      const invalidAgenticWf = wf(def('my-workflow'), createBundledSource());
+
+      const snapshot = fakeSnapshot({
+        sources: [createBundledSource()],
+        resolved: [{ workflow: invalidAgenticWf, resolvedBy: { kind: 'unique', sourceRef: 0, variantResolution: { kind: 'feature_flag_selected', selectedVariant: 'agentic', availableVariants: ['agentic', 'standard'], enabledFlags: { v2Tools: false, agenticRoutines: true } } } }],
+      });
+
+      const deps = fakePipelineDeps({
+        schemaValidate: () => err([{ instancePath: '/steps/0', message: 'agentic step invalid', keyword: 'required' }]),
+      });
+
+      const report = validateRegistry(snapshot, deps);
+
+      expect(report.isValid).toBe(false);
+      expect(report.invalidResolvedCount).toBe(1);
+    });
+
+    it('7b. Standard invalid but v2 valid and selected → passes (standard not selected)', () => {
+      // When v2 is selected and valid, the standard variant being invalid doesn't matter
+      // for the resolved set (standard is a variant loser — raw file tier 1 catches it).
+      const validV2Wf = wf(def('my-workflow'), createBundledSource());
+
+      const snapshot = fakeSnapshot({
+        sources: [createBundledSource()],
+        resolved: [{ workflow: validV2Wf, resolvedBy: { kind: 'unique', sourceRef: 0, variantResolution: { kind: 'feature_flag_selected', selectedVariant: 'v2', availableVariants: ['v2', 'standard'], enabledFlags: { v2Tools: true, agenticRoutines: false } } } }],
+      });
+
+      const deps = fakePipelineDeps(); // All phases pass
+
+      const report = validateRegistry(snapshot, deps);
+
+      expect(report.isValid).toBe(true);
+      expect(report.validResolvedCount).toBe(1);
+    });
   });
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -362,7 +420,7 @@ describe('Phase 5: God-Tier Validation Regression Tests', () => {
   // ───────────────────────────────────────────────────────────────────────────
 
   describe('Serialization Round-Trip', () => {
-    it('11. Normalization produces undefined fields → round_trip_failed', () => {
+    it('11. Normalization produces undefined fields → JSON.stringify silently drops them (documents behavior)', () => {
       const workflow = wf(def('test-workflow'), createBundledSource());
 
       // Mock normalizeToExecutable to return a snapshot where JSON.stringify drops fields

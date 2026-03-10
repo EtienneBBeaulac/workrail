@@ -19,6 +19,7 @@ import { IFeatureFlagProvider, EnvironmentFeatureFlagProvider } from '../../conf
 import { validateWorkflowIdForSave } from '../../domain/workflow-id-policy';
 import { assertWithinBase as assertWithinBaseSafe } from '../../utils/storage-security';
 import { selectVariant, type VariantCandidate } from './workflow-resolution';
+import { findWorkflowJsonFiles } from '../../application/use-cases/raw-workflow-file-scanner';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -107,38 +108,11 @@ export class FileWorkflowStorage implements IWorkflowStorage {
   }
 
   /**
-   * Recursively find all JSON files in a directory
-   */
-  private async findJsonFiles(dir: string): Promise<string[]> {
-    const files: string[] = [];
-    
-    async function scan(currentDir: string) {
-      const entries = await fs.readdir(currentDir, { withFileTypes: true });
-      
-      for (const entry of entries) {
-        const fullPath = path.join(currentDir, entry.name);
-        
-        if (entry.isDirectory()) {
-          // Skip examples directory
-          if (entry.name === 'examples') {
-            continue;
-          }
-          await scan(fullPath);
-        } else if (entry.isFile() && entry.name.endsWith('.json')) {
-          files.push(fullPath);
-        }
-      }
-    }
-    
-    await scan(dir);
-    return files;
-  }
-
-  /**
-   * Build or refresh the workflow index by scanning the directory recursively
+   * Build or refresh the workflow index by scanning the directory recursively.
+   * Uses the shared findWorkflowJsonFiles() — same function the raw file scanner uses.
    */
   private async buildWorkflowIndex(): Promise<Map<string, WorkflowIndexEntry>> {
-    const allJsonFiles = await this.findJsonFiles(this.baseDirReal);
+    const allJsonFiles = await findWorkflowJsonFiles(this.baseDirReal);
     
     // Filter files relative to baseDir for processing
     const relativeFiles = allJsonFiles.map(f => path.relative(this.baseDirReal, f));
