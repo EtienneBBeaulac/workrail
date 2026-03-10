@@ -1,7 +1,7 @@
 import type { Result } from 'neverthrow';
 import { err, ok } from 'neverthrow';
 import type { Workflow } from '../../../types/workflow.js';
-import { getStepById } from '../../../types/workflow.js';
+import { getStepById, isLoopStepDefinition } from '../../../types/workflow.js';
 import type { LoadedSessionTruthV2 } from '../../ports/session-event-log-store.port.js';
 import type { LoopPathFrameV1 } from '../schemas/execution-snapshot/index.js';
 import type { NodeId, RunId } from '../ids/index.js';
@@ -203,35 +203,90 @@ function applyPromptBudget(combinedPrompt: string): string {
 }
 
 /**
+ * Resolve the maxIterations for the parent loop that contains a given body step.
+ * Returns undefined if the step is not inside a loop or the loop config is missing.
+ */
+function resolveParentLoopMaxIterations(
+  workflow: Workflow,
+  stepId: string,
+): number | undefined {
+  for (const step of workflow.definition.steps) {
+    if (isLoopStepDefinition(step) && Array.isArray(step.body)) {
+      for (const bodyStep of step.body) {
+        if (bodyStep.id === stepId) {
+          return step.loop.maxIterations;
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Build scope-narrowing instruction based on iteration progress.
+ * Guides the agent to do appropriately focused work on each pass.
+ */
+function buildScopeInstruction(iteration: number, maxIterations: number | undefined): string {
+  if (iteration <= 1) return 'Focus on what the first pass missed — do not re-litigate settled findings.';
+  if (maxIterations !== undefined && iteration + 1 >= maxIterations) return 'FINAL PASS — verify prior amendments landed correctly. Only flag regressions or clearly missed issues.';
+  return 'Diminishing returns expected. Focus on gaps and regressions, not fresh territory.';
+}
+
+/**
  * Build a loop context banner injected before the step's authored prompt.
- * Helps agents understand they are intentionally re-entering a loop body step,
- * not looping due to an error.
+ * Helps agents understand they are re-entering a loop body step with new context.
  *
- * Only injected for non-exit body steps (exit steps have explicit instructions
- * in their own prompt and the output-contract requirements section).
+ * Design principles:
+ * - Never show loopId (agents copy it into artifacts and cause mismatches).
+ * - First iteration: soft orientation with termination bound.
+ * - Subsequent iterations: progress indicator, scope narrowing, differentiated framing.
+ * - Exit steps: no banner (they have output-contract requirements instead).
  */
 function buildLoopContextBanner(args: {
   readonly loopPath: readonly LoopPathFrameV1[];
   readonly isExitStep: boolean;
+  readonly maxIterations: number | undefined;
 }): string {
   if (args.loopPath.length === 0 || args.isExitStep) return '';
 
   const current = args.loopPath[args.loopPath.length - 1]!;
-  const iterationLabel = `Iteration ${current.iteration + 1}`;
+  const iterationNumber = current.iteration + 1;
+  const maxIter = args.maxIterations;
 
-  return [
-    `---`,
-    `**LOOP: ${current.loopId} | ${iterationLabel}** — This step repeats intentionally; the workflow is not stuck or broken.`,
-    ``,
-    `Choose the instruction that matches your current task:`,
-    `- **Drafting / updating**: incorporate amendments discovered in previous iterations before writing.`,
-    `- **Auditing / reviewing**: look for what previous passes *missed*, not what they already caught.`,
-    `- **Applying changes**: follow prior findings precisely; don't re-debate settled decisions.`,
-    ``,
-    `Prior iteration work is visible in the **Ancestry Recap** section below (if present).`,
-    `---`,
-    ``,
-  ].join('\n');
+  // First iteration: soft orientation with termination bound
+  if (current.iteration === 0) {
+    const bound = maxIter !== undefined ? ` (up to ${maxIter} passes)` : '';
+    return [
+      `> This step is part of an iterative loop${bound}. After your work, a decision step determines whether another pass is needed.`,
+      ``,
+    ].join('\n');
+  }
+
+  // Subsequent iterations: progress + scope + differentiated framing
+  const lines: string[] = ['---'];
+
+  // Progress indicator
+  if (maxIter !== undefined) {
+    const filled = Math.min(iterationNumber, maxIter);
+    const empty = Math.max(maxIter - filled, 0);
+    const bar = '\u2588'.repeat(filled) + '\u2591'.repeat(empty);
+    lines.push(`**Progress: [${bar}] Pass ${iterationNumber} of ${maxIter}**`);
+  } else {
+    lines.push(`**Pass ${iterationNumber}**`);
+  }
+
+  lines.push('');
+
+  // Scope narrowing
+  lines.push(`**Scope**: ${buildScopeInstruction(current.iteration, maxIter)}`);
+  lines.push('');
+
+  // Task orientation
+  lines.push('Your previous work is in the **Ancestry Recap** below. Build on it — do not repeat work already done.');
+  lines.push('---');
+  lines.push('');
+
+  return lines.join('\n');
 }
 
 /**
@@ -250,7 +305,8 @@ function formatOutputContractRequirements(
         `Artifact contract: ${LOOP_CONTROL_CONTRACT_REF}`,
         `Provide an artifact with kind: "wr.loop_control"`,
         `Required field: decision ("continue" | "stop")`,
-        `Optional field: loopId — omit unless targeting a specific named loop`,
+        `Do NOT include loopId — the engine matches automatically`,
+        `Canonical format:\n\`\`\`json\n{ "artifacts": [{ "kind": "wr.loop_control", "decision": "stop" }] }\n\`\`\``,
       ];
     default:
       return [
@@ -336,7 +392,8 @@ export function renderPendingPrompt(args: {
 
   // Loop context banner — prepended before the authored prompt so the agent
   // understands it is intentionally re-entering a loop body step.
-  const loopBanner = buildLoopContextBanner({ loopPath: args.loopPath, isExitStep });
+  const maxIterations = resolveParentLoopMaxIterations(args.workflow, args.stepId);
+  const loopBanner = buildLoopContextBanner({ loopPath: args.loopPath, isExitStep, maxIterations });
 
   // Extract validation requirements and append to prompt if present
   const validationCriteria = step.validationCriteria;

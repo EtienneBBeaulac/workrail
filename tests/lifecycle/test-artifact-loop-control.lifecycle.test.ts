@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { testArtifactLoopControlFixture } from './fixtures/test-artifact-loop-control.fixture.js';
+import { testMismatchedLoopIdFixture } from './fixtures/test-mismatched-loopid.fixture.js';
 import { executeWorkflowLifecycle, type LifecycleHarnessDeps } from './lifecycle-harness.js';
 import { WorkflowCompiler } from '../../src/application/services/workflow-compiler.js';
 import { WorkflowInterpreter } from '../../src/application/services/workflow-interpreter.js';
@@ -29,6 +30,30 @@ describe('Lifecycle: test-artifact-loop-control', () => {
       'do-work',
       'decide-continue',
       'complete',
+    ]);
+  });
+});
+
+describe('Lifecycle: mismatched loopId regression (infinite loop fix)', () => {
+  const deps: LifecycleHarnessDeps = {
+    compiler: new WorkflowCompiler(),
+    interpreter: new WorkflowInterpreter(),
+  };
+
+  it('agent stop decision is honored even when artifact loopId differs from conditionSource loopId', () => {
+    // Regression test: reproduces the exact bug that caused infinite loops.
+    // The agent copies the wrong ID (step ID instead of loop ID) into the artifact.
+    // The engine must still honor the stop decision because matching is loopId-agnostic.
+    const result = executeWorkflowLifecycle(testMismatchedLoopIdFixture, deps);
+    if (result.kind !== 'success') {
+      throw new Error(`Expected success, got ${result.kind}: ${JSON.stringify(result)}`);
+    }
+    // Loop should execute once and exit — NOT infinite loop
+    expect(result.stepsVisited).toEqual([
+      'init',
+      'do-work',
+      'exit-decision',
+      'done',
     ]);
   });
 });

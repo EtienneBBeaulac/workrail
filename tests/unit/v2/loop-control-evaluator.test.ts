@@ -18,7 +18,7 @@ describe('evaluateLoopControlFromArtifacts', () => {
         { kind: 'wr.loop_control', loopId: 'test-loop', decision: 'continue' },
       ];
 
-      const result = evaluateLoopControlFromArtifacts(artifacts, 'test-loop');
+      const result = evaluateLoopControlFromArtifacts(artifacts);
       expect(result.kind).toBe('found');
       if (result.kind === 'found') {
         expect(result.decision).toBe('continue');
@@ -31,7 +31,7 @@ describe('evaluateLoopControlFromArtifacts', () => {
         { kind: 'wr.loop_control', decision: 'stop' },
       ];
 
-      const result = evaluateLoopControlFromArtifacts(artifacts, 'plan-iteration');
+      const result = evaluateLoopControlFromArtifacts(artifacts);
       expect(result.kind).toBe('found');
       if (result.kind === 'found') {
         expect(result.decision).toBe('stop');
@@ -44,21 +44,21 @@ describe('evaluateLoopControlFromArtifacts', () => {
         { kind: 'wr.loop_control', loopId: 'test-loop', decision: 'stop' },
       ];
 
-      const result = evaluateLoopControlFromArtifacts(artifacts, 'test-loop');
+      const result = evaluateLoopControlFromArtifacts(artifacts);
       expect(result.kind).toBe('found');
       if (result.kind === 'found') {
         expect(result.decision).toBe('stop');
       }
     });
 
-    it('finds correct artifact among multiple', () => {
+    it('finds most recent artifact among multiple', () => {
       const artifacts = [
         { kind: 'other_artifact', data: 'value' },
         { kind: 'wr.loop_control', loopId: 'loop-a', decision: 'continue' },
         { kind: 'wr.loop_control', loopId: 'loop-b', decision: 'stop' },
       ];
 
-      const result = evaluateLoopControlFromArtifacts(artifacts, 'loop-b');
+      const result = evaluateLoopControlFromArtifacts(artifacts);
       expect(result.kind).toBe('found');
       if (result.kind === 'found') {
         expect(result.decision).toBe('stop');
@@ -76,7 +76,7 @@ describe('evaluateLoopControlFromArtifacts', () => {
         },
       ];
 
-      const result = evaluateLoopControlFromArtifacts(artifacts, 'test-loop');
+      const result = evaluateLoopControlFromArtifacts(artifacts);
       expect(result.kind).toBe('found');
       if (result.kind === 'found') {
         expect(result.artifact.metadata?.reason).toBe('Issues found');
@@ -86,23 +86,24 @@ describe('evaluateLoopControlFromArtifacts', () => {
 
   describe('not found', () => {
     it('returns not_found for empty artifacts', () => {
-      const result = evaluateLoopControlFromArtifacts([], 'test-loop');
+      const result = evaluateLoopControlFromArtifacts([]);
       expect(result.kind).toBe('not_found');
       if (result.kind === 'not_found') {
         expect(result.reason).toContain('No artifacts provided');
       }
     });
 
-    it('returns not_found when loopId not present', () => {
+    it('finds artifact even when agent provides a different loopId than expected', () => {
       const artifacts = [
         { kind: 'wr.loop_control', loopId: 'other-loop', decision: 'continue' },
       ];
 
-      const result = evaluateLoopControlFromArtifacts(artifacts, 'test-loop');
-      expect(result.kind).toBe('not_found');
-      if (result.kind === 'not_found') {
-        expect(result.reason).toContain('No loop control artifact found');
-        expect(result.reason).toContain('test-loop');
+      // The function is loopId-agnostic — it finds any valid artifact
+      const result = evaluateLoopControlFromArtifacts(artifacts);
+      expect(result.kind).toBe('found');
+      if (result.kind === 'found') {
+        expect(result.decision).toBe('continue');
+        expect(result.artifact.loopId).toBe('other-loop');
       }
     });
 
@@ -112,25 +113,62 @@ describe('evaluateLoopControlFromArtifacts', () => {
         { kind: 'another_artifact', data: 'value2' },
       ];
 
-      const result = evaluateLoopControlFromArtifacts(artifacts, 'test-loop');
+      const result = evaluateLoopControlFromArtifacts(artifacts);
       expect(result.kind).toBe('not_found');
     });
   });
 
-  describe('edge cases', () => {
-    it('handles artifacts with invalid schema (returns not_found)', () => {
+  describe('invalid (kind matches but schema fails)', () => {
+    it('returns invalid for artifact with bad loopId format', () => {
       const artifacts = [
-        { kind: 'wr.loop_control', loopId: 'INVALID-CAPS', decision: 'continue' }, // Invalid loopId
+        { kind: 'wr.loop_control', loopId: 'INVALID-CAPS', decision: 'continue' },
       ];
 
-      const result = evaluateLoopControlFromArtifacts(artifacts, 'INVALID-CAPS');
-      expect(result.kind).toBe('not_found');
+      const result = evaluateLoopControlFromArtifacts(artifacts);
+      expect(result.kind).toBe('invalid');
+      if (result.kind === 'invalid') {
+        expect(result.reason).toContain('schema validation');
+      }
     });
 
+    it('returns invalid for artifact with missing decision field', () => {
+      const artifacts = [
+        { kind: 'wr.loop_control', loopId: 'test-loop' }, // no decision
+      ];
+
+      const result = evaluateLoopControlFromArtifacts(artifacts);
+      expect(result.kind).toBe('invalid');
+    });
+
+    it('returns invalid for artifact with extra fields (strict mode)', () => {
+      const artifacts = [
+        { kind: 'wr.loop_control', decision: 'stop', extraField: 'unexpected' },
+      ];
+
+      const result = evaluateLoopControlFromArtifacts(artifacts);
+      expect(result.kind).toBe('invalid');
+    });
+
+    it('returns found when valid artifact exists alongside invalid one', () => {
+      // findLoopControlArtifact reverse-searches, so the valid one (last) is found
+      const artifacts = [
+        { kind: 'wr.loop_control', loopId: 'INVALID-CAPS', decision: 'continue' }, // invalid schema
+        { kind: 'wr.loop_control', decision: 'stop' }, // valid (no loopId)
+      ];
+
+      const result = evaluateLoopControlFromArtifacts(artifacts);
+      expect(result.kind).toBe('found');
+      if (result.kind === 'found') {
+        expect(result.decision).toBe('stop');
+      }
+    });
+  });
+
+  describe('edge cases', () => {
     it('handles null in artifacts array', () => {
       const artifacts = [null, { kind: 'wr.loop_control', loopId: 'test-loop', decision: 'continue' }];
 
-      const result = evaluateLoopControlFromArtifacts(artifacts as any, 'test-loop');
+      const result = evaluateLoopControlFromArtifacts(artifacts as any);
       expect(result.kind).toBe('found');
     });
   });

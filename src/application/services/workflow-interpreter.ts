@@ -17,6 +17,7 @@ import {
   traceEvaluatedCondition,
   traceExitedLoop,
   traceSelectedNextStep,
+  traceArtifactMatchResult,
 } from '../../v2/durable-core/domain/decision-trace-builder';
 
 export interface NextStep {
@@ -257,7 +258,7 @@ export class WorkflowInterpreter {
             return ok(shouldEnter);
           }
           case 'while': {
-            const res = this.evaluateWhileUntilCondition(loopCompiled, iteration, context, artifacts, frame, false);
+            const res = this.evaluateWhileUntilCondition(loopCompiled, iteration, context, artifacts, frame, false, trace);
             if (res.isOk()) {
               const source = loopCompiled.conditionSource?.kind === 'artifact_contract' ? 'artifact'
                 : loopCompiled.conditionSource?.kind === 'context_variable' ? 'context'
@@ -268,7 +269,7 @@ export class WorkflowInterpreter {
             return res;
           }
           case 'until': {
-            const res = this.evaluateWhileUntilCondition(loopCompiled, iteration, context, artifacts, frame, true);
+            const res = this.evaluateWhileUntilCondition(loopCompiled, iteration, context, artifacts, frame, true, trace);
             if (res.isOk()) {
               const source = loopCompiled.conditionSource?.kind === 'artifact_contract' ? 'artifact'
                 : loopCompiled.conditionSource?.kind === 'context_variable' ? 'context'
@@ -386,7 +387,8 @@ export class WorkflowInterpreter {
     context: Record<string, unknown>,
     artifacts: readonly unknown[],
     frame: LoopFrame,
-    invertForUntil: boolean
+    invertForUntil: boolean,
+    traceEntries: DecisionTraceEntry[] = [],
   ): Result<boolean, LoopKernelError> {
     const source: LoopConditionSource | undefined = loopCompiled.conditionSource;
 
@@ -411,15 +413,28 @@ export class WorkflowInterpreter {
     switch (source.kind) {
       case 'artifact_contract': {
         // ONLY artifacts. No context fallback.
-        const result = evaluateLoopControlFromArtifacts(artifacts, source.loopId);
-        if (result.kind === 'found') {
-          return ok(result.decision === 'continue');
+        const result = evaluateLoopControlFromArtifacts(artifacts);
+
+        // Trace every evaluation for observability (regardless of outcome)
+        traceEntries.push(traceArtifactMatchResult(source.loopId, iteration, result));
+
+        // Exhaustive dispatch on evaluation result
+        switch (result.kind) {
+          case 'found':
+            return ok(result.decision === 'continue');
+          case 'not_found':
+          case 'invalid':
+            // No valid artifact yet — default to continue (enter the loop).
+            // The loop_control artifact is produced inside the body (exit-decision step);
+            // it cannot exist before the first iteration runs. Only an explicit 'stop'
+            // decision exits the loop; absence of the artifact is not a stop signal.
+            return ok(true);
+          default: {
+            // Exhaustiveness guard — compile error if a new variant is added
+            const _exhaustive: never = result;
+            return ok(true);
+          }
         }
-        // not_found: no artifact yet — default to continue (enter the loop).
-        // The loop_control artifact is produced inside the body (exit-decision step);
-        // it cannot exist before the first iteration runs. Only an explicit 'stop'
-        // decision exits the loop; absence of the artifact is not a stop signal.
-        return ok(true);
       }
       case 'context_variable': {
         // ONLY context. No artifact awareness.

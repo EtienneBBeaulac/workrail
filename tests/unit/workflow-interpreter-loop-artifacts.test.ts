@@ -237,8 +237,9 @@ describe('Interpreter: artifact_contract loops', () => {
     }
   });
 
-  it('enters loop when artifact loopId does not match (no decision for this loop yet)', () => {
-    // Artifact for a different loop doesn't count — treat as no artifact for this loop.
+  it('enters loop when artifact with different loopId says continue (loopId-agnostic matching)', () => {
+    // loopId-agnostic: any valid wr.loop_control artifact is matched regardless of loopId.
+    // This artifact says 'continue' so the loop enters.
     const artifacts = [
       { kind: 'wr.loop_control', loopId: 'other-loop', decision: 'continue' },
     ];
@@ -254,6 +255,60 @@ describe('Interpreter: artifact_contract loops', () => {
     const result = interpreter.next(compiled, baseState, { continuePlanning: true }, []);
     expect(result.isOk()).toBe(true);
     if (result.isOk()) {
+      expect(result.value.next?.stepInstanceId.stepId).toBe('body-step');
+    }
+  });
+
+  it('exits loop when artifact with WRONG loopId says stop (regression: infinite loop fix)', () => {
+    // THE BUG: agent copied step ID instead of loop ID into the artifact.
+    // conditionSource.loopId is 'loop-step', but agent wrote 'wrong-loop-id'.
+    // With loopId-agnostic matching, the engine still finds and honors the stop.
+    const artifacts = [
+      { kind: 'wr.loop_control', loopId: 'wrong-loop-id', decision: 'stop' },
+    ];
+    const result = interpreter.next(compiled, baseState, {}, artifacts);
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.isComplete).toBe(true);
+    }
+  });
+
+  it('exits loop when artifact has no loopId at all and says stop', () => {
+    // Agent omitted loopId entirely (following the "do NOT include loopId" guidance).
+    const artifacts = [
+      { kind: 'wr.loop_control', decision: 'stop' },
+    ];
+    const result = interpreter.next(compiled, baseState, {}, artifacts);
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.isComplete).toBe(true);
+    }
+  });
+
+  it('last artifact wins when multiple wr.loop_control artifacts present', () => {
+    // Agent produced two artifacts in one step — the most recent (last) one wins.
+    const artifacts = [
+      { kind: 'wr.loop_control', decision: 'continue' },
+      { kind: 'wr.loop_control', decision: 'stop' },
+    ];
+    const result = interpreter.next(compiled, baseState, {}, artifacts);
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      // Last artifact says 'stop', loop should exit
+      expect(result.value.isComplete).toBe(true);
+    }
+  });
+
+  it('earlier stop is overridden by later continue', () => {
+    // Inverse case: earlier artifact said stop, later one says continue.
+    const artifacts = [
+      { kind: 'wr.loop_control', decision: 'stop' },
+      { kind: 'wr.loop_control', decision: 'continue' },
+    ];
+    const result = interpreter.next(compiled, baseState, {}, artifacts);
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      // Last artifact says 'continue', loop should enter
       expect(result.value.next?.stepInstanceId.stepId).toBe('body-step');
     }
   });
@@ -292,6 +347,55 @@ describe('Interpreter: decision trace output', () => {
       const kinds = trace.map((t) => t.kind);
       expect(kinds).toContain('evaluated_condition');
       expect(kinds).toContain('exited_loop');
+    }
+  });
+
+  it('trace includes artifact match=found for mismatched loopId stop (regression observability)', () => {
+    const compiled = compileWorkflow(buildArtifactContractWorkflow());
+    // Agent wrote wrong loopId — engine still finds it (loopId-agnostic)
+    const artifacts = [
+      { kind: 'wr.loop_control', loopId: 'completely-wrong-id', decision: 'stop' },
+    ];
+    const result = interpreter.next(compiled, baseState, {}, artifacts);
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      const { trace } = result.value;
+      // Should have artifact match trace entry showing 'found' even with wrong loopId
+      const matchEntry = trace.find(t => t.summary.includes('artifact match=found'));
+      expect(matchEntry).toBeDefined();
+      expect(matchEntry!.summary).toContain('decision="stop"');
+      // And should have exited the loop
+      const kinds = trace.map(t => t.kind);
+      expect(kinds).toContain('exited_loop');
+    }
+  });
+
+  it('trace includes artifact match=not_found when no artifact provided', () => {
+    const compiled = compileWorkflow(buildArtifactContractWorkflow());
+    const result = interpreter.next(compiled, baseState, {}, []);
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      const { trace } = result.value;
+      const matchEntry = trace.find(t => t.summary.includes('artifact match=not_found'));
+      expect(matchEntry).toBeDefined();
+    }
+  });
+
+  it('trace includes artifact match=invalid when schema-invalid artifact provided, loop defaults to continue', () => {
+    const compiled = compileWorkflow(buildArtifactContractWorkflow());
+    // Agent produced an artifact with kind=wr.loop_control but invalid schema (uppercase loopId)
+    const artifacts = [
+      { kind: 'wr.loop_control', loopId: 'INVALID-CAPS', decision: 'stop' },
+    ];
+    const result = interpreter.next(compiled, baseState, {}, artifacts);
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      const { trace } = result.value;
+      const matchEntry = trace.find(t => t.summary.includes('artifact match=invalid'));
+      expect(matchEntry).toBeDefined();
+      expect(matchEntry!.summary).toContain('schema validation');
+      // Loop defaults to continue (enters body) because the artifact is invalid
+      expect(result.value.next?.stepInstanceId.stepId).toBe('body-step');
     }
   });
 
@@ -362,7 +466,7 @@ describe('findLoopControlArtifact: latest artifact wins', () => {
       { kind: 'wr.loop_control', loopId: 'loop-step', decision: 'continue' },
       { kind: 'wr.loop_control', loopId: 'loop-step', decision: 'stop' },
     ];
-    const found = findLoopControlArtifact(artifacts, 'loop-step');
+    const found = findLoopControlArtifact(artifacts);
     expect(found).not.toBeNull();
     expect(found?.decision).toBe('stop');
   });
@@ -373,7 +477,7 @@ describe('findLoopControlArtifact: latest artifact wins', () => {
       { kind: 'wr.loop_control', loopId: 'loop-step', decision: 'stop' },
       { kind: 'wr.loop_control', loopId: 'loop-step', decision: 'continue' },
     ];
-    const found = findLoopControlArtifact(artifacts, 'loop-step');
+    const found = findLoopControlArtifact(artifacts);
     expect(found).not.toBeNull();
     expect(found?.decision).toBe('continue');
   });

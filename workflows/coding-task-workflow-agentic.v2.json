@@ -139,7 +139,7 @@
         {
           "id": "phase-4c-loop-decision",
           "title": "Loop Exit Decision",
-          "prompt": "Provide a loop control artifact.\n\nDecision rules:\n- if `planFindings` is non-empty → continue\n- if `planFindings` is empty → stop, but enumerate what was checked to justify the clean pass\n- if max iterations reached → stop and document remaining concerns\n\nOutput exactly:\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"loopId\": \"plan_audit_loop\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
+          "prompt": "Provide a loop control artifact.\n\nDecision rules:\n- if `planFindings` is non-empty → continue\n- if `planFindings` is empty → stop, but enumerate what was checked to justify the clean pass\n- if max iterations reached → stop and document remaining concerns\n\nOutput exactly:\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
           "requireConfirmation": true,
           "outputContract": {
             "contractRef": "wr.contracts.loop_control"
