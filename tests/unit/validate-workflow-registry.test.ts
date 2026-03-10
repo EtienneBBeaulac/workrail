@@ -1023,13 +1023,22 @@ describe('Phase 5: God-Tier Validation Regression Tests', () => {
   // ───────────────────────────────────────────────────────────────────────────
 
   describe('Fixture-vs-File Drift Detection', () => {
-    it.skip('36. Lifecycle fixture definitions match bundled files after normalization', () => {
-      // Phase 6 provides the lifecycle fixtures.
-      // This test activates when lifecycle harness is implemented.
-      // 
-      // Design: For each fixture in tests/lifecycle/fixtures/*.ts, load the
-      // corresponding bundled workflow file, normalize both, and assert the
-      // normalized definitions are structurally equal (JSON.stringify comparison).
+    it('36. Lifecycle fixture definitions match bundled files', async () => {
+      const { testSessionPersistenceFixture } = await import('../lifecycle/fixtures/test-session-persistence.fixture.js');
+      const { workflowDiagnoseEnvironmentFixture } = await import('../lifecycle/fixtures/workflow-diagnose-environment.fixture.js');
+      const { testArtifactLoopControlFixture } = await import('../lifecycle/fixtures/test-artifact-loop-control.fixture.js');
+
+      for (const fixture of [
+        testSessionPersistenceFixture,
+        workflowDiagnoseEnvironmentFixture,
+        testArtifactLoopControlFixture,
+      ]) {
+        const filePath = path.join(__dirname, '../../workflows', `${fixture.workflowId}.json`);
+        const fileContent = JSON.parse(await fs.readFile(filePath, 'utf-8'));
+
+        // Deep structural comparison — ignores key ordering and formatting differences
+        expect(fixture.definition).toEqual(fileContent);
+      }
     });
   });
 });
