@@ -9,12 +9,17 @@ describe('MCP Server Core Functionality', () => {
   const entryPoint = path.join(__dirname, '../../src/mcp-server.ts');
 
   describe('Module Structure', () => {
-    it('should have entry point that delegates to mcp/server.ts', () => {
+    it('should have entry point that resolves transport mode and starts appropriate server', () => {
       const content = fs.readFileSync(entryPoint, 'utf8');
       
-      expect(content).toContain("import { startServer } from './mcp/server.js'");
-      expect(content).toContain('startServer()');
+      // New structure: imports transport entries and mode resolver
+      expect(content).toContain("import { resolveTransportMode } from './mcp/transports/transport-mode.js'");
+      expect(content).toContain("import { startStdioServer } from './mcp/transports/stdio-entry.js'");
+      expect(content).toContain("import { startHttpServer } from './mcp/transports/http-entry.js'");
       expect(content).toContain('process.exit(1)');
+      
+      // Backwards compat export
+      expect(content).toContain("export { startServer } from './mcp/server.js'");
     });
 
     it('should have all required module files', () => {

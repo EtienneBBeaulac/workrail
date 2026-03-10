@@ -178,14 +178,38 @@ function toMcpTool<TInput extends z.ZodType>(tool: ToolDefinition<TInput>): Tool
 
 
 // -----------------------------------------------------------------------------
-// Server Start
+// Server Composition (Transport-Agnostic)
 // -----------------------------------------------------------------------------
 
 /**
- * Start the MCP server.
- * This is the main entry point.
+ * Composed MCP server — ready for transport connection.
+ * 
+ * Contains the MCP Server instance with all tools and handlers registered,
+ * but no transport connected. Pure composition with no transport-specific
+ * side effects (no stdin watchers, no roots fetching).
  */
-export async function startServer(): Promise<void> {
+export interface ComposedServer {
+  readonly server: import('@modelcontextprotocol/sdk/server/index.js').Server;
+  readonly ctx: ToolContext;
+  readonly rootsManager: WorkspaceRootsManager;
+  readonly tools: readonly Tool[];
+  readonly handlers: Record<string, WrappedToolHandler>;
+}
+
+/**
+ * Compose the MCP server from DI container.
+ * 
+ * Pure composition function:
+ * - Bootstraps DI and creates tool context
+ * - Builds tools and handlers from workflow edition
+ * - Registers request handlers on the MCP Server
+ * - Mounts console routes if available
+ * - Returns composed server ready for transport connection
+ * 
+ * No transport-specific behavior (stdin watchers, roots fetching, etc).
+ * Those belong in the transport-specific entry points.
+ */
+export async function composeServer(): Promise<ComposedServer> {
   // Bootstrap DI container
   await bootstrap({ runtimeMode: { kind: 'production' } });
 
@@ -313,9 +337,31 @@ export async function startServer(): Promise<void> {
     return handler(args ?? {}, requestCtx);
   });
 
-  // Handle root change notifications from the client.
-  // Re-fetches the root list via roots/list after each notification.
-  // Graceful: some clients don't support roots/list; failures are logged and ignored.
+  return { server, ctx, rootsManager, tools, handlers };
+}
+
+// -----------------------------------------------------------------------------
+// Server Start (stdio transport — to be refactored in next slice)
+// -----------------------------------------------------------------------------
+
+/**
+ * Start the MCP server over stdio transport.
+ * This is the main entry point for IDE/Firebender usage.
+ * 
+ * TODO: This function will be moved to src/mcp/transports/stdio-entry.ts
+ * after the http-entry is added (keeping both entry points together).
+ */
+export async function startServer(): Promise<void> {
+  const { server, ctx, rootsManager } = await composeServer();
+
+  const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
+  const {
+    RootsListChangedNotificationSchema,
+  } = await import('@modelcontextprotocol/sdk/types.js');
+
+  // -------------------------------------------------------------------------
+  // stdio-specific: Handle root change notifications from the client
+  // -------------------------------------------------------------------------
   server.setNotificationHandler(RootsListChangedNotificationSchema, async () => {
     try {
       const result = await server.listRoots();
@@ -326,12 +372,15 @@ export async function startServer(): Promise<void> {
     }
   });
 
-  // Connect transport
+  // -------------------------------------------------------------------------
+  // stdio-specific: Connect transport
+  // -------------------------------------------------------------------------
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
-  // Fetch initial workspace roots from the client.
-  // Graceful: clients that don't support roots/list will cause this to fail or return nothing.
+  // -------------------------------------------------------------------------
+  // stdio-specific: Fetch initial workspace roots from the IDE client
+  // -------------------------------------------------------------------------
   try {
     const result = await server.listRoots();
     rootsManager.updateRootUris(result.roots.map((r: { uri: string }) => r.uri));
@@ -342,27 +391,28 @@ export async function startServer(): Promise<void> {
 
   console.error('WorkRail MCP Server running on stdio');
 
-  // Composition-root shutdown hook:
-  // Infrastructure can request shutdown via ShutdownEvents, but only the entrypoint terminates the process.
+  // -------------------------------------------------------------------------
+  // Shutdown hooks (shared infrastructure, but wired differently per transport)
+  // -------------------------------------------------------------------------
   const shutdownEvents = container.resolve<ShutdownEvents>(DI.Runtime.ShutdownEvents);
   const processSignals = container.resolve<ProcessSignals>(DI.Runtime.ProcessSignals);
   const terminator = container.resolve<ProcessTerminator>(DI.Runtime.ProcessTerminator);
 
-  // Ensure we can shut down even when session tools are disabled (no HttpServer to emit events).
+  // Signal handlers: needed for both stdio and HTTP modes
   processSignals.on('SIGINT', () => shutdownEvents.emit({ kind: 'shutdown_requested', signal: 'SIGINT' }));
   processSignals.on('SIGTERM', () => shutdownEvents.emit({ kind: 'shutdown_requested', signal: 'SIGTERM' }));
   processSignals.on('SIGHUP', () => shutdownEvents.emit({ kind: 'shutdown_requested', signal: 'SIGHUP' }));
 
-  // Shut down when the MCP client disconnects (e.g. IDE reconfigure).
+  // stdio-specific: Shut down when stdin closes (IDE disconnect).
   // The MCP SDK's StdioServerTransport does not listen for stdin 'end',
   // so server.onclose never fires on disconnect. Without this, the HTTP
-  // server keeps the process alive after stdin EOF, blocking the
-  // client-side close and preventing server restart.
+  // server keeps the process alive after stdin EOF, blocking client restart.
   process.stdin.on('end', () => {
     console.error('[MCP] stdin closed, initiating shutdown');
     shutdownEvents.emit({ kind: 'shutdown_requested', signal: 'SIGHUP' });
   });
 
+  // Shutdown handler (same for both modes)
   let shutdownStarted = false;
   shutdownEvents.onShutdown((event: ShutdownEvent) => {
     if (shutdownStarted) return;
