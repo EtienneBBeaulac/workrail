@@ -131,35 +131,31 @@ export function parseLoopControlArtifact(artifact: unknown): LoopControlArtifact
 }
 
 /**
- * Find the most recent loop control artifact for a specific loopId.
+ * Find the most recent loop control artifact.
  *
  * Iterates in reverse so the last (newest) matching artifact wins.
  * Artifacts are collected in chronological order by the engine, so the last
  * one is the most recent exit-decision — the only one that matters for
  * deciding whether to continue or stop.
  *
- * Matching rules (agent-friendly):
- * - If the artifact has a loopId: it must equal `expectedLoopId` (explicit routing).
- * - If the artifact omits loopId: it matches any active loop — nested loops are not
- *   supported, so there is always at most one active loop in scope.
+ * Matching rules:
+ * - Any valid wr.loop_control artifact matches regardless of loopId value.
+ * - Nested loops are not supported, so there is at most one active loop.
+ * - The agent-supplied loopId (if present) is preserved in the returned artifact
+ *   for tracing but does NOT affect matching. This prevents infinite loops caused
+ *   by agents copying the wrong ID from prompts/banners.
  *
  * @param artifacts - Array of unknown artifacts (chronological order)
- * @param expectedLoopId - The loop ID derived from the compiled conditionSource
- * @returns The most recent matching loop control artifact or null
+ * @returns The most recent valid loop control artifact or null
  */
 export function findLoopControlArtifact(
   artifacts: readonly unknown[],
-  expectedLoopId: string
 ): LoopControlArtifactV1 | null {
   for (let i = artifacts.length - 1; i >= 0; i--) {
     const artifact = artifacts[i];
     if (!isLoopControlArtifact(artifact)) continue;
     const parsed = parseLoopControlArtifact(artifact);
-    if (!parsed) continue;
-    // Match when: loopId absent (anonymous — matches the active loop) or exact match.
-    if (parsed.loopId === undefined || parsed.loopId === expectedLoopId) {
-      return parsed;
-    }
+    if (parsed) return parsed;
   }
   return null;
 }

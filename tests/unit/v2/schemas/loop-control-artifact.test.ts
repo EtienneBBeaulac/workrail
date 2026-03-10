@@ -299,6 +299,10 @@ describe('parseLoopControlArtifact', () => {
 });
 
 describe('findLoopControlArtifact', () => {
+  // After the loopId-agnostic matching fix, findLoopControlArtifact returns the
+  // most recent valid wr.loop_control artifact regardless of loopId value.
+  // This prevents infinite loops caused by agents copying wrong IDs from prompts.
+
   const artifacts = [
     { kind: 'other_artifact', data: 'value' },
     { kind: 'wr.loop_control', loopId: 'loop-a', decision: 'continue' },
@@ -306,71 +310,72 @@ describe('findLoopControlArtifact', () => {
     { kind: 'another_artifact', data: 'value2' },
   ];
 
-  it('finds artifact by loopId', () => {
-    const result = findLoopControlArtifact(artifacts, 'loop-a');
+  it('returns the most recent valid artifact regardless of loopId', () => {
+    const result = findLoopControlArtifact(artifacts);
     expect(result).not.toBeNull();
-    expect(result?.loopId).toBe('loop-a');
-    expect(result?.decision).toBe('continue');
-  });
-
-  it('finds correct artifact when multiple exist', () => {
-    const result = findLoopControlArtifact(artifacts, 'loop-b');
-    expect(result).not.toBeNull();
+    // loop-b is the most recent wr.loop_control artifact (index 2, reverse search)
     expect(result?.loopId).toBe('loop-b');
     expect(result?.decision).toBe('stop');
   });
 
-  it('returns null for non-existent loopId', () => {
-    const result = findLoopControlArtifact(artifacts, 'loop-c');
-    expect(result).toBeNull();
-  });
-
   it('returns null for empty artifacts array', () => {
-    const result = findLoopControlArtifact([], 'any-loop');
+    const result = findLoopControlArtifact([]);
     expect(result).toBeNull();
   });
 
-  it('handles artifacts with invalid schema gracefully', () => {
+  it('handles artifacts with invalid schema gracefully (skips invalid, finds valid)', () => {
     const badArtifacts = [
       { kind: 'wr.loop_control', loopId: 'INVALID-CAPS', decision: 'continue' }, // Invalid loopId
       { kind: 'wr.loop_control', loopId: 'valid-loop', decision: 'stop' },
     ];
 
-    const result = findLoopControlArtifact(badArtifacts, 'valid-loop');
+    const result = findLoopControlArtifact(badArtifacts);
     expect(result).not.toBeNull();
     expect(result?.loopId).toBe('valid-loop');
   });
 
-  it('matches anonymous artifact (no loopId) for any expectedLoopId', () => {
+  it('matches anonymous artifact (no loopId)', () => {
     const artifacts = [
       { kind: 'wr.loop_control', decision: 'stop' }, // no loopId
     ];
 
-    const result = findLoopControlArtifact(artifacts, 'plan-iteration');
+    const result = findLoopControlArtifact(artifacts);
     expect(result).not.toBeNull();
     expect(result?.decision).toBe('stop');
     expect(result?.loopId).toBeUndefined();
   });
 
-  it('prefers the most recent artifact — anonymous stop wins over older named continue', () => {
+  it('prefers the most recent artifact — later stop wins over older continue', () => {
     const artifacts = [
       { kind: 'wr.loop_control', loopId: 'plan-iteration', decision: 'continue' },
-      { kind: 'wr.loop_control', decision: 'stop' }, // anonymous, most recent
+      { kind: 'wr.loop_control', decision: 'stop' }, // most recent
     ];
 
-    const result = findLoopControlArtifact(artifacts, 'plan-iteration');
+    const result = findLoopControlArtifact(artifacts);
     expect(result).not.toBeNull();
     expect(result?.decision).toBe('stop');
   });
 
-  it('skips anonymous artifact when a named match appears later', () => {
+  it('returns most recent artifact when multiple exist in sequence', () => {
     const artifacts = [
-      { kind: 'wr.loop_control', decision: 'stop' }, // anonymous, older
-      { kind: 'wr.loop_control', loopId: 'plan-iteration', decision: 'continue' }, // named, most recent
+      { kind: 'wr.loop_control', decision: 'stop' }, // older
+      { kind: 'wr.loop_control', loopId: 'plan-iteration', decision: 'continue' }, // most recent
     ];
 
-    const result = findLoopControlArtifact(artifacts, 'plan-iteration');
+    const result = findLoopControlArtifact(artifacts);
     expect(result).not.toBeNull();
     expect(result?.decision).toBe('continue');
+  });
+
+  it('matches artifact regardless of agent-supplied loopId (the infinite loop fix)', () => {
+    // Agent provided a loopId that differs from conditionSource.loopId — doesn't matter,
+    // the function only cares about kind + decision validity
+    const artifacts = [
+      { kind: 'wr.loop_control', loopId: 'phase-4-plan-iterations', decision: 'stop' },
+    ];
+
+    const result = findLoopControlArtifact(artifacts);
+    expect(result).not.toBeNull();
+    expect(result?.decision).toBe('stop');
   });
 });

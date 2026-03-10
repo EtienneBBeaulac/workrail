@@ -105,7 +105,7 @@
         {
           "id": "phase-4b-loop-decision",
           "title": "Evidence Loop Decision",
-          "prompt": "Decide whether the evidence loop should continue.\n\nDecision rules:\n- if `contradictionCount > 0` → continue\n- else if `unresolvedEvidenceGapCount > 0` → continue\n- else if `hasStrongAlternative = true` and the alternative is not meaningfully weaker → continue\n- else if `diagnosisType = inconclusive_but_narrowed` and further evidence is not realistically available → stop with bounded uncertainty\n- else → stop\n\nOutput exactly:\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"loopId\": \"bug_evidence_loop\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
+          "prompt": "Decide whether the evidence loop should continue.\n\nDecision rules:\n- if `contradictionCount > 0` → continue\n- else if `unresolvedEvidenceGapCount > 0` → continue\n- else if `hasStrongAlternative = true` and the alternative is not meaningfully weaker → continue\n- else if `diagnosisType = inconclusive_but_narrowed` and further evidence is not realistically available → stop with bounded uncertainty\n- else → stop\n\nOutput exactly:\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
           "requireConfirmation": true,
           "outputContract": {
             "contractRef": "wr.contracts.loop_control"

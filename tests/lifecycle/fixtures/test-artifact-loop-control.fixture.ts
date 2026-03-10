@@ -24,7 +24,7 @@ export const testArtifactLoopControlFixture: WorkflowFixture = {
         id: 'init-loop',
         title: 'Initialize Loop',
         prompt:
-          'Initialize the bounded iteration loop.\n\n**Provide a loop control artifact:**\n```json\n{\n  "artifacts": [{\n    "kind": "wr.loop_control",\n    "loopId": "test-iteration",\n    "decision": "continue",\n    "metadata": {\n      "reason": "Starting iteration loop"\n    }\n  }]\n}\n```\n\nThe artifact must have:\n- kind: \'wr.loop_control\'\n- loopId: \'test-iteration\' (lowercase with hyphens)\n- decision: \'continue\' or \'stop\'',
+          'Initialize the bounded iteration loop.\n\n**Provide a loop control artifact:**\n```json\n{\n  "artifacts": [{\n    "kind": "wr.loop_control",\n    "decision": "continue",\n    "metadata": {\n      "reason": "Starting iteration loop"\n    }\n  }]\n}\n```\n\nThe artifact must have:\n- kind: \'wr.loop_control\'\n- decision: \'continue\' or \'stop\'',
         requireConfirmation: false,
         outputContract: {
           contractRef: 'wr.contracts.loop_control',
@@ -54,7 +54,7 @@ export const testArtifactLoopControlFixture: WorkflowFixture = {
             id: 'decide-continue',
             title: 'Loop Decision',
             prompt:
-              'Decide whether to continue or stop the loop.\n\n**Provide a loop control artifact:**\n```json\n{\n  "artifacts": [{\n    "kind": "wr.loop_control",\n    "loopId": "test-iteration",\n    "decision": "continue",\n    "metadata": {\n      "reason": "More work needed",\n      "iterationIndex": 1\n    }\n  }]\n}\n```\n\n**Decision logic:**\n- If more work is needed: decision = \'continue\'\n- If work is complete: decision = \'stop\'\n\nThe artifact must have:\n- kind: \'wr.loop_control\'\n- loopId: \'test-iteration\'\n- decision: \'continue\' or \'stop\'',
+              'Decide whether to continue or stop the loop.\n\n**Provide a loop control artifact:**\n```json\n{\n  "artifacts": [{\n    "kind": "wr.loop_control",\n    "decision": "continue",\n    "metadata": {\n      "reason": "More work needed",\n      "iterationIndex": 1\n    }\n  }]\n}\n```\n\n**Decision logic:**\n- If more work is needed: decision = \'continue\'\n- If work is complete: decision = \'stop\'\n\nThe artifact must have:\n- kind: \'wr.loop_control\'\n- decision: \'continue\' or \'stop\'',
             requireConfirmation: true,
             outputContract: {
               contractRef: 'wr.contracts.loop_control',

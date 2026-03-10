@@ -14,6 +14,7 @@ import {
   traceEvaluatedCondition,
   traceExitedLoop,
   traceSelectedNextStep,
+  traceArtifactMatchResult,
   applyTraceBudget,
   buildDecisionTraceEventData,
   type DecisionTraceEntry,
@@ -68,6 +69,39 @@ describe('trace entry constructors', () => {
     expect(entry.kind).toBe('selected_next_step');
     expect(entry.summary).toContain('investigate');
     expect(entry.refs).toEqual([{ kind: 'step_id', stepId: 'investigate' }]);
+  });
+
+  it('traceArtifactMatchResult — found', () => {
+    const entry = traceArtifactMatchResult('plan-loop', 1, {
+      kind: 'found',
+      decision: 'stop',
+      artifact: { kind: 'wr.loop_control', decision: 'stop', loopId: 'plan-loop' } as any,
+    });
+    expect(entry.kind).toBe('evaluated_condition');
+    expect(entry.summary).toContain('found');
+    expect(entry.summary).toContain('decision="stop"');
+    expect(entry.refs).toEqual([
+      { kind: 'loop_id', loopId: 'plan-loop' },
+      { kind: 'iteration', value: 1 },
+    ]);
+  });
+
+  it('traceArtifactMatchResult — not_found', () => {
+    const entry = traceArtifactMatchResult('plan-loop', 0, {
+      kind: 'not_found',
+      reason: 'no artifact yet',
+    });
+    expect(entry.summary).toContain('not_found');
+    expect(entry.summary).toContain('no artifact yet');
+  });
+
+  it('traceArtifactMatchResult — invalid', () => {
+    const entry = traceArtifactMatchResult('plan-loop', 2, {
+      kind: 'invalid',
+      reason: 'malformed schema',
+    });
+    expect(entry.summary).toContain('invalid');
+    expect(entry.summary).toContain('malformed schema');
   });
 });
 
