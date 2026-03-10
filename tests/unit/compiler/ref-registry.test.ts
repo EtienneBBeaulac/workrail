@@ -30,6 +30,30 @@ describe('RefRegistry', () => {
     expect(result._unsafeUnwrap()).toContain('memory_briefing');
   });
 
+  it('resolves wr.refs.notes_first_durability to non-empty text', () => {
+    const result = registry.resolve('wr.refs.notes_first_durability');
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap()).toContain('notesMarkdown');
+  });
+
+  it('resolves wr.refs.synthesis_under_disagreement to non-empty text', () => {
+    const result = registry.resolve('wr.refs.synthesis_under_disagreement');
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap()).toContain('disagree');
+  });
+
+  it('resolves wr.refs.parallelize_cognition_serialize_synthesis to non-empty text', () => {
+    const result = registry.resolve('wr.refs.parallelize_cognition_serialize_synthesis');
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap()).toContain('Parallelize');
+  });
+
+  it('resolves wr.refs.adversarial_challenge_rules to non-empty text', () => {
+    const result = registry.resolve('wr.refs.adversarial_challenge_rules');
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap()).toContain('challenge');
+  });
+
   it('returns UNKNOWN_REF for unregistered ref ID', () => {
     const result = registry.resolve('wr.refs.nonexistent');
     expect(result.isErr()).toBe(true);
@@ -49,6 +73,10 @@ describe('RefRegistry', () => {
     expect(registry.has('wr.refs.memory_usage')).toBe(true);
     expect(registry.has('wr.refs.memory_store')).toBe(true);
     expect(registry.has('wr.refs.memory_query')).toBe(true);
+    expect(registry.has('wr.refs.notes_first_durability')).toBe(true);
+    expect(registry.has('wr.refs.synthesis_under_disagreement')).toBe(true);
+    expect(registry.has('wr.refs.parallelize_cognition_serialize_synthesis')).toBe(true);
+    expect(registry.has('wr.refs.adversarial_challenge_rules')).toBe(true);
   });
 
   it('has() returns false for unknown refs', () => {
@@ -61,7 +89,11 @@ describe('RefRegistry', () => {
     expect(ids).toContain('wr.refs.memory_usage');
     expect(ids).toContain('wr.refs.memory_store');
     expect(ids).toContain('wr.refs.memory_query');
-    expect(ids.length).toBe(3);
+    expect(ids).toContain('wr.refs.notes_first_durability');
+    expect(ids).toContain('wr.refs.synthesis_under_disagreement');
+    expect(ids).toContain('wr.refs.parallelize_cognition_serialize_synthesis');
+    expect(ids).toContain('wr.refs.adversarial_challenge_rules');
+    expect(ids.length).toBe(7);
   });
 
   it('resolution is deterministic: same ID always returns same content', () => {
