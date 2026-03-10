@@ -2,16 +2,39 @@
 /**
  * MCP Server Entry Point
  *
- * This file exists for backwards compatibility with the bin entry in package.json.
- * All implementation has been moved to src/mcp/server.ts.
+ * Resolves transport mode from environment and starts the appropriate server.
+ * 
+ * Environment:
+ * - WORKRAIL_TRANSPORT: 'stdio' (default) | 'http'
+ * - WORKRAIL_HTTP_PORT: port for HTTP mode (default: 3100)
  */
 
+import { resolveTransportMode } from './mcp/transports/transport-mode.js';
+import { startStdioServer } from './mcp/transports/stdio-entry.js';
+import { startHttpServer } from './mcp/transports/http-entry.js';
+import { assertNever } from './runtime/assert-never.js';
+
+// For backwards compatibility
 export { startServer } from './mcp/server.js';
 
-// Re-export and run
-import { startServer } from './mcp/server.js';
+// Resolve transport mode and start
+const mode = resolveTransportMode(process.env);
 
-startServer().catch((error) => {
-  console.error('Fatal error running server:', error);
-  process.exit(1);
-});
+switch (mode.kind) {
+  case 'stdio':
+    startStdioServer().catch((error) => {
+      console.error('[stdio] Fatal error:', error);
+      process.exit(1);
+    });
+    break;
+
+  case 'http':
+    startHttpServer(mode.port).catch((error) => {
+      console.error('[http] Fatal error:', error);
+      process.exit(1);
+    });
+    break;
+
+  default:
+    assertNever(mode);
+}
