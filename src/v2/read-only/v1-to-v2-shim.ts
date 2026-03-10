@@ -1,6 +1,8 @@
 import type { Workflow } from '../../types/workflow.js';
 import type { CompiledWorkflowSnapshotV1 } from '../durable-core/schemas/compiled-workflow/index.js';
 import { resolveDefinitionSteps } from '../../application/services/workflow-compiler.js';
+import { type Result, ok, err } from 'neverthrow';
+import type { DomainError } from '../../domain/execution/error.js';
 
 /**
  * Slice 1: compile a v1 Workflow into a read-only preview snapshot.
@@ -99,4 +101,40 @@ export function compileV1WorkflowToPinnedSnapshot(workflow: Workflow): Extract<C
     version: workflow.definition.version,
     definition: resolvedDefinition as unknown,
   };
+}
+
+/**
+ * Result-returning wrapper for compileV1WorkflowToPinnedSnapshot.
+ *
+ * Used by the validation pipeline to handle normalization errors explicitly.
+ * Returns Result<T, DomainError> where T matches the pipeline's ExecutableCompiledWorkflowSnapshot type.
+ *
+ * This propagates resolution errors from promptBlocks/templates/refs instead of
+ * silently falling back to the raw definition.
+ */
+export function normalizeV1WorkflowToPinnedSnapshot(
+  workflow: Workflow
+): Result<Extract<CompiledWorkflowSnapshotV1, { sourceKind: 'v1_pinned' }>, DomainError> {
+  // Attempt to resolve authoring-layer constructs (templates, features, refs, promptBlocks)
+  const resolved = resolveDefinitionSteps(
+    workflow.definition.steps,
+    workflow.definition.features ?? [],
+  );
+
+  // If resolution fails, return the error to the pipeline
+  if (resolved.isErr()) {
+    return err(resolved.error);
+  }
+
+  const resolvedDefinition = { ...workflow.definition, steps: resolved.value };
+
+  return ok({
+    schemaVersion: 1,
+    sourceKind: 'v1_pinned' as const,
+    workflowId: workflow.definition.id,
+    name: workflow.definition.name,
+    description: workflow.definition.description,
+    version: workflow.definition.version,
+    definition: resolvedDefinition as unknown,
+  });
 }

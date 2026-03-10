@@ -134,6 +134,10 @@ export class CachingCompositeWorkflowStorage implements ICompositeWorkflowStorag
     return this.inner.getSources();
   }
 
+  getStorageInstances(): readonly IWorkflowStorage[] {
+    return this.inner.getStorageInstances();
+  }
+
   async loadAllWorkflows(): Promise<readonly Workflow[]> {
     if (this.isFresh(this.workflowCache)) {
       this.stats.hits += 1;

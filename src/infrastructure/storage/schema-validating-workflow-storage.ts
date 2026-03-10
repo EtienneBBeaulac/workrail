@@ -7,19 +7,37 @@ import {
   WorkflowSummary, 
   WorkflowDefinition,
   WorkflowSource,
-  createWorkflow 
+  createWorkflow,
+  toWorkflowSummary
 } from '../../types/workflow';
 import { InvalidWorkflowError } from '../../core/error-handler';
 import { validateWorkflowIdForLoad, validateWorkflowIdForSave } from '../../domain/workflow-id-policy';
 
 /**
+ * Structured prefix for validation errors.
+ * Enables grep-based monitoring and structured log parsing.
+ */
+const VALIDATION_ERROR_PREFIX = '[ValidationError]';
+
+/**
+ * Report a validation failure with structured context.
+ * Phase 4 (Option B): runtime still filters invalid workflows, but reports them loudly.
+ */
+function reportValidationFailure(workflowId: string, sourceKind: string, error: string): void {
+  console.error(`${VALIDATION_ERROR_PREFIX} ${sourceKind}/${workflowId}: ${error}`);
+}
+
+/**
  * Decorator that validates workflows against the JSON schema.
  * 
  * Validates the definition portion of workflows on load.
- * Invalid workflows are logged and filtered out (graceful degradation).
+ * Invalid workflows are reported via structured logging and filtered out (graceful degradation).
  * 
- * IMPORTANT: This decorator delegates to inner storage for summaries.
- * Validation happens on loadAllWorkflows() and getWorkflowById().
+ * Phase 4 (Option B — temporary containment):
+ * - Runtime still filters invalid workflows for safety
+ * - Every filter action is reported with workflow ID, source kind, and error
+ * - listWorkflowSummaries() validates through loadAllWorkflows() (no bypass)
+ * - The CI gate (Phases 2-3) is the hard failure path; runtime remains soft
  */
 export class SchemaValidatingWorkflowStorage implements IWorkflowStorage {
   public readonly kind = 'single' as const;
@@ -32,9 +50,6 @@ export class SchemaValidatingWorkflowStorage implements IWorkflowStorage {
     this.validator = ajv.compile(schema);
   }
 
-  /**
-   * The source from the inner storage.
-   */
   get source(): WorkflowSource {
     return this.inner.source;
   }
@@ -47,8 +62,6 @@ export class SchemaValidatingWorkflowStorage implements IWorkflowStorage {
     }
 
     // v2 lock: enforce workflow ID namespace rules at load/validate time.
-    // - legacy IDs are warn-only (not rejected)
-    // - wr.* is reserved for bundled workflows
     validateWorkflowIdForLoad(definition.id, sourceKind);
 
     return true;
@@ -57,7 +70,6 @@ export class SchemaValidatingWorkflowStorage implements IWorkflowStorage {
   async loadAllWorkflows(): Promise<readonly Workflow[]> {
     const workflows = await this.inner.loadAllWorkflows();
     
-    // Filter out invalid workflows, logging errors
     const validWorkflows: Workflow[] = [];
     
     for (const workflow of workflows) {
@@ -66,11 +78,11 @@ export class SchemaValidatingWorkflowStorage implements IWorkflowStorage {
           validWorkflows.push(workflow);
         }
       } catch (err) {
-        console.error(
-          `[SchemaValidation] Workflow '${workflow.definition.id}' failed validation:`,
-          err instanceof Error ? err.message : err
+        reportValidationFailure(
+          workflow.definition.id,
+          workflow.source.kind,
+          err instanceof Error ? err.message : String(err)
         );
-        // Skip invalid workflows (graceful degradation)
       }
     }
     
@@ -88,22 +100,24 @@ export class SchemaValidatingWorkflowStorage implements IWorkflowStorage {
       this.validateDefinition(workflow.definition, workflow.source.kind);
       return workflow;
     } catch (err) {
-      console.error(
-        `[SchemaValidation] Workflow '${id}' failed validation:`,
-        err instanceof Error ? err.message : err
+      reportValidationFailure(
+        id,
+        workflow.source.kind,
+        err instanceof Error ? err.message : String(err)
       );
       return null;
     }
   }
 
   async listWorkflowSummaries(): Promise<readonly WorkflowSummary[]> {
-    // Delegate to inner storage - summaries are derived from validated workflows
-    // We validate when workflows are actually loaded
-    return this.inner.listWorkflowSummaries();
+    // Phase 4 fix: validate through loadAllWorkflows() and derive summaries
+    // from the validated set. Previously this delegated to inner storage,
+    // bypassing validation — invalid workflows appeared in the workflow list.
+    const validated = await this.loadAllWorkflows();
+    return validated.map(toWorkflowSummary);
   }
 
   async save(definition: WorkflowDefinition): Promise<void> {
-    // Validate before saving
     this.validateDefinition(definition, this.source.kind);
     validateWorkflowIdForSave(definition.id, this.source.kind);
 
@@ -115,6 +129,7 @@ export class SchemaValidatingWorkflowStorage implements IWorkflowStorage {
 
 /**
  * Schema validator for composite storage.
+ * Same Phase 4 improvements as SchemaValidatingWorkflowStorage.
  */
 export class SchemaValidatingCompositeWorkflowStorage implements ICompositeWorkflowStorage {
   public readonly kind = 'composite' as const;
@@ -134,7 +149,6 @@ export class SchemaValidatingCompositeWorkflowStorage implements ICompositeWorkf
       throw new InvalidWorkflowError(id, JSON.stringify(this.validator.errors));
     }
 
-    // v2 lock: enforce workflow ID namespace rules at load/validate time.
     validateWorkflowIdForLoad(definition.id, sourceKind);
 
     return true;
@@ -142,6 +156,10 @@ export class SchemaValidatingCompositeWorkflowStorage implements ICompositeWorkf
 
   getSources(): readonly WorkflowSource[] {
     return this.inner.getSources();
+  }
+
+  getStorageInstances(): readonly IWorkflowStorage[] {
+    return this.inner.getStorageInstances();
   }
 
   async loadAllWorkflows(): Promise<readonly Workflow[]> {
@@ -154,9 +172,10 @@ export class SchemaValidatingCompositeWorkflowStorage implements ICompositeWorkf
           validWorkflows.push(workflow);
         }
       } catch (err) {
-        console.error(
-          `[SchemaValidation] Workflow '${workflow.definition.id}' failed validation:`,
-          err instanceof Error ? err.message : err
+        reportValidationFailure(
+          workflow.definition.id,
+          workflow.source.kind,
+          err instanceof Error ? err.message : String(err)
         );
       }
     }
@@ -173,24 +192,22 @@ export class SchemaValidatingCompositeWorkflowStorage implements ICompositeWorkf
       this.validateDefinition(workflow.definition, workflow.source.kind);
       return workflow;
     } catch (err) {
-      console.error(
-        `[SchemaValidation] Workflow '${id}' failed validation:`,
-        err instanceof Error ? err.message : err
+      reportValidationFailure(
+        id,
+        workflow.source.kind,
+        err instanceof Error ? err.message : String(err)
       );
       return null;
     }
   }
 
   async listWorkflowSummaries(): Promise<readonly WorkflowSummary[]> {
-    return this.inner.listWorkflowSummaries();
+    // Phase 4 fix: validate through loadAllWorkflows(), then derive summaries.
+    const validated = await this.loadAllWorkflows();
+    return validated.map(toWorkflowSummary);
   }
 
   async save(definition: WorkflowDefinition): Promise<void> {
-    // Lock: composite storage save delegates to highest-priority writable source.
-    // We use 'project' as a conservative sourceKind for validation because:
-    // - validateWorkflowIdForSave rejects legacy IDs and wr.* for ALL non-bundled sourceKinds
-    // - actual save target (project/user/custom) doesn't matter; all have same restrictions
-    // - this prevents needing to query inner storage for actual writable source
     this.validateDefinition(definition, 'project');
     validateWorkflowIdForSave(definition.id, 'project');
 

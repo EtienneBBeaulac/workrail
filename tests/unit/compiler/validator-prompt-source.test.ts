@@ -105,6 +105,48 @@ describe('ValidationEngine accepts promptBlocks and templateCall', () => {
     expect(result.issues.some((i) => i.includes('must have prompt, promptBlocks, or templateCall'))).toBe(true);
   });
 
+  it('rejects step with both prompt and promptBlocks (XOR enforcement)', () => {
+    const wf = mkWorkflow([
+      {
+        id: 'step-1',
+        title: 'Step 1',
+        prompt: 'Raw prompt.',
+        promptBlocks: { goal: 'Also blocks.' },
+      } as WorkflowStepDefinition,
+    ]);
+    const result = validationEngine.validateWorkflow(wf);
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((i) => i.includes('multiple prompt sources'))).toBe(true);
+  });
+
+  it('rejects step with both prompt and templateCall (XOR enforcement)', () => {
+    const wf = mkWorkflow([
+      {
+        id: 'step-1',
+        title: 'Step 1',
+        prompt: 'Raw prompt.',
+        templateCall: { templateId: 'wr.templates.probe' },
+      } as WorkflowStepDefinition,
+    ]);
+    const result = validationEngine.validateWorkflow(wf);
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((i) => i.includes('multiple prompt sources'))).toBe(true);
+  });
+
+  it('rejects step with both promptBlocks and templateCall (XOR enforcement)', () => {
+    const wf = mkWorkflow([
+      {
+        id: 'step-1',
+        title: 'Step 1',
+        promptBlocks: { goal: 'Blocks.' },
+        templateCall: { templateId: 'wr.templates.probe' },
+      } as WorkflowStepDefinition,
+    ]);
+    const result = validationEngine.validateWorkflow(wf);
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((i) => i.includes('multiple prompt sources'))).toBe(true);
+  });
+
   it('accepts inline loop body step with promptBlocks', () => {
     const wf = mkWorkflow([
       {

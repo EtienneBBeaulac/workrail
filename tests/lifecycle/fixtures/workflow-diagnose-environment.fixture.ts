@@ -1,0 +1,49 @@
+import type { WorkflowFixture } from '../lifecycle-harness.js';
+
+/**
+ * Fixture for workflow-diagnose-environment workflow.
+ *
+ * 2 steps with requireConfirmation variation.
+ * Tests that interpreter handles confirmation fields correctly (doesn't block execution).
+ */
+export const workflowDiagnoseEnvironmentFixture: WorkflowFixture = {
+  workflowId: 'workflow-diagnose-environment',
+  definition: {
+    id: 'workflow-diagnose-environment',
+    name: 'Diagnostic: Environment & Subagents',
+    version: '1.0.0',
+    description:
+      'Automated capability detection for Agentic IDEs. Probes for subagent access and generates a local configuration file.',
+    steps: [
+      {
+        id: 'step-0-probe-capabilities',
+        title: 'Step 0: Probe Subagent Capabilities',
+        prompt:
+          '**INITIATING CAPABILITY PROBE**\n\nI need to determine if this environment supports subagent delegation.\n\n**YOUR MISSION:** Attempt to contact a subagent and verify its tool access.\n\n**EXECUTE:**\n1. Check for existing `.workrail/config.json`. If it exists, read it.\n2. **Active Probe:** Attempt to use the `task` tool (or equivalent) to send a message to a subagent type \'context-researcher\' (or \'researcher\').\n   - *Prompt:* "Please run `workflow_list` and tell me what you see."\n3. **Analyze Result:**\n   - **Success:** Subagent replied AND saw workflows. (Tier 3)\n   - **Partial:** Subagent replied but saw NO tools. (Tier 2)\n   - **Failure:** Tool call failed or no subagent found. (Tier 1)\n\n**WORKING NOTES:**\n- Probe Result (Success/Partial/Fail)\n- Subagent Name (if discovered)\n- Tool Access Verified?',
+        agentRole: 'You are a system administrator verifying environment capabilities.',
+        requireConfirmation: false,
+        guidance: [
+          "AUTO-DISCOVERY: Try standard names like 'context-researcher', 'researcher', 'coder'.",
+          'TOOL CHECK: The specific test is \'Can you see WorkRail tools?\'.',
+          "FAIL FAST: If the 'task' tool doesn't exist, you are immediately in Tier 1 (Solo).",
+        ],
+      },
+      {
+        id: 'step-1-configure-environment',
+        title: 'Step 1: Configure Environment',
+        prompt:
+          '**CONFIGURE WORKRAIL ENVIRONMENT**\n\nBased on the probe result, configure the local workspace.\n\n**YOUR MISSION:** Create or update `.workrail/config.json` to reflect reality.\n\n**EXECUTE:**\n1. **Tier 3 (Delegation):**\n   - Write config: `{"mode": "delegate", "subagents": {"researcher": "[name]"}}`\n   - Inform user: "Delegation enabled. Subagent \'[name]\' connected."\n2. **Tier 2 (Proxy):**\n   - Write config: `{"mode": "proxy", "subagents": {"researcher": "[name]"}}`\n   - Inform user: "Proxy mode enabled. Subagent connected but needs tool whitelist fix."\n3. **Tier 1 (Solo):**\n   - Write config: `{"mode": "solo"}`\n   - Inform user: "Solo mode enabled. No subagents detected."\n\n**DELIVERABLE:**\n- `.workrail/config.json` file created/updated.\n- Brief summary of capabilities detected.',
+        agentRole: 'You are a configuration manager ensuring the system is set up correctly.',
+        requireConfirmation: true,
+        guidance: [
+          "PERSISTENCE: Use 'write_file' to save the config.",
+          'USER INFO: Be clear about what mode is being set and why.',
+        ],
+      },
+    ],
+  },
+  stepFixtures: {
+    'step-0-probe-capabilities': { notesMarkdown: 'Probe complete: Tier 1 (solo mode)' },
+    'step-1-configure-environment': { notesMarkdown: 'Config written: solo mode enabled' },
+  },
+};

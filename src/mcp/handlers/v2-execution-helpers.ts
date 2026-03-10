@@ -57,12 +57,14 @@ export type StartWorkflowError =
   | { readonly kind: 'validation_failed'; readonly failure: ToolFailure }
   | { readonly kind: 'workflow_not_found'; readonly workflowId: WorkflowId }
   | { readonly kind: 'workflow_has_no_steps'; readonly workflowId: WorkflowId }
+  | { readonly kind: 'workflow_compile_failed'; readonly message: string }
   | { readonly kind: 'keyring_load_failed'; readonly cause: KeyringError }
   | { readonly kind: 'hash_computation_failed'; readonly message: string }
   | { readonly kind: 'pinned_workflow_store_failed'; readonly cause: PinnedWorkflowStoreError }
   | { readonly kind: 'snapshot_creation_failed'; readonly cause: SnapshotStoreError }
   | { readonly kind: 'session_append_failed'; readonly cause: ExecutionSessionGateErrorV2 | SessionEventLogStoreError }
-  | { readonly kind: 'token_signing_failed'; readonly cause: TokenDecodeErrorV2 | TokenVerifyErrorV2 | TokenSignErrorV2 };
+  | { readonly kind: 'token_signing_failed'; readonly cause: TokenDecodeErrorV2 | TokenVerifyErrorV2 | TokenSignErrorV2 }
+  | { readonly kind: 'prompt_render_failed'; readonly message: string };
 
 /**
  * Typed error union for continue_workflow handler.
@@ -83,7 +85,8 @@ export type ContinueWorkflowError =
   | { readonly kind: 'pinned_workflow_store_failed'; readonly cause: PinnedWorkflowStoreError }
   | { readonly kind: 'pinned_workflow_missing'; readonly workflowHash: WorkflowHash }
   | { readonly kind: 'token_signing_failed'; readonly cause: TokenDecodeErrorV2 | TokenVerifyErrorV2 | TokenSignErrorV2 }
-  | { readonly kind: 'advance_execution_failed'; readonly cause: ExecutionSessionGateErrorV2 | SessionEventLogStoreError };
+  | { readonly kind: 'advance_execution_failed'; readonly cause: ExecutionSessionGateErrorV2 | SessionEventLogStoreError }
+  | { readonly kind: 'prompt_render_failed'; readonly message: string };
 
 /**
  * Map StartWorkflowError to ToolFailure.
@@ -118,6 +121,12 @@ export function mapStartWorkflowErrorToToolError(e: StartWorkflowError): ToolFai
         suggestion: 'Tell the user: "This workflow definition is empty (no steps). The workflow JSON file needs to be fixed."',
       });
 
+    case 'workflow_compile_failed':
+      return errNotRetryable('PRECONDITION_FAILED',
+        `Workflow definition is invalid and cannot be started: ${e.message}`,
+        { suggestion: 'Tell the user: "The workflow definition has an authoring error that prevents execution. Fix the workflow JSON file and try again."' },
+      );
+
     case 'keyring_load_failed':
       return mapKeyringErrorToToolError(e.cause);
 
@@ -138,6 +147,12 @@ export function mapStartWorkflowErrorToToolError(e: StartWorkflowError): ToolFai
 
     case 'token_signing_failed':
       return mapTokenSigningErrorToToolError(e.cause);
+
+    case 'prompt_render_failed':
+      return errNotRetryable('INTERNAL_ERROR',
+        `WorkRail could not render the pending step prompt: ${e.message}`,
+        { suggestion: internalSuggestion('Retry start_workflow.', 'A step referenced by the workflow was not found in the executable definition.') },
+      );
 
     default:
       const _exhaustive: never = e;
@@ -200,6 +215,12 @@ export function mapContinueWorkflowErrorToToolError(e: ContinueWorkflowError): T
 
     case 'advance_execution_failed':
       return mapSessionOrGateErrorToToolError(e.cause);
+
+    case 'prompt_render_failed':
+      return errNotRetryable('INTERNAL_ERROR',
+        `WorkRail could not render the pending step prompt: ${e.message}`,
+        { suggestion: internalSuggestion('Retry continue_workflow.', 'A step referenced by the workflow was not found in the executable definition.') },
+      );
 
     default:
       const _exhaustive: never = e;
@@ -572,39 +593,8 @@ export function mapSessionOrGateErrorToToolError(e: SessionEventLogStoreError | 
 import type { LoopPathFrameV1 } from '../../v2/durable-core/schemas/execution-snapshot/index.js';
 import type { RunId, NodeId } from '../../v2/durable-core/ids/index.js';
 import type { LoadedSessionTruthV2 } from '../../v2/ports/session-event-log-store.port.js';
-import { renderPendingPrompt, type StepMetadata } from '../../v2/durable-core/domain/prompt-renderer.js';
-
-/**
- * Render a pending prompt with fallback to default metadata.
- * Used in replay and rehydrate paths where prompt rendering should not fail.
- *
- * @param args - Workflow, step details, truth, and scope identifiers
- * @returns PromptOutputV1 (always succeeds, falls back on error)
- */
-export function renderPendingPromptOrDefault(args: {
-  readonly workflow: ReturnType<typeof import('../../types/workflow.js').createWorkflow>;
-  readonly stepId: string;
-  readonly loopPath: readonly LoopPathFrameV1[];
-  readonly truth: LoadedSessionTruthV2;
-  readonly runId: RunId;
-  readonly nodeId: NodeId;
-  readonly rehydrateOnly: boolean;
-}): StepMetadata {
-  return renderPendingPrompt({
-    workflow: args.workflow,
-    stepId: args.stepId,
-    loopPath: args.loopPath,
-    truth: args.truth,
-    runId: args.runId,
-    nodeId: args.nodeId,
-    rehydrateOnly: args.rehydrateOnly,
-  }).unwrapOr({
-    stepId: args.stepId,
-    title: args.stepId,
-    prompt: `Pending step: ${args.stepId}`,
-    requireConfirmation: false,
-  });
-}
+// renderPendingPromptOrDefault was deleted (Phase 4: eliminate silent hiding).
+// Callers now handle the Result from renderPendingPrompt explicitly.
 
 // ── Preferences Derivation Helpers ────────────────────────────────────────
 

@@ -7,7 +7,8 @@
  * definition) always finds a compiled prompt, never undefined.
  */
 import { describe, it, expect } from 'vitest';
-import { compileV1WorkflowToPinnedSnapshot, compileV1WorkflowToV2PreviewSnapshot } from '../../../src/v2/read-only/v1-to-v2-shim';
+import { compileV1WorkflowToPinnedSnapshot, compileV1WorkflowToV2PreviewSnapshot, normalizeV1WorkflowToPinnedSnapshot } from '../../../src/v2/read-only/v1-to-v2-shim';
+import { WorkflowCompiler } from '../../../src/application/services/workflow-compiler';
 import { createWorkflow, createBundledSource } from '../../../src/types/workflow';
 import type { WorkflowDefinition } from '../../../src/types/workflow-definition';
 
@@ -38,7 +39,7 @@ describe('compileV1WorkflowToPinnedSnapshot', () => {
     expect((def.steps[0] as any).prompt).toBe('Do the thing.');
   });
 
-  it('resolves promptBlocks into prompt string before pinning', () => {
+  it('resolves promptBlocks into prompt string and strips promptBlocks before pinning', () => {
     const wf = mkWorkflow({
       steps: [
         {
@@ -62,10 +63,13 @@ describe('compileV1WorkflowToPinnedSnapshot', () => {
     expect(step.prompt).toContain('Follow systematic methodology.');
     expect(step.prompt).toContain('Gather evidence.');
     expect(step.prompt).toContain('Form hypotheses.');
-    // Rendered format: ## Goal, ## Constraints, ## Procedure
     expect(step.prompt).toContain('## Goal');
     expect(step.prompt).toContain('## Constraints');
     expect(step.prompt).toContain('## Procedure');
+
+    // promptBlocks must be stripped — having both prompt and promptBlocks
+    // causes the compiler's own XOR check to reject the step at advance time.
+    expect(step.promptBlocks).toBeUndefined();
   });
 
   it('resolves features + refs in promptBlocks before pinning', () => {
@@ -114,9 +118,9 @@ describe('compileV1WorkflowToPinnedSnapshot', () => {
     expect((def.steps[1] as any).prompt).toContain('Check it worked.');
   });
 
-  it('falls back to raw definition if resolution fails (resilience)', () => {
-    // Step with both prompt AND promptBlocks — this is a compile error.
-    // The pinning boundary should fall back gracefully.
+  it('strict normalization rejects workflow with both prompt and promptBlocks', () => {
+    // Step with both prompt AND promptBlocks — the strict path must reject this
+    // instead of falling back to the raw definition.
     const wf = mkWorkflow({
       steps: [
         {
@@ -128,10 +132,42 @@ describe('compileV1WorkflowToPinnedSnapshot', () => {
       ] as any,
     });
 
+    const result = normalizeV1WorkflowToPinnedSnapshot(wf);
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      expect(result.error.message).toContain('prompt');
+      expect(result.error.message).toContain('promptBlocks');
+    }
+  });
+
+  it('strict normalization rejects invalid workflow that later causes advance failure', () => {
+    // Prove the full chain: invalid workflow → strict normalization rejects it →
+    // compiler would also reject the pinned result. This is the exact failure
+    // we diagnosed: invalid authored workflow gets pinned, later fails at advance.
+    const wf = mkWorkflow({
+      steps: [
+        {
+          id: 's1',
+          title: 'Step 1',
+          prompt: 'Raw.',
+          promptBlocks: { goal: 'Also blocks.' },
+        },
+      ] as any,
+    });
+
+    // Strict path rejects before pinning
+    const normalizeResult = normalizeV1WorkflowToPinnedSnapshot(wf);
+    expect(normalizeResult.isErr()).toBe(true);
+
+    // Legacy permissive path still pins (for backward compat of preview)
     const pinned = compileV1WorkflowToPinnedSnapshot(wf);
-    const def = pinned.definition as WorkflowDefinition;
-    // Falls back to raw definition — prompt preserved as-is
-    expect((def.steps[0] as any).prompt).toBe('Raw.');
+    expect(pinned.definition).toBeDefined();
+
+    // Compiler also rejects the pinned snapshot (this is what continue_workflow hit)
+    const compiler = new WorkflowCompiler();
+    const pinnedWorkflow = createWorkflow(pinned.definition as WorkflowDefinition, createBundledSource());
+    const compileResult = compiler.compile(pinnedWorkflow);
+    expect(compileResult.isErr()).toBe(true);
   });
 });
 

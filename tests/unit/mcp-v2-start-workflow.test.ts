@@ -99,6 +99,64 @@ async function mkCtxWithWorkflow(workflowId: string): Promise<ToolContext> {
   };
 }
 
+/**
+ * Create a context whose getWorkflowById returns a workflow with
+ * both prompt AND promptBlocks on a step (invalid XOR).
+ */
+async function mkCtxWithInvalidWorkflow(workflowId: string): Promise<ToolContext> {
+  const wf = createWorkflow(
+    {
+      id: workflowId,
+      name: 'Invalid Workflow',
+      description: 'Test',
+      version: '0.1.0',
+      steps: [{ id: 'bad-step', title: 'Bad', prompt: 'Raw.', promptBlocks: { goal: 'Also blocks.' } }],
+    } as any,
+    createProjectDirectorySource(path.join(os.tmpdir(), 'workrail-project'))
+  );
+
+  const dataDir = new LocalDataDirV2(process.env);
+  const fsPort = new NodeFileSystemV2();
+  const sha256 = new NodeSha256V2();
+  const crypto = new NodeCryptoV2();
+  const sessionStore = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha256);
+  const clock = new NodeTimeClockV2();
+  const lockPort = new LocalSessionLockV2(dataDir, fsPort, clock);
+  const gate = new ExecutionSessionGateV2(lockPort, sessionStore);
+  const snapshotStore = new LocalSnapshotStoreV2(dataDir, fsPort, crypto);
+  const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir, fsPort);
+  const hmac = new NodeHmacSha256V2();
+  const base64url = new NodeBase64UrlV2();
+  const entropy = new NodeRandomEntropyV2();
+  const idFactory = new IdFactoryV2(entropy);
+  const base32 = new Base32AdapterV2();
+  const bech32m = new Bech32mAdapterV2();
+  const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url, entropy);
+  const keyringRes = await keyringPort.loadOrCreate();
+  if (keyringRes.isErr()) throw new Error(`keyring load failed: ${keyringRes.error.code}`);
+
+  const tokenCodecPorts = unsafeTokenCodecPorts({
+    keyring: keyringRes.value,
+    hmac,
+    base64url,
+    base32,
+    bech32m,
+  });
+
+  return {
+    workflowService: {
+      listWorkflowSummaries: async () => [],
+      getWorkflowById: async (id: string) => (id === workflowId ? wf : null),
+      getNextStep: async () => { throw new Error('not used'); },
+      validateStepOutput: async () => ({ valid: true, issues: [], suggestions: [] }),
+    } as any,
+    featureFlags: null as any,
+    sessionManager: null,
+    httpServer: null,
+    v2: { gate, sessionStore, snapshotStore, pinnedStore, sha256, crypto, idFactory, tokenCodecPorts },
+  };
+}
+
 describe('v2 start_workflow (Slice 3.5)', () => {
   it('returns VALIDATION_ERROR for oversized context on continue_workflow (rehydrate-only path)', async () => {
     const root = await mkTempDataDir();
@@ -125,6 +183,31 @@ describe('v2 start_workflow (Slice 3.5)', () => {
       expect(details.details.kind).toBe('context_budget_exceeded');
       expect(details.details.tool).toBe('continue_workflow');
       expect(details.details.measuredBytes).toBeGreaterThan(262144);
+    } finally {
+      process.env.WORKRAIL_DATA_DIR = prev;
+    }
+  });
+
+  it('rejects workflow with both prompt and promptBlocks before creating a session', async () => {
+    const root = await mkTempDataDir();
+    const prev = process.env.WORKRAIL_DATA_DIR;
+    process.env.WORKRAIL_DATA_DIR = root;
+    try {
+      const workflowId = 'invalid-workflow';
+      const ctx = await mkCtxWithInvalidWorkflow(workflowId);
+
+      const res = await handleV2StartWorkflow({ workflowId } as any, ctx);
+
+      // Must fail before session creation — not later at continue_workflow
+      expect(res.type).toBe('error');
+      if (res.type !== 'error') return;
+
+      expect(res.code).toBe('PRECONDITION_FAILED');
+      expect(res.message).toContain('invalid');
+
+      // No session should have been created in the data dir
+      const sessionDirs = await import('fs/promises').then(f => f.readdir(path.join(root, 'sessions')).catch(() => []));
+      expect(sessionDirs.length).toBe(0);
     } finally {
       process.env.WORKRAIL_DATA_DIR = prev;
     }

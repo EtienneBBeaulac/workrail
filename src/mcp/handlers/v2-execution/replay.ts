@@ -22,10 +22,10 @@ import type { TokenCodecPorts } from '../../../v2/durable-core/tokens/token-code
 import { ResultAsync as RA, okAsync, errAsync as neErrorAsync, ok } from 'neverthrow';
 import { loadValidationResultV1 } from '../../../v2/durable-core/domain/validation-loader.js';
 import {
-  renderPendingPromptOrDefault,
   derivePreferencesOrDefault,
   type ContinueWorkflowError,
 } from '../v2-execution-helpers.js';
+import { renderPendingPrompt, type StepMetadata } from '../../../v2/durable-core/domain/prompt-renderer.js';
 import * as z from 'zod';
 import { attemptIdForNextNode, signTokenOrErr } from '../v2-token-ops.js';
 import { deriveNextIntent } from '../v2-state-conversion.js';
@@ -47,27 +47,32 @@ export function buildBlockedReplayResponse(args: {
   readonly inputStateToken: string;
   readonly inputAckToken: string;
   readonly ports: TokenCodecPorts;
-}): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, never> {
+}): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, ContinueWorkflowError> {
   const { sessionId, runId, nodeId, attemptId, blockers, snapshot, truth, workflow, inputStateToken, inputAckToken, ports } = args;
 
   const pendingNow = snapshot ? derivePendingStep(snapshot.enginePayload.engineState) : null;
   const isCompleteNow = snapshot ? deriveIsComplete(snapshot.enginePayload.engineState) : false;
 
-  // S9: Use renderPendingPrompt (no recovery for replay; fact-returning)
-  const meta = pendingNow
-    ? renderPendingPromptOrDefault({
-        workflow,
-        stepId: String(pendingNow.stepId),
-        loopPath: pendingNow.loopPath,
-        truth,
-        runId: asRunId(String(runId)),
-        nodeId: asNodeId(String(nodeId)),
-        rehydrateOnly: false,
-      })
-    : null;
+  // S9: Render pending step — fail explicitly on missing step (no silent fallback)
+  let metaOrNull: StepMetadata | null = null;
+  if (pendingNow) {
+    const result = renderPendingPrompt({
+      workflow,
+      stepId: String(pendingNow.stepId),
+      loopPath: pendingNow.loopPath,
+      truth,
+      runId: asRunId(String(runId)),
+      nodeId: asNodeId(String(nodeId)),
+      rehydrateOnly: false,
+    });
+    if (result.isErr()) {
+      return neErrorAsync({ kind: 'prompt_render_failed' as const, message: result.error.message });
+    }
+    metaOrNull = result.value;
+  }
 
   const preferences = derivePreferencesOrDefault({ truth, runId, nodeId });
-  const nextIntent = deriveNextIntent({ rehydrateOnly: false, isComplete: isCompleteNow, pending: meta });
+  const nextIntent = deriveNextIntent({ rehydrateOnly: false, isComplete: isCompleteNow, pending: metaOrNull });
 
   // Mint checkpoint token for replay (idempotent — same inputs produce same token)
   const replayCheckpointTokenRes = pendingNow
@@ -83,10 +88,10 @@ export function buildBlockedReplayResponse(args: {
     ackToken: inputAckToken,
     checkpointToken: replayCheckpointTokenRes.isOk() ? replayCheckpointTokenRes.value : undefined,
     isComplete: isCompleteNow,
-    pending: meta ? { stepId: meta.stepId, title: meta.title, prompt: meta.prompt } : null,
+    pending: metaOrNull ? { stepId: metaOrNull.stepId, title: metaOrNull.title, prompt: metaOrNull.prompt } : null,
     preferences,
     nextIntent,
-    nextCall: buildNextCall({ stateToken: inputStateToken, ackToken: inputAckToken, isComplete: isCompleteNow, pending: meta }),
+    nextCall: buildNextCall({ stateToken: inputStateToken, ackToken: inputAckToken, isComplete: isCompleteNow, pending: metaOrNull }),
     blockers,
     retryable: undefined,
     retryAckToken: undefined,
@@ -177,21 +182,26 @@ export function buildAdvancedReplayResponse(args: {
     }
     const validation = loadValidationResultV1(truth.events, String(blocked.validationRef)).unwrapOr(null) ?? undefined;
 
-    // S9: Use renderPendingPrompt (no recovery for replay; fact-returning)
-    const meta = pending
-      ? renderPendingPromptOrDefault({
-          workflow,
-          stepId: String(pending.stepId),
-          loopPath: pending.loopPath,
-          truth,
-          runId: asRunId(String(runId)),
-          nodeId: asNodeId(String(toNodeIdBranded)),
-          rehydrateOnly: false,
-        })
-      : null;
+    // S9: Render pending step — fail explicitly on missing step (no silent fallback)
+    let blockedMeta: StepMetadata | null = null;
+    if (pending) {
+      const result = renderPendingPrompt({
+        workflow,
+        stepId: String(pending.stepId),
+        loopPath: pending.loopPath,
+        truth,
+        runId: asRunId(String(runId)),
+        nodeId: asNodeId(String(toNodeIdBranded)),
+        rehydrateOnly: false,
+      });
+      if (result.isErr()) {
+        return neErrorAsync({ kind: 'prompt_render_failed' as const, message: result.error.message });
+      }
+      blockedMeta = result.value;
+    }
 
     const preferences = derivePreferencesOrDefault({ truth, runId, nodeId: toNodeIdBranded });
-    const nextIntent = deriveNextIntent({ rehydrateOnly: false, isComplete, pending: meta });
+    const nextIntent = deriveNextIntent({ rehydrateOnly: false, isComplete, pending: blockedMeta });
 
     return okAsync(
       V2ContinueWorkflowOutputSchema.parse({
@@ -200,10 +210,10 @@ export function buildAdvancedReplayResponse(args: {
         ackToken: pending ? nextAckTokenRes.value : undefined,
         checkpointToken: pending ? nextCheckpointTokenRes.value : undefined,
         isComplete,
-        pending: meta ? { stepId: meta.stepId, title: meta.title, prompt: meta.prompt } : null,
+        pending: blockedMeta ? { stepId: blockedMeta.stepId, title: blockedMeta.title, prompt: blockedMeta.prompt } : null,
         preferences,
         nextIntent,
-        nextCall: buildNextCall({ stateToken: nextStateTokenRes.value, ackToken: pending ? nextAckTokenRes.value : undefined, isComplete, pending: meta, retryable, retryAckToken: retryAckTokenRes.value }),
+        nextCall: buildNextCall({ stateToken: nextStateTokenRes.value, ackToken: pending ? nextAckTokenRes.value : undefined, isComplete, pending: blockedMeta, retryable, retryAckToken: retryAckTokenRes.value }),
         blockers,
         retryable,
         retryAckToken: retryAckTokenRes.value,
@@ -212,21 +222,26 @@ export function buildAdvancedReplayResponse(args: {
     );
   }
 
-  // S9: Use renderPendingPrompt (no recovery for replay; fact-returning)
-  const meta = pending
-    ? renderPendingPromptOrDefault({
-        workflow,
-        stepId: String(pending.stepId),
-        loopPath: pending.loopPath,
-        truth,
-        runId: asRunId(String(runId)),
-        nodeId: asNodeId(String(toNodeIdBranded)),
-        rehydrateOnly: false,
-      })
-    : { stepId: '', title: '', prompt: '', requireConfirmation: false };
+  // S9: Render pending step — fail explicitly on missing step (no silent fallback)
+  let okMeta: StepMetadata | null = null;
+  if (pending) {
+    const result = renderPendingPrompt({
+      workflow,
+      stepId: String(pending.stepId),
+      loopPath: pending.loopPath,
+      truth,
+      runId: asRunId(String(runId)),
+      nodeId: asNodeId(String(toNodeIdBranded)),
+      rehydrateOnly: false,
+    });
+    if (result.isErr()) {
+      return neErrorAsync({ kind: 'prompt_render_failed' as const, message: result.error.message });
+    }
+    okMeta = result.value;
+  }
 
   const preferences = derivePreferencesOrDefault({ truth, runId, nodeId: toNodeIdBranded });
-  const nextIntent = deriveNextIntent({ rehydrateOnly: false, isComplete, pending: pending ? meta : null });
+  const nextIntent = deriveNextIntent({ rehydrateOnly: false, isComplete, pending: okMeta });
 
   return okAsync(
     V2ContinueWorkflowOutputSchema.parse({
@@ -235,10 +250,10 @@ export function buildAdvancedReplayResponse(args: {
       ackToken: pending ? nextAckTokenRes.value : undefined,
       checkpointToken: pending ? nextCheckpointTokenRes.value : undefined,
       isComplete,
-      pending: pending ? { stepId: meta.stepId, title: meta.title, prompt: meta.prompt } : null,
+      pending: okMeta ? { stepId: okMeta.stepId, title: okMeta.title, prompt: okMeta.prompt } : null,
       preferences,
       nextIntent,
-      nextCall: buildNextCall({ stateToken: nextStateTokenRes.value, ackToken: pending ? nextAckTokenRes.value : undefined, isComplete, pending: pending ? meta : null }),
+      nextCall: buildNextCall({ stateToken: nextStateTokenRes.value, ackToken: pending ? nextAckTokenRes.value : undefined, isComplete, pending: okMeta }),
     })
   );
 }

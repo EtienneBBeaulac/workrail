@@ -691,6 +691,16 @@ export class ValidationEngine {
           suggestions.push('Add a prompt string, structured promptBlocks, or a templateCall to each step');
         }
 
+        // Enforce prompt-source XOR: exactly one of prompt, promptBlocks, templateCall
+        const typedStep = step as WorkflowStepDefinition;
+        const promptSourceCount =
+          (typedStep.prompt ? 1 : 0) +
+          ((typedStep as any).promptBlocks ? 1 : 0) +
+          ((typedStep as any).templateCall ? 1 : 0);
+        if (promptSourceCount > 1) {
+          issues.push(`Step '${step.id}' declares multiple prompt sources (prompt, promptBlocks, templateCall) — use exactly one`);
+        }
+
         this.collectQuotedJsonValidationMessageWarnings(step as any, `Step '${step.id}'`, warnings);
 
         // Validate function calls for standard steps using workflow + step scopes
@@ -734,6 +744,21 @@ export class ValidationEngine {
       warnings: warnings.length > 0 ? warnings : undefined,
       info: info.length > 0 ? info : undefined
     };
+  }
+
+  /**
+   * Validate workflow structure (no normalization).
+   * Returns Result<Workflow, string[]> for pipeline integration.
+   *
+   * This is used by the Phase 1a validation pipeline to perform structural checks
+   * without triggering normalization (which is handled separately in the pipeline).
+   */
+  validateWorkflowStructureOnly(workflow: Workflow): Result<Workflow, readonly string[]> {
+    const result = this.validateWorkflow(workflow);
+    if (result.valid) {
+      return ok(workflow);
+    }
+    return err(result.issues);
   }
 
   private collectQuotedJsonValidationMessageWarnings(

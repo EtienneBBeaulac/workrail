@@ -1,0 +1,238 @@
+{
+  "id": "mr-review-workflow-agentic",
+  "name": "MR Review Workflow (v2 • Notes-First • Parallel Reviewer Families)",
+  "version": "2.1.0",
+  "description": "A v2-first MR review workflow that uses a shared fact packet, parallel reviewer families, an explicit coverage ledger, and contradiction-driven synthesis to produce high-signal review output without duplicating context gathering.",
+  "recommendedPreferences": {
+    "recommendedAutonomy": "guided",
+    "recommendedRiskPolicy": "conservative"
+  },
+  "features": [
+    "wr.features.subagent_guidance"
+  ],
+  "preconditions": [
+    "User has the MR/PR context and a code diff accessible as pasted text or a file path.",
+    "The agent has access to tools for reading the diff, changed files, and surrounding code.",
+    "A human reviewer or author will consume the final review output."
+  ],
+  "clarificationPrompts": [
+    "What is the MR title, purpose, and any related ticket or acceptance criteria?",
+    "Where is the diff located, or can you paste it?",
+    "Are there specific focus areas for this review (performance, security, API design, data integrity, etc.)?"
+  ],
+  "metaGuidance": [
+    "DEFAULT BEHAVIOR: self-execute with tools. Only ask for missing external artifacts, permissions, or business context you cannot resolve yourself.",
+    "V2 DURABILITY: use output.notesMarkdown and explicit context variables as durable workflow state. Do NOT rely on the live review document as required workflow memory.",
+    "ARTIFACT STRATEGY: `reviewDocPath` is a human-facing artifact only. Keep it updated for readability, but keep execution truth in notes/context variables.",
+    "MAIN AGENT OWNS REVIEW: the main agent owns truth, synthesis, severity calibration, final recommendation, and document finalization.",
+    "SUBAGENT MODEL: use the WorkRail Executor only. Do not refer to Builder, Researcher, or other named subagent identities.",
+    "PARALLELISM: parallelize independent cognition; serialize synthesis, canonical review findings, recommendation decisions, and final document writes.",
+    "REVIEW MODEL: first build shared context, then freeze a neutral fact packet, then let multiple reviewer families interpret the same packet in parallel.",
+    "REVIEWER FAMILIES: use specialist reviewer families such as correctness/invariants, patterns/architecture, runtime/production-risk, test/docs/rollout, false-positive skeptic, and missed-issue hunter.",
+    "COVERAGE LEDGER: explicitly track what review domains are `checked`, `uncertain`, `not_applicable`, `contradicted`, or `needs_followup`. Do not finalize with unresolved important coverage gaps unless you name them explicitly.",
+    "SYNTHESIS: when reviewer families disagree, treat the disagreement as first-class work. Resolve it explicitly; do not handwave contradictory outputs.",
+    "TRIGGERS: WorkRail can only react to explicit fields. Use structural fields like `contextUnknownCount`, `criticalSurfaceTouched`, `coverageUncertainCount`, and `majorFindingsCount`.",
+    "TRIGGERS (cont): also track `falsePositiveRiskCount`, `blindSpotCount`, `contradictionCount`, and `needsSimulation` to route fresh-eye review and synthesis work.",
+    "BOUNDARY: do not post comments, approve, reject, or merge unless the user explicitly asks. Produce a high-quality review artifact and recommendation only."
+  ],
+  "steps": [
+    {
+      "id": "phase-0-triage-and-mode",
+      "title": "Phase 0: Triage (MR Context • Risk • Mode)",
+      "prompt": "Understand the MR and choose the right rigor.\n\nCapture:\n- `mrTitle`\n- `mrPurpose`\n- `ticketContext`\n- `focusAreas`\n- `changedFileCount`\n- `criticalSurfaceTouched` (true/false)\n- `reviewMode`: QUICK / STANDARD / THOROUGH\n- `riskLevel`: Low / Medium / High\n- `maxParallelism`: 0 / 3 / 5\n\nDecision guidance:\n- QUICK: very small, isolated, low-risk changes with little ambiguity\n- STANDARD: typical feature or bug-fix reviews with moderate ambiguity or moderate risk\n- THOROUGH: critical surfaces, architectural novelty, high risk, broad change sets, or strong need for independent reviewer perspectives\n\nAlso choose `reviewDocPath` for the human-facing live artifact. Default suggestion: `mr-review.md` at the project root.\n\nSet context variables:\n- `mrTitle`\n- `mrPurpose`\n- `ticketContext`\n- `focusAreas`\n- `changedFileCount`\n- `criticalSurfaceTouched`\n- `reviewMode`\n- `riskLevel`\n- `maxParallelism`\n- `reviewDocPath`\n\nAsk for confirmation only if the selected mode materially changes expectations or if the diff/source context is still missing.",
+      "requireConfirmation": true
+    },
+    {
+      "id": "phase-0b-minimum-inputs-gate",
+      "title": "Phase 0b: Minimum Inputs Gate",
+      "prompt": "If critical inputs are missing, ask only for the minimum needed to review effectively.\n\nPossible asks:\n- missing diff path or pasted diff\n- missing MR purpose or intended behavior change\n- missing ticket or requirements context when the diff alone is not enough\n- missing repo access or file paths needed to inspect surrounding code\n\nDo NOT ask for information you can discover with tools.",
+      "requireConfirmation": {
+        "or": [
+          { "var": "reviewMode", "equals": "STANDARD" },
+          { "var": "reviewMode", "equals": "THOROUGH" }
+        ]
+      }
+    },
+    {
+      "id": "phase-1-context-understanding",
+      "title": "Phase 1: Shared Context Understanding",
+      "promptBlocks": {
+        "goal": "Build the minimum complete understanding needed to review accurately.",
+        "constraints": [
+          [
+            { "kind": "ref", "refId": "wr.refs.notes_first_durability" }
+          ],
+          "Do the main context work yourself using tools.",
+          "Keep `reviewDocPath` updated for human readability, but keep execution truth in notes/context variables."
+        ],
+        "procedure": [
+          "Produce a concise MR summary and intended behavior change, changed files overview, module or subsystem neighborhood, bounded call graph / public contracts / impacted consumers where relevant, repo patterns that matter for this review, and explicit unknowns / likely blind spots.",
+          "Set context variables: `contextSummary`, `candidateFiles`, `moduleRoots`, `contextUnknownCount`, `coverageGapCount`, `authorIntentUnclear`, `retriageNeeded`.",
+          "Compute `contextUnknownCount` as unresolved technical unknowns that materially affect review quality.",
+          "Compute `coverageGapCount` as likely review angles or code areas still insufficiently understood.",
+          "Set `retriageNeeded = true` if the real risk or surface area is larger than Phase 0 suggested.",
+          "Mode-adaptive context audit: QUICK = self-check only; STANDARD = if `contextUnknownCount > 0` and delegation is available, spawn TWO WorkRail Executors SIMULTANEOUSLY running `routine-context-gathering` with focus=COMPLETENESS and focus=DEPTH, then synthesize both outputs; THOROUGH = if delegation is available, spawn the same two parallel context auditors and synthesize both outputs."
+        ],
+        "verify": [
+          "All material technical unknowns are counted in `contextUnknownCount`.",
+          "Likely review blind spots are reflected in `coverageGapCount`.",
+          "Any delegated context outputs are synthesized before proceeding."
+        ]
+      },
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-1b-retriage-after-context",
+      "title": "Phase 1b: Re-Triage After Context",
+      "runCondition": {
+        "var": "retriageNeeded",
+        "equals": true
+      },
+      "prompt": "Reassess the review mode now that the real code context is known.\n\nReview:\n- `contextUnknownCount`\n- `coverageGapCount`\n- actual systems/components involved\n- whether `criticalSurfaceTouched` is still accurate\n- whether runtime or production simulation now looks necessary\n\nDo:\n- confirm or adjust `reviewMode`\n- confirm or adjust `riskLevel`\n- confirm or adjust `maxParallelism`\n- set `needsSimulation` to true or false\n- set `retriageChanged`\n\nEscalation rules:\n- QUICK may escalate to STANDARD if `criticalSurfaceTouched = true` or `contextUnknownCount > 0`\n- STANDARD may escalate to THOROUGH if `criticalSurfaceTouched = true` and risk is High, or if multiple unresolved context gaps remain\n\nSet context variables:\n- `reviewMode`\n- `riskLevel`\n- `maxParallelism`\n- `needsSimulation`\n- `retriageChanged`",
+      "requireConfirmation": {
+        "or": [
+          { "var": "retriageChanged", "equals": true },
+          { "var": "riskLevel", "equals": "High" }
+        ]
+      }
+    },
+    {
+      "id": "phase-2-fact-packet-and-family-selection",
+      "title": "Phase 2: Freeze Fact Packet and Select Reviewer Families",
+      "prompt": "Freeze the shared factual basis that all downstream reviewer families must use, then choose the reviewer families from that same phase.\n\nCreate a neutral `reviewFactPacket` containing:\n- MR purpose and expected behavior change\n- changed files and module roots\n- key contracts, invariants, and affected consumers\n- call graph highlights or execution touchpoints\n- relevant repo patterns and exemplars\n- tests/docs expectations\n- explicit open unknowns\n\nInitialize `coverageLedger` with these domains, each marked as `checked`, `uncertain`, `not_applicable`, `contradicted`, or `needs_followup`:\n- correctness_logic\n- contracts_invariants\n- patterns_architecture\n- runtime_production_risk\n- tests_docs_rollout\n- security_performance\n\nThen perform a preliminary review from the shared fact packet and choose reviewer families.\n\nReviewer family options:\n- `correctness_invariants`\n- `patterns_architecture`\n- `runtime_production_risk`\n- `test_docs_rollout`\n- `false_positive_skeptic`\n- `missed_issue_hunter`\n\nSelection guidance:\n- QUICK: no family bundle by default; add `false_positive_skeptic` only if a supposedly easy review still feels risky or ambiguous\n- STANDARD: run 3 families by default\n- THOROUGH: run 5 families by default\n- always include `correctness_invariants` unless clearly not applicable\n- always include `test_docs_rollout` in STANDARD and THOROUGH unless clearly not applicable\n- include `runtime_production_risk` when `criticalSurfaceTouched = true` or `needsSimulation = true`\n- include `missed_issue_hunter` in THOROUGH mode\n- include `false_positive_skeptic` whenever Major/Critical findings are likely, the change is controversial, or severity inflation risk is non-trivial\n\nAnti-anchoring rule:\n- reviewer families must treat `reviewFactPacket` as primary truth\n- `recommendationHypothesis` is optional secondary context only; it must not become the frame every family simply validates\n\nCoverage ledger rules:\n- use `contradicted` when evidence materially conflicts across reviewer families and the disagreement is unresolved\n- use `needs_followup` when the domain is relevant and additional targeted work is still required\n- use `uncertain` only for bounded ambiguity where no direct contradiction exists yet\n- compute `coverageUncertainCount` as the count of coverage domains not yet safely closed: `uncertain` + `contradicted` + `needs_followup`\n\nDefault reviewer-bundle rule:\n- QUICK: `needsReviewerBundle = false` unless a trigger or risk signal clearly justifies it\n- STANDARD / THOROUGH: `needsReviewerBundle = true` by default unless the review is materially simpler than expected\n\nSet context variables:\n- `reviewFactPacket`\n- `coverageLedger`\n- `coverageUncertainCount`\n- `preliminaryFindings`\n- `recommendationHypothesis`\n- `reviewFamiliesSelected`\n- `needsReviewerBundle`",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-3-reviewer-family-bundle",
+      "title": "Phase 3: Parallel Reviewer Family Bundle",
+      "runCondition": {
+        "var": "needsReviewerBundle",
+        "equals": true
+      },
+      "promptBlocks": {
+        "goal": "Run the selected reviewer families in parallel from the same shared fact packet.",
+        "constraints": [
+          [
+            { "kind": "ref", "refId": "wr.refs.notes_first_durability" }
+          ],
+          [
+            { "kind": "ref", "refId": "wr.refs.synthesis_under_disagreement" }
+          ],
+          "Each reviewer family must use `reviewFactPacket` as primary truth.",
+          "Use `recommendationHypothesis` only as secondary comparison context.",
+          "If a family disagrees with the preliminary direction, it must say so explicitly."
+        ],
+        "procedure": [
+          "Each reviewer family must return: key findings, severity estimates, confidence level, top risks, recommendation, and what others may have missed.",
+          "Family missions: `correctness_invariants` = logic, correctness, API and invariant risks; `patterns_architecture` = pattern fit, design consistency, architectural concerns; `runtime_production_risk` = runtime behavior, production impact, performance/state-flow risk; `test_docs_rollout` = test adequacy, docs, migration, rollout, affected consumers; `false_positive_skeptic` = challenge likely overreaches, weak evidence, or severity inflation; `missed_issue_hunter` = search for an important category of issue the others may miss.",
+          "Mode-adaptive parallelism: STANDARD = spawn THREE WorkRail Executors SIMULTANEOUSLY for the selected families; THOROUGH = spawn FIVE WorkRail Executors SIMULTANEOUSLY for the selected families.",
+          "Set context variables: `familyFindingsSummary`, `familyRecommendationSpread`, `contradictionCount`, `blindSpotCount`, `falsePositiveRiskCount`, `needsSimulation`.",
+          "Compute `contradictionCount` as material disagreements across reviewer families about issue validity, severity, or final recommendation.",
+          "Increase `blindSpotCount` if the missed-issue hunter or any other family identifies uncovered review space.",
+          "Increase `falsePositiveRiskCount` when the skeptic materially weakens one or more high-severity findings."
+        ],
+        "verify": [
+          "The same fact packet was used as primary truth across reviewer families.",
+          "Contradictions, blind spots, and false-positive risks are all reflected structurally in context variables.",
+          "Parallel reviewer outputs are not treated as self-finalizing; the main agent still owns synthesis."
+        ]
+      },
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-4-contradiction-and-synthesis-loop",
+      "type": "loop",
+      "title": "Phase 4: Contradiction Resolution and Synthesis Loop",
+      "loop": {
+        "type": "while",
+        "conditionSource": {
+          "kind": "artifact_contract",
+          "contractRef": "wr.contracts.loop_control",
+          "loopId": "mr_review_synthesis_loop"
+        },
+        "maxIterations": 4
+      },
+      "body": [
+        {
+          "id": "phase-4a-targeted-follow-up",
+          "title": "Targeted Follow-Up Bundle",
+          "promptBlocks": {
+            "goal": "If contradictions or important coverage gaps remain, run only the smallest targeted follow-up work needed.",
+            "constraints": [
+              [
+                { "kind": "ref", "refId": "wr.refs.parallelize_cognition_serialize_synthesis" }
+              ],
+              "Prefer one compact targeted bundle over multiple new delegation moments.",
+              "Do not regather broad context unless a contradiction proves the original fact packet is insufficient."
+            ],
+            "procedure": [
+              "If `contradictionCount > 0`, run targeted challenge or validation aimed at the specific disagreement.",
+              "If `coverageUncertainCount > 0` or `blindSpotCount > 0`, run the smallest reviewer family or context follow-up needed to close the gap.",
+              "If `needsSimulation = true`, include `routine-execution-simulation`.",
+              "If `falsePositiveRiskCount > 0`, include `routine-hypothesis-challenge`.",
+              "If no trigger fires, do not delegate this step."
+            ],
+            "verify": [
+              "Only the smallest targeted bundle needed was run.",
+              "No broad context regather happened without an explicit contradiction-driven reason."
+            ]
+          },
+          "requireConfirmation": false
+        },
+        {
+          "id": "phase-4b-canonical-synthesis",
+          "title": "Canonical Synthesis and Coverage Update",
+      "prompt": "Synthesize all reviewer-family outputs and any targeted follow-up into one canonical review state.\n\nSynthesis decision table:\n- if 2+ reviewer families flag the same serious issue with the same severity, treat it as validated\n- if the same issue is flagged with different severities, default to the higher severity unless the lower-severity position includes specific counter-evidence\n- if one family flags an issue and others are silent, investigate it but do not automatically block unless it is clearly critical or security-sensitive\n- if one family says false positive and another says valid issue, require explicit main-agent adjudication in notes before finalization\n- if recommendation spread shows material disagreement, findings override recommendation until reconciled\n- if simulation reveals a new production risk, add a new finding and re-evaluate recommendation confidence\n\nCoverage ledger rules:\n- move a domain from `uncertain` to `checked` only when the evidence is materially adequate\n- keep a domain `uncertain` if disagreement or missing evidence still materially affects recommendation quality\n- mark `not_applicable` only when the MR genuinely does not engage that dimension\n- clear `contradicted` only when the contradiction is explicitly resolved by evidence or adjudication\n- clear `needs_followup` only when the required targeted follow-up has actually been completed or the domain is explicitly downgraded as non-material\n\nRecommendation confidence rules:\n- set `recommendationConfidenceBand = High` only if no unresolved material contradictions remain, no important coverage domains remain uncertain, false-positive risk is not material, and consensus is strong enough for the current mode\n- set `recommendationConfidenceBand = Medium` when one bounded uncertainty remains but the recommendation is still directionally justified\n- set `recommendationConfidenceBand = Low` when multiple viable interpretations remain, major contradictions are unresolved, or important coverage gaps still weaken the recommendation\n\nSet context variables:\n- `reviewFindings`\n- `criticalFindingsCount`\n- `majorFindingsCount`\n- `minorFindingsCount`\n- `nitFindingsCount`\n- `recommendation`\n- `recommendationConfidenceBand`\n- `recommendationDriftDetected`\n- `coverageLedger`\n- `coverageUncertainCount`\n- `docCompletenessConcernCount`\n\nUpdate `reviewDocPath` so the human artifact matches the canonical review state.",
+          "requireConfirmation": false
+        },
+        {
+          "id": "phase-4c-loop-decision",
+          "title": "Synthesis Loop Decision",
+          "prompt": "Decide whether the synthesis loop should continue.\n\nDecision rules:\n- if `contradictionCount > 0` → continue\n- else if `coverageUncertainCount > 0` and the uncertainty materially affects the recommendation → continue\n- else if `falsePositiveRiskCount > 0` → continue\n- else if `recommendationDriftDetected = true` → continue\n- else → stop\n\nOutput exactly:\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"loopId\": \"mr_review_synthesis_loop\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
+          "requireConfirmation": true,
+          "outputContract": {
+            "contractRef": "wr.contracts.loop_control"
+          }
+        }
+      ]
+    },
+    {
+      "id": "phase-5-final-validation",
+      "title": "Phase 5: Final Validation",
+      "promptBlocks": {
+        "goal": "Before final handoff, decide whether additional validation is still required.",
+        "constraints": [
+          [
+            { "kind": "ref", "refId": "wr.refs.adversarial_challenge_rules" }
+          ],
+          [
+            { "kind": "ref", "refId": "wr.refs.synthesis_under_disagreement" }
+          ]
+        ],
+        "procedure": [
+          "Run final validation if any of these are true: `criticalSurfaceTouched = true`, `needsSimulation = true`, `falsePositiveRiskCount > 0`, `coverageUncertainCount > 0`, `docCompletenessConcernCount > 0`, or `recommendationConfidenceBand != High`.",
+          "Mode-adaptive validation: QUICK = self-validate and optionally spawn ONE WorkRail Executor running `routine-hypothesis-challenge` if a serious uncertainty remains; STANDARD = if validation is required and delegation is available, spawn TWO WorkRail Executors SIMULTANEOUSLY running `routine-hypothesis-challenge` and either `routine-execution-simulation` or `routine-plan-analysis`; THOROUGH = if validation is required and delegation is available, spawn THREE WorkRail Executors SIMULTANEOUSLY running `routine-hypothesis-challenge`, `routine-execution-simulation` when needed, and `routine-plan-analysis`.",
+          "Compute `docCompletenessConcernCount` by counting one concern for each material packaging gap: missing rationale for any Critical or Major finding, missing ready-to-post MR comment for any Critical or Major finding, recommendation mismatch with canonical findings, still-uncertain / contradicted / needs-followup coverage domains not summarized clearly, or any missing required final section needed for actionability.",
+          "Set context variables: `validatorConsensusLevel`, `validationSummary`, `recommendationConfidenceBand`, `docCompletenessConcernCount`."
+        ],
+        "verify": [
+          "If 2+ validators still raise serious concerns, confidence is downgraded and synthesis is reopened.",
+          "If exactly one validator raises a concern, it is investigated before deciding whether to reopen anything.",
+          "If no validator can materially break the current recommendation and findings are internally consistent, proceed to handoff."
+        ]
+      },
+      "requireConfirmation": {
+        "or": [
+          { "var": "validatorConsensusLevel", "equals": "Low" },
+          { "var": "recommendationConfidenceBand", "equals": "Low" }
+        ]
+      }
+    },
+    {
+      "id": "phase-6-final-handoff",
+      "title": "Phase 6: Final Handoff",
+      "prompt": "Provide the final MR review handoff.\n\nInclude:\n- MR title and purpose\n- review mode used\n- final recommendation and confidence band\n- counts of Critical / Major / Minor / Nit findings\n- top findings with rationale\n- strongest areas of uncertainty, if any\n- summary of the coverage ledger, especially any still-uncertain domains\n- path to the full human-facing review artifact (`reviewDocPath`)\n- ready-to-post MR comments summary\n- any validation outcomes worth the human reviewer seeing\n\nRules:\n- the final recommendation assists a human reviewer; it does not replace them\n- keep `reviewDocPath` updated, but do not treat it as workflow state\n- do not post comments, approve, reject, or merge unless the user explicitly asks",
+      "requireConfirmation": true
+    }
+  ]
+}

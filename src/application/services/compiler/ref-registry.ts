@@ -54,6 +54,46 @@ const REF_CONTENT = {
     '- Use workspace-scoped queries to find related past work',
     '- Do not block on Memory failures — proceed without prior context if unavailable',
   ].join('\n'),
+
+  'wr.refs.notes_first_durability': [
+    'Durability rules (notes-first):',
+    '- Use output.notesMarkdown as the primary durable record for every step',
+    '- Keep execution truth in notes and explicit context variables, not in markdown sidecar files',
+    '- Human-facing artifacts (review docs, plans) are for readability only — they are NOT required workflow memory',
+    '- If a chat rewind occurs, the durable notes and context variables survive; sidecar files may not',
+    '- Always record key decisions, findings, and rationale in notesMarkdown before advancing',
+  ].join('\n'),
+
+  'wr.refs.synthesis_under_disagreement': [
+    'Synthesis rules when parallel outputs disagree:',
+    '- Treat disagreement as first-class work — never handwave contradictory outputs',
+    '- If 2+ parallel outputs flag the same issue at the same severity, treat it as validated',
+    '- If the same issue is flagged at different severities, default to the higher severity unless the lower-severity position includes specific counter-evidence',
+    '- If one output flags an issue and others are silent, investigate it but do not automatically block unless it is clearly critical',
+    '- If one output says false positive and another says valid issue, require explicit main-agent adjudication in notes before finalization',
+    '- If outputs show material disagreement, findings override any preliminary recommendation until the disagreement is reconciled',
+    '- Document every resolved contradiction with its resolution rationale',
+  ].join('\n'),
+
+  'wr.refs.parallelize_cognition_serialize_synthesis': [
+    'Parallelism rules:',
+    '- Parallelize independent cognition: context gathering, hypothesis generation, audit routines, and reviewer families can run simultaneously',
+    '- Serialize synthesis: merging parallel outputs, resolving contradictions, making canonical decisions, and writing final artifacts must happen sequentially by the main agent',
+    '- Never let a parallel subagent finalize or commit to a canonical answer — the main agent owns synthesis and final decisions',
+    '- Prefer one compact targeted bundle over multiple small sequential delegation moments',
+    '- When spawning parallel executors, give each a clear, non-overlapping focus area',
+  ].join('\n'),
+
+  'wr.refs.adversarial_challenge_rules': [
+    'Adversarial challenge rules:',
+    '- Actively try to break the current leading position — do not just look for confirming evidence',
+    '- For each finding or conclusion, ask: what evidence would disprove this? Is that evidence missing or present?',
+    '- If the challenge cannot materially weaken the position, the position is strengthened',
+    '- If the challenge reveals a genuine weakness, it must be recorded as a finding and the position must be updated',
+    '- Do not soften findings to avoid conflict — severity should reflect actual risk, not social comfort',
+    '- Challenge severity inflation as well as severity deflation — false positives waste as much attention as false negatives',
+    '- If 2+ independent challengers raise the same serious concern, treat it as blocking by default',
+  ].join('\n'),
 } as const satisfies Record<string, string>;
 
 type KnownRefId = keyof typeof REF_CONTENT;

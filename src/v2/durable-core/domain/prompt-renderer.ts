@@ -312,15 +312,24 @@ export function renderPendingPrompt(args: {
   readonly nodeId: NodeId;
   readonly rehydrateOnly: boolean;
 }): Result<StepMetadata, PromptRenderError> {
-  // Extract base step metadata
+  // Extract base step metadata.
+  // Fail-fast: a missing step is a structural invariant violation, not a "use a fallback" situation.
+  // If the interpreter says a step is pending but the workflow doesn't have it, that means
+  // either the workflow definition is corrupt or the step ID was mangled during normalization.
   const step = getStepById(args.workflow, args.stepId);
-  const baseTitle = step?.title ?? args.stepId;
-  const basePrompt = step?.prompt ?? `Pending step: ${args.stepId}`;
-  const requireConfirmation = Boolean(step?.requireConfirmation);
-  const functionReferences = step?.functionReferences ?? [];
+  if (!step) {
+    return err({
+      code: 'RENDER_FAILED' as const,
+      message: `Step '${args.stepId}' not found in workflow '${args.workflow.definition.id}'`,
+    });
+  }
+  const baseTitle = step.title;
+  const basePrompt = step.prompt;
+  const requireConfirmation = Boolean(step.requireConfirmation);
+  const functionReferences = step.functionReferences ?? [];
 
   // Extract output contract requirements (system-injected, not prompt-authored)
-  const outputContract = step && typeof step === 'object' && 'outputContract' in step
+  const outputContract = 'outputContract' in step
     ? (step as { outputContract?: { contractRef?: string } }).outputContract
     : undefined;
   const isExitStep = outputContract?.contractRef === LOOP_CONTROL_CONTRACT_REF;
@@ -330,7 +339,7 @@ export function renderPendingPrompt(args: {
   const loopBanner = buildLoopContextBanner({ loopPath: args.loopPath, isExitStep });
 
   // Extract validation requirements and append to prompt if present
-  const validationCriteria = step?.validationCriteria;
+  const validationCriteria = step.validationCriteria;
   const requirements = extractValidationRequirements(validationCriteria);
   const requirementsSection = requirements.length > 0
     ? `\n\n**OUTPUT REQUIREMENTS:**\n${requirements.map(r => `- ${r}`).join('\n')}`
@@ -346,7 +355,7 @@ export function renderPendingPrompt(args: {
   // This makes the enforcement visible to the agent before they submit.
   const isNotesOptional =
     outputContract !== undefined ||
-    (step !== null && step !== undefined && 'notesOptional' in step && (step as { notesOptional?: boolean }).notesOptional === true);
+    ('notesOptional' in step && (step as { notesOptional?: boolean }).notesOptional === true);
   const notesSection = isNotesOptional
     ? ''
     : '\n\n**NOTES REQUIRED (System):** You must include `output.notesMarkdown` when advancing. ' +

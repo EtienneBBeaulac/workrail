@@ -62,6 +62,24 @@ const FEATURE_DEFINITIONS: readonly FeatureDefinition[] = [
       ],
     ],
   },
+  {
+    id: 'wr.features.subagent_guidance',
+    constraints: [
+      'Use the WorkRail Executor as the only subagent model. Do not refer to or rely on named Builder, Researcher, or other identities.',
+      'The main agent owns strategy, decisions, synthesis, and final outputs. Subagents provide independent cognitive perspectives only.',
+      [
+        { kind: 'ref', refId: 'wr.refs.parallelize_cognition_serialize_synthesis' },
+      ],
+    ],
+    procedure: [
+      'When delegating to WorkRail Executors, provide each with a clear non-overlapping focus and the shared fact packet or context as primary truth.',
+      'After receiving parallel subagent outputs, synthesize them yourself — do not let any single subagent output become the canonical answer without main-agent review.',
+    ],
+    verify: [
+      'All delegated outputs were synthesized by the main agent, not adopted verbatim.',
+      'No subagent was given final decision authority over canonical findings, recommendations, or artifacts.',
+    ],
+  },
 ] as const;
 
 // ---------------------------------------------------------------------------
