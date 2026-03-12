@@ -26,6 +26,10 @@ import type { ProcessTerminator } from '../runtime/ports/process-terminator.js';
 import type { ToolContext, V2Dependencies } from './types.js';
 import { assertNever } from '../runtime/assert-never.js';
 import { unsafeTokenCodecPorts } from '../v2/durable-core/tokens/token-codec-ports.js';
+import { validateWorkflowSchema } from '../application/validation.js';
+import { normalizeV1WorkflowToPinnedSnapshot } from '../v2/read-only/v1-to-v2-shim.js';
+import type { WorkflowCompiler } from '../application/services/workflow-compiler.js';
+import type { ValidationEngine } from '../application/services/validation-engine.js';
 import { LocalWorkspaceAnchorV2 } from '../v2/infra/local/workspace-anchor/index.js';
 import { WorkspaceRootsManager } from './workspace-roots-manager.js';
 import { LocalDirectoryListingV2 } from '../v2/infra/local/directory-listing/index.js';
@@ -123,6 +127,16 @@ export async function createToolContext(): Promise<ToolContext> {
       const fsPort = container.resolve<any>(DI.V2.FileSystem);
       const directoryListing = new LocalDirectoryListingV2(fsPort);
 
+      // Construct Phase 1a validation pipeline deps (same pattern as CLI and validate-workflow-json)
+      const validationEngine = container.resolve<ValidationEngine>(DI.Infra.ValidationEngine);
+      const compiler = container.resolve<WorkflowCompiler>(DI.Services.WorkflowCompiler);
+      const validationPipelineDeps = {
+        schemaValidate: validateWorkflowSchema,
+        structuralValidate: validationEngine.validateWorkflowStructureOnly.bind(validationEngine),
+        compiler,
+        normalizeToExecutable: normalizeV1WorkflowToPinnedSnapshot,
+      };
+
       v2 = {
         gate,
         sessionStore,
@@ -132,6 +146,7 @@ export async function createToolContext(): Promise<ToolContext> {
         crypto,
         idFactory,
         tokenCodecPorts,
+        validationPipelineDeps,
         // resolvedRootUris starts empty; overridden per-request at the CallTool boundary
         // with a snapshot of the current MCP client roots (see startServer).
         resolvedRootUris: [],

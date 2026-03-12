@@ -1,3 +1,4 @@
+import { createTestValidationPipelineDeps } from "../../helpers/v2-test-helpers.js";
 import 'reflect-metadata';
 import { describe, it, expect, afterEach } from 'vitest';
 import * as os from 'os';
@@ -70,7 +71,7 @@ async function mkCtxWithWorkflow(workflowId: string, definition: any): Promise<T
     featureFlags: null as any,
     sessionManager: null,
     httpServer: null,
-    v2: { gate, sessionStore, snapshotStore, pinnedStore, sha256, crypto, idFactory, tokenCodecPorts, sessionEventLogStore: sessionStore },
+    v2: { gate, sessionStore, snapshotStore, pinnedStore, sha256, crypto, idFactory, tokenCodecPorts, sessionEventLogStore: sessionStore, validationPipelineDeps: createTestValidationPipelineDeps() },
   };
 }
 

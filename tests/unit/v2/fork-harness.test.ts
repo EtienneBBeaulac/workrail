@@ -1,3 +1,4 @@
+import { createTestValidationPipelineDeps } from "../../helpers/v2-test-helpers.js";
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
@@ -83,7 +84,7 @@ async function createV2Context(): Promise<ToolContext> {
     featureFlags,
     sessionManager: null,
     httpServer: null,
-    v2: { gate, sessionStore, snapshotStore, pinnedStore, sha256, crypto, tokenCodecPorts, idFactory },
+    v2: { gate, sessionStore, snapshotStore, pinnedStore, sha256, crypto, tokenCodecPorts, idFactory, validationPipelineDeps: createTestValidationPipelineDeps() },
   };
 }
 

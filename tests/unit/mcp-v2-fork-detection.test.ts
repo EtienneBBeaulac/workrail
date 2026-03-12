@@ -1,3 +1,4 @@
+import { createTestValidationPipelineDeps } from "../helpers/v2-test-helpers.js";
 import { describe, it, expect } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
@@ -87,6 +88,7 @@ async function mkCtxWithWorkflow(workflowId: string, dataDir: string): Promise<T
       sha256: sha256V2,
       crypto: cryptoV2,
       tokenCodecPorts,
+    validationPipelineDeps: createTestValidationPipelineDeps(),
       idFactory: idFactoryV2,
     },
   };

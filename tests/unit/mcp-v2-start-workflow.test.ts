@@ -1,3 +1,4 @@
+import { createTestValidationPipelineDeps } from '../helpers/v2-test-helpers.js';
 import { describe, expect, it } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
@@ -94,7 +95,8 @@ async function mkCtxWithWorkflow(workflowId: string): Promise<ToolContext> {
       sha256,
       crypto,
       idFactory,
-      tokenCodecPorts
+      tokenCodecPorts,
+      validationPipelineDeps: createTestValidationPipelineDeps(),
     },
   };
 }
@@ -153,7 +155,7 @@ async function mkCtxWithInvalidWorkflow(workflowId: string): Promise<ToolContext
     featureFlags: null as any,
     sessionManager: null,
     httpServer: null,
-    v2: { gate, sessionStore, snapshotStore, pinnedStore, sha256, crypto, idFactory, tokenCodecPorts },
+    v2: { gate, sessionStore, snapshotStore, pinnedStore, sha256, crypto, idFactory, tokenCodecPorts, validationPipelineDeps: createTestValidationPipelineDeps() },
   };
 }
 

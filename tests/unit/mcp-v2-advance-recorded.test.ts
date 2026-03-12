@@ -1,3 +1,4 @@
+import { createTestValidationPipelineDeps } from "../helpers/v2-test-helpers.js";
 import { describe, expect, it } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
@@ -66,6 +67,7 @@ async function mkV2Deps(dataDir: LocalDataDirV2): Promise<V2Dependencies> {
     sha256,
     crypto,
     tokenCodecPorts,
+    validationPipelineDeps: createTestValidationPipelineDeps(),
     idFactory,
     // Test convenience (aliases):
     sessionGate,
