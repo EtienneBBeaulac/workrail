@@ -22,6 +22,12 @@ import { Bech32mAdapterV2 } from '../../src/v2/infra/local/bech32m/index.js';
 import { signTokenV1Binary, unsafeTokenCodecPorts } from '../../src/v2/durable-core/tokens/index.js';
 import type { V2Dependencies } from '../../src/mcp/types.js';
 import type { KeyringV1 } from '../../src/v2/ports/keyring.port.js';
+import { validateWorkflowSchema } from '../../src/application/validation.js';
+import { normalizeV1WorkflowToPinnedSnapshot } from '../../src/v2/read-only/v1-to-v2-shim.js';
+import { WorkflowCompiler } from '../../src/application/services/workflow-compiler.js';
+import { ValidationEngine } from '../../src/application/services/validation-engine.js';
+import { EnhancedLoopValidator } from '../../src/application/services/enhanced-loop-validator.js';
+import type { ValidationPipelineDepsPhase1a } from '../../src/application/services/workflow-validation-pipeline.js';
 
 /**
  * Create a temporary data directory for v2 tests.
@@ -88,6 +94,22 @@ export function dummyToolContext(): ToolContext {
 }
 
 /**
+ * Create Phase 1a validation pipeline deps for tests.
+ * Same construction pattern as CLI and server.ts composition root.
+ */
+export function createTestValidationPipelineDeps(): ValidationPipelineDepsPhase1a {
+  const loopValidator = new EnhancedLoopValidator();
+  const validationEngine = new ValidationEngine(loopValidator);
+  const compiler = new WorkflowCompiler();
+  return {
+    schemaValidate: validateWorkflowSchema,
+    structuralValidate: validationEngine.validateWorkflowStructureOnly.bind(validationEngine),
+    compiler,
+    normalizeToExecutable: normalizeV1WorkflowToPinnedSnapshot,
+  };
+}
+
+/**
  * Create complete V2Dependencies with all adapters initialized.
  * Useful for integration-style unit tests that need real implementations.
  * 
@@ -138,6 +160,7 @@ export async function createV2Dependencies(dataDir: LocalDataDirV2): Promise<V2D
     crypto,
     idFactory,
     tokenCodecPorts,
+    validationPipelineDeps: createTestValidationPipelineDeps(),
   };
 }
 

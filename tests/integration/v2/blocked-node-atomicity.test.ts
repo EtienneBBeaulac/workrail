@@ -1,3 +1,4 @@
+import { createTestValidationPipelineDeps } from "../../helpers/v2-test-helpers.js";
 import 'reflect-metadata';
 import { describe, it, expect, afterEach } from 'vitest';
 import * as os from 'os';
@@ -91,6 +92,7 @@ async function mkCtxWithWorkflow(workflowId: string, definition: any): Promise<T
       crypto,
       idFactory,
       tokenCodecPorts,
+    validationPipelineDeps: createTestValidationPipelineDeps(),
       sessionEventLogStore: sessionStore,
     },
   };
@@ -114,12 +116,12 @@ describe('Blocked node atomicity (validation + node + edge atomic)', () => {
         version: '1.0.0',
         steps: [
           {
-            id: 'step_validated',
+            id: 'step-validated',
             title: 'Validated step',
             prompt: 'Return "result".',
             validationCriteria: [{ type: 'contains', value: 'result', message: 'Must contain result' }],
           },
-          { id: 'step_next', title: 'Next', prompt: 'Next' },
+          { id: 'step-next', title: 'Next', prompt: 'Next' },
         ],
       });
 
@@ -187,12 +189,12 @@ describe('Blocked node atomicity (validation + node + edge atomic)', () => {
         version: '1.0.0',
         steps: [
           {
-            id: 'step_val',
+            id: 'step-val',
             title: 'Val',
             prompt: 'Return "done".',
             validationCriteria: [{ type: 'contains', value: 'done', message: 'Must contain done' }],
           },
-          { id: 'step_next', title: 'Next', prompt: 'Next' },
+          { id: 'step-next', title: 'Next', prompt: 'Next' },
         ],
       });
 

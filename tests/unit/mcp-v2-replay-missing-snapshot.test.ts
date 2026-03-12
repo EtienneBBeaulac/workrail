@@ -1,3 +1,4 @@
+import { createTestValidationPipelineDeps } from "../helpers/v2-test-helpers.js";
 import { describe, expect, it } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
@@ -250,6 +251,7 @@ describe('v2 replay fail-closed: missing snapshot', () => {
         sha256,
         crypto,
         tokenCodecPorts,
+    validationPipelineDeps: createTestValidationPipelineDeps(),
         hmac,
         base64url: localBase64url,
         base32,

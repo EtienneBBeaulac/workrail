@@ -1,3 +1,4 @@
+import { createTestValidationPipelineDeps } from "../../helpers/v2-test-helpers.js";
 import 'reflect-metadata';
 import { describe, it, expect, afterEach } from 'vitest';
 import * as os from 'os';
@@ -91,6 +92,7 @@ async function mkCtxWithWorkflow(workflowId: string, definition: any): Promise<T
       crypto,
       idFactory,
       tokenCodecPorts,
+    validationPipelineDeps: createTestValidationPipelineDeps(),
       sessionEventLogStore: sessionStore,
     },
   };
@@ -114,14 +116,14 @@ describe('Blocked node concurrent retries (idempotency + race safety)', () => {
         version: '1.0.0',
         steps: [
           {
-            id: 'step_validated',
+            id: 'step-validated',
             title: 'Validated step',
             prompt: 'Return output with "status" keyword.',
             validationCriteria: [
               { type: 'contains', value: 'status', message: 'Must contain status' },
             ],
           },
-          { id: 'step_next', title: 'Next', prompt: 'Next' },
+          { id: 'step-next', title: 'Next', prompt: 'Next' },
         ],
       });
 
@@ -208,12 +210,12 @@ describe('Blocked node concurrent retries (idempotency + race safety)', () => {
         version: '1.0.0',
         steps: [
           {
-            id: 'step_val',
+            id: 'step-val',
             title: 'Validated',
             prompt: 'Return "ok".',
             validationCriteria: [{ type: 'contains', value: 'ok', message: 'Must contain ok' }],
           },
-          { id: 'step_next', title: 'Next', prompt: 'Next' },
+          { id: 'step-next', title: 'Next', prompt: 'Next' },
         ],
       });
 
@@ -274,14 +276,14 @@ describe('Blocked node concurrent retries (idempotency + race safety)', () => {
         version: '1.0.0',
         steps: [
           {
-            id: 'step_validated',
+            id: 'step-validated',
             title: 'Validated step',
             prompt: 'Return output with "status" keyword.',
             validationCriteria: [
               { type: 'contains', value: 'status', message: 'Must contain status' },
             ],
           },
-          { id: 'step_next', title: 'Next', prompt: 'Next' },
+          { id: 'step-next', title: 'Next', prompt: 'Next' },
         ],
       });
 

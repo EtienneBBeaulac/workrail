@@ -19,7 +19,7 @@ import { deriveWorkflowHashRef } from '../../../v2/durable-core/ids/workflow-has
 import type { Sha256PortV2 } from '../../../v2/ports/sha256.port.js';
 import type { TokenCodecPorts } from '../../../v2/durable-core/tokens/token-codec-ports.js';
 import { ResultAsync as RA, okAsync, errAsync as neErrorAsync } from 'neverthrow';
-import { normalizeV1WorkflowToPinnedSnapshot } from '../../../v2/read-only/v1-to-v2-shim.js';
+import { validateWorkflowPhase1a, type ValidationPipelineDepsPhase1a } from '../../../application/services/workflow-validation-pipeline.js';
 import { workflowHashForCompiledSnapshot } from '../../../v2/durable-core/canonical/hashing.js';
 import type { JsonValue } from '../../../v2/durable-core/canonical/json-types.js';
 import { anchorsToObservations, type ObservationEventData } from '../../../v2/durable-core/domain/observation-builder.js';
@@ -47,13 +47,14 @@ export function loadAndPinWorkflow(args: {
   readonly workflowService: import('../../../application/services/workflow-service.js').WorkflowService;
   readonly crypto: Sha256PortV2;
   readonly pinnedStore: import('../../../v2/ports/pinned-workflow-store.port.js').PinnedWorkflowStorePortV2;
+  readonly validationPipelineDeps: ValidationPipelineDepsPhase1a;
 }): RA<{
   readonly workflow: import('../../../types/workflow.js').Workflow;
   readonly workflowHash: WorkflowHash;
   readonly pinnedWorkflow: ReturnType<typeof createWorkflow>;
   readonly firstStep: { readonly id: string };
 }, StartWorkflowError> {
-  const { workflowId, workflowService, crypto, pinnedStore } = args;
+  const { workflowId, workflowService, crypto, pinnedStore, validationPipelineDeps } = args;
 
   return RA.fromPromise(workflowService.getWorkflowById(workflowId), (e) => ({
     kind: 'precondition_failed' as const,
@@ -70,17 +71,29 @@ export function loadAndPinWorkflow(args: {
       return okAsync({ workflow });
     })
     .andThen(({ workflow }) => {
-      // Pin the full v1 workflow definition for determinism.
-      // Strict: if normalization fails (e.g. prompt+promptBlocks XOR, bad templateCall),
-      // reject before session creation — never pin an invalid executable snapshot.
-      const normalizeResult = normalizeV1WorkflowToPinnedSnapshot(workflow);
-      if (normalizeResult.isErr()) {
+      // Run the Phase 1a validation pipeline before creating any durable state.
+      // Phases: schema → structural → v1 compilation → normalization.
+      // This replaces the previous normalize-only call with full validation.
+      const pipelineOutcome = validateWorkflowPhase1a(workflow, validationPipelineDeps);
+      if (pipelineOutcome.kind !== 'phase1a_valid') {
+        // Map pipeline failure variants to StartWorkflowError
+        const message = pipelineOutcome.kind === 'schema_failed'
+          ? `Schema validation failed: ${pipelineOutcome.errors.map(e => e.message ?? e.instancePath).join('; ')}`
+          : pipelineOutcome.kind === 'structural_failed'
+            ? `Structural validation failed: ${pipelineOutcome.issues.join('; ')}`
+            : pipelineOutcome.kind === 'v1_compilation_failed'
+              ? `Compilation failed: ${pipelineOutcome.cause.message}`
+              : pipelineOutcome.kind === 'normalization_failed'
+                ? `Normalization failed: ${pipelineOutcome.cause.message}`
+                : pipelineOutcome.kind === 'executable_compilation_failed'
+                  ? `Executable compilation failed: ${pipelineOutcome.cause.message}`
+                  : 'Unknown validation failure';
         return neErrorAsync({
           kind: 'workflow_compile_failed' as const,
-          message: normalizeResult.error.message,
+          message,
         });
       }
-      const compiled = normalizeResult.value;
+      const compiled = pipelineOutcome.snapshot;
       const workflowHashRes = workflowHashForCompiledSnapshot(compiled as unknown as JsonValue, crypto);
       if (workflowHashRes.isErr()) {
         return neErrorAsync({ kind: 'hash_computation_failed' as const, message: workflowHashRes.error.message });
@@ -316,14 +329,15 @@ export function executeStartWorkflow(
   input: import('../../v2/tools.js').V2StartWorkflowInput,
   ctx: V2ToolContext
 ): RA<z.infer<typeof V2StartWorkflowOutputSchema>, StartWorkflowError> {
-  const { gate, sessionStore, snapshotStore, pinnedStore, crypto, tokenCodecPorts, idFactory } = ctx.v2;
+  const { gate, sessionStore, snapshotStore, pinnedStore, crypto, tokenCodecPorts, idFactory, validationPipelineDeps } = ctx.v2;
 
-  // 1. Load and pin workflow
+  // 1. Load, validate (Phase 1a pipeline), and pin workflow
   return loadAndPinWorkflow({
     workflowId: input.workflowId,
     workflowService: ctx.workflowService,
     crypto,
     pinnedStore,
+    validationPipelineDeps,
   })
     .andThen(({ workflow, firstStep, workflowHash, pinnedWorkflow }) => {
       // 2. Resolve workspace anchors for observation events (graceful: empty on failure).

@@ -1,3 +1,4 @@
+import { createTestValidationPipelineDeps } from '../../helpers/v2-test-helpers.js';
 import 'reflect-metadata';
 import { describe, it, expect, afterEach } from 'vitest';
 import * as os from 'os';
@@ -91,6 +92,7 @@ async function mkCtxWithWorkflow(workflowId: string, definition: any): Promise<T
       crypto,
       idFactory,
       tokenCodecPorts,
+      validationPipelineDeps: createTestValidationPipelineDeps(),
       sessionEventLogStore: sessionStore,
     },
   };
@@ -114,14 +116,14 @@ describe('Blocked node retry flow (end-to-end)', () => {
         version: '1.0.0',
         steps: [
           {
-            id: 'step_with_validation',
+            id: 'step-with-validation',
             title: 'Step with validation',
             prompt: 'Return JSON with status field.',
             validationCriteria: [
               { type: 'contains', value: 'status', message: 'Output must contain "status"' },
             ],
           },
-          { id: 'step_next', title: 'Next step', prompt: 'Next step prompt' },
+          { id: 'step-next', title: 'Next step', prompt: 'Next step prompt' },
         ],
       });
 
@@ -221,7 +223,7 @@ describe('Blocked node retry flow (end-to-end)', () => {
         version: '1.0.0',
         steps: [
           {
-            id: 'step_bad_schema',
+            id: 'step-bad-schema',
             title: 'Bad schema step',
             prompt: 'Return JSON.',
             validationCriteria: [
@@ -232,7 +234,7 @@ describe('Blocked node retry flow (end-to-end)', () => {
               },
             ],
           },
-          { id: 'step_next', title: 'Next', prompt: 'Next' },
+          { id: 'step-next', title: 'Next', prompt: 'Next' },
         ],
       });
 
@@ -298,7 +300,7 @@ describe('Blocked node retry flow (end-to-end)', () => {
         version: '1.0.0',
         steps: [
           {
-            id: 'step_strict',
+            id: 'step-strict',
             title: 'Strict validation',
             prompt: 'Return JSON with both status and code.',
             validationCriteria: [
@@ -306,7 +308,7 @@ describe('Blocked node retry flow (end-to-end)', () => {
               { type: 'contains', value: 'code', message: 'Must contain code' },
             ],
           },
-          { id: 'step_next', title: 'Next', prompt: 'Next' },
+          { id: 'step-next', title: 'Next', prompt: 'Next' },
         ],
       });
 

@@ -28,6 +28,7 @@ import type { WorkspaceContextResolverPortV2 } from '../v2/ports/workspace-ancho
 import type { DataDirPortV2 } from '../v2/ports/data-dir.port.js';
 import type { DirectoryListingPortV2 } from '../v2/ports/directory-listing.port.js';
 import type { SessionSummaryProviderPortV2 } from '../v2/ports/session-summary-provider.port.js';
+import type { ValidationPipelineDepsPhase1a } from '../application/services/workflow-validation-pipeline.js';
 
 // Note: JsonValue type is imported from output-schemas.js above
 
@@ -209,6 +210,10 @@ export interface V2Dependencies {
 
   // Grouped token dependencies (always complete)
   readonly tokenCodecPorts: TokenCodecPorts;
+
+  // Validation pipeline deps for Phase 1a gate at start_workflow boundary.
+  // Runs schema + structural + v1 compilation + normalization before session creation.
+  readonly validationPipelineDeps: ValidationPipelineDepsPhase1a;
 
   // Per-request workspace root URIs snapshotted from MCP client roots at the CallTool boundary.
   // Absent or empty when the client does not support the MCP roots protocol.

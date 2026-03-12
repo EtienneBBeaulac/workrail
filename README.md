@@ -31,8 +31,8 @@ to conclusions.
 WorkRail replaces the human effort of guiding an agent step-by-step.
 
 Instead of one system prompt that fades over time, WorkRail drip-feeds instructions through
-the [Model Context Protocol](https://modelcontextprotocol.org). The agent calls `workflow_next`,
-gets ONE step, completes it, calls again. Future steps stay hidden until previous ones are done.
+the [Model Context Protocol](https://modelcontextprotocol.org). The agent calls `start_workflow`,
+gets the first step, completes it, calls `continue_workflow`. Future steps stay hidden until previous ones are done.
 
 **The agent can't skip to implementation because it doesn't know those steps exist yet.**
 
@@ -44,7 +44,7 @@ You                      Agent                     WorkRail
  │  "Fix the auth bug"     │                          │
  │────────────────────────>│                          │
  │                         │                          │
- │                         │  workflow_next()         │
+ │                         │  start_workflow()        │
  │                         │─────────────────────────>│
  │                         │                          │
  │                         │   Step 1: Understand     │
@@ -55,7 +55,7 @@ You                      Agent                     WorkRail
  │    see exactly?"        │                          │
  │<────────────────────────│                          │
  │                         │                          │
- │         ...             │  workflow_next()         │
+ │         ...             │  continue_workflow()     │
  │                         │─────────────────────────>│
  │                         │                          │
  │                         │   Step 2: Plan your      │
@@ -81,21 +81,21 @@ Agent: "I see the issue! In auth.js line 42, there's a null check that
 You:   "There's a bug in the auth flow"
 
 Agent: "I'll use the bug-investigation workflow."
-        → workflow_next()
+        → start_workflow()
        
        Step 1: Investigation Setup
        "Before I investigate, I need to understand the problem.
         What exactly happens when it fails? Can you share the error?"
        
        [Documents bug, reproduction steps, environment]
-        → workflow_next()
+        → continue_workflow()
        
        Step 2: Plan Investigation
        "I'll trace execution from login through the auth middleware.
         Key areas: token validation, session lookup, error handling."
        
        [Creates investigation plan before touching code]
-        → workflow_next()
+        → continue_workflow()
        
        Step 3: Form Hypotheses
        "Based on my analysis, three possible causes:
@@ -164,13 +164,13 @@ The agent will find the workflow, start at step 1, and proceed systematically.
 
 ## Included Workflows
 
-20+ workflows included for development, debugging, review, documentation, and more:
+30+ workflows included for development, debugging, review, documentation, and more:
 
 | Workflow | When to Use |
 |----------|-------------|
-| `coding-task-workflow-with-loops` | Feature development with analysis, planning, and review |
-| `bug-investigation` | Systematic debugging with hypothesis testing |
-| `mr-review-workflow` | Code review with architecture and security checks |
+| `coding-task-workflow-agentic` | Feature development with notes-first durability and audit loops |
+| `bug-investigation-agentic` | Systematic debugging with evidence-based analysis |
+| `mr-review-workflow-agentic` | Code review with parallel reviewer families |
 | `exploration-workflow` | Understanding an unfamiliar codebase |
 | `document-creation-workflow` | Technical documentation with structure |
 

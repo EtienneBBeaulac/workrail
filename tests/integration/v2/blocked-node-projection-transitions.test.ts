@@ -1,3 +1,4 @@
+import { createTestValidationPipelineDeps } from "../../helpers/v2-test-helpers.js";
 import 'reflect-metadata';
 import { describe, it, expect, afterEach } from 'vitest';
 import * as os from 'os';
@@ -93,6 +94,7 @@ async function mkCtxWithWorkflow(workflowId: string, definition: any): Promise<T
       crypto,
       idFactory,
       tokenCodecPorts,
+    validationPipelineDeps: createTestValidationPipelineDeps(),
       sessionEventLogStore: sessionStore,
     },
   };
@@ -189,12 +191,12 @@ describe('Blocked node projection consistency (status transitions)', () => {
         version: '1.0.0',
         steps: [
           {
-            id: 'step_a',
+            id: 'step-a',
             title: 'Step A',
             prompt: 'Return "ok".',
             validationCriteria: [{ type: 'contains', value: 'ok', message: 'Must contain ok' }],
           },
-          { id: 'step_b', title: 'Step B', prompt: 'Step B' },
+          { id: 'step-b', title: 'Step B', prompt: 'Step B' },
         ],
       });
 

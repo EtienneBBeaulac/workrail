@@ -47,10 +47,10 @@ If you MUST whitelist tools, you must explicitly add the WorkRail suite:
       "tools": [
         "read_file", 
         "grep",
-        "workflow_list",
-        "workflow_get",
-        "workflow_next",
-        "workflow_validate"
+        "list_workflows",
+        "start_workflow",
+        "continue_workflow",
+        "checkpoint_workflow"
       ]
     }
   }
@@ -223,7 +223,7 @@ Each executor works independently, exploring different solution spaces.
 
 **Fix:** Either:
 - Remove the `tools` field entirely from the YAML frontmatter (use inheritance)
-- Or add WorkRail tools to the whitelist: `workflow_list`, `workflow_get`, `workflow_next`
+- Or add WorkRail tools to the whitelist: `list_workflows`, `start_workflow`, `continue_workflow`, `checkpoint_workflow`
 
 The provided `workrail-executor.md` uses inheritance (no `tools` field), so this shouldn't happen unless you modified it.
 
