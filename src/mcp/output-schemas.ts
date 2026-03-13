@@ -103,7 +103,29 @@ export const V2PendingStepSchema = z.object({
   stepId: z.string().min(1),
   title: z.string().min(1),
   prompt: z.string().min(1),
+  agentRole: z.string().min(1).optional(),
 });
+
+export type V2PendingStep = z.infer<typeof V2PendingStepSchema>;
+
+/**
+ * Single construction point for pending step payloads.
+ * Prevents field-list drift across the 5+ call sites that build pending steps.
+ */
+export function toPendingStep(meta: {
+  readonly stepId: string;
+  readonly title: string;
+  readonly prompt: string;
+  readonly agentRole?: string;
+} | null): V2PendingStep | null {
+  if (!meta) return null;
+  return {
+    stepId: meta.stepId,
+    title: meta.title,
+    prompt: meta.prompt,
+    ...(meta.agentRole ? { agentRole: meta.agentRole } : {}),
+  };
+}
 
 export const V2PreferencesSchema = z.object({
   autonomy: z.enum(['guided', 'full_auto_stop_on_user_deps', 'full_auto_never_stop']),

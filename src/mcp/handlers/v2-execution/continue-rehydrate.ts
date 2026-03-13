@@ -1,5 +1,5 @@
 import type { V2ContinueWorkflowInput } from '../../v2/tools.js';
-import { V2ContinueWorkflowOutputSchema } from '../../output-schemas.js';
+import { V2ContinueWorkflowOutputSchema, toPendingStep } from '../../output-schemas.js';
 import { deriveIsComplete, derivePendingStep } from '../../../v2/durable-core/projections/snapshot-state.js';
 import { createWorkflow } from '../../../types/workflow.js';
 import type { DomainEventV1 } from '../../../v2/durable-core/schemas/session/index.js';
@@ -182,7 +182,7 @@ export function handleRehydrateIntent(args: {
             ackToken: ackTokenRes.value,
             checkpointToken: checkpointTokenRes.value,
             isComplete,
-            pending: { stepId: meta.stepId, title: meta.title, prompt: meta.prompt },
+            pending: toPendingStep(meta),
             preferences,
             nextIntent,
             nextCall: buildNextCall({ stateToken: input.stateToken, ackToken: ackTokenRes.value, isComplete, pending: meta }),

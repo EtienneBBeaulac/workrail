@@ -1,4 +1,4 @@
-import { V2ContinueWorkflowOutputSchema } from '../../output-schemas.js';
+import { V2ContinueWorkflowOutputSchema, toPendingStep } from '../../output-schemas.js';
 import { deriveIsComplete, derivePendingStep } from '../../../v2/durable-core/projections/snapshot-state.js';
 import type { ExecutionSnapshotFileV1 } from '../../../v2/durable-core/schemas/execution-snapshot/index.js';
 import {
@@ -88,7 +88,7 @@ export function buildBlockedReplayResponse(args: {
     ackToken: inputAckToken,
     checkpointToken: replayCheckpointTokenRes.isOk() ? replayCheckpointTokenRes.value : undefined,
     isComplete: isCompleteNow,
-    pending: metaOrNull ? { stepId: metaOrNull.stepId, title: metaOrNull.title, prompt: metaOrNull.prompt } : null,
+    pending: toPendingStep(metaOrNull),
     preferences,
     nextIntent,
     nextCall: buildNextCall({ stateToken: inputStateToken, ackToken: inputAckToken, isComplete: isCompleteNow, pending: metaOrNull }),
@@ -210,7 +210,7 @@ export function buildAdvancedReplayResponse(args: {
         ackToken: pending ? nextAckTokenRes.value : undefined,
         checkpointToken: pending ? nextCheckpointTokenRes.value : undefined,
         isComplete,
-        pending: blockedMeta ? { stepId: blockedMeta.stepId, title: blockedMeta.title, prompt: blockedMeta.prompt } : null,
+        pending: toPendingStep(blockedMeta),
         preferences,
         nextIntent,
         nextCall: buildNextCall({ stateToken: nextStateTokenRes.value, ackToken: pending ? nextAckTokenRes.value : undefined, isComplete, pending: blockedMeta, retryable, retryAckToken: retryAckTokenRes.value }),
@@ -250,7 +250,7 @@ export function buildAdvancedReplayResponse(args: {
       ackToken: pending ? nextAckTokenRes.value : undefined,
       checkpointToken: pending ? nextCheckpointTokenRes.value : undefined,
       isComplete,
-      pending: okMeta ? { stepId: okMeta.stepId, title: okMeta.title, prompt: okMeta.prompt } : null,
+      pending: toPendingStep(okMeta),
       preferences,
       nextIntent,
       nextCall: buildNextCall({ stateToken: nextStateTokenRes.value, ackToken: pending ? nextAckTokenRes.value : undefined, isComplete, pending: okMeta }),

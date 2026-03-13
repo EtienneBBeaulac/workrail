@@ -1,5 +1,5 @@
 import type { V2ToolContext } from '../../types.js';
-import { V2StartWorkflowOutputSchema } from '../../output-schemas.js';
+import { V2StartWorkflowOutputSchema, toPendingStep } from '../../output-schemas.js';
 import { deriveIsComplete, derivePendingStep } from '../../../v2/durable-core/projections/snapshot-state.js';
 import type { ExecutionSnapshotFileV1 } from '../../../v2/durable-core/schemas/execution-snapshot/index.js';
 import { asDelimiterSafeIdV1 } from '../../../v2/durable-core/schemas/execution-snapshot/step-instance-key.js';
@@ -456,7 +456,7 @@ export function executeStartWorkflow(
         }
 
         const meta = metaResult.value;
-        const pending = { stepId: meta.stepId, title: meta.title, prompt: meta.prompt };
+        const pending = toPendingStep(meta);
         const preferences = defaultPreferences;
         const nextIntent = deriveNextIntent({ rehydrateOnly: false, isComplete: false, pending: meta });
 
