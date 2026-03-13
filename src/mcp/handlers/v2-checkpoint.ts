@@ -31,7 +31,7 @@ import { EVENT_KIND } from '../../v2/durable-core/constants.js';
 
 type CheckpointOutput = z.infer<typeof V2CheckpointWorkflowOutputSchema>;
 
-type CheckpointError =
+export type CheckpointError =
   | { readonly kind: 'precondition_failed'; readonly message: string }
   | { readonly kind: 'token_signing_failed'; readonly cause: unknown }
   | { readonly kind: 'validation_failed'; readonly failure: ToolFailure }
@@ -118,7 +118,7 @@ export async function handleV2CheckpointWorkflow(
 // Core execution
 // ---------------------------------------------------------------------------
 
-function executeCheckpoint(
+export function executeCheckpoint(
   input: V2CheckpointWorkflowInput,
   ctx: V2ToolContext,
 ): RA<CheckpointOutput, CheckpointError> {

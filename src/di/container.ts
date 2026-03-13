@@ -78,6 +78,7 @@ function detectRuntimeMode(): RuntimeMode {
 function toProcessLifecyclePolicy(mode: RuntimeMode): ProcessLifecyclePolicy {
   switch (mode.kind) {
     case 'test':
+    case 'library':
       return { kind: 'no_signal_handlers' };
     case 'cli':
     case 'rpc':
@@ -107,7 +108,7 @@ function registerRuntime(options: ContainerInitOptions = {}): void {
   container.register<ShutdownEvents>(DI.Runtime.ShutdownEvents, { useValue: new InMemoryShutdownEvents() });
 
   const terminator: ProcessTerminator =
-    mode.kind === 'test' ? new ThrowingProcessTerminator() : new NodeProcessTerminator();
+    (mode.kind === 'test' || mode.kind === 'library') ? new ThrowingProcessTerminator() : new NodeProcessTerminator();
   container.register<ProcessTerminator>(DI.Runtime.ProcessTerminator, { useValue: terminator });
 }
 

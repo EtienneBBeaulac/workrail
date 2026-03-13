@@ -104,7 +104,7 @@ export async function handleV2ContinueWorkflow(
   );
 }
 
-function executeContinueWorkflow(
+export function executeContinueWorkflow(
   input: V2ContinueWorkflowInput,
   ctx: V2ToolContext
 ): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, ContinueWorkflowError> {
