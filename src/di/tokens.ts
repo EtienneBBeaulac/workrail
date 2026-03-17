@@ -87,6 +87,9 @@ export const DI = {
     PinnedWorkflowStore: Symbol('V2.PinnedWorkflowStore'),
     SessionLock: Symbol('V2.SessionLock'),
     
+    // Token alias store (Level 2: global JSONL index for v2 short token resolution)
+    TokenAliasStore: Symbol('V2.TokenAliasStore'),
+
     // Orchestration (Level 3: depends on stores)
     ExecutionGate: Symbol('V2.ExecutionGate'),
   },

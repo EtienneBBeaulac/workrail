@@ -27,7 +27,9 @@ import { NodeTimeClockV2 } from '../../src/v2/infra/local/time-clock/index.js';
 import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
 import { Bech32mAdapterV2 } from '../../src/v2/infra/local/bech32m/index.js';
 import { Base32AdapterV2 } from '../../src/v2/infra/local/base32/index.js';
-import { parseTokenV1Binary, unsafeTokenCodecPorts } from '../../src/v2/durable-core/tokens/index.js';
+import { unsafeTokenCodecPorts } from '../../src/v2/durable-core/tokens/index.js';
+import { parseShortTokenNative } from '../../src/v2/durable-core/tokens/short-token.js';
+import { InMemoryTokenAliasStoreV2 } from '../../src/v2/infra/in-memory/token-alias-store/index.js';
 
 async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-fork-'));
@@ -87,8 +89,10 @@ async function mkCtxWithWorkflow(workflowId: string, dataDir: string): Promise<T
       pinnedStore: pinnedStoreV2,
       sha256: sha256V2,
       crypto: cryptoV2,
+      entropy: entropyV2,
       tokenCodecPorts,
-    validationPipelineDeps: createTestValidationPipelineDeps(),
+      tokenAliasStore: new InMemoryTokenAliasStoreV2(),
+      validationPipelineDeps: createTestValidationPipelineDeps(),
       idFactory: idFactoryV2,
     },
   };
@@ -108,7 +112,7 @@ describe('v2 fork detection (Phase 5)', () => {
       expect(start.type).toBe('success');
       if (start.type !== 'success') return;
 
-      const first = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: start.data.stateToken, ackToken: start.data.ackToken, output: { notesMarkdown: 'Step 1 done.' } } as any, ctx);
+      const first = await handleV2ContinueWorkflow({ continueToken: start.data.continueToken, output: { notesMarkdown: 'Step 1 done.' } } as any, ctx);
       expect(first.type).toBe('success');
       if (first.type !== 'success') return;
       expect(first.data.kind).toBe('ok');
@@ -116,13 +120,13 @@ describe('v2 fork detection (Phase 5)', () => {
 
       // To simulate a rewind/fork, we need to call rehydrate on the ORIGINAL stateToken to get a fresh ackToken.
       // (Reusing the same ackToken would be an idempotent replay, not a fork.)
-      const rehydrate = await handleV2ContinueWorkflow({ intent: 'rehydrate', stateToken: start.data.stateToken } as any, ctx);
+      const rehydrate = await handleV2ContinueWorkflow({ continueToken: start.data.continueToken, intent: 'rehydrate' } as any, ctx);
       expect(rehydrate.type).toBe('success');
       if (rehydrate.type !== 'success') return;
 
       // Now advance from the root node again with the NEW ackToken.
       // This should detect that root node already has a child and create a fork.
-      const fork = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: start.data.stateToken, ackToken: rehydrate.data.ackToken, output: { notesMarkdown: 'Step 1 fork.' } } as any, ctx);
+      const fork = await handleV2ContinueWorkflow({ continueToken: rehydrate.data.continueToken, output: { notesMarkdown: 'Step 1 fork.' } } as any, ctx);
       expect(fork.type).toBe('success');
       if (fork.type !== 'success') return;
       expect(fork.data.kind).toBe('ok');
@@ -131,11 +135,9 @@ describe('v2 fork detection (Phase 5)', () => {
       // - 2 node_created events (root + 2 children)
       // - 2 edge_created events
       // - at least one edge has cause.kind=non_tip_advance
-      const parsed = parseTokenV1Binary(start.data.stateToken, {
-        bech32m: new Bech32mAdapterV2(),
-        base32: new (await import('../../src/v2/infra/local/base32/index.js')).Base32AdapterV2(),
-      })._unsafeUnwrap();
-      const sid = parsed.payload.sessionId;
+      const pt = parseShortTokenNative(start.data.continueToken)!;
+      const aliasEntry = (ctx.v2 as any).tokenAliasStore.lookup(pt.nonceHex);
+      const sid = aliasEntry!.sessionId;
 
       const truth = await ctx.v2!.sessionStore.load(sid).match(
         (v) => v,

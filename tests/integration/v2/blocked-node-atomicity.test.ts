@@ -22,7 +22,9 @@ import { LocalSnapshotStoreV2 } from '../../../src/v2/infra/local/snapshot-store
 import { LocalPinnedWorkflowStoreV2 } from '../../../src/v2/infra/local/pinned-workflow-store/index.js';
 import { ExecutionSessionGateV2 } from '../../../src/v2/usecases/execution-session-gate.js';
 
-import { unsafeTokenCodecPorts, parseTokenV1Binary } from '../../../src/v2/durable-core/tokens/index.js';
+import { unsafeTokenCodecPorts } from '../../../src/v2/durable-core/tokens/index.js';
+import { InMemoryTokenAliasStoreV2 } from '../../../src/v2/infra/in-memory/token-alias-store/index.js';
+import { parseShortTokenNative as parseShortToken } from '../../../src/v2/durable-core/tokens/short-token.js';
 import { NodeHmacSha256V2 } from '../../../src/v2/infra/local/hmac-sha256/index.js';
 import { NodeBase64UrlV2 } from '../../../src/v2/infra/local/base64url/index.js';
 import { LocalKeyringV2 } from '../../../src/v2/infra/local/keyring/index.js';
@@ -90,9 +92,11 @@ async function mkCtxWithWorkflow(workflowId: string, definition: any): Promise<T
       pinnedStore,
       sha256,
       crypto,
+      entropy,
       idFactory,
       tokenCodecPorts,
-    validationPipelineDeps: createTestValidationPipelineDeps(),
+      tokenAliasStore: new InMemoryTokenAliasStoreV2(),
+      validationPipelineDeps: createTestValidationPipelineDeps(),
       sessionEventLogStore: sessionStore,
     },
   };
@@ -131,7 +135,7 @@ describe('Blocked node atomicity (validation + node + edge atomic)', () => {
 
       // Advance with invalid output → should create validation + blocked node + edge
       const blockRes = await handleV2ContinueWorkflow(
-        { stateToken: startRes.data.stateToken, ackToken: startRes.data.ackToken!, output: { notesMarkdown: 'invalid' } } as V2ContinueWorkflowInput,
+        { continueToken: startRes.data.continueToken, output: { notesMarkdown: 'invalid' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(blockRes.type).toBe('success');
@@ -140,10 +144,10 @@ describe('Blocked node atomicity (validation + node + edge atomic)', () => {
 
       // Verify atomicity: validation event, node, and edge all present
       const sessionStore = ctx.v2!.sessionEventLogStore as any;
-      const bech32m = new Bech32mAdapterV2();
-      const base32 = new Base32AdapterV2();
-      const parsedState = parseTokenV1Binary(startRes.data.stateToken, { bech32m, base32 })._unsafeUnwrap();
-      const sessionId = asSessionId(parsedState.payload.sessionId);
+      // bech32m/base32 no longer needed for token parsing
+      // (removed)
+      const _t = parseShortToken(startRes.data.continueToken)!;
+      const sessionId = asSessionId(ctx.v2!.tokenAliasStore.lookup(_t.nonceHex)!.sessionId);
       const loadRes = await sessionStore.load(sessionId);
       if (loadRes.isErr()) throw new Error(`Unexpected load error: ${loadRes.error.code}`);
       const truth = loadRes.value;
@@ -204,7 +208,7 @@ describe('Blocked node atomicity (validation + node + edge atomic)', () => {
 
       // Block
       const blockRes = await handleV2ContinueWorkflow(
-        { stateToken: startRes.data.stateToken, ackToken: startRes.data.ackToken!, output: { notesMarkdown: 'bad' } } as V2ContinueWorkflowInput,
+        { continueToken: startRes.data.continueToken, output: { notesMarkdown: 'bad' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(blockRes.type).toBe('success');
@@ -212,11 +216,11 @@ describe('Blocked node atomicity (validation + node + edge atomic)', () => {
       expect(blockRes.data.kind).toBe('blocked');
       if (blockRes.data.kind !== 'blocked') return;
 
-      const retryToken = blockRes.data.retryAckToken!;
+      const retryToken = blockRes.data.retryContinueToken!;
 
       // Retry successfully
       const retryRes = await handleV2ContinueWorkflow(
-        { stateToken: blockRes.data.stateToken, ackToken: retryToken, output: { notesMarkdown: 'done' } } as V2ContinueWorkflowInput,
+        { continueToken: blockRes.data.continueToken, output: { notesMarkdown: 'done' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(retryRes.type).toBe('success');
@@ -225,10 +229,10 @@ describe('Blocked node atomicity (validation + node + edge atomic)', () => {
 
       // Verify atomicity: validation event (for retry) + step node + edge all present
       const sessionStore = ctx.v2!.sessionEventLogStore as any;
-      const bech32m = new Bech32mAdapterV2();
-      const base32 = new Base32AdapterV2();
-      const parsedState = parseTokenV1Binary(startRes.data.stateToken, { bech32m, base32 })._unsafeUnwrap();
-      const sessionId = asSessionId(parsedState.payload.sessionId);
+      // bech32m/base32 no longer needed for token parsing
+      // (removed)
+      const _t = parseShortToken(startRes.data.continueToken)!;
+      const sessionId = asSessionId(ctx.v2!.tokenAliasStore.lookup(_t.nonceHex)!.sessionId);
       const loadRes = await sessionStore.load(sessionId);
       if (loadRes.isErr()) throw new Error(`Unexpected load error: ${loadRes.error.code}`);
       const truth = loadRes.value;
@@ -288,7 +292,7 @@ describe('Blocked node atomicity (validation + node + edge atomic)', () => {
 
       // Block
       const blockRes = await handleV2ContinueWorkflow(
-        { stateToken: startRes.data.stateToken, ackToken: startRes.data.ackToken!, output: { notesMarkdown: 'fail' } } as V2ContinueWorkflowInput,
+        { continueToken: startRes.data.continueToken, output: { notesMarkdown: 'fail' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(blockRes.type).toBe('success');
@@ -296,10 +300,10 @@ describe('Blocked node atomicity (validation + node + edge atomic)', () => {
 
       // Load events and verify: either all present or none (no partial state)
       const sessionStore = ctx.v2!.sessionEventLogStore as any;
-      const bech32m = new Bech32mAdapterV2();
-      const base32 = new Base32AdapterV2();
-      const parsedState = parseTokenV1Binary(startRes.data.stateToken, { bech32m, base32 })._unsafeUnwrap();
-      const sessionId = asSessionId(parsedState.payload.sessionId);
+      // bech32m/base32 no longer needed for token parsing
+      // (removed)
+      const _t = parseShortToken(startRes.data.continueToken)!;
+      const sessionId = asSessionId(ctx.v2!.tokenAliasStore.lookup(_t.nonceHex)!.sessionId);
       const loadRes = await sessionStore.load(sessionId);
       if (loadRes.isErr()) throw new Error(`Unexpected load error: ${loadRes.error.code}`);
       const truth = loadRes.value;

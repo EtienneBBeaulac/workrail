@@ -19,8 +19,7 @@ const BASE_PREFERENCES = { autonomy: 'full_auto_stop_on_user_deps' as const, ris
 
 function startResponse(overrides: Record<string, unknown> = {}) {
   return {
-    stateToken: 'st1testtoken',
-    ackToken: 'ack1testtoken',
+    continueToken: 'ct_test123',
     checkpointToken: 'chk1testtoken',
     isComplete: false,
     pending: {
@@ -32,7 +31,7 @@ function startResponse(overrides: Record<string, unknown> = {}) {
     nextIntent: 'perform_pending_then_continue',
     nextCall: {
       tool: 'continue_workflow' as const,
-      params: { intent: 'advance' as const, stateToken: 'st1testtoken', ackToken: 'ack1testtoken' },
+      params: { continueToken: 'ct_test123' },
     },
     ...overrides,
   };
@@ -48,8 +47,7 @@ function continueOkResponse(overrides: Record<string, unknown> = {}) {
 function continueBlockedResponse(overrides: Record<string, unknown> = {}) {
   return {
     kind: 'blocked' as const,
-    stateToken: 'st1testtoken',
-    ackToken: 'ack1testtoken',
+    continueToken: 'ct_test123',
     checkpointToken: 'chk1testtoken',
     isComplete: false,
     pending: {
@@ -61,7 +59,7 @@ function continueBlockedResponse(overrides: Record<string, unknown> = {}) {
     nextIntent: 'perform_pending_then_continue',
     nextCall: {
       tool: 'continue_workflow' as const,
-      params: { intent: 'advance' as const, stateToken: 'st1testtoken', ackToken: 'ack1retrytoken' },
+      params: { continueToken: 'ack1retrytoken' },
     },
     blockers: {
       blockers: [
@@ -74,7 +72,7 @@ function continueBlockedResponse(overrides: Record<string, unknown> = {}) {
       ],
     },
     retryable: true,
-    retryAckToken: 'ack1retrytoken',
+    retryContinueToken: 'ack1retrytoken',
     ...overrides,
   };
 }
@@ -93,7 +91,7 @@ describe('formatV2ExecutionResponse — shape detection', () => {
 
   it('returns null for non-execution tool outputs', () => {
     expect(formatV2ExecutionResponse({ workflows: [] })).toBeNull();
-    expect(formatV2ExecutionResponse({ checkpointNodeId: 'n1', stateToken: 'st1x' })).toBeNull();
+    expect(formatV2ExecutionResponse({ checkpointNodeId: 'n1', continueToken: 'ct_test123' })).toBeNull();
     expect(formatV2ExecutionResponse({ candidates: [], totalEligible: 0 })).toBeNull();
   });
 
@@ -147,11 +145,10 @@ describe('formatV2ExecutionResponse — success', () => {
     expect(result).toContain('output.notesMarkdown');
   });
 
-  it('renders token JSON block with stateToken and ackToken', () => {
+  it('renders token JSON block with continueToken', () => {
     const result = formatV2ExecutionResponse(startResponse())!;
     expect(result).toContain('```json');
-    expect(result).toContain('"stateToken":"st1testtoken"');
-    expect(result).toContain('"ackToken":"ack1testtoken"');
+    expect(result).toContain('"continueToken":"ct_test123"');
   });
 
   it('does not include intent in the token JSON block', () => {
@@ -162,9 +159,11 @@ describe('formatV2ExecutionResponse — success', () => {
     expect(parsed).not.toHaveProperty('intent');
   });
 
-  it('mentions checkpointToken separately', () => {
+  it('does not mention checkpointToken in prose (removed to reduce agent noise)', () => {
     const result = formatV2ExecutionResponse(startResponse())!;
-    expect(result).toContain('Checkpoint token (for `checkpoint_workflow`): `chk1testtoken`');
+    // checkpointToken was intentionally removed from prose output (Solution 2).
+    // The token is still present in the structured JSON response; agents rarely need it.
+    expect(result).not.toContain('Checkpoint token (for `checkpoint_workflow`)');
   });
 
   it('omits checkpointToken line when not present', () => {
@@ -222,7 +221,6 @@ describe('formatV2ExecutionResponse — rehydrate', () => {
     const result = formatV2ExecutionResponse(continueOkResponse({
       nextIntent: 'rehydrate_only',
       pending: null,
-      ackToken: undefined,
       nextCall: null,
     }))!;
     expect(result).toContain('State Recovered');
@@ -255,13 +253,13 @@ describe('formatV2ExecutionResponse — blocked retryable', () => {
     expect(result).toContain('Retry with corrected output:');
   });
 
-  it('uses ackToken (not retryAckToken) as key in the JSON block', () => {
+  it('uses retryContinueToken as continueToken in the JSON block for retryable blocks', () => {
     const result = formatV2ExecutionResponse(continueBlockedResponse())!;
     const jsonMatch = result.match(/```json\n(.*)\n```/);
     expect(jsonMatch).not.toBeNull();
     const parsed = JSON.parse(jsonMatch![1]);
-    expect(parsed).toHaveProperty('ackToken', 'ack1retrytoken');
-    expect(parsed).not.toHaveProperty('retryAckToken');
+    expect(parsed).toHaveProperty('continueToken', 'ack1retrytoken');
+    expect(parsed).not.toHaveProperty('retryContinueToken');
   });
 
   it('renders validation issues as bulleted list', () => {
@@ -287,7 +285,7 @@ describe('formatV2ExecutionResponse — blocked non-retryable', () => {
   it('renders Blocked heading', () => {
     const result = formatV2ExecutionResponse(continueBlockedResponse({
       retryable: false,
-      retryAckToken: undefined,
+      retryContinueToken: undefined,
       nextCall: null,
       blockers: {
         blockers: [{
@@ -303,7 +301,7 @@ describe('formatV2ExecutionResponse — blocked non-retryable', () => {
   it('includes user-facing guidance', () => {
     const result = formatV2ExecutionResponse(continueBlockedResponse({
       retryable: false,
-      retryAckToken: undefined,
+      retryContinueToken: undefined,
       nextCall: null,
       blockers: {
         blockers: [{
@@ -320,7 +318,7 @@ describe('formatV2ExecutionResponse — blocked non-retryable', () => {
   it('includes only stateToken in the JSON block when nextCall is null', () => {
     const result = formatV2ExecutionResponse(continueBlockedResponse({
       retryable: false,
-      retryAckToken: undefined,
+      retryContinueToken: undefined,
       nextCall: null,
       blockers: {
         blockers: [{
@@ -333,7 +331,7 @@ describe('formatV2ExecutionResponse — blocked non-retryable', () => {
     const jsonMatch = result.match(/```json\n(.*)\n```/);
     expect(jsonMatch).not.toBeNull();
     const parsed = JSON.parse(jsonMatch![1]);
-    expect(parsed).toEqual({ stateToken: 'st1testtoken' });
+    expect(parsed).toEqual({ continueToken: 'ct_test123' });
   });
 });
 
@@ -346,7 +344,6 @@ describe('formatV2ExecutionResponse — complete', () => {
     const result = formatV2ExecutionResponse(continueOkResponse({
       nextIntent: 'complete',
       pending: null,
-      ackToken: undefined,
       checkpointToken: undefined,
       isComplete: true,
       nextCall: null,
@@ -359,7 +356,6 @@ describe('formatV2ExecutionResponse — complete', () => {
     const result = formatV2ExecutionResponse(continueOkResponse({
       nextIntent: 'complete',
       pending: null,
-      ackToken: undefined,
       checkpointToken: undefined,
       isComplete: true,
       nextCall: null,
@@ -376,7 +372,7 @@ describe('formatV2ExecutionResponse — multiple blockers', () => {
   it('renders all blocker messages', () => {
     const result = formatV2ExecutionResponse(continueBlockedResponse({
       retryable: false,
-      retryAckToken: undefined,
+      retryContinueToken: undefined,
       nextCall: null,
       blockers: {
         blockers: [
@@ -463,7 +459,6 @@ describe('formatV2ExecutionResponse — persona headers', () => {
     const result = formatV2ExecutionResponse(continueOkResponse({
       nextIntent: 'rehydrate_only',
       pending: null,
-      ackToken: undefined,
       nextCall: null,
     }))!;
     expect(result).not.toContain(USER_HEADER);
@@ -481,7 +476,7 @@ describe('formatV2ExecutionResponse — persona headers', () => {
   it('blocked non-retryable: SYSTEM-only, no USER header', () => {
     const result = formatV2ExecutionResponse(continueBlockedResponse({
       retryable: false,
-      retryAckToken: undefined,
+      retryContinueToken: undefined,
       nextCall: null,
       blockers: {
         blockers: [{
@@ -500,7 +495,6 @@ describe('formatV2ExecutionResponse — persona headers', () => {
     const result = formatV2ExecutionResponse(continueOkResponse({
       nextIntent: 'complete',
       pending: null,
-      ackToken: undefined,
       checkpointToken: undefined,
       isComplete: true,
       nextCall: null,

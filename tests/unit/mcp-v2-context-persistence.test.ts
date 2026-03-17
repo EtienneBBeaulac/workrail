@@ -26,7 +26,9 @@ import { NodeTimeClockV2 } from '../../src/v2/infra/local/time-clock/index.js';
 import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
 import { Bech32mAdapterV2 } from '../../src/v2/infra/local/bech32m/index.js';
 import { Base32AdapterV2 } from '../../src/v2/infra/local/base32/index.js';
-import { unsafeTokenCodecPorts, parseTokenV1Binary } from '../../src/v2/durable-core/tokens/index.js';
+import { unsafeTokenCodecPorts } from '../../src/v2/durable-core/tokens/index.js';
+import { parseShortTokenNative } from '../../src/v2/durable-core/tokens/short-token.js';
+import { InMemoryTokenAliasStoreV2 } from '../../src/v2/infra/in-memory/token-alias-store/index.js';
 
 async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-context-'));
@@ -91,9 +93,11 @@ async function mkCtxWithWorkflow(workflowId: string): Promise<ToolContext> {
       pinnedStore,
       sha256,
       crypto,
+      entropy,
       idFactory,
       tokenCodecPorts,
-    validationPipelineDeps: createTestValidationPipelineDeps(),
+      tokenAliasStore: new InMemoryTokenAliasStoreV2(),
+      validationPipelineDeps: createTestValidationPipelineDeps(),
     },
   };
 }
@@ -112,12 +116,10 @@ describe('v2 context persistence (S8)', () => {
       expect(result.type).toBe('success');
       if (result.type !== 'success') return;
 
-      const stateToken = (result.data as any).stateToken;
-      const parsed = parseTokenV1Binary(stateToken, ctx.v2.tokenCodecPorts);
-      expect(parsed.isOk()).toBe(true);
-      if (parsed.isErr()) return;
-
-      const sessionId = parsed.value.payload.sessionId;
+      const stateToken = (result.data as any).continueToken;
+      const pt = parseShortTokenNative(stateToken)!;
+      const aliasEntry = (ctx.v2 as any).tokenAliasStore.lookup(pt.nonceHex);
+      const sessionId = aliasEntry!.sessionId;
 
       const truth = await ctx.v2.sessionStore.load(sessionId as any).match(
         (v) => v,

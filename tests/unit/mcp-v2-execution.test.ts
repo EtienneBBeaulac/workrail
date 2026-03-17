@@ -1,4 +1,4 @@
-import { createTestValidationPipelineDeps } from "../helpers/v2-test-helpers.js";
+import { createTestValidationPipelineDeps, mintTestContinueToken } from "../helpers/v2-test-helpers.js";
 import { describe, expect, it } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
@@ -74,8 +74,10 @@ async function mkV2Deps(): Promise<V2Dependencies> {
     pinnedStore,
     sha256: sha256Port,
     crypto,
+    entropy,
     idFactory,
     tokenCodecPorts,
+    tokenAliasStore: new (await import('../../src/v2/infra/in-memory/token-alias-store/index.js')).InMemoryTokenAliasStoreV2(),
     validationPipelineDeps: createTestValidationPipelineDeps(),
   };
 }
@@ -114,34 +116,27 @@ async function mkSignedToken(args: { root: string; payload: unknown }): Promise<
 }
 
 describe('v2 execution placeholder handlers (Slice 3.2 boundary validation)', () => {
-  it('returns VALIDATION_ERROR for an invalid stateToken', async () => {
-    const res = await handleV2ContinueWorkflow({ intent: 'rehydrate', stateToken: 'not-a-token' } as any, await dummyCtx());
+  it('returns TOKEN_INVALID_FORMAT for an invalid continueToken', async () => {
+    const res = await handleV2ContinueWorkflow({ continueToken: 'not-a-token' } as any, await dummyCtx());
     expect(res.type).toBe('error');
     if (res.type !== 'error') return;
     expect(res.code).toBe('TOKEN_INVALID_FORMAT');
   });
 
-  it('returns TOKEN_UNKNOWN_NODE for a valid stateToken without durable run state (rehydrate path)', async () => {
+  it('returns TOKEN_UNKNOWN_NODE for a valid continueToken without durable run state (rehydrate path)', async () => {
     const root = await mkTempDataDir();
     const prev = process.env.WORKRAIL_DATA_DIR;
     process.env.WORKRAIL_DATA_DIR = root;
     try {
-
-      const wfRef = deriveWorkflowHashRef(
-        asWorkflowHash(asSha256Digest('sha256:5b2d9fb885d0adc6565e1fd59e6abb3769b69e4dba5a02b6eea750137a5c0be2'))
-      )._unsafeUnwrap();
-
-      const payload = StateTokenPayloadV1Schema.parse({
-        tokenVersion: 1,
-        tokenKind: 'state',
+      const ctx = await dummyCtx();
+      const continueToken = await mintTestContinueToken(ctx.v2!, {
         sessionId: mkId('sess', 1),
         runId: mkId('run', 2),
         nodeId: mkId('node', 3),
-        workflowHashRef: String(wfRef),
+        attemptId: mkId('attempt', 4),
+        workflowHashRef: 'deadbeef',
       });
-
-      const token = await mkSignedToken({ root, payload });
-      const res = await handleV2ContinueWorkflow({ intent: 'rehydrate', stateToken: token } as any, await dummyCtx());
+      const res = await handleV2ContinueWorkflow({ continueToken, intent: 'rehydrate' } as any, ctx);
 
       expect(res.type).toBe('error');
       if (res.type !== 'error') return;
@@ -151,44 +146,5 @@ describe('v2 execution placeholder handlers (Slice 3.2 boundary validation)', ()
     }
   });
 
-  it('returns TOKEN_SCOPE_MISMATCH when ackToken scope mismatches stateToken', async () => {
-    const root = await mkTempDataDir();
-    const prev = process.env.WORKRAIL_DATA_DIR;
-    process.env.WORKRAIL_DATA_DIR = root;
-    try {
-
-      const wfRef = deriveWorkflowHashRef(
-        asWorkflowHash(asSha256Digest('sha256:5b2d9fb885d0adc6565e1fd59e6abb3769b69e4dba5a02b6eea750137a5c0be2'))
-      )._unsafeUnwrap();
-
-      const statePayload = StateTokenPayloadV1Schema.parse({
-        tokenVersion: 1,
-        tokenKind: 'state',
-        sessionId: mkId('sess', 1),
-        runId: mkId('run', 2),
-        nodeId: mkId('node', 3),
-        workflowHashRef: String(wfRef),
-      });
-
-      const ackPayload = AckTokenPayloadV1Schema.parse({
-        tokenVersion: 1,
-        tokenKind: 'ack',
-        sessionId: mkId('sess', 1),
-        runId: mkId('run', 2),
-        nodeId: mkId('node', 4), // mismatch
-        attemptId: mkId('attempt', 5),
-      });
-
-      const stateToken = await mkSignedToken({ root, payload: statePayload });
-      const ackToken = await mkSignedToken({ root, payload: ackPayload });
-
-      const res = await handleV2ContinueWorkflow({ intent: 'advance', stateToken, ackToken } as any, await dummyCtx());
-      expect(res.type).toBe('error');
-      if (res.type !== 'error') return;
-      expect(res.code).toBe('TOKEN_SCOPE_MISMATCH');
-      expect(res.message).toContain('nodeId mismatch');
-    } finally {
-      process.env.WORKRAIL_DATA_DIR = prev;
-    }
-  });
+  // TOKEN_SCOPE_MISMATCH test removed — with single continueToken, no scope mismatch is possible.
 });

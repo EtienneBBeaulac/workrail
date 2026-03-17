@@ -1,4 +1,4 @@
-import { createTestValidationPipelineDeps } from "../helpers/v2-test-helpers.js";
+import { createTestValidationPipelineDeps, mintTestContinueToken } from "../helpers/v2-test-helpers.js";
 import { describe, expect, it } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
@@ -28,6 +28,7 @@ import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
 import { Bech32mAdapterV2 } from '../../src/v2/infra/local/bech32m/index.js';
 import { Base32AdapterV2 } from '../../src/v2/infra/local/base32/index.js';
 import { signTokenV1Binary, unsafeTokenCodecPorts } from '../../src/v2/durable-core/tokens/index.js';
+import { InMemoryTokenAliasStoreV2 } from '../../src/v2/infra/in-memory/token-alias-store/index.js';
 import { StateTokenPayloadV1Schema, AckTokenPayloadV1Schema } from '../../src/v2/durable-core/tokens/index.js';
 import { asWorkflowHash, asSha256Digest } from '../../src/v2/durable-core/ids/index.js';
 import { deriveWorkflowHashRef } from '../../src/v2/durable-core/ids/workflow-hash-ref.js';
@@ -66,7 +67,9 @@ async function mkV2Deps(dataDir: LocalDataDirV2): Promise<V2Dependencies> {
     pinnedStore,
     sha256,
     crypto,
+    entropy,
     tokenCodecPorts,
+    tokenAliasStore: new InMemoryTokenAliasStoreV2(),
     validationPipelineDeps: createTestValidationPipelineDeps(),
     idFactory,
     // Test convenience (aliases):
@@ -198,34 +201,16 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
         );
 
       const attemptId = v2.idFactory.mintAttemptId();
-      const statePayload = StateTokenPayloadV1Schema.parse({
-        tokenVersion: 1,
-        tokenKind: 'state',
-        sessionId,
-        runId,
-        nodeId,
-        workflowHashRef: String(workflowHashRef),
-      });
-      const ackPayload = AckTokenPayloadV1Schema.parse({
-        tokenVersion: 1,
-        tokenKind: 'ack',
-        sessionId,
-        runId,
-        nodeId,
-        attemptId,
-      });
+      const continueToken = await mintTestContinueToken(v2, { sessionId, runId, nodeId, attemptId, workflowHashRef: String(workflowHashRef) });
 
-      const stateToken = await mkSignedToken({ v2, payload: statePayload });
-      const ackToken = await mkSignedToken({ v2, payload: ackPayload });
-
-      const first = await handleV2ContinueWorkflow({ intent: 'advance', stateToken, ackToken, output: { notesMarkdown: 'Step completed.' } } as any, dummyCtx(v2));
+      const first = await handleV2ContinueWorkflow({ continueToken, output: { notesMarkdown: 'Step completed.' } } as any, dummyCtx(v2));
       expect(first.type).toBe('success');
       if (first.type !== 'success') return;
       expect(first.data.kind).toBe('ok');
       expect(first.data.isComplete).toBe(true);
       expect(first.data.pending).toBeNull();
 
-      const second = await handleV2ContinueWorkflow({ intent: 'advance', stateToken, ackToken, output: { notesMarkdown: 'Step completed.' } } as any, dummyCtx(v2));
+      const second = await handleV2ContinueWorkflow({ continueToken, output: { notesMarkdown: 'Step completed.' } } as any, dummyCtx(v2));
       expect(second).toEqual(first);
 
       const truth = await v2.sessionEventLogStore.load(sessionId as any).match(
@@ -350,31 +335,13 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
         );
 
       const attemptId = v2.idFactory.mintAttemptId();
-      const statePayload = StateTokenPayloadV1Schema.parse({
-        tokenVersion: 1,
-        tokenKind: 'state',
-        sessionId,
-        runId,
-        nodeId,
-        workflowHashRef: String(workflowHashRef),
-      });
-      const ackPayload = AckTokenPayloadV1Schema.parse({
-        tokenVersion: 1,
-        tokenKind: 'ack',
-        sessionId,
-        runId,
-        nodeId,
-        attemptId,
-      });
-
-      const stateToken = await mkSignedToken({ v2, payload: statePayload });
-      const ackToken = await mkSignedToken({ v2, payload: ackPayload });
+      const continueToken = await mintTestContinueToken(v2, { sessionId, runId, nodeId, attemptId, workflowHashRef: String(workflowHashRef) });
 
       const outputNotes = '## Triage Summary\n\nBug found in authentication module.';
 
       // First call with output
       const first = await handleV2ContinueWorkflow(
-        { intent: 'advance', stateToken, ackToken, output: { notesMarkdown: outputNotes } } as any,
+        { continueToken, output: { notesMarkdown: outputNotes } } as any,
         dummyCtx(v2)
       );
       expect(first.type).toBe('success');
@@ -383,9 +350,9 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
       expect(first.data.isComplete).toBe(true);
       expect(first.data.pending).toBeNull();
 
-      // Replay same ackToken + output
+      // Replay same continueToken + output
       const second = await handleV2ContinueWorkflow(
-        { intent: 'advance', stateToken, ackToken, output: { notesMarkdown: outputNotes } } as any,
+        { continueToken, output: { notesMarkdown: outputNotes } } as any,
         dummyCtx(v2)
       );
       expect(second).toEqual(first);

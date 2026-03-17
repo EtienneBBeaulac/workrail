@@ -22,7 +22,9 @@ import { LocalSnapshotStoreV2 } from '../../../src/v2/infra/local/snapshot-store
 import { LocalPinnedWorkflowStoreV2 } from '../../../src/v2/infra/local/pinned-workflow-store/index.js';
 import { ExecutionSessionGateV2 } from '../../../src/v2/usecases/execution-session-gate.js';
 
-import { unsafeTokenCodecPorts, parseTokenV1Binary } from '../../../src/v2/durable-core/tokens/index.js';
+import { unsafeTokenCodecPorts } from '../../../src/v2/durable-core/tokens/index.js';
+import { InMemoryTokenAliasStoreV2 } from '../../../src/v2/infra/in-memory/token-alias-store/index.js';
+import { parseShortTokenNative } from '../../../src/v2/durable-core/tokens/short-token.js';
 import { NodeHmacSha256V2 } from '../../../src/v2/infra/local/hmac-sha256/index.js';
 import { NodeBase64UrlV2 } from '../../../src/v2/infra/local/base64url/index.js';
 import { LocalKeyringV2 } from '../../../src/v2/infra/local/keyring/index.js';
@@ -90,8 +92,10 @@ async function mkCtxWithWorkflow(workflowId: string, definition: any): Promise<T
       pinnedStore,
       sha256,
       crypto,
+      entropy,
       idFactory,
       tokenCodecPorts,
+      tokenAliasStore: new InMemoryTokenAliasStoreV2(),
       validationPipelineDeps: createTestValidationPipelineDeps(),
       sessionEventLogStore: sessionStore,
     },
@@ -103,7 +107,7 @@ describe('Blocked node retry flow (end-to-end)', () => {
     delete process.env.WORKRAIL_DATA_DIR;
   });
 
-  it('blocks on invalid output → replays blocked → retries with retryAckToken → advances', async () => {
+  it('blocks on invalid output → replays blocked → retries with retryContinueToken → advances', async () => {
     const root = await mkTempDataDir();
     const prev = process.env.WORKRAIL_DATA_DIR;
     process.env.WORKRAIL_DATA_DIR = root;
@@ -135,12 +139,12 @@ describe('Blocked node retry flow (end-to-end)', () => {
       expect(startRes.type).toBe('success');
       if (startRes.type !== 'success') return;
 
-      const { stateToken, ackToken } = startRes.data;
-      expect(ackToken).toBeDefined();
+      const { continueToken } = startRes.data;
+      expect(continueToken).toBeDefined();
 
       // 2. Advance with invalid output (missing "status") → should block
       const blockRes = await handleV2ContinueWorkflow(
-        { stateToken, ackToken: ackToken!, output: { notesMarkdown: 'invalid output' } } as V2ContinueWorkflowInput,
+        { continueToken, output: { notesMarkdown: 'invalid output' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(blockRes.type).toBe('success');
@@ -150,19 +154,19 @@ describe('Blocked node retry flow (end-to-end)', () => {
       if (blockRes.data.kind !== 'blocked') return;
       
       expect(blockRes.data.retryable).toBe(true);
-      expect(blockRes.data.retryAckToken).toBeDefined();
+      expect(blockRes.data.retryContinueToken).toBeDefined();
       expect(blockRes.data.validation).toBeDefined();
       expect(blockRes.data.validation?.issues.length).toBeGreaterThan(0);
 
-      const blockedStateToken = blockRes.data.stateToken;
-      const retryAckToken = blockRes.data.retryAckToken!;
+      const blockedStateToken = blockRes.data.continueToken;
+      const retryContinueToken = blockRes.data.retryContinueToken!;
 
       // 3. Verify event log: validation_performed event exists with eventIndex < node eventIndex.
       const sessionStore = ctx.v2!.sessionEventLogStore as any;
       const bech32m = new Bech32mAdapterV2();
       const base32 = new Base32AdapterV2();
-      const parsedState = parseTokenV1Binary(stateToken, { bech32m, base32 })._unsafeUnwrap();
-      const sessionId = asSessionId(parsedState.payload.sessionId);
+      const _pt1 = parseShortTokenNative(continueToken)!;
+      const sessionId = asSessionId(ctx.v2!.tokenAliasStore.lookup(_pt1.nonceHex)!.sessionId);
       const loadRes = await sessionStore.load(sessionId);
       if (loadRes.isErr()) throw new Error(`Unexpected load error: ${loadRes.error.code}`);
       const truth1 = loadRes.value;
@@ -175,7 +179,7 @@ describe('Blocked node retry flow (end-to-end)', () => {
 
       // 4. Replay original ackToken → should return same blocked response (idempotency).
       const replayRes = await handleV2ContinueWorkflow(
-        { stateToken, ackToken: ackToken! } as V2ContinueWorkflowInput,
+        { continueToken, intent: 'advance' } as V2ContinueWorkflowInput,
         ctx
       );
       expect(replayRes.type).toBe('success');
@@ -183,11 +187,11 @@ describe('Blocked node retry flow (end-to-end)', () => {
       
       expect(replayRes.data.kind).toBe('blocked');
       if (replayRes.data.kind !== 'blocked') return;
-      expect(replayRes.data.retryAckToken).toBe(retryAckToken);
+      expect(replayRes.data.retryContinueToken).toBe(retryContinueToken);
 
-      // 5. Retry with retryAckToken + valid output → should advance successfully.
+      // 5. Retry with retryContinueToken + valid output → should advance successfully.
       const retryRes = await handleV2ContinueWorkflow(
-        { stateToken: blockedStateToken, ackToken: retryAckToken, output: { notesMarkdown: 'valid with status' } } as V2ContinueWorkflowInput,
+        { continueToken: retryContinueToken, output: { notesMarkdown: 'valid with status' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(retryRes.type).toBe('success');
@@ -210,7 +214,7 @@ describe('Blocked node retry flow (end-to-end)', () => {
     }
   });
 
-  it('terminal block (from evaluation error) has no retryAckToken', async () => {
+  it('terminal block (from evaluation error) has no retryContinueToken', async () => {
     const root = await mkTempDataDir();
     const prev = process.env.WORKRAIL_DATA_DIR;
     process.env.WORKRAIL_DATA_DIR = root;
@@ -244,7 +248,7 @@ describe('Blocked node retry flow (end-to-end)', () => {
 
       // Advance with any output → ValidationEngine throws on bad schema → should create terminal block
       const blockRes = await handleV2ContinueWorkflow(
-        { stateToken: startRes.data.stateToken, ackToken: startRes.data.ackToken!, output: { notesMarkdown: '{"test": true}' } } as V2ContinueWorkflowInput,
+        { continueToken: startRes.data.continueToken, output: { notesMarkdown: '{"test": true}' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(blockRes.type).toBe('success');
@@ -253,16 +257,16 @@ describe('Blocked node retry flow (end-to-end)', () => {
       expect(blockRes.data.kind).toBe('blocked');
       if (blockRes.data.kind !== 'blocked') return;
 
-      // Terminal block: retryable=false, no retryAckToken
+      // Terminal block: retryable=false, no retryContinueToken
       expect(blockRes.data.retryable).toBe(false);
-      expect(blockRes.data.retryAckToken).toBeUndefined();
+      expect(blockRes.data.retryContinueToken).toBeUndefined();
 
       // Verify blocked_attempt node was created (terminal blocks ARE nodes)
       const sessionStore = ctx.v2!.sessionEventLogStore as any;
       const bech32m = new Bech32mAdapterV2();
       const base32 = new Base32AdapterV2();
-      const parsedState = parseTokenV1Binary(startRes.data.stateToken, { bech32m, base32 })._unsafeUnwrap();
-      const sessionId = asSessionId(parsedState.payload.sessionId);
+      const _pt2 = parseShortTokenNative(startRes.data.continueToken)!;
+      const sessionId = asSessionId(ctx.v2!.tokenAliasStore.lookup(_pt2.nonceHex)!.sessionId);
       const loadRes = await sessionStore.load(sessionId);
       if (loadRes.isErr()) throw new Error(`Unexpected load error: ${loadRes.error.code}`);
       const truth = loadRes.value;
@@ -319,11 +323,11 @@ describe('Blocked node retry flow (end-to-end)', () => {
       expect(startRes.type).toBe('success');
       if (startRes.type !== 'success') return;
 
-      const { stateToken: st1, ackToken: ack1 } = startRes.data;
+      const { continueToken: st1 } = startRes.data;
 
       // Block 1: missing both status and code.
       const block1Res = await handleV2ContinueWorkflow(
-        { stateToken: st1, ackToken: ack1!, output: { notesMarkdown: 'invalid' } } as V2ContinueWorkflowInput,
+        { continueToken: st1, output: { notesMarkdown: 'invalid' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(block1Res.type).toBe('success');
@@ -331,12 +335,12 @@ describe('Blocked node retry flow (end-to-end)', () => {
       expect(block1Res.data.kind).toBe('blocked');
       if (block1Res.data.kind !== 'blocked') return;
 
-      const retry1Token = block1Res.data.retryAckToken!;
+      const retry1Token = block1Res.data.retryContinueToken!;
       expect(retry1Token).toBeDefined();
 
       // Retry 1: has "status" but still missing "code" → should block again (chained).
       const block2Res = await handleV2ContinueWorkflow(
-        { stateToken: block1Res.data.stateToken, ackToken: retry1Token, output: { notesMarkdown: 'has status' } } as V2ContinueWorkflowInput,
+        { continueToken: block1Res.data.continueToken, output: { notesMarkdown: 'has status' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(block2Res.type).toBe('success');
@@ -344,7 +348,7 @@ describe('Blocked node retry flow (end-to-end)', () => {
       expect(block2Res.data.kind).toBe('blocked');
       if (block2Res.data.kind !== 'blocked') return;
 
-      const retry2Token = block2Res.data.retryAckToken!;
+      const retry2Token = block2Res.data.retryContinueToken!;
       expect(retry2Token).toBeDefined();
       expect(retry2Token).not.toBe(retry1Token);
 
@@ -352,8 +356,8 @@ describe('Blocked node retry flow (end-to-end)', () => {
       const sessionStore = ctx.v2!.sessionEventLogStore as any;
       const bech32m = new Bech32mAdapterV2();
       const base32 = new Base32AdapterV2();
-      const parsedState = parseTokenV1Binary(st1, { bech32m, base32 })._unsafeUnwrap();
-      const sessionId = asSessionId(parsedState.payload.sessionId);
+      const _pt3 = parseShortTokenNative(st1)!;
+      const sessionId = asSessionId(ctx.v2!.tokenAliasStore.lookup(_pt3.nonceHex)!.sessionId);
       const loadRes = await sessionStore.load(sessionId);
       if (loadRes.isErr()) throw new Error(`Unexpected load error: ${loadRes.error.code}`);
       const truth = loadRes.value;
@@ -364,7 +368,7 @@ describe('Blocked node retry flow (end-to-end)', () => {
 
       // Retry 2: has both "status" and "code" → should advance.
       const retrySuccessRes = await handleV2ContinueWorkflow(
-        { stateToken: block2Res.data.stateToken, ackToken: retry2Token, output: { notesMarkdown: 'has status and code' } } as V2ContinueWorkflowInput,
+        { continueToken: block2Res.data.continueToken, output: { notesMarkdown: 'has status and code' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(retrySuccessRes.type).toBe('success');

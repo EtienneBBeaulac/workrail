@@ -20,7 +20,8 @@ import { LocalSnapshotStoreV2 } from '../../src/v2/infra/local/snapshot-store/in
 import { LocalPinnedWorkflowStoreV2 } from '../../src/v2/infra/local/pinned-workflow-store/index.js';
 import { ExecutionSessionGateV2 } from '../../src/v2/usecases/execution-session-gate.js';
 
-import { parseTokenV1Binary, unsafeTokenCodecPorts } from '../../src/v2/durable-core/tokens/index.js';
+import { unsafeTokenCodecPorts } from '../../src/v2/durable-core/tokens/index.js';
+import { InMemoryTokenAliasStoreV2 } from '../../src/v2/infra/in-memory/token-alias-store/index.js';
 import { NodeHmacSha256V2 } from '../../src/v2/infra/local/hmac-sha256/index.js';
 import { NodeBase64UrlV2 } from '../../src/v2/infra/local/base64url/index.js';
 import { LocalKeyringV2 } from '../../src/v2/infra/local/keyring/index.js';
@@ -86,7 +87,7 @@ async function mkCtxWithWorkflow(workflowId: string): Promise<ToolContext> {
     featureFlags: null as any,
     sessionManager: null,
     httpServer: null,
-    v2: { gate, sessionStore, snapshotStore, pinnedStore, sha256, crypto, idFactory, tokenCodecPorts, validationPipelineDeps: createTestValidationPipelineDeps() },
+    v2: { gate, sessionStore, snapshotStore, pinnedStore, sha256, crypto, entropy, idFactory, tokenCodecPorts, tokenAliasStore: new InMemoryTokenAliasStoreV2(), validationPipelineDeps: createTestValidationPipelineDeps() },
   };
 }
 
@@ -103,12 +104,12 @@ describe('v2 continue_workflow rehydrate-only is pure (no durable writes)', () =
       expect(start.type).toBe('success');
       if (start.type !== 'success') return;
 
-      const parsed = parseTokenV1Binary(start.data.stateToken, {
-        bech32m: new Bech32mAdapterV2(),
-        base32: new Base32AdapterV2(),
-      })._unsafeUnwrap();
-
-      const sessionId = (parsed.payload as any).sessionId as string;
+      const { parseShortTokenNative } = await import('../../src/v2/durable-core/tokens/short-token.js');
+      const parsed = parseShortTokenNative(start.data.continueToken);
+      if (!parsed) throw new Error('Expected v2 short stateToken');
+      const aliasEntry = (ctx.v2 as any).tokenAliasStore.lookup(parsed.nonceHex);
+      if (!aliasEntry) throw new Error('Alias not found for stateToken');
+      const sessionId = aliasEntry.sessionId;
 
       const before = await (ctx.v2 as any).sessionStore.load(sessionId).match(
         (v: any) => v,
@@ -117,7 +118,7 @@ describe('v2 continue_workflow rehydrate-only is pure (no durable writes)', () =
         }
       );
 
-      const res = await handleV2ContinueWorkflow({ intent: 'rehydrate', stateToken: start.data.stateToken } as any, ctx);
+      const res = await handleV2ContinueWorkflow({ continueToken: start.data.continueToken, intent: 'rehydrate' } as any, ctx);
       expect(res.type).toBe('success');
 
       const after = await (ctx.v2 as any).sessionStore.load(sessionId).match(

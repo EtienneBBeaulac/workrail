@@ -376,7 +376,7 @@ describe('V2ContinueWorkflowInputShape suggestion behaviour (regression)', () =>
 
   it('correctTemplate is non-null when agent passes unknown key "content"', () => {
     const result = generateSuggestions(
-      { stateToken: 'st1...', ackToken: 'ack1...', intent: 'advance', content: 'my notes' },
+      { continueToken: 'ct_test123', intent: 'advance', content: 'my notes' },
       V2ContinueWorkflowInputShape,
       DEFAULT_SUGGESTION_CONFIG,
     );
@@ -385,7 +385,7 @@ describe('V2ContinueWorkflowInputShape suggestion behaviour (regression)', () =>
 
   it('correctTemplate includes output.notesMarkdown when agent passes unknown key "deliverable"', () => {
     const result = generateSuggestions(
-      { stateToken: 'st1...', ackToken: 'ack1...', intent: 'advance', deliverable: 'my notes' },
+      { continueToken: 'ct_test123', intent: 'advance', deliverable: 'my notes' },
       V2ContinueWorkflowInputShape,
       DEFAULT_SUGGESTION_CONFIG,
     );
@@ -398,19 +398,19 @@ describe('V2ContinueWorkflowInputShape suggestion behaviour (regression)', () =>
   it('correctTemplate is non-null when agent passes unknown key "content" (no didYouMean needed)', () => {
     // "content" is close to "context" — agent should at least see the template
     const result = generateSuggestions(
-      { stateToken: 'st1...', ackToken: 'ack1...', content: 'my notes' },
+      { continueToken: 'ct_test123', content: 'my notes' },
       V2ContinueWorkflowInputShape,
       DEFAULT_SUGGESTION_CONFIG,
     );
     expect(result.correctTemplate).not.toBeNull();
-    // stateToken must appear (it's required)
-    expect(result.correctTemplate).toHaveProperty('stateToken');
+    // continueToken must appear (it's required)
+    expect(result.correctTemplate).toHaveProperty('continueToken');
   });
 
   it('extractExpectedKeys returns all V2ContinueWorkflowInputShape fields', () => {
     const keys = extractExpectedKeys(V2ContinueWorkflowInputShape);
-    expect(keys).toContain('stateToken');
-    expect(keys).toContain('ackToken');
+    expect(keys).toContain('continueToken');
+    // ackToken removed - one-token design;
     expect(keys).toContain('intent');
     expect(keys).toContain('context');
     expect(keys).toContain('output');

@@ -1,4 +1,5 @@
-import { createTestValidationPipelineDeps } from "../helpers/v2-test-helpers.js";
+import { InMemoryTokenAliasStoreV2 } from "../../src/v2/infra/in-memory/token-alias-store/index.js";
+import { createTestValidationPipelineDeps, mintTestContinueToken } from '../helpers/v2-test-helpers.js';
 import { describe, expect, it } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
@@ -74,6 +75,8 @@ async function createV2Context() {
     crypto,
     idFactory,
     tokenCodecPorts,
+    tokenAliasStore: new InMemoryTokenAliasStoreV2(),
+    entropy,
     validationPipelineDeps: createTestValidationPipelineDeps(),
     hmac,
     base64url,
@@ -214,28 +217,11 @@ describe('v2 replay is fact-returning and fail-closed (Phase 3)', () => {
           }
         );
 
-      const statePayload = StateTokenPayloadV1Schema.parse({
-        tokenVersion: 1,
-        tokenKind: 'state',
-        sessionId,
-        runId,
-        nodeId,
-        workflowHashRef: String(workflowHashRef),
-      });
-      const ackPayload = AckTokenPayloadV1Schema.parse({
-        tokenVersion: 1,
-        tokenKind: 'ack',
-        sessionId,
-        runId,
-        nodeId,
-        attemptId,
-      });
-
-      const stateToken = await mkSignedToken({ v2: v2Ctx, payload: statePayload });
-      const ackToken = await mkSignedToken({ v2: v2Ctx, payload: ackPayload });
+      
 
       const v2Ctx2 = await createV2Context();
-      const res = await handleV2ContinueWorkflow({ intent: 'advance', stateToken, ackToken } as any, dummyCtx(v2Ctx2));
+      const continueToken = await mintTestContinueToken(v2Ctx2, { sessionId, runId, nodeId, attemptId, workflowHashRef: String(workflowHashRef) });
+      const res = await handleV2ContinueWorkflow({ continueToken, } as any, dummyCtx(v2Ctx2));
       expect(res.type).toBe('error');
       if (res.type !== 'error') return;
       expect(res.code).toBe('INTERNAL_ERROR');
@@ -378,28 +364,11 @@ describe('v2 replay is fact-returning and fail-closed (Phase 3)', () => {
           }
         );
 
-      const statePayload = StateTokenPayloadV1Schema.parse({
-        tokenVersion: 1,
-        tokenKind: 'state',
-        sessionId,
-        runId,
-        nodeId,
-        workflowHashRef: String(workflowHashRef),
-      });
-      const ackPayload = AckTokenPayloadV1Schema.parse({
-        tokenVersion: 1,
-        tokenKind: 'ack',
-        sessionId,
-        runId,
-        nodeId,
-        attemptId,
-      });
-
-      const stateToken = await mkSignedToken({ v2: v2Ctx, payload: statePayload });
-      const ackToken = await mkSignedToken({ v2: v2Ctx, payload: ackPayload });
+      
 
       const v2Ctx2 = await createV2Context();
-      const res = await handleV2ContinueWorkflow({ intent: 'advance', stateToken, ackToken } as any, dummyCtx(v2Ctx2));
+      const continueToken = await mintTestContinueToken(v2Ctx2, { sessionId, runId, nodeId, attemptId, workflowHashRef: String(workflowHashRef) });
+      const res = await handleV2ContinueWorkflow({ continueToken, } as any, dummyCtx(v2Ctx2));
       expect(res.type).toBe('error');
       if (res.type !== 'error') return;
       expect(['INTERNAL_ERROR', 'SESSION_NOT_HEALTHY']).toContain(res.code);

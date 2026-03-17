@@ -538,12 +538,13 @@ describe('Token parameter consistency (Section 1.2)', () => {
    * - ackToken (opaque, required for advance, forbidden for rehydrate)
    */
   
-  it('V2ContinueWorkflowInput must have intent, stateToken, and ackToken parameters', () => {
+  it('V2ContinueWorkflowInput must have continueToken and intent parameters', () => {
     const params = getParameterNames(V2ContinueWorkflowInput);
     
+    expect(params, 'V2ContinueWorkflowInput must have continueToken').toContain('continueToken');
     expect(params, 'V2ContinueWorkflowInput must have intent').toContain('intent');
-    expect(params, 'V2ContinueWorkflowInput must have stateToken').toContain('stateToken');
-    expect(params, 'V2ContinueWorkflowInput must have ackToken').toContain('ackToken');
+    expect(params, 'V2ContinueWorkflowInput must not have stateToken').not.toContain('stateToken');
+    expect(params, 'V2ContinueWorkflowInput must not have ackToken').not.toContain('ackToken');
   });
 
   it('token parameters must not use snake_case', () => {

@@ -20,7 +20,9 @@ import { LocalSnapshotStoreV2 } from '../../src/v2/infra/local/snapshot-store/in
 import { LocalPinnedWorkflowStoreV2 } from '../../src/v2/infra/local/pinned-workflow-store/index.js';
 import { ExecutionSessionGateV2 } from '../../src/v2/usecases/execution-session-gate.js';
 
-import { parseTokenV1Binary, verifyTokenSignatureV1Binary, unsafeTokenCodecPorts } from '../../src/v2/durable-core/tokens/index.js';
+import { unsafeTokenCodecPorts } from '../../src/v2/durable-core/tokens/index.js';
+import { parseShortTokenNative } from '../../src/v2/durable-core/tokens/short-token.js';
+import { InMemoryTokenAliasStoreV2 } from '../../src/v2/infra/in-memory/token-alias-store/index.js';
 import { NodeHmacSha256V2 } from '../../src/v2/infra/local/hmac-sha256/index.js';
 import { NodeBase64UrlV2 } from '../../src/v2/infra/local/base64url/index.js';
 import { LocalKeyringV2 } from '../../src/v2/infra/local/keyring/index.js';
@@ -86,7 +88,7 @@ async function mkCtxWithWorkflow(workflowId: string): Promise<ToolContext> {
     featureFlags: null as any,
     sessionManager: null,
     httpServer: null,
-    v2: { gate, sessionStore, snapshotStore, pinnedStore, sha256, crypto, idFactory, tokenCodecPorts, validationPipelineDeps: createTestValidationPipelineDeps() },
+    v2: { gate, sessionStore, snapshotStore, pinnedStore, sha256, crypto, entropy, idFactory, tokenCodecPorts, tokenAliasStore: new InMemoryTokenAliasStoreV2(), validationPipelineDeps: createTestValidationPipelineDeps() },
   };
 }
 
@@ -103,16 +105,10 @@ describe('v2 start_workflow emits baseline preferences_changed', () => {
       expect(res.type).toBe('success');
       if (res.type !== 'success') return;
 
-      // Recover sessionId from stateToken.
-      const parsed = parseTokenV1Binary(res.data.stateToken, {
-        bech32m: new Bech32mAdapterV2(),
-        base32: new Base32AdapterV2(),
-      })._unsafeUnwrap();
-
-      // Quick signature check (optional but cheap):
-      verifyTokenSignatureV1Binary(parsed, (ctx.v2 as any).tokenCodecPorts)._unsafeUnwrap();
-
-      const sessionId = (parsed.payload as any).sessionId as string;
+      // Recover sessionId from stateToken via alias store.
+      const pt = parseShortTokenNative(res.data.continueToken)!;
+      const aliasEntry = (ctx.v2 as any).tokenAliasStore.lookup(pt.nonceHex);
+      const sessionId = aliasEntry!.sessionId as string;
       const truth = await (ctx.v2 as any).sessionStore.load(sessionId).match(
         (v: any) => v,
         (e: any) => {

@@ -14,6 +14,7 @@ export type {
   EngineConfig,
   EngineResult,
   EngineError,
+  InfraErrorCode,
   StepResponse,
   StepResponseOk,
   StepResponseBlocked,
@@ -26,9 +27,10 @@ export type {
   RiskPolicy,
   NextIntent,
   Blocker,
+  BlockerCode,
   StateToken,
   AckToken,
   CheckpointToken,
 } from './types.js';
 
-export { engineOk, engineErr, asStateToken, asAckToken, asCheckpointToken } from './types.js';
+export { engineOk, engineErr, asStateToken, asAckToken, asCheckpointToken, unwrapToken } from './types.js';

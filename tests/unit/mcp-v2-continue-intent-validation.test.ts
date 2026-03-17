@@ -1,11 +1,12 @@
 /**
- * Boundary validation tests for V2ContinueWorkflowInput intent discriminant.
+ * Boundary validation tests for V2ContinueWorkflowInput.
  *
  * These tests validate the Zod schema boundary — the first line of defense
  * against invalid agent calls. They verify:
+ * - continueToken is required
  * - Unknown keys are rejected (.strict())
- * - Missing intent is rejected
- * - Cross-field constraints are enforced (intent + ackToken agreement)
+ * - Intent auto-inference works correctly
+ * - Cross-field constraints are enforced
  * - Error messages are agent-actionable (self-correcting)
  */
 import { describe, expect, it } from 'vitest';
@@ -14,49 +15,68 @@ import { V2ContinueWorkflowInput } from '../../src/mcp/v2/tools.js';
 describe('V2ContinueWorkflowInput boundary validation', () => {
   // ── Happy paths ──────────────────────────────────────────────────
 
-  it('accepts valid advance input', () => {
+  it('accepts valid advance input with continueToken and output', () => {
     const result = V2ContinueWorkflowInput.safeParse({
-      intent: 'advance',
-      stateToken: 'st1abc',
-      ackToken: 'ack1abc',
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it('accepts valid advance input with output', () => {
-    const result = V2ContinueWorkflowInput.safeParse({
-      intent: 'advance',
-      stateToken: 'st1abc',
-      ackToken: 'ack1abc',
+      continueToken: 'ct_abc123',
       output: { notesMarkdown: 'Completed phase 1.' },
     });
     expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.intent).toBe('advance');
+      expect(result.data.continueToken).toBe('ct_abc123');
+    }
   });
 
-  it('accepts valid rehydrate input', () => {
+  it('accepts valid rehydrate input (no output)', () => {
     const result = V2ContinueWorkflowInput.safeParse({
-      intent: 'rehydrate',
-      stateToken: 'st1abc',
+      continueToken: 'ct_abc123',
     });
     expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.intent).toBe('rehydrate');
+    }
   });
 
   it('accepts valid rehydrate input with context', () => {
     const result = V2ContinueWorkflowInput.safeParse({
-      intent: 'rehydrate',
-      stateToken: 'st1abc',
+      continueToken: 'ct_abc123',
       context: { branch: 'main' },
     });
     expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.intent).toBe('rehydrate');
+      expect(result.data.context).toEqual({ branch: 'main' });
+    }
+  });
+
+  it('accepts explicit advance intent', () => {
+    const result = V2ContinueWorkflowInput.safeParse({
+      continueToken: 'ct_abc123',
+      intent: 'advance',
+      output: { notesMarkdown: 'Done.' },
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.intent).toBe('advance');
+    }
+  });
+
+  it('accepts explicit rehydrate intent', () => {
+    const result = V2ContinueWorkflowInput.safeParse({
+      continueToken: 'ct_abc123',
+      intent: 'rehydrate',
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.intent).toBe('rehydrate');
+    }
   });
 
   // ── Unknown keys rejected (.strict()) ────────────────────────────
 
   it('rejects unknown key "completedStep"', () => {
     const result = V2ContinueWorkflowInput.safeParse({
-      intent: 'advance',
-      stateToken: 'st1abc',
-      ackToken: 'ack1abc',
+      continueToken: 'ct_abc123',
       completedStep: 'phase-0-setup',
     });
     expect(result.success).toBe(false);
@@ -66,11 +86,10 @@ describe('V2ContinueWorkflowInput boundary validation', () => {
     }
   });
 
-  it('rejects unknown key "completed_step"', () => {
+  it('rejects unknown key "stateToken"', () => {
     const result = V2ContinueWorkflowInput.safeParse({
-      intent: 'rehydrate',
-      stateToken: 'st1abc',
-      completed_step: 'phase-0-setup',
+      continueToken: 'ct_abc123',
+      stateToken: 'st1test',
     });
     expect(result.success).toBe(false);
     if (!result.success) {
@@ -79,22 +98,28 @@ describe('V2ContinueWorkflowInput boundary validation', () => {
     }
   });
 
-  it('rejects unknown key "step"', () => {
+  it('rejects unknown key "ackToken"', () => {
     const result = V2ContinueWorkflowInput.safeParse({
-      intent: 'advance',
-      stateToken: 'st1abc',
-      ackToken: 'ack1abc',
-      step: 'next',
+      continueToken: 'ct_abc123',
+      ackToken: 'ack1test',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects unknown key "nextToken"', () => {
+    const result = V2ContinueWorkflowInput.safeParse({
+      continueToken: 'ct_abc123',
+      nextToken: 'ack1abc',
     });
     expect(result.success).toBe(false);
   });
 
   // ── Intent auto-inference ───────────────────────────────────────
 
-  it('auto-infers advance when intent omitted and ackToken present', () => {
+  it('auto-infers advance when output present', () => {
     const result = V2ContinueWorkflowInput.safeParse({
-      stateToken: 'st1abc',
-      ackToken: 'ack1abc',
+      continueToken: 'ct_abc123',
+      output: { notesMarkdown: 'Done.' },
     });
     expect(result.success).toBe(true);
     if (result.success) {
@@ -102,9 +127,9 @@ describe('V2ContinueWorkflowInput boundary validation', () => {
     }
   });
 
-  it('auto-infers rehydrate when intent omitted and ackToken absent', () => {
+  it('auto-infers rehydrate when output absent', () => {
     const result = V2ContinueWorkflowInput.safeParse({
-      stateToken: 'st1abc',
+      continueToken: 'ct_abc123',
     });
     expect(result.success).toBe(true);
     if (result.success) {
@@ -116,8 +141,8 @@ describe('V2ContinueWorkflowInput boundary validation', () => {
 
   it('rejects invalid intent value', () => {
     const result = V2ContinueWorkflowInput.safeParse({
+      continueToken: 'ct_abc123',
       intent: 'complete',
-      stateToken: 'st1abc',
     });
     expect(result.success).toBe(false);
     if (!result.success) {
@@ -126,54 +151,12 @@ describe('V2ContinueWorkflowInput boundary validation', () => {
     }
   });
 
-  it('rejects intent value "next"', () => {
-    const result = V2ContinueWorkflowInput.safeParse({
-      intent: 'next',
-      stateToken: 'st1abc',
-      ackToken: 'ack1abc',
-    });
-    expect(result.success).toBe(false);
-  });
-
-  // ── Cross-field: advance without ackToken ────────────────────────
-
-  it('rejects advance without ackToken with self-correcting message', () => {
-    const result = V2ContinueWorkflowInput.safeParse({
-      intent: 'advance',
-      stateToken: 'st1abc',
-    });
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      const ackError = result.error.errors.find((e) => e.path.includes('ackToken'));
-      expect(ackError).toBeDefined();
-      expect(ackError!.message).toContain('intent is "advance" but ackToken is missing');
-      expect(ackError!.message).toContain('set intent to "rehydrate"');
-    }
-  });
-
-  // ── Cross-field: rehydrate with ackToken ─────────────────────────
-
-  it('rejects rehydrate with ackToken with self-correcting message', () => {
-    const result = V2ContinueWorkflowInput.safeParse({
-      intent: 'rehydrate',
-      stateToken: 'st1abc',
-      ackToken: 'ack1abc',
-    });
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      const ackError = result.error.errors.find((e) => e.path.includes('ackToken'));
-      expect(ackError).toBeDefined();
-      expect(ackError!.message).toContain('intent is "rehydrate" but ackToken was provided');
-      expect(ackError!.message).toContain('set intent to "advance"');
-    }
-  });
-
   // ── Cross-field: rehydrate with output ───────────────────────────
 
   it('rejects rehydrate with output with self-correcting message', () => {
     const result = V2ContinueWorkflowInput.safeParse({
+      continueToken: 'ct_abc123',
       intent: 'rehydrate',
-      stateToken: 'st1abc',
       output: { notesMarkdown: 'some notes' },
     });
     expect(result.success).toBe(false);
@@ -181,20 +164,22 @@ describe('V2ContinueWorkflowInput boundary validation', () => {
       const outputError = result.error.errors.find((e) => e.path.includes('output'));
       expect(outputError).toBeDefined();
       expect(outputError!.message).toContain('intent is "rehydrate" but output was provided');
-      expect(outputError!.message).toContain('set intent to "advance"');
     }
   });
 
-  // ── Missing stateToken ───────────────────────────────────────────
+  // ── Missing continueToken ────────────────────────────────────────
 
-  it('rejects input without stateToken', () => {
+  it('rejects input without continueToken', () => {
     const result = V2ContinueWorkflowInput.safeParse({
       intent: 'rehydrate',
     });
     expect(result.success).toBe(false);
-    if (!result.success) {
-      const stateError = result.error.errors.find((e) => e.path.includes('stateToken'));
-      expect(stateError).toBeDefined();
-    }
+  });
+
+  it('rejects empty continueToken', () => {
+    const result = V2ContinueWorkflowInput.safeParse({
+      continueToken: '',
+    });
+    expect(result.success).toBe(false);
   });
 });

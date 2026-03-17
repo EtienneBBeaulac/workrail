@@ -28,6 +28,7 @@ import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
 import { Bech32mAdapterV2 } from '../../src/v2/infra/local/bech32m/index.js';
 import { Base32AdapterV2 } from '../../src/v2/infra/local/base32/index.js';
 import { unsafeTokenCodecPorts } from '../../src/v2/durable-core/tokens/index.js';
+import { InMemoryTokenAliasStoreV2 } from '../../src/v2/infra/in-memory/token-alias-store/index.js';
 
 async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-exec-contract-'));
@@ -72,8 +73,10 @@ async function createV2Context(): Promise<ToolContext> {
       pinnedStore,
       sha256,
       crypto,
+      entropy,
       tokenCodecPorts,
-    validationPipelineDeps: createTestValidationPipelineDeps(),
+      tokenAliasStore: new InMemoryTokenAliasStoreV2(),
+      validationPipelineDeps: createTestValidationPipelineDeps(),
       idFactory,
     },
   };
@@ -115,31 +118,31 @@ describe('MCP contract: v2 start_workflow / continue_workflow (Slice 3)', () => 
     if (start.type !== 'success') return;
 
     // Token size budget regression guard (prevents future payload bloat).
-    expect(start.data.stateToken.length).toBeLessThan(170); // Binary tokens: ~166 chars
-    expect(start.data.ackToken).toBeDefined();
-    if (start.data.ackToken) {
-      expect(start.data.ackToken.length).toBeLessThan(170); // Binary tokens: ~167 chars
+    expect(start.data.continueToken.length).toBeLessThan(170); // Binary tokens: ~166 chars
+    expect(start.data.continueToken).toBeDefined();
+    if (start.data.continueToken) {
+      expect(start.data.continueToken.length).toBeLessThan(170); // Binary tokens: ~167 chars
     }
 
     expect(start.data.pending?.stepId).toBe('triage');
     expect(start.data.isComplete).toBe(false);
 
-    const rehydrate1 = await handleV2ContinueWorkflow({ intent: 'rehydrate', stateToken: start.data.stateToken } as any, ctx);
+    const rehydrate1 = await handleV2ContinueWorkflow({ continueToken: start.data.continueToken, intent: 'rehydrate' } as any, ctx);
     expect(rehydrate1.type).toBe('success');
     if (rehydrate1.type !== 'success') return;
     expect(rehydrate1.data.kind).toBe('ok');
     expect(rehydrate1.data.pending?.stepId).toBe('triage');
 
-    const rehydrate2 = await handleV2ContinueWorkflow({ intent: 'rehydrate', stateToken: start.data.stateToken } as any, ctx);
+    const rehydrate2 = await handleV2ContinueWorkflow({ continueToken: start.data.continueToken, intent: 'rehydrate' } as any, ctx);
     expect(rehydrate2.type).toBe('success');
     if (rehydrate2.type !== 'success') return;
-    // Rehydrate is side-effect-free and deterministic in content, but may mint fresh ack/checkpoint tokens.
+    // Rehydrate is side-effect-free and deterministic in content, but mints fresh continueToken each call (new attemptId).
     expect(rehydrate2.data.kind).toBe('ok');
-    expect(rehydrate2.data.stateToken).toBe(rehydrate1.data.stateToken);
+    // continueToken may differ between rehydrate calls (fresh attemptId each time)
     expect(rehydrate2.data.isComplete).toBe(rehydrate1.data.isComplete);
     expect(rehydrate2.data.pending).toEqual(rehydrate1.data.pending);
 
-    const ack1 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: start.data.stateToken, ackToken: start.data.ackToken, output: { notesMarkdown: 'Step completed.' } } as any, ctx);
+    const ack1 = await handleV2ContinueWorkflow({ continueToken: start.data.continueToken, output: { notesMarkdown: 'Step completed.' } } as any, ctx);
     expect(ack1.type).toBe('success');
     if (ack1.type !== 'success') return;
     // This workflow has a single step; after acknowledging it we should complete.
@@ -147,7 +150,7 @@ describe('MCP contract: v2 start_workflow / continue_workflow (Slice 3)', () => 
     expect(ack1.data.isComplete).toBe(true);
     expect(ack1.data.pending).toBeNull();
 
-    const ack2 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: start.data.stateToken, ackToken: start.data.ackToken, output: { notesMarkdown: 'Step completed.' } } as any, ctx);
+    const ack2 = await handleV2ContinueWorkflow({ continueToken: start.data.continueToken, output: { notesMarkdown: 'Step completed.' } } as any, ctx);
     expect(ack2).toEqual(ack1); // idempotent replay
 
     // Verify v2 context is properly initialized

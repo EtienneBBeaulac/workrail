@@ -31,6 +31,9 @@ export function asStateToken(s: string): StateToken { return s as StateToken; }
 export function asAckToken(s: string): AckToken { return s as AckToken; }
 export function asCheckpointToken(s: string): CheckpointToken { return s as CheckpointToken; }
 
+// Unwrap — extract the raw string from a branded token (for passing to internal APIs)
+export function unwrapToken(t: StateToken | AckToken | CheckpointToken): string { return t as string; }
+
 // ---------------------------------------------------------------------------
 // Pending step
 // ---------------------------------------------------------------------------
@@ -68,8 +71,21 @@ export type NextIntent =
 // Blockers
 // ---------------------------------------------------------------------------
 
+/** Exhaustive blocker codes — matches V2BlockerSchema.code enum. */
+export type BlockerCode =
+  | 'USER_ONLY_DEPENDENCY'
+  | 'MISSING_REQUIRED_OUTPUT'
+  | 'INVALID_REQUIRED_OUTPUT'
+  | 'MISSING_REQUIRED_NOTES'
+  | 'MISSING_CONTEXT_KEY'
+  | 'CONTEXT_BUDGET_EXCEEDED'
+  | 'REQUIRED_CAPABILITY_UNKNOWN'
+  | 'REQUIRED_CAPABILITY_UNAVAILABLE'
+  | 'INVARIANT_VIOLATION'
+  | 'STORAGE_CORRUPTION_DETECTED';
+
 export interface Blocker {
-  readonly code: string;
+  readonly code: BlockerCode;
   readonly message: string;
   readonly suggestedFix?: string;
 }
@@ -81,6 +97,11 @@ export interface Blocker {
 interface StepResponseBase {
   readonly stateToken: StateToken;
   readonly ackToken: AckToken | null;
+  /**
+   * Checkpoint token for saving progress without advancing.
+   * Always present on start responses. May be null on edge-case continue responses
+   * (e.g., rehydrate of a completed session).
+   */
   readonly checkpointToken: CheckpointToken | null;
   readonly isComplete: boolean;
   readonly preferences: StepPreferences;
@@ -130,18 +151,32 @@ export interface WorkflowListResponse {
 // Engine errors — typed variants with domain-specific payloads
 // ---------------------------------------------------------------------------
 
+/**
+ * Infrastructure error code — the typed `code` from the underlying port error.
+ * Consumers can programmatically match on this without parsing message strings.
+ *
+ * Known codes (not exhaustive — ports may add new codes):
+ * - Session store: SESSION_STORE_IO_ERROR, SESSION_STORE_CORRUPTION_DETECTED, SESSION_STORE_LOCK_BUSY, SESSION_STORE_INVARIANT_VIOLATION
+ * - Snapshot store: SNAPSHOT_STORE_IO_ERROR, SNAPSHOT_STORE_CORRUPTION_DETECTED, SNAPSHOT_STORE_INVARIANT_VIOLATION
+ * - Pinned workflow store: PINNED_WORKFLOW_IO_ERROR
+ * - Keyring: KEYRING_IO_ERROR, KEYRING_CORRUPTION_DETECTED, KEYRING_INVARIANT_VIOLATION
+ * - Execution gate: SESSION_LOCKED, LOCK_ACQUIRE_FAILED, LOCK_RELEASE_FAILED, SESSION_NOT_HEALTHY, GATE_CALLBACK_FAILED
+ * - Token codec: BECH32M_INVALID_FORMAT, BECH32M_CHECKSUM_FAILED, BECH32M_HRP_MISMATCH, BASE32_INVALID_CHARACTERS
+ */
+export type InfraErrorCode = string;
+
 export type EngineError =
   | { readonly kind: 'workflow_not_found'; readonly workflowId: string }
   | { readonly kind: 'workflow_has_no_steps'; readonly workflowId: string }
   | { readonly kind: 'workflow_compile_failed'; readonly message: string }
   | { readonly kind: 'validation_failed'; readonly message: string }
-  | { readonly kind: 'token_invalid'; readonly message: string }
+  | { readonly kind: 'token_invalid'; readonly message: string; readonly code?: InfraErrorCode }
   | { readonly kind: 'token_signing_failed'; readonly message: string }
-  | { readonly kind: 'session_error'; readonly message: string }
-  | { readonly kind: 'storage_error'; readonly message: string }
+  | { readonly kind: 'session_error'; readonly message: string; readonly code?: InfraErrorCode }
+  | { readonly kind: 'storage_error'; readonly message: string; readonly code?: InfraErrorCode }
   | { readonly kind: 'prompt_render_failed'; readonly message: string }
   | { readonly kind: 'precondition_failed'; readonly message: string }
-  | { readonly kind: 'internal_error'; readonly message: string };
+  | { readonly kind: 'internal_error'; readonly message: string; readonly code?: InfraErrorCode };
 
 // ---------------------------------------------------------------------------
 // Result type — explicit success/failure without exceptions
@@ -172,6 +207,27 @@ export interface EngineConfig {
 // Engine interface
 // ---------------------------------------------------------------------------
 
+/**
+ * In-process WorkRail engine.
+ *
+ * Current scope: **transport replacement** — same step-by-step execution model
+ * as the MCP surface, but via direct function calls instead of JSON-RPC over HTTP.
+ * The caller drives the loop (start → continue → continue → ... → complete) the
+ * same way an MCP agent would.
+ *
+ * Future direction: **bot-as-orchestrator** — the caller reads `agentRole` + `prompt`
+ * from each step, constructs its own system prompts enriched with domain context,
+ * manages the agent lifecycle independently, and feeds output back. That model uses
+ * the same API but changes *who* drives the agent loop (the bot, not the workflow).
+ *
+ * Intentionally omitted:
+ * - `resumeSession` — requires sessionSummaryProvider, workspaceResolver, and
+ *   directoryListing ports that depend on MCP workspace roots. Library consumers
+ *   know exactly which workflow to start; session discovery is an interactive-agent
+ *   concern. If resume is needed later, add the optional ports to EngineConfig.
+ * - `nextCall` — MCP-specific field that tells an agent which tool to call next.
+ *   Library consumers drive the call sequence directly; they don't need tool templates.
+ */
 export interface WorkRailEngine {
   /** Start a workflow, get the first step. */
   readonly startWorkflow: (workflowId: string) => Promise<EngineResult<StepResponse>>;
@@ -180,7 +236,13 @@ export interface WorkRailEngine {
   readonly continueWorkflow: (
     stateToken: StateToken,
     ackToken: AckToken | null,
-    output?: { readonly notesMarkdown?: string },
+    output?: {
+      readonly notesMarkdown?: string;
+      /** Structured artifacts (schema is workflow/contract-defined, e.g. wr.loop_control). */
+      readonly artifacts?: readonly unknown[];
+    },
+    /** External facts to durably record. WorkRail auto-merges with previous context. */
+    context?: Readonly<Record<string, unknown>>,
   ) => Promise<EngineResult<StepResponse>>;
 
   /** Checkpoint without advancing. */

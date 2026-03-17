@@ -11,7 +11,9 @@ import type { SessionHealthDetails } from '../../src/mcp/types.js';
 import { createWorkflow } from '../../src/types/workflow.js';
 import { createProjectDirectorySource } from '../../src/types/workflow-source.js';
 
-import { parseTokenV1Binary, unsafeTokenCodecPorts } from '../../src/v2/durable-core/tokens/index.js';
+import { unsafeTokenCodecPorts } from '../../src/v2/durable-core/tokens/index.js';
+import { parseShortTokenNative } from '../../src/v2/durable-core/tokens/short-token.js';
+import { InMemoryTokenAliasStoreV2 } from '../../src/v2/infra/in-memory/token-alias-store/index.js';
 import { LocalDataDirV2 } from '../../src/v2/infra/local/data-dir/index.js';
 import { NodeFileSystemV2 } from '../../src/v2/infra/local/fs/index.js';
 import { NodeSha256V2 } from '../../src/v2/infra/local/sha256/index.js';
@@ -55,7 +57,7 @@ async function mkV2Deps() {
   const keyring = await keyringPort.loadOrCreate().match(v => v, e => { throw new Error(`keyring: ${e.code}`); });
 
   const tokenCodecPorts = unsafeTokenCodecPorts({ keyring, hmac, base64url, base32, bech32m });
-  return { gate, sessionStore, snapshotStore, pinnedStore, keyring, sha256, crypto, idFactory, tokenCodecPorts, hmac, base64url, base32, bech32m, validationPipelineDeps: createTestValidationPipelineDeps() };
+  return { gate, sessionStore, snapshotStore, pinnedStore, keyring, sha256, crypto, entropy, idFactory, tokenCodecPorts, tokenAliasStore: new InMemoryTokenAliasStoreV2(), hmac, base64url, base32, bech32m, validationPipelineDeps: createTestValidationPipelineDeps() };
 }
 
 async function mkCtxWithWorkflow(workflowId: string): Promise<ToolContext> {
@@ -102,9 +104,10 @@ describe('v2 execution: SESSION_NOT_HEALTHY error response', () => {
       expect(started.type).toBe('success');
       if (started.type !== 'success') return;
 
-      const stateToken = started.data.stateToken;
-      const parsedState = parseTokenV1Binary(stateToken, { bech32m: new Bech32mAdapterV2(), base32: new (await import('../../src/v2/infra/local/base32/index.js')).Base32AdapterV2() })._unsafeUnwrap();
-      const sessionId = parsedState.payload.sessionId;
+      const continueToken = started.data.continueToken;
+      const pt1 = parseShortTokenNative(continueToken)!;
+      const aliasEntry1 = (ctx.v2 as any).tokenAliasStore.lookup(pt1.nonceHex);
+      const sessionId = aliasEntry1!.sessionId;
 
       // Corrupt the session manifest file by truncating it
       const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: root });
@@ -116,7 +119,7 @@ describe('v2 execution: SESSION_NOT_HEALTHY error response', () => {
       await fd.close();
 
       // Try to load the session - should fail with SESSION_NOT_HEALTHY
-      const result = await handleV2ContinueWorkflow({ intent: 'rehydrate', stateToken } as any, ctx);
+      const result = await handleV2ContinueWorkflow({ continueToken, intent: 'rehydrate' } as any, ctx);
 
       // Assert: error response
       expect(result.type).toBe('error');
@@ -170,9 +173,10 @@ describe('v2 execution: SESSION_NOT_HEALTHY error response', () => {
       expect(started.type).toBe('success');
       if (started.type !== 'success') return;
 
-      const stateToken = started.data.stateToken;
-      const parsedState = parseTokenV1Binary(stateToken, { bech32m: new Bech32mAdapterV2(), base32: new (await import('../../src/v2/infra/local/base32/index.js')).Base32AdapterV2() })._unsafeUnwrap();
-      const sessionId = parsedState.payload.sessionId;
+      const continueToken = started.data.continueToken;
+      const pt2 = parseShortTokenNative(continueToken)!;
+      const aliasEntry2 = (ctx.v2 as any).tokenAliasStore.lookup(pt2.nonceHex);
+      const sessionId = aliasEntry2!.sessionId;
 
       // Corrupt manifest
       const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: root });
@@ -182,7 +186,7 @@ describe('v2 execution: SESSION_NOT_HEALTHY error response', () => {
       await fd.close();
 
       // Get error
-      const result = await handleV2ContinueWorkflow({ intent: 'rehydrate', stateToken } as any, ctx);
+      const result = await handleV2ContinueWorkflow({ continueToken, intent: 'rehydrate' } as any, ctx);
       expect(result.type).toBe('error');
       if (result.type !== 'error') return;
 

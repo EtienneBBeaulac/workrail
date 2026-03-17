@@ -24,7 +24,7 @@ import {
 } from '../v2-execution-helpers.js';
 import { renderPendingPrompt } from '../../../v2/durable-core/domain/prompt-renderer.js';
 import * as z from 'zod';
-import { newAttemptId, signTokenOrErr } from '../v2-token-ops.js';
+import { newAttemptId, mintContinueAndCheckpointTokens } from '../v2-token-ops.js';
 import { deriveNextIntent } from '../v2-state-conversion.js';
 import { EVENT_KIND } from '../../../v2/durable-core/constants.js';
 import { buildNextCall } from './index.js';
@@ -44,8 +44,10 @@ export function handleRehydrateIntent(args: {
   readonly pinnedStore: import('../../../v2/ports/pinned-workflow-store.port.js').PinnedWorkflowStorePortV2;
   readonly snapshotStore: import('../../../v2/ports/snapshot-store.port.js').SnapshotStorePortV2;
   readonly idFactory: { readonly mintAttemptId: () => import('../../../v2/durable-core/tokens/index.js').AttemptId };
+  readonly aliasStore: import('../../../v2/ports/token-alias-store.port.js').TokenAliasStorePortV2;
+  readonly entropy: import('../../../v2/ports/random-entropy.port.js').RandomEntropyPortV2;
 }): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, ContinueWorkflowError> {
-  const { input, sessionId, runId, nodeId, workflowHashRef, truth, tokenCodecPorts, pinnedStore, snapshotStore, idFactory } = args;
+  const { input, sessionId, runId, nodeId, workflowHashRef, truth, tokenCodecPorts, pinnedStore, snapshotStore, idFactory, aliasStore, entropy } = args;
 
   const runStarted = truth.events.find(
     (e): e is Extract<DomainEventV1, { kind: 'run_started' }> => e.kind === EVENT_KIND.RUN_STARTED && e.scope.runId === String(runId)
@@ -115,30 +117,28 @@ export function handleRehydrateIntent(args: {
 
         return okAsync(V2ContinueWorkflowOutputSchema.parse({
           kind: 'ok',
-          stateToken: input.stateToken,
           isComplete,
           pending: null,
           preferences,
           nextIntent,
-          nextCall: buildNextCall({ stateToken: input.stateToken, ackToken: undefined, isComplete, pending: null }),
+          nextCall: null,
         }));
       }
 
       const attemptId = newAttemptId(idFactory);
-      const ackTokenRes = signTokenOrErr({
-        payload: { tokenVersion: 1, tokenKind: 'ack', sessionId, runId, nodeId, attemptId },
-        ports: tokenCodecPorts,
-      });
-      if (ackTokenRes.isErr()) return neErrorAsync({ kind: 'token_signing_failed' as const, cause: ackTokenRes.error });
 
-      // Mint checkpoint token for rehydrate (available when pending step exists)
-      const checkpointTokenRes = signTokenOrErr({
-        payload: { tokenVersion: 1, tokenKind: 'checkpoint', sessionId, runId, nodeId, attemptId },
-        ports: tokenCodecPorts,
-      });
-      if (checkpointTokenRes.isErr()) return neErrorAsync({ kind: 'token_signing_failed' as const, cause: checkpointTokenRes.error });
+      const entryBase = {
+        sessionId: String(sessionId),
+        runId: String(runId),
+        nodeId: String(nodeId),
+        attemptId: String(attemptId),
+        workflowHashRef: String(workflowHashRef),
+      };
 
-      return pinnedStore.get(workflowHash)
+      return mintContinueAndCheckpointTokens({ entry: entryBase, ports: tokenCodecPorts, aliasStore, entropy })
+        .mapErr((failure) => ({ kind: 'token_signing_failed' as const, cause: failure as never }))
+        .andThen(({ continueToken: continueTokenValue, checkpointToken: checkpointTokenValue }) =>
+      pinnedStore.get(workflowHash)
         .mapErr((cause) => ({ kind: 'pinned_workflow_store_failed' as const, cause }))
         .andThen((pinned) => {
           if (!pinned) return neErrorAsync({ kind: 'pinned_workflow_missing' as const, workflowHash });
@@ -178,15 +178,15 @@ export function handleRehydrateIntent(args: {
 
           return okAsync(V2ContinueWorkflowOutputSchema.parse({
             kind: 'ok',
-            stateToken: input.stateToken,
-            ackToken: ackTokenRes.value,
-            checkpointToken: checkpointTokenRes.value,
+            continueToken: continueTokenValue,
+            checkpointToken: checkpointTokenValue,
             isComplete,
             pending: toPendingStep(meta),
             preferences,
             nextIntent,
-            nextCall: buildNextCall({ stateToken: input.stateToken, ackToken: ackTokenRes.value, isComplete, pending: meta }),
+            nextCall: buildNextCall({ continueToken: continueTokenValue, isComplete, pending: meta }),
           }));
-        });
+        })
+      ); // close mintContinueAndCheckpointTokens().andThen()
     });
 }
