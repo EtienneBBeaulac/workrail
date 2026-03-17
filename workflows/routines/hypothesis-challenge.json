@@ -2,11 +2,11 @@
   "id": "routine-hypothesis-challenge",
   "name": "Hypothesis Challenge Routine",
   "version": "1.0.0",
-  "description": "Lean adversarial review of a hypothesis, recommendation, or diagnosis. Finds the strongest counter-argument, exposes weak assumptions and evidence gaps, optionally deepens for THOROUGH review, and delivers verdicts plus critical tests.",
+  "description": "Lean adversarial review of a hypothesis, recommendation, or diagnosis. Produces the strongest counter-argument, exposes weak assumptions and evidence gaps, identifies likely failure modes, and defines the critical tests needed to keep, revise, or reject the current claim.",
   "clarificationPrompts": [
     "What hypothesis, recommendation, or diagnosis should I challenge?",
     "What evidence currently supports it?",
-    "What depth do you need? (default=STANDARD; optional QUICK / STANDARD / THOROUGH or legacy rigor=1/3/5)",
+    "What depth do you need? (QUICK / STANDARD / THOROUGH; legacy rigor=1/3/5 is still accepted for compatibility)",
     "What artifact name should I produce?"
   ],
   "preconditions": [
@@ -19,28 +19,29 @@
     "ROLE: you are an adversarial reviewer, not a neutral summarizer.",
     "SCOPE: challenge assumptions, evidence quality, and likely failure modes.",
     "DISCIPLINE: produce concrete counter-arguments and critical tests, not vague skepticism.",
-    "DEPTH: default behavior should feel like STANDARD; THOROUGH adds extra alternative-explanation work."
+    "DEPTH: QUICK = strongest counter only; STANDARD = counter + failure-mode review; THOROUGH = add alternative explanations and sharper discrimination tests.",
+    "COMPATIBILITY: prefer depth language (QUICK / STANDARD / THOROUGH). Treat legacy rigor values as adapter input, not the primary model."
   ],
   "steps": [
     {
-      "id": "step-state-target",
-      "title": "Step 1: State the Target and Its Assumptions",
-      "prompt": "State the hypothesis, recommendation, or diagnosis you are challenging.\n\nCapture:\n- the core claim in one sentence\n- the main assumptions it depends on\n- the strongest evidence currently supporting it\n- what would count as meaningful disproof\n\nWorking notes:\n- Target claim\n- Key assumptions\n- Supporting evidence\n- Disproof criteria",
-      "agentRole": "You are defining exactly what must be broken or defended.",
+      "id": "step-load-target",
+      "title": "Step 1: Load the Target Claim and Evidence",
+      "prompt": "Load the current claim you are challenging.\n\nCapture:\n- the target claim in one sentence\n- the main assumptions it depends on\n- the strongest supporting evidence currently available\n- what result would count as meaningful disproof\n\nKeep this step compact and precise. The goal is to define exactly what is under challenge and what would falsify it.",
+      "agentRole": "You are defining exactly what claim is on trial and what would falsify it.",
       "requireConfirmation": false
     },
     {
-      "id": "step-find-counterargument",
+      "id": "step-break-claim",
       "title": "Step 2: Find the Strongest Counter-Argument",
-      "prompt": "Find the strongest case against the current claim.\n\nChallenge it by asking:\n- What is the strongest alternative explanation?\n- What evidence could be interpreted differently?\n- What hidden assumption is doing too much work?\n- What would a sharp skeptic say first?\n\nWorking notes:\n- Strongest counter-argument\n- Reinterpreted evidence\n- Weak assumption under pressure\n- Biggest blind spot",
-      "agentRole": "You are a sharp skeptic trying to overturn the current favorite.",
+      "prompt": "Find the strongest case against the current claim.\n\nChallenge it by asking:\n- What is the strongest counter-argument or competing explanation?\n- What evidence could be interpreted differently?\n- What hidden assumption is carrying too much weight?\n- What would a sharp skeptic say first?\n\nOptimize for the single strongest attack, not a long list of weak objections.",
+      "agentRole": "You are a sharp skeptic trying to overturn the current favorite with the strongest available attack.",
       "requireConfirmation": false
     },
     {
-      "id": "step-probe-failure-modes",
-      "title": "Step 3: Probe Failure Modes and Weak Evidence",
-      "prompt": "Probe where the current claim could fail.\n\nReview:\n- the most likely failure modes if the claim is wrong\n- the weakest parts of the evidence chain\n- edge cases or environmental factors that could invalidate the conclusion\n- whether the claim explains all relevant facts or leaves contradictions behind\n\nWorking notes:\n- Likely failure modes\n- Evidence gaps\n- Contradictions or unexplained facts\n- Conditions that would flip the conclusion",
-      "agentRole": "You are testing whether the current story survives realistic pressure.",
+      "id": "step-review-failure-modes",
+      "title": "Step 3: Review Weak Evidence and Likely Failure Modes",
+      "prompt": "Probe where the current claim could fail under realistic pressure.\n\nReview:\n- the weakest part of the evidence chain\n- the most likely failure modes if the claim is wrong\n- edge cases or environmental factors that could invalidate the conclusion\n- contradictions, unexplained facts, or missing proof\n\nFocus on the few things most likely to flip the conclusion rather than exhaustive enumeration.",
+      "agentRole": "You are testing whether the current story survives realistic pressure and real evidence quality.",
       "requireConfirmation": false
     },
     {
@@ -48,18 +49,19 @@
       "title": "Step 4: Generate Alternative Explanations and Critical Tests",
       "runCondition": {
         "or": [
+          { "var": "depth", "equals": "THOROUGH" },
           { "var": "rigorMode", "equals": "THOROUGH" },
           { "var": "rigor", "gte": 5 }
         ]
       },
-      "prompt": "For THOROUGH review, go beyond counter-argument into alternatives and proof strategy.\n\nProduce:\n- the 1-2 strongest alternative explanations or competing hypotheses\n- why each might beat the current claim\n- the critical tests, observations, or traces that would discriminate between them\n- what result would cause you to keep, revise, or reject the current claim\n\nWorking notes:\n- Alternative explanations\n- Why they are plausible\n- Critical tests\n- Decision thresholds",
+      "prompt": "For THOROUGH review, go beyond the primary counter-argument into alternatives and discrimination strategy.\n\nProduce:\n- the 1-2 strongest alternative explanations or competing hypotheses\n- why each might beat the current claim\n- the critical tests, observations, or traces that would discriminate between them\n- what result would cause you to keep, revise, or reject the current claim\n\nThis step exists to make THOROUGH meaningfully deeper than STANDARD, not just wordier.",
       "agentRole": "You are building the shortest path to proving which explanation survives.",
       "requireConfirmation": false
     },
     {
       "id": "step-deliver",
       "title": "Step 5: Deliver the Challenge Verdict",
-      "prompt": "Create `{deliverableName}`.\n\nRequired structure:\n- Target Claim\n- Strongest Counter-Argument\n- Weak Assumptions / Evidence Gaps\n- Likely Failure Modes\n- Alternative Explanations (if explored)\n- Critical Tests\n- Verdict: Keep / Revise / Reject\n- Recommendation\n\nOptimize for a compact artifact the main workflow can interrogate and act on.",
+      "prompt": "Create `{deliverableName}`.\n\nRequired structure:\n- Target Claim\n- Strongest Counter-Argument\n- Weak Assumptions / Evidence Gaps\n- Likely Failure Modes\n- Alternative Explanations (if explored)\n- Critical Tests\n- Verdict: Keep / Revise / Reject\n- Next Action\n\nOptimize for a compact artifact that a main workflow can interrogate and act on immediately. Prefer decisive arguments over exhaustive ceremony.",
       "agentRole": "You are delivering a decisive challenge artifact for the main workflow or caller to synthesize.",
       "requireConfirmation": false
     }
