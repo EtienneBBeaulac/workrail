@@ -24,13 +24,22 @@ export const DecisionTraceRefKindSchema = z.enum([
 
 export type DecisionTraceRefKind = z.infer<typeof DecisionTraceRefKindSchema>;
 
+const EXPANDED_STEP_ID_PATTERN = /^[a-z0-9_-]+(?:\.[a-z0-9_-]+)*$/;
+
 /**
  * Decision trace ref: step_id
- * References a workflow step by its delimiter-safe ID.
+ * References a workflow step by ID.
+ *
+ * Supports both:
+ * - author-authored step IDs: `step-id`
+ * - routine-expanded step IDs: `template-call.step-id`
  */
 const StepIdRefSchema = z.object({
   kind: z.literal('step_id'),
-  stepId: z.string().regex(DELIMITER_SAFE_ID_PATTERN, 'stepId must be delimiter-safe: [a-z0-9_-]+'),
+  stepId: z.string().regex(
+    EXPANDED_STEP_ID_PATTERN,
+    'stepId must be delimiter-safe segments joined by dots: [a-z0-9_-]+(?:\\.[a-z0-9_-]+)*'
+  ),
 }).strict();
 
 /**

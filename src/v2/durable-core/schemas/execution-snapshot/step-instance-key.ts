@@ -20,6 +20,28 @@ export const DelimiterSafeIdV1Schema = z
   .transform(asDelimiterSafeIdV1);
 
 /**
+ * Expanded step identifiers for executable state.
+ *
+ * Supports routine-expanded step IDs like `template-call.step-id` while still
+ * forbidding loop/path delimiters such as `@`, `/`, and `:`.
+ */
+export type ExpandedStepIdV1 = Brand<string, 'v2.ExpandedStepIdV1'>;
+
+export function asExpandedStepIdV1(value: string): ExpandedStepIdV1 {
+  return value as ExpandedStepIdV1;
+}
+
+const EXPANDED_STEP_ID_PATTERN = /^[a-z0-9_-]+(?:\.[a-z0-9_-]+)*$/;
+
+export const ExpandedStepIdV1Schema = z
+  .string()
+  .regex(
+    EXPANDED_STEP_ID_PATTERN,
+    'Expected expanded step id: [a-z0-9_-]+(?:\\.[a-z0-9_-]+)*'
+  )
+  .transform(asExpandedStepIdV1);
+
+/**
  * StepInstanceKey canonical format (locked).
  *
  * - If `loopPath` is empty: `stepId`
@@ -42,7 +64,7 @@ function asStepInstanceKeyV1(value: string): StepInstanceKeyV1 {
   return value as StepInstanceKeyV1;
 }
 
-export function stepInstanceKeyFromParts(stepId: DelimiterSafeIdV1, loopPath: readonly LoopPathFrameV1[]): StepInstanceKeyV1 {
+export function stepInstanceKeyFromParts(stepId: ExpandedStepIdV1, loopPath: readonly LoopPathFrameV1[]): StepInstanceKeyV1 {
   if (loopPath.length === 0) return asStepInstanceKeyV1(stepId);
   const prefix = loopPath.map((f) => `${f.loopId}@${f.iteration}`).join('/');
   return asStepInstanceKeyV1(`${prefix}::${stepId}`);
@@ -55,7 +77,7 @@ export function parseStepInstanceKeyV1(raw: string): Result<StepInstanceKeyV1, S
   const parts = raw.split('::');
   if (parts.length === 1) {
     const stepId = parts[0]!;
-    if (!/^[a-z0-9_-]+$/.test(stepId)) {
+    if (!EXPANDED_STEP_ID_PATTERN.test(stepId)) {
       return err({ code: 'STEP_INSTANCE_KEY_BAD_FORMAT', message: 'Invalid stepId segment' });
     }
     return ok(asStepInstanceKeyV1(stepId));
@@ -65,7 +87,7 @@ export function parseStepInstanceKeyV1(raw: string): Result<StepInstanceKeyV1, S
   }
 
   const [loopPathRaw, stepId] = parts as [string, string];
-  if (!/^[a-z0-9_-]+$/.test(stepId)) {
+  if (!EXPANDED_STEP_ID_PATTERN.test(stepId)) {
     return err({ code: 'STEP_INSTANCE_KEY_BAD_FORMAT', message: 'Invalid stepId segment' });
   }
 

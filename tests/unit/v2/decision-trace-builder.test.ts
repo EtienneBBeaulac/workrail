@@ -25,6 +25,7 @@ import {
   MAX_DECISION_TRACE_TOTAL_BYTES,
   TRUNCATION_MARKER,
 } from '../../../src/v2/durable-core/constants.js';
+import { DomainEventV1Schema } from '../../../src/v2/durable-core/schemas/session/index.js';
 
 const utf8Bytes = (s: string) => new TextEncoder().encode(s).length;
 
@@ -178,6 +179,28 @@ describe('buildDecisionTraceEventData', () => {
       expect(result.value.entries).toHaveLength(3);
       expect(result.value.entries[0]!.kind).toBe('entered_loop');
       expect(result.value.entries[2]!.kind).toBe('selected_next_step');
+    }
+  });
+
+  it('preserves dotted expanded step IDs that still validate as domain events', () => {
+    const entries: DecisionTraceEntry[] = [
+      traceSelectedNextStep('phase-1b-design-deep.step-discover-philosophy'),
+    ];
+
+    const result = buildDecisionTraceEventData('trace_005', entries);
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      const event = {
+        v: 1 as const,
+        eventId: 'evt_trace_005',
+        eventIndex: 0,
+        sessionId: 'sess_1',
+        kind: 'decision_trace_appended' as const,
+        dedupeKey: 'decision_trace_appended:sess_1:trace_005',
+        scope: { runId: 'run_1', nodeId: 'node_1' },
+        data: result.value,
+      };
+      expect(() => DomainEventV1Schema.parse(event)).not.toThrow();
     }
   });
 
