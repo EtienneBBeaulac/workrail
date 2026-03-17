@@ -124,35 +124,8 @@ describe('End-to-end routine injection through the compiler', () => {
   });
 });
 
-describe('Lean workflow with injected routine-tension-driven-design', () => {
-  it('compiles the lean workflow with routine injection expanding Phase 1', () => {
-    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
-    const routine = loadRoutineJson('tension-driven-design.json');
-
-    const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
-    expect(result.isOk()).toBe(true);
-
-    const steps = result._unsafeUnwrap();
-
-    // Phase 0 is still the first step (regular, not injected)
-    expect(steps[0]!.id).toBe('phase-0-understand-and-classify');
-
-    // Phase 1 templateCall should be expanded into the routine's 5 steps
-    const routineStepIds = routine.steps.map(
-      (s: { id: string }) => `phase-1-design-generation.${s.id}`,
-    );
-    for (const expectedId of routineStepIds) {
-      const found = steps.find(s => s.id === expectedId);
-      expect(found, `Expected expanded step '${expectedId}' to exist`).toBeDefined();
-    }
-
-    // The challenge-and-select step should follow the routine steps
-    const selectStep = steps.find(s => s.id === 'phase-1f-challenge-and-select') as WorkflowStepDefinition;
-    expect(selectStep).toBeDefined();
-    expect(selectStep.prompt).toContain('selectedApproach');
-  });
-
-  it('preserves all other phases after injection', () => {
+describe('Lean workflow — Phase 1 orchestration with injected routine', () => {
+  it('compiles with the three-part Phase 1 structure (hypothesis, design, select)', () => {
     const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
 
     const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
@@ -161,9 +134,90 @@ describe('Lean workflow with injected routine-tension-driven-design', () => {
     const steps = result._unsafeUnwrap();
     const stepIds = steps.map(s => s.id);
 
-    // Key phases that should survive compilation
+    // Phase 1a: hypothesis step
+    expect(stepIds).toContain('phase-1a-hypothesis');
+
+    // Phase 1b-quick: lightweight inline design
+    expect(stepIds).toContain('phase-1b-design-quick');
+
+    // Phase 1b-deep: expanded routine steps (5 from tension-driven-design)
+    const routine = loadRoutineJson('tension-driven-design.json');
+    for (const routineStep of routine.steps) {
+      const expandedId = `phase-1b-design-deep.${routineStep.id}`;
+      expect(stepIds, `Expected '${expandedId}' in compiled steps`).toContain(expandedId);
+    }
+
+    // Phase 1c: challenge and select
+    expect(stepIds).toContain('phase-1c-challenge-and-select');
+  });
+
+  it('hypothesis step references initialHypothesis context variable', () => {
+    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
+
+    const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
+    const steps = result._unsafeUnwrap();
+
+    const hypothesis = steps.find(s => s.id === 'phase-1a-hypothesis') as WorkflowStepDefinition;
+    expect(hypothesis.prompt).toContain('initialHypothesis');
+  });
+
+  it('QUICK design step has rigorMode=QUICK runCondition', () => {
+    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
+
+    const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
+    const steps = result._unsafeUnwrap();
+
+    const quickStep = steps.find(s => s.id === 'phase-1b-design-quick') as WorkflowStepDefinition;
+    expect(quickStep.runCondition).toEqual({
+      and: [
+        { var: 'taskComplexity', not_equals: 'Small' },
+        { var: 'rigorMode', equals: 'QUICK' },
+      ],
+    });
+  });
+
+  it('deep design routine steps inherit compound runCondition (not Small AND not QUICK)', () => {
+    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
+    const routine = loadRoutineJson('tension-driven-design.json');
+
+    const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
+    const steps = result._unsafeUnwrap();
+
+    const expectedRunCondition = {
+      and: [
+        { var: 'taskComplexity', not_equals: 'Small' },
+        { var: 'rigorMode', not_equals: 'QUICK' },
+      ],
+    };
+
+    for (const routineStep of routine.steps) {
+      const expandedId = `phase-1b-design-deep.${routineStep.id}`;
+      const step = steps.find(s => s.id === expandedId) as WorkflowStepDefinition;
+      expect(step, `Expected '${expandedId}' to exist`).toBeDefined();
+      expect(step.runCondition).toEqual(expectedRunCondition);
+    }
+  });
+
+  it('challenge-and-select step references initialHypothesis for comparison', () => {
+    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
+
+    const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
+    const steps = result._unsafeUnwrap();
+
+    const selectStep = steps.find(s => s.id === 'phase-1c-challenge-and-select') as WorkflowStepDefinition;
+    expect(selectStep.prompt).toContain('initialHypothesis');
+    expect(selectStep.prompt).toContain('selectedApproach');
+    expect(selectStep.prompt).toContain('changed your mind');
+  });
+
+  it('preserves all other phases after restructured Phase 1', () => {
+    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
+
+    const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
+    const steps = result._unsafeUnwrap();
+    const stepIds = steps.map(s => s.id);
+
     expect(stepIds).toContain('phase-0-understand-and-classify');
-    expect(stepIds).toContain('phase-1f-challenge-and-select');
     expect(stepIds).toContain('phase-2-design-review');
     expect(stepIds).toContain('phase-3-plan-and-test-design');
     expect(stepIds).toContain('phase-4-plan-audit');
@@ -172,34 +226,14 @@ describe('Lean workflow with injected routine-tension-driven-design', () => {
     expect(stepIds).toContain('phase-7-final-verification');
   });
 
-  it('expanded routine steps inherit runCondition from the templateCall step', () => {
-    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
-    const routine = loadRoutineJson('tension-driven-design.json');
-
-    const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
-    expect(result.isOk()).toBe(true);
-
-    const steps = result._unsafeUnwrap();
-    const expectedRunCondition = { var: 'taskComplexity', not_equals: 'Small' };
-
-    // Every expanded routine step should inherit the parent's runCondition
-    for (const routineStep of routine.steps) {
-      const expandedId = `phase-1-design-generation.${routineStep.id}`;
-      const step = steps.find(s => s.id === expandedId) as WorkflowStepDefinition;
-      expect(step, `Expected '${expandedId}' to exist`).toBeDefined();
-      expect(step.runCondition).toEqual(expectedRunCondition);
-    }
-  });
-
-  it('arg substitution works in the lean workflow (deliverableName)', () => {
+  it('arg substitution works in the deep design path (deliverableName)', () => {
     const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
 
     const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
-    expect(result.isOk()).toBe(true);
-
     const steps = result._unsafeUnwrap();
+
     const deliverStep = steps.find(
-      s => s.id === 'phase-1-design-generation.step-deliver',
+      s => s.id === 'phase-1b-design-deep.step-deliver',
     ) as WorkflowStepDefinition;
 
     expect(deliverStep).toBeDefined();

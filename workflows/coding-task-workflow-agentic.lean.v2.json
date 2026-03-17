@@ -40,11 +40,35 @@
       }
     },
     {
-      "id": "phase-1-design-generation",
-      "title": "Phase 1: Design Generation (Injected Routine — Tension-Driven Design)",
+      "id": "phase-1a-hypothesis",
+      "title": "Phase 1a: State Hypothesis",
       "runCondition": {
         "var": "taskComplexity",
         "not_equals": "Small"
+      },
+      "prompt": "Before any design work, state your current hypothesis in 3-5 sentences.\n\nBased on what you learned in Phase 0, write:\n1. Your current best guess for the approach\n2. Your main concern about that guess\n3. What would most likely make that guess wrong\n\nThis is your reference point. After design generation, you will compare the result against this hypothesis and say what changed your mind or what held firm.\n\nSet context variable:\n- `initialHypothesis`",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-1b-design-quick",
+      "title": "Phase 1b: Lightweight Design (QUICK)",
+      "runCondition": {
+        "and": [
+          { "var": "taskComplexity", "not_equals": "Small" },
+          { "var": "rigorMode", "equals": "QUICK" }
+        ]
+      },
+      "prompt": "Generate a lightweight design inline. QUICK rigor means the path is clear and risk is low.\n\nProduce two mandatory candidates:\n1. The simplest possible change that satisfies acceptance criteria\n2. Follow the existing repo pattern for this kind of change\n\nFor each candidate:\n- One-sentence summary\n- Key tradeoff\n- Failure mode to watch\n- Philosophy fit (name specific principles)\n\nCompare and recommend. If both converge on the same approach, say so honestly.\n\nSet context variable:\n- `designCandidates`",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-1b-design-deep",
+      "title": "Phase 1b: Design Generation (Injected Routine — Tension-Driven Design)",
+      "runCondition": {
+        "and": [
+          { "var": "taskComplexity", "not_equals": "Small" },
+          { "var": "rigorMode", "not_equals": "QUICK" }
+        ]
       },
       "templateCall": {
         "templateId": "wr.templates.routine.tension-driven-design",
@@ -54,13 +78,13 @@
       }
     },
     {
-      "id": "phase-1f-challenge-and-select",
-      "title": "Phase 1f: Challenge Leading Option and Select",
+      "id": "phase-1c-challenge-and-select",
+      "title": "Phase 1c: Challenge and Select",
       "runCondition": {
         "var": "taskComplexity",
         "not_equals": "Small"
       },
-      "prompt": "Review the design candidates produced by the tension-driven design routine, challenge the leading option, and make a final selection.\n\nPart A — Challenge the leading option:\nBefore accepting the routine's recommendation, challenge it:\n- What's the strongest argument against the recommended approach?\n- What assumption, if wrong, would invalidate it?\n- STANDARD/THOROUGH: optionally spawn ONE WorkRail Executor running `routine-hypothesis-challenge` focused on the recommended approach's failure modes\n\nPart B — Select:\nMake the final architecture decision. The routine's output is evidence, not a decision — you own the choice.\n\nIf the simplest solution satisfies acceptance criteria, prefer it. Complexity must justify itself.\n\nSet context variables:\n- `selectedApproach` — the chosen design with rationale tied back to tensions\n- `runnerUpApproach` — the next-best option and why it lost\n- `architectureRationale` — which tensions were resolved and which were accepted\n- `pivotTriggers` — specific conditions under which you'd switch to the runner-up\n- `keyRiskToMonitor` — the failure mode of the selected approach\n- `acceptedTradeoffs` — what the selected approach gives up (feeds directly into design review)\n- `identifiedFailureModes` — per-candidate failure modes (feeds directly into design review)",
+      "prompt": "Compare the design output against your initial hypothesis and make the final architecture decision.\n\nPart A — Compare to hypothesis:\nRevisit `initialHypothesis`. Now that you have design candidates:\n- Where did the design work confirm your hypothesis?\n- Where did it challenge or change your thinking?\n- What did you learn that you hadn't considered?\nState explicitly what changed your mind and what held firm.\n\nPart B — Challenge the leading option:\n- What's the strongest argument against the recommended approach?\n- What assumption, if wrong, would invalidate it?\n- STANDARD/THOROUGH: optionally spawn ONE WorkRail Executor running `routine-hypothesis-challenge` focused on the leading option's failure modes\n- THOROUGH: optionally also spawn ONE WorkRail Executor running `routine-execution-simulation` to trace the 3 most likely failure scenarios\n\nPart C — Select:\nMake the final architecture decision. The design output is evidence, not a decision — you own the choice.\n\nIf the simplest solution satisfies acceptance criteria, prefer it. Complexity must justify itself. If the challenged leading candidate no longer looks best, switch deliberately rather than defending sunk cost.\n\nSet context variables:\n- `selectedApproach` — the chosen design with rationale tied back to tensions\n- `runnerUpApproach` — the next-best option and why it lost\n- `architectureRationale` — which tensions were resolved and which were accepted\n- `pivotTriggers` — specific conditions under which you'd switch to the runner-up\n- `keyRiskToMonitor` — the failure mode of the selected approach\n- `acceptedTradeoffs` — what the selected approach gives up (feeds directly into design review)\n- `identifiedFailureModes` — per-candidate failure modes (feeds directly into design review)",
       "requireConfirmation": {
         "or": [
           { "var": "automationLevel", "equals": "Low" },
