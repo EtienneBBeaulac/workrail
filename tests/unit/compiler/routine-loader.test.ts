@@ -5,6 +5,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import path from 'path';
+import os from 'os';
 import { loadRoutineDefinitions } from '../../../src/application/services/compiler/routine-loader.js';
 
 // Resolve the real routines directory
@@ -26,7 +27,7 @@ describe('loadRoutineDefinitions', () => {
   });
 
   it('returns empty result for nonexistent directory', () => {
-    const result = loadRoutineDefinitions('/tmp/nonexistent-routines-dir-xyz');
+    const result = loadRoutineDefinitions(path.join(os.tmpdir(), 'nonexistent-routines-dir-xyz'));
     expect(result.isOk()).toBe(true);
     const { routines, warnings } = result._unsafeUnwrap();
     expect(routines.size).toBe(0);
