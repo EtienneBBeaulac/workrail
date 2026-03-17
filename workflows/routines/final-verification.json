@@ -1,0 +1,62 @@
+{
+  "id": "routine-final-verification",
+  "name": "Final Verification Routine",
+  "version": "1.0.0",
+  "description": "Performs reusable final verification over acceptance criteria, invariants, validation evidence, regressions, cumulative drift, and philosophy alignment. Produces a proof-oriented verification artifact built around claim -> evidence -> gap -> severity -> readiness verdict.",
+  "clarificationPrompts": [
+    "What implementation or slices should I verify?",
+    "What acceptance criteria and invariants must hold?",
+    "What validation commands or evidence are available?",
+    "What artifact name should I produce?"
+  ],
+  "preconditions": [
+    "Implementation is available for review",
+    "Acceptance criteria are available",
+    "Invariants are available",
+    "A deterministic validation path exists"
+  ],
+  "metaGuidance": [
+    "PURPOSE: verify whether the whole task is truly done, not just locally green.",
+    "ROLE: you are a verifier proving or disproving readiness using evidence.",
+    "PROOF: map every readiness claim to tests, build output, artifacts, or explicit reasoning.",
+    "SEVERITY: every gap should be classified clearly so the caller knows what blocks shipping.",
+    "DRIFT: look for cumulative compromise, not just isolated defects."
+  ],
+  "steps": [
+    {
+      "id": "step-map-claims-to-proof",
+      "title": "Step 1: Map Acceptance Criteria and Invariants to Proof",
+      "prompt": "Map the implementation's readiness claims to concrete proof.\n\nFor each acceptance criterion and invariant:\n- state the claim clearly\n- identify the strongest supporting evidence (test, build output, artifact, code reasoning)\n- note whether the proof is strong, partial, or missing\n- record any gap that prevents the claim from being fully proven\n\nWorking notes:\n- Claim -> proof matrix\n- Strong / partial / missing proof\n- Gaps that weaken readiness",
+      "agentRole": "You are a verifier mapping claims to concrete proof.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-review-validation-evidence",
+      "title": "Step 2: Review Validation Evidence Quality",
+      "prompt": "Review the overall validation evidence quality.\n\nCheck:\n- whether the right validation commands were run\n- whether the evidence is trustworthy and sufficient for readiness\n- whether any critical area has only weak or indirect proof\n- whether additional validation would materially change confidence\n\nWorking notes:\n- Validation commands reviewed\n- Evidence strength assessment\n- Missing or weak proof",
+      "agentRole": "You are checking whether the validation story is actually strong enough to trust.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-classify-gaps-and-regressions",
+      "title": "Step 3: Classify Gaps, Regressions, and Drift by Severity",
+      "prompt": "Review the implementation for regressions, drift, and unresolved gaps.\n\nCheck:\n- invariant violations or regressions\n- whether repeated small compromises added up to a larger pattern problem\n- whether the implementation still matches intended plan boundaries\n- whether any proof gaps should block shipping versus merely lower confidence\n\nClassify each issue by severity:\n- Red: blocks readiness\n- Orange: should be fixed before shipping if possible\n- Yellow: acceptable tension or bounded follow-up\n\nWorking notes:\n- Regressions found\n- Drift assessment\n- Severity-classified gaps",
+      "agentRole": "You are looking for the subtle ways a task can go wrong even when individual slices seemed fine.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-review-philosophy",
+      "title": "Step 4: Review Philosophy Alignment",
+      "prompt": "Review the final result against the dev's philosophy.\n\nAssess:\n- which principles are clearly satisfied\n- which tensions remain intentionally accepted\n- which philosophy violations should be severity Red, Orange, or Yellow\n- whether any philosophy concern changes the readiness verdict\n\nWorking notes:\n- Satisfied principles\n- Accepted tensions\n- Severity-classified philosophy concerns",
+      "agentRole": "You are checking whether the finished result still reflects the dev's standards.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-deliver",
+      "title": "Step 5: Deliver Final Verification Findings",
+      "prompt": "Create `{deliverableName}`.\n\nRequired structure:\n- Readiness Claims and Proof Matrix\n  - claim\n  - supporting evidence\n  - proof strength (strong / partial / missing)\n  - proof gap\n- Validation Evidence Summary\n- Severity-Classified Gaps\n  - Red (blocking)\n  - Orange (should fix)\n  - Yellow (accepted tension / follow-up)\n- Regression / Drift Review\n- Philosophy Alignment\n- Recommended Fixes\n- Readiness Verdict\n  - Ready\n  - Ready with Accepted Tensions\n  - Not Ready\n\nOptimize for a compact artifact the main workflow can use to decide whether to fix, re-verify, or hand off.",
+      "agentRole": "You are delivering a verification artifact the main workflow can interpret and act on.",
+      "requireConfirmation": false
+    }
+  ]
+}

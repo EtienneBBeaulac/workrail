@@ -260,3 +260,82 @@ describe('Lean workflow — Phase 1 orchestration with injected routine', () => 
     expect(deliverStep.prompt).not.toContain('{deliverableName}');
   });
 });
+
+describe('Lean workflow — injected review routines inside loops', () => {
+  it('expands the design review routine inside Phase 2 while keeping workflow-owned wrapper steps', () => {
+    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
+    const routine = loadRoutineJson('design-review.json');
+
+    const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
+    expect(result.isOk()).toBe(true);
+
+    const steps = result._unsafeUnwrap();
+    const phase2Loop = steps.find(
+      s => s.id === 'phase-2-design-review',
+    ) as LoopStepDefinition;
+    expect(phase2Loop).toBeDefined();
+
+    const body = phase2Loop.body as WorkflowStepDefinition[];
+    const bodyIds = body.map(step => step.id);
+
+    expect(bodyIds).toContain('phase-2a-pre-assess-design-review');
+    expect(bodyIds).toContain('phase-2c-synthesize-design-review');
+    expect(bodyIds).toContain('phase-2d-loop-decision');
+
+    for (const routineStep of routine.steps) {
+      const expandedId = `phase-2b-design-review-core.${routineStep.id}`;
+      expect(bodyIds, `Expected '${expandedId}' in Phase 2 body`).toContain(expandedId);
+    }
+  });
+
+  it('expands the final verification routine inside Phase 7 while keeping fix-and-loop-control in workflow', () => {
+    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
+    const routine = loadRoutineJson('final-verification.json');
+
+    const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
+    expect(result.isOk()).toBe(true);
+
+    const steps = result._unsafeUnwrap();
+    const phase7Loop = steps.find(
+      s => s.id === 'phase-7-final-verification',
+    ) as LoopStepDefinition;
+    expect(phase7Loop).toBeDefined();
+
+    const body = phase7Loop.body as WorkflowStepDefinition[];
+    const bodyIds = body.map(step => step.id);
+
+    expect(bodyIds).toContain('phase-7b-fix-and-summarize');
+    expect(bodyIds).toContain('phase-7c-loop-decision');
+
+    for (const routineStep of routine.steps) {
+      const expandedId = `phase-7a-final-verification-core.${routineStep.id}`;
+      expect(bodyIds, `Expected '${expandedId}' in Phase 7 body`).toContain(expandedId);
+    }
+  });
+
+  it('review routines inherit their parent loop-step run conditions when expanded', () => {
+    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
+
+    const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
+    expect(result.isOk()).toBe(true);
+
+    const steps = result._unsafeUnwrap();
+    const phase2Loop = steps.find(s => s.id === 'phase-2-design-review') as LoopStepDefinition;
+    const phase7Loop = steps.find(s => s.id === 'phase-7-final-verification') as LoopStepDefinition;
+
+    const phase2Body = phase2Loop.body as WorkflowStepDefinition[];
+    const phase7Body = phase7Loop.body as WorkflowStepDefinition[];
+
+    const phase2CoreStep = phase2Body.find(
+      step => step.id === 'phase-2b-design-review-core.step-deliver',
+    ) as WorkflowStepDefinition;
+    const phase7CoreStep = phase7Body.find(
+      step => step.id === 'phase-7a-final-verification-core.step-deliver',
+    ) as WorkflowStepDefinition;
+
+    expect(phase2CoreStep).toBeDefined();
+    expect(phase7CoreStep).toBeDefined();
+    expect(phase2CoreStep.runCondition).toBeUndefined();
+    expect(phase7CoreStep.runCondition).toBeUndefined();
+  });
+});

@@ -1,7 +1,7 @@
 {
   "id": "coding-task-workflow-agentic",
   "name": "Agentic Task Dev Workflow (Lean • Notes-First • WorkRail Executor)",
-  "version": "2.1.0",
+  "version": "1.0.0",
   "description": "Lean variant of the agentic coding workflow. Merges triage, inputs gate, context gathering, and re-triage into a single Understand & Classify phase. Reduces context variable count and removes top-level clarificationPrompts. Same quality guarantees with fewer tokens.",
   "recommendedPreferences": {
     "recommendedAutonomy": "guided",
@@ -58,7 +58,7 @@
           { "var": "rigorMode", "equals": "QUICK" }
         ]
       },
-      "prompt": "Generate a lightweight design inline. QUICK rigor means the path is clear and risk is low.\n\nProduce two mandatory candidates:\n1. The simplest possible change that satisfies acceptance criteria\n2. Follow the existing repo pattern for this kind of change\n\nFor each candidate:\n- One-sentence summary\n- Key tradeoff\n- Failure mode to watch\n- Philosophy fit (name specific principles)\n\nCompare and recommend. If both converge on the same approach, say so honestly.\n\nWrite the output to `design-candidates.md` using the same structure as the deep design path:\n- Problem Understanding\n- Candidates (each with: summary, tradeoff, failure mode, philosophy fit)\n- Comparison and Recommendation\n\nSet context variable:\n- `designSummary` — one-paragraph summary of the recommendation and why",
+      "prompt": "Generate a lightweight design inline. QUICK rigor means the path is clear and risk is low.\n\nProduce two mandatory candidates:\n1. The simplest possible change that satisfies acceptance criteria\n2. Follow the existing repo pattern for this kind of change\n\nFor each candidate:\n- One-sentence summary\n- Which tensions it resolves and which it accepts\n- How it relates to existing repo patterns (follows / adapts / departs)\n- Failure mode to watch\n- Philosophy fit (name specific principles)\n\nCompare and recommend. If both converge on the same approach, say so honestly.\n\nWrite the output to `design-candidates.md` with this structure:\n- Problem Understanding (core tensions, what makes it hard)\n- Philosophy Constraints (which principles matter for this problem)\n- Candidates (each with: summary, tensions resolved/accepted, failure mode, philosophy fit)\n- Comparison and Recommendation\n- Open Questions (if any remain)",
       "requireConfirmation": false
     },
     {
@@ -112,13 +112,30 @@
       },
       "body": [
         {
-          "id": "phase-2a-review-design",
-          "title": "Review Design for Gaps, Issues, and Improvements",
-          "prompt": "Review the selected architecture using the explicit tradeoffs and failure modes from Phase 1 as your review criteria — not a generic gaps checklist.\n\nTargeted review (derived from Phase 1 outputs):\n1. Are the `acceptedTradeoffs` actually acceptable? For each accepted tradeoff, verify it won't violate acceptance criteria or invariants under realistic conditions.\n2. Are the `identifiedFailureModes` actually handled? For each failure mode, trace through the design and confirm there's a mitigation path. If not, flag it.\n3. Does the selected approach's relationship to existing repo patterns hold up? If it 'adapts' an existing pattern, verify the adaptation doesn't break the invariants the original pattern protects.\n4. Is there a simpler version of the selected approach that still satisfies acceptance criteria? (Complexity must continue to justify itself.)\n\nCompare against the runner-up:\n- Are there elements from the runner-up that would strengthen the selected approach without adding complexity?\n- Would a hybrid resolve an accepted tradeoff that's bothering you?\n\nPhilosophy alignment: does the architecture respect the user's active coding rules?\n\nBefore delegating, state your current assessment: what do you think the strongest and weakest parts of the design are right now?\n\nMode-adaptive delegation:\n- QUICK: self-review only\n- STANDARD: optionally spawn ONE WorkRail Executor running `routine-hypothesis-challenge` focused specifically on the accepted tradeoffs and failure modes\n- THOROUGH: spawn TWO WorkRail Executors — `routine-hypothesis-challenge` on tradeoffs + `routine-execution-simulation` on failure modes\n\nAfter receiving subagent output (if used), interrogate it against your pre-assessment. Do not adopt their framing wholesale. State what changed your thinking and what didn't.\n\nIf issues are found, fix the design (update `selectedApproach`, `architectureRationale`, `pivotTriggers`, `acceptedTradeoffs`, `identifiedFailureModes`) before continuing.\n\nSet context variables:\n- `designFindings`\n- `designRevised`",
+          "id": "phase-2a-pre-assess-design-review",
+          "title": "Pre-Assess Design Review",
+          "prompt": "Before the detailed design review, state your current assessment in 2-4 sentences.\n\nSay:\n- what you think the strongest part of the selected design is right now\n- what you think the weakest part is right now\n- which tradeoff or failure mode worries you most\n\nThis is your reference point for interpreting the review findings.\n\nSet context variable:\n- `designReviewAssessment`",
           "requireConfirmation": false
         },
         {
-          "id": "phase-2b-loop-decision",
+          "id": "phase-2b-design-review-core",
+          "title": "Design Review Core",
+          "templateCall": {
+            "templateId": "wr.templates.routine.design-review",
+            "args": {
+              "deliverableName": "design-review-findings.md"
+            }
+          },
+          "requireConfirmation": false
+        },
+        {
+          "id": "phase-2c-synthesize-design-review",
+          "title": "Synthesize Design Review Findings",
+          "prompt": "Read `design-review-findings.md` and synthesize the review into workflow-owned decisions.\n\nPart A — Compare against your pre-assessment:\nRevisit `designReviewAssessment`.\n- What did the review confirm?\n- What did it surface that you missed?\n- What changed your mind and what held firm?\n\nPart B — Optional mode-adaptive challenge around the review findings:\n- QUICK: self-synthesize only\n- STANDARD: optionally spawn ONE WorkRail Executor running `routine-hypothesis-challenge` focused on the most serious review finding\n- THOROUGH: optionally spawn TWO WorkRail Executors — `routine-hypothesis-challenge` on the most serious finding + `routine-execution-simulation` on the most dangerous failure mode\n\nPart C — Decide:\nInterpret the findings yourself. Do not adopt the review artifact or any subagent framing wholesale.\n\nIf issues are found, fix the design (update `selectedApproach`, `architectureRationale`, `pivotTriggers`, `acceptedTradeoffs`, `identifiedFailureModes`) before continuing.\n\nSet context variables:\n- `designFindings`\n- `designRevised`",
+          "requireConfirmation": false
+        },
+        {
+          "id": "phase-2d-loop-decision",
           "title": "Design Review Loop Decision",
           "prompt": "Provide a loop control artifact.\n\nDecision rules:\n- if `designFindings` is non-empty and design was revised -> continue (verify the revision)\n- if `designFindings` is empty -> stop\n- if max iterations reached -> stop and document remaining concerns\n\nOutput exactly:\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
           "requireConfirmation": false,
@@ -242,13 +259,24 @@
       },
       "body": [
         {
-          "id": "phase-7a-verify-and-fix",
-          "title": "Verify Integration and Fix Issues",
-          "prompt": "Perform integration verification across all implemented slices.\n\nRequired:\n- verify acceptance criteria\n- map invariants to concrete proof (tests, build results, explicit reasoning)\n- run whole-task validation commands\n- identify any invariant violations or regressions\n- confirm the implemented result aligns with the user's coding philosophy, naming any tensions explicitly\n- review cumulative drift across all slices\n- check whether repeated small compromises added up to a larger pattern problem\n\nIf issues are found, fix them immediately:\n- apply code fixes\n- re-run affected tests\n- update `implementation_plan.md` if the fix changed boundaries or approach\n\nSet context variables:\n- `integrationFindings`\n- `integrationPassed`\n- `regressionDetected`",
+          "id": "phase-7a-final-verification-core",
+          "title": "Final Verification Core",
+          "templateCall": {
+            "templateId": "wr.templates.routine.final-verification",
+            "args": {
+              "deliverableName": "final-verification-findings.md"
+            }
+          },
           "requireConfirmation": false
         },
         {
-          "id": "phase-7b-loop-decision",
+          "id": "phase-7b-fix-and-summarize",
+          "title": "Fix Issues and Summarize Verification",
+          "prompt": "Read `final-verification-findings.md` and turn it into workflow-owned decisions and fixes.\n\nRequired:\n- interpret the findings yourself rather than rubber-stamping them\n- identify any invariant violations or regressions that must be fixed now\n- if issues are found, fix them immediately\n- re-run affected tests\n- update `implementation_plan.md` if the fix changed boundaries or approach\n\nSet context variables:\n- `integrationFindings`\n- `integrationPassed`\n- `regressionDetected`",
+          "requireConfirmation": false
+        },
+        {
+          "id": "phase-7c-loop-decision",
           "title": "Final Verification Loop Decision",
           "prompt": "Provide a loop control artifact.\n\nDecision rules:\n- if `integrationFindings` is non-empty and fixes were applied -> continue (re-verify the fixes)\n- if `integrationFindings` is empty or all issues resolved -> stop and produce handoff\n- if max iterations reached -> stop and document remaining concerns\n\nWhen stopping, include the handoff summary:\n- acceptance criteria status\n- invariant status\n- test/build summary\n- concise PR/MR description draft (why, test plan, rollout notes)\n- follow-up tickets\n- any philosophy tensions accepted intentionally and why\n\nKeep the handoff concise and executive-level. Do not auto-merge or push unless the user explicitly asks.\n\nOutput exactly:\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
           "requireConfirmation": true,
