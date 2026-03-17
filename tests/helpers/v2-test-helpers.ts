@@ -20,6 +20,9 @@ import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
 import { Base32AdapterV2 } from '../../src/v2/infra/local/base32/index.js';
 import { Bech32mAdapterV2 } from '../../src/v2/infra/local/bech32m/index.js';
 import { signTokenV1Binary, unsafeTokenCodecPorts } from '../../src/v2/durable-core/tokens/index.js';
+import { parseShortTokenNative } from '../../src/v2/durable-core/tokens/short-token.js';
+import type { TokenAliasStorePortV2 } from '../../src/v2/ports/token-alias-store.port.js';
+import { InMemoryTokenAliasStoreV2 } from '../../src/v2/infra/in-memory/token-alias-store/index.js';
 import type { V2Dependencies } from '../../src/mcp/types.js';
 import type { KeyringV1 } from '../../src/v2/ports/keyring.port.js';
 import { validateWorkflowSchema } from '../../src/application/validation.js';
@@ -151,6 +154,8 @@ export async function createV2Dependencies(dataDir: LocalDataDirV2): Promise<V2D
     bech32m,
   });
   
+  const tokenAliasStore = new InMemoryTokenAliasStoreV2();
+
   return {
     gate,
     sessionStore,
@@ -158,8 +163,10 @@ export async function createV2Dependencies(dataDir: LocalDataDirV2): Promise<V2D
     pinnedStore,
     sha256,
     crypto,
+    entropy,
     idFactory,
     tokenCodecPorts,
+    tokenAliasStore,
     validationPipelineDeps: createTestValidationPipelineDeps(),
   };
 }
@@ -172,12 +179,55 @@ export async function createV2Dependencies(dataDir: LocalDataDirV2): Promise<V2D
  * @param v2 - V2Dependencies object with tokenCodecPorts
  * @returns Signed binary token string (st1... / ack1... / chk1...)
  */
+/**
+ * Extract sessionId from a v2 short token via the alias store.
+ * Throws clearly if the token is not a valid v2 short token or the alias is missing.
+ */
+export function resolveSessionIdFromToken(token: string, aliasStore: TokenAliasStorePortV2): string {
+  const parsed = parseShortTokenNative(token);
+  if (!parsed) throw new Error(`Not a v2 short token: ${token.slice(0, 30)}...`);
+  const entry = aliasStore.lookup(parsed.nonceHex);
+  if (!entry) throw new Error(`Alias not found for nonce: ${parsed.nonceHex}`);
+  return entry.sessionId;
+}
+
 export function signToken(payload: unknown, v2: V2Dependencies): string {
   const token = signTokenV1Binary(payload as any, v2.tokenCodecPorts);
   if (token.isErr()) {
     throw new Error(`Token signing failed in test helper: ${token.error.code}`);
   }
   return token.value;
+}
+
+/**
+ * Mint a continueToken for tests that manually seed durable state.
+ * This creates a ct_... short token registered in the alias store,
+ * equivalent to what the handlers produce.
+ */
+export async function mintTestContinueToken(v2: V2Dependencies, args: {
+  sessionId: string;
+  runId: string;
+  nodeId: string;
+  attemptId: string;
+  workflowHashRef?: string;
+}): Promise<string> {
+  const { mintContinueAndCheckpointTokens } = await import('../../src/mcp/handlers/v2-token-ops.js');
+  const result = await mintContinueAndCheckpointTokens({
+    entry: {
+      sessionId: args.sessionId,
+      runId: args.runId,
+      nodeId: args.nodeId,
+      attemptId: args.attemptId,
+      ...(args.workflowHashRef ? { workflowHashRef: args.workflowHashRef } : {}),
+    },
+    ports: v2.tokenCodecPorts,
+    aliasStore: v2.tokenAliasStore,
+    entropy: v2.entropy,
+  }).match(
+    (v) => v,
+    (e) => { throw new Error(`mintTestContinueToken failed: ${JSON.stringify(e)}`); }
+  );
+  return result.continueToken;
 }
 
 /**

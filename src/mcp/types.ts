@@ -29,6 +29,8 @@ import type { DataDirPortV2 } from '../v2/ports/data-dir.port.js';
 import type { DirectoryListingPortV2 } from '../v2/ports/directory-listing.port.js';
 import type { SessionSummaryProviderPortV2 } from '../v2/ports/session-summary-provider.port.js';
 import type { ValidationPipelineDepsPhase1a } from '../application/services/workflow-validation-pipeline.js';
+import type { TokenAliasStorePortV2 } from '../v2/ports/token-alias-store.port.js';
+import type { RandomEntropyPortV2 } from '../v2/ports/random-entropy.port.js';
 
 // Note: JsonValue type is imported from output-schemas.js above
 
@@ -210,6 +212,13 @@ export interface V2Dependencies {
 
   // Grouped token dependencies (always complete)
   readonly tokenCodecPorts: TokenCodecPorts;
+
+  // Token alias store for v2 short token registration and resolution.
+  // Required: must be present and have loadIndex() called before any v2 tool runs.
+  readonly tokenAliasStore: TokenAliasStorePortV2;
+
+  // Random entropy source — used for minting short token nonces.
+  readonly entropy: RandomEntropyPortV2;
 
   // Validation pipeline deps for Phase 1a gate at start_workflow boundary.
   // Runs schema + structural + v1 compilation + normalization before session creation.

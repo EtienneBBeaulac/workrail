@@ -11,8 +11,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { toMcpResult } from '../../../src/mcp/handler-factory.js';
 
 const EXECUTION_RESPONSE = {
-  stateToken: 'st1testtoken',
-  ackToken: 'ack1testtoken',
+  continueToken: 'ct_test123',
   checkpointToken: 'chk1testtoken',
   isComplete: false,
   pending: {
@@ -24,7 +23,7 @@ const EXECUTION_RESPONSE = {
   nextIntent: 'perform_pending_then_continue',
   nextCall: {
     tool: 'continue_workflow' as const,
-    params: { intent: 'advance' as const, stateToken: 'st1testtoken', ackToken: 'ack1testtoken' },
+    params: { intent: 'advance' as const, continueToken: 'ct_test123' },
   },
 };
 
@@ -86,7 +85,7 @@ describe('toMcpResult — WORKRAIL_JSON_RESPONSES env flag', () => {
     const text = (result.content[0] as { text: string }).text;
     expect(() => JSON.parse(text)).not.toThrow();
     const parsed = JSON.parse(text);
-    expect(parsed).toHaveProperty('stateToken');
+    expect(parsed).toHaveProperty('continueToken');
     expect(parsed).toHaveProperty('pending');
   });
 });

@@ -28,6 +28,8 @@ import { IdFactoryV2 } from '../../../src/v2/infra/local/id-factory/index.js';
 import { Bech32mAdapterV2 } from '../../../src/v2/infra/local/bech32m/index.js';
 import { Base32AdapterV2 } from '../../../src/v2/infra/local/base32/index.js';
 import { parseTokenV1Binary, unsafeTokenCodecPorts } from '../../../src/v2/durable-core/tokens/index.js';
+import { parseShortTokenNative } from '../../../src/v2/durable-core/tokens/short-token.js';
+import { InMemoryTokenAliasStoreV2 } from '../../../src/v2/infra/in-memory/token-alias-store/index.js';
 
 import { projectRunDagV2 } from '../../../src/v2/projections/run-dag.js';
 import { asSessionId } from '../../../src/v2/durable-core/ids/index.js';
@@ -84,18 +86,26 @@ async function createV2Context(): Promise<ToolContext> {
     featureFlags,
     sessionManager: null,
     httpServer: null,
-    v2: { gate, sessionStore, snapshotStore, pinnedStore, sha256, crypto, tokenCodecPorts, idFactory, validationPipelineDeps: createTestValidationPipelineDeps() },
+    v2: { gate, sessionStore, snapshotStore, pinnedStore, sha256, crypto, entropy, tokenCodecPorts, idFactory, tokenAliasStore: new InMemoryTokenAliasStoreV2(), validationPipelineDeps: createTestValidationPipelineDeps() },
   };
 }
 
-function extractSessionIdFromToken(stateToken: string): string {
+function extractSessionIdFromToken(token: string, ctx: ToolContext): string {
+  // v2 short token path (ct_, st_, ak_, ck_ prefixes)
+  const parsed = parseShortTokenNative(token);
+  if (parsed) {
+    const entry = ctx.v2!.tokenAliasStore.lookup(parsed.nonceHex);
+    if (!entry) throw new Error(`No alias found for nonce: ${parsed.nonceHex}`);
+    return entry.sessionId;
+  }
+  // v1 bech32m path (backward compat)
   const bech32m = new Bech32mAdapterV2();
   const base32 = new Base32AdapterV2();
-  const parsed = parseTokenV1Binary(stateToken, { bech32m, base32 });
-  if (parsed.isErr()) {
-    throw new Error(`Invalid token format: ${parsed.error.code}`);
+  const v1parsed = parseTokenV1Binary(token, { bech32m, base32 });
+  if (v1parsed.isErr()) {
+    throw new Error(`Invalid token format: ${v1parsed.error.code}`);
   }
-  return String(parsed.value.payload.sessionId);
+  return String(v1parsed.value.payload.sessionId);
 }
 
 describe('v2 fork harness (branching stress test)', () => {
@@ -138,13 +148,11 @@ describe('v2 fork harness (branching stress test)', () => {
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
 
-    const nodeA_stateToken = start.data.stateToken;
-    const nodeA_ackToken_1 = start.data.ackToken;
+    const nodeA_stateToken = start.data.continueToken;
+    const nodeA_ackToken_1 = start.data.continueToken;
 
     const ack1 = await handleV2ContinueWorkflow({
-      intent: 'advance',
-      stateToken: nodeA_stateToken,
-      ackToken: nodeA_ackToken_1,
+      continueToken: nodeA_stateToken,
       output: { notesMarkdown: 'Branch 1' },
     } as any, ctx);
     expect(ack1.type).toBe('success');
@@ -154,16 +162,14 @@ describe('v2 fork harness (branching stress test)', () => {
 
     const rehydrate2 = await handleV2ContinueWorkflow({
       intent: 'rehydrate',
-      stateToken: nodeA_stateToken,
+      continueToken: nodeA_stateToken,
     } as any, ctx);
     expect(rehydrate2.type).toBe('success');
     if (rehydrate2.type !== 'success') return;
-    const nodeA_ackToken_2 = rehydrate2.data.ackToken;
+    const nodeA_ackToken_2 = rehydrate2.data.continueToken;
 
     const ack2 = await handleV2ContinueWorkflow({
-      intent: 'advance',
-      stateToken: nodeA_stateToken,
-      ackToken: nodeA_ackToken_2,
+      continueToken: nodeA_ackToken_2,
       output: { notesMarkdown: 'Branch 2' },
     } as any, ctx);
     expect(ack2.type).toBe('success');
@@ -172,22 +178,20 @@ describe('v2 fork harness (branching stress test)', () => {
 
     const rehydrate3 = await handleV2ContinueWorkflow({
       intent: 'rehydrate',
-      stateToken: nodeA_stateToken,
+      continueToken: nodeA_stateToken,
     } as any, ctx);
     expect(rehydrate3.type).toBe('success');
     if (rehydrate3.type !== 'success') return;
-    const nodeA_ackToken_3 = rehydrate3.data.ackToken;
+    const nodeA_ackToken_3 = rehydrate3.data.continueToken;
 
     const ack3 = await handleV2ContinueWorkflow({
-      intent: 'advance',
-      stateToken: nodeA_stateToken,
-      ackToken: nodeA_ackToken_3,
+      continueToken: nodeA_ackToken_3,
       output: { notesMarkdown: 'Branch 3' },
     } as any, ctx);
     expect(ack3.type).toBe('success');
     if (ack3.type !== 'success') return;
 
-    const sessionId = asSessionId(extractSessionIdFromToken(nodeA_stateToken));
+    const sessionId = asSessionId(extractSessionIdFromToken(nodeA_stateToken, ctx));
     const truthRes = await ctx.v2!.sessionStore.load(sessionId);
     expect(truthRes.isOk()).toBe(true);
     const truth = truthRes._unsafeUnwrap();
@@ -231,27 +235,25 @@ describe('v2 fork harness (branching stress test)', () => {
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
 
-    const nodeA_stateToken = start.data.stateToken;
+    const nodeA_stateToken = start.data.continueToken;
 
     for (let i = 0; i < 10; i++) {
       const rehydrate = await handleV2ContinueWorkflow({
         intent: 'rehydrate',
-        stateToken: nodeA_stateToken,
+        continueToken: nodeA_stateToken,
       } as any, ctx);
       expect(rehydrate.type).toBe('success');
       if (rehydrate.type !== 'success') return;
 
       const ack = await handleV2ContinueWorkflow({
-        intent: 'advance',
-        stateToken: nodeA_stateToken,
-        ackToken: rehydrate.data.ackToken,
+        continueToken: rehydrate.data.continueToken,
         output: { notesMarkdown: `Branch ${i + 1}` },
       } as any, ctx);
       expect(ack.type).toBe('success');
       if (ack.type !== 'success') return;
     }
 
-    const sessionId = asSessionId(extractSessionIdFromToken(nodeA_stateToken));
+    const sessionId = asSessionId(extractSessionIdFromToken(nodeA_stateToken, ctx));
     const truthRes = await ctx.v2!.sessionStore.load(sessionId);
     expect(truthRes.isOk()).toBe(true);
 
@@ -278,27 +280,22 @@ describe('v2 fork harness (branching stress test)', () => {
     if (start.type !== 'success') return;
 
     const ack1 = await handleV2ContinueWorkflow({
-      intent: 'advance',
-      stateToken: start.data.stateToken,
-      ackToken: start.data.ackToken,
+      continueToken: start.data.continueToken,
     } as any, ctx);
     expect(ack1.type).toBe('success');
 
     const rehydrate = await handleV2ContinueWorkflow({
-      intent: 'rehydrate',
-      stateToken: start.data.stateToken,
+      continueToken: start.data.continueToken, intent: 'rehydrate',
     } as any, ctx);
     expect(rehydrate.type).toBe('success');
     if (rehydrate.type !== 'success') return;
 
     const ack2 = await handleV2ContinueWorkflow({
-      intent: 'advance',
-      stateToken: start.data.stateToken,
-      ackToken: rehydrate.data.ackToken,
+      continueToken: rehydrate.data.continueToken,
     } as any, ctx);
     expect(ack2.type).toBe('success');
 
-    const sessionId = asSessionId(extractSessionIdFromToken(start.data.stateToken));
+    const sessionId = asSessionId(extractSessionIdFromToken(start.data.continueToken, ctx));
     const truthRes = await ctx.v2!.sessionStore.load(sessionId);
     const events = truthRes._unsafeUnwrap().events;
 
@@ -321,31 +318,27 @@ describe('v2 fork harness (branching stress test)', () => {
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
 
-    const nodeA_state = start.data.stateToken;
+    const nodeA_state = start.data.continueToken;
 
     const ack1 = await handleV2ContinueWorkflow({
-      intent: 'advance',
-      stateToken: nodeA_state,
-      ackToken: start.data.ackToken,
+      continueToken: nodeA_state,
       output: { notesMarkdown: 'BRANCH_1_OUTPUT' },
     } as any, ctx);
     expect(ack1.type).toBe('success');
     if (ack1.type !== 'success') return;
 
-    const rehydrate = await handleV2ContinueWorkflow({ intent: 'rehydrate', stateToken: nodeA_state } as any, ctx);
+    const rehydrate = await handleV2ContinueWorkflow({ continueToken: nodeA_state , intent: 'rehydrate' } as any, ctx);
     expect(rehydrate.type).toBe('success');
     if (rehydrate.type !== 'success') return;
 
     const ack2 = await handleV2ContinueWorkflow({
-      intent: 'advance',
-      stateToken: nodeA_state,
-      ackToken: rehydrate.data.ackToken,
+      continueToken: rehydrate.data.continueToken,
       output: { notesMarkdown: 'BRANCH_2_OUTPUT' },
     } as any, ctx);
     expect(ack2.type).toBe('success');
     if (ack2.type !== 'success') return;
 
-    const sessionId = asSessionId(extractSessionIdFromToken(nodeA_state));
+    const sessionId = asSessionId(extractSessionIdFromToken(nodeA_state, ctx));
     const truthRes = await ctx.v2!.sessionStore.load(sessionId);
     const events = truthRes._unsafeUnwrap().events;
 
@@ -373,24 +366,20 @@ describe('v2 fork harness (branching stress test)', () => {
     if (start.type !== 'success') return;
 
     const ack1 = await handleV2ContinueWorkflow({
-      intent: 'advance',
-      stateToken: start.data.stateToken,
-      ackToken: start.data.ackToken,
+      continueToken: start.data.continueToken,
       output: { notesMarkdown: 'First ack' },
     } as any, ctx);
     expect(ack1.type).toBe('success');
 
     const ack2 = await handleV2ContinueWorkflow({
-      intent: 'advance',
-      stateToken: start.data.stateToken,
-      ackToken: start.data.ackToken,
+      continueToken: start.data.continueToken,
       output: { notesMarkdown: 'Replay ack (should be ignored)' },
     } as any, ctx);
     expect(ack2.type).toBe('success');
 
     expect(ack2.data).toEqual(ack1.data);
 
-    const sessionId = asSessionId(extractSessionIdFromToken(start.data.stateToken));
+    const sessionId = asSessionId(extractSessionIdFromToken(start.data.continueToken, ctx));
     const truthRes = await ctx.v2!.sessionStore.load(sessionId);
     const dagRes = projectRunDagV2(truthRes._unsafeUnwrap().events);
     

@@ -22,7 +22,9 @@ import { LocalSnapshotStoreV2 } from '../../../src/v2/infra/local/snapshot-store
 import { LocalPinnedWorkflowStoreV2 } from '../../../src/v2/infra/local/pinned-workflow-store/index.js';
 import { ExecutionSessionGateV2 } from '../../../src/v2/usecases/execution-session-gate.js';
 
-import { unsafeTokenCodecPorts, parseTokenV1Binary } from '../../../src/v2/durable-core/tokens/index.js';
+import { unsafeTokenCodecPorts } from '../../../src/v2/durable-core/tokens/index.js';
+import { InMemoryTokenAliasStoreV2 } from '../../../src/v2/infra/in-memory/token-alias-store/index.js';
+import { parseShortTokenNative } from '../../../src/v2/durable-core/tokens/short-token.js';
 import { NodeHmacSha256V2 } from '../../../src/v2/infra/local/hmac-sha256/index.js';
 import { NodeBase64UrlV2 } from '../../../src/v2/infra/local/base64url/index.js';
 import { LocalKeyringV2 } from '../../../src/v2/infra/local/keyring/index.js';
@@ -90,9 +92,11 @@ async function mkCtxWithWorkflow(workflowId: string, definition: any): Promise<T
       pinnedStore,
       sha256,
       crypto,
+      entropy,
       idFactory,
       tokenCodecPorts,
-    validationPipelineDeps: createTestValidationPipelineDeps(),
+      tokenAliasStore: new InMemoryTokenAliasStoreV2(),
+      validationPipelineDeps: createTestValidationPipelineDeps(),
       sessionEventLogStore: sessionStore,
     },
   };
@@ -103,7 +107,7 @@ describe('Blocked node concurrent retries (idempotency + race safety)', () => {
     delete process.env.WORKRAIL_DATA_DIR;
   });
 
-  it('parallel retries with same retryAckToken → one advances, one gets TOKEN_SESSION_LOCKED', async () => {
+  it('parallel retries with same retryContinueToken → one advances, one gets TOKEN_SESSION_LOCKED', async () => {
     const root = await mkTempDataDir();
     const prev = process.env.WORKRAIL_DATA_DIR;
     process.env.WORKRAIL_DATA_DIR = root;
@@ -133,7 +137,7 @@ describe('Blocked node concurrent retries (idempotency + race safety)', () => {
 
       // Block
       const blockRes = await handleV2ContinueWorkflow(
-        { stateToken: startRes.data.stateToken, ackToken: startRes.data.ackToken!, output: { notesMarkdown: 'invalid' } } as V2ContinueWorkflowInput,
+        { continueToken: startRes.data.continueToken, output: { notesMarkdown: 'invalid' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(blockRes.type).toBe('success');
@@ -141,23 +145,24 @@ describe('Blocked node concurrent retries (idempotency + race safety)', () => {
       expect(blockRes.data.kind).toBe('blocked');
       if (blockRes.data.kind !== 'blocked') return;
 
-      const retryToken = blockRes.data.retryAckToken!;
-      const blockedState = blockRes.data.stateToken;
+      const retryToken = blockRes.data.retryContinueToken!;
+      const blockedState = blockRes.data.continueToken;
 
       // Parallel retries with Promise.all (simulates concurrent agent calls)
       const [retry1Res, retry2Res] = await Promise.all([
         handleV2ContinueWorkflow(
-          { stateToken: blockedState, ackToken: retryToken, output: { notesMarkdown: 'has status now' } } as V2ContinueWorkflowInput,
+          { continueToken: retryToken, output: { notesMarkdown: 'has status now' } } as V2ContinueWorkflowInput,
           ctx
         ),
         handleV2ContinueWorkflow(
-          { stateToken: blockedState, ackToken: retryToken, output: { notesMarkdown: 'also has status' } } as V2ContinueWorkflowInput,
+          { continueToken: retryToken, output: { notesMarkdown: 'also has status' } } as V2ContinueWorkflowInput,
           ctx
         ),
       ]);
 
       // One succeeds, one gets lock busy error (order non-deterministic)
       const results = [retry1Res, retry2Res];
+      console.log('DEBUG results:', JSON.stringify(results.map(r => ({ type: r.type, code: r.type === 'error' ? (r as any).code : undefined, kind: r.type === 'success' ? (r as any).data?.kind : undefined }))));
       const successResults = results.filter((r) => r.type === 'success');
       const errorResults = results.filter((r) => r.type === 'error');
 
@@ -184,8 +189,8 @@ describe('Blocked node concurrent retries (idempotency + race safety)', () => {
       const sessionStore = ctx.v2!.sessionEventLogStore as any;
       const bech32m = new Bech32mAdapterV2();
       const base32 = new Base32AdapterV2();
-      const parsedState = parseTokenV1Binary(startRes.data.stateToken, { bech32m, base32 })._unsafeUnwrap();
-      const sessionId = asSessionId(parsedState.payload.sessionId);
+      const _pt = parseShortTokenNative(startRes.data.continueToken)!;
+      const sessionId = asSessionId(ctx.v2!.tokenAliasStore.lookup(_pt.nonceHex)!.sessionId);
       const loadRes = await sessionStore.load(sessionId);
       if (loadRes.isErr()) throw new Error(`Unexpected load error: ${loadRes.error.code}`);
       const truth = loadRes.value;
@@ -197,7 +202,7 @@ describe('Blocked node concurrent retries (idempotency + race safety)', () => {
     }
   });
 
-  it('retry with original ackToken (not retryAckToken) after block → replays blocked state', async () => {
+  it('retry with original ackToken (not retryContinueToken) after block → replays blocked state', async () => {
     const root = await mkTempDataDir();
     const prev = process.env.WORKRAIL_DATA_DIR;
     process.env.WORKRAIL_DATA_DIR = root;
@@ -223,11 +228,11 @@ describe('Blocked node concurrent retries (idempotency + race safety)', () => {
       expect(startRes.type).toBe('success');
       if (startRes.type !== 'success') return;
 
-      const originalAck = startRes.data.ackToken!;
+      const originalAck = startRes.data.continueToken!;
 
       // Block
       const blockRes = await handleV2ContinueWorkflow(
-        { stateToken: startRes.data.stateToken, ackToken: originalAck, output: { notesMarkdown: 'bad' } } as V2ContinueWorkflowInput,
+        { continueToken: startRes.data.continueToken, output: { notesMarkdown: 'bad' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(blockRes.type).toBe('success');
@@ -235,11 +240,11 @@ describe('Blocked node concurrent retries (idempotency + race safety)', () => {
       expect(blockRes.data.kind).toBe('blocked');
       if (blockRes.data.kind !== 'blocked') return;
 
-      const retryToken = blockRes.data.retryAckToken!;
+      const retryToken = blockRes.data.retryContinueToken!;
 
-      // Retry succeeds with retryAckToken
+      // Retry succeeds with retryContinueToken
       const retryRes = await handleV2ContinueWorkflow(
-        { stateToken: blockRes.data.stateToken, ackToken: retryToken, output: { notesMarkdown: 'ok' } } as V2ContinueWorkflowInput,
+        { continueToken: blockRes.data.continueToken, output: { notesMarkdown: 'ok' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(retryRes.type).toBe('success');
@@ -248,7 +253,7 @@ describe('Blocked node concurrent retries (idempotency + race safety)', () => {
 
       // Now use original ackToken again → should replay blocked state (not advance)
       const replayOriginalRes = await handleV2ContinueWorkflow(
-        { stateToken: startRes.data.stateToken, ackToken: originalAck, output: { notesMarkdown: 'different' } } as V2ContinueWorkflowInput,
+        { continueToken: startRes.data.continueToken, output: { notesMarkdown: 'different' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(replayOriginalRes.type).toBe('success');
@@ -256,8 +261,8 @@ describe('Blocked node concurrent retries (idempotency + race safety)', () => {
       expect(replayOriginalRes.data.kind).toBe('blocked');
       if (replayOriginalRes.data.kind !== 'blocked') return;
 
-      // Should return same retryAckToken (fact-returning replay)
-      expect(replayOriginalRes.data.retryAckToken).toBe(retryToken);
+      // Should return same retryContinueToken (fact-returning replay)
+      expect(replayOriginalRes.data.retryContinueToken).toBe(retryToken);
     } finally {
       process.env.WORKRAIL_DATA_DIR = prev;
     }
@@ -292,7 +297,7 @@ describe('Blocked node concurrent retries (idempotency + race safety)', () => {
       if (startRes.type !== 'success') return;
 
       const blockRes = await handleV2ContinueWorkflow(
-        { stateToken: startRes.data.stateToken, ackToken: startRes.data.ackToken!, output: { notesMarkdown: 'invalid' } } as V2ContinueWorkflowInput,
+        { continueToken: startRes.data.continueToken, output: { notesMarkdown: 'invalid' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(blockRes.type).toBe('success');
@@ -300,11 +305,11 @@ describe('Blocked node concurrent retries (idempotency + race safety)', () => {
       expect(blockRes.data.kind).toBe('blocked');
       if (blockRes.data.kind !== 'blocked') return;
 
-      const retryToken = blockRes.data.retryAckToken!;
+      const retryToken = blockRes.data.retryContinueToken!;
 
       // First retry (advances)
       const retry1Res = await handleV2ContinueWorkflow(
-        { stateToken: blockRes.data.stateToken, ackToken: retryToken, output: { notesMarkdown: 'has status A' } } as V2ContinueWorkflowInput,
+        { continueToken: blockRes.data.continueToken, output: { notesMarkdown: 'has status A' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(retry1Res.type).toBe('success');
@@ -313,7 +318,7 @@ describe('Blocked node concurrent retries (idempotency + race safety)', () => {
 
       // Second retry with same token (should replay, not create duplicate)
       const retry2Res = await handleV2ContinueWorkflow(
-        { stateToken: blockRes.data.stateToken, ackToken: retryToken, output: { notesMarkdown: 'has status B' } } as V2ContinueWorkflowInput,
+        { continueToken: blockRes.data.continueToken, output: { notesMarkdown: 'has status B' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(retry2Res.type).toBe('success');
@@ -321,14 +326,14 @@ describe('Blocked node concurrent retries (idempotency + race safety)', () => {
       expect(retry2Res.data.kind).toBe('ok');
 
       // Both see same final state
-      expect(retry1Res.data.stateToken).toBe(retry2Res.data.stateToken);
+      expect(retry1Res.data.continueToken).toBe(retry2Res.data.continueToken);
 
       // Verify: only ONE step node created (dedupeKey prevented duplicate)
       const sessionStore = ctx.v2!.sessionEventLogStore as any;
       const bech32m = new Bech32mAdapterV2();
       const base32 = new Base32AdapterV2();
-      const parsedState = parseTokenV1Binary(startRes.data.stateToken, { bech32m, base32 })._unsafeUnwrap();
-      const sessionId = asSessionId(parsedState.payload.sessionId);
+      const _pt = parseShortTokenNative(startRes.data.continueToken)!;
+      const sessionId = asSessionId(ctx.v2!.tokenAliasStore.lookup(_pt.nonceHex)!.sessionId);
       const loadRes = await sessionStore.load(sessionId);
       if (loadRes.isErr()) throw new Error(`Unexpected load error: ${loadRes.error.code}`);
       const truth = loadRes.value;

@@ -153,22 +153,15 @@ describe('MCP HTTP transport integration', () => {
     const text = contentItem.text;
     
     // WorkRail tools return structured data embedded in the text.
-    // For v2 tools, look for the JSON block in the response.
-    // Actually, let me just check if tokens are in the text directly.
-    expect(text).toContain('stateToken');
-    expect(text).toContain('ackToken');
+    // One-token path: formatted output now contains continueToken
+    expect(text).toContain('continueToken');
     
-    // Extract tokens via regex (the response format includes them as code blocks or JSON)
-    const stateMatch = text.match(/"stateToken":\s*"([^"]+)"/);
-    const ackMatch = text.match(/"ackToken":\s*"([^"]+)"/);
-    
-    expect(stateMatch).toBeDefined();
-    expect(ackMatch).toBeDefined();
-    
-    const stateToken = stateMatch![1];
-    const ackToken = ackMatch![1];
+    // Extract continueToken via regex
+    const continueMatch = text.match(/"continueToken":\s*"([^"]+)"/);
+    expect(continueMatch).toBeDefined();
+    const continueToken = continueMatch![1];
 
-    // Step 2: continue_workflow
+    // Step 2: continue_workflow using one-token path
     const continueResponse = await fetch(`http://localhost:${HTTP_PORT}/mcp`, {
       method: 'POST',
       headers: {
@@ -183,8 +176,7 @@ describe('MCP HTTP transport integration', () => {
         params: {
           name: 'continue_workflow',
           arguments: {
-            stateToken,
-            ackToken,
+            continueToken,
             output: { notesMarkdown: '## Step 1 complete\\n\\nTest output.' },
           },
         },
@@ -199,7 +191,6 @@ describe('MCP HTTP transport integration', () => {
     
     // Workflow advanced successfully
     const continueText = continueData.result.content[0].text;
-    expect(continueText).toContain('stateToken');
-    expect(continueText).toContain('ackToken');
+    expect(continueText).toContain('continueToken');
   });
 });

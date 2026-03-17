@@ -11,7 +11,7 @@ import { NodeRandomEntropyV2 } from '../../../src/v2/infra/local/random-entropy/
 import type { KeyringV1 } from '../../../src/v2/ports/keyring.port.js';
 
 describe('Blocked node replay under key rotation (functional equivalence)', () => {
-  it('retryAckToken re-signed after key rotation decodes to same retryAttemptId', () => {
+  it('retryContinueToken re-signed after key rotation decodes to same retryAttemptId', () => {
     const hmac = new NodeHmacSha256V2();
     const base64url = new NodeBase64UrlV2();
     const base32 = new Base32AdapterV2();

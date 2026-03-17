@@ -6,4 +6,5 @@ export type RuntimeMode =
   | { kind: 'production' }
   | { kind: 'test' }
   | { kind: 'cli' }
-  | { kind: 'rpc' };
+  | { kind: 'rpc' }
+  | { kind: 'library' };

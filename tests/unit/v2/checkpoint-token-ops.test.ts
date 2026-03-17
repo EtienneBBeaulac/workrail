@@ -12,6 +12,7 @@ import * as fs from 'fs/promises';
 
 import { parseCheckpointTokenOrFail, signTokenOrErr } from '../../../src/mcp/handlers/v2-token-ops.js';
 import { unsafeTokenCodecPorts } from '../../../src/v2/durable-core/tokens/index.js';
+import { InMemoryTokenAliasStoreV2 } from '../../../src/v2/infra/in-memory/token-alias-store/index.js';
 import { NodeHmacSha256V2 } from '../../../src/v2/infra/local/hmac-sha256/index.js';
 import { NodeBase64UrlV2 } from '../../../src/v2/infra/local/base64url/index.js';
 import { Base32AdapterV2 } from '../../../src/v2/infra/local/base32/index.js';
@@ -81,26 +82,27 @@ function mintCheckpointToken(
 
 describe('parseCheckpointTokenOrFail', () => {
   let ports: TokenCodecPorts;
+  const aliasStore = new InMemoryTokenAliasStoreV2();
 
   it('setup', async () => {
     ports = await createTestPorts();
   });
 
-  it('parses a valid checkpoint token', () => {
+  it('parses a valid checkpoint token', async () => {
     const token = mintCheckpointToken(ports);
-    const result = parseCheckpointTokenOrFail(token, ports);
+    const result = await parseCheckpointTokenOrFail(token, ports, aliasStore);
 
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.token.payload.tokenKind).toBe('checkpoint');
-      expect(String(result.token.payload.sessionId)).toBe(SESS_ID);
-      expect(String(result.token.payload.runId)).toBe(RUN_ID);
-      expect(String(result.token.payload.nodeId)).toBe(NODE_ID);
-      expect(String(result.token.payload.attemptId)).toBe(ATT_ID);
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.payload.tokenKind).toBe('checkpoint');
+      expect(String(result.value.payload.sessionId)).toBe(SESS_ID);
+      expect(String(result.value.payload.runId)).toBe(RUN_ID);
+      expect(String(result.value.payload.nodeId)).toBe(NODE_ID);
+      expect(String(result.value.payload.attemptId)).toBe(ATT_ID);
     }
   });
 
-  it('rejects a state token', () => {
+  it('rejects a state token', async () => {
     const wfHash = asWorkflowHash(asSha256Digest('sha256:5b2d9fb885d0adc6565e1fd59e6abb3769b69e4dba5a02b6eea750137a5c0be2'));
     const wfRef = deriveWorkflowHashRef(wfHash)._unsafeUnwrap();
     const stateRes = signTokenOrErr({
@@ -116,14 +118,14 @@ describe('parseCheckpointTokenOrFail', () => {
     });
     expect(stateRes.isOk()).toBe(true);
 
-    const result = parseCheckpointTokenOrFail(stateRes._unsafeUnwrap(), ports);
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.failure.message).toContain('checkpoint');
+    const result = await parseCheckpointTokenOrFail(stateRes._unsafeUnwrap(), ports, aliasStore);
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      expect(result.error.message).toContain('checkpoint');
     }
   });
 
-  it('rejects an ack token', () => {
+  it('rejects an ack token', async () => {
     const ackRes = signTokenOrErr({
       payload: {
         tokenVersion: 1,
@@ -137,24 +139,24 @@ describe('parseCheckpointTokenOrFail', () => {
     });
     expect(ackRes.isOk()).toBe(true);
 
-    const result = parseCheckpointTokenOrFail(ackRes._unsafeUnwrap(), ports);
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.failure.message).toContain('checkpoint');
+    const result = await parseCheckpointTokenOrFail(ackRes._unsafeUnwrap(), ports, aliasStore);
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      expect(result.error.message).toContain('checkpoint');
     }
   });
 
-  it('rejects garbage input', () => {
-    const result = parseCheckpointTokenOrFail('garbage-not-a-token', ports);
-    expect(result.ok).toBe(false);
+  it('rejects garbage input', async () => {
+    const result = await parseCheckpointTokenOrFail('garbage-not-a-token', ports, aliasStore);
+    expect(result.isErr()).toBe(true);
   });
 
-  it('rejects tampered token', () => {
+  it('rejects tampered token', async () => {
     const token = mintCheckpointToken(ports);
     // Tamper with the last character
     const tampered = token.slice(0, -1) + (token.slice(-1) === 'q' ? 'p' : 'q');
-    const result = parseCheckpointTokenOrFail(tampered, ports);
-    expect(result.ok).toBe(false);
+    const result = await parseCheckpointTokenOrFail(tampered, ports, aliasStore);
+    expect(result.isErr()).toBe(true);
   });
 });
 

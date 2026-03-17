@@ -20,7 +20,9 @@ import { LocalSnapshotStoreV2 } from '../../src/v2/infra/local/snapshot-store/in
 import { LocalPinnedWorkflowStoreV2 } from '../../src/v2/infra/local/pinned-workflow-store/index.js';
 import { ExecutionSessionGateV2 } from '../../src/v2/usecases/execution-session-gate.js';
 
-import { parseTokenV1Binary, verifyTokenSignatureV1Binary, unsafeTokenCodecPorts } from '../../src/v2/durable-core/tokens/index.js';
+import { unsafeTokenCodecPorts } from '../../src/v2/durable-core/tokens/index.js';
+import { parseShortTokenNative } from '../../src/v2/durable-core/tokens/short-token.js';
+import { InMemoryTokenAliasStoreV2 } from '../../src/v2/infra/in-memory/token-alias-store/index.js';
 import { NodeHmacSha256V2 } from '../../src/v2/infra/local/hmac-sha256/index.js';
 import { NodeBase64UrlV2 } from '../../src/v2/infra/local/base64url/index.js';
 import { LocalKeyringV2 } from '../../src/v2/infra/local/keyring/index.js';
@@ -34,7 +36,7 @@ async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-start-'));
 }
 
-async function mkCtxWithWorkflow(workflowId: string): Promise<ToolContext> {
+async function mkCtxWithWorkflow(workflowId: string): Promise<{ ctx: ToolContext; aliasStore: InMemoryTokenAliasStoreV2 }> {
   const wf = createWorkflow(
     {
       id: workflowId,
@@ -75,7 +77,9 @@ async function mkCtxWithWorkflow(workflowId: string): Promise<ToolContext> {
     bech32m,
   });
 
-  return {
+  const tokenAliasStore = new InMemoryTokenAliasStoreV2();
+
+  const ctx: ToolContext = {
     workflowService: {
       listWorkflowSummaries: async () => [],
       getWorkflowById: async (id: string) => (id === workflowId ? wf : null),
@@ -94,11 +98,15 @@ async function mkCtxWithWorkflow(workflowId: string): Promise<ToolContext> {
       pinnedStore,
       sha256,
       crypto,
+      entropy,
       idFactory,
       tokenCodecPorts,
+      tokenAliasStore,
       validationPipelineDeps: createTestValidationPipelineDeps(),
     },
   };
+
+  return { ctx, aliasStore: tokenAliasStore };
 }
 
 /**
@@ -155,7 +163,7 @@ async function mkCtxWithInvalidWorkflow(workflowId: string): Promise<ToolContext
     featureFlags: null as any,
     sessionManager: null,
     httpServer: null,
-    v2: { gate, sessionStore, snapshotStore, pinnedStore, sha256, crypto, idFactory, tokenCodecPorts, validationPipelineDeps: createTestValidationPipelineDeps() },
+    v2: { gate, sessionStore, snapshotStore, pinnedStore, sha256, crypto, entropy, idFactory, tokenCodecPorts, tokenAliasStore: new InMemoryTokenAliasStoreV2(), validationPipelineDeps: createTestValidationPipelineDeps() },
   };
 }
 
@@ -166,14 +174,14 @@ describe('v2 start_workflow (Slice 3.5)', () => {
     process.env.WORKRAIL_DATA_DIR = root;
     try {
       const workflowId = 'test-workflow';
-      const ctx = await mkCtxWithWorkflow(workflowId);
+      const { ctx } = await mkCtxWithWorkflow(workflowId);
 
       const start = await handleV2StartWorkflow({ workflowId } as any, ctx);
       expect(start.type).toBe('success');
       if (start.type !== 'success') return;
 
       const big = 'a'.repeat(262_200);
-      const res = await handleV2ContinueWorkflow({ intent: 'rehydrate', stateToken: start.data.stateToken, context: { big } } as any, ctx);
+      const res = await handleV2ContinueWorkflow({ continueToken: start.data.continueToken, intent: 'rehydrate', context: { big } } as any, ctx);
       expect(res.type).toBe('error');
       if (res.type !== 'error') return;
 
@@ -216,12 +224,12 @@ describe('v2 start_workflow (Slice 3.5)', () => {
   });
 
   it('creates durable session/run/root node and returns signed tokens + first pending step', async () => {
-    const root = await mkTempDataDir();
-    const prev = process.env.WORKRAIL_DATA_DIR;
-    process.env.WORKRAIL_DATA_DIR = root;
-    try {
-      const workflowId = 'test-workflow';
-      const ctx = await mkCtxWithWorkflow(workflowId);
+          const root = await mkTempDataDir();
+      const prev = process.env.WORKRAIL_DATA_DIR;
+      process.env.WORKRAIL_DATA_DIR = root;
+      try {
+        const workflowId = 'test-workflow';
+        const { ctx, aliasStore } = await mkCtxWithWorkflow(workflowId);
 
       const res = await handleV2StartWorkflow({ workflowId } as any, ctx);
       expect(res.type).toBe('success');
@@ -231,36 +239,28 @@ describe('v2 start_workflow (Slice 3.5)', () => {
       }
       if (res.type !== 'success') return;
 
-      expect(typeof res.data.stateToken).toBe('string');
-      expect(typeof res.data.ackToken).toBe('string');
+      expect(typeof res.data.continueToken).toBe('string');
+      expect(typeof res.data.continueToken).toBe('string');
       expect(res.data.isComplete).toBe(false);
       expect(res.data.pending?.stepId).toBe('triage');
 
-      // Verify signatures using the same keyring in the temp data dir.
-      const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: root });
-      const fsPort = new NodeFileSystemV2();
-      const hmac = new NodeHmacSha256V2();
+      // Verify v2 short token format.
       const localBase64url = new NodeBase64UrlV2();
-      const base32 = new Base32AdapterV2();
-      const bech32m = new Bech32mAdapterV2();
-      const keyring = await new LocalKeyringV2(dataDir, fsPort, localBase64url, new NodeRandomEntropyV2()).loadOrCreate().match(
-        (v) => v,
-        (e) => {
-          throw new Error(`unexpected keyring error: ${e.code}`);
-        }
-      );
+      expect(res.data.continueToken).toMatch(/^ct_[A-Za-z0-9_-]{24}$/);
+      expect(res.data.continueToken).toMatch(/^ct_[A-Za-z0-9_-]{24}$/);
 
-      const parsedState = parseTokenV1Binary(res.data.stateToken, { bech32m, base32 })._unsafeUnwrap();
-      const parsedAck = parseTokenV1Binary(res.data.ackToken, { bech32m, base32 })._unsafeUnwrap();
-
-      const verifyPorts = { keyring, hmac, base64url: localBase64url };
-      expect(verifyTokenSignatureV1Binary(parsedState, verifyPorts).isOk()).toBe(true);
-      expect(verifyTokenSignatureV1Binary(parsedAck, verifyPorts).isOk()).toBe(true);
+      // Resolve session ID from alias store (registered during mintShortTokenTriple).
+      const parsedState = parseShortTokenNative(res.data.continueToken)!;
+      const stateAlias = aliasStore.lookup(parsedState.nonceHex);
+      expect(stateAlias).not.toBeNull();
+      if (!stateAlias) throw new Error('state alias not found');
 
       // Durable truth exists and is loadable via the session store.
+      const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: root });
+      const fsPort = new NodeFileSystemV2();
       const sha256 = new NodeSha256V2();
       const store = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha256);
-      const truth = await store.load(parsedState.payload.sessionId).match(
+      const truth = await store.load(stateAlias.sessionId).match(
         (v) => v,
         (e) => {
           throw new Error(`unexpected load error: ${e.code}`);

@@ -180,8 +180,7 @@ describe('Context Locks', () => {
       // We verify the schema doesn't have a context field.
       const responseExample = {
         kind: 'ok',
-        stateToken: 'st1invalid',
-        ackToken: 'ack1invalid',
+        continueToken: 'ct_test123',
         checkpointToken: 'chk1invalid',
         isComplete: false,
         pending: { stepId: 'step1', title: 'Title', prompt: 'Prompt' },

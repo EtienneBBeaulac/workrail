@@ -33,6 +33,7 @@ import {
 const VALID_STATE_TOKEN = 'st1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq';
 const VALID_ACK_TOKEN = 'ack1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq';
 const VALID_CHECKPOINT_TOKEN = 'chk1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq';
+const VALID_CONTINUE_TOKEN = 'ct_ABCDEFGHIJKLMNOPQRSTUVWX';
 
 function validPendingStep() {
   return { stepId: 'step-1', title: 'Step 1', prompt: 'Do the thing' };
@@ -120,20 +121,19 @@ describe('inspect_workflow response contract', () => {
 describe('start_workflow response contract', () => {
   it('accepts valid response with pending step', () => {
     const response = {
-      stateToken: VALID_STATE_TOKEN,
-      ackToken: VALID_ACK_TOKEN,
+      continueToken: VALID_CONTINUE_TOKEN,
       isComplete: false,
       pending: validPendingStep(),
       preferences: validPreferences(),
       nextIntent: 'perform_pending_then_continue',
-      nextCall: { tool: 'continue_workflow' as const, params: { intent: 'advance' as const, stateToken: VALID_STATE_TOKEN, ackToken: VALID_ACK_TOKEN } },
+      nextCall: { tool: 'continue_workflow' as const, params: { continueToken: VALID_CONTINUE_TOKEN } },
     };
     expect(V2StartWorkflowOutputSchema.safeParse(response).success).toBe(true);
   });
 
-  it('accepts complete workflow (no pending, no ackToken)', () => {
+  it('accepts complete workflow (no pending)', () => {
     const response = {
-      stateToken: VALID_STATE_TOKEN,
+      continueToken: VALID_CONTINUE_TOKEN,
       isComplete: true,
       pending: null,
       preferences: validPreferences(),
@@ -143,28 +143,26 @@ describe('start_workflow response contract', () => {
     expect(V2StartWorkflowOutputSchema.safeParse(response).success).toBe(true);
   });
 
-  it('rejects pending step without ackToken', () => {
+  it('rejects pending step without continueToken', () => {
     const response = {
-      stateToken: VALID_STATE_TOKEN,
       isComplete: false,
       pending: validPendingStep(),
       preferences: validPreferences(),
       nextIntent: 'perform_pending_then_continue',
       nextCall: null,
     };
-    // ackToken is required when pending exists (refine rule)
+    // continueToken is required when pending exists (refine rule)
     expect(V2StartWorkflowOutputSchema.safeParse(response).success).toBe(false);
   });
 
-  it('rejects invalid stateToken format', () => {
+  it('rejects invalid continueToken format', () => {
     const response = {
-      stateToken: 'not-a-valid-token',
-      ackToken: VALID_ACK_TOKEN,
+      continueToken: 'not-a-valid-token',
       isComplete: false,
       pending: validPendingStep(),
       preferences: validPreferences(),
       nextIntent: 'perform_pending_then_continue',
-      nextCall: { tool: 'continue_workflow' as const, params: { intent: 'advance' as const, stateToken: 'not-a-valid-token', ackToken: VALID_ACK_TOKEN } },
+      nextCall: { tool: 'continue_workflow' as const, params: { continueToken: 'not-a-valid-token' } },
     };
     expect(V2StartWorkflowOutputSchema.safeParse(response).success).toBe(false);
   });
@@ -178,13 +176,12 @@ describe('continue_workflow response contract', () => {
   it('accepts valid ok response', () => {
     const response = {
       kind: 'ok',
-      stateToken: VALID_STATE_TOKEN,
-      ackToken: VALID_ACK_TOKEN,
+      continueToken: VALID_CONTINUE_TOKEN,
       isComplete: false,
       pending: validPendingStep(),
       preferences: validPreferences(),
       nextIntent: 'perform_pending_then_continue',
-      nextCall: { tool: 'continue_workflow' as const, params: { intent: 'advance' as const, stateToken: VALID_STATE_TOKEN, ackToken: VALID_ACK_TOKEN } },
+      nextCall: { tool: 'continue_workflow' as const, params: { continueToken: VALID_CONTINUE_TOKEN } },
     };
     expect(V2ContinueWorkflowOutputSchema.safeParse(response).success).toBe(true);
   });
@@ -192,8 +189,7 @@ describe('continue_workflow response contract', () => {
   it('accepts valid blocked response', () => {
     const response = {
       kind: 'blocked',
-      stateToken: VALID_STATE_TOKEN,
-      ackToken: VALID_ACK_TOKEN,
+      continueToken: VALID_CONTINUE_TOKEN,
       isComplete: false,
       pending: validPendingStep(),
       preferences: validPreferences(),
@@ -216,7 +212,7 @@ describe('continue_workflow response contract', () => {
   it('accepts rehydrate-only response (complete, no pending)', () => {
     const response = {
       kind: 'ok',
-      stateToken: VALID_STATE_TOKEN,
+      continueToken: VALID_CONTINUE_TOKEN,
       isComplete: true,
       pending: null,
       preferences: validPreferences(),
@@ -229,7 +225,7 @@ describe('continue_workflow response contract', () => {
   it('rejects unknown kind', () => {
     const response = {
       kind: 'unknown',
-      stateToken: VALID_STATE_TOKEN,
+      continueToken: VALID_CONTINUE_TOKEN,
       isComplete: false,
       pending: null,
       preferences: validPreferences(),
@@ -367,7 +363,7 @@ describe('checkpoint_workflow response contract', () => {
     const response = {
       checkpointNodeId: 'node_abc123',
       stateToken: VALID_STATE_TOKEN,
-      nextCall: { tool: 'continue_workflow', params: { intent: 'rehydrate', stateToken: VALID_STATE_TOKEN } },
+      nextCall: { tool: 'continue_workflow', params: { continueToken: VALID_CONTINUE_TOKEN } },
     };
     expect(V2CheckpointWorkflowOutputSchema.safeParse(response).success).toBe(true);
   });
@@ -396,42 +392,39 @@ describe('checkpointToken in response contracts', () => {
   it('continue_workflow accepts checkpointToken', () => {
     const response = {
       kind: 'ok',
-      stateToken: VALID_STATE_TOKEN,
-      ackToken: VALID_ACK_TOKEN,
+      continueToken: VALID_CONTINUE_TOKEN,
       checkpointToken: VALID_CHECKPOINT_TOKEN,
       isComplete: false,
       pending: validPendingStep(),
       preferences: validPreferences(),
       nextIntent: 'perform_pending_then_continue',
-      nextCall: { tool: 'continue_workflow', params: { intent: 'advance', stateToken: VALID_STATE_TOKEN, ackToken: VALID_ACK_TOKEN } },
+      nextCall: { tool: 'continue_workflow', params: { continueToken: VALID_CONTINUE_TOKEN } },
     };
     expect(V2ContinueWorkflowOutputSchema.safeParse(response).success).toBe(true);
   });
 
-  it('continue_workflow accepts response without checkpointToken (backward compatible)', () => {
+  it('continue_workflow accepts response without checkpointToken', () => {
     const response = {
       kind: 'ok',
-      stateToken: VALID_STATE_TOKEN,
-      ackToken: VALID_ACK_TOKEN,
+      continueToken: VALID_CONTINUE_TOKEN,
       isComplete: false,
       pending: validPendingStep(),
       preferences: validPreferences(),
       nextIntent: 'perform_pending_then_continue',
-      nextCall: { tool: 'continue_workflow', params: { intent: 'advance', stateToken: VALID_STATE_TOKEN, ackToken: VALID_ACK_TOKEN } },
+      nextCall: { tool: 'continue_workflow', params: { continueToken: VALID_CONTINUE_TOKEN } },
     };
     expect(V2ContinueWorkflowOutputSchema.safeParse(response).success).toBe(true);
   });
 
   it('start_workflow accepts checkpointToken', () => {
     const response = {
-      stateToken: VALID_STATE_TOKEN,
-      ackToken: VALID_ACK_TOKEN,
+      continueToken: VALID_CONTINUE_TOKEN,
       checkpointToken: VALID_CHECKPOINT_TOKEN,
       isComplete: false,
       pending: validPendingStep(),
       preferences: validPreferences(),
       nextIntent: 'perform_pending_then_continue',
-      nextCall: { tool: 'continue_workflow', params: { intent: 'advance', stateToken: VALID_STATE_TOKEN, ackToken: VALID_ACK_TOKEN } },
+      nextCall: { tool: 'continue_workflow', params: { continueToken: VALID_CONTINUE_TOKEN } },
     };
     expect(V2StartWorkflowOutputSchema.safeParse(response).success).toBe(true);
   });
@@ -439,14 +432,13 @@ describe('checkpointToken in response contracts', () => {
   it('rejects invalid checkpointToken format', () => {
     const response = {
       kind: 'ok',
-      stateToken: VALID_STATE_TOKEN,
-      ackToken: VALID_ACK_TOKEN,
+      continueToken: VALID_CONTINUE_TOKEN,
       checkpointToken: 'invalid-format',
       isComplete: false,
       pending: validPendingStep(),
       preferences: validPreferences(),
       nextIntent: 'perform_pending_then_continue',
-      nextCall: { tool: 'continue_workflow', params: { intent: 'advance', stateToken: VALID_STATE_TOKEN, ackToken: VALID_ACK_TOKEN } },
+      nextCall: { tool: 'continue_workflow', params: { continueToken: VALID_CONTINUE_TOKEN } },
     };
     expect(V2ContinueWorkflowOutputSchema.safeParse(response).success).toBe(false);
   });

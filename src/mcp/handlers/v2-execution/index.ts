@@ -1,9 +1,8 @@
 import type { ToolContext, ToolResult, V2ToolContext } from '../../types.js';
-import { error, success, requireV2Context } from '../../types.js';
+import { success, requireV2Context } from '../../types.js';
 import type { V2ContinueWorkflowInput, V2StartWorkflowInput } from '../../v2/tools.js';
 import { V2ContinueWorkflowOutputSchema } from '../../output-schemas.js';
 import {
-  assertTokenScopeMatchesStateBinary,
   asAttemptId,
 } from '../../../v2/durable-core/tokens/index.js';
 import {
@@ -15,11 +14,10 @@ import { ResultAsync as RA, errAsync as neErrorAsync } from 'neverthrow';
 import {
   mapStartWorkflowErrorToToolError,
   mapContinueWorkflowErrorToToolError,
-  mapTokenDecodeErrorToToolError,
   type ContinueWorkflowError,
 } from '../v2-execution-helpers.js';
 import * as z from 'zod';
-import { parseStateTokenOrFail, parseAckTokenOrFail } from '../v2-token-ops.js';
+import { parseContinueTokenOrFail } from '../v2-token-ops.js';
 import { checkContextBudget } from '../v2-context-budget.js';
 import { executeStartWorkflow } from './start.js';
 import { handleRehydrateIntent } from './continue-rehydrate.js';
@@ -39,43 +37,29 @@ import { handleAdvanceIntent } from './continue-advance.js';
 // Pure function: derives the pre-built continuation template from response values.
 // Tells the agent exactly what to call when done — no memory of tool descriptions needed.
 
-type NextCallAdvance = {
+type NextCallTemplate = {
   readonly tool: 'continue_workflow';
-  readonly params: { readonly intent: 'advance'; readonly stateToken: string; readonly ackToken: string };
+  readonly params: { readonly continueToken: string };
 };
-type NextCallRehydrate = {
-  readonly tool: 'continue_workflow';
-  readonly params: { readonly intent: 'rehydrate'; readonly stateToken: string };
-};
-type NextCallTemplate = NextCallAdvance | NextCallRehydrate;
 
 export function buildNextCall(args: {
-  readonly stateToken: string;
-  readonly ackToken: string | undefined;
+  readonly continueToken?: string;
   readonly isComplete: boolean;
   readonly pending: { readonly stepId: string } | null;
-  readonly retryable?: boolean;
-  readonly retryAckToken?: string;
+  readonly retryContinueToken?: string;
 }): NextCallTemplate | null {
-  // Workflow complete, nothing to call
   if (args.isComplete && !args.pending) return null;
 
-  // Blocked retryable: use retryAckToken so agent retries with corrected output
-  if (args.retryable && args.retryAckToken) {
-    return {
-      tool: 'continue_workflow',
-      params: { intent: 'advance', stateToken: args.stateToken, ackToken: args.retryAckToken },
-    };
+  // Blocked retryable: use retry continue token
+  if (args.retryContinueToken) {
+    return { tool: 'continue_workflow', params: { continueToken: args.retryContinueToken } };
   }
 
-  // Blocked non-retryable: agent can't proceed without user intervention
-  if (!args.ackToken) return null;
+  if (args.continueToken) {
+    return { tool: 'continue_workflow', params: { continueToken: args.continueToken } };
+  }
 
-  // Normal: advance with the ackToken from this response
-  return {
-    tool: 'continue_workflow',
-    params: { intent: 'advance', stateToken: args.stateToken, ackToken: args.ackToken },
-  };
+  return null;
 }
 
 export async function handleV2StartWorkflow(
@@ -104,73 +88,64 @@ export async function handleV2ContinueWorkflow(
   );
 }
 
-function executeContinueWorkflow(
+export function executeContinueWorkflow(
   input: V2ContinueWorkflowInput,
   ctx: V2ToolContext
 ): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, ContinueWorkflowError> {
-  const { gate, sessionStore, snapshotStore, pinnedStore, sha256, tokenCodecPorts, idFactory } = ctx.v2;
+  const { gate, sessionStore, snapshotStore, pinnedStore, sha256, tokenCodecPorts, idFactory, tokenAliasStore, entropy } = ctx.v2;
 
-  // Parse and validate state token
-  const stateRes = parseStateTokenOrFail(input.stateToken, tokenCodecPorts);
-  if (!stateRes.ok) return neErrorAsync({ kind: 'validation_failed', failure: stateRes.failure });
-  const state = stateRes.token;
-
-  // Check context budget
+  // Check context budget (synchronous, early guard)
   const ctxCheck = checkContextBudget({ tool: 'continue_workflow', context: input.context });
   if (!ctxCheck.ok) return neErrorAsync({ kind: 'validation_failed', failure: ctxCheck.error });
 
-  const sessionId = asSessionId(state.payload.sessionId);
-  const runId = asRunId(state.payload.runId);
-  const nodeId = asNodeId(state.payload.nodeId);
-  const workflowHashRef = state.payload.workflowHashRef;
+  return parseContinueTokenOrFail(input.continueToken, tokenCodecPorts, tokenAliasStore)
+    .mapErr((failure) => ({ kind: 'validation_failed' as const, failure }))
+    .andThen((resolved) => {
+      const sessionId = asSessionId(resolved.sessionId);
+      const runId = asRunId(resolved.runId);
+      const nodeId = asNodeId(resolved.nodeId);
+      const workflowHashRef = resolved.workflowHashRef;
 
-  // Route based on intent: rehydrate (side-effect-free) or advance (state mutation)
-  if (input.intent === 'rehydrate') {
-    return sessionStore.load(sessionId)
-      .mapErr((cause) => ({ kind: 'session_load_failed' as const, cause }))
-      .andThen((truth) => handleRehydrateIntent({
-        input,
-        sessionId,
-        runId,
-        nodeId,
-        workflowHashRef,
-        truth,
-        tokenCodecPorts,
-        pinnedStore,
-        snapshotStore,
-        idFactory,
-      }));
-  }
+      if (input.intent === 'rehydrate') {
+        return sessionStore.load(sessionId)
+          .mapErr((cause) => ({ kind: 'session_load_failed' as const, cause }))
+          .andThen((truth) => handleRehydrateIntent({
+            input,
+            sessionId,
+            runId,
+            nodeId,
+            workflowHashRef,
+            truth,
+            tokenCodecPorts,
+            pinnedStore,
+            snapshotStore,
+            idFactory,
+            aliasStore: tokenAliasStore,
+            entropy,
+          }));
+      }
 
-  // Advance path: validate ackToken and route to advance handler
-  if (!input.ackToken) {
-    return neErrorAsync({ kind: 'validation_failed', failure: error('VALIDATION_ERROR', 'ackToken is required for advance intent') });
-  }
-  const ackRes = parseAckTokenOrFail(input.ackToken, tokenCodecPorts);
-  if (!ackRes.ok) return neErrorAsync({ kind: 'validation_failed', failure: ackRes.failure });
-  const ack = ackRes.token;
+      const attemptId = asAttemptId(resolved.attemptId);
 
-  const scopeRes = assertTokenScopeMatchesStateBinary(state, ack);
-  if (scopeRes.isErr()) return neErrorAsync({ kind: 'validation_failed', failure: mapTokenDecodeErrorToToolError(scopeRes.error) });
-
-  const attemptId = asAttemptId(ack.payload.attemptId);
-
-  return sessionStore.load(sessionId)
-    .mapErr((cause) => ({ kind: 'session_load_failed' as const, cause }))
-    .andThen((truth) => handleAdvanceIntent({
-      input,
-      sessionId,
-      runId,
-      nodeId,
-      attemptId,
-      workflowHashRef,
-      truth,
-      gate,
-      sessionStore,
-      snapshotStore,
-      pinnedStore,
-      tokenCodecPorts,
-      idFactory,
-      sha256,
-    }));
+      return sessionStore.load(sessionId)
+        .mapErr((cause) => ({ kind: 'session_load_failed' as const, cause }))
+        .andThen((truth) => handleAdvanceIntent({
+          input,
+          sessionId,
+          runId,
+          nodeId,
+          attemptId,
+          workflowHashRef,
+          truth,
+          gate,
+          sessionStore,
+          snapshotStore,
+          pinnedStore,
+          tokenCodecPorts,
+          idFactory,
+          sha256,
+          aliasStore: tokenAliasStore,
+          entropy,
+        }));
+    });
 }

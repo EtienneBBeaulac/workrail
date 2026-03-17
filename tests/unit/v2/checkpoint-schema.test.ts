@@ -14,9 +14,9 @@ import {
   V2StartWorkflowOutputSchema,
 } from '../../../src/mcp/output-schemas.js';
 
-// Use valid bech32m-charset tokens for schema tests
+// Use valid token formats
 const VALID_STATE = 'st1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq';
-const VALID_ACK = 'ack1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq';
+const VALID_CONTINUE = 'ct_AAAAAAAAAAAAAAAAAAAAAAAA';
 const VALID_CHK = 'chk1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq';
 
 describe('V2CheckpointWorkflowOutputSchema', () => {
@@ -24,7 +24,7 @@ describe('V2CheckpointWorkflowOutputSchema', () => {
     const result = V2CheckpointWorkflowOutputSchema.safeParse({
       checkpointNodeId: 'chk-node-001',
       stateToken: VALID_STATE,
-      nextCall: { tool: 'continue_workflow', params: { intent: 'rehydrate', stateToken: VALID_STATE } },
+      nextCall: { tool: 'continue_workflow', params: { continueToken: VALID_CONTINUE } },
     });
     expect(result.success).toBe(true);
   });
@@ -55,15 +55,14 @@ describe('V2CheckpointWorkflowOutputSchema', () => {
 describe('checkpointToken in continue_workflow output', () => {
   const validBase = {
     kind: 'ok' as const,
-    stateToken: VALID_STATE,
+    continueToken: VALID_CONTINUE,
     isComplete: false,
     pending: { stepId: 'step-1', title: 'Step 1', prompt: 'Do stuff' },
-    ackToken: VALID_ACK,
     preferences: { autonomy: 'guided', riskPolicy: 'conservative' },
     nextIntent: 'perform_pending_then_continue',
     nextCall: {
       tool: 'continue_workflow',
-      params: { intent: 'advance', stateToken: VALID_STATE, ackToken: VALID_ACK },
+      params: { continueToken: VALID_CONTINUE },
     },
   };
 
@@ -91,15 +90,14 @@ describe('checkpointToken in continue_workflow output', () => {
 
 describe('checkpointToken in start_workflow output', () => {
   const validBase = {
-    stateToken: VALID_STATE,
-    ackToken: VALID_ACK,
+    continueToken: VALID_CONTINUE,
     isComplete: false,
     pending: { stepId: 'step-1', title: 'Step 1', prompt: 'Do stuff' },
     preferences: { autonomy: 'guided', riskPolicy: 'conservative' },
     nextIntent: 'perform_pending_then_continue',
     nextCall: {
       tool: 'continue_workflow',
-      params: { intent: 'advance', stateToken: VALID_STATE, ackToken: VALID_ACK },
+      params: { continueToken: VALID_CONTINUE },
     },
   };
 

@@ -23,6 +23,7 @@ interface V2PendingStep {
   readonly stepId: string;
   readonly title: string;
   readonly prompt: string;
+  readonly agentRole?: string;
 }
 
 interface V2Preferences {
@@ -31,9 +32,7 @@ interface V2Preferences {
 }
 
 interface V2NextCallParams {
-  readonly intent: string;
-  readonly stateToken: string;
-  readonly ackToken?: string;
+  readonly continueToken: string;
 }
 
 interface V2NextCall {
@@ -54,8 +53,7 @@ interface V2Validation {
 }
 
 interface V2ExecutionBase {
-  readonly stateToken: string;
-  readonly ackToken?: string;
+  readonly continueToken?: string;
   readonly checkpointToken?: string;
   readonly isComplete: boolean;
   readonly pending: V2PendingStep | null;
@@ -68,7 +66,7 @@ interface V2Blocked extends V2ExecutionBase {
   readonly kind: 'blocked';
   readonly blockers: { readonly blockers: readonly V2Blocker[] };
   readonly retryable?: boolean;
-  readonly retryAckToken?: string;
+  readonly retryContinueToken?: string;
   readonly validation?: V2Validation;
 }
 
@@ -82,14 +80,13 @@ type V2ExecutionResponse = V2ExecutionBase | (V2ExecutionBase & { readonly kind:
  * Detect whether the data is a v2 execution response (start_workflow or
  * continue_workflow). Returns false for all other tool outputs.
  *
- * Detection relies on the co-presence of `stateToken`, `pending`,
- * `nextIntent`, and `preferences` — a shape unique to execution responses.
+ * Detection relies on the co-presence of `pending`, `nextIntent`, and
+ * `preferences` — a shape unique to execution responses.
  */
 function isV2ExecutionResponse(data: unknown): data is V2ExecutionResponse {
   if (typeof data !== 'object' || data === null) return false;
   const d = data as Record<string, unknown>;
   return (
-    typeof d.stateToken === 'string' &&
     'pending' in d &&
     typeof d.nextIntent === 'string' &&
     typeof d.preferences === 'object' && d.preferences !== null
@@ -154,33 +151,39 @@ const PERSONA_SYSTEM = '---------\nSYSTEM\n---------';
  * Build the JSON code block the agent copies into their next call.
  *
  * Uses nextCall.params (minus intent, which is auto-inferred) as the
- * canonical source. When nextCall is null (complete / non-retryable blocked),
- * includes only stateToken for session reference.
+ * canonical source. The formatted block surfaces `nextToken` as the single
+ * agent-facing advance token, while the raw API continues to use `ackToken`.
+ * When nextCall is null (complete / non-retryable blocked), includes only
+ * stateToken for session reference.
  *
- * checkpointToken is for checkpoint_workflow (a different tool), so it is
- * mentioned separately rather than mixed into the continue_workflow params.
+ * checkpointToken is intentionally omitted from the prose output — it is
+ * available in the raw JSON response for callers who need it, but surfacing it
+ * in formatted output adds noise for agents on the happy path.
+ *
+ * stepId is included as a label so agents can anchor to the correct block in
+ * long multi-step sessions and avoid accidentally using tokens from earlier steps.
  */
 function formatTokenBlock(data: V2ExecutionResponse): string {
   const params: Record<string, string> = {};
 
   if (data.nextCall) {
-    params.stateToken = data.nextCall.params.stateToken;
-    if (data.nextCall.params.ackToken) {
-      params.ackToken = data.nextCall.params.ackToken;
-    }
-  } else {
-    params.stateToken = data.stateToken;
+    params.continueToken = data.nextCall.params.continueToken;
+  } else if (data.continueToken) {
+    params.continueToken = data.continueToken;
   }
 
   const lines: string[] = [];
+
+  // Label with step ID to help agents identify the current token block and
+  // avoid reusing tokens from earlier steps in their context.
+  if (data.pending?.stepId) {
+    lines.push(`**Tokens for step \`${data.pending.stepId}\` — use these for your next \`continue_workflow\` call (not tokens from earlier steps):**`);
+    lines.push('');
+  }
+
   lines.push('```json');
   lines.push(JSON.stringify(params));
   lines.push('```');
-
-  if (data.checkpointToken) {
-    lines.push('');
-    lines.push(`Checkpoint token (for \`checkpoint_workflow\`): \`${data.checkpointToken}\``);
-  }
 
   return lines.join('\n');
 }
@@ -288,6 +291,9 @@ function formatRehydrate(data: V2ExecutionResponse): string {
 
   lines.push(PERSONA_SYSTEM);
   lines.push('');
+  // Token block at the top of SYSTEM section for easy agent reference.
+  lines.push(formatTokenBlock(data));
+  lines.push('');
 
   if (!data.pending) {
     lines.push('# State Recovered');
@@ -297,8 +303,6 @@ function formatRehydrate(data: V2ExecutionResponse): string {
   }
 
   lines.push('Continue working on this step. When done, call `continue_workflow` to advance.');
-  lines.push('');
-  lines.push(formatTokenBlock(data));
 
   return lines.join('\n');
 }
@@ -318,11 +322,13 @@ function formatSuccess(data: V2ExecutionResponse): string {
 
   lines.push(PERSONA_SYSTEM);
   lines.push('');
+  // Token block at the top of SYSTEM section — agents read from top, and it's
+  // the most salient piece of information they need for the next call.
+  lines.push(formatTokenBlock(data));
+  lines.push('');
   lines.push('Execute this step, then call `continue_workflow` to advance.');
   lines.push('');
   lines.push('Include `output.notesMarkdown` documenting your work — what you did, key decisions, what you produced, and anything notable.');
-  lines.push('');
-  lines.push(formatTokenBlock(data));
   lines.push('');
   lines.push(formatPreferences(data.preferences));
 

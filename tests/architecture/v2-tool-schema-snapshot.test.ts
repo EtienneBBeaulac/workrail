@@ -77,11 +77,10 @@ describe('v2 tool schema field snapshots (anti-drift)', () => {
 
   it('continue_workflow: exact field set', () => {
     expect(extractFieldNames(V2ContinueWorkflowInput)).toEqual([
-      'ackToken',
       'context',
+      'continueToken',
       'intent',
       'output',
-      'stateToken',
     ]);
   });
 
@@ -112,10 +111,8 @@ describe('v2 tool schema field snapshots (anti-drift)', () => {
   });
 
   it('continue_workflow intent enum is exactly [advance, rehydrate] (optional with auto-inference)', () => {
-    // Schema is: ZodPipeline(ZodEffects(transform, ZodEffects(strict, ZodObject)))
-    // Navigate to the inner ZodObject to get the shape
-    const innerObject = V2ContinueWorkflowInput._def.in._def.schema;
-    const shape = innerObject._def.shape();
+    // Use the generic shape extractor to handle ZodPipeline/ZodEffects nesting
+    const shape = extractShapeFromSchema(V2ContinueWorkflowInput);
     const intentDef = shape.intent._def;
     // intent is now z.enum([...]).optional(), so unwrap the optional
     const innerEnum = intentDef.innerType._def;

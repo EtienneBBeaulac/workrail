@@ -1,4 +1,4 @@
-import { V2ContinueWorkflowOutputSchema } from '../../output-schemas.js';
+import { V2ContinueWorkflowOutputSchema, toPendingStep } from '../../output-schemas.js';
 import { deriveIsComplete, derivePendingStep } from '../../../v2/durable-core/projections/snapshot-state.js';
 import type { ExecutionSnapshotFileV1 } from '../../../v2/durable-core/schemas/execution-snapshot/index.js';
 import {
@@ -27,77 +27,12 @@ import {
 } from '../v2-execution-helpers.js';
 import { renderPendingPrompt, type StepMetadata } from '../../../v2/durable-core/domain/prompt-renderer.js';
 import * as z from 'zod';
-import { attemptIdForNextNode, signTokenOrErr } from '../v2-token-ops.js';
+import { attemptIdForNextNode, mintContinueAndCheckpointTokens } from '../v2-token-ops.js';
 import { deriveNextIntent } from '../v2-state-conversion.js';
 import { EVENT_KIND } from '../../../v2/durable-core/constants.js';
 import { buildNextCall } from './index.js';
 
-/**
- * Build response for blocked outcome (no advance occurred).
- */
-export function buildBlockedReplayResponse(args: {
-  readonly sessionId: SessionId;
-  readonly runId: RunId;
-  readonly nodeId: NodeId;
-  readonly attemptId: AttemptId;
-  readonly blockers: import('../../../v2/durable-core/schemas/session/blockers.js').BlockerReportV1;
-  readonly snapshot: ExecutionSnapshotFileV1 | null;
-  readonly truth: LoadedSessionTruthV2;
-  readonly workflow: ReturnType<typeof createWorkflow>;
-  readonly inputStateToken: string;
-  readonly inputAckToken: string;
-  readonly ports: TokenCodecPorts;
-}): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, ContinueWorkflowError> {
-  const { sessionId, runId, nodeId, attemptId, blockers, snapshot, truth, workflow, inputStateToken, inputAckToken, ports } = args;
 
-  const pendingNow = snapshot ? derivePendingStep(snapshot.enginePayload.engineState) : null;
-  const isCompleteNow = snapshot ? deriveIsComplete(snapshot.enginePayload.engineState) : false;
-
-  // S9: Render pending step — fail explicitly on missing step (no silent fallback)
-  let metaOrNull: StepMetadata | null = null;
-  if (pendingNow) {
-    const result = renderPendingPrompt({
-      workflow,
-      stepId: String(pendingNow.stepId),
-      loopPath: pendingNow.loopPath,
-      truth,
-      runId: asRunId(String(runId)),
-      nodeId: asNodeId(String(nodeId)),
-      rehydrateOnly: false,
-    });
-    if (result.isErr()) {
-      return neErrorAsync({ kind: 'prompt_render_failed' as const, message: result.error.message });
-    }
-    metaOrNull = result.value;
-  }
-
-  const preferences = derivePreferencesOrDefault({ truth, runId, nodeId });
-  const nextIntent = deriveNextIntent({ rehydrateOnly: false, isComplete: isCompleteNow, pending: metaOrNull });
-
-  // Mint checkpoint token for replay (idempotent — same inputs produce same token)
-  const replayCheckpointTokenRes = pendingNow
-    ? signTokenOrErr({
-        payload: { tokenVersion: 1, tokenKind: 'checkpoint', sessionId, runId, nodeId, attemptId },
-        ports,
-      })
-    : ok(undefined);
-
-  return okAsync(V2ContinueWorkflowOutputSchema.parse({
-    kind: 'blocked',
-    stateToken: inputStateToken,
-    ackToken: inputAckToken,
-    checkpointToken: replayCheckpointTokenRes.isOk() ? replayCheckpointTokenRes.value : undefined,
-    isComplete: isCompleteNow,
-    pending: metaOrNull ? { stepId: metaOrNull.stepId, title: metaOrNull.title, prompt: metaOrNull.prompt } : null,
-    preferences,
-    nextIntent,
-    nextCall: buildNextCall({ stateToken: inputStateToken, ackToken: inputAckToken, isComplete: isCompleteNow, pending: metaOrNull }),
-    blockers,
-    retryable: undefined,
-    retryAckToken: undefined,
-    validation: loadValidationResultV1(truth.events, `validation_${String(attemptId)}`).unwrapOr(null) ?? undefined,
-  }));
-}
 
 /**
  * Build response for advanced outcome (execution advanced to new node).
@@ -114,8 +49,10 @@ export function buildAdvancedReplayResponse(args: {
   readonly workflowHash: WorkflowHash;
   readonly ports: TokenCodecPorts;
   readonly sha256: Sha256PortV2;
+  readonly aliasStore: import('../../../v2/ports/token-alias-store.port.js').TokenAliasStorePortV2;
+  readonly entropy: import('../../../v2/ports/random-entropy.port.js').RandomEntropyPortV2;
 }): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, ContinueWorkflowError> {
-  const { sessionId, runId, toNodeId, attemptId, toSnapshot, workflow, truth, workflowHash, ports, sha256 } = args;
+  const { sessionId, runId, toNodeId, attemptId, toSnapshot, workflow, truth, workflowHash, ports, sha256, aliasStore, entropy } = args;
   
   const toNodeIdBranded = asNodeId(String(toNodeId));
   const pending = derivePendingStep(toSnapshot.enginePayload.engineState);
@@ -126,60 +63,47 @@ export function buildAdvancedReplayResponse(args: {
     return neErrorAsync({ kind: 'invariant_violation' as const, message: `Failed to derive next attemptId: ${nextAttemptIdRes.error.message}` });
   }
   const nextAttemptId = nextAttemptIdRes.value;
-  
-  const nextAckTokenRes = pending
-    ? signTokenOrErr({
-        payload: { tokenVersion: 1, tokenKind: 'ack', sessionId, runId, nodeId: toNodeIdBranded, attemptId: nextAttemptId },
-        ports,
-      })
-    : ok(undefined);
-  if (nextAckTokenRes.isErr()) {
-    return neErrorAsync({ kind: 'token_signing_failed' as const, cause: nextAckTokenRes.error });
-  }
-
-  // Mint checkpoint token (available when there's a pending step)
-  const nextCheckpointTokenRes = pending
-    ? signTokenOrErr({
-        payload: { tokenVersion: 1, tokenKind: 'checkpoint', sessionId, runId, nodeId: toNodeIdBranded, attemptId: nextAttemptId },
-        ports,
-      })
-    : ok(undefined);
-  if (nextCheckpointTokenRes.isErr()) {
-    return neErrorAsync({ kind: 'token_signing_failed' as const, cause: nextCheckpointTokenRes.error });
-  }
 
   const wfRefRes = deriveWorkflowHashRef(workflowHash);
   if (wfRefRes.isErr()) {
     return neErrorAsync({ kind: 'precondition_failed' as const, message: wfRefRes.error.message, suggestion: 'Ensure workflowHash is a valid sha256 digest.' });
   }
-  const nextStateTokenRes = signTokenOrErr({
-    payload: { tokenVersion: 1, tokenKind: 'state', sessionId, runId, nodeId: toNodeIdBranded, workflowHashRef: wfRefRes.value },
-    ports,
-  });
-  if (nextStateTokenRes.isErr()) {
-    return neErrorAsync({ kind: 'token_signing_failed' as const, cause: nextStateTokenRes.error });
-  }
+
+  const entryBase = {
+    sessionId: String(sessionId),
+    runId: String(runId),
+    nodeId: String(toNodeIdBranded),
+    attemptId: String(nextAttemptId),
+    workflowHashRef: String(wfRefRes.value),
+  };
+
+  const nextTokensMint: RA<{ continueToken: string; checkpointToken: string }, ContinueWorkflowError> =
+    mintContinueAndCheckpointTokens({ entry: entryBase, ports, aliasStore, entropy })
+      .mapErr((failure) => ({ kind: 'token_signing_failed' as const, cause: failure as never }));
 
   if (toSnapshot.enginePayload.engineState.kind === 'blocked') {
     const blocked = toSnapshot.enginePayload.engineState.blocked;
     const blockers = blocked.blockers;
     const retryable = blocked.kind === 'retryable_block';
-    const retryAckTokenRes = retryable
-      ? signTokenOrErr({
-          payload: {
-            tokenVersion: 1,
-            tokenKind: 'ack',
-            sessionId,
-            runId,
-            nodeId: toNodeIdBranded,
-            attemptId: asAttemptId(String(blocked.retryAttemptId)),
+
+    // Conditionally mint retryContinueToken (only for retryable blocks)
+    const retryContinueMint: RA<string | undefined, ContinueWorkflowError> = retryable
+      ? mintContinueAndCheckpointTokens({
+          entry: {
+            aliasSlot: 'retry',
+            sessionId: String(sessionId),
+            runId: String(runId),
+            nodeId: String(toNodeIdBranded),
+            attemptId: String(blocked.retryAttemptId),
+            workflowHashRef: String(wfRefRes.value),
           },
           ports,
-        })
-      : ok(undefined);
-    if (retryAckTokenRes.isErr()) {
-      return neErrorAsync({ kind: 'token_signing_failed' as const, cause: retryAckTokenRes.error });
-    }
+          aliasStore,
+          entropy,
+        }).map((tokens) => tokens.continueToken)
+          .mapErr((failure) => ({ kind: 'token_signing_failed' as const, cause: failure as never }))
+      : okAsync(undefined);
+
     const validation = loadValidationResultV1(truth.events, String(blocked.validationRef)).unwrapOr(null) ?? undefined;
 
     // S9: Render pending step — fail explicitly on missing step (no silent fallback)
@@ -203,22 +127,23 @@ export function buildAdvancedReplayResponse(args: {
     const preferences = derivePreferencesOrDefault({ truth, runId, nodeId: toNodeIdBranded });
     const nextIntent = deriveNextIntent({ rehydrateOnly: false, isComplete, pending: blockedMeta });
 
-    return okAsync(
-      V2ContinueWorkflowOutputSchema.parse({
-        kind: 'blocked',
-        stateToken: nextStateTokenRes.value,
-        ackToken: pending ? nextAckTokenRes.value : undefined,
-        checkpointToken: pending ? nextCheckpointTokenRes.value : undefined,
-        isComplete,
-        pending: blockedMeta ? { stepId: blockedMeta.stepId, title: blockedMeta.title, prompt: blockedMeta.prompt } : null,
-        preferences,
-        nextIntent,
-        nextCall: buildNextCall({ stateToken: nextStateTokenRes.value, ackToken: pending ? nextAckTokenRes.value : undefined, isComplete, pending: blockedMeta, retryable, retryAckToken: retryAckTokenRes.value }),
-        blockers,
-        retryable,
-        retryAckToken: retryAckTokenRes.value,
-        validation,
-      })
+    return nextTokensMint.andThen((nextTokens) =>
+      retryContinueMint.andThen((retryContinueToken) =>
+        okAsync(V2ContinueWorkflowOutputSchema.parse({
+          kind: 'blocked',
+          continueToken: pending ? nextTokens.continueToken : undefined,
+          checkpointToken: pending ? nextTokens.checkpointToken : undefined,
+          isComplete,
+          pending: toPendingStep(blockedMeta),
+          preferences,
+          nextIntent,
+          nextCall: buildNextCall({ continueToken: pending ? nextTokens.continueToken : undefined, isComplete, pending: blockedMeta, retryContinueToken }),
+          blockers,
+          retryable,
+          retryContinueToken,
+          validation,
+        }))
+      )
     );
   }
 
@@ -243,18 +168,19 @@ export function buildAdvancedReplayResponse(args: {
   const preferences = derivePreferencesOrDefault({ truth, runId, nodeId: toNodeIdBranded });
   const nextIntent = deriveNextIntent({ rehydrateOnly: false, isComplete, pending: okMeta });
 
-  return okAsync(
-    V2ContinueWorkflowOutputSchema.parse({
-      kind: 'ok',
-      stateToken: nextStateTokenRes.value,
-      ackToken: pending ? nextAckTokenRes.value : undefined,
-      checkpointToken: pending ? nextCheckpointTokenRes.value : undefined,
-      isComplete,
-      pending: okMeta ? { stepId: okMeta.stepId, title: okMeta.title, prompt: okMeta.prompt } : null,
-      preferences,
-      nextIntent,
-      nextCall: buildNextCall({ stateToken: nextStateTokenRes.value, ackToken: pending ? nextAckTokenRes.value : undefined, isComplete, pending: okMeta }),
-    })
+  return nextTokensMint.andThen((nextTokens) =>
+    okAsync(
+      V2ContinueWorkflowOutputSchema.parse({
+        kind: 'ok',
+        continueToken: pending ? nextTokens.continueToken : undefined,
+        checkpointToken: pending ? nextTokens.checkpointToken : undefined,
+        isComplete,
+        pending: toPendingStep(okMeta),
+        preferences,
+        nextIntent,
+        nextCall: buildNextCall({ continueToken: pending ? nextTokens.continueToken : undefined, isComplete, pending: okMeta }),
+      })
+    )
   );
 }
 
@@ -270,12 +196,12 @@ export function replayFromRecordedAdvance(args: {
   readonly nodeId: NodeId;
   readonly workflowHash: WorkflowHash;
   readonly attemptId: AttemptId;
-  readonly inputStateToken: string;
-  readonly inputAckToken: string;
   readonly pinnedWorkflow: ReturnType<typeof createWorkflow>;
   readonly snapshotStore: import('../../../v2/ports/snapshot-store.port.js').SnapshotStorePortV2;
   readonly sha256: Sha256PortV2;
   readonly tokenCodecPorts: TokenCodecPorts;
+  readonly aliasStore: import('../../../v2/ports/token-alias-store.port.js').TokenAliasStorePortV2;
+  readonly entropy: import('../../../v2/ports/random-entropy.port.js').RandomEntropyPortV2;
 }): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, ContinueWorkflowError> {
   const {
     recordedEvent,
@@ -285,41 +211,20 @@ export function replayFromRecordedAdvance(args: {
     nodeId,
     workflowHash,
     attemptId,
-    inputStateToken,
-    inputAckToken,
     pinnedWorkflow,
     snapshotStore,
     sha256,
     tokenCodecPorts,
+    aliasStore,
+    entropy,
   } = args;
 
-  // Backward-compat: replay old sessions that used advance_recorded.outcome.kind='blocked'
-  // (deprecated by ADR 008 — new advances create blocked_attempt nodes instead).
-  // Keep until all persisted sessions have been migrated or expired.
+  // Legacy blocked outcomes (deprecated by ADR 008) are treated as invariant violations
   if (recordedEvent.data.outcome.kind === 'blocked') {
-    const blockers = recordedEvent.data.outcome.blockers;
-    const snapNode = truth.events.find(
-      (e): e is Extract<DomainEventV1, { kind: 'node_created' }> =>
-        e.kind === EVENT_KIND.NODE_CREATED && e.scope?.nodeId === String(nodeId)
-    );
-
-    const snapRA = snapNode
-      ? snapshotStore.getExecutionSnapshotV1(snapNode.data.snapshotRef).mapErr((cause) => ({ kind: 'snapshot_load_failed' as const, cause }))
-      : okAsync(null);
-
-    return snapRA.andThen((snapshot) => buildBlockedReplayResponse({
-      sessionId,
-      runId,
-      nodeId,
-      attemptId,
-      blockers,
-      snapshot,
-      truth,
-      workflow: pinnedWorkflow,
-      inputStateToken,
-      inputAckToken,
-      ports: tokenCodecPorts,
-    }));
+    return neErrorAsync({
+      kind: 'invariant_violation' as const,
+      message: 'Legacy blocked advance_recorded outcomes are no longer supported. Sessions must be re-created.',
+    });
   }
 
   // Advanced outcome
@@ -358,6 +263,8 @@ export function replayFromRecordedAdvance(args: {
         workflowHash,
         ports: tokenCodecPorts,
         sha256,
+        aliasStore,
+        entropy,
       });
     });
 }

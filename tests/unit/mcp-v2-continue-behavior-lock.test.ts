@@ -1,4 +1,4 @@
-import { createTestValidationPipelineDeps } from "../helpers/v2-test-helpers.js";
+import { createTestValidationPipelineDeps, mintTestContinueToken } from "../helpers/v2-test-helpers.js";
 /**
  * Behavioral lock tests for orchestrateContinueWorkflow.
  * 
@@ -43,6 +43,18 @@ import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
 import { Bech32mAdapterV2 } from '../../src/v2/infra/local/bech32m/index.js';
 import { Base32AdapterV2 } from '../../src/v2/infra/local/base32/index.js';
 import { unsafeTokenCodecPorts } from '../../src/v2/durable-core/tokens/index.js';
+import { InMemoryTokenAliasStoreV2 } from '../../src/v2/infra/in-memory/token-alias-store/index.js';
+import { parseShortTokenNative } from '../../src/v2/durable-core/tokens/short-token.js';
+import type { TokenAliasStorePortV2 } from '../../src/v2/ports/token-alias-store.port.js';
+import { asSessionId } from '../../src/v2/durable-core/ids/index.js';
+
+function resolveSessionId(token: string, aliasStore: TokenAliasStorePortV2): string {
+  const parsed = parseShortTokenNative(token);
+  if (!parsed) throw new Error(`Not a v2 short token: ${token}`);
+  const entry = aliasStore.lookup(parsed.nonceHex);
+  if (!entry) throw new Error(`Alias not found for nonce: ${parsed.nonceHex}`);
+  return entry.sessionId;
+}
 
 async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-continue-lock-'));
@@ -69,7 +81,8 @@ async function mkV2Deps() {
   const keyring = await keyringPort.loadOrCreate().match(v => v, e => { throw new Error(`keyring: ${e.code}`); });
 
   const tokenCodecPorts = unsafeTokenCodecPorts({ keyring, hmac, base64url, base32, bech32m });
-  return { gate, sessionStore, snapshotStore, pinnedStore, keyring, sha256, crypto, idFactory, tokenCodecPorts, hmac, base64url, base32, bech32m, validationPipelineDeps: createTestValidationPipelineDeps() };
+  const tokenAliasStore = new InMemoryTokenAliasStoreV2();
+  return { gate, sessionStore, snapshotStore, pinnedStore, keyring, sha256, crypto, entropy, idFactory, tokenCodecPorts, tokenAliasStore, hmac, base64url, base32, bech32m, validationPipelineDeps: createTestValidationPipelineDeps() };
 }
 
 describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => {
@@ -118,7 +131,7 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     expect(start.data.isComplete).toBe(false);
 
     // Advance step 1 → step 2
-    const adv1 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: start.data.stateToken, ackToken: start.data.ackToken, output: { notesMarkdown: 'Step 1 done.' } } as any, ctx);
+    const adv1 = await handleV2ContinueWorkflow({ continueToken: start.data.continueToken, output: { notesMarkdown: 'Step 1 done.' } } as any, ctx);
     expect(adv1.type).toBe('success');
     if (adv1.type !== 'success') return;
     expect(adv1.data.kind).toBe('ok');
@@ -126,7 +139,7 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     expect(adv1.data.isComplete).toBe(false);
 
     // Advance step 2 → step 3
-    const adv2 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: adv1.data.stateToken, ackToken: adv1.data.ackToken, output: { notesMarkdown: 'Step 2 done.' } } as any, ctx);
+    const adv2 = await handleV2ContinueWorkflow({ continueToken: adv1.data.continueToken, output: { notesMarkdown: 'Step 2 done.' } } as any, ctx);
     expect(adv2.type).toBe('success');
     if (adv2.type !== 'success') return;
     expect(adv2.data.kind).toBe('ok');
@@ -134,7 +147,7 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     expect(adv2.data.isComplete).toBe(false);
 
     // Advance step 3 → complete
-    const adv3 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: adv2.data.stateToken, ackToken: adv2.data.ackToken, output: { notesMarkdown: 'Step 3 done.' } } as any, ctx);
+    const adv3 = await handleV2ContinueWorkflow({ continueToken: adv2.data.continueToken, output: { notesMarkdown: 'Step 3 done.' } } as any, ctx);
     expect(adv3.type).toBe('success');
     if (adv3.type !== 'success') return;
     expect(adv3.data.kind).toBe('ok');
@@ -153,20 +166,14 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     if (start.type !== 'success') return;
 
     const adv1 = await handleV2ContinueWorkflow({
-      intent: 'advance',
-      stateToken: start.data.stateToken,
-      ackToken: start.data.ackToken,
+      continueToken: start.data.continueToken,
       output: { notesMarkdown: 'Completed step 1 successfully.' },
     } as any, ctx);
     expect(adv1.type).toBe('success');
     if (adv1.type !== 'success') return;
 
     // Verify output was persisted
-    const { parseTokenV1Binary } = await import('../../src/v2/durable-core/tokens/token-codec.js');
-    const bech32m = new Bech32mAdapterV2();
-    const base32 = new Base32AdapterV2();
-    const parsed = parseTokenV1Binary(start.data.stateToken, { bech32m, base32 })._unsafeUnwrap();
-    const sessionId = parsed.payload.sessionId;
+    const sessionId = asSessionId(resolveSessionId(start.data.continueToken, v2.tokenAliasStore));
 
     const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: root });
     const fsPort = new NodeFileSystemV2();
@@ -193,19 +200,15 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
 
-    const adv1 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: start.data.stateToken, ackToken: start.data.ackToken, output: { notesMarkdown: 'Step 1 done.' } } as any, ctx);
+    const adv1 = await handleV2ContinueWorkflow({ continueToken: start.data.continueToken, output: { notesMarkdown: 'Step 1 done.' } } as any, ctx);
     expect(adv1.type).toBe('success');
     if (adv1.type !== 'success') return;
 
-    const adv2 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: start.data.stateToken, ackToken: start.data.ackToken, output: { notesMarkdown: 'Step 1 done.' } } as any, ctx);
+    const adv2 = await handleV2ContinueWorkflow({ continueToken: start.data.continueToken, output: { notesMarkdown: 'Step 1 done.' } } as any, ctx);
     expect(adv2).toEqual(adv1); // Exact same response
 
     // Verify no duplicate events
-    const { parseTokenV1Binary } = await import('../../src/v2/durable-core/tokens/token-codec.js');
-    const bech32m = new Bech32mAdapterV2();
-    const base32 = new Base32AdapterV2();
-    const parsed = parseTokenV1Binary(start.data.stateToken, { bech32m, base32 })._unsafeUnwrap();
-    const sessionId = parsed.payload.sessionId;
+    const sessionId = asSessionId(resolveSessionId(start.data.continueToken, v2.tokenAliasStore));
 
     const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: root });
     const fsPort = new NodeFileSystemV2();
@@ -232,26 +235,22 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     if (start.type !== 'success') return;
 
     // Advance once (creates child node)
-    const adv1 = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: start.data.stateToken, ackToken: start.data.ackToken, output: { notesMarkdown: 'Step 1 done.' } } as any, ctx);
+    const adv1 = await handleV2ContinueWorkflow({ continueToken: start.data.continueToken, output: { notesMarkdown: 'Step 1 done.' } } as any, ctx);
     expect(adv1.type).toBe('success');
     if (adv1.type !== 'success') return;
 
     // Rehydrate root to get fresh ackToken
-    const rehydrate = await handleV2ContinueWorkflow({ intent: 'rehydrate', stateToken: start.data.stateToken } as any, ctx);
+    const rehydrate = await handleV2ContinueWorkflow({ continueToken: start.data.continueToken, intent: 'rehydrate' } as any, ctx);
     expect(rehydrate.type).toBe('success');
     if (rehydrate.type !== 'success') return;
 
-    // Advance from root again (fork) — uses the original node's ackToken from rehydrate
-    const fork = await handleV2ContinueWorkflow({ intent: 'advance', stateToken: start.data.stateToken, ackToken: rehydrate.data.ackToken, output: { notesMarkdown: 'Step 1 fork.' } } as any, ctx);
+    // Advance from root again (fork) — uses rehydrate's continueToken (fresh attemptId for same node)
+    const fork = await handleV2ContinueWorkflow({ continueToken: rehydrate.data.continueToken, output: { notesMarkdown: 'Step 1 fork.' } } as any, ctx);
     expect(fork.type).toBe('success');
     if (fork.type !== 'success') return;
 
     // Verify fork edge exists
-    const { parseTokenV1Binary } = await import('../../src/v2/durable-core/tokens/token-codec.js');
-    const bech32m = new Bech32mAdapterV2();
-    const base32 = new Base32AdapterV2();
-    const parsed = parseTokenV1Binary(start.data.stateToken, { bech32m, base32 })._unsafeUnwrap();
-    const sessionId = parsed.payload.sessionId;
+    const sessionId = asSessionId(resolveSessionId(start.data.continueToken, v2.tokenAliasStore));
 
     const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: root });
     const fsPort = new NodeFileSystemV2();
@@ -288,18 +287,15 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     const wfHash = asWorkflowHash(asSha256Digest('sha256:0000000000000000000000000000000000000000000000000000000000000000'));
     const wfRef = deriveWorkflowHashRef(wfHash)._unsafeUnwrap();
 
-    const payload = {
-      tokenVersion: 1,
-      tokenKind: 'state' as const,
+    const token = await mintTestContinueToken(v2, {
       sessionId: mkId('sess', 99),
       runId: mkId('run', 99),
       nodeId: mkId('node', 99),
+      attemptId: mkId('att', 99),
       workflowHashRef: String(wfRef),
-    };
+    });
 
-    const token = signTokenV1Binary(payload, v2.tokenCodecPorts)._unsafeUnwrap();
-
-    const res = await handleV2ContinueWorkflow({ intent: 'rehydrate', stateToken: token } as any, ctx);
+    const res = await handleV2ContinueWorkflow({ continueToken: token , intent: 'rehydrate' } as any, ctx);
     expect(res.type).toBe('error');
     if (res.type !== 'error') return;
     expect(res.code).toBe('TOKEN_UNKNOWN_NODE');

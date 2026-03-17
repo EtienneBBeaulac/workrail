@@ -320,6 +320,7 @@ export interface StepMetadata {
   readonly stepId: string;
   readonly title: string;
   readonly prompt: string;
+  readonly agentRole?: string;
   readonly requireConfirmation: boolean;
 }
 
@@ -381,6 +382,7 @@ export function renderPendingPrompt(args: {
   }
   const baseTitle = step.title;
   const basePrompt = step.prompt;
+  const agentRole = step.agentRole;
   const requireConfirmation = Boolean(step.requireConfirmation);
   const functionReferences = step.functionReferences ?? [];
 
@@ -448,7 +450,7 @@ export function renderPendingPrompt(args: {
 
   // If not rehydrate-only, return enhanced prompt (no recovery needed for advance/start)
   if (!args.rehydrateOnly) {
-    return ok({ stepId: args.stepId, title: baseTitle, prompt: enhancedPrompt, requireConfirmation });
+    return ok({ stepId: args.stepId, title: baseTitle, prompt: enhancedPrompt, agentRole, requireConfirmation });
   }
 
   // Rehydrate-only: load recovery projections (extracted helper)
@@ -458,6 +460,7 @@ export function renderPendingPrompt(args: {
       stepId: args.stepId,
       title: baseTitle,
       prompt: enhancedPrompt + '\n\n' + projectionsRes.error,
+      agentRole,
       requireConfirmation,
     });
   }
@@ -478,7 +481,7 @@ export function renderPendingPrompt(args: {
 
   // No recovery content
   if (sections.length === 0) {
-    return ok({ stepId: args.stepId, title: baseTitle, prompt: enhancedPrompt, requireConfirmation });
+    return ok({ stepId: args.stepId, title: baseTitle, prompt: enhancedPrompt, agentRole, requireConfirmation });
   }
 
   // Combine and apply budget (extracted helpers)
@@ -486,5 +489,5 @@ export function renderPendingPrompt(args: {
   const combinedPrompt = `${enhancedPrompt}\n\n${recoveryText}`;
   const finalPrompt = applyPromptBudget(combinedPrompt);
 
-  return ok({ stepId: args.stepId, title: baseTitle, prompt: finalPrompt, requireConfirmation });
+  return ok({ stepId: args.stepId, title: baseTitle, prompt: finalPrompt, agentRole, requireConfirmation });
 }

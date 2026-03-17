@@ -60,4 +60,7 @@ export interface DataDirPortV2 {
   sessionManifestPath(sessionId: SessionId): string;
   /** Absolute path to the session lock file. */
   sessionLockPath(sessionId: SessionId): string;
+
+  /** Absolute path to the global token alias index (v2 short token → session position map). */
+  tokenIndexPath(): string;
 }

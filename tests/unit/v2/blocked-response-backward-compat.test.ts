@@ -5,8 +5,7 @@ describe('Blocked response backward compatibility', () => {
   // Old schema (before blocked nodes feature - v0.8.x)
   const OldV2ContinueWorkflowBlockedSchema = z.object({
     kind: z.literal('blocked'),
-    stateToken: z.string(),
-    ackToken: z.string().optional(),
+    continueToken: z.string(),
     isComplete: z.boolean(),
     pending: z.object({ stepId: z.string(), title: z.string(), prompt: z.string() }).nullable(),
     preferences: z.any(),
@@ -15,11 +14,10 @@ describe('Blocked response backward compatibility', () => {
   });
 
   it('old schema parses new blocked response (extra fields ignored)', () => {
-    // New response with retryable, retryAckToken, validation fields
+    // New response with retryable, retryContinueToken, validation fields
     const newResponse = {
       kind: 'blocked',
-      stateToken: 'st1qpzry9x8gf2tvdw0s3jn54khce6mua7l',
-      ackToken: 'ack1qpzry9x8gf2tvdw0s3jn54khce6mua7l',
+      continueToken: 'ct_test123',
       isComplete: false,
       pending: { stepId: 'step1', title: 'Test', prompt: 'Do something' },
       preferences: { autonomy: 'guided', riskPolicy: 'conservative' },
@@ -36,7 +34,7 @@ describe('Blocked response backward compatibility', () => {
       
       // New fields (should be ignored by old clients)
       retryable: true,
-      retryAckToken: 'ack1retry9x8gf2tvdw0s3jn54khce6mua7l',
+      retryContinueToken: 'ack1retry9x8gf2tvdw0s3jn54khce6mua7l',
       validation: {
         issues: ['Missing required field'],
         suggestions: ['Add the field'],
@@ -48,11 +46,11 @@ describe('Blocked response backward compatibility', () => {
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.kind).toBe('blocked');
-      expect(result.data.stateToken).toBe('st1qpzry9x8gf2tvdw0s3jn54khce6mua7l');
+      expect(result.data.continueToken).toBe('ct_test123');
       
       // Verify old client doesn't see new fields (Zod strips them)
       expect('retryable' in result.data).toBe(false);
-      expect('retryAckToken' in result.data).toBe(false);
+      expect('retryContinueToken' in result.data).toBe(false);
       expect('validation' in result.data).toBe(false);
     }
   });
@@ -60,7 +58,7 @@ describe('Blocked response backward compatibility', () => {
   it('terminal block response (retryable=false) still parses for old clients', () => {
     const terminalBlockResponse = {
       kind: 'blocked',
-      stateToken: 'st1...',
+      continueToken: 'ct_test123',
       isComplete: false,
       pending: null,
       preferences: { autonomy: 'guided', riskPolicy: 'conservative' },
@@ -75,7 +73,7 @@ describe('Blocked response backward compatibility', () => {
         ],
       },
       retryable: false,  // New field
-      // No retryAckToken (terminal)
+      // No retryContinueToken (terminal)
       validation: {
         issues: ['Invariant violation occurred'],
         suggestions: [],

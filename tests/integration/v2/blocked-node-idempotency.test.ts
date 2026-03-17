@@ -22,7 +22,9 @@ import { LocalSnapshotStoreV2 } from '../../../src/v2/infra/local/snapshot-store
 import { LocalPinnedWorkflowStoreV2 } from '../../../src/v2/infra/local/pinned-workflow-store/index.js';
 import { ExecutionSessionGateV2 } from '../../../src/v2/usecases/execution-session-gate.js';
 
-import { unsafeTokenCodecPorts, parseTokenV1Binary } from '../../../src/v2/durable-core/tokens/index.js';
+import { unsafeTokenCodecPorts } from '../../../src/v2/durable-core/tokens/index.js';
+import { InMemoryTokenAliasStoreV2 } from '../../../src/v2/infra/in-memory/token-alias-store/index.js';
+import { parseShortTokenNative } from '../../../src/v2/durable-core/tokens/short-token.js';
 import { NodeHmacSha256V2 } from '../../../src/v2/infra/local/hmac-sha256/index.js';
 import { NodeBase64UrlV2 } from '../../../src/v2/infra/local/base64url/index.js';
 import { LocalKeyringV2 } from '../../../src/v2/infra/local/keyring/index.js';
@@ -70,7 +72,7 @@ async function mkCtxWithWorkflow(workflowId: string, definition: any): Promise<T
     featureFlags: null as any,
     sessionManager: null,
     httpServer: null,
-    v2: { gate, sessionStore, snapshotStore, pinnedStore, sha256, crypto, idFactory, tokenCodecPorts, sessionEventLogStore: sessionStore, validationPipelineDeps: createTestValidationPipelineDeps() },
+    v2: { gate, sessionStore, snapshotStore, pinnedStore, sha256, crypto, entropy, idFactory, tokenCodecPorts, tokenAliasStore: new InMemoryTokenAliasStoreV2(), sessionEventLogStore: sessionStore, validationPipelineDeps: createTestValidationPipelineDeps() },
   };
 }
 
@@ -79,7 +81,7 @@ describe('Blocked node idempotency (dedupeKey enforcement)', () => {
     delete process.env.WORKRAIL_DATA_DIR;
   });
 
-  it('retry with same retryAckToken twice is idempotent', async () => {
+  it('retry with same retryContinueToken twice is idempotent', async () => {
     const root = await mkTempDataDir();
     const prev = process.env.WORKRAIL_DATA_DIR;
     process.env.WORKRAIL_DATA_DIR = root;
@@ -101,7 +103,7 @@ describe('Blocked node idempotency (dedupeKey enforcement)', () => {
       if (startRes.type !== 'success') return;
 
       const blockRes = await handleV2ContinueWorkflow(
-        { stateToken: startRes.data.stateToken, ackToken: startRes.data.ackToken!, output: { notesMarkdown: 'invalid' } } as V2ContinueWorkflowInput,
+        { continueToken: startRes.data.continueToken, output: { notesMarkdown: 'invalid' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(blockRes.type).toBe('success');
@@ -109,11 +111,11 @@ describe('Blocked node idempotency (dedupeKey enforcement)', () => {
       expect(blockRes.data.kind).toBe('blocked');
       if (blockRes.data.kind !== 'blocked') return;
 
-      const retryToken = blockRes.data.retryAckToken!;
+      const retryToken = blockRes.data.retryContinueToken!;
 
       // First retry (advances)
       const retry1Res = await handleV2ContinueWorkflow(
-        { stateToken: blockRes.data.stateToken, ackToken: retryToken, output: { notesMarkdown: 'result A' } } as V2ContinueWorkflowInput,
+        { continueToken: blockRes.data.continueToken, output: { notesMarkdown: 'result A' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(retry1Res.type).toBe('success');
@@ -122,7 +124,7 @@ describe('Blocked node idempotency (dedupeKey enforcement)', () => {
 
       // Second retry with same token (should replay)
       const retry2Res = await handleV2ContinueWorkflow(
-        { stateToken: blockRes.data.stateToken, ackToken: retryToken, output: { notesMarkdown: 'result B' } } as V2ContinueWorkflowInput,
+        { continueToken: blockRes.data.continueToken, output: { notesMarkdown: 'result B' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(retry2Res.type).toBe('success');
@@ -130,14 +132,14 @@ describe('Blocked node idempotency (dedupeKey enforcement)', () => {
       expect(retry2Res.data.kind).toBe('ok');
 
       // Both return same stateToken (idempotent)
-      expect(retry1Res.data.stateToken).toBe(retry2Res.data.stateToken);
+      expect(retry1Res.data.continueToken).toBe(retry2Res.data.continueToken);
 
       // Verify: only ONE advance_recorded event for retry
       const sessionStore = ctx.v2!.sessionEventLogStore as any;
       const bech32m = new Bech32mAdapterV2();
       const base32 = new Base32AdapterV2();
-      const parsedState = parseTokenV1Binary(startRes.data.stateToken, { bech32m, base32 })._unsafeUnwrap();
-      const sessionId = asSessionId(parsedState.payload.sessionId);
+      const _pt = parseShortTokenNative(startRes.data.continueToken)!;
+      const sessionId = asSessionId(ctx.v2!.tokenAliasStore.lookup(_pt.nonceHex)!.sessionId);
       const loadRes = await sessionStore.load(sessionId);
       if (loadRes.isErr()) throw new Error(`Unexpected load error: ${loadRes.error.code}`);
       const truth = loadRes.value;
@@ -171,11 +173,11 @@ describe('Blocked node idempotency (dedupeKey enforcement)', () => {
       expect(startRes.type).toBe('success');
       if (startRes.type !== 'success') return;
 
-      const originalAck = startRes.data.ackToken!;
+      const originalAck = startRes.data.continueToken!;
 
       // Block
       const blockRes = await handleV2ContinueWorkflow(
-        { stateToken: startRes.data.stateToken, ackToken: originalAck, output: { notesMarkdown: 'bad' } } as V2ContinueWorkflowInput,
+        { continueToken: startRes.data.continueToken, output: { notesMarkdown: 'bad' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(blockRes.type).toBe('success');
@@ -185,7 +187,7 @@ describe('Blocked node idempotency (dedupeKey enforcement)', () => {
 
       // Retry successfully
       const retryRes = await handleV2ContinueWorkflow(
-        { stateToken: blockRes.data.stateToken, ackToken: blockRes.data.retryAckToken!, output: { notesMarkdown: 'done' } } as V2ContinueWorkflowInput,
+        { continueToken: blockRes.data.continueToken, output: { notesMarkdown: 'done' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(retryRes.type).toBe('success');
@@ -194,7 +196,7 @@ describe('Blocked node idempotency (dedupeKey enforcement)', () => {
 
       // Use original ackToken again (should replay blocked state, not advance)
       const replayOriginalRes = await handleV2ContinueWorkflow(
-        { stateToken: startRes.data.stateToken, ackToken: originalAck, output: { notesMarkdown: 'different' } } as V2ContinueWorkflowInput,
+        { continueToken: startRes.data.continueToken, output: { notesMarkdown: 'different' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(replayOriginalRes.type).toBe('success');

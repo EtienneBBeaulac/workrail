@@ -1,4 +1,4 @@
-import { createTestValidationPipelineDeps } from "../helpers/v2-test-helpers.js";
+import { createTestValidationPipelineDeps, mintTestContinueToken } from '../helpers/v2-test-helpers.js';
 import { describe, expect, it } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
@@ -28,6 +28,7 @@ import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
 import { Bech32mAdapterV2 } from '../../src/v2/infra/local/bech32m/index.js';
 import { Base32AdapterV2 } from '../../src/v2/infra/local/base32/index.js';
 import { signTokenV1Binary, unsafeTokenCodecPorts } from '../../src/v2/durable-core/tokens/index.js';
+import { InMemoryTokenAliasStoreV2 } from '../../src/v2/infra/in-memory/token-alias-store/index.js';
 import { StateTokenPayloadV1Schema, AckTokenPayloadV1Schema } from '../../src/v2/durable-core/tokens/index.js';
 import { asWorkflowHash, asSha256Digest } from '../../src/v2/durable-core/ids/index.js';
 import { deriveWorkflowHashRef } from '../../src/v2/durable-core/ids/workflow-hash-ref.js';
@@ -65,7 +66,9 @@ async function mkV2Deps(dataDir: LocalDataDirV2): Promise<V2Dependencies> {
     pinnedStore,
     sha256,
     crypto,
+    entropy,
     tokenCodecPorts,
+    tokenAliasStore: new InMemoryTokenAliasStoreV2(),
     validationPipelineDeps: createTestValidationPipelineDeps(),
     idFactory,
     sessionGate,
@@ -205,32 +208,11 @@ describe('v2 continue_workflow: validationCriteria enforcement (mode-driven)', (
           }
         );
 
-      const stateToken = await mkSignedToken({
-        v2,
-        payload: StateTokenPayloadV1Schema.parse({
-          tokenVersion: 1,
-          tokenKind: 'state',
-          sessionId,
-          runId,
-          nodeId,
-          workflowHashRef: String(workflowHashRef),
-        }),
-      });
-      const ackToken = await mkSignedToken({
-        v2,
-        payload: AckTokenPayloadV1Schema.parse({
-          tokenVersion: 1,
-          tokenKind: 'ack',
-          sessionId,
-          runId,
-          nodeId,
-          attemptId,
-        }),
-      });
+      const continueToken = await mintTestContinueToken(v2, { sessionId, runId, nodeId, attemptId, workflowHashRef: String(workflowHashRef) });
 
       // Advance without output — both MISSING_REQUIRED_OUTPUT (validationCriteria) and
       // MISSING_REQUIRED_NOTES (notes enforcement) fire. Verify the output-contract blocker is present.
-      const res = await handleV2ContinueWorkflow({ intent: 'advance', stateToken, ackToken } as any, dummyCtx(v2));
+      const res = await handleV2ContinueWorkflow({ continueToken, } as any, dummyCtx(v2));
       expect(res.type).toBe('success');
       if (res.type !== 'success') return;
 
@@ -382,30 +364,9 @@ describe('v2 continue_workflow: validationCriteria enforcement (mode-driven)', (
           }
         );
 
-      const stateToken = await mkSignedToken({
-        v2,
-        payload: StateTokenPayloadV1Schema.parse({
-          tokenVersion: 1,
-          tokenKind: 'state',
-          sessionId,
-          runId,
-          nodeId,
-          workflowHashRef: String(workflowHashRef),
-        }),
-      });
-      const ackToken = await mkSignedToken({
-        v2,
-        payload: AckTokenPayloadV1Schema.parse({
-          tokenVersion: 1,
-          tokenKind: 'ack',
-          sessionId,
-          runId,
-          nodeId,
-          attemptId,
-        }),
-      });
+      const continueToken = await mintTestContinueToken(v2, { sessionId, runId, nodeId, attemptId, workflowHashRef: String(workflowHashRef) });
 
-      const res = await handleV2ContinueWorkflow({ intent: 'advance', stateToken, ackToken } as any, dummyCtx(v2));
+      const res = await handleV2ContinueWorkflow({ continueToken, } as any, dummyCtx(v2));
       expect(res.type).toBe('success');
       if (res.type !== 'success') return;
 
