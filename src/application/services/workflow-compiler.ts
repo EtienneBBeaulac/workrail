@@ -127,8 +127,15 @@ export function resolveDefinitionSteps(
 export class WorkflowCompiler {
   private readonly templateRegistry: TemplateRegistry;
 
-  constructor(templateRegistry: TemplateRegistry = _defaultTemplateRegistry) {
-    this.templateRegistry = templateRegistry;
+  constructor() {
+    this.templateRegistry = _defaultTemplateRegistry;
+  }
+
+  /** Create a compiler with a custom template registry (e.g. with routine-derived templates). */
+  static withTemplateRegistry(registry: TemplateRegistry): WorkflowCompiler {
+    const compiler = new WorkflowCompiler();
+    (compiler as unknown as { templateRegistry: TemplateRegistry }).templateRegistry = registry;
+    return compiler;
   }
 
   compile(workflow: Workflow): Result<CompiledWorkflow, DomainError> {
