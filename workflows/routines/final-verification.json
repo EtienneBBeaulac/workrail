@@ -1,0 +1,61 @@
+{
+  "id": "routine-final-verification",
+  "name": "Final Verification Routine",
+  "version": "1.0.0",
+  "description": "Performs reusable final verification over acceptance criteria, invariants, validation evidence, regressions, cumulative drift, and philosophy alignment. Produces a reusable verification findings artifact.",
+  "clarificationPrompts": [
+    "What implementation or slices should I verify?",
+    "What acceptance criteria and invariants must hold?",
+    "What validation commands or evidence are available?",
+    "What artifact name should I produce?"
+  ],
+  "preconditions": [
+    "Implementation is available for review",
+    "Acceptance criteria are available",
+    "Invariants are available",
+    "A deterministic validation path exists"
+  ],
+  "metaGuidance": [
+    "PURPOSE: verify whether the whole task is truly done, not just locally green.",
+    "ROLE: you are a verifier proving or disproving readiness using evidence.",
+    "PROOF: map claims to tests, build output, or explicit reasoning.",
+    "DRIFT: look for cumulative compromise, not just isolated defects."
+  ],
+  "steps": [
+    {
+      "id": "step-verify-acceptance",
+      "title": "Step 1: Verify Acceptance Criteria and Invariants",
+      "prompt": "Verify the implemented result against the acceptance criteria and invariants.\n\nReview:\n- Whether each acceptance criterion is satisfied\n- Whether each invariant still holds\n- What proof exists for each (test, build output, code reasoning)\n\nWorking notes:\n- Acceptance criteria status\n- Invariant status\n- Proof matrix",
+      "agentRole": "You are a verifier mapping claims to concrete proof.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-review-validation",
+      "title": "Step 2: Review Validation Evidence",
+      "prompt": "Review the whole-task validation evidence.\n\nCheck:\n- Whether the right validation commands were run\n- Whether results are sufficient and trustworthy\n- Whether any gaps remain in the evidence\n\nWorking notes:\n- Validation commands reviewed\n- Evidence sufficiency\n- Evidence gaps",
+      "agentRole": "You are checking whether the validation story is actually strong enough to trust.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-review-regressions",
+      "title": "Step 3: Review Regressions and Cumulative Drift",
+      "prompt": "Review the implementation for regressions and cumulative drift.\n\nCheck:\n- Any invariant violations or regressions\n- Whether repeated small compromises added up to a larger pattern problem\n- Whether the implementation still matches the intended plan boundaries\n\nWorking notes:\n- Regressions found\n- Drift assessment\n- Boundary mismatches",
+      "agentRole": "You are looking for the subtle ways a task can go wrong even when individual slices seemed fine.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-review-philosophy",
+      "title": "Step 4: Review Philosophy Alignment",
+      "prompt": "Review the final result against the dev's philosophy.\n\nAssess:\n- Which principles are clearly satisfied\n- Which tensions remain intentionally accepted\n- Whether any philosophy violations should block shipping\n\nWorking notes:\n- Satisfied principles\n- Accepted tensions\n- Blocking philosophy concerns",
+      "agentRole": "You are checking whether the finished result still reflects the dev's standards.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-deliver",
+      "title": "Step 5: Deliver Final Verification Findings",
+      "prompt": "Create `{deliverableName}`.\n\nRequired structure:\n- Acceptance Criteria Status\n- Invariant Status\n- Validation Evidence Summary\n- Regression / Drift Review\n- Philosophy Alignment\n- Findings\n- Recommended Fixes\n- Readiness Assessment\n\nOptimize for a compact artifact the main workflow can use to decide whether to fix, re-verify, or hand off.",
+      "agentRole": "You are delivering a verification artifact the main workflow can interpret and act on.",
+      "requireConfirmation": false
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "id": "routine-design-review",
+  "name": "Design Review Routine",
+  "version": "1.0.0",
+  "description": "Reviews a selected design using explicit tradeoffs, failure modes, simpler-alternative checks, runner-up comparison, and philosophy alignment. Produces a reusable design-review findings artifact.",
+  "clarificationPrompts": [
+    "What design artifact or summary should I review?",
+    "What tradeoffs, failure modes, and runner-up option are available?",
+    "What artifact name should I produce?"
+  ],
+  "preconditions": [
+    "A selected design or design summary is available",
+    "Accepted tradeoffs and failure modes are available",
+    "A runner-up or alternative approach is available",
+    "The dev's philosophy or rules are available"
+  ],
+  "metaGuidance": [
+    "PURPOSE: review the quality of a selected design, not generate a fresh design from scratch.",
+    "ROLE: you are a reviewer looking for real gaps, not generic criticism.",
+    "PHILOSOPHY: name tensions by principle when they matter.",
+    "SIMPLICITY: always ask whether a simpler version would still satisfy acceptance criteria."
+  ],
+  "steps": [
+    {
+      "id": "step-review-tradeoffs",
+      "title": "Step 1: Review Accepted Tradeoffs",
+      "prompt": "Review the selected design by walking through the accepted tradeoffs explicitly.\n\nFor each accepted tradeoff:\n- Verify it will not violate acceptance criteria or invariants under realistic conditions\n- Identify what would make the tradeoff no longer acceptable\n- Note any hidden assumptions\n\nWorking notes:\n- Tradeoff review\n- Hidden assumptions\n- Conditions under which the tradeoff fails",
+      "agentRole": "You are a reviewer validating whether accepted tradeoffs are actually acceptable.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-review-failure-modes",
+      "title": "Step 2: Review Failure Modes",
+      "prompt": "Review the identified failure modes for the selected design.\n\nFor each failure mode:\n- Trace whether the design handles it adequately\n- Identify missing mitigations\n- Note which failure mode is most dangerous if it occurs\n\nWorking notes:\n- Failure mode coverage\n- Missing mitigations\n- Highest-risk failure mode",
+      "agentRole": "You are a failure analyst checking whether the design can survive realistic problems.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-compare-runner-up",
+      "title": "Step 3: Compare Against Runner-Up and Simpler Alternatives",
+      "prompt": "Compare the selected design against the runner-up and a simpler possible variant.\n\nReview:\n- Whether the runner-up has elements worth pulling into the selected design\n- Whether a hybrid would resolve an uncomfortable tradeoff without adding much complexity\n- Whether a simpler version of the selected design would still satisfy acceptance criteria\n\nWorking notes:\n- Runner-up strengths worth borrowing\n- Simpler alternative analysis\n- Hybrid opportunities",
+      "agentRole": "You are comparing options honestly rather than defending the current favorite.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-review-philosophy",
+      "title": "Step 4: Review Philosophy Alignment",
+      "prompt": "Review the selected design against the dev's philosophy.\n\nName the principles that matter for this design and assess:\n- Which principles are satisfied clearly\n- Which principles are under tension\n- Which tensions are acceptable versus risky\n\nWorking notes:\n- Relevant principles\n- Satisfied principles\n- Tensions and why they matter",
+      "agentRole": "You are checking whether the design respects what the dev actually values.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-deliver",
+      "title": "Step 5: Deliver Design Review Findings",
+      "prompt": "Create `{deliverableName}`.\n\nRequired structure:\n- Tradeoff Review\n- Failure Mode Review\n- Runner-Up / Simpler Alternative Review\n- Philosophy Alignment\n- Findings (Red / Orange / Yellow or equivalent severity)\n- Recommended Revisions\n- Residual Concerns\n\nOptimize for concise, actionable findings that the main workflow can interpret and decide on.",
+      "agentRole": "You are delivering a review artifact for the main workflow to synthesize and act on.",
+      "requireConfirmation": false
+    }
+  ]
+}
