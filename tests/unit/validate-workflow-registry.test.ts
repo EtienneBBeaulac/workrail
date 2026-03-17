@@ -263,12 +263,45 @@ describe('Phase 5: God-Tier Validation Regression Tests', () => {
   // ───────────────────────────────────────────────────────────────────────────
 
   describe('Variant Resolution', () => {
+    it('4b. lean variant selected when leanWorkflows enabled', () => {
+      const candidates: VariantCandidate[] = [
+        { variantKind: 'lean', identifier: 'workflow.lean.v2.json' },
+        { variantKind: 'v2', identifier: 'workflow.v2.json' },
+        { variantKind: 'standard', identifier: 'workflow.json' },
+      ];
+      const flags: VariantSelectionFlags = { v2Tools: true, agenticRoutines: false, leanWorkflows: true };
+
+      const result = selectVariant(candidates, flags);
+
+      expect(result.selectedVariant).toBe('lean');
+      expect(result.selectedIdentifier).toBe('workflow.lean.v2.json');
+      expect(result.resolution.kind).toBe('feature_flag_selected');
+      if (result.resolution.kind === 'feature_flag_selected') {
+        expect(result.resolution.selectedVariant).toBe('lean');
+        expect(result.resolution.enabledFlags.leanWorkflows).toBe(true);
+      }
+    });
+
+    it('4c. lean variant NOT selected when leanWorkflows disabled, falls to v2', () => {
+      const candidates: VariantCandidate[] = [
+        { variantKind: 'lean', identifier: 'workflow.lean.v2.json' },
+        { variantKind: 'v2', identifier: 'workflow.v2.json' },
+        { variantKind: 'standard', identifier: 'workflow.json' },
+      ];
+      const flags: VariantSelectionFlags = { v2Tools: true, agenticRoutines: false, leanWorkflows: false };
+
+      const result = selectVariant(candidates, flags);
+
+      expect(result.selectedVariant).toBe('v2');
+      expect(result.selectedIdentifier).toBe('workflow.v2.json');
+    });
+
     it('5. v2 variant selected when v2Tools enabled', () => {
       const candidates: VariantCandidate[] = [
         { variantKind: 'v2', identifier: 'workflow.v2.json' },
         { variantKind: 'standard', identifier: 'workflow.json' },
       ];
-      const flags: VariantSelectionFlags = { v2Tools: true, agenticRoutines: false };
+      const flags: VariantSelectionFlags = { v2Tools: true, agenticRoutines: false, leanWorkflows: false };
 
       const result = selectVariant(candidates, flags);
 
@@ -286,7 +319,7 @@ describe('Phase 5: God-Tier Validation Regression Tests', () => {
         { variantKind: 'agentic', identifier: 'workflow.agentic.json' },
         { variantKind: 'standard', identifier: 'workflow.json' },
       ];
-      const flags: VariantSelectionFlags = { v2Tools: false, agenticRoutines: true };
+      const flags: VariantSelectionFlags = { v2Tools: false, agenticRoutines: true, leanWorkflows: false };
 
       const result = selectVariant(candidates, flags);
 
@@ -303,7 +336,7 @@ describe('Phase 5: God-Tier Validation Regression Tests', () => {
         { variantKind: 'v2', identifier: 'workflow.v2.json' },
         { variantKind: 'standard', identifier: 'workflow.json' },
       ];
-      const flags: VariantSelectionFlags = { v2Tools: false, agenticRoutines: false };
+      const flags: VariantSelectionFlags = { v2Tools: false, agenticRoutines: false, leanWorkflows: false };
 
       const result = selectVariant(candidates, flags);
 
@@ -318,7 +351,7 @@ describe('Phase 5: God-Tier Validation Regression Tests', () => {
 
       const snapshot = fakeSnapshot({
         sources: [createBundledSource()],
-        resolved: [{ workflow: invalidV2Wf, resolvedBy: { kind: 'unique', sourceRef: 0, variantResolution: { kind: 'feature_flag_selected', selectedVariant: 'v2', availableVariants: ['v2', 'standard'], enabledFlags: { v2Tools: true, agenticRoutines: false } } } }],
+        resolved: [{ workflow: invalidV2Wf, resolvedBy: { kind: 'unique', sourceRef: 0, variantResolution: { kind: 'feature_flag_selected', selectedVariant: 'v2', availableVariants: ['v2', 'standard'], enabledFlags: { v2Tools: true, agenticRoutines: false, leanWorkflows: false } } } }],
       });
 
       // Schema validation fails for the resolved workflow (simulating invalid v2 variant)
@@ -338,7 +371,7 @@ describe('Phase 5: God-Tier Validation Regression Tests', () => {
 
       const snapshot = fakeSnapshot({
         sources: [createBundledSource()],
-        resolved: [{ workflow: invalidAgenticWf, resolvedBy: { kind: 'unique', sourceRef: 0, variantResolution: { kind: 'feature_flag_selected', selectedVariant: 'agentic', availableVariants: ['agentic', 'standard'], enabledFlags: { v2Tools: false, agenticRoutines: true } } } }],
+        resolved: [{ workflow: invalidAgenticWf, resolvedBy: { kind: 'unique', sourceRef: 0, variantResolution: { kind: 'feature_flag_selected', selectedVariant: 'agentic', availableVariants: ['agentic', 'standard'], enabledFlags: { v2Tools: false, agenticRoutines: true, leanWorkflows: false } } } }],
       });
 
       const deps = fakePipelineDeps({
@@ -358,7 +391,7 @@ describe('Phase 5: God-Tier Validation Regression Tests', () => {
 
       const snapshot = fakeSnapshot({
         sources: [createBundledSource()],
-        resolved: [{ workflow: validV2Wf, resolvedBy: { kind: 'unique', sourceRef: 0, variantResolution: { kind: 'feature_flag_selected', selectedVariant: 'v2', availableVariants: ['v2', 'standard'], enabledFlags: { v2Tools: true, agenticRoutines: false } } } }],
+        resolved: [{ workflow: validV2Wf, resolvedBy: { kind: 'unique', sourceRef: 0, variantResolution: { kind: 'feature_flag_selected', selectedVariant: 'v2', availableVariants: ['v2', 'standard'], enabledFlags: { v2Tools: true, agenticRoutines: false, leanWorkflows: false } } } }],
       });
 
       const deps = fakePipelineDeps(); // All phases pass
@@ -747,7 +780,7 @@ describe('Phase 5: God-Tier Validation Regression Tests', () => {
           { variantKind: 'v2', identifier: 'workflow.v2.json' },
           { variantKind: 'standard', identifier: 'workflow.json' },
         ],
-        { v2Tools: false, agenticRoutines: false }
+        { v2Tools: false, agenticRoutines: false, leanWorkflows: false }
       );
 
       expect(selection.selectedVariant).toBe('standard');

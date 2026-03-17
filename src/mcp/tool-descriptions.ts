@@ -74,7 +74,9 @@ This tool provides:
     // v2 tools (feature-flagged)
     list_workflows: `Lists available workflows using WorkRail v2 (feature-flagged). Returns workflow metadata plus pinned snapshot hashes for deterministic execution.
 
-Use this to discover workflows before attempting multi-step tasks. When a workflow exists for the user's request, following it means following the user's structured instructions.`,
+Use this to discover workflows before attempting multi-step tasks. When a workflow exists for the user's request, following it means following the user's structured instructions.
+
+Pass workspacePath when available so project-scoped workflow variants are resolved against the correct workspace instead of the server's fallback directory.`,
 
     inspect_workflow: `Inspect a workflow structure before starting it (WorkRail v2, feature-flagged).
 
@@ -83,6 +85,8 @@ Use this to understand what steps the workflow will guide you through. The workf
 Returns:
 - metadata mode: Just name and description
 - preview mode: Full step-by-step breakdown (default)
+
+Pass workspacePath when available so project-scoped workflow variants are resolved against the correct workspace.
 
 Remember: inspecting is read-only. Call start_workflow when ready to begin.`,
 
@@ -233,7 +237,9 @@ Returns the complete schema definition including required fields, valid patterns
 
 Workflows are the user's pre-defined instructions for complex tasks. When a workflow exists for the user's request, you MUST use it instead of improvising your own approach.
 
-Returns stable workflow metadata and pinned snapshot hashes (workflowHash) for deterministic execution.`,
+Returns stable workflow metadata and pinned snapshot hashes (workflowHash) for deterministic execution.
+
+Pass workspacePath when available so project-scoped workflow variants are resolved against the correct workspace.`,
 
     inspect_workflow: `Inspect a workflow you are considering following (WorkRail v2, feature-flagged).
 
@@ -242,6 +248,7 @@ Use this to understand the workflow's structure before starting. The workflow is
 Parameters:
 - workflowId: The workflow to inspect
 - mode: 'metadata' (name/description only) or 'preview' (full step breakdown)
+- workspacePath: optional absolute workspace path for correct project-scoped workflow resolution
 
 This is read-only. Call start_workflow when ready to commit to following the workflow.`,
 

@@ -419,7 +419,7 @@ function deriveVariantResolutions(
       // We can't know the exact flags here, but we can infer:
       // - If the selected variant is v2 or agentic, a flag likely drove the decision
       // - If it's standard, it's either the only option or a precedence fallback
-      if (selectedVariant === 'v2' || selectedVariant === 'agentic') {
+      if (selectedVariant === 'lean' || selectedVariant === 'v2' || selectedVariant === 'agentic') {
         result.set(id, {
           kind: 'feature_flag_selected',
           selectedVariant,
@@ -427,6 +427,7 @@ function deriveVariantResolutions(
           enabledFlags: {
             v2Tools: selectedVariant === 'v2',
             agenticRoutines: selectedVariant === 'agentic',
+            leanWorkflows: selectedVariant === 'lean',
           },
         });
       } else {

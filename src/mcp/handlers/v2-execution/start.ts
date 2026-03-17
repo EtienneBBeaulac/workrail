@@ -38,13 +38,14 @@ import { defaultPreferences } from '../v2-execution-helpers.js';
 import { EVENT_KIND } from '../../../v2/durable-core/constants.js';
 import { buildNextCall } from './index.js';
 import { resolveFirstStep } from '../../../v2/durable-core/domain/start-construction.js';
+import { createWorkflowReaderForRequest, hasRequestWorkspaceSignal } from '../shared/request-workflow-reader.js';
 
 /**
  * Load workflow, compile it, hash it, and pin to store for deterministic execution.
  */
 export function loadAndPinWorkflow(args: {
   readonly workflowId: string;
-  readonly workflowService: import('../../../application/services/workflow-service.js').WorkflowService;
+  readonly workflowReader: Pick<import('../../../types/storage.js').IWorkflowReader, 'getWorkflowById'>;
   readonly crypto: Sha256PortV2;
   readonly pinnedStore: import('../../../v2/ports/pinned-workflow-store.port.js').PinnedWorkflowStorePortV2;
   readonly validationPipelineDeps: ValidationPipelineDepsPhase1a;
@@ -54,9 +55,9 @@ export function loadAndPinWorkflow(args: {
   readonly pinnedWorkflow: ReturnType<typeof createWorkflow>;
   readonly firstStep: { readonly id: string };
 }, StartWorkflowError> {
-  const { workflowId, workflowService, crypto, pinnedStore, validationPipelineDeps } = args;
+  const { workflowId, workflowReader, crypto, pinnedStore, validationPipelineDeps } = args;
 
-  return RA.fromPromise(workflowService.getWorkflowById(workflowId), (e) => ({
+  return RA.fromPromise(workflowReader.getWorkflowById(workflowId), (e) => ({
     kind: 'precondition_failed' as const,
     message: e instanceof Error ? e.message : String(e),
   }))
@@ -330,11 +331,21 @@ export function executeStartWorkflow(
   ctx: V2ToolContext
 ): RA<z.infer<typeof V2StartWorkflowOutputSchema>, StartWorkflowError> {
   const { gate, sessionStore, snapshotStore, pinnedStore, crypto, tokenCodecPorts, idFactory, validationPipelineDeps } = ctx.v2;
+  const workflowReader = hasRequestWorkspaceSignal({
+    workspacePath: input.workspacePath,
+    resolvedRootUris: ctx.v2.resolvedRootUris,
+  })
+    ? createWorkflowReaderForRequest({
+        featureFlags: ctx.featureFlags,
+        workspacePath: input.workspacePath,
+        resolvedRootUris: ctx.v2.resolvedRootUris,
+      })
+    : ctx.workflowService;
 
   // 1. Load, validate (Phase 1a pipeline), and pin workflow
   return loadAndPinWorkflow({
     workflowId: input.workflowId,
-    workflowService: ctx.workflowService,
+    workflowReader,
     crypto,
     pinnedStore,
     validationPipelineDeps,

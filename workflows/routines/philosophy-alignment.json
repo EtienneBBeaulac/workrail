@@ -5,9 +5,9 @@
   "description": "Independently evaluates a plan or implementation artifact against the user's coding philosophy. Produces findings by principle name and distinguishes blocking violations from acceptable tensions.",
   "clarificationPrompts": [
     "What artifact should I review? (plan, architecture summary, implementation diff, files)",
-    "What philosophy principles or user rules should I apply?",
     "What mode is this review in? (plan, architecture, implementation)",
-    "What artifact name should I produce?"
+    "What artifact name should I produce?",
+    "Are `philosophySources` and `philosophyConflicts` available in context? (if not, I will discover from scratch)"
   ],
   "preconditions": [
     "A review artifact is available",
@@ -24,30 +24,30 @@
   ],
   "steps": [
     {
-      "id": "step-understand-scope",
-      "title": "Step 1: Understand the Artifact and Scope",
-      "prompt": "Understand what you are reviewing.\n\nRead and summarize:\n- the artifact under review\n- the review mode (plan, architecture, implementation)\n- the relevant philosophy principles / user rules\n- any supporting files or repo patterns needed for evidence\n\nIdentify:\n- which principles are actually touched by this artifact\n- where violations are most likely to appear\n- where principle tensions may naturally arise\n\nWorking notes:\n- Review scope\n- Applicable principles\n- Likely risk areas\n- Possible tension zones",
-      "agentRole": "You are understanding the review scope before judging the design quality.",
+      "id": "step-discover-philosophy",
+      "title": "Step 1: Discover the Dev's Philosophy",
+      "prompt": "Discover the dev's coding philosophy and preferences. Check `philosophySources` context variable first — if it contains pointers to rules, Memory entries, or repo files, go read those sources directly.\n\nIf `philosophySources` is empty or unavailable, discover from scratch using this fallback chain:\n1. Memory MCP (if available): call `mcp_memory_conventions`, `mcp_memory_prefer`, `mcp_memory_recall` to retrieve learned preferences\n2. Active session rules / Firebender rules: read any rules or philosophy documents in context\n3. Repo patterns: infer preferences from how the codebase works — error handling, mutability, test style, naming, architecture\n\nAlso check `philosophyConflicts` — if stated rules conflict with repo patterns, note which apply to this review.\n\nWorking notes:\n- Philosophy sources consulted\n- Key principles discovered\n- Conflicts between stated and practiced philosophy",
+      "agentRole": "You are discovering what the dev actually cares about before judging their code against it.",
       "requireConfirmation": false
     },
     {
-      "id": "step-select-principles",
-      "title": "Step 2: Select the Relevant Principles",
-      "prompt": "Select the subset of principles that materially apply.\n\nRules:\n- do not pretend every principle matters equally for every artifact\n- prioritize the principles actually implicated by the design or implementation\n- note any principles that are out of scope for this review\n\nWorking notes:\n- High-priority principles\n- Secondary principles\n- Out-of-scope principles",
+      "id": "step-understand-scope",
+      "title": "Step 2: Understand the Artifact and Select Principles",
+      "prompt": "Understand what you are reviewing and select the principles that matter.\n\nRead and summarize:\n- the artifact under review\n- the review mode (plan, architecture, implementation)\n- any supporting files or repo patterns needed for evidence\n\nSelect the subset of discovered principles that materially apply:\n- do not pretend every principle matters equally for every artifact\n- prioritize the principles actually implicated by the design or implementation\n- note any principles that are out of scope for this review\n\nIdentify:\n- which principles are actually touched by this artifact\n- where violations are most likely to appear\n- where principle tensions may naturally arise\n\nWorking notes:\n- Review scope\n- High-priority principles\n- Secondary principles\n- Likely risk areas\n- Possible tension zones",
       "agentRole": "You are focusing the review on the principles that actually matter for this artifact.",
       "requireConfirmation": false
     },
     {
       "id": "step-evaluate-artifact",
-      "title": "Step 3: Evaluate Principle-by-Principle",
+      "title": "Step 3: Evaluate Principle-by-Principle (from source, not summary)",
       "prompt": "Evaluate the artifact against each relevant principle.\n\nFor each principle, determine:\n- what the artifact does well\n- what violates the principle, if anything\n- whether this is a Red violation, Orange issue, or Yellow tension\n- what change or justification would resolve it\n\nSeverity guide:\n- Red = blocking violation of a key philosophy principle\n- Orange = meaningful design quality issue that should be fixed or justified\n- Yellow = principle tension or trade-off that may be acceptable if explicit\n\nWorking notes:\n- Findings by principle\n- Evidence / citations\n- Severity\n- Recommended action or required justification",
       "agentRole": "You are performing a principle-by-principle review with specific, evidence-based findings.",
       "requireConfirmation": false
     },
     {
       "id": "step-identify-tensions",
-      "title": "Step 4: Identify Principle Tensions",
-      "prompt": "Identify where principles conflict.\n\nLook for cases like:\n- simplicity vs extensibility\n- YAGNI vs architecture cleanliness\n- explicitness vs verbosity\n- atomicity vs implementation complexity\n\nFor each tension:\n- name the principles involved\n- explain the trade-off\n- say what decision still needs to be made or documented\n\nWorking notes:\n- Principle tensions\n- Why they exist\n- What decision or explicit acceptance is needed",
+      "title": "Step 4: Identify Principle Tensions (including stated vs practiced)",
+      "prompt": "Identify where principles conflict.\n\nLook for cases like:\n- simplicity vs extensibility\n- YAGNI vs architecture cleanliness\n- explicitness vs verbosity\n- atomicity vs implementation complexity\n- stated philosophy vs actual repo patterns (e.g., rules say immutability but module uses mutable state)\n\nFor each tension:\n- name the principles involved\n- explain the trade-off\n- say what decision still needs to be made or documented\n\nWorking notes:\n- Principle tensions\n- Why they exist\n- What decision or explicit acceptance is needed",
       "agentRole": "You are surfacing real trade-offs instead of flattening them into fake certainty.",
       "requireConfirmation": false
     },

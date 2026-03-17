@@ -1,0 +1,224 @@
+{
+  "id": "coding-task-workflow-agentic",
+  "name": "Agentic Task Dev Workflow (Lean • Notes-First • WorkRail Executor)",
+  "version": "2.1.0",
+  "description": "Lean variant of the agentic coding workflow. Merges triage, inputs gate, context gathering, and re-triage into a single Understand & Classify phase. Reduces context variable count and removes top-level clarificationPrompts. Same quality guarantees with fewer tokens.",
+  "recommendedPreferences": {
+    "recommendedAutonomy": "guided",
+    "recommendedRiskPolicy": "conservative"
+  },
+  "preconditions": [
+    "User provides a task description or equivalent objective.",
+    "Agent has codebase read access and can run the tools needed for analysis and validation.",
+    "A deterministic validation path exists (tests, build, or an explicit verification strategy).",
+    "If the task touches critical paths, rollback or containment strategy can be defined."
+  ],
+  "metaGuidance": [
+    "DEFAULT BEHAVIOR: self-execute with tools. Only ask the user for business decisions, missing external artifacts, or permissions you cannot resolve.",
+    "V2 DURABILITY: use output.notesMarkdown as the primary durable record. Do NOT mirror execution state into CONTEXT.md or any markdown checkpoint file.",
+    "ARTIFACT STRATEGY: `implementation_plan.md` is the only default human-facing artifact for non-small tasks. `spec.md` or `design.md` are optional and should be created only when they materially improve handoff or reviewability.",
+    "OWNERSHIP & DELEGATION: the main agent owns strategy, decisions, synthesis, and implementation. Delegate only specific cognitive routines (auditing, challenge, simulation, ideation) via the WorkRail Executor. Never hand off full task ownership or rely on named Builder/Researcher identities.",
+    "SUBAGENT SYNTHESIS: treat subagent output as raw investigative material from junior analysts — smart but inexperienced with this codebase and prone to missing context. Before spawning subagents, write 2-3 sentences stating your current hypothesis and main concerns. After receiving subagent output, interrogate it: What did they get wrong? What did they miss? What did they surface that you hadn't considered? Where are they just restating the obvious? Your synthesis must include what you changed your mind about (and why) or what you held firm on despite subagent disagreement (and why). Never summarize subagent findings as your conclusion — form your own.",
+    "PARALLELISM: when reads, audits, or delegations are independent, run them in parallel inside the phase. Parallelize cognition; serialize synthesis and canonical writes.",
+    "PHILOSOPHY LENS: apply the user's coding philosophy (from active session rules) as the evaluation lens. Flag violations by principle name, not as generic feedback. If principles conflict, surface the tension explicitly instead of silently choosing.",
+    "PHILOSOPHY CHECKS: watch for immutability, architectural fixes over patches, illegal states unrepresentable, explicit domain types, reduced path explosion, type safety, exhaustiveness, and errors as data.",
+    "PHILOSOPHY CHECKS (cont): validate at boundaries, fail fast on invariant violations, prefer determinism and small pure functions, use data-driven control flow, DI at boundaries, YAGNI with discipline, and atomicity.",
+    "PHILOSOPHY CHECKS (cont): treat graceful degradation, observability, fakes over mocks, and focused interfaces as first-class review concerns.",
+    "DRIFT HANDLING: when reality diverges from the plan, update the plan artifact and re-audit deliberately rather than accumulating undocumented drift.",
+    "NEVER COMMIT MARKDOWN FILES UNLESS USER EXPLICITLY ASKS."
+  ],
+  "steps": [
+    {
+      "id": "phase-0-understand-and-classify",
+      "title": "Phase 0: Understand & Classify",
+      "prompt": "Build understanding and classify the task in one pass.\n\nStep 1 — Early exit check:\nBefore any exploration, verify that acceptance criteria or expected behavior exist. If they are completely absent and cannot be inferred, ask the user and stop. Do NOT ask questions you can resolve with tools.\n\nStep 2 — Explore:\nUse tools to build the minimum complete understanding needed to design correctly. Read independent files in parallel when possible.\n\nGather:\n- key entry points and call chain sketch\n- relevant files, modules, and functions\n- existing repo patterns with concrete file references\n- testing strategy already present in the repo\n- risks and unknowns\n- explicit invariants and non-goals\n\nStep 3 — Discover the dev's philosophy and preferences:\nDiscover what the dev cares about using this fallback chain (try each, use all that are available):\n1. Memory MCP (if available): call `mcp_memory_conventions`, `mcp_memory_prefer`, `mcp_memory_recall` to retrieve learned preferences and coding philosophy\n2. Active session rules / Firebender rules: read any rules, commands, or philosophy documents already in context\n3. Repo patterns: infer preferences from how the codebase already works — error handling style, mutability patterns, test approach, naming conventions, architecture patterns\n4. Ask the dev: only if the above sources are contradictory or clearly insufficient for this task\n\nDo NOT distill into a summary — record WHERE the philosophy lives (which rules, which Memory entries, which repo files exemplify it) so later phases can reference the source directly.\n\nIf stated rules conflict with actual repo patterns (e.g., rules say 'prefer immutability' but the module uses MutableStateFlow), note the conflict in `philosophyConflicts` — this is valuable signal for design decisions.\n\nStep 4 — Classify (informed by exploration):\nNow that you have real context, classify:\n- `taskComplexity`: Small / Medium / Large\n- `riskLevel`: Low / Medium / High\n- `rigorMode`: QUICK / STANDARD / THOROUGH\n- `automationLevel`: High / Medium / Low\n- `prStrategy`: SinglePR / MultiPR\n\nDecision guidance:\n- QUICK: small, low-risk, clear path, little ambiguity\n- STANDARD: medium scope or moderate risk\n- THOROUGH: large scope, architectural uncertainty, or high-risk change\n\nStep 5 — Optional deeper context (post-classification):\nIf `rigorMode` is STANDARD or THOROUGH and understanding still feels incomplete or the call chain is too fuzzy, and delegation is available, spawn TWO WorkRail Executors SIMULTANEOUSLY running `routine-context-gathering` with focus=COMPLETENESS and focus=DEPTH. Synthesize both outputs before finishing this step.\n\nSet context variables:\n- `taskComplexity`\n- `riskLevel`\n- `rigorMode`\n- `automationLevel`\n- `prStrategy`\n- `contextSummary`\n- `candidateFiles`\n- `invariants`\n- `nonGoals`\n- `openQuestions`\n- `philosophySources` — pointers to where the dev's philosophy lives (rules, Memory entries, repo files), not a summary\n- `philosophyConflicts` — conflicts between stated rules and actual repo patterns (if any)\n\nRules:\n- answer your own questions with tools whenever possible\n- only keep true human-decision questions in `openQuestions`\n- keep `openQuestions` bounded to the minimum necessary\n- classify AFTER exploring, not before",
+      "requireConfirmation": {
+        "or": [
+          { "var": "taskComplexity", "equals": "Large" },
+          { "var": "riskLevel", "equals": "High" }
+        ]
+      }
+    },
+    {
+      "id": "phase-1-architecture-decision",
+      "title": "Phase 1: Architecture Decision (Generate, Compare, Challenge, Select)",
+      "runCondition": {
+        "var": "taskComplexity",
+        "not_equals": "Small"
+      },
+      "prompt": "Design the architecture through deep understanding, not surface-level generation.\n\nPart A — Understand the problem deeply:\n- What are the core tensions in this problem? (e.g., performance vs simplicity, flexibility vs type safety, backward compatibility vs clean design)\n- How does the codebase already solve similar problems? Study the most relevant existing patterns — don't just list files, analyze the architectural decisions and constraints they protect.\n- What's the simplest naive solution? Why is it insufficient? (If it IS sufficient, that's your leading candidate — the burden of proof is on complexity.)\n- What makes this problem hard? What would a junior developer miss?\n\nPart B — Identify tensions and constraints (including philosophy):\n- Extract 2-4 real tradeoffs from your understanding (not generic labels like 'simplicity' or 'maintainability')\n- These tensions drive candidate generation — each candidate resolves them differently\n- Filter `philosophySources` to the principles actually under pressure for THIS problem. Which of the dev's philosophy principles constrain the solution space? For example: does the simplest solution require mutable state when the dev prefers immutability? Does the existing pattern use exceptions when the dev prefers Result types? Would the cleanest approach violate their preference for small interfaces?\n- If `philosophyConflicts` exist for this area of the codebase, surface them as explicit tensions the design must resolve: follow the stated rule, follow the existing pattern, or reconcile them\n\nPart C — State your hypothesis before delegating:\nBefore spawning any subagents, write 2-3 sentences: what do you currently believe the best approach is, and what concerns you most about it? This is your reference point for interrogating subagent output later.\n\nPart D — Generate candidates from tensions:\n- QUICK: self-generate candidates from your tensions. Include mandatory candidates: (1) simplest possible change that satisfies acceptance criteria, (2) follow existing repo pattern.\n- STANDARD: spawn ONE WorkRail Executor running `routine-tension-driven-design` with your tensions, philosophy sources, and problem understanding as input. Simultaneously, spawn ONE WorkRail Executor running `routine-hypothesis-challenge`: 'What constraints or failure modes would make you choose a fundamentally different approach? Propose one, grounded in real reasons.'\n- THOROUGH: spawn ONE WorkRail Executor running `routine-tension-driven-design`, ONE running `routine-hypothesis-challenge` (adversarial divergence), and ONE running `routine-execution-simulation`: 'Trace through the leading approach's 3 most likely failure scenarios step by step.'\n- For STANDARD with riskLevel=High: also spawn the execution simulation subagent.\n\nThe main agent ALWAYS self-generates its own candidates too (at minimum the two mandatory ones: simplest change + existing pattern). Subagent candidates supplement, not replace, your own thinking.\n\nPart E — Interrogate subagent output (if subagents were used):\nDo NOT summarize subagent findings as your own. Instead, interrogate against your hypothesis:\n- Where do subagent findings challenge your hypothesis? Are they right or did they miss context?\n- What did they surface that you genuinely hadn't considered?\n- Where are they just restating the obvious or echoing each other?\n- What did they get wrong or overweight?\nState explicitly: what you changed your mind about and why, or what you held firm on despite their input and why.\n\nPart F — Compare via tradeoffs (not checklists):\nFor each surviving candidate, produce:\n- One-sentence summary of the approach\n- Which tensions it resolves and which it accepts\n- The specific failure mode you'd watch for\n- How it relates to existing repo patterns (follows / adapts / departs)\n- What you gain and what you give up\n- Which of the dev's philosophy principles it honors and which it conflicts with — be specific (principle name + how)\n\nPart G — Challenge the leading option:\n- STANDARD: optionally challenge with ONE WorkRail Executor running `routine-hypothesis-challenge`\n- THOROUGH: challenge top 1-2 candidates using ONE or TWO WorkRail Executors running `routine-hypothesis-challenge`\n\nPart H — Select:\nSet context variables:\n- `selectedApproach` — the chosen design with rationale tied back to tensions\n- `runnerUpApproach` — the next-best option and why it lost\n- `architectureRationale` — which tensions were resolved and which were accepted\n- `pivotTriggers` — specific conditions under which you'd switch to the runner-up\n- `keyRiskToMonitor` — the failure mode of the selected approach\n- `acceptedTradeoffs` — what the selected approach gives up (feeds directly into design review)\n- `identifiedFailureModes` — per-candidate failure modes (feeds directly into design review)\n\nRules:\n- the main agent owns the final decision; subagents contribute depth, not decisions\n- if the simplest solution satisfies acceptance criteria, prefer it — complexity must justify itself\n- if the challenged leading candidate no longer looks best, switch deliberately rather than defending sunk cost\n- subagents go deep on specific questions, not wide on generic plans",
+      "requireConfirmation": {
+        "or": [
+          { "var": "automationLevel", "equals": "Low" },
+          { "var": "taskComplexity", "equals": "Large" },
+          { "var": "riskLevel", "equals": "High" }
+        ]
+      }
+    },
+    {
+      "id": "phase-2-design-review",
+      "type": "loop",
+      "title": "Phase 2: Design Review",
+      "runCondition": {
+        "var": "taskComplexity",
+        "not_equals": "Small"
+      },
+      "loop": {
+        "type": "while",
+        "conditionSource": {
+          "kind": "artifact_contract",
+          "contractRef": "wr.contracts.loop_control",
+          "loopId": "design_review_loop"
+        },
+        "maxIterations": 2
+      },
+      "body": [
+        {
+          "id": "phase-2a-review-design",
+          "title": "Review Design for Gaps, Issues, and Improvements",
+          "prompt": "Review the selected architecture using the explicit tradeoffs and failure modes from Phase 1 as your review criteria — not a generic gaps checklist.\n\nTargeted review (derived from Phase 1 outputs):\n1. Are the `acceptedTradeoffs` actually acceptable? For each accepted tradeoff, verify it won't violate acceptance criteria or invariants under realistic conditions.\n2. Are the `identifiedFailureModes` actually handled? For each failure mode, trace through the design and confirm there's a mitigation path. If not, flag it.\n3. Does the selected approach's relationship to existing repo patterns hold up? If it 'adapts' an existing pattern, verify the adaptation doesn't break the invariants the original pattern protects.\n4. Is there a simpler version of the selected approach that still satisfies acceptance criteria? (Complexity must continue to justify itself.)\n\nCompare against the runner-up:\n- Are there elements from the runner-up that would strengthen the selected approach without adding complexity?\n- Would a hybrid resolve an accepted tradeoff that's bothering you?\n\nPhilosophy alignment: does the architecture respect the user's active coding rules?\n\nBefore delegating, state your current assessment: what do you think the strongest and weakest parts of the design are right now?\n\nMode-adaptive delegation:\n- QUICK: self-review only\n- STANDARD: optionally spawn ONE WorkRail Executor running `routine-hypothesis-challenge` focused specifically on the accepted tradeoffs and failure modes\n- THOROUGH: spawn TWO WorkRail Executors — `routine-hypothesis-challenge` on tradeoffs + `routine-execution-simulation` on failure modes\n\nAfter receiving subagent output (if used), interrogate it against your pre-assessment. Do not adopt their framing wholesale. State what changed your thinking and what didn't.\n\nIf issues are found, fix the design (update `selectedApproach`, `architectureRationale`, `pivotTriggers`, `acceptedTradeoffs`, `identifiedFailureModes`) before continuing.\n\nSet context variables:\n- `designFindings`\n- `designRevised`",
+          "requireConfirmation": false
+        },
+        {
+          "id": "phase-2b-loop-decision",
+          "title": "Design Review Loop Decision",
+          "prompt": "Provide a loop control artifact.\n\nDecision rules:\n- if `designFindings` is non-empty and design was revised -> continue (verify the revision)\n- if `designFindings` is empty -> stop\n- if max iterations reached -> stop and document remaining concerns\n\nOutput exactly:\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
+          "requireConfirmation": false,
+          "outputContract": {
+            "contractRef": "wr.contracts.loop_control"
+          }
+        }
+      ]
+    },
+    {
+      "id": "phase-3-plan-and-test-design",
+      "title": "Phase 3: Slice, Plan, and Test Design",
+      "runCondition": {
+        "var": "taskComplexity",
+        "not_equals": "Small"
+      },
+      "prompt": "Create or update the human-facing implementation artifact: `implementation_plan.md`.\n\nThis phase combines slicing, plan drafting, philosophy alignment, and test design.\n\nThe plan must include:\n1. Problem statement\n2. Acceptance criteria\n3. Non-goals\n4. Philosophy-driven constraints (from the user's active rules)\n5. Invariants\n6. Selected approach + rationale + runner-up\n7. Vertical slices\n8. Work packages only when they improve execution or enable safe parallelism\n9. Test design\n10. Risk register\n11. PR packaging strategy\n12. Philosophy alignment per slice:\n   - [principle] -> [satisfied / tension / violated + 1-line why]\n\nSet context variables:\n- `implementationPlan`\n- `slices`\n- `testDesign`\n- `estimatedPRCount`\n- `followUpTickets` (initialize if needed)\n- `unresolvedUnknownCount`\n- `planConfidenceBand`\n\nRules:\n- keep `implementation_plan.md` concrete enough for another engineer to implement without guessing\n- use work packages only when they create real clarity; do not over-fragment work\n- use the user's coding philosophy as the primary planning lens, and name tensions explicitly\n- set `unresolvedUnknownCount` to the number of still-open issues that would materially affect implementation quality\n- set `planConfidenceBand` to Low / Medium / High based on how ready the plan actually is",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-4-plan-audit",
+      "type": "loop",
+      "title": "Phase 4: Plan Audit (Review, Fix, Decide)",
+      "runCondition": {
+        "var": "taskComplexity",
+        "not_equals": "Small"
+      },
+      "loop": {
+        "type": "while",
+        "conditionSource": {
+          "kind": "artifact_contract",
+          "contractRef": "wr.contracts.loop_control",
+          "loopId": "plan_audit_loop"
+        },
+        "maxIterations": 2
+      },
+      "body": [
+        {
+          "id": "phase-4a-audit-and-refocus",
+          "title": "Audit Plan and Apply Fixes",
+          "prompt": "Audit the plan and fix what you find in one pass.\n\nPart A -- Audit:\n- completeness / missing work\n- weak assumptions and risks\n- invariant coverage\n- slice boundary quality\n- philosophy alignment against the user's active rules\n- regression check against `resolvedFindings` (if present): if a previously resolved issue reappeared, treat it as Critical\n\nPhilosophy rules:\n- flag findings by principle name\n- Red / Orange findings go into `planFindings`\n- Yellow tensions are informational only and do NOT block loop exit\n\nBefore delegating, state your hypothesis: what do you think the plan's biggest weakness is right now? What are you most and least confident about?\n\nMode-adaptive delegation:\n- QUICK: self-audit only\n- STANDARD: if delegation is available, spawn THREE WorkRail Executors SIMULTANEOUSLY running `routine-plan-analysis`, `routine-hypothesis-challenge`, and `routine-philosophy-alignment`; include `routine-execution-simulation` only when runtime or state-flow risk is material\n- THOROUGH: if delegation is available, spawn FOUR WorkRail Executors SIMULTANEOUSLY running `routine-plan-analysis`, `routine-hypothesis-challenge`, `routine-execution-simulation`, and `routine-philosophy-alignment`\n\nInterrogate subagent output (if used):\n- Do NOT treat auditor findings as your findings. They are raw input from junior analysts.\n- Where 2+ auditors flag the same issue -> likely real, but verify it yourself\n- Where one auditor flags a unique concern -> investigate; is it genuine or did they miss context?\n- Where auditors conflict -> reason through it yourself rather than splitting the difference\n- State what changed your assessment of the plan and what didn't\n\nPart B -- Refocus (apply fixes immediately):\n- update `implementation_plan.md` to incorporate amendments\n- update `slices` if the plan shape changed\n- extract out-of-scope work into `followUpTickets`\n- track resolved findings (cap at 10, drop oldest)\n\nSet context variables:\n- `planFindings`\n- `planConfidence`\n- `resolvedFindings`\n- `followUpTickets`\n\nRules:\n- the main agent is synthesizer and final decision-maker\n- do not delegate sequentially when audit routines are independent\n- do not silently accept plan drift; reflect changes in the plan artifact immediately",
+          "requireConfirmation": false
+        },
+        {
+          "id": "phase-4b-loop-decision",
+          "title": "Loop Exit Decision",
+          "prompt": "Provide a loop control artifact.\n\nDecision rules:\n- if `planFindings` is non-empty -> continue\n- if `planFindings` is empty -> stop, but enumerate what was checked to justify the clean pass\n- if max iterations reached -> stop and document remaining concerns\n\nOutput exactly:\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
+          "requireConfirmation": true,
+          "outputContract": {
+            "contractRef": "wr.contracts.loop_control"
+          }
+        }
+      ]
+    },
+    {
+      "id": "phase-5-small-task-fast-path",
+      "title": "Phase 5: Small Task Fast Path",
+      "runCondition": {
+        "var": "taskComplexity",
+        "equals": "Small"
+      },
+      "prompt": "For Small tasks:\n- confirm target locations and relevant patterns with tools\n- implement the smallest correct change\n- verify with tests/build or a deterministic check\n- apply the user's coding philosophy as the active review lens before finalizing\n- provide a concise PR-ready summary\n\nDo not create heavyweight planning artifacts unless risk unexpectedly grows.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-6-implement-slices",
+      "type": "loop",
+      "title": "Phase 6: Implement Slice-by-Slice",
+      "runCondition": {
+        "var": "taskComplexity",
+        "not_equals": "Small"
+      },
+      "loop": {
+        "type": "forEach",
+        "items": "slices",
+        "itemVar": "currentSlice",
+        "indexVar": "sliceIndex",
+        "maxIterations": 20
+      },
+      "body": [
+        {
+          "id": "phase-6a-implement-slice",
+          "title": "Implement Slice",
+          "prompt": "Implement slice `{{currentSlice.name}}`.\n\nBefore writing code, do a quick inline check:\n- if pivot triggers have fired or plan assumptions are clearly stale, stop and return to planning instead of coding through it\n- if target files or symbols no longer match the plan, stop and re-plan\n\nImplementation rules:\n- the main agent owns implementation\n- delegate only targeted cognitive routines via the WorkRail Executor (challenge, simulation, philosophy review), not the whole slice\n- read independent files in parallel when possible\n- implement incrementally and keep the slice within its intended boundary\n- apply the user's coding philosophy as the active implementation lens\n- run tests and build after implementation to confirm the slice works\n\nTrack whether this slice required:\n- a new special-case (`specialCaseIntroduced`)\n- an unplanned abstraction (`unplannedAbstractionIntroduced`)\n- unexpected file changes outside planned scope (`unexpectedScopeChange`)\n\nSet `verifyNeeded` to true if ANY of:\n- `sliceIndex` is odd (verify every 2 slices)\n- `specialCaseIntroduced = true`\n- `unplannedAbstractionIntroduced = true`\n- `unexpectedScopeChange = true`\n- tests or build failed\n\nIf `prStrategy = MultiPR`, stop with a concise PR package for user review.\n\nSet context variables:\n- `specialCaseIntroduced`\n- `unplannedAbstractionIntroduced`\n- `unexpectedScopeChange`\n- `verifyNeeded`",
+          "requireConfirmation": {
+            "var": "prStrategy",
+            "equals": "MultiPR"
+          }
+        },
+        {
+          "id": "phase-6b-verify-slice",
+          "title": "Verify Slice",
+          "runCondition": {
+            "var": "verifyNeeded",
+            "equals": true
+          },
+          "prompt": "Evaluate what was just implemented with fresh eyes.\n\nReview:\n- does the implementation match the plan intent, not just the letter?\n- are there hidden assumptions or edge cases the implementation glossed over?\n- do invariants still hold?\n- are there philosophy-alignment regressions?\n- if multiple slices have passed since last verification, review all unverified slices together\n\nBefore delegating (if applicable), state: what is your honest assessment of the slice you just implemented? Where are you least confident?\n\nMode-adaptive delegation:\n- QUICK: self-verify only\n- STANDARD: if a fresh-eye trigger fired (`specialCaseIntroduced`, `unplannedAbstractionIntroduced`, or `unexpectedScopeChange`), optionally spawn ONE or TWO WorkRail Executors running `routine-hypothesis-challenge` and `routine-philosophy-alignment`\n- THOROUGH: if any fresh-eye trigger fired, spawn up to THREE WorkRail Executors running `routine-hypothesis-challenge`, `routine-execution-simulation`, and `routine-philosophy-alignment`\n\nAfter receiving subagent output (if used), interrogate: did they find something you genuinely missed, or are they flagging things you already considered and accepted? State what changed your assessment.\n\nSet context variables:\n- `verificationFindings`\n- `verificationFailed`\n\nRule:\n- if serious concerns are found, stop and return to planning or ask the user\n- do not rubber-stamp; this step exists specifically to catch what the implementation step missed",
+          "requireConfirmation": {
+            "var": "verificationFailed",
+            "equals": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "phase-7-final-verification",
+      "type": "loop",
+      "title": "Phase 7: Final Verification & Handoff",
+      "runCondition": {
+        "var": "taskComplexity",
+        "not_equals": "Small"
+      },
+      "loop": {
+        "type": "while",
+        "conditionSource": {
+          "kind": "artifact_contract",
+          "contractRef": "wr.contracts.loop_control",
+          "loopId": "final_verification_loop"
+        },
+        "maxIterations": 2
+      },
+      "body": [
+        {
+          "id": "phase-7a-verify-and-fix",
+          "title": "Verify Integration and Fix Issues",
+          "prompt": "Perform integration verification across all implemented slices.\n\nRequired:\n- verify acceptance criteria\n- map invariants to concrete proof (tests, build results, explicit reasoning)\n- run whole-task validation commands\n- identify any invariant violations or regressions\n- confirm the implemented result aligns with the user's coding philosophy, naming any tensions explicitly\n- review cumulative drift across all slices\n- check whether repeated small compromises added up to a larger pattern problem\n\nIf issues are found, fix them immediately:\n- apply code fixes\n- re-run affected tests\n- update `implementation_plan.md` if the fix changed boundaries or approach\n\nSet context variables:\n- `integrationFindings`\n- `integrationPassed`\n- `regressionDetected`",
+          "requireConfirmation": false
+        },
+        {
+          "id": "phase-7b-loop-decision",
+          "title": "Final Verification Loop Decision",
+          "prompt": "Provide a loop control artifact.\n\nDecision rules:\n- if `integrationFindings` is non-empty and fixes were applied -> continue (re-verify the fixes)\n- if `integrationFindings` is empty or all issues resolved -> stop and produce handoff\n- if max iterations reached -> stop and document remaining concerns\n\nWhen stopping, include the handoff summary:\n- acceptance criteria status\n- invariant status\n- test/build summary\n- concise PR/MR description draft (why, test plan, rollout notes)\n- follow-up tickets\n- any philosophy tensions accepted intentionally and why\n\nKeep the handoff concise and executive-level. Do not auto-merge or push unless the user explicitly asks.\n\nOutput exactly:\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
+          "requireConfirmation": true,
+          "outputContract": {
+            "contractRef": "wr.contracts.loop_control"
+          }
+        }
+      ]
+    }
+  ]
+}

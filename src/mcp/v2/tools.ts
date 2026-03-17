@@ -1,21 +1,26 @@
 import { z } from 'zod';
 import type { ToolAnnotations } from '../tool-factory.js';
 
-export const V2ListWorkflowsInput = z.object({});
+const workspacePathField = z.string()
+  .refine((p) => p.startsWith('/'), 'workspacePath must be an absolute path (starting with /)')
+  .optional()
+  .describe('Absolute path to your current workspace directory (e.g. the "Workspace:" value from your system parameters). Used to resolve project-scoped workflow variants against the correct workspace. If omitted, WorkRail uses MCP roots when available, then falls back to the server process directory.');
+
+export const V2ListWorkflowsInput = z.object({
+  workspacePath: workspacePathField,
+});
 export type V2ListWorkflowsInput = z.infer<typeof V2ListWorkflowsInput>;
 
 export const V2InspectWorkflowInput = z.object({
   workflowId: z.string().min(1).regex(/^[A-Za-z0-9_-]+$/, 'Workflow ID must contain only letters, numbers, hyphens, and underscores').describe('The workflow ID to inspect'),
   mode: z.enum(['metadata', 'preview']).default('preview').describe('Detail level: metadata (name and description only) or preview (full step-by-step breakdown, default)'),
+  workspacePath: workspacePathField,
 });
 export type V2InspectWorkflowInput = z.infer<typeof V2InspectWorkflowInput>;
 
 export const V2StartWorkflowInput = z.object({
   workflowId: z.string().min(1).regex(/^[A-Za-z0-9_-]+$/, 'Workflow ID must contain only letters, numbers, hyphens, and underscores').describe('The workflow ID to start'),
-  workspacePath: z.string()
-    .refine((p) => p.startsWith('/'), 'workspacePath must be an absolute path (starting with /)')
-    .optional()
-    .describe('Absolute path to your current workspace directory (e.g. the "Workspace:" value from your system parameters). Used to anchor this session to your workspace for future resume_session discovery. Pass this on every start_workflow call. If omitted, WorkRail uses the server process directory which may not match your workspace.'),
+  workspacePath: workspacePathField.describe('Absolute path to your current workspace directory (e.g. the "Workspace:" value from your system parameters). Used to resolve the correct project-scoped workflow variant and to anchor this session to your workspace for future resume_session discovery. Pass this on every start_workflow call. If omitted, WorkRail uses MCP roots when available, then falls back to the server process directory.'),
 });
 export type V2StartWorkflowInput = z.infer<typeof V2StartWorkflowInput>;
 
