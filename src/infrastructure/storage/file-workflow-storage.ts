@@ -292,25 +292,6 @@ export class FileWorkflowStorage implements IWorkflowStorage {
     return workflow;
   }
 
-  /**
-   * Extract routine definitions from loaded workflows.
-   * Returns a map of routine ID -> WorkflowDefinition for routines
-   * (workflows whose ID starts with "routine-").
-   * Used to populate the template registry with routine-derived expanders.
-   */
-  public async getRoutineDefinitions(): Promise<ReadonlyMap<string, WorkflowDefinition>> {
-    const index = await this.getWorkflowIndex();
-    const routines = new Map<string, WorkflowDefinition>();
-
-    for (const entry of index.values()) {
-      if (entry.id.startsWith('routine-')) {
-        routines.set(entry.id, entry.definition);
-      }
-    }
-
-    return routines;
-  }
-
   public async listWorkflowSummaries(): Promise<readonly WorkflowSummary[]> {
     const workflows = await this.loadAllWorkflows();
     return workflows.map(toWorkflowSummary);

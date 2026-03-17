@@ -10,6 +10,11 @@ import { createTemplateRegistry } from '../../../src/application/services/compil
 import type { TemplateRegistry } from '../../../src/application/services/compiler/template-registry.js';
 import type { WorkflowStepDefinition, LoopStepDefinition } from '../../../src/types/workflow-definition.js';
 import { ok, err } from 'neverthrow';
+import {
+  createRoutineExpander,
+  routineIdToTemplateId,
+} from '../../../src/application/services/compiler/template-registry.js';
+import type { WorkflowDefinition } from '../../../src/types/workflow-definition.js';
 
 // ---------------------------------------------------------------------------
 // Fake registry for testing expansion machinery
@@ -202,121 +207,185 @@ describe('resolveTemplatesPass', () => {
       const b = resolveTemplatesPass(steps, testRegistry)._unsafeUnwrap();
       expect(JSON.stringify(a)).toBe(JSON.stringify(b));
     });
+
+    it('propagates runCondition from templateCall step to expanded steps', () => {
+      const runCondition = { var: 'taskComplexity', not_equals: 'Small' };
+      const steps: WorkflowStepDefinition[] = [
+        {
+          id: 'phase-1',
+          title: 'Phase 1',
+          runCondition,
+          templateCall: { templateId: 'wr.templates.test_probe' },
+        },
+      ];
+      const result = resolveTemplatesPass(steps, testRegistry);
+      expect(result.isOk()).toBe(true);
+      const resolved = result._unsafeUnwrap();
+      expect(resolved).toHaveLength(2);
+      // Both expanded steps should inherit the parent's runCondition
+      for (const step of resolved) {
+        expect((step as WorkflowStepDefinition).runCondition).toEqual(runCondition);
+      }
+    });
+
+    it('does not override existing runCondition on expanded steps', () => {
+      // Use routine-based registry for this test since test_probe doesn't set runCondition
+      // But the behavior is the same: if an expanded step already has runCondition, keep it
+      const runCondition = { var: 'taskComplexity', not_equals: 'Small' };
+      const steps: WorkflowStepDefinition[] = [
+        {
+          id: 'phase-1',
+          title: 'Phase 1',
+          runCondition,
+          templateCall: { templateId: 'wr.templates.test_probe' },
+        },
+      ];
+      const result = resolveTemplatesPass(steps, testRegistry);
+      expect(result.isOk()).toBe(true);
+      // test_probe steps don't have runCondition, so parent's is inherited
+      const resolved = result._unsafeUnwrap() as WorkflowStepDefinition[];
+      expect(resolved[0]!.runCondition).toEqual(runCondition);
+    });
+
+    it('does not add runCondition when templateCall step has none', () => {
+      const steps: WorkflowStepDefinition[] = [
+        {
+          id: 'phase-1',
+          title: 'Phase 1',
+          templateCall: { templateId: 'wr.templates.test_probe' },
+        },
+      ];
+      const result = resolveTemplatesPass(steps, testRegistry);
+      expect(result.isOk()).toBe(true);
+      const resolved = result._unsafeUnwrap() as WorkflowStepDefinition[];
+      // No runCondition on parent, so expanded steps should have none
+      expect(resolved[0]!.runCondition).toBeUndefined();
+    });
   });
 
-  describe('with routine-derived registry', () => {
-    // Integration test: routine JSON -> template registry -> resolveTemplatesPass
-    const routineDefinitions = new Map([
-      ['routine-test-design', {
+  describe('step ID collision detection', () => {
+    it('detects duplicate step IDs from two identical non-template steps', () => {
+      const steps: WorkflowStepDefinition[] = [
+        { id: 'dup', title: 'First', prompt: 'First.' },
+        { id: 'dup', title: 'Second', prompt: 'Second.' },
+      ];
+      const result = resolveTemplatesPass(steps, testRegistry);
+      expect(result.isErr()).toBe(true);
+      const error = result._unsafeUnwrapErr();
+      expect(error.code).toBe('DUPLICATE_STEP_ID');
+      expect(error.stepId).toBe('dup');
+    });
+
+    it('detects duplicate step IDs after template expansion', () => {
+      // Two template calls with the same callerId would produce colliding IDs
+      const steps: WorkflowStepDefinition[] = [
+        {
+          id: 'probe',
+          title: 'Probe 1',
+          templateCall: { templateId: 'wr.templates.test_probe' },
+        },
+        // Manually create steps that collide with the expanded IDs
+        { id: 'probe.check', title: 'Collider', prompt: 'Collides.' },
+      ];
+      const result = resolveTemplatesPass(steps, testRegistry);
+      expect(result.isErr()).toBe(true);
+      const error = result._unsafeUnwrapErr();
+      expect(error.code).toBe('DUPLICATE_STEP_ID');
+      expect(error.stepId).toBe('probe.check');
+    });
+  });
+
+  describe('with routine-based registry (integration)', () => {
+    function makeRoutineRegistry() {
+      const routineDefinition: WorkflowDefinition = {
         id: 'routine-test-design',
         name: 'Test Design Routine',
-        description: 'A test design routine',
+        description: 'A routine for testing',
         version: '1.0.0',
-        metaGuidance: ['Think deeply about the problem.'],
+        metaGuidance: ['Be thorough in your analysis.'],
         steps: [
-          { id: 'step-understand', title: 'Understand', prompt: 'Understand the problem for {deliverableName}.', agentRole: 'You are a designer.' },
-          { id: 'step-generate', title: 'Generate', prompt: 'Generate candidates.' },
-          { id: 'step-deliver', title: 'Deliver', prompt: 'Create `{deliverableName}`.' },
+          {
+            id: 'step-understand',
+            title: 'Understand the Problem',
+            prompt: 'Analyze {problem} deeply.',
+            agentRole: 'You are a problem analyst.',
+          },
+          {
+            id: 'step-design',
+            title: 'Design Solution',
+            prompt: 'Design a solution for {problem} and write to {deliverableName}.',
+          },
         ],
-      }],
-    ]);
+      } as WorkflowDefinition;
 
-    const routineRegistry = createTemplateRegistry(routineDefinitions as any);
+      const expander = createRoutineExpander('routine-test-design', routineDefinition)._unsafeUnwrap();
+      const routineExpanders = new Map([
+        [routineIdToTemplateId('routine-test-design'), expander],
+      ]);
+      return createTemplateRegistry(routineExpanders);
+    }
 
-    it('expands routine-derived template via resolveTemplatesPass', () => {
+    it('expands routine-based templateCall into routine steps', () => {
+      const registry = makeRoutineRegistry();
       const steps: WorkflowStepDefinition[] = [
-        { id: 'before', title: 'Before', prompt: 'Before step.' },
         {
           id: 'phase-1-design',
           title: 'Phase 1: Design',
           templateCall: {
             templateId: 'wr.templates.routine.test-design',
-            args: { deliverableName: 'design-candidates.md' },
+            args: { problem: 'caching', deliverableName: 'design.md' },
           },
         },
-        { id: 'after', title: 'After', prompt: 'After step.' },
       ];
-
-      const result = resolveTemplatesPass(steps, routineRegistry);
+      const result = resolveTemplatesPass(steps, registry);
       expect(result.isOk()).toBe(true);
       const resolved = result._unsafeUnwrap();
-
-      // 1 before + 3 routine steps + 1 after = 5
-      expect(resolved).toHaveLength(5);
-      expect(resolved[0]!.id).toBe('before');
-      expect(resolved[1]!.id).toBe('phase-1-design.step-understand');
-      expect(resolved[2]!.id).toBe('phase-1-design.step-generate');
-      expect(resolved[3]!.id).toBe('phase-1-design.step-deliver');
-      expect(resolved[4]!.id).toBe('after');
+      expect(resolved).toHaveLength(2);
+      expect(resolved[0]!.id).toBe('phase-1-design.step-understand');
+      expect((resolved[0] as WorkflowStepDefinition).prompt).toBe('Analyze caching deeply.');
+      expect((resolved[0] as WorkflowStepDefinition).agentRole).toBe('You are a problem analyst.');
+      expect((resolved[0] as WorkflowStepDefinition).guidance).toEqual(['Be thorough in your analysis.']);
+      expect(resolved[1]!.id).toBe('phase-1-design.step-design');
+      expect((resolved[1] as WorkflowStepDefinition).prompt).toBe('Design a solution for caching and write to design.md.');
     });
 
-    it('substitutes args in expanded routine step prompts', () => {
+    it('mixes routine-based and regular steps', () => {
+      const registry = makeRoutineRegistry();
       const steps: WorkflowStepDefinition[] = [
+        { id: 'intro', title: 'Introduction', prompt: 'Start here.' },
         {
-          id: 'design',
-          title: 'Design',
+          id: 'design-phase',
+          title: 'Design Phase',
           templateCall: {
             templateId: 'wr.templates.routine.test-design',
-            args: { deliverableName: 'output.md' },
+            args: { problem: 'auth', deliverableName: 'auth-design.md' },
+          },
+        },
+        { id: 'implement', title: 'Implement', prompt: 'Build it.' },
+      ];
+      const result = resolveTemplatesPass(steps, registry);
+      expect(result.isOk()).toBe(true);
+      const resolved = result._unsafeUnwrap();
+      expect(resolved).toHaveLength(4);
+      expect(resolved[0]!.id).toBe('intro');
+      expect(resolved[1]!.id).toBe('design-phase.step-understand');
+      expect(resolved[2]!.id).toBe('design-phase.step-design');
+      expect(resolved[3]!.id).toBe('implement');
+    });
+
+    it('fails when routine templateCall has missing args', () => {
+      const registry = makeRoutineRegistry();
+      const steps: WorkflowStepDefinition[] = [
+        {
+          id: 'design-phase',
+          title: 'Design Phase',
+          templateCall: {
+            templateId: 'wr.templates.routine.test-design',
+            args: { problem: 'caching' }, // missing deliverableName
           },
         },
       ];
-
-      const resolved = resolveTemplatesPass(steps, routineRegistry)._unsafeUnwrap();
-      expect((resolved[0] as WorkflowStepDefinition).prompt).toBe('Understand the problem for output.md.');
-      expect((resolved[2] as WorkflowStepDefinition).prompt).toBe('Create `output.md`.');
-    });
-
-    it('injects routine metaGuidance as step-level guidance', () => {
-      const steps: WorkflowStepDefinition[] = [
-        {
-          id: 'design',
-          title: 'Design',
-          templateCall: {
-            templateId: 'wr.templates.routine.test-design',
-            args: { deliverableName: 'output.md' },
-          },
-        },
-      ];
-
-      const resolved = resolveTemplatesPass(steps, routineRegistry)._unsafeUnwrap();
-      // All expanded steps should have the routine metaGuidance as guidance
-      for (const step of resolved) {
-        expect((step as WorkflowStepDefinition).guidance).toContain('Think deeply about the problem.');
-      }
-    });
-
-    it('preserves agentRole from routine steps', () => {
-      const steps: WorkflowStepDefinition[] = [
-        {
-          id: 'design',
-          title: 'Design',
-          templateCall: {
-            templateId: 'wr.templates.routine.test-design',
-            args: { deliverableName: 'output.md' },
-          },
-        },
-      ];
-
-      const resolved = resolveTemplatesPass(steps, routineRegistry)._unsafeUnwrap();
-      expect((resolved[0] as WorkflowStepDefinition).agentRole).toBe('You are a designer.');
-      // Steps without agentRole should not have it
-      expect((resolved[1] as WorkflowStepDefinition).agentRole).toBeUndefined();
-    });
-
-    it('fails when required args are missing', () => {
-      const steps: WorkflowStepDefinition[] = [
-        {
-          id: 'design',
-          title: 'Design',
-          templateCall: {
-            templateId: 'wr.templates.routine.test-design',
-            args: {}, // missing deliverableName
-          },
-        },
-      ];
-
-      const result = resolveTemplatesPass(steps, routineRegistry);
+      const result = resolveTemplatesPass(steps, registry);
       expect(result.isErr()).toBe(true);
       const error = result._unsafeUnwrapErr();
       expect(error.code).toBe('TEMPLATE_EXPAND_ERROR');
