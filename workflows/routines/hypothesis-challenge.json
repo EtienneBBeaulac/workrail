@@ -1,113 +1,67 @@
 {
   "id": "routine-hypothesis-challenge",
   "name": "Hypothesis Challenge Routine",
-  "version": "1.1.0",
-  "description": "Adversarial testing of hypotheses using an Ideate -> Plan -> Execute strategy. Configurable rigor levels (1-5) allow for progressively deeper skepticism and stress testing.",
+  "version": "1.0.0",
+  "description": "Lean adversarial review of a hypothesis, recommendation, or diagnosis. Finds the strongest counter-argument, exposes weak assumptions and evidence gaps, optionally deepens for THOROUGH review, and delivers verdicts plus critical tests.",
   "clarificationPrompts": [
-    "What hypotheses or assumptions should I challenge?",
-    "What rigor level do you need? (1=Surface, 3=Deep, 5=Maximum)",
-    "What evidence supports these hypotheses?",
-    "What context should I consider? (bug description, findings, constraints)"
+    "What hypothesis, recommendation, or diagnosis should I challenge?",
+    "What evidence currently supports it?",
+    "What depth do you need? (default=STANDARD; optional QUICK / STANDARD / THOROUGH or legacy rigor=1/3/5)",
+    "What artifact name should I produce?"
   ],
   "preconditions": [
-    "Hypotheses or assumptions are clearly stated",
-    "Rigor level (1-5) is specified",
-    "Supporting evidence is available",
-    "Agent has read access to relevant context"
+    "A target hypothesis, recommendation, or diagnosis is available",
+    "Supporting evidence or reasoning is available",
+    "Relevant context is available for challenge"
   ],
   "metaGuidance": [
-    "**ROUTINE PURPOSE:**",
-    "This routine performs adversarial testing. It separates strategy (Ideating attack vectors) from execution (Challenging/Stress Testing).",
-    "**PHASES:**",
-    "1. IDEATE: Brainstorm attack vectors and common flaws",
-    "2. STRATEGIZE: Define the challenge plan for the requested rigor",
-    "3. EXECUTE: Run the challenge (Surface/Deep/Max)",
-    "4. SYNTHESIZE: Deliver verdicts and alternative explanations",
-    "**CORE PRINCIPLES:**",
-    "- ADVERSARIAL: Actively try to disprove, don't confirm",
-    "- SYSTEMATIC: Challenge assumptions, logic, and evidence",
-    "- CONSTRUCTIVE: Goal is to strengthen truth, not just destroy"
+    "PURPOSE: strengthen truth by trying to break the current story.",
+    "ROLE: you are an adversarial reviewer, not a neutral summarizer.",
+    "SCOPE: challenge assumptions, evidence quality, and likely failure modes.",
+    "DISCIPLINE: produce concrete counter-arguments and critical tests, not vague skepticism.",
+    "DEPTH: default behavior should feel like STANDARD; THOROUGH adds extra alternative-explanation work."
   ],
   "steps": [
     {
-      "id": "step-0-ideate-vectors",
-      "title": "Step 0: Ideate Challenge Strategy",
-      "prompt": "**IDEATE ATTACK VECTORS**\n\nBefore diving into specific hypotheses, step back and look at the whole picture.\n\n**YOUR MISSION:** Brainstorm ways to break these hypotheses.\n\n**EXECUTE:**\n1. Review all hypotheses together\n2. Identify shared assumptions (do they all assume X?)\n3. Brainstorm classes of failure (Concurrency? State? Logic?)\n4. Identify weak points in the evidence provided\n\n**REFLECT:**\n- Are these hypotheses too similar?\n- Are they missing a whole category of explanation?\n- What is the most likely \"unknown unknown\"?\n\n**WORKING NOTES:**\n- Common Assumptions\n- Potential Attack Vectors (e.g., Race Conditions, Edge Cases)\n- Evidence Weaknesses",
-      "agentRole": "You are a red-team strategist planning your attack.",
-      "requireConfirmation": false,
-      "guidance": [
-        "BRAINSTORM: Look for systemic issues first",
-        "CATEGORIES: Think in categories (Logic, Data, Timing, Environment)",
-        "SKEPTICISM: Assume the hypotheses are wrong. Why?"
-      ]
+      "id": "step-state-target",
+      "title": "Step 1: State the Target and Its Assumptions",
+      "prompt": "State the hypothesis, recommendation, or diagnosis you are challenging.\n\nCapture:\n- the core claim in one sentence\n- the main assumptions it depends on\n- the strongest evidence currently supporting it\n- what would count as meaningful disproof\n\nWorking notes:\n- Target claim\n- Key assumptions\n- Supporting evidence\n- Disproof criteria",
+      "agentRole": "You are defining exactly what must be broken or defended.",
+      "requireConfirmation": false
     },
     {
-      "id": "step-1-plan-challenge",
-      "title": "Step 1: Plan Challenge Tactics",
-      "prompt": "**DEFINE CHALLENGE PLAN**\n\nNow define your specific tactics for the requested rigor level.\n\n**YOUR MISSION:** Create a concrete plan to test these hypotheses.\n\n**EXECUTE:**\n1. Map attack vectors to specific hypotheses\n2. Define **Key Questions** to answer\n3. Select **Stress Tests** or **Counter-Examples** to search for\n4. Define criteria for \"disproof\"\n\n**DELIVERABLE:**\nCreate `challenge-strategy.md`:\n- Attack Plan for each Hypothesis\n- Key Assumptions to Probe\n- Required Evidence check",
-      "agentRole": "You are a lead auditor defining the scope of the audit.",
-      "requireConfirmation": false,
-      "guidance": [
-        "TACTICS: Be specific (e.g., \"Check for null user in auth flow\")",
-        "CRITERIA: What would convince you the hypothesis is false?"
-      ]
+      "id": "step-find-counterargument",
+      "title": "Step 2: Find the Strongest Counter-Argument",
+      "prompt": "Find the strongest case against the current claim.\n\nChallenge it by asking:\n- What is the strongest alternative explanation?\n- What evidence could be interpreted differently?\n- What hidden assumption is doing too much work?\n- What would a sharp skeptic say first?\n\nWorking notes:\n- Strongest counter-argument\n- Reinterpreted evidence\n- Weak assumption under pressure\n- Biggest blind spot",
+      "agentRole": "You are a sharp skeptic trying to overturn the current favorite.",
+      "requireConfirmation": false
     },
     {
-      "id": "step-execute-rigor-1",
-      "title": "Execution: Rigor 1 (Surface)",
+      "id": "step-probe-failure-modes",
+      "title": "Step 3: Probe Failure Modes and Weak Evidence",
+      "prompt": "Probe where the current claim could fail.\n\nReview:\n- the most likely failure modes if the claim is wrong\n- the weakest parts of the evidence chain\n- edge cases or environmental factors that could invalidate the conclusion\n- whether the claim explains all relevant facts or leaves contradictions behind\n\nWorking notes:\n- Likely failure modes\n- Evidence gaps\n- Contradictions or unexplained facts\n- Conditions that would flip the conclusion",
+      "agentRole": "You are testing whether the current story survives realistic pressure.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-thorough-alternatives",
+      "title": "Step 4: Generate Alternative Explanations and Critical Tests",
       "runCondition": {
-        "var": "rigor",
-        "gte": 1
+        "or": [
+          { "var": "rigorMode", "equals": "THOROUGH" },
+          { "var": "rigor", "gte": 5 }
+        ]
       },
-      "prompt": "**EXECUTE RIGOR 1: SURFACE CHALLENGE**\n\nExecute your challenge plan at Rigor 1 (Surface).\n\n**MISSION:** Identify obvious flaws and simple counter-examples.\n\n**EXECUTE:**\n1. Follow `challenge-strategy.md`\n2. Check for obvious logical gaps\n3. Identify simple counter-examples\n4. Check for Occam's Razor alternatives\n\n**WORKING NOTES:**\n- Obvious Flaws\n- Simple Counter-Examples\n- Better Alternatives",
-      "agentRole": "You are a skeptical reviewer looking for quick wins.",
-      "requireConfirmation": false,
-      "guidance": [
-        "FOCUS: Obvious errors, simple logic gaps",
-        "SPEED: Don't dig deep yet, look for low-hanging fruit"
-      ]
+      "prompt": "For THOROUGH review, go beyond counter-argument into alternatives and proof strategy.\n\nProduce:\n- the 1-2 strongest alternative explanations or competing hypotheses\n- why each might beat the current claim\n- the critical tests, observations, or traces that would discriminate between them\n- what result would cause you to keep, revise, or reject the current claim\n\nWorking notes:\n- Alternative explanations\n- Why they are plausible\n- Critical tests\n- Decision thresholds",
+      "agentRole": "You are building the shortest path to proving which explanation survives.",
+      "requireConfirmation": false
     },
     {
-      "id": "step-execute-rigor-3",
-      "title": "Execution: Rigor 3 (Deep)",
-      "runCondition": {
-        "var": "rigor",
-        "gte": 3
-      },
-      "prompt": "**EXECUTE RIGOR 3: DEEP CHALLENGE**\n\nExecute your challenge plan at Rigor 3 (Deep Analysis).\n\n**MISSION:** Deeply challenge with edge cases and hidden assumptions.\n\n**EXECUTE:**\n1. Follow `challenge-strategy.md`\n2. Expose hidden assumptions\n3. Generate systematic edge cases\n4. Analyze timing and environment factors\n\n**WORKING NOTES:**\n- Hidden Assumptions Exposed\n- Edge Case Analysis\n- Environmental Factors",
-      "agentRole": "You are a rigorous auditor digging for structural flaws.",
-      "requireConfirmation": false,
-      "guidance": [
-        "FOCUS: Unstated assumptions, boundary conditions",
-        "DEPTH: trace logic chains to find breaks"
-      ]
-    },
-    {
-      "id": "step-execute-rigor-5",
-      "title": "Execution: Rigor 5 (Maximum)",
-      "runCondition": {
-        "var": "rigor",
-        "gte": 5
-      },
-      "prompt": "**EXECUTE RIGOR 5: MAX CHALLENGE**\n\nExecute your challenge plan at Rigor 5 (Maximum Skepticism).\n\n**MISSION:** Try to break it completely.\n\n**EXECUTE:**\n1. Follow `challenge-strategy.md`\n2. Exhaustive assumption enumeration\n3. Extreme edge cases and adversarial inputs\n4. Second-order effects and chaos scenarios\n\n**WORKING NOTES:**\n- Exhaustive Challenges\n- Extreme Scenarios\n- Disproof Attempts",
-      "agentRole": "You are a relentless adversary trying to prove it wrong.",
-      "requireConfirmation": false,
-      "guidance": [
-        "FOCUS: Breaking the system, extreme edge cases",
-        "MINDSET: Trust nothing, verify everything"
-      ]
-    },
-    {
-      "id": "step-synthesize",
-      "title": "Step 5: Synthesize Verdicts",
-      "prompt": "**SYNTHESIZE VERDICTS**\n\nSynthesize all challenges into final verdicts.\n\n**MISSION:** Deliver clear judgments on each hypothesis.\n\n**EXECUTE:**\n1. Review all Working Notes\n2. Assign Verdicts (Keep/Revise/Reject)\n3. Prioritize Alternatives\n4. Define Critical Tests\n\n**DELIVERABLE:**\nCreate `{deliverableName}`:\n- Executive Summary\n- Hypothesis Analysis & Verdicts\n- Critical Tests Needed\n- Recommendations",
-      "agentRole": "You are a judge delivering the final verdict.",
-      "requireConfirmation": false,
-      "guidance": [
-        "VERDICTS: Be decisive based on evidence",
-        "ALTERNATIVES: Propose concrete, better explanations",
-        "ACTION: What specifically needs to be tested?"
-      ]
+      "id": "step-deliver",
+      "title": "Step 5: Deliver the Challenge Verdict",
+      "prompt": "Create `{deliverableName}`.\n\nRequired structure:\n- Target Claim\n- Strongest Counter-Argument\n- Weak Assumptions / Evidence Gaps\n- Likely Failure Modes\n- Alternative Explanations (if explored)\n- Critical Tests\n- Verdict: Keep / Revise / Reject\n- Recommendation\n\nOptimize for a compact artifact the main workflow can interrogate and act on.",
+      "agentRole": "You are delivering a decisive challenge artifact for the main workflow or caller to synthesize.",
+      "requireConfirmation": false
     }
   ]
 }

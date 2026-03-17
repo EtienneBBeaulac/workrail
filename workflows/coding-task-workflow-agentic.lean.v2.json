@@ -1,7 +1,7 @@
 {
   "id": "coding-task-workflow-agentic",
   "name": "Agentic Task Dev Workflow (Lean • Notes-First • WorkRail Executor)",
-  "version": "2.1.0",
+  "version": "1.0.0",
   "description": "Lean variant of the agentic coding workflow. Merges triage, inputs gate, context gathering, and re-triage into a single Understand & Classify phase. Reduces context variable count and removes top-level clarificationPrompts. Same quality guarantees with fewer tokens.",
   "recommendedPreferences": {
     "recommendedAutonomy": "guided",
