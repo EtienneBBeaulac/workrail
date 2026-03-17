@@ -1,6 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { pathToFileURL } from 'url';
 import { describe, expect, it } from 'vitest';
 import { StaticFeatureFlagProvider } from '../../../src/config/feature-flags.js';
 import {
@@ -33,30 +34,46 @@ function writeWorkflow(workspaceDir: string, name: string): void {
 
 describe('request-workflow-reader', () => {
   it('prefers explicit workspacePath over roots and server cwd', () => {
+    const explicitWorkspace = path.join(os.tmpdir(), 'explicit-workspace');
+    const rootWorkspace = path.join(os.tmpdir(), 'root-workspace');
+    const serverWorkspace = path.join(os.tmpdir(), 'server-workspace');
+
     expect(resolveRequestWorkspaceDirectory({
-      workspacePath: '/tmp/explicit',
-      resolvedRootUris: ['file:///tmp/root'],
-      serverCwd: '/tmp/cwd',
-    })).toBe('/tmp/explicit');
+      workspacePath: explicitWorkspace,
+      resolvedRootUris: [pathToFileURL(rootWorkspace).toString()],
+      serverCwd: serverWorkspace,
+    })).toBe(explicitWorkspace);
   });
 
   it('uses the first MCP root URI when workspacePath is absent', () => {
+    const rootWorkspaceA = path.join(os.tmpdir(), 'root-workspace-a');
+    const rootWorkspaceB = path.join(os.tmpdir(), 'root-workspace-b');
+    const serverWorkspace = path.join(os.tmpdir(), 'server-workspace');
+
     expect(resolveRequestWorkspaceDirectory({
-      resolvedRootUris: ['file:///tmp/root-a', 'file:///tmp/root-b'],
-      serverCwd: '/tmp/cwd',
-    })).toBe('/tmp/root-a');
+      resolvedRootUris: [
+        pathToFileURL(rootWorkspaceA).toString(),
+        pathToFileURL(rootWorkspaceB).toString(),
+      ],
+      serverCwd: serverWorkspace,
+    })).toBe(rootWorkspaceA);
   });
 
   it('falls back to server cwd when no workspacePath or usable root URI exists', () => {
+    const serverWorkspace = path.join(os.tmpdir(), 'server-workspace');
+
     expect(resolveRequestWorkspaceDirectory({
       resolvedRootUris: ['https://example.com/workspace'],
-      serverCwd: '/tmp/cwd',
-    })).toBe('/tmp/cwd');
+      serverCwd: serverWorkspace,
+    })).toBe(serverWorkspace);
   });
 
   it('appends workflows unless the directory is already workflows', () => {
-    expect(toProjectWorkflowDirectory('/tmp/project')).toBe('/tmp/project/workflows');
-    expect(toProjectWorkflowDirectory('/tmp/project/workflows')).toBe('/tmp/project/workflows');
+    const projectDirectory = path.join(os.tmpdir(), 'project');
+    const workflowsDirectory = path.join(projectDirectory, 'workflows');
+
+    expect(toProjectWorkflowDirectory(projectDirectory)).toBe(workflowsDirectory);
+    expect(toProjectWorkflowDirectory(workflowsDirectory)).toBe(workflowsDirectory);
   });
 
   it('loads project workflows from the request workspace instead of server cwd', async () => {
@@ -73,7 +90,7 @@ describe('request-workflow-reader', () => {
         agenticRoutines: false,
         experimentalWorkflows: false,
       }),
-      resolvedRootUris: [`file://${workspaceA}`],
+      resolvedRootUris: [pathToFileURL(workspaceA).toString()],
       serverCwd: workspaceB,
     });
 
