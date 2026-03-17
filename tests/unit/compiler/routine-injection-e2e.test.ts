@@ -198,6 +198,25 @@ describe('Lean workflow — Phase 1 orchestration with injected routine', () => 
     }
   });
 
+  it('both design paths produce design-candidates.md as unified output contract', () => {
+    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
+
+    const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
+    const steps = result._unsafeUnwrap();
+
+    // QUICK path writes to design-candidates.md
+    const quickStep = steps.find(s => s.id === 'phase-1b-design-quick') as WorkflowStepDefinition;
+    expect(quickStep.prompt).toContain('design-candidates.md');
+
+    // Deep path's final step also writes to design-candidates.md (via routine arg)
+    const deliverStep = steps.find(s => s.id === 'phase-1b-design-deep.step-deliver') as WorkflowStepDefinition;
+    expect(deliverStep.prompt).toContain('design-candidates.md');
+
+    // Challenge step reads from design-candidates.md
+    const selectStep = steps.find(s => s.id === 'phase-1c-challenge-and-select') as WorkflowStepDefinition;
+    expect(selectStep.prompt).toContain('design-candidates.md');
+  });
+
   it('challenge-and-select step references initialHypothesis for comparison', () => {
     const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
 
