@@ -115,4 +115,57 @@ describe('ack-advance-append-plan', () => {
     expect(plan.events[1]!.sessionId).toBe('sess_01jh_test');
     for (const e of plan.events) expect(() => DomainEventV1Schema.parse(e)).not.toThrow();
   });
+
+  it('accepts decision trace extra events that reference dotted expanded step IDs', () => {
+    const res = buildAckAdvanceAppendPlanV1({
+      sessionId: 'sess_01jh_test',
+      runId: 'run_01jh_test',
+      fromNodeId: 'node_01jh_from',
+      workflowHash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000' as any,
+      attemptId: 'att_01jh_test',
+      nextEventIndex: 10,
+      outcome: { kind: 'advanced', toNodeId: 'node_01jh_to' },
+      toNodeId: 'node_01jh_to',
+      toNodeKind: 'step',
+      snapshotRef: 'sha256:4444444444444444444444444444444444444444444444444444444444444444' as any,
+      causeKind: 'intentional_fork',
+      extraEventsToAppend: [
+        {
+          v: 1,
+          eventId: 'evt_01jh_trace',
+          kind: 'decision_trace_appended',
+          dedupeKey: 'decision_trace_appended:sess_01jh_test:trace_01jh_test',
+          scope: { runId: 'run_01jh_test', nodeId: 'node_01jh_from' },
+          data: {
+            traceId: 'trace_01jh_test',
+            entries: [
+              {
+                kind: 'selected_next_step',
+                summary: 'Selected next step phase-1b-design-deep.step-discover-philosophy.',
+                refs: [{ kind: 'step_id', stepId: 'phase-1b-design-deep.step-discover-philosophy' }],
+              },
+            ],
+          },
+        },
+      ],
+      minted: {
+        advanceRecordedEventId: 'evt_01jh_adv',
+        nodeCreatedEventId: 'evt_01jh_node',
+        edgeCreatedEventId: 'evt_01jh_edge',
+        outputEventIds: [],
+      },
+      outputsToAppend: [],
+    });
+
+    expect(res.isOk()).toBe(true);
+
+    const plan = res._unsafeUnwrap();
+    expect(plan.events.map((e) => e.kind)).toEqual([
+      'advance_recorded',
+      'decision_trace_appended',
+      'node_created',
+      'edge_created',
+    ]);
+    for (const e of plan.events) expect(() => DomainEventV1Schema.parse(e)).not.toThrow();
+  });
 });

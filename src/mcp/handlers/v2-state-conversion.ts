@@ -8,7 +8,11 @@
  */
 
 import type { EngineStateV1, LoopPathFrameV1 } from '../../v2/durable-core/schemas/execution-snapshot/index.js';
-import { asDelimiterSafeIdV1, stepInstanceKeyFromParts } from '../../v2/durable-core/schemas/execution-snapshot/step-instance-key.js';
+import {
+  asDelimiterSafeIdV1,
+  asExpandedStepIdV1,
+  stepInstanceKeyFromParts,
+} from '../../v2/durable-core/schemas/execution-snapshot/step-instance-key.js';
 import type { ExecutionState, LoopFrame } from '../../domain/execution/state.js';
 import type { RunId, NodeId } from '../../v2/durable-core/ids/index.js';
 import type { LoadedSessionTruthV2 } from '../../v2/ports/session-event-log-store.port.js';
@@ -52,7 +56,7 @@ export function convertRunningExecutionStateToEngineState(
   const completedArray: readonly string[] = [...state.completed].sort((a: string, b: string) =>
     a.localeCompare(b)
   );
-  const completed = completedArray.map(s => stepInstanceKeyFromParts(asDelimiterSafeIdV1(s), []));
+  const completed = completedArray.map(s => stepInstanceKeyFromParts(asExpandedStepIdV1(s), []));
 
   const loopStack = state.loopStack.map((f: LoopFrame) => ({
     loopId: asDelimiterSafeIdV1(f.loopId),
@@ -64,7 +68,7 @@ export function convertRunningExecutionStateToEngineState(
     ? {
         kind: 'some' as const,
         step: {
-          stepId: asDelimiterSafeIdV1(state.pendingStep.stepId),
+          stepId: asExpandedStepIdV1(state.pendingStep.stepId),
           loopPath: state.pendingStep.loopPath.map((p) => ({
             loopId: asDelimiterSafeIdV1(p.loopId),
             iteration: p.iteration,

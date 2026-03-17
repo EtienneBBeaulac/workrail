@@ -5,6 +5,7 @@ import type { Brand } from '../../../../runtime/brand.js';
 import { BlockedSnapshotV1Schema } from './blocked-snapshot.js';
 import {
   DelimiterSafeIdV1Schema,
+  ExpandedStepIdV1Schema,
   StepInstanceKeyV1Schema,
   stepInstanceKeyFromParts,
   type DelimiterSafeIdV1,
@@ -66,7 +67,7 @@ export const LoopPathFrameV1Schema = z.object({
 export type PendingStepV1 = z.infer<typeof PendingStepV1Schema>;
 
 export const PendingStepV1Schema = z.object({
-  stepId: DelimiterSafeIdV1Schema,
+  stepId: ExpandedStepIdV1Schema,
   loopPath: z.array(LoopPathFrameV1Schema),
 }).strict();
 

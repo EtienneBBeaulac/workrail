@@ -2,7 +2,7 @@ import type { V2ToolContext } from '../../types.js';
 import { V2StartWorkflowOutputSchema, toPendingStep } from '../../output-schemas.js';
 import { deriveIsComplete, derivePendingStep } from '../../../v2/durable-core/projections/snapshot-state.js';
 import type { ExecutionSnapshotFileV1 } from '../../../v2/durable-core/schemas/execution-snapshot/index.js';
-import { asDelimiterSafeIdV1 } from '../../../v2/durable-core/schemas/execution-snapshot/step-instance-key.js';
+import { asExpandedStepIdV1 } from '../../../v2/durable-core/schemas/execution-snapshot/step-instance-key.js';
 import { createWorkflow } from '../../../types/workflow.js';
 import type { DomainEventV1 } from '../../../v2/durable-core/schemas/session/index.js';
 import {
@@ -341,7 +341,7 @@ export function executeStartWorkflow(
               kind: 'running' as const,
               completed: { kind: 'set' as const, values: [] },
               loopStack: [],
-              pending: { kind: 'some' as const, step: { stepId: asDelimiterSafeIdV1(firstStep.id), loopPath: [] } },
+              pending: { kind: 'some' as const, step: { stepId: asExpandedStepIdV1(firstStep.id), loopPath: [] } },
             },
           },
         };
