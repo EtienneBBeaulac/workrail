@@ -18,23 +18,28 @@ export type SourceRef = number; // index into RegistrySnapshot.sources[]
  *
  * Philosophy: "Exhaustiveness everywhere" — three explicit selection paths.
  */
+/**
+ * All recognized variant kinds, ordered by precedence (highest first).
+ */
+export type VariantKind = 'lean' | 'v2' | 'agentic' | 'standard';
+
 export type VariantResolution =
   | { readonly kind: 'only_variant' }
   | {
       readonly kind: 'feature_flag_selected';
-      readonly selectedVariant: 'v2' | 'agentic' | 'standard';
-      readonly availableVariants: readonly ('v2' | 'agentic' | 'standard')[];
-      readonly enabledFlags: { readonly v2Tools: boolean; readonly agenticRoutines: boolean };
+      readonly selectedVariant: VariantKind;
+      readonly availableVariants: readonly VariantKind[];
+      readonly enabledFlags: { readonly v2Tools: boolean; readonly agenticRoutines: boolean; readonly leanWorkflows: boolean };
     }
   | {
       readonly kind: 'precedence_fallback';
       /**
        * Multiple variants existed, but no feature flags enabled.
-       * Precedence rule: .v2. > .agentic. > standard (independent of flags).
+       * Precedence rule: .lean. > .v2. > .agentic. > standard (independent of flags).
        * This is a fallback — the files exist but aren't being used as intended.
        */
-      readonly selectedVariant: 'v2' | 'agentic' | 'standard';
-      readonly availableVariants: readonly ('v2' | 'agentic' | 'standard')[];
+      readonly selectedVariant: VariantKind;
+      readonly availableVariants: readonly VariantKind[];
     };
 
 /**
@@ -196,7 +201,7 @@ function isBundledWorkflow(workflow: Workflow): boolean {
  * Variant candidate for a single workflow within one source.
  */
 export interface VariantCandidate {
-  readonly variantKind: 'v2' | 'agentic' | 'standard';
+  readonly variantKind: VariantKind;
   readonly identifier: string; // filename or other identifier for traceability
 }
 
@@ -206,13 +211,14 @@ export interface VariantCandidate {
 export interface VariantSelectionFlags {
   readonly v2Tools: boolean;
   readonly agenticRoutines: boolean;
+  readonly leanWorkflows: boolean;
 }
 
 /**
  * Result of variant selection for a single workflow ID within one source.
  */
 export interface VariantSelectionResult {
-  readonly selectedVariant: 'v2' | 'agentic' | 'standard';
+  readonly selectedVariant: VariantKind;
   readonly selectedIdentifier: string;
   readonly resolution: VariantResolution;
 }
@@ -251,11 +257,25 @@ export function selectVariant(
   // Multiple variants — apply precedence rules
   const availableVariants = candidates.map(c => c.variantKind);
 
+  const leanCandidate = candidates.find(c => c.variantKind === 'lean');
   const v2Candidate = candidates.find(c => c.variantKind === 'v2');
   const agenticCandidate = candidates.find(c => c.variantKind === 'agentic');
   const standardCandidate = candidates.find(c => c.variantKind === 'standard');
 
-  // Feature-flag-driven selection
+  // Feature-flag-driven selection (lean > v2 > agentic > standard)
+  if (flags.leanWorkflows && leanCandidate) {
+    return {
+      selectedVariant: 'lean',
+      selectedIdentifier: leanCandidate.identifier,
+      resolution: {
+        kind: 'feature_flag_selected',
+        selectedVariant: 'lean',
+        availableVariants,
+        enabledFlags: flags,
+      },
+    };
+  }
+
   if (flags.v2Tools && v2Candidate) {
     return {
       selectedVariant: 'v2',
@@ -295,8 +315,8 @@ export function selectVariant(
     };
   }
 
-  // No standard variant; fall back to first available (v2 > agentic by precedence)
-  const fallback = v2Candidate ?? agenticCandidate ?? candidates[0]!;
+  // No standard variant; fall back by precedence (lean > v2 > agentic)
+  const fallback = leanCandidate ?? v2Candidate ?? agenticCandidate ?? candidates[0]!;
   return {
     selectedVariant: fallback.variantKind,
     selectedIdentifier: fallback.identifier,

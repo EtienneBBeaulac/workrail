@@ -42,7 +42,7 @@ export async function findWorkflowJsonFiles(baseDirReal: string): Promise<string
 // Raw Workflow File Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type VariantKind = 'v2' | 'agentic' | 'standard';
+export type VariantKind = 'lean' | 'v2' | 'agentic' | 'standard';
 
 /**
  * A successfully parsed workflow file with metadata.
@@ -145,12 +145,14 @@ export async function scanRawWorkflowFiles(baseDirReal: string): Promise<RawWork
  * Detect variant kind from filename.
  *
  * Rules:
+ * - Contains `.lean.` → 'lean'
  * - Contains `.v2.` → 'v2'
  * - Contains `.agentic.` → 'agentic'
  * - Otherwise → 'standard'
  */
 function detectVariantKind(relativeFilePath: string): VariantKind {
   const normalized = relativeFilePath.replace(/\\/g, '/'); // normalize path separators
+  if (normalized.includes('.lean.')) return 'lean';
   if (normalized.includes('.v2.')) return 'v2';
   if (normalized.includes('.agentic.')) return 'agentic';
   return 'standard';

@@ -54,14 +54,17 @@ function extractFieldNames(schema: any): string[] {
 }
 
 describe('v2 tool schema field snapshots (anti-drift)', () => {
-  it('list_workflows: no input fields', () => {
-    expect(extractFieldNames(V2ListWorkflowsInput)).toEqual([]);
+  it('list_workflows: exact field set', () => {
+    expect(extractFieldNames(V2ListWorkflowsInput)).toEqual([
+      'workspacePath',
+    ]);
   });
 
   it('inspect_workflow: exact field set', () => {
     expect(extractFieldNames(V2InspectWorkflowInput)).toEqual([
       'mode',
       'workflowId',
+      'workspacePath',
     ]);
   });
 

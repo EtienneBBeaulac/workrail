@@ -1,0 +1,63 @@
+{
+  "id": "routine-tension-driven-design",
+  "name": "Tension-Driven Design Generation",
+  "version": "1.0.0",
+  "description": "Generates design candidates by deeply understanding a problem, identifying real tensions and constraints (including the dev's philosophy), and producing candidates that resolve those tensions differently. Each candidate includes explicit tradeoffs, failure modes, and philosophy alignment. Replaces perspective-based generation with constraint-driven generation for higher-quality, genuinely diverse candidates.",
+  "clarificationPrompts": [
+    "What problem should this design solve?",
+    "What acceptance criteria, invariants, and constraints must it respect?",
+    "Are `philosophySources` and `philosophyConflicts` available in context? (if not, I will discover from scratch)",
+    "What artifact name should I produce?"
+  ],
+  "preconditions": [
+    "Problem statement is available",
+    "Acceptance criteria and non-goals are available",
+    "Relevant files, patterns, or codebase references are available",
+    "Agent has read access to the codebase"
+  ],
+  "metaGuidance": [
+    "PURPOSE: generate genuinely different design candidates grounded in real problem tensions, not abstract perspectives.",
+    "ROLE: you are a designer, not an auditor or implementer. Think deeply about the problem before proposing solutions.",
+    "PHILOSOPHY: the dev's coding philosophy is a design constraint, not an afterthought review lens. Discover it and use it.",
+    "SIMPLICITY BIAS: always consider whether the problem even needs an architectural solution. The simplest change that works is a valid candidate.",
+    "REPO PATTERNS: study how the codebase already solves similar problems. The best design often adapts an existing pattern.",
+    "HONESTY: for each candidate, state what you gain, what you give up, and how it fails. Optimize for useful comparison, not persuasion."
+  ],
+  "steps": [
+    {
+      "id": "step-discover-philosophy",
+      "title": "Step 1: Discover the Dev's Philosophy",
+      "prompt": "Discover the dev's coding philosophy and preferences before designing anything.\n\nCheck `philosophySources` context variable first — if it contains pointers to rules, Memory entries, or repo files, go read those sources directly.\n\nIf `philosophySources` is empty or unavailable, discover from scratch:\n1. Memory MCP (if available): call `mcp_memory_conventions`, `mcp_memory_prefer`, `mcp_memory_recall` to retrieve learned preferences\n2. Active session rules / Firebender rules: read any rules or philosophy documents in context\n3. Repo patterns: infer preferences from how the codebase works — error handling, mutability, test style, architecture\n\nNote any `philosophyConflicts` (stated rules vs actual repo patterns).\n\nWorking notes:\n- Philosophy sources consulted\n- Key principles discovered\n- Conflicts between stated and practiced philosophy\n- Which principles are likely to constrain this design",
+      "agentRole": "You are discovering what the dev actually cares about before designing solutions.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-understand-deeply",
+      "title": "Step 2: Understand the Problem Deeply",
+      "prompt": "Understand the problem before proposing anything.\n\nReason through:\n- What are the core tensions in this problem? (e.g., performance vs simplicity, flexibility vs type safety, backward compatibility vs clean design)\n- How does the codebase already solve similar problems? Study the most relevant existing patterns — analyze the architectural decisions and constraints they protect, not just list files.\n- What's the simplest naive solution? Why is it insufficient? (If it IS sufficient, note that — it may be the best candidate.)\n- What makes this problem hard? What would a junior developer miss?\n- Which of the dev's philosophy principles are under pressure from this problem's constraints?\n\nWorking notes:\n- Core tensions (2-4 real tradeoffs, not generic labels)\n- Existing patterns analysis (decisions, invariants they protect)\n- Naive solution and why it's insufficient (or sufficient)\n- What makes this hard\n- Philosophy principles under pressure",
+      "agentRole": "You are reasoning deeply about the problem space before generating any solutions.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-generate-candidates",
+      "title": "Step 3: Generate Candidates from Tensions",
+      "prompt": "Generate design candidates that resolve the identified tensions differently.\n\nMANDATORY candidates:\n1. The simplest possible change that satisfies acceptance criteria. If the problem doesn't need an architectural solution, say so.\n2. Follow the existing repo pattern — adapt what the codebase already does for similar problems. Don't invent when you can adapt.\n\nAdditional candidates (1-2 more):\n- Each must resolve the identified tensions DIFFERENTLY, not just vary surface details\n- Each must be grounded in a real constraint or tradeoff, not an abstract perspective label\n- Consider philosophy conflicts: if the stated philosophy disagrees with repo patterns, one candidate could follow the stated philosophy and another could follow the established pattern\n\nFor each candidate, produce:\n- One-sentence summary of the approach\n- Which tensions it resolves and which it accepts\n- The specific failure mode you'd watch for\n- How it relates to existing repo patterns (follows / adapts / departs)\n- What you gain and what you give up\n- Which philosophy principles it honors and which it conflicts with (by name)\n\nRules:\n- candidates must be genuinely different in shape, not just wording\n- if all candidates converge on the same approach, that's signal — note it honestly rather than manufacturing fake diversity\n- cite specific files or patterns when they materially shape a candidate",
+      "agentRole": "You are generating genuinely diverse design candidates grounded in real tensions.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-compare-and-recommend",
+      "title": "Step 4: Compare via Tradeoffs and Recommend",
+      "prompt": "Compare candidates through tradeoff analysis, not checklists.\n\nFor the set of candidates, assess:\n- Which tensions does each resolve best?\n- Which has the most manageable failure mode?\n- Which best fits the dev's philosophy? Where are the philosophy conflicts?\n- Which is most consistent with existing repo patterns?\n- Which would be easiest to evolve or reverse if assumptions are wrong?\n\nProduce a clear recommendation with rationale tied back to tensions and philosophy. If two candidates are close, say so and explain what would tip the decision.\n\nSelf-critique your recommendation:\n- What's the strongest argument against your pick?\n- What would make you switch to a different candidate?\n- What assumption, if wrong, would invalidate this design?\n\nWorking notes:\n- Comparison matrix (tensions x candidates)\n- Recommendation and rationale\n- Strongest counter-argument\n- Pivot conditions",
+      "agentRole": "You are comparing candidates honestly and recommending based on tradeoffs, not advocacy.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-deliver",
+      "title": "Step 5: Deliver the Design Candidates",
+      "prompt": "Create `{deliverableName}`.\n\nRequired structure:\n- Problem Understanding (tensions, what makes it hard)\n- Philosophy Constraints (which principles matter, any conflicts)\n- Candidates (each with: summary, tensions resolved/accepted, failure mode, repo-pattern relationship, gains/losses, philosophy fit)\n- Comparison and Recommendation\n- Self-Critique (strongest counter-argument, pivot conditions)\n- Open Questions for the Main Agent\n\nThe main agent will interrogate this output — it is raw investigative material, not a final decision. Optimize for honest, useful analysis over polished presentation.",
+      "agentRole": "You are delivering design analysis for the main agent to interrogate and build on.",
+      "requireConfirmation": false
+    }
+  ]
+}

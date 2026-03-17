@@ -71,6 +71,14 @@ export const FEATURE_FLAG_DEFINITIONS: ReadonlyArray<FeatureFlagDefinition> = [
     stable: false,
   },
   {
+    key: 'leanWorkflows',
+    envVar: 'WORKRAIL_ENABLE_LEAN_WORKFLOWS',
+    defaultValue: false,
+    description: 'Enable lean workflow variants (.lean.) that merge phases and reduce token usage while preserving quality',
+    since: '0.10.0',
+    stable: false,
+  },
+  {
     key: 'authoritativeDescriptions',
     envVar: 'WORKRAIL_AUTHORITATIVE_DESCRIPTIONS',
     defaultValue: false,

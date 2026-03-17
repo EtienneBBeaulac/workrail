@@ -13,24 +13,35 @@ import type { JsonValue } from '../../v2/durable-core/canonical/json-types.js';
 const TIMEOUT_MS = 30_000;
 
 import { withTimeout } from './shared/with-timeout.js';
+import { createWorkflowReaderForRequest, hasRequestWorkspaceSignal } from './shared/request-workflow-reader.js';
 
 export async function handleV2ListWorkflows(
-  _input: V2ListWorkflowsInput,
+  input: V2ListWorkflowsInput,
   ctx: ToolContext
 ): Promise<ToolResult<unknown>> {
   const guard = requireV2Context(ctx);
   if (!guard.ok) return guard.error;
   const { crypto, pinnedStore } = guard.ctx.v2;
+  const workflowReader = hasRequestWorkspaceSignal({
+    workspacePath: input.workspacePath,
+    resolvedRootUris: guard.ctx.v2.resolvedRootUris,
+  })
+    ? createWorkflowReaderForRequest({
+        featureFlags: ctx.featureFlags,
+        workspacePath: input.workspacePath,
+        resolvedRootUris: guard.ctx.v2.resolvedRootUris,
+      })
+    : ctx.workflowService;
 
   return ResultAsync.fromPromise(
-    withTimeout(ctx.workflowService.listWorkflowSummaries(), TIMEOUT_MS, 'list_workflows'),
+    withTimeout(workflowReader.listWorkflowSummaries(), TIMEOUT_MS, 'list_workflows'),
     (err) => mapUnknownErrorToToolError(err)
   )
     .andThen((summaries) =>
       ResultAsync.combine(
         summaries.map((s) =>
           ResultAsync.fromPromise(
-            ctx.workflowService.getWorkflowById(s.id),
+            workflowReader.getWorkflowById(s.id),
             (err) => mapUnknownErrorToToolError(err)
           ).andThen((wf) => {
             if (!wf) {
@@ -107,9 +118,19 @@ export async function handleV2InspectWorkflow(
   const guard = requireV2Context(ctx);
   if (!guard.ok) return guard.error;
   const { crypto, pinnedStore } = guard.ctx.v2;
+  const workflowReader = hasRequestWorkspaceSignal({
+    workspacePath: input.workspacePath,
+    resolvedRootUris: guard.ctx.v2.resolvedRootUris,
+  })
+    ? createWorkflowReaderForRequest({
+        featureFlags: ctx.featureFlags,
+        workspacePath: input.workspacePath,
+        resolvedRootUris: guard.ctx.v2.resolvedRootUris,
+      })
+    : ctx.workflowService;
 
   return ResultAsync.fromPromise(
-    withTimeout(ctx.workflowService.getWorkflowById(input.workflowId), TIMEOUT_MS, 'inspect_workflow'),
+    withTimeout(workflowReader.getWorkflowById(input.workflowId), TIMEOUT_MS, 'inspect_workflow'),
     (err) => mapUnknownErrorToToolError(err)
   )
     .andThen((workflow) => {

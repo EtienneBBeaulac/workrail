@@ -132,6 +132,10 @@ export class FileWorkflowStorage implements IWorkflowStorage {
             continue;
           }
         }
+        // Skip lean workflow variants unless lean workflows are enabled.
+        if (!this.featureFlags.isEnabled('leanWorkflows') && file.includes('.lean.')) {
+          continue;
+        }
         // Skip v2-only workflow variants unless v2 tools are enabled.
         if (!this.featureFlags.isEnabled('v2Tools') && file.includes('.v2.')) {
           continue;
@@ -160,12 +164,14 @@ export class FileWorkflowStorage implements IWorkflowStorage {
     const flags = {
       v2Tools: this.featureFlags.isEnabled('v2Tools'),
       agenticRoutines: this.featureFlags.isEnabled('agenticRoutines'),
+      leanWorkflows: this.featureFlags.isEnabled('leanWorkflows'),
     };
 
     for (const [id, files] of idToFiles) {
       // Build variant candidates from file entries
       const candidates: VariantCandidate[] = files.map(f => ({
-        variantKind: f.file.includes('.v2.') ? 'v2' as const
+        variantKind: f.file.includes('.lean.') ? 'lean' as const
+                   : f.file.includes('.v2.') ? 'v2' as const
                    : f.file.includes('.agentic.') ? 'agentic' as const
                    : 'standard' as const,
         identifier: f.file,
