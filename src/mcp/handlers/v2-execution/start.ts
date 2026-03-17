@@ -1,5 +1,5 @@
 import type { V2ToolContext } from '../../types.js';
-import { V2StartWorkflowOutputSchema } from '../../output-schemas.js';
+import { V2StartWorkflowOutputSchema, toPendingStep } from '../../output-schemas.js';
 import { deriveIsComplete, derivePendingStep } from '../../../v2/durable-core/projections/snapshot-state.js';
 import type { ExecutionSnapshotFileV1 } from '../../../v2/durable-core/schemas/execution-snapshot/index.js';
 import { asDelimiterSafeIdV1 } from '../../../v2/durable-core/schemas/execution-snapshot/step-instance-key.js';
@@ -32,7 +32,7 @@ import {
 import { renderPendingPrompt } from '../../../v2/durable-core/domain/prompt-renderer.js';
 import { resolveWorkspaceAnchors } from '../v2-workspace-resolution.js';
 import * as z from 'zod';
-import { newAttemptId, signTokenOrErr } from '../v2-token-ops.js';
+import { newAttemptId, mintContinueAndCheckpointTokens } from '../v2-token-ops.js';
 import { mapWorkflowSourceKind, deriveNextIntent } from '../v2-state-conversion.js';
 import { defaultPreferences } from '../v2-execution-helpers.js';
 import { EVENT_KIND } from '../../../v2/durable-core/constants.js';
@@ -262,6 +262,8 @@ export function buildInitialEvents(args: {
 
 /**
  * Mint state, ack, and checkpoint tokens for a new workflow session.
+ *
+ * Emits v2 short tokens (~27 chars) and registers alias entries durably.
  */
 export function mintStartTokens(args: {
   readonly sessionId: SessionId;
@@ -270,67 +272,34 @@ export function mintStartTokens(args: {
   readonly attemptId: import('../../../v2/durable-core/tokens/index.js').AttemptId;
   readonly workflowHashRef: import('../../../v2/durable-core/ids/index.js').WorkflowHashRef;
   readonly ports: TokenCodecPorts;
+  readonly aliasStore: import('../../../v2/ports/token-alias-store.port.js').TokenAliasStorePortV2;
+  readonly entropy: import('../../../v2/ports/random-entropy.port.js').RandomEntropyPortV2;
 }): RA<{
-  readonly stateToken: string;
-  readonly ackToken: string;
+  readonly continueToken: string;
   readonly checkpointToken: string;
 }, StartWorkflowError> {
-  const { sessionId, runId, nodeId, attemptId, workflowHashRef, ports } = args;
+  const { sessionId, runId, nodeId, attemptId, workflowHashRef, ports, aliasStore, entropy } = args;
 
-  const statePayload = {
-    tokenVersion: 1 as const,
-    tokenKind: 'state' as const,
-    sessionId,
-    runId,
-    nodeId,
-    workflowHashRef,
+  const entryBase = {
+    sessionId: String(sessionId),
+    runId: String(runId),
+    nodeId: String(nodeId),
+    attemptId: String(attemptId),
+    workflowHashRef: String(workflowHashRef),
   };
 
-  const ackPayload = {
-    tokenVersion: 1 as const,
-    tokenKind: 'ack' as const,
-    sessionId,
-    runId,
-    nodeId,
-    attemptId,
-  };
-
-  const checkpointPayload = {
-    tokenVersion: 1 as const,
-    tokenKind: 'checkpoint' as const,
-    sessionId,
-    runId,
-    nodeId,
-    attemptId,
-  };
-
-  const stateTokenRes = signTokenOrErr({ payload: statePayload, ports });
-  if (stateTokenRes.isErr()) {
-    return neErrorAsync({ kind: 'token_signing_failed' as const, cause: stateTokenRes.error });
-  }
-
-  const ackTokenRes = signTokenOrErr({ payload: ackPayload, ports });
-  if (ackTokenRes.isErr()) {
-    return neErrorAsync({ kind: 'token_signing_failed' as const, cause: ackTokenRes.error });
-  }
-
-  const checkpointTokenRes = signTokenOrErr({ payload: checkpointPayload, ports });
-  if (checkpointTokenRes.isErr()) {
-    return neErrorAsync({ kind: 'token_signing_failed' as const, cause: checkpointTokenRes.error });
-  }
-
-  return okAsync({
-    stateToken: stateTokenRes.value,
-    ackToken: ackTokenRes.value,
-    checkpointToken: checkpointTokenRes.value,
-  });
+  return mintContinueAndCheckpointTokens({ entry: entryBase, ports, aliasStore, entropy })
+    .mapErr((failure) => ({
+      kind: 'token_signing_failed' as const,
+      cause: failure as unknown as import('../../../v2/durable-core/tokens/index.js').TokenSignErrorV2,
+    }));
 }
 
 export function executeStartWorkflow(
   input: import('../../v2/tools.js').V2StartWorkflowInput,
   ctx: V2ToolContext
 ): RA<z.infer<typeof V2StartWorkflowOutputSchema>, StartWorkflowError> {
-  const { gate, sessionStore, snapshotStore, pinnedStore, crypto, tokenCodecPorts, idFactory, validationPipelineDeps } = ctx.v2;
+  const { gate, sessionStore, snapshotStore, pinnedStore, crypto, tokenCodecPorts, idFactory, validationPipelineDeps, tokenAliasStore, entropy } = ctx.v2;
   const workflowReader = hasRequestWorkspaceSignal({
     workspacePath: input.workspacePath,
     resolvedRootUris: ctx.v2.resolvedRootUris,
@@ -436,6 +405,8 @@ export function executeStartWorkflow(
         attemptId,
         workflowHashRef: wfRefRes.value,
         ports: tokenCodecPorts,
+        aliasStore: tokenAliasStore,
+        entropy,
       }).andThen((tokens) => {
         // 7. Render pending step and build response
         const metaResult = renderPendingPrompt({
@@ -456,19 +427,18 @@ export function executeStartWorkflow(
         }
 
         const meta = metaResult.value;
-        const pending = { stepId: meta.stepId, title: meta.title, prompt: meta.prompt };
+        const pending = toPendingStep(meta);
         const preferences = defaultPreferences;
         const nextIntent = deriveNextIntent({ rehydrateOnly: false, isComplete: false, pending: meta });
 
         return okAsync(V2StartWorkflowOutputSchema.parse({
-          stateToken: tokens.stateToken,
-          ackToken: tokens.ackToken,
+          continueToken: tokens.continueToken,
           checkpointToken: tokens.checkpointToken,
           isComplete: false,
           pending,
           preferences,
           nextIntent,
-          nextCall: buildNextCall({ stateToken: tokens.stateToken, ackToken: tokens.ackToken, isComplete: false, pending }),
+          nextCall: buildNextCall({ continueToken: tokens.continueToken, isComplete: false, pending }),
         }));
       });
     });

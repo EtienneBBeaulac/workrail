@@ -203,4 +203,125 @@ describe('resolveTemplatesPass', () => {
       expect(JSON.stringify(a)).toBe(JSON.stringify(b));
     });
   });
+
+  describe('with routine-derived registry', () => {
+    // Integration test: routine JSON -> template registry -> resolveTemplatesPass
+    const routineDefinitions = new Map([
+      ['routine-test-design', {
+        id: 'routine-test-design',
+        name: 'Test Design Routine',
+        description: 'A test design routine',
+        version: '1.0.0',
+        metaGuidance: ['Think deeply about the problem.'],
+        steps: [
+          { id: 'step-understand', title: 'Understand', prompt: 'Understand the problem for {deliverableName}.', agentRole: 'You are a designer.' },
+          { id: 'step-generate', title: 'Generate', prompt: 'Generate candidates.' },
+          { id: 'step-deliver', title: 'Deliver', prompt: 'Create `{deliverableName}`.' },
+        ],
+      }],
+    ]);
+
+    const routineRegistry = createTemplateRegistry(routineDefinitions as any);
+
+    it('expands routine-derived template via resolveTemplatesPass', () => {
+      const steps: WorkflowStepDefinition[] = [
+        { id: 'before', title: 'Before', prompt: 'Before step.' },
+        {
+          id: 'phase-1-design',
+          title: 'Phase 1: Design',
+          templateCall: {
+            templateId: 'wr.templates.routine.test-design',
+            args: { deliverableName: 'design-candidates.md' },
+          },
+        },
+        { id: 'after', title: 'After', prompt: 'After step.' },
+      ];
+
+      const result = resolveTemplatesPass(steps, routineRegistry);
+      expect(result.isOk()).toBe(true);
+      const resolved = result._unsafeUnwrap();
+
+      // 1 before + 3 routine steps + 1 after = 5
+      expect(resolved).toHaveLength(5);
+      expect(resolved[0]!.id).toBe('before');
+      expect(resolved[1]!.id).toBe('phase-1-design.step-understand');
+      expect(resolved[2]!.id).toBe('phase-1-design.step-generate');
+      expect(resolved[3]!.id).toBe('phase-1-design.step-deliver');
+      expect(resolved[4]!.id).toBe('after');
+    });
+
+    it('substitutes args in expanded routine step prompts', () => {
+      const steps: WorkflowStepDefinition[] = [
+        {
+          id: 'design',
+          title: 'Design',
+          templateCall: {
+            templateId: 'wr.templates.routine.test-design',
+            args: { deliverableName: 'output.md' },
+          },
+        },
+      ];
+
+      const resolved = resolveTemplatesPass(steps, routineRegistry)._unsafeUnwrap();
+      expect((resolved[0] as WorkflowStepDefinition).prompt).toBe('Understand the problem for output.md.');
+      expect((resolved[2] as WorkflowStepDefinition).prompt).toBe('Create `output.md`.');
+    });
+
+    it('injects routine metaGuidance as step-level guidance', () => {
+      const steps: WorkflowStepDefinition[] = [
+        {
+          id: 'design',
+          title: 'Design',
+          templateCall: {
+            templateId: 'wr.templates.routine.test-design',
+            args: { deliverableName: 'output.md' },
+          },
+        },
+      ];
+
+      const resolved = resolveTemplatesPass(steps, routineRegistry)._unsafeUnwrap();
+      // All expanded steps should have the routine metaGuidance as guidance
+      for (const step of resolved) {
+        expect((step as WorkflowStepDefinition).guidance).toContain('Think deeply about the problem.');
+      }
+    });
+
+    it('preserves agentRole from routine steps', () => {
+      const steps: WorkflowStepDefinition[] = [
+        {
+          id: 'design',
+          title: 'Design',
+          templateCall: {
+            templateId: 'wr.templates.routine.test-design',
+            args: { deliverableName: 'output.md' },
+          },
+        },
+      ];
+
+      const resolved = resolveTemplatesPass(steps, routineRegistry)._unsafeUnwrap();
+      expect((resolved[0] as WorkflowStepDefinition).agentRole).toBe('You are a designer.');
+      // Steps without agentRole should not have it
+      expect((resolved[1] as WorkflowStepDefinition).agentRole).toBeUndefined();
+    });
+
+    it('fails when required args are missing', () => {
+      const steps: WorkflowStepDefinition[] = [
+        {
+          id: 'design',
+          title: 'Design',
+          templateCall: {
+            templateId: 'wr.templates.routine.test-design',
+            args: {}, // missing deliverableName
+          },
+        },
+      ];
+
+      const result = resolveTemplatesPass(steps, routineRegistry);
+      expect(result.isErr()).toBe(true);
+      const error = result._unsafeUnwrapErr();
+      expect(error.code).toBe('TEMPLATE_EXPAND_ERROR');
+      expect(error.cause.message).toContain('MISSING_TEMPLATE_ARG');
+      expect(error.cause.message).toContain('deliverableName');
+    });
+  });
 });

@@ -40,8 +40,19 @@ import { IdFactoryV2 } from '../../../src/v2/infra/local/id-factory/index.js';
 import { Bech32mAdapterV2 } from '../../../src/v2/infra/local/bech32m/index.js';
 import { Base32AdapterV2 } from '../../../src/v2/infra/local/base32/index.js';
 import { unsafeTokenCodecPorts } from '../../../src/v2/durable-core/tokens/index.js';
-import { parseCheckpointTokenOrFail } from '../../../src/mcp/handlers/v2-token-ops.js';
+import { parseShortTokenNative } from '../../../src/v2/durable-core/tokens/short-token.js';
 import { asSessionId } from '../../../src/v2/durable-core/ids/index.js';
+import { InMemoryTokenAliasStoreV2 } from '../../../src/v2/infra/in-memory/token-alias-store/index.js';
+import type { TokenAliasStorePortV2 } from '../../../src/v2/ports/token-alias-store.port.js';
+
+/** Extract sessionId from a v2 short token via the alias store. */
+function resolveSessionIdFromToken(token: string, aliasStore: TokenAliasStorePortV2): string {
+  const parsed = parseShortTokenNative(token);
+  if (!parsed) throw new Error(`Short token parse failed for: ${token}`);
+  const entry = aliasStore.lookup(parsed.nonceHex);
+  if (!entry) throw new Error(`No alias found for token nonce: ${parsed.nonceHex}`);
+  return entry.sessionId;
+}
 
 async function mkV2Deps() {
   const dataDir = new LocalDataDirV2(process.env);
@@ -63,7 +74,8 @@ async function mkV2Deps() {
   const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url, entropy);
   const keyring = await keyringPort.loadOrCreate().match(v => v, e => { throw new Error(`keyring: ${e.code}`); });
   const tokenCodecPorts = unsafeTokenCodecPorts({ keyring, hmac, base64url, base32, bech32m });
-  return { gate, sessionStore, snapshotStore, pinnedStore, sha256, crypto, idFactory, tokenCodecPorts, validationPipelineDeps: createTestValidationPipelineDeps() };
+  const tokenAliasStore = new InMemoryTokenAliasStoreV2();
+  return { gate, sessionStore, snapshotStore, pinnedStore, sha256, crypto, idFactory, entropy, tokenCodecPorts, tokenAliasStore, validationPipelineDeps: createTestValidationPipelineDeps() };
 }
 
 describe('handleV2CheckpointWorkflow (integration)', () => {
@@ -130,7 +142,7 @@ describe('handleV2CheckpointWorkflow (integration)', () => {
     if (result.type !== 'success') return;
     expect(result.data.checkpointNodeId).toBeDefined();
     expect(result.data.checkpointNodeId).not.toBe('unknown');
-    expect(result.data.stateToken).toMatch(/^st1/);
+    expect(result.data.stateToken).toMatch(/^st[1_]/);
   });
 
   it('is idempotent — same checkpointToken returns same checkpointNodeId', async () => {
@@ -145,7 +157,7 @@ describe('handleV2CheckpointWorkflow (integration)', () => {
     if (r1.type !== 'success' || r2.type !== 'success') return;
 
     expect(r2.data.checkpointNodeId).toBe(r1.data.checkpointNodeId);
-    expect(r2.data.stateToken).toMatch(/^st1/);
+    expect(r2.data.stateToken).toMatch(/^st[1_]/);
   });
 
   it('agent can continue_workflow after checkpoint with the returned stateToken', async () => {
@@ -156,8 +168,8 @@ describe('handleV2CheckpointWorkflow (integration)', () => {
     expect(cp.type).toBe('success');
     if (cp.type !== 'success') return;
 
-    // Resume from checkpoint — rehydrate to same pending step
-    const resume = await handleV2ContinueWorkflow({ stateToken: cp.data.stateToken, intent: 'rehydrate' } as any, ctx);
+    // Resume from checkpoint — use the nextCall's continueToken to rehydrate
+    const resume = await handleV2ContinueWorkflow({ continueToken: cp.data.nextCall.params.continueToken, intent: 'rehydrate' } as any, ctx);
     if (resume.type === 'error') console.error('Continue after checkpoint error:', JSON.stringify(resume));
     expect(resume.type).toBe('success');
     if (resume.type !== 'success') return;
@@ -174,8 +186,8 @@ describe('handleV2CheckpointWorkflow (integration)', () => {
     const ctx = await buildCtx();
     const start = await startWorkflow(ctx);
 
-    // Pass stateToken where checkpointToken is expected — different token kind
-    const result = await handleV2CheckpointWorkflow({ checkpointToken: start.stateToken }, ctx);
+    // Pass continueToken where checkpointToken is expected — different token kind
+    const result = await handleV2CheckpointWorkflow({ checkpointToken: start.continueToken }, ctx);
     expect(result.type).toBe('error');
   });
 
@@ -187,11 +199,7 @@ describe('handleV2CheckpointWorkflow (integration)', () => {
     expect(cp.type).toBe('success');
 
     // Load session truth to verify durable events
-    const parsed = parseCheckpointTokenOrFail(start.checkpointToken, ctx.v2!.tokenCodecPorts!);
-    expect(parsed.ok).toBe(true);
-    if (!parsed.ok) return;
-
-    const sessionId = asSessionId(String(parsed.token.payload.sessionId));
+    const sessionId = asSessionId(resolveSessionIdFromToken(start.checkpointToken, ctx.v2!.tokenAliasStore!));
     const truthRes = await ctx.v2!.sessionStore.load(sessionId);
     if (truthRes.isErr()) {
       console.error('Session load error:', JSON.stringify(truthRes.error));
@@ -223,11 +231,7 @@ describe('handleV2CheckpointWorkflow (integration)', () => {
     if (r1.type === 'error') console.error('Checkpoint 1 error:', JSON.stringify(r1));
     if (r2.type === 'error') console.error('Checkpoint 2 error:', JSON.stringify(r2));
 
-    const parsed = parseCheckpointTokenOrFail(start.checkpointToken, ctx.v2!.tokenCodecPorts!);
-    expect(parsed.ok).toBe(true);
-    if (!parsed.ok) return;
-
-    const sessionId = asSessionId(String(parsed.token.payload.sessionId));
+    const sessionId = asSessionId(resolveSessionIdFromToken(start.checkpointToken, ctx.v2!.tokenAliasStore!));
     const truthRes = await ctx.v2!.sessionStore.load(sessionId);
     if (truthRes.isErr()) {
       console.error('Session load error:', JSON.stringify(truthRes.error));

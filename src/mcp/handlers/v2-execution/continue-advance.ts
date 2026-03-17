@@ -49,8 +49,10 @@ export function handleAdvanceIntent(args: {
   readonly tokenCodecPorts: TokenCodecPorts;
   readonly idFactory: { readonly mintNodeId: () => NodeId; readonly mintEventId: () => string };
   readonly sha256: Sha256PortV2;
+  readonly aliasStore: import('../../../v2/ports/token-alias-store.port.js').TokenAliasStorePortV2;
+  readonly entropy: import('../../../v2/ports/random-entropy.port.js').RandomEntropyPortV2;
 }): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, ContinueWorkflowError> {
-  const { input, sessionId, runId, nodeId, attemptId, workflowHashRef, truth, gate, sessionStore, snapshotStore, pinnedStore, tokenCodecPorts, idFactory, sha256 } = args;
+  const { input, sessionId, runId, nodeId, attemptId, workflowHashRef, truth, gate, sessionStore, snapshotStore, pinnedStore, tokenCodecPorts, idFactory, sha256, aliasStore, entropy } = args;
 
   const dedupeKey = `advance_recorded:${sessionId}:${nodeId}:${attemptId}`;
 
@@ -136,12 +138,12 @@ export function handleAdvanceIntent(args: {
           nodeId,
           workflowHash,
           attemptId,
-          inputStateToken: input.stateToken,
-          inputAckToken: input.ackToken!,
           pinnedWorkflow,
           snapshotStore,
           sha256,
           tokenCodecPorts,
+          aliasStore,
+          entropy,
         });
       }
 
@@ -231,12 +233,12 @@ export function handleAdvanceIntent(args: {
             nodeId,
             workflowHash,
             attemptId,
-            inputStateToken: input.stateToken,
-            inputAckToken: input.ackToken!,
             pinnedWorkflow,
             snapshotStore,
             sha256,
             tokenCodecPorts,
+            aliasStore,
+            entropy,
           });
         });
     });

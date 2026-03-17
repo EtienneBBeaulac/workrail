@@ -14,6 +14,13 @@
   "bin": {
     "workrail": "dist/mcp-server.js"
   },
+  "exports": {
+    ".": "./dist/mcp-server.js",
+    "./engine": {
+      "import": "./dist/engine/index.js",
+      "types": "./dist/engine/index.d.ts"
+    }
+  },
   "files": [
     "dist",
     "spec",

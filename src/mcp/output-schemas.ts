@@ -1,5 +1,10 @@
 import { z } from 'zod';
 import { ExecutionStateSchema } from '../domain/execution/state.js';
+import {
+  STATE_TOKEN_PATTERN,
+  CHECKPOINT_TOKEN_PATTERN,
+  CONTINUE_TOKEN_PATTERN,
+} from '../v2/durable-core/tokens/token-patterns.js';
 
 // -----------------------------------------------------------------------------
 // JSON-safe value schema (prevents undefined / functions leaking across boundary)
@@ -103,7 +108,29 @@ export const V2PendingStepSchema = z.object({
   stepId: z.string().min(1),
   title: z.string().min(1),
   prompt: z.string().min(1),
+  agentRole: z.string().min(1).optional(),
 });
+
+export type V2PendingStep = z.infer<typeof V2PendingStepSchema>;
+
+/**
+ * Single construction point for pending step payloads.
+ * Prevents field-list drift across the 5+ call sites that build pending steps.
+ */
+export function toPendingStep(meta: {
+  readonly stepId: string;
+  readonly title: string;
+  readonly prompt: string;
+  readonly agentRole?: string;
+} | null): V2PendingStep | null {
+  if (!meta) return null;
+  return {
+    stepId: meta.stepId,
+    title: meta.title,
+    prompt: meta.prompt,
+    ...(meta.agentRole ? { agentRole: meta.agentRole } : {}),
+  };
+}
 
 export const V2PreferencesSchema = z.object({
   autonomy: z.enum(['guided', 'full_auto_stop_on_user_deps', 'full_auto_never_stop']),
@@ -119,19 +146,9 @@ export const V2NextIntentSchema = z.enum([
 
 // Pre-built continuation template: tells the agent exactly what to call when done.
 // null when workflow is complete or blocked non-retryable (nothing to call).
-// Discriminated union: advance always has ackToken, rehydrate never does.
-const V2NextCallAdvanceParams = z.object({
-  intent: z.literal('advance'),
-  stateToken: z.string().min(1),
-  ackToken: z.string().min(1),
-});
-const V2NextCallRehydrateParams = z.object({
-  intent: z.literal('rehydrate'),
-  stateToken: z.string().min(1),
-});
 export const V2NextCallSchema = z.object({
   tool: z.literal('continue_workflow'),
-  params: z.discriminatedUnion('intent', [V2NextCallAdvanceParams, V2NextCallRehydrateParams]),
+  params: z.object({ continueToken: z.string().min(1) }),
 }).nullable();
 
 function utf8ByteLength(s: string): number {
@@ -227,13 +244,15 @@ export const V2BlockerReportSchema = z
     }
   });
 
-// Checkpoint token format: chk1<bech32m chars>
-const checkpointTokenSchema = z.string().regex(/^chk1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid checkpointToken format').optional();
+// Checkpoint token format: chk1<bech32m> or ck_<base64url-24>
+const checkpointTokenSchema = z.string().regex(CHECKPOINT_TOKEN_PATTERN, 'Invalid checkpointToken format').optional();
+
+// continueToken format: ct_<base64url-24> only (v2-only concept)
+const continueTokenSchema = z.string().regex(CONTINUE_TOKEN_PATTERN, 'Invalid continueToken format').optional();
 
 const V2ContinueWorkflowOkSchema = z.object({
   kind: z.literal('ok'),
-  stateToken: z.string().regex(/^st1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid stateToken format'),
-  ackToken: z.string().regex(/^ack1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid ackToken format').optional(),
+  continueToken: continueTokenSchema,
   checkpointToken: checkpointTokenSchema,
   isComplete: z.boolean(),
   pending: V2PendingStepSchema.nullable(),
@@ -244,8 +263,7 @@ const V2ContinueWorkflowOkSchema = z.object({
 
 const V2ContinueWorkflowBlockedSchema = z.object({
   kind: z.literal('blocked'),
-  stateToken: z.string().regex(/^st1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid stateToken format'),
-  ackToken: z.string().regex(/^ack1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid ackToken format').optional(),
+  continueToken: continueTokenSchema,
   checkpointToken: checkpointTokenSchema,
   isComplete: z.boolean(),
   pending: V2PendingStepSchema.nullable(),
@@ -253,9 +271,8 @@ const V2ContinueWorkflowBlockedSchema = z.object({
   nextIntent: V2NextIntentSchema,
   nextCall: V2NextCallSchema,
   blockers: V2BlockerReportSchema,
-  // Additive (backward compatible): enables one-call retry for retryable blocks
   retryable: z.boolean().optional(),
-  retryAckToken: z.string().optional(),
+  retryContinueToken: z.string().optional(),
   validation: z
     .object({
       issues: z.array(z.string()),
@@ -268,15 +285,15 @@ export const V2ContinueWorkflowOutputSchema = z.discriminatedUnion('kind', [
   V2ContinueWorkflowOkSchema,
   V2ContinueWorkflowBlockedSchema,
 ]).refine(
-  (data) => (data.pending ? data.ackToken != null : true),
-  { message: 'ackToken is required when a pending step exists' }
+  (data) => (data.pending ? data.continueToken != null : true),
+  { message: 'continueToken is required when a pending step exists' }
 );
 
 export const V2ResumeSessionOutputSchema = z.object({
   candidates: z.array(z.object({
     sessionId: z.string().min(1),
     runId: z.string().min(1),
-    stateToken: z.string().regex(/^st1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid stateToken format'),
+    stateToken: z.string().regex(STATE_TOKEN_PATTERN, 'Invalid stateToken format'),
     snippet: z.string().max(1024),
     whyMatched: z.array(z.enum([
       'matched_head_sha',
@@ -291,7 +308,7 @@ export const V2ResumeSessionOutputSchema = z.object({
 
 export const V2CheckpointWorkflowOutputSchema = z.object({
   checkpointNodeId: z.string().min(1),
-  stateToken: z.string().regex(/^st1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid stateToken format'),
+  stateToken: z.string().regex(STATE_TOKEN_PATTERN, 'Invalid stateToken format'),
   nextCall: V2NextCallSchema.describe(
     'Pre-built template for your next continue_workflow call. ' +
     'After checkpoint, use this to rehydrate and continue working on the current step.'
@@ -299,8 +316,7 @@ export const V2CheckpointWorkflowOutputSchema = z.object({
 });
 
 export const V2StartWorkflowOutputSchema = z.object({
-  stateToken: z.string().regex(/^st1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid stateToken format'),
-  ackToken: z.string().regex(/^ack1[023456789acdefghjklmnpqrstuvwxyz]+$/, 'Invalid ackToken format').optional(),
+  continueToken: continueTokenSchema,
   checkpointToken: checkpointTokenSchema,
   isComplete: z.boolean(),
   pending: V2PendingStepSchema.nullable(),
@@ -308,8 +324,8 @@ export const V2StartWorkflowOutputSchema = z.object({
   nextIntent: V2NextIntentSchema,
   nextCall: V2NextCallSchema,
 }).refine(
-  (data) => (data.pending ? data.ackToken != null : true),
-  { message: 'ackToken is required when a pending step exists' }
+  (data) => (data.pending ? data.continueToken != null : true),
+  { message: 'continueToken is required when a pending step exists' }
 );
 
 // -----------------------------------------------------------------------------

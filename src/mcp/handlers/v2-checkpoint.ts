@@ -15,7 +15,7 @@ import type { ToolContext, ToolResult, V2ToolContext } from '../types.js';
 import { success, errNotRetryable, requireV2Context } from '../types.js';
 import type { V2CheckpointWorkflowInput } from '../v2/tools.js';
 import { V2CheckpointWorkflowOutputSchema } from '../output-schemas.js';
-import { parseCheckpointTokenOrFail, signTokenOrErr } from './v2-token-ops.js';
+import { parseCheckpointTokenOrFail, mintSingleShortToken, mintContinueAndCheckpointTokens } from './v2-token-ops.js';
 import { type ToolFailure, mapExecutionSessionGateErrorToToolError } from './v2-execution-helpers.js';
 import type { SessionId, NodeId, RunId, AttemptId } from '../../v2/durable-core/ids/index.js';
 import { asSessionId, asRunId, asNodeId, asAttemptId } from '../../v2/durable-core/ids/index.js';
@@ -31,7 +31,7 @@ import { EVENT_KIND } from '../../v2/durable-core/constants.js';
 
 type CheckpointOutput = z.infer<typeof V2CheckpointWorkflowOutputSchema>;
 
-type CheckpointError =
+export type CheckpointError =
   | { readonly kind: 'precondition_failed'; readonly message: string }
   | { readonly kind: 'token_signing_failed'; readonly cause: unknown }
   | { readonly kind: 'validation_failed'; readonly failure: ToolFailure }
@@ -55,28 +55,33 @@ function findNodeCreated(
   );
 }
 
-/** Mint a stateToken for the original node (checkpoint does not advance). */
+/** Mint a short stateToken for the original node (checkpoint does not advance). */
 function mintStateTokenForNode(
   originalNode: Extract<DomainEventV1, { kind: 'node_created' }>,
   sessionId: SessionId,
   runId: RunId,
   nodeId: NodeId,
   tokenCodecPorts: V2ToolContext['v2']['tokenCodecPorts'],
-): { ok: true; value: string } | { ok: false; error: CheckpointError } {
+  aliasStore: V2ToolContext['v2']['tokenAliasStore'],
+  entropy: V2ToolContext['v2']['entropy'],
+): RA<string, CheckpointError> {
   const wfRefRes = deriveWorkflowHashRef(originalNode.data.workflowHash);
   if (wfRefRes.isErr()) {
-    return { ok: false, error: { kind: 'precondition_failed', message: 'Cannot derive workflowHashRef for stateToken.' } };
+    return errAsync({ kind: 'precondition_failed', message: 'Cannot derive workflowHashRef for stateToken.' });
   }
 
-  const stateTokenRes = signTokenOrErr({
-    payload: { tokenVersion: 1, tokenKind: 'state', sessionId, runId, nodeId, workflowHashRef: wfRefRes.value },
+  return mintSingleShortToken({
+    kind: 'state',
+    entry: {
+      sessionId: String(sessionId),
+      runId: String(runId),
+      nodeId: String(nodeId),
+      workflowHashRef: String(wfRefRes.value),
+    },
     ports: tokenCodecPorts,
-  });
-  if (stateTokenRes.isErr()) {
-    return { ok: false, error: { kind: 'token_signing_failed', cause: stateTokenRes.error } };
-  }
-
-  return { ok: true, value: stateTokenRes.value };
+    aliasStore,
+    entropy,
+  }).mapErr((failure) => ({ kind: 'token_signing_failed' as const, cause: failure as never }));
 }
 
 /** Validate raw event objects against DomainEventV1Schema. Fail fast on first invalid event. */
@@ -118,19 +123,16 @@ export async function handleV2CheckpointWorkflow(
 // Core execution
 // ---------------------------------------------------------------------------
 
-function executeCheckpoint(
+export function executeCheckpoint(
   input: V2CheckpointWorkflowInput,
   ctx: V2ToolContext,
 ): RA<CheckpointOutput, CheckpointError> {
-  const { gate, sessionStore, tokenCodecPorts, idFactory } = ctx.v2;
+  const { gate, sessionStore, tokenCodecPorts, idFactory, tokenAliasStore, entropy } = ctx.v2;
 
-  // Parse and verify checkpoint token
-  const tokenRes = parseCheckpointTokenOrFail(input.checkpointToken, tokenCodecPorts);
-  if (!tokenRes.ok) {
-    return errAsync({ kind: 'validation_failed', failure: tokenRes.failure });
-  }
-
-  const token = tokenRes.token;
+  // Parse and verify checkpoint token (async — supports both v1 and v2 short formats)
+  return parseCheckpointTokenOrFail(input.checkpointToken, tokenCodecPorts, tokenAliasStore)
+    .mapErr((failure) => ({ kind: 'validation_failed' as const, failure }))
+    .andThen((token) => {
   const sessionId = asSessionId(String(token.payload.sessionId));
   const runId = asRunId(String(token.payload.runId));
   const nodeId = asNodeId(String(token.payload.nodeId));
@@ -153,7 +155,7 @@ function executeCheckpoint(
       // Idempotent replay: dedupeKey found → pure read, no lock needed
       const alreadyRecorded = truth.events.some((e) => e.dedupeKey === dedupeKey);
       if (alreadyRecorded) {
-        return replayCheckpoint(truth.events, dedupeKey, originalNode, sessionId, runId, nodeId, tokenCodecPorts);
+        return replayCheckpoint(truth.events, dedupeKey, originalNode, sessionId, runId, nodeId, attemptId, tokenCodecPorts, tokenAliasStore, entropy);
       }
 
       // First-write path: acquire lock, re-check under lock (double-checked locking),
@@ -171,12 +173,12 @@ function executeCheckpoint(
             // pre-lock read and lock acquisition.
             const alreadyRecordedLocked = truthLocked.events.some((e) => e.dedupeKey === dedupeKey);
             if (alreadyRecordedLocked) {
-              return replayCheckpoint(truthLocked.events, dedupeKey, originalNodeLocked, sessionId, runId, nodeId, tokenCodecPorts);
+              return replayCheckpoint(truthLocked.events, dedupeKey, originalNodeLocked, sessionId, runId, nodeId, attemptId, tokenCodecPorts, tokenAliasStore, entropy);
             }
 
             return writeCheckpoint(
-              truthLocked, dedupeKey, originalNodeLocked, sessionId, runId, nodeId,
-              idFactory.mintNodeId(), () => idFactory.mintEventId(), lock, sessionStore, tokenCodecPorts,
+              truthLocked, dedupeKey, originalNodeLocked, sessionId, runId, nodeId, attemptId,
+              idFactory.mintNodeId(), () => idFactory.mintEventId(), lock, sessionStore, tokenCodecPorts, tokenAliasStore, entropy,
             );
           });
       }).mapErr((gateErr): CheckpointError => {
@@ -186,6 +188,7 @@ function executeCheckpoint(
         return gateErr as CheckpointError;
       });
     });
+  }); // close parseCheckpointTokenOrFail().andThen()
 }
 
 // ---------------------------------------------------------------------------
@@ -199,7 +202,10 @@ function replayCheckpoint(
   sessionId: SessionId,
   runId: RunId,
   nodeId: NodeId,
+  attemptId: AttemptId,
   tokenCodecPorts: V2ToolContext['v2']['tokenCodecPorts'],
+  aliasStore: V2ToolContext['v2']['tokenAliasStore'],
+  entropy: V2ToolContext['v2']['entropy'],
 ): RA<CheckpointOutput, CheckpointError> {
   const existingCheckpointNode = events.find(
     (e): e is Extract<DomainEventV1, { kind: 'node_created' }> =>
@@ -210,14 +216,22 @@ function replayCheckpoint(
     : 'unknown';
 
   // Re-mint stateToken pointing at the ORIGINAL node (checkpoint does not advance)
-  const tokenResult = mintStateTokenForNode(originalNode, sessionId, runId, nodeId, tokenCodecPorts);
-  if (!tokenResult.ok) return errAsync(tokenResult.error);
-
-  return okAsync(V2CheckpointWorkflowOutputSchema.parse({
-    checkpointNodeId,
-    stateToken: tokenResult.value,
-    nextCall: { tool: 'continue_workflow', params: { intent: 'rehydrate', stateToken: tokenResult.value } },
-  }));
+  const workflowHashRefRes = deriveWorkflowHashRef(originalNode.data.workflowHash);
+  const workflowHashRef = workflowHashRefRes.isOk() ? workflowHashRefRes.value : undefined;
+  return mintStateTokenForNode(originalNode, sessionId, runId, nodeId, tokenCodecPorts, aliasStore, entropy)
+    .andThen((stateTokenValue) =>
+      mintContinueAndCheckpointTokens({
+        entry: { sessionId: String(sessionId), runId: String(runId), nodeId: String(nodeId), attemptId: String(attemptId), workflowHashRef },
+        ports: tokenCodecPorts, aliasStore, entropy,
+      }).andThen(({ continueToken }) =>
+        okAsync(V2CheckpointWorkflowOutputSchema.parse({
+          checkpointNodeId,
+          stateToken: stateTokenValue,
+          nextCall: { tool: 'continue_workflow', params: { continueToken } },
+        }))
+      )
+    )
+    .mapErr((e): CheckpointError => ({ kind: 'store_failed', cause: e as any }));
 }
 
 // ---------------------------------------------------------------------------
@@ -231,11 +245,14 @@ function writeCheckpoint(
   sessionId: SessionId,
   runId: RunId,
   nodeId: NodeId,
+  attemptId: AttemptId,
   checkpointNodeId: NodeId,
   mintEventId: () => string,
   lock: Parameters<Parameters<ExecutionSessionGateV2['withHealthySessionLock']>[1]>[0],
   sessionStore: V2ToolContext['v2']['sessionStore'],
   tokenCodecPorts: V2ToolContext['v2']['tokenCodecPorts'],
+  aliasStore: V2ToolContext['v2']['tokenAliasStore'],
+  entropy: V2ToolContext['v2']['entropy'],
 ): RA<CheckpointOutput, CheckpointError> {
 
   // Mint event IDs upfront so edge_created can reference node_created's eventId
@@ -297,14 +314,23 @@ function writeCheckpoint(
     .andThen(() => {
       // Mint stateToken pointing at the ORIGINAL node (not the checkpoint node).
       // Checkpoint marks progress but does NOT advance — the agent continues from the same step.
-      const tokenResult = mintStateTokenForNode(originalNode, sessionId, runId, nodeId, tokenCodecPorts);
-      if (!tokenResult.ok) return errAsync<CheckpointOutput, CheckpointError>(tokenResult.error);
-
-      return okAsync(V2CheckpointWorkflowOutputSchema.parse({
-        checkpointNodeId: String(checkpointNodeId),
-        stateToken: tokenResult.value,
-        nextCall: { tool: 'continue_workflow', params: { intent: 'rehydrate', stateToken: tokenResult.value } },
-      }));
+      // Also mint a continueToken for the nextCall so the agent can use the one-token API.
+      const workflowHashRefRes = deriveWorkflowHashRef(originalNode.data.workflowHash);
+      const workflowHashRef = workflowHashRefRes.isOk() ? workflowHashRefRes.value : undefined;
+      return mintStateTokenForNode(originalNode, sessionId, runId, nodeId, tokenCodecPorts, aliasStore, entropy)
+        .andThen((stateTokenValue) =>
+          mintContinueAndCheckpointTokens({
+            entry: { sessionId: String(sessionId), runId: String(runId), nodeId: String(nodeId), attemptId: String(attemptId), workflowHashRef },
+            ports: tokenCodecPorts, aliasStore, entropy,
+          }).andThen(({ continueToken }) =>
+            okAsync(V2CheckpointWorkflowOutputSchema.parse({
+              checkpointNodeId: String(checkpointNodeId),
+              stateToken: stateTokenValue,
+              nextCall: { tool: 'continue_workflow', params: { continueToken } },
+            }))
+          )
+        )
+        .mapErr((e): CheckpointError => ({ kind: 'store_failed', cause: e as any }));
     });
 }
 

@@ -34,6 +34,7 @@ import { LocalWorkspaceAnchorV2 } from '../v2/infra/local/workspace-anchor/index
 import { WorkspaceRootsManager } from './workspace-roots-manager.js';
 import { LocalDirectoryListingV2 } from '../v2/infra/local/directory-listing/index.js';
 import { LocalSessionSummaryProviderV2 } from '../v2/infra/local/session-summary-provider/index.js';
+
 import { createToolFactory, type ToolAnnotations, type ToolDefinition } from './tool-factory.js';
 import type { IToolDescriptionProvider } from './tool-description-provider.js';
 import { createHandler } from './handler-factory.js';
@@ -108,6 +109,7 @@ export async function createToolContext(): Promise<ToolContext> {
     } else {
       const sha256 = container.resolve<any>(DI.V2.Sha256);
       const crypto = container.resolve<any>(DI.V2.Crypto);
+      const entropy = container.resolve<any>(DI.V2.RandomEntropy);
       const hmac = container.resolve<any>(DI.V2.HmacSha256);
       const base64url = container.resolve<any>(DI.V2.Base64Url);
       const base32 = container.resolve<any>(DI.V2.Base32);
@@ -137,6 +139,15 @@ export async function createToolContext(): Promise<ToolContext> {
         normalizeToExecutable: normalizeV1WorkflowToPinnedSnapshot,
       };
 
+      // Resolve the token alias store from DI and load its index.
+      const tokenAliasStore = container.resolve<any>(DI.V2.TokenAliasStore);
+      const aliasLoadResult = await tokenAliasStore.loadIndex();
+      if (aliasLoadResult.isErr()) {
+        // Non-fatal: if the index file doesn't exist yet (fresh install), loadIndex()
+        // treats it as an empty index. Log but don't disable v2 tools.
+        console.error(`[V2Init] Token alias index load warning: ${aliasLoadResult.error.message}`);
+      }
+
       v2 = {
         gate,
         sessionStore,
@@ -144,8 +155,10 @@ export async function createToolContext(): Promise<ToolContext> {
         pinnedStore,
         sha256,
         crypto,
+        entropy,
         idFactory,
         tokenCodecPorts,
+        tokenAliasStore,
         validationPipelineDeps,
         // resolvedRootUris starts empty; overridden per-request at the CallTool boundary
         // with a snapshot of the current MCP client roots (see startServer).

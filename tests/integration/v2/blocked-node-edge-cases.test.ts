@@ -23,7 +23,9 @@ import { LocalSnapshotStoreV2 } from '../../../src/v2/infra/local/snapshot-store
 import { LocalPinnedWorkflowStoreV2 } from '../../../src/v2/infra/local/pinned-workflow-store/index.js';
 import { ExecutionSessionGateV2 } from '../../../src/v2/usecases/execution-session-gate.js';
 
-import { unsafeTokenCodecPorts, parseTokenV1Binary } from '../../../src/v2/durable-core/tokens/index.js';
+import { unsafeTokenCodecPorts } from '../../../src/v2/durable-core/tokens/index.js';
+import { InMemoryTokenAliasStoreV2 } from '../../../src/v2/infra/in-memory/token-alias-store/index.js';
+import { parseShortTokenNative } from '../../../src/v2/durable-core/tokens/short-token.js';
 import { NodeHmacSha256V2 } from '../../../src/v2/infra/local/hmac-sha256/index.js';
 import { NodeBase64UrlV2 } from '../../../src/v2/infra/local/base64url/index.js';
 import { LocalKeyringV2 } from '../../../src/v2/infra/local/keyring/index.js';
@@ -71,7 +73,7 @@ async function mkCtxWithWorkflow(workflowId: string, definition: any): Promise<T
     featureFlags: null as any,
     sessionManager: null,
     httpServer: null,
-    v2: { gate, sessionStore, snapshotStore, pinnedStore, sha256, crypto, idFactory, tokenCodecPorts, sessionEventLogStore: sessionStore, validationPipelineDeps: createTestValidationPipelineDeps() },
+    v2: { gate, sessionStore, snapshotStore, pinnedStore, sha256, crypto, entropy, idFactory, tokenCodecPorts, tokenAliasStore: new InMemoryTokenAliasStoreV2(), sessionEventLogStore: sessionStore, validationPipelineDeps: createTestValidationPipelineDeps() },
   };
 }
 
@@ -102,7 +104,7 @@ describe('Blocked node edge cases', () => {
       if (startRes.type !== 'success') return;
 
       const blockRes = await handleV2ContinueWorkflow(
-        { stateToken: startRes.data.stateToken, ackToken: startRes.data.ackToken!, output: { notesMarkdown: 'missing keyword' } } as V2ContinueWorkflowInput,
+        { continueToken: startRes.data.continueToken, output: { notesMarkdown: 'missing keyword' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(blockRes.type).toBe('success');
@@ -141,7 +143,7 @@ describe('Blocked node edge cases', () => {
       if (startRes.type !== 'success') return;
 
       const blockRes = await handleV2ContinueWorkflow(
-        { stateToken: startRes.data.stateToken, ackToken: startRes.data.ackToken!, output: { notesMarkdown: 'fail' } } as V2ContinueWorkflowInput,
+        { continueToken: startRes.data.continueToken, output: { notesMarkdown: 'fail' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(blockRes.type).toBe('success');
@@ -152,8 +154,10 @@ describe('Blocked node edge cases', () => {
       const sessionStore = ctx.v2!.sessionEventLogStore as any;
       const bech32m = new Bech32mAdapterV2();
       const base32 = new Base32AdapterV2();
-      const parsedState = parseTokenV1Binary(startRes.data.stateToken, { bech32m, base32 })._unsafeUnwrap();
-      const sessionId = asSessionId(parsedState.payload.sessionId);
+      const _pt = parseShortTokenNative(startRes.data.continueToken)!;
+      const stAlias = ctx.v2!.tokenAliasStore.lookup(_pt.nonceHex)!;
+      const sessionId = asSessionId(stAlias.sessionId);
+      const runId = stAlias.runId as string;
 
       // Before retry: blocked node is tip
       const truth1Res = await sessionStore.load(sessionId);
@@ -161,15 +165,13 @@ describe('Blocked node edge cases', () => {
       const dag1Res = projectRunDagV2(truth1Res.value.events);
       expect(dag1Res.isOk()).toBe(true);
       if (!dag1Res.isOk()) return;
-
-      const runId = parsedState.payload.runId;
       const tipBefore = dag1Res.value.runsById[runId]!.preferredTipNodeId;
       const tipNodeBefore = dag1Res.value.runsById[runId]!.nodesById[tipBefore!];
       expect(tipNodeBefore?.nodeKind).toBe('blocked_attempt');
 
       // Retry successfully
       const retryRes = await handleV2ContinueWorkflow(
-        { stateToken: blockRes.data.stateToken, ackToken: blockRes.data.retryAckToken!, output: { notesMarkdown: 'pass' } } as V2ContinueWorkflowInput,
+        { continueToken: blockRes.data.continueToken, output: { notesMarkdown: 'pass' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(retryRes.type).toBe('success');

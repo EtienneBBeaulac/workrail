@@ -78,6 +78,7 @@ function detectRuntimeMode(): RuntimeMode {
 function toProcessLifecyclePolicy(mode: RuntimeMode): ProcessLifecyclePolicy {
   switch (mode.kind) {
     case 'test':
+    case 'library':
       return { kind: 'no_signal_handlers' };
     case 'cli':
     case 'rpc':
@@ -107,7 +108,7 @@ function registerRuntime(options: ContainerInitOptions = {}): void {
   container.register<ShutdownEvents>(DI.Runtime.ShutdownEvents, { useValue: new InMemoryShutdownEvents() });
 
   const terminator: ProcessTerminator =
-    mode.kind === 'test' ? new ThrowingProcessTerminator() : new NodeProcessTerminator();
+    (mode.kind === 'test' || mode.kind === 'library') ? new ThrowingProcessTerminator() : new NodeProcessTerminator();
   container.register<ProcessTerminator>(DI.Runtime.ProcessTerminator, { useValue: terminator });
 }
 
@@ -285,6 +286,7 @@ async function registerV2Services(): Promise<void> {
 
   // Level 2: Stores (depend on Level 1 primitives)
   const { LocalKeyringV2 } = await import('../v2/infra/local/keyring/index.js');
+  const { LocalTokenAliasStoreV2 } = await import('../v2/infra/local/token-alias-store/index.js');
   const { LocalSessionEventLogStoreV2 } = await import('../v2/infra/local/session-store/index.js');
   const { LocalSnapshotStoreV2 } = await import('../v2/infra/local/snapshot-store/index.js');
   const { LocalPinnedWorkflowStoreV2 } = await import('../v2/infra/local/pinned-workflow-store/index.js');
@@ -297,6 +299,13 @@ async function registerV2Services(): Promise<void> {
       const base64url = c.resolve<any>(DI.V2.Base64Url);
       const entropy = c.resolve<any>(DI.V2.RandomEntropy);
       return new LocalKeyringV2(dataDir, fs, base64url, entropy);
+    }),
+  });
+  container.register(DI.V2.TokenAliasStore, {
+    useFactory: instanceCachingFactory((c: DependencyContainer) => {
+      const dataDir = c.resolve<any>(DI.V2.DataDir);
+      const fs = c.resolve<any>(DI.V2.FileSystem);
+      return new LocalTokenAliasStoreV2(dataDir, fs);
     }),
   });
   container.register(DI.V2.SessionStore, {

@@ -32,7 +32,7 @@ describe('v2 execution preconditions (v2 context gate)', () => {
 
   it('fails fast when ctx.v2 is null (continue_workflow)', async () => {
     const ctx = ctxWithV2(null);
-    const res = await handleV2ContinueWorkflow({ intent: 'rehydrate', stateToken: 'invalid-token' } as any, ctx);
+    const res = await handleV2ContinueWorkflow({ continueToken: 'invalid-token' , intent: 'rehydrate' } as any, ctx);
 
     expect(res.type).toBe('error');
     if (res.type !== 'error') return;

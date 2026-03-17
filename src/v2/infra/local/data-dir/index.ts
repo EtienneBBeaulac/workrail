@@ -65,4 +65,11 @@ export class LocalDataDirV2 implements DataDirPortV2 {
   sessionLockPath(sessionId: SessionId): string {
     return path.join(this.sessionDir(sessionId), '.lock');
   }
+
+  tokenIndexPath(): string {
+    // Stored alongside keyring.json in the keys directory.
+    // WHY: Both the keyring and the alias index are process-global, non-session-specific
+    // artifacts that live outside the session tree.
+    return path.join(this.keysDir(), 'token-index.jsonl');
+  }
 }

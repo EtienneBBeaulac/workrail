@@ -22,7 +22,9 @@ import { LocalSnapshotStoreV2 } from '../../../src/v2/infra/local/snapshot-store
 import { LocalPinnedWorkflowStoreV2 } from '../../../src/v2/infra/local/pinned-workflow-store/index.js';
 import { ExecutionSessionGateV2 } from '../../../src/v2/usecases/execution-session-gate.js';
 
-import { unsafeTokenCodecPorts, parseTokenV1Binary } from '../../../src/v2/durable-core/tokens/index.js';
+import { unsafeTokenCodecPorts } from '../../../src/v2/durable-core/tokens/index.js';
+import { InMemoryTokenAliasStoreV2 } from '../../../src/v2/infra/in-memory/token-alias-store/index.js';
+import { parseShortTokenNative } from '../../../src/v2/durable-core/tokens/short-token.js';
 import { NodeHmacSha256V2 } from '../../../src/v2/infra/local/hmac-sha256/index.js';
 import { NodeBase64UrlV2 } from '../../../src/v2/infra/local/base64url/index.js';
 import { LocalKeyringV2 } from '../../../src/v2/infra/local/keyring/index.js';
@@ -92,9 +94,11 @@ async function mkCtxWithWorkflow(workflowId: string, definition: any): Promise<T
       pinnedStore,
       sha256,
       crypto,
+      entropy,
       idFactory,
       tokenCodecPorts,
-    validationPipelineDeps: createTestValidationPipelineDeps(),
+      tokenAliasStore: new InMemoryTokenAliasStoreV2(),
+      validationPipelineDeps: createTestValidationPipelineDeps(),
       sessionEventLogStore: sessionStore,
     },
   };
@@ -133,7 +137,7 @@ describe('Blocked node projection consistency (status transitions)', () => {
 
       // Block
       const blockRes = await handleV2ContinueWorkflow(
-        { stateToken: startRes.data.stateToken, ackToken: startRes.data.ackToken!, output: { notesMarkdown: 'bad output' } } as V2ContinueWorkflowInput,
+        { continueToken: startRes.data.continueToken, output: { notesMarkdown: 'bad output' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(blockRes.type).toBe('success');
@@ -144,8 +148,10 @@ describe('Blocked node projection consistency (status transitions)', () => {
       const sessionStore = ctx.v2!.sessionEventLogStore as any;
       const bech32m = new Bech32mAdapterV2();
       const base32 = new Base32AdapterV2();
-      const parsedState = parseTokenV1Binary(startRes.data.stateToken, { bech32m, base32 })._unsafeUnwrap();
-      const sessionId = asSessionId(parsedState.payload.sessionId);
+      const _pt = parseShortTokenNative(startRes.data.continueToken)!;
+      const stAlias1 = ctx.v2!.tokenAliasStore.lookup(_pt.nonceHex)!;
+      const sessionId = asSessionId(stAlias1.sessionId);
+      const runId = stAlias1.runId as string;
       const loadRes = await sessionStore.load(sessionId);
       if (loadRes.isErr()) throw new Error(`Unexpected load error: ${loadRes.error.code}`);
       const truth = loadRes.value;
@@ -160,7 +166,6 @@ describe('Blocked node projection consistency (status transitions)', () => {
       if (!statusRes.isOk()) return;
       const status = statusRes.value;
 
-      const runId = parsedState.payload.runId;
       const runStatus = status.byRunId[runId];
       const run = dag.runsById[runId];
 
@@ -206,7 +211,7 @@ describe('Blocked node projection consistency (status transitions)', () => {
 
       // Block
       const blockRes = await handleV2ContinueWorkflow(
-        { stateToken: startRes.data.stateToken, ackToken: startRes.data.ackToken!, output: { notesMarkdown: 'bad' } } as V2ContinueWorkflowInput,
+        { continueToken: startRes.data.continueToken, output: { notesMarkdown: 'bad' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(blockRes.type).toBe('success');
@@ -216,7 +221,7 @@ describe('Blocked node projection consistency (status transitions)', () => {
 
       // Retry successfully
       const retryRes = await handleV2ContinueWorkflow(
-        { stateToken: blockRes.data.stateToken, ackToken: blockRes.data.retryAckToken!, output: { notesMarkdown: 'ok' } } as V2ContinueWorkflowInput,
+        { continueToken: blockRes.data.continueToken, output: { notesMarkdown: 'ok' } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(retryRes.type).toBe('success');
@@ -227,8 +232,10 @@ describe('Blocked node projection consistency (status transitions)', () => {
       const sessionStore = ctx.v2!.sessionEventLogStore as any;
       const bech32m = new Bech32mAdapterV2();
       const base32 = new Base32AdapterV2();
-      const parsedState = parseTokenV1Binary(startRes.data.stateToken, { bech32m, base32 })._unsafeUnwrap();
-      const sessionId = asSessionId(parsedState.payload.sessionId);
+      const _pt = parseShortTokenNative(startRes.data.continueToken)!;
+      const stAlias2 = ctx.v2!.tokenAliasStore.lookup(_pt.nonceHex)!;
+      const sessionId = asSessionId(stAlias2.sessionId);
+      const runId = stAlias2.runId as string;
       const loadRes = await sessionStore.load(sessionId);
       if (loadRes.isErr()) throw new Error(`Unexpected load error: ${loadRes.error.code}`);
       const truth = loadRes.value;
@@ -243,7 +250,6 @@ describe('Blocked node projection consistency (status transitions)', () => {
       if (!statusRes.isOk()) return;
       const status = statusRes.value;
 
-      const runId = parsedState.payload.runId;
       const run = dag.runsById[runId];
       const runStatus = status.byRunId[runId];
 

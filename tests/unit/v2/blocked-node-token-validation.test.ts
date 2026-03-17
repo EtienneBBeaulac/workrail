@@ -52,7 +52,7 @@ describe('Blocked node token validation', () => {
     }
   });
 
-  it('retryAckToken with wrong sessionId fails scope validation', () => {
+  it('retryContinueToken with wrong sessionId fails scope validation', () => {
     const sessionId1 = idFactory.mintSessionId();
     const sessionId2 = idFactory.mintSessionId();
 
@@ -62,7 +62,7 @@ describe('Blocked node token validation', () => {
     // This would be caught by assertTokenScopeMatchesStateBinary in v2-execution.ts
   });
 
-  it('retryAckToken validates with previous key after rotation', () => {
+  it('retryContinueToken validates with previous key after rotation', () => {
     const keyA = randomBytes(32);
     const keyB = randomBytes(32);
 
@@ -104,7 +104,7 @@ describe('Blocked node token validation', () => {
     }
   });
 
-  it('retryAckToken validates with current key', () => {
+  it('retryContinueToken validates with current key', () => {
     const keyring: KeyringV1 = {
       v: 1,
       current: { alg: 'hmac_sha256', keyBase64Url: randomBytes(32).toString('base64url') },
