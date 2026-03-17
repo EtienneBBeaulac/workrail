@@ -16,7 +16,7 @@ import { createRefRegistry } from './compiler/ref-registry';
 import { resolveFeaturesPass } from './compiler/resolve-features';
 import { createFeatureRegistry } from './compiler/feature-registry';
 import { resolveTemplatesPass } from './compiler/resolve-templates';
-import { createTemplateRegistry } from './compiler/template-registry';
+import { createTemplateRegistry, type TemplateRegistry } from './compiler/template-registry';
 
 export interface CompiledLoop {
   readonly loop: LoopStepDefinition;
@@ -51,7 +51,9 @@ export interface CompiledWorkflow {
 
 const _refRegistry = createRefRegistry();
 const _featureRegistry = createFeatureRegistry();
-const _templateRegistry = createTemplateRegistry();
+
+/** Default template registry (no routines). Callers with routines should pass their own. */
+const _defaultTemplateRegistry = createTemplateRegistry();
 
 /**
  * Run the full authoring-layer resolution pipeline on definition steps.
@@ -61,13 +63,18 @@ const _templateRegistry = createTemplateRegistry();
  * Pure function — deterministic, no I/O. Used by both the compiler and
  * the pinning boundary to ensure stored definitions have all promptBlocks
  * resolved into prompt strings.
+ *
+ * @param templateRegistry - Optional template registry. When omitted, uses a
+ *   default registry with no routine-derived templates. Pass a registry created
+ *   with routine definitions to enable routine injection via templateCall.
  */
 export function resolveDefinitionSteps(
   steps: readonly (WorkflowStepDefinition | LoopStepDefinition)[],
   features: readonly string[],
+  templateRegistry: TemplateRegistry = _defaultTemplateRegistry,
 ): Result<readonly (WorkflowStepDefinition | LoopStepDefinition)[], DomainError> {
   // Phase 0: Expand template_call steps into real steps (must run first)
-  const templatesResult = resolveTemplatesPass(steps, _templateRegistry);
+  const templatesResult = resolveTemplatesPass(steps, templateRegistry);
   if (templatesResult.isErr()) {
     const e = templatesResult.error;
     const message = e.code === 'TEMPLATE_RESOLVE_ERROR'
@@ -118,10 +125,17 @@ export function resolveDefinitionSteps(
 
 @singleton()
 export class WorkflowCompiler {
+  private readonly templateRegistry: TemplateRegistry;
+
+  constructor(templateRegistry: TemplateRegistry = _defaultTemplateRegistry) {
+    this.templateRegistry = templateRegistry;
+  }
+
   compile(workflow: Workflow): Result<CompiledWorkflow, DomainError> {
     const resolvedResult = resolveDefinitionSteps(
       workflow.definition.steps,
       workflow.definition.features ?? [],
+      this.templateRegistry,
     );
     if (resolvedResult.isErr()) return err(resolvedResult.error);
     const steps = resolvedResult.value;
