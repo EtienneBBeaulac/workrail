@@ -16,7 +16,14 @@ import { createRefRegistry } from './compiler/ref-registry';
 import { resolveFeaturesPass } from './compiler/resolve-features';
 import { createFeatureRegistry } from './compiler/feature-registry';
 import { resolveTemplatesPass } from './compiler/resolve-templates';
-import { createTemplateRegistry, type TemplateRegistry } from './compiler/template-registry';
+import {
+  createTemplateRegistry,
+  createRoutineExpander,
+  routineIdToTemplateId,
+  type TemplateExpander,
+  type TemplateRegistry,
+} from './compiler/template-registry';
+import { loadRoutineDefinitions } from './compiler/routine-loader';
 
 export interface CompiledLoop {
   readonly loop: LoopStepDefinition;
@@ -52,8 +59,49 @@ export interface CompiledWorkflow {
 const _refRegistry = createRefRegistry();
 const _featureRegistry = createFeatureRegistry();
 
-/** Default template registry (no routines). Callers with routines should pass their own. */
-const _defaultTemplateRegistry = createTemplateRegistry();
+/**
+ * Build template registry populated with routine-derived expanders.
+ * Loads routine definitions from disk (sync, startup-only) and creates
+ * expanders for each. The registry is then frozen and reused for all compilations.
+ */
+function buildTemplateRegistry(): TemplateRegistry {
+  const routineExpanders = new Map<string, TemplateExpander>();
+
+  const loadResult = loadRoutineDefinitions();
+  if (loadResult.isErr()) {
+    // Directory-level failure is non-fatal — system works without routine injection
+    console.warn(`[WorkflowCompiler] Failed to load routine definitions: ${loadResult.error}`);
+    return createTemplateRegistry();
+  }
+
+  const { routines, warnings } = loadResult.value;
+
+  // Surface loader warnings as structured log entries
+  for (const w of warnings) {
+    console.warn(`[WorkflowCompiler] Skipped routine file '${w.file}': ${w.reason}`);
+  }
+
+  for (const [routineId, definition] of routines) {
+    const expanderResult = createRoutineExpander(routineId, definition);
+    if (expanderResult.isOk()) {
+      routineExpanders.set(routineIdToTemplateId(routineId), expanderResult.value);
+    } else {
+      console.warn(`[WorkflowCompiler] Failed to create expander for routine '${routineId}': ${expanderResult.error.message}`);
+    }
+  }
+
+  return createTemplateRegistry(routineExpanders.size > 0 ? routineExpanders : undefined);
+}
+
+// Lazy singleton: built on first use, not at module import time.
+// Avoids sync filesystem I/O as a side effect of importing this module.
+let _templateRegistryCache: TemplateRegistry | undefined;
+function getTemplateRegistry(): TemplateRegistry {
+  if (!_templateRegistryCache) {
+    _templateRegistryCache = buildTemplateRegistry();
+  }
+  return _templateRegistryCache;
+}
 
 /**
  * Run the full authoring-layer resolution pipeline on definition steps.
@@ -63,22 +111,19 @@ const _defaultTemplateRegistry = createTemplateRegistry();
  * Pure function — deterministic, no I/O. Used by both the compiler and
  * the pinning boundary to ensure stored definitions have all promptBlocks
  * resolved into prompt strings.
- *
- * @param templateRegistry - Optional template registry. When omitted, uses a
- *   default registry with no routine-derived templates. Pass a registry created
- *   with routine definitions to enable routine injection via templateCall.
  */
 export function resolveDefinitionSteps(
   steps: readonly (WorkflowStepDefinition | LoopStepDefinition)[],
   features: readonly string[],
-  templateRegistry: TemplateRegistry = _defaultTemplateRegistry,
 ): Result<readonly (WorkflowStepDefinition | LoopStepDefinition)[], DomainError> {
   // Phase 0: Expand template_call steps into real steps (must run first)
-  const templatesResult = resolveTemplatesPass(steps, templateRegistry);
+  const templatesResult = resolveTemplatesPass(steps, getTemplateRegistry());
   if (templatesResult.isErr()) {
     const e = templatesResult.error;
     const message = e.code === 'TEMPLATE_RESOLVE_ERROR'
       ? `Step '${e.stepId}': template error — ${e.cause.message}`
+      : e.code === 'DUPLICATE_STEP_ID'
+      ? e.message
       : `Step '${e.stepId}': template expansion error — ${e.cause.message}`;
     return err(Err.invalidState(message));
   }
@@ -125,24 +170,10 @@ export function resolveDefinitionSteps(
 
 @singleton()
 export class WorkflowCompiler {
-  private readonly templateRegistry: TemplateRegistry;
-
-  constructor() {
-    this.templateRegistry = _defaultTemplateRegistry;
-  }
-
-  /** Create a compiler with a custom template registry (e.g. with routine-derived templates). */
-  static withTemplateRegistry(registry: TemplateRegistry): WorkflowCompiler {
-    const compiler = new WorkflowCompiler();
-    (compiler as unknown as { templateRegistry: TemplateRegistry }).templateRegistry = registry;
-    return compiler;
-  }
-
   compile(workflow: Workflow): Result<CompiledWorkflow, DomainError> {
     const resolvedResult = resolveDefinitionSteps(
       workflow.definition.steps,
       workflow.definition.features ?? [],
-      this.templateRegistry,
     );
     if (resolvedResult.isErr()) return err(resolvedResult.error);
     const steps = resolvedResult.value;

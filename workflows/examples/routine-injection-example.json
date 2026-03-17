@@ -1,0 +1,28 @@
+{
+  "id": "routine-injection-example",
+  "name": "Routine Injection Example — Design with Tension-Driven Design",
+  "version": "1.0.0",
+  "description": "Example workflow that uses templateCall to inject the tension-driven-design routine inline. Validates the end-to-end routine injection path.",
+  "steps": [
+    {
+      "id": "phase-0-gather",
+      "title": "Phase 0: Gather Context",
+      "prompt": "Gather context about the problem space."
+    },
+    {
+      "id": "phase-1-design",
+      "title": "Phase 1: Design (Injected Routine)",
+      "templateCall": {
+        "templateId": "wr.templates.routine.tension-driven-design",
+        "args": {
+          "deliverableName": "design-candidates.md"
+        }
+      }
+    },
+    {
+      "id": "phase-2-implement",
+      "title": "Phase 2: Implement",
+      "prompt": "Implement the selected design."
+    }
+  ]
+}

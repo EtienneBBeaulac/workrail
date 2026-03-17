@@ -40,13 +40,51 @@
       }
     },
     {
-      "id": "phase-1-architecture-decision",
-      "title": "Phase 1: Architecture Decision (Generate, Compare, Challenge, Select)",
+      "id": "phase-1a-hypothesis",
+      "title": "Phase 1a: State Hypothesis",
       "runCondition": {
         "var": "taskComplexity",
         "not_equals": "Small"
       },
-      "prompt": "Design the architecture through deep understanding, not surface-level generation.\n\nPart A — Understand the problem deeply:\n- What are the core tensions in this problem? (e.g., performance vs simplicity, flexibility vs type safety, backward compatibility vs clean design)\n- How does the codebase already solve similar problems? Study the most relevant existing patterns — don't just list files, analyze the architectural decisions and constraints they protect.\n- What's the simplest naive solution? Why is it insufficient? (If it IS sufficient, that's your leading candidate — the burden of proof is on complexity.)\n- What makes this problem hard? What would a junior developer miss?\n\nPart B — Identify tensions and constraints (including philosophy):\n- Extract 2-4 real tradeoffs from your understanding (not generic labels like 'simplicity' or 'maintainability')\n- These tensions drive candidate generation — each candidate resolves them differently\n- Filter `philosophySources` to the principles actually under pressure for THIS problem. Which of the dev's philosophy principles constrain the solution space? For example: does the simplest solution require mutable state when the dev prefers immutability? Does the existing pattern use exceptions when the dev prefers Result types? Would the cleanest approach violate their preference for small interfaces?\n- If `philosophyConflicts` exist for this area of the codebase, surface them as explicit tensions the design must resolve: follow the stated rule, follow the existing pattern, or reconcile them\n\nPart C — State your hypothesis before delegating:\nBefore spawning any subagents, write 2-3 sentences: what do you currently believe the best approach is, and what concerns you most about it? This is your reference point for interrogating subagent output later.\n\nPart D — Generate candidates from tensions:\n- QUICK: self-generate candidates from your tensions. Include mandatory candidates: (1) simplest possible change that satisfies acceptance criteria, (2) follow existing repo pattern.\n- STANDARD: spawn ONE WorkRail Executor running `routine-tension-driven-design` with your tensions, philosophy sources, and problem understanding as input. Simultaneously, spawn ONE WorkRail Executor running `routine-hypothesis-challenge`: 'What constraints or failure modes would make you choose a fundamentally different approach? Propose one, grounded in real reasons.'\n- THOROUGH: spawn ONE WorkRail Executor running `routine-tension-driven-design`, ONE running `routine-hypothesis-challenge` (adversarial divergence), and ONE running `routine-execution-simulation`: 'Trace through the leading approach's 3 most likely failure scenarios step by step.'\n- For STANDARD with riskLevel=High: also spawn the execution simulation subagent.\n\nThe main agent ALWAYS self-generates its own candidates too (at minimum the two mandatory ones: simplest change + existing pattern). Subagent candidates supplement, not replace, your own thinking.\n\nPart E — Interrogate subagent output (if subagents were used):\nDo NOT summarize subagent findings as your own. Instead, interrogate against your hypothesis:\n- Where do subagent findings challenge your hypothesis? Are they right or did they miss context?\n- What did they surface that you genuinely hadn't considered?\n- Where are they just restating the obvious or echoing each other?\n- What did they get wrong or overweight?\nState explicitly: what you changed your mind about and why, or what you held firm on despite their input and why.\n\nPart F — Compare via tradeoffs (not checklists):\nFor each surviving candidate, produce:\n- One-sentence summary of the approach\n- Which tensions it resolves and which it accepts\n- The specific failure mode you'd watch for\n- How it relates to existing repo patterns (follows / adapts / departs)\n- What you gain and what you give up\n- Which of the dev's philosophy principles it honors and which it conflicts with — be specific (principle name + how)\n\nPart G — Challenge the leading option:\n- STANDARD: optionally challenge with ONE WorkRail Executor running `routine-hypothesis-challenge`\n- THOROUGH: challenge top 1-2 candidates using ONE or TWO WorkRail Executors running `routine-hypothesis-challenge`\n\nPart H — Select:\nSet context variables:\n- `selectedApproach` — the chosen design with rationale tied back to tensions\n- `runnerUpApproach` — the next-best option and why it lost\n- `architectureRationale` — which tensions were resolved and which were accepted\n- `pivotTriggers` — specific conditions under which you'd switch to the runner-up\n- `keyRiskToMonitor` — the failure mode of the selected approach\n- `acceptedTradeoffs` — what the selected approach gives up (feeds directly into design review)\n- `identifiedFailureModes` — per-candidate failure modes (feeds directly into design review)\n\nRules:\n- the main agent owns the final decision; subagents contribute depth, not decisions\n- if the simplest solution satisfies acceptance criteria, prefer it — complexity must justify itself\n- if the challenged leading candidate no longer looks best, switch deliberately rather than defending sunk cost\n- subagents go deep on specific questions, not wide on generic plans",
+      "prompt": "Before any design work, state your current hypothesis in 3-5 sentences.\n\nBased on what you learned in Phase 0, write:\n1. Your current best guess for the approach\n2. Your main concern about that guess\n3. What would most likely make that guess wrong\n\nThis is your reference point. After design generation, you will compare the result against this hypothesis and say what changed your mind or what held firm.\n\nSet context variable:\n- `initialHypothesis`",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-1b-design-quick",
+      "title": "Phase 1b: Lightweight Design (QUICK)",
+      "runCondition": {
+        "and": [
+          { "var": "taskComplexity", "not_equals": "Small" },
+          { "var": "rigorMode", "equals": "QUICK" }
+        ]
+      },
+      "prompt": "Generate a lightweight design inline. QUICK rigor means the path is clear and risk is low.\n\nProduce two mandatory candidates:\n1. The simplest possible change that satisfies acceptance criteria\n2. Follow the existing repo pattern for this kind of change\n\nFor each candidate:\n- One-sentence summary\n- Key tradeoff\n- Failure mode to watch\n- Philosophy fit (name specific principles)\n\nCompare and recommend. If both converge on the same approach, say so honestly.\n\nWrite the output to `design-candidates.md` using the same structure as the deep design path:\n- Problem Understanding\n- Candidates (each with: summary, tradeoff, failure mode, philosophy fit)\n- Comparison and Recommendation\n\nSet context variable:\n- `designSummary` — one-paragraph summary of the recommendation and why",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-1b-design-deep",
+      "title": "Phase 1b: Design Generation (Injected Routine — Tension-Driven Design)",
+      "runCondition": {
+        "and": [
+          { "var": "taskComplexity", "not_equals": "Small" },
+          { "var": "rigorMode", "not_equals": "QUICK" }
+        ]
+      },
+      "templateCall": {
+        "templateId": "wr.templates.routine.tension-driven-design",
+        "args": {
+          "deliverableName": "design-candidates.md"
+        }
+      }
+    },
+    {
+      "id": "phase-1c-challenge-and-select",
+      "title": "Phase 1c: Challenge and Select",
+      "runCondition": {
+        "var": "taskComplexity",
+        "not_equals": "Small"
+      },
+      "prompt": "Read `design-candidates.md`, compare against your initial hypothesis, and make the final architecture decision.\n\nInput contract: both QUICK and deep design paths produce `design-candidates.md` with candidates, tradeoffs, and a recommendation. Use that artifact as your primary input.\n\nPart A — Compare to hypothesis:\nRevisit `initialHypothesis`. Now that you have design candidates:\n- Where did the design work confirm your hypothesis?\n- Where did it challenge or change your thinking?\n- What did you learn that you hadn't considered?\nState explicitly what changed your mind and what held firm.\n\nPart B — Challenge the leading option:\n- What's the strongest argument against the recommended approach?\n- What assumption, if wrong, would invalidate it?\n- STANDARD/THOROUGH: optionally spawn ONE WorkRail Executor running `routine-hypothesis-challenge` focused on the leading option's failure modes\n- THOROUGH: optionally also spawn ONE WorkRail Executor running `routine-execution-simulation` to trace the 3 most likely failure scenarios\n\nPart C — Select:\nMake the final architecture decision. The design output is evidence, not a decision — you own the choice.\n\nIf the simplest solution satisfies acceptance criteria, prefer it. Complexity must justify itself. If the challenged leading candidate no longer looks best, switch deliberately rather than defending sunk cost.\n\nSet context variables:\n- `selectedApproach` — the chosen design with rationale tied back to tensions\n- `runnerUpApproach` — the next-best option and why it lost\n- `architectureRationale` — which tensions were resolved and which were accepted\n- `pivotTriggers` — specific conditions under which you'd switch to the runner-up\n- `keyRiskToMonitor` — the failure mode of the selected approach\n- `acceptedTradeoffs` — what the selected approach gives up (feeds directly into design review)\n- `identifiedFailureModes` — per-candidate failure modes (feeds directly into design review)",
       "requireConfirmation": {
         "or": [
           { "var": "automationLevel", "equals": "Low" },

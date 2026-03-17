@@ -23,7 +23,8 @@ import { isLoopStepDefinition } from '../../../types/workflow-definition.js';
 
 export type ResolveTemplatesPassError =
   | { readonly code: 'TEMPLATE_RESOLVE_ERROR'; readonly stepId: string; readonly cause: TemplateResolveError }
-  | { readonly code: 'TEMPLATE_EXPAND_ERROR'; readonly stepId: string; readonly cause: TemplateExpandError };
+  | { readonly code: 'TEMPLATE_EXPAND_ERROR'; readonly stepId: string; readonly cause: TemplateExpandError }
+  | { readonly code: 'DUPLICATE_STEP_ID'; readonly stepId: string; readonly templateId: string; readonly message: string };
 
 // ---------------------------------------------------------------------------
 // Step-level template resolution
@@ -57,6 +58,17 @@ function resolveStepTemplate(
     });
   }
 
+  // Propagate the parent step's runCondition to all expanded steps.
+  // Without this, a templateCall step with runCondition would lose
+  // that condition after expansion — the expanded steps would always
+  // run regardless of the original gate.
+  if (step.runCondition) {
+    return ok(expandResult.value.map(expanded => ({
+      ...expanded,
+      runCondition: expanded.runCondition ?? step.runCondition,
+    })));
+  }
+
   return ok(expandResult.value);
 }
 
@@ -76,6 +88,8 @@ export function resolveTemplatesPass(
   registry: TemplateRegistry,
 ): Result<readonly (WorkflowStepDefinition | LoopStepDefinition)[], ResolveTemplatesPassError> {
   const resolved: (WorkflowStepDefinition | LoopStepDefinition)[] = [];
+  // Track all emitted step IDs to detect collisions from template expansion
+  const seenIds = new Set<string>();
 
   for (const step of steps) {
     if (isLoopStepDefinition(step)) {
@@ -86,19 +100,49 @@ export function resolveTemplatesPass(
         for (const bodyStep of step.body) {
           const res = resolveStepTemplate(bodyStep, registry);
           if (res.isErr()) return err(res.error);
+          for (const expanded of res.value) {
+            const collision = checkIdCollision(expanded.id, bodyStep.templateCall?.templateId, seenIds);
+            if (collision) return err(collision);
+          }
           bodyResolved.push(...res.value);
         }
+        const loopCollision = checkIdCollision(step.id, undefined, seenIds);
+        if (loopCollision) return err(loopCollision);
         resolved.push({ ...step, body: bodyResolved } as LoopStepDefinition);
       } else {
+        const loopCollision = checkIdCollision(step.id, undefined, seenIds);
+        if (loopCollision) return err(loopCollision);
         resolved.push(step);
       }
     } else {
       const res = resolveStepTemplate(step, registry);
       if (res.isErr()) return err(res.error);
+      for (const expanded of res.value) {
+        const collision = checkIdCollision(expanded.id, step.templateCall?.templateId, seenIds);
+        if (collision) return err(collision);
+      }
       // Template expansion may produce multiple steps — splice them in
       resolved.push(...res.value);
     }
   }
 
   return ok(resolved);
+}
+
+/** Check for duplicate step IDs during template expansion. */
+function checkIdCollision(
+  stepId: string,
+  templateId: string | undefined,
+  seenIds: Set<string>,
+): ResolveTemplatesPassError | undefined {
+  if (seenIds.has(stepId)) {
+    return {
+      code: 'DUPLICATE_STEP_ID',
+      stepId,
+      templateId: templateId ?? '(none)',
+      message: `Duplicate step id '${stepId}' after template expansion${templateId ? ` (from template '${templateId}')` : ''}`,
+    };
+  }
+  seenIds.add(stepId);
+  return undefined;
 }

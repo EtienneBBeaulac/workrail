@@ -1,15 +1,16 @@
 /**
- * Template Registry — Step Expansion
+ * Template Registry — Step Expansion with Routine Injection
  *
  * Maps `wr.templates.*` IDs to template expansion functions.
  * Templates expand a single step into one or more real steps at compile time.
  *
- * Supports two sources of templates:
- * 1. Static (WorkRail-owned) template definitions
- * 2. Routine-derived templates — routine JSON steps injected via templateCall
+ * Two sources of template expanders:
+ * 1. Built-in (closed-set, WorkRail-owned) — defined in TEMPLATE_DEFINITIONS
+ * 2. Routine-derived — created from routine JSON definitions via createRoutineExpander()
  *
- * Templates produce steps that become part of the compiled workflow hash.
- * Deterministic: same input always produces same output.
+ * Routine-derived expanders use the naming convention:
+ *   wr.templates.routine.<routine-id-without-routine-prefix>
+ *   e.g., routine-tension-driven-design -> wr.templates.routine.tension-driven-design
  */
 
 import type { Result } from 'neverthrow';
@@ -53,105 +54,109 @@ export interface TemplateRegistry {
 }
 
 // ---------------------------------------------------------------------------
-// Routine-to-template bridge
+// Routine-to-template expansion
 // ---------------------------------------------------------------------------
 
-/** Single-brace arg pattern: matches {argName} but not {{contextVar}}.
- * Uses negative lookbehind/lookahead to skip double-brace context variables. */
+/** Single-brace arg pattern: {argName} but NOT {{contextVar}} */
 const SINGLE_BRACE_ARG = /(?<!\{)\{([^{}]+)\}(?!\})/g;
 
 /**
+ * Validates that a template arg value is a substitutable primitive.
+ * Objects/arrays would silently produce "[object Object]" — reject them
+ * at compile time rather than producing broken prompts at runtime.
+ */
+function isSubstitutableValue(value: unknown): value is string | number | boolean {
+  return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
+}
+
+/**
  * Substitute single-brace `{argName}` placeholders in a string.
- * Double-brace `{{contextVar}}` patterns are left untouched (runtime context).
+ * Double-brace `{{contextVar}}` patterns are left untouched (runtime interpolation).
  *
- * Returns the substituted string, or an error listing unresolved args.
+ * Limitation: no escape mechanism for literal single-brace patterns.
+ * Workaround: use double-braces or rephrase.
  */
 function substituteArgs(
-  text: string,
+  template: string,
   args: Readonly<Record<string, unknown>>,
+  templateId: string,
   routineId: string,
   stepId: string,
 ): Result<string, TemplateExpandError> {
   const missing: string[] = [];
+  const badType: string[] = [];
 
-  const substituted = text.replace(SINGLE_BRACE_ARG, (match, argName: string) => {
-    if (argName in args) {
-      return String(args[argName]);
+  const result = template.replace(SINGLE_BRACE_ARG, (match, argName: string) => {
+    if (!(argName in args)) {
+      missing.push(argName);
+      return match;
     }
-    missing.push(argName);
-    return match; // leave in place for error reporting
+    const value = args[argName];
+    if (!isSubstitutableValue(value)) {
+      badType.push(argName);
+      return match;
+    }
+    return String(value);
   });
 
   if (missing.length > 0) {
     return err({
       code: 'TEMPLATE_EXPAND_FAILED',
-      templateId: `wr.templates.routine.${routineId}`,
+      templateId,
       message: `MISSING_TEMPLATE_ARG: routine '${routineId}' step '${stepId}' references arg(s) '${missing.join("', '")}' but they were not provided in templateCall.args`,
     });
   }
 
-  return ok(substituted);
+  if (badType.length > 0) {
+    return err({
+      code: 'TEMPLATE_EXPAND_FAILED',
+      templateId,
+      message: `INVALID_TEMPLATE_ARG_TYPE: routine '${routineId}' step '${stepId}' arg(s) '${badType.join("', '")}' must be string, number, or boolean (got non-primitive)`,
+    });
+  }
+
+  return ok(result);
 }
 
 /**
- * Validate that a routine's steps don't contain templateCall (no recursive injection).
+ * Convert a routine's ID to its template registry key.
+ * Strips the "routine-" prefix if present.
+ *
+ * routine-tension-driven-design -> wr.templates.routine.tension-driven-design
+ * context-gathering -> wr.templates.routine.context-gathering
  */
-function validateNoRecursiveTemplateCall(
-  routineId: string,
-  steps: readonly WorkflowStepDefinition[],
-): Result<void, TemplateExpandError> {
-  for (const step of steps) {
-    if (step.templateCall) {
-      return err({
-        code: 'TEMPLATE_EXPAND_FAILED',
-        templateId: `wr.templates.routine.${routineId}`,
-        message: `Routine '${routineId}' step '${step.id}' contains a templateCall. Recursive routine injection is not supported.`,
-      });
-    }
-  }
-  return ok(undefined);
+export function routineIdToTemplateId(routineId: string): string {
+  const name = routineId.startsWith('routine-') ? routineId.slice('routine-'.length) : routineId;
+  return `wr.templates.routine.${name}`;
 }
 
 /**
  * Create a TemplateExpander from a routine definition.
  *
- * Maps routine steps to WorkflowStepDefinition[] with:
- * - Step ID prefixing (callerId.stepId)
- * - Single-brace arg substitution on prompts
- * - Routine metaGuidance injected as step-level guidance
- * - Validation: required fields, no unresolved args, no recursive templateCall
- *
- * Pure function — no I/O.
+ * Pure function. The expander:
+ * - Maps routine steps to WorkflowStepDefinition[]
+ * - Prefixes step IDs with callerId for provenance
+ * - Performs {arg} substitution on step prompts
+ * - Injects routine metaGuidance as step-level guidance
+ * - Validates required fields (id, title, prompt) on each step
+ * - Skips preconditions and clarificationPrompts (parent workflow handles these)
  */
 export function createRoutineExpander(
   routineId: string,
   definition: WorkflowDefinition,
 ): Result<TemplateExpander, TemplateExpandError> {
-  const routineSteps = definition.steps as readonly WorkflowStepDefinition[];
-
-  // Validate no recursive templateCall at registration time
-  const recursiveCheck = validateNoRecursiveTemplateCall(routineId, routineSteps);
-  if (recursiveCheck.isErr()) return err(recursiveCheck.error);
-
-  // Validate required fields on all steps
-  for (const step of routineSteps) {
-    if (!step.id || !step.title) {
+  // Validate: no recursive templateCall in routine steps
+  for (const step of definition.steps) {
+    if ('templateCall' in step && step.templateCall) {
       return err({
         code: 'TEMPLATE_EXPAND_FAILED',
-        templateId: `wr.templates.routine.${routineId}`,
-        message: `Routine '${routineId}' step '${step.id ?? '(missing id)'}' is missing required field '${!step.id ? 'id' : 'title'}'.`,
-      });
-    }
-    if (!step.prompt) {
-      return err({
-        code: 'TEMPLATE_EXPAND_FAILED',
-        templateId: `wr.templates.routine.${routineId}`,
-        message: `Routine '${routineId}' step '${step.id}' is missing required field 'prompt'.`,
+        templateId: routineIdToTemplateId(routineId),
+        message: `Routine '${routineId}' step '${step.id}' contains a templateCall. Recursive routine injection is not allowed.`,
       });
     }
   }
 
-  const routineGuidance = definition.metaGuidance ?? [];
+  const templateId = routineIdToTemplateId(routineId);
 
   const expander: TemplateExpander = (
     callerId: string,
@@ -159,23 +164,50 @@ export function createRoutineExpander(
   ): Result<readonly WorkflowStepDefinition[], TemplateExpandError> => {
     const expandedSteps: WorkflowStepDefinition[] = [];
 
-    for (const step of routineSteps) {
+    for (const step of definition.steps) {
+      // Validate required fields
+      if (!step.id || !step.title) {
+        return err({
+          code: 'TEMPLATE_EXPAND_FAILED',
+          templateId,
+          message: `Routine '${routineId}' step '${step.id ?? '(missing id)'}' is missing required field '${!step.id ? 'id' : 'title'}'.`,
+        });
+      }
+      if (!step.prompt) {
+        return err({
+          code: 'TEMPLATE_EXPAND_FAILED',
+          templateId,
+          message: `Routine '${routineId}' step '${step.id}' is missing required field 'prompt'.`,
+        });
+      }
+
       // Substitute args in prompt
-      const promptResult = substituteArgs(step.prompt!, args, routineId, step.id);
+      const promptResult = substituteArgs(step.prompt, args, templateId, routineId, step.id);
       if (promptResult.isErr()) return err(promptResult.error);
 
-      // Merge routine metaGuidance into step-level guidance (Option B from design)
-      const mergedGuidance: readonly string[] = routineGuidance.length > 0
-        ? [...(step.guidance ?? []), ...routineGuidance]
-        : (step.guidance ?? []);
+      // Also substitute args in title (some routines may reference args there)
+      const titleResult = substituteArgs(step.title, args, templateId, routineId, step.id);
+      if (titleResult.isErr()) return err(titleResult.error);
 
+      // Build expanded step: spread all original fields, then override
+      // id/title/prompt with processed values and inject metaGuidance.
+      // Spreading preserves fields like agentRole, requireConfirmation,
+      // notesOptional, outputContract, runCondition, etc. without
+      // needing to explicitly list each one.
       const expandedStep: WorkflowStepDefinition = {
+        ...step,
         id: `${callerId}.${step.id}`,
-        title: step.title,
+        title: titleResult.value,
         prompt: promptResult.value,
-        ...(step.agentRole !== undefined && { agentRole: step.agentRole }),
-        ...(mergedGuidance.length > 0 && { guidance: mergedGuidance }),
-        ...(step.requireConfirmation !== undefined && { requireConfirmation: step.requireConfirmation }),
+        // Inject routine metaGuidance as step-level guidance (Option B from design doc)
+        ...(definition.metaGuidance && definition.metaGuidance.length > 0
+          ? {
+              guidance: [
+                ...(step.guidance ?? []),
+                ...definition.metaGuidance,
+              ],
+            }
+          : {}),
       };
 
       expandedSteps.push(expandedStep);
@@ -187,58 +219,39 @@ export function createRoutineExpander(
   return ok(expander);
 }
 
-/**
- * Derive the template ID for a routine.
- * Convention: routine "routine-tension-driven-design" -> "wr.templates.routine.tension-driven-design"
- */
-export function routineIdToTemplateId(routineId: string): string {
-  const name = routineId.startsWith('routine-') ? routineId.slice('routine-'.length) : routineId;
-  return `wr.templates.routine.${name}`;
-}
-
 // ---------------------------------------------------------------------------
 // Canonical template definitions (closed set, WorkRail-owned)
 // ---------------------------------------------------------------------------
 
-// Static templates (empty for now — added in future PRs).
-const STATIC_TEMPLATE_DEFINITIONS = new Map<string, TemplateExpander>();
+// Empty for now — built-in template definitions can be added here.
+const TEMPLATE_DEFINITIONS = new Map<string, TemplateExpander>();
 
 // ---------------------------------------------------------------------------
 // Registry constructor
 // ---------------------------------------------------------------------------
 
 /**
- * Create the template registry.
+ * Create the template registry, optionally populated with routine-derived expanders.
  *
- * Merges static (WorkRail-owned) templates with routine-derived templates.
- * Routine definitions are optional — when absent, only static templates are available.
- *
- * Returns the registry and any errors encountered during routine expander creation
- * (routine errors are non-fatal to the registry itself — invalid routines are skipped
- * and reported).
+ * @param routineExpanders - Map of template IDs to expanders derived from routine definitions.
+ *   Created externally via createRoutineExpander() to keep this function pure.
  */
 export function createTemplateRegistry(
-  routineDefinitions?: ReadonlyMap<string, WorkflowDefinition>,
+  routineExpanders?: ReadonlyMap<string, TemplateExpander>,
 ): TemplateRegistry {
-  const allTemplates = new Map<string, TemplateExpander>(STATIC_TEMPLATE_DEFINITIONS);
-
-  // Register routine-derived templates
-  if (routineDefinitions) {
-    for (const [routineId, definition] of routineDefinitions) {
-      const templateId = routineIdToTemplateId(routineId);
-      const expanderResult = createRoutineExpander(routineId, definition);
-      if (expanderResult.isOk()) {
-        allTemplates.set(templateId, expanderResult.value);
-      }
-      // Invalid routines are silently skipped — they can still be used via delegation
+  // Merge built-in and routine-derived expanders
+  const allExpanders = new Map<string, TemplateExpander>(TEMPLATE_DEFINITIONS);
+  if (routineExpanders) {
+    for (const [id, expander] of routineExpanders) {
+      allExpanders.set(id, expander);
     }
   }
 
-  const knownIds = [...allTemplates.keys()];
+  const knownIds = [...allExpanders.keys()];
 
   return {
     resolve(templateId: string): Result<TemplateExpander, TemplateResolveError> {
-      const expander = allTemplates.get(templateId);
+      const expander = allExpanders.get(templateId);
       if (!expander) {
         return err({
           code: 'UNKNOWN_TEMPLATE',
@@ -250,7 +263,7 @@ export function createTemplateRegistry(
     },
 
     has(templateId: string): boolean {
-      return allTemplates.has(templateId);
+      return allExpanders.has(templateId);
     },
 
     knownIds(): readonly string[] {
