@@ -157,6 +157,9 @@ describe('FeatureFlags - Functionality', () => {
       
       // sessionTools defaults to false (experimental)
       expect(provider.isEnabled('sessionTools')).toBe(false);
+
+      // agentic routines default to true after rollout
+      expect(provider.isEnabled('agenticRoutines')).toBe(true);
       
       // verboseLogging defaults to false (but stable)
       expect(provider.isEnabled('verboseLogging')).toBe(false);
@@ -212,6 +215,7 @@ describe('FeatureFlags - Functionality', () => {
       
       // Others use their defaults from FEATURE_FLAG_DEFINITIONS
       expect(provider.isEnabled('experimentalWorkflows')).toBe(false);
+      expect(provider.isEnabled('agenticRoutines')).toBe(true);
       expect(provider.isEnabled('verboseLogging')).toBe(false);
     });
   });
@@ -302,4 +306,3 @@ describe('FeatureFlags - Real-World Scenarios', () => {
     });
   });
 });
-

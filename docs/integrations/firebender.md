@@ -85,19 +85,14 @@ Edit your `~/.firebender/firebender.json` (or project-specific `firebender.json`
 
 **Important:** The subagent config uses **tool inheritance** (no `tools` field), so it will automatically have access to all tools including WorkRail.
 
-### 3. Enable Agentic Workflows in WorkRail
+### 3. Agentic Workflows Are Enabled by Default
 
-Set the feature flag to enable `.agentic.json` workflow variants:
+`.agentic.json` workflow variants and routines now ship enabled by default in WorkRail.
 
-```bash
-export WORKRAIL_ENABLE_AGENTIC_ROUTINES=true
-```
-
-Or add to your shell profile (`~/.zshrc`, `~/.bashrc`):
+If you need to disable them temporarily, set:
 
 ```bash
-echo 'export WORKRAIL_ENABLE_AGENTIC_ROUTINES=true' >> ~/.zshrc
-source ~/.zshrc
+export WORKRAIL_ENABLE_AGENTIC_ROUTINES=false
 ```
 
 ### 4. Verify Your Setup
@@ -318,4 +313,3 @@ Run the Diagnostic Workflow to test your configuration:
 1. Start a chat with the Main Agent.
 2. Ask: "Run the environment diagnostic workflow."
 3. Follow the steps to probe your subagent's capabilities.
-
