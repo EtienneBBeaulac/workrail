@@ -4,8 +4,8 @@ import { singleton } from 'tsyringe';
  * Feature Flags System
  * 
  * Enables/disables features at runtime via environment variables or configuration.
- * Follows trunk-based development: features are merged with flags OFF by default,
- * then enabled when stable.
+ * Follows trunk-based development: features are merged behind flags first,
+ * then enabled by default once stable.
  * 
  * @module config/feature-flags
  */
@@ -16,7 +16,7 @@ import { singleton } from 'tsyringe';
  * Each flag includes:
  * - key: Unique identifier (used in code)
  * - envVar: Environment variable name
- * - defaultValue: Safe default (false for experimental features)
+ * - defaultValue: Safe default for the current rollout phase
  * - description: What this flag controls
  * - since: Version when flag was introduced
  * - stable: Whether feature is production-ready
@@ -65,10 +65,10 @@ export const FEATURE_FLAG_DEFINITIONS: ReadonlyArray<FeatureFlagDefinition> = [
   {
     key: 'agenticRoutines',
     envVar: 'WORKRAIL_ENABLE_AGENTIC_ROUTINES',
-    defaultValue: false,
+    defaultValue: true,
     description: 'Enable Agentic Orchestration features (subagent delegation, .agentic.json overrides, routines)',
     since: '0.8.3',
-    stable: false,
+    stable: true,
   },
   {
     key: 'leanWorkflows',
@@ -297,7 +297,8 @@ export class StaticFeatureFlagProvider implements IFeatureFlagProvider {
   constructor(private readonly flags: Partial<FeatureFlags> = {}) {}
   
   isEnabled(key: FeatureFlagKey): boolean {
-    return this.flags[key] ?? false;
+    const definition = FEATURE_FLAG_DEFINITIONS.find(flag => flag.key === key);
+    return this.flags[key] ?? definition?.defaultValue ?? false;
   }
   
   getAll(): FeatureFlags {
