@@ -121,14 +121,14 @@ describe('selectWorkflowToolEdition', () => {
     expect(Object.keys(edition1.handlers)).toEqual(Object.keys(edition2.handlers));
   });
 
-  it('defaults to v1 when v2Tools flag is not explicitly set', () => {
-    // Empty flags - should use defaults (v2Tools defaults to false)
+  it('defaults to v2 when v2Tools flag is not explicitly set', () => {
+    // Empty flags should inherit shipped defaults (v2Tools defaults to true)
     const flags = new StaticFeatureFlagProvider({});
     const buildTool = createMockBuildTool();
 
     const edition = selectWorkflowToolEdition(flags, buildTool);
 
-    expect(edition.kind).toBe('v1');
-    expect(edition.tools.map(t => t.name)).toEqual(V1_TOOL_NAMES);
+    expect(edition.kind).toBe('v2');
+    expect(edition.tools.map(t => t.name)).toEqual(V2_TOOL_NAMES);
   });
 });
