@@ -9,6 +9,9 @@ import {
   asSessionId,
   asRunId,
   asNodeId,
+  type SessionId,
+  type RunId,
+  type NodeId,
 } from '../../../v2/durable-core/ids/index.js';
 import { ResultAsync as RA, errAsync as neErrorAsync } from 'neverthrow';
 import {
@@ -17,7 +20,8 @@ import {
   type ContinueWorkflowError,
 } from '../v2-execution-helpers.js';
 import * as z from 'zod';
-import { parseContinueTokenOrFail } from '../v2-token-ops.js';
+import { parseContinueTokenOrFail, parseStateTokenOrFail } from '../v2-token-ops.js';
+import { errNotRetryable } from '../../types.js';
 import { checkContextBudget } from '../v2-context-budget.js';
 import { executeStartWorkflow } from './start.js';
 import { handleRehydrateIntent } from './continue-rehydrate.js';
@@ -88,6 +92,59 @@ export async function handleV2ContinueWorkflow(
   );
 }
 
+// ── Token kind routing ────────────────────────────────────────────────────
+// Isolates prefix-matching behind a typed ADT so the main dispatch is
+// exhaustive over token kinds — no raw string comparisons leak downstream.
+
+type TokenRouting =
+  | { readonly kind: 'state'; readonly raw: string }
+  | { readonly kind: 'continue'; readonly raw: string };
+
+function classifyToken(raw: string): TokenRouting {
+  if (raw.startsWith('st_') || raw.startsWith('st1')) return { kind: 'state', raw };
+  return { kind: 'continue', raw };
+}
+
+// ── Shared rehydrate dispatch ─────────────────────────────────────────────
+// Both token paths converge here when intent is rehydrate.
+// A single place prevents the two callers from silently diverging.
+
+type RehydrateArgs = {
+  readonly sessionId: SessionId;
+  readonly runId: RunId;
+  readonly nodeId: NodeId;
+  readonly workflowHashRef: string;
+  readonly input: V2ContinueWorkflowInput;
+  readonly ctx: V2ToolContext;
+};
+
+function loadAndRehydrate(
+  args: RehydrateArgs,
+): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, ContinueWorkflowError> {
+  const { sessionId, runId, nodeId, workflowHashRef, input } = args;
+  const { sessionStore, tokenCodecPorts, pinnedStore, snapshotStore, idFactory, tokenAliasStore, entropy } = args.ctx.v2;
+
+  return sessionStore.load(sessionId)
+    .mapErr((cause) => ({ kind: 'session_load_failed' as const, cause }))
+    .andThen((truth) => handleRehydrateIntent({
+      input,
+      sessionId,
+      runId,
+      nodeId,
+      workflowHashRef,
+      truth,
+      tokenCodecPorts,
+      pinnedStore,
+      snapshotStore,
+      idFactory,
+      aliasStore: tokenAliasStore,
+      entropy,
+      resolvedRootUris: args.ctx.v2.resolvedRootUris,
+    }));
+}
+
+// ── Main handler ─────────────────────────────────────────────────────────
+
 export function executeContinueWorkflow(
   input: V2ContinueWorkflowInput,
   ctx: V2ToolContext
@@ -98,54 +155,77 @@ export function executeContinueWorkflow(
   const ctxCheck = checkContextBudget({ tool: 'continue_workflow', context: input.context });
   if (!ctxCheck.ok) return neErrorAsync({ kind: 'validation_failed', failure: ctxCheck.error });
 
-  return parseContinueTokenOrFail(input.continueToken, tokenCodecPorts, tokenAliasStore)
-    .mapErr((failure) => ({ kind: 'validation_failed' as const, failure }))
-    .andThen((resolved) => {
-      const sessionId = asSessionId(resolved.sessionId);
-      const runId = asRunId(resolved.runId);
-      const nodeId = asNodeId(resolved.nodeId);
-      const workflowHashRef = resolved.workflowHashRef;
+  const routing = classifyToken(input.continueToken);
 
-      if (input.intent === 'rehydrate') {
-        return sessionStore.load(sessionId)
-          .mapErr((cause) => ({ kind: 'session_load_failed' as const, cause }))
-          .andThen((truth) => handleRehydrateIntent({
-            input,
-            sessionId,
-            runId,
-            nodeId,
-            workflowHashRef,
-            truth,
-            tokenCodecPorts,
-            pinnedStore,
-            snapshotStore,
-            idFactory,
-            aliasStore: tokenAliasStore,
-            entropy,
-          }));
+  switch (routing.kind) {
+    case 'state': {
+      // State tokens (st_/st1) from resume_session carry no advance authority —
+      // they scope to rehydration only. Reject advance explicitly so the error is actionable.
+      // Two sub-cases with different root causes and suggestions:
+      //   (a) output was provided → transform auto-inferred intent: 'advance' (agent should remove output)
+      //   (b) intent: 'advance' was explicit → agent should use 'rehydrate' instead
+      if (input.intent === 'advance') {
+        const hasOutput = input.output != null;
+        const message = hasOutput
+          ? 'A resumeToken cannot carry output — resumeTokens are read-only. Remove the output field and call continue_workflow with just the resumeToken to rehydrate session context.'
+          : 'A resumeToken (st_... / st1...) carries no advance authority. Use intent: "rehydrate" to restore session context.';
+        const suggestion = hasOutput
+          ? 'Remove the output field. Pass just { continueToken: "<resumeToken>", intent: "rehydrate" } to rehydrate, then use the returned continueToken to advance.'
+          : 'Pass intent: "rehydrate" when using the resumeToken from resume_session or checkpoint_workflow.';
+        return neErrorAsync({
+          kind: 'validation_failed',
+          failure: errNotRetryable('TOKEN_SCOPE_MISMATCH', message, { suggestion }),
+        });
       }
 
-      const attemptId = asAttemptId(resolved.attemptId);
-
-      return sessionStore.load(sessionId)
-        .mapErr((cause) => ({ kind: 'session_load_failed' as const, cause }))
-        .andThen((truth) => handleAdvanceIntent({
+      return parseStateTokenOrFail(routing.raw, tokenCodecPorts, tokenAliasStore)
+        .mapErr((failure) => ({ kind: 'validation_failed' as const, failure }))
+        .andThen((resolved) => loadAndRehydrate({
+          sessionId: asSessionId(resolved.payload.sessionId),
+          runId: asRunId(resolved.payload.runId),
+          nodeId: asNodeId(resolved.payload.nodeId),
+          workflowHashRef: resolved.payload.workflowHashRef,
           input,
-          sessionId,
-          runId,
-          nodeId,
-          attemptId,
-          workflowHashRef,
-          truth,
-          gate,
-          sessionStore,
-          snapshotStore,
-          pinnedStore,
-          tokenCodecPorts,
-          idFactory,
-          sha256,
-          aliasStore: tokenAliasStore,
-          entropy,
+          ctx,
         }));
-    });
+    }
+
+    case 'continue': {
+      return parseContinueTokenOrFail(routing.raw, tokenCodecPorts, tokenAliasStore)
+        .mapErr((failure) => ({ kind: 'validation_failed' as const, failure }))
+        .andThen((resolved) => {
+          const sessionId = asSessionId(resolved.sessionId);
+          const runId = asRunId(resolved.runId);
+          const nodeId = asNodeId(resolved.nodeId);
+          const workflowHashRef = resolved.workflowHashRef;
+
+          if (input.intent === 'rehydrate') {
+            return loadAndRehydrate({ sessionId, runId, nodeId, workflowHashRef, input, ctx });
+          }
+
+          const attemptId = asAttemptId(resolved.attemptId);
+
+          return sessionStore.load(sessionId)
+            .mapErr((cause) => ({ kind: 'session_load_failed' as const, cause }))
+            .andThen((truth) => handleAdvanceIntent({
+              input,
+              sessionId,
+              runId,
+              nodeId,
+              attemptId,
+              workflowHashRef,
+              truth,
+              gate,
+              sessionStore,
+              snapshotStore,
+              pinnedStore,
+              tokenCodecPorts,
+              idFactory,
+              sha256,
+              aliasStore: tokenAliasStore,
+              entropy,
+            }));
+        });
+    }
+  }
 }

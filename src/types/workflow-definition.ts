@@ -173,6 +173,33 @@ export interface FunctionCall {
  * - Defined entirely by its fields
  * - Can be serialized/deserialized without loss
  */
+// =============================================================================
+// EXTENSION POINT TYPES
+// =============================================================================
+
+/**
+ * A single extension point declared by a parent workflow.
+ *
+ * Extension points define bounded cognitive slots that users can customize
+ * per-project via .workrail/bindings.json, without forking the workflow.
+ *
+ * The `default` is the routine/workflow ID used when no project override exists.
+ * Resolution order: .workrail/bindings.json override → default.
+ *
+ * Lock: extension points are compile-time only. Tokens ({{wr.bindings.slotId}})
+ * are resolved before hashing. Unknown slot IDs fail fast at compile time.
+ */
+export interface ExtensionPoint {
+  /** Stable identifier used in {{wr.bindings.slotId}} tokens */
+  readonly slotId: string;
+  /** Human description of what this slot does */
+  readonly purpose: string;
+  /** Default routine/workflow ID used when no project override is declared */
+  readonly default: string;
+  /** Allowed implementation kinds (optional; informational only in v1) */
+  readonly acceptedKinds?: readonly ('routine' | 'workflow')[];
+}
+
 /**
  * Workflow-level preference recommendations.
  * 
@@ -210,6 +237,18 @@ export interface WorkflowDefinition {
    * Resolved at compile time — unknown feature IDs fail fast.
    */
   readonly features?: readonly string[];
+  /**
+   * Extension points: bounded cognitive slots that users can customize
+   * via .workrail/bindings.json without forking the workflow.
+   *
+   * Each slot is referenced in step prompts via {{wr.bindings.slotId}}.
+   * The compiler resolves these tokens at compile time using:
+   *   1. Project override from .workrail/bindings.json
+   *   2. Fallback to this slot's `default` field
+   *
+   * Unknown tokens fail fast at compile time.
+   */
+  readonly extensionPoints?: readonly ExtensionPoint[];
 }
 
 // =============================================================================
@@ -285,5 +324,6 @@ export function createWorkflowDefinition(
     clarificationPrompts: definition.clarificationPrompts ? Object.freeze([...definition.clarificationPrompts]) : undefined,
     metaGuidance: definition.metaGuidance ? Object.freeze([...definition.metaGuidance]) : undefined,
     functionDefinitions: definition.functionDefinitions ? Object.freeze([...definition.functionDefinitions]) : undefined,
+    extensionPoints: definition.extensionPoints ? Object.freeze([...definition.extensionPoints]) : undefined,
   }) as WorkflowDefinition;
 }

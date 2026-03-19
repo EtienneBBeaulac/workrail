@@ -16,7 +16,7 @@
         "fun createFile(filename) = 'Use edit_file to create/update {filename}. NEVER output full content in chat—only summarize. If fails, request user help & log command.'",
         "fun applyUserRules() = 'Apply & reference user-defined rules, patterns & preferences. Document alignment in Decision Log. Explain rule influence in decisions.'",
         "fun matchPatterns() = 'Use codebase_search/grep to find similar patterns. Reference Decision Log patterns. Match target area unless user rules override.'",
-        "fun addResumptionJson(phase) = 'Update CONTEXT.md resumption section with: 1) workflow_get instructions (id: coding-task-workflow-with-loops, mode: preview), 2) workflow_next JSON with workflowId, completedSteps up to {phase}, all context variables.'",
+        "fun addResumptionJson(phase) = 'Update CONTEXT.md with: 1) workflow_get (id: coding-task-workflow-with-loops, mode: preview), 2) workflow_next JSON with workflowId, completedSteps up to {phase}, all continue_workflow context keys.'",
         "fun gitCommit(type, msg) = 'If git available: commit with {type}: {msg}. If unavailable: log in CONTEXT.md with timestamp.'",
         "fun verifyImplementation() = '1) Test coverage >80%, 2) Run full test suite, 3) Self-review. Max 2 attempts before failure protocol.'",
         "fun checkAutomation(action) = 'High: auto-{action} if confidence >8. Medium: request confirmation. Low: extra confirmations.'",
@@ -57,7 +57,7 @@
                 "Consider both technical complexity and business risk",
                 "When in doubt, err on the side of more thorough analysis (higher complexity)",
                 "Always allow human override of your classification",
-                "Set context variables that will be used for conditional step execution and automation",
+                "Set these keys in the next `continue_workflow` call's `context` object that will be used for conditional step execution and automation",
                 "Automation levels: High=auto-approve confidence >8, Medium=standard, Low=extra confirmations"
             ],
             "requireConfirmation": true

@@ -164,12 +164,24 @@ export function validateWorkflowPhase1a(
     return { kind: 'normalization_failed', workflowId, cause: normalizationResult.error };
   }
 
+  // Enrich the snapshot with the binding manifest captured during v1 compilation.
+  // This freezes the slotId→routineId pairs active at compile time so resume-time
+  // drift detection can compare against the current project bindings.
+  // Only included when bindings were actually resolved (no-op for zero-extensionPoint workflows).
+  const { resolvedBindings, resolvedOverrides } = v1CompilationResult.value;
+  const snapshotBase = normalizationResult.value;
+  const snapshotWithBindings: ExecutableCompiledWorkflowSnapshot = resolvedBindings.size > 0
+    ? { ...snapshotBase, resolvedBindings: Object.fromEntries(resolvedBindings) }
+    : snapshotBase;
+  const snapshot: ExecutableCompiledWorkflowSnapshot = resolvedOverrides.size > 0
+    ? { ...snapshotWithBindings, pinnedOverrides: Object.fromEntries(resolvedOverrides) }
+    : snapshotWithBindings;
+
   // Phase 4b: Recompile the normalized executable snapshot.
   // Runtime recompiles the pinned snapshot at advance time. If the normalized
   // form introduces invariant violations (e.g. resolver leaves both prompt and
   // promptBlocks on a step), this catches it at validation time instead of
   // at continue_workflow time after the user has already done work.
-  const snapshot = normalizationResult.value;
   if (hasWorkflowDefinitionShape(snapshot.definition)) {
     const executableWorkflow = createWorkflow(
       snapshot.definition as import('../../types/workflow-definition.js').WorkflowDefinition,
