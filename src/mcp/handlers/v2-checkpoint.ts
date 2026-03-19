@@ -55,7 +55,7 @@ function findNodeCreated(
   );
 }
 
-/** Mint a short stateToken for the original node (checkpoint does not advance). */
+/** Mint a short resumeToken for the original node (checkpoint does not advance). */
 function mintStateTokenForNode(
   originalNode: Extract<DomainEventV1, { kind: 'node_created' }>,
   sessionId: SessionId,
@@ -67,7 +67,7 @@ function mintStateTokenForNode(
 ): RA<string, CheckpointError> {
   const wfRefRes = deriveWorkflowHashRef(originalNode.data.workflowHash);
   if (wfRefRes.isErr()) {
-    return errAsync({ kind: 'precondition_failed', message: 'Cannot derive workflowHashRef for stateToken.' });
+    return errAsync({ kind: 'precondition_failed', message: 'Cannot derive workflowHashRef for resumeToken.' });
   }
 
   return mintSingleShortToken({
@@ -215,18 +215,18 @@ function replayCheckpoint(
     ? String(existingCheckpointNode.scope?.nodeId ?? 'unknown')
     : 'unknown';
 
-  // Re-mint stateToken pointing at the ORIGINAL node (checkpoint does not advance)
+  // Re-mint resumeToken pointing at the ORIGINAL node (checkpoint does not advance)
   const workflowHashRefRes = deriveWorkflowHashRef(originalNode.data.workflowHash);
   const workflowHashRef = workflowHashRefRes.isOk() ? workflowHashRefRes.value : undefined;
   return mintStateTokenForNode(originalNode, sessionId, runId, nodeId, tokenCodecPorts, aliasStore, entropy)
-    .andThen((stateTokenValue) =>
+    .andThen((resumeTokenValue) =>
       mintContinueAndCheckpointTokens({
         entry: { sessionId: String(sessionId), runId: String(runId), nodeId: String(nodeId), attemptId: String(attemptId), workflowHashRef },
         ports: tokenCodecPorts, aliasStore, entropy,
       }).andThen(({ continueToken }) =>
         okAsync(V2CheckpointWorkflowOutputSchema.parse({
           checkpointNodeId,
-          stateToken: stateTokenValue,
+          resumeToken: resumeTokenValue,
           nextCall: { tool: 'continue_workflow', params: { continueToken } },
         }))
       )
@@ -312,20 +312,20 @@ function writeCheckpoint(
   return sessionStore.append(lock, { events: validated, snapshotPins })
     .mapErr((cause): CheckpointError => ({ kind: 'store_failed', cause }))
     .andThen(() => {
-      // Mint stateToken pointing at the ORIGINAL node (not the checkpoint node).
+      // Mint resumeToken pointing at the ORIGINAL node (not the checkpoint node).
       // Checkpoint marks progress but does NOT advance — the agent continues from the same step.
       // Also mint a continueToken for the nextCall so the agent can use the one-token API.
       const workflowHashRefRes = deriveWorkflowHashRef(originalNode.data.workflowHash);
       const workflowHashRef = workflowHashRefRes.isOk() ? workflowHashRefRes.value : undefined;
       return mintStateTokenForNode(originalNode, sessionId, runId, nodeId, tokenCodecPorts, aliasStore, entropy)
-        .andThen((stateTokenValue) =>
+        .andThen((resumeTokenValue) =>
           mintContinueAndCheckpointTokens({
             entry: { sessionId: String(sessionId), runId: String(runId), nodeId: String(nodeId), attemptId: String(attemptId), workflowHashRef },
             ports: tokenCodecPorts, aliasStore, entropy,
           }).andThen(({ continueToken }) =>
             okAsync(V2CheckpointWorkflowOutputSchema.parse({
               checkpointNodeId: String(checkpointNodeId),
-              stateToken: stateTokenValue,
+              resumeToken: resumeTokenValue,
               nextCall: { tool: 'continue_workflow', params: { continueToken } },
             }))
           )

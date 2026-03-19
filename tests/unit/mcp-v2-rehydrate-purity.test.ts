@@ -106,9 +106,9 @@ describe('v2 continue_workflow rehydrate-only is pure (no durable writes)', () =
 
       const { parseShortTokenNative } = await import('../../src/v2/durable-core/tokens/short-token.js');
       const parsed = parseShortTokenNative(start.data.continueToken);
-      if (!parsed) throw new Error('Expected v2 short stateToken');
+      if (!parsed) throw new Error('Expected v2 short resumeToken');
       const aliasEntry = (ctx.v2 as any).tokenAliasStore.lookup(parsed.nonceHex);
-      if (!aliasEntry) throw new Error('Alias not found for stateToken');
+      if (!aliasEntry) throw new Error('Alias not found for resumeToken');
       const sessionId = aliasEntry.sessionId;
 
       const before = await (ctx.v2 as any).sessionStore.load(sessionId).match(

@@ -218,12 +218,12 @@ describe('bundle-format-single-json: Export is single JSON bundle with versioned
 });
 
 describe('bundle-tokens-not-portable: Tokens are not included in bundle', () => {
-  it('rejects bundle if stateToken field is present in session', () => {
+  it('rejects bundle if resumeToken field is present in session', () => {
     const bundle = createMinimalBundle();
-    // @ts-ignore - attempt to add stateToken
-    bundle.session.stateToken = 'st1invalid';
+    // @ts-ignore - attempt to add resumeToken
+    bundle.session.resumeToken = 'st1invalid';
     const result = ExportBundleV1Schema.safeParse(bundle);
-    // Schema should not have stateToken field, so this fails strict validation
+    // Schema should not have resumeToken field, so this fails strict validation
     expect(result.success).toBe(true); // Zod doesn't reject extra fields by default
     // But the schema explicitly defines only allowed fields
   });
@@ -240,10 +240,10 @@ describe('bundle-tokens-not-portable: Tokens are not included in bundle', () => 
   it('session events must not contain token payloads', () => {
     // This test verifies that DomainEventV1Schema doesn't include token fields
     const event = createMinimalEvent();
-    // @ts-ignore - attempt to add stateToken to event
-    event.stateToken = 'st1invalid';
+    // @ts-ignore - attempt to add resumeToken to event
+    event.resumeToken = 'st1invalid';
     const result = DomainEventV1Schema.safeParse(event);
-    // Event schema doesn't include stateToken, so it should still parse
+    // Event schema doesn't include resumeToken, so it should still parse
     // (Zod ignores extra fields by default unless strict is used)
     expect(result.success).toBe(true);
   });
@@ -478,7 +478,7 @@ describe('bundle schema: integration across locks', () => {
     const bundle = createMinimalBundle();
     const sessionStr = JSON.stringify(bundle.session);
     // Verify tokens are not in the serialized session
-    expect(sessionStr).not.toContain('stateToken');
+    expect(sessionStr).not.toContain('resumeToken');
     expect(sessionStr).not.toContain('ackToken');
   });
 

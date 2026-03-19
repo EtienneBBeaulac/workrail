@@ -118,7 +118,7 @@ describe('v2 fork detection (Phase 5)', () => {
       expect(first.data.kind).toBe('ok');
       expect(first.data.pending?.stepId).toBe('step2');
 
-      // To simulate a rewind/fork, we need to call rehydrate on the ORIGINAL stateToken to get a fresh ackToken.
+      // To simulate a rewind/fork, we need to call rehydrate on the ORIGINAL resumeToken to get a fresh ackToken.
       // (Reusing the same ackToken would be an idempotent replay, not a fork.)
       const rehydrate = await handleV2ContinueWorkflow({ continueToken: start.data.continueToken, intent: 'rehydrate' } as any, ctx);
       expect(rehydrate.type).toBe('success');

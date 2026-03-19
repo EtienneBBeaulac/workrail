@@ -266,7 +266,7 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     expect(forkEdges.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('TOKEN_UNKNOWN_NODE when stateToken references non-existent run', async () => {
+  it('TOKEN_UNKNOWN_NODE when resumeToken references non-existent run', async () => {
     const workflowService = resolveService<any>(DI.Services.Workflow);
     const featureFlags = resolveService<any>(DI.Infra.FeatureFlags);
     const v2 = await mkV2Deps();
@@ -302,7 +302,7 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     expect(res.message).toContain('No durable run state');
   });
 
-  it('TOKEN_WORKFLOW_HASH_MISMATCH when node hash differs from stateToken', async () => {
+  it('TOKEN_WORKFLOW_HASH_MISMATCH when node hash differs from resumeToken', async () => {
     const workflowService = resolveService<any>(DI.Services.Workflow);
     const featureFlags = resolveService<any>(DI.Infra.FeatureFlags);
     const v2 = await mkV2Deps();

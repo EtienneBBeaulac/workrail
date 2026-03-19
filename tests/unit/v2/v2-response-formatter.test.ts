@@ -315,7 +315,7 @@ describe('formatV2ExecutionResponse — blocked non-retryable', () => {
     expect(result).toContain('Inform the user');
   });
 
-  it('includes only stateToken in the JSON block when nextCall is null', () => {
+  it('includes only resumeToken in the JSON block when nextCall is null', () => {
     const result = formatV2ExecutionResponse(continueBlockedResponse({
       retryable: false,
       retryContinueToken: undefined,

@@ -15,6 +15,13 @@
  */
 
 import type { DescriptionsByMode } from './types/tool-description-types.js';
+import {
+  CHECKPOINT_WORKFLOW_PROTOCOL,
+  CONTINUE_WORKFLOW_PROTOCOL,
+  RESUME_SESSION_PROTOCOL,
+  START_WORKFLOW_PROTOCOL,
+  renderProtocolDescription,
+} from './workflow-protocol-contracts.js';
 
 export const DESCRIPTIONS: DescriptionsByMode = {
   // ─────────────────────────────────────────────────────────────────
@@ -90,82 +97,13 @@ Pass workspacePath when available so project-scoped workflow variants are resolv
 
 Remember: inspecting is read-only. Call start_workflow when ready to begin.`,
 
-    start_workflow: `Begin following a workflow's step-by-step instructions (WorkRail v2, feature-flagged).
+    start_workflow: renderProtocolDescription(START_WORKFLOW_PROTOCOL, 'standard'),
 
-The workflow represents the user's plan for this task. Each step will tell you exactly what to do. Your job is to execute each step's instructions and report back.
+    continue_workflow: renderProtocolDescription(CONTINUE_WORKFLOW_PROTOCOL, 'standard'),
 
-The response contains your first step's instructions as the main content, with tokens in a JSON code block at the end. The step title is the heading, and the step prompt is the body.
+    checkpoint_workflow: renderProtocolDescription(CHECKPOINT_WORKFLOW_PROTOCOL, 'standard'),
 
-What to do:
-1. Read the step instructions (the main body of the response) and execute them exactly
-2. When done, call continue_workflow with the stateToken and ackToken from the JSON block at the end
-3. Add output.notesMarkdown documenting your work (see notes guidance below)
-4. Don't predict what comes next — the workflow will tell you
-
-Notes guidance: Write output.notesMarkdown for a human reader who will reference it later. Include what you did, key decisions and trade-offs, what you produced (files, endpoints, test results), and anything notable (risks, open questions, things you deliberately skipped). Use markdown formatting. Be specific — names, paths, numbers. 10–30 lines is ideal; too short is worse than too long.
-
-Workspace anchoring: Pass workspacePath (the "Workspace:" path from your system parameters) so this session can be found by resume_session in future chats. Without it, session discovery may not work.
-
-Context auto-loads: If you provide context at start, WorkRail remembers it. On future continue_workflow calls, only pass context if you have NEW information to add.`,
-
-    continue_workflow: `Get the next step in the workflow (WorkRail v2, feature-flagged).
-
-QUICK START — How to call back after completing a step:
-Copy the stateToken and ackToken from the JSON code block at the end of the previous response. Just add your output.
-
-Two modes:
-
-ADVANCE (with ackToken):
-- "I completed the current step; give me the next one"
-- Requires: stateToken + ackToken (from the JSON block in previous response)
-- Optional: output (your work summary), context (if facts changed)
-- Result: WorkRail advances to next step and returns it
-
-REHYDRATE (without ackToken):
-- "Remind me what the current step is" (after rewind or lost context)
-- Requires: stateToken only
-- Do NOT include ackToken or output
-- Result: Same pending step returned; no advancement; side-effect-free
-
-Intent is auto-inferred: ackToken present → advance, ackToken absent → rehydrate.
-You can set intent explicitly if you prefer, but it's optional.
-
-Reading the response:
-The response is natural language with your step instructions as the main content. A JSON code block at the end contains the tokens for your next call. The response tells you directly what to do — execute the step, retry with corrections, wait for user input, or acknowledge completion.
-
-Parameters:
-- stateToken (required): From the JSON block in the previous response
-- ackToken (required for advance): From the JSON block in the previous response
-- intent (optional): "advance" or "rehydrate" — auto-inferred from ackToken if omitted
-- context (optional): NEW facts only. Omit if unchanged — WorkRail auto-loads previous context
-- output.notesMarkdown (advance only): Recap of THIS step — what you did, key decisions, what you produced, anything notable. Write for a human reviewer. Use markdown, be specific (names, paths, numbers). 10–30 lines; never accumulate previous steps.
-
-The workflow is the user's structured instructions. Follow each step exactly as described.`,
-
-    checkpoint_workflow: `Save a checkpoint on the current workflow step (WorkRail v2, feature-flagged).
-
-Creates a durable checkpoint on your current step without advancing. Useful for saving progress on long-running steps.
-
-Requires: checkpointToken (from the most recent start_workflow or continue_workflow response).
-
-Idempotent: calling with the same checkpointToken multiple times is safe and returns the same result.
-
-Returns: checkpointNodeId + a fresh stateToken.`,
-
-    resume_session: `Find and reconnect to an existing workflow session (WorkRail v2, feature-flagged).
-
-Use this when you need to resume a previously started workflow but don't have the stateToken (e.g., new chat, lost context).
-
-Pass workspacePath (the "Workspace:" path from your system parameters) to match sessions anchored to your current workspace. Without it, git-based tier matching won't work.
-
-WorkRail ranks sessions using a 5-tier matching algorithm:
-1. Exact git HEAD SHA match
-2. Git branch match (exact or prefix)
-3. Free text match against session notes
-4. Free text match against workflow ID
-5. Recency fallback
-
-Returns: Up to 5 ranked candidates, each with a stateToken you can use with continue_workflow.`,
+    resume_session: renderProtocolDescription(RESUME_SESSION_PROTOCOL, 'standard'),
   },
 
   // ─────────────────────────────────────────────────────────────────
@@ -252,93 +190,12 @@ Parameters:
 
 This is read-only. Call start_workflow when ready to commit to following the workflow.`,
 
-    start_workflow: `Begin executing the user's workflow instructions (WorkRail v2, feature-flagged).
+    start_workflow: renderProtocolDescription(START_WORKFLOW_PROTOCOL, 'authoritative'),
 
-The workflow is the USER'S VOICE expressing their plan for this task. Each step is a DIRECT INSTRUCTION from the user (or workflow author representing user intent). You MUST execute each step exactly as specified.
+    continue_workflow: renderProtocolDescription(CONTINUE_WORKFLOW_PROTOCOL, 'authoritative'),
 
-The response contains your first step's instructions as the main content (heading + body), with tokens in a JSON code block at the end.
+    checkpoint_workflow: renderProtocolDescription(CHECKPOINT_WORKFLOW_PROTOCOL, 'authoritative'),
 
-REQUIRED BEHAVIOR:
-1. Execute the step instructions (the main body of the response) EXACTLY as described
-2. When done, call continue_workflow with the stateToken and ackToken from the JSON block at the end
-3. Add output.notesMarkdown documenting your work — write for a human reader who will reference it later. Include what you did, key decisions/trade-offs, what you produced (files, endpoints, test results), and anything notable (risks, open questions, deliberate omissions). Use markdown formatting, be specific (names, paths, numbers). 10–30 lines; too short is worse than too long.
-4. Round-trip tokens UNCHANGED (don't decode, inspect, or modify them)
-5. Follow the workflow to completion — don't improvise alternative approaches
-
-Workspace anchoring (IMPORTANT):
-- Pass workspacePath set to the "Workspace:" value from your system parameters
-- This anchors the session to your workspace so resume_session can find it in future chats
-- Example: workspacePath: "/Users/you/git/my-project"
-
-Context handling:
-- Pass context at start to establish baseline facts
-- WorkRail auto-loads context on subsequent calls
-- Only pass context again if facts have CHANGED (e.g., user provided new information)`,
-
-    continue_workflow: `Get your next INSTRUCTION from the workflow (WorkRail v2, feature-flagged).
-
-The workflow represents the USER'S PLAN. The step returned is a DIRECT INSTRUCTION you MUST follow.
-
-HOW TO CALL — Copy the stateToken and ackToken from the JSON code block at the end of the previous response. Add output if desired.
-
-Two modes:
-
-ADVANCE (with ackToken):
-- Purpose: "I completed the current step; give me the next instruction"
-- Requires: stateToken + ackToken (from the JSON block in the previous response)
-- Optional: output (your work summary), context (if facts changed)
-- Result: WorkRail advances to next step
-- Idempotent: Safe to retry with same tokens if unsure
-
-REHYDRATE (without ackToken):
-- Purpose: "Remind me what the current step is" (after rewind/lost context)
-- Requires: stateToken only
-- Do NOT include ackToken or output
-- Result: Same pending step returned; no advancement
-- Side-effect-free: No durable writes; pure state recovery
-
-Intent is auto-inferred: ackToken present → advance, ackToken absent → rehydrate.
-You can set intent explicitly if you prefer, but it's optional.
-
-REQUIRED BEHAVIOR:
-1. Execute the step EXACTLY as described in the response body
-2. When done, call continue_workflow with tokens from the JSON block — do NOT construct params manually
-3. Do NOT predict what comes next — call continue_workflow and the workflow will tell you
-4. Do NOT skip steps, combine steps, or improvise your own approach
-
-Reading the response:
-The response is natural language. The step instructions are the main content (heading + body). A JSON code block at the end has the tokens for your next call. The response tells you directly what to do — execute the step, retry with corrections, wait for user input, or acknowledge completion.
-
-Parameters:
-- stateToken (required): From the JSON block in the previous response
-- ackToken (required for advance): From the JSON block in the previous response
-- intent (optional): "advance" or "rehydrate" — auto-inferred from ackToken if omitted
-- context (optional): NEW facts only (auto-merges with previous). Omit if unchanged
-- output.notesMarkdown (advance only): Recap of THIS step — what you did, key decisions, what you produced, anything notable. Write for a human reviewer. Use markdown, be specific (names, paths, numbers). 10–30 lines; never accumulate previous steps.
-
-The workflow is the user's structured will. Follow it exactly — it may validate, loop, or branch in ways you don't predict.`,
-
-    checkpoint_workflow: `Save a checkpoint on the current workflow step (WorkRail v2, feature-flagged).
-
-Creates a durable checkpoint without advancing. Use for long-running steps to save progress.
-
-Requires: checkpointToken from the most recent response. Idempotent.
-
-Returns: checkpointNodeId + fresh stateToken.`,
-
-    resume_session: `Find and reconnect to an existing workflow session (WorkRail v2, feature-flagged).
-
-Call this when resuming a workflow without a stateToken. WorkRail ranks sessions deterministically:
-1. Exact git HEAD SHA match (tier 1)
-2. Git branch match (tier 2)
-3. Notes content match (tier 3)
-4. Workflow ID match (tier 4)
-5. Recency (tier 5)
-
-IMPORTANT: Pass workspacePath set to the "Workspace:" value from your system parameters.
-Without it, tier 1 and tier 2 matching won't work (git context defaults to server directory, not yours).
-Example: workspacePath: "/Users/you/git/my-project"
-
-Returns: Up to 5 candidates with stateTokens. Use the best match's stateToken with continue_workflow.`,
+    resume_session: renderProtocolDescription(RESUME_SESSION_PROTOCOL, 'authoritative'),
   },
 } as const;

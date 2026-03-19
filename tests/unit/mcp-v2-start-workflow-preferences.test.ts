@@ -105,7 +105,7 @@ describe('v2 start_workflow emits baseline preferences_changed', () => {
       expect(res.type).toBe('success');
       if (res.type !== 'success') return;
 
-      // Recover sessionId from stateToken via alias store.
+      // Recover sessionId from resumeToken via alias store.
       const pt = parseShortTokenNative(res.data.continueToken)!;
       const aliasEntry = (ctx.v2 as any).tokenAliasStore.lookup(pt.nonceHex);
       const sessionId = aliasEntry!.sessionId as string;

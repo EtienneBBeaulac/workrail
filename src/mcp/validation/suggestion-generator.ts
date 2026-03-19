@@ -20,7 +20,7 @@ import type {
   UnknownKeySuggestion,
   MissingRequiredSuggestion,
 } from './suggestion-types.js';
-import { EMPTY_SUGGESTION_RESULT } from './suggestion-types.js';
+import { EMPTY_SUGGESTION_RESULT, similarity } from './suggestion-types.js';
 import { findClosestMatch } from './string-similarity.js';
 import {
   extractExpectedKeys,
@@ -44,11 +44,22 @@ export type { ZodIssue } from 'zod';
 function generateUnknownKeySuggestions(
   unknownKeys: readonly string[],
   expectedKeys: readonly string[],
-  config: SuggestionConfig
+  config: SuggestionConfig,
+  aliasMap?: Readonly<Record<string, string>>,
 ): readonly UnknownKeySuggestion[] {
   const suggestions: UnknownKeySuggestion[] = [];
 
   for (const unknownKey of unknownKeys) {
+    const aliasTarget = aliasMap?.[unknownKey];
+    if (aliasTarget) {
+      suggestions.push({
+        kind: 'unknown_key',
+        provided: unknownKey,
+        didYouMean: aliasTarget,
+        similarity: similarity(1),
+      });
+      continue;
+    }
     const match = findClosestMatch(unknownKey, expectedKeys, config.similarityThreshold);
     if (match) {
       suggestions.push({
@@ -116,7 +127,8 @@ function generateMissingRequiredSuggestions(
 export function generateSuggestions(
   args: unknown,
   schema: z.ZodType,
-  config: SuggestionConfig
+  config: SuggestionConfig,
+  aliasMap?: Readonly<Record<string, string>>,
 ): SuggestionResult {
   const suggestions: ValidationSuggestion[] = [];
 
@@ -128,7 +140,8 @@ export function generateSuggestions(
   const unknownKeySuggestions = generateUnknownKeySuggestions(
     unknownKeys,
     expectedKeys,
-    config
+    config,
+    aliasMap,
   );
   suggestions.push(...unknownKeySuggestions);
 
