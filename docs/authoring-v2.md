@@ -28,6 +28,7 @@ WorkRail v2 introduces several primitives for expressive workflows:
 - **Contract packs**: WorkRail-owned output schemas for structured artifacts (e.g., `wr.contracts.capability_observation`).
 - **PromptBlocks** (optional): structure step prompts as blocks (goal/constraints/procedure/outputRequired/verify) which compile to deterministic text.
 - **AgentRole**: workflow and/or step-level stance/persona (not system prompt control).
+- **Extension points**: named slots declared with `extensionPoints` and referenced via `{{wr.bindings.slotId}}` tokens; resolved at compile time from project `.workrail/bindings.json` overrides or workflow defaults. Enables team customization without forking workflow JSON.
 
 For detailed JSON syntax and examples, see: `docs/design/workflow-authoring-v2.md`.
 

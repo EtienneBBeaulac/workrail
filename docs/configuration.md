@@ -162,6 +162,32 @@ WORKFLOW_GIT_REPOS='[
 
 ---
 
+## Project Binding Overrides
+
+Workflows that declare `extensionPoints` can be customized at the project level by creating `.workrail/bindings.json` in your project root.
+
+```json
+{
+  "my-workflow": {
+    "design_review": "my-team-design-review"
+  }
+}
+```
+
+The file is looked up relative to the `workspacePath` passed to `start_workflow` and `continue_workflow` (falls back to the MCP root URI, then `process.cwd()`).
+
+**Gitignore for personal overrides:**
+
+```
+.workrail/bindings.json
+```
+
+**Commit for team-wide defaults** — the file is plain JSON and safe to version.
+
+For full documentation, see [Extension Points](authoring.md#extension-points).
+
+---
+
 ## Cache & Performance
 
 | Variable | Default | Description |
