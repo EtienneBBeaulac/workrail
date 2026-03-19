@@ -64,6 +64,7 @@ Tell your AI agent:
 | `preconditions` | string[] | Prerequisites before starting |
 | `clarificationPrompts` | string[] | Questions to ask upfront |
 | `metaGuidance` | string[] | Persistent best practices shown throughout |
+| `extensionPoints` | object[] | Named slots for team-level customization (see [Extension Points](#extension-points)) |
 
 ### Example with All Fields
 
@@ -286,6 +287,74 @@ Iterate over steps for batch operations, retries, or refinement.
 **Important:** Always set `maxIterations` to prevent infinite loops.
 
 For detailed loop documentation, see [Loop Support](features/loops.md).
+
+---
+
+## Extension Points
+
+Extension points let workflow authors declare named slots that teams can override with their own routines — without editing the shared workflow JSON.
+
+### Declaring extension points
+
+Add `extensionPoints` at the top level of your workflow. Each entry declares:
+
+- `slotId` — the token name used in step prompts
+- `purpose` — human-readable description of what belongs here
+- `default` — the routine ID used when no project override is present
+
+```json
+{
+  "id": "my-workflow",
+  "extensionPoints": [
+    {
+      "slotId": "design_review",
+      "purpose": "The routine used to review designs before implementation",
+      "default": "tension-driven-design"
+    }
+  ],
+  "steps": [
+    {
+      "id": "review",
+      "title": "Design Review",
+      "prompt": "Run {{wr.bindings.design_review}} on the current proposal."
+    }
+  ]
+}
+```
+
+At compile time, `{{wr.bindings.design_review}}` is replaced with the resolved routine ID.
+
+### Overriding at project level
+
+Create `.workrail/bindings.json` in your project root (gitignore it for personal overrides, or commit it for team-wide defaults):
+
+```json
+{
+  "my-workflow": {
+    "design_review": "my-team-design-review"
+  }
+}
+```
+
+A flat format also works and applies to all workflows:
+
+```json
+{
+  "design_review": "my-team-design-review"
+}
+```
+
+### Drift detection
+
+If `.workrail/bindings.json` changes between session start and a later `continue_workflow` call, WorkRail surfaces a warning in the response describing which slots changed. Start a new session to pick up the updated bindings.
+
+### Rules
+
+- Tokens must reference a declared `slotId` — unknown tokens are a compile-time error.
+- `default` is required; the workflow must be runnable with no project overrides present.
+- Slot IDs are case-sensitive and must not contain whitespace.
+
+For the full design rationale, see `docs/design/workflow-extension-points.md`.
 
 ---
 
