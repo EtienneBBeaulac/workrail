@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 
@@ -31,6 +33,10 @@ import {
 
 // Tool descriptions
 import { DESCRIPTIONS } from '../../src/mcp/tool-descriptions.js';
+import {
+  CONTINUE_WORKFLOW_CONTEXT_OBJECT_GUIDANCE,
+  CONTINUE_WORKFLOW_SINGLE_CONTEXT_OBJECT_GUIDANCE,
+} from '../../src/mcp/workflow-protocol-contracts.js';
 
 /**
  * Schema Consistency Architecture Tests
@@ -412,6 +418,62 @@ describe('Description-schema alignment', () => {
       );
     }
   });
+
+  it('start_workflow descriptions use continueToken language instead of legacy token names', () => {
+    for (const description of [
+      DESCRIPTIONS.standard.start_workflow,
+      DESCRIPTIONS.authoritative.start_workflow,
+    ]) {
+      expect(description).toContain('continueToken');
+      expect(description).not.toContain('resumeToken');
+      expect(description).not.toContain('ackToken');
+    }
+  });
+
+  it('continue_workflow descriptions teach the canonical field names', () => {
+    for (const description of [
+      DESCRIPTIONS.standard.continue_workflow,
+      DESCRIPTIONS.authoritative.continue_workflow,
+    ]) {
+      expect(description).toContain('continueToken');
+      expect(description).toContain('context');
+      expect(description).toContain('output');
+      expect(description).not.toContain('resumeToken');
+      expect(description).not.toContain('ackToken');
+      expect(description).not.toContain('contextVariables');
+    }
+  });
+
+  it('checkpoint_workflow descriptions point agents back to continueToken via nextCall', () => {
+    for (const description of [
+      DESCRIPTIONS.standard.checkpoint_workflow,
+      DESCRIPTIONS.authoritative.checkpoint_workflow,
+    ]) {
+      expect(description).toContain('checkpointToken');
+      expect(description).toContain('continueToken');
+      expect(description).toContain('resumeToken');
+    }
+  });
+});
+
+describe('coding-task workflow protocol wording', () => {
+  const workflowPaths = [
+    path.resolve(process.cwd(), 'workflows/coding-task-workflow-agentic.json'),
+    path.resolve(process.cwd(), 'workflows/coding-task-workflow-agentic.v2.json'),
+    path.resolve(process.cwd(), 'workflows/coding-task-workflow-agentic.lean.v2.json'),
+  ];
+
+  it('uses canonical continue_workflow context-object wording in all coding-task workflow variants', () => {
+    for (const workflowPath of workflowPaths) {
+      const workflowText = readFileSync(workflowPath, 'utf8');
+      expect(workflowText).not.toMatch(/Set context variables\b/);
+      expect(workflowText).not.toMatch(/Set context variable(?::|\s+`)/);
+      expect(
+        workflowText.includes(CONTINUE_WORKFLOW_CONTEXT_OBJECT_GUIDANCE) ||
+        workflowText.includes(CONTINUE_WORKFLOW_SINGLE_CONTEXT_OBJECT_GUIDANCE)
+      ).toBe(true);
+    }
+  });
 });
 
 // -----------------------------------------------------------------------------
@@ -534,7 +596,7 @@ describe('Token parameter consistency (Section 1.2)', () => {
    * 
    * V2ContinueWorkflowInput must have:
    * - intent (explicit discriminant: "advance" | "rehydrate")
-   * - stateToken (opaque, required)
+   * - resumeToken (opaque, required)
    * - ackToken (opaque, required for advance, forbidden for rehydrate)
    */
   
@@ -543,7 +605,7 @@ describe('Token parameter consistency (Section 1.2)', () => {
     
     expect(params, 'V2ContinueWorkflowInput must have continueToken').toContain('continueToken');
     expect(params, 'V2ContinueWorkflowInput must have intent').toContain('intent');
-    expect(params, 'V2ContinueWorkflowInput must not have stateToken').not.toContain('stateToken');
+    expect(params, 'V2ContinueWorkflowInput must not have resumeToken').not.toContain('resumeToken');
     expect(params, 'V2ContinueWorkflowInput must not have ackToken').not.toContain('ackToken');
   });
 

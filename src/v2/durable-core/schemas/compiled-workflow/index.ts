@@ -34,6 +34,35 @@ const CompiledWorkflowSnapshotV1PinnedSchema = z.object({
   // The full v1 workflow definition as JSON-safe data.
   // This is the determinism anchor for v1-backed v2 execution.
   definition: JsonValueSchema,
+  /**
+   * Binding manifest frozen at start time: slotId → resolvedRoutineId.
+   *
+   * Captured during v1 compilation and stored alongside the definition so
+   * that resume-time drift detection can compare what was active at session
+   * start against what .workrail/bindings.json currently declares.
+   *
+   * Absent for workflows without extensionPoints (empty map = no bindings).
+   * Optional for backward compatibility with snapshots produced before this field existed.
+   *
+   * Note on hashing: this field is included in the workflow hash (via
+   * workflowHashForCompiledSnapshot). Two runs of the same workflow JSON
+   * with different .workrail/bindings.json overrides will produce different
+   * hashes and different pinned snapshots. This is intentional — different
+   * bindings produce different compiled output and must be treated as distinct
+   * determinism anchors.
+   */
+  resolvedBindings: z.record(z.string()).optional(),
+  /**
+   * Project-override subset of resolvedBindings: only slots sourced from
+   * .workrail/bindings.json (not extensionPoint defaults).
+   *
+   * Used by drift detection at resume time so that override-removal is
+   * correctly identified as drift. If a slot is absent here, it was compiled
+   * from its extensionPoint default — `undefined` current override is not drift.
+   *
+   * Optional for backward compatibility with older snapshots.
+   */
+  pinnedOverrides: z.record(z.string()).optional(),
 });
 
 export const CompiledWorkflowSnapshotV1Schema = z.discriminatedUnion('sourceKind', [

@@ -1,5 +1,11 @@
 import type { V2ContinueWorkflowInput } from '../../v2/tools.js';
 import { V2ContinueWorkflowOutputSchema, toPendingStep } from '../../output-schemas.js';
+import { detectBindingDrift, type BindingDriftWarning } from '../../../v2/durable-core/domain/binding-drift.js';
+// Use the uncached loader for drift detection — we want the current on-disk state,
+// not a value that may have been frozen at process startup. The cached
+// getProjectBindings is intentionally NOT used here.
+import { loadProjectBindings } from '../../../application/services/compiler/binding-registry.js';
+import { resolveBindingBaseDir } from '../v2-workspace-resolution.js';
 import { deriveIsComplete, derivePendingStep } from '../../../v2/durable-core/projections/snapshot-state.js';
 import { createWorkflow } from '../../../types/workflow.js';
 import type { DomainEventV1 } from '../../../v2/durable-core/schemas/session/index.js';
@@ -46,8 +52,10 @@ export function handleRehydrateIntent(args: {
   readonly idFactory: { readonly mintAttemptId: () => import('../../../v2/durable-core/tokens/index.js').AttemptId };
   readonly aliasStore: import('../../../v2/ports/token-alias-store.port.js').TokenAliasStorePortV2;
   readonly entropy: import('../../../v2/ports/random-entropy.port.js').RandomEntropyPortV2;
+  /** MCP roots resolved by the server — used as fallback for binding base dir. */
+  readonly resolvedRootUris?: readonly string[];
 }): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, ContinueWorkflowError> {
-  const { input, sessionId, runId, nodeId, workflowHashRef, truth, tokenCodecPorts, pinnedStore, snapshotStore, idFactory, aliasStore, entropy } = args;
+  const { input, sessionId, runId, nodeId, workflowHashRef, truth, tokenCodecPorts, pinnedStore, snapshotStore, idFactory, aliasStore, entropy, resolvedRootUris } = args;
 
   const runStarted = truth.events.find(
     (e): e is Extract<DomainEventV1, { kind: 'run_started' }> => e.kind === EVENT_KIND.RUN_STARTED && e.scope.runId === String(runId)
@@ -56,8 +64,8 @@ export function handleRehydrateIntent(args: {
   if (!runStarted || typeof workflowId !== 'string' || workflowId.trim() === '') {
     return neErrorAsync({
       kind: 'token_unknown_node' as const,
-      message: 'No durable run state was found for this stateToken (missing run_started).',
-      suggestion: 'Use start_workflow to mint a new run, or use a stateToken returned by WorkRail for an existing run.',
+      message: 'No durable run state was found for this continueToken (missing run_started).',
+      suggestion: 'Use start_workflow to mint a new run, or use a continueToken returned by WorkRail for an existing run.',
     });
   }
   const workflowHash = runStarted.data.workflowHash;
@@ -70,7 +78,7 @@ export function handleRehydrateIntent(args: {
     });
   }
   if (String(expectedRefRes.value) !== String(workflowHashRef)) {
-    return neErrorAsync({ kind: 'precondition_failed' as const, message: 'workflowHash mismatch for this run.', suggestion: 'Use the stateToken returned by WorkRail for this run.' });
+    return neErrorAsync({ kind: 'precondition_failed' as const, message: 'workflowHash mismatch for this run.', suggestion: 'Use the continueToken returned by WorkRail for this run.' });
   }
 
   const nodeCreated = truth.events.find(
@@ -80,8 +88,8 @@ export function handleRehydrateIntent(args: {
   if (!nodeCreated) {
     return neErrorAsync({
       kind: 'token_unknown_node' as const,
-      message: 'No durable node state was found for this stateToken (missing node_created).',
-      suggestion: 'Use a stateToken returned by WorkRail for an existing node.',
+      message: 'No durable node state was found for this continueToken (missing node_created).',
+      suggestion: 'Use a continueToken returned by WorkRail for an existing node.',
     });
   }
   const expectedNodeRefRes = deriveWorkflowHashRef(nodeCreated.data.workflowHash);
@@ -93,9 +101,11 @@ export function handleRehydrateIntent(args: {
     });
   }
   if (String(expectedNodeRefRes.value) !== String(workflowHashRef)) {
-    return neErrorAsync({ kind: 'precondition_failed' as const, message: 'workflowHash mismatch for this node.', suggestion: 'Use the stateToken returned by WorkRail for this node.' });
+    return neErrorAsync({ kind: 'precondition_failed' as const, message: 'workflowHash mismatch for this node.', suggestion: 'Use the continueToken returned by WorkRail for this node.' });
   }
 
+  // Load execution snapshot first, then the pinned workflow snapshot.
+  // Pinned is loaded on all paths: drift detection runs regardless of pending state.
   return snapshotStore.getExecutionSnapshotV1(nodeCreated.data.snapshotRef)
     .mapErr((cause) => ({ kind: 'snapshot_load_failed' as const, cause }))
     .andThen((snapshot) => {
@@ -103,7 +113,7 @@ export function handleRehydrateIntent(args: {
         return neErrorAsync({
           kind: 'token_unknown_node' as const,
           message: 'No execution snapshot was found for this node.',
-          suggestion: 'Use a stateToken returned by WorkRail for an existing node.',
+          suggestion: 'Use a continueToken returned by WorkRail for an existing node.',
         });
       }
 
@@ -111,34 +121,10 @@ export function handleRehydrateIntent(args: {
       const pending = derivePendingStep(engineState);
       const isComplete = deriveIsComplete(engineState);
 
-      if (!pending) {
-        const preferences = derivePreferencesOrDefault({ truth, runId, nodeId });
-        const nextIntent = deriveNextIntent({ rehydrateOnly: true, isComplete, pending: null });
-
-        return okAsync(V2ContinueWorkflowOutputSchema.parse({
-          kind: 'ok',
-          isComplete,
-          pending: null,
-          preferences,
-          nextIntent,
-          nextCall: null,
-        }));
-      }
-
-      const attemptId = newAttemptId(idFactory);
-
-      const entryBase = {
-        sessionId: String(sessionId),
-        runId: String(runId),
-        nodeId: String(nodeId),
-        attemptId: String(attemptId),
-        workflowHashRef: String(workflowHashRef),
-      };
-
-      return mintContinueAndCheckpointTokens({ entry: entryBase, ports: tokenCodecPorts, aliasStore, entropy })
-        .mapErr((failure) => ({ kind: 'token_signing_failed' as const, cause: failure as never }))
-        .andThen(({ continueToken: continueTokenValue, checkpointToken: checkpointTokenValue }) =>
-      pinnedStore.get(workflowHash)
+      // Load the pinned workflow snapshot for all rehydrate paths.
+      // Required for: binding drift detection (both complete and pending paths)
+      // and prompt rendering (pending path only).
+      return pinnedStore.get(workflowHash)
         .mapErr((cause) => ({ kind: 'pinned_workflow_store_failed' as const, cause }))
         .andThen((pinned) => {
           if (!pinned) return neErrorAsync({ kind: 'pinned_workflow_missing' as const, workflowHash });
@@ -150,43 +136,126 @@ export function handleRehydrateIntent(args: {
               suggestion: 'Re-pin the workflow via start_workflow.',
             });
           }
-          
-          const wf = createWorkflow(pinned.definition as WorkflowDefinition, createBundledSource());
-          
-          // S9: Use renderPendingPrompt (includes recap recovery + function expansion)
-          const metaRes = renderPendingPrompt({
-            workflow: wf,
-            stepId: String(pending.stepId),
-            loopPath: pending.loopPath,
-            truth,
-            runId: asRunId(String(runId)),
-            nodeId: asNodeId(String(nodeId)),
-            rehydrateOnly: true,
-          });
-          
-          if (metaRes.isErr()) {
-            return neErrorAsync({
-              kind: 'invariant_violation' as const,
-              message: `Prompt rendering failed: ${metaRes.error.message}`,
-            });
+
+          // Detect binding drift on every rehydrate — whether or not there is a
+          // pending step. This ensures the user sees drift warnings even when
+          // resuming a completed or between-node session.
+          //
+          // resolveBindingBaseDir applies the same priority ladder as workspace
+          // anchor resolution: explicit workspacePath > MCP root URI > server CWD.
+          const bindingBaseDir = resolveBindingBaseDir(
+            input.workspacePath,
+            resolvedRootUris ?? [],
+          );
+          const driftWarnings = detectBindingDriftForSnapshot(pinned, workflowId, bindingBaseDir);
+
+          if (!pending) {
+            const preferences = derivePreferencesOrDefault({ truth, runId, nodeId });
+            const nextIntent = deriveNextIntent({ rehydrateOnly: true, isComplete, pending: null });
+
+            return okAsync(V2ContinueWorkflowOutputSchema.parse({
+              kind: 'ok',
+              isComplete,
+              pending: null,
+              preferences,
+              nextIntent,
+              nextCall: null,
+              ...(driftWarnings.length > 0 ? { warnings: driftWarnings } : {}),
+            }));
           }
-          
-          const meta = metaRes.value;
 
-          const preferences = derivePreferencesOrDefault({ truth, runId, nodeId });
-          const nextIntent = deriveNextIntent({ rehydrateOnly: true, isComplete, pending: meta });
+          const attemptId = newAttemptId(idFactory);
 
-          return okAsync(V2ContinueWorkflowOutputSchema.parse({
-            kind: 'ok',
-            continueToken: continueTokenValue,
-            checkpointToken: checkpointTokenValue,
-            isComplete,
-            pending: toPendingStep(meta),
-            preferences,
-            nextIntent,
-            nextCall: buildNextCall({ continueToken: continueTokenValue, isComplete, pending: meta }),
-          }));
-        })
-      ); // close mintContinueAndCheckpointTokens().andThen()
+          const entryBase = {
+            sessionId: String(sessionId),
+            runId: String(runId),
+            nodeId: String(nodeId),
+            attemptId: String(attemptId),
+            workflowHashRef: String(workflowHashRef),
+          };
+
+          return mintContinueAndCheckpointTokens({ entry: entryBase, ports: tokenCodecPorts, aliasStore, entropy })
+            .mapErr((failure) => ({ kind: 'token_signing_failed' as const, cause: failure as never }))
+            .andThen(({ continueToken: continueTokenValue, checkpointToken: checkpointTokenValue }) => {
+              const wf = createWorkflow(pinned.definition as WorkflowDefinition, createBundledSource());
+
+              // S9: Use renderPendingPrompt (includes recap recovery + function expansion)
+              const metaRes = renderPendingPrompt({
+                workflow: wf,
+                stepId: String(pending.stepId),
+                loopPath: pending.loopPath,
+                truth,
+                runId: asRunId(String(runId)),
+                nodeId: asNodeId(String(nodeId)),
+                rehydrateOnly: true,
+              });
+
+              if (metaRes.isErr()) {
+                return neErrorAsync({
+                  kind: 'invariant_violation' as const,
+                  message: `Prompt rendering failed: ${metaRes.error.message}`,
+                });
+              }
+
+              const meta = metaRes.value;
+              const preferences = derivePreferencesOrDefault({ truth, runId, nodeId });
+              const nextIntent = deriveNextIntent({ rehydrateOnly: true, isComplete, pending: meta });
+
+              return okAsync(V2ContinueWorkflowOutputSchema.parse({
+                kind: 'ok',
+                continueToken: continueTokenValue,
+                checkpointToken: checkpointTokenValue,
+                isComplete,
+                pending: toPendingStep(meta),
+                preferences,
+                nextIntent,
+                nextCall: buildNextCall({ continueToken: continueTokenValue, isComplete, pending: meta }),
+                ...(driftWarnings.length > 0 ? { warnings: driftWarnings } : {}),
+              }));
+            });
+        });
     });
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Detect binding drift for a pinned snapshot.
+ *
+ * Reads current project bindings from .workrail/bindings.json and compares
+ * against the manifest frozen into the snapshot at session start.
+ * Returns an empty array when no drift is detected or when the snapshot
+ * predates the resolvedBindings field (backward compatibility).
+ */
+function detectBindingDriftForSnapshot(
+  pinned: import('../../../v2/durable-core/schemas/compiled-workflow/index.js').CompiledWorkflowSnapshotV1 & { sourceKind: 'v1_pinned' },
+  workflowId: string,
+  baseDir: string,
+): readonly BindingDriftWarning[] {
+  // Use pinnedOverrides (project-sourced slots only) for drift detection.
+  // This correctly handles override-removal: if a slot was in pinnedOverrides
+  // but has no current override, the session compiled with an explicit override
+  // that is now gone — that IS drift.
+  //
+  // Slots absent from pinnedOverrides were compiled from extensionPoint defaults;
+  // if they have no current override, that's still the default — not drift.
+  //
+  // Fall back to resolvedBindings only if pinnedOverrides is absent (older
+  // snapshots produced before this field existed), accepting reduced accuracy
+  // for those sessions.
+  const pinnedOverrides = pinned.pinnedOverrides ?? pinned.resolvedBindings;
+  if (!pinnedOverrides || Object.keys(pinnedOverrides).length === 0) return [];
+
+  // loadProjectBindings always reads from disk — no cache — so we get the
+  // state of .workrail/bindings.json as it is right now, not as it was when
+  // the process started. This is intentional: drift detection must reflect
+  // real current state, not a stale cached snapshot.
+  //
+  // baseDir anchors the lookup to the correct workspace: the caller derives
+  // this from input.workspacePath → MCP roots URI → server CWD, matching
+  // the same priority ladder used at start_workflow time.
+  const currentBindings = loadProjectBindings(workflowId, baseDir);
+  return detectBindingDrift(pinnedOverrides, currentBindings);
 }

@@ -45,7 +45,7 @@ describe('End-to-end routine injection through the compiler', () => {
     const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
     expect(result.isOk()).toBe(true);
 
-    const steps = result._unsafeUnwrap();
+    const steps = result._unsafeUnwrap().steps;
 
     // First step is the regular gather context step
     expect(steps[0]!.id).toBe('phase-0-gather');
@@ -79,7 +79,7 @@ describe('End-to-end routine injection through the compiler', () => {
     const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
     expect(result.isOk()).toBe(true);
 
-    const steps = result._unsafeUnwrap();
+    const steps = result._unsafeUnwrap().steps;
 
     // Every expanded routine step should have guidance from the routine's metaGuidance
     for (let i = 1; i <= routine.steps.length; i++) {
@@ -99,7 +99,7 @@ describe('End-to-end routine injection through the compiler', () => {
     const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
     expect(result.isOk()).toBe(true);
 
-    const steps = result._unsafeUnwrap();
+    const steps = result._unsafeUnwrap().steps;
 
     // The last routine step (step-deliver) references {deliverableName} in its prompt
     const deliverStep = steps.find(s => s.id === 'phase-1-design.step-deliver') as WorkflowStepDefinition;
@@ -115,7 +115,7 @@ describe('End-to-end routine injection through the compiler', () => {
     const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
     expect(result.isOk()).toBe(true);
 
-    const steps = result._unsafeUnwrap();
+    const steps = result._unsafeUnwrap().steps;
     const gatherStep = steps[0] as WorkflowStepDefinition;
     const implementStep = steps[steps.length - 1] as WorkflowStepDefinition;
 
@@ -131,7 +131,7 @@ describe('Lean workflow — Phase 1 orchestration with injected routine', () => 
     const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
     expect(result.isOk()).toBe(true);
 
-    const steps = result._unsafeUnwrap();
+    const steps = result._unsafeUnwrap().steps;
     const stepIds = steps.map(s => s.id);
 
     // Phase 1a: hypothesis step
@@ -155,7 +155,7 @@ describe('Lean workflow — Phase 1 orchestration with injected routine', () => 
     const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
 
     const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
-    const steps = result._unsafeUnwrap();
+    const steps = result._unsafeUnwrap().steps;
 
     const hypothesis = steps.find(s => s.id === 'phase-1a-hypothesis') as WorkflowStepDefinition;
     expect(hypothesis.prompt).toContain('initialHypothesis');
@@ -165,7 +165,7 @@ describe('Lean workflow — Phase 1 orchestration with injected routine', () => 
     const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
 
     const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
-    const steps = result._unsafeUnwrap();
+    const steps = result._unsafeUnwrap().steps;
 
     const quickStep = steps.find(s => s.id === 'phase-1b-design-quick') as WorkflowStepDefinition;
     expect(quickStep.runCondition).toEqual({
@@ -181,7 +181,7 @@ describe('Lean workflow — Phase 1 orchestration with injected routine', () => 
     const routine = loadRoutineJson('tension-driven-design.json');
 
     const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
-    const steps = result._unsafeUnwrap();
+    const steps = result._unsafeUnwrap().steps;
 
     const expectedRunCondition = {
       and: [
@@ -202,7 +202,7 @@ describe('Lean workflow — Phase 1 orchestration with injected routine', () => 
     const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
 
     const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
-    const steps = result._unsafeUnwrap();
+    const steps = result._unsafeUnwrap().steps;
 
     // QUICK path writes to design-candidates.md
     const quickStep = steps.find(s => s.id === 'phase-1b-design-quick') as WorkflowStepDefinition;
@@ -221,7 +221,7 @@ describe('Lean workflow — Phase 1 orchestration with injected routine', () => 
     const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
 
     const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
-    const steps = result._unsafeUnwrap();
+    const steps = result._unsafeUnwrap().steps;
 
     const selectStep = steps.find(s => s.id === 'phase-1c-challenge-and-select') as WorkflowStepDefinition;
     expect(selectStep.prompt).toContain('initialHypothesis');
@@ -233,7 +233,7 @@ describe('Lean workflow — Phase 1 orchestration with injected routine', () => 
     const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
 
     const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
-    const steps = result._unsafeUnwrap();
+    const steps = result._unsafeUnwrap().steps;
     const stepIds = steps.map(s => s.id);
 
     expect(stepIds).toContain('phase-0-understand-and-classify');
@@ -249,7 +249,7 @@ describe('Lean workflow — Phase 1 orchestration with injected routine', () => 
     const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
 
     const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
-    const steps = result._unsafeUnwrap();
+    const steps = result._unsafeUnwrap().steps;
 
     const deliverStep = steps.find(
       s => s.id === 'phase-1b-design-deep.step-deliver',
@@ -269,7 +269,7 @@ describe('Lean workflow — injected review routines inside loops', () => {
     const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
     expect(result.isOk()).toBe(true);
 
-    const steps = result._unsafeUnwrap();
+    const steps = result._unsafeUnwrap().steps;
     const phase2Loop = steps.find(
       s => s.id === 'phase-2-design-review',
     ) as LoopStepDefinition;
@@ -295,7 +295,7 @@ describe('Lean workflow — injected review routines inside loops', () => {
     const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
     expect(result.isOk()).toBe(true);
 
-    const steps = result._unsafeUnwrap();
+    const steps = result._unsafeUnwrap().steps;
     const phase7Loop = steps.find(
       s => s.id === 'phase-7-final-verification',
     ) as LoopStepDefinition;
@@ -319,7 +319,7 @@ describe('Lean workflow — injected review routines inside loops', () => {
     const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
     expect(result.isOk()).toBe(true);
 
-    const steps = result._unsafeUnwrap();
+    const steps = result._unsafeUnwrap().steps;
     const phase2Loop = steps.find(s => s.id === 'phase-2-design-review') as LoopStepDefinition;
     const phase7Loop = steps.find(s => s.id === 'phase-7-final-verification') as LoopStepDefinition;
 

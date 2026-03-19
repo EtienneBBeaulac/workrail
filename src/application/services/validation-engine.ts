@@ -10,6 +10,7 @@ import type {
 } from '../../types/workflow-definition';
 import { isLoopStepDefinition, stepHasPromptSource } from '../../types/workflow-definition';
 import type { Workflow } from '../../types/workflow';
+import { BINDING_TOKEN_RE } from './compiler/resolve-bindings';
 import { 
   ValidationRule, 
   ValidationComposition, 
@@ -652,6 +653,115 @@ export class ValidationEngine {
     const suggestions: string[] = [];
     const warnings: string[] = [];
     const info: string[] = [];
+
+    // Validate extensionPoints declarations (structural)
+    const extensionPoints = workflow.definition.extensionPoints ?? [];
+    if (extensionPoints.length > 0) {
+      const seenSlotIds = new Set<string>();
+      for (const ep of extensionPoints) {
+        // Non-empty string checks
+        if (!ep.slotId || typeof ep.slotId !== 'string') {
+          issues.push(`extensionPoints entry has missing or empty slotId`);
+          suggestions.push('Each extensionPoint must have a non-empty slotId string');
+        } else if (!ep.purpose || typeof ep.purpose !== 'string') {
+          issues.push(`extensionPoints[${ep.slotId}]: purpose must be a non-empty string`);
+        } else if (!ep.default || typeof ep.default !== 'string') {
+          issues.push(`extensionPoints[${ep.slotId}]: default must be a non-empty string`);
+        }
+        // Uniqueness check
+        if (ep.slotId) {
+          if (seenSlotIds.has(ep.slotId)) {
+            issues.push(`extensionPoints has duplicate slotId '${ep.slotId}'`);
+            suggestions.push('Each slotId must be unique within extensionPoints');
+          }
+          seenSlotIds.add(ep.slotId);
+        }
+      }
+
+      // Pre-compilation cross-check: binding tokens in prompts AND promptBlocks must
+      // reference declared slots. Mirrors the surface coverage of resolveBindingsPass.
+      // BINDING_TOKEN_RE is imported from the compiler pass — single definition, no drift.
+      const declaredSlotIds = new Set(extensionPoints.map(ep => ep.slotId).filter(Boolean));
+
+      const checkStringForUnknownBindings = (text: string, stepId: string) => {
+        BINDING_TOKEN_RE.lastIndex = 0;
+        let match: RegExpExecArray | null;
+        while ((match = BINDING_TOKEN_RE.exec(text)) !== null) {
+          const slotId = match[1]!;
+          if (!declaredSlotIds.has(slotId)) {
+            issues.push(
+              `Step '${stepId}': binding token '{{wr.bindings.${slotId}}}' references undeclared slot. Declared slots: [${[...declaredSlotIds].join(', ')}]`
+            );
+            suggestions.push(`Add an extensionPoint with slotId '${slotId}' to the workflow definition`);
+          }
+        }
+      };
+
+      /** Scan a step's prompt string and all promptBlocks string fields. */
+      const checkStepForUnknownBindings = (step: WorkflowStepDefinition, stepId: string) => {
+        if (step.prompt !== undefined) {
+          checkStringForUnknownBindings(step.prompt, stepId);
+        }
+        if (step.promptBlocks !== undefined) {
+          const pb = step.promptBlocks;
+          if (typeof pb.goal === 'string') checkStringForUnknownBindings(pb.goal, stepId);
+          for (const v of pb.constraints ?? []) {
+            if (typeof v === 'string') checkStringForUnknownBindings(v, stepId);
+          }
+          for (const v of pb.procedure ?? []) {
+            if (typeof v === 'string') checkStringForUnknownBindings(v, stepId);
+          }
+          for (const v of pb.verify ?? []) {
+            if (typeof v === 'string') checkStringForUnknownBindings(v, stepId);
+          }
+          for (const v of Object.values(pb.outputRequired ?? {})) {
+            checkStringForUnknownBindings(v, stepId);
+          }
+        }
+      };
+
+      for (const step of workflow.definition.steps) {
+        checkStepForUnknownBindings(step, step.id);
+        if (isLoopStepDefinition(step) && Array.isArray(step.body)) {
+          for (const inlineStep of step.body) {
+            checkStepForUnknownBindings(inlineStep, inlineStep.id ?? 'unknown');
+          }
+        }
+      }
+    } else {
+      // No extensionPoints declared — flag any step that uses binding tokens (prompt or promptBlocks)
+      const BINDING_TOKEN_DETECT = /\{\{wr\.bindings\./;
+
+      const stepUsesBindingToken = (step: WorkflowStepDefinition): boolean => {
+        if (typeof step.prompt === 'string' && BINDING_TOKEN_DETECT.test(step.prompt)) return true;
+        if (step.promptBlocks !== undefined) {
+          const pb = step.promptBlocks;
+          if (typeof pb.goal === 'string' && BINDING_TOKEN_DETECT.test(pb.goal)) return true;
+          for (const v of [...(pb.constraints ?? []), ...(pb.procedure ?? []), ...(pb.verify ?? [])]) {
+            if (typeof v === 'string' && BINDING_TOKEN_DETECT.test(v)) return true;
+          }
+          for (const v of Object.values(pb.outputRequired ?? {})) {
+            if (BINDING_TOKEN_DETECT.test(v)) return true;
+          }
+        }
+        return false;
+      };
+
+      for (const step of workflow.definition.steps) {
+        if (stepUsesBindingToken(step)) {
+          issues.push(`Step '${step.id}': uses {{wr.bindings.*}} token but workflow declares no extensionPoints`);
+          suggestions.push('Add an extensionPoints array to the workflow definition');
+        }
+        if (isLoopStepDefinition(step) && Array.isArray(step.body)) {
+          for (const inlineStep of step.body) {
+            if (stepUsesBindingToken(inlineStep)) {
+              issues.push(`Step '${inlineStep.id ?? 'unknown'}' (loop body): uses {{wr.bindings.*}} token but workflow declares no extensionPoints`);
+              suggestions.push('Add an extensionPoints array to the workflow definition');
+            }
+          }
+        }
+      }
+    }
 
     // Check for duplicate step IDs
     const stepIds = new Set<string>();
