@@ -151,6 +151,16 @@ export const V2NextCallSchema = z.object({
   params: z.object({ continueToken: z.string().min(1) }),
 }).nullable();
 
+// Resume-specific nextCall: always non-null and carries a locked intent: 'rehydrate'
+// since resumeTokens from resume_session have no advance authority.
+export const V2ResumeNextCallSchema = z.object({
+  tool: z.literal('continue_workflow'),
+  params: z.object({
+    continueToken: z.string().min(1),
+    intent: z.literal('rehydrate'),
+  }),
+});
+
 function utf8ByteLength(s: string): number {
   return new TextEncoder().encode(s).length;
 }
@@ -250,6 +260,25 @@ const checkpointTokenSchema = z.string().regex(CHECKPOINT_TOKEN_PATTERN, 'Invali
 // continueToken format: ct_<base64url-24> only (v2-only concept)
 const continueTokenSchema = z.string().regex(CONTINUE_TOKEN_PATTERN, 'Invalid continueToken format').optional();
 
+// Re-export domain type so consumers can import from one place.
+// Defined in the domain layer to avoid a layering violation.
+export type { BindingDriftWarning as V2BindingDriftWarning } from '../v2/durable-core/domain/binding-drift.js';
+
+/**
+ * Binding drift warning emitted when project bindings differ from what was
+ * frozen into the session at start time. Informational only — execution continues.
+ *
+ * Schema mirrors BindingDriftWarning from the domain layer.
+ */
+export const V2BindingDriftWarningSchema = z.object({
+  code: z.literal('BINDING_DRIFT'),
+  slotId: z.string().min(1),
+  pinnedValue: z.string().min(1),
+  currentValue: z.string().min(1),
+  // `message` is intentionally absent — derivable via formatDriftWarning().
+  // Presentation is the formatter's responsibility, not the domain type's.
+});
+
 const V2ContinueWorkflowOkSchema = z.object({
   kind: z.literal('ok'),
   continueToken: continueTokenSchema,
@@ -259,6 +288,12 @@ const V2ContinueWorkflowOkSchema = z.object({
   preferences: V2PreferencesSchema,
   nextIntent: V2NextIntentSchema,
   nextCall: V2NextCallSchema,
+  /**
+   * Binding drift warnings: emitted when .workrail/bindings.json has changed
+   * since this session was started. The session continues with the original
+   * compiled values — start a new session to pick up new bindings.
+   */
+  warnings: z.array(V2BindingDriftWarningSchema).optional(),
 });
 
 const V2ContinueWorkflowBlockedSchema = z.object({
@@ -293,22 +328,51 @@ export const V2ResumeSessionOutputSchema = z.object({
   candidates: z.array(z.object({
     sessionId: z.string().min(1),
     runId: z.string().min(1),
-    stateToken: z.string().regex(STATE_TOKEN_PATTERN, 'Invalid stateToken format'),
+    workflowId: z.string().min(1),
+    /**
+     * The durable state token for this candidate session.
+     * Note: unlike checkpoint_workflow (where resumeToken and nextCall.params.continueToken
+     * are different token kinds), here resumeToken === nextCall.params.continueToken.
+     * Both are the same st_ token — resumeToken is exposed for display/identity purposes;
+     * nextCall is the action interface. Use nextCall, not resumeToken, to resume.
+     */
+    resumeToken: z.string().regex(STATE_TOKEN_PATTERN, 'Invalid resumeToken format'),
     snippet: z.string().max(1024),
     whyMatched: z.array(z.enum([
-      'matched_head_sha',
-      'matched_branch',
-      'matched_notes',
-      'matched_workflow_id',
-      'recency_fallback',
-    ])),
+      'matched_head_sha',    // Tier 1 — exact git commit match (strongest signal)
+      'matched_branch',      // Tier 2 — same git branch
+      'matched_notes',       // Tier 3 — query matched recap notes (semantic)
+      'matched_workflow_id', // Tier 4 — same workflow ID
+      'recency_fallback',    // Tier 5 — no signal; most recent sessions only. Verify snippet before resuming.
+    ])).describe(
+      'Match signals explaining why this candidate was ranked. ' +
+      'matched_head_sha/branch/notes/workflow_id = strong signal. ' +
+      'recency_fallback = no strong signal; inspect the snippet before resuming.'
+    ),
+    /**
+     * Pre-built continuation template — pass directly to continue_workflow with intent: "rehydrate".
+     * Follows the same nextCall pattern as start_workflow, continue_workflow, and checkpoint_workflow.
+     * The resumeToken is valid as the continueToken for rehydration (no advance authority — read-only resume).
+     */
+    nextCall: V2ResumeNextCallSchema,
   })).max(5),
+  /**
+   * Total number of healthy sessions found before the top-5 cap was applied.
+   * When equal to candidates.length: all found sessions are shown.
+   * When greater than candidates.length: only the top-ranked subset is shown.
+   */
   totalEligible: z.number().int().min(0),
 });
 
 export const V2CheckpointWorkflowOutputSchema = z.object({
   checkpointNodeId: z.string().min(1),
-  stateToken: z.string().regex(STATE_TOKEN_PATTERN, 'Invalid stateToken format'),
+  /**
+   * Durable cross-chat bookmark pointing at the original (pre-checkpoint) node.
+   * To resume this exact position in a future chat: pass this as continueToken
+   * with intent: "rehydrate" to continue_workflow.
+   * Different from nextCall.params.continueToken (a ct_ token for advancing in the current chat).
+   */
+  resumeToken: z.string().regex(STATE_TOKEN_PATTERN, 'Invalid resumeToken format'),
   nextCall: V2NextCallSchema.describe(
     'Pre-built template for your next continue_workflow call. ' +
     'After checkpoint, use this to rehydrate and continue working on the current step.'

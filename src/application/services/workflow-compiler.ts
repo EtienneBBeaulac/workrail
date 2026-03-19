@@ -24,6 +24,10 @@ import {
   type TemplateRegistry,
 } from './compiler/template-registry';
 import { loadRoutineDefinitions } from './compiler/routine-loader';
+import { resolveBindingsPass } from './compiler/resolve-bindings';
+import { getProjectBindings } from './compiler/binding-registry';
+import { sentinelScanPass } from './compiler/sentinel-scan';
+import type { ExtensionPoint } from '../../types/workflow-definition';
 
 export interface CompiledLoop {
   readonly loop: LoopStepDefinition;
@@ -50,6 +54,18 @@ export interface CompiledWorkflow {
    * These must never run as top-level steps.
    */
   readonly loopBodyStepIds: ReadonlySet<string>;
+  /**
+   * Full binding manifest: slotId → resolved routineId for all {{wr.bindings.*}}
+   * tokens substituted during compilation (project overrides + defaults).
+   * Empty map for workflows without extensionPoints.
+   */
+  readonly resolvedBindings: ReadonlyMap<string, string>;
+  /**
+   * Project-override subset of resolvedBindings.
+   * Only slots sourced from .workrail/bindings.json — not extensionPoint defaults.
+   * Used by drift detection so that override-removal is correctly flagged.
+   */
+  readonly resolvedOverrides: ReadonlyMap<string, string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,18 +120,57 @@ function getTemplateRegistry(): TemplateRegistry {
 }
 
 /**
+ * Result shape for resolveDefinitionSteps — includes the resolved steps array
+ * and the binding manifest captured during compilation.
+ */
+export interface ResolvedDefinitionResult {
+  readonly steps: readonly (WorkflowStepDefinition | LoopStepDefinition)[];
+  /**
+   * Full binding manifest: slotId → resolved routineId for all {{wr.bindings.*}}
+   * tokens substituted during this compilation (both project overrides and defaults).
+   * Empty map for workflows without extensionPoints.
+   */
+  readonly resolvedBindings: ReadonlyMap<string, string>;
+  /**
+   * Project-override subset of resolvedBindings: only slots sourced from
+   * .workrail/bindings.json (not from extensionPoint defaults).
+   *
+   * Used by drift detection so that override-removal is correctly identified as
+   * drift. Slots missing from this map were resolved via defaults — if they
+   * have no current override at resume time, that is not drift.
+   */
+  readonly resolvedOverrides: ReadonlyMap<string, string>;
+}
+
+/**
  * Run the full authoring-layer resolution pipeline on definition steps.
  *
- * Order: templates → features → refs → promptBlocks rendering.
+ * Order: templates → bindings → features → refs → promptBlocks rendering → sentinel.
  *
  * Pure function — deterministic, no I/O. Used by both the compiler and
  * the pinning boundary to ensure stored definitions have all promptBlocks
- * resolved into prompt strings.
+ * and binding tokens resolved into prompt strings.
+ *
+ * @param extensionPoints - Extension point declarations from the workflow definition.
+ *   Used as fallback defaults when no project-level override exists for a slot.
+ *   Defaults to empty array for backward compatibility.
+ * @param workflowId - ID of the workflow being compiled. Used to locate the
+ *   per-workflow section in `.workrail/bindings.json`. Defaults to `''` which
+ *   intentionally skips project-level binding overrides — used by the shim's
+ *   preview call (single-step compilation) where project bindings are irrelevant
+ *   and extensionPoints defaults to `[]`.
+ * @param baseDir - Base directory for resolving `.workrail/bindings.json`.
+ *   Defaults to `process.cwd()`. Inject a workspace-specific path in
+ *   multi-workspace or shared-server setups to prevent bindings from one project
+ *   silently resolving for another.
  */
 export function resolveDefinitionSteps(
   steps: readonly (WorkflowStepDefinition | LoopStepDefinition)[],
   features: readonly string[],
-): Result<readonly (WorkflowStepDefinition | LoopStepDefinition)[], DomainError> {
+  extensionPoints: readonly ExtensionPoint[] = [],
+  workflowId: string = '',
+  baseDir?: string,
+): Result<ResolvedDefinitionResult, DomainError> {
   // Phase 0: Expand template_call steps into real steps (must run first)
   const templatesResult = resolveTemplatesPass(steps, getTemplateRegistry());
   if (templatesResult.isErr()) {
@@ -128,9 +183,22 @@ export function resolveDefinitionSteps(
     return err(Err.invalidState(message));
   }
 
+  // Phase 0.5: Resolve {{wr.bindings.slotId}} tokens in step prompts and promptBlocks.
+  // Must run after templates (so template-expanded steps are visible) and before
+  // features (independent surface, no ordering dependency).
+  const bindingsResult = resolveBindingsPass(
+    templatesResult.value,
+    extensionPoints,
+    workflowId ? getProjectBindings(workflowId, baseDir) : new Map(),
+  );
+  if (bindingsResult.isErr()) {
+    const e = bindingsResult.error;
+    return err(Err.invalidState(e.message));
+  }
+
   // Phase 1a: Apply declared features to promptBlocks (may inject refs)
   const featuresResult = resolveFeaturesPass(
-    templatesResult.value,
+    bindingsResult.value.steps,
     features,
     _featureRegistry,
   );
@@ -161,7 +229,19 @@ export function resolveDefinitionSteps(
     return err(Err.invalidState(message));
   }
 
-  return ok(blocksResult.value);
+  // Phase 1d: Sentinel scan — fail fast on any surviving {{wr.*}} tokens.
+  // If this fires, an upstream pass has a traversal bug.
+  const sentinelResult = sentinelScanPass(blocksResult.value);
+  if (sentinelResult.isErr()) {
+    const e = sentinelResult.error;
+    return err(Err.invalidState(e.message));
+  }
+
+  return ok({
+    steps: blocksResult.value,
+    resolvedBindings: bindingsResult.value.resolvedBindings,
+    resolvedOverrides: bindingsResult.value.resolvedOverrides,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -170,13 +250,20 @@ export function resolveDefinitionSteps(
 
 @singleton()
 export class WorkflowCompiler {
-  compile(workflow: Workflow): Result<CompiledWorkflow, DomainError> {
+  /**
+   * @param baseDir - Optional workspace root for resolving `.workrail/bindings.json`.
+   *   Defaults to `process.cwd()`. Pass an explicit path in multi-workspace setups.
+   */
+  compile(workflow: Workflow, baseDir?: string): Result<CompiledWorkflow, DomainError> {
     const resolvedResult = resolveDefinitionSteps(
       workflow.definition.steps,
       workflow.definition.features ?? [],
+      workflow.definition.extensionPoints ?? [],
+      workflow.definition.id,
+      baseDir,
     );
     if (resolvedResult.isErr()) return err(resolvedResult.error);
-    const steps = resolvedResult.value;
+    const { steps, resolvedBindings, resolvedOverrides } = resolvedResult.value;
 
     const stepById = new Map<string, WorkflowStepDefinition | LoopStepDefinition>();
     for (const step of steps) {
@@ -234,6 +321,8 @@ export class WorkflowCompiler {
       stepById,
       compiledLoops,
       loopBodyStepIds,
+      resolvedBindings,
+      resolvedOverrides,
     });
   }
 

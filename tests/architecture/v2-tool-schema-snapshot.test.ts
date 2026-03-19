@@ -14,6 +14,7 @@ import {
   V2InspectWorkflowInput,
   V2StartWorkflowInput,
   V2ContinueWorkflowInput,
+  V2ContinueWorkflowInputShape,
   V2CheckpointWorkflowInput,
   V2ResumeSessionInput,
   V2_TOOL_ANNOTATIONS,
@@ -75,12 +76,24 @@ describe('v2 tool schema field snapshots (anti-drift)', () => {
     ]);
   });
 
-  it('continue_workflow: exact field set', () => {
-    expect(extractFieldNames(V2ContinueWorkflowInput)).toEqual([
+  it('continue_workflow canonical shape: exact field set', () => {
+    expect(extractFieldNames(V2ContinueWorkflowInputShape)).toEqual([
       'context',
       'continueToken',
       'intent',
       'output',
+      'workspacePath',
+    ]);
+  });
+
+  it('continue_workflow validation boundary: exact field set', () => {
+    expect(extractFieldNames(V2ContinueWorkflowInput)).toEqual([
+      'context',
+      'contextVariables',
+      'continueToken',
+      'intent',
+      'output',
+      'workspacePath',
     ]);
   });
 

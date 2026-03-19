@@ -436,7 +436,7 @@ export async function createWorkRailEngine(
       }
       return engineOk({
         checkpointNodeId: result.value.checkpointNodeId,
-        stateToken: asStateToken(result.value.stateToken),
+        stateToken: asStateToken(result.value.resumeToken),
       });
     },
 

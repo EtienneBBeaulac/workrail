@@ -29,6 +29,41 @@ import type { WorkspaceAnchor, WorkspaceSource } from '../../v2/ports/workspace-
 import type { V2Dependencies } from '../types.js';
 
 // ---------------------------------------------------------------------------
+// Binding base dir — pure path resolution for .workrail/bindings.json lookup
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the directory to use when loading `.workrail/bindings.json` for
+ * binding drift detection at resume time.
+ *
+ * Mirrors the priority ladder of selectWorkspaceSource but returns a concrete
+ * absolute path synchronously — no async, no git resolution, no anchors.
+ * Used only by loadProjectBindings, which appends `.workrail/bindings.json`.
+ *
+ * Priority:
+ *  1. explicit workspacePath from the tool input (highest confidence)
+ *  2. primary MCP root URI converted to path (strips file:// prefix)
+ *  3. server process.cwd() (always available, may be wrong for remote clients)
+ */
+export function resolveBindingBaseDir(
+  workspacePath: string | undefined,
+  resolvedRootUris: readonly string[],
+): string {
+  if (workspacePath !== undefined) return workspacePath;
+
+  const primaryUri = resolvedRootUris[0];
+  if (primaryUri !== undefined) {
+    // Convert file:///absolute/path → /absolute/path.
+    // Non-file URIs (e.g. ssh://) fall through to server_cwd.
+    if (primaryUri.startsWith('file://')) {
+      return decodeURIComponent(primaryUri.replace(/^file:\/\//, ''));
+    }
+  }
+
+  return process.cwd();
+}
+
+// ---------------------------------------------------------------------------
 // Source selection — pure function, no I/O
 // ---------------------------------------------------------------------------
 

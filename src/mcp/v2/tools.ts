@@ -1,5 +1,10 @@
 import { z } from 'zod';
 import type { ToolAnnotations } from '../tool-factory.js';
+import {
+  CONTINUE_WORKFLOW_PROTOCOL,
+  findAliasFieldConflicts,
+  normalizeAliasedFields,
+} from '../workflow-protocol-contracts.js';
 
 const workspacePathField = z.string()
   .refine((p) => p.startsWith('/'), 'workspacePath must be an absolute path (starting with /)')
@@ -36,9 +41,12 @@ export type V2StartWorkflowInput = z.infer<typeof V2StartWorkflowInput>;
  * @canonical
  */
 export const V2ContinueWorkflowInputShape = z.object({
+  workspacePath: workspacePathField,
   continueToken: z.string().min(1).describe(
-    'The single token for your next continue_workflow call. Carries session identity AND advance authority. ' +
-    'Round-trip exactly as received from start_workflow or previous continue_workflow — never decode, inspect, or modify it.'
+    'The token for your next continue_workflow call. Two valid token kinds: ' +
+    '(1) A continueToken (ct_...) from start_workflow or a previous continue_workflow — carries session identity AND advance authority. ' +
+    '(2) A resumeToken (st_...) from resume_session or checkpoint_workflow — carries session identity only; valid for intent: "rehydrate", not "advance". ' +
+    'Round-trip exactly as received — never decode, inspect, or modify it.'
   ),
   intent: z.enum(['advance', 'rehydrate']).optional().describe(
     'What you want to do. Auto-inferred if omitted: ' +
@@ -64,17 +72,35 @@ export const V2ContinueWorkflowInputShape = z.object({
     .describe('Durable output to attach to the current node. Only valid when intent is "advance".'),
 }).strict();
 
+const continueWorkflowContextAliasField = z.record(z.unknown()).optional().describe(
+  'Compatibility alias for context. Canonical field name: "context".'
+);
+
 /**
  * Validation schema for continue_workflow (runtime contract).
  *
  * Derives from V2ContinueWorkflowInputShape and adds:
  * - Cross-field validation on the raw boundary shape
- * - Canonical normalization to a single internal ackToken field
+ * - Canonical normalization of boundary aliases onto the single continue_workflow contract
  *
  * Handlers use THIS schema for validation. Introspection uses the shape schema.
  */
 export const V2ContinueWorkflowInput = V2ContinueWorkflowInputShape
+  .extend({
+    contextVariables: continueWorkflowContextAliasField,
+  })
   .superRefine((data, ctx) => {
+    const aliasMap = CONTINUE_WORKFLOW_PROTOCOL.aliasMap;
+    const conflicts = aliasMap
+      ? findAliasFieldConflicts(data as Readonly<Record<string, unknown>>, aliasMap)
+      : [];
+    for (const { alias, canonical } of conflicts) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [alias],
+        message: `Provide either "${canonical}" or "${alias}", not both. Canonical field: "${canonical}".`,
+      });
+    }
     if (data.intent === 'rehydrate' && data.output) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -86,19 +112,24 @@ export const V2ContinueWorkflowInput = V2ContinueWorkflowInputShape
     }
   })
   .transform((data) => {
+    const normalized = CONTINUE_WORKFLOW_PROTOCOL.aliasMap
+      ? normalizeAliasedFields(data as Readonly<Record<string, unknown>>, CONTINUE_WORKFLOW_PROTOCOL.aliasMap)
+      : (data as Record<string, unknown>);
     const intent = data.intent ?? (data.output ? 'advance' : 'rehydrate');
     return {
       intent,
       continueToken: data.continueToken,
-      ...(data.context ? { context: data.context } : {}),
+      ...(normalized.context ? { context: normalized.context } : {}),
       ...(data.output ? { output: data.output } : {}),
+      ...(data.workspacePath !== undefined ? { workspacePath: data.workspacePath } : {}),
     };
   });
 export type V2ContinueWorkflowInput = z.infer<typeof V2ContinueWorkflowInput>;
 
 export const V2ResumeSessionInput = z.object({
-  query: z.string().max(256).optional().describe(
-    'Free text search to find a relevant session. Matches against recap notes and workflow IDs.'
+  query: z.string().min(1).max(256).optional().describe(
+    'Free text search to find a relevant session. Matches against recap notes and workflow IDs. ' +
+    'Without query, only git-context matching runs — the semantic (notes) tier is skipped.'
   ),
   gitBranch: z.string().max(256).optional().describe(
     'Git branch name to match against session observations. Overrides auto-detected branch.'

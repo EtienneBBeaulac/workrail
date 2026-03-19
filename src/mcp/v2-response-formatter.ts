@@ -52,6 +52,13 @@ interface V2Validation {
   readonly suggestions: readonly string[];
 }
 
+interface V2BindingDriftWarning {
+  readonly code: 'BINDING_DRIFT';
+  readonly slotId: string;
+  readonly pinnedValue: string;
+  readonly currentValue: string;
+}
+
 interface V2ExecutionBase {
   readonly continueToken?: string;
   readonly checkpointToken?: string;
@@ -60,6 +67,7 @@ interface V2ExecutionBase {
   readonly preferences: V2Preferences;
   readonly nextIntent: string;
   readonly nextCall: V2NextCall | null;
+  readonly warnings?: readonly V2BindingDriftWarning[];
 }
 
 interface V2Blocked extends V2ExecutionBase {
@@ -151,10 +159,8 @@ const PERSONA_SYSTEM = '---------\nSYSTEM\n---------';
  * Build the JSON code block the agent copies into their next call.
  *
  * Uses nextCall.params (minus intent, which is auto-inferred) as the
- * canonical source. The formatted block surfaces `nextToken` as the single
- * agent-facing advance token, while the raw API continues to use `ackToken`.
- * When nextCall is null (complete / non-retryable blocked), includes only
- * stateToken for session reference.
+ * canonical source. The formatted block surfaces `continueToken` as the
+ * single agent-facing continuation token.
  *
  * checkpointToken is intentionally omitted from the prose output — it is
  * available in the raw JSON response for callers who need it, but surfacing it
@@ -189,16 +195,41 @@ function formatTokenBlock(data: V2ExecutionResponse): string {
 }
 
 // ---------------------------------------------------------------------------
+// Binding drift warning section
+// ---------------------------------------------------------------------------
+
+/**
+ * Render binding drift warnings as a SYSTEM advisory block.
+ * Returns an empty string when there are no warnings.
+ */
+function formatBindingDriftWarnings(data: V2ExecutionResponse): string {
+  if (!data.warnings || data.warnings.length === 0) return '';
+  const lines: string[] = [
+    '',
+    '> **⚠ Binding Drift Detected**',
+    '> Your `.workrail/bindings.json` has changed since this session was started.',
+    '> The session continues with the original compiled bindings. Start a new session to pick up the changes.',
+    '>',
+  ];
+  for (const w of data.warnings) {
+    lines.push(`> - \`${w.slotId}\`: was \`${w.pinnedValue}\`, now \`${w.currentValue}\``);
+  }
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
 // Variant formatters
 // ---------------------------------------------------------------------------
 
-function formatComplete(_data: V2ExecutionResponse): string {
+function formatComplete(data: V2ExecutionResponse): string {
+  const driftBlock = formatBindingDriftWarnings(data);
   return [
     PERSONA_SYSTEM,
     '',
     '# Workflow Complete',
     '',
     'The workflow has finished. No further steps to execute.',
+    ...(driftBlock ? [driftBlock] : []),
   ].join('\n');
 }
 
@@ -302,6 +333,12 @@ function formatRehydrate(data: V2ExecutionResponse): string {
     lines.push('');
   }
 
+  const driftBlock = formatBindingDriftWarnings(data);
+  if (driftBlock) {
+    lines.push(driftBlock);
+    lines.push('');
+  }
+
   lines.push('Continue working on this step. When done, call `continue_workflow` to advance.');
 
   return lines.join('\n');
@@ -331,6 +368,12 @@ function formatSuccess(data: V2ExecutionResponse): string {
   lines.push('Include `output.notesMarkdown` documenting your work — what you did, key decisions, what you produced, and anything notable.');
   lines.push('');
   lines.push(formatPreferences(data.preferences));
+
+  const driftBlock = formatBindingDriftWarnings(data);
+  if (driftBlock) {
+    lines.push('');
+    lines.push(driftBlock);
+  }
 
   return lines.join('\n');
 }
