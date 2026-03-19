@@ -9,7 +9,7 @@
  * definitions required for deterministic resumption.
  *
  * Key invariants:
- * - Tokens (stateToken, ackToken) are NOT included (re-minted on import)
+ * - Tokens (resumeToken, ackToken) are NOT included (re-minted on import)
  * - Integrity uses JCS canonical bytes + SHA-256
  * - Import validates integrity and ordering before storing
  * - Import defaults to import-as-new on session ID collision
@@ -128,7 +128,7 @@ const PinnedWorkflowsMapV1Schema = z
  *
  * Lock: bundle-format-single-json, bundle-tokens-not-portable
  *
- * Note: Tokens (stateToken, ackToken) are explicitly NOT included.
+ * Note: Tokens (resumeToken, ackToken) are explicitly NOT included.
  * On import, WorkRail re-mints fresh runtime tokens from the stored nodes
  * and snapshots.
  */

@@ -260,7 +260,7 @@ export function mapTokenDecodeErrorToToolError(e: TokenDecodeErrorV2): ToolFailu
         'TOKEN_INVALID_FORMAT',
         `Wrong token type. ${e.message}`,
         {
-          suggestion: 'Ensure you are using the correct token (stateToken vs ackToken) for this operation.',
+          suggestion: 'Ensure you are using the correct token type for this operation (continueToken, checkpointToken, or resumeToken).',
           details: {
             errorType: 'hrp_mismatch',
           },

@@ -146,5 +146,29 @@ describe('v2 execution placeholder handlers (Slice 3.2 boundary validation)', ()
     }
   });
 
-  // TOKEN_SCOPE_MISMATCH test removed — with single continueToken, no scope mismatch is possible.
+  // ── resumeToken routing ────────────────────────────────────────────────────
+  // resumeTokens (st_...) from resume_session carry no advance authority.
+  // The handler must reject them with TOKEN_SCOPE_MISMATCH before touching the keyring.
+
+  it('returns TOKEN_SCOPE_MISMATCH when a resumeToken is passed with intent: advance', async () => {
+    // Any st_ prefix triggers the scope check before signature verification —
+    // no valid signature is needed for this test.
+    const res = await handleV2ContinueWorkflow(
+      { continueToken: 'st_ABCDEFGHIJKLMNOPQRSTUVWX', intent: 'advance' } as any,
+      await dummyCtx(),
+    );
+    expect(res.type).toBe('error');
+    if (res.type !== 'error') return;
+    expect(res.code).toBe('TOKEN_SCOPE_MISMATCH');
+  });
+
+  it('returns TOKEN_SCOPE_MISMATCH when a st1... resumeToken is passed with intent: advance', async () => {
+    const res = await handleV2ContinueWorkflow(
+      { continueToken: 'st1qqqqqqqqqqqqqqqqqqqqqq', intent: 'advance' } as any,
+      await dummyCtx(),
+    );
+    expect(res.type).toBe('error');
+    if (res.type !== 'error') return;
+    expect(res.code).toBe('TOKEN_SCOPE_MISMATCH');
+  });
 });

@@ -234,7 +234,7 @@ export function reasonToBlocker(reason: ReasonV1): Result<BlockerV1, ReasonModel
           code: 'MISSING_REQUIRED_OUTPUT' as const,
           pointer: { kind: 'output_contract' as const, contractRef },
           message: `Missing required output (contractRef=${contractRef}).`,
-          suggestedFix: 'Call continue_workflow WITHOUT ackToken to rehydrate and receive a fresh ackToken, then retry with output.notesMarkdown that satisfies the step output requirements.',
+          suggestedFix: 'Call continue_workflow without output to rehydrate the current step, then retry with output.notesMarkdown that satisfies the step output requirements.',
         }))
         .andThen(ensureBlockerTextBudgets);
 
@@ -244,7 +244,7 @@ export function reasonToBlocker(reason: ReasonV1): Result<BlockerV1, ReasonModel
           code: 'INVALID_REQUIRED_OUTPUT' as const,
           pointer: { kind: 'output_contract' as const, contractRef },
           message: `Invalid output for contractRef=${contractRef}.`,
-          suggestedFix: 'Update output.notesMarkdown to satisfy validation. Then call continue_workflow WITHOUT ackToken (rehydrate) to receive a fresh ackToken, and retry advance with that new ackToken. Replaying the same ackToken is idempotent and will keep returning this blocked result.',
+          suggestedFix: 'Update output.notesMarkdown to satisfy validation. Then call continue_workflow without output to rehydrate the current step and retry advance with the corrected output. Replaying the same invalid advance will keep returning this blocked result.',
         }))
         .andThen(ensureBlockerTextBudgets);
 

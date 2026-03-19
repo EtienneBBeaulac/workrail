@@ -14,7 +14,7 @@
     "preconditions": [
         "User has a clear task, problem, or question to explore",
         "User can provide initial context, constraints, or requirements",
-        "Agent can maintain context variables throughout the workflow"
+        "Agent can maintain `continue_workflow` context keys throughout the workflow"
     ],
     "metaGuidance": [
         "FUNCTION DEFINITIONS: fun trackEvidence(source, grade) = 'Add to context.evidenceLog[] with {source, grade, timestamp}. Grade: High (peer-reviewed/official), Medium (expert/established), Low (anecdotal/emerging)'",
@@ -45,7 +45,7 @@
                 "Consider both domain complexity and option space size",
                 "When in doubt, err on the side of more thorough analysis (higher complexity)",
                 "Always allow human override of classification",
-                "Set context variables for conditional step execution and automation",
+                "Set these keys in the next `continue_workflow` call's `context` object for conditional step execution and automation",
                 "Automation levels: High=auto-approve confidence >8, Medium=standard, Low=extra confirmations"
             ],
             "requireConfirmation": true
@@ -72,7 +72,7 @@
                 "Some tasks may span domains - choose primary domain",
                 "This classification affects tool selection and evaluation criteria",
                 "Document reasoning for domain choice",
-                "Set domain-specific context variables for later steps"
+                "Set domain-specific keys in the next `continue_workflow` call's `context` object for later steps"
             ],
             "requireConfirmation": false
         },

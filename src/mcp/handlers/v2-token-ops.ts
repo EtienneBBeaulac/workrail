@@ -68,7 +68,7 @@ export type CheckpointTokenInput = ParsedTokenV1Binary & {
 /**
  * Resolved continue token — carries ALL fields needed for both advance and rehydrate.
  *
- * WHY: The one-token protocol collapses stateToken + ackToken into a single opaque token.
+ * WHY: The one-token protocol collapses resumeToken + ackToken into a single opaque token.
  * The server resolves session identity AND advance authority from this alone.
  * No need for separate state/ack parsing or scope-matching assertions.
  */
@@ -207,7 +207,7 @@ export function parseStateTokenOrFail(
       if (resolved.payload.tokenKind !== 'state') {
         return errAsync(
           errNotRetryable('TOKEN_INVALID_FORMAT', 'Expected a state token (st_... or st1...).', {
-            suggestion: 'Use the stateToken returned by WorkRail.',
+            suggestion: 'Use the resumeToken returned by WorkRail.',
           }) as ToolFailure,
         );
       }
@@ -229,7 +229,7 @@ export function parseStateTokenOrFail(
   if (parsedRes.value.payload.tokenKind !== 'state') {
     return errAsync(
       errNotRetryable('TOKEN_INVALID_FORMAT', 'Expected a state token (st1...).', {
-        suggestion: 'Use the stateToken returned by WorkRail.',
+        suggestion: 'Use the resumeToken returned by WorkRail.',
       }) as ToolFailure,
     );
   }
@@ -523,7 +523,7 @@ function reTokenFromNonceHex(
 // --------------------------------------------------------------------------
 
 export interface ShortTokenTriple {
-  readonly stateToken: string;
+  readonly resumeToken: string;
   readonly ackToken: string;
   readonly checkpointToken: string;
 }
@@ -564,7 +564,7 @@ export function mintShortTokenTriple(
     const replayCk = reTokenFromNonceHex('checkpoint', existingCk.nonceHex, ports);
     if (replayState.isOk() && replayAck.isOk() && replayCk.isOk()) {
       return okAsync({
-        stateToken: replayState.value,
+        resumeToken: replayState.value,
         ackToken: replayAck.value,
         checkpointToken: replayCk.value,
       });
@@ -594,7 +594,7 @@ export function mintShortTokenTriple(
     );
   }
 
-  const stateTokenStr = stateMinted.value;
+  const resumeTokenStr = stateMinted.value;
   const ackTokenStr = ackMinted.value;
   const ckTokenStr = ckMinted.value;
 
@@ -635,7 +635,7 @@ export function mintShortTokenTriple(
     .andThen(() => aliasStore.register(ackEntry))
     .andThen(() => aliasStore.register(ckEntry))
     .map(() => ({
-      stateToken: stateTokenStr,
+      resumeToken: resumeTokenStr,
       ackToken: ackTokenStr,
       checkpointToken: ckTokenStr,
     }))
