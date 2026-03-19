@@ -173,7 +173,7 @@ describe('Context Locks', () => {
      */
     it('should not echo context in response payload', () => {
       // The handler returns V2ContinueWorkflowOutputSchema which has:
-      // kind, stateToken, ackToken, checkpointToken, isComplete, pending
+      // kind, resumeToken, ackToken, checkpointToken, isComplete, pending
       // It does NOT include context in the response.
       
       // This is a structural invariant—the output schema is the enforcement.

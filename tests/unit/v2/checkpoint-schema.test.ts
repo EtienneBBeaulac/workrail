@@ -23,7 +23,7 @@ describe('V2CheckpointWorkflowOutputSchema', () => {
   it('accepts valid checkpoint output', () => {
     const result = V2CheckpointWorkflowOutputSchema.safeParse({
       checkpointNodeId: 'chk-node-001',
-      stateToken: VALID_STATE,
+      resumeToken: VALID_STATE,
       nextCall: { tool: 'continue_workflow', params: { continueToken: VALID_CONTINUE } },
     });
     expect(result.success).toBe(true);
@@ -31,22 +31,22 @@ describe('V2CheckpointWorkflowOutputSchema', () => {
 
   it('rejects missing checkpointNodeId', () => {
     const result = V2CheckpointWorkflowOutputSchema.safeParse({
-      stateToken: VALID_STATE,
+      resumeToken: VALID_STATE,
     });
     expect(result.success).toBe(false);
   });
 
-  it('rejects missing stateToken', () => {
+  it('rejects missing resumeToken', () => {
     const result = V2CheckpointWorkflowOutputSchema.safeParse({
       checkpointNodeId: 'chk-node-001',
     });
     expect(result.success).toBe(false);
   });
 
-  it('rejects invalid stateToken format', () => {
+  it('rejects invalid resumeToken format', () => {
     const result = V2CheckpointWorkflowOutputSchema.safeParse({
       checkpointNodeId: 'chk-node-001',
-      stateToken: 'invalid-format',
+      resumeToken: 'invalid-format',
     });
     expect(result.success).toBe(false);
   });

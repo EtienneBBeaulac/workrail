@@ -217,6 +217,8 @@ export interface RankedResumeCandidate {
   readonly lastActivityEventIndex: number;
   /** Non-nullable: HealthySessionSummary guarantees a known workflow with a pinned hash. */
   readonly workflowHash: WorkflowHash;
+  /** Non-nullable: required to identify the workflow for session resumption. */
+  readonly workflowId: WorkflowId;
 }
 
 /** Max candidates returned (locked §2.3). */
@@ -266,5 +268,6 @@ export function rankResumeCandidates(
     tierAssignment: tier,
     lastActivityEventIndex: summary.preferredTip.lastActivityEventIndex,
     workflowHash: summary.workflow.workflowHash,
+    workflowId: summary.workflow.workflowId,
   }));
 }

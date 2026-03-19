@@ -131,7 +131,7 @@ describe('Blocked node idempotency (dedupeKey enforcement)', () => {
       if (retry2Res.type !== 'success') return;
       expect(retry2Res.data.kind).toBe('ok');
 
-      // Both return same stateToken (idempotent)
+      // Both return same resumeToken (idempotent)
       expect(retry1Res.data.continueToken).toBe(retry2Res.data.continueToken);
 
       // Verify: only ONE advance_recorded event for retry

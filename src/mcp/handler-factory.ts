@@ -91,6 +91,7 @@ export function createHandler<TInput extends z.ZodType, TOutput>(
   schema: TInput,
   handler: (input: z.infer<TInput>, ctx: ToolContext) => Promise<ToolResult<TOutput>>,
   shapeSchema?: z.ZodObject<z.ZodRawShape>,
+  aliasMap?: Readonly<Record<string, string>>,
 ): WrappedToolHandler {
   return async (args: unknown, ctx: ToolContext): Promise<McpCallToolResult> => {
     const parseResult = schema.safeParse(args);
@@ -99,7 +100,7 @@ export function createHandler<TInput extends z.ZodType, TOutput>(
       const introspectionSchema = shapeSchema ?? schema;
 
       // Generate suggestions for self-correction (pure, deterministic)
-      const suggestionResult = generateSuggestions(args, introspectionSchema, DEFAULT_SUGGESTION_CONFIG);
+      const suggestionResult = generateSuggestions(args, introspectionSchema, DEFAULT_SUGGESTION_CONFIG, aliasMap);
       const suggestionDetails = formatSuggestionDetails(suggestionResult);
 
       // Restore optional fields that the agent provided with the wrong type.

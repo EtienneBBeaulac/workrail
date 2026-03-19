@@ -86,10 +86,10 @@ describe('V2ContinueWorkflowInput boundary validation', () => {
     }
   });
 
-  it('rejects unknown key "stateToken"', () => {
+  it('rejects unknown key "resumeToken"', () => {
     const result = V2ContinueWorkflowInput.safeParse({
       continueToken: 'ct_abc123',
-      stateToken: 'st1test',
+      resumeToken: 'st1test',
     });
     expect(result.success).toBe(false);
     if (!result.success) {
@@ -181,5 +181,47 @@ describe('V2ContinueWorkflowInput boundary validation', () => {
       continueToken: '',
     });
     expect(result.success).toBe(false);
+  });
+
+  // ── resumeToken resume path ──────────────────────────────────────
+  // When the agent uses a candidate from resume_session, it passes the resumeToken
+  // (st_... / st1...) as the continueToken with intent: 'rehydrate'.
+  // The schema accepts any non-empty string — the token-kind validation and routing
+  // happen inside executeContinueWorkflow.
+
+  it('accepts st_ resumeToken as continueToken with explicit rehydrate intent', () => {
+    const result = V2ContinueWorkflowInput.safeParse({
+      continueToken: 'st_ABCDEFGHIJKLMNOPQRSTUVWX',
+      intent: 'rehydrate',
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.intent).toBe('rehydrate');
+      expect(result.data.continueToken).toBe('st_ABCDEFGHIJKLMNOPQRSTUVWX');
+    }
+  });
+
+  it('auto-infers rehydrate when st_ resumeToken is passed without output', () => {
+    const result = V2ContinueWorkflowInput.safeParse({
+      continueToken: 'st_ABCDEFGHIJKLMNOPQRSTUVWX',
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      // No output → rehydrate auto-inferred — safe for the handler to route to rehydrate path
+      expect(result.data.intent).toBe('rehydrate');
+    }
+  });
+
+  it('schema accepts st_ resumeToken with advance intent (handler rejects it — not schema)', () => {
+    // The schema does NOT enforce token-kind restrictions on continueToken.
+    // executeContinueWorkflow detects st_/st1 prefix and rejects advance intent
+    // with an actionable error: "resumeToken carries no advance authority".
+    const result = V2ContinueWorkflowInput.safeParse({
+      continueToken: 'st_ABCDEFGHIJKLMNOPQRSTUVWX',
+      intent: 'advance',
+      output: { notesMarkdown: 'Done.' },
+    });
+    // Schema accepts it — handler enforces the token-kind boundary
+    expect(result.success).toBe(true);
   });
 });

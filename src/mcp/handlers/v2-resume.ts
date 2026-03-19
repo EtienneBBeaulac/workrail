@@ -47,7 +47,7 @@ function anchorValue(anchors: readonly WorkspaceAnchor[], key: WorkspaceAnchor['
  * Flow:
  * 1. Resolve workspace anchors (or use input overrides)
  * 2. Enumerate + load + rank sessions via SessionSummaryProvider
- * 3. Mint fresh stateToken per candidate
+ * 3. Mint fresh resumeToken per candidate
  * 4. Return bounded response (max 5 candidates)
  */
 export async function handleV2ResumeSession(
@@ -83,9 +83,9 @@ export async function handleV2ResumeSession(
     return errNotRetryable('INTERNAL_ERROR', `Resume failed: ${resumeResult.error.message}`);
   }
 
-  const candidates = resumeResult.value;
+  const { candidates, totalFound } = resumeResult.value;
 
-  // Mint fresh stateTokens for each candidate.
+  // Mint fresh resumeTokens for each candidate.
   // workflowHash is guaranteed non-null by HealthySessionSummary (validated at boundary).
   const { outputCandidates, skipped } = mintCandidateTokens(candidates, v2.tokenCodecPorts);
 
@@ -95,7 +95,7 @@ export async function handleV2ResumeSession(
 
   const output = V2ResumeSessionOutputSchema.parse({
     candidates: outputCandidates,
-    totalEligible: candidates.length,
+    totalEligible: totalFound,
   });
 
   return {
@@ -111,13 +111,19 @@ export async function handleV2ResumeSession(
 interface MintedCandidate {
   readonly sessionId: string;
   readonly runId: string;
-  readonly stateToken: string;
+  readonly workflowId: string;
+  readonly resumeToken: string;
   readonly snippet: string;
   readonly whyMatched: string[];
+  /** Pre-built template — the agent picks the best candidate and calls continue_workflow with this. */
+  readonly nextCall: {
+    readonly tool: 'continue_workflow';
+    readonly params: { readonly continueToken: string; readonly intent: 'rehydrate' };
+  };
 }
 
 /**
- * Mint stateTokens for ranked candidates.
+ * Mint resumeTokens for ranked candidates.
  *
  * Why separate function: isolates the token-minting concern from the handler
  * orchestration. Pure (no I/O), testable independently.
@@ -139,7 +145,7 @@ function mintCandidateTokens(
       continue;
     }
 
-    const stateTokenRes = signTokenOrErr({
+    const resumeTokenRes = signTokenOrErr({
       payload: {
         tokenVersion: 1 as const,
         tokenKind: 'state' as const,
@@ -151,7 +157,7 @@ function mintCandidateTokens(
       ports,
     });
 
-    if (stateTokenRes.isErr()) {
+    if (resumeTokenRes.isErr()) {
       skipped++;
       continue;
     }
@@ -159,9 +165,14 @@ function mintCandidateTokens(
     outputCandidates.push({
       sessionId: candidate.sessionId,
       runId: candidate.runId,
-      stateToken: stateTokenRes.value,
+      workflowId: candidate.workflowId,
+      resumeToken: resumeTokenRes.value,
       snippet: candidate.snippet,
       whyMatched: [...candidate.whyMatched],
+      nextCall: {
+        tool: 'continue_workflow',
+        params: { continueToken: resumeTokenRes.value, intent: 'rehydrate' },
+      },
     });
   }
 

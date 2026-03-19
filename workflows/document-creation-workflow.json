@@ -35,7 +35,7 @@
       "agentRole": "You are a documentation strategy specialist with expertise in assessing documentation complexity and risk. Your role is to accurately classify documentation needs based on technical depth, stakeholder impact, and integration requirements.",
       "guidance": [
         "Consider both content complexity and organizational impact",
-        "Set context variables that drive conditional workflow execution",
+        "Set these keys in the next `continue_workflow` call's `context` object that drive conditional workflow execution",
         "When uncertain, err toward higher complexity for better quality",
         "Automation levels: High=auto-approve confidence >8, Medium=standard, Low=extra confirmations"
       ],

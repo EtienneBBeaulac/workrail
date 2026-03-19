@@ -25,6 +25,7 @@ import {
   V2NextIntentSchema,
   V2BlockerReportSchema,
 } from '../../src/mcp/output-schemas.js';
+import { V2ResumeSessionInput } from '../../src/mcp/v2/tools.js';
 
 // ---------------------------------------------------------------------------
 // Helpers: minimal valid response shapes (boundary-only, no runtime deps)
@@ -362,24 +363,24 @@ describe('checkpoint_workflow response contract', () => {
   it('accepts valid checkpoint output', () => {
     const response = {
       checkpointNodeId: 'node_abc123',
-      stateToken: VALID_STATE_TOKEN,
+      resumeToken: VALID_STATE_TOKEN,
       nextCall: { tool: 'continue_workflow', params: { continueToken: VALID_CONTINUE_TOKEN } },
     };
     expect(V2CheckpointWorkflowOutputSchema.safeParse(response).success).toBe(true);
   });
 
   it('rejects missing checkpointNodeId', () => {
-    const response = { stateToken: VALID_STATE_TOKEN };
+    const response = { resumeToken: VALID_STATE_TOKEN };
     expect(V2CheckpointWorkflowOutputSchema.safeParse(response).success).toBe(false);
   });
 
-  it('rejects missing stateToken', () => {
+  it('rejects missing resumeToken', () => {
     const response = { checkpointNodeId: 'node_abc123' };
     expect(V2CheckpointWorkflowOutputSchema.safeParse(response).success).toBe(false);
   });
 
-  it('rejects invalid stateToken format', () => {
-    const response = { checkpointNodeId: 'node_abc123', stateToken: 'not-a-token' };
+  it('rejects invalid resumeToken format', () => {
+    const response = { checkpointNodeId: 'node_abc123', resumeToken: 'not-a-token' };
     expect(V2CheckpointWorkflowOutputSchema.safeParse(response).success).toBe(false);
   });
 });
@@ -448,20 +449,46 @@ describe('checkpointToken in response contracts', () => {
 // resume_session output contract
 // ---------------------------------------------------------------------------
 
+/** Minimal valid resume candidate — keeps test fixtures DRY. */
+function validResumeCandidate(overrides?: Partial<{
+  sessionId: string;
+  runId: string;
+  workflowId: string;
+  resumeToken: string;
+  snippet: string;
+  whyMatched: string[];
+}>) {
+  return {
+    sessionId: 'sess_abc123',
+    runId: 'run_001',
+    workflowId: 'coding-task-workflow-agentic',
+    resumeToken: VALID_STATE_TOKEN,
+    snippet: 'Working on feature X...',
+    whyMatched: ['matched_branch'],
+    nextCall: {
+      tool: 'continue_workflow',
+      params: { continueToken: VALID_STATE_TOKEN, intent: 'rehydrate' },
+    },
+    ...overrides,
+  };
+}
+
 describe('V2ResumeSessionOutputSchema', () => {
   it('accepts valid resume response with candidates', () => {
     const response = {
-      candidates: [
-        {
-          sessionId: 'sess_abc123',
-          runId: 'run_001',
-          stateToken: VALID_STATE_TOKEN,
-          snippet: 'Working on feature X...',
-          whyMatched: ['matched_branch'],
-        },
-      ],
+      candidates: [validResumeCandidate()],
       totalEligible: 3,
     };
+    expect(V2ResumeSessionOutputSchema.safeParse(response).success).toBe(true);
+  });
+
+  it('accepts totalEligible greater than candidates.length (pre-cap total)', () => {
+    // totalEligible now represents all healthy sessions found, not just the ranked subset.
+    // 47 sessions found → top 5 ranked → totalEligible: 47, candidates.length: 5
+    const fiveCandidates = Array.from({ length: 5 }, (_, i) =>
+      validResumeCandidate({ sessionId: `sess_${String(i)}`, runId: `run_${String(i)}`, snippet: '', whyMatched: ['recency_fallback'] })
+    );
+    const response = { candidates: fiveCandidates, totalEligible: 47 };
     expect(V2ResumeSessionOutputSchema.safeParse(response).success).toBe(true);
   });
 
@@ -472,15 +499,7 @@ describe('V2ResumeSessionOutputSchema', () => {
 
   it('accepts multiple whyMatched reasons', () => {
     const response = {
-      candidates: [
-        {
-          sessionId: 'sess_abc123',
-          runId: 'run_001',
-          stateToken: VALID_STATE_TOKEN,
-          snippet: 'Some recap text',
-          whyMatched: ['matched_head_sha', 'matched_branch'],
-        },
-      ],
+      candidates: [validResumeCandidate({ whyMatched: ['matched_head_sha', 'matched_branch'] })],
       totalEligible: 1,
     };
     expect(V2ResumeSessionOutputSchema.safeParse(response).success).toBe(true);
@@ -496,45 +515,59 @@ describe('V2ResumeSessionOutputSchema', () => {
     ];
     for (const reason of LOCKED_WHY_MATCHED) {
       const response = {
-        candidates: [
-          {
-            sessionId: 'sess_abc',
-            runId: 'run_001',
-            stateToken: VALID_STATE_TOKEN,
-            snippet: '',
-            whyMatched: [reason],
-          },
-        ],
+        candidates: [validResumeCandidate({ snippet: '', whyMatched: [reason] })],
         totalEligible: 1,
       };
       expect(V2ResumeSessionOutputSchema.safeParse(response).success).toBe(true);
     }
   });
 
+  it('rejects candidate missing workflowId', () => {
+    const candidate = validResumeCandidate() as Record<string, unknown>;
+    delete candidate['workflowId'];
+    expect(V2ResumeSessionOutputSchema.safeParse({ candidates: [candidate], totalEligible: 1 }).success).toBe(false);
+  });
+
+  it('rejects candidate missing nextCall', () => {
+    const candidate = validResumeCandidate() as Record<string, unknown>;
+    delete candidate['nextCall'];
+    expect(V2ResumeSessionOutputSchema.safeParse({ candidates: [candidate], totalEligible: 1 }).success).toBe(false);
+  });
+
+  it('nextCall must have tool: continue_workflow and intent: rehydrate', () => {
+    // wrong tool
+    const wrongTool = {
+      ...validResumeCandidate(),
+      nextCall: { tool: 'start_workflow', params: { continueToken: VALID_STATE_TOKEN, intent: 'rehydrate' } },
+    };
+    expect(V2ResumeSessionOutputSchema.safeParse({ candidates: [wrongTool], totalEligible: 1 }).success).toBe(false);
+
+    // wrong intent
+    const wrongIntent = {
+      ...validResumeCandidate(),
+      nextCall: { tool: 'continue_workflow', params: { continueToken: VALID_STATE_TOKEN, intent: 'advance' } },
+    };
+    expect(V2ResumeSessionOutputSchema.safeParse({ candidates: [wrongIntent], totalEligible: 1 }).success).toBe(false);
+  });
+
+  it('nextCall continueToken matches resumeToken of the candidate', () => {
+    // This is the self-documenting contract: nextCall.params.continueToken IS the resumeToken
+    const candidate = validResumeCandidate();
+    expect(candidate.nextCall.params.continueToken).toBe(candidate.resumeToken);
+  });
+
   it('rejects invalid whyMatched value', () => {
     const response = {
-      candidates: [
-        {
-          sessionId: 'sess_abc',
-          runId: 'run_001',
-          stateToken: VALID_STATE_TOKEN,
-          snippet: '',
-          whyMatched: ['invalid_reason'],
-        },
-      ],
+      candidates: [validResumeCandidate({ whyMatched: ['invalid_reason'] })],
       totalEligible: 1,
     };
     expect(V2ResumeSessionOutputSchema.safeParse(response).success).toBe(false);
   });
 
   it('enforces max 5 candidates', () => {
-    const sixCandidates = Array.from({ length: 6 }, (_, i) => ({
-      sessionId: `sess_${String(i)}`,
-      runId: `run_${String(i)}`,
-      stateToken: VALID_STATE_TOKEN,
-      snippet: '',
-      whyMatched: ['recency_fallback' as const],
-    }));
+    const sixCandidates = Array.from({ length: 6 }, (_, i) =>
+      validResumeCandidate({ sessionId: `sess_${String(i)}`, runId: `run_${String(i)}`, snippet: '', whyMatched: ['recency_fallback'] })
+    );
     const response = { candidates: sixCandidates, totalEligible: 6 };
     expect(V2ResumeSessionOutputSchema.safeParse(response).success).toBe(false);
   });
@@ -542,5 +575,51 @@ describe('V2ResumeSessionOutputSchema', () => {
   it('rejects negative totalEligible', () => {
     const response = { candidates: [], totalEligible: -1 };
     expect(V2ResumeSessionOutputSchema.safeParse(response).success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resume_session INPUT contract
+// ---------------------------------------------------------------------------
+
+describe('V2ResumeSessionInput', () => {
+  it('accepts empty input — all fields are optional (workspace context auto-detected)', () => {
+    expect(V2ResumeSessionInput.safeParse({}).success).toBe(true);
+  });
+
+  it('accepts valid query', () => {
+    expect(V2ResumeSessionInput.safeParse({ query: 'resume the ACEI-1234 workflow' }).success).toBe(true);
+  });
+
+  it('rejects empty query string — use undefined to omit, not empty string', () => {
+    const result = V2ResumeSessionInput.safeParse({ query: '' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects query exceeding 256 characters', () => {
+    const result = V2ResumeSessionInput.safeParse({ query: 'a'.repeat(257) });
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts valid absolute workspacePath', () => {
+    expect(V2ResumeSessionInput.safeParse({ workspacePath: '/Users/dev/my-project' }).success).toBe(true);
+  });
+
+  it('rejects non-absolute workspacePath (must start with /)', () => {
+    const result = V2ResumeSessionInput.safeParse({ workspacePath: 'relative/path' });
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts valid 40-char lowercase hex gitHeadSha', () => {
+    expect(V2ResumeSessionInput.safeParse({ gitHeadSha: 'a'.repeat(40) }).success).toBe(true);
+  });
+
+  it('rejects gitHeadSha that is not 40-char hex', () => {
+    expect(V2ResumeSessionInput.safeParse({ gitHeadSha: 'abc123' }).success).toBe(false);
+    expect(V2ResumeSessionInput.safeParse({ gitHeadSha: 'G'.repeat(40) }).success).toBe(false);
+  });
+
+  it('rejects unknown fields (strict schema)', () => {
+    expect(V2ResumeSessionInput.safeParse({ unknownField: 'value' }).success).toBe(false);
   });
 });

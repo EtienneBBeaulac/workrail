@@ -25,6 +25,7 @@ import {
   EMPTY_SUGGESTION_RESULT,
 } from '../../src/mcp/validation/index.js';
 import { V2ContinueWorkflowInputShape } from '../../src/mcp/v2/tools.js';
+import { CONTINUE_WORKFLOW_PROTOCOL } from '../../src/mcp/workflow-protocol-contracts.js';
 
 // -----------------------------------------------------------------------------
 // Test Schemas (use REAL Zod schemas, not mocks)
@@ -299,6 +300,23 @@ describe('generateSuggestions', () => {
 
     expect(result.correctTemplate).not.toBeNull();
     expect(result.correctTemplate).toHaveProperty('workflowId');
+  });
+
+  it('prefers canonical aliases over fuzzy matching when alias metadata exists', () => {
+    const result = generateSuggestions(
+      { continueToken: 'ct_test', contextVariables: { branch: 'main' } },
+      V2ContinueWorkflowInputShape,
+      DEFAULT_SUGGESTION_CONFIG,
+      CONTINUE_WORKFLOW_PROTOCOL.aliasMap
+    );
+
+    expect(result.suggestions).toContainEqual(
+      expect.objectContaining({
+        kind: 'unknown_key',
+        provided: 'contextVariables',
+        didYouMean: 'context',
+      })
+    );
   });
 
   it('returns empty result for valid input', () => {

@@ -170,20 +170,20 @@ export function mapInternalErrorToToolError(e: InternalError): ToolFailure {
     case 'missing_node_or_run':
       return errNotRetryable(
         'PRECONDITION_FAILED',
-        'The stateToken you provided does not match any active workflow session. It may be expired or from a different session.',
-        { suggestion: 'Use the stateToken returned by the most recent start_workflow or continue_workflow call.' },
+        'The continueToken you provided does not match any active workflow session. It may be expired or from a different session.',
+        { suggestion: 'Use the continueToken returned by the most recent start_workflow or continue_workflow call.' },
       ) as ToolFailure;
     case 'workflow_hash_mismatch':
       return errNotRetryable(
         'TOKEN_WORKFLOW_HASH_MISMATCH',
-        'The stateToken refers to a different version of this workflow than what is currently stored.',
+        'The continueToken refers to a different version of this workflow than what is currently stored.',
         { suggestion: 'Call start_workflow to create a new session with the current workflow version.' },
       ) as ToolFailure;
     case 'token_scope_mismatch':
       return errNotRetryable(
         'TOKEN_SCOPE_MISMATCH',
-        'The stateToken and ackToken do not belong to the same session or node. Tokens must come from the same WorkRail response.',
-        { suggestion: 'Use the stateToken and ackToken from the same continue_workflow or start_workflow response. Do not mix tokens from different calls.' },
+        'The continueToken does not belong to the current session or node. Use the most recent token block from the same WorkRail response.',
+        { suggestion: 'Use the continueToken from the same continue_workflow or start_workflow response. Do not mix tokens from different calls.' },
       ) as ToolFailure;
     case 'missing_snapshot':
       return internalError(
@@ -193,7 +193,7 @@ export function mapInternalErrorToToolError(e: InternalError): ToolFailure {
     case 'no_pending_step':
       return internalError(
         'There is no pending step to advance. The workflow may already be complete.',
-        'Call continue_workflow with only a stateToken (no ackToken) to check the current workflow state.',
+        'Call continue_workflow with only continueToken (and no output) to rehydrate the current workflow state.',
       );
     case 'invariant_violation':
       return internalError(

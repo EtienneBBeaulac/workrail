@@ -79,7 +79,7 @@ export function handleAdvanceIntent(args: {
     return neErrorAsync({
       kind: 'precondition_failed' as const,
       message: 'workflowHash mismatch for this run.',
-      suggestion: 'Use the stateToken returned by WorkRail for this run.',
+      suggestion: 'Use the continueToken returned by WorkRail for this run.',
     });
   }
 
@@ -106,7 +106,7 @@ export function handleAdvanceIntent(args: {
     return neErrorAsync({
       kind: 'precondition_failed' as const,
       message: 'workflowHash mismatch for this node.',
-      suggestion: 'Use the stateToken returned by WorkRail for this node.',
+      suggestion: 'Use the continueToken returned by WorkRail for this node.',
     });
   }
 

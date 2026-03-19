@@ -28,6 +28,7 @@ import { handleV2ContinueWorkflow, handleV2StartWorkflow } from '../handlers/v2-
 import { handleV2InspectWorkflow, handleV2ListWorkflows } from '../handlers/v2-workflow.js';
 import { handleV2CheckpointWorkflow } from '../handlers/v2-checkpoint.js';
 import { handleV2ResumeSession } from '../handlers/v2-resume.js';
+import { CONTINUE_WORKFLOW_PROTOCOL } from '../workflow-protocol-contracts.js';
 
 // -----------------------------------------------------------------------------
 // V2 Tool Registration
@@ -95,7 +96,12 @@ export function buildV2ToolRegistry(buildTool: ToolBuilder): V2ToolRegistration 
     inspect_workflow: createHandler(V2InspectWorkflowInput, handleV2InspectWorkflow),
     start_workflow: createHandler(V2StartWorkflowInput, handleV2StartWorkflow),
     // continue_workflow uses separate shape schema for introspection (canonical source)
-    continue_workflow: createHandler(V2ContinueWorkflowInput, handleV2ContinueWorkflow, V2ContinueWorkflowInputShape),
+    continue_workflow: createHandler(
+      V2ContinueWorkflowInput,
+      handleV2ContinueWorkflow,
+      V2ContinueWorkflowInputShape,
+      CONTINUE_WORKFLOW_PROTOCOL.aliasMap,
+    ),
     checkpoint_workflow: createHandler(V2CheckpointWorkflowInput, handleV2CheckpointWorkflow),
     resume_session: createHandler(V2ResumeSessionInput, handleV2ResumeSession),
   };

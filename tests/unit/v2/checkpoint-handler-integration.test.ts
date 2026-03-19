@@ -142,7 +142,7 @@ describe('handleV2CheckpointWorkflow (integration)', () => {
     if (result.type !== 'success') return;
     expect(result.data.checkpointNodeId).toBeDefined();
     expect(result.data.checkpointNodeId).not.toBe('unknown');
-    expect(result.data.stateToken).toMatch(/^st[1_]/);
+    expect(result.data.resumeToken).toMatch(/^st[1_]/);
   });
 
   it('is idempotent — same checkpointToken returns same checkpointNodeId', async () => {
@@ -157,10 +157,10 @@ describe('handleV2CheckpointWorkflow (integration)', () => {
     if (r1.type !== 'success' || r2.type !== 'success') return;
 
     expect(r2.data.checkpointNodeId).toBe(r1.data.checkpointNodeId);
-    expect(r2.data.stateToken).toMatch(/^st[1_]/);
+    expect(r2.data.resumeToken).toMatch(/^st[1_]/);
   });
 
-  it('agent can continue_workflow after checkpoint with the returned stateToken', async () => {
+  it('agent can continue_workflow after checkpoint with the returned resumeToken', async () => {
     const ctx = await buildCtx();
     const start = await startWorkflow(ctx);
 
