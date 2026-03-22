@@ -10,4 +10,5 @@ export type { IWorkflowStorage } from './types/storage.js';
 export type { IFeatureFlagProvider } from './config/feature-flags.js';
 
 // Infrastructure exports
-export { startServer } from './mcp/server.js';
+export { composeServer } from './mcp/server.js';
+export { startStdioServer } from './mcp/transports/stdio-entry.js';
