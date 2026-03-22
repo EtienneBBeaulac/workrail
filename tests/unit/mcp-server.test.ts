@@ -18,8 +18,9 @@ describe('MCP Server Core Functionality', () => {
       expect(content).toContain("import { startHttpServer } from './mcp/transports/http-entry.js'");
       expect(content).toContain('process.exit(1)');
       
-      // Backwards compat export
-      expect(content).toContain("export { startServer } from './mcp/server.js'");
+      // Public API exports
+      expect(content).toContain("export { startStdioServer } from './mcp/transports/stdio-entry.js'");
+      expect(content).toContain("export { composeServer } from './mcp/server.js'");
     });
 
     it('should have all required module files', () => {
@@ -28,6 +29,9 @@ describe('MCP Server Core Functionality', () => {
       expect(fs.existsSync(path.join(mcpDir, 'server.ts'))).toBe(true);
       expect(fs.existsSync(path.join(mcpDir, 'handlers/workflow.ts'))).toBe(true);
       expect(fs.existsSync(path.join(mcpDir, 'handlers/session.ts'))).toBe(true);
+      expect(fs.existsSync(path.join(mcpDir, 'transports/stdio-entry.ts'))).toBe(true);
+      expect(fs.existsSync(path.join(mcpDir, 'transports/http-entry.ts'))).toBe(true);
+      expect(fs.existsSync(path.join(mcpDir, 'transports/shutdown-hooks.ts'))).toBe(true);
     });
   });
 
@@ -210,9 +214,10 @@ describe('MCP Server Core Functionality', () => {
       expect(serverContent).toContain('container.resolve');
     });
 
-    it('should use StdioServerTransport', () => {
-      expect(serverContent).toContain('StdioServerTransport');
-      expect(serverContent).toContain('server.connect');
+    it('should NOT contain stdio transport logic (moved to transports/stdio-entry.ts)', () => {
+      expect(serverContent).not.toContain('StdioServerTransport');
+      expect(serverContent).not.toContain('server.connect');
+      expect(serverContent).not.toContain('startServer');
     });
 
     it('should conditionally register session tools', () => {

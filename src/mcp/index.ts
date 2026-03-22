@@ -121,8 +121,14 @@ export type {
 // Server
 export {
   createToolContext,
-  startServer,
+  composeServer,
 } from './server.js';
+
+export type { ComposedServer } from './server.js';
+
+// Transport entry points
+export { startStdioServer } from './transports/stdio-entry.js';
+export { startHttpServer } from './transports/http-entry.js';
 
 // Utilities
 export { zodToJsonSchema } from './zod-to-json-schema.js';
