@@ -14,8 +14,10 @@ import { startStdioServer } from './mcp/transports/stdio-entry.js';
 import { startHttpServer } from './mcp/transports/http-entry.js';
 import { assertNever } from './runtime/assert-never.js';
 
-// For backwards compatibility
-export { startServer } from './mcp/server.js';
+// Public API: transport entry points
+export { startStdioServer } from './mcp/transports/stdio-entry.js';
+export { startHttpServer } from './mcp/transports/http-entry.js';
+export { composeServer } from './mcp/server.js';
 
 // Resolve transport mode and start
 const mode = resolveTransportMode(process.env);

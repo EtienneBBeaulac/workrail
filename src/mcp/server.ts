@@ -19,10 +19,6 @@ import type { WorkflowService } from '../application/services/workflow-service.j
 import type { IFeatureFlagProvider } from '../config/feature-flags.js';
 import type { SessionManager } from '../infrastructure/session/SessionManager.js';
 import type { HttpServer } from '../infrastructure/session/HttpServer.js';
-import type { ShutdownEvents, ShutdownEvent } from '../runtime/ports/shutdown-events.js';
-import type { ProcessSignals } from '../runtime/ports/process-signals.js';
-import type { ProcessTerminator } from '../runtime/ports/process-terminator.js';
-
 import type { ToolContext, V2Dependencies } from './types.js';
 import { assertNever } from '../runtime/assert-never.js';
 import { unsafeTokenCodecPorts } from '../v2/durable-core/tokens/token-codec-ports.js';
@@ -31,7 +27,7 @@ import { normalizeV1WorkflowToPinnedSnapshot } from '../v2/read-only/v1-to-v2-sh
 import type { WorkflowCompiler } from '../application/services/workflow-compiler.js';
 import type { ValidationEngine } from '../application/services/validation-engine.js';
 import { LocalWorkspaceAnchorV2 } from '../v2/infra/local/workspace-anchor/index.js';
-import { WorkspaceRootsManager } from './workspace-roots-manager.js';
+import { WorkspaceRootsManager, type RootsReader } from './workspace-roots-manager.js';
 import { LocalDirectoryListingV2 } from '../v2/infra/local/directory-listing/index.js';
 import { LocalSessionSummaryProviderV2 } from '../v2/infra/local/session-summary-provider/index.js';
 
@@ -161,7 +157,7 @@ export async function createToolContext(): Promise<ToolContext> {
         tokenAliasStore,
         validationPipelineDeps,
         // resolvedRootUris starts empty; overridden per-request at the CallTool boundary
-        // with a snapshot of the current MCP client roots (see startServer).
+        // with a snapshot of the current MCP client roots (see transport entry points).
         resolvedRootUris: [],
         workspaceResolver: new LocalWorkspaceAnchorV2(process.cwd()),
         dataDir,
@@ -216,12 +212,22 @@ function toMcpTool<TInput extends z.ZodType>(tool: ToolDefinition<TInput>): Tool
  * but no transport connected. Pure composition with no transport-specific
  * side effects (no stdin watchers, no roots fetching).
  */
+/**
+ * Read-only view exposed to consumers of composeServer().
+ * Transport entry points that need write access to roots use the
+ * internal ComposedServerInternal type instead.
+ */
 export interface ComposedServer {
   readonly server: import('@modelcontextprotocol/sdk/server/index.js').Server;
   readonly ctx: ToolContext;
-  readonly rootsManager: WorkspaceRootsManager;
+  readonly rootsReader: RootsReader;
   readonly tools: readonly Tool[];
   readonly handlers: Record<string, WrappedToolHandler>;
+}
+
+/** @internal Transport entry points need write access to roots. */
+export interface ComposedServerInternal extends ComposedServer {
+  readonly rootsManager: WorkspaceRootsManager;
 }
 
 /**
@@ -237,7 +243,7 @@ export interface ComposedServer {
  * No transport-specific behavior (stdin watchers, roots fetching, etc).
  * Those belong in the transport-specific entry points.
  */
-export async function composeServer(): Promise<ComposedServer> {
+export async function composeServer(): Promise<ComposedServerInternal> {
   // Bootstrap DI container
   await bootstrap({ runtimeMode: { kind: 'production' } });
 
@@ -295,11 +301,9 @@ export async function composeServer(): Promise<ComposedServer> {
 
   // Dynamically import SDK modules (ESM-only)
   const { Server } = await import('@modelcontextprotocol/sdk/server/index.js');
-  const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
   const {
     CallToolRequestSchema,
     ListToolsRequestSchema,
-    RootsListChangedNotificationSchema,
   } = await import('@modelcontextprotocol/sdk/types.js');
 
   // Create server
@@ -365,96 +369,7 @@ export async function composeServer(): Promise<ComposedServer> {
     return handler(args ?? {}, requestCtx);
   });
 
-  return { server, ctx, rootsManager, tools, handlers };
+  return { server, ctx, rootsManager, rootsReader: rootsManager, tools, handlers };
 }
 
-// -----------------------------------------------------------------------------
-// Server Start (stdio transport — to be refactored in next slice)
-// -----------------------------------------------------------------------------
 
-/**
- * Start the MCP server over stdio transport.
- * This is the main entry point for IDE/Firebender usage.
- * 
- * TODO: This function will be moved to src/mcp/transports/stdio-entry.ts
- * after the http-entry is added (keeping both entry points together).
- */
-export async function startServer(): Promise<void> {
-  const { server, ctx, rootsManager } = await composeServer();
-
-  const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
-  const {
-    RootsListChangedNotificationSchema,
-  } = await import('@modelcontextprotocol/sdk/types.js');
-
-  // -------------------------------------------------------------------------
-  // stdio-specific: Handle root change notifications from the client
-  // -------------------------------------------------------------------------
-  server.setNotificationHandler(RootsListChangedNotificationSchema, async () => {
-    try {
-      const result = await server.listRoots();
-      rootsManager.updateRootUris(result.roots.map((r: { uri: string }) => r.uri));
-      console.error(`[Roots] Updated workspace roots: ${result.roots.map((r: { uri: string }) => r.uri).join(', ') || '(none)'}`);
-    } catch {
-      console.error('[Roots] Failed to fetch updated roots after change notification');
-    }
-  });
-
-  // -------------------------------------------------------------------------
-  // stdio-specific: Connect transport
-  // -------------------------------------------------------------------------
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-
-  // -------------------------------------------------------------------------
-  // stdio-specific: Fetch initial workspace roots from the IDE client
-  // -------------------------------------------------------------------------
-  try {
-    const result = await server.listRoots();
-    rootsManager.updateRootUris(result.roots.map((r: { uri: string }) => r.uri));
-    console.error(`[Roots] Initial workspace roots: ${result.roots.map((r: { uri: string }) => r.uri).join(', ') || '(none)'}`);
-  } catch {
-    console.error('[Roots] Client does not support roots/list; workspace context will use server CWD fallback');
-  }
-
-  console.error('WorkRail MCP Server running on stdio');
-
-  // -------------------------------------------------------------------------
-  // Shutdown hooks (shared infrastructure, but wired differently per transport)
-  // -------------------------------------------------------------------------
-  const shutdownEvents = container.resolve<ShutdownEvents>(DI.Runtime.ShutdownEvents);
-  const processSignals = container.resolve<ProcessSignals>(DI.Runtime.ProcessSignals);
-  const terminator = container.resolve<ProcessTerminator>(DI.Runtime.ProcessTerminator);
-
-  // Signal handlers: needed for both stdio and HTTP modes
-  processSignals.on('SIGINT', () => shutdownEvents.emit({ kind: 'shutdown_requested', signal: 'SIGINT' }));
-  processSignals.on('SIGTERM', () => shutdownEvents.emit({ kind: 'shutdown_requested', signal: 'SIGTERM' }));
-  processSignals.on('SIGHUP', () => shutdownEvents.emit({ kind: 'shutdown_requested', signal: 'SIGHUP' }));
-
-  // stdio-specific: Shut down when stdin closes (IDE disconnect).
-  // The MCP SDK's StdioServerTransport does not listen for stdin 'end',
-  // so server.onclose never fires on disconnect. Without this, the HTTP
-  // server keeps the process alive after stdin EOF, blocking client restart.
-  process.stdin.on('end', () => {
-    console.error('[MCP] stdin closed, initiating shutdown');
-    shutdownEvents.emit({ kind: 'shutdown_requested', signal: 'SIGHUP' });
-  });
-
-  // Shutdown handler (same for both modes)
-  let shutdownStarted = false;
-  shutdownEvents.onShutdown((event: ShutdownEvent) => {
-    if (shutdownStarted) return;
-    shutdownStarted = true;
-
-    void (async () => {
-      try {
-        console.error(`[Shutdown] Requested by ${event.signal}. Stopping services...`);
-        await ctx.httpServer?.stop();
-        terminator.terminate({ kind: 'success' });
-      } catch (err) {
-        console.error('[Shutdown] Error while stopping services:', err);
-        terminator.terminate({ kind: 'failure' });
-      }
-    })();
-  });
-}

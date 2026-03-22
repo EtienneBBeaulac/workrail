@@ -13,11 +13,7 @@
 
 import { composeServer } from '../server.js';
 import { createHttpListener } from './http-listener.js';
-import { container } from '../../di/container.js';
-import { DI } from '../../di/tokens.js';
-import type { ShutdownEvents } from '../../runtime/ports/shutdown-events.js';
-import type { ProcessSignals } from '../../runtime/ports/process-signals.js';
-import type { ProcessTerminator } from '../../runtime/ports/process-terminator.js';
+import { wireShutdownHooks } from './shutdown-hooks.js';
 import * as crypto from 'crypto';
 import express from 'express';
 
@@ -59,33 +55,12 @@ export async function startHttpServer(port: number): Promise<void> {
   // -------------------------------------------------------------------------
 
   // -------------------------------------------------------------------------
-  // Shutdown hooks (long-running server, like stdio)
+  // Shutdown hooks (shared)
   // -------------------------------------------------------------------------
-  const shutdownEvents = container.resolve<ShutdownEvents>(DI.Runtime.ShutdownEvents);
-  const processSignals = container.resolve<ProcessSignals>(DI.Runtime.ProcessSignals);
-  const terminator = container.resolve<ProcessTerminator>(DI.Runtime.ProcessTerminator);
-
-  // Signal handlers: standard for long-running processes
-  processSignals.on('SIGINT', () => shutdownEvents.emit({ kind: 'shutdown_requested', signal: 'SIGINT' }));
-  processSignals.on('SIGTERM', () => shutdownEvents.emit({ kind: 'shutdown_requested', signal: 'SIGTERM' }));
-  processSignals.on('SIGHUP', () => shutdownEvents.emit({ kind: 'shutdown_requested', signal: 'SIGHUP' }));
-
-  // Shutdown handler
-  let shutdownStarted = false;
-  shutdownEvents.onShutdown((event) => {
-    if (shutdownStarted) return;
-    shutdownStarted = true;
-
-    void (async () => {
-      try {
-        console.error(`[Shutdown] Requested by ${event.signal}. Stopping services...`);
-        await listener.stop();
-        await ctx.httpServer?.stop();
-        terminator.terminate({ kind: 'success' });
-      } catch (err) {
-        console.error('[Shutdown] Error while stopping services:', err);
-        terminator.terminate({ kind: 'failure' });
-      }
-    })();
+  wireShutdownHooks({
+    onBeforeTerminate: async () => {
+      await listener.stop();
+      await ctx.httpServer?.stop();
+    },
   });
 }
