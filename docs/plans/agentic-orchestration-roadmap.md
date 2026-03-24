@@ -74,6 +74,29 @@ The rollout is structured in **3 Phased Tiers**, gated by feature flags, ensurin
 
 ---
 
+## Backlog Candidates / Open Product Directions
+
+### Authorable Response Supplements
+
+**Goal:** Let workflow authors declare small, typed response-boundary supplements that WorkRail can deliver separately from the main authored step prompt.
+
+**Why it matters:**
+*   Keeps the primary step prompt user-voiced while still allowing start/resume-only guidance.
+*   Makes current runtime-owned supplement behavior explicit and eventually authorable.
+*   Gives workflow-for-workflows and future linting a real schema surface instead of relying on hidden server policy.
+
+**Constraints:**
+*   Should be a **narrow, typed feature**, not arbitrary extra prompt sludge.
+*   Must preserve separation between **core step instructions** and **delivery-owned framing**.
+*   `once_per_session` semantics must be explicit: policy-level first, durable tracking only if truly required later.
+
+**Likely shape:**
+*   A dedicated workflow field such as `responseSupplements`
+*   Typed supplement kinds, lifecycle targeting (`start`, `rehydrate`, maybe `advance`), and explicit delivery modes
+*   Strong validation and authoring guidance to prevent misuse
+
+---
+
 ## Summary of Phased Rollout
 
 | Phase | Focus | Technical Change | Risk | Value |

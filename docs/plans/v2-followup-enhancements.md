@@ -1,6 +1,14 @@
 # WorkRail v2 Follow-up Enhancements
 
-**Status**: In Progress — P1 implemented, P2–P6 planning  
+> **Active follow-up initiative**
+>
+> This file is still useful for the detailed open v2 follow-up work, but it is no longer the canonical high-level entrypoint.
+>
+> Prefer:
+> - `docs/plans/workflow-v2-roadmap.md`
+> - `docs/plans/workflow-v2-design.md`
+
+**Status**: In Progress — detailed follow-up initiative after core v2 delivery  
 **Date**: 2026-02-17  
 **Updated**: 2026-02-18  
 **Context**: Post-v2 core completion. All functional slices shipped, 2628 tests passing. This doc captures enhancement opportunities discovered during manual testing and production usage.

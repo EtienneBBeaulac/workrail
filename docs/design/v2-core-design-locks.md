@@ -1445,7 +1445,7 @@ When implementing WorkRail v2, treat the following documents as the authoritativ
    - `docs/design/studio.md`
 
 7) **High-level summary (non-normative):**
-   - `docs/plans/workrail-v2-one-pager.md`
+   - `docs/plans/workflow-v2-roadmap.md`
 
 ## 16.2) Generation + verifier contract (anti-drift) (locked intent)
 To prevent v1-style schema/description drift, v2 requires a deterministic generator + verifier pipeline.
@@ -2174,7 +2174,7 @@ Locks:
 **Where to document** (when locked):
 1. Update `src/mcp/v2/tools.ts` schema description for `notesMarkdown`
 2. Add normative section to `docs/reference/workflow-execution-contract.md`
-3. Update `docs/plans/workrail-v2-design-resumption-pack.md` philosophy section
+3. Update `docs/plans/workflow-v2-design.md`
 
 **Decision needed before Slice 4a ships.**
 
