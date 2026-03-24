@@ -26,6 +26,13 @@ export interface V2ExecutionRenderEnvelope<TResponse> {
   readonly contentEnvelope?: StepContentEnvelope;
 }
 
+interface V2ExecutionRenderMetadata {
+  readonly lifecycle: V2ExecutionResponseLifecycle;
+  readonly contentEnvelope?: StepContentEnvelope;
+}
+
+const V2_EXECUTION_RENDER_META = Symbol.for('workrail.v2ExecutionRenderMeta');
+
 export function createV2ExecutionRenderEnvelope<TResponse>(args: {
   readonly response: TResponse;
   readonly lifecycle: V2ExecutionResponseLifecycle;
@@ -40,6 +47,51 @@ export function createV2ExecutionRenderEnvelope<TResponse>(args: {
 }
 
 const VALID_LIFECYCLES: ReadonlySet<string> = new Set(V2_EXECUTION_LIFECYCLES);
+
+export function attachV2ExecutionRenderMetadata<TResponse extends object>(args: {
+  readonly response: TResponse;
+  readonly lifecycle: V2ExecutionResponseLifecycle;
+  readonly contentEnvelope?: StepContentEnvelope;
+}): TResponse {
+  Object.defineProperty(args.response, V2_EXECUTION_RENDER_META, {
+    value: Object.freeze({
+      lifecycle: args.lifecycle,
+      ...(args.contentEnvelope != null ? { contentEnvelope: args.contentEnvelope } : {}),
+    } satisfies V2ExecutionRenderMetadata),
+    enumerable: false,
+    configurable: false,
+    writable: false,
+  });
+
+  return args.response;
+}
+
+export function getV2ExecutionRenderEnvelope(
+  value: unknown,
+): V2ExecutionRenderEnvelope<unknown> | null {
+  if (typeof value !== 'object' || value === null) return null;
+
+  const candidate = value as Record<string, unknown>;
+  if (
+    candidate.kind === 'v2_execution_render_envelope' &&
+    'response' in candidate &&
+    typeof candidate.lifecycle === 'string' &&
+    VALID_LIFECYCLES.has(candidate.lifecycle)
+  ) {
+    return candidate as unknown as V2ExecutionRenderEnvelope<unknown>;
+  }
+
+  const metadata = Reflect.get(candidate, V2_EXECUTION_RENDER_META) as V2ExecutionRenderMetadata | undefined;
+  if (metadata == null || !VALID_LIFECYCLES.has(metadata.lifecycle)) {
+    return null;
+  }
+
+  return createV2ExecutionRenderEnvelope({
+    response: value,
+    lifecycle: metadata.lifecycle,
+    contentEnvelope: metadata.contentEnvelope,
+  });
+}
 
 export function isV2ExecutionRenderEnvelope(
   value: unknown,
