@@ -75,6 +75,7 @@ jobs:
       - name: Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKRAIL_ALLOW_MAJOR_RELEASE: ${{ vars.WORKRAIL_ALLOW_MAJOR_RELEASE }}
         run: |
           set -euo pipefail
 

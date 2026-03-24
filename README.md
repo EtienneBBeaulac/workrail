@@ -156,9 +156,12 @@ The agent will find the workflow, start at step 1, and proceed systematically.
 
 - **Lockfile is enforced**: `package-lock.json` is canonical and CI will fail if `npm ci` would modify it. Commit lockfile changes intentionally.
 - **Release authority**: releases are produced by **semantic-release** in GitHub Actions (don’t bump versions/tags locally).
+- **Major releases are approval-gated**: breaking changes become **minor by default** and only become **major** when `WORKRAIL_ALLOW_MAJOR_RELEASE=true`.
 - **Preview a release (dry-run)**:
   - **Locally**: `npx semantic-release --dry-run --no-ci`
-  - **In Actions**: run the **Release (dry-run)** workflow (`.github/workflows/release-dry-run.yml`).
+  - **Locally (major allowed)**: `WORKRAIL_ALLOW_MAJOR_RELEASE=true npx semantic-release --dry-run --no-ci`
+- **In Actions**: run the **Release (dry-run)** workflow (`.github/workflows/release-dry-run.yml`).
+- **Full release policy**: see [`docs/reference/releases.md`](docs/reference/releases.md)
 
 ---
 
