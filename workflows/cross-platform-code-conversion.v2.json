@@ -40,7 +40,32 @@
     {
       "id": "phase-0-scope",
       "title": "Phase 0: Scope & Platform Analysis",
-      "prompt": "Understand what you're converting before you touch anything.\n\nFigure out:\n- What is being converted? (single file, module, feature, full component, entire app)\n- What is the source platform? (Android/Kotlin, iOS/Swift, Web/React, etc.)\n- What is the target platform?\n- How large is the conversion scope? (file count, rough LOC)\n- Where does the converted code go? Find the target repo yourself before asking the user.\n\nIf the user hasn't specified scope boundaries, ask. Don't guess at scope.\n\nThen classify the conversion:\n- `conversionComplexity`: Small (1-3 files, straightforward translation) / Medium (a module or feature, mixed difficulty) / Large (many modules, significant platform-specific code)\n\nUse this guidance:\n- Small: few files, mostly mechanical, low risk of idiom mismatch\n- Medium: a module or feature with some platform-specific code mixed in\n- Large: many files, deep platform coupling, multiple idiom mapping decisions\n\nCapture:\n- `sourcePlatform`\n- `targetPlatform`\n- `conversionScope`\n- `targetRepoPath`\n- `estimatedSize`\n- `conversionComplexity`",
+      "promptBlocks": {
+        "goal": "Understand the migration scope, platforms, target repo location, and rough size before any implementation begins.",
+        "constraints": [
+          "If the user has not specified scope boundaries, ask. Do not guess at scope.",
+          "Find the target repo yourself before asking the user."
+        ],
+        "procedure": [
+          "Determine what is being converted: single file, module, feature, full component, or entire app.",
+          "Identify the source platform and target platform.",
+          "Estimate conversion size using file count and rough LOC.",
+          "Classify `conversionComplexity` as Small, Medium, or Large using this guidance: Small = 1-3 files and mostly mechanical; Medium = module or feature with mixed difficulty; Large = many files with deep platform coupling and multiple idiom-mapping decisions."
+        ],
+        "outputRequired": {
+          "sourcePlatform": "The source platform being migrated from.",
+          "targetPlatform": "The target platform being migrated to.",
+          "conversionScope": "The bounded scope of the migration.",
+          "targetRepoPath": "Where the converted code should land.",
+          "estimatedSize": "A rough estimate of migration size.",
+          "conversionComplexity": "Small, Medium, or Large."
+        },
+        "verify": [
+          "The migration scope is explicit and bounded.",
+          "The target repo location is identified or intentionally escalated.",
+          "The complexity classification matches the actual size and risk of the work."
+        ]
+      },
       "requireConfirmation": {
         "var": "conversionComplexity",
         "not_equals": "Small"
@@ -215,7 +240,31 @@
           { "var": "bucketACounts", "not_equals": 0 }
         ]
       },
-      "prompt": "Delegate all Bucket A batches to subagents in parallel. If subagent delegation is not available in your environment, convert Bucket A files yourself sequentially — they're mechanical translations.\n\nOnly delegate files that are not boundary-critical and do not require unresolved target integration analysis. If `adaptationProfile` is `high`, be stricter: delegate only clearly mechanical files with no boundary or integration ambiguity. If a supposedly easy file affects a semantic boundary, a target-repo seam, or requires contract judgment, keep it with main-agent review.\n\nFor each batch in `bucketABatches`, spawn a subagent with these instructions:\n- Source platform: `{{sourcePlatform}}`\n- Target platform: `{{targetPlatform}}`\n- Target repo: `{{targetRepoPath}}`\n- Files to convert: (list the specific files in this batch)\n- Task: translate these files from the source language to the target language. Follow target platform naming conventions. These are platform-agnostic files — no library substitution or idiom mapping needed. Preserve the public API. Convert tests if they exist.\n\nRun batches in parallel. Each subagent works independently on files with no cross-dependencies.\n\nWhen all subagents finish, review their output:\n- Spot-check a few converted files for quality\n- Flag any files a subagent misclassified as easy (actually needs library substitution, platform-specific handling, semantic contract review, or target integration analysis)\n- Move misclassified files back to the appropriate bucket for main agent handling\n\nRun build or typecheck on the Bucket A output to catch issues early.\n\nCapture:\n- `bucketAComplete`\n- `bucketABuildPassed`\n- `reclassifiedFiles`",
+      "promptBlocks": {
+        "goal": "Delegate only safe mechanical conversion work from Bucket A while keeping all real judgment and synthesis with the main agent.",
+        "constraints": [
+          "Delegate only files that are not boundary-critical and do not require unresolved target integration analysis.",
+          "If `adaptationProfile` is `high`, delegate only clearly mechanical files with no boundary or integration ambiguity.",
+          "If a supposedly easy file affects a semantic boundary, a target-repo seam, or requires contract judgment, keep it with main-agent review."
+        ],
+        "procedure": [
+          "If subagent delegation is not available in your environment, convert Bucket A files yourself sequentially instead.",
+          "For each batch in `bucketABatches`, delegate a bounded translation task using `sourcePlatform`, `targetPlatform`, `targetRepoPath`, and the specific files in that batch.",
+          "Instruct subagents to perform only platform-agnostic translation, follow target naming conventions, preserve the public API, and convert tests if they exist.",
+          "After all batches finish, spot-check the output, flag misclassified files, and move them back to the appropriate main-agent bucket.",
+          "Run build or typecheck on the Bucket A output before continuing."
+        ],
+        "outputRequired": {
+          "bucketAComplete": "Whether Bucket A work is complete.",
+          "bucketABuildPassed": "Whether the delegated Bucket A output builds or typechecks cleanly.",
+          "reclassifiedFiles": "Any files that were delegated but need to return to main-agent handling."
+        },
+        "verify": [
+          "No ambiguous or boundary-critical files were delegated as mechanical work.",
+          "Delegated output was reviewed by the main agent before proceeding.",
+          "Misclassified files were re-routed instead of being silently accepted."
+        ]
+      },
       "requireConfirmation": false
     },
     {
@@ -239,7 +288,45 @@
         {
           "id": "phase-5a-convert-batch",
           "title": "Convert Current Batch",
-          "prompt": "Convert the current batch: `{{currentBatch.name}}`\n\nThis is Bucket B or C code that needs your full context.\n\n- **Bucket B**: Follow the dependency mapping from Phase 3f. Substitute libraries, keep structure.\n- **Bucket C**: Follow the idiom mapping from Phase 3f. Restructure where the target platform has a better way.\n\nUse both `semanticContractInventory` and `targetIntegrationAnalysis` for any boundary touched by this batch. If `adaptationProfile` is `high`, also follow `architectureAdaptationPlan`. If the chosen target construct, target seam, or reuse/adaptation decision changes, update the relevant row rather than letting the implementation drift silently.\n\nAlso handle any `reclassifiedFiles` that were moved back from Bucket A delegation.\n\nFor all files:\n- Follow target platform conventions\n- Preserve public API contracts where possible\n- Fit the target repo's actual architectural seams\n- Add TODO comments for anything uncertain\n- Convert tests alongside production code when source tests exist\n\nRun build or typecheck after this batch. If it fails, fix it before moving on.\n\nTrack whether this batch required:\n- `bucketDriftDetected`: a file turned out to be harder than its bucket classification (e.g., Bucket B file needed Bucket C-level design decisions)\n- `unexpectedDependency`: a dependency was discovered that wasn't in the Phase 3 mapping\n- `buildBroke`: build or typecheck failed after this batch\n- `contractDriftDetected`: the implementation forced a change to a semantic contract row\n- `contractRowsUpdated`: one or more contract rows were revised for this batch\n- `contractUncertain`: a touched boundary can no longer be mapped confidently\n- `integrationDriftDetected`: the implementation forced a change to target module placement, reuse/adaptation choice, or integration seam\n- `integrationAnalysisUpdated`: one or more target integration rows were revised for this batch\n- `integrationUncertain`: a touched boundary no longer has a confident target-repo fit decision\n- `architectureDriftDetected`: high-adaptation implementation required a different architecture-level adaptation than planned\n- `adaptationPlanUpdated`: the architecture adaptation plan was revised for this batch\n\nCapture:\n- `batchFilesConverted`\n- `batchBuildPassed`\n- `batchIssues`\n- `bucketDriftDetected`\n- `unexpectedDependency`\n- `buildBroke`\n- `contractDriftDetected`\n- `contractRowsUpdated`\n- `contractUncertain`\n- `integrationDriftDetected`\n- `integrationAnalysisUpdated`\n- `integrationUncertain`\n- `architectureDriftDetected`\n- `adaptationPlanUpdated`",
+          "promptBlocks": {
+            "goal": "Convert the current Bucket B or C batch using the approved plan, contract inventory, and target-integration analysis.",
+            "constraints": [
+              "Follow target platform conventions.",
+              "Preserve public API contracts where possible.",
+              "Fit the target repo's actual architectural seams.",
+              "Add TODO comments for anything uncertain.",
+              "Convert tests alongside production code when source tests exist."
+            ],
+            "procedure": [
+              "Convert `{{currentBatch.name}}` using the dependency mapping and idiom mapping from Phase 3f.",
+              "For any touched boundary, consult both `semanticContractInventory` and `targetIntegrationAnalysis`.",
+              "If `adaptationProfile` is `high`, also follow `architectureAdaptationPlan`.",
+              "If the chosen target construct, target seam, or reuse/adaptation decision changes, update the relevant artifact rows rather than letting implementation drift silently.",
+              "Also handle any `reclassifiedFiles` that returned from Bucket A delegation.",
+              "Run build or typecheck after this batch and fix failures before moving on."
+            ],
+            "outputRequired": {
+              "batchFilesConverted": "The files converted in this batch.",
+              "batchBuildPassed": "Whether the batch builds or typechecks cleanly.",
+              "batchIssues": "Problems encountered while converting the batch.",
+              "bucketDriftDetected": "Whether the batch proved harder than its original bucket classification.",
+              "unexpectedDependency": "Whether the batch exposed a dependency missing from the prior plan.",
+              "buildBroke": "Whether build or typecheck failed after the batch.",
+              "contractDriftDetected": "Whether implementation forced a semantic-contract change.",
+              "contractRowsUpdated": "Whether semantic contract rows were revised.",
+              "contractUncertain": "Whether a touched boundary can no longer be mapped confidently.",
+              "integrationDriftDetected": "Whether implementation forced a change to target seam or reuse/adaptation choice.",
+              "integrationAnalysisUpdated": "Whether target integration rows were revised.",
+              "integrationUncertain": "Whether a touched boundary no longer has a confident target-repo fit.",
+              "architectureDriftDetected": "Whether high-adaptation implementation diverged from the architecture adaptation plan.",
+              "adaptationPlanUpdated": "Whether the architecture adaptation plan was revised for this batch."
+            },
+            "verify": [
+              "Any contract or integration drift is reflected explicitly in the tracked artifacts.",
+              "No touched boundary is left without a clear contract and target-fit status.",
+              "The batch is build-clean or the failure has been captured for immediate follow-up."
+            ]
+          },
           "requireConfirmation": false
         },
         {
@@ -257,7 +344,33 @@
               { "var": "architectureDriftDetected", "equals": true }
             ]
           },
-          "prompt": "Something unexpected happened in this batch. Before moving on, check what went wrong.\n\nIf `bucketDriftDetected`: the file was harder than classified. Update the idiom or dependency mapping from Phase 3f so downstream batches don't hit the same surprise. Record what changed.\n\nIf `unexpectedDependency`: a dependency wasn't in the Phase 3f plan. Map it now and check whether other batches depend on the same thing.\n\nIf `buildBroke`: diagnose whether the failure is local to this batch or a cross-batch integration issue. Fix it before continuing.\n\nIf `contractDriftDetected`: update `semanticContractInventory` so the batch implementation and planned boundary contract agree.\n\nIf `contractUncertain`: stop and surface the boundary that can no longer be mapped confidently. Do not guess.\n\nIf `integrationDriftDetected`: update `targetIntegrationAnalysis` so the chosen target area, seam, and reuse/adaptation decision match what the batch actually required.\n\nIf `integrationUncertain`: stop and surface the boundary whose target-repo fit is no longer clear. Do not improvise.\n\nIf `architectureDriftDetected`: update `architectureAdaptationPlan` so the chosen high-adaptation design still reflects reality before you continue.\n\nIf the drift is severe enough that the Phase 3 plan is unreliable, say so. Don't silently absorb complexity.\n\nCapture:\n- `mappingUpdated`\n- `contractInventoryUpdated`\n- `targetIntegrationUpdated`\n- `adaptationPlanUpdated`\n- `verificationPassed`",
+          "promptBlocks": {
+            "goal": "Resolve unexpected batch drift before continuing so downstream work is not based on stale assumptions.",
+            "constraints": [
+              "Do not silently absorb drift.",
+              "If a boundary can no longer be mapped confidently, stop and surface it instead of guessing."
+            ],
+            "procedure": [
+              "If `bucketDriftDetected`, update the idiom or dependency mapping from Phase 3f so later batches do not repeat the same surprise.",
+              "If `unexpectedDependency`, map it now and assess whether other batches also depend on it.",
+              "If `buildBroke`, determine whether the failure is local to this batch or cross-batch integration related, then fix it before continuing.",
+              "If `contractDriftDetected`, update `semanticContractInventory` to match the real implementation.",
+              "If `integrationDriftDetected`, update `targetIntegrationAnalysis` to match the actual target seam and reuse/adaptation choice.",
+              "If `architectureDriftDetected`, update `architectureAdaptationPlan` before continuing."
+            ],
+            "outputRequired": {
+              "mappingUpdated": "Whether the implementation mapping was revised.",
+              "contractInventoryUpdated": "Whether the semantic contract inventory was revised.",
+              "targetIntegrationUpdated": "Whether the target integration analysis was revised.",
+              "adaptationPlanUpdated": "Whether the architecture adaptation plan was revised.",
+              "verificationPassed": "Whether the batch is safe to continue past."
+            },
+            "verify": [
+              "Any real drift is reflected in the planning artifacts.",
+              "Uncertainty is surfaced instead of hidden.",
+              "The next batch will not proceed from stale assumptions."
+            ]
+          },
           "requireConfirmation": {
             "or": [
               { "var": "contractUncertain", "equals": true },
