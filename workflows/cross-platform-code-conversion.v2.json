@@ -7,10 +7,6 @@
     "recommendedAutonomy": "guided",
     "recommendedRiskPolicy": "conservative"
   },
-  "features": [
-    "wr.features.subagent_guidance",
-    "wr.features.memory_context"
-  ],
   "preconditions": [
     "User specifies source and target platforms.",
     "Agent has read access to the source codebase.",
@@ -44,7 +40,8 @@
         "goal": "Understand the migration scope, platforms, target repo location, and rough size before any implementation begins.",
         "constraints": [
           "If the user has not specified scope boundaries, ask. Do not guess at scope.",
-          "Find the target repo yourself before asking the user."
+          "Find the target repo yourself before asking the user.",
+          "Check saved repo mappings in agent config or memory before falling back to broader discovery."
         ],
         "procedure": [
           "Determine what is being converted: single file, module, feature, full component, or entire app.",
@@ -96,7 +93,7 @@
           { "var": "adaptationProfile", "equals": "low" }
         ]
       },
-      "prompt": "For Small conversions, skip triage and planning — just convert.\n\n- Translate the files to the target platform idiomatically\n- Follow target platform naming and structure conventions\n- Map any dependencies to target equivalents\n- Convert tests if they exist\n- Run build or typecheck to verify\n\nIf something turns out harder than expected (deep platform coupling, no clean dependency equivalent), update `conversionComplexity` to `Medium` and stop. The full triage and planning pipeline will activate for the remaining work.\n\nCapture:\n- `filesConverted`\n- `buildPassed`\n- `conversionComplexity`",
+      "prompt": "For Small conversions, skip triage and planning — just convert.\n\n- Translate the files to the target platform idiomatically\n- Follow target platform naming and structure conventions\n- Map any dependencies to target equivalents\n- Convert tests if they exist\n- Run build or typecheck to verify\n\nIf something turns out harder than expected (deep platform coupling, no clean dependency equivalent, or meaningful architectural mismatch), update `conversionComplexity` to `Medium`, update `adaptationProfile` to `moderate` or `high` based on the newly discovered mismatch, and stop. The full triage and planning pipeline will activate for the remaining work.\n\nCapture:\n- `filesConverted`\n- `buildPassed`\n- `conversionComplexity`\n- `adaptationProfile`",
       "requireConfirmation": false
     },
     {
@@ -174,7 +171,7 @@
         "var": "adaptationProfile",
         "equals": "high"
       },
-      "prompt": "Prepare a concise design brief for the high-adaptation design routine.\n\nSummarize:\n- the migration scope and non-goals\n- the most important rows from `semanticContractInventory`\n- the most important rows from `targetIntegrationAnalysis`\n- the architectural tensions driving adaptation difficulty\n- the constraints that make this migration more than straightforward translation\n\nWrite this to `conversion-design-brief.md`. Keep it concrete and scoped so the design routine works from evidence rather than generic migration advice.\n\nCapture:\n- `designBriefReady`",
+      "prompt": "Prepare a concise design brief for the high-adaptation design routine.\n\nSummarize:\n- the migration scope and non-goals\n- the most important rows from `semanticContractInventory`\n- the most important rows from `targetIntegrationAnalysis`\n- the architectural tensions driving adaptation difficulty\n- the constraints that make this migration more than straightforward translation\n\nTurn that into explicit routine inputs:\n- `problemStatement`: what design problem the routine should solve\n- `acceptanceCriteria`: the contract and target-fit outcomes the design must satisfy\n- `nonGoals`: what the migration should not expand into\n- `relevantFiles`: the most important source and target files the routine should study\n- `philosophySources`: any repo rules or sources that should constrain the design\n\nWrite the human-readable brief to `conversion-design-brief.md`, but make the captured context variables the primary handoff to the routine.\n\nCapture:\n- `designBriefReady`\n- `problemStatement`\n- `acceptanceCriteria`\n- `nonGoals`\n- `relevantFiles`\n- `philosophySources`",
       "requireConfirmation": false
     },
     {
@@ -421,7 +418,7 @@
     {
       "id": "phase-7-handoff",
       "title": "Phase 7: Handoff",
-      "prompt": "Summarize what was converted.\n\nInclude:\n- Source and target platforms\n- Total files converted\n- Build/typecheck status\n- Known gaps, TODOs, or limitations\n- What would need manual attention\n\nKeep it concise. The converted code is the deliverable.",
+      "prompt": "Summarize what was converted.\n\nInclude:\n- Source and target platforms\n- Total files converted\n- Build/typecheck status\n- Adaptation profile used\n- Known gaps, TODOs, or limitations\n- What would need manual attention\n\nKeep it concise. The converted code is the deliverable.",
       "promptFragments": [
         {
           "id": "phase-7-small-summary",
@@ -436,7 +433,7 @@
               { "var": "adaptationProfile", "not_equals": "low" }
             ]
           },
-          "text": "Also include: bucket breakdown (A/B/C counts), delegation results (how many files delegated, subagent quality, any reclassified), key idiom mapping decisions, dependency substitutions, notable preserved contracts, notable target integration decisions, any intentional semantic changes, any architecture adaptation choices, and any boundaries needing manual review."
+          "text": "Also include: bucket breakdown (A/B/C counts), delegation results (how many files delegated, subagent quality, any reclassified), key idiom mapping decisions, dependency substitutions, notable preserved contracts, notable target integration decisions, any intentional semantic changes, the selected adaptation approach, any architecture adaptation choices, and any boundaries needing manual review."
         }
       ],
       "notesOptional": true,
