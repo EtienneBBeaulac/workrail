@@ -351,7 +351,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-artifact
     concurrency:
-      group: workrail-e2e-fixed-3456
+      group: workrail-e2e-fixed-3456-${{ github.ref }}-${{ matrix.node-version }}
       cancel-in-progress: false
     strategy:
       matrix:
