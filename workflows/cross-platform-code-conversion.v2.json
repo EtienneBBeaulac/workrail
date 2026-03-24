@@ -57,7 +57,10 @@
           "text": "For Small conversions, keep this lightweight. A quick read of the files in scope is enough — don't map the entire architecture. Focus on identifying any platform-specific code that would prevent a straight translation."
         }
       ],
-      "requireConfirmation": false
+      "requireConfirmation": {
+        "var": "adaptationProfile",
+        "equals": "high"
+      }
     },
     {
       "id": "phase-small-fast-path",
@@ -140,8 +143,18 @@
       }
     },
     {
-      "id": "phase-3c-design-generation",
-      "title": "Phase 3c: High-Adaptation Design Generation",
+      "id": "phase-3c-design-brief",
+      "title": "Phase 3c: Prepare High-Adaptation Design Brief",
+      "runCondition": {
+        "var": "adaptationProfile",
+        "equals": "high"
+      },
+      "prompt": "Prepare a concise design brief for the high-adaptation design routine.\n\nSummarize:\n- the migration scope and non-goals\n- the most important rows from `semanticContractInventory`\n- the most important rows from `targetIntegrationAnalysis`\n- the architectural tensions driving adaptation difficulty\n- the constraints that make this migration more than straightforward translation\n\nWrite this to `conversion-design-brief.md`. Keep it concrete and scoped so the design routine works from evidence rather than generic migration advice.\n\nCapture:\n- `designBriefReady`",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-3d-design-generation",
+      "title": "Phase 3d: High-Adaptation Design Generation",
       "runCondition": {
         "var": "adaptationProfile",
         "equals": "high"
@@ -155,8 +168,8 @@
       "requireConfirmation": false
     },
     {
-      "id": "phase-3d-select-adaptation-approach",
-      "title": "Phase 3d: Select Adaptation Approach",
+      "id": "phase-3e-select-adaptation-approach",
+      "title": "Phase 3e: Select Adaptation Approach",
       "runCondition": {
         "var": "adaptationProfile",
         "equals": "high"
@@ -165,8 +178,8 @@
       "requireConfirmation": true
     },
     {
-      "id": "phase-3e-plan-hard-items",
-      "title": "Phase 3e: Plan Platform-Specific Conversions",
+      "id": "phase-3f-plan-hard-items",
+      "title": "Phase 3f: Plan Platform-Specific Conversions",
       "runCondition": {
         "or": [
           { "var": "conversionComplexity", "not_equals": "Small" },
@@ -176,12 +189,12 @@
       "prompt": "For Bucket B and Bucket C items, plan the conversion before writing code.\n\nUse both `semanticContractInventory` and `targetIntegrationAnalysis` as required inputs. If `adaptationProfile` is `high`, also use `architectureAdaptationPlan` as a required input. The implementation plan must preserve boundary contracts and fit the target repo's actual seams.\n\nFor Bucket B (library substitution):\n- Map each source dependency to its target-platform equivalent\n- If no equivalent exists, flag it and propose an alternative\n\nFor Bucket C (platform-specific):\n- Threading/concurrency model mapping\n- UI framework mapping\n- DI framework mapping\n- State management mapping\n- Error handling mapping\n- Navigation patterns\n- Lifecycle management approach\n- Testing framework mapping\n- Target module/layer placement and adapter seams\n\nFor anything with no clean target equivalent, propose an idiomatic solution and explain the tradeoff.\n\nBucket A items don't need a plan. They're mechanical translation handled by subagents.\n\nCapture:\n- `idiomMapping`\n- `dependencyMapping`\n- `tradeoffs`",
       "promptFragments": [
         {
-          "id": "phase-3e-medium-focused",
+          "id": "phase-3f-medium-focused",
           "when": { "var": "conversionComplexity", "equals": "Medium" },
           "text": "For Medium conversions, focus the plan on the items that actually need design decisions. Don't exhaustively map every dimension — only the ones relevant to the files in scope."
         },
         {
-          "id": "phase-3e-high-adaptation",
+          "id": "phase-3f-high-adaptation",
           "when": { "var": "adaptationProfile", "equals": "high" },
           "text": "For high-adaptation migrations, state clearly what is translated directly, what is adapted through seams or adapters, and what is intentionally redesigned."
         }
@@ -226,7 +239,7 @@
         {
           "id": "phase-5a-convert-batch",
           "title": "Convert Current Batch",
-          "prompt": "Convert the current batch: `{{currentBatch.name}}`\n\nThis is Bucket B or C code that needs your full context.\n\n- **Bucket B**: Follow the dependency mapping from Phase 3e. Substitute libraries, keep structure.\n- **Bucket C**: Follow the idiom mapping from Phase 3e. Restructure where the target platform has a better way.\n\nUse both `semanticContractInventory` and `targetIntegrationAnalysis` for any boundary touched by this batch. If `adaptationProfile` is `high`, also follow `architectureAdaptationPlan`. If the chosen target construct, target seam, or reuse/adaptation decision changes, update the relevant row rather than letting the implementation drift silently.\n\nAlso handle any `reclassifiedFiles` that were moved back from Bucket A delegation.\n\nFor all files:\n- Follow target platform conventions\n- Preserve public API contracts where possible\n- Fit the target repo's actual architectural seams\n- Add TODO comments for anything uncertain\n- Convert tests alongside production code when source tests exist\n\nRun build or typecheck after this batch. If it fails, fix it before moving on.\n\nTrack whether this batch required:\n- `bucketDriftDetected`: a file turned out to be harder than its bucket classification (e.g., Bucket B file needed Bucket C-level design decisions)\n- `unexpectedDependency`: a dependency was discovered that wasn't in the Phase 3 mapping\n- `buildBroke`: build or typecheck failed after this batch\n- `contractDriftDetected`: the implementation forced a change to a semantic contract row\n- `contractRowsUpdated`: one or more contract rows were revised for this batch\n- `contractUncertain`: a touched boundary can no longer be mapped confidently\n- `integrationDriftDetected`: the implementation forced a change to target module placement, reuse/adaptation choice, or integration seam\n- `integrationAnalysisUpdated`: one or more target integration rows were revised for this batch\n- `integrationUncertain`: a touched boundary no longer has a confident target-repo fit decision\n- `architectureDriftDetected`: high-adaptation implementation required a different architecture-level adaptation than planned\n- `adaptationPlanUpdated`: the architecture adaptation plan was revised for this batch\n\nCapture:\n- `batchFilesConverted`\n- `batchBuildPassed`\n- `batchIssues`\n- `bucketDriftDetected`\n- `unexpectedDependency`\n- `buildBroke`\n- `contractDriftDetected`\n- `contractRowsUpdated`\n- `contractUncertain`\n- `integrationDriftDetected`\n- `integrationAnalysisUpdated`\n- `integrationUncertain`\n- `architectureDriftDetected`\n- `adaptationPlanUpdated`",
+          "prompt": "Convert the current batch: `{{currentBatch.name}}`\n\nThis is Bucket B or C code that needs your full context.\n\n- **Bucket B**: Follow the dependency mapping from Phase 3f. Substitute libraries, keep structure.\n- **Bucket C**: Follow the idiom mapping from Phase 3f. Restructure where the target platform has a better way.\n\nUse both `semanticContractInventory` and `targetIntegrationAnalysis` for any boundary touched by this batch. If `adaptationProfile` is `high`, also follow `architectureAdaptationPlan`. If the chosen target construct, target seam, or reuse/adaptation decision changes, update the relevant row rather than letting the implementation drift silently.\n\nAlso handle any `reclassifiedFiles` that were moved back from Bucket A delegation.\n\nFor all files:\n- Follow target platform conventions\n- Preserve public API contracts where possible\n- Fit the target repo's actual architectural seams\n- Add TODO comments for anything uncertain\n- Convert tests alongside production code when source tests exist\n\nRun build or typecheck after this batch. If it fails, fix it before moving on.\n\nTrack whether this batch required:\n- `bucketDriftDetected`: a file turned out to be harder than its bucket classification (e.g., Bucket B file needed Bucket C-level design decisions)\n- `unexpectedDependency`: a dependency was discovered that wasn't in the Phase 3 mapping\n- `buildBroke`: build or typecheck failed after this batch\n- `contractDriftDetected`: the implementation forced a change to a semantic contract row\n- `contractRowsUpdated`: one or more contract rows were revised for this batch\n- `contractUncertain`: a touched boundary can no longer be mapped confidently\n- `integrationDriftDetected`: the implementation forced a change to target module placement, reuse/adaptation choice, or integration seam\n- `integrationAnalysisUpdated`: one or more target integration rows were revised for this batch\n- `integrationUncertain`: a touched boundary no longer has a confident target-repo fit decision\n- `architectureDriftDetected`: high-adaptation implementation required a different architecture-level adaptation than planned\n- `adaptationPlanUpdated`: the architecture adaptation plan was revised for this batch\n\nCapture:\n- `batchFilesConverted`\n- `batchBuildPassed`\n- `batchIssues`\n- `bucketDriftDetected`\n- `unexpectedDependency`\n- `buildBroke`\n- `contractDriftDetected`\n- `contractRowsUpdated`\n- `contractUncertain`\n- `integrationDriftDetected`\n- `integrationAnalysisUpdated`\n- `integrationUncertain`\n- `architectureDriftDetected`\n- `adaptationPlanUpdated`",
           "requireConfirmation": false
         },
         {
@@ -244,12 +257,12 @@
               { "var": "architectureDriftDetected", "equals": true }
             ]
           },
-          "prompt": "Something unexpected happened in this batch. Before moving on, check what went wrong.\n\nIf `bucketDriftDetected`: the file was harder than classified. Update the idiom or dependency mapping from Phase 3e so downstream batches don't hit the same surprise. Record what changed.\n\nIf `unexpectedDependency`: a dependency wasn't in the Phase 3e plan. Map it now and check whether other batches depend on the same thing.\n\nIf `buildBroke`: diagnose whether the failure is local to this batch or a cross-batch integration issue. Fix it before continuing.\n\nIf `contractDriftDetected`: update `semanticContractInventory` so the batch implementation and planned boundary contract agree.\n\nIf `contractUncertain`: stop and surface the boundary that can no longer be mapped confidently. Do not guess.\n\nIf `integrationDriftDetected`: update `targetIntegrationAnalysis` so the chosen target area, seam, and reuse/adaptation decision match what the batch actually required.\n\nIf `integrationUncertain`: stop and surface the boundary whose target-repo fit is no longer clear. Do not improvise.\n\nIf `architectureDriftDetected`: update `architectureAdaptationPlan` so the chosen high-adaptation design still reflects reality before you continue.\n\nIf the drift is severe enough that the Phase 3 plan is unreliable, say so. Don't silently absorb complexity.\n\nCapture:\n- `mappingUpdated`\n- `contractInventoryUpdated`\n- `targetIntegrationUpdated`\n- `adaptationPlanUpdated`\n- `verificationPassed`",
+          "prompt": "Something unexpected happened in this batch. Before moving on, check what went wrong.\n\nIf `bucketDriftDetected`: the file was harder than classified. Update the idiom or dependency mapping from Phase 3f so downstream batches don't hit the same surprise. Record what changed.\n\nIf `unexpectedDependency`: a dependency wasn't in the Phase 3f plan. Map it now and check whether other batches depend on the same thing.\n\nIf `buildBroke`: diagnose whether the failure is local to this batch or a cross-batch integration issue. Fix it before continuing.\n\nIf `contractDriftDetected`: update `semanticContractInventory` so the batch implementation and planned boundary contract agree.\n\nIf `contractUncertain`: stop and surface the boundary that can no longer be mapped confidently. Do not guess.\n\nIf `integrationDriftDetected`: update `targetIntegrationAnalysis` so the chosen target area, seam, and reuse/adaptation decision match what the batch actually required.\n\nIf `integrationUncertain`: stop and surface the boundary whose target-repo fit is no longer clear. Do not improvise.\n\nIf `architectureDriftDetected`: update `architectureAdaptationPlan` so the chosen high-adaptation design still reflects reality before you continue.\n\nIf the drift is severe enough that the Phase 3 plan is unreliable, say so. Don't silently absorb complexity.\n\nCapture:\n- `mappingUpdated`\n- `contractInventoryUpdated`\n- `targetIntegrationUpdated`\n- `adaptationPlanUpdated`\n- `verificationPassed`",
           "requireConfirmation": {
             "or": [
-              { "var": "bucketDriftDetected", "equals": true },
               { "var": "contractUncertain", "equals": true },
-              { "var": "integrationUncertain", "equals": true }
+              { "var": "integrationUncertain", "equals": true },
+              { "var": "architectureDriftDetected", "equals": true }
             ]
           }
         }
