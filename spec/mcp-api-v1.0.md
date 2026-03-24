@@ -175,20 +175,17 @@ Retrieves workflow information with configurable detail level. Supports progress
   "jsonrpc": "2.0",
   "id": 2,
   "result": {
-    "id": "coding-task-workflow-with-loops",
-    "name": "Excellent Adaptive Coding Workflow",
-    "description": "A comprehensive workflow for AI-assisted coding",
+    "id": "coding-task-workflow-agentic",
+    "name": "Lean Agentic Coding Task Workflow",
+    "description": "Lean workflow for executing coding tasks with scoped design, bounded delegation, and explicit verification.",
     "version": "0.1.0",
-    "preconditions": ["User has a clear task description"],
-    "clarificationPrompts": ["What is the complexity level?"],
-    "metaGuidance": ["Follow PREP -> IMPLEMENT -> VERIFY pattern"],
-    "totalSteps": 8,
+    "preconditions": ["Task description is available and any required codebase or artifact access is accessible to the agent."],
+    "metaGuidance": ["Stay outcome-focused and evidence-based throughout the task."],
+    "totalSteps": 14,
     "firstStep": {
-      "id": "phase-0-intelligent-triage",
-      "title": "Phase 0: Intelligent Task Triage & Complexity Analysis",
-      "prompt": "**ANALYZE**: Evaluate the provided task for complexity indicators...",
-      "agentRole": "You are a technical assessment specialist...",
-      "guidance": ["Be thorough in your analysis"],
+      "id": "phase-0-understand-and-classify",
+      "title": "Phase 0: Understand & Classify",
+      "prompt": "Understand this before you touch anything....",
       "requireConfirmation": true
     }
   }
@@ -201,14 +198,13 @@ Retrieves workflow information with configurable detail level. Supports progress
   "jsonrpc": "2.0",
   "id": 2,
   "result": {
-    "id": "coding-task-workflow-with-loops",
-    "name": "Excellent Adaptive Coding Workflow",
-    "description": "A comprehensive workflow for AI-assisted coding",
+    "id": "coding-task-workflow-agentic",
+    "name": "Lean Agentic Coding Task Workflow",
+    "description": "Lean workflow for executing coding tasks with scoped design, bounded delegation, and explicit verification.",
     "version": "0.1.0",
-    "preconditions": ["User has a clear task description"],
-    "clarificationPrompts": ["What is the complexity level?"],
-    "metaGuidance": ["Follow PREP -> IMPLEMENT -> VERIFY pattern"],
-    "totalSteps": 8
+    "preconditions": ["Task description is available and any required codebase or artifact access is accessible to the agent."],
+    "metaGuidance": ["Stay outcome-focused and evidence-based throughout the task."],
+    "totalSteps": 14
   }
 }
 ```

@@ -2,22 +2,36 @@
 
 > **Auto-generated** from workflow files. Run `workrail list` for the latest.
 >
-> Last updated: 2025-12-05
+> Last updated: 2026-03-24
 
 ## Overview
 
-WorkRail includes **14 production workflows** across multiple categories.
+WorkRail includes **20 production workflows** across multiple categories.
 
 | Category | Count |
 |----------|-------|
-| Debugging | 1 |
+| Development | 1 |
+| Debugging | 2 |
 | Code Review | 2 |
 | Documentation | 3 |
 | Exploration & Analysis | 3 |
 | Learning & Education | 3 |
-| Other | 2 |
+| Other | 6 |
 
 ---
+
+## Development
+
+Feature implementation and coding workflows
+
+### `coding-task-workflow-agentic`
+
+**Agentic Task Dev Workflow (Lean • Notes-First • WorkRail Executor)** (v1.0.0)
+
+The user guides the agent through understanding the task, selecting an approach, planning in slices, implementing incrementally, and verifying the result through explicit review and validation checkpoints.
+
+- **Steps**: 12
+- **File**: `workflows/coding-task-workflow-agentic.lean.v2.json`
 
 ## Debugging
 
@@ -32,18 +46,18 @@ A systematic bug investigation workflow that finds the true source of bugs throu
 - **Steps**: 10
 - **File**: `workflows/bug-investigation.json`
 
+### `bug-investigation-agentic`
+
+**Bug Investigation (v2 • Notes-First • WorkRail Executor)** (v2.0.0)
+
+A v2-first bug investigation workflow focused on moving from theory to proof with notes-first durability, explicit trigger fields, de-anchored fresh-eye review, and investigation-only handoff boundaries.
+
+- **Steps**: 9
+- **File**: `workflows/bug-investigation.agentic.v2.json`
+
 ## Code Review
 
 Merge request and code review processes
-
-### `coding-task-workflow-with-loops`
-
-**Excellent Adaptive Coding Workflow with Devil's Advocate Review** (v0.8.0)
-
-Comprehensive AI coding workflow with bidirectional re-triage, deep analysis, intelligent clarification, devil's advocate review, automation levels, failure bounds, tool fallbacks, and context documentation for production-ready development.
-
-- **Steps**: 23
-- **File**: `workflows/coding-task-workflow-with-loops.json`
 
 ### `mr-review-workflow`
 
@@ -53,6 +67,15 @@ An adaptive workflow to guide an AI agent in performing a comprehensive code rev
 
 - **Steps**: 10
 - **File**: `workflows/mr-review-workflow.json`
+
+### `mr-review-workflow-agentic`
+
+**MR Review Workflow (v2 • Notes-First • Parallel Reviewer Families)** (v2.1.0)
+
+A v2-first MR review workflow that uses a shared fact packet, parallel reviewer families, an explicit coverage ledger, and contradiction-driven synthesis to produce high-signal review output without duplicating context gathering.
+
+- **Steps**: 9
+- **File**: `workflows/mr-review-workflow.agentic.v2.json`
 
 ## Documentation
 
@@ -151,6 +174,42 @@ A comprehensive workflow for creating dynamic, interesting, and insightful prese
 
 Miscellaneous workflows
 
+### `cross-platform-code-conversion`
+
+**Cross-Platform Code Conversion** (v0.1.0)
+
+Guides an agent through converting code from one platform to another (e.g., Android to iOS, iOS to Web). Triages files by difficulty, delegates easy literal translations to parallel subagents, then the main agent tackles platform-specific code requiring design decisions.
+
+- **Steps**: 9
+- **File**: `workflows/cross-platform-code-conversion.v2.json`
+
+### `design-thinking-workflow`
+
+**Design Thinking Workflow** (v0.0.1)
+
+A structured-reflective design thinking process: Empathize → Define → multi-round Ideate → Synthesize → Prototype (learning artifact) → Test plan → Iterate (test/learn/refine).
+
+- **Steps**: 11
+- **File**: `workflows/design-thinking-workflow.json`
+
+### `design-thinking-workflow-autonomous-agentic`
+
+**Design Thinking Workflow (Autonomous, Tiered Agent Cascade)** (v0.1.0)
+
+Autonomous design thinking: minimal human input; doc-first execution; supports Agent Cascade Protocol tiers (Solo/Proxy/Delegation) with explicit fallbacks.
+
+- **Steps**: 16
+- **File**: `workflows/design-thinking-workflow-autonomous.agentic.json`
+
+### `relocation-workflow-us`
+
+**Relocation Decision Workflow (US v1 — AreaSpec • Custom Areas • Dossier • Evidence • Ranking)** (v0.2.0)
+
+A bias-resistant, evidence-driven relocation workflow for the United States. Helps users discover what they care about, generate a broad candidate pool (including optional custom areas), screen it with strict caps, deep-dive shortlisted areas, and produce a master dossier plus per-location profile docs with a transparent, explainable weighted ranking.
+
+- **Steps**: 19
+- **File**: `workflows/relocation-workflow-us.json`
+
 ### `workflow-diagnose-environment`
 
 **Diagnostic: Environment & Subagents** (v1.0.0)
@@ -162,12 +221,12 @@ Automated capability detection for Agentic IDEs. Probes for subagent access and 
 
 ### `workflow-for-workflows`
 
-**Progressive Workflow Creation Guide** (v0.1.0)
+**Workflow Authoring Workflow (Lean, References-First)** (v2.0.0)
 
-An adaptive meta-workflow that guides users through creating high-quality workflow templates with personalized learning paths. Offers three experience-based approaches: Basic (step-by-step with detailed explanations), Intermediate (balanced guidance with examples), and Advanced (comprehensive features with expert context). All paths can produce sophisticated workflows - the difference is in explanation depth and feature introduction timing.
+Guides an agent through creating a new WorkRail workflow: understand the task, choose the shape, draft the JSON, validate with real validators, review the method, and optionally refine.
 
-- **Steps**: 14
-- **File**: `workflows/workflow-for-workflows.json`
+- **Steps**: 8
+- **File**: `workflows/workflow-for-workflows.v2.json`
 
 ---
 
@@ -177,7 +236,7 @@ Tell your AI agent which workflow to use:
 
 ```
 "Use the bug-investigation workflow to debug this issue"
-"Use the coding-task-workflow-with-loops to implement this feature"
+"Use the coding-task-workflow-agentic to implement this feature"
 ```
 
 Or browse programmatically:
