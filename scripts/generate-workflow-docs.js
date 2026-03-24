@@ -5,9 +5,14 @@
  * 
  * Usage: node scripts/generate-workflow-docs.js
  * 
- * Filters out:
- * - .agentic.json variants (feature-flagged)
- * - .v2.json variants (feature-flagged)
+ * Selects one canonical file per workflow ID.
+ *
+ * Preference order:
+ * - `.lean.v2.json`
+ * - `.v2.json`
+ * - `.json`
+ *
+ * Also skips:
  * - routines/ subdirectory (internal)
  * - examples/ subdirectory (not production workflows)
  */
@@ -85,7 +90,14 @@ function categorizeWorkflow(id, name) {
 
 function loadWorkflows() {
   const files = fs.readdirSync(WORKFLOW_DIR);
-  const workflows = [];
+  const workflowVariants = [];
+
+  function canonicalPriority(file) {
+    if (file.endsWith('.lean.v2.json')) return 300;
+    if (file.endsWith('.v2.json')) return 200;
+    if (file.endsWith('.json')) return 100;
+    return 0;
+  }
   
   for (const file of files) {
     // Skip directories
@@ -99,13 +111,13 @@ function loadWorkflows() {
       continue;
     }
     
-    // Skip feature-flagged variants
-    if (file.includes('.agentic.') || file.includes('.v2.')) {
-      continue;
-    }
-    
     // Skip changelogs
     if (file.startsWith('CHANGELOG')) {
+      continue;
+    }
+
+    // Skip internal test workflows
+    if (file.startsWith('test-')) {
       continue;
     }
     
@@ -113,20 +125,33 @@ function loadWorkflows() {
       const content = fs.readFileSync(filePath, 'utf-8');
       const workflow = JSON.parse(content);
       
-      workflows.push({
+      workflowVariants.push({
         id: workflow.id,
         name: workflow.name,
         description: workflow.description,
         version: workflow.version,
         stepsCount: workflow.steps?.length || 0,
-        file: file
+        file: file,
+        priority: canonicalPriority(file),
       });
     } catch (err) {
       console.error(`Warning: Could not parse ${file}: ${err.message}`);
     }
   }
-  
-  return workflows;
+
+  const canonicalById = new Map();
+  for (const workflow of workflowVariants) {
+    const current = canonicalById.get(workflow.id);
+    if (!current || workflow.priority > current.priority || (
+      workflow.priority === current.priority && workflow.file.localeCompare(current.file) < 0
+    )) {
+      canonicalById.set(workflow.id, workflow);
+    }
+  }
+
+  return Array.from(canonicalById.values())
+    .map(({ priority, ...workflow }) => workflow)
+    .sort((a, b) => a.id.localeCompare(b.id));
 }
 
 function generateMarkdown(workflows) {
@@ -183,7 +208,7 @@ Tell your AI agent which workflow to use:
 
 \`\`\`
 "Use the bug-investigation workflow to debug this issue"
-"Use the coding-task-workflow-with-loops to implement this feature"
+"Use the coding-task-workflow-agentic to implement this feature"
 \`\`\`
 
 Or browse programmatically:

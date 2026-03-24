@@ -55,7 +55,7 @@ function cleanContextForWorkflowNext(
 ```typescript
 // During your workflow execution:
 const response = await workflow_next({
-  workflowId: "coding-task-workflow-with-loops",
+  workflowId: "coding-task-workflow-agentic",
   completedSteps: ["phase-6-prep"],
   context: cleanContextForWorkflowNext(fullContext, [
     'featureBranch',      // I created this

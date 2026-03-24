@@ -10,7 +10,7 @@ Agents currently send back the ENTIRE context (15-20KB) on every `workflow_next`
 
 ```json
 {
-  "workflowId": "coding-task-workflow-with-loops",
+  "workflowId": "coding-task-workflow-agentic",
   "completedSteps": ["phase-6-prep"],
   "context": {
     // All 17KB of data including:
@@ -28,7 +28,7 @@ Agents currently send back the ENTIRE context (15-20KB) on every `workflow_next`
 
 ```json
 {
-  "workflowId": "coding-task-workflow-with-loops", 
+  "workflowId": "coding-task-workflow-agentic", 
   "completedSteps": ["phase-6-prep"],
   "context": {
     // Only what you need or changed:
@@ -84,7 +84,7 @@ Never send these back:
 
 ```json
 {
-  "workflowId": "coding-task-workflow-with-loops",
+  "workflowId": "coding-task-workflow-agentic",
   "completedSteps": ["phase-6-prep", "phase-6-implement"],
   "context": {
     "currentStep": { /* current */ },
@@ -100,7 +100,7 @@ Never send these back:
 
 ```json
 {
-  "workflowId": "coding-task-workflow-with-loops",
+  "workflowId": "coding-task-workflow-agentic",
   "completedSteps": ["phase-2-informed-clarification"],
   "context": {
     "clarifiedRequirements": "Updated requirements...", // MODIFIED
