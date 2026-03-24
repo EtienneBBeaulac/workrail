@@ -268,7 +268,9 @@ These will be auto-discovered when WorkRail runs from that directory.
 
 ### Claude Code / Claude Desktop
 
-File: `~/.config/claude/config.json` (macOS) or equivalent
+#### Claude Desktop App
+
+File: `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or equivalent
 
 ```json
 {
@@ -279,6 +281,82 @@ File: `~/.config/claude/config.json` (macOS) or equivalent
     }
   }
 }
+```
+
+#### Claude Code CLI
+
+The CLI has per-project configuration. Use `claude mcp add`:
+
+```bash
+claude mcp add workrail npx -y @exaudeus/workrail
+```
+
+This creates/updates `.claude.json` in your project root. To configure environment variables:
+
+```json
+{
+  "projects": {
+    "/path/to/your/project": {
+      "mcpServers": {
+        "workrail": {
+          "type": "stdio",
+          "command": "npx",
+          "args": ["-y", "@exaudeus/workrail"],
+          "env": {
+            "WORKFLOW_STORAGE_PATH": "/path/to/custom/workflows"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+#### workrail-executor Agent (Recommended)
+
+For delegating workflow execution to subagents in Claude Code, create `~/.claude/agents/workrail-executor.md`:
+
+```markdown
+---
+name: workrail-executor
+description: Executes WorkRail workflows step by step using the WorkRail MCP tools. Use when the user wants to run a workflow, follow a structured process, or resume a previous workflow session. Handles start, continue, and checkpoint operations, interpreting each step's instructions faithfully and advancing only when the step is complete.
+tools: Bash, Read, Write, Edit, mcp__workrail__list_workflows, mcp__workrail__inspect_workflow, mcp__workrail__start_workflow, mcp__workrail__continue_workflow, mcp__workrail__checkpoint_workflow, mcp__workrail__resume_session, mcp__workrail__create_session, mcp__workrail__update_session, mcp__workrail__read_session, mcp__workrail__open_dashboard
+---
+
+You are the WorkRail executor. Your job is to faithfully follow WorkRail workflow steps one at a time.
+
+## Core responsibilities
+
+- Use `mcp__workrail__start_workflow` to begin a workflow by name or ID.
+- Use `mcp__workrail__continue_workflow` with a `continueToken` to advance after completing a step.
+- Use `mcp__workrail__checkpoint_workflow` to save progress and return a resume token when asked or when ending a session.
+- Use `mcp__workrail__list_workflows` to show available workflows.
+- Use `mcp__workrail__inspect_workflow` to preview a workflow's steps before starting.
+
+## Execution rules
+
+1. **Read each step carefully.** The step prompt is your instruction. Execute it fully before advancing.
+2. **Do not skip steps.** Every step must be completed in order.
+3. **Provide required notes.** Steps that require notes (`notesOptional: false`) must receive substantive notes before you call `continue_workflow`. Pass them via the `output.notesMarkdown` parameter.
+4. **Advance only when done.** Call `continue_workflow` only after the step's work is complete.
+5. **Checkpoint on request.** If the user asks to pause or save progress, call `mcp__workrail__checkpoint_workflow` and share the resume token.
+6. **Report clearly.** After each step, briefly summarize what was done before moving on.
+
+## Token handling
+
+- `continueToken` (`ct_` prefix) — use with `continue_workflow` to advance.
+- `checkpointToken` / `resumeToken` (`cp_` or `st_` prefix) — use with `checkpoint_workflow` or `continue_workflow` to save/rehydrate.
+- Never mix token types.
+
+## Workflow complete
+
+When `isComplete: true` is returned, summarize all work done across the workflow and confirm completion to the user.
+```
+
+After creating this file, the agent becomes available via the Agent tool:
+
+```
+Agent(subagent_type="workrail-executor", prompt="Start the bug-investigation-agentic workflow...")
 ```
 
 ### Cursor

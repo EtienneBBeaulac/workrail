@@ -245,8 +245,12 @@ support [conditions, loops, validation criteria](docs/authoring.md), and more.
 
 - [All Workflows](docs/workflows.md) – Full list with detailed descriptions
 - [Writing Workflows](docs/authoring.md) – Custom workflow creation guide
+- [Workflow Authoring Principles (v2)](docs/authoring-v2.md) – Cross-workflow design rules and authoring principles
 - [Configuration](docs/configuration.md) – Git repos, environment variables, local paths
 - [Advanced Features](docs/advanced.md) – Loops, conditionals, validation
+- **Integrations**
+  - [Claude Code Setup](docs/integrations/claude-code.md) – Complete guide for Desktop & CLI
+  - [Firebender Setup](docs/integrations/firebender.md) – Firebender integration
 
 ---
 
