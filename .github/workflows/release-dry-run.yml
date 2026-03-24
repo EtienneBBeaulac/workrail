@@ -37,4 +37,5 @@ jobs:
       - name: semantic-release dry-run
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKRAIL_ALLOW_MAJOR_RELEASE: ${{ vars.WORKRAIL_ALLOW_MAJOR_RELEASE }}
         run: npx semantic-release --dry-run --no-ci
