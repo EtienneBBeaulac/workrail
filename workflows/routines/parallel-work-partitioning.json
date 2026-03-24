@@ -1,0 +1,43 @@
+{
+  "id": "routine-parallel-work-partitioning",
+  "name": "Parallel Work Partitioning Routine",
+  "version": "0.1.0",
+  "description": "Analyzes a set of work items and their dependencies, partitions them into independent batches that can be safely parallelized across subagents, and produces a sorted execution plan. Flags items with cross-dependencies for sequential handling by the main agent.",
+  "metaGuidance": [
+    "INDEPENDENCE IS THE PRIORITY: a batch is only parallel-safe if no item in it depends on any other item in any concurrent batch.",
+    "CONSERVATIVE CLASSIFICATION: when dependency is unclear, classify as sequential. Wrong parallelization is worse than missed parallelization.",
+    "MAIN AGENT OWNS HARD WORK: items needing judgment, design decisions, or cross-cutting context belong to the main agent, not subagents."
+  ],
+  "steps": [
+    {
+      "id": "step-inventory",
+      "title": "Step 1: Inventory Work Items",
+      "prompt": "List every work item in scope.\n\nFor each item, capture:\n- Item identifier (file path, module name, test case, doc section, etc.)\n- One-line description of what needs to be done\n- Estimated complexity: trivial / moderate / complex\n- Whether it requires judgment or design decisions (yes/no)\n\nDon't classify or sort yet. Just get the full inventory.\n\nCapture:\n- `workItems` (the full list)\n- `totalCount`",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-dependency-map",
+      "title": "Step 2: Map Dependencies",
+      "prompt": "For each work item, identify its dependencies on other items in the inventory.\n\nA dependency exists when:\n- Item B imports, references, or extends something in Item A\n- Item B's output format or API is consumed by Item A\n- Item B cannot be correctly completed without Item A being done first\n- Item B shares mutable state, configuration, or resources with Item A\n\nA dependency does NOT exist just because:\n- Items are in the same module or directory\n- Items use the same library or framework\n- Items are conceptually related but structurally independent\n\nProduce a dependency map: for each item, list which other items it depends on (if any). Items with no dependencies on other in-scope items are roots.\n\nCapture:\n- `dependencyMap`\n- `rootItems` (items with no in-scope dependencies)\n- `crossCuttingItems` (items that many others depend on)",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-classify",
+      "title": "Step 3: Classify Parallel vs. Sequential",
+      "prompt": "Classify each work item into one of two tracks:\n\n**Parallel track** — can be delegated to a subagent. ALL of these must be true:\n- No unresolved dependencies on other in-scope items (or all dependencies are already completed/in an earlier batch)\n- Trivial or moderate complexity\n- Does NOT require judgment, design decisions, or cross-cutting context\n- Can be verified independently (build, test, or review in isolation)\n- Failure is cheap to fix (a bad result can be caught and redone)\n\n**Sequential track** — must be handled by the main agent. ANY of these makes it sequential:\n- Has dependencies on items that haven't been completed yet\n- Complex or requires design decisions\n- Touches cross-cutting concerns (shared state, configuration, APIs used by many items)\n- Needs context from other items to be done correctly\n- Failure is expensive (wrong output cascades to other items)\n\nWhen in doubt, classify as sequential.\n\nCapture:\n- `parallelItems`\n- `sequentialItems`\n- `classificationRationale` (one line per item explaining the decision)",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-batch",
+      "title": "Step 4: Form Parallel Batches",
+      "prompt": "Group parallel-track items into batches that can run concurrently.\n\nBatching rules:\n- No two items in the same batch should depend on each other\n- No two items in the same batch should write to the same file or resource\n- Keep batches between 3-5 items for manageable subagent scope\n- Items that share a common dependency should be in the same batch or in batches that run after that dependency is resolved\n- Prefer grouping items by similarity (same file type, same kind of work) so each subagent gets coherent instructions\n\nAlso sort sequential-track items by dependency order (dependencies first).\n\nCapture:\n- `parallelBatches` (array of batches, each with item list and subagent instructions summary)\n- `sequentialOrder` (sorted list of sequential items)\n- `executionPlan` (the full plan: which parallel batches run first, then which sequential items, noting any sync points)",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-plan-delivery",
+      "title": "Step 5: Produce Execution Plan",
+      "prompt": "Write the final execution plan as a structured artifact in {deliverableName}.\n\nStructure:\n\n```markdown\n# Parallel Work Partitioning Plan\n\n## Summary\n- Total items: [count]\n- Parallel track: [count] items in [N] batches\n- Sequential track: [count] items\n- Cross-cutting items: [list]\n\n## Execution Order\n\n### Wave 1: Parallel Batches (delegate to subagents)\n\n#### Batch 1: [theme/description]\n- [item]: [one-line task]\n- [item]: [one-line task]\n**Subagent instructions**: [what the subagent needs to know]\n\n#### Batch 2: ...\n\n### Wave 2: Sequential Items (main agent)\n1. [item]: [one-line task] — depends on: [items]\n2. [item]: [one-line task] — depends on: [items]\n\n## Dependency Graph\n[Compact representation of which items depend on which]\n\n## Risk Notes\n- [Any items where classification was uncertain]\n- [Any sync points where parallel work must complete before sequential work starts]\n```\n\nCapture:\n- `planDelivered`",
+      "requireConfirmation": false
+    }
+  ]
+}

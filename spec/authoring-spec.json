@@ -1,0 +1,1373 @@
+{
+  "$schema": "./authoring-spec.schema.json",
+  "version": 3,
+  "title": "WorkRail Authoring Rules",
+  "purpose": "Canonical current rules for authoring good WorkRail workflows. workflow.schema.json remains the source of truth for legal structure.",
+  "lastReviewed": "2026-03-21",
+  "principles": [
+    "Schema defines what is valid. These rules define what is good.",
+    "Prefer current authoring rules over design rationale or historical notes.",
+    "Keep prompts user-voiced without losing explicit protocol requirements.",
+    "Keep boundary-owned response supplements separate from workflow-authored prompt text."
+  ],
+  "consumedBy": [
+    "docs",
+    "tooling",
+    "workflow-for-workflows",
+    "future-linting"
+  ],
+  "changeProtocol": [
+    "When a workflow feature lands or changes, update the schema and runtime first.",
+    "Then update this authoring spec so guidance matches the shipped behavior.",
+    "Then regenerate or update human-facing docs and examples derived from this spec.",
+    "Do not leave authoring guidance behind the runtime."
+  ],
+  "ruleModel": {
+    "levels": [
+      "required",
+      "recommended",
+      "discouraged"
+    ],
+    "statuses": [
+      "active",
+      "experimental",
+      "planned",
+      "deprecated"
+    ],
+    "enforcementModes": [
+      "runtime",
+      "validator",
+      "ci",
+      "advisory",
+      "planned"
+    ],
+    "scopeStyle": "Use small, stable scope strings tied to obvious workflow surfaces."
+  },
+  "scopeCatalog": [
+    {
+      "id": "workflow.definition",
+      "description": "Whole-workflow authored shape"
+    },
+    {
+      "id": "workflow.description",
+      "description": "Top-level workflow description text"
+    },
+    {
+      "id": "workflow.meta-guidance",
+      "description": "Workflow-level meta guidance"
+    },
+    {
+      "id": "workflow.extension-points",
+      "description": "Workflow-level extension point declarations and binding slots"
+    },
+    {
+      "id": "workflow.features",
+      "description": "Compiler feature declarations (closed-set middleware injected at compile time)"
+    },
+    {
+      "id": "step.prompt",
+      "description": "Primary step prompt text"
+    },
+    {
+      "id": "step.prompt-fragment",
+      "description": "Conditional prompt fragment text"
+    },
+    {
+      "id": "step.prompt-blocks",
+      "description": "Structured prompt blocks or shared prompt composition structures"
+    },
+    {
+      "id": "step.output-requirements",
+      "description": "Explicit artifact or output requirements in a step"
+    },
+    {
+      "id": "step.context-capture",
+      "description": "Explicit context values a step must capture"
+    },
+    {
+      "id": "step.self-audit",
+      "description": "A step asking the agent to assess its own understanding or confidence"
+    },
+    {
+      "id": "step.delegation-checkpoint",
+      "description": "A step that explicitly fans out to subagents and later synthesizes"
+    },
+    {
+      "id": "step.confirmation",
+      "description": "A step that deliberately pauses for human confirmation"
+    },
+    {
+      "id": "loop.step",
+      "description": "The loop construct itself"
+    },
+    {
+      "id": "loop.pre-check",
+      "description": "Checks done before entering a loop or another pass"
+    },
+    {
+      "id": "loop.decision.prompt",
+      "description": "Prompt that decides whether a loop continues or stops"
+    },
+    {
+      "id": "loop.decision",
+      "description": "The loop decision checkpoint as a whole"
+    },
+    {
+      "id": "loop.decision.output-example",
+      "description": "Example artifact or output shape shown in a loop decision step"
+    },
+    {
+      "id": "workflow.rigor-policy",
+      "description": "Rules that differ by QUICK, STANDARD, or THOROUGH rigor"
+    },
+    {
+      "id": "prompt.composition",
+      "description": "Prompt assembly strategy including fragments, templates, and shared structure"
+    },
+    {
+      "id": "prompt.templates",
+      "description": "Context variable templates and prompt-time substitution"
+    },
+    {
+      "id": "response.supplement",
+      "description": "Boundary-owned supplemental instructions delivered alongside a workflow step"
+    },
+    {
+      "id": "synthesis.design",
+      "description": "Design synthesis after delegated or external review"
+    },
+    {
+      "id": "synthesis.plan-audit",
+      "description": "Plan-audit synthesis after delegated review"
+    },
+    {
+      "id": "synthesis.slice-verification",
+      "description": "Slice verification synthesis after delegated review"
+    },
+    {
+      "id": "synthesis.final-verification",
+      "description": "Final verification synthesis after delegated review"
+    },
+    {
+      "id": "synthesis.claim-adoption",
+      "description": "Rules for adopting or rejecting subagent claims"
+    },
+    {
+      "id": "workflow.authoring",
+      "description": "General workflow authoring behavior"
+    },
+    {
+      "id": "tooling.workflow-authoring",
+      "description": "Authoring helpers, generation tools, or workflow-for-workflows logic"
+    },
+    {
+      "id": "documentation.authoring",
+      "description": "Human-facing authoring documentation"
+    },
+    {
+      "id": "documentation.validation",
+      "description": "Validation-focused documentation"
+    },
+    {
+      "id": "validator.implementation",
+      "description": "Workflow validator implementation and behavior"
+    },
+    {
+      "id": "ci.validation",
+      "description": "CI validation surfaces for workflows"
+    },
+    {
+      "id": "artifact.plan",
+      "description": "Implementation-planning artifacts"
+    },
+    {
+      "id": "artifact.spec",
+      "description": "Behavior/specification artifacts"
+    },
+    {
+      "id": "artifact.verification",
+      "description": "Verification or handoff artifacts"
+    },
+    {
+      "id": "delegation.context-packet",
+      "description": "Structured context passed to subagents"
+    },
+    {
+      "id": "delegation.result-envelope",
+      "description": "Structured result shape returned by subagents"
+    },
+    {
+      "id": "legacy.patterns",
+      "description": "Older authoring patterns that should now be discouraged or avoided"
+    }
+  ],
+  "topics": [
+    {
+      "id": "structure",
+      "title": "Workflow structure",
+      "rules": [
+        {
+          "id": "schema-is-legal-truth",
+          "status": "active",
+          "level": "required",
+          "scope": [
+            "workflow.definition",
+            "documentation.authoring",
+            "tooling.workflow-authoring"
+          ],
+          "rule": "Treat workflow.schema.json as the source of truth for legal structure.",
+          "why": "A second schema will drift.",
+          "enforcement": [
+            "advisory"
+          ],
+          "sourceRefs": [
+            {
+              "kind": "schema",
+              "path": "spec/workflow.schema.json",
+              "note": "Legal workflow structure lives here."
+            }
+          ],
+          "checks": [
+            "Do not restate field legality unless the point is authoring quality rather than legality.",
+            "If this spec mentions a field shape, it should be guidance, not a competing schema."
+          ],
+          "antiPatterns": [
+            "Encoding field legality in multiple docs or specs",
+            "Treating prose docs as authoritative over schema"
+          ]
+        },
+        {
+          "id": "runtime-behavior-beats-prose",
+          "status": "active",
+          "level": "required",
+          "scope": [
+            "documentation.authoring",
+            "documentation.validation",
+            "tooling.workflow-authoring"
+          ],
+          "rule": "When docs and runtime behavior disagree, update the docs to match runtime or fix runtime immediately.",
+          "why": "Authors need one trustworthy mental model.",
+          "enforcement": [
+            "advisory"
+          ],
+          "sourceRefs": [
+            {
+              "kind": "runtime",
+              "path": "src/application/services/validation-engine.ts",
+              "note": "Structural authoring invariants enforced by runtime validation."
+            },
+            {
+              "kind": "runtime",
+              "path": "src/v2/durable-core/domain/prompt-renderer.ts",
+              "note": "Prompt rendering and runtime prompt behavior."
+            }
+          ],
+          "checks": [
+            "Compare guidance against validator and renderer behavior before declaring a rule canonical.",
+            "Do not leave known mismatches unresolved."
+          ],
+          "antiPatterns": [
+            "Documented behavior that runtime no longer supports",
+            "Validator behavior that contradicts authoring guidance without a tracked fix"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "authoring-journey",
+      "title": "Authoring journey",
+      "rules": [
+        {
+          "id": "start-from-real-sources",
+          "status": "active",
+          "level": "required",
+          "scope": [
+            "workflow.authoring",
+            "documentation.authoring",
+            "tooling.workflow-authoring"
+          ],
+          "rule": "When authoring a workflow from scratch, start from the schema, current runtime behavior, and modern example workflows before drafting prompts.",
+          "why": "Good workflow authoring starts from how WorkRail actually works, not from stale habits or isolated docs.",
+          "enforcement": [
+            "advisory"
+          ],
+          "sourceRefs": [
+            {
+              "kind": "schema",
+              "path": "spec/workflow.schema.json",
+              "note": "Legal structure and supported fields."
+            },
+            {
+              "kind": "runtime",
+              "path": "src/application/services/validation-engine.ts",
+              "note": "Validator-enforced authoring rules."
+            },
+            {
+              "kind": "example",
+              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "note": "Current modern example."
+            }
+          ],
+          "checks": [
+            "Read the schema and at least one modern workflow before drafting.",
+            "Do not rely on outdated workflow patterns as the starting point."
+          ],
+          "antiPatterns": [
+            "Drafting a workflow from memory without checking current schema or examples"
+          ]
+        },
+        {
+          "id": "validate-early-and-often",
+          "status": "active",
+          "level": "required",
+          "scope": [
+            "workflow.authoring",
+            "ci.validation",
+            "validator.implementation"
+          ],
+          "rule": "Validate early while authoring, not only at the end.",
+          "why": "Small validation loops catch structural mistakes before they accumulate into major rework.",
+          "enforcement": [
+            "validator",
+            "ci",
+            "advisory"
+          ],
+          "sourceRefs": [
+            {
+              "kind": "documentation",
+              "path": "docs/workflow-validation.md",
+              "note": "Validation workflow for authors."
+            },
+            {
+              "kind": "validator",
+              "path": "scripts/validate-workflows-registry.ts",
+              "note": "Registry validation surface."
+            }
+          ],
+          "checks": [
+            "Run real validators while drafting and after major structural changes.",
+            "Use generated docs or examples only after the spec itself validates."
+          ],
+          "antiPatterns": [
+            "Only validating after a large authoring session is finished"
+          ]
+        },
+        {
+          "id": "author-in-phases",
+          "status": "active",
+          "level": "recommended",
+          "scope": [
+            "workflow.authoring",
+            "tooling.workflow-authoring"
+          ],
+          "rule": "Author workflows in phases: define shape first, then prompts, then validation/refinement.",
+          "why": "Separating structure, prompt design, and validation makes workflows easier to reason about and revise.",
+          "enforcement": [
+            "advisory"
+          ],
+          "checks": [
+            "Get step/loop structure right before polishing prompt voice.",
+            "Use validation as a dedicated pass, not just a cleanup afterthought."
+          ],
+          "antiPatterns": [
+            "Polishing prompt wording before the workflow structure is stable"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "prompt-voice",
+      "title": "Prompt voice",
+      "rules": [
+        {
+          "id": "user-voiced-prompts",
+          "status": "active",
+          "level": "recommended",
+          "scope": [
+            "workflow.description",
+            "step.prompt",
+            "step.prompt-fragment"
+          ],
+          "rule": "Write prompts as direct user intent rather than workflow-engine narration.",
+          "why": "Agents follow user-voiced instructions more naturally than middleware prose.",
+          "enforcement": [
+            "advisory"
+          ],
+          "checks": [
+            "The opening sentence should sound like a direct ask, not system narration.",
+            "The step should still be understandable without workflow-internal jargon."
+          ],
+          "antiPatterns": [
+            "Provide a loop control artifact.",
+            "Input contract: ...",
+            "Part A / Part B / Rules: ... when the structure adds ceremony rather than clarity"
+          ],
+          "exampleRefs": [
+            {
+              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "note": "See the sharpened user-voiced prompts in the current lean coding workflow."
+            }
+          ]
+        },
+        {
+          "id": "protocol-footers-stay-explicit",
+          "status": "active",
+          "level": "required",
+          "scope": [
+            "step.output-requirements",
+            "step.context-capture",
+            "loop.decision.prompt"
+          ],
+          "rule": "Keep exact protocol requirements explicit when the engine needs a specific output shape, artifact, or context capture.",
+          "why": "Voice improvements must not make the workflow ambiguous or unrunnable.",
+          "enforcement": [
+            "advisory"
+          ],
+          "sourceRefs": [
+            {
+              "kind": "example",
+              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "note": "Uses explicit capture footers and shape-preserving loop outputs."
+            }
+          ],
+          "checks": [
+            "If the step must emit a specific artifact or capture specific context, say that plainly.",
+            "Do not hide exact output requirements behind prose-only wording."
+          ],
+          "antiPatterns": [
+            "Removing explicit output shape because it sounds too workflow-y",
+            "Replacing exact capture requirements with vague summary prose"
+          ],
+          "exampleRefs": [
+            {
+              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "note": "Uses compact Capture footers and explicit loop-control wording."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "prompt-composition",
+      "title": "Prompt composition",
+      "rules": [
+        {
+          "id": "prefer-structured-prompt-composition",
+          "status": "active",
+          "level": "recommended",
+          "scope": [
+            "prompt.composition",
+            "step.prompt",
+            "step.prompt-fragment",
+            "prompt.templates"
+          ],
+          "rule": "Prefer structured prompt composition over duplicating large prompt branches inline.",
+          "why": "Shared structure is easier to maintain and easier for agents to reason about than repeated prose branches.",
+          "enforcement": [
+            "advisory"
+          ],
+          "sourceRefs": [
+            {
+              "kind": "documentation",
+              "path": "docs/authoring.md",
+              "note": "Documents context templates and prompt fragments."
+            },
+            {
+              "kind": "example",
+              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "note": "Uses prompt fragments to slim mode-specific prompt branches."
+            }
+          ],
+          "checks": [
+            "Use prompt fragments for conditional branches instead of repeating near-identical prompt blocks.",
+            "Use context templates for small runtime substitutions, not for complex logic.",
+            "Keep the base prompt readable without forcing readers to mentally diff three branches."
+          ],
+          "antiPatterns": [
+            "Copy-pasting QUICK, STANDARD, and THOROUGH branches inline when only a few lines differ",
+            "Encoding runtime logic in prose when promptFragments or templates are the right mechanism"
+          ],
+          "exampleRefs": [
+            {
+              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "note": "Uses prompt fragments and context templates to keep prompts slimmer at render time."
+            }
+          ]
+        },
+        {
+          "id": "templates-are-for-simple-substitution",
+          "status": "active",
+          "level": "recommended",
+          "scope": [
+            "prompt.templates",
+            "step.prompt",
+            "step.prompt-fragment"
+          ],
+          "rule": "Use context variable templates for simple substitution, not for hidden control flow or expression-heavy prompt logic.",
+          "why": "Templates are easy to read when they substitute concrete values and hard to trust when they become a second programming language.",
+          "enforcement": [
+            "advisory"
+          ],
+          "sourceRefs": [
+            {
+              "kind": "runtime",
+              "path": "src/v2/durable-core/domain/context-template-resolver.ts",
+              "note": "Runtime template resolution only handles simple identifier dot-paths."
+            },
+            {
+              "kind": "runtime",
+              "path": "src/v2/durable-core/domain/prompt-renderer.ts",
+              "note": "Templates are resolved at prompt render time."
+            }
+          ],
+          "checks": [
+            "A template token should read like a variable lookup, not a mini expression engine.",
+            "If the prompt logic branches, prefer prompt fragments or explicit workflow control flow."
+          ],
+          "antiPatterns": [
+            "Expression-heavy template syntax inside prompts",
+            "Using templates to hide control-flow decisions that should be explicit in the workflow"
+          ]
+        },
+        {
+          "id": "prompt-fragments-for-conditional-variants",
+          "status": "active",
+          "level": "recommended",
+          "scope": [
+            "prompt.composition",
+            "step.prompt-fragment",
+            "step.prompt"
+          ],
+          "rule": "Use prompt fragments for conditional prompt variants when the base prompt stays the same and only focused instructions differ.",
+          "why": "Prompt fragments keep authored prompts smaller and make render-time differences explicit.",
+          "enforcement": [
+            "advisory"
+          ],
+          "sourceRefs": [
+            {
+              "kind": "documentation",
+              "path": "docs/authoring.md",
+              "note": "Conditional prompt fragments are documented explicitly."
+            },
+            {
+              "kind": "runtime",
+              "path": "src/v2/durable-core/domain/prompt-renderer.ts",
+              "note": "Prompt fragments are assembled at render time."
+            },
+            {
+              "kind": "validator",
+              "path": "src/application/services/validation-engine.ts",
+              "note": "Prompt fragment structure is validated."
+            }
+          ],
+          "checks": [
+            "Keep the base prompt readable and put conditional additions into fragments.",
+            "Do not move the entire prompt into fragments if most of it is always present."
+          ],
+          "antiPatterns": [
+            "Repeating an entire prompt three times for small rigor-mode differences",
+            "Using fragments when there is no stable base prompt"
+          ]
+        },
+        {
+          "id": "extension-points-over-hardcoded-binding-slots",
+          "status": "active",
+          "level": "recommended",
+          "scope": [
+            "workflow.extension-points",
+            "prompt.composition",
+            "workflow.definition"
+          ],
+          "rule": "Use extension points when a workflow wants stable customization slots rather than hardcoding routine or binding references inline.",
+          "why": "Extension points make customization explicit, inspectable, and project-overridable.",
+          "enforcement": [
+            "advisory"
+          ],
+          "sourceRefs": [
+            {
+              "kind": "documentation",
+              "path": "docs/authoring.md",
+              "note": "Extension points are documented for workflow authors."
+            },
+            {
+              "kind": "runtime",
+              "path": "src/application/services/compiler/resolve-bindings.ts",
+              "note": "Binding resolution depends on declared extension points."
+            },
+            {
+              "kind": "validator",
+              "path": "src/application/services/validation-engine.ts",
+              "note": "Extension point declarations and binding-token usage are validated."
+            }
+          ],
+          "checks": [
+            "Declare extension points at the workflow level when bindings are part of the contract.",
+            "Avoid hidden or undocumented binding slots in prompts."
+          ],
+          "antiPatterns": [
+            "Hardcoding team-customizable routine names in prompt text without an extension-point declaration",
+            "Using `{{wr.bindings.*}}` tokens in a workflow that declares no extension points"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "features",
+      "title": "Compiler features (middleware)",
+      "rules": [
+        {
+          "id": "declare-features-for-cross-cutting-concerns",
+          "status": "active",
+          "level": "recommended",
+          "scope": [
+            "workflow.features",
+            "workflow.definition"
+          ],
+          "rule": "Declare compiler features when a workflow uses cross-cutting capabilities that benefit from systematic injection across all steps.",
+          "why": "Features inject constraints, procedure steps, and verification checks at compile time. Declaring them ensures consistent behavior across every step without repeating guidance in each prompt.",
+          "enforcement": [
+            "advisory"
+          ],
+          "sourceRefs": [
+            {
+              "kind": "runtime",
+              "path": "src/application/services/compiler/feature-registry.ts",
+              "note": "Canonical closed-set feature definitions and injection logic."
+            },
+            {
+              "kind": "schema",
+              "path": "spec/workflow.schema.json",
+              "note": "The features array field on the workflow definition."
+            }
+          ],
+          "checks": [
+            "If the workflow delegates work to subagents, declare `wr.features.subagent_guidance`.",
+            "If the workflow uses Memory MCP for context recall or persistence, declare `wr.features.memory_context`.",
+            "Do not duplicate feature-injected guidance in metaGuidance or step prompts. Let the compiler handle it."
+          ],
+          "antiPatterns": [
+            "Hand-writing delegation discipline rules in metaGuidance when `wr.features.subagent_guidance` would inject them systematically",
+            "Repeating Memory MCP usage instructions in every step instead of declaring `wr.features.memory_context`",
+            "Declaring features the workflow does not actually use"
+          ]
+        },
+        {
+          "id": "features-are-closed-set",
+          "status": "active",
+          "level": "required",
+          "scope": [
+            "workflow.features"
+          ],
+          "rule": "Only declare features from the closed set owned by WorkRail. Do not invent feature IDs.",
+          "why": "Features modify compiled content that becomes part of the workflow hash. User-defined features would break deterministic compilation.",
+          "enforcement": [
+            "runtime",
+            "validator"
+          ],
+          "sourceRefs": [
+            {
+              "kind": "runtime",
+              "path": "src/application/services/compiler/feature-registry.ts",
+              "note": "The registry rejects unknown feature IDs at compile time."
+            }
+          ],
+          "checks": [
+            "Every feature ID in the `features` array must resolve in the feature registry.",
+            "Unknown feature IDs cause a compile-time error.",
+            "Known features: `wr.features.subagent_guidance` (delegation discipline for workflows that spawn subagents), `wr.features.memory_context` (Memory MCP usage constraints for cross-step/cross-session recall)."
+          ],
+          "antiPatterns": [
+            "Inventing feature IDs like `wr.features.my_custom_thing`"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "response-supplements",
+      "title": "Response supplements and delivery-owned guidance",
+      "rules": [
+        {
+          "id": "keep-boundary-owned-guidance-out-of-step-prompts",
+          "status": "active",
+          "level": "recommended",
+          "scope": [
+            "response.supplement",
+            "step.prompt",
+            "prompt.composition",
+            "documentation.authoring",
+            "tooling.workflow-authoring"
+          ],
+          "rule": "Use response supplements for short, boundary-owned guidance that should stay structurally separate from the workflow-authored step prompt.",
+          "why": "Mixing delivery-owned instructions into the main prompt weakens user voice and makes it harder for agents to distinguish the core task from WorkRail logistics.",
+          "enforcement": [
+            "advisory"
+          ],
+          "sourceRefs": [
+            {
+              "kind": "runtime",
+              "path": "src/mcp/response-supplements.ts",
+              "note": "Canonical supplement policy lives here."
+            },
+            {
+              "kind": "runtime",
+              "path": "src/mcp/v2-response-formatter.ts",
+              "note": "Supplements are rendered as separate MCP content items here."
+            }
+          ],
+          "checks": [
+            "If the text is system-owned or delivery-owned rather than part of the workflow author's actual step instruction, prefer a response supplement.",
+            "If the text should appear only at start or resume, prefer a response supplement over repeating it in every authored prompt.",
+            "Keep the main step prompt readable as a direct user ask even without the supplement."
+          ],
+          "antiPatterns": [
+            "Inlining notes onboarding into every step prompt",
+            "Mixing WorkRail delivery framing directly into workflow-authored instructions",
+            "Treating boundary logistics as normal step prose"
+          ]
+        },
+        {
+          "id": "one-time-supplements-are-policy-not-durable-state",
+          "status": "active",
+          "level": "recommended",
+          "scope": [
+            "response.supplement",
+            "documentation.authoring",
+            "tooling.workflow-authoring"
+          ],
+          "rule": "Model one-time response supplements as delivery policy unless exact display history is part of workflow semantics.",
+          "why": "Presentation rules should not leak into durable execution state unless the system truly needs to remember delivery history as part of execution correctness.",
+          "enforcement": [
+            "advisory"
+          ],
+          "sourceRefs": [
+            {
+              "kind": "runtime",
+              "path": "src/mcp/response-supplements.ts",
+              "note": "Defines per_lifecycle vs once_per_session delivery semantics."
+            }
+          ],
+          "checks": [
+            "Use per_lifecycle when the guidance should appear on every eligible lifecycle.",
+            "Use once_per_session with an explicit emitOn lifecycle when one lifecycle should own the message.",
+            "Do not persist shown/not-shown state unless exact delivery history becomes a real execution requirement."
+          ],
+          "antiPatterns": [
+            "Adding durable session state for purely presentational guidance",
+            "Calling something once_per_session while still emitting it on multiple lifecycles",
+            "Treating supplement delivery history as part of core workflow meaning when it is only presentation policy"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "loops",
+      "title": "Loops and control flow",
+      "rules": [
+        {
+          "id": "loop-control-semantic-correctness",
+          "status": "active",
+          "level": "required",
+          "scope": [
+            "loop.decision.prompt",
+            "loop.decision.output-example"
+          ],
+          "rule": "Loop decision prompts must allow both `continue` and `stop` semantically and in the output example.",
+          "why": "Hardcoding `continue` in the example artifact creates contradictory instructions.",
+          "enforcement": [
+            "validator",
+            "ci",
+            "advisory"
+          ],
+          "sourceRefs": [
+            {
+              "kind": "validator",
+              "path": "scripts/validate-workflows-registry.ts",
+              "note": "Registry validation should preserve semantically correct discoverable workflows."
+            },
+            {
+              "kind": "example",
+              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "note": "Current loop decision prompts show shape-only output examples."
+            }
+          ],
+          "checks": [
+            "Prompt text allows both outcomes.",
+            "Example output shows the required shape without forcing one decision."
+          ],
+          "antiPatterns": [
+            "Output exactly ... `decision`: `continue`",
+            "Prompt text says to stop, but the example output only permits continue"
+          ],
+          "exampleRefs": [
+            {
+              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "note": "Current loop decision steps show shape-only output examples."
+            }
+          ]
+        },
+        {
+          "id": "loops-need-real-exit-rules",
+          "status": "active",
+          "level": "required",
+          "scope": [
+            "loop.step",
+            "loop.decision"
+          ],
+          "rule": "Loops must have explicit exit rules, bounded iterations, and a clear reason for another pass.",
+          "why": "Unclear loops invite runaway iteration or ceremonial extra passes.",
+          "enforcement": [
+            "validator",
+            "ci",
+            "advisory"
+          ],
+          "checks": [
+            "The loop has a max iteration bound.",
+            "The decision step explains why another pass is or is not needed.",
+            "The loop does not rely on vibes-only continuation criteria."
+          ],
+          "antiPatterns": [
+            "Retry until it feels done",
+            "Continue while confidence is low without defining how confidence is evaluated"
+          ]
+        },
+        {
+          "id": "forced-self-audit-over-vibes",
+          "status": "active",
+          "level": "recommended",
+          "scope": [
+            "step.self-audit",
+            "loop.pre-check"
+          ],
+          "rule": "When a workflow needs a self-audit, use concrete rubric-driven checks rather than vibes-only booleans.",
+          "why": "Agents will often take the easy path if the workflow lets them self-certify confidence without evidence.",
+          "enforcement": [
+            "advisory"
+          ],
+          "checks": [
+            "Score concrete dimensions instead of asking whether the agent still feels fuzzy.",
+            "Require brief evidence for each scored dimension when the audit matters."
+          ],
+          "antiPatterns": [
+            "`stillFuzzy = true|false`",
+            "`contextAuditNeeded = true|false` without an explicit rubric"
+          ],
+          "exampleRefs": [
+            {
+              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "note": "Phase 0 uses a context-clarity rubric instead of a vibes-only confidence flag."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "confirmation",
+      "title": "Confirmation discipline",
+      "rules": [
+        {
+          "id": "confirm-only-for-real-human-decisions",
+          "status": "active",
+          "level": "recommended",
+          "scope": [
+            "step.confirmation",
+            "workflow.rigor-policy",
+            "workflow.authoring"
+          ],
+          "rule": "Use confirmation gates for real human decisions or review barriers, not as routine ceremony.",
+          "why": "Unnecessary confirmations slow workflows down and teach agents to interrupt instead of act.",
+          "enforcement": [
+            "advisory"
+          ],
+          "sourceRefs": [
+            {
+              "kind": "example",
+              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "note": "Uses confirmation for real review barriers like MultiPR checkpoints."
+            }
+          ],
+          "checks": [
+            "A confirmation step should protect a genuine human choice, review checkpoint, or PR boundary.",
+            "Do not require confirmation just because a step modified a file or finished a phase."
+          ],
+          "antiPatterns": [
+            "Confirming every draft or artifact creation by default",
+            "Using requireConfirmation as a substitute for clear loop or rigor policy"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "delegation",
+      "title": "Delegation and subagents",
+      "rules": [
+        {
+          "id": "bounded-delegation",
+          "status": "active",
+          "level": "required",
+          "scope": [
+            "workflow.meta-guidance",
+            "step.delegation-checkpoint"
+          ],
+          "rule": "Delegate bounded cognitive routines, not ownership of the full workflow or task.",
+          "why": "Main-agent ownership preserves context, accountability, and synthesis quality.",
+          "enforcement": [
+            "advisory"
+          ],
+          "sourceRefs": [
+            {
+              "kind": "example",
+              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "note": "Delegation checkpoints keep the main agent as the synthesizer and decision-maker."
+            }
+          ],
+          "checks": [
+            "Subagents have a bounded mission.",
+            "The main agent still owns strategy, synthesis, and final decisions."
+          ],
+          "antiPatterns": [
+            "Handing the full task to a subagent and accepting its result wholesale",
+            "Treating named builder or researcher roles as alternate owners"
+          ]
+        },
+        {
+          "id": "batched-checkpoints-over-ad-hoc-optionality",
+          "status": "active",
+          "level": "recommended",
+          "scope": [
+            "step.delegation-checkpoint",
+            "workflow.rigor-policy"
+          ],
+          "rule": "Prefer a few explicit fan-out and fan-in checkpoints over many optional one-off subagent calls.",
+          "why": "This is easier to reason about, fits the runtime cost model better, and reduces agent corner-cutting.",
+          "enforcement": [
+            "advisory"
+          ],
+          "checks": [
+            "Use delegation at deliberate review barriers rather than sprinkling optional single calls everywhere.",
+            "Use rigor or trigger rules to determine when a batch is mandatory."
+          ],
+          "antiPatterns": [
+            "If it helps, maybe run one subagent",
+            "Optional challenge wording at high-value decision points"
+          ],
+          "exampleRefs": [
+            {
+              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "note": "Uses explicit challenge, audit, and verification barriers."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "subagent-synthesis",
+      "title": "Subagent synthesis and claim adoption",
+      "rules": [
+        {
+          "id": "subagent-output-is-evidence",
+          "status": "active",
+          "level": "required",
+          "scope": [
+            "synthesis.design",
+            "synthesis.plan-audit",
+            "synthesis.slice-verification",
+            "synthesis.final-verification"
+          ],
+          "rule": "Treat subagent output as evidence, not truth or authority.",
+          "why": "Delegation improves perspective, but the main agent still owns judgment.",
+          "enforcement": [
+            "advisory"
+          ],
+          "checks": [
+            "The main agent states what it agrees with, rejects, or still doubts.",
+            "The workflow does not let subagent output silently become the decision."
+          ],
+          "antiPatterns": [
+            "Accepting subagent conclusions wholesale",
+            "Treating multiple subagent agreement as automatic truth"
+          ]
+        },
+        {
+          "id": "verify-high-impact-claims",
+          "status": "active",
+          "level": "required",
+          "scope": [
+            "synthesis.claim-adoption"
+          ],
+          "rule": "Any subagent finding that changes a decision must be classified as `Confirmed`, `Plausible`, or `Rejected`.",
+          "why": "Decision-driving claims need explicit handling rather than vague agreement.",
+          "enforcement": [
+            "advisory"
+          ],
+          "sourceRefs": [
+            {
+              "kind": "example",
+              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "note": "Major synthesis checkpoints use Confirmed / Plausible / Rejected for adopted claims."
+            }
+          ],
+          "checks": [
+            "`Confirmed` claims cite primary evidence such as code, artifacts, spec, tests/build, or direct workflow context.",
+            "`Plausible` claims do not drive the decision until verified.",
+            "`Rejected` claims say why they failed against fuller context or direct evidence."
+          ],
+          "antiPatterns": [
+            "Subagent agreement alone is enough for `Confirmed`",
+            "Using delegated findings as blockers or green lights without verification"
+          ],
+          "exampleRefs": [
+            {
+              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "note": "Major synthesis checkpoints use Confirmed / Plausible / Rejected for decision-driving findings."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "legacy-patterns",
+      "title": "Discouraged legacy patterns",
+      "rules": [
+        {
+          "id": "avoid-heavy-clarification-front-doors",
+          "status": "active",
+          "level": "discouraged",
+          "scope": [
+            "legacy.patterns",
+            "workflow.authoring"
+          ],
+          "rule": "Avoid large up-front clarification batteries when the workflow can discover context with tools first and ask only the real remaining questions.",
+          "why": "Heavy intake creates ceremony and often asks the user things the agent could have learned itself.",
+          "enforcement": [
+            "advisory"
+          ],
+          "checks": [
+            "Prefer targeted questioning after exploration over blanket intake questionnaires."
+          ],
+          "antiPatterns": [
+            "Multiple broad clarification prompts before any repo exploration",
+            "Learning-path or experience-level questionnaires that do not affect workflow correctness"
+          ]
+        },
+        {
+          "id": "avoid-pseudo-dsl-meta-guidance",
+          "status": "active",
+          "level": "discouraged",
+          "scope": [
+            "legacy.patterns",
+            "workflow.meta-guidance"
+          ],
+          "rule": "Avoid pseudo-functions, fake DSLs, or teaching-product helper syntax in meta guidance.",
+          "why": "Pseudo-DSL prose is harder to trust, harder to maintain, and usually weaker than either plain rules or real composition features.",
+          "enforcement": [
+            "advisory"
+          ],
+          "checks": [
+            "Meta guidance should read like rules, not pretend code."
+          ],
+          "antiPatterns": [
+            "fun adaptToPath(content) = ...",
+            "Helper-function prose that mimics an API but is not actually executable"
+          ]
+        },
+        {
+          "id": "avoid-local-regex-validation-when-real-validators-exist",
+          "status": "active",
+          "level": "discouraged",
+          "scope": [
+            "legacy.patterns",
+            "documentation.validation",
+            "workflow.authoring"
+          ],
+          "rule": "Avoid local regex-style validation heuristics when a real workflow validator exists.",
+          "why": "Approximate checks drift fast and create false confidence.",
+          "enforcement": [
+            "advisory"
+          ],
+          "checks": [
+            "Use real validators as the gate and keep heuristics secondary at most."
+          ],
+          "antiPatterns": [
+            "Treating hand-written regex checks as the final proof of correctness"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "examples",
+      "title": "Examples",
+      "rules": [
+        {
+          "id": "examples-must-stay-modern-and-validated",
+          "status": "active",
+          "level": "required",
+          "scope": [
+            "workflow.authoring",
+            "documentation.authoring",
+            "tooling.workflow-authoring"
+          ],
+          "rule": "Examples used by this spec should be modern, still validated, and still representative of current authoring guidance.",
+          "why": "Examples quietly drifting out of date undermines the trustworthiness of the whole authoring system.",
+          "enforcement": [
+            "advisory"
+          ],
+          "checks": [
+            "Example refs should point to workflows that still validate.",
+            "Review example refs when the referenced workflow changes materially."
+          ],
+          "antiPatterns": [
+            "Keeping a canonical example ref after the workflow has drifted into a legacy style"
+          ],
+          "exampleRefs": [
+            {
+              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "note": "Current example of modern prompt composition, delegation barriers, and loop semantics."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "validation",
+      "title": "Validation",
+      "rules": [
+        {
+          "id": "validator-first",
+          "status": "active",
+          "level": "required",
+          "scope": [
+            "workflow.authoring",
+            "tooling.workflow-authoring",
+            "ci.validation"
+          ],
+          "rule": "Use real workflow validators and runtime-equivalent validation as the gate for correctness.",
+          "why": "Validator behavior is the executable truth for whether a workflow is actually runnable.",
+          "enforcement": [
+            "runtime",
+            "validator",
+            "ci"
+          ],
+          "sourceRefs": [
+            {
+              "kind": "validator",
+              "path": "scripts/validate-workflows-registry.ts",
+              "note": "Registry validation is part of the real validation surface."
+            },
+            {
+              "kind": "validator",
+              "path": "src/application/services/validation-engine.ts",
+              "note": "Structural validation logic lives here."
+            }
+          ],
+          "checks": [
+            "Validate against the same workflow runtime would discover and execute.",
+            "Do not rely on regex-style local approximations when a real validator exists."
+          ],
+          "antiPatterns": [
+            "Docs-only validation",
+            "File-shape checks that ignore runtime registry resolution"
+          ]
+        },
+        {
+          "id": "validation-bar-must-match-runtime",
+          "status": "active",
+          "level": "required",
+          "scope": [
+            "documentation.validation",
+            "validator.implementation"
+          ],
+          "rule": "Validation guidance must align with the same discovery, resolution, normalization, compilation, and lifecycle behavior that runtime uses.",
+          "why": "A workflow that passes guidance-level validation but fails at runtime is a trust failure.",
+          "enforcement": [
+            "validator",
+            "ci",
+            "advisory"
+          ],
+          "checks": [
+            "Validation docs should describe the same phases runtime actually depends on.",
+            "If runtime adds a new contract surface, update authoring guidance and validation docs."
+          ],
+          "antiPatterns": [
+            "Saying a workflow is valid because the file parses even though registry resolution or runtime compilation can still fail"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "artifacts",
+      "title": "Artifacts and planning surfaces",
+      "rules": [
+        {
+          "id": "artifact-canonicality",
+          "status": "active",
+          "level": "recommended",
+          "scope": [
+            "artifact.plan",
+            "artifact.spec",
+            "artifact.verification"
+          ],
+          "rule": "When multiple human-facing artifacts exist, say which one is canonical for which concern.",
+          "why": "Ambiguous ownership between plan, spec, and verification artifacts causes drift.",
+          "enforcement": [
+            "advisory"
+          ],
+          "checks": [
+            "If both a behavior artifact and an implementation artifact exist, define the boundary explicitly.",
+            "Verification steps should know which artifact is the source of truth for behavior."
+          ],
+          "antiPatterns": [
+            "Plan and spec both contain acceptance criteria with no stated source of truth",
+            "Verification steps check one artifact while planning updates a different one"
+          ],
+          "exampleRefs": [
+            {
+              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "note": "Uses explicit spec vs implementation-plan ownership."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "plannedTopics": [
+    {
+      "id": "delegation-results",
+      "title": "Planned delegation packets and outputs",
+      "rules": [
+        {
+          "id": "delegation-package",
+          "status": "planned",
+          "level": "recommended",
+          "scope": [
+            "delegation.context-packet"
+          ],
+          "rule": "Every subagent should receive a self-contained context packet with mission, current decision, relevant files or artifacts, constraints, and expected deliverable shape.",
+          "why": "Subagents do not inherit parent context cleanly today, and the engine should make the packet explicit.",
+          "enforcement": [
+            "planned",
+            "advisory"
+          ],
+          "checks": [
+            "The context packet should be inspectable.",
+            "The packet should be curated rather than hidden full-session inheritance."
+          ],
+          "antiPatterns": [
+            "Assuming a subagent implicitly knows the parent context"
+          ]
+        },
+        {
+          "id": "subagent-results-should-be-structured",
+          "status": "planned",
+          "level": "recommended",
+          "scope": [
+            "delegation.result-envelope",
+            "synthesis.claim-adoption",
+            "step.delegation-checkpoint"
+          ],
+          "rule": "Delegated routines should return a structured result envelope rather than only freeform notes.",
+          "why": "Parents can synthesize, verify, and reject subagent claims much more reliably when results are shaped consistently.",
+          "enforcement": [
+            "planned",
+            "advisory"
+          ],
+          "checks": [
+            "A good result envelope includes findings, assumptions, missing context, confidence, and claims requiring verification.",
+            "Decision-driving claims should be easy for the parent to inspect without rereading the entire deliverable."
+          ],
+          "antiPatterns": [
+            "Freeform delegated output with no separation between findings, assumptions, and uncertainty",
+            "Subagent output that hides which claims still need parent verification"
+          ]
+        },
+        {
+          "id": "subagent-output-discloses-assumptions",
+          "status": "planned",
+          "level": "recommended",
+          "scope": [
+            "delegation.result-envelope",
+            "synthesis.claim-adoption"
+          ],
+          "rule": "Subagent output should disclose the assumptions it depended on.",
+          "why": "The parent cannot judge a delegated finding properly if the hidden assumptions stay hidden.",
+          "enforcement": [
+            "planned",
+            "advisory"
+          ],
+          "checks": [
+            "High-impact findings name the assumptions they depend on.",
+            "Assumptions are separated from findings, not buried in prose."
+          ],
+          "antiPatterns": [
+            "Delegated recommendations that read as certain but rely on unstated assumptions"
+          ]
+        },
+        {
+          "id": "subagent-output-discloses-missing-context",
+          "status": "planned",
+          "level": "recommended",
+          "scope": [
+            "delegation.result-envelope",
+            "delegation.context-packet"
+          ],
+          "rule": "Subagent output should disclose what context it was missing or uncertain about.",
+          "why": "The parent needs to know whether a finding is weak because the delegated context packet was incomplete.",
+          "enforcement": [
+            "planned",
+            "advisory"
+          ],
+          "checks": [
+            "Missing context is called out explicitly instead of implied through hedging."
+          ],
+          "antiPatterns": [
+            "A confident delegated result that omits obvious context gaps"
+          ]
+        },
+        {
+          "id": "subagent-output-exposes-confidence",
+          "status": "planned",
+          "level": "recommended",
+          "scope": [
+            "delegation.result-envelope",
+            "synthesis.claim-adoption"
+          ],
+          "rule": "Subagent output should expose confidence for its key findings or recommendations.",
+          "why": "The parent needs a fast read on which delegated conclusions are tentative versus well-supported.",
+          "enforcement": [
+            "planned",
+            "advisory"
+          ],
+          "checks": [
+            "Confidence is attached to findings or recommendations, not hidden in a general disclaimer."
+          ],
+          "antiPatterns": [
+            "All findings are presented with the same implied confidence"
+          ]
+        },
+        {
+          "id": "high-impact-findings-must-be-easy-to-verify",
+          "status": "planned",
+          "level": "recommended",
+          "scope": [
+            "delegation.result-envelope",
+            "synthesis.claim-adoption"
+          ],
+          "rule": "High-impact delegated findings should be easy for the parent to verify against primary evidence.",
+          "why": "The parent should not have to reverse-engineer a delegated deliverable to validate the claims that change the decision.",
+          "enforcement": [
+            "planned",
+            "advisory"
+          ],
+          "checks": [
+            "Decision-driving claims are surfaced explicitly.",
+            "The output makes it obvious what should be verified in code, artifacts, or tests."
+          ],
+          "antiPatterns": [
+            "Burying the finding that changes the decision inside a long prose dump"
+          ]
+        }
+      ]
+    }
+  ],
+  "plannedRules": [
+  ]
+}
