@@ -16,7 +16,7 @@
  */
 
 import {
-  isV2ExecutionRenderEnvelope,
+  getV2ExecutionRenderEnvelope,
   type V2ExecutionResponseLifecycle,
 } from './render-envelope.js';
 import {
@@ -506,9 +506,10 @@ function deriveRenderInput(data: unknown): {
   readonly lifecycle: V2ExecutionResponseLifecycle;
   readonly contentEnvelope?: import('./step-content-envelope.js').StepContentEnvelope;
 } | null {
-  if (isV2ExecutionRenderEnvelope(data)) {
-    return isV2ExecutionResponse(data.response)
-      ? { response: data.response, lifecycle: data.lifecycle, contentEnvelope: data.contentEnvelope }
+  const envelope = getV2ExecutionRenderEnvelope(data);
+  if (envelope != null) {
+    return isV2ExecutionResponse(envelope.response)
+      ? { response: envelope.response, lifecycle: envelope.lifecycle, contentEnvelope: envelope.contentEnvelope }
       : null;
   }
 
