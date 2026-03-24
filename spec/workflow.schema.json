@@ -67,7 +67,7 @@
     },
     "metaGuidance": {
       "type": "array",
-      "description": "Persistent best practices that apply throughout the workflow",
+      "description": "Persistent behavioral rules surfaced on start and resume. Not repeated on every step advance. For external document pointers, use 'references' instead.",
       "items": {
         "type": "string",
         "minLength": 1,
@@ -142,6 +142,14 @@
         "$ref": "#/$defs/extensionPoint"
       },
       "uniqueItems": true
+    },
+    "references": {
+      "type": "array",
+      "description": "Workflow-declared references to external documents. Each reference is a pointer — content is never inlined. Declarations participate in the workflow hash; referenced file content does not.",
+      "items": {
+        "$ref": "#/$defs/workflowReference"
+      },
+      "uniqueItems": true
     }
   },
   "required": [
@@ -187,6 +195,49 @@
         }
       },
       "required": ["slotId", "purpose", "default"],
+      "additionalProperties": false
+    },
+    "workflowReference": {
+      "type": "object",
+      "description": "A pointer to an external document relevant to the workflow. Content is never inlined — the agent reads the file itself if needed.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier within the workflow",
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "minLength": 2,
+          "maxLength": 64
+        },
+        "title": {
+          "type": "string",
+          "description": "Human-readable title for the reference",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "source": {
+          "type": "string",
+          "description": "File path relative to workspace root",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "purpose": {
+          "type": "string",
+          "description": "Why this reference matters to the workflow",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "authoritative": {
+          "type": "boolean",
+          "description": "Whether this document is authoritative (agent should follow it strictly)"
+        },
+        "resolveFrom": {
+          "type": "string",
+          "enum": ["workspace", "package"],
+          "description": "Resolution base for source path. 'workspace' (default) resolves against the user's project root. 'package' resolves against the workrail package root (for files shipped with the workflow).",
+          "default": "workspace"
+        }
+      },
+      "required": ["id", "title", "source", "purpose", "authoritative"],
       "additionalProperties": false
     },
     "stepId": {
@@ -246,7 +297,13 @@
         "functionDefinitions": { "type": "array", "items": { "$ref": "#/$defs/functionDefinition" } },
         "functionCalls": { "type": "array", "items": { "$ref": "#/$defs/functionCall" } },
         "functionReferences": { "type": "array", "items": { "type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*\\(\\)$" } },
-        "templateCall": { "$ref": "#/$defs/templateCall" }
+        "templateCall": { "$ref": "#/$defs/templateCall" },
+        "promptFragments": {
+          "type": "array",
+          "description": "Conditional prompt fragments appended to the step's base prompt at render time. Each fragment is appended in declaration order when its 'when' condition matches the session context.",
+          "items": { "$ref": "#/$defs/promptFragment" },
+          "minItems": 1
+        }
       },
       "required": ["id", "title"],
       "additionalProperties": false
@@ -471,8 +528,37 @@
         "not": {
           "$ref": "#/$defs/condition",
           "description": "Logical NOT of a condition"
+        },
+        "in": {
+          "type": "array",
+          "description": "Check if variable value is in this array of allowed values"
         }
       },
+      "additionalProperties": false
+    },
+    "promptFragment": {
+      "type": "object",
+      "description": "A conditional prompt fragment appended to a step's base prompt at render time when its condition matches the session context.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for this fragment within the step",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "when": {
+          "$ref": "#/$defs/condition",
+          "description": "Condition evaluated against session context at render time. If absent, fragment is always appended."
+        },
+        "text": {
+          "type": "string",
+          "description": "Prompt text appended when the condition matches. Must not contain {{wr.*}} tokens.",
+          "minLength": 1,
+          "maxLength": 4096
+        }
+      },
+      "required": ["id", "text"],
       "additionalProperties": false
     },
     "confirmationRule": {

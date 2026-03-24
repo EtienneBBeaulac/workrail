@@ -1,0 +1,199 @@
+{
+  "id": "cross-platform-code-conversion",
+  "name": "Cross-Platform Code Conversion",
+  "version": "0.1.0",
+  "description": "Guides an agent through converting code from one platform to another (e.g., Android to iOS, iOS to Web). Triages files by difficulty, delegates easy literal translations to parallel subagents, then the main agent tackles platform-specific code requiring design decisions.",
+  "recommendedPreferences": {
+    "recommendedAutonomy": "guided",
+    "recommendedRiskPolicy": "conservative"
+  },
+  "features": [
+    "wr.features.subagent_guidance",
+    "wr.features.memory_context"
+  ],
+  "preconditions": [
+    "User specifies source and target platforms.",
+    "Agent has read access to the source codebase.",
+    "Agent has write access to create target-platform files.",
+    "Agent can run build or typecheck tools for the target platform."
+  ],
+  "metaGuidance": [
+    "IDIOMATIC CONVERSION: translate patterns and idioms, not syntax. A Kotlin sealed class becomes a Swift enum with associated values, not a class hierarchy workaround.",
+    "SCOPE DISCIPLINE: convert only what the user scoped. Do not expand to adjacent features or modules unless explicitly asked.",
+    "DEPENDENCY MAPPING: never assume a library exists on the target platform. Map each dependency to its target equivalent or flag it as needing a custom solution.",
+    "PLATFORM CONVENTIONS: follow the target platform's conventions for project structure, naming, error handling, concurrency, and testing.",
+    "BUILD PROOF: code that does not build is not done. Run build or typecheck after every conversion batch.",
+    "PRESERVE INTENT: the goal is functional equivalence, not line-by-line correspondence. Restructure when the target platform has a better way.",
+    "TRIAGE FIRST: not all code is equal. Separate trivial translations from code needing real design decisions. Delegate the easy stuff, focus on the hard stuff.",
+    "TARGET REPO DISCOVERY: find the target repo yourself before asking. Check workspace roots, sibling dirs, monorepo modules, and agent config files first.",
+    "PERSIST REPO MAPPINGS: once a target repo is confirmed, offer to save the source-to-target mapping in the source repo's agent config so future runs skip discovery.",
+    "DRIFT DETECTION: if a file turns out harder than its bucket classification during conversion, stop and reclassify it. Do not silently absorb complexity."
+  ],
+  "steps": [
+    {
+      "id": "phase-0-scope",
+      "title": "Phase 0: Scope & Platform Analysis",
+      "prompt": "Understand what you're converting before you touch anything.\n\nFigure out:\n- What is being converted? (single file, module, feature, full component, entire app)\n- What is the source platform? (Android/Kotlin, iOS/Swift, Web/React, etc.)\n- What is the target platform?\n- How large is the conversion scope? (file count, rough LOC)\n- Where does the converted code go? Find the target repo yourself before asking the user.\n\nIf the user hasn't specified scope boundaries, ask. Don't guess at scope.\n\nThen classify the conversion:\n- `conversionComplexity`: Small (1-3 files, straightforward translation) / Medium (a module or feature, mixed difficulty) / Large (many modules, significant platform-specific code)\n\nUse this guidance:\n- Small: few files, mostly mechanical, low risk of idiom mismatch\n- Medium: a module or feature with some platform-specific code mixed in\n- Large: many files, deep platform coupling, multiple idiom mapping decisions\n\nCapture:\n- `sourcePlatform`\n- `targetPlatform`\n- `conversionScope`\n- `targetRepoPath`\n- `estimatedSize`\n- `conversionComplexity`",
+      "requireConfirmation": {
+        "var": "conversionComplexity",
+        "not_equals": "Small"
+      }
+    },
+    {
+      "id": "phase-1-understand-source",
+      "title": "Phase 1: Understand Source Code",
+      "prompt": "Read and analyze the source code through a conversion lens — what will be easy to convert, what will be hard, and why.\n\nMap out:\n- Architecture and module structure\n- Key patterns used (MVI, MVVM, dependency injection, etc.)\n- External dependencies and what they do\n- Entry points and public API surface\n- Platform coupling depth: is the code cleanly layered or is platform-specific code smeared throughout? This directly determines how much falls into easy vs. hard buckets.\n- Concurrency model: Coroutines, Combine, RxJS, async/await? This is often the single hardest mapping decision.\n- DI approach: Dagger/Hilt, Swinject, Koin? DI frameworks rarely map 1:1.\n- Test coverage shape: unit tests on business logic (convert easily), UI tests (likely rewrite), integration tests (depends on infra).\n- Shared code boundaries: is there already a shared/common module that might not need conversion at all?\n\nCapture:\n- `sourceArchitecture`\n- `dependencies`\n- `publicApiSurface`\n- `platformCouplingAssessment`\n- `concurrencyModel`\n- `testCoverageShape`",
+      "promptFragments": [
+        {
+          "id": "phase-1-small-light",
+          "when": { "var": "conversionComplexity", "equals": "Small" },
+          "text": "For Small conversions, keep this lightweight. A quick read of the files in scope is enough — don't map the entire architecture. Focus on identifying any platform-specific code that would prevent a straight translation."
+        }
+      ],
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-small-fast-path",
+      "title": "Small Conversion Fast Path",
+      "runCondition": {
+        "var": "conversionComplexity",
+        "equals": "Small"
+      },
+      "prompt": "For Small conversions, skip triage and planning — just convert.\n\n- Translate the files to the target platform idiomatically\n- Follow target platform naming and structure conventions\n- Map any dependencies to target equivalents\n- Convert tests if they exist\n- Run build or typecheck to verify\n\nIf something turns out harder than expected (deep platform coupling, no clean dependency equivalent), update `conversionComplexity` to `Medium` and stop. The full triage and planning pipeline will activate for the remaining work.\n\nCapture:\n- `filesConverted`\n- `buildPassed`\n- `conversionComplexity`",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-2-triage",
+      "title": "Phase 2: Triage & Sort",
+      "runCondition": {
+        "var": "conversionComplexity",
+        "not_equals": "Small"
+      },
+      "prompt": "Classify every file or module in scope into one of three buckets:\n\n**Bucket A — Literal translation**: Platform-agnostic business logic, data models, utilities, pure functions. These use no platform-specific APIs or libraries. Conversion is mechanical: translate the language syntax, follow target naming conventions, done. These will be delegated to subagents.\n\n**Bucket B — Library substitution**: Code that uses platform-specific libraries (networking, persistence, serialization, DI) but follows standard patterns. These need dependency mapping but the structure stays the same.\n\n**Bucket C — Platform-specific**: Code deeply tied to the platform (UI layer, lifecycle management, concurrency/threading, navigation, platform APIs). These need design decisions about target-platform idioms.\n\nFor each file or module, list:\n- File/module name\n- Bucket (A, B, or C)\n- One-line reason for classification\n- Dependencies it has on other files in scope (so we know conversion order)\n\nSort the work items within each bucket by dependency order (convert dependencies first).\n\nGroup Bucket A files into parallel batches of 3-5 files each. Each batch should contain files with no cross-dependencies so subagents can work independently.\n\nGroup Bucket B and C files into sequential batches by dependency order.\n\nEach batch should have: `name` (short label), `bucket` (A, B, or C), and `files` (list of file paths).\n\nCapture:\n- `bucketABatches` (parallel batches for subagent delegation)\n- `bucketBCBatches` (sequential batches for main agent)\n- `bucketACounts`\n- `bucketBCounts`\n- `bucketCCounts`",
+      "requireConfirmation": true
+    },
+    {
+      "id": "phase-3-plan-hard-items",
+      "title": "Phase 3: Plan Platform-Specific Conversions",
+      "runCondition": {
+        "var": "conversionComplexity",
+        "not_equals": "Small"
+      },
+      "prompt": "For Bucket B and Bucket C items, plan the conversion before writing code.\n\nFor Bucket B (library substitution):\n- Map each source dependency to its target-platform equivalent\n- If no equivalent exists, flag it and propose an alternative\n\nFor Bucket C (platform-specific):\n- Threading/concurrency model mapping\n- UI framework mapping\n- DI framework mapping\n- State management mapping\n- Error handling mapping\n- Navigation patterns\n- Lifecycle management approach\n- Testing framework mapping\n\nFor anything with no clean target equivalent, propose an idiomatic solution and explain the tradeoff.\n\nBucket A items don't need a plan. They're mechanical translation handled by subagents.\n\nCapture:\n- `idiomMapping`\n- `dependencyMapping`\n- `tradeoffs`",
+      "promptFragments": [
+        {
+          "id": "phase-3-medium-focused",
+          "when": { "var": "conversionComplexity", "equals": "Medium" },
+          "text": "For Medium conversions, focus the plan on the items that actually need design decisions. Don't exhaustively map every dimension — only the ones relevant to the files in scope."
+        }
+      ],
+      "requireConfirmation": true
+    },
+    {
+      "id": "phase-4-delegate-bucket-a",
+      "title": "Phase 4: Delegate Bucket A (Parallel Subagents)",
+      "runCondition": {
+        "and": [
+          { "var": "conversionComplexity", "not_equals": "Small" },
+          { "var": "bucketACounts", "not_equals": 0 }
+        ]
+      },
+      "prompt": "Delegate all Bucket A batches to subagents in parallel. If subagent delegation is not available in your environment, convert Bucket A files yourself sequentially — they're mechanical translations.\n\nFor each batch in `bucketABatches`, spawn a subagent with these instructions:\n- Source platform: `{{sourcePlatform}}`\n- Target platform: `{{targetPlatform}}`\n- Target repo: `{{targetRepoPath}}`\n- Files to convert: (list the specific files in this batch)\n- Task: translate these files from the source language to the target language. Follow target platform naming conventions. These are platform-agnostic files — no library substitution or idiom mapping needed. Preserve the public API. Convert tests if they exist.\n\nRun batches in parallel. Each subagent works independently on files with no cross-dependencies.\n\nWhen all subagents finish, review their output:\n- Spot-check a few converted files for quality\n- Flag any files a subagent misclassified as easy (actually needs library substitution or platform-specific handling)\n- Move misclassified files back to the appropriate bucket for main agent handling\n\nRun build or typecheck on the Bucket A output to catch issues early.\n\nCapture:\n- `bucketAComplete`\n- `bucketABuildPassed`\n- `reclassifiedFiles`",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-5-convert-hard",
+      "type": "loop",
+      "title": "Phase 5: Convert Bucket B & C (Main Agent)",
+      "runCondition": {
+        "var": "conversionComplexity",
+        "not_equals": "Small"
+      },
+      "loop": {
+        "type": "forEach",
+        "items": "bucketBCBatches",
+        "itemVar": "currentBatch",
+        "indexVar": "batchIndex",
+        "maxIterations": 30
+      },
+      "body": [
+        {
+          "id": "phase-5a-convert-batch",
+          "title": "Convert Current Batch",
+          "prompt": "Convert the current batch: `{{currentBatch.name}}`\n\nThis is Bucket B or C code that needs your full context.\n\n- **Bucket B**: Follow the dependency mapping from Phase 3. Substitute libraries, keep structure.\n- **Bucket C**: Follow the idiom mapping from Phase 3. Restructure where the target platform has a better way.\n\nAlso handle any `reclassifiedFiles` that were moved back from Bucket A delegation.\n\nFor all files:\n- Follow target platform conventions\n- Preserve public API contracts where possible\n- Add TODO comments for anything uncertain\n- Convert tests alongside production code when source tests exist\n\nRun build or typecheck after this batch. If it fails, fix it before moving on.\n\nTrack whether this batch required:\n- `bucketDriftDetected`: a file turned out to be harder than its bucket classification (e.g., Bucket B file needed Bucket C-level design decisions)\n- `unexpectedDependency`: a dependency was discovered that wasn't in the Phase 3 mapping\n- `buildBroke`: build or typecheck failed after this batch\n\nCapture:\n- `batchFilesConverted`\n- `batchBuildPassed`\n- `batchIssues`\n- `bucketDriftDetected`\n- `unexpectedDependency`\n- `buildBroke`",
+          "requireConfirmation": false
+        },
+        {
+          "id": "phase-5b-verify-batch",
+          "title": "Verify Batch",
+          "runCondition": {
+            "or": [
+              { "var": "bucketDriftDetected", "equals": true },
+              { "var": "unexpectedDependency", "equals": true },
+              { "var": "buildBroke", "equals": true }
+            ]
+          },
+          "prompt": "Something unexpected happened in this batch. Before moving on, check what went wrong.\n\nIf `bucketDriftDetected`: the file was harder than classified. Update the idiom or dependency mapping from Phase 3 so downstream batches don't hit the same surprise. Record what changed.\n\nIf `unexpectedDependency`: a dependency wasn't in the Phase 3 plan. Map it now and check whether other batches depend on the same thing.\n\nIf `buildBroke`: diagnose whether the failure is local to this batch or a cross-batch integration issue. Fix it before continuing.\n\nIf the drift is severe enough that the Phase 3 plan is unreliable, say so. Don't silently absorb complexity.\n\nCapture:\n- `mappingUpdated`\n- `verificationPassed`",
+          "requireConfirmation": {
+            "var": "bucketDriftDetected",
+            "equals": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "phase-6-verify",
+      "type": "loop",
+      "title": "Phase 6: Final Verification",
+      "runCondition": {
+        "var": "conversionComplexity",
+        "not_equals": "Small"
+      },
+      "loop": {
+        "type": "while",
+        "conditionSource": {
+          "kind": "artifact_contract",
+          "contractRef": "wr.contracts.loop_control",
+          "loopId": "final_verification_loop"
+        },
+        "maxIterations": 3
+      },
+      "body": [
+        {
+          "id": "phase-6a-full-build",
+          "title": "Full Build and Integration Check",
+          "prompt": "Run a full build or typecheck on the entire converted codebase — both subagent-converted and main-agent-converted code together.\n\nCheck for:\n- Build/compile errors from cross-batch integration issues\n- Inconsistencies between subagent output and main agent output (naming, patterns)\n- Non-idiomatic patterns that slipped through\n- Missing error handling at module boundaries\n- Threading or concurrency issues across modules\n- Broken public API contracts\n\nFix each issue. If a fix is a band-aid over a deeper mapping problem, go back and fix the mapping.\n\nCapture:\n- `fullBuildPassed`\n- `integrationIssues`\n- `issuesFixed`",
+          "requireConfirmation": false
+        },
+        {
+          "id": "phase-6b-loop-decision",
+          "title": "Verification Loop Decision",
+          "prompt": "Decide whether verification needs another pass.\n\n- If the build fails or critical integration issues remain: continue.\n- If the build passes and remaining issues are minor: stop.\n- If you've hit the iteration limit: stop and record what remains.\n\nEmit the loop-control artifact:\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue or stop\"\n  }]\n}\n```",
+          "requireConfirmation": false,
+          "outputContract": {
+            "contractRef": "wr.contracts.loop_control"
+          }
+        }
+      ]
+    },
+    {
+      "id": "phase-7-handoff",
+      "title": "Phase 7: Handoff",
+      "prompt": "Summarize what was converted.\n\nInclude:\n- Source and target platforms\n- Total files converted\n- Build/typecheck status\n- Known gaps, TODOs, or limitations\n- What would need manual attention\n\nKeep it concise. The converted code is the deliverable.",
+      "promptFragments": [
+        {
+          "id": "phase-7-small-summary",
+          "when": { "var": "conversionComplexity", "equals": "Small" },
+          "text": "For Small conversions, keep the summary brief — just list what was converted, build status, and any issues."
+        },
+        {
+          "id": "phase-7-full-summary",
+          "when": { "var": "conversionComplexity", "not_equals": "Small" },
+          "text": "Also include: bucket breakdown (A/B/C counts), delegation results (how many files delegated, subagent quality, any reclassified), key idiom mapping decisions, and dependency substitutions."
+        }
+      ],
+      "notesOptional": true,
+      "requireConfirmation": false
+    }
+  ]
+}

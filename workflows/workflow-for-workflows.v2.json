@@ -1,0 +1,186 @@
+{
+  "id": "workflow-for-workflows",
+  "name": "Workflow Authoring Workflow (Lean, References-First)",
+  "version": "2.0.0",
+  "description": "Guides an agent through creating a new WorkRail workflow: understand the task, choose the shape, draft the JSON, validate with real validators, review the method, and optionally refine.",
+  "recommendedPreferences": {
+    "recommendedAutonomy": "guided",
+    "recommendedRiskPolicy": "conservative"
+  },
+  "preconditions": [
+    "User has a recurring task or problem the new workflow should solve.",
+    "Agent has access to file creation, editing, and terminal tools.",
+    "Agent can run workflow validators (npm run validate:registry or equivalent)."
+  ],
+  "metaGuidance": [
+    "REFERENCE HIERARCHY: treat workflow-schema as legal truth for structure. Treat authoring-spec as canonical current guidance for what makes a workflow good. Treat authoring-provenance as optional maintainer context only.",
+    "META DISTINCTION: you are creating a workflow, not executing one. Keep the authored workflow's concerns separate from this meta-workflow's execution.",
+    "DEFAULT BEHAVIOR: self-execute with tools. Only ask the user for business decisions about the workflow being created, not things you can learn from the schema, authoring spec, or example workflows.",
+    "AUTHORED VOICE: prompts in the created workflow must be user-voiced. No middleware narration, no pseudo-DSL, no tutorial framing, no teaching-product language.",
+    "VOICE ADAPTATION: the lean coding workflow is one voice example, not the universal template. Adapt vocabulary and tone to the created workflow's domain.",
+    "VOICE EXAMPLES: Coding: 'Review the changes in this MR.' Ops: 'Check whether the pipeline is healthy.' Content: 'Read the draft and check the argument.' NOT: 'The system will now perform a comprehensive analysis of...'",
+    "VALIDATION GATE: validate with real validators, not regex approximations. When validator output and authoring assumptions conflict, runtime wins.",
+    "ARTIFACT STRATEGY: the workflow JSON file is the primary output. Intermediate notes go in output.notesMarkdown. Do not create extra planning artifacts unless the workflow is genuinely complex.",
+    "V2 DURABILITY: use output.notesMarkdown as the primary durable record. Do not mirror execution state into CONTEXT.md or markdown checkpoint files.",
+    "ANTI-PATTERNS TO AVOID IN CREATED WORKFLOWS: no pseudo-function metaGuidance, no learning-path branching, no satisfaction-score loops, no heavy clarification batteries, no regex-as-primary-validation, no celebration phases.",
+    "NEVER COMMIT MARKDOWN FILES UNLESS USER EXPLICITLY ASKS."
+  ],
+  "references": [
+    {
+      "id": "workflow-schema",
+      "title": "Workflow JSON Schema",
+      "source": "spec/workflow.schema.json",
+      "resolveFrom": "package",
+      "purpose": "Canonical schema for validating structure and field semantics while authoring workflows. This is legal truth.",
+      "authoritative": true
+    },
+    {
+      "id": "authoring-spec",
+      "title": "Workflow Authoring Specification",
+      "source": "spec/authoring-spec.json",
+      "resolveFrom": "package",
+      "purpose": "Canonical authoring guidance, rule levels, and examples for composing workflows correctly. This is current authoring truth.",
+      "authoritative": true
+    },
+    {
+      "id": "authoring-provenance",
+      "title": "Workflow Authoring Provenance",
+      "source": "spec/authoring-spec.provenance.json",
+      "resolveFrom": "package",
+      "purpose": "Source-of-truth map showing what is canonical, derived, and non-canonical in workflow authoring guidance. Optional maintainer context.",
+      "authoritative": false
+    },
+    {
+      "id": "lean-coding-workflow",
+      "title": "Lean Coding Workflow (Modern Example)",
+      "source": "workflows/coding-task-workflow-agentic.lean.v2.json",
+      "resolveFrom": "package",
+      "purpose": "Current modern example of a well-authored workflow. Inspect for patterns, voice, loop semantics, prompt fragments, and delegation policy.",
+      "authoritative": false
+    }
+  ],
+  "steps": [
+    {
+      "id": "phase-0-understand",
+      "title": "Phase 0: Understand the Workflow to Create",
+      "prompt": "Before you write anything, understand what you're building.\n\nStart by reading:\n- `workflow-schema` reference (legal structure)\n- `authoring-spec` reference (what makes a workflow good)\n- `lean-coding-workflow` reference (modern example to inspect)\n\nThen understand the task from the user:\n- What recurring task or problem does this workflow solve?\n- Who runs it and how often?\n- What does success look like?\n- What constraints exist (tools, permissions, domain rules)?\n\nExplore first. Use tools to understand the domain if it involves code or a repo. Ask the user only what you genuinely cannot figure out yourself.\n\nThen classify:\n- `workflowComplexity`: Simple (linear, few steps) / Medium (branches, loops, or moderate step count) / Complex (multiple loops, delegation, extension points, many steps)\n- `rigorMode`: QUICK (simple linear workflow, low risk) / STANDARD (moderate complexity or domain risk) / THOROUGH (complex architecture, high stakes, needs review loops)\n\nCapture:\n- `workflowComplexity`\n- `rigorMode`\n- `taskDescription`\n- `intendedAudience`\n- `successCriteria`\n- `domainConstraints`\n- `openQuestions` (only real questions that need user input)",
+      "requireConfirmation": true
+    },
+    {
+      "id": "phase-1-shape",
+      "title": "Phase 1: Choose the Workflow Shape",
+      "runCondition": {
+        "var": "workflowComplexity",
+        "not_equals": "Simple"
+      },
+      "prompt": "Decide the architecture before you write JSON.\n\nBased on what you learned in Phase 0, decide:\n\n1. **Step structure**: how many phases, what each one does, what order\n2. **Loops**: does any phase need iteration? If so, what are the exit rules and max iterations?\n\nLoop design heuristics:\n- Add a loop ONLY when: (a) a quality gate may fail on first pass (validation, review), (b) each pass adds measurable value (progressive refinement), or (c) external feedback requires re-execution.\n- Do NOT loop when: (a) the agent can get it right in one pass with sufficient context, or (b) the full workflow is cheap enough to re-run entirely.\n- Every loop needs: an explicit exit condition (not vibes), a bounded maxIterations, and a decision step with outputContract.\n- Sensible defaults: validation ≈ 2-3, review/refinement ≈ 2, user-feedback ≈ 2-3 with confirmation gate. Go higher only with explicit justification in your notes.\n3. **Confirmation gates**: where does the user genuinely need to approve before proceeding? Don't add confirmations as ceremony.\n4. **Delegation**: does any step benefit from subagent routines? If so, which ones and why? Keep delegation bounded.\n5. **Prompt composition**: will any steps need promptFragments for rigor-mode branching? Will any steps share enough structure to use templates?\n6. **Extension points**: are there customizable slots that projects might want to override (e.g., a verification routine, a review routine)?\n7. **References**: should the created workflow declare its own references to external docs?\n8. **Artifacts**: what does each step produce? Which artifact is canonical for which concern?\n9. **metaGuidance**: what persistent behavioral rules should the agent see on start and resume?\n\nWrite the shape as a structured outline in your notes. Include:\n- Phase list with titles and one-line goals\n- Which phases loop and why\n- Which phases have confirmation gates and why\n- Context variables that flow between phases\n- Artifact ownership (which artifact is canonical for what)\n\nDon't write JSON yet.\n\nCapture:\n- `workflowOutline`\n- `loopDesign`\n- `confirmationDesign`\n- `delegationDesign`\n- `artifactPlan`\n- `contextModel` (the context variables the workflow will use and where they're set)\n- `voiceStrategy` (domain vocabulary, authority posture: directive/collaborative/supervisory, density calibration)",
+      "requireConfirmation": {
+        "or": [
+          { "var": "workflowComplexity", "not_equals": "Simple" },
+          { "var": "rigorMode", "not_equals": "QUICK" }
+        ]
+      }
+    },
+    {
+      "id": "phase-2-draft",
+      "title": "Phase 2: Draft the Workflow",
+      "prompt": "Write the workflow JSON file.\n\nUse the outline from Phase 1 and write the best first draft you can. Phase 3 will catch structural issues, so focus on getting the shape and voice right. Follow these rules:\n\n1. The schema (`workflow-schema` reference) defines what is structurally legal. Do not invent fields.\n2. The authoring spec (`authoring-spec` reference) defines what is good. Follow its active rules.\n3. Write prompts in the user's voice. The opening sentence of each step should sound like a direct ask, not system narration.\n4. Calibrate prompt density to the step's needs. Not all steps need the same level of detail:\n   - Sparse (expert audience, clear task): direct ask + capture footer only.\n   - Focused (expert audience, ambiguous task): direct ask + key criteria or trade-offs + capture.\n   - Guided (broad audience, clear task): direct ask + enumerated sub-steps + capture.\n   - Scaffolded (broad audience, ambiguous task): direct ask + context frame + sub-steps + heuristic + capture.\n   Default to Focused if unsure. Vary density across steps -- uniform density is a smell.\n5. Keep protocol requirements explicit. If a step must emit a specific artifact or capture specific context, say that plainly.\n6. Use promptFragments for conditional rigor-mode branches instead of duplicating entire steps.\n7. Loop decision steps must use `outputContract` with `wr.contracts.loop_control` and allow both `continue` and `stop` in the output example.\n8. Loops must have explicit exit rules, bounded maxIterations, and a clear reason for another pass.\n9. Confirmation gates are for real human decisions, not routine ceremony.\n10. metaGuidance should be clean behavioral rules, not pseudo-functions or teaching prose.\n11. Do not use regex validationCriteria as the primary quality gate. Use real validators.\n\nAsk the user what filename to use if they haven't specified one.\n\nWrite the file. Do not explain the JSON back to the user field by field.\n\nCapture:\n- `workflowFilePath`\n- `draftComplete`",
+      "promptFragments": [
+        {
+          "id": "phase-2-simple-fast",
+          "when": { "var": "workflowComplexity", "equals": "Simple" },
+          "text": "No shape outline exists for Simple workflows -- Phase 1 was skipped. Decide the step list now and draft directly. Keep it linear, 3-5 steps, no loops unless the task genuinely needs iteration. metaGuidance is optional for Simple workflows."
+        }
+      ],
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-3-validate",
+      "type": "loop",
+      "title": "Phase 3: Validate and Fix",
+      "loop": {
+        "type": "while",
+        "conditionSource": {
+          "kind": "artifact_contract",
+          "contractRef": "wr.contracts.loop_control",
+          "loopId": "validation_loop"
+        },
+        "maxIterations": 3
+      },
+      "body": [
+        {
+          "id": "phase-3a-run-validation",
+          "title": "Run Validation",
+          "prompt": "Run the real workflow validators against the drafted workflow.\n\nUse the available validation tools or commands (e.g., `npm run validate:registry`, schema validation, or the MCP validation surface). Do not rely on reading the JSON and eyeballing it.\n\nIf validation passes cleanly, say so and move to the loop decision.\n\nIf validation fails:\n1. List the actual errors.\n2. Fix each one in the workflow file.\n3. Re-run validation to confirm the fixes worked.\n\nIf the validator reports something that conflicts with your authoring assumptions, the validator (runtime) wins. Update your understanding.\n\nCapture:\n- `validationErrors`\n- `validationPassed`",
+          "promptFragments": [
+            {
+              "id": "phase-3a-thorough",
+              "when": { "var": "rigorMode", "equals": "THOROUGH" },
+              "text": "After fixing structural errors, also check the workflow against the authoring spec rules manually. Score each active required-level rule as pass/fail and fix any failures before moving on."
+            }
+          ],
+          "requireConfirmation": false
+        },
+        {
+          "id": "phase-3b-loop-decision",
+          "title": "Validation Loop Decision",
+          "prompt": "Decide whether validation needs another pass.\n\n- If all errors are fixed and validation passes: stop.\n- If you fixed errors but haven't re-validated yet: continue.\n- If you've hit the iteration limit: stop and record what remains.\n\nEmit the loop-control artifact in this shape (`decision` must be `continue` or `stop`):\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue or stop\"\n  }]\n}\n```",
+          "requireConfirmation": false,
+          "outputContract": {
+            "contractRef": "wr.contracts.loop_control"
+          }
+        }
+      ]
+    },
+    {
+      "id": "phase-3-escalation",
+      "title": "Validation Escalation",
+      "runCondition": {
+        "var": "validationPassed",
+        "equals": false
+      },
+      "prompt": "Validation did not pass after the maximum number of attempts.\n\nCheck whether the last validation run actually passed. If `validationPassed` is false or if you're uncertain, list the remaining errors and your assessment of their severity.\n\nThen present the options:\n1. Proceed with known issues documented in handoff notes.\n2. Stop workflow creation here so the user can intervene manually.\n\nDo not silently continue with a broken workflow.",
+      "requireConfirmation": true
+    },
+    {
+      "id": "phase-4-review",
+      "title": "Phase 4: Method Review",
+      "prompt": "The workflow is valid. Now check whether it's actually good.\n\nScore each dimension 0-2 with one sentence of evidence:\n\n- `voiceClarity`: 0 = prompts are direct user-voiced asks in the workflow's domain vocabulary, 1 = mostly user-voiced but borrows vocabulary from other domains or has middleware narration, 2 = reads like system documentation or sounds like a different domain\n- `ceremonyLevel`: 0 = confirmations only at real decision points, 1 = one or two unnecessary gates, 2 = over-asks the user or adds routine ceremony\n- `loopSoundness`: 0 = loops have explicit exit rules, bounded iterations, and real decision steps, 1 = minor issues with exit clarity, 2 = vibes-only exit conditions or unbounded loops (score 0 if no loops)\n- `delegationBoundedness`: 0 = delegation is bounded and explicit or absent, 1 = one delegation could be tighter, 2 = open-ended or ownership-transferring delegation (score 0 if no delegation)\n- `legacyPatterns`: 0 = no legacy anti-patterns, 1 = minor legacy residue, 2 = pseudo-DSL, learning paths, satisfaction loops, or regex-as-gate present\n- `artifactClarity`: 0 = clear what each artifact is for and which is canonical, 1 = mostly clear, 2 = ambiguous artifact ownership\n\nIf the total score is 0-2: the workflow is ready.\nIf the total score is 3-5: fix the worst dimensions before proceeding.\nIf the total score is 6+: this needs significant rework. Fix the worst dimensions here, re-validate, and record what you would change if you could redraft from scratch.\n\nFix any issues directly in the workflow file. Re-run validation if you changed structure.\n\nCapture:\n- `reviewScores`\n- `reviewPassed`\n- `fixesApplied`",
+      "promptFragments": [
+        {
+          "id": "phase-4-quick-skip",
+          "when": { "var": "rigorMode", "equals": "QUICK" },
+          "text": "For QUICK rigor, do a fast pass on voiceClarity and legacyPatterns only. Skip the full rubric unless something looks off."
+        },
+        {
+          "id": "phase-4-thorough-extra",
+          "when": { "var": "rigorMode", "equals": "THOROUGH" },
+          "text": "Also review:\n- Are the context captures complete and correctly named?\n- Do runConditions and promptFragment conditions use the right variables?\n- Is the metaGuidance minimal and non-redundant?\n- Would this workflow make sense to an agent that has never seen it before?"
+        },
+        {
+          "id": "phase-4-trace-walkthrough",
+          "when": { "var": "rigorMode", "not_equals": "QUICK" },
+          "text": "After scoring the rubric, trace through the workflow with the user's original task as the test scenario. For each step:\n- What context variables does it need? Are they available from prior steps?\n- What would the agent actually do given only the prompt and references?\n- What does it produce? Does the next step have everything it needs?\n\nFlag any context flow gaps, naming mismatches, or steps where the agent wouldn't know what to do. Fix them in the workflow file."
+        }
+      ],
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-5-refine",
+      "title": "Phase 5: Refinement",
+      "runCondition": {
+        "var": "rigorMode",
+        "not_equals": "QUICK"
+      },
+      "prompt": "The workflow is valid and reviewed. Check whether any of these improvements are worth making:\n\n1. **Prompt fragments**: are there steps with near-identical prompts that differ only by rigor mode? Extract the differences into promptFragments.\n2. **Extension points**: are there slots that different teams or projects would want to customize? Declare them.\n3. **References**: should the workflow point at external documents the agent should be aware of during execution?\n4. **Deduplication**: is there repeated prose across steps that could be moved to metaGuidance or a shared pattern?\n5. **Context templates**: are there simple variable substitutions that would make prompts cleaner?\n\nOnly make changes that genuinely improve the workflow. Do not refine for the sake of refining.\n\nIf you change anything, re-run validation.\n\nCapture:\n- `refinementsApplied`\n- `finalValidationPassed`",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-6-handoff",
+      "title": "Phase 6: Handoff",
+      "prompt": "Summarize what was created.\n\nInclude:\n- workflow file path and name\n- what the workflow does (one sentence)\n- step count and structure overview\n- loops, confirmations, and delegation if any\n- validation status\n- any known limitations or future improvements\n- how to test it: where to place the file and how to run it\n\nKeep it concise. The workflow file is the deliverable, not the summary.",
+      "notesOptional": true,
+      "requireConfirmation": false
+    }
+  ]
+}
