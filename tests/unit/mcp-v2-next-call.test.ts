@@ -153,7 +153,6 @@ import { Bech32mAdapterV2 } from '../../src/v2/infra/local/bech32m/index.js';
 import { Base32AdapterV2 } from '../../src/v2/infra/local/base32/index.js';
 import { unsafeTokenCodecPorts } from '../../src/v2/durable-core/tokens/index.js';
 import { InMemoryTokenAliasStoreV2 } from '../../src/v2/infra/in-memory/token-alias-store/index.js';
-import { unwrapResponse } from '../helpers/unwrap-response.js';
 
 async function mkCtx(): Promise<ToolContext> {
   const workflowService = resolveService<any>(DI.Services.Workflow);
@@ -221,99 +220,88 @@ describe('nextCall in live execution responses', () => {
     const start = await handleV2StartWorkflow({ workflowId: 'two-step' } as any, ctx);
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
-    const startResponse = unwrapResponse(start.data);
 
-    expect(startResponse.nextCall).not.toBeNull();
-    expect((startResponse.nextCall as any).tool).toBe('continue_workflow');
+    expect(start.data.response.nextCall).not.toBeNull();
+    expect(start.data.response.nextCall!.tool).toBe('continue_workflow');
     // One-token: nextCall uses continueToken only
-    expect((startResponse.nextCall as any).params.continueToken).toBe(startResponse.continueToken);
+    expect(start.data.response.nextCall!.params.continueToken).toBe(start.data.response.continueToken);
   });
 
   it('rehydrate returns nextCall with continue template (for when agent finishes the step)', async () => {
     const ctx = await mkCtx();
     const start = await handleV2StartWorkflow({ workflowId: 'two-step' } as any, ctx);
     if (start.type !== 'success') return;
-    const startResponse = unwrapResponse(start.data);
 
     const rehydrate = await handleV2ContinueWorkflow(
-      { continueToken: startResponse.continueToken, intent: 'rehydrate' } as any, ctx
+      { continueToken: start.data.response.continueToken, intent: 'rehydrate' } as any, ctx
     );
     expect(rehydrate.type).toBe('success');
     if (rehydrate.type !== 'success') return;
-    const rehydrateResponse = unwrapResponse(rehydrate.data);
 
-    expect(rehydrateResponse.nextCall).not.toBeNull();
-    expect((rehydrateResponse.nextCall as any).tool).toBe('continue_workflow');
-    expect((rehydrateResponse.nextCall as any).params.continueToken).toBe(rehydrateResponse.continueToken);
+    expect(rehydrate.data.response.nextCall).not.toBeNull();
+    expect(rehydrate.data.response.nextCall!.tool).toBe('continue_workflow');
+    expect(rehydrate.data.response.nextCall!.params.continueToken).toBe(rehydrate.data.response.continueToken);
   });
 
   it('advance to next step returns nextCall for the next advance', async () => {
     const ctx = await mkCtx();
     const start = await handleV2StartWorkflow({ workflowId: 'two-step' } as any, ctx);
     if (start.type !== 'success') return;
-    const startResponse = unwrapResponse(start.data);
 
     const adv1 = await handleV2ContinueWorkflow(
-      { continueToken: startResponse.continueToken, output: { notesMarkdown: 'Step A done.' } } as any, ctx
+      { continueToken: start.data.response.continueToken, output: { notesMarkdown: 'Step A done.' } } as any, ctx
     );
     expect(adv1.type).toBe('success');
     if (adv1.type !== 'success') return;
-    const adv1Response = unwrapResponse(adv1.data);
 
     // Should have step-b pending with a nextCall template
-    expect(adv1Response.pending?.stepId).toBe('step-b');
-    expect(adv1Response.nextCall).not.toBeNull();
-    expect((adv1Response.nextCall as any).params.continueToken).toBe(adv1Response.continueToken);
+    expect(adv1.data.response.pending?.stepId).toBe('step-b');
+    expect(adv1.data.response.nextCall).not.toBeNull();
+    expect(adv1.data.response.nextCall!.params.continueToken).toBe(adv1.data.response.continueToken);
   });
 
   it('advance past last step returns nextCall: null (workflow complete)', async () => {
     const ctx = await mkCtx();
     const start = await handleV2StartWorkflow({ workflowId: 'two-step' } as any, ctx);
     if (start.type !== 'success') return;
-    const startResponse = unwrapResponse(start.data);
 
     // Advance through step-a
     const adv1 = await handleV2ContinueWorkflow(
-      { continueToken: startResponse.continueToken, output: { notesMarkdown: 'Step A done.' } } as any, ctx
+      { continueToken: start.data.response.continueToken, output: { notesMarkdown: 'Step A done.' } } as any, ctx
     );
     if (adv1.type !== 'success') return;
-    const adv1Response = unwrapResponse(adv1.data);
 
     // Advance through step-b (last step) → complete
     const adv2 = await handleV2ContinueWorkflow(
-      { continueToken: adv1Response.continueToken, output: { notesMarkdown: 'Step B done.' } } as any, ctx
+      { continueToken: adv1.data.response.continueToken, output: { notesMarkdown: 'Step B done.' } } as any, ctx
     );
     expect(adv2.type).toBe('success');
     if (adv2.type !== 'success') return;
-    const adv2Response = unwrapResponse(adv2.data);
 
-    expect(adv2Response.isComplete).toBe(true);
-    expect(adv2Response.pending).toBeNull();
-    expect(adv2Response.nextCall).toBeNull();
+    expect(adv2.data.response.isComplete).toBe(true);
+    expect(adv2.data.response.pending).toBeNull();
+    expect(adv2.data.response.nextCall).toBeNull();
   });
 
   it('nextCall params can be used directly as continue_workflow input', async () => {
     const ctx = await mkCtx();
     const start = await handleV2StartWorkflow({ workflowId: 'two-step' } as any, ctx);
     if (start.type !== 'success') return;
-    const startResponse = unwrapResponse(start.data);
 
     // Use nextCall.params directly as the input (the whole point of the feature), adding notes
-    const nextCallParams = (startResponse.nextCall as any).params;
+    const nextCallParams = start.data.response.nextCall!.params;
     const adv1 = await handleV2ContinueWorkflow(
       { ...nextCallParams, output: { notesMarkdown: 'Step A done via nextCall.' } } as any, ctx
     );
     expect(adv1.type).toBe('success');
     if (adv1.type !== 'success') return;
-    const adv1Response = unwrapResponse(adv1.data);
-    expect(adv1Response.pending?.stepId).toBe('step-b');
+    expect(adv1.data.response.pending?.stepId).toBe('step-b');
   });
 
   it('formatted nextToken block can be used directly as continue_workflow input', async () => {
     const ctx = await mkCtx();
     const start = await handleV2StartWorkflow({ workflowId: 'two-step' } as any, ctx);
     if (start.type !== 'success') return;
-    const startResponse = unwrapResponse(start.data);
 
     const formatted = formatV2ExecutionResponse(start.data);
     expect(formatted).not.toBeNull();
@@ -323,7 +311,7 @@ describe('nextCall in live execution responses', () => {
 
     const formattedParams = JSON.parse(jsonMatch![1]);
     expect(formattedParams).toEqual({
-      continueToken: startResponse.continueToken,
+      continueToken: start.data.response.continueToken,
     });
 
     const normalizedInput = V2ContinueWorkflowInput.parse({
@@ -334,7 +322,6 @@ describe('nextCall in live execution responses', () => {
     const adv1 = await handleV2ContinueWorkflow(normalizedInput as any, ctx);
     expect(adv1.type).toBe('success');
     if (adv1.type !== 'success') return;
-    const adv1Response = unwrapResponse(adv1.data);
-    expect(adv1Response.pending?.stepId).toBe('step-b');
+    expect(adv1.data.response.pending?.stepId).toBe('step-b');
   });
 });

@@ -26,7 +26,7 @@ import type { PreValidateResult } from './validation/workflow-next-prevalidate.j
 import type { WrappedToolHandler, McpCallToolResult } from './types/workflow-tool-edition.js';
 import { internalSuggestion } from './handlers/v2-execution-helpers.js';
 import { formatV2ExecutionResponse, type FormattedResponse } from './v2-response-formatter.js';
-import { getV2ExecutionRenderEnvelope } from './render-envelope.js';
+import { isV2ExecutionRenderEnvelope } from './render-envelope.js';
 
 // -----------------------------------------------------------------------------
 // Result Conversion
@@ -57,7 +57,7 @@ export function toMcpResult<T>(result: ToolResult<T>): McpCallToolResult {
         }
       }
       // JSON mode: include references alongside the response when present
-      const envelope = getV2ExecutionRenderEnvelope(result.data);
+      const envelope = isV2ExecutionRenderEnvelope(result.data) ? result.data : null;
       const responseBody = envelope != null ? envelope.response : result.data;
       const refs = envelope?.contentEnvelope?.references;
       const jsonPayload = (refs != null && refs.length > 0)

@@ -300,14 +300,13 @@ describe('v2 start_workflow (Slice 3.5)', () => {
       expect(start.type).toBe('success');
       if (start.type !== 'success') return;
 
-      const { getV2ExecutionRenderEnvelope } = await import('../../src/mcp/render-envelope.js');
-      const startEnvelope = getV2ExecutionRenderEnvelope(start.data);
-      expect(startEnvelope).not.toBeNull();
-      if (startEnvelope == null) return;
+      const { isV2ExecutionRenderEnvelope } = await import('../../src/mcp/render-envelope.js');
+      expect(isV2ExecutionRenderEnvelope(start.data)).toBe(true);
+      if (!isV2ExecutionRenderEnvelope(start.data)) return;
 
-      expect(startEnvelope.contentEnvelope).toBeDefined();
-      expect(startEnvelope.contentEnvelope!.references).toHaveLength(1);
-      expect(startEnvelope.contentEnvelope!.references[0]).toMatchObject({
+      expect(start.data.contentEnvelope).toBeDefined();
+      expect(start.data.contentEnvelope!.references).toHaveLength(1);
+      expect(start.data.contentEnvelope!.references[0]).toMatchObject({
         id: 'guide',
         source: 'docs/guide.md',
         resolveFrom: 'workspace',
@@ -324,13 +323,12 @@ describe('v2 start_workflow (Slice 3.5)', () => {
       expect(rehydrate.type).toBe('success');
       if (rehydrate.type !== 'success') return;
 
-      const rehydrateEnvelope = getV2ExecutionRenderEnvelope(rehydrate.data);
-      expect(rehydrateEnvelope).not.toBeNull();
-      if (rehydrateEnvelope == null) return;
+      expect(isV2ExecutionRenderEnvelope(rehydrate.data)).toBe(true);
+      if (!isV2ExecutionRenderEnvelope(rehydrate.data)) return;
 
-      expect(rehydrateEnvelope.contentEnvelope).toBeDefined();
-      expect(rehydrateEnvelope.contentEnvelope!.references).toHaveLength(1);
-      expect(rehydrateEnvelope.contentEnvelope!.references[0]).toMatchObject({
+      expect(rehydrate.data.contentEnvelope).toBeDefined();
+      expect(rehydrate.data.contentEnvelope!.references).toHaveLength(1);
+      expect(rehydrate.data.contentEnvelope!.references[0]).toMatchObject({
         id: 'guide',
         source: 'docs/guide.md',
         resolveFrom: 'workspace',

@@ -26,7 +26,7 @@ import { checkContextBudget } from '../v2-context-budget.js';
 import { executeStartWorkflow } from './start.js';
 import { handleRehydrateIntent, type RehydrateResult } from './continue-rehydrate.js';
 import { handleAdvanceIntent } from './continue-advance.js';
-import { attachV2ExecutionRenderMetadata } from '../../render-envelope.js';
+import { createV2ExecutionRenderEnvelope } from '../../render-envelope.js';
 import type { StepContentEnvelope } from '../../step-content-envelope.js';
 
 /** Unified result for continue_workflow — envelope present on rehydrate with pending step. */
@@ -82,7 +82,7 @@ export async function handleV2StartWorkflow(
   if (!guard.ok) return guard.error;
 
   return executeStartWorkflow(input, guard.ctx).match(
-    (result) => success(attachV2ExecutionRenderMetadata({
+    (result) => success(createV2ExecutionRenderEnvelope({
       response: result.response,
       lifecycle: 'start',
       contentEnvelope: result.contentEnvelope,
@@ -99,7 +99,7 @@ export async function handleV2ContinueWorkflow(
   if (!guard.ok) return guard.error;
 
   return executeContinueWorkflow(input, guard.ctx).match(
-    (result) => success(attachV2ExecutionRenderMetadata({
+    (result) => success(createV2ExecutionRenderEnvelope({
       response: result.response,
       lifecycle: input.intent === 'rehydrate' ? 'rehydrate' : 'advance',
       contentEnvelope: result.contentEnvelope,

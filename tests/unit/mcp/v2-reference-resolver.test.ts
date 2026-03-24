@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { resolveWorkflowReferences, type FileExistsPort } from '../../../src/mcp/handlers/v2-reference-resolver.js';
 import type { WorkflowReference } from '../../../src/types/workflow-definition.js';
 
-const normalizePathForAssertion = (value: string): string => value.replaceAll('\\', '/');
-
 const SAMPLE_REF: WorkflowReference = {
   id: 'api-spec',
   title: 'API Specification',
@@ -45,7 +43,7 @@ describe('resolveWorkflowReferences', () => {
     expect(result.resolved).toHaveLength(1);
     expect(result.resolved[0]!.status).toBe('resolved');
     if (result.resolved[0]!.status === 'resolved') {
-      expect(normalizePathForAssertion(result.resolved[0]!.resolvedPath)).toContain('spec/api.json');
+      expect(result.resolved[0]!.resolvedPath).toContain('spec/api.json');
     }
     expect(result.warnings).toHaveLength(0);
   });
@@ -111,8 +109,8 @@ describe('resolveWorkflowReferences', () => {
 
     // The resolved path should NOT start with /workspace
     expect(seenPaths).toHaveLength(1);
-    expect(normalizePathForAssertion(seenPaths[0])).not.toContain('/workspace');
-    expect(normalizePathForAssertion(seenPaths[0])).toContain('spec/workflow.schema.json');
+    expect(seenPaths[0]).not.toContain('/workspace');
+    expect(seenPaths[0]).toContain('spec/workflow.schema.json');
   });
 
   it('blocks package-relative refs that escape package root via ../', async () => {
