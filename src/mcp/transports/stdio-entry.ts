@@ -6,7 +6,11 @@
  */
 
 import { composeServer } from '../server.js';
-import { wireShutdownHooks, wireStdinShutdown } from './shutdown-hooks.js';
+import { container } from '../../di/container.js';
+import { DI } from '../../di/tokens.js';
+import type { ShutdownEvents } from '../../runtime/ports/shutdown-events.js';
+import type { ProcessSignals } from '../../runtime/ports/process-signals.js';
+import type { ProcessTerminator } from '../../runtime/ports/process-terminator.js';
 
 const INITIAL_ROOTS_TIMEOUT_MS = 1000;
 
@@ -68,12 +72,41 @@ export async function startStdioServer(): Promise<void> {
     });
 
   // -------------------------------------------------------------------------
-  // Shutdown hooks (shared + stdio-specific stdin watcher)
+  // Shutdown hooks
   // -------------------------------------------------------------------------
-  wireShutdownHooks({
-    onBeforeTerminate: async () => {
-      await ctx.httpServer?.stop();
-    },
+  const shutdownEvents = container.resolve<ShutdownEvents>(DI.Runtime.ShutdownEvents);
+  const processSignals = container.resolve<ProcessSignals>(DI.Runtime.ProcessSignals);
+  const terminator = container.resolve<ProcessTerminator>(DI.Runtime.ProcessTerminator);
+
+  // Signal handlers: standard for long-running processes
+  processSignals.on('SIGINT', () => shutdownEvents.emit({ kind: 'shutdown_requested', signal: 'SIGINT' }));
+  processSignals.on('SIGTERM', () => shutdownEvents.emit({ kind: 'shutdown_requested', signal: 'SIGTERM' }));
+  processSignals.on('SIGHUP', () => shutdownEvents.emit({ kind: 'shutdown_requested', signal: 'SIGHUP' }));
+
+  // stdio-specific: Shut down when stdin closes (IDE disconnect).
+  // The MCP SDK's StdioServerTransport does not listen for stdin 'end',
+  // so server.onclose never fires on disconnect. Without this, the HTTP
+  // server keeps the process alive after stdin EOF, blocking client restart.
+  process.stdin.on('end', () => {
+    console.error('[MCP] stdin closed, initiating shutdown');
+    shutdownEvents.emit({ kind: 'shutdown_requested', signal: 'SIGHUP' });
   });
-  wireStdinShutdown();
+
+  // Shutdown handler
+  let shutdownStarted = false;
+  shutdownEvents.onShutdown((event) => {
+    if (shutdownStarted) return;
+    shutdownStarted = true;
+
+    void (async () => {
+      try {
+        console.error(`[Shutdown] Requested by ${event.signal}. Stopping services...`);
+        await ctx.httpServer?.stop();
+        terminator.terminate({ kind: 'success' });
+      } catch (err) {
+        console.error('[Shutdown] Error while stopping services:', err);
+        terminator.terminate({ kind: 'failure' });
+      }
+    })();
+  });
 }
