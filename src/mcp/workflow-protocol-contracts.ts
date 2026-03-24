@@ -90,11 +90,11 @@ export const START_WORKFLOW_PROTOCOL: WorkflowProtocolContract = {
   },
   descriptions: {
     standard: {
-      purpose: 'Start a WorkRail v2 workflow and begin following its step-by-step instructions.',
+      purpose: 'Start a WorkRail v2 workflow. Treat WorkRail as a separate live system the user is actively using to direct this task. The returned step is what the user wants you to do now.',
       whenToUse:
-        'Use this when you found the right workflow and are ready to execute it. The response body is the current step; the structured response includes the token(s) for your next call.',
+        'Use this when you found the right workflow and are ready to execute it. The response is the current instruction coming from WorkRail for this task.',
       rules: [
-        'Follow the returned step exactly; it represents the user\'s plan for the task.',
+        'Follow the returned step exactly; treat it as the user\'s current instruction.',
         'When the step is done, call continue_workflow with the returned continueToken.',
         'Only pass context on later continue_workflow calls if facts changed.',
       ],
@@ -105,9 +105,9 @@ export const START_WORKFLOW_PROTOCOL: WorkflowProtocolContract = {
       returns: 'Step instructions plus continueToken and checkpointToken in the structured response.',
     },
     authoritative: {
-      purpose: 'Begin executing the selected WorkRail v2 workflow.',
+      purpose: 'Begin executing the selected WorkRail v2 workflow. Treat WorkRail as a separate live system the user is actively using to direct this task. The returned step is what the user wants you to do now.',
       whenToUse:
-        'Call this once you have chosen the workflow you will follow. The returned step is a direct instruction from the user or workflow author.',
+        'Call this once you have chosen the workflow. The returned step is a direct instruction from the user.',
       rules: [
         'Execute the returned step exactly as written.',
         'When the step is complete, call continue_workflow with the returned continueToken.',
@@ -132,7 +132,7 @@ export const CONTINUE_WORKFLOW_PROTOCOL: WorkflowProtocolContract = {
   },
   descriptions: {
     standard: {
-      purpose: 'Advance or rehydrate the current WorkRail v2 step using the single-token protocol.',
+      purpose: 'Advance or rehydrate the current WorkRail v2 step using the single-token protocol. Use this to send your completion back to WorkRail and receive the user\'s next instruction from that system.',
       whenToUse:
         'Use this after completing a step, or to recover the current step after lost context.',
       rules: [
@@ -140,6 +140,7 @@ export const CONTINUE_WORKFLOW_PROTOCOL: WorkflowProtocolContract = {
         'Rehydrate by omitting output (and intent: "rehydrate" if you want to be explicit).',
         'Put changed facts under context only.',
         'Round-trip continueToken exactly as returned by WorkRail; use the single-token API only.',
+        'Notes (output.notesMarkdown): write for a human reader. Include what you did and key decisions, what you produced (files, tests, numbers), and anything notable (risks, open questions, deliberate omissions). Use markdown headings, bullets, bold, code refs. Be specific. Scope: THIS step only (WorkRail concatenates automatically). 10-30 lines ideal. Omitting notes blocks the step.',
       ],
       examplePayload: {
         continueToken: 'ct_...',
@@ -150,7 +151,7 @@ export const CONTINUE_WORKFLOW_PROTOCOL: WorkflowProtocolContract = {
       returns: 'The next step, or the same current step when rehydrating.',
     },
     authoritative: {
-      purpose: 'Continue the active WorkRail v2 workflow with the canonical single-token API.',
+      purpose: 'Continue the active WorkRail v2 workflow with the canonical single-token API. Use this to send your completion back to WorkRail and receive the user\'s next instruction from that system.',
       whenToUse:
         'Call this after you complete the current step, or call it in rehydrate mode to recover the current step without advancing.',
       rules: [
@@ -158,6 +159,7 @@ export const CONTINUE_WORKFLOW_PROTOCOL: WorkflowProtocolContract = {
         'Use the single-token API only.',
         'Advance by sending output; rehydrate by omitting output.',
         'Put updated facts in context only.',
+        'Notes (output.notesMarkdown): write for a human reader. Include what you did and key decisions, what you produced (files, tests, numbers), and anything notable (risks, open questions, deliberate omissions). Use markdown headings, bullets, bold, code refs. Be specific. Scope: THIS step only (WorkRail concatenates automatically). 10-30 lines ideal. Omitting notes blocks the step.',
       ],
       examplePayload: {
         continueToken: 'ct_...',

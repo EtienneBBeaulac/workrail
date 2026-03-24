@@ -1,0 +1,370 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://workrail.dev/schemas/authoring-spec/v1",
+  "title": "WorkRail Authoring Spec Schema",
+  "description": "Schema for spec/authoring-spec.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "title",
+    "purpose",
+    "principles",
+    "consumedBy",
+    "changeProtocol",
+    "ruleModel",
+    "scopeCatalog",
+    "topics"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "lastReviewed": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "principles": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      },
+      "minItems": 1
+    },
+    "consumedBy": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "changeProtocol": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      },
+      "minItems": 1
+    },
+    "ruleModel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "levels",
+        "statuses",
+        "enforcementModes",
+        "scopeStyle"
+      ],
+      "properties": {
+        "levels": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["required", "recommended", "discouraged"]
+          },
+          "uniqueItems": true
+        },
+        "statuses": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["active", "experimental", "planned", "deprecated"]
+          },
+          "uniqueItems": true
+        },
+        "enforcementModes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["runtime", "validator", "ci", "advisory", "planned"]
+          },
+          "uniqueItems": true
+        },
+        "scopeStyle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
+    },
+    "scopeCatalog": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/scopeEntry"
+      },
+      "minItems": 1
+    },
+    "topics": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/topic"
+      },
+      "minItems": 1
+    },
+    "plannedTopics": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/topic"
+      }
+    },
+    "plannedRules": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/plannedRule"
+      }
+    }
+  },
+  "$defs": {
+    "ruleLevel": {
+      "type": "string",
+      "enum": ["required", "recommended", "discouraged"]
+    },
+    "ruleStatus": {
+      "type": "string",
+      "enum": ["active", "experimental", "planned", "deprecated"]
+    },
+    "enforcementMode": {
+      "type": "string",
+      "enum": ["runtime", "validator", "ci", "advisory", "planned"]
+    },
+    "scopeToken": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)*$",
+      "minLength": 3,
+      "maxLength": 64
+    },
+    "scopeEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "description"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/scopeToken"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
+    },
+    "topic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "rules"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/scopeToken"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/rule"
+          },
+          "minItems": 1
+        }
+      }
+    },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "status",
+        "level",
+        "scope",
+        "rule",
+        "why",
+        "enforcement"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/scopeToken"
+        },
+        "status": {
+          "$ref": "#/$defs/ruleStatus"
+        },
+        "level": {
+          "$ref": "#/$defs/ruleLevel"
+        },
+        "scope": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/scopeToken"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "rule": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "why": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "enforcement": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/enforcementMode"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "antiPatterns": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "examples": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "exampleRefs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/exampleRef"
+          }
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/sourceRef"
+          }
+        }
+      }
+    },
+    "plannedRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "status",
+        "scope",
+        "rule",
+        "why",
+        "enforcement"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/scopeToken"
+        },
+        "status": {
+          "$ref": "#/$defs/ruleStatus"
+        },
+        "scope": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/scopeToken"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "rule": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "why": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "enforcement": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/enforcementMode"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/sourceRef"
+          }
+        }
+      }
+    },
+    "exampleRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
+    },
+    "sourceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "path"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["schema", "runtime", "validator", "documentation", "example"]
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
+    }
+  }
+}

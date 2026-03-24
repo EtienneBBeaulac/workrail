@@ -20,6 +20,8 @@ export interface Condition {
   startsWith?: string;
   endsWith?: string;
   matches?: string; // regex pattern
+  // Array membership
+  in?: unknown[];
   // Logical operators
   and?: Condition[];
   or?: Condition[];
@@ -162,6 +164,14 @@ function evaluateConditionUnsafe(condition: Condition, context: ConditionContext
       }
     }
     
+    // Array membership
+    if (condition.in !== undefined) {
+      if (!Array.isArray(condition.in)) {
+        throw new Error('in operator requires an array');
+      }
+      return condition.in.some(item => lenientEquals(value, item));
+    }
+
     // If only var is specified, check for truthiness
     return !!value;
   }
@@ -201,6 +211,7 @@ export function validateCondition(condition: any): void {
   const supportedKeys = [
     'var', 'equals', 'not_equals', 'gt', 'gte', 'lt', 'lte', 
     'contains', 'startsWith', 'endsWith', 'matches',
+    'in',
     'and', 'or', 'not'
   ];
 

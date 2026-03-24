@@ -29,6 +29,7 @@ WorkRail v2 introduces several primitives for expressive workflows:
 - **PromptBlocks** (optional): structure step prompts as blocks (goal/constraints/procedure/outputRequired/verify) which compile to deterministic text.
 - **AgentRole**: workflow and/or step-level stance/persona (not system prompt control).
 - **Extension points**: named slots declared with `extensionPoints` and referenced via `{{wr.bindings.slotId}}` tokens; resolved at compile time from project `.workrail/bindings.json` overrides or workflow defaults. Enables team customization without forking workflow JSON.
+- **References**: workflow-declared pointers to external documents (schemas, specs, guides). Resolved at start time, delivered as a separate MCP content item. The agent reads the files itself if needed. See "Workflow references" section below.
 
 For detailed JSON syntax and examples, see: `docs/design/workflow-authoring-v2.md`.
 
@@ -58,6 +59,92 @@ When something needs to be injected at a specific point (“run an audit here”
 
 Tags can still exist as optional **classification** metadata (for UI organization and search), but should not be the primary injection mechanism.
 
+### Response supplements for start/resume-only instructions
+
+Some instructions should **not** be mixed into the workflow-authored step prompt:
+
+- short onboarding guidance
+- authority/provenance framing for the WorkRail channel
+- logistics that should appear only at workflow start or when resuming
+
+For these, use **response supplements** at the MCP response boundary rather than editing workflow JSON prompts directly.
+
+Current implementation lives in `src/mcp/response-supplements.ts`.
+
+#### When to use a response supplement
+
+Use a response supplement when all of the following are true:
+
+- the instruction is **system-owned** or delivery-owned, not part of the workflow author's actual step text
+- it should be shown only for specific lifecycle moments like **`start`** or **`rehydrate`**
+- it should remain **structurally separate** from the main step prompt so agents do not confuse it with the user's core instruction
+
+Do **not** use a response supplement for:
+
+- normal step instructions that belong in the workflow prompt
+- durable session state
+- anything that must be remembered as part of the workflow's semantic execution state
+
+#### Delivery modes
+
+Response supplements support two delivery modes:
+
+- **`per_lifecycle`**: emit on every eligible lifecycle (for example, every `rehydrate`)
+- **`once_per_session`**: emit only on one designated lifecycle (for example, `start`) without persisting delivery state
+
+In the current design, `once_per_session` is a **policy-level one-time instruction**, not a durable delivery record. It means:
+
+- choose the single lifecycle where the supplement should appear
+- render it there deterministically
+- do **not** store "shown/not shown" in session state unless exact delivery history becomes a real execution requirement
+
+This keeps presentation policy out of durable workflow state.
+
+#### How to add a one-time instruction
+
+1. Add a new supplement entry in `src/mcp/response-supplements.ts`
+2. Give it a stable `kind` and explicit `order`
+3. Choose the eligible `lifecycles`
+4. Set `delivery` to:
+   - `{ mode: 'per_lifecycle' }`, or
+   - `{ mode: 'once_per_session', emitOn: '<lifecycle>' }`
+5. Keep the text:
+   - short
+   - system-owned
+   - clearly separate from the main authored prompt
+6. Add or update:
+   - unit tests in `tests/unit/mcp/response-supplements.test.ts`
+   - integration tests if MCP boundary behavior matters
+
+#### Authoring rule of thumb
+
+Use the **workflow prompt** for what the user wants done.
+
+Use a **response supplement** for small, boundary-owned instructions about how WorkRail should frame or deliver that step to the agent.
+
+### Workflow references
+
+Workflows can declare pointers to external documents that the agent should be aware of during execution. Unlike `metaGuidance` (short behavioral rules surfaced on start and resume), references point at external files without inlining their content.
+
+```jsonc
+"references": [
+  {
+    "id": "api-schema",
+    "title": "API Schema",
+    "source": "./spec/api-schema.json",
+    "purpose": "Canonical API contract",
+    "authoritative": true
+  }
+]
+```
+
+- **Delivered automatically** as a separate MCP content item on `start` (full details) and `rehydrate` (compact reminder). Not on `advance`.
+- **Pointer-only**: WorkRail validates the path exists at start time but does not inline the file content. The agent reads files itself.
+- **Surfaced in `inspect_workflow`** for discoverability before starting.
+- **Included in `workflowHash`**: reference declarations (not file contents) are part of the hash.
+
+For JSON syntax details, see: `docs/design/workflow-authoring-v2.md` → "References" section.
+
 ### Step identity and provenance
 
 To keep authoring simple:
@@ -78,3 +165,25 @@ WorkRail v2 treats debugging/auditing as first-class:
 - WorkRail should record a bounded “decision trace” (why a step was selected/skipped, loop decisions, fork detection) as durable data.
 - Dashboards and exports can surface this trace for post-mortems without requiring the agent to carry debugging internals in chat.
 - “Cognitive audits” (subagent auditor model) are supported via built-in templates/features, not bespoke author boilerplate.
+
+### Forced self-audit over self-reported confidence
+
+Agents will often take the easy way out:
+
+- assume they already have enough context
+- assume they already understand the boundary
+- skip challenge or audit because it "probably isn't needed"
+
+So when a workflow needs an honest self-check, do **not** rely on vibes-only fields like:
+
+- `stillFuzzy = true|false`
+- `contextAuditNeeded = true|false`
+- optional challenge wording with no rubric or trigger
+
+Prefer patterns that force the agent to confront uncertainty:
+
+- score concrete dimensions instead of reporting confidence directly
+- require a short evidence statement for each score
+- derive the next action from the rubric or trigger rules
+
+The workflow should prove to the agent that it may not know enough yet, instead of asking the agent whether it feels confident.

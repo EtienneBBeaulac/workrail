@@ -23,6 +23,7 @@ import { DI } from '../../src/di/tokens.js';
 import type { ToolContext } from '../../src/mcp/types.js';
 
 import { handleV2StartWorkflow, handleV2ContinueWorkflow } from '../../src/mcp/handlers/v2-execution.js';
+import { unwrapResponse } from '../helpers/unwrap-response.js';
 import { InMemoryWorkflowStorage } from '../../src/infrastructure/storage/in-memory-storage.js';
 
 import { LocalDataDirV2 } from '../../src/v2/infra/local/data-dir/index.js';
@@ -127,32 +128,36 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     const start = await handleV2StartWorkflow({ workflowId: 'behavior-lock-wf' } as any, ctx);
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
-    expect(start.data.pending?.stepId).toBe('step1');
-    expect(start.data.isComplete).toBe(false);
+    const startR = unwrapResponse(start.data);
+    expect(startR.pending?.stepId).toBe('step1');
+    expect(startR.isComplete).toBe(false);
 
     // Advance step 1 → step 2
-    const adv1 = await handleV2ContinueWorkflow({ continueToken: start.data.continueToken, output: { notesMarkdown: 'Step 1 done.' } } as any, ctx);
+    const adv1 = await handleV2ContinueWorkflow({ continueToken: startR.continueToken, output: { notesMarkdown: 'Step 1 done.' } } as any, ctx);
     expect(adv1.type).toBe('success');
     if (adv1.type !== 'success') return;
-    expect(adv1.data.kind).toBe('ok');
-    expect(adv1.data.pending?.stepId).toBe('step2');
-    expect(adv1.data.isComplete).toBe(false);
+    const adv1R = unwrapResponse(adv1.data);
+    expect(adv1R.kind).toBe('ok');
+    expect(adv1R.pending?.stepId).toBe('step2');
+    expect(adv1R.isComplete).toBe(false);
 
     // Advance step 2 → step 3
-    const adv2 = await handleV2ContinueWorkflow({ continueToken: adv1.data.continueToken, output: { notesMarkdown: 'Step 2 done.' } } as any, ctx);
+    const adv2 = await handleV2ContinueWorkflow({ continueToken: adv1R.continueToken, output: { notesMarkdown: 'Step 2 done.' } } as any, ctx);
     expect(adv2.type).toBe('success');
     if (adv2.type !== 'success') return;
-    expect(adv2.data.kind).toBe('ok');
-    expect(adv2.data.pending?.stepId).toBe('step3');
-    expect(adv2.data.isComplete).toBe(false);
+    const adv2R = unwrapResponse(adv2.data);
+    expect(adv2R.kind).toBe('ok');
+    expect(adv2R.pending?.stepId).toBe('step3');
+    expect(adv2R.isComplete).toBe(false);
 
     // Advance step 3 → complete
-    const adv3 = await handleV2ContinueWorkflow({ continueToken: adv2.data.continueToken, output: { notesMarkdown: 'Step 3 done.' } } as any, ctx);
+    const adv3 = await handleV2ContinueWorkflow({ continueToken: adv2R.continueToken, output: { notesMarkdown: 'Step 3 done.' } } as any, ctx);
     expect(adv3.type).toBe('success');
     if (adv3.type !== 'success') return;
-    expect(adv3.data.kind).toBe('ok');
-    expect(adv3.data.pending).toBeNull();
-    expect(adv3.data.isComplete).toBe(true);
+    const adv3R = unwrapResponse(adv3.data);
+    expect(adv3R.kind).toBe('ok');
+    expect(adv3R.pending).toBeNull();
+    expect(adv3R.isComplete).toBe(true);
   });
 
   it('advance with output persists node_output_appended event', async () => {
@@ -164,16 +169,17 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     const start = await handleV2StartWorkflow({ workflowId: 'behavior-lock-wf' } as any, ctx);
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
+    const startR = unwrapResponse(start.data);
 
     const adv1 = await handleV2ContinueWorkflow({
-      continueToken: start.data.continueToken,
+      continueToken: startR.continueToken,
       output: { notesMarkdown: 'Completed step 1 successfully.' },
     } as any, ctx);
     expect(adv1.type).toBe('success');
     if (adv1.type !== 'success') return;
 
     // Verify output was persisted
-    const sessionId = asSessionId(resolveSessionId(start.data.continueToken, v2.tokenAliasStore));
+    const sessionId = asSessionId(resolveSessionId(startR.continueToken as string, v2.tokenAliasStore));
 
     const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: root });
     const fsPort = new NodeFileSystemV2();
@@ -199,16 +205,17 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     const start = await handleV2StartWorkflow({ workflowId: 'behavior-lock-wf' } as any, ctx);
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
+    const startR = unwrapResponse(start.data);
 
-    const adv1 = await handleV2ContinueWorkflow({ continueToken: start.data.continueToken, output: { notesMarkdown: 'Step 1 done.' } } as any, ctx);
+    const adv1 = await handleV2ContinueWorkflow({ continueToken: startR.continueToken, output: { notesMarkdown: 'Step 1 done.' } } as any, ctx);
     expect(adv1.type).toBe('success');
     if (adv1.type !== 'success') return;
 
-    const adv2 = await handleV2ContinueWorkflow({ continueToken: start.data.continueToken, output: { notesMarkdown: 'Step 1 done.' } } as any, ctx);
+    const adv2 = await handleV2ContinueWorkflow({ continueToken: startR.continueToken, output: { notesMarkdown: 'Step 1 done.' } } as any, ctx);
     expect(adv2).toEqual(adv1); // Exact same response
 
     // Verify no duplicate events
-    const sessionId = asSessionId(resolveSessionId(start.data.continueToken, v2.tokenAliasStore));
+    const sessionId = asSessionId(resolveSessionId(startR.continueToken as string, v2.tokenAliasStore));
 
     const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: root });
     const fsPort = new NodeFileSystemV2();
@@ -233,24 +240,26 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     const start = await handleV2StartWorkflow({ workflowId: 'behavior-lock-wf' } as any, ctx);
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
+    const startR = unwrapResponse(start.data);
 
     // Advance once (creates child node)
-    const adv1 = await handleV2ContinueWorkflow({ continueToken: start.data.continueToken, output: { notesMarkdown: 'Step 1 done.' } } as any, ctx);
+    const adv1 = await handleV2ContinueWorkflow({ continueToken: startR.continueToken, output: { notesMarkdown: 'Step 1 done.' } } as any, ctx);
     expect(adv1.type).toBe('success');
     if (adv1.type !== 'success') return;
 
     // Rehydrate root to get fresh ackToken
-    const rehydrate = await handleV2ContinueWorkflow({ continueToken: start.data.continueToken, intent: 'rehydrate' } as any, ctx);
+    const rehydrate = await handleV2ContinueWorkflow({ continueToken: startR.continueToken, intent: 'rehydrate' } as any, ctx);
     expect(rehydrate.type).toBe('success');
     if (rehydrate.type !== 'success') return;
+    const rehydrateR = unwrapResponse(rehydrate.data);
 
     // Advance from root again (fork) — uses rehydrate's continueToken (fresh attemptId for same node)
-    const fork = await handleV2ContinueWorkflow({ continueToken: rehydrate.data.continueToken, output: { notesMarkdown: 'Step 1 fork.' } } as any, ctx);
+    const fork = await handleV2ContinueWorkflow({ continueToken: rehydrateR.continueToken, output: { notesMarkdown: 'Step 1 fork.' } } as any, ctx);
     expect(fork.type).toBe('success');
     if (fork.type !== 'success') return;
 
     // Verify fork edge exists
-    const sessionId = asSessionId(resolveSessionId(start.data.continueToken, v2.tokenAliasStore));
+    const sessionId = asSessionId(resolveSessionId(startR.continueToken as string, v2.tokenAliasStore));
 
     const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: root });
     const fsPort = new NodeFileSystemV2();

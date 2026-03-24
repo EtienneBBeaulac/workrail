@@ -1,3 +1,4 @@
+import { unwrapResponse } from '../helpers/unwrap-response.js';
 import { createTestValidationPipelineDeps } from "../helpers/v2-test-helpers.js";
 import { describe, expect, it } from 'vitest';
 import * as os from 'os';
@@ -116,7 +117,7 @@ describe('v2 context persistence (S8)', () => {
       expect(result.type).toBe('success');
       if (result.type !== 'success') return;
 
-      const stateToken = (result.data as any).continueToken;
+      const stateToken = (unwrapResponse(result.data) as any).continueToken;
       const pt = parseShortTokenNative(stateToken)!;
       const aliasEntry = (ctx.v2 as any).tokenAliasStore.lookup(pt.nonceHex);
       const sessionId = aliasEntry!.sessionId;

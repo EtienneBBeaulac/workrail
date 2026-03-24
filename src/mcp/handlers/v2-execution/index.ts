@@ -24,8 +24,16 @@ import { parseContinueTokenOrFail, parseStateTokenOrFail } from '../v2-token-ops
 import { errNotRetryable } from '../../types.js';
 import { checkContextBudget } from '../v2-context-budget.js';
 import { executeStartWorkflow } from './start.js';
-import { handleRehydrateIntent } from './continue-rehydrate.js';
+import { handleRehydrateIntent, type RehydrateResult } from './continue-rehydrate.js';
 import { handleAdvanceIntent } from './continue-advance.js';
+import { attachV2ExecutionRenderMetadata } from '../../render-envelope.js';
+import type { StepContentEnvelope } from '../../step-content-envelope.js';
+
+/** Unified result for continue_workflow — envelope present on rehydrate with pending step. */
+interface ContinueWorkflowResult {
+  readonly response: z.infer<typeof V2ContinueWorkflowOutputSchema>;
+  readonly contentEnvelope?: StepContentEnvelope;
+}
 
 /**
  * v2 Slice 3: token orchestration (`start_workflow` / `continue_workflow`).
@@ -74,7 +82,11 @@ export async function handleV2StartWorkflow(
   if (!guard.ok) return guard.error;
 
   return executeStartWorkflow(input, guard.ctx).match(
-    (payload) => success(payload),
+    (result) => success(attachV2ExecutionRenderMetadata({
+      response: result.response,
+      lifecycle: 'start',
+      contentEnvelope: result.contentEnvelope,
+    })),
     (e) => mapStartWorkflowErrorToToolError(e)
   );
 }
@@ -87,7 +99,11 @@ export async function handleV2ContinueWorkflow(
   if (!guard.ok) return guard.error;
 
   return executeContinueWorkflow(input, guard.ctx).match(
-    (payload) => success(payload),
+    (result) => success(attachV2ExecutionRenderMetadata({
+      response: result.response,
+      lifecycle: input.intent === 'rehydrate' ? 'rehydrate' : 'advance',
+      contentEnvelope: result.contentEnvelope,
+    })),
     (e) => mapContinueWorkflowErrorToToolError(e)
   );
 }
@@ -120,7 +136,7 @@ type RehydrateArgs = {
 
 function loadAndRehydrate(
   args: RehydrateArgs,
-): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, ContinueWorkflowError> {
+): RA<RehydrateResult, ContinueWorkflowError> {
   const { sessionId, runId, nodeId, workflowHashRef, input } = args;
   const { sessionStore, tokenCodecPorts, pinnedStore, snapshotStore, idFactory, tokenAliasStore, entropy } = args.ctx.v2;
 
@@ -148,7 +164,7 @@ function loadAndRehydrate(
 export function executeContinueWorkflow(
   input: V2ContinueWorkflowInput,
   ctx: V2ToolContext
-): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, ContinueWorkflowError> {
+): RA<ContinueWorkflowResult, ContinueWorkflowError> {
   const { gate, sessionStore, snapshotStore, pinnedStore, sha256, tokenCodecPorts, idFactory, tokenAliasStore, entropy } = ctx.v2;
 
   // Check context budget (synchronous, early guard)
@@ -224,7 +240,8 @@ export function executeContinueWorkflow(
               sha256,
               aliasStore: tokenAliasStore,
               entropy,
-            }));
+            }))
+            .map((response) => ({ response }));
         });
     }
   }

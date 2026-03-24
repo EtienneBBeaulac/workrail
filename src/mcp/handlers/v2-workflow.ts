@@ -169,11 +169,14 @@ export async function handleV2InspectWorkflow(
               ? { schemaVersion: compiled.schemaVersion, sourceKind: compiled.sourceKind, workflowId: compiled.workflowId }
               : compiled;
 
+          // Surface references for discoverability (available before start_workflow)
+          const references = workflow.definition.references;
           const payload = V2WorkflowInspectOutputSchema.parse({
             workflowId: input.workflowId,
             workflowHash,
             mode: input.mode,
             compiled: body,
+            ...(references != null && references.length > 0 ? { references } : {}),
           });
           return okAsync(success(payload) as ToolResult<unknown>);
         });

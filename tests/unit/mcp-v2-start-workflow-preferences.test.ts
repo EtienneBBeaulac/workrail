@@ -1,3 +1,4 @@
+import { unwrapResponse } from '../helpers/unwrap-response.js';
 import { createTestValidationPipelineDeps } from "../helpers/v2-test-helpers.js";
 import { describe, expect, it } from 'vitest';
 import * as os from 'os';
@@ -106,7 +107,7 @@ describe('v2 start_workflow emits baseline preferences_changed', () => {
       if (res.type !== 'success') return;
 
       // Recover sessionId from resumeToken via alias store.
-      const pt = parseShortTokenNative(res.data.continueToken)!;
+      const pt = parseShortTokenNative(unwrapResponse(res.data).continueToken)!;
       const aliasEntry = (ctx.v2 as any).tokenAliasStore.lookup(pt.nonceHex);
       const sessionId = aliasEntry!.sessionId as string;
       const truth = await (ctx.v2 as any).sessionStore.load(sessionId).match(

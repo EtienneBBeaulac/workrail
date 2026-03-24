@@ -1,3 +1,4 @@
+import { unwrapResponse } from '../helpers/unwrap-response.js';
 import { createTestValidationPipelineDeps, mintTestContinueToken } from "../helpers/v2-test-helpers.js";
 import { describe, expect, it } from 'vitest';
 import * as os from 'os';
@@ -206,9 +207,9 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
       const first = await handleV2ContinueWorkflow({ continueToken, output: { notesMarkdown: 'Step completed.' } } as any, dummyCtx(v2));
       expect(first.type).toBe('success');
       if (first.type !== 'success') return;
-      expect(first.data.kind).toBe('ok');
-      expect(first.data.isComplete).toBe(true);
-      expect(first.data.pending).toBeNull();
+      expect(unwrapResponse(first.data).kind).toBe('ok');
+      expect(unwrapResponse(first.data).isComplete).toBe(true);
+      expect(unwrapResponse(first.data).pending).toBeNull();
 
       const second = await handleV2ContinueWorkflow({ continueToken, output: { notesMarkdown: 'Step completed.' } } as any, dummyCtx(v2));
       expect(second).toEqual(first);
@@ -346,9 +347,9 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
       );
       expect(first.type).toBe('success');
       if (first.type !== 'success') return;
-      expect(first.data.kind).toBe('ok');
-      expect(first.data.isComplete).toBe(true);
-      expect(first.data.pending).toBeNull();
+      expect(unwrapResponse(first.data).kind).toBe('ok');
+      expect(unwrapResponse(first.data).isComplete).toBe(true);
+      expect(unwrapResponse(first.data).pending).toBeNull();
 
       // Replay same continueToken + output
       const second = await handleV2ContinueWorkflow(

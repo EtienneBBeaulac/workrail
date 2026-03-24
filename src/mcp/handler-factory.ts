@@ -25,7 +25,8 @@ import { toBoundedJsonValue } from './validation/bounded-json.js';
 import type { PreValidateResult } from './validation/workflow-next-prevalidate.js';
 import type { WrappedToolHandler, McpCallToolResult } from './types/workflow-tool-edition.js';
 import { internalSuggestion } from './handlers/v2-execution-helpers.js';
-import { formatV2ExecutionResponse } from './v2-response-formatter.js';
+import { formatV2ExecutionResponse, type FormattedResponse } from './v2-response-formatter.js';
+import { getV2ExecutionRenderEnvelope } from './render-envelope.js';
 
 // -----------------------------------------------------------------------------
 // Result Conversion
@@ -43,13 +44,30 @@ export function toMcpResult<T>(result: ToolResult<T>): McpCallToolResult {
   switch (result.type) {
     case 'success': {
       if (!jsonResponsesOverride) {
-        const nl = formatV2ExecutionResponse(result.data);
-        if (nl !== null) {
-          return { content: [{ type: 'text', text: nl }] };
+        const formatted: FormattedResponse | null = formatV2ExecutionResponse(result.data);
+        if (formatted !== null) {
+          const content: { type: 'text'; text: string }[] = [{ type: 'text', text: formatted.primary }];
+          if (formatted.references != null) {
+            content.push({ type: 'text', text: formatted.references.text });
+          }
+          for (const supplement of formatted.supplements ?? []) {
+            content.push({ type: 'text', text: supplement.text });
+          }
+          return { content };
         }
       }
+      // JSON mode: include references alongside the response when present
+      const envelope = getV2ExecutionRenderEnvelope(result.data);
+      const responseBody = envelope != null ? envelope.response : result.data;
+      const refs = envelope?.contentEnvelope?.references;
+      const jsonPayload = (refs != null && refs.length > 0)
+        ? { ...responseBody as Record<string, unknown>, references: refs }
+        : responseBody;
       return {
-        content: [{ type: 'text', text: JSON.stringify(result.data, null, 2) }],
+        content: [{
+          type: 'text',
+          text: JSON.stringify(jsonPayload, null, 2),
+        }],
       };
     }
     case 'error':

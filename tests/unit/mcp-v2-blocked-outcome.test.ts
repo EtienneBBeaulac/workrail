@@ -1,3 +1,4 @@
+import { unwrapResponse } from '../helpers/unwrap-response.js';
 /**
  * Tests that replaying an advance via continueToken is idempotent.
  * Uses the actual start_workflow → advance → replay flow.
@@ -115,7 +116,7 @@ describe('v2 continue_workflow: advance replay idempotency', () => {
     expect(startRes.type).toBe('success');
     if (startRes.type !== 'success') return;
 
-    const startToken = startRes.data.continueToken;
+    const startToken = unwrapResponse(startRes.data).continueToken;
 
     // 2. Advance with output
     const firstAdvance = await handleV2ContinueWorkflow(
@@ -132,9 +133,9 @@ describe('v2 continue_workflow: advance replay idempotency', () => {
     );
     expect(replay1.type).toBe('success');
     if (replay1.type !== 'success') return;
-    expect(replay1.data.kind).toBe(firstAdvance.data.kind);
-    expect(replay1.data.continueToken).toBe(firstAdvance.data.continueToken);
-    expect(replay1.data.checkpointToken).toBe(firstAdvance.data.checkpointToken);
+    expect(unwrapResponse(replay1.data).kind).toBe(unwrapResponse(firstAdvance.data).kind);
+    expect(unwrapResponse(replay1.data).continueToken).toBe(unwrapResponse(firstAdvance.data).continueToken);
+    expect(unwrapResponse(replay1.data).checkpointToken).toBe(unwrapResponse(firstAdvance.data).checkpointToken);
 
     // 4. Replay again — still idempotent
     const replay2 = await handleV2ContinueWorkflow(
@@ -143,8 +144,8 @@ describe('v2 continue_workflow: advance replay idempotency', () => {
     );
     expect(replay2.type).toBe('success');
     if (replay2.type !== 'success') return;
-    expect(replay2.data.continueToken).toBe(firstAdvance.data.continueToken);
-    expect(replay2.data.checkpointToken).toBe(firstAdvance.data.checkpointToken);
+    expect(unwrapResponse(replay2.data).continueToken).toBe(unwrapResponse(firstAdvance.data).continueToken);
+    expect(unwrapResponse(replay2.data).checkpointToken).toBe(unwrapResponse(firstAdvance.data).checkpointToken);
   });
 
   it('maintains deterministic response across multiple replays', async () => {
@@ -162,14 +163,14 @@ describe('v2 continue_workflow: advance replay idempotency', () => {
     if (startRes.type !== 'success') return;
 
     const advanceRes = await handleV2ContinueWorkflow(
-      { continueToken: startRes.data.continueToken, output: { notesMarkdown: 'test' } } as V2ContinueWorkflowInput,
+      { continueToken: unwrapResponse(startRes.data).continueToken, output: { notesMarkdown: 'test' } } as V2ContinueWorkflowInput,
       ctx
     );
     expect(advanceRes.type).toBe('success');
     if (advanceRes.type !== 'success') return;
 
     // Replay three times — all must be identical
-    const token = startRes.data.continueToken;
+    const token = unwrapResponse(startRes.data).continueToken;
     const r1 = await handleV2ContinueWorkflow({ continueToken: token, intent: 'advance' } as any, ctx);
     const r2 = await handleV2ContinueWorkflow({ continueToken: token, intent: 'advance' } as any, ctx);
     const r3 = await handleV2ContinueWorkflow({ continueToken: token, intent: 'advance' } as any, ctx);
@@ -180,10 +181,10 @@ describe('v2 continue_workflow: advance replay idempotency', () => {
 
     if (r1.type === 'success' && r2.type === 'success' && r3.type === 'success') {
       // All responses should be structurally identical
-      expect(r1.data.continueToken).toBe(r2.data.continueToken);
-      expect(r2.data.continueToken).toBe(r3.data.continueToken);
-      expect(r1.data.checkpointToken).toBe(r2.data.checkpointToken);
-      expect(r2.data.checkpointToken).toBe(r3.data.checkpointToken);
+      expect(unwrapResponse(r1.data).continueToken).toBe(unwrapResponse(r2.data).continueToken);
+      expect(unwrapResponse(r2.data).continueToken).toBe(unwrapResponse(r3.data).continueToken);
+      expect(unwrapResponse(r1.data).checkpointToken).toBe(unwrapResponse(r2.data).checkpointToken);
+      expect(unwrapResponse(r2.data).checkpointToken).toBe(unwrapResponse(r3.data).checkpointToken);
     }
   });
 });

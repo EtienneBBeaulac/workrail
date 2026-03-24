@@ -107,6 +107,8 @@ function mapStartError(e: StartWorkflowError): EngineError {
       return { kind: 'storage_error', message: e.cause.message, code: e.cause.code };
     case 'session_append_failed':
       return { kind: 'session_error', message: e.cause.message, code: e.cause.code };
+    case 'reference_resolution_failed':
+      return { kind: 'internal_error', message: 'WorkRail could not resolve workflow references.' };
   }
 }
 
@@ -390,7 +392,7 @@ export async function createWorkRailEngine(
       if (result.isErr()) {
         return engineErr(mapStartError(result.error));
       }
-      return engineOk(mapStartOutput(result.value));
+      return engineOk(mapStartOutput(result.value.response));
     },
 
     async continueWorkflow(
@@ -421,7 +423,7 @@ export async function createWorkRailEngine(
       if (result.isErr()) {
         return engineErr(mapContinueError(result.error));
       }
-      return engineOk(mapContinueOutput(result.value));
+      return engineOk(mapContinueOutput(result.value.response));
     },
 
     async checkpointWorkflow(

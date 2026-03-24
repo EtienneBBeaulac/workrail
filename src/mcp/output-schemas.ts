@@ -98,6 +98,14 @@ export const V2WorkflowInspectOutputSchema = z.object({
   workflowHash: z.string().min(1),
   mode: z.enum(['metadata', 'preview']),
   compiled: JsonValueSchema,
+  references: z.array(z.object({
+    id: z.string().min(1),
+    title: z.string().min(1),
+    source: z.string().min(1),
+    purpose: z.string().min(1),
+    authoritative: z.boolean(),
+    resolveFrom: z.enum(['workspace', 'package']).optional(),
+  })).optional(),
 });
 
 // -----------------------------------------------------------------------------

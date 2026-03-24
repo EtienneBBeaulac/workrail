@@ -1,3 +1,4 @@
+import { unwrapResponse } from '../helpers/unwrap-response.js';
 import { createTestValidationPipelineDeps } from "../helpers/v2-test-helpers.js";
 import { describe, it, expect } from 'vitest';
 import * as os from 'os';
@@ -112,30 +113,30 @@ describe('v2 fork detection (Phase 5)', () => {
       expect(start.type).toBe('success');
       if (start.type !== 'success') return;
 
-      const first = await handleV2ContinueWorkflow({ continueToken: start.data.continueToken, output: { notesMarkdown: 'Step 1 done.' } } as any, ctx);
+      const first = await handleV2ContinueWorkflow({ continueToken: unwrapResponse(start.data).continueToken, output: { notesMarkdown: 'Step 1 done.' } } as any, ctx);
       expect(first.type).toBe('success');
       if (first.type !== 'success') return;
-      expect(first.data.kind).toBe('ok');
-      expect(first.data.pending?.stepId).toBe('step2');
+      expect(unwrapResponse(first.data).kind).toBe('ok');
+      expect(unwrapResponse(first.data).pending?.stepId).toBe('step2');
 
       // To simulate a rewind/fork, we need to call rehydrate on the ORIGINAL resumeToken to get a fresh ackToken.
       // (Reusing the same ackToken would be an idempotent replay, not a fork.)
-      const rehydrate = await handleV2ContinueWorkflow({ continueToken: start.data.continueToken, intent: 'rehydrate' } as any, ctx);
+      const rehydrate = await handleV2ContinueWorkflow({ continueToken: unwrapResponse(start.data).continueToken, intent: 'rehydrate' } as any, ctx);
       expect(rehydrate.type).toBe('success');
       if (rehydrate.type !== 'success') return;
 
       // Now advance from the root node again with the NEW ackToken.
       // This should detect that root node already has a child and create a fork.
-      const fork = await handleV2ContinueWorkflow({ continueToken: rehydrate.data.continueToken, output: { notesMarkdown: 'Step 1 fork.' } } as any, ctx);
+      const fork = await handleV2ContinueWorkflow({ continueToken: unwrapResponse(rehydrate.data).continueToken, output: { notesMarkdown: 'Step 1 fork.' } } as any, ctx);
       expect(fork.type).toBe('success');
       if (fork.type !== 'success') return;
-      expect(fork.data.kind).toBe('ok');
+      expect(unwrapResponse(fork.data).kind).toBe('ok');
 
       // Load truth and verify:
       // - 2 node_created events (root + 2 children)
       // - 2 edge_created events
       // - at least one edge has cause.kind=non_tip_advance
-      const pt = parseShortTokenNative(start.data.continueToken)!;
+      const pt = parseShortTokenNative(unwrapResponse(start.data).continueToken)!;
       const aliasEntry = (ctx.v2 as any).tokenAliasStore.lookup(pt.nonceHex);
       const sid = aliasEntry!.sessionId;
 

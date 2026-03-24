@@ -1,3 +1,4 @@
+import { unwrapResponse } from '../helpers/unwrap-response.js';
 import { createTestValidationPipelineDeps, mintTestContinueToken } from '../helpers/v2-test-helpers.js';
 import { describe, expect, it } from 'vitest';
 import * as os from 'os';
@@ -216,8 +217,9 @@ describe('v2 continue_workflow: validationCriteria enforcement (mode-driven)', (
       expect(res.type).toBe('success');
       if (res.type !== 'success') return;
 
-      expect(res.data.kind).toBe('blocked');
-      const outputBlocker = res.data.blockers.blockers.find((b: any) => b.code === 'MISSING_REQUIRED_OUTPUT');
+      const resData = unwrapResponse(res.data);
+      expect(resData.kind).toBe('blocked');
+      const outputBlocker = (resData as any).blockers.blockers.find((b: any) => b.code === 'MISSING_REQUIRED_OUTPUT');
       expect(outputBlocker).toBeDefined();
       expect(outputBlocker!.pointer.kind).toBe('output_contract');
       expect(outputBlocker!.pointer.contractRef).toBe('wr.validationCriteria');
@@ -370,8 +372,9 @@ describe('v2 continue_workflow: validationCriteria enforcement (mode-driven)', (
       expect(res.type).toBe('success');
       if (res.type !== 'success') return;
 
-      expect(res.data.kind).toBe('ok');
-      expect(res.data.isComplete).toBe(true);
+      const resData2 = unwrapResponse(res.data);
+      expect(resData2.kind).toBe('ok');
+      expect(resData2.isComplete).toBe(true);
 
       const truth = await v2.sessionEventLogStore.load(sessionId as any).match((v) => v, (e) => {
         throw new Error(`unexpected load error: ${e.code}`);

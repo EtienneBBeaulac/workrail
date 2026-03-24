@@ -1,3 +1,4 @@
+import { unwrapResponse } from '../helpers/unwrap-response.js';
 import { createTestValidationPipelineDeps } from "../helpers/v2-test-helpers.js";
 import { describe, expect, it } from 'vitest';
 import * as os from 'os';
@@ -105,7 +106,7 @@ describe('v2 continue_workflow rehydrate-only is pure (no durable writes)', () =
       if (start.type !== 'success') return;
 
       const { parseShortTokenNative } = await import('../../src/v2/durable-core/tokens/short-token.js');
-      const parsed = parseShortTokenNative(start.data.continueToken);
+      const parsed = parseShortTokenNative(unwrapResponse(start.data).continueToken);
       if (!parsed) throw new Error('Expected v2 short resumeToken');
       const aliasEntry = (ctx.v2 as any).tokenAliasStore.lookup(parsed.nonceHex);
       if (!aliasEntry) throw new Error('Alias not found for resumeToken');
@@ -118,7 +119,7 @@ describe('v2 continue_workflow rehydrate-only is pure (no durable writes)', () =
         }
       );
 
-      const res = await handleV2ContinueWorkflow({ continueToken: start.data.continueToken, intent: 'rehydrate' } as any, ctx);
+      const res = await handleV2ContinueWorkflow({ continueToken: unwrapResponse(start.data).continueToken, intent: 'rehydrate' } as any, ctx);
       expect(res.type).toBe('success');
 
       const after = await (ctx.v2 as any).sessionStore.load(sessionId).match(

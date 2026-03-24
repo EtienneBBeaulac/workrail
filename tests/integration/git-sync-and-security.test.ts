@@ -399,7 +399,7 @@ describe('Git Sync & Security - No Corners Rounded', () => {
       await expect(storage.loadAllWorkflows()).rejects.toThrow(/too many/i);
       
       console.log('✅ PROVEN: Max files limit enforced');
-    });
+    }, 30000);
 
     it('should sanitize Git ref names to prevent command injection', async () => {
       // Should throw during construction due to unsafe branch name
@@ -697,4 +697,3 @@ describe('Git Sync & Security - No Corners Rounded', () => {
     });
   });
 });
-

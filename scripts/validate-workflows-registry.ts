@@ -91,6 +91,13 @@ interface CliArgs {
   readonly timeout: number;
 }
 
+interface PackageScopedReferenceViolation {
+  readonly workflowFile: string;
+  readonly referenceId: string;
+  readonly source: string;
+  readonly message: string;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // CLI Argument Parsing
 // ─────────────────────────────────────────────────────────────────────────────
@@ -111,6 +118,49 @@ function parseArgs(argv: string[]): CliArgs {
   }
 
   return { json, timeout };
+}
+
+function listWorkflowJsonFiles(workflowsDir: string): string[] {
+  return fs.readdirSync(workflowsDir)
+    .filter((name) => name.endsWith('.json'))
+    .map((name) => path.join(workflowsDir, name));
+}
+
+function isPathWithin(resolvedPath: string, basePath: string): boolean {
+  const normalizedBase = path.resolve(basePath) + path.sep;
+  const normalizedResolved = path.resolve(resolvedPath);
+  return normalizedResolved === path.resolve(basePath) || normalizedResolved.startsWith(normalizedBase);
+}
+
+function validateBundledPackageScopedReferences(repoRoot: string): PackageScopedReferenceViolation[] {
+  const packageJsonPath = path.join(repoRoot, 'package.json');
+  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8')) as { files?: string[] };
+  const publishedRoots = (packageJson.files ?? []).map((entry) => path.resolve(repoRoot, entry));
+  const workflowsDir = path.join(repoRoot, 'workflows');
+
+  const violations: PackageScopedReferenceViolation[] = [];
+  for (const workflowPath of listWorkflowJsonFiles(workflowsDir)) {
+    const workflow = JSON.parse(fs.readFileSync(workflowPath, 'utf-8')) as {
+      references?: Array<{ id?: string; source?: string; resolveFrom?: 'workspace' | 'package' }>;
+    };
+
+    for (const ref of workflow.references ?? []) {
+      if (ref.resolveFrom !== 'package' || typeof ref.source !== 'string') continue;
+
+      const resolvedRefPath = path.resolve(repoRoot, ref.source);
+      const allowed = publishedRoots.some((publishedRoot) => isPathWithin(resolvedRefPath, publishedRoot));
+      if (!allowed) {
+        violations.push({
+          workflowFile: path.relative(repoRoot, workflowPath),
+          referenceId: ref.id ?? '(unknown)',
+          source: ref.source,
+          message: `package-scoped reference points outside published package roots (${(packageJson.files ?? []).join(', ')})`,
+        });
+      }
+    }
+  }
+
+  return violations;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -248,6 +298,7 @@ function printVariantSummary(variantName: string, report: RegistryValidationRepo
 async function main(): Promise<void> {
   const args = parseArgs(process.argv);
   const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+  const repoRoot = path.resolve(scriptDir, '..');
   const variantsPath = path.join(scriptDir, 'workflow-validation-variants.json');
 
   if (!fs.existsSync(variantsPath)) {
@@ -260,6 +311,22 @@ async function main(): Promise<void> {
 
   if (variants.length === 0) {
     console.error('No variants defined in workflow-validation-variants.json');
+    process.exit(1);
+  }
+
+  const packageRefViolations = validateBundledPackageScopedReferences(repoRoot);
+  if (packageRefViolations.length > 0) {
+    if (args.json) {
+      console.log(JSON.stringify({
+        error: 'bundled_package_reference_validation_failed',
+        violations: packageRefViolations,
+      }, null, 2));
+    } else {
+      console.error('Bundled workflow package-reference validation failed:');
+      for (const violation of packageRefViolations) {
+        console.error(`  - ${violation.workflowFile} :: ${violation.referenceId} (${violation.source}) — ${violation.message}`);
+      }
+    }
     process.exit(1);
   }
 

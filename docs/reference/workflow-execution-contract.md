@@ -58,7 +58,7 @@ Lists available workflows.
 
 ### `inspect_workflow`
 
-Read-only retrieval of workflow metadata and/or a preview to help select a workflow.
+Read-only retrieval of workflow metadata and/or a preview to help select a workflow. Includes workflow-declared `references` (if any) for discoverability before starting execution.
 
 ### `start_workflow`
 
@@ -304,6 +304,28 @@ If a workflow prefers `delegation`, it should not require an upfront probe. Inst
 - At steps that can benefit from parallelism, the prompt instructs the agent to attempt delegation/subagents when available.
 - If delegation is unavailable, the agent executes the sequential alternative and records a durable capability observation indicating `delegation` is unavailable.
 - Studio surfaces a warning that the delegated path was not applied, but the workflow continues normally.
+
+## Response content structure (normative)
+
+Execution tool responses (`start_workflow`, `continue_workflow`) are delivered as multiple MCP content items, each with `type: "text"`. The items are ordered:
+
+1. **Primary content**: the authored prompt (or system message for completed/blocked states). Always present.
+2. **Workflow references** (when present): a dedicated content item listing external documents the workflow points at. Only emitted when the workflow declares `references` and the lifecycle warrants it.
+3. **Response supplements** (when present): system-level guidance items (e.g., boundary-owned delivery guidance, one-time supplements).
+
+### Reference delivery by lifecycle
+
+| Lifecycle | Reference content |
+|-----------|------------------|
+| `start` | Full reference set: title, resolved path, purpose, authority level, resolution status |
+| `rehydrate` | Compact reminder: title and path only |
+| `advance` | Not emitted (agent already has references from start/rehydrate) |
+
+References with unresolved paths (file not found at start time) are surfaced with an `[unresolved]` tag. Unresolved references produce a warning but do not block execution.
+
+### Content envelope (internal)
+
+Internally, WorkRail assembles a `StepContentEnvelope` that carries typed content categories (authored prompt, resolved references, supplements). The formatter consumes this envelope to produce the MCP content items above. This is an implementation detail not exposed in the public tool output schema.
 
 ## Durable outputs (`output` envelope)
 

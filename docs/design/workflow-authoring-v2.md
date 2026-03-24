@@ -24,6 +24,7 @@ WorkRail v2 uses **JSON** as the canonical authoring format.
   "agentRole": "Optional: workflow-level stance/persona for the agent",
   "capabilities": { ... },
   "features": [ ... ],
+  "references": [ ... ],
   "conditions": [ ... ],
   "steps": [ ... ]
 }
@@ -95,6 +96,52 @@ A small subset of features can accept typed configuration:
 - `wr.features.mode_guidance`
 
 Config schemas are WorkRail-owned and validated per feature.
+
+## References (workflow-declared external documents)
+
+References let a workflow point at authoritative external documents (schemas, specs, team guides, playbooks) without inlining their content into prompts or `metaGuidance`.
+
+```jsonc
+"references": [
+  {
+    "id": "api-schema",
+    "title": "API Schema",
+    "source": "./spec/api-schema.json",       // resolves against user's workspace (default)
+    "purpose": "Canonical API contract the implementation must satisfy",
+    "authoritative": true
+  },
+  {
+    "id": "authoring-spec",
+    "title": "Authoring Specification",
+    "source": "./spec/authoring-spec.json",   // resolves against workrail package root
+    "purpose": "Canonical workflow authoring rules",
+    "authoritative": true,
+    "resolveFrom": "package"
+  }
+]
+```
+
+**Fields:**
+- `id` (string, unique): identifier for the reference
+- `title` (string): human-readable display name
+- `source` (string): file path, resolved relative to the base specified by `resolveFrom`
+- `purpose` (string): why this reference matters to the workflow
+- `authoritative` (boolean): whether the agent should treat this as a binding constraint vs advisory guidance
+- `resolveFrom` (optional, `"workspace"` | `"package"`, default `"workspace"`): where to resolve `source` from. Use `"workspace"` for project-specific files; use `"package"` for files shipped with the workflow (specs, schemas, bundled guides)
+
+**Behavior:**
+- References are **pointers, not content**. WorkRail resolves paths at start time (against workspace root or package root per `resolveFrom`) and surfaces them to the agent as a separate content section. The agent reads files itself if needed.
+- On `start_workflow`: full reference set with titles, paths, purposes, and authority level.
+- On `rehydrate`: compact reminder (titles and paths only).
+- On `advance`: no references emitted (the agent already has them).
+- Unresolved paths (file missing) produce a warning but do not block the workflow. The reference is surfaced with an `[unresolved]` tag.
+- Reference declarations are included in the `workflowHash` (the declarations, not the file contents), so changing which references a workflow declares creates a new hash.
+
+**When to use references vs metaGuidance:**
+- Use **references** to point at external documents the agent should consult.
+- Use **metaGuidance** for short behavioral rules surfaced on start and resume (e.g., "always maintain CONTEXT.md", "use Memory MCP for persistence").
+
+References are surfaced in `inspect_workflow` output for discoverability before starting execution.
 
 ## Steps
 
@@ -609,8 +656,9 @@ WorkRail compiles the source workflow:
 1) Expands `template_call` steps into their full step sequences (with provenance).
 2) Applies `features` in deterministic order (injects prompt content, adds probe logic, etc.).
 3) Resolves `contractRef` to actual schemas from the contract pack registry.
-4) Renders `promptBlocks` into deterministic text `pending.prompt` strings.
-5) Computes `workflowHash` from the fully expanded canonical model.
+4) Validates `references` structurally (unique IDs, non-empty fields).
+5) Renders `promptBlocks` into deterministic text `pending.prompt` strings.
+6) Computes `workflowHash` from the fully expanded canonical model (including reference declarations).
 
 ## Source vs compiled (Studio)
 
