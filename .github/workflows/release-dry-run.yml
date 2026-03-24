@@ -38,4 +38,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WORKRAIL_ALLOW_MAJOR_RELEASE: ${{ vars.WORKRAIL_ALLOW_MAJOR_RELEASE }}
-        run: npx semantic-release --dry-run --no-ci
+        run: |
+          set -euo pipefail
+
+          # Mirror the real release job: use the upgraded global npm and avoid
+          # PATH shadowing from ./node_modules/.bin when invoking semantic-release.
+          export PATH="$(echo "$PATH" | tr ':' '\n' | awk '!/\/node_modules\/\.bin/' | paste -sd ':' -)"
+          hash -r
+
+          node ./node_modules/semantic-release/bin/semantic-release.js --dry-run --no-ci
