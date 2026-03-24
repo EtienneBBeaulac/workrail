@@ -34,6 +34,13 @@ import { newAttemptId, mintContinueAndCheckpointTokens } from '../v2-token-ops.j
 import { deriveNextIntent } from '../v2-state-conversion.js';
 import { EVENT_KIND } from '../../../v2/durable-core/constants.js';
 import { buildNextCall } from './index.js';
+import { buildStepContentEnvelope, type StepContentEnvelope, type ResolvedReference } from '../../step-content-envelope.js';
+
+/** Result wrapper for rehydrate — envelope is present only when a pending step exists. */
+export interface RehydrateResult {
+  readonly response: z.infer<typeof V2ContinueWorkflowOutputSchema>;
+  readonly contentEnvelope?: StepContentEnvelope;
+}
 
 /**
  * Handle rehydrate intent: side-effect-free state restoration.
@@ -54,7 +61,7 @@ export function handleRehydrateIntent(args: {
   readonly entropy: import('../../../v2/ports/random-entropy.port.js').RandomEntropyPortV2;
   /** MCP roots resolved by the server — used as fallback for binding base dir. */
   readonly resolvedRootUris?: readonly string[];
-}): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, ContinueWorkflowError> {
+}): RA<RehydrateResult, ContinueWorkflowError> {
   const { input, sessionId, runId, nodeId, workflowHashRef, truth, tokenCodecPorts, pinnedStore, snapshotStore, idFactory, aliasStore, entropy, resolvedRootUris } = args;
 
   const runStarted = truth.events.find(
@@ -153,7 +160,7 @@ export function handleRehydrateIntent(args: {
             const preferences = derivePreferencesOrDefault({ truth, runId, nodeId });
             const nextIntent = deriveNextIntent({ rehydrateOnly: true, isComplete, pending: null });
 
-            return okAsync(V2ContinueWorkflowOutputSchema.parse({
+            const parsed = V2ContinueWorkflowOutputSchema.parse({
               kind: 'ok',
               isComplete,
               pending: null,
@@ -161,7 +168,8 @@ export function handleRehydrateIntent(args: {
               nextIntent,
               nextCall: null,
               ...(driftWarnings.length > 0 ? { warnings: driftWarnings } : {}),
-            }));
+            });
+            return okAsync({ response: parsed });
           }
 
           const attemptId = newAttemptId(idFactory);
@@ -201,7 +209,12 @@ export function handleRehydrateIntent(args: {
               const preferences = derivePreferencesOrDefault({ truth, runId, nodeId });
               const nextIntent = deriveNextIntent({ rehydrateOnly: true, isComplete, pending: meta });
 
-              return okAsync(V2ContinueWorkflowOutputSchema.parse({
+              const contentEnvelope = buildStepContentEnvelope({
+                meta,
+                references: pinned.resolvedReferences ?? buildPinnedReferencesFallback((pinned.definition as WorkflowDefinition).references ?? []),
+              });
+
+              const parsed = V2ContinueWorkflowOutputSchema.parse({
                 kind: 'ok',
                 continueToken: continueTokenValue,
                 checkpointToken: checkpointTokenValue,
@@ -211,7 +224,8 @@ export function handleRehydrateIntent(args: {
                 nextIntent,
                 nextCall: buildNextCall({ continueToken: continueTokenValue, isComplete, pending: meta }),
                 ...(driftWarnings.length > 0 ? { warnings: driftWarnings } : {}),
-              }));
+              });
+              return okAsync({ response: parsed, contentEnvelope });
             });
         });
     });
@@ -220,6 +234,26 @@ export function handleRehydrateIntent(args: {
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Build fallback pinned references from declarations for older snapshots.
+ *
+ * Newer snapshots persist the start-time resolved state directly.
+ * This fallback exists only for snapshots produced before that field existed.
+ */
+function buildPinnedReferencesFallback(
+  refs: readonly import('../../../types/workflow-definition.js').WorkflowReference[],
+): readonly ResolvedReference[] {
+  return refs.map((ref) => ({
+    id: ref.id,
+    title: ref.title,
+    source: ref.source,
+    purpose: ref.purpose,
+    authoritative: ref.authoritative,
+    resolveFrom: (ref.resolveFrom ?? 'workspace') as 'workspace' | 'package',
+    status: 'pinned' as const,
+  }));
+}
 
 /**
  * Detect binding drift for a pinned snapshot.

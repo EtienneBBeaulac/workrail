@@ -221,10 +221,10 @@ describe('nextCall in live execution responses', () => {
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
 
-    expect(start.data.nextCall).not.toBeNull();
-    expect(start.data.nextCall!.tool).toBe('continue_workflow');
+    expect(start.data.response.nextCall).not.toBeNull();
+    expect(start.data.response.nextCall!.tool).toBe('continue_workflow');
     // One-token: nextCall uses continueToken only
-    expect(start.data.nextCall!.params.continueToken).toBe(start.data.continueToken);
+    expect(start.data.response.nextCall!.params.continueToken).toBe(start.data.response.continueToken);
   });
 
   it('rehydrate returns nextCall with continue template (for when agent finishes the step)', async () => {
@@ -233,14 +233,14 @@ describe('nextCall in live execution responses', () => {
     if (start.type !== 'success') return;
 
     const rehydrate = await handleV2ContinueWorkflow(
-      { continueToken: start.data.continueToken, intent: 'rehydrate' } as any, ctx
+      { continueToken: start.data.response.continueToken, intent: 'rehydrate' } as any, ctx
     );
     expect(rehydrate.type).toBe('success');
     if (rehydrate.type !== 'success') return;
 
-    expect(rehydrate.data.nextCall).not.toBeNull();
-    expect(rehydrate.data.nextCall!.tool).toBe('continue_workflow');
-    expect(rehydrate.data.nextCall!.params.continueToken).toBe(rehydrate.data.continueToken);
+    expect(rehydrate.data.response.nextCall).not.toBeNull();
+    expect(rehydrate.data.response.nextCall!.tool).toBe('continue_workflow');
+    expect(rehydrate.data.response.nextCall!.params.continueToken).toBe(rehydrate.data.response.continueToken);
   });
 
   it('advance to next step returns nextCall for the next advance', async () => {
@@ -249,15 +249,15 @@ describe('nextCall in live execution responses', () => {
     if (start.type !== 'success') return;
 
     const adv1 = await handleV2ContinueWorkflow(
-      { continueToken: start.data.continueToken, output: { notesMarkdown: 'Step A done.' } } as any, ctx
+      { continueToken: start.data.response.continueToken, output: { notesMarkdown: 'Step A done.' } } as any, ctx
     );
     expect(adv1.type).toBe('success');
     if (adv1.type !== 'success') return;
 
     // Should have step-b pending with a nextCall template
-    expect(adv1.data.pending?.stepId).toBe('step-b');
-    expect(adv1.data.nextCall).not.toBeNull();
-    expect(adv1.data.nextCall!.params.continueToken).toBe(adv1.data.continueToken);
+    expect(adv1.data.response.pending?.stepId).toBe('step-b');
+    expect(adv1.data.response.nextCall).not.toBeNull();
+    expect(adv1.data.response.nextCall!.params.continueToken).toBe(adv1.data.response.continueToken);
   });
 
   it('advance past last step returns nextCall: null (workflow complete)', async () => {
@@ -267,20 +267,20 @@ describe('nextCall in live execution responses', () => {
 
     // Advance through step-a
     const adv1 = await handleV2ContinueWorkflow(
-      { continueToken: start.data.continueToken, output: { notesMarkdown: 'Step A done.' } } as any, ctx
+      { continueToken: start.data.response.continueToken, output: { notesMarkdown: 'Step A done.' } } as any, ctx
     );
     if (adv1.type !== 'success') return;
 
     // Advance through step-b (last step) → complete
     const adv2 = await handleV2ContinueWorkflow(
-      { continueToken: adv1.data.continueToken, output: { notesMarkdown: 'Step B done.' } } as any, ctx
+      { continueToken: adv1.data.response.continueToken, output: { notesMarkdown: 'Step B done.' } } as any, ctx
     );
     expect(adv2.type).toBe('success');
     if (adv2.type !== 'success') return;
 
-    expect(adv2.data.isComplete).toBe(true);
-    expect(adv2.data.pending).toBeNull();
-    expect(adv2.data.nextCall).toBeNull();
+    expect(adv2.data.response.isComplete).toBe(true);
+    expect(adv2.data.response.pending).toBeNull();
+    expect(adv2.data.response.nextCall).toBeNull();
   });
 
   it('nextCall params can be used directly as continue_workflow input', async () => {
@@ -289,13 +289,13 @@ describe('nextCall in live execution responses', () => {
     if (start.type !== 'success') return;
 
     // Use nextCall.params directly as the input (the whole point of the feature), adding notes
-    const nextCallParams = start.data.nextCall!.params;
+    const nextCallParams = start.data.response.nextCall!.params;
     const adv1 = await handleV2ContinueWorkflow(
       { ...nextCallParams, output: { notesMarkdown: 'Step A done via nextCall.' } } as any, ctx
     );
     expect(adv1.type).toBe('success');
     if (adv1.type !== 'success') return;
-    expect(adv1.data.pending?.stepId).toBe('step-b');
+    expect(adv1.data.response.pending?.stepId).toBe('step-b');
   });
 
   it('formatted nextToken block can be used directly as continue_workflow input', async () => {
@@ -306,12 +306,12 @@ describe('nextCall in live execution responses', () => {
     const formatted = formatV2ExecutionResponse(start.data);
     expect(formatted).not.toBeNull();
 
-    const jsonMatch = formatted!.match(/```json\n(.*)\n```/);
+    const jsonMatch = formatted!.primary.match(/```json\n(.*)\n```/);
     expect(jsonMatch).not.toBeNull();
 
     const formattedParams = JSON.parse(jsonMatch![1]);
     expect(formattedParams).toEqual({
-      continueToken: start.data.continueToken,
+      continueToken: start.data.response.continueToken,
     });
 
     const normalizedInput = V2ContinueWorkflowInput.parse({
@@ -322,6 +322,6 @@ describe('nextCall in live execution responses', () => {
     const adv1 = await handleV2ContinueWorkflow(normalizedInput as any, ctx);
     expect(adv1.type).toBe('success');
     if (adv1.type !== 'success') return;
-    expect(adv1.data.pending?.stepId).toBe('step-b');
+    expect(adv1.data.response.pending?.stepId).toBe('step-b');
   });
 });

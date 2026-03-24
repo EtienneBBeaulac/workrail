@@ -1,3 +1,4 @@
+import { unwrapResponse } from '../helpers/unwrap-response.js';
 import { createTestValidationPipelineDeps, mintTestContinueToken } from '../helpers/v2-test-helpers.js';
 import { describe, expect, it } from 'vitest';
 import * as os from 'os';
@@ -206,9 +207,10 @@ describe('v2 execution: nextIntent', () => {
       expect(res.type).toBe('success');
       if (res.type !== 'success') return;
 
-      expect(res.data.kind).toBe('ok');
-      expect(res.data.pending?.stepId).toBe('step2');
-      expect(res.data.nextIntent).toBe('await_user_confirmation');
+      const resData = unwrapResponse(res.data);
+      expect(resData.kind).toBe('ok');
+      expect((resData as any).pending?.stepId).toBe('step2');
+      expect((resData as any).nextIntent).toBe('await_user_confirmation');
     } finally {
       process.env.WORKRAIL_DATA_DIR = prev;
     }

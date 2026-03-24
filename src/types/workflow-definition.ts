@@ -12,6 +12,7 @@
 import { ValidationCriteria } from './validation';
 import type { ArtifactContractRef } from '../v2/durable-core/schemas/artifacts/index';
 import type { PromptBlocks } from '../application/services/compiler/prompt-blocks.js';
+import type { Condition } from '../utils/condition-evaluator.js';
 
 // =============================================================================
 // STEP TYPES
@@ -28,6 +29,27 @@ export interface OutputContract {
   readonly contractRef: ArtifactContractRef;
   /** Whether the artifact is required (default: true) */
   readonly required?: boolean;
+}
+
+/**
+ * A conditional prompt fragment appended to a step's base prompt at render time.
+ *
+ * When `when` matches the session context, `text` is appended after the base prompt
+ * in declaration order. Fragments without `when` are always appended.
+ *
+ * Fragment texts support {{varName}} context template substitution at render time.
+ * {{wr.*}} tokens are rejected by structural validation at compile time.
+ */
+export interface PromptFragment {
+  /** Unique identifier within the step (used for validation and debugging) */
+  readonly id: string;
+  /**
+   * Condition evaluated against accumulated session context at render time.
+   * When absent, the fragment is always appended.
+   */
+  readonly when?: Condition;
+  /** Text appended when the condition matches. May contain {{varName}} context templates. */
+  readonly text: string;
 }
 
 export interface WorkflowStepDefinition {
@@ -81,6 +103,15 @@ export interface WorkflowStepDefinition {
    * "phase-0.investigate", "phase-0.plan").
    */
   readonly templateCall?: TemplateCall;
+  /**
+   * Conditional prompt fragments appended to this step's base prompt at render time.
+   * Each fragment whose `when` condition matches the session context is appended in
+   * declaration order. Fragments without `when` are always appended.
+   *
+   * Lock: evaluated at render time (not compile time) against accumulated session context.
+   * Fragment texts must not contain {{wr.*}} tokens (validated at compile time).
+   */
+  readonly promptFragments?: readonly PromptFragment[];
   readonly functionDefinitions?: readonly FunctionDefinition[];
   readonly functionCalls?: readonly FunctionCall[];
   readonly functionReferences?: readonly string[];
@@ -215,6 +246,47 @@ export interface WorkflowRecommendedPreferences {
   readonly recommendedRiskPolicy?: 'conservative' | 'balanced' | 'aggressive';
 }
 
+/**
+ * A workflow-declared reference to an external document.
+ *
+ * References are pointers — content is never inlined. The agent reads the
+ * file itself if needed. Declarations are included in the workflow hash;
+ * referenced file content is not (hash stability).
+ *
+ * Resolution phases:
+ * - Compile-time: structural validation (unique IDs, non-empty fields)
+ * - Start-time: path existence validated via filesystem I/O (handler layer)
+ *
+ * Lock: references are workflow-declared in v1. Project-attached references
+ * (.workrail/references.json) are a future extension.
+ */
+export interface WorkflowReference {
+  /** Unique identifier within the workflow */
+  readonly id: string;
+  /** Human-readable title for the reference */
+  readonly title: string;
+  /**
+   * File path to the referenced document.
+   *
+   * Resolution base depends on `resolveFrom`:
+   * - `'workspace'` (default): resolved relative to the user's workspace root.
+   * - `'package'`: resolved relative to the workrail package root. Use this for
+   *   files that ship with the workflow (specs, schemas, guides).
+   */
+  readonly source: string;
+  /** Why this reference matters to the workflow */
+  readonly purpose: string;
+  /** Whether this document is authoritative (agent should follow it strictly) */
+  readonly authoritative: boolean;
+  /**
+   * Where to resolve `source` from.
+   *
+   * - `'workspace'` (default): user's project root. For project-specific artifacts.
+   * - `'package'`: workrail package root. For files bundled with the workflow.
+   */
+  readonly resolveFrom?: 'workspace' | 'package';
+}
+
 export interface WorkflowDefinition {
   readonly id: string;
   readonly name: string;
@@ -223,6 +295,16 @@ export interface WorkflowDefinition {
   readonly steps: readonly (WorkflowStepDefinition | LoopStepDefinition)[];
   readonly preconditions?: readonly string[];
   readonly clarificationPrompts?: readonly string[];
+  /**
+   * Workflow-level behavioral rules surfaced on start and resume.
+   *
+   * Use metaGuidance for persistent behavioral constraints ("always maintain CONTEXT.md",
+   * "never commit without user approval"). These are compiled into step guidance at
+   * compile-time via the template registry.
+   *
+   * For pointing agents at external documents, use `references` instead.
+   * For conditional prompt content based on session state, use `promptFragments`.
+   */
   readonly metaGuidance?: readonly string[];
   readonly functionDefinitions?: readonly FunctionDefinition[];
   /**
@@ -249,6 +331,17 @@ export interface WorkflowDefinition {
    * Unknown tokens fail fast at compile time.
    */
   readonly extensionPoints?: readonly ExtensionPoint[];
+  /**
+   * Workflow-declared references to external documents.
+   *
+   * Each reference points at an authoritative or supporting document that
+   * the agent should be aware of. References are validated structurally at
+   * compile time and resolved (path existence) at start time.
+   *
+   * Declarations participate in the workflow hash. Referenced file content
+   * does not (hash remains stable when referenced files change).
+   */
+  readonly references?: readonly WorkflowReference[];
 }
 
 // =============================================================================
@@ -325,5 +418,6 @@ export function createWorkflowDefinition(
     metaGuidance: definition.metaGuidance ? Object.freeze([...definition.metaGuidance]) : undefined,
     functionDefinitions: definition.functionDefinitions ? Object.freeze([...definition.functionDefinitions]) : undefined,
     extensionPoints: definition.extensionPoints ? Object.freeze([...definition.extensionPoints]) : undefined,
+    references: definition.references ? Object.freeze(definition.references.map(ref => Object.freeze({ ...ref }))) : undefined,
   }) as WorkflowDefinition;
 }

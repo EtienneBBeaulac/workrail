@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "title": "WorkRail Authoring Spec Provenance",
+  "purpose": "Maintainer-facing provenance and source hierarchy for authoring-spec.json.",
+  "canonicalSources": [
+    {
+      "path": "spec/workflow.schema.json",
+      "role": "Legal workflow structure"
+    },
+    {
+      "path": "src/application/services/validation-engine.ts",
+      "role": "Structural authoring invariants actually enforced"
+    },
+    {
+      "path": "src/infrastructure/storage/schema-validating-workflow-storage.ts",
+      "role": "Runtime-authoritative schema validation"
+    },
+    {
+      "path": "scripts/validate-workflows-registry.ts",
+      "role": "Registry and discoverability validation"
+    },
+    {
+      "path": "src/v2/durable-core/domain/prompt-renderer.ts",
+      "role": "Runtime prompt rendering and prompt composition behavior"
+    }
+  ],
+  "secondarySources": [
+    {
+      "path": "docs/design/workflow-authoring-v2.md",
+      "role": "Design intent and model rationale"
+    },
+    {
+      "path": "docs/authoring-v2.md",
+      "role": "High-level v2 authoring guidance"
+    },
+    {
+      "path": "docs/authoring.md",
+      "role": "Human-readable guide"
+    },
+    {
+      "path": "docs/workflow-validation.md",
+      "role": "Practical validation workflow"
+    },
+    {
+      "path": "docs/reference/god-tier-workflow-validation.md",
+      "role": "Validation philosophy and correctness bar"
+    },
+    {
+      "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+      "role": "Current example of modern workflow style"
+    }
+  ],
+  "nonCanonicalSources": [
+    {
+      "path": "docs/plans/**",
+      "role": "Historical or supporting context only"
+    },
+    {
+      "path": "ADRs and transitional notes",
+      "role": "Historical or supporting context only"
+    }
+  ],
+  "derivedArtifacts": [
+    {
+      "path": "docs/authoring.md",
+      "role": "Primary human-readable guide derived from authoring-spec.json"
+    },
+    {
+      "path": "docs/authoring-v2.md",
+      "role": "Candidate for merge or retirement once coverage is preserved"
+    }
+  ],
+  "notes": [
+    "This file exists to keep provenance out of the main authoring rules file.",
+    "authoring-spec.json should stay author-facing and current-rule-focused."
+  ]
+}

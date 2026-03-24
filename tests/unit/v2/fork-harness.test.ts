@@ -6,6 +6,7 @@ import * as fs from 'fs/promises';
 
 import { handleV2StartWorkflow, handleV2ContinueWorkflow } from '../../../src/mcp/handlers/v2-execution.js';
 import type { ToolContext } from '../../../src/mcp/types.js';
+import { unwrapResponse } from '../../helpers/unwrap-response.js';
 import { setupIntegrationTest, teardownIntegrationTest, resolveService } from '../../di/integration-container.js';
 import { DI } from '../../../src/di/tokens.js';
 import { InMemoryWorkflowStorage } from '../../../src/infrastructure/storage/in-memory-storage.js';
@@ -147,9 +148,10 @@ describe('v2 fork harness (branching stress test)', () => {
     const start = await handleV2StartWorkflow({ workflowId: 'fork-test' } as any, ctx);
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
+    const startR = unwrapResponse(start.data);
 
-    const nodeA_stateToken = start.data.continueToken;
-    const nodeA_ackToken_1 = start.data.continueToken;
+    const nodeA_stateToken = startR.continueToken;
+    const nodeA_ackToken_1 = startR.continueToken;
 
     const ack1 = await handleV2ContinueWorkflow({
       continueToken: nodeA_stateToken,
@@ -157,8 +159,9 @@ describe('v2 fork harness (branching stress test)', () => {
     } as any, ctx);
     expect(ack1.type).toBe('success');
     if (ack1.type !== 'success') return;
-    expect(ack1.data.kind).toBe('ok');
-    expect(ack1.data.pending?.stepId).toBe('step2');
+    const ack1R = unwrapResponse(ack1.data);
+    expect(ack1R.kind).toBe('ok');
+    expect(ack1R.pending?.stepId).toBe('step2');
 
     const rehydrate2 = await handleV2ContinueWorkflow({
       intent: 'rehydrate',
@@ -166,7 +169,7 @@ describe('v2 fork harness (branching stress test)', () => {
     } as any, ctx);
     expect(rehydrate2.type).toBe('success');
     if (rehydrate2.type !== 'success') return;
-    const nodeA_ackToken_2 = rehydrate2.data.continueToken;
+    const nodeA_ackToken_2 = unwrapResponse(rehydrate2.data).continueToken;
 
     const ack2 = await handleV2ContinueWorkflow({
       continueToken: nodeA_ackToken_2,
@@ -174,7 +177,8 @@ describe('v2 fork harness (branching stress test)', () => {
     } as any, ctx);
     expect(ack2.type).toBe('success');
     if (ack2.type !== 'success') return;
-    expect(ack2.data.kind).toBe('ok');
+    const ack2R = unwrapResponse(ack2.data);
+    expect(ack2R.kind).toBe('ok');
 
     const rehydrate3 = await handleV2ContinueWorkflow({
       intent: 'rehydrate',
@@ -182,7 +186,7 @@ describe('v2 fork harness (branching stress test)', () => {
     } as any, ctx);
     expect(rehydrate3.type).toBe('success');
     if (rehydrate3.type !== 'success') return;
-    const nodeA_ackToken_3 = rehydrate3.data.continueToken;
+    const nodeA_ackToken_3 = unwrapResponse(rehydrate3.data).continueToken;
 
     const ack3 = await handleV2ContinueWorkflow({
       continueToken: nodeA_ackToken_3,
@@ -235,7 +239,7 @@ describe('v2 fork harness (branching stress test)', () => {
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
 
-    const nodeA_stateToken = start.data.continueToken;
+    const nodeA_stateToken = unwrapResponse(start.data).continueToken;
 
     for (let i = 0; i < 10; i++) {
       const rehydrate = await handleV2ContinueWorkflow({
@@ -246,7 +250,7 @@ describe('v2 fork harness (branching stress test)', () => {
       if (rehydrate.type !== 'success') return;
 
       const ack = await handleV2ContinueWorkflow({
-        continueToken: rehydrate.data.continueToken,
+        continueToken: unwrapResponse(rehydrate.data).continueToken,
         output: { notesMarkdown: `Branch ${i + 1}` },
       } as any, ctx);
       expect(ack.type).toBe('success');
@@ -278,24 +282,25 @@ describe('v2 fork harness (branching stress test)', () => {
     const start = await handleV2StartWorkflow({ workflowId: 'fork-test' } as any, ctx);
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
+    const startR = unwrapResponse(start.data);
 
     const ack1 = await handleV2ContinueWorkflow({
-      continueToken: start.data.continueToken,
+      continueToken: startR.continueToken,
     } as any, ctx);
     expect(ack1.type).toBe('success');
 
     const rehydrate = await handleV2ContinueWorkflow({
-      continueToken: start.data.continueToken, intent: 'rehydrate',
+      continueToken: startR.continueToken, intent: 'rehydrate',
     } as any, ctx);
     expect(rehydrate.type).toBe('success');
     if (rehydrate.type !== 'success') return;
 
     const ack2 = await handleV2ContinueWorkflow({
-      continueToken: rehydrate.data.continueToken,
+      continueToken: unwrapResponse(rehydrate.data).continueToken,
     } as any, ctx);
     expect(ack2.type).toBe('success');
 
-    const sessionId = asSessionId(extractSessionIdFromToken(start.data.continueToken, ctx));
+    const sessionId = asSessionId(extractSessionIdFromToken(startR.continueToken, ctx));
     const truthRes = await ctx.v2!.sessionStore.load(sessionId);
     const events = truthRes._unsafeUnwrap().events;
 
@@ -318,7 +323,7 @@ describe('v2 fork harness (branching stress test)', () => {
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
 
-    const nodeA_state = start.data.continueToken;
+    const nodeA_state = unwrapResponse(start.data).continueToken;
 
     const ack1 = await handleV2ContinueWorkflow({
       continueToken: nodeA_state,
@@ -332,7 +337,7 @@ describe('v2 fork harness (branching stress test)', () => {
     if (rehydrate.type !== 'success') return;
 
     const ack2 = await handleV2ContinueWorkflow({
-      continueToken: rehydrate.data.continueToken,
+      continueToken: unwrapResponse(rehydrate.data).continueToken,
       output: { notesMarkdown: 'BRANCH_2_OUTPUT' },
     } as any, ctx);
     expect(ack2.type).toBe('success');
@@ -364,22 +369,23 @@ describe('v2 fork harness (branching stress test)', () => {
     const start = await handleV2StartWorkflow({ workflowId: 'fork-test' } as any, ctx);
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
+    const startR = unwrapResponse(start.data);
 
     const ack1 = await handleV2ContinueWorkflow({
-      continueToken: start.data.continueToken,
+      continueToken: startR.continueToken,
       output: { notesMarkdown: 'First ack' },
     } as any, ctx);
     expect(ack1.type).toBe('success');
 
     const ack2 = await handleV2ContinueWorkflow({
-      continueToken: start.data.continueToken,
+      continueToken: startR.continueToken,
       output: { notesMarkdown: 'Replay ack (should be ignored)' },
     } as any, ctx);
     expect(ack2.type).toBe('success');
 
-    expect(ack2.data).toEqual(ack1.data);
+    expect(unwrapResponse(ack2.data)).toEqual(unwrapResponse(ack1.data));
 
-    const sessionId = asSessionId(extractSessionIdFromToken(start.data.continueToken, ctx));
+    const sessionId = asSessionId(extractSessionIdFromToken(startR.continueToken, ctx));
     const truthRes = await ctx.v2!.sessionStore.load(sessionId);
     const dagRes = projectRunDagV2(truthRes._unsafeUnwrap().events);
     

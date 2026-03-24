@@ -9,6 +9,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { toMcpResult } from '../../../src/mcp/handler-factory.js';
+import { createV2ExecutionRenderEnvelope } from '../../../src/mcp/render-envelope.js';
 
 const EXECUTION_RESPONSE = {
   continueToken: 'ct_test123',
@@ -87,5 +88,66 @@ describe('toMcpResult — WORKRAIL_JSON_RESPONSES env flag', () => {
     const parsed = JSON.parse(text);
     expect(parsed).toHaveProperty('continueToken');
     expect(parsed).toHaveProperty('pending');
+  });
+});
+
+describe('toMcpResult — clean response supplements', () => {
+  const originalClean = process.env.WORKRAIL_CLEAN_RESPONSE_FORMAT;
+
+  beforeEach(() => {
+    process.env.WORKRAIL_CLEAN_RESPONSE_FORMAT = 'true';
+  });
+
+  afterEach(() => {
+    if (originalClean === undefined) {
+      delete process.env.WORKRAIL_CLEAN_RESPONSE_FORMAT;
+    } else {
+      process.env.WORKRAIL_CLEAN_RESPONSE_FORMAT = originalClean;
+    }
+  });
+
+  it('start responses include authority context and notes guidance as separate content items', () => {
+    const result = toMcpResult({
+      type: 'success',
+      data: createV2ExecutionRenderEnvelope({
+        response: EXECUTION_RESPONSE,
+        lifecycle: 'start',
+      }),
+    });
+
+    expect(result.content).toHaveLength(3);
+    expect((result.content[0] as { text: string }).text).toContain('Execute the first task.');
+    expect((result.content[1] as { text: string }).text).toContain('WorkRail is a separate live system');
+    expect((result.content[2] as { text: string }).text).toContain('How to write good notes');
+  });
+
+  it('rehydrate responses include authority context but not notes guidance', () => {
+    const result = toMcpResult({
+      type: 'success',
+      data: createV2ExecutionRenderEnvelope({
+        response: {
+          ...EXECUTION_RESPONSE,
+          nextIntent: 'rehydrate_only' as const,
+        },
+        lifecycle: 'rehydrate',
+      }),
+    });
+
+    expect(result.content).toHaveLength(2);
+    expect((result.content[1] as { text: string }).text).toContain('WorkRail is a separate live system');
+    expect((result.content[1] as { text: string }).text).not.toContain('How to write good notes');
+  });
+
+  it('advance responses do not include supplemental content items', () => {
+    const result = toMcpResult({
+      type: 'success',
+      data: createV2ExecutionRenderEnvelope({
+        response: EXECUTION_RESPONSE,
+        lifecycle: 'advance',
+      }),
+    });
+
+    expect(result.content).toHaveLength(1);
+    expect((result.content[0] as { text: string }).text).not.toContain('# Step 1: Do Something');
   });
 });

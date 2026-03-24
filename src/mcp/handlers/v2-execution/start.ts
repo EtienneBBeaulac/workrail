@@ -26,6 +26,7 @@ import { anchorsToObservations, type ObservationEventData } from '../../../v2/du
 import { createBundledSource } from '../../../types/workflow-source.js';
 import type { WorkflowDefinition } from '../../../types/workflow-definition.js';
 import { hasWorkflowDefinitionShape } from '../../../types/workflow-definition.js';
+import type { CompiledWorkflowSnapshotV1 } from '../../../v2/durable-core/schemas/compiled-workflow/index.js';
 import {
   type StartWorkflowError,
 } from '../v2-execution-helpers.js';
@@ -39,6 +40,18 @@ import { EVENT_KIND } from '../../../v2/durable-core/constants.js';
 import { buildNextCall } from './index.js';
 import { resolveFirstStep } from '../../../v2/durable-core/domain/start-construction.js';
 import { createWorkflowReaderForRequest, hasRequestWorkspaceSignal } from '../shared/request-workflow-reader.js';
+import { buildStepContentEnvelope, type StepContentEnvelope, type ResolvedReference } from '../../step-content-envelope.js';
+import { resolveBindingBaseDir } from '../v2-workspace-resolution.js';
+import { resolveWorkflowReferences } from '../v2-reference-resolver.js';
+
+/**
+ * Result of executeStartWorkflow — includes both the public response and
+ * the internal content envelope for the formatter.
+ */
+export interface StartWorkflowResult {
+  readonly response: z.infer<typeof V2StartWorkflowOutputSchema>;
+  readonly contentEnvelope: StepContentEnvelope;
+}
 
 /**
  * Load workflow, compile it, hash it, and pin to store for deterministic execution.
@@ -49,13 +62,16 @@ export function loadAndPinWorkflow(args: {
   readonly crypto: Sha256PortV2;
   readonly pinnedStore: import('../../../v2/ports/pinned-workflow-store.port.js').PinnedWorkflowStorePortV2;
   readonly validationPipelineDeps: ValidationPipelineDepsPhase1a;
+  readonly workspacePath?: string;
+  readonly resolvedRootUris?: readonly string[];
 }): RA<{
   readonly workflow: import('../../../types/workflow.js').Workflow;
   readonly workflowHash: WorkflowHash;
   readonly pinnedWorkflow: ReturnType<typeof createWorkflow>;
   readonly firstStep: { readonly id: string };
+  readonly resolvedReferences: readonly ResolvedReference[];
 }, StartWorkflowError> {
-  const { workflowId, workflowReader, crypto, pinnedStore, validationPipelineDeps } = args;
+  const { workflowId, workflowReader, crypto, pinnedStore, validationPipelineDeps, workspacePath, resolvedRootUris } = args;
 
   return RA.fromPromise(workflowReader.getWorkflowById(workflowId), (e) => ({
     kind: 'precondition_failed' as const,
@@ -95,44 +111,52 @@ export function loadAndPinWorkflow(args: {
         });
       }
       const compiled = pipelineOutcome.snapshot;
-      const workflowHashRes = workflowHashForCompiledSnapshot(compiled as unknown as JsonValue, crypto);
-      if (workflowHashRes.isErr()) {
-        return neErrorAsync({ kind: 'hash_computation_failed' as const, message: workflowHashRes.error.message });
-      }
-      const workflowHash = workflowHashRes.value;
+      const bindingBaseDir = resolveBindingBaseDir(workspacePath, resolvedRootUris ?? []);
 
-      return pinnedStore.get(workflowHash)
-        .mapErr((cause) => ({ kind: 'pinned_workflow_store_failed' as const, cause }))
-        .andThen((existingPinned) => {
-          if (!existingPinned) {
-            return pinnedStore.put(workflowHash, compiled)
-              .mapErr((cause) => ({ kind: 'pinned_workflow_store_failed' as const, cause }));
+      return enrichPinnedSnapshotWithResolvedReferences(compiled, workflow.definition.references ?? [], bindingBaseDir)
+        .andThen(({ snapshot: enrichedCompiled, resolvedReferences }) => {
+          const workflowHashRes = workflowHashForCompiledSnapshot(enrichedCompiled as unknown as JsonValue, crypto);
+          if (workflowHashRes.isErr()) {
+            return neErrorAsync({ kind: 'hash_computation_failed' as const, message: workflowHashRes.error.message });
           }
-          return okAsync(undefined);
-        })
-        .andThen(() => pinnedStore.get(workflowHash).mapErr((cause) => ({ kind: 'pinned_workflow_store_failed' as const, cause })))
-        .andThen((pinned) => {
-          if (!pinned || pinned.sourceKind !== 'v1_pinned' || !hasWorkflowDefinitionShape(pinned.definition)) {
-            return neErrorAsync({
-              kind: 'invariant_violation' as const,
-              message: 'Failed to pin executable workflow snapshot (missing or invalid pinned workflow).',
+          const workflowHash = workflowHashRes.value;
+
+          return pinnedStore.get(workflowHash)
+            .mapErr((cause) => ({ kind: 'pinned_workflow_store_failed' as const, cause }))
+            .andThen((existingPinned) => {
+              if (!existingPinned) {
+                return pinnedStore.put(workflowHash, enrichedCompiled)
+                  .mapErr((cause) => ({ kind: 'pinned_workflow_store_failed' as const, cause }));
+              }
+              return okAsync(undefined);
+            })
+            .andThen(() => pinnedStore.get(workflowHash).mapErr((cause) => ({ kind: 'pinned_workflow_store_failed' as const, cause })))
+            .andThen((pinned) => {
+              if (!pinned || pinned.sourceKind !== 'v1_pinned' || !hasWorkflowDefinitionShape(pinned.definition)) {
+                return neErrorAsync({
+                  kind: 'invariant_violation' as const,
+                  message: 'Failed to pin executable workflow snapshot (missing or invalid pinned workflow).',
+                });
+              }
+              const pinnedWorkflow = createWorkflow(pinned.definition as WorkflowDefinition, createBundledSource());
+
+              const resolution = resolveFirstStep(workflow, pinned);
+              if (resolution.isErr()) {
+                const error: StartWorkflowError = resolution.error.reason === 'no_steps'
+                  ? { kind: 'workflow_has_no_steps' as const, workflowId: asWorkflowId(resolution.error.detail) }
+                  : { kind: 'invariant_violation' as const, message: resolution.error.detail };
+                return neErrorAsync(error);
+              }
+
+              const firstStep = resolution.value;
+              return okAsync({
+                workflow,
+                firstStep,
+                workflowHash,
+                pinnedWorkflow,
+                resolvedReferences: pinned.resolvedReferences ?? resolvedReferences,
+              });
             });
-          }
-          const pinnedWorkflow = createWorkflow(pinned.definition as WorkflowDefinition, createBundledSource());
-          
-          // Resolve and validate first step using the shared pure function
-          const resolution = resolveFirstStep(workflow, pinned);
-          
-          if (resolution.isErr()) {
-            // Map domain outcome to runtime error
-            const error: StartWorkflowError = resolution.error.reason === 'no_steps'
-              ? { kind: 'workflow_has_no_steps' as const, workflowId: asWorkflowId(resolution.error.detail) }
-              : { kind: 'invariant_violation' as const, message: resolution.error.detail };
-            return neErrorAsync(error);
-          }
-          
-          const firstStep = resolution.value;
-          return okAsync({ workflow, firstStep, workflowHash, pinnedWorkflow });
         });
     });
 }
@@ -298,7 +322,7 @@ export function mintStartTokens(args: {
 export function executeStartWorkflow(
   input: import('../../v2/tools.js').V2StartWorkflowInput,
   ctx: V2ToolContext
-): RA<z.infer<typeof V2StartWorkflowOutputSchema>, StartWorkflowError> {
+): RA<StartWorkflowResult, StartWorkflowError> {
   const { gate, sessionStore, snapshotStore, pinnedStore, crypto, tokenCodecPorts, idFactory, validationPipelineDeps, tokenAliasStore, entropy } = ctx.v2;
   const workflowReader = hasRequestWorkspaceSignal({
     workspacePath: input.workspacePath,
@@ -318,8 +342,10 @@ export function executeStartWorkflow(
     crypto,
     pinnedStore,
     validationPipelineDeps,
+    workspacePath: input.workspacePath,
+    resolvedRootUris: ctx.v2.resolvedRootUris,
   })
-    .andThen(({ workflow, firstStep, workflowHash, pinnedWorkflow }) => {
+    .andThen(({ workflow, firstStep, workflowHash, pinnedWorkflow, resolvedReferences }) => {
       // 2. Resolve workspace anchors for observation events (graceful: empty on failure).
       // Priority: explicit workspacePath input > MCP roots URI > server process CWD.
       const anchorsRA: RA<readonly ObservationEventData[], never> =
@@ -381,11 +407,11 @@ export function executeStartWorkflow(
               })
             )
               .mapErr((cause) => ({ kind: 'session_append_failed' as const, cause }))
-              .map(() => ({ workflow, firstStep, workflowHash, pinnedWorkflow, sessionId, runId, nodeId }));
+              .map(() => ({ workflow, firstStep, workflowHash, pinnedWorkflow, resolvedReferences, sessionId, runId, nodeId }));
           });
       });
     })
-    .andThen(({ pinnedWorkflow, firstStep, workflowHash, sessionId, runId, nodeId }) => {
+    .andThen(({ pinnedWorkflow, firstStep, workflowHash, sessionId, runId, nodeId, resolvedReferences }) => {
       // 5. Derive workflow hash ref
       const wfRefRes = deriveWorkflowHashRef(workflowHash);
       if (wfRefRes.isErr()) {
@@ -431,15 +457,53 @@ export function executeStartWorkflow(
         const preferences = defaultPreferences;
         const nextIntent = deriveNextIntent({ rehydrateOnly: false, isComplete: false, pending: meta });
 
-        return okAsync(V2StartWorkflowOutputSchema.parse({
-          continueToken: tokens.continueToken,
-          checkpointToken: tokens.checkpointToken,
-          isComplete: false,
-          pending,
-          preferences,
-          nextIntent,
-          nextCall: buildNextCall({ continueToken: tokens.continueToken, isComplete: false, pending }),
-        }));
+        const contentEnvelope = buildStepContentEnvelope({
+          meta,
+          references: resolvedReferences,
+        });
+
+          const parsed = V2StartWorkflowOutputSchema.parse({
+            continueToken: tokens.continueToken,
+            checkpointToken: tokens.checkpointToken,
+            isComplete: false,
+            pending,
+            preferences,
+            nextIntent,
+            nextCall: buildNextCall({ continueToken: tokens.continueToken, isComplete: false, pending }),
+          });
+          return okAsync({ response: parsed, contentEnvelope });
       });
     });
+}
+
+function enrichPinnedSnapshotWithResolvedReferences(
+  snapshot: Extract<CompiledWorkflowSnapshotV1, { sourceKind: 'v1_pinned' }>,
+  references: readonly import('../../../types/workflow-definition.js').WorkflowReference[],
+  workspacePath: string,
+): RA<{
+  readonly snapshot: Extract<CompiledWorkflowSnapshotV1, { sourceKind: 'v1_pinned' }>;
+  readonly resolvedReferences: readonly ResolvedReference[];
+}, StartWorkflowError> {
+  if (references.length === 0) {
+    return okAsync({ snapshot, resolvedReferences: [] });
+  }
+
+  return RA.fromPromise(
+    resolveWorkflowReferences(references, workspacePath),
+    () => ({ kind: 'reference_resolution_failed' as const }),
+  ).map((result) => {
+    for (const warning of result.warnings) {
+      console.warn(`[workrail:reference-resolution] ${warning.message}`);
+    }
+
+    const pinnedResolvedReferences = [...result.resolved];
+
+    return {
+      snapshot: {
+        ...snapshot,
+        resolvedReferences: pinnedResolvedReferences,
+      },
+      resolvedReferences: result.resolved,
+    };
+  });
 }

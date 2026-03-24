@@ -63,6 +63,49 @@ const CompiledWorkflowSnapshotV1PinnedSchema = z.object({
    * Optional for backward compatibility with older snapshots.
    */
   pinnedOverrides: z.record(z.string()).optional(),
+  /**
+   * Reference resolution state frozen at start time.
+   *
+   * This preserves the exact reference status the session started with
+   * (`resolved` vs `unresolved`, plus any absolute resolved path) so
+   * rehydrate can replay the same truth without re-checking the filesystem.
+   *
+   * Included in the workflow hash intentionally: different reference
+   * resolution outcomes produce different agent-visible context.
+   *
+   * Optional for backward compatibility with snapshots produced before
+   * reference state was pinned.
+   */
+  resolvedReferences: z.array(z.discriminatedUnion('status', [
+    z.object({
+      id: z.string().min(1),
+      title: z.string().min(1),
+      source: z.string().min(1),
+      purpose: z.string().min(1),
+      authoritative: z.boolean(),
+      resolveFrom: z.enum(['workspace', 'package']),
+      status: z.literal('resolved'),
+      resolvedPath: z.string().min(1),
+    }),
+    z.object({
+      id: z.string().min(1),
+      title: z.string().min(1),
+      source: z.string().min(1),
+      purpose: z.string().min(1),
+      authoritative: z.boolean(),
+      resolveFrom: z.enum(['workspace', 'package']),
+      status: z.literal('unresolved'),
+    }),
+    z.object({
+      id: z.string().min(1),
+      title: z.string().min(1),
+      source: z.string().min(1),
+      purpose: z.string().min(1),
+      authoritative: z.boolean(),
+      resolveFrom: z.enum(['workspace', 'package']),
+      status: z.literal('pinned'),
+    }),
+  ])).optional(),
 });
 
 export const CompiledWorkflowSnapshotV1Schema = z.discriminatedUnion('sourceKind', [

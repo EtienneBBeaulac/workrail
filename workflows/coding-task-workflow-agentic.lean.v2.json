@@ -2,7 +2,7 @@
   "id": "coding-task-workflow-agentic",
   "name": "Agentic Task Dev Workflow (Lean • Notes-First • WorkRail Executor)",
   "version": "1.0.0",
-  "description": "Lean variant of the agentic coding workflow. Merges triage, inputs gate, context gathering, and re-triage into a single Understand & Classify phase. Reduces context variable count and removes top-level clarificationPrompts. Same quality guarantees with fewer tokens.",
+  "description": "The user guides the agent through understanding the task, selecting an approach, planning in slices, implementing incrementally, and verifying the result through explicit review and validation checkpoints.",
   "recommendedPreferences": {
     "recommendedAutonomy": "guided",
     "recommendedRiskPolicy": "conservative"
@@ -16,22 +16,46 @@
   "metaGuidance": [
     "DEFAULT BEHAVIOR: self-execute with tools. Only ask the user for business decisions, missing external artifacts, or permissions you cannot resolve.",
     "V2 DURABILITY: use output.notesMarkdown as the primary durable record. Do NOT mirror execution state into CONTEXT.md or any markdown checkpoint file.",
-    "ARTIFACT STRATEGY: `implementation_plan.md` is the only default human-facing artifact for non-small tasks. `spec.md` or `design.md` are optional and should be created only when they materially improve handoff or reviewability.",
+    "ARTIFACT STRATEGY: `implementation_plan.md` drives execution. `spec.md`, when created, is canonical for observable behavior and serves as the verification anchor. Do not create extra artifacts unless they materially improve handoff.",
     "OWNERSHIP & DELEGATION: the main agent owns strategy, decisions, synthesis, and implementation. Delegate only bounded cognitive routines via WorkRail Executor. Never hand off full task ownership or rely on named Builder/Researcher identities.",
     "SUBAGENT SYNTHESIS: treat subagent output as evidence, not conclusions. State your hypothesis before delegating, then interrogate what came back: what was missed, wrong, or new? Say what changed your mind or what you still reject, and why.",
     "PARALLELISM: when reads, audits, or delegations are independent, run them in parallel inside the phase. Parallelize cognition; serialize synthesis and canonical writes.",
     "PHILOSOPHY LENS: apply the user's coding philosophy (from active session rules) as the evaluation lens. Flag violations by principle name, not as generic feedback. If principles conflict, surface the tension explicitly instead of silently choosing.",
-    "PHILOSOPHY CHECKS: watch for immutability, architectural fixes over patches, illegal states unrepresentable, explicit domain types, reduced path explosion, type safety, exhaustiveness, and errors as data.",
-    "PHILOSOPHY CHECKS (cont): validate at boundaries, fail fast on invariant violations, prefer determinism and small pure functions, use data-driven control flow, DI at boundaries, YAGNI with discipline, and atomicity.",
-    "PHILOSOPHY CHECKS (cont): treat graceful degradation, observability, fakes over mocks, and focused interfaces as first-class review concerns.",
+    "VALIDATION: prefer static/compile-time safety over runtime checks. Use build, type-checking, and tests as the primary proof of correctness — in that order of reliability.",
     "DRIFT HANDLING: when reality diverges from the plan, update the plan artifact and re-audit deliberately rather than accumulating undocumented drift.",
     "NEVER COMMIT MARKDOWN FILES UNLESS USER EXPLICITLY ASKS."
+  ],
+  "references": [
+    {
+      "id": "authoring-spec",
+      "title": "Authoring Specification",
+      "source": "./spec/authoring-spec.json",
+      "purpose": "Canonical rules and constraints for workflow authoring. Consult when making structural decisions about workflow design.",
+      "authoritative": true,
+      "resolveFrom": "package"
+    },
+    {
+      "id": "workflow-schema",
+      "title": "Workflow JSON Schema",
+      "source": "./spec/workflow.schema.json",
+      "purpose": "The JSON schema that all workflow definitions must conform to. Use as the structural contract reference.",
+      "authoritative": true,
+      "resolveFrom": "package"
+    },
+    {
+      "id": "authoring-provenance",
+      "title": "Workflow Authoring Provenance",
+      "source": "./spec/authoring-spec.provenance.json",
+      "purpose": "Source-of-truth map showing what is canonical, derived, and non-canonical in workflow authoring guidance.",
+      "authoritative": false,
+      "resolveFrom": "package"
+    }
   ],
   "steps": [
     {
       "id": "phase-0-understand-and-classify",
       "title": "Phase 0: Understand & Classify",
-      "prompt": "Build understanding and classify the task in one pass.\n\nStep 1 — Early exit check:\nBefore any exploration, verify that acceptance criteria or expected behavior exist. If they are completely absent and cannot be inferred, ask the user and stop. Do NOT ask questions you can resolve with tools.\n\nStep 2 — Explore:\nUse tools to build the minimum complete understanding needed to design correctly. Read independent files in parallel when possible.\n\nGather:\n- key entry points and call chain sketch\n- relevant files, modules, and functions\n- existing repo patterns with concrete file references\n- testing strategy already present in the repo\n- risks and unknowns\n- explicit invariants and non-goals\n\nStep 3 — Discover the dev's philosophy and preferences:\nDiscover what the dev cares about using this fallback chain (try each, use all that are available):\n1. Memory MCP (if available): call `mcp_memory_conventions`, `mcp_memory_prefer`, `mcp_memory_recall` to retrieve learned preferences and coding philosophy\n2. Active session rules / Firebender rules: read any rules, commands, or philosophy documents already in context\n3. Repo patterns: infer preferences from how the codebase already works — error handling style, mutability patterns, test approach, naming conventions, architecture patterns\n4. Ask the dev: only if the above sources are contradictory or clearly insufficient for this task\n\nDo NOT distill into a summary — record WHERE the philosophy lives (which rules, which Memory entries, which repo files exemplify it) so later phases can reference the source directly.\n\nIf stated rules conflict with actual repo patterns (e.g., rules say 'prefer immutability' but the module uses MutableStateFlow), note the conflict in `philosophyConflicts` — this is valuable signal for design decisions.\n\nStep 4 — Classify (informed by exploration):\nNow that you have real context, classify:\n- `taskComplexity`: Small / Medium / Large\n- `riskLevel`: Low / Medium / High\n- `rigorMode`: QUICK / STANDARD / THOROUGH\n- `automationLevel`: High / Medium / Low\n- `prStrategy`: SinglePR / MultiPR\n\nDecision guidance:\n- QUICK: small, low-risk, clear path, little ambiguity\n- STANDARD: medium scope or moderate risk\n- THOROUGH: large scope, architectural uncertainty, or high-risk change\n\nStep 5 — Optional deeper context (post-classification):\nIf `rigorMode` is STANDARD or THOROUGH and understanding still feels incomplete or the call chain is too fuzzy, and delegation is available, spawn TWO WorkRail Executors SIMULTANEOUSLY running `routine-context-gathering` with focus=COMPLETENESS and focus=DEPTH. Synthesize both outputs before finishing this step.\n\nSet these keys in the next `continue_workflow` call's `context` object:\n- `taskComplexity`\n- `riskLevel`\n- `rigorMode`\n- `automationLevel`\n- `prStrategy`\n- `contextSummary`\n- `candidateFiles`\n- `invariants`\n- `nonGoals`\n- `openQuestions`\n- `philosophySources` — pointers to where the dev's philosophy lives (rules, Memory entries, repo files), not a summary\n- `philosophyConflicts` — conflicts between stated rules and actual repo patterns (if any)\n\nRules:\n- answer your own questions with tools whenever possible\n- only keep true human-decision questions in `openQuestions`\n- keep `openQuestions` bounded to the minimum necessary\n- classify AFTER exploring, not before",
+      "prompt": "Understand this before you touch anything.\n\nMake sure the expected behavior is clear enough to proceed. If it really isn't, ask me only what you can't answer yourself. Don't ask me things you can find with tools.\n\nThen dig through the code. Figure out:\n- where this starts and what the call chain looks like\n- which files, modules, and functions matter\n- what patterns this should follow\n- how this repo verifies similar work\n- what the real risks, invariants, and non-goals are\n\nFigure out what philosophy to use while doing the work. Prefer, in order: Memory MCP (`mcp_memory_conventions`, `mcp_memory_prefer`, `mcp_memory_recall`), active session/Firebender rules, repo patterns, then me only if those still conflict or aren't enough.\n\nRecord where that philosophy lives, not a summary. If the stated rules and repo patterns disagree, capture the conflict.\n\nOnce you actually understand the task, classify it:\n- `taskComplexity`: Small / Medium / Large\n- `riskLevel`: Low / Medium / High\n- `rigorMode`: QUICK / STANDARD / THOROUGH\n- `automationLevel`: High / Medium / Low\n- `prStrategy`: SinglePR / MultiPR\n\nUse this guidance:\n- QUICK: small, low-risk, clear path, little ambiguity\n- STANDARD: medium scope or moderate risk\n- THOROUGH: large scope, architectural uncertainty, or high-risk change\n\nThen force a context-clarity check. Score each from 0-2 and give one sentence of evidence for each score:\n- `entryPointClarity`: 0 = clear entry point and call chain, 1 = partial chain with gaps, 2 = still unclear where behavior starts or flows\n- `boundaryClarity`: 0 = clear boundary, 1 = likely boundary but some uncertainty, 2 = patch-vs-boundary decision still unclear\n- `invariantClarity`: 0 = important invariants are explicit, 1 = some are inferred or uncertain, 2 = important invariants are still unclear\n- `verificationClarity`: 0 = clear deterministic verification path, 1 = partial verification path, 2 = verification is still weak or unclear\n\nUse the rubric, not vibes:\n- QUICK: do not run the deeper context batch; if the rubric says you're missing too much context, your classification is probably wrong and you should reclassify upward before moving on\n- STANDARD: run the deeper context batch if the total score is 3 or more, or if `boundaryClarity`, `invariantClarity`, or `verificationClarity` is 2\n- THOROUGH: always run the deeper context batch\n\nThe deeper context batch is:\n- `routine-context-gathering` with `focus=COMPLETENESS`\n- `routine-context-gathering` with `focus=DEPTH`\n\nAfter the batch, synthesize what changed, what stayed the same, and what is still unknown. If the extra context changes the classification, update it before you leave this step.\n\nCapture:\n- `taskComplexity`\n- `riskLevel`\n- `rigorMode`\n- `automationLevel`\n- `prStrategy`\n- `contextSummary`\n- `candidateFiles`\n- `invariants`\n- `nonGoals`\n- `openQuestions` (only real human-decision questions)\n- `philosophySources`\n- `philosophyConflicts`",
       "requireConfirmation": {
         "or": [
           { "var": "taskComplexity", "equals": "Large" },
@@ -43,10 +67,12 @@
       "id": "phase-1a-hypothesis",
       "title": "Phase 1a: State Hypothesis",
       "runCondition": {
-        "var": "taskComplexity",
-        "not_equals": "Small"
+        "and": [
+          { "var": "taskComplexity", "not_equals": "Small" },
+          { "var": "rigorMode", "not_equals": "QUICK" }
+        ]
       },
-      "prompt": "Before any design work, state your current hypothesis in 3-5 sentences.\n\nBased on what you learned in Phase 0, write:\n1. Your current best guess for the approach\n2. Your main concern about that guess\n3. What would most likely make that guess wrong\n\nThis is your reference point. After design generation, you will compare the result against this hypothesis and say what changed your mind or what held firm.\n\nSet this key in the next `continue_workflow` call's `context` object:\n- `initialHypothesis`",
+      "prompt": "Before you do design work, tell me your current best guess.\n\nKeep it short:\n1. what you think the right approach is\n2. what worries you about it\n3. what would most likely make it wrong\n\nCapture:\n- `initialHypothesis`",
       "requireConfirmation": false
     },
     {
@@ -84,7 +110,19 @@
         "var": "taskComplexity",
         "not_equals": "Small"
       },
-      "prompt": "Read `design-candidates.md`, compare against your initial hypothesis, and make the final architecture decision.\n\nInput contract: both QUICK and deep design paths produce `design-candidates.md` with candidates, tradeoffs, and a recommendation. Use that artifact as your primary input.\n\nPart A — Compare to hypothesis:\nRevisit `initialHypothesis`. Now that you have design candidates:\n- Where did the design work confirm your hypothesis?\n- Where did it challenge or change your thinking?\n- What did you learn that you hadn't considered?\nState explicitly what changed your mind and what held firm.\n\nPart B — Challenge the leading option:\n- What's the strongest argument against the recommended approach?\n- What assumption, if wrong, would invalidate it?\n- STANDARD/THOROUGH: optionally spawn ONE WorkRail Executor running `routine-hypothesis-challenge` focused on the leading option's failure modes\n- THOROUGH: optionally also spawn ONE WorkRail Executor running `routine-execution-simulation` to trace the 3 most likely failure scenarios\n\nPart C — Select:\nMake the final architecture decision. The design output is evidence, not a decision — you own the choice.\n\nIf the simplest solution satisfies acceptance criteria, prefer it. Complexity must justify itself. If the challenged leading candidate no longer looks best, switch deliberately rather than defending sunk cost.\n\nSet these keys in the next `continue_workflow` call's `context` object:\n- `selectedApproach` — the chosen design with rationale tied back to tensions\n- `runnerUpApproach` — the next-best option and why it lost\n- `architectureRationale` — which tensions were resolved and which were accepted\n- `pivotTriggers` — specific conditions under which you'd switch to the runner-up\n- `keyRiskToMonitor` — the failure mode of the selected approach\n- `acceptedTradeoffs` — what the selected approach gives up (feeds directly into design review)\n- `identifiedFailureModes` — per-candidate failure modes (feeds directly into design review)",
+      "prompt": "Read `design-candidates.md`, compare it to your original guess, and make the call.\n\nBe explicit about three things:\n- what the design work confirmed\n- what changed your mind\n- what you missed the first time\n\nThen pressure-test the leading option:\n- what's the strongest case against it?\n- what assumption breaks it?\n\nAfter the challenge batch, say:\n- what changed your mind\n- what didn't\n- which findings you reject and why\n\nPick the approach yourself. Don't hide behind the artifact. If the simplest thing works, prefer it. If the front-runner stops looking right after challenge, switch.\n\nCapture:\n- `selectedApproach` — chosen design with rationale tied to tensions\n- `runnerUpApproach` — next-best option and why it lost\n- `architectureRationale` — tensions resolved vs accepted\n- `pivotTriggers` — conditions under which you'd switch to the runner-up\n- `keyRiskToMonitor` — failure mode of the selected approach\n- `acceptedTradeoffs`\n- `identifiedFailureModes`",
+      "promptFragments": [
+        {
+          "id": "phase-1c-challenge-standard",
+          "when": { "var": "rigorMode", "in": ["STANDARD", "THOROUGH"] },
+              "text": "Run `routine-hypothesis-challenge` on the leading option's failure modes before you decide."
+        },
+        {
+          "id": "phase-1c-challenge-thorough",
+          "when": { "var": "rigorMode", "equals": "THOROUGH" },
+              "text": "Also run `routine-execution-simulation` on the three most likely failure paths before you decide."
+        }
+      ],
       "requireConfirmation": {
         "or": [
           { "var": "automationLevel", "equals": "Low" },
@@ -131,13 +169,20 @@
         {
           "id": "phase-2c-synthesize-design-review",
           "title": "Synthesize Design Review Findings",
-          "prompt": "Read `design-review-findings.md` and synthesize the review into workflow-owned decisions.\n\nPart A — Compare against your pre-assessment:\nRevisit `designReviewAssessment`.\n- What did the review confirm?\n- What did it surface that you missed?\n- What changed your mind and what held firm?\n\nPart B — Optional mode-adaptive challenge around the review findings:\n- QUICK: self-synthesize only\n- STANDARD: optionally spawn ONE WorkRail Executor running `routine-hypothesis-challenge` focused on the most serious review finding\n- THOROUGH: optionally spawn TWO WorkRail Executors — `routine-hypothesis-challenge` on the most serious finding + `routine-execution-simulation` on the most dangerous failure mode\n\nPart C — Decide:\nInterpret the findings yourself. Do not adopt the review artifact or any subagent framing wholesale.\n\nIf issues are found, fix the design (update `selectedApproach`, `architectureRationale`, `pivotTriggers`, `acceptedTradeoffs`, `identifiedFailureModes`) before continuing.\n\nSet these keys in the next `continue_workflow` call's `context` object:\n- `designFindings`\n- `designRevised`",
+          "prompt": "Read `design-review-findings.md` and turn the review into workflow-owned decisions.\n\nCompare it against `designReviewAssessment`:\n- what did the review confirm?\n- what did it surface that you missed?\n- what changed your mind and what held firm?\n\nIf the findings are real, fix the design before you continue (`selectedApproach`, `architectureRationale`, `pivotTriggers`, `acceptedTradeoffs`, `identifiedFailureModes`).\n\nAfter any extra challenge, synthesize explicitly:\n- which findings actually matter\n- what changed in the design\n- what you reject and why\n\nFor any finding that changes the decision, classify it as:\n- `Confirmed`: you checked it against primary evidence (code, artifacts, spec, tests/build, or direct workflow context)\n- `Plausible`: interesting, but not verified enough to drive the decision yet\n- `Rejected`: contradicted by fuller context or direct evidence\n\nSubagent agreement alone is not enough for `Confirmed`.\n\nCapture:\n- `designFindings`\n- `designRevised`",
+          "promptFragments": [
+            {
+              "id": "phase-2c-challenge-thorough",
+              "when": { "var": "rigorMode", "equals": "THOROUGH" },
+              "text": "If the review surfaced materially non-empty or surprising findings, run `routine-hypothesis-challenge` on the most serious finding and `routine-execution-simulation` on the most dangerous failure mode before you finalize the revised design."
+            }
+          ],
           "requireConfirmation": false
         },
         {
           "id": "phase-2d-loop-decision",
           "title": "Design Review Loop Decision",
-          "prompt": "Provide a loop control artifact.\n\nDecision rules:\n- if `designFindings` is non-empty and design was revised -> continue (verify the revision)\n- if `designFindings` is empty -> stop\n- if max iterations reached -> stop and document remaining concerns\n\nOutput exactly:\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
+          "prompt": "Decide whether the design needs another pass.\n\nIf `designFindings` is non-empty and the design was revised, keep going so the revision gets checked.\nIf `designFindings` is empty, stop.\nIf you've hit the limit, stop and record the remaining concerns.\n\nThen emit the required loop-control artifact in this shape (`decision` must be `continue` or `stop`):\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
           "requireConfirmation": false,
           "outputContract": {
             "contractRef": "wr.contracts.loop_control"
@@ -152,7 +197,24 @@
         "var": "taskComplexity",
         "not_equals": "Small"
       },
-      "prompt": "Create or update the human-facing implementation artifact: `implementation_plan.md`.\n\nThis phase combines slicing, plan drafting, philosophy alignment, and test design.\n\nThe plan must include:\n1. Problem statement\n2. Acceptance criteria\n3. Non-goals\n4. Philosophy-driven constraints (from the user's active rules)\n5. Invariants\n6. Selected approach + rationale + runner-up\n7. Vertical slices\n8. Work packages only when they improve execution or enable safe parallelism\n9. Test design\n10. Risk register\n11. PR packaging strategy\n12. Philosophy alignment per slice:\n   - [principle] -> [satisfied / tension / violated + 1-line why]\n\nSet these keys in the next `continue_workflow` call's `context` object:\n- `implementationPlan`\n- `slices`\n- `testDesign`\n- `estimatedPRCount`\n- `followUpTickets` (initialize if needed)\n- `unresolvedUnknownCount`\n- `planConfidenceBand`\n\nRules:\n- keep `implementation_plan.md` concrete enough for another engineer to implement without guessing\n- use work packages only when they create real clarity; do not over-fragment work\n- use the user's coding philosophy as the primary planning lens, and name tensions explicitly\n- set `unresolvedUnknownCount` to the number of still-open issues that would materially affect implementation quality\n- set `planConfidenceBand` to Low / Medium / High based on how ready the plan actually is",
+      "prompt": "Turn the decision into a plan someone else could execute without guessing.\n\nUpdate `implementation_plan.md`.\n\nIt should cover:\n1. Problem statement\n2. Acceptance criteria (mirror `spec.md` if it exists; `spec.md` owns observable behavior)\n3. Non-goals\n4. Philosophy-driven constraints\n5. Invariants\n6. Selected approach + rationale + runner-up\n7. Vertical slices\n8. Work packages only if they actually help\n9. Test design\n10. Risk register\n11. PR packaging strategy\n12. Philosophy alignment per slice:\n   - [principle] -> [satisfied / tension / violated + 1-line why]\n\nCapture:\n- `implementationPlan`\n- `slices`\n- `testDesign`\n- `estimatedPRCount`\n- `followUpTickets` (initialize if needed)\n- `unresolvedUnknownCount` — count of open issues that would materially affect implementation quality\n- `planConfidenceBand` — Low / Medium / High",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-3b-spec",
+      "title": "Phase 3b: Spec (Observable Behavior)",
+      "runCondition": {
+        "and": [
+          { "var": "taskComplexity", "not_equals": "Small" },
+          {
+            "or": [
+              { "var": "taskComplexity", "equals": "Large" },
+              { "var": "riskLevel", "equals": "High" }
+            ]
+          }
+        ]
+      },
+      "prompt": "Write `spec.md`.\n\nKeep it about what the feature does from the outside, not how you plan to build it.\n\nInclude:\n1. Feature summary\n2. Acceptance criteria\n3. Non-goals\n4. External API / interface contract if it matters\n5. Edge cases and failure modes\n6. How each acceptance criterion will be verified\n\nKeep it tight. If something can't be verified, it doesn't belong as an acceptance criterion.\n\n`spec.md` is canonical for observable behavior.",
       "requireConfirmation": false
     },
     {
@@ -160,8 +222,10 @@
       "type": "loop",
       "title": "Phase 4: Plan Audit (Review, Fix, Decide)",
       "runCondition": {
-        "var": "taskComplexity",
-        "not_equals": "Small"
+        "and": [
+          { "var": "taskComplexity", "not_equals": "Small" },
+          { "var": "rigorMode", "not_equals": "QUICK" }
+        ]
       },
       "loop": {
         "type": "while",
@@ -176,13 +240,30 @@
         {
           "id": "phase-4a-audit-and-refocus",
           "title": "Audit Plan and Apply Fixes",
-          "prompt": "Audit the plan and fix what you find in one pass.\n\nPart A -- Audit:\n- completeness / missing work\n- weak assumptions and risks\n- invariant coverage\n- slice boundary quality\n- philosophy alignment against the user's active rules\n- regression check against `resolvedFindings` (if present): if a previously resolved issue reappeared, treat it as Critical\n\nPhilosophy rules:\n- flag findings by principle name\n- Red / Orange findings go into `planFindings`\n- Yellow tensions are informational only and do NOT block loop exit\n\nBefore delegating, state your hypothesis: what do you think the plan's biggest weakness is right now? What are you most and least confident about?\n\nMode-adaptive delegation:\n- QUICK: self-audit only\n- STANDARD: if delegation is available, spawn THREE WorkRail Executors SIMULTANEOUSLY running `routine-plan-analysis`, `routine-hypothesis-challenge`, and `routine-philosophy-alignment`; include `routine-execution-simulation` only when runtime or state-flow risk is material\n- THOROUGH: if delegation is available, spawn FOUR WorkRail Executors SIMULTANEOUSLY running `routine-plan-analysis`, `routine-hypothesis-challenge`, `routine-execution-simulation`, and `routine-philosophy-alignment`\n\nInterrogate subagent output (if used):\n- Do NOT treat auditor findings as your findings. They are raw input from junior analysts.\n- Where 2+ auditors flag the same issue -> likely real, but verify it yourself\n- Where one auditor flags a unique concern -> investigate; is it genuine or did they miss context?\n- Where auditors conflict -> reason through it yourself rather than splitting the difference\n- State what changed your assessment of the plan and what didn't\n\nPart B -- Refocus (apply fixes immediately):\n- update `implementation_plan.md` to incorporate amendments\n- update `slices` if the plan shape changed\n- extract out-of-scope work into `followUpTickets`\n- track resolved findings (cap at 10, drop oldest)\n\nSet these keys in the next `continue_workflow` call's `context` object:\n- `planFindings`\n- `planConfidence`\n- `resolvedFindings`\n- `followUpTickets`\n\nRules:\n- the main agent is synthesizer and final decision-maker\n- do not delegate sequentially when audit routines are independent\n- do not silently accept plan drift; reflect changes in the plan artifact immediately",
+          "prompt": "Audit the plan and fix it in the same pass.\n\nLook for:\n- missing work\n- weak assumptions and risks\n- invariant gaps\n- bad slice boundaries\n- philosophy violations or tensions\n- regressions from things you already fixed\n- mismatches between `implementation_plan.md` and `spec.md` if there is a spec\n\nBefore you delegate, say what looks weakest right now and what you trust least.\n\nAfter the audit batch, synthesize explicitly:\n- what multiple auditors agreed on\n- what only one auditor raised\n- what you reject and why\n- what changed in the plan because of the audit\n\nFor any finding that changes the plan, classify it as:\n- `Confirmed`: you checked it against primary evidence (code, plan/spec artifacts, tests/build, or direct workflow context)\n- `Plausible`: interesting, but not verified enough to change the plan yet\n- `Rejected`: contradicted by fuller context or direct evidence\n\nSubagent agreement alone is not enough for `Confirmed`.\n\nThen fix the plan immediately:\n- update `implementation_plan.md`\n- update `spec.md` if acceptance criteria or other observable behavior changed\n- update `slices` if the shape changed\n- move out-of-scope work into `followUpTickets`\n- track resolved findings (cap at 10, drop oldest)\n\nCapture:\n- `planFindings`\n- `planConfidence`\n- `resolvedFindings`\n- `followUpTickets`\n\nIf the plan drifted, fix the plan. Don't just keep going.",
+          "promptFragments": [
+            {
+              "id": "phase-4a-delegation-quick",
+              "when": { "var": "rigorMode", "equals": "QUICK" },
+              "text": "Do this yourself."
+            },
+            {
+              "id": "phase-4a-delegation-standard",
+              "when": { "var": "rigorMode", "equals": "STANDARD" },
+              "text": "Run `routine-plan-analysis`, `routine-hypothesis-challenge`, and `routine-philosophy-alignment` in parallel before you decide whether the plan is good enough."
+            },
+            {
+              "id": "phase-4a-delegation-thorough",
+              "when": { "var": "rigorMode", "equals": "THOROUGH" },
+              "text": "Run `routine-plan-analysis`, `routine-hypothesis-challenge`, `routine-execution-simulation`, and `routine-philosophy-alignment` in parallel before you decide whether the plan is good enough."
+            }
+          ],
           "requireConfirmation": false
         },
         {
           "id": "phase-4b-loop-decision",
           "title": "Loop Exit Decision",
-          "prompt": "Provide a loop control artifact.\n\nDecision rules:\n- if `planFindings` is non-empty -> continue\n- if `planFindings` is empty -> stop, but enumerate what was checked to justify the clean pass\n- if max iterations reached -> stop and document remaining concerns\n\nOutput exactly:\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
+          "prompt": "Decide whether the plan needs another pass.\n\nIf `planFindings` is non-empty, keep going.\nIf it's empty, stop — but say what you checked so the clean pass means something.\nIf you've hit the limit, stop and record what still bothers you.\n\nThen emit the required loop-control artifact in this shape (`decision` must be `continue` or `stop`):\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
           "requireConfirmation": true,
           "outputContract": {
             "contractRef": "wr.contracts.loop_control"
@@ -219,11 +300,8 @@
         {
           "id": "phase-6a-implement-slice",
           "title": "Implement Slice",
-          "prompt": "Implement slice `{{currentSlice.name}}`.\n\nBefore writing code, do a quick inline check:\n- if pivot triggers have fired or plan assumptions are clearly stale, stop and return to planning instead of coding through it\n- if target files or symbols no longer match the plan, stop and re-plan\n\nImplementation rules:\n- the main agent owns implementation\n- delegate only targeted cognitive routines via the WorkRail Executor (challenge, simulation, philosophy review), not the whole slice\n- read independent files in parallel when possible\n- implement incrementally and keep the slice within its intended boundary\n- apply the user's coding philosophy as the active implementation lens\n- run tests and build after implementation to confirm the slice works\n\nTrack whether this slice required:\n- a new special-case (`specialCaseIntroduced`)\n- an unplanned abstraction (`unplannedAbstractionIntroduced`)\n- unexpected file changes outside planned scope (`unexpectedScopeChange`)\n\nSet `verifyNeeded` to true if ANY of:\n- `sliceIndex` is odd (verify every 2 slices)\n- `specialCaseIntroduced = true`\n- `unplannedAbstractionIntroduced = true`\n- `unexpectedScopeChange = true`\n- tests or build failed\n\nIf `prStrategy = MultiPR`, stop with a concise PR package for user review.\n\nSet these keys in the next `continue_workflow` call's `context` object:\n- `specialCaseIntroduced`\n- `unplannedAbstractionIntroduced`\n- `unexpectedScopeChange`\n- `verifyNeeded`",
-          "requireConfirmation": {
-            "var": "prStrategy",
-            "equals": "MultiPR"
-          }
+          "prompt": "Implement only the current slice: `{{currentSlice.name}}`.\n\nBefore you code, check whether the plan is still valid:\n- if the pivot triggers fired or the assumptions went stale, stop and go back to planning\n- if the target files or symbols no longer match, stop and re-plan\n\nStay in this slice.\n- don't do the rest of the plan early\n- only pull forward later-slice work if you absolutely need it to make this slice compile or integrate, and count that as `unexpectedScopeChange = true`\n- keep the changes incremental\n- run tests and build to prove the slice works\n\nTrack whether this slice required:\n- a new special-case (`specialCaseIntroduced`)\n- an unplanned abstraction (`unplannedAbstractionIntroduced`)\n- unexpected file changes outside planned scope (`unexpectedScopeChange`)\n\nSet `verifyNeeded` to true if ANY of:\n- `sliceIndex` is odd (verify every 2 slices)\n- `prStrategy = MultiPR`\n- `specialCaseIntroduced = true`\n- `unplannedAbstractionIntroduced = true`\n- `unexpectedScopeChange = true`\n- tests or build failed\n\nCapture:\n- `specialCaseIntroduced`\n- `unplannedAbstractionIntroduced`\n- `unexpectedScopeChange`\n- `verifyNeeded`",
+          "requireConfirmation": false
         },
         {
           "id": "phase-6b-verify-slice",
@@ -232,10 +310,34 @@
             "var": "verifyNeeded",
             "equals": true
           },
-          "prompt": "Evaluate what was just implemented with fresh eyes.\n\nReview:\n- does the implementation match the plan intent, not just the letter?\n- are there hidden assumptions or edge cases the implementation glossed over?\n- do invariants still hold?\n- are there philosophy-alignment regressions?\n- if multiple slices have passed since last verification, review all unverified slices together\n\nBefore delegating (if applicable), state: what is your honest assessment of the slice you just implemented? Where are you least confident?\n\nMode-adaptive delegation:\n- QUICK: self-verify only\n- STANDARD: if a fresh-eye trigger fired (`specialCaseIntroduced`, `unplannedAbstractionIntroduced`, or `unexpectedScopeChange`), optionally spawn ONE or TWO WorkRail Executors running `routine-hypothesis-challenge` and `routine-philosophy-alignment`\n- THOROUGH: if any fresh-eye trigger fired, spawn up to THREE WorkRail Executors running `routine-hypothesis-challenge`, `routine-execution-simulation`, and `routine-philosophy-alignment`\n\nAfter receiving subagent output (if used), interrogate: did they find something you genuinely missed, or are they flagging things you already considered and accepted? State what changed your assessment.\n\nSet these keys in the next `continue_workflow` call's `context` object:\n- `verificationFindings`\n- `verificationFailed`\n\nRule:\n- if serious concerns are found, stop and return to planning or ask the user\n- do not rubber-stamp; this step exists specifically to catch what the implementation step missed",
+          "prompt": "Take a fresh look at what you just changed.\n\nCheck whether:\n- it matches the plan's intent, not just the letter\n- it hides assumptions or skips edge cases\n- invariants still hold\n- it regressed against the user's philosophy\n- multiple unverified slices now need to be reviewed together\n- `unexpectedScopeChange` was just harmless integration work or real plan drift\n\nIf any of `specialCaseIntroduced`, `unplannedAbstractionIntroduced`, or `unexpectedScopeChange` is true, or if tests/build were shaky, run the verification batch before you decide this slice is done.\n\nAfter the verification batch, synthesize explicitly:\n- what multiple reviewers agreed on\n- what only one reviewer raised\n- what you reject and why\n- whether the drift was harmless integration work or real plan drift\n\nFor any finding that changes whether this slice is accepted, classify it as:\n- `Confirmed`: you checked it against primary evidence (code, plan/spec artifacts, tests/build, or direct workflow context)\n- `Plausible`: interesting, but not verified enough to accept or block the slice yet\n- `Rejected`: contradicted by fuller context or direct evidence\n\nSubagent agreement alone is not enough for `Confirmed`.\n\nSay where you're least confident.\n\nIf the slice drifted materially, update `implementation_plan.md` and `spec.md` if observable behavior changed. If the drift changed boundaries or makes the current plan unreliable, stop and go back to planning.\n\nIf the concerns are serious, stop and go back to planning or ask me. Don't wave this through just because the code exists.\n\nCapture:\n- `verificationFindings`\n- `verificationFailed`",
+          "promptFragments": [
+            {
+              "id": "phase-6b-delegation-quick",
+              "when": { "var": "rigorMode", "equals": "QUICK" },
+              "text": "Do the verification yourself."
+            },
+            {
+              "id": "phase-6b-delegation-standard",
+              "when": { "var": "rigorMode", "equals": "STANDARD" },
+              "text": "If any slice-risk trigger fired, run `routine-hypothesis-challenge` and `routine-philosophy-alignment` before you decide this slice is done."
+            },
+            {
+              "id": "phase-6b-delegation-thorough",
+              "when": { "var": "rigorMode", "equals": "THOROUGH" },
+              "text": "If any slice-risk trigger fired, also run `routine-execution-simulation` before you decide this slice is done."
+            },
+            {
+              "id": "phase-6b-multi-pr",
+              "when": { "var": "prStrategy", "equals": "MultiPR" },
+              "text": "If this slice is verified and ready, stop here and package it for review before you move to the next slice."
+            }
+          ],
           "requireConfirmation": {
-            "var": "verificationFailed",
-            "equals": true
+            "or": [
+              { "var": "verificationFailed", "equals": true },
+              { "var": "prStrategy", "equals": "MultiPR" }
+            ]
           }
         }
       ]
@@ -243,7 +345,7 @@
     {
       "id": "phase-7-final-verification",
       "type": "loop",
-      "title": "Phase 7: Final Verification & Handoff",
+      "title": "Phase 7: Final Verification Barrier (Verify, Fix, Re-Verify)",
       "runCondition": {
         "var": "taskComplexity",
         "not_equals": "Small"
@@ -260,7 +362,7 @@
       "body": [
         {
           "id": "phase-7a-final-verification-core",
-          "title": "Final Verification Core",
+          "title": "Run Final Verification Batch",
           "templateCall": {
             "templateId": "wr.templates.routine.final-verification",
             "args": {
@@ -271,14 +373,14 @@
         },
         {
           "id": "phase-7b-fix-and-summarize",
-          "title": "Fix Issues and Summarize Verification",
-          "prompt": "Read `final-verification-findings.md` and turn it into workflow-owned decisions and fixes.\n\nRequired:\n- interpret the findings yourself rather than rubber-stamping them\n- identify any invariant violations or regressions that must be fixed now\n- if issues are found, fix them immediately\n- re-run affected tests\n- update `implementation_plan.md` if the fix changed boundaries or approach\n\nSet these keys in the next `continue_workflow` call's `context` object:\n- `integrationFindings`\n- `integrationPassed`\n- `regressionDetected`",
+          "title": "Synthesize Findings, Fix, and Re-Verify",
+          "prompt": "Read `final-verification-findings.md` and decide what actually needs fixing.\n\nDon't rubber-stamp it. The verifier is evidence, not the decision.\n\nIf `spec.md` exists, use it as the verification anchor and make sure every acceptance criterion is actually met.\n\nThis loop is verify, fix, then re-verify. If you fix anything here, the next pass exists to prove the fixes worked.\n\nSynthesize the verification output explicitly:\n- what the verifier found\n- what you agree with\n- what you reject and why\n- what changed because of the fixes\n\nFor any finding that changes final acceptance, classify it as:\n- `Confirmed`: you checked it against primary evidence (code, spec, tests/build, or direct workflow context)\n- `Plausible`: interesting, but not verified enough to accept or block final signoff yet\n- `Rejected`: contradicted by fuller context or direct evidence\n\nSubagent agreement alone is not enough for `Confirmed`.\n\nFix what has to be fixed now, rerun the affected verification, and update:\n- `implementation_plan.md` if the execution shape changed\n- `spec.md` if acceptance criteria, observable behavior, or external contracts changed\n\nCapture:\n- `integrationFindings`\n- `integrationPassed`\n- `regressionDetected`",
           "requireConfirmation": false
         },
         {
           "id": "phase-7c-loop-decision",
           "title": "Final Verification Loop Decision",
-          "prompt": "Provide a loop control artifact.\n\nDecision rules:\n- if `integrationFindings` is non-empty and fixes were applied -> continue (re-verify the fixes)\n- if `integrationFindings` is empty or all issues resolved -> stop and produce handoff\n- if max iterations reached -> stop and document remaining concerns\n\nWhen stopping, include the handoff summary:\n- acceptance criteria status\n- invariant status\n- test/build summary\n- concise PR/MR description draft (why, test plan, rollout notes)\n- follow-up tickets\n- any philosophy tensions accepted intentionally and why\n\nKeep the handoff concise and executive-level. Do not auto-merge or push unless the user explicitly asks.\n\nOutput exactly:\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
+          "prompt": "Decide whether final verification needs another pass or whether we're done.\n\nThis loop gets up to two verify/fix passes.\n- If verification found real issues and you fixed them, keep going so the fixes get re-verified.\n- If the issues are clean or resolved, stop.\n- If you've hit the limit, stop and record what remains.\n\nWhen you stop, include:\n- acceptance criteria status\n- invariant status\n- test/build summary\n- a concise PR/MR draft (why, test plan, rollout notes)\n- follow-up tickets\n- any philosophy tensions you accepted on purpose\n\nThen emit the required loop-control artifact in this shape (`decision` must be `continue` or `stop`):\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
           "requireConfirmation": true,
           "outputContract": {
             "contractRef": "wr.contracts.loop_control"

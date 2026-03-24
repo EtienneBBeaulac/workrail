@@ -763,6 +763,34 @@ export class ValidationEngine {
       }
     }
 
+    // Validate references (structural)
+    if (workflow.definition.references !== undefined) {
+      const seenRefIds = new Set<string>();
+      for (const ref of workflow.definition.references) {
+        if (!ref.id || typeof ref.id !== 'string') {
+          issues.push(`Workflow reference has missing or empty id`);
+        } else {
+          if (seenRefIds.has(ref.id)) {
+            issues.push(`Workflow reference has duplicate id '${ref.id}'`);
+            suggestions.push('Each workflow reference id must be unique');
+          }
+          seenRefIds.add(ref.id);
+        }
+        if (!ref.title || typeof ref.title !== 'string') {
+          issues.push(`Workflow reference '${ref.id ?? '(unknown)'}' has missing or empty title`);
+        }
+        if (!ref.source || typeof ref.source !== 'string') {
+          issues.push(`Workflow reference '${ref.id ?? '(unknown)'}' has missing or empty source`);
+        }
+        if (!ref.purpose || typeof ref.purpose !== 'string') {
+          issues.push(`Workflow reference '${ref.id ?? '(unknown)'}' has missing or empty purpose`);
+        }
+        if (typeof ref.authoritative !== 'boolean') {
+          issues.push(`Workflow reference '${ref.id ?? '(unknown)'}' has missing or non-boolean authoritative field`);
+        }
+      }
+    }
+
     // Check for duplicate step IDs
     const stepIds = new Set<string>();
     for (const step of workflow.definition.steps) {
@@ -812,6 +840,30 @@ export class ValidationEngine {
         }
 
         this.collectQuotedJsonValidationMessageWarnings(step as any, `Step '${step.id}'`, warnings);
+
+        // Validate promptFragments (structural)
+        const typedStepForFragments = step as WorkflowStepDefinition;
+        if (typedStepForFragments.promptFragments !== undefined) {
+          const seenFragmentIds = new Set<string>();
+          for (const fragment of typedStepForFragments.promptFragments) {
+            if (!fragment.id || typeof fragment.id !== 'string') {
+              issues.push(`Step '${step.id}': promptFragment has missing or empty id`);
+            } else {
+              if (seenFragmentIds.has(fragment.id)) {
+                issues.push(`Step '${step.id}': promptFragments has duplicate id '${fragment.id}'`);
+                suggestions.push('Each promptFragment id must be unique within a step');
+              }
+              seenFragmentIds.add(fragment.id);
+            }
+            if (!fragment.text || typeof fragment.text !== 'string') {
+              issues.push(`Step '${step.id}': promptFragment '${fragment.id ?? '(unknown)'}' has missing or empty text`);
+            } else if (/\{\{wr\./i.test(fragment.text)) {
+              // Fragment texts bypass the compiler token resolution passes — reject WR tokens explicitly.
+              issues.push(`Step '${step.id}': promptFragment '${fragment.id}' text contains '{{wr.*}}' token — fragments are raw text and do not support token resolution`);
+              suggestions.push('Move {{wr.*}} tokens to the step prompt or promptBlocks where they are resolved at compile time');
+            }
+          }
+        }
 
         // Validate function calls for standard steps using workflow + step scopes
         const callValidation = this.validateStepFunctionCalls(

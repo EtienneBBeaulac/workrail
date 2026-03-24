@@ -217,16 +217,16 @@ describe('Lean workflow — Phase 1 orchestration with injected routine', () => 
     expect(selectStep.prompt).toContain('design-candidates.md');
   });
 
-  it('challenge-and-select step references initialHypothesis for comparison', () => {
+  it('challenge-and-select step captures selectedApproach and references comparison', () => {
     const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
 
     const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
     const steps = result._unsafeUnwrap().steps;
 
     const selectStep = steps.find(s => s.id === 'phase-1c-challenge-and-select') as WorkflowStepDefinition;
-    expect(selectStep.prompt).toContain('initialHypothesis');
     expect(selectStep.prompt).toContain('selectedApproach');
     expect(selectStep.prompt).toContain('changed your mind');
+    expect(selectStep.prompt).toContain('original guess');
   });
 
   it('preserves all other phases after restructured Phase 1', () => {

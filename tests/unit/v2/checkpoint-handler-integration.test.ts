@@ -17,6 +17,7 @@ import * as fs from 'fs/promises';
 import { setupIntegrationTest, teardownIntegrationTest, resolveService } from '../../di/integration-container.js';
 import { DI } from '../../../src/di/tokens.js';
 import type { ToolContext } from '../../../src/mcp/types.js';
+import { unwrapResponse } from '../../helpers/unwrap-response.js';
 
 import { handleV2StartWorkflow, handleV2ContinueWorkflow } from '../../../src/mcp/handlers/v2-execution.js';
 import { handleV2CheckpointWorkflow } from '../../../src/mcp/handlers/v2-checkpoint.js';
@@ -122,7 +123,8 @@ describe('handleV2CheckpointWorkflow (integration)', () => {
     const result = await handleV2StartWorkflow({ workflowId: 'checkpoint-test' } as any, ctx);
     expect(result.type).toBe('success');
     if (result.type !== 'success') throw new Error('start_workflow failed');
-    return result.data;
+    const data = result.data;
+    return unwrapResponse(data);
   }
 
   it('creates a checkpoint successfully from a valid checkpointToken', async () => {
@@ -173,7 +175,8 @@ describe('handleV2CheckpointWorkflow (integration)', () => {
     if (resume.type === 'error') console.error('Continue after checkpoint error:', JSON.stringify(resume));
     expect(resume.type).toBe('success');
     if (resume.type !== 'success') return;
-    expect(resume.data.pending).toBeDefined();
+    const resumeR = unwrapResponse(resume.data);
+    expect(resumeR.pending).toBeDefined();
   });
 
   it('rejects an invalid token string', async () => {

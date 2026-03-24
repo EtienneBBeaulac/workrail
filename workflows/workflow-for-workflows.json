@@ -42,6 +42,32 @@
         "Phase 6 DSL Optimization: For intermediate/advanced users with complex workflows, consider Function Reference Pattern to reduce duplication.",
         "SCHEMA FIRST: Always getSchema() at start of Phase 2 to ensure compliance with current workflow schema version and structure."
     ],
+    "references": [
+        {
+            "id": "workflow-schema",
+            "title": "Workflow JSON Schema",
+            "source": "spec/workflow.schema.json",
+            "resolveFrom": "package",
+            "purpose": "Canonical schema for validating structure and field semantics while authoring workflows.",
+            "authoritative": true
+        },
+        {
+            "id": "authoring-spec",
+            "title": "Workflow Authoring Specification",
+            "source": "spec/authoring-spec.json",
+            "resolveFrom": "package",
+            "purpose": "Canonical authoring guidance, rule levels, and examples for composing workflows correctly.",
+            "authoritative": true
+        },
+        {
+            "id": "authoring-provenance",
+            "title": "Workflow Authoring Provenance",
+            "source": "spec/authoring-spec.provenance.json",
+            "resolveFrom": "package",
+            "purpose": "Source-of-truth map showing what is canonical, derived, and non-canonical in workflow authoring guidance.",
+            "authoritative": false
+        }
+    ],
     "steps": [
         {
             "id": "phase-0-discovery-loop",

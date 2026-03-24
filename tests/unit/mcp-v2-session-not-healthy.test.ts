@@ -1,3 +1,4 @@
+import { unwrapResponse } from '../helpers/unwrap-response.js';
 import { createTestValidationPipelineDeps } from "../helpers/v2-test-helpers.js";
 import { describe, expect, it } from 'vitest';
 import * as os from 'os';
@@ -104,7 +105,7 @@ describe('v2 execution: SESSION_NOT_HEALTHY error response', () => {
       expect(started.type).toBe('success');
       if (started.type !== 'success') return;
 
-      const continueToken = started.data.continueToken;
+      const continueToken = unwrapResponse(started.data).continueToken;
       const pt1 = parseShortTokenNative(continueToken)!;
       const aliasEntry1 = (ctx.v2 as any).tokenAliasStore.lookup(pt1.nonceHex);
       const sessionId = aliasEntry1!.sessionId;
@@ -173,7 +174,7 @@ describe('v2 execution: SESSION_NOT_HEALTHY error response', () => {
       expect(started.type).toBe('success');
       if (started.type !== 'success') return;
 
-      const continueToken = started.data.continueToken;
+      const continueToken = unwrapResponse(started.data).continueToken;
       const pt2 = parseShortTokenNative(continueToken)!;
       const aliasEntry2 = (ctx.v2 as any).tokenAliasStore.lookup(pt2.nonceHex);
       const sessionId = aliasEntry2!.sessionId;

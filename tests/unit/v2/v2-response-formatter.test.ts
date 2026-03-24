@@ -11,6 +11,12 @@
 import { describe, it, expect } from 'vitest';
 import { formatV2ExecutionResponse } from '../../../src/mcp/v2-response-formatter.js';
 
+// Helper: unwrap FormattedResponse to primary string for backward-compatible assertions.
+function formatPrimary(data: unknown): string | null {
+  const res = formatV2ExecutionResponse(data);
+  return res?.primary ?? null;
+}
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
@@ -83,32 +89,32 @@ function continueBlockedResponse(overrides: Record<string, unknown> = {}) {
 
 describe('formatV2ExecutionResponse — shape detection', () => {
   it('returns null for non-object data', () => {
-    expect(formatV2ExecutionResponse(null)).toBeNull();
-    expect(formatV2ExecutionResponse('hello')).toBeNull();
-    expect(formatV2ExecutionResponse(42)).toBeNull();
-    expect(formatV2ExecutionResponse(undefined)).toBeNull();
+    expect(formatPrimary(null)).toBeNull();
+    expect(formatPrimary('hello')).toBeNull();
+    expect(formatPrimary(42)).toBeNull();
+    expect(formatPrimary(undefined)).toBeNull();
   });
 
   it('returns null for non-execution tool outputs', () => {
-    expect(formatV2ExecutionResponse({ workflows: [] })).toBeNull();
-    expect(formatV2ExecutionResponse({ checkpointNodeId: 'n1', continueToken: 'ct_test123' })).toBeNull();
-    expect(formatV2ExecutionResponse({ candidates: [], totalEligible: 0 })).toBeNull();
+    expect(formatPrimary({ workflows: [] })).toBeNull();
+    expect(formatPrimary({ checkpointNodeId: 'n1', continueToken: 'ct_test123' })).toBeNull();
+    expect(formatPrimary({ candidates: [], totalEligible: 0 })).toBeNull();
   });
 
   it('matches start_workflow response shape', () => {
-    const result = formatV2ExecutionResponse(startResponse());
+    const result = formatPrimary(startResponse());
     expect(result).not.toBeNull();
     expect(result).toContain('Phase 2: Define the Problem Space');
   });
 
   it('matches continue_workflow ok response shape', () => {
-    const result = formatV2ExecutionResponse(continueOkResponse());
+    const result = formatPrimary(continueOkResponse());
     expect(result).not.toBeNull();
     expect(result).toContain('Phase 2: Define the Problem Space');
   });
 
   it('matches continue_workflow blocked response shape', () => {
-    const result = formatV2ExecutionResponse(continueBlockedResponse());
+    const result = formatPrimary(continueBlockedResponse());
     expect(result).not.toBeNull();
     expect(result).toContain('Blocked');
   });
@@ -120,39 +126,39 @@ describe('formatV2ExecutionResponse — shape detection', () => {
 
 describe('formatV2ExecutionResponse — success', () => {
   it('renders step title as heading', () => {
-    const result = formatV2ExecutionResponse(startResponse())!;
+    const result = formatPrimary(startResponse())!;
     expect(result).toMatch(/^# Phase 2: Define the Problem Space$/m);
   });
 
   it('embeds stepId as HTML comment for debugging', () => {
-    const result = formatV2ExecutionResponse(startResponse())!;
+    const result = formatPrimary(startResponse())!;
     expect(result).toContain('<!-- stepId: phase-2-define-problem -->');
   });
 
   it('renders step prompt as body', () => {
-    const result = formatV2ExecutionResponse(startResponse())!;
+    const result = formatPrimary(startResponse())!;
     expect(result).toContain('Turn empathy into a precise definition.');
     expect(result).toContain('Document the POV statement.');
   });
 
   it('includes instruction to execute and continue', () => {
-    const result = formatV2ExecutionResponse(startResponse())!;
+    const result = formatPrimary(startResponse())!;
     expect(result).toContain('Execute this step, then call `continue_workflow` to advance.');
   });
 
   it('includes notes guidance', () => {
-    const result = formatV2ExecutionResponse(startResponse())!;
+    const result = formatPrimary(startResponse())!;
     expect(result).toContain('output.notesMarkdown');
   });
 
   it('renders token JSON block with continueToken', () => {
-    const result = formatV2ExecutionResponse(startResponse())!;
+    const result = formatPrimary(startResponse())!;
     expect(result).toContain('```json');
     expect(result).toContain('"continueToken":"ct_test123"');
   });
 
   it('does not include intent in the token JSON block', () => {
-    const result = formatV2ExecutionResponse(startResponse())!;
+    const result = formatPrimary(startResponse())!;
     const jsonMatch = result.match(/```json\n(.*)\n```/);
     expect(jsonMatch).not.toBeNull();
     const parsed = JSON.parse(jsonMatch![1]);
@@ -160,31 +166,31 @@ describe('formatV2ExecutionResponse — success', () => {
   });
 
   it('does not mention checkpointToken in prose (removed to reduce agent noise)', () => {
-    const result = formatV2ExecutionResponse(startResponse())!;
+    const result = formatPrimary(startResponse())!;
     // checkpointToken was intentionally removed from prose output (Solution 2).
     // The token is still present in the structured JSON response; agents rarely need it.
     expect(result).not.toContain('Checkpoint token (for `checkpoint_workflow`)');
   });
 
   it('omits checkpointToken line when not present', () => {
-    const result = formatV2ExecutionResponse(startResponse({ checkpointToken: undefined }))!;
+    const result = formatPrimary(startResponse({ checkpointToken: undefined }))!;
     expect(result).not.toContain('checkpoint_workflow');
   });
 
   it('renders preferences summary', () => {
-    const result = formatV2ExecutionResponse(startResponse())!;
+    const result = formatPrimary(startResponse())!;
     expect(result).toContain('Preferences: full autonomy (stop on user deps), balanced risk.');
   });
 
   it('renders guided + conservative preferences', () => {
-    const result = formatV2ExecutionResponse(startResponse({
+    const result = formatPrimary(startResponse({
       preferences: { autonomy: 'guided', riskPolicy: 'conservative' },
     }))!;
     expect(result).toContain('Preferences: guided mode, conservative risk.');
   });
 
   it('renders full_auto_never_stop + aggressive preferences', () => {
-    const result = formatV2ExecutionResponse(startResponse({
+    const result = formatPrimary(startResponse({
       preferences: { autonomy: 'full_auto_never_stop', riskPolicy: 'aggressive' },
     }))!;
     expect(result).toContain('Preferences: full autonomy (never stop), aggressive risk.');
@@ -197,28 +203,28 @@ describe('formatV2ExecutionResponse — success', () => {
 
 describe('formatV2ExecutionResponse — rehydrate', () => {
   it('renders title with (resumed) suffix', () => {
-    const result = formatV2ExecutionResponse(continueOkResponse({
+    const result = formatPrimary(continueOkResponse({
       nextIntent: 'rehydrate_only',
     }))!;
     expect(result).toMatch(/^# Phase 2: Define the Problem Space \(resumed\)$/m);
   });
 
   it('includes instruction to continue working', () => {
-    const result = formatV2ExecutionResponse(continueOkResponse({
+    const result = formatPrimary(continueOkResponse({
       nextIntent: 'rehydrate_only',
     }))!;
     expect(result).toContain('Continue working on this step.');
   });
 
   it('renders prompt body', () => {
-    const result = formatV2ExecutionResponse(continueOkResponse({
+    const result = formatPrimary(continueOkResponse({
       nextIntent: 'rehydrate_only',
     }))!;
     expect(result).toContain('Turn empathy into a precise definition.');
   });
 
   it('handles rehydrate with no pending step', () => {
-    const result = formatV2ExecutionResponse(continueOkResponse({
+    const result = formatPrimary(continueOkResponse({
       nextIntent: 'rehydrate_only',
       pending: null,
       nextCall: null,
@@ -234,27 +240,27 @@ describe('formatV2ExecutionResponse — rehydrate', () => {
 
 describe('formatV2ExecutionResponse — blocked retryable', () => {
   it('renders Blocked heading from blocker code', () => {
-    const result = formatV2ExecutionResponse(continueBlockedResponse())!;
+    const result = formatPrimary(continueBlockedResponse())!;
     expect(result).toMatch(/^# Blocked: Missing Required Notes$/m);
   });
 
   it('renders blocker message', () => {
-    const result = formatV2ExecutionResponse(continueBlockedResponse())!;
+    const result = formatPrimary(continueBlockedResponse())!;
     expect(result).toContain('Step "phase-1-empathize" requires notes documenting your work.');
   });
 
   it('renders suggestedFix as "What to do"', () => {
-    const result = formatV2ExecutionResponse(continueBlockedResponse())!;
+    const result = formatPrimary(continueBlockedResponse())!;
     expect(result).toContain('**What to do:** Add output.notesMarkdown with a detailed recap.');
   });
 
   it('includes retry instruction', () => {
-    const result = formatV2ExecutionResponse(continueBlockedResponse())!;
+    const result = formatPrimary(continueBlockedResponse())!;
     expect(result).toContain('Retry with corrected output:');
   });
 
   it('uses retryContinueToken as continueToken in the JSON block for retryable blocks', () => {
-    const result = formatV2ExecutionResponse(continueBlockedResponse())!;
+    const result = formatPrimary(continueBlockedResponse())!;
     const jsonMatch = result.match(/```json\n(.*)\n```/);
     expect(jsonMatch).not.toBeNull();
     const parsed = JSON.parse(jsonMatch![1]);
@@ -263,7 +269,7 @@ describe('formatV2ExecutionResponse — blocked retryable', () => {
   });
 
   it('renders validation issues as bulleted list', () => {
-    const result = formatV2ExecutionResponse(continueBlockedResponse({
+    const result = formatPrimary(continueBlockedResponse({
       validation: {
         issues: ['notesMarkdown must be at least 50 characters', 'notesMarkdown must contain a heading'],
         suggestions: ['Include a summary under ## Summary'],
@@ -283,7 +289,7 @@ describe('formatV2ExecutionResponse — blocked retryable', () => {
 
 describe('formatV2ExecutionResponse — blocked non-retryable', () => {
   it('renders Blocked heading', () => {
-    const result = formatV2ExecutionResponse(continueBlockedResponse({
+    const result = formatPrimary(continueBlockedResponse({
       retryable: false,
       retryContinueToken: undefined,
       nextCall: null,
@@ -299,7 +305,7 @@ describe('formatV2ExecutionResponse — blocked non-retryable', () => {
   });
 
   it('includes user-facing guidance', () => {
-    const result = formatV2ExecutionResponse(continueBlockedResponse({
+    const result = formatPrimary(continueBlockedResponse({
       retryable: false,
       retryContinueToken: undefined,
       nextCall: null,
@@ -316,7 +322,7 @@ describe('formatV2ExecutionResponse — blocked non-retryable', () => {
   });
 
   it('includes only resumeToken in the JSON block when nextCall is null', () => {
-    const result = formatV2ExecutionResponse(continueBlockedResponse({
+    const result = formatPrimary(continueBlockedResponse({
       retryable: false,
       retryContinueToken: undefined,
       nextCall: null,
@@ -341,7 +347,7 @@ describe('formatV2ExecutionResponse — blocked non-retryable', () => {
 
 describe('formatV2ExecutionResponse — complete', () => {
   it('renders completion heading', () => {
-    const result = formatV2ExecutionResponse(continueOkResponse({
+    const result = formatPrimary(continueOkResponse({
       nextIntent: 'complete',
       pending: null,
       checkpointToken: undefined,
@@ -353,7 +359,7 @@ describe('formatV2ExecutionResponse — complete', () => {
   });
 
   it('does not include a token JSON block', () => {
-    const result = formatV2ExecutionResponse(continueOkResponse({
+    const result = formatPrimary(continueOkResponse({
       nextIntent: 'complete',
       pending: null,
       checkpointToken: undefined,
@@ -370,7 +376,7 @@ describe('formatV2ExecutionResponse — complete', () => {
 
 describe('formatV2ExecutionResponse — multiple blockers', () => {
   it('renders all blocker messages', () => {
-    const result = formatV2ExecutionResponse(continueBlockedResponse({
+    const result = formatPrimary(continueBlockedResponse({
       retryable: false,
       retryContinueToken: undefined,
       nextCall: null,
@@ -407,7 +413,7 @@ const SYSTEM_HEADER = '---------\nSYSTEM\n---------';
 
 describe('formatV2ExecutionResponse — persona headers', () => {
   it('success: has USER section before prompt and SYSTEM section after', () => {
-    const result = formatV2ExecutionResponse(startResponse())!;
+    const result = formatPrimary(startResponse())!;
     const userIdx = result.indexOf(USER_HEADER);
     const systemIdx = result.indexOf(SYSTEM_HEADER);
     const promptIdx = result.indexOf('Turn empathy into a precise definition.');
@@ -421,7 +427,7 @@ describe('formatV2ExecutionResponse — persona headers', () => {
   });
 
   it('success: USER section contains title and prompt', () => {
-    const result = formatV2ExecutionResponse(startResponse())!;
+    const result = formatPrimary(startResponse())!;
     const userIdx = result.indexOf(USER_HEADER);
     const systemIdx = result.indexOf(SYSTEM_HEADER);
     const userSection = result.slice(userIdx, systemIdx);
@@ -431,7 +437,7 @@ describe('formatV2ExecutionResponse — persona headers', () => {
   });
 
   it('success: SYSTEM section contains tokens and preferences', () => {
-    const result = formatV2ExecutionResponse(startResponse())!;
+    const result = formatPrimary(startResponse())!;
     const systemIdx = result.indexOf(SYSTEM_HEADER);
     const systemSection = result.slice(systemIdx);
 
@@ -441,7 +447,7 @@ describe('formatV2ExecutionResponse — persona headers', () => {
   });
 
   it('rehydrate: has USER section before prompt and SYSTEM section after', () => {
-    const result = formatV2ExecutionResponse(continueOkResponse({
+    const result = formatPrimary(continueOkResponse({
       nextIntent: 'rehydrate_only',
     }))!;
     const userIdx = result.indexOf(USER_HEADER);
@@ -456,7 +462,7 @@ describe('formatV2ExecutionResponse — persona headers', () => {
   });
 
   it('rehydrate with no pending: SYSTEM-only, no USER header', () => {
-    const result = formatV2ExecutionResponse(continueOkResponse({
+    const result = formatPrimary(continueOkResponse({
       nextIntent: 'rehydrate_only',
       pending: null,
       nextCall: null,
@@ -467,14 +473,14 @@ describe('formatV2ExecutionResponse — persona headers', () => {
   });
 
   it('blocked retryable: SYSTEM-only, no USER header', () => {
-    const result = formatV2ExecutionResponse(continueBlockedResponse())!;
+    const result = formatPrimary(continueBlockedResponse())!;
     expect(result).not.toContain(USER_HEADER);
     expect(result).toContain(SYSTEM_HEADER);
     expect(result).toContain('# Blocked: Missing Required Notes');
   });
 
   it('blocked non-retryable: SYSTEM-only, no USER header', () => {
-    const result = formatV2ExecutionResponse(continueBlockedResponse({
+    const result = formatPrimary(continueBlockedResponse({
       retryable: false,
       retryContinueToken: undefined,
       nextCall: null,
@@ -492,7 +498,7 @@ describe('formatV2ExecutionResponse — persona headers', () => {
   });
 
   it('complete: SYSTEM-only, no USER header', () => {
-    const result = formatV2ExecutionResponse(continueOkResponse({
+    const result = formatPrimary(continueOkResponse({
       nextIntent: 'complete',
       pending: null,
       checkpointToken: undefined,
@@ -506,10 +512,10 @@ describe('formatV2ExecutionResponse — persona headers', () => {
 
   it('no response has both USER and SYSTEM headers appearing more than once', () => {
     const variants = [
-      formatV2ExecutionResponse(startResponse())!,
-      formatV2ExecutionResponse(continueOkResponse({ nextIntent: 'rehydrate_only' }))!,
-      formatV2ExecutionResponse(continueBlockedResponse())!,
-      formatV2ExecutionResponse(continueOkResponse({
+      formatPrimary(startResponse())!,
+      formatPrimary(continueOkResponse({ nextIntent: 'rehydrate_only' }))!,
+      formatPrimary(continueBlockedResponse())!,
+      formatPrimary(continueOkResponse({
         nextIntent: 'complete', pending: null, ackToken: undefined,
         checkpointToken: undefined, isComplete: true, nextCall: null,
       }))!,

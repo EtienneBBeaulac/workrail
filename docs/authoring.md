@@ -1,614 +1,722 @@
 # Workflow Authoring Guide
 
-Create custom workflows to guide AI agents through your team's processes.
-
-## Quick Start
-
-### 1. Create a Workflow File
-
-Create a JSON file in `~/.workrail/workflows/`:
-
-```json
-{
-  "id": "my-workflow",
-  "name": "My Custom Workflow",
-  "version": "1.0.0",
-  "description": "A workflow for my specific process",
-  "steps": [
-    {
-      "id": "step-1",
-      "title": "First Step",
-      "prompt": "Instructions for what to do in this step.",
-      "agentRole": "You are a helpful assistant focused on this task."
-    },
-    {
-      "id": "step-2",
-      "title": "Second Step",
-      "prompt": "Instructions for the second step.",
-      "agentRole": "You are continuing the previous work."
-    }
-  ]
-}
-```
-
-### 2. Validate It
-
-```bash
-workrail validate ~/.workrail/workflows/my-workflow.json
-```
-
-### 3. Use It
-
-Tell your AI agent:
-
-> "Use the my-workflow workflow to help me with this task"
-
----
-
-## Workflow Schema
-
-### Required Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | string | Unique identifier (lowercase, hyphens, no spaces) |
-| `name` | string | Human-readable name |
-| `version` | string | Semantic version (e.g., "1.0.0") |
-| `description` | string | What this workflow accomplishes |
-| `steps` | array | List of workflow steps (minimum 1) |
-
-### Optional Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `preconditions` | string[] | Prerequisites before starting |
-| `clarificationPrompts` | string[] | Questions to ask upfront |
-| `metaGuidance` | string[] | Persistent best practices shown throughout |
-| `extensionPoints` | object[] | Named slots for team-level customization (see [Extension Points](#extension-points)) |
-
-### Example with All Fields
-
-```json
-{
-  "id": "code-review",
-  "name": "Team Code Review Process",
-  "version": "1.0.0",
-  "description": "Systematic code review following our team standards",
-  
-  "preconditions": [
-    "MR/PR is ready for review",
-    "All CI checks have passed",
-    "Self-review has been completed by the author"
-  ],
-  
-  "clarificationPrompts": [
-    "What is the scope of this change?",
-    "Are there any areas of particular concern?",
-    "What is the testing strategy?"
-  ],
-  
-  "metaGuidance": [
-    "Focus on correctness and maintainability over style",
-    "Provide actionable feedback with examples",
-    "Consider security implications of all changes"
-  ],
-  
-  "steps": [...]
-}
-```
-
----
-
-## Step Schema
-
-### Required Step Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | string | Unique step identifier |
-| `title` | string | Human-readable step name |
-| `prompt` | string | Instructions for the AI agent |
-
-### Optional Step Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `agentRole` | string | Persona/role for the agent (10-1024 chars) |
-| `guidance` | string[] | Additional tips for this step |
-| `askForFiles` | boolean | Request file context from user |
-| `requireConfirmation` | boolean | Pause for user approval |
-| `runCondition` | object | Conditional execution logic |
-
-### Example Step
-
-```json
-{
-  "id": "security-review",
-  "title": "Security Assessment",
-  "prompt": "Review the code changes for security vulnerabilities:\n\n1. Check for injection risks (SQL, XSS, command)\n2. Verify authentication and authorization\n3. Look for sensitive data exposure\n4. Check for insecure dependencies\n\nDocument any findings with severity levels.",
-  "agentRole": "You are a security-focused code reviewer with expertise in OWASP Top 10 vulnerabilities.",
-  "guidance": [
-    "Pay special attention to user input handling",
-    "Check for hardcoded secrets or credentials",
-    "Verify that error messages don't leak sensitive information"
-  ],
-  "requireConfirmation": true
-}
-```
-
----
-
-## Conditional Steps
-
-Use `runCondition` to skip steps based on context variables.
-
-### Simple Condition
-
-```json
-{
-  "id": "deep-analysis",
-  "title": "Deep Architecture Analysis",
-  "prompt": "Perform detailed architectural review...",
-  "runCondition": {
-    "var": "complexity",
-    "equals": "high"
-  }
-}
-```
-
-### Operators
-
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `equals` | Equal to | `{ "var": "x", "equals": "value" }` |
-| `not_equals` | Not equal to | `{ "var": "x", "not_equals": "value" }` |
-| `gt` | Greater than | `{ "var": "x", "gt": 5 }` |
-| `gte` | Greater than or equal | `{ "var": "x", "gte": 5 }` |
-| `lt` | Less than | `{ "var": "x", "lt": 10 }` |
-| `lte` | Less than or equal | `{ "var": "x", "lte": 10 }` |
-
-### Logical Operators
-
-**AND:**
-
-```json
-{
-  "runCondition": {
-    "and": [
-      { "var": "complexity", "equals": "high" },
-      { "var": "hasTests", "equals": false }
-    ]
-  }
-}
-```
-
-**OR:**
-
-```json
-{
-  "runCondition": {
-    "or": [
-      { "var": "type", "equals": "feature" },
-      { "var": "type", "equals": "refactor" }
-    ]
-  }
-}
-```
-
-**NOT:**
-
-```json
-{
-  "runCondition": {
-    "not": { "var": "skipAnalysis", "equals": true }
-  }
-}
-```
-
----
-
-## Loops
-
-Iterate over steps for batch operations, retries, or refinement.
-
-### For Loop (Fixed Count)
-
-```json
-{
-  "id": "implement-features",
-  "type": "loop",
-  "title": "Implement Each Feature",
-  "loop": {
-    "type": "for",
-    "count": 3,
-    "maxIterations": 5,
-    "iterationVar": "featureNumber"
-  },
-  "body": "implement-single-feature"
-}
-```
-
-### ForEach Loop (Over Items)
-
-```json
-{
-  "id": "review-files",
-  "type": "loop",
-  "title": "Review Each Changed File",
-  "loop": {
-    "type": "forEach",
-    "items": "changedFiles",
-    "itemVar": "currentFile",
-    "indexVar": "fileIndex",
-    "maxIterations": 50
-  },
-  "body": [
-    {
-      "id": "review-file",
-      "title": "Review {{currentFile}}",
-      "prompt": "Review the file {{currentFile}} for issues..."
-    }
-  ]
-}
-```
-
-### While Loop (Condition-Based)
-
-```json
-{
-  "id": "refine-solution",
-  "type": "loop",
-  "title": "Refine Until Satisfactory",
-  "loop": {
-    "type": "while",
-    "condition": { "var": "needsRefinement", "equals": true },
-    "maxIterations": 5
-  },
-  "body": "refinement-step"
-}
-```
-
-### Until Loop
-
-```json
-{
-  "id": "search-root-cause",
-  "type": "loop",
-  "title": "Search Until Found",
-  "loop": {
-    "type": "until",
-    "condition": { "var": "rootCauseFound", "equals": true },
-    "maxIterations": 10
-  },
-  "body": "investigate-hypothesis"
-}
-```
-
-**Important:** Always set `maxIterations` to prevent infinite loops.
-
-For detailed loop documentation, see [Loop Support](features/loops.md).
-
----
-
-## Extension Points
-
-Extension points let workflow authors declare named slots that teams can override with their own routines — without editing the shared workflow JSON.
-
-### Declaring extension points
-
-Add `extensionPoints` at the top level of your workflow. Each entry declares:
-
-- `slotId` — the token name used in step prompts
-- `purpose` — human-readable description of what belongs here
-- `default` — the routine ID used when no project override is present
-
-```json
-{
-  "id": "my-workflow",
-  "extensionPoints": [
-    {
-      "slotId": "design_review",
-      "purpose": "The routine used to review designs before implementation",
-      "default": "tension-driven-design"
-    }
-  ],
-  "steps": [
-    {
-      "id": "review",
-      "title": "Design Review",
-      "prompt": "Run {{wr.bindings.design_review}} on the current proposal."
-    }
-  ]
-}
-```
-
-At compile time, `{{wr.bindings.design_review}}` is replaced with the resolved routine ID.
-
-### Overriding at project level
-
-Create `.workrail/bindings.json` in your project root (gitignore it for personal overrides, or commit it for team-wide defaults):
-
-```json
-{
-  "my-workflow": {
-    "design_review": "my-team-design-review"
-  }
-}
-```
-
-A flat format also works and applies to all workflows:
-
-```json
-{
-  "design_review": "my-team-design-review"
-}
-```
-
-### Drift detection
-
-If `.workrail/bindings.json` changes between session start and a later `continue_workflow` call, WorkRail surfaces a warning in the response describing which slots changed. Start a new session to pick up the updated bindings.
-
-### Rules
-
-- Tokens must reference a declared `slotId` — unknown tokens are a compile-time error.
-- `default` is required; the workflow must be runnable with no project overrides present.
-- Slot IDs are case-sensitive and must not contain whitespace.
-
-For the full design rationale, see `docs/design/workflow-extension-points.md`.
-
----
-
-## Best Practices
-
-### 1. Keep Steps Atomic
-
-Each step should be:
-
-- **Completable** independently
-- **Testable** with clear success criteria
-- **Committable** as a logical unit
-
-**Bad - Too large:**
-
-```json
-{
-  "title": "Implement everything",
-  "prompt": "Build the entire authentication system"
-}
-```
-
-**Good - Focused:**
-
-```json
-{
-  "title": "Create User Model",
-  "prompt": "Create a User model with email and password fields"
-}
-```
-
-### 2. Write Clear Prompts
-
-Be specific about what to do:
-
-**Bad - Vague:**
-
-```json
-{
-  "prompt": "Review the code"
-}
-```
-
-**Good - Specific:**
-
-```json
-{
-  "prompt": "Review the authentication code for:\n1. Input validation\n2. Error handling\n3. Security vulnerabilities\n\nDocument findings with severity (Critical/High/Medium/Low)."
-}
-```
-
-### 3. Use agentRole Effectively
-
-Set the right persona for the task:
-
-```json
-{
-  "agentRole": "You are a senior security engineer performing a thorough code audit. You are methodical, skeptical, and document everything."
-}
-```
-
-### 4. Add Verification Steps
-
-Include steps to verify work:
-
-```json
-{
-  "id": "verify-implementation",
-  "title": "Verify Changes",
-  "prompt": "Verify the implementation:\n1. Run tests\n2. Check for regressions\n3. Validate against requirements",
-  "requireConfirmation": true
-}
-```
-
-### 5. Use Preconditions
-
-Catch missing context early:
-
-```json
-{
-  "preconditions": [
-    "Task requirements are documented",
-    "Codebase access is available",
-    "Test environment is set up"
-  ]
-}
-```
-
-### 6. Add metaGuidance
-
-Embed best practices that apply throughout:
-
-```json
-{
-  "metaGuidance": [
-    "Always verify understanding before implementing",
-    "One task at a time - never combine unrelated changes",
-    "Write tests for all new functionality"
-  ]
-}
-```
-
----
-
-## Workflow Patterns
-
-### Pattern: prep/implement/verify
-
-Structure steps around understanding, doing, and checking:
-
-```json
-{
-  "steps": [
-    {
-      "id": "understand",
-      "title": "Understand Requirements",
-      "prompt": "Analyze the requirements and clarify any ambiguities..."
-    },
-    {
-      "id": "plan",
-      "title": "Create Plan",
-      "prompt": "Create a detailed implementation plan...",
-      "requireConfirmation": true
-    },
-    {
-      "id": "implement",
-      "title": "Implement Solution",
-      "prompt": "Implement according to the plan..."
-    },
-    {
-      "id": "verify",
-      "title": "Verify Implementation",
-      "prompt": "Verify the implementation meets requirements..."
-    }
-  ]
-}
-```
-
-### Pattern: Complexity Triage
-
-Use conditions to adapt based on complexity:
-
-```json
-{
-  "steps": [
-    {
-      "id": "triage",
-      "title": "Assess Complexity",
-      "prompt": "Evaluate task complexity (simple/medium/complex) and set the complexity variable."
-    },
-    {
-      "id": "quick-path",
-      "title": "Quick Implementation",
-      "prompt": "Implement directly...",
-      "runCondition": { "var": "complexity", "equals": "simple" }
-    },
-    {
-      "id": "full-analysis",
-      "title": "Full Analysis",
-      "prompt": "Perform detailed analysis...",
-      "runCondition": { "var": "complexity", "not_equals": "simple" }
-    }
-  ]
-}
-```
-
-### Pattern: Iterative Refinement
-
-Use loops for refinement cycles:
-
-```json
-{
-  "id": "refine-loop",
-  "type": "loop",
-  "title": "Iterative Refinement",
-  "loop": {
-    "type": "for",
-    "count": 3,
-    "maxIterations": 3,
-    "iterationVar": "iteration"
-  },
-  "body": [
-    {
-      "id": "review",
-      "title": "Review (Iteration {{iteration}})",
-      "prompt": "Review the current solution and identify improvements..."
-    },
-    {
-      "id": "improve",
-      "title": "Apply Improvements",
-      "prompt": "Apply the identified improvements..."
-    }
-  ]
-}
-```
-
----
-
-## Testing Workflows
-
-### Validate JSON
-
-```bash
-workrail validate my-workflow.json
-```
-
-### Dry Run
-
-Walk through your workflow manually:
-
-1. Can each step be completed with the information provided?
-2. Are there hidden dependencies between steps?
-3. Do the prompts make sense in sequence?
-
-### Test with Different Scenarios
-
-- Simple case: Does it work for straightforward inputs?
-- Edge cases: What happens with unusual inputs?
-- Error cases: How does it handle failures?
-
----
-
-## Sharing Workflows
-
-### Team Repository
-
-Create a Git repository with your workflows:
-
-```
-team-workflows/
-├── workflows/
-│   ├── code-review.json
-│   ├── incident-response.json
-│   └── onboarding.json
-└── README.md
-```
-
-Configure WorkRail to load from it:
-
-```bash
-WORKFLOW_GIT_REPOS=https://github.com/yourteam/workflows.git
-```
-
-See [Configuration](configuration.md#git-repositories) for details.
-
-### Local Sharing
-
-Copy workflow files to team members' `~/.workrail/workflows/` directories.
-
----
-
-## See Also
-
-- [All Workflows](workflows.md) – Browse existing workflows for inspiration
-- [Configuration](configuration.md) – Set up workflow sources
-- [Loop Documentation](features/loops.md) – Detailed loop patterns
-- [Advanced Features](advanced.md) – Validation, optimization
+> Generated from `spec/authoring-spec.json`. Do not edit this file by hand.
+
+Canonical current rules for authoring good WorkRail workflows. workflow.schema.json remains the source of truth for legal structure.
+
+## Principles
+- Schema defines what is valid. These rules define what is good.
+- Prefer current authoring rules over design rationale or historical notes.
+- Keep prompts user-voiced without losing explicit protocol requirements.
+- Keep boundary-owned response supplements separate from workflow-authored prompt text.
+
+## Consumers
+- `docs`
+- `tooling`
+- `workflow-for-workflows`
+- `future-linting`
+
+## Change protocol
+- When a workflow feature lands or changes, update the schema and runtime first.
+- Then update this authoring spec so guidance matches the shipped behavior.
+- Then regenerate or update human-facing docs and examples derived from this spec.
+- Do not leave authoring guidance behind the runtime.
+
+## Quickstart
+### start-from-real-sources
+- **Level**: required
+- **Status**: active
+- **Scope**: workflow.authoring, documentation.authoring, tooling.workflow-authoring
+- **Rule**: When authoring a workflow from scratch, start from the schema, current runtime behavior, and modern example workflows before drafting prompts.
+- **Why**: Good workflow authoring starts from how WorkRail actually works, not from stale habits or isolated docs.
+- **Enforced by**: advisory
+
+**Checks**
+- Read the schema and at least one modern workflow before drafting.
+- Do not rely on outdated workflow patterns as the starting point.
+
+**Anti-patterns**
+- Drafting a workflow from memory without checking current schema or examples
+
+**Source refs**
+- `spec/workflow.schema.json` (schema) — Legal structure and supported fields.
+- `src/application/services/validation-engine.ts` (runtime) — Validator-enforced authoring rules.
+- `workflows/coding-task-workflow-agentic.lean.v2.json` (example) — Current modern example.
+
+### validate-early-and-often
+- **Level**: required
+- **Status**: active
+- **Scope**: workflow.authoring, ci.validation, validator.implementation
+- **Rule**: Validate early while authoring, not only at the end.
+- **Why**: Small validation loops catch structural mistakes before they accumulate into major rework.
+- **Enforced by**: validator, ci, advisory
+
+**Checks**
+- Run real validators while drafting and after major structural changes.
+- Use generated docs or examples only after the spec itself validates.
+
+**Anti-patterns**
+- Only validating after a large authoring session is finished
+
+**Source refs**
+- `docs/workflow-validation.md` (documentation) — Validation workflow for authors.
+- `scripts/validate-workflows-registry.ts` (validator) — Registry validation surface.
+
+### author-in-phases
+- **Level**: recommended
+- **Status**: active
+- **Scope**: workflow.authoring, tooling.workflow-authoring
+- **Rule**: Author workflows in phases: define shape first, then prompts, then validation/refinement.
+- **Why**: Separating structure, prompt design, and validation makes workflows easier to reason about and revise.
+- **Enforced by**: advisory
+
+**Checks**
+- Get step/loop structure right before polishing prompt voice.
+- Use validation as a dedicated pass, not just a cleanup afterthought.
+
+**Anti-patterns**
+- Polishing prompt wording before the workflow structure is stable
+
+
+## Current authoring rules
+
+## Workflow structure
+### schema-is-legal-truth
+- **Level**: required
+- **Status**: active
+- **Scope**: workflow.definition, documentation.authoring, tooling.workflow-authoring
+- **Rule**: Treat workflow.schema.json as the source of truth for legal structure.
+- **Why**: A second schema will drift.
+- **Enforced by**: advisory
+
+**Checks**
+- Do not restate field legality unless the point is authoring quality rather than legality.
+- If this spec mentions a field shape, it should be guidance, not a competing schema.
+
+**Anti-patterns**
+- Encoding field legality in multiple docs or specs
+- Treating prose docs as authoritative over schema
+
+**Source refs**
+- `spec/workflow.schema.json` (schema) — Legal workflow structure lives here.
+
+### runtime-behavior-beats-prose
+- **Level**: required
+- **Status**: active
+- **Scope**: documentation.authoring, documentation.validation, tooling.workflow-authoring
+- **Rule**: When docs and runtime behavior disagree, update the docs to match runtime or fix runtime immediately.
+- **Why**: Authors need one trustworthy mental model.
+- **Enforced by**: advisory
+
+**Checks**
+- Compare guidance against validator and renderer behavior before declaring a rule canonical.
+- Do not leave known mismatches unresolved.
+
+**Anti-patterns**
+- Documented behavior that runtime no longer supports
+- Validator behavior that contradicts authoring guidance without a tracked fix
+
+**Source refs**
+- `src/application/services/validation-engine.ts` (runtime) — Structural authoring invariants enforced by runtime validation.
+- `src/v2/durable-core/domain/prompt-renderer.ts` (runtime) — Prompt rendering and runtime prompt behavior.
+
+
+## Prompt voice
+### user-voiced-prompts
+- **Level**: recommended
+- **Status**: active
+- **Scope**: workflow.description, step.prompt, step.prompt-fragment
+- **Rule**: Write prompts as direct user intent rather than workflow-engine narration.
+- **Why**: Agents follow user-voiced instructions more naturally than middleware prose.
+- **Enforced by**: advisory
+
+**Checks**
+- The opening sentence should sound like a direct ask, not system narration.
+- The step should still be understandable without workflow-internal jargon.
+
+**Anti-patterns**
+- Provide a loop control artifact.
+- Input contract: ...
+- Part A / Part B / Rules: ... when the structure adds ceremony rather than clarity
+
+**Example refs**
+- `workflows/coding-task-workflow-agentic.lean.v2.json` — See the sharpened user-voiced prompts in the current lean coding workflow.
+
+### protocol-footers-stay-explicit
+- **Level**: required
+- **Status**: active
+- **Scope**: step.output-requirements, step.context-capture, loop.decision.prompt
+- **Rule**: Keep exact protocol requirements explicit when the engine needs a specific output shape, artifact, or context capture.
+- **Why**: Voice improvements must not make the workflow ambiguous or unrunnable.
+- **Enforced by**: advisory
+
+**Checks**
+- If the step must emit a specific artifact or capture specific context, say that plainly.
+- Do not hide exact output requirements behind prose-only wording.
+
+**Anti-patterns**
+- Removing explicit output shape because it sounds too workflow-y
+- Replacing exact capture requirements with vague summary prose
+
+**Example refs**
+- `workflows/coding-task-workflow-agentic.lean.v2.json` — Uses compact Capture footers and explicit loop-control wording.
+
+**Source refs**
+- `workflows/coding-task-workflow-agentic.lean.v2.json` (example) — Uses explicit capture footers and shape-preserving loop outputs.
+
+
+## Prompt composition
+### prefer-structured-prompt-composition
+- **Level**: recommended
+- **Status**: active
+- **Scope**: prompt.composition, step.prompt, step.prompt-fragment, prompt.templates
+- **Rule**: Prefer structured prompt composition over duplicating large prompt branches inline.
+- **Why**: Shared structure is easier to maintain and easier for agents to reason about than repeated prose branches.
+- **Enforced by**: advisory
+
+**Checks**
+- Use prompt fragments for conditional branches instead of repeating near-identical prompt blocks.
+- Use context templates for small runtime substitutions, not for complex logic.
+- Keep the base prompt readable without forcing readers to mentally diff three branches.
+
+**Anti-patterns**
+- Copy-pasting QUICK, STANDARD, and THOROUGH branches inline when only a few lines differ
+- Encoding runtime logic in prose when promptFragments or templates are the right mechanism
+
+**Example refs**
+- `workflows/coding-task-workflow-agentic.lean.v2.json` — Uses prompt fragments and context templates to keep prompts slimmer at render time.
+
+**Source refs**
+- `docs/authoring.md` (documentation) — Documents context templates and prompt fragments.
+- `workflows/coding-task-workflow-agentic.lean.v2.json` (example) — Uses prompt fragments to slim mode-specific prompt branches.
+
+### templates-are-for-simple-substitution
+- **Level**: recommended
+- **Status**: active
+- **Scope**: prompt.templates, step.prompt, step.prompt-fragment
+- **Rule**: Use context variable templates for simple substitution, not for hidden control flow or expression-heavy prompt logic.
+- **Why**: Templates are easy to read when they substitute concrete values and hard to trust when they become a second programming language.
+- **Enforced by**: advisory
+
+**Checks**
+- A template token should read like a variable lookup, not a mini expression engine.
+- If the prompt logic branches, prefer prompt fragments or explicit workflow control flow.
+
+**Anti-patterns**
+- Expression-heavy template syntax inside prompts
+- Using templates to hide control-flow decisions that should be explicit in the workflow
+
+**Source refs**
+- `src/v2/durable-core/domain/context-template-resolver.ts` (runtime) — Runtime template resolution only handles simple identifier dot-paths.
+- `src/v2/durable-core/domain/prompt-renderer.ts` (runtime) — Templates are resolved at prompt render time.
+
+### prompt-fragments-for-conditional-variants
+- **Level**: recommended
+- **Status**: active
+- **Scope**: prompt.composition, step.prompt-fragment, step.prompt
+- **Rule**: Use prompt fragments for conditional prompt variants when the base prompt stays the same and only focused instructions differ.
+- **Why**: Prompt fragments keep authored prompts smaller and make render-time differences explicit.
+- **Enforced by**: advisory
+
+**Checks**
+- Keep the base prompt readable and put conditional additions into fragments.
+- Do not move the entire prompt into fragments if most of it is always present.
+
+**Anti-patterns**
+- Repeating an entire prompt three times for small rigor-mode differences
+- Using fragments when there is no stable base prompt
+
+**Source refs**
+- `docs/authoring.md` (documentation) — Conditional prompt fragments are documented explicitly.
+- `src/v2/durable-core/domain/prompt-renderer.ts` (runtime) — Prompt fragments are assembled at render time.
+- `src/application/services/validation-engine.ts` (validator) — Prompt fragment structure is validated.
+
+### extension-points-over-hardcoded-binding-slots
+- **Level**: recommended
+- **Status**: active
+- **Scope**: workflow.extension-points, prompt.composition, workflow.definition
+- **Rule**: Use extension points when a workflow wants stable customization slots rather than hardcoding routine or binding references inline.
+- **Why**: Extension points make customization explicit, inspectable, and project-overridable.
+- **Enforced by**: advisory
+
+**Checks**
+- Declare extension points at the workflow level when bindings are part of the contract.
+- Avoid hidden or undocumented binding slots in prompts.
+
+**Anti-patterns**
+- Hardcoding team-customizable routine names in prompt text without an extension-point declaration
+- Using `{{wr.bindings.*}}` tokens in a workflow that declares no extension points
+
+**Source refs**
+- `docs/authoring.md` (documentation) — Extension points are documented for workflow authors.
+- `src/application/services/compiler/resolve-bindings.ts` (runtime) — Binding resolution depends on declared extension points.
+- `src/application/services/validation-engine.ts` (validator) — Extension point declarations and binding-token usage are validated.
+
+
+## Response supplements and delivery-owned guidance
+### keep-boundary-owned-guidance-out-of-step-prompts
+- **Level**: recommended
+- **Status**: active
+- **Scope**: response.supplement, step.prompt, prompt.composition, documentation.authoring, tooling.workflow-authoring
+- **Rule**: Use response supplements for short, boundary-owned guidance that should stay structurally separate from the workflow-authored step prompt.
+- **Why**: Mixing delivery-owned instructions into the main prompt weakens user voice and makes it harder for agents to distinguish the core task from WorkRail logistics.
+- **Enforced by**: advisory
+
+**Checks**
+- If the text is system-owned or delivery-owned rather than part of the workflow author's actual step instruction, prefer a response supplement.
+- If the text should appear only at start or resume, prefer a response supplement over repeating it in every authored prompt.
+- Keep the main step prompt readable as a direct user ask even without the supplement.
+
+**Anti-patterns**
+- Inlining notes onboarding into every step prompt
+- Mixing WorkRail delivery framing directly into workflow-authored instructions
+- Treating boundary logistics as normal step prose
+
+**Source refs**
+- `src/mcp/response-supplements.ts` (runtime) — Canonical supplement policy lives here.
+- `src/mcp/v2-response-formatter.ts` (runtime) — Supplements are rendered as separate MCP content items here.
+
+### one-time-supplements-are-policy-not-durable-state
+- **Level**: recommended
+- **Status**: active
+- **Scope**: response.supplement, documentation.authoring, tooling.workflow-authoring
+- **Rule**: Model one-time response supplements as delivery policy unless exact display history is part of workflow semantics.
+- **Why**: Presentation rules should not leak into durable execution state unless the system truly needs to remember delivery history as part of execution correctness.
+- **Enforced by**: advisory
+
+**Checks**
+- Use per_lifecycle when the guidance should appear on every eligible lifecycle.
+- Use once_per_session with an explicit emitOn lifecycle when one lifecycle should own the message.
+- Do not persist shown/not-shown state unless exact delivery history becomes a real execution requirement.
+
+**Anti-patterns**
+- Adding durable session state for purely presentational guidance
+- Calling something once_per_session while still emitting it on multiple lifecycles
+- Treating supplement delivery history as part of core workflow meaning when it is only presentation policy
+
+**Source refs**
+- `src/mcp/response-supplements.ts` (runtime) — Defines per_lifecycle vs once_per_session delivery semantics.
+
+
+## Loops and control flow
+### loop-control-semantic-correctness
+- **Level**: required
+- **Status**: active
+- **Scope**: loop.decision.prompt, loop.decision.output-example
+- **Rule**: Loop decision prompts must allow both `continue` and `stop` semantically and in the output example.
+- **Why**: Hardcoding `continue` in the example artifact creates contradictory instructions.
+- **Enforced by**: validator, ci, advisory
+
+**Checks**
+- Prompt text allows both outcomes.
+- Example output shows the required shape without forcing one decision.
+
+**Anti-patterns**
+- Output exactly ... `decision`: `continue`
+- Prompt text says to stop, but the example output only permits continue
+
+**Example refs**
+- `workflows/coding-task-workflow-agentic.lean.v2.json` — Current loop decision steps show shape-only output examples.
+
+**Source refs**
+- `scripts/validate-workflows-registry.ts` (validator) — Registry validation should preserve semantically correct discoverable workflows.
+- `workflows/coding-task-workflow-agentic.lean.v2.json` (example) — Current loop decision prompts show shape-only output examples.
+
+### loops-need-real-exit-rules
+- **Level**: required
+- **Status**: active
+- **Scope**: loop.step, loop.decision
+- **Rule**: Loops must have explicit exit rules, bounded iterations, and a clear reason for another pass.
+- **Why**: Unclear loops invite runaway iteration or ceremonial extra passes.
+- **Enforced by**: validator, ci, advisory
+
+**Checks**
+- The loop has a max iteration bound.
+- The decision step explains why another pass is or is not needed.
+- The loop does not rely on vibes-only continuation criteria.
+
+**Anti-patterns**
+- Retry until it feels done
+- Continue while confidence is low without defining how confidence is evaluated
+
+### forced-self-audit-over-vibes
+- **Level**: recommended
+- **Status**: active
+- **Scope**: step.self-audit, loop.pre-check
+- **Rule**: When a workflow needs a self-audit, use concrete rubric-driven checks rather than vibes-only booleans.
+- **Why**: Agents will often take the easy path if the workflow lets them self-certify confidence without evidence.
+- **Enforced by**: advisory
+
+**Checks**
+- Score concrete dimensions instead of asking whether the agent still feels fuzzy.
+- Require brief evidence for each scored dimension when the audit matters.
+
+**Anti-patterns**
+- `stillFuzzy = true|false`
+- `contextAuditNeeded = true|false` without an explicit rubric
+
+**Example refs**
+- `workflows/coding-task-workflow-agentic.lean.v2.json` — Phase 0 uses a context-clarity rubric instead of a vibes-only confidence flag.
+
+
+## Confirmation discipline
+### confirm-only-for-real-human-decisions
+- **Level**: recommended
+- **Status**: active
+- **Scope**: step.confirmation, workflow.rigor-policy, workflow.authoring
+- **Rule**: Use confirmation gates for real human decisions or review barriers, not as routine ceremony.
+- **Why**: Unnecessary confirmations slow workflows down and teach agents to interrupt instead of act.
+- **Enforced by**: advisory
+
+**Checks**
+- A confirmation step should protect a genuine human choice, review checkpoint, or PR boundary.
+- Do not require confirmation just because a step modified a file or finished a phase.
+
+**Anti-patterns**
+- Confirming every draft or artifact creation by default
+- Using requireConfirmation as a substitute for clear loop or rigor policy
+
+**Source refs**
+- `workflows/coding-task-workflow-agentic.lean.v2.json` (example) — Uses confirmation for real review barriers like MultiPR checkpoints.
+
+
+## Delegation and subagents
+### bounded-delegation
+- **Level**: required
+- **Status**: active
+- **Scope**: workflow.meta-guidance, step.delegation-checkpoint
+- **Rule**: Delegate bounded cognitive routines, not ownership of the full workflow or task.
+- **Why**: Main-agent ownership preserves context, accountability, and synthesis quality.
+- **Enforced by**: advisory
+
+**Checks**
+- Subagents have a bounded mission.
+- The main agent still owns strategy, synthesis, and final decisions.
+
+**Anti-patterns**
+- Handing the full task to a subagent and accepting its result wholesale
+- Treating named builder or researcher roles as alternate owners
+
+**Source refs**
+- `workflows/coding-task-workflow-agentic.lean.v2.json` (example) — Delegation checkpoints keep the main agent as the synthesizer and decision-maker.
+
+### batched-checkpoints-over-ad-hoc-optionality
+- **Level**: recommended
+- **Status**: active
+- **Scope**: step.delegation-checkpoint, workflow.rigor-policy
+- **Rule**: Prefer a few explicit fan-out and fan-in checkpoints over many optional one-off subagent calls.
+- **Why**: This is easier to reason about, fits the runtime cost model better, and reduces agent corner-cutting.
+- **Enforced by**: advisory
+
+**Checks**
+- Use delegation at deliberate review barriers rather than sprinkling optional single calls everywhere.
+- Use rigor or trigger rules to determine when a batch is mandatory.
+
+**Anti-patterns**
+- If it helps, maybe run one subagent
+- Optional challenge wording at high-value decision points
+
+**Example refs**
+- `workflows/coding-task-workflow-agentic.lean.v2.json` — Uses explicit challenge, audit, and verification barriers.
+
+
+## Subagent synthesis and claim adoption
+### subagent-output-is-evidence
+- **Level**: required
+- **Status**: active
+- **Scope**: synthesis.design, synthesis.plan-audit, synthesis.slice-verification, synthesis.final-verification
+- **Rule**: Treat subagent output as evidence, not truth or authority.
+- **Why**: Delegation improves perspective, but the main agent still owns judgment.
+- **Enforced by**: advisory
+
+**Checks**
+- The main agent states what it agrees with, rejects, or still doubts.
+- The workflow does not let subagent output silently become the decision.
+
+**Anti-patterns**
+- Accepting subagent conclusions wholesale
+- Treating multiple subagent agreement as automatic truth
+
+### verify-high-impact-claims
+- **Level**: required
+- **Status**: active
+- **Scope**: synthesis.claim-adoption
+- **Rule**: Any subagent finding that changes a decision must be classified as `Confirmed`, `Plausible`, or `Rejected`.
+- **Why**: Decision-driving claims need explicit handling rather than vague agreement.
+- **Enforced by**: advisory
+
+**Checks**
+- `Confirmed` claims cite primary evidence such as code, artifacts, spec, tests/build, or direct workflow context.
+- `Plausible` claims do not drive the decision until verified.
+- `Rejected` claims say why they failed against fuller context or direct evidence.
+
+**Anti-patterns**
+- Subagent agreement alone is enough for `Confirmed`
+- Using delegated findings as blockers or green lights without verification
+
+**Example refs**
+- `workflows/coding-task-workflow-agentic.lean.v2.json` — Major synthesis checkpoints use Confirmed / Plausible / Rejected for decision-driving findings.
+
+**Source refs**
+- `workflows/coding-task-workflow-agentic.lean.v2.json` (example) — Major synthesis checkpoints use Confirmed / Plausible / Rejected for adopted claims.
+
+
+## Discouraged legacy patterns
+### avoid-heavy-clarification-front-doors
+- **Level**: discouraged
+- **Status**: active
+- **Scope**: legacy.patterns, workflow.authoring
+- **Rule**: Avoid large up-front clarification batteries when the workflow can discover context with tools first and ask only the real remaining questions.
+- **Why**: Heavy intake creates ceremony and often asks the user things the agent could have learned itself.
+- **Enforced by**: advisory
+
+**Checks**
+- Prefer targeted questioning after exploration over blanket intake questionnaires.
+
+**Anti-patterns**
+- Multiple broad clarification prompts before any repo exploration
+- Learning-path or experience-level questionnaires that do not affect workflow correctness
+
+### avoid-pseudo-dsl-meta-guidance
+- **Level**: discouraged
+- **Status**: active
+- **Scope**: legacy.patterns, workflow.meta-guidance
+- **Rule**: Avoid pseudo-functions, fake DSLs, or teaching-product helper syntax in meta guidance.
+- **Why**: Pseudo-DSL prose is harder to trust, harder to maintain, and usually weaker than either plain rules or real composition features.
+- **Enforced by**: advisory
+
+**Checks**
+- Meta guidance should read like rules, not pretend code.
+
+**Anti-patterns**
+- fun adaptToPath(content) = ...
+- Helper-function prose that mimics an API but is not actually executable
+
+### avoid-local-regex-validation-when-real-validators-exist
+- **Level**: discouraged
+- **Status**: active
+- **Scope**: legacy.patterns, documentation.validation, workflow.authoring
+- **Rule**: Avoid local regex-style validation heuristics when a real workflow validator exists.
+- **Why**: Approximate checks drift fast and create false confidence.
+- **Enforced by**: advisory
+
+**Checks**
+- Use real validators as the gate and keep heuristics secondary at most.
+
+**Anti-patterns**
+- Treating hand-written regex checks as the final proof of correctness
+
+
+## Examples
+### examples-must-stay-modern-and-validated
+- **Level**: required
+- **Status**: active
+- **Scope**: workflow.authoring, documentation.authoring, tooling.workflow-authoring
+- **Rule**: Examples used by this spec should be modern, still validated, and still representative of current authoring guidance.
+- **Why**: Examples quietly drifting out of date undermines the trustworthiness of the whole authoring system.
+- **Enforced by**: advisory
+
+**Checks**
+- Example refs should point to workflows that still validate.
+- Review example refs when the referenced workflow changes materially.
+
+**Anti-patterns**
+- Keeping a canonical example ref after the workflow has drifted into a legacy style
+
+**Example refs**
+- `workflows/coding-task-workflow-agentic.lean.v2.json` — Current example of modern prompt composition, delegation barriers, and loop semantics.
+
+
+## Validation
+### validator-first
+- **Level**: required
+- **Status**: active
+- **Scope**: workflow.authoring, tooling.workflow-authoring, ci.validation
+- **Rule**: Use real workflow validators and runtime-equivalent validation as the gate for correctness.
+- **Why**: Validator behavior is the executable truth for whether a workflow is actually runnable.
+- **Enforced by**: runtime, validator, ci
+
+**Checks**
+- Validate against the same workflow runtime would discover and execute.
+- Do not rely on regex-style local approximations when a real validator exists.
+
+**Anti-patterns**
+- Docs-only validation
+- File-shape checks that ignore runtime registry resolution
+
+**Source refs**
+- `scripts/validate-workflows-registry.ts` (validator) — Registry validation is part of the real validation surface.
+- `src/application/services/validation-engine.ts` (validator) — Structural validation logic lives here.
+
+### validation-bar-must-match-runtime
+- **Level**: required
+- **Status**: active
+- **Scope**: documentation.validation, validator.implementation
+- **Rule**: Validation guidance must align with the same discovery, resolution, normalization, compilation, and lifecycle behavior that runtime uses.
+- **Why**: A workflow that passes guidance-level validation but fails at runtime is a trust failure.
+- **Enforced by**: validator, ci, advisory
+
+**Checks**
+- Validation docs should describe the same phases runtime actually depends on.
+- If runtime adds a new contract surface, update authoring guidance and validation docs.
+
+**Anti-patterns**
+- Saying a workflow is valid because the file parses even though registry resolution or runtime compilation can still fail
+
+
+## Artifacts and planning surfaces
+### artifact-canonicality
+- **Level**: recommended
+- **Status**: active
+- **Scope**: artifact.plan, artifact.spec, artifact.verification
+- **Rule**: When multiple human-facing artifacts exist, say which one is canonical for which concern.
+- **Why**: Ambiguous ownership between plan, spec, and verification artifacts causes drift.
+- **Enforced by**: advisory
+
+**Checks**
+- If both a behavior artifact and an implementation artifact exist, define the boundary explicitly.
+- Verification steps should know which artifact is the source of truth for behavior.
+
+**Anti-patterns**
+- Plan and spec both contain acceptance criteria with no stated source of truth
+- Verification steps check one artifact while planning updates a different one
+
+**Example refs**
+- `workflows/coding-task-workflow-agentic.lean.v2.json` — Uses explicit spec vs implementation-plan ownership.
+
+
+## Planned guidance
+
+> This section is future-facing. It is **not** current runtime truth or current engine support.
+
+## Planned delegation packets and outputs
+### delegation-package
+- **Level**: recommended
+- **Status**: planned
+- **Scope**: delegation.context-packet
+- **Rule**: Every subagent should receive a self-contained context packet with mission, current decision, relevant files or artifacts, constraints, and expected deliverable shape.
+- **Why**: Subagents do not inherit parent context cleanly today, and the engine should make the packet explicit.
+- **Enforced by**: planned, advisory
+
+**Checks**
+- The context packet should be inspectable.
+- The packet should be curated rather than hidden full-session inheritance.
+
+**Anti-patterns**
+- Assuming a subagent implicitly knows the parent context
+
+### subagent-results-should-be-structured
+- **Level**: recommended
+- **Status**: planned
+- **Scope**: delegation.result-envelope, synthesis.claim-adoption, step.delegation-checkpoint
+- **Rule**: Delegated routines should return a structured result envelope rather than only freeform notes.
+- **Why**: Parents can synthesize, verify, and reject subagent claims much more reliably when results are shaped consistently.
+- **Enforced by**: planned, advisory
+
+**Checks**
+- A good result envelope includes findings, assumptions, missing context, confidence, and claims requiring verification.
+- Decision-driving claims should be easy for the parent to inspect without rereading the entire deliverable.
+
+**Anti-patterns**
+- Freeform delegated output with no separation between findings, assumptions, and uncertainty
+- Subagent output that hides which claims still need parent verification
+
+### subagent-output-discloses-assumptions
+- **Level**: recommended
+- **Status**: planned
+- **Scope**: delegation.result-envelope, synthesis.claim-adoption
+- **Rule**: Subagent output should disclose the assumptions it depended on.
+- **Why**: The parent cannot judge a delegated finding properly if the hidden assumptions stay hidden.
+- **Enforced by**: planned, advisory
+
+**Checks**
+- High-impact findings name the assumptions they depend on.
+- Assumptions are separated from findings, not buried in prose.
+
+**Anti-patterns**
+- Delegated recommendations that read as certain but rely on unstated assumptions
+
+### subagent-output-discloses-missing-context
+- **Level**: recommended
+- **Status**: planned
+- **Scope**: delegation.result-envelope, delegation.context-packet
+- **Rule**: Subagent output should disclose what context it was missing or uncertain about.
+- **Why**: The parent needs to know whether a finding is weak because the delegated context packet was incomplete.
+- **Enforced by**: planned, advisory
+
+**Checks**
+- Missing context is called out explicitly instead of implied through hedging.
+
+**Anti-patterns**
+- A confident delegated result that omits obvious context gaps
+
+### subagent-output-exposes-confidence
+- **Level**: recommended
+- **Status**: planned
+- **Scope**: delegation.result-envelope, synthesis.claim-adoption
+- **Rule**: Subagent output should expose confidence for its key findings or recommendations.
+- **Why**: The parent needs a fast read on which delegated conclusions are tentative versus well-supported.
+- **Enforced by**: planned, advisory
+
+**Checks**
+- Confidence is attached to findings or recommendations, not hidden in a general disclaimer.
+
+**Anti-patterns**
+- All findings are presented with the same implied confidence
+
+### high-impact-findings-must-be-easy-to-verify
+- **Level**: recommended
+- **Status**: planned
+- **Scope**: delegation.result-envelope, synthesis.claim-adoption
+- **Rule**: High-impact delegated findings should be easy for the parent to verify against primary evidence.
+- **Why**: The parent should not have to reverse-engineer a delegated deliverable to validate the claims that change the decision.
+- **Enforced by**: planned, advisory
+
+**Checks**
+- Decision-driving claims are surfaced explicitly.
+- The output makes it obvious what should be verified in code, artifacts, or tests.
+
+**Anti-patterns**
+- Burying the finding that changes the decision inside a long prose dump
+
+
+## Scope catalog
+- `workflow.definition`: Whole-workflow authored shape
+- `workflow.description`: Top-level workflow description text
+- `workflow.meta-guidance`: Workflow-level meta guidance
+- `workflow.extension-points`: Workflow-level extension point declarations and binding slots
+- `step.prompt`: Primary step prompt text
+- `step.prompt-fragment`: Conditional prompt fragment text
+- `step.prompt-blocks`: Structured prompt blocks or shared prompt composition structures
+- `step.output-requirements`: Explicit artifact or output requirements in a step
+- `step.context-capture`: Explicit context values a step must capture
+- `step.self-audit`: A step asking the agent to assess its own understanding or confidence
+- `step.delegation-checkpoint`: A step that explicitly fans out to subagents and later synthesizes
+- `step.confirmation`: A step that deliberately pauses for human confirmation
+- `loop.step`: The loop construct itself
+- `loop.pre-check`: Checks done before entering a loop or another pass
+- `loop.decision.prompt`: Prompt that decides whether a loop continues or stops
+- `loop.decision`: The loop decision checkpoint as a whole
+- `loop.decision.output-example`: Example artifact or output shape shown in a loop decision step
+- `workflow.rigor-policy`: Rules that differ by QUICK, STANDARD, or THOROUGH rigor
+- `prompt.composition`: Prompt assembly strategy including fragments, templates, and shared structure
+- `prompt.templates`: Context variable templates and prompt-time substitution
+- `response.supplement`: Boundary-owned supplemental instructions delivered alongside a workflow step
+- `synthesis.design`: Design synthesis after delegated or external review
+- `synthesis.plan-audit`: Plan-audit synthesis after delegated review
+- `synthesis.slice-verification`: Slice verification synthesis after delegated review
+- `synthesis.final-verification`: Final verification synthesis after delegated review
+- `synthesis.claim-adoption`: Rules for adopting or rejecting subagent claims
+- `workflow.authoring`: General workflow authoring behavior
+- `tooling.workflow-authoring`: Authoring helpers, generation tools, or workflow-for-workflows logic
+- `documentation.authoring`: Human-facing authoring documentation
+- `documentation.validation`: Validation-focused documentation
+- `validator.implementation`: Workflow validator implementation and behavior
+- `ci.validation`: CI validation surfaces for workflows
+- `artifact.plan`: Implementation-planning artifacts
+- `artifact.spec`: Behavior/specification artifacts
+- `artifact.verification`: Verification or handoff artifacts
+- `delegation.context-packet`: Structured context passed to subagents
+- `delegation.result-envelope`: Structured result shape returned by subagents
+- `legacy.patterns`: Older authoring patterns that should now be discouraged or avoided
+

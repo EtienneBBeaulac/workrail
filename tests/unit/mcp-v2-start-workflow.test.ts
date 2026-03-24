@@ -6,6 +6,8 @@ import * as fs from 'fs/promises';
 
 import { handleV2ContinueWorkflow, handleV2StartWorkflow } from '../../src/mcp/handlers/v2-execution.js';
 import type { ToolContext } from '../../src/mcp/types.js';
+import { unwrapResponse } from '../helpers/unwrap-response.js';
+import { EnvironmentFeatureFlagProvider } from '../../src/config/feature-flags.js';
 
 import { createWorkflow } from '../../src/types/workflow.js';
 import { createProjectDirectorySource } from '../../src/types/workflow-source.js';
@@ -109,6 +111,63 @@ async function mkCtxWithWorkflow(workflowId: string): Promise<{ ctx: ToolContext
   return { ctx, aliasStore: tokenAliasStore };
 }
 
+async function mkRequestCtx(): Promise<ToolContext> {
+  const dataDir = new LocalDataDirV2(process.env);
+  const fsPort = new NodeFileSystemV2();
+  const sha256 = new NodeSha256V2();
+  const crypto = new NodeCryptoV2();
+  const sessionStore = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha256);
+  const clock = new NodeTimeClockV2();
+  const lockPort = new LocalSessionLockV2(dataDir, fsPort, clock);
+  const gate = new ExecutionSessionGateV2(lockPort, sessionStore);
+  const snapshotStore = new LocalSnapshotStoreV2(dataDir, fsPort, crypto);
+  const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir, fsPort);
+  const hmac = new NodeHmacSha256V2();
+  const base64url = new NodeBase64UrlV2();
+  const entropy = new NodeRandomEntropyV2();
+  const idFactory = new IdFactoryV2(entropy);
+  const base32 = new Base32AdapterV2();
+  const bech32m = new Bech32mAdapterV2();
+  const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url, entropy);
+  const keyringRes = await keyringPort.loadOrCreate();
+  if (keyringRes.isErr()) throw new Error(`keyring load failed: ${keyringRes.error.code}`);
+
+  const tokenCodecPorts = unsafeTokenCodecPorts({
+    keyring: keyringRes.value,
+    hmac,
+    base64url,
+    base32,
+    bech32m,
+  });
+
+  return {
+    workflowService: {
+      listWorkflowSummaries: async () => [],
+      getWorkflowById: async () => null,
+      getNextStep: async () => {
+        throw new Error('not used');
+      },
+      validateStepOutput: async () => ({ valid: true, issues: [], suggestions: [] }),
+    } as any,
+    featureFlags: EnvironmentFeatureFlagProvider.withEnv({}),
+    sessionManager: null,
+    httpServer: null,
+    v2: {
+      gate,
+      sessionStore,
+      snapshotStore,
+      pinnedStore,
+      sha256,
+      crypto,
+      entropy,
+      idFactory,
+      tokenCodecPorts,
+      tokenAliasStore: new InMemoryTokenAliasStoreV2(),
+      validationPipelineDeps: createTestValidationPipelineDeps(),
+    },
+  };
+}
+
 /**
  * Create a context whose getWorkflowById returns a workflow with
  * both prompt AND promptBlocks on a step (invalid XOR).
@@ -181,7 +240,8 @@ describe('v2 start_workflow (Slice 3.5)', () => {
       if (start.type !== 'success') return;
 
       const big = 'a'.repeat(262_200);
-      const res = await handleV2ContinueWorkflow({ continueToken: start.data.continueToken, intent: 'rehydrate', context: { big } } as any, ctx);
+      const startResponse = unwrapResponse(start.data);
+      const res = await handleV2ContinueWorkflow({ continueToken: startResponse.continueToken, intent: 'rehydrate', context: { big } } as any, ctx);
       expect(res.type).toBe('error');
       if (res.type !== 'error') return;
 
@@ -195,6 +255,89 @@ describe('v2 start_workflow (Slice 3.5)', () => {
       expect(details.details.measuredBytes).toBeGreaterThan(262144);
     } finally {
       process.env.WORKRAIL_DATA_DIR = prev;
+    }
+  });
+
+  it('start_workflow persists resolved reference state and reuses it on rehydrate', async () => {
+    const root = await mkTempDataDir();
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'workrail-ref-workspace-'));
+    const prev = process.env.WORKRAIL_DATA_DIR;
+    process.env.WORKRAIL_DATA_DIR = root;
+
+    try {
+      const workflowsDir = path.join(workspaceDir, 'workflows');
+      const docsDir = path.join(workspaceDir, 'docs');
+      await fs.mkdir(workflowsDir, { recursive: true });
+      await fs.mkdir(docsDir, { recursive: true });
+      await fs.writeFile(path.join(docsDir, 'guide.md'), '# Guide\n');
+
+      const workflowId = 'refs-workflow';
+      const workflowFile = {
+        id: workflowId,
+        name: 'Refs Workflow',
+        description: 'Workflow used to verify reference resolution end to end.',
+        version: '0.1.0',
+        references: [
+          {
+            id: 'guide',
+            title: 'Workspace Guide',
+            source: 'docs/guide.md',
+            purpose: 'Shared project guidance',
+            authoritative: true,
+          },
+        ],
+        steps: [
+          { id: 'triage', title: 'Triage', prompt: 'Do triage' },
+        ],
+      };
+      await fs.writeFile(
+        path.join(workflowsDir, `${workflowId}.json`),
+        JSON.stringify(workflowFile, null, 2),
+      );
+
+      const ctx = await mkRequestCtx();
+      const start = await handleV2StartWorkflow({ workflowId, workspacePath: workspaceDir } as any, ctx);
+      expect(start.type).toBe('success');
+      if (start.type !== 'success') return;
+
+      const { isV2ExecutionRenderEnvelope } = await import('../../src/mcp/render-envelope.js');
+      expect(isV2ExecutionRenderEnvelope(start.data)).toBe(true);
+      if (!isV2ExecutionRenderEnvelope(start.data)) return;
+
+      expect(start.data.contentEnvelope).toBeDefined();
+      expect(start.data.contentEnvelope!.references).toHaveLength(1);
+      expect(start.data.contentEnvelope!.references[0]).toMatchObject({
+        id: 'guide',
+        source: 'docs/guide.md',
+        resolveFrom: 'workspace',
+        status: 'resolved',
+        resolvedPath: path.join(workspaceDir, 'docs', 'guide.md'),
+      });
+
+      const startResponse = unwrapResponse(start.data);
+      const rehydrate = await handleV2ContinueWorkflow({
+        continueToken: startResponse.continueToken,
+        intent: 'rehydrate',
+        workspacePath: workspaceDir,
+      } as any, ctx);
+      expect(rehydrate.type).toBe('success');
+      if (rehydrate.type !== 'success') return;
+
+      expect(isV2ExecutionRenderEnvelope(rehydrate.data)).toBe(true);
+      if (!isV2ExecutionRenderEnvelope(rehydrate.data)) return;
+
+      expect(rehydrate.data.contentEnvelope).toBeDefined();
+      expect(rehydrate.data.contentEnvelope!.references).toHaveLength(1);
+      expect(rehydrate.data.contentEnvelope!.references[0]).toMatchObject({
+        id: 'guide',
+        source: 'docs/guide.md',
+        resolveFrom: 'workspace',
+        status: 'resolved',
+        resolvedPath: path.join(workspaceDir, 'docs', 'guide.md'),
+      });
+    } finally {
+      process.env.WORKRAIL_DATA_DIR = prev;
+      await fs.rm(workspaceDir, { recursive: true, force: true });
     }
   });
 
@@ -239,18 +382,19 @@ describe('v2 start_workflow (Slice 3.5)', () => {
       }
       if (res.type !== 'success') return;
 
-      expect(typeof res.data.continueToken).toBe('string');
-      expect(typeof res.data.continueToken).toBe('string');
-      expect(res.data.isComplete).toBe(false);
-      expect(res.data.pending?.stepId).toBe('triage');
+      const response = unwrapResponse(res.data);
+      expect(typeof response.continueToken).toBe('string');
+      expect(typeof response.continueToken).toBe('string');
+      expect(response.isComplete).toBe(false);
+      expect(response.pending?.stepId).toBe('triage');
 
       // Verify v2 short token format.
       const localBase64url = new NodeBase64UrlV2();
-      expect(res.data.continueToken).toMatch(/^ct_[A-Za-z0-9_-]{24}$/);
-      expect(res.data.continueToken).toMatch(/^ct_[A-Za-z0-9_-]{24}$/);
+      expect(response.continueToken).toMatch(/^ct_[A-Za-z0-9_-]{24}$/);
+      expect(response.continueToken).toMatch(/^ct_[A-Za-z0-9_-]{24}$/);
 
       // Resolve session ID from alias store (registered during mintShortTokenTriple).
-      const parsedState = parseShortTokenNative(res.data.continueToken)!;
+      const parsedState = parseShortTokenNative(response.continueToken)!;
       const stateAlias = aliasStore.lookup(parsedState.nonceHex);
       expect(stateAlias).not.toBeNull();
       if (!stateAlias) throw new Error('state alias not found');

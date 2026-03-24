@@ -15,6 +15,15 @@
  * @module mcp/v2-response-formatter
  */
 
+import {
+  isV2ExecutionRenderEnvelope,
+  type V2ExecutionResponseLifecycle,
+} from './render-envelope.js';
+import {
+  buildResponseSupplements,
+  type FormattedSupplement,
+} from './response-supplements.js';
+
 // ---------------------------------------------------------------------------
 // Response shape types (mirrors output schemas without importing them)
 // ---------------------------------------------------------------------------
@@ -379,19 +388,244 @@ function formatSuccess(data: V2ExecutionResponse): string {
 }
 
 // ---------------------------------------------------------------------------
+// Clean format variants ("transparent proxy" — authored prompt as-is)
+// ---------------------------------------------------------------------------
+
+// Read per-call for consistency with prompt-renderer (both react to env changes).
+function isCleanResponseFormat(): boolean {
+  return process.env.WORKRAIL_CLEAN_RESPONSE_FORMAT === 'true';
+}
+
+// Footer phrasing variants to avoid looking templated.
+// Selected by step index (derived from stepId hash) for determinism.
+const CLEAN_ADVANCE_FOOTERS: readonly string[] = [
+  'WorkRail: when done, call continue_workflow with your notes. Token:',
+  'WorkRail: advance with continue_workflow when ready. Include your notes. Token:',
+  'WorkRail: call continue_workflow with your notes to move on. Token:',
+  'WorkRail: finished? continue_workflow with notes. Token:',
+];
+
+const CLEAN_REHYDRATE_FOOTERS: readonly string[] = [
+  'WorkRail: you are resuming this step. When ready, call continue_workflow with your notes. Token:',
+  'WorkRail: picking up where you left off. Advance with continue_workflow and notes. Token:',
+  'WorkRail: resuming. Call continue_workflow with notes when done. Token:',
+];
+
+function pickFooter(variants: readonly string[], stepId: string | undefined): string {
+  if (!stepId) return variants[0]!;
+  // Simple deterministic hash from stepId
+  let hash = 0;
+  for (let i = 0; i < stepId.length; i++) {
+    hash = ((hash << 5) - hash + stepId.charCodeAt(i)) | 0;
+  }
+  return variants[Math.abs(hash) % variants.length]!;
+}
+
+function formatCleanComplete(_data: V2ExecutionResponse): string {
+  return 'Workflow complete. No further steps.';
+}
+
+function formatCleanBlocked(data: V2Blocked): string {
+  const firstBlocker = data.blockers.blockers[0];
+  const heading = firstBlocker ? (BLOCKER_HEADING[firstBlocker.code] ?? firstBlocker.code) : 'Blocked';
+  const lines: string[] = [`Blocked: ${heading}`, ''];
+
+  for (const b of data.blockers.blockers) {
+    lines.push(b.message);
+    if (b.suggestedFix) {
+      lines.push('');
+      lines.push(`What to do: ${b.suggestedFix}`);
+    }
+    lines.push('');
+  }
+
+  if (data.validation) {
+    if (data.validation.issues.length > 0) {
+      lines.push('Issues:');
+      for (const issue of data.validation.issues) lines.push(`- ${issue}`);
+      lines.push('');
+    }
+  }
+
+  const token = data.retryContinueToken ?? data.nextCall?.params.continueToken ?? data.continueToken;
+  if (token) {
+    lines.push(`WorkRail: retry with corrected output. Token: ${token}`);
+  }
+
+  return lines.join('\n');
+}
+
+function formatCleanRehydrate(data: V2ExecutionResponse): string {
+  const lines: string[] = [];
+
+  if (data.pending) {
+    lines.push(data.pending.prompt);
+    lines.push('');
+  }
+
+  const token = data.nextCall?.params.continueToken ?? data.continueToken;
+  lines.push('---');
+  if (token) {
+    const footer = pickFooter(CLEAN_REHYDRATE_FOOTERS, data.pending?.stepId);
+    lines.push(`${footer} ${token}`);
+  }
+
+  const driftBlock = formatBindingDriftWarnings(data);
+  if (driftBlock) {
+    lines.push(driftBlock);
+  }
+
+  return lines.join('\n');
+}
+
+function formatCleanSuccess(data: V2ExecutionResponse): string {
+  const lines: string[] = [];
+
+  if (data.pending) {
+    lines.push(data.pending.prompt);
+    lines.push('');
+  }
+
+  const token = data.nextCall?.params.continueToken ?? data.continueToken;
+  lines.push('---');
+  if (token) {
+    const footer = pickFooter(CLEAN_ADVANCE_FOOTERS, data.pending?.stepId);
+    lines.push(`${footer} ${token}`);
+  }
+
+  const driftBlock = formatBindingDriftWarnings(data);
+  if (driftBlock) {
+    lines.push(driftBlock);
+  }
+
+  return lines.join('\n');
+}
+
+function deriveRenderInput(data: unknown): {
+  readonly response: V2ExecutionResponse;
+  readonly lifecycle: V2ExecutionResponseLifecycle;
+  readonly contentEnvelope?: import('./step-content-envelope.js').StepContentEnvelope;
+} | null {
+  if (isV2ExecutionRenderEnvelope(data)) {
+    return isV2ExecutionResponse(data.response)
+      ? { response: data.response, lifecycle: data.lifecycle, contentEnvelope: data.contentEnvelope }
+      : null;
+  }
+
+  return isV2ExecutionResponse(data)
+    ? { response: data, lifecycle: 'advance' }
+    : null;
+}
+
+// ---------------------------------------------------------------------------
+// Reference rendering
+// ---------------------------------------------------------------------------
+
+/**
+ * Render workflow references as a dedicated text section.
+ *
+ * Returns null when no references exist or the envelope is absent.
+ * On 'start' lifecycle: full reference set with titles, paths, purposes.
+ * On 'rehydrate' lifecycle: compact reminder (titles and paths only).
+ * On 'advance' lifecycle: no references emitted.
+ */
+function renderReferencesSection(
+  contentEnvelope: import('./step-content-envelope.js').StepContentEnvelope | undefined,
+  lifecycle: V2ExecutionResponseLifecycle,
+): FormattedReferences | null {
+  if (contentEnvelope == null) return null;
+  const refs = contentEnvelope.references;
+  if (refs.length === 0) return null;
+
+  switch (lifecycle) {
+    case 'start': {
+      const lines = ['Workflow References:', ''];
+      for (const ref of refs) {
+        const displayPath = ref.status === 'resolved' ? ref.resolvedPath : ref.source;
+        const statusTag = ref.status === 'unresolved' ? ' [unresolved]' : ref.status === 'pinned' ? ' [pinned]' : '';
+        const authority = ref.authoritative ? ' (authoritative)' : '';
+        const resolveTag = ref.resolveFrom === 'package' ? ' [package]' : '';
+        lines.push(`- **${ref.title}**${authority}${statusTag}${resolveTag}`);
+        lines.push(`  Path: ${displayPath}`);
+        lines.push(`  Purpose: ${ref.purpose}`);
+        lines.push('');
+      }
+      return { kind: 'references', text: lines.join('\n').trimEnd() };
+    }
+    case 'rehydrate': {
+      const lines = ['Workflow References (reminder):', ''];
+      for (const ref of refs) {
+        const displayPath = ref.status === 'resolved' ? ref.resolvedPath : ref.source;
+        const statusTag = ref.status === 'unresolved' ? ' [unresolved]' : ref.status === 'pinned' ? ' [pinned]' : '';
+        const resolveTag = ref.resolveFrom === 'package' ? ' [package]' : '';
+        lines.push(`- ${ref.title}${statusTag}${resolveTag}: ${displayPath}`);
+      }
+      return { kind: 'references', text: lines.join('\n').trimEnd() };
+    }
+    case 'advance':
+      return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
+
+/** Typed wrapper for rendered reference content, distinguishable from supplements. */
+export interface FormattedReferences {
+  readonly kind: 'references';
+  readonly text: string;
+}
+
+/**
+ * Structured response from the formatter.
+ *
+ * - `primary`: the main content (authored prompt + footer, or system message)
+ * - `references`: optional typed reference content, structurally separate
+ * - `supplements`: optional system payloads delivered as separate MCP content items
+ */
+export interface FormattedResponse {
+  readonly primary: string;
+  readonly references?: FormattedReferences;
+  readonly supplements?: readonly FormattedSupplement[];
+}
 
 /**
  * Format a v2 execution response as natural language.
  *
- * Returns the formatted string if the data is a recognized v2 execution
+ * Returns a FormattedResponse if the data is a recognized v2 execution
  * response shape (start_workflow or continue_workflow output). Returns null
  * if the data does not match, signaling the caller to fall back to JSON.
+ *
+ * When WORKRAIL_CLEAN_RESPONSE_FORMAT is enabled, uses the "transparent proxy"
+ * format: authored prompt delivered as-is with a minimal WorkRail footer.
+ * This improves agent authority perception by removing system scaffolding.
  */
-export function formatV2ExecutionResponse(data: unknown): string | null {
-  if (!isV2ExecutionResponse(data)) return null;
+export function formatV2ExecutionResponse(data: unknown): FormattedResponse | null {
+  const renderInput = deriveRenderInput(data);
+  if (!renderInput) return null;
+  const cleanFormat = isCleanResponseFormat();
+  const { response, lifecycle, contentEnvelope } = renderInput;
 
+  // Render references from content envelope (if present and non-empty)
+  const references = renderReferencesSection(contentEnvelope, lifecycle);
+
+  if (cleanFormat) {
+    return {
+      ...formatV2Clean(response),
+      ...(references != null ? { references } : {}),
+      supplements: buildResponseSupplements({ lifecycle, cleanFormat }),
+    };
+  }
+
+  // Classic format: single content item, no separate guidance
+  return {
+    primary: formatV2Classic(response),
+    ...(references != null ? { references } : {}),
+  };
+}
+
+function formatV2Classic(data: V2ExecutionResponse): string {
   if (data.nextIntent === 'complete' && !data.pending) {
     return formatComplete(data);
   }
@@ -405,4 +639,22 @@ export function formatV2ExecutionResponse(data: unknown): string | null {
   }
 
   return formatSuccess(data);
+}
+
+function formatV2Clean(data: V2ExecutionResponse): Pick<FormattedResponse, 'primary'> {
+  if (data.nextIntent === 'complete' && !data.pending) {
+    return { primary: formatCleanComplete(data) };
+  }
+
+  if (isBlocked(data)) {
+    return { primary: formatCleanBlocked(data) };
+  }
+
+  if (data.nextIntent === 'rehydrate_only') {
+    return { primary: formatCleanRehydrate(data) };
+  }
+
+  return {
+    primary: formatCleanSuccess(data),
+  };
 }

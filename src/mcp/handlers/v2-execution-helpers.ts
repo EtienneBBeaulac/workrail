@@ -64,7 +64,8 @@ export type StartWorkflowError =
   | { readonly kind: 'snapshot_creation_failed'; readonly cause: SnapshotStoreError }
   | { readonly kind: 'session_append_failed'; readonly cause: ExecutionSessionGateErrorV2 | SessionEventLogStoreError }
   | { readonly kind: 'token_signing_failed'; readonly cause: TokenDecodeErrorV2 | TokenVerifyErrorV2 | TokenSignErrorV2 }
-  | { readonly kind: 'prompt_render_failed'; readonly message: string };
+  | { readonly kind: 'prompt_render_failed'; readonly message: string }
+  | { readonly kind: 'reference_resolution_failed' };
 
 /**
  * Typed error union for continue_workflow handler.
@@ -152,6 +153,12 @@ export function mapStartWorkflowErrorToToolError(e: StartWorkflowError): ToolFai
       return errNotRetryable('INTERNAL_ERROR',
         `WorkRail could not render the pending step prompt: ${e.message}`,
         { suggestion: internalSuggestion('Retry start_workflow.', 'A step referenced by the workflow was not found in the executable definition.') },
+      );
+
+    case 'reference_resolution_failed':
+      return errNotRetryable('INTERNAL_ERROR',
+        'WorkRail could not resolve workflow references. This is not caused by your input.',
+        { suggestion: internalSuggestion('Retry start_workflow.', 'Reference resolution encountered an unexpected error.') },
       );
 
     default:
