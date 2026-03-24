@@ -1,0 +1,90 @@
+name: Work item
+description: Track a feature, bug, or chore with the Phase 1 ticket shape
+title: "[work] "
+labels: []
+body:
+  - type: dropdown
+    id: work_type
+    attributes:
+      label: Work type
+      description: Pick the closest Phase 1 work type label.
+      options:
+        - feature
+        - bug
+        - chore
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is wrong, missing, or confusing?
+      placeholder: Describe the actual problem to solve.
+    validations:
+      required: true
+
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What outcome do we want?
+      placeholder: Describe the intended outcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance criteria
+      description: What must be true for this to count as done?
+      placeholder: |
+        - [ ] Criterion 1
+        - [ ] Criterion 2
+    validations:
+      required: true
+
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification
+      description: How should completion be checked?
+      placeholder: |
+        - [ ] Verification step 1
+        - [ ] Verification step 2
+    validations:
+      required: true
+
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Non-goals
+      description: What is intentionally out of scope?
+      placeholder: |
+        - None
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Relevant files, docs, prior issues, PRs, or design notes.
+      placeholder: |
+        - docs/...
+        - src/...
+        - #123
+        - PR #456
+    validations:
+      required: false
+
+  - type: textarea
+    id: agent_execution_note
+    attributes:
+      label: Agent execution note
+      description: Fill this out if you may later hand this issue to an agent.
+      placeholder: |
+        - Can an agent take this if I explicitly hand it over: yes/no
+        - Avoid:
+    validations:
+      required: false
