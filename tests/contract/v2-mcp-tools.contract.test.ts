@@ -464,6 +464,9 @@ function validResumeCandidate(overrides?: Partial<{
     workflowId: 'coding-task-workflow-agentic',
     resumeToken: VALID_STATE_TOKEN,
     snippet: 'Working on feature X...',
+    pendingStepId: 'phase-2-define-problem',
+    isComplete: false,
+    lastModifiedMs: 1700000000000,
     whyMatched: ['matched_branch'],
     nextCall: {
       tool: 'continue_workflow',
@@ -507,9 +510,11 @@ describe('V2ResumeSessionOutputSchema', () => {
 
   it('accepts all valid whyMatched values', () => {
     const LOCKED_WHY_MATCHED = [
+      'matched_exact_id',
       'matched_head_sha',
       'matched_branch',
       'matched_notes',
+      'matched_notes_partial',
       'matched_workflow_id',
       'recency_fallback',
     ];

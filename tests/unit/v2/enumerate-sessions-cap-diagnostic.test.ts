@@ -154,12 +154,12 @@ describe('Session enumeration cap regression', () => {
 
     expect(result.value).toHaveLength(60);
     // sess_0060 should be first (newest mtime)
-    expect(String(result.value[0])).toBe('sess_0060');
+    expect(String(result.value[0]!.sessionId)).toBe('sess_0060');
 
     // After provider cap at 50:
     const capped = result.value.slice(0, 50);
     // sess_0060 IS in the capped list (it's first)
-    expect(capped.map(String)).toContain('sess_0060');
+    expect(capped.map(e => String(e.sessionId))).toContain('sess_0060');
 
     console.log('[FIX VERIFIED] Most recent session (sess_0060) is first despite alphabetically last');
   });
@@ -183,7 +183,7 @@ describe('Session enumeration cap regression', () => {
     expect(result.isOk()).toBe(true);
     if (!result.isOk()) return;
 
-    const sorted = result.value.map(String);
+    const sorted = result.value.map(e => String(e.sessionId));
     // E1 should be first (newest mtime)
     expect(sorted[0]).toBe('sess_dlzozumq6yypgv6lfspxxr7oq4');
 
