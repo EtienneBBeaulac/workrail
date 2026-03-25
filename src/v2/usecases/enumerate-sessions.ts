@@ -34,6 +34,12 @@ export function enumerateSessions(ports: {
     );
 }
 
+/** Session ID with its filesystem modification time. */
+export interface SessionWithMtime {
+  readonly sessionId: SessionId;
+  readonly mtimeMs: number;
+}
+
 /**
  * Enumerate session IDs by most recent modification time (descending).
  *
@@ -41,6 +47,8 @@ export function enumerateSessions(ports: {
  * With >50 sessions, alphabetical ordering causes random exclusion since session IDs
  * are uncorrelated with recency. Sorting by mtime ensures the most relevant sessions
  * are prioritized.
+ *
+ * Returns sessionId + mtimeMs pairs so callers can surface recency to users.
  *
  * Filters directory entries to valid session ID format only.
  * Sorts by mtime descending, with alphabetical tie-breaking for determinism.
@@ -50,7 +58,7 @@ export function enumerateSessions(ports: {
 export function enumerateSessionsByRecency(ports: {
   readonly directoryListing: DirectoryListingPortV2;
   readonly dataDir: DataDirPortV2;
-}): ResultAsync<readonly SessionId[], FsError> {
+}): ResultAsync<readonly SessionWithMtime[], FsError> {
   return ports.directoryListing
     .readdirWithMtime(ports.dataDir.sessionsDir())
     .map((entries) =>
@@ -62,6 +70,6 @@ export function enumerateSessionsByRecency(ports: {
           // Tie-break alphabetically by name (deterministic)
           return a.name.localeCompare(b.name);
         })
-        .map((entry) => asSessionId(entry.name))
+        .map((entry) => ({ sessionId: asSessionId(entry.name), mtimeMs: entry.mtimeMs }))
     );
 }

@@ -74,6 +74,8 @@ export async function handleV2ResumeSession(
     gitHeadSha: input.gitHeadSha ?? anchorValue(anchors, 'git_head_sha'),
     gitBranch: input.gitBranch ?? anchorValue(anchors, 'git_branch'),
     freeTextQuery: input.query,
+    runId: input.runId,
+    sessionId: input.sessionId,
   };
 
   // Run resume
@@ -115,6 +117,9 @@ interface MintedCandidate {
   readonly resumeToken: string;
   readonly snippet: string;
   readonly whyMatched: string[];
+  readonly pendingStepId: string | null;
+  readonly isComplete: boolean;
+  readonly lastModifiedMs: number | null;
   /** Pre-built template — the agent picks the best candidate and calls continue_workflow with this. */
   readonly nextCall: {
     readonly tool: 'continue_workflow';
@@ -169,6 +174,9 @@ function mintCandidateTokens(
       resumeToken: resumeTokenRes.value,
       snippet: candidate.snippet,
       whyMatched: [...candidate.whyMatched],
+      pendingStepId: candidate.pendingStepId,
+      isComplete: candidate.isComplete,
+      lastModifiedMs: candidate.lastModifiedMs,
       nextCall: {
         tool: 'continue_workflow',
         params: { continueToken: resumeTokenRes.value, intent: 'rehydrate' },

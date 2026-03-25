@@ -166,6 +166,7 @@ export async function createToolContext(): Promise<ToolContext> {
           directoryListing,
           dataDir,
           sessionStore,
+          snapshotStore,
         }),
       };
       console.error('[FeatureFlags] v2 tools enabled');
