@@ -213,44 +213,44 @@ export const CHECKPOINT_WORKFLOW_PROTOCOL: WorkflowProtocolContract = {
 export const RESUME_SESSION_PROTOCOL: WorkflowProtocolContract = {
   canonicalParams: {
     required: [],
-    optional: ['query', 'gitBranch', 'gitHeadSha', 'workspacePath'],
+    optional: ['query', 'runId', 'sessionId', 'gitBranch', 'gitHeadSha', 'workspacePath'],
   },
   descriptions: {
     standard: {
-      purpose: 'Find and reconnect to an existing WorkRail v2 workflow session.',
+      purpose: 'Find and reconnect to an existing WorkRail workflow session. WorkRail is a workflow engine that persists session state across chat conversations. When a user says "resume my workflow", this is the tool to call.',
       whenToUse:
-        'Use this when you need to resume a previously started workflow but no longer have the latest continueToken in chat context.',
+        'Use this when the user wants to resume, continue, or reconnect to a previously started workflow. The user may provide a session ID, run ID, a description of what they were working on, or nothing at all. This tool searches stored sessions and returns the best matches.',
       rules: [
-        'Always pass query with the user\'s stated topic or intent (e.g. "resume the ACEI-1234 workflow"). Without query, only git-context matching runs and the right session may not surface.',
-        'Pass workspacePath when available so WorkRail can match sessions to the correct workspace and git context.',
-        'Pick the best candidate, then call continue_workflow using its nextCall template — no manual parameter construction needed.',
-        'Do not call read_session to resume; use the nextCall from the chosen candidate.',
-        'If candidates is empty, no eligible session exists — call start_workflow to begin a new session instead.',
-        'If all candidates have whyMatched: ["recency_fallback"], the match had no strong signal (git or notes). Verify the snippet before resuming.',
+        'If the user provides a run ID (run_...) or session ID (sess_...), pass it as runId or sessionId for an exact match. This is the most reliable way to find a specific session.',
+        'If the user describes what they were working on (e.g. "the mr ownership task"), pass their words as query. This searches session recap notes and workflow IDs for matching keywords.',
+        'Always pass workspacePath (from your system parameters) so WorkRail can also match by git context (branch, commit).',
+        'The response includes ranked candidates with match explanations and ready-to-use continuation templates. Present the top candidates to the user if there is ambiguity.',
+        'To resume a candidate: call continue_workflow with the candidate\'s nextCall.params (continueToken and intent: "rehydrate"). The response will give you the full session context.',
+        'If no candidates match, ask the user for more details or suggest starting a fresh workflow with start_workflow.',
       ],
       examplePayload: {
         workspacePath: '/Users/you/git/my-project',
         query: 'resume the coding task workflow for protocol drift',
       },
-      returns: 'Up to 5 ranked candidates, each with whyMatched explaining the match signal and a nextCall template for continue_workflow. If candidates is empty, call start_workflow.',
+      returns: 'Up to 5 ranked candidates with match signals, session previews, and ready-to-use continuation templates. The response explains which candidate to pick and exactly how to resume it.',
     },
     authoritative: {
-      purpose: 'Find an existing WorkRail v2 session and reconnect to it deterministically.',
+      purpose: 'Find an existing WorkRail workflow session and reconnect to it. WorkRail persists workflow state across chat conversations. When a user says "resume my workflow", call this tool.',
       whenToUse:
-        'Call this when resuming a workflow without the latest in-chat token block.',
+        'Call this when resuming a workflow. The user may provide a run ID, session ID, a description, or nothing.',
       rules: [
-        'Always pass query with the user\'s stated topic or intent. Semantic (notes) matching only runs when query is provided.',
-        'Pass workspacePath set to the current workspace whenever possible.',
-        'Pick the best candidate and call continue_workflow with its nextCall — the resumeToken is already embedded in nextCall.params.continueToken.',
-        'Do not invent token values or call read_session to resume execution.',
-        'If candidates is empty, no eligible session exists — call start_workflow instead.',
-        'whyMatched values: matched_head_sha / matched_branch / matched_notes = strong signal; recency_fallback = no signal, verify snippet before resuming.',
+        'If the user provides a run ID (run_...) or session ID (sess_...), pass it as runId or sessionId for exact lookup.',
+        'If the user describes their task, pass their words as query to search session notes.',
+        'Always pass workspacePath from your system parameters for git-context matching.',
+        'Present candidates to the user when there is ambiguity. The response explains match strength.',
+        'To resume: call continue_workflow with the chosen candidate\'s nextCall.params (continueToken + intent: "rehydrate").',
+        'If no candidates match, ask for more details or start a fresh workflow.',
       ],
       examplePayload: {
         workspacePath: '/Users/you/git/my-project',
         query: 'resume the coding task workflow for protocol drift',
       },
-      returns: 'Up to 5 ranked candidates, each with whyMatched confidence signals and a pre-built nextCall. Empty candidates means no session found — call start_workflow.',
+      returns: 'Up to 5 ranked candidates with match signals, previews, and ready-to-use continuation templates.',
     },
   },
 };

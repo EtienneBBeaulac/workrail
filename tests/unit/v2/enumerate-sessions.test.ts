@@ -104,9 +104,12 @@ describe('enumerateSessionsByRecency', () => {
     expect(result.isOk()).toBe(true);
     if (!result.isOk()) return;
 
-    const ids = result.value.map(String);
+    const ids = result.value.map(e => String(e.sessionId));
     // Most recent first
     expect(ids).toEqual(['sess_zzz', 'sess_mmm', 'sess_aaa']);
+    // Mtime is preserved
+    expect(result.value[0]!.mtimeMs).toBe(3000);
+    expect(result.value[2]!.mtimeMs).toBe(1000);
   });
 
   it('tie-breaks by session ID alphabetically when mtime is equal', async () => {
@@ -121,7 +124,7 @@ describe('enumerateSessionsByRecency', () => {
     expect(result.isOk()).toBe(true);
     if (!result.isOk()) return;
 
-    const ids = result.value.map(String);
+    const ids = result.value.map(e => String(e.sessionId));
     // All same mtime → alphabetical
     expect(ids).toEqual(['sess_aaa', 'sess_mmm', 'sess_zzz']);
   });
@@ -138,7 +141,7 @@ describe('enumerateSessionsByRecency', () => {
     expect(result.isOk()).toBe(true);
     if (!result.isOk()) return;
 
-    expect(result.value.map(String)).toEqual(['sess_valid']);
+    expect(result.value.map(e => String(e.sessionId))).toEqual(['sess_valid']);
   });
 
   it('returns empty array when no sessions exist', async () => {
@@ -170,6 +173,6 @@ describe('enumerateSessionsByRecency', () => {
 
     expect(result.value).toHaveLength(60);
     // Most recent first (mtimeMs=99999), even though it's alphabetically last
-    expect(String(result.value[0])).toBe('sess_0060');
+    expect(String(result.value[0]!.sessionId)).toBe('sess_0060');
   });
 });

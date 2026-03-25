@@ -25,7 +25,7 @@ import { toBoundedJsonValue } from './validation/bounded-json.js';
 import type { PreValidateResult } from './validation/workflow-next-prevalidate.js';
 import type { WrappedToolHandler, McpCallToolResult } from './types/workflow-tool-edition.js';
 import { internalSuggestion } from './handlers/v2-execution-helpers.js';
-import { formatV2ExecutionResponse, type FormattedResponse } from './v2-response-formatter.js';
+import { formatV2ExecutionResponse, formatV2ResumeResponse, type FormattedResponse } from './v2-response-formatter.js';
 import { getV2ExecutionRenderEnvelope } from './render-envelope.js';
 
 // -----------------------------------------------------------------------------
@@ -44,7 +44,8 @@ export function toMcpResult<T>(result: ToolResult<T>): McpCallToolResult {
   switch (result.type) {
     case 'success': {
       if (!jsonResponsesOverride) {
-        const formatted: FormattedResponse | null = formatV2ExecutionResponse(result.data);
+        const formatted: FormattedResponse | null =
+          formatV2ExecutionResponse(result.data) ?? formatV2ResumeResponse(result.data);
         if (formatted !== null) {
           const content: { type: 'text'; text: string }[] = [{ type: 'text', text: formatted.primary }];
           if (formatted.references != null) {

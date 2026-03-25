@@ -129,7 +129,16 @@ export type V2ContinueWorkflowInput = z.infer<typeof V2ContinueWorkflowInput>;
 export const V2ResumeSessionInput = z.object({
   query: z.string().min(1).max(256).optional().describe(
     'Free text search to find a relevant session. Matches against recap notes and workflow IDs. ' +
+    'Tip: use the user\'s exact words (e.g. "mr ownership", "ACEI-1234"). ' +
     'Without query, only git-context matching runs — the semantic (notes) tier is skipped.'
+  ),
+  runId: z.string().regex(/^run_[a-z0-9]+$/).optional().describe(
+    'Exact run ID to find (e.g. "run_tbi2ag7njfjgc2aitt4qg5eaiq"). ' +
+    'When provided, the matching session is returned as the sole top-priority candidate.'
+  ),
+  sessionId: z.string().regex(/^sess_[a-zA-Z0-9_]+$/).optional().describe(
+    'Exact session ID to find (e.g. "sess_s5o2ieem4mwypoqnn6ztzyyag4"). ' +
+    'When provided, the matching session is returned as the sole top-priority candidate.'
   ),
   gitBranch: z.string().max(256).optional().describe(
     'Git branch name to match against session observations. Overrides auto-detected branch.'
