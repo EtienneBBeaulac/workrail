@@ -346,15 +346,28 @@ export const V2ResumeSessionOutputSchema = z.object({
      */
     resumeToken: z.string().regex(STATE_TOKEN_PATTERN, 'Invalid resumeToken format'),
     snippet: z.string().max(1024),
+    pendingStepId: z.string().nullable().describe(
+      'The current pending step ID (e.g. "phase-3-implement") if the workflow is in progress. ' +
+      'Null if the workflow is complete or the step could not be determined.'
+    ),
+    isComplete: z.boolean().describe(
+      'Whether the workflow run has completed. Completed sessions are deprioritized in ranking.'
+    ),
+    lastModifiedMs: z.number().nullable().describe(
+      'Filesystem modification time (epoch ms) of the session. Null if unavailable.'
+    ),
     whyMatched: z.array(z.enum([
-      'matched_head_sha',    // Tier 1 — exact git commit match (strongest signal)
+      'matched_exact_id',    // Tier 0 — exact runId or sessionId match (strongest signal)
+      'matched_head_sha',    // Tier 1 — exact git commit match
       'matched_branch',      // Tier 2 — same git branch
-      'matched_notes',       // Tier 3 — query matched recap notes (semantic)
-      'matched_workflow_id', // Tier 4 — same workflow ID
-      'recency_fallback',    // Tier 5 — no signal; most recent sessions only. Verify snippet before resuming.
+      'matched_notes',       // Tier 3 — query matched ALL recap note tokens
+      'matched_notes_partial', // Tier 4 — query matched SOME recap note tokens
+      'matched_workflow_id', // Tier 5 — same workflow ID
+      'recency_fallback',    // Tier 6 — no signal; most recent sessions only. Verify snippet before resuming.
     ])).describe(
       'Match signals explaining why this candidate was ranked. ' +
-      'matched_head_sha/branch/notes/workflow_id = strong signal. ' +
+      'matched_exact_id/head_sha/branch/notes = strong signal. ' +
+      'matched_notes_partial = moderate signal (some query words matched). ' +
       'recency_fallback = no strong signal; inspect the snippet before resuming.'
     ),
     /**

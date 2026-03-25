@@ -3,17 +3,19 @@ import { okAsync } from 'neverthrow';
 import type { DirectoryListingPortV2 } from '../../../ports/directory-listing.port.js';
 import type { DataDirPortV2 } from '../../../ports/data-dir.port.js';
 import type { SessionEventLogReadonlyStorePortV2, LoadedSessionTruthV2 } from '../../../ports/session-event-log-store.port.js';
+import type { SnapshotStorePortV2 } from '../../../ports/snapshot-store.port.js';
 import type { SessionSummaryProviderPortV2, SessionSummaryError } from '../../../ports/session-summary-provider.port.js';
 import type { HealthySessionSummary, SessionObservations, IdentifiedWorkflow, RecapSnippet } from '../../../projections/resume-ranking.js';
 import { asRecapSnippet } from '../../../projections/resume-ranking.js';
 import type { RunDagRunV2, RunDagNodeV2 } from '../../../projections/run-dag.js';
-import { enumerateSessionsByRecency } from '../../../usecases/enumerate-sessions.js';
+import { enumerateSessionsByRecency, type SessionWithMtime } from '../../../usecases/enumerate-sessions.js';
 import { projectSessionHealthV2 } from '../../../projections/session-health.js';
 import { projectRunDagV2 } from '../../../projections/run-dag.js';
 import { projectNodeOutputsV2, type NodeOutputsProjectionV2 } from '../../../projections/node-outputs.js';
+import { derivePendingStep, deriveIsComplete } from '../../../durable-core/projections/snapshot-state.js';
 import type { DomainEventV1 } from '../../../durable-core/schemas/session/index.js';
-import type { SessionId } from '../../../durable-core/ids/index.js';
-import { asWorkflowId, asWorkflowHash, asSha256Digest } from '../../../durable-core/ids/index.js';
+import type { SessionId, SnapshotRef } from '../../../durable-core/ids/index.js';
+import { asWorkflowId, asWorkflowHash, asSha256Digest, asSnapshotRef } from '../../../durable-core/ids/index.js';
 import { EVENT_KIND, OUTPUT_CHANNEL, PAYLOAD_KIND, SHA256_DIGEST_PATTERN } from '../../../durable-core/constants.js';
 
 // ---------------------------------------------------------------------------
@@ -44,6 +46,7 @@ type RunStartedEventV1 = Extract<DomainEventV1, { kind: 'run_started' }>;
 interface RunWithTip {
   readonly run: RunDagRunV2;
   readonly tipNodeId: string;
+  readonly tipSnapshotRef: string;
   readonly lastActivityEventIndex: number;
 }
 
@@ -55,7 +58,7 @@ interface RunWithTip {
  * Max sessions to scan (explicit bound to prevent unbounded enumeration).
  * Locked: prevents runaway scanning on large workspaces.
  */
-const MAX_SESSIONS_TO_SCAN = 50;
+const MAX_SESSIONS_TO_SCAN = 200;
 
 /**
  * Max ancestor depth for recap aggregation.
@@ -69,6 +72,12 @@ const MAX_RECAP_ANCESTOR_DEPTH = 100;
 // ---------------------------------------------------------------------------
 // Empty sentinels (named, not inlined)
 // ---------------------------------------------------------------------------
+
+/** Internal result from projectSessionSummary — carries snapshotRef for enrichment. */
+interface ProjectedSummary {
+  readonly summary: HealthySessionSummary;
+  readonly tipSnapshotRef: string;
+}
 
 const EMPTY_OBSERVATIONS: SessionObservations = {
   gitHeadSha: null,
@@ -89,6 +98,8 @@ export interface LocalSessionSummaryProviderPorts {
   readonly directoryListing: DirectoryListingPortV2;
   readonly dataDir: DataDirPortV2;
   readonly sessionStore: SessionEventLogReadonlyStorePortV2;
+  /** Optional: enables pendingStepId and isComplete extraction from tip snapshots. */
+  readonly snapshotStore?: SnapshotStorePortV2;
 }
 
 // ---------------------------------------------------------------------------
@@ -116,10 +127,11 @@ export class LocalSessionSummaryProviderV2 implements SessionSummaryProviderPort
         code: 'SESSION_SUMMARY_ENUMERATION_FAILED',
         message: `Failed to enumerate sessions: ${fsErr.message}`,
       }))
-      .andThen((sessionIds) =>
+      .andThen((entries) =>
         collectHealthySummaries(
-          sessionIds.slice(0, MAX_SESSIONS_TO_SCAN),
+          entries.slice(0, MAX_SESSIONS_TO_SCAN),
           this.ports.sessionStore,
+          this.ports.snapshotStore ?? null,
         )
       );
   }
@@ -138,13 +150,14 @@ export class LocalSessionSummaryProviderV2 implements SessionSummaryProviderPort
  * Uses a functional reduce so the accumulator is immutable at each step.
  */
 function collectHealthySummaries(
-  sessionIds: readonly SessionId[],
+  entries: readonly SessionWithMtime[],
   sessionStore: SessionEventLogReadonlyStorePortV2,
+  snapshotStore: SnapshotStorePortV2 | null,
 ): ResultAsync<readonly HealthySessionSummary[], SessionSummaryError> {
-  return sessionIds.reduce(
-    (acc, sessionId) =>
+  return entries.reduce(
+    (acc, entry) =>
       acc.andThen((summaries) =>
-        loadSessionSummary(sessionId, sessionStore).map((summary) =>
+        loadSessionSummary(entry, sessionStore, snapshotStore).map((summary) =>
           summary !== null ? [...summaries, summary] : summaries,
         )
       ),
@@ -157,13 +170,43 @@ function collectHealthySummaries(
  * Returns null on any failure — graceful degradation for individual sessions.
  */
 function loadSessionSummary(
-  sessionId: SessionId,
+  entry: SessionWithMtime,
   sessionStore: SessionEventLogReadonlyStorePortV2,
+  snapshotStore: SnapshotStorePortV2 | null,
 ): ResultAsync<HealthySessionSummary | null, never> {
   return sessionStore
-    .load(sessionId)
-    .map((truth) => projectSessionSummary(sessionId, truth))
+    .load(entry.sessionId)
+    .andThen((truth) => {
+      const projected = projectSessionSummary(entry.sessionId, truth, entry.mtimeMs);
+      if (!projected) return okAsync(null);
+
+      // If snapshot store is available, enrich with pendingStepId and isComplete
+      if (!snapshotStore) return okAsync(projected.summary);
+
+      const ref = safeSnapshotRef(projected.tipSnapshotRef);
+      if (!ref) return okAsync(projected.summary);
+
+      return snapshotStore.getExecutionSnapshotV1(ref)
+        .map((snapshot) => {
+          if (!snapshot) return projected.summary;
+          const engineState = snapshot.enginePayload.engineState;
+          const pending = derivePendingStep(engineState);
+          const isComplete = deriveIsComplete(engineState);
+          return {
+            ...projected.summary,
+            pendingStepId: pending?.stepId ?? null,
+            isComplete,
+          };
+        })
+        .orElse(() => okAsync(projected.summary)); // Graceful: snapshot failures don't break summary
+    })
     .orElse(() => okAsync(null)); // Graceful skip: individual store failures don't abort enumeration
+}
+
+/** Convert a raw snapshot ref string to a branded SnapshotRef, returning null if malformed. */
+function safeSnapshotRef(raw: string): SnapshotRef | null {
+  if (!raw || !SHA256_DIGEST_PATTERN.test(raw)) return null;
+  return asSnapshotRef(asSha256Digest(raw));
 }
 
 // ---------------------------------------------------------------------------
@@ -180,7 +223,8 @@ function loadSessionSummary(
 function projectSessionSummary(
   sessionId: SessionId,
   truth: LoadedSessionTruthV2,
-): HealthySessionSummary | null {
+  mtimeMs: number,
+): ProjectedSummary | null {
   // Gate: unhealthy sessions cannot be summarized
   const health = projectSessionHealthV2(truth);
   if (health.isErr() || health.value.kind !== 'healthy') return null;
@@ -204,16 +248,23 @@ function projectSessionSummary(
     : null;
 
   return {
-    sessionId,
-    runId: bestRun.run.runId,
-    preferredTip: {
-      nodeId: bestRun.tipNodeId,
-      lastActivityEventIndex: bestRun.lastActivityEventIndex,
-    },
-    recapSnippet,
-    observations: extractObservations(truth.events),
-    workflow,
-  } satisfies HealthySessionSummary;
+    summary: {
+      sessionId,
+      runId: bestRun.run.runId,
+      preferredTip: {
+        nodeId: bestRun.tipNodeId,
+        lastActivityEventIndex: bestRun.lastActivityEventIndex,
+      },
+      recapSnippet,
+      observations: extractObservations(truth.events),
+      workflow,
+      lastModifiedMs: mtimeMs,
+      // Defaults; enriched by snapshot store if available
+      pendingStepId: null,
+      isComplete: false,
+    } satisfies HealthySessionSummary,
+    tipSnapshotRef: bestRun.tipSnapshotRef,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -231,7 +282,8 @@ function selectBestRun(runs: readonly RunDagRunV2[]): RunWithTip | null {
     const tipNodeId = r.preferredTipNodeId;
     if (!tipNodeId) return [];
     const tipNode = r.nodesById[tipNodeId];
-    return [{ run: r, tipNodeId, lastActivityEventIndex: tipNode?.createdAtEventIndex ?? 0 }];
+    if (!tipNode) return [];
+    return [{ run: r, tipNodeId, tipSnapshotRef: tipNode.snapshotRef, lastActivityEventIndex: tipNode.createdAtEventIndex }];
   });
 
   if (runsWithTip.length === 0) return null;
