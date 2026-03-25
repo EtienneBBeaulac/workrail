@@ -659,3 +659,209 @@ function formatV2Clean(data: V2ExecutionResponse): Pick<FormattedResponse, 'prim
     primary: formatCleanSuccess(data),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Resume session response formatter
+// ---------------------------------------------------------------------------
+
+interface ResumeCandidate {
+  readonly sessionId: string;
+  readonly runId: string;
+  readonly workflowId: string;
+  readonly resumeToken: string;
+  readonly snippet: string;
+  readonly whyMatched: readonly string[];
+  readonly pendingStepId?: string | null;
+  readonly isComplete?: boolean;
+  readonly lastModifiedMs?: number | null;
+  readonly nextCall: {
+    readonly tool: 'continue_workflow';
+    readonly params: { readonly continueToken: string; readonly intent: 'rehydrate' };
+  };
+}
+
+interface ResumeSessionResponse {
+  readonly candidates: readonly ResumeCandidate[];
+  readonly totalEligible: number;
+}
+
+function isResumeSessionResponse(data: unknown): data is ResumeSessionResponse {
+  if (typeof data !== 'object' || data === null) return false;
+  const d = data as Record<string, unknown>;
+  // Distinguish from execution responses (which have pending/nextIntent/preferences)
+  // and other tool outputs. Resume responses uniquely have candidates + totalEligible
+  // WITHOUT the execution response fields.
+  return (
+    Array.isArray(d.candidates) &&
+    typeof d.totalEligible === 'number' &&
+    !('pending' in d) &&
+    !('nextIntent' in d)
+  );
+}
+
+const WHY_MATCHED_LABELS: Readonly<Record<string, string>> = {
+  matched_exact_id: 'Exact ID match',
+  matched_head_sha: 'Same git commit (HEAD SHA)',
+  matched_branch: 'Same git branch',
+  matched_notes: 'Query matched session notes',
+  matched_notes_partial: 'Query partially matched session notes',
+  matched_workflow_id: 'Query matched workflow type',
+  recency_fallback: 'No strong match signal (recent session)',
+};
+
+/** Format a relative time string from epoch ms (e.g. "2 hours ago", "3 days ago"). */
+function formatRelativeTime(epochMs: number): string {
+  const diffMs = Date.now() - epochMs;
+  if (diffMs < 0) return 'just now';
+  const minutes = Math.floor(diffMs / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days} day${days === 1 ? '' : 's'} ago`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return `${weeks} week${weeks === 1 ? '' : 's'} ago`;
+  const months = Math.floor(days / 30);
+  return `${months} month${months === 1 ? '' : 's'} ago`;
+}
+
+function formatResumeCandidate(c: ResumeCandidate, index: number): string {
+  const lines: string[] = [];
+  const matchLabel = c.whyMatched.map(w => WHY_MATCHED_LABELS[w] ?? w).join(', ');
+  const isWeak = c.whyMatched.every(w => w === 'recency_fallback');
+  const statusTag = c.isComplete ? ' (completed)' : '';
+
+  lines.push(`### Candidate ${index + 1}: \`${c.workflowId}\`${statusTag}${isWeak ? ' (weak match)' : ''}`);
+  lines.push(`- **Session**: \`${c.sessionId}\``);
+  lines.push(`- **Run**: \`${c.runId}\``);
+  lines.push(`- **Match reason**: ${matchLabel}`);
+
+  if (c.pendingStepId) {
+    lines.push(`- **Current step**: \`${c.pendingStepId}\``);
+  } else if (c.isComplete) {
+    lines.push('- **Status**: Workflow completed');
+  }
+
+  if (c.lastModifiedMs != null) {
+    lines.push(`- **Last active**: ${formatRelativeTime(c.lastModifiedMs)}`);
+  }
+
+  if (c.snippet) {
+    // Show first ~200 chars of snippet
+    const preview = c.snippet.length > 200 ? c.snippet.slice(0, 200) + '...' : c.snippet;
+    lines.push(`- **Preview**: ${preview.replace(/\n/g, ' ')}`);
+  } else {
+    lines.push('- **Preview**: (no recap notes available)');
+  }
+
+  if (c.isComplete) {
+    lines.push('');
+    lines.push('> This workflow has already completed. Resuming it will show the final state.');
+  }
+
+  lines.push('');
+  lines.push('To resume, call `continue_workflow` with:');
+  lines.push('```json');
+  lines.push(JSON.stringify(c.nextCall.params, null, 2));
+  lines.push('```');
+
+  return lines.join('\n');
+}
+
+/** Help text showing the agent what parameters are available for narrowing results. */
+const SEARCH_PARAMS_HELP = [
+  '**To narrow results, call `resume_session` again with any of these parameters:**',
+  '- `query`: Free text keywords from the session (e.g. "mr ownership", "ACEI-1234", "login feature")',
+  '- `runId`: Exact run ID if the user has one (e.g. "run_abc123def456")',
+  '- `sessionId`: Exact session ID if the user has one (e.g. "sess_abc123")',
+  '- `workspacePath`: Absolute path to the workspace (helps match by git branch/commit)',
+].join('\n');
+
+/**
+ * Format a resume_session response as natural language.
+ *
+ * The key design goal: an agent with ZERO context about WorkRail should be able
+ * to read this response and know exactly what to do. The formatter explains:
+ * 1. What these candidates are
+ * 2. Which one to pick and why
+ * 3. Exactly how to resume (copy-paste JSON)
+ * 4. What to do if none match
+ * 5. What parameters are available for better searching
+ */
+export function formatV2ResumeResponse(data: unknown): FormattedResponse | null {
+  if (!isResumeSessionResponse(data)) return null;
+
+  const { candidates, totalEligible } = data;
+  const lines: string[] = [];
+
+  if (candidates.length === 0) {
+    lines.push('## No Resumable Sessions Found');
+    lines.push('');
+    lines.push(`Searched ${totalEligible} session(s) but none matched your query or workspace context.`);
+    lines.push('');
+    lines.push('**What to do**: Ask the user for more details about which session they want to resume. They might know:');
+    lines.push('- A description of what they were working on (pass as `query`)');
+    lines.push('- A run ID or session ID (pass as `runId` or `sessionId`)');
+    lines.push('- Or start a fresh workflow with `start_workflow`.');
+    lines.push('');
+    lines.push(SEARCH_PARAMS_HELP);
+    return { primary: lines.join('\n') };
+  }
+
+  const hasStrongMatch = candidates.some(c => !c.whyMatched.every(w => w === 'recency_fallback'));
+  const allRecencyFallback = !hasStrongMatch;
+
+  if (allRecencyFallback) {
+    // No search signal was provided or nothing matched - show recent sessions as context
+    // but tell the agent to ask the user
+    lines.push('## Recent Workflow Sessions');
+    lines.push('');
+    lines.push(`No specific search criteria matched, so here are the **${candidates.length} most recent** sessions (out of ${totalEligible} total).`);
+    lines.push('');
+    lines.push('**Action required**: Present these to the user and ask which one they want to resume. If none of these are right, ask the user to describe what they were working on so you can search more specifically.');
+    lines.push('');
+
+    for (let i = 0; i < candidates.length; i++) {
+      lines.push(formatResumeCandidate(candidates[i]!, i));
+      lines.push('');
+    }
+
+    if (totalEligible > candidates.length) {
+      lines.push('---');
+      lines.push(`${totalEligible - candidates.length} more session(s) not shown.`);
+      lines.push('');
+    }
+
+    lines.push(SEARCH_PARAMS_HELP);
+  } else {
+    // We have signal - show ranked results
+    lines.push('## Resumable Workflow Sessions');
+    lines.push('');
+    lines.push(`Found **${totalEligible}** session(s) total. Showing the top ${candidates.length} ranked by match strength.`);
+    lines.push('');
+
+    const best = candidates[0]!;
+    const bestIsExact = best.whyMatched.includes('matched_exact_id');
+    if (bestIsExact) {
+      lines.push(`**Recommendation**: Candidate 1 is an exact ID match. Resume it directly.`);
+    } else {
+      lines.push(`**Recommendation**: Candidate 1 has the strongest match signal. Present the top candidates to the user and let them confirm which one to resume.`);
+    }
+    lines.push('');
+
+    for (let i = 0; i < candidates.length; i++) {
+      lines.push(formatResumeCandidate(candidates[i]!, i));
+      lines.push('');
+    }
+
+    if (totalEligible > candidates.length) {
+      lines.push('---');
+      lines.push(`${totalEligible - candidates.length} more session(s) not shown.`);
+      lines.push('');
+      lines.push(SEARCH_PARAMS_HELP);
+    }
+  }
+
+  return { primary: lines.join('\n') };
+}
