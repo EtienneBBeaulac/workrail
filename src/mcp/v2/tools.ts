@@ -1,3 +1,4 @@
+import path from 'path';
 import { z } from 'zod';
 import type { ToolAnnotations } from '../tool-factory.js';
 import {
@@ -6,8 +7,12 @@ import {
   normalizeAliasedFields,
 } from '../workflow-protocol-contracts.js';
 
+function isAbsoluteWorkspacePath(p: string): boolean {
+  return path.isAbsolute(p);
+}
+
 const workspacePathField = z.string()
-  .refine((p) => p.startsWith('/'), 'workspacePath must be an absolute path (starting with /)')
+  .refine((p) => isAbsoluteWorkspacePath(p), 'workspacePath must be an absolute path')
   .describe('Absolute path to your current workspace directory (e.g. the "Workspace:" value from your system parameters). Used to resolve project-scoped workflow variants against the correct workspace. If omitted, WorkRail uses MCP roots when available, then falls back to the server process directory.');
 
 const optionalWorkspacePathField = workspacePathField.optional();
