@@ -143,6 +143,56 @@ For explicit status on the major older planning docs themselves, see `docs/roadm
   - `docs/plans/agentic-orchestration-roadmap.md`
   - `docs/ideas/backlog.md`
 
+### Legacy workflow modernization
+
+- **Status**: active
+- **Active focus now**:
+  - modernize `workflows/workflow-for-workflows.v2.json` so it can handle both creating a new workflow and modernizing an existing one
+  - track execution in issue `#151`
+- **Why it is here**:
+  - several bundled workflows are still authored in older styles
+  - many are not `.v2` or `.lean.v2` variants
+  - several do not yet use the newer authoring features and patterns now treated as the modern baseline in `docs/authoring.md`
+- **Modern baseline to migrate toward**:
+  - current v2/lean structure where appropriate
+  - `metaGuidance` and `recommendedPreferences`
+  - `references` for authoritative companion material where useful
+  - `templateCall` / routine injection instead of repeating large prompt blocks
+  - `promptFragments` for conditional branches instead of near-duplicate prompts
+  - tighter loop-control wording and newer evidence-oriented review / verification structure
+- **Highest-priority bundled workflows to revamp**:
+  - `workflows/exploration-workflow.json`
+  - `workflows/adaptive-ticket-creation.json`
+  - `workflows/mr-review-workflow.json`
+  - `workflows/mr-review-workflow.agentic.json`
+  - `workflows/bug-investigation.json`
+  - `workflows/bug-investigation.agentic.json`
+  - `workflows/design-thinking-workflow.json`
+  - `workflows/design-thinking-workflow-autonomous.agentic.json`
+  - `workflows/documentation-update-workflow.json`
+  - `workflows/document-creation-workflow.json`
+- **Additional older bundled workflows to review for modernization**:
+  - `workflows/intelligent-test-case-generation.json`
+  - `workflows/learner-centered-course-workflow.json`
+  - `workflows/presentation-creation.json`
+  - `workflows/personal-learning-materials-creation-branched.json`
+  - `workflows/scoped-documentation-workflow.json`
+  - `workflows/relocation-workflow-us.json`
+  - `workflows/workflow-diagnose-environment.json`
+- **Lower priority / already more modern**:
+  - `workflows/coding-task-workflow-agentic.v2.json` — superseded by the lean v2 variant as the current modern example
+  - `workflows/workflow-for-workflows.json` — older large-form version; `workflow-for-workflows.v2.json` is already the more modern path
+  - `workflows/cross-platform-code-conversion.v2.json` — already v2 and already uses several modern authoring features
+  - `workflows/bug-investigation.agentic.v2.json`
+  - `workflows/mr-review-workflow.agentic.v2.json`
+- **What “modernization” should mean here**:
+  - do not mechanically rename files to `.v2` or `.lean`
+  - instead, review each workflow for real migration value against the current authoring guide and engine capabilities
+  - prefer high-value conversions first: workflows that are widely used, prompt-heavy, repetitive, or still missing modern review / routine / reference structure
+- **Source docs**:
+  - `docs/authoring.md`
+  - `docs/ideas/backlog.md`
+
 ### Multi-tenancy
 
 - **Status**: unimplemented
@@ -174,6 +224,22 @@ For explicit status on the major older planning docs themselves, see `docs/roadm
 - **Why parked**:
   - mentioned as future adapter direction, but not currently close to delivery
 - **Source doc**: `docs/plans/agentic-orchestration-roadmap.md`
+
+### Dashboard artifacts (replace file-based docs with session-scoped outputs)
+
+- **Status**: designed, unimplemented
+- **Summary**: instead of having agents write markdown files into the repo, agents would submit structured artifacts through `continue_workflow` output payloads. These artifacts are stored per-session and rendered in the console/dashboard. Default: per-step `notesMarkdown` rendering. Explicit: workflow-defined output contracts via `wr.contracts.*` packs with server-side reducers.
+- **What exists**:
+  - full design in `workflow-execution-contract.md` (section "Replacing File-Based Docs with Dashboard Artifacts")
+  - illustrative examples for `mr-review-workflow` (triage, changed files table, findings, MR comments)
+  - output contract enforcement model in v2 (contract packs, blocked node validation)
+  - `notesMarkdown` already flows through `continue_workflow`
+- **What is missing**:
+  - console/dashboard UI to render artifacts (no UI exists yet)
+  - server-side artifact storage and reducers
+  - contract pack definitions beyond `wr.contracts.loop_control`
+  - migration path for existing workflows that write markdown files
+- **Source doc**: `docs/reference/workflow-execution-contract.md`
 
 ### Standup Status Generator workflow
 
