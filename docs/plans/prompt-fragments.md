@@ -50,10 +50,4 @@ Delivered work includes:
 
 ## Source history
 
-The earlier design/review/verification docs for this feature are now superseded:
-
-- `docs/plans/prompt-fragments-design.md`
-- `docs/plans/prompt-fragments-design-review.md`
-- `docs/plans/prompt-fragments-verification.md`
-
-Use this file plus the shipped code/tests as the canonical view.
+The earlier design/review/verification docs for this feature have been removed (they were superseded stubs). This file plus the shipped code/tests is the canonical view.

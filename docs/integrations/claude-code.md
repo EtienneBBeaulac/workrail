@@ -187,9 +187,9 @@ Please use the workrail-executor agent to run the bug-investigation-agentic work
 **Common causes:**
 
 1. **Wrong tool names in agent config** - Tool names must match exactly:
-   - ✅ `mcp__workrail__start_workflow`
-   - ❌ `mcp_workrail_start_workflow` (missing double underscores)
-   - ❌ `mcp__workrail__mcp_workrail_start_workflow` (doubled prefix)
+   - Correct: `mcp__workrail__start_workflow`
+   - Wrong: `mcp_workrail_start_workflow` (missing double underscores)
+   - Wrong: `mcp__workrail__mcp_workrail_start_workflow` (doubled prefix)
 
 2. **Agent config not reloaded** - After editing `~/.claude/agents/workrail-executor.md`, start a fresh session
 

@@ -219,7 +219,6 @@
 For implementation details, see:
 - [Architecture Guide](02-architecture.md) for security component design
 - [Testing Strategy](04-testing-strategy.md) for security testing approaches
-- [Development Phases](03-development-phases.md) for security implementation phases
 
 ---
 
@@ -227,6 +226,5 @@ For implementation details, see:
 
 - **[Architecture Guide](02-architecture.md)** - System design and security component architecture
 - **[Testing Strategy](04-testing-strategy.md)** - Security testing approaches and requirements
-- **[Development Phases](03-development-phases.md)** - Security implementation phases and priorities
 - **[API Specification](../spec/mcp-api-v1.0.md)** - Security integration with JSON-RPC 2.0 protocol
 - **[Workflow Schema](../spec/workflow.schema.json)** - Security validation constraints and requirements

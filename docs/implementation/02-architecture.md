@@ -310,7 +310,6 @@ if (rule.condition && !evaluateCondition(rule.condition, context)) {
 ## References
 
 * [Main README](../../README.md)
-* [Development Phases](03-development-phases.md)
 * [Advanced Validation Guide](13-advanced-validation-guide.md)
 * [Simple Workflow Guide](09-simple-workflow-guide.md)
 * [API Specification](../../spec/mcp-api-v1.0.md)
