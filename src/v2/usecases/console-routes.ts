@@ -16,13 +16,17 @@ import type { ConsoleService } from './console-service.js';
  * Works both from source (src/) and from compiled output (dist/).
  */
 function resolveConsoleDist(): string | null {
-  // From compiled dist/v2/usecases/ -> ../../../console/dist
-  const fromDist = path.join(__dirname, '../../../console/dist');
-  if (fs.existsSync(fromDist)) return fromDist;
+  // Released/compiled server path: dist/v2/usecases -> ../../console
+  const releasedDist = path.join(__dirname, '../../console');
+  if (fs.existsSync(releasedDist)) return releasedDist;
 
-  // From source src/v2/usecases/ -> ../../../console/dist
-  const fromSrc = path.join(__dirname, '../../../console/dist');
-  if (fs.existsSync(fromSrc)) return fromSrc;
+  // Source tree path during local development/testing: src/v2/usecases -> ../../../dist/console
+  const fromSourceBuild = path.join(__dirname, '../../../dist/console');
+  if (fs.existsSync(fromSourceBuild)) return fromSourceBuild;
+
+  // Backward-compatible fallback for older layouts that built in-place
+  const legacyConsoleDist = path.join(__dirname, '../../../console/dist');
+  if (fs.existsSync(legacyConsoleDist)) return legacyConsoleDist;
 
   return null;
 }

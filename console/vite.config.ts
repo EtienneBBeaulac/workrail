@@ -17,6 +17,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: 'dist',
+    outDir: '../dist/console',
+    emptyOutDir: true,
   },
 });
