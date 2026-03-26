@@ -41,10 +41,10 @@ export const FEATURE_FLAG_DEFINITIONS: ReadonlyArray<FeatureFlagDefinition> = [
   {
     key: 'sessionTools',
     envVar: 'WORKRAIL_ENABLE_SESSION_TOOLS',
-    defaultValue: false,
+    defaultValue: true,
     description: 'Enable session management tools (workrail_create_session, workrail_update_session, etc.) and HTTP dashboard server',
     since: '0.6.0',
-    stable: false,
+    stable: true,
   },
   {
     key: 'experimentalWorkflows',
