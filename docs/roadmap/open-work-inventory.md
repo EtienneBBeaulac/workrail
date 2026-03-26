@@ -145,10 +145,11 @@ For explicit status on the major older planning docs themselves, see `docs/roadm
 
 ### Legacy workflow modernization
 
-- **Status**: active
+- **Status**: partial / in progress
+- **Recently shipped**:
+  - `workflows/workflow-for-workflows.v2.json` now supports both creating a new workflow and modernizing an existing one (`#152`, from issue `#151`)
 - **Active focus now**:
-  - modernize `workflows/workflow-for-workflows.v2.json` so it can handle both creating a new workflow and modernizing an existing one
-  - track execution in issue `#151`
+  - next highest-value modernization candidate remains `workflows/exploration-workflow.json`
 - **Why it is here**:
   - several bundled workflows are still authored in older styles
   - many are not `.v2` or `.lean.v2` variants

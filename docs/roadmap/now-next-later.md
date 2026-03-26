@@ -7,7 +7,7 @@ This is the lightweight cross-cutting roadmap view for WorkRail.
 - ~~Complete v2 sign-off and cleanup~~ (done -- v2 is default-on; stale docs cleaned up)
 - ~~Expand lifecycle validation coverage to a realistic target~~ (done -- auto-walk smoke test covers all bundled workflows)
 - ~~Finish prompt vs supplement boundary alignment across runtime, docs, and planning~~ (done -- boundary is documented consistently across authoring locks, execution contract, and planning docs)
-- Modernize `workflow-for-workflows.v2.json` so one canonical authoring workflow supports both creating and modernizing workflows (active -- issue `#151`)
+- ~~Modernize `workflow-for-workflows.v2.json` so one canonical authoring workflow supports both creating and modernizing workflows~~ (done -- shipped in `#152`, tracked from issue `#151`)
 
 ## Next
 
