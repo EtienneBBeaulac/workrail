@@ -155,8 +155,8 @@ describe('FeatureFlags - Functionality', () => {
     it('uses default for undefined environment variable', () => {
       const provider = new CustomEnvFeatureFlagProvider({});
       
-      // sessionTools defaults to false (experimental)
-      expect(provider.isEnabled('sessionTools')).toBe(false);
+      // sessionTools defaults to true after rollout
+      expect(provider.isEnabled('sessionTools')).toBe(true);
 
       // agentic routines default to true after rollout
       expect(provider.isEnabled('agenticRoutines')).toBe(true);
@@ -171,8 +171,8 @@ describe('FeatureFlags - Functionality', () => {
         WORKRAIL_ENABLE_SESSION_TOOLS: 'maybe',
       });
       
-      // Falls back to default (false)
-      expect(provider.isEnabled('sessionTools')).toBe(false);
+      // Falls back to default (true)
+      expect(provider.isEnabled('sessionTools')).toBe(true);
     });
   });
 
@@ -253,27 +253,25 @@ describe('FeatureFlags - Functionality', () => {
 
 describe('FeatureFlags - Real-World Scenarios', () => {
   describe('Trunk-Based Development', () => {
-    it('supports merging features with flags OFF by default', () => {
-      // Scenario: Feature merged to main, but not ready for production
+    it('supports merged stable features being ON by default', () => {
+      // Scenario: Feature has completed rollout and is ready for production
       const provider = new CustomEnvFeatureFlagProvider({});
       
-      // Flag is OFF by default (safe to merge)
-      expect(provider.isEnabled('sessionTools')).toBe(false);
+      // Flag is ON by default for users
+      expect(provider.isEnabled('sessionTools')).toBe(true);
       
-      // Can be enabled in specific environments for testing
+      // Can still be overridden explicitly in specific environments
       const testProvider = new CustomEnvFeatureFlagProvider({
-        WORKRAIL_ENABLE_SESSION_TOOLS: 'true',
+        WORKRAIL_ENABLE_SESSION_TOOLS: 'false',
       });
-      expect(testProvider.isEnabled('sessionTools')).toBe(true);
+      expect(testProvider.isEnabled('sessionTools')).toBe(false);
     });
 
     it('supports gradual rollout by changing defaults', () => {
-      // Phase 1: Feature merged, flag OFF by default
+      // Phase 1: Feature stabilized, flag ON by default
       const phase1 = new CustomEnvFeatureFlagProvider({});
-      expect(phase1.isEnabled('sessionTools')).toBe(false);
+      expect(phase1.isEnabled('sessionTools')).toBe(true);
       
-      // Phase 2: Feature stabilized, flag ON by default
-      // (would require changing defaultValue in FEATURE_FLAG_DEFINITIONS)
       // Users can still explicitly disable if needed
       const phase2 = new CustomEnvFeatureFlagProvider({
         WORKRAIL_ENABLE_SESSION_TOOLS: 'false', // Explicit override
