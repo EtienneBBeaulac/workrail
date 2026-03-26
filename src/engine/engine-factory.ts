@@ -388,7 +388,8 @@ export async function createWorkRailEngine(
 
   const engine: WorkRailEngine = {
     async startWorkflow(workflowId: string): Promise<EngineResult<StepResponse>> {
-      const result = await executeStartWorkflow({ workflowId }, v2Ctx);
+      const workspacePath = process.cwd();
+      const result = await executeStartWorkflow({ workflowId, workspacePath }, v2Ctx);
       if (result.isErr()) {
         return engineErr(mapStartError(result.error));
       }
@@ -407,9 +408,11 @@ export async function createWorkRailEngine(
       // The engine layer maps stateToken → continueToken (the branded StateToken
       // now wraps a continue token string from the one-token protocol)
       const intent = ackToken ? 'advance' : 'rehydrate';
+      const workspacePath = process.cwd();
       const input = {
         continueToken: unwrapToken(stateToken),
         intent: intent as 'advance' | 'rehydrate',
+        ...(intent === 'rehydrate' ? { workspacePath } : {}),
         ...(output ? {
           output: {
             notesMarkdown: output.notesMarkdown,

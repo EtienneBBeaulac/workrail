@@ -454,16 +454,24 @@ function validResumeCandidate(overrides?: Partial<{
   sessionId: string;
   runId: string;
   workflowId: string;
+  sessionTitle: string | null;
+  gitBranch: string | null;
   resumeToken: string;
   snippet: string;
   whyMatched: string[];
+  confidence: 'strong' | 'medium' | 'weak';
+  matchExplanation: string;
 }>) {
   return {
     sessionId: 'sess_abc123',
     runId: 'run_001',
     workflowId: 'coding-task-workflow-agentic',
+    sessionTitle: 'Task dev for MR ownership',
+    gitBranch: 'feature/mr-ownership',
     resumeToken: VALID_STATE_TOKEN,
     snippet: 'Working on feature X...',
+    confidence: 'medium',
+    matchExplanation: 'Matched current git branch; same workspace',
     pendingStepId: 'phase-2-define-problem',
     isComplete: false,
     lastModifiedMs: 1700000000000,
@@ -511,6 +519,7 @@ describe('V2ResumeSessionOutputSchema', () => {
   it('accepts all valid whyMatched values', () => {
     const LOCKED_WHY_MATCHED = [
       'matched_exact_id',
+      'matched_repo_root',
       'matched_head_sha',
       'matched_branch',
       'matched_notes',
@@ -533,9 +542,33 @@ describe('V2ResumeSessionOutputSchema', () => {
     expect(V2ResumeSessionOutputSchema.safeParse({ candidates: [candidate], totalEligible: 1 }).success).toBe(false);
   });
 
+  it('rejects candidate missing sessionTitle', () => {
+    const candidate = validResumeCandidate() as Record<string, unknown>;
+    delete candidate['sessionTitle'];
+    expect(V2ResumeSessionOutputSchema.safeParse({ candidates: [candidate], totalEligible: 1 }).success).toBe(false);
+  });
+
+  it('rejects candidate missing gitBranch', () => {
+    const candidate = validResumeCandidate() as Record<string, unknown>;
+    delete candidate['gitBranch'];
+    expect(V2ResumeSessionOutputSchema.safeParse({ candidates: [candidate], totalEligible: 1 }).success).toBe(false);
+  });
+
   it('rejects candidate missing nextCall', () => {
     const candidate = validResumeCandidate() as Record<string, unknown>;
     delete candidate['nextCall'];
+    expect(V2ResumeSessionOutputSchema.safeParse({ candidates: [candidate], totalEligible: 1 }).success).toBe(false);
+  });
+
+  it('rejects candidate missing confidence', () => {
+    const candidate = validResumeCandidate() as Record<string, unknown>;
+    delete candidate['confidence'];
+    expect(V2ResumeSessionOutputSchema.safeParse({ candidates: [candidate], totalEligible: 1 }).success).toBe(false);
+  });
+
+  it('rejects candidate missing matchExplanation', () => {
+    const candidate = validResumeCandidate() as Record<string, unknown>;
+    delete candidate['matchExplanation'];
     expect(V2ResumeSessionOutputSchema.safeParse({ candidates: [candidate], totalEligible: 1 }).success).toBe(false);
   });
 
@@ -588,21 +621,24 @@ describe('V2ResumeSessionOutputSchema', () => {
 // ---------------------------------------------------------------------------
 
 describe('V2ResumeSessionInput', () => {
-  it('accepts empty input — all fields are optional (workspace context auto-detected)', () => {
-    expect(V2ResumeSessionInput.safeParse({}).success).toBe(true);
+  it('rejects empty input because workspacePath is required', () => {
+    expect(V2ResumeSessionInput.safeParse({}).success).toBe(false);
   });
 
   it('accepts valid query', () => {
-    expect(V2ResumeSessionInput.safeParse({ query: 'resume the ACEI-1234 workflow' }).success).toBe(true);
+    expect(V2ResumeSessionInput.safeParse({
+      workspacePath: '/Users/me/git/project',
+      query: 'resume the ACEI-1234 workflow',
+    }).success).toBe(true);
   });
 
   it('rejects empty query string — use undefined to omit, not empty string', () => {
-    const result = V2ResumeSessionInput.safeParse({ query: '' });
+    const result = V2ResumeSessionInput.safeParse({ workspacePath: '/Users/me/git/project', query: '' });
     expect(result.success).toBe(false);
   });
 
   it('rejects query exceeding 256 characters', () => {
-    const result = V2ResumeSessionInput.safeParse({ query: 'a'.repeat(257) });
+    const result = V2ResumeSessionInput.safeParse({ workspacePath: '/Users/me/git/project', query: 'a'.repeat(257) });
     expect(result.success).toBe(false);
   });
 
@@ -616,15 +652,15 @@ describe('V2ResumeSessionInput', () => {
   });
 
   it('accepts valid 40-char lowercase hex gitHeadSha', () => {
-    expect(V2ResumeSessionInput.safeParse({ gitHeadSha: 'a'.repeat(40) }).success).toBe(true);
+    expect(V2ResumeSessionInput.safeParse({ workspacePath: '/Users/dev/my-project', gitHeadSha: 'a'.repeat(40) }).success).toBe(true);
   });
 
   it('rejects gitHeadSha that is not 40-char hex', () => {
-    expect(V2ResumeSessionInput.safeParse({ gitHeadSha: 'abc123' }).success).toBe(false);
-    expect(V2ResumeSessionInput.safeParse({ gitHeadSha: 'G'.repeat(40) }).success).toBe(false);
+    expect(V2ResumeSessionInput.safeParse({ workspacePath: '/Users/dev/my-project', gitHeadSha: 'abc123' }).success).toBe(false);
+    expect(V2ResumeSessionInput.safeParse({ workspacePath: '/Users/dev/my-project', gitHeadSha: 'G'.repeat(40) }).success).toBe(false);
   });
 
   it('rejects unknown fields (strict schema)', () => {
-    expect(V2ResumeSessionInput.safeParse({ unknownField: 'value' }).success).toBe(false);
+    expect(V2ResumeSessionInput.safeParse({ workspacePath: '/Users/dev/my-project', unknownField: 'value' }).success).toBe(false);
   });
 });

@@ -324,15 +324,24 @@ export function executeStartWorkflow(
   ctx: V2ToolContext
 ): RA<StartWorkflowResult, StartWorkflowError> {
   const { gate, sessionStore, snapshotStore, pinnedStore, crypto, tokenCodecPorts, idFactory, validationPipelineDeps, tokenAliasStore, entropy } = ctx.v2;
-  const workflowReader = hasRequestWorkspaceSignal({
-    workspacePath: input.workspacePath,
-    resolvedRootUris: ctx.v2.resolvedRootUris,
-  })
-    ? createWorkflowReaderForRequest({
-        featureFlags: ctx.featureFlags,
-        workspacePath: input.workspacePath,
-        resolvedRootUris: ctx.v2.resolvedRootUris,
-      })
+  const shouldUseRequestReader =
+    ctx.featureFlags != null && hasRequestWorkspaceSignal({
+      workspacePath: input.workspacePath,
+      resolvedRootUris: ctx.v2.resolvedRootUris,
+    });
+  const workflowReader = shouldUseRequestReader
+    ? {
+        getWorkflowById: async (workflowId: string) => {
+          const requestReader = createWorkflowReaderForRequest({
+            featureFlags: ctx.featureFlags,
+            workspacePath: input.workspacePath,
+            resolvedRootUris: ctx.v2.resolvedRootUris,
+          });
+          const requestResult = await requestReader.getWorkflowById(workflowId);
+          if (requestResult != null) return requestResult;
+          return ctx.workflowService.getWorkflowById(workflowId);
+        },
+      }
     : ctx.workflowService;
 
   // 1. Load, validate (Phase 1a pipeline), and pin workflow

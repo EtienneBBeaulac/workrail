@@ -57,6 +57,9 @@ describe('explicit_path source', () => {
 
       const sha = anchors.find((a) => a.key === 'git_head_sha');
       if (sha) expect(sha.value).toMatch(/^[0-9a-f]{40}$/);
+
+      const repoRootHash = anchors.find((a) => a.key === 'repo_root_hash');
+      expect(repoRootHash?.value).toMatch(/^sha256:[0-9a-f]{64}$/);
     }
   });
 
@@ -90,6 +93,7 @@ describe('mcp_root_uri source', () => {
     expect(result.isOk()).toBe(true);
     if (result.isOk()) {
       expect(result.value.length).toBeGreaterThanOrEqual(1);
+      expect(result.value.some((a) => a.key === 'repo_root_hash')).toBe(true);
     }
   });
 
@@ -130,6 +134,7 @@ describe('server_cwd source', () => {
     expect(result.isOk()).toBe(true);
     if (result.isOk()) {
       expect(result.value.length).toBeGreaterThanOrEqual(1);
+      expect(result.value.some((a) => a.key === 'repo_root_hash')).toBe(true);
     }
   });
 

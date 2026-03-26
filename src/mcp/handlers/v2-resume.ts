@@ -73,6 +73,8 @@ export async function handleV2ResumeSession(
   const query: ResumeQuery = {
     gitHeadSha: input.gitHeadSha ?? anchorValue(anchors, 'git_head_sha'),
     gitBranch: input.gitBranch ?? anchorValue(anchors, 'git_branch'),
+    repoRootHash: anchorValue(anchors, 'repo_root_hash'),
+    sameWorkspaceOnly: input.sameWorkspaceOnly,
     freeTextQuery: input.query,
     runId: input.runId,
     sessionId: input.sessionId,
@@ -114,9 +116,13 @@ interface MintedCandidate {
   readonly sessionId: string;
   readonly runId: string;
   readonly workflowId: string;
+  readonly sessionTitle: string | null;
+  readonly gitBranch: string | null;
   readonly resumeToken: string;
   readonly snippet: string;
   readonly whyMatched: string[];
+  readonly confidence: 'strong' | 'medium' | 'weak';
+  readonly matchExplanation: string;
   readonly pendingStepId: string | null;
   readonly isComplete: boolean;
   readonly lastModifiedMs: number | null;
@@ -171,9 +177,13 @@ function mintCandidateTokens(
       sessionId: candidate.sessionId,
       runId: candidate.runId,
       workflowId: candidate.workflowId,
+      sessionTitle: candidate.sessionTitle,
+      gitBranch: candidate.gitBranch,
       resumeToken: resumeTokenRes.value,
       snippet: candidate.snippet,
       whyMatched: [...candidate.whyMatched],
+      confidence: candidate.confidence,
+      matchExplanation: candidate.matchExplanation,
       pendingStepId: candidate.pendingStepId,
       isComplete: candidate.isComplete,
       lastModifiedMs: candidate.lastModifiedMs,

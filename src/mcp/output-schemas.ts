@@ -337,6 +337,12 @@ export const V2ResumeSessionOutputSchema = z.object({
     sessionId: z.string().min(1),
     runId: z.string().min(1),
     workflowId: z.string().min(1),
+    sessionTitle: z.string().nullable().describe(
+      'Human-readable task/session title derived from persisted workflow context or early recap text.'
+    ),
+    gitBranch: z.string().nullable().describe(
+      'Git branch associated with the session, if available.'
+    ),
     /**
      * The durable state token for this candidate session.
      * Note: unlike checkpoint_workflow (where resumeToken and nextCall.params.continueToken
@@ -346,6 +352,12 @@ export const V2ResumeSessionOutputSchema = z.object({
      */
     resumeToken: z.string().regex(STATE_TOKEN_PATTERN, 'Invalid resumeToken format'),
     snippet: z.string().max(1024),
+    confidence: z.enum(['strong', 'medium', 'weak']).describe(
+      'Coarse confidence band for how likely this candidate is the intended session.'
+    ),
+    matchExplanation: z.string().min(1).describe(
+      'Short natural-language explanation of why this candidate ranked here.'
+    ),
     pendingStepId: z.string().nullable().describe(
       'The current pending step ID (e.g. "phase-3-implement") if the workflow is in progress. ' +
       'Null if the workflow is complete or the step could not be determined.'
@@ -358,16 +370,18 @@ export const V2ResumeSessionOutputSchema = z.object({
     ),
     whyMatched: z.array(z.enum([
       'matched_exact_id',    // Tier 0 — exact runId or sessionId match (strongest signal)
-      'matched_head_sha',    // Tier 1 — exact git commit match
-      'matched_branch',      // Tier 2 — same git branch
-      'matched_notes',       // Tier 3 — query matched ALL recap note tokens
-      'matched_notes_partial', // Tier 4 — query matched SOME recap note tokens
-      'matched_workflow_id', // Tier 5 — same workflow ID
+      'matched_notes',       // Tier 1 — query matched ALL session-text tokens
+      'matched_notes_partial', // Tier 2 — query matched SOME session-text tokens
+      'matched_workflow_id', // Tier 3 — workflow type matched the query
+      'matched_head_sha',    // Tier 4 — exact git commit match
+      'matched_branch',      // Tier 5 — same git branch
+      'matched_repo_root',   // Supplemental — same repo/workspace
       'recency_fallback',    // Tier 6 — no signal; most recent sessions only. Verify snippet before resuming.
     ])).describe(
       'Match signals explaining why this candidate was ranked. ' +
-      'matched_exact_id/head_sha/branch/notes = strong signal. ' +
-      'matched_notes_partial = moderate signal (some query words matched). ' +
+      'matched_exact_id and matched_notes are strongest. ' +
+      'matched_notes_partial/matched_workflow_id are moderate text signals. ' +
+      'matched_repo_root/head_sha/branch are workspace-context signals. ' +
       'recency_fallback = no strong signal; inspect the snippet before resuming.'
     ),
     /**

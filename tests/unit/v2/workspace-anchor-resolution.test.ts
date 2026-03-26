@@ -123,6 +123,17 @@ describe('resolveWorkspaceAnchors', () => {
     expect(fakeResolver.capturedSource).toEqual<WorkspaceSource>({ kind: 'explicit_path', path: '/Users/me/repo' });
   });
 
+  it('uses explicit workspacePath even when the server has different MCP roots', async () => {
+    const fakeResolver = new FakeWorkspaceResolver();
+    fakeResolver.response = [{ key: 'repo_root_hash', value: 'sha256:' + '1'.repeat(64) }];
+
+    const v2 = makeV2(fakeResolver, ['file:///Users/other/workspace']);
+    const result = await resolveWorkspaceAnchors(v2, '/Users/me/repo');
+
+    expect(result.isOk()).toBe(true);
+    expect(fakeResolver.capturedSource).toEqual<WorkspaceSource>({ kind: 'explicit_path', path: '/Users/me/repo' });
+  });
+
   it('delegates to resolver with mcp_root_uri when workspacePath absent but rootUris present', async () => {
     const fakeResolver = new FakeWorkspaceResolver();
     fakeResolver.response = [{ key: 'git_branch', value: 'feature/x' }];

@@ -85,8 +85,8 @@ export function findAliasFieldConflicts(
 
 export const START_WORKFLOW_PROTOCOL: WorkflowProtocolContract = {
   canonicalParams: {
-    required: ['workflowId'],
-    optional: ['workspacePath'],
+    required: ['workflowId', 'workspacePath'],
+    optional: [],
   },
   descriptions: {
     standard: {
@@ -96,6 +96,7 @@ export const START_WORKFLOW_PROTOCOL: WorkflowProtocolContract = {
       rules: [
         'Follow the returned step exactly; treat it as the user\'s current instruction.',
         'When the step is done, call continue_workflow with the returned continueToken.',
+        'Always pass workspacePath. Shared MCP servers cannot safely infer which repo/workspace you mean.',
         'Only pass context on later continue_workflow calls if facts changed.',
       ],
       examplePayload: {
@@ -111,7 +112,7 @@ export const START_WORKFLOW_PROTOCOL: WorkflowProtocolContract = {
       rules: [
         'Execute the returned step exactly as written.',
         'When the step is complete, call continue_workflow with the returned continueToken.',
-        'Pass workspacePath when available so WorkRail anchors the session to the correct workspace.',
+        'Pass workspacePath on every call. Shared MCP servers cannot safely infer the correct workspace.',
       ],
       examplePayload: {
         workflowId: 'coding-task-workflow-agentic',
@@ -125,7 +126,7 @@ export const START_WORKFLOW_PROTOCOL: WorkflowProtocolContract = {
 export const CONTINUE_WORKFLOW_PROTOCOL: WorkflowProtocolContract = {
   canonicalParams: {
     required: ['continueToken'],
-    optional: ['intent', 'context', 'output'],
+    optional: ['intent', 'context', 'output', 'workspacePath'],
   },
   aliasMap: {
     contextVariables: 'context',
@@ -138,6 +139,7 @@ export const CONTINUE_WORKFLOW_PROTOCOL: WorkflowProtocolContract = {
       rules: [
         'Advance by sending output (and intent: "advance" if you want to be explicit).',
         'Rehydrate by omitting output (and intent: "rehydrate" if you want to be explicit).',
+        'When rehydrating, always pass workspacePath so WorkRail can restore the correct repo/workspace context on shared servers.',
         'Put changed facts under context only.',
         'Round-trip continueToken exactly as returned by WorkRail; use the single-token API only.',
         'Notes (output.notesMarkdown): write for a human reader. Include what you did and key decisions, what you produced (files, tests, numbers), and anything notable (risks, open questions, deliberate omissions). Use markdown headings, bullets, bold, code refs. Be specific. Scope: THIS step only (WorkRail concatenates automatically). 10-30 lines ideal. Omitting notes blocks the step.',
@@ -158,6 +160,7 @@ export const CONTINUE_WORKFLOW_PROTOCOL: WorkflowProtocolContract = {
         'Use continueToken exactly as returned by WorkRail.',
         'Use the single-token API only.',
         'Advance by sending output; rehydrate by omitting output.',
+        'For rehydrate calls, pass workspacePath so WorkRail can restore the correct workspace context.',
         'Put updated facts in context only.',
         'Notes (output.notesMarkdown): write for a human reader. Include what you did and key decisions, what you produced (files, tests, numbers), and anything notable (risks, open questions, deliberate omissions). Use markdown headings, bullets, bold, code refs. Be specific. Scope: THIS step only (WorkRail concatenates automatically). 10-30 lines ideal. Omitting notes blocks the step.',
       ],
@@ -212,8 +215,8 @@ export const CHECKPOINT_WORKFLOW_PROTOCOL: WorkflowProtocolContract = {
 
 export const RESUME_SESSION_PROTOCOL: WorkflowProtocolContract = {
   canonicalParams: {
-    required: [],
-    optional: ['query', 'runId', 'sessionId', 'gitBranch', 'gitHeadSha', 'workspacePath'],
+    required: ['workspacePath'],
+    optional: ['query', 'runId', 'sessionId', 'gitBranch', 'gitHeadSha'],
   },
   descriptions: {
     standard: {
@@ -223,9 +226,9 @@ export const RESUME_SESSION_PROTOCOL: WorkflowProtocolContract = {
       rules: [
         'If the user provides a run ID (run_...) or session ID (sess_...), pass it as runId or sessionId for an exact match. This is the most reliable way to find a specific session.',
         'If the user describes what they were working on (e.g. "the mr ownership task"), pass their words as query. This searches session recap notes and workflow IDs for matching keywords.',
-        'Always pass workspacePath (from your system parameters) so WorkRail can also match by git context (branch, commit).',
+        'Always pass workspacePath (from your system parameters). Shared MCP servers cannot safely infer the current workspace, and resume quality depends on the current repo identity.',
         'The response includes ranked candidates with match explanations and ready-to-use continuation templates. Present the top candidates to the user if there is ambiguity.',
-        'To resume a candidate: call continue_workflow with the candidate\'s nextCall.params (continueToken and intent: "rehydrate"). The response will give you the full session context.',
+        'To inspect or resume a candidate: call continue_workflow with the candidate\'s nextCall.params (continueToken and intent: "rehydrate"). This is the correct inspection path for v2 sessions and restores the full session context.',
         'If no candidates match, ask the user for more details or suggest starting a fresh workflow with start_workflow.',
       ],
       examplePayload: {
@@ -241,9 +244,9 @@ export const RESUME_SESSION_PROTOCOL: WorkflowProtocolContract = {
       rules: [
         'If the user provides a run ID (run_...) or session ID (sess_...), pass it as runId or sessionId for exact lookup.',
         'If the user describes their task, pass their words as query to search session notes.',
-        'Always pass workspacePath from your system parameters for git-context matching.',
+        'Always pass workspacePath from your system parameters. Shared MCP servers cannot safely infer the current workspace.',
         'Present candidates to the user when there is ambiguity. The response explains match strength.',
-        'To resume: call continue_workflow with the chosen candidate\'s nextCall.params (continueToken + intent: "rehydrate").',
+        'To inspect or resume: call continue_workflow with the chosen candidate\'s nextCall.params (continueToken + intent: "rehydrate"). Do NOT use legacy session tools to inspect a v2 workflow resume candidate.',
         'If no candidates match, ask for more details or start a fresh workflow.',
       ],
       examplePayload: {

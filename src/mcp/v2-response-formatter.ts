@@ -668,9 +668,13 @@ interface ResumeCandidate {
   readonly sessionId: string;
   readonly runId: string;
   readonly workflowId: string;
+  readonly sessionTitle?: string | null;
+  readonly gitBranch?: string | null;
   readonly resumeToken: string;
   readonly snippet: string;
   readonly whyMatched: readonly string[];
+  readonly confidence?: 'strong' | 'medium' | 'weak';
+  readonly matchExplanation?: string;
   readonly pendingStepId?: string | null;
   readonly isComplete?: boolean;
   readonly lastModifiedMs?: number | null;
@@ -701,11 +705,12 @@ function isResumeSessionResponse(data: unknown): data is ResumeSessionResponse {
 
 const WHY_MATCHED_LABELS: Readonly<Record<string, string>> = {
   matched_exact_id: 'Exact ID match',
-  matched_head_sha: 'Same git commit (HEAD SHA)',
-  matched_branch: 'Same git branch',
   matched_notes: 'Query matched session notes',
   matched_notes_partial: 'Query partially matched session notes',
   matched_workflow_id: 'Query matched workflow type',
+  matched_head_sha: 'Same git commit (HEAD SHA)',
+  matched_branch: 'Same git branch',
+  matched_repo_root: 'Same workspace/repository',
   recency_fallback: 'No strong match signal (recent session)',
 };
 
@@ -732,10 +737,22 @@ function formatResumeCandidate(c: ResumeCandidate, index: number): string {
   const isWeak = c.whyMatched.every(w => w === 'recency_fallback');
   const statusTag = c.isComplete ? ' (completed)' : '';
 
-  lines.push(`### Candidate ${index + 1}: \`${c.workflowId}\`${statusTag}${isWeak ? ' (weak match)' : ''}`);
+  const heading = c.sessionTitle?.trim() || c.workflowId;
+  lines.push(`### Candidate ${index + 1}: \`${heading}\`${statusTag}${isWeak ? ' (weak match)' : ''}`);
   lines.push(`- **Session**: \`${c.sessionId}\``);
   lines.push(`- **Run**: \`${c.runId}\``);
+  lines.push(`- **Workflow**: \`${c.workflowId}\``);
   lines.push(`- **Match reason**: ${matchLabel}`);
+  if (c.confidence) {
+    lines.push(`- **Confidence**: ${c.confidence}`);
+  }
+  if (c.matchExplanation) {
+    lines.push(`- **Why this ranked here**: ${c.matchExplanation}`);
+  }
+
+  if (c.gitBranch) {
+    lines.push(`- **Branch**: \`${c.gitBranch}\``);
+  }
 
   if (c.pendingStepId) {
     lines.push(`- **Current step**: \`${c.pendingStepId}\``);
@@ -761,10 +778,11 @@ function formatResumeCandidate(c: ResumeCandidate, index: number): string {
   }
 
   lines.push('');
-  lines.push('To resume, call `continue_workflow` with:');
+  lines.push('To inspect or resume this candidate, call `continue_workflow` with:');
   lines.push('```json');
   lines.push(JSON.stringify(c.nextCall.params, null, 2));
   lines.push('```');
+  lines.push('This `rehydrate` call restores the exact workflow state and shows the current step/context.');
 
   return lines.join('\n');
 }
@@ -776,6 +794,7 @@ const SEARCH_PARAMS_HELP = [
   '- `runId`: Exact run ID if the user has one (e.g. "run_abc123def456")',
   '- `sessionId`: Exact session ID if the user has one (e.g. "sess_abc123")',
   '- `workspacePath`: Absolute path to the workspace (helps match by git branch/commit)',
+  '- `sameWorkspaceOnly`: Restrict results to the current repo/workspace when that is clearly what the user means',
 ].join('\n');
 
 /**
@@ -840,6 +859,15 @@ export function formatV2ResumeResponse(data: unknown): FormattedResponse | null 
     lines.push('');
     lines.push(`Found **${totalEligible}** session(s) total. Showing the top ${candidates.length} ranked by match strength.`);
     lines.push('');
+
+    const allWorkspaceDriven = candidates.every((c) =>
+      c.whyMatched.every((w) => w === 'matched_head_sha' || w === 'matched_branch')
+    );
+    if (allWorkspaceDriven) {
+      lines.push('**Note**: These candidates are ranked primarily from current workspace git context (branch/commit), not from a strong text match on your query.');
+      lines.push('If the previews do not clearly match the user\'s request, inspect a candidate with `continue_workflow(..., intent: "rehydrate")` or ask for a more specific phrase / session ID.');
+      lines.push('');
+    }
 
     const best = candidates[0]!;
     const bestIsExact = best.whyMatched.includes('matched_exact_id');

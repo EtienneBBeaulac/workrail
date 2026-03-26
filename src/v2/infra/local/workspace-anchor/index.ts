@@ -6,6 +6,7 @@ import type {
   WorkspaceAnchorError,
 } from '../../../ports/workspace-anchor.port.js';
 import { exec } from 'child_process';
+import { createHash } from 'crypto';
 import { promisify } from 'util';
 import { fileURLToPath } from 'url';
 
@@ -62,6 +63,14 @@ export class LocalWorkspaceAnchorV2 implements WorkspaceContextResolverPortV2 {
   private async runGitCommands(cwd: string): Promise<readonly WorkspaceAnchor[]> {
     const anchors: WorkspaceAnchor[] = [];
 
+    const repoRoot = await this.gitCommand('git rev-parse --show-toplevel', cwd);
+    if (!repoRoot) return anchors;
+
+    const repoRootHash = hashRepoRoot(repoRoot);
+    if (repoRootHash) {
+      anchors.push({ key: 'repo_root_hash', value: repoRootHash });
+    }
+
     // git branch: read symbolic ref (graceful: empty on detached HEAD or non-git)
     const branch = await this.gitCommand('git rev-parse --abbrev-ref HEAD', cwd);
     if (branch && branch !== 'HEAD') {
@@ -90,6 +99,21 @@ export class LocalWorkspaceAnchorV2 implements WorkspaceContextResolverPortV2 {
       return null;
     }
   }
+}
+
+function hashRepoRoot(repoRoot: string): string | null {
+  try {
+    const normalized = repoRoot.trim();
+    if (!normalized) return null;
+    const digest = createSha256Hex(normalized);
+    return `sha256:${digest}`;
+  } catch {
+    return null;
+  }
+}
+
+function createSha256Hex(input: string): string {
+  return createHash('sha256').update(input).digest('hex');
 }
 
 /**

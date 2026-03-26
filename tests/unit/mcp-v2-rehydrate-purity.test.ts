@@ -101,7 +101,7 @@ describe('v2 continue_workflow rehydrate-only is pure (no durable writes)', () =
       const workflowId = 'test-workflow';
       const ctx = await mkCtxWithWorkflow(workflowId);
 
-      const start = await handleV2StartWorkflow({ workflowId } as any, ctx);
+      const start = await handleV2StartWorkflow({ workflowId , workspacePath: root } as any, ctx);
       expect(start.type).toBe('success');
       if (start.type !== 'success') return;
 
@@ -119,7 +119,7 @@ describe('v2 continue_workflow rehydrate-only is pure (no durable writes)', () =
         }
       );
 
-      const res = await handleV2ContinueWorkflow({ continueToken: unwrapResponse(start.data).continueToken, intent: 'rehydrate' } as any, ctx);
+      const res = await handleV2ContinueWorkflow({ continueToken: unwrapResponse(start.data).continueToken, intent: 'rehydrate' , workspacePath: root } as any, ctx);
       expect(res.type).toBe('success');
 
       const after = await (ctx.v2 as any).sessionStore.load(sessionId).match(

@@ -120,7 +120,7 @@ describe('handleV2CheckpointWorkflow (integration)', () => {
 
   /** Start a workflow, assert success, return data */
   async function startWorkflow(ctx: ToolContext) {
-    const result = await handleV2StartWorkflow({ workflowId: 'checkpoint-test' } as any, ctx);
+    const result = await handleV2StartWorkflow({ workflowId: 'checkpoint-test', workspacePath: root } as any, ctx);
     expect(result.type).toBe('success');
     if (result.type !== 'success') throw new Error('start_workflow failed');
     const data = result.data;
@@ -171,7 +171,7 @@ describe('handleV2CheckpointWorkflow (integration)', () => {
     if (cp.type !== 'success') return;
 
     // Resume from checkpoint — use the nextCall's continueToken to rehydrate
-    const resume = await handleV2ContinueWorkflow({ continueToken: cp.data.nextCall.params.continueToken, intent: 'rehydrate' } as any, ctx);
+    const resume = await handleV2ContinueWorkflow({ continueToken: cp.data.nextCall.params.continueToken, intent: 'rehydrate' , workspacePath: root } as any, ctx);
     if (resume.type === 'error') console.error('Continue after checkpoint error:', JSON.stringify(resume));
     expect(resume.type).toBe('success');
     if (resume.type !== 'success') return;

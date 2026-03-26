@@ -115,7 +115,6 @@ describe('MCP HTTP transport integration', () => {
 
   it('can start and continue a workflow over HTTP', async () => {
     // Step 1: start_workflow
-    // Note: workspacePath is optional — if omitted, falls back to server CWD
     const startResponse = await fetch(`http://localhost:${HTTP_PORT}/mcp`, {
       method: 'POST',
       headers: {
@@ -131,7 +130,7 @@ describe('MCP HTTP transport integration', () => {
           name: 'start_workflow',
           arguments: {
             workflowId: 'test-session-persistence',
-            // Omit workspacePath — let it use server CWD fallback
+            workspacePath: process.cwd(),
           },
         },
       }),

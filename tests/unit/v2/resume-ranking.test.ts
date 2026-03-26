@@ -1,13 +1,14 @@
 /**
  * Resume Ranking Projection Tests
  *
- * Tests the pure 5-tier ranking algorithm, text normalization,
+ * Tests the pure 7-tier ranking algorithm, text normalization,
  * tier assignment, sorting, and output bounding.
  */
 import { describe, it, expect } from 'vitest';
 import {
   rankResumeCandidates,
   assignTier,
+  computeQueryRelevanceScore,
   normalizeToTokens,
   allQueryTokensMatch,
   queryTokenMatchRatio,
@@ -40,6 +41,7 @@ function mkSummary(overrides: Partial<HealthySessionSummary> & { sessionId: stri
     recapSnippet: overrides.recapSnippet ?? null,
     observations: overrides.observations ?? { gitHeadSha: null, gitBranch: null, repoRootHash: null },
     workflow: overrides.workflow ?? DEFAULT_WORKFLOW,
+    sessionTitle: overrides.sessionTitle ?? null,
     lastModifiedMs: overrides.lastModifiedMs ?? null,
     pendingStepId: overrides.pendingStepId ?? null,
     isComplete: overrides.isComplete ?? false,
@@ -120,47 +122,47 @@ describe('asRecapSnippet', () => {
 // ---------------------------------------------------------------------------
 
 describe('assignTier', () => {
-  it('returns tier 1 for exact git_head_sha match', () => {
+  it('returns tier 4 for exact git_head_sha match', () => {
     const summary = mkSummary({
       sessionId: 'sess_1',
       runId: 'run_1',
       observations: { gitHeadSha: 'abc123', gitBranch: null, repoRootHash: null },
     });
     const tier = assignTier(summary, { gitHeadSha: 'abc123' });
-    expect(tier).toEqual({ tier: 1, kind: 'matched_head_sha' });
+    expect(tier).toEqual({ tier: 4, kind: 'matched_head_sha' });
   });
 
-  it('returns tier 2 exact for matching git_branch', () => {
+  it('returns tier 5 exact for matching git_branch', () => {
     const summary = mkSummary({
       sessionId: 'sess_1',
       runId: 'run_1',
       observations: { gitHeadSha: null, gitBranch: 'feature/foo', repoRootHash: null },
     });
     const tier = assignTier(summary, { gitBranch: 'feature/foo' });
-    expect(tier).toEqual({ tier: 2, kind: 'matched_branch', matchType: 'exact' });
+    expect(tier).toEqual({ tier: 5, kind: 'matched_branch', matchType: 'exact' });
   });
 
-  it('returns tier 2 prefix for prefix-matching git_branch', () => {
+  it('returns tier 5 prefix for prefix-matching git_branch', () => {
     const summary = mkSummary({
       sessionId: 'sess_1',
       runId: 'run_1',
       observations: { gitHeadSha: null, gitBranch: 'feature/foo-bar', repoRootHash: null },
     });
     const tier = assignTier(summary, { gitBranch: 'feature/foo' });
-    expect(tier).toEqual({ tier: 2, kind: 'matched_branch', matchType: 'prefix' });
+    expect(tier).toEqual({ tier: 5, kind: 'matched_branch', matchType: 'prefix' });
   });
 
-  it('returns tier 3 for text match on recap notes', () => {
+  it('returns tier 1 for text match on recap notes', () => {
     const summary = mkSummary({
       sessionId: 'sess_1',
       runId: 'run_1',
       recapSnippet: asRecapSnippet('Implemented the login feature with OAuth support'),
     });
     const tier = assignTier(summary, { freeTextQuery: 'login oauth' });
-    expect(tier).toEqual({ tier: 3, kind: 'matched_notes' });
+    expect(tier).toEqual({ tier: 1, kind: 'matched_notes' });
   });
 
-  it('returns tier 5 for text match on workflow id', () => {
+  it('returns tier 3 for text match on workflow id', () => {
     const summary = mkSummary({
       sessionId: 'sess_1',
       runId: 'run_1',
@@ -171,7 +173,7 @@ describe('assignTier', () => {
       },
     });
     const tier = assignTier(summary, { freeTextQuery: 'coding-task-agentic' });
-    expect(tier).toEqual({ tier: 5, kind: 'matched_workflow_id' });
+    expect(tier).toEqual({ tier: 3, kind: 'matched_workflow_id' });
   });
 
   it('returns tier 6 for recency fallback', () => {
@@ -183,13 +185,26 @@ describe('assignTier', () => {
     expect(tier).toEqual({ tier: 6, kind: 'recency_fallback' });
   });
 
-  it('prefers tier 1 over tier 2 when both match', () => {
+  it('prefers explicit query match over passive git context when both match', () => {
     const summary = mkSummary({
       sessionId: 'sess_1',
       runId: 'run_1',
       observations: { gitHeadSha: 'abc123', gitBranch: 'main', repoRootHash: null },
+      recapSnippet: asRecapSnippet('Working on MR ownership implementation'),
     });
-    const tier = assignTier(summary, { gitHeadSha: 'abc123', gitBranch: 'main' });
+    const tier = assignTier(summary, { gitHeadSha: 'abc123', gitBranch: 'main', freeTextQuery: 'mr ownership' });
+    expect(tier.tier).toBe(1);
+  });
+
+  it('matches session title from persisted context before falling back to git context', () => {
+    const summary = mkSummary({
+      sessionId: 'sess_1',
+      runId: 'run_1',
+      sessionTitle: 'Task dev for MR ownership',
+      observations: { gitHeadSha: 'abc123', gitBranch: 'main', repoRootHash: null },
+    });
+    const tier = assignTier(summary, { gitHeadSha: 'abc123', freeTextQuery: 'mr ownership' });
+    expect(tier.kind).toBe('matched_notes');
     expect(tier.tier).toBe(1);
   });
 });
@@ -221,7 +236,7 @@ describe('rankResumeCandidates', () => {
 
     const ranked = rankResumeCandidates(summaries, { gitHeadSha: 'sha1' });
 
-    // sess_b is tier 1 (sha match), others are tier 6 (recency fallback)
+    // sess_b is tier 4 (sha match), others are tier 6 (recency fallback)
     expect(ranked[0]!.sessionId).toBe(asSessionId('sess_b'));
     // Among tier 6: sess_c (15) before sess_a (5)
     expect(ranked[1]!.sessionId).toBe(asSessionId('sess_c'));
@@ -279,7 +294,28 @@ describe('rankResumeCandidates', () => {
     const ranked = rankResumeCandidates(summaries, { gitHeadSha: 'sha_match' });
     expect(ranked[0]!.whyMatched).toEqual(['matched_head_sha']);
     expect(ranked[0]!.snippet).toBe('Working on authentication flow');
-    expect(ranked[0]!.tierAssignment.tier).toBe(1);
+    expect(ranked[0]!.tierAssignment.tier).toBe(4);
+  });
+
+  it('includes supplemental repo match reason when workspace repo matches', () => {
+    const summaries = [
+      mkSummary({
+        sessionId: 'sess_1',
+        runId: 'run_1',
+        recapSnippet: asRecapSnippet('Working on authentication flow'),
+        observations: {
+          gitHeadSha: 'sha_match',
+          gitBranch: 'feature/auth',
+          repoRootHash: 'sha256:' + '1'.repeat(64),
+        },
+      }),
+    ];
+
+    const ranked = rankResumeCandidates(summaries, {
+      gitHeadSha: 'sha_match',
+      repoRootHash: 'sha256:' + '1'.repeat(64),
+    });
+    expect(ranked[0]!.whyMatched).toEqual(['matched_head_sha', 'matched_repo_root']);
   });
 
   it('returns empty snippet when no recap exists', () => {
@@ -364,11 +400,11 @@ describe('assignTier - exact ID matching', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Partial notes matching (Tier 3.5)
+// Partial notes matching (Tier 2)
 // ---------------------------------------------------------------------------
 
 describe('assignTier - partial notes matching', () => {
-  it('returns tier 4 (partial notes) when some but not all query tokens match notes', () => {
+  it('returns tier 2 (partial notes) when some but not all query tokens match notes', () => {
     const summary = mkSummary({
       sessionId: 'sess_1',
       runId: 'run_1',
@@ -377,7 +413,7 @@ describe('assignTier - partial notes matching', () => {
     // "mr ownership task dev" - "mr" and "ownership" match, "task" and "dev" don't
     const tier = assignTier(summary, { freeTextQuery: 'mr ownership task dev' });
     expect(tier.kind).toBe('matched_notes_partial');
-    expect(tier.tier).toBe(4);
+    expect(tier.tier).toBe(2);
   });
 
   it('does not return partial match when ratio is below threshold', () => {
@@ -391,16 +427,15 @@ describe('assignTier - partial notes matching', () => {
     expect(tier.kind).not.toBe('matched_notes_partial');
   });
 
-  it('returns partial match at exactly 40% boundary (2 of 5 tokens)', () => {
+  it('returns partial match at weighted boundary when the matched tokens are distinctive', () => {
     const summary = mkSummary({
       sessionId: 'sess_1',
       runId: 'run_1',
-      recapSnippet: asRecapSnippet('Working on alpha and beta releases'),
+      recapSnippet: asRecapSnippet('Working on ownership and classifier migration'),
     });
-    // 2 of 5 = 0.4 = exactly at threshold
-    const tier = assignTier(summary, { freeTextQuery: 'alpha beta gamma delta epsilon' });
+    const tier = assignTier(summary, { freeTextQuery: 'ownership classifier adapter sync bridge' });
     expect(tier.kind).toBe('matched_notes_partial');
-    expect(tier.tier).toBe(4);
+    expect(tier.tier).toBe(2);
   });
 
   it('falls through to recency when runId does not match', () => {
@@ -428,37 +463,91 @@ describe('assignTier - partial notes matching', () => {
 // ---------------------------------------------------------------------------
 
 describe('rankResumeCandidates - partial match ratio sorting', () => {
-  it('sorts higher match ratio before lower within tier 4', () => {
+  it('sorts higher weighted match ratio before lower within partial tier', () => {
     const summaries = [
       mkSummary({
         sessionId: 'sess_low_ratio',
         runId: 'run_low',
-        recapSnippet: asRecapSnippet('Working on alpha feature'),
-        // "alpha beta gamma delta epsilon" -> only "alpha" matches (1/5 = 0.2 → below threshold)
-        // But let's use a scenario where both are above threshold
+        recapSnippet: asRecapSnippet('Working on ownership adapter changes'),
       }),
       mkSummary({
         sessionId: 'sess_high_ratio',
         runId: 'run_high',
-        recapSnippet: asRecapSnippet('Working on alpha beta gamma feature for the team'),
-        // "alpha beta gamma" match (3/5 = 0.6)
+        recapSnippet: asRecapSnippet('Working on ownership classifier adapter bridge changes'),
       }),
       mkSummary({
         sessionId: 'sess_med_ratio',
         runId: 'run_med',
-        recapSnippet: asRecapSnippet('Working on alpha beta feature deployment'),
-        // "alpha beta" match (2/5 = 0.4)
+        recapSnippet: asRecapSnippet('Working on ownership classifier adapter updates'),
       }),
     ];
 
-    const ranked = rankResumeCandidates(summaries, { freeTextQuery: 'alpha beta gamma delta epsilon' });
+    const ranked = rankResumeCandidates(summaries, { freeTextQuery: 'ownership classifier adapter bridge sync' });
 
     // Filter to only tier 4 (partial) matches
     const partialMatches = ranked.filter(r => r.tierAssignment.kind === 'matched_notes_partial');
-    // high (0.6) before med (0.4); low should not appear (0.2 below threshold)
+    // high (4/5) before med (3/5); low (2/5) falls below the weighted threshold
     expect(partialMatches.length).toBeGreaterThanOrEqual(2);
     expect(partialMatches[0]!.sessionId).toBe(asSessionId('sess_high_ratio'));
     expect(partialMatches[1]!.sessionId).toBe(asSessionId('sess_med_ratio'));
+  });
+});
+
+describe('computeQueryRelevanceScore', () => {
+  it('prefers session title text over workflow id and branch', () => {
+    const summary = mkSummary({
+      sessionId: 'sess_1',
+      runId: 'run_1',
+      sessionTitle: 'Task dev for MR ownership',
+      observations: { gitHeadSha: null, gitBranch: 'feature/mr-ownership', repoRootHash: null },
+    });
+
+    const score = computeQueryRelevanceScore(summary, { freeTextQuery: 'mr ownership task dev' });
+    expect(score).toBeGreaterThanOrEqual(0.75);
+  });
+
+  it('boosts same-repo sessions when repoRootHash matches the current workspace', () => {
+    const sameRepo = mkSummary({
+      sessionId: 'sess_same_repo',
+      runId: 'run_same_repo',
+      sessionTitle: 'Task dev for MR ownership',
+      observations: { gitHeadSha: null, gitBranch: 'feature/mr-ownership', repoRootHash: 'sha256:' + '1'.repeat(64) },
+    });
+
+    const otherRepo = mkSummary({
+      sessionId: 'sess_other_repo',
+      runId: 'run_other_repo',
+      sessionTitle: 'Task dev for MR ownership',
+      observations: { gitHeadSha: null, gitBranch: 'feature/mr-ownership', repoRootHash: 'sha256:' + '2'.repeat(64) },
+    });
+
+    const query = { freeTextQuery: 'mr ownership task dev', repoRootHash: 'sha256:' + '1'.repeat(64) };
+    expect(computeQueryRelevanceScore(sameRepo, query)).toBeGreaterThan(computeQueryRelevanceScore(otherRepo, query));
+  });
+});
+
+describe('rankResumeCandidates - sameWorkspaceOnly', () => {
+  it('filters out cross-repo sessions when sameWorkspaceOnly is enabled', () => {
+    const summaries = [
+      mkSummary({
+        sessionId: 'sess_same_repo',
+        runId: 'run_same_repo',
+        observations: { gitHeadSha: null, gitBranch: 'feature/x', repoRootHash: 'sha256:' + '1'.repeat(64) },
+      }),
+      mkSummary({
+        sessionId: 'sess_other_repo',
+        runId: 'run_other_repo',
+        observations: { gitHeadSha: null, gitBranch: 'feature/x', repoRootHash: 'sha256:' + '2'.repeat(64) },
+      }),
+    ];
+
+    const ranked = rankResumeCandidates(summaries, {
+      repoRootHash: 'sha256:' + '1'.repeat(64),
+      sameWorkspaceOnly: true,
+    });
+
+    expect(ranked).toHaveLength(1);
+    expect(ranked[0]!.sessionId).toBe(asSessionId('sess_same_repo'));
   });
 });
 
@@ -572,12 +661,12 @@ describe('rankResumeCandidates - completed session deprioritization', () => {
         runId: 'run_complete_matched',
         isComplete: true,
         observations: { gitHeadSha: 'abc123', gitBranch: null, repoRootHash: null },
-        // SHA match -> tier 1
+        // SHA match -> tier 4
       }),
     ];
 
     const ranked = rankResumeCandidates(summaries, { gitHeadSha: 'abc123' });
-    // Completed with tier 1 should still beat in-progress with tier 6
+    // Completed with tier 4 should still beat in-progress with tier 6
     expect(ranked[0]!.sessionId).toBe(asSessionId('sess_complete_but_matched'));
     expect(ranked[0]!.isComplete).toBe(true);
     expect(ranked[1]!.sessionId).toBe(asSessionId('sess_active'));
@@ -589,11 +678,13 @@ describe('rankResumeCandidates - completed session deprioritization', () => {
 // ---------------------------------------------------------------------------
 
 describe('rankResumeCandidates - new output fields', () => {
-  it('includes pendingStepId, isComplete, and lastModifiedMs in output', () => {
+  it('includes sessionTitle, gitBranch, pendingStepId, isComplete, lastModifiedMs, confidence, and explanation in output', () => {
     const summaries = [
       mkSummary({
         sessionId: 'sess_1',
         runId: 'run_1',
+        sessionTitle: 'Task dev for MR ownership',
+        observations: { gitHeadSha: null, gitBranch: 'feature/mr-ownership', repoRootHash: null },
         pendingStepId: 'phase-3-implement',
         isComplete: false,
         lastModifiedMs: 1700000000000,
@@ -601,9 +692,13 @@ describe('rankResumeCandidates - new output fields', () => {
     ];
 
     const ranked = rankResumeCandidates(summaries, {});
+    expect(ranked[0]!.sessionTitle).toBe('Task dev for MR ownership');
+    expect(ranked[0]!.gitBranch).toBe('feature/mr-ownership');
     expect(ranked[0]!.pendingStepId).toBe('phase-3-implement');
     expect(ranked[0]!.isComplete).toBe(false);
     expect(ranked[0]!.lastModifiedMs).toBe(1700000000000);
+    expect(ranked[0]!.confidence).toBe('weak');
+    expect(ranked[0]!.matchExplanation).toContain('Recent session');
   });
 
   it('includes null pendingStepId for completed sessions', () => {
@@ -620,5 +715,146 @@ describe('rankResumeCandidates - new output fields', () => {
     const ranked = rankResumeCandidates(summaries, {});
     expect(ranked[0]!.pendingStepId).toBeNull();
     expect(ranked[0]!.isComplete).toBe(true);
+  });
+
+  it('uses query-centered snippet when a later match is more relevant than the start of the recap', () => {
+    const summaries = [
+      mkSummary({
+        sessionId: 'sess_1',
+        runId: 'run_1',
+        recapSnippet: asRecapSnippet(
+          'Initial setup and generic implementation work. ' +
+          'Later we added MR ownership routing and ownership-aware matching for resume search.'
+        ),
+      }),
+    ];
+
+    const ranked = rankResumeCandidates(summaries, { freeTextQuery: 'ownership' });
+    expect(ranked[0]!.snippet.toLowerCase()).toContain('ownership');
+  });
+
+  it('assigns strong confidence to exact ID matches', () => {
+    const summaries = [mkSummary({ sessionId: 'sess_1', runId: 'run_1' })];
+    const ranked = rankResumeCandidates(summaries, { runId: 'run_1' });
+    expect(ranked[0]!.confidence).toBe('strong');
+    expect(ranked[0]!.matchExplanation).toContain('Exact runId match');
+  });
+});
+
+describe('rankResumeCandidates - transcript-like scenarios', () => {
+  it('breaks git SHA ties using explicit query relevance from session title', () => {
+    const summaries = [
+      mkSummary({
+        sessionId: 'sess_mr_ownership',
+        runId: 'run_mr_ownership',
+        sessionTitle: 'Task dev for MR ownership',
+        recapSnippet: asRecapSnippet('Design review for MR ownership classification and compatibility'),
+        observations: { gitHeadSha: 'sha_shared', gitBranch: 'feature/mr-ownership', repoRootHash: null },
+        preferredTip: { nodeId: 'n1', lastActivityEventIndex: 5 },
+      }),
+      mkSummary({
+        sessionId: 'sess_unrelated_but_recent',
+        runId: 'run_unrelated',
+        sessionTitle: 'People search-first picker UI integration',
+        recapSnippet: asRecapSnippet('Implemented search-first picker UI integration'),
+        observations: { gitHeadSha: 'sha_shared', gitBranch: 'feature/people-picker', repoRootHash: null },
+        preferredTip: { nodeId: 'n2', lastActivityEventIndex: 50 },
+      }),
+    ];
+
+    const ranked = rankResumeCandidates(summaries, {
+      gitHeadSha: 'sha_shared',
+      freeTextQuery: 'task dev mr ownership',
+    });
+
+    expect(ranked[0]!.sessionId).toBe(asSessionId('sess_mr_ownership'));
+    expect(ranked[0]!.sessionTitle).toBe('Task dev for MR ownership');
+    expect(ranked[0]!.whyMatched).toEqual(['matched_notes', 'matched_head_sha']);
+  });
+
+  it('prefers the same repo and distinctive ownership token over generic task/dev matches', () => {
+    const summaries = [
+      mkSummary({
+        sessionId: 'sess_opex_mr_ownership',
+        runId: 'run_opex_mr_ownership',
+        sessionTitle: 'Task dev for MR ownership',
+        recapSnippet: asRecapSnippet('Add MR ownership data handling and ownership-specific task-dev notes'),
+        observations: {
+          gitHeadSha: 'shared_sha',
+          gitBranch: 'feature/mr-ownership',
+          repoRootHash: 'sha256:' + '1'.repeat(64),
+        },
+        preferredTip: { nodeId: 'n1', lastActivityEventIndex: 5 },
+      }),
+      mkSummary({
+        sessionId: 'sess_other_repo_generic',
+        runId: 'run_other_repo_generic',
+        sessionTitle: 'Task dev for bare integration harness',
+        recapSnippet: asRecapSnippet('Task dev workflow for integration harness cleanup and generic implementation work'),
+        observations: {
+          gitHeadSha: 'shared_sha',
+          gitBranch: 'zim/etienneb/acei-852_zim-bare-integration-tests',
+          repoRootHash: 'sha256:' + '2'.repeat(64),
+        },
+        preferredTip: { nodeId: 'n2', lastActivityEventIndex: 50 },
+      }),
+      mkSummary({
+        sessionId: 'sess_other_repo_ownershipless',
+        runId: 'run_other_repo_ownershipless',
+        sessionTitle: 'Task dev for merge request dashboard',
+        recapSnippet: asRecapSnippet('Refine merge request dashboard task-dev flow without ownership support'),
+        observations: {
+          gitHeadSha: 'shared_sha',
+          gitBranch: 'main',
+          repoRootHash: 'sha256:' + '3'.repeat(64),
+        },
+        preferredTip: { nodeId: 'n3', lastActivityEventIndex: 60 },
+      }),
+    ];
+
+    const ranked = rankResumeCandidates(summaries, {
+      gitHeadSha: 'shared_sha',
+      freeTextQuery: 'task dev for mr ownership',
+      repoRootHash: 'sha256:' + '1'.repeat(64),
+    });
+
+    expect(ranked[0]!.sessionId).toBe(asSessionId('sess_opex_mr_ownership'));
+    expect(ranked[0]!.sessionTitle).toBe('Task dev for MR ownership');
+    expect(ranked[0]!.gitBranch).toBe('feature/mr-ownership');
+    expect(ranked[0]!.whyMatched).toContain('matched_repo_root');
+  });
+
+  it('prefers the current workspace repo when branch and sha are otherwise identical', () => {
+    const summaries = [
+      mkSummary({
+        sessionId: 'sess_current_repo',
+        runId: 'run_current_repo',
+        observations: {
+          gitHeadSha: 'shared_sha',
+          gitBranch: 'main',
+          repoRootHash: 'sha256:' + '1'.repeat(64),
+        },
+        preferredTip: { nodeId: 'n1', lastActivityEventIndex: 5 },
+      }),
+      mkSummary({
+        sessionId: 'sess_other_repo',
+        runId: 'run_other_repo',
+        observations: {
+          gitHeadSha: 'shared_sha',
+          gitBranch: 'main',
+          repoRootHash: 'sha256:' + '2'.repeat(64),
+        },
+        preferredTip: { nodeId: 'n2', lastActivityEventIndex: 50 },
+      }),
+    ];
+
+    const ranked = rankResumeCandidates(summaries, {
+      gitHeadSha: 'shared_sha',
+      gitBranch: 'main',
+      repoRootHash: 'sha256:' + '1'.repeat(64),
+    });
+
+    expect(ranked[0]!.sessionId).toBe(asSessionId('sess_current_repo'));
+    expect(ranked[0]!.whyMatched).toContain('matched_repo_root');
   });
 });

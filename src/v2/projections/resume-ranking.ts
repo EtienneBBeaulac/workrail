@@ -75,6 +75,8 @@ export interface HealthySessionSummary {
   readonly recapSnippet: RecapSnippet | null;
   readonly observations: SessionObservations;
   readonly workflow: IdentifiedWorkflow;
+  /** Human-readable title derived from persisted run context or early recap text. */
+  readonly sessionTitle: string | null;
   /** Filesystem modification time (epoch ms). Used for relative-time display. */
   readonly lastModifiedMs: number | null;
   /** Current pending step ID from execution snapshot, if the workflow is in progress. */
@@ -91,6 +93,7 @@ export interface HealthySessionSummary {
 export type WhyMatched =
   | 'matched_exact_id'
   | 'matched_head_sha'
+  | 'matched_repo_root'
   | 'matched_branch'
   | 'matched_notes'
   | 'matched_notes_partial'
@@ -100,11 +103,11 @@ export type WhyMatched =
 /** Tier assignment — discriminated union. Exhaustive, testable independently. */
 export type TierAssignment =
   | { readonly tier: 0; readonly kind: 'matched_exact_id'; readonly matchField: 'runId' | 'sessionId' }
-  | { readonly tier: 1; readonly kind: 'matched_head_sha' }
-  | { readonly tier: 2; readonly kind: 'matched_branch'; readonly matchType: 'exact' | 'prefix' }
-  | { readonly tier: 3; readonly kind: 'matched_notes' }
-  | { readonly tier: 4; readonly kind: 'matched_notes_partial'; readonly matchRatio: number }
-  | { readonly tier: 5; readonly kind: 'matched_workflow_id' }
+  | { readonly tier: 1; readonly kind: 'matched_notes' }
+  | { readonly tier: 2; readonly kind: 'matched_notes_partial'; readonly matchRatio: number }
+  | { readonly tier: 3; readonly kind: 'matched_workflow_id' }
+  | { readonly tier: 4; readonly kind: 'matched_head_sha' }
+  | { readonly tier: 5; readonly kind: 'matched_branch'; readonly matchType: 'exact' | 'prefix' }
   | { readonly tier: 6; readonly kind: 'recency_fallback' };
 
 // ---------------------------------------------------------------------------
@@ -203,6 +206,8 @@ export function fuzzyQueryTokenMatchRatio(
 export interface ResumeQuery {
   readonly gitHeadSha?: string;
   readonly gitBranch?: string;
+  readonly repoRootHash?: string;
+  readonly sameWorkspaceOnly?: boolean;
   readonly freeTextQuery?: string;
   /** Exact run ID to find — bypasses all other ranking when matched. */
   readonly runId?: string;
@@ -218,8 +223,204 @@ export interface ResumeQuery {
 const MIN_PARTIAL_MATCH_RATIO = 0.4;
 
 /**
+ * Low-signal query words that appear in many coding-task sessions.
+ * These still count, but they should not drown out distinctive words like "ownership".
+ */
+const LOW_SIGNAL_QUERY_TOKENS = new Set([
+  'task',
+  'dev',
+  'work',
+  'workflow',
+  'coding',
+  'feature',
+  'phase',
+  'implement',
+  'implementation',
+  'review',
+  'fix',
+  'bug',
+]);
+
+function tokenSpecificityWeight(token: string): number {
+  if (token.length <= 2) return 0.2;
+  if (LOW_SIGNAL_QUERY_TOKENS.has(token)) return 0.35;
+  return Math.min(2.5, 1 + Math.max(0, token.length - 4) * 0.18);
+}
+
+function weightedFuzzyQueryTokenMatchRatio(
+  queryTokens: ReadonlySet<string>,
+  candidateTokens: ReadonlySet<string>,
+): number {
+  if (queryTokens.size === 0 || candidateTokens.size === 0) return 0;
+
+  let matchedWeight = 0;
+  let totalWeight = 0;
+
+  for (const qt of queryTokens) {
+    const weight = tokenSpecificityWeight(qt);
+    totalWeight += weight;
+    if (candidateTokens.has(qt) || fuzzyTokenMatch(qt, candidateTokens)) {
+      matchedWeight += weight;
+    }
+  }
+
+  return totalWeight === 0 ? 0 : matchedWeight / totalWeight;
+}
+
+function repoScopeMatches(summary: HealthySessionSummary, query: ResumeQuery): boolean {
+  return Boolean(
+    query.repoRootHash &&
+    summary.observations.repoRootHash &&
+    query.repoRootHash === summary.observations.repoRootHash,
+  );
+}
+
+function shouldKeepSummary(summary: HealthySessionSummary, query: ResumeQuery): boolean {
+  if (!query.sameWorkspaceOnly) return true;
+  if (!query.repoRootHash) return true;
+  return repoScopeMatches(summary, query);
+}
+
+/** Build the main searchable session text surface from identity-bearing session fields. */
+function buildSearchableSessionText(summary: HealthySessionSummary): string {
+  return [summary.sessionTitle, summary.recapSnippet]
+    .filter((part): part is string => Boolean(part && part.trim().length > 0))
+    .join('\n\n');
+}
+
+function collectMatchReasons(summary: HealthySessionSummary, query: ResumeQuery, tier: TierAssignment): readonly WhyMatched[] {
+  const reasons: WhyMatched[] = [tierToWhyMatched(tier)];
+
+  if (repoScopeMatches(summary, query) && !reasons.includes('matched_repo_root')) {
+    reasons.push('matched_repo_root');
+  }
+
+  if (
+    query.gitHeadSha &&
+    summary.observations.gitHeadSha === query.gitHeadSha &&
+    !reasons.includes('matched_head_sha')
+  ) {
+    reasons.push('matched_head_sha');
+  }
+
+  if (
+    query.gitBranch &&
+    summary.observations.gitBranch &&
+    (
+      summary.observations.gitBranch === query.gitBranch ||
+      summary.observations.gitBranch.startsWith(query.gitBranch) ||
+      query.gitBranch.startsWith(summary.observations.gitBranch)
+    ) &&
+    !reasons.includes('matched_branch')
+  ) {
+    reasons.push('matched_branch');
+  }
+
+  return reasons;
+}
+
+function buildPreviewSnippet(summary: HealthySessionSummary, query: ResumeQuery): string {
+  const previewSource = buildSearchableSessionText(summary);
+  if (!previewSource) return '';
+
+  const queryTokens = query.freeTextQuery ? [...normalizeToTokens(query.freeTextQuery)] : [];
+  if (queryTokens.length === 0) return summary.recapSnippet ?? previewSource;
+
+  const lower = previewSource.toLowerCase();
+  let bestIndex = -1;
+  for (const token of queryTokens) {
+    if (token.length < 3) continue;
+    const idx = lower.indexOf(token);
+    if (idx !== -1 && (bestIndex === -1 || idx < bestIndex)) bestIndex = idx;
+  }
+
+  if (bestIndex === -1) return summary.recapSnippet ?? previewSource;
+
+  const start = Math.max(0, bestIndex - 100);
+  const end = Math.min(previewSource.length, bestIndex + 180);
+  const slice = previewSource.slice(start, end).trim();
+  const prefix = start > 0 ? '...' : '';
+  const suffix = end < previewSource.length ? '...' : '';
+  return `${prefix}${slice}${suffix}`;
+}
+
+function deriveConfidence(tier: TierAssignment, reasons: readonly WhyMatched[]): 'strong' | 'medium' | 'weak' {
+  if (tier.kind === 'matched_exact_id' || tier.kind === 'matched_notes') return 'strong';
+  if (tier.kind === 'matched_notes_partial' || tier.kind === 'matched_workflow_id') return 'medium';
+  if (reasons.includes('matched_repo_root') || reasons.includes('matched_head_sha') || reasons.includes('matched_branch')) {
+    return 'medium';
+  }
+  return 'weak';
+}
+
+function buildMatchExplanation(
+  tier: TierAssignment,
+  reasons: readonly WhyMatched[],
+  summary: HealthySessionSummary,
+): string {
+  const parts: string[] = [];
+
+  switch (tier.kind) {
+    case 'matched_exact_id':
+      parts.push(`Exact ${tier.matchField} match`);
+      break;
+    case 'matched_notes':
+      parts.push('Strong text match against session title/notes');
+      break;
+    case 'matched_notes_partial':
+      parts.push(`Partial text match (${Math.round(tier.matchRatio * 100)}%) against session title/notes`);
+      break;
+    case 'matched_workflow_id':
+      parts.push('Matched workflow type');
+      break;
+    case 'matched_head_sha':
+      parts.push('Matched current git commit');
+      break;
+    case 'matched_branch':
+      parts.push(tier.matchType === 'exact' ? 'Matched current git branch' : 'Partially matched current git branch');
+      break;
+    case 'recency_fallback':
+      parts.push('Recent session with no stronger explicit match');
+      break;
+  }
+
+  if (reasons.includes('matched_repo_root')) parts.push('same workspace');
+  if (summary.isComplete) parts.push('completed');
+
+  return parts.join('; ');
+}
+
+/** Compute a fuzzy query relevance score across session text, workflow id, and branch. */
+export function computeQueryRelevanceScore(summary: HealthySessionSummary, query: ResumeQuery): number {
+  const queryTokens = query.freeTextQuery ? normalizeToTokens(query.freeTextQuery) : null;
+  const repoBonus = repoScopeMatches(summary, query) ? 0.2 : 0;
+  if (!queryTokens || queryTokens.size === 0) return repoBonus;
+
+  const sessionText = buildSearchableSessionText(summary);
+  const sessionTextRatio = sessionText
+    ? weightedFuzzyQueryTokenMatchRatio(queryTokens, normalizeToTokens(sessionText))
+    : 0;
+
+  const workflowRatio = weightedFuzzyQueryTokenMatchRatio(
+    queryTokens,
+    normalizeToTokens(String(summary.workflow.workflowId)),
+  );
+
+  const branchRatio = summary.observations.gitBranch
+    ? weightedFuzzyQueryTokenMatchRatio(queryTokens, normalizeToTokens(summary.observations.gitBranch))
+    : 0;
+
+  // Session text is the highest-signal surface. Workflow ID and branch act as weaker tie-breakers.
+  return Math.max(sessionTextRatio + repoBonus, workflowRatio * 0.75 + repoBonus, branchRatio * 0.5 + repoBonus);
+}
+
+/**
  * Assign a tier to a session summary based on the query.
  * Highest matching tier wins (tier 0 = best, exact ID match).
+ *
+ * Design choice: if the user supplied an explicit free-text query, match their
+ * words against persisted session text BEFORE passive git-context signals. This
+ * prevents "same current HEAD" from drowning out "resume the MR ownership task".
  */
 export function assignTier(summary: HealthySessionSummary, query: ResumeQuery): TierAssignment {
   // Tier 0: exact match on runId or sessionId
@@ -230,49 +431,51 @@ export function assignTier(summary: HealthySessionSummary, query: ResumeQuery): 
     return { tier: 0, kind: 'matched_exact_id', matchField: 'sessionId' };
   }
 
-  // Tier 1: exact match on git_head_sha
-  if (query.gitHeadSha && summary.observations.gitHeadSha === query.gitHeadSha) {
-    return { tier: 1, kind: 'matched_head_sha' };
-  }
-
-  // Tier 2: exact or prefix match on git_branch
-  if (query.gitBranch && summary.observations.gitBranch) {
-    if (summary.observations.gitBranch === query.gitBranch) {
-      return { tier: 2, kind: 'matched_branch', matchType: 'exact' };
-    }
-    if (summary.observations.gitBranch.startsWith(query.gitBranch) ||
-        query.gitBranch.startsWith(summary.observations.gitBranch)) {
-      return { tier: 2, kind: 'matched_branch', matchType: 'prefix' };
-    }
-  }
-
-  // Normalize query tokens once for text-based tiers (3, 4, 5)
+  // Normalize query tokens once for text-based tiers (1, 2, 3)
   const queryTokens = query.freeTextQuery ? normalizeToTokens(query.freeTextQuery) : null;
 
-  // Tier 3: ALL token match on recap notes (exact)
-  if (queryTokens && queryTokens.size > 0 && summary.recapSnippet) {
-    const noteTokens = normalizeToTokens(summary.recapSnippet);
-    if (allQueryTokensMatch(queryTokens, noteTokens)) {
-      return { tier: 3, kind: 'matched_notes' };
+  // Tier 1/2: query match on searchable session text (context-derived title + recap).
+  if (queryTokens && queryTokens.size > 0) {
+    const sessionText = buildSearchableSessionText(summary);
+    if (sessionText) {
+      const sessionTextTokens = normalizeToTokens(sessionText);
+      if (allQueryTokensMatch(queryTokens, sessionTextTokens)) {
+        return { tier: 1, kind: 'matched_notes' };
+      }
+
+      const ratio = weightedFuzzyQueryTokenMatchRatio(queryTokens, sessionTextTokens);
+      if (ratio >= MIN_PARTIAL_MATCH_RATIO) {
+        return { tier: 2, kind: 'matched_notes_partial', matchRatio: ratio };
+      }
     }
-    // Tier 4: partial/fuzzy token match on recap notes (at least MIN_PARTIAL_MATCH_RATIO)
-    // Uses fuzzy matching so "owner" matches "ownership", "auth" matches "authentication"
-    const ratio = fuzzyQueryTokenMatchRatio(queryTokens, noteTokens);
-    if (ratio >= MIN_PARTIAL_MATCH_RATIO) {
-      return { tier: 4, kind: 'matched_notes_partial', matchRatio: ratio };
+
+    // Tier 3: exact or partial match on workflow id
+    const workflowTokens = normalizeToTokens(String(summary.workflow.workflowId));
+    if (allQueryTokensMatch(queryTokens, workflowTokens)) {
+      return { tier: 3, kind: 'matched_workflow_id' };
+    }
+
+    const workflowRatio = weightedFuzzyQueryTokenMatchRatio(queryTokens, workflowTokens);
+    if (workflowRatio >= MIN_PARTIAL_MATCH_RATIO) {
+      return { tier: 3, kind: 'matched_workflow_id' };
     }
   }
 
-  // Tier 5: exact token match on workflow id
-  if (queryTokens && queryTokens.size > 0 && summary.workflow.kind === 'identified') {
-    const workflowTokens = normalizeToTokens(String(summary.workflow.workflowId));
-    if (allQueryTokensMatch(queryTokens, workflowTokens)) {
-      return { tier: 5, kind: 'matched_workflow_id' };
+  // Tier 4: exact match on git_head_sha
+  if (query.gitHeadSha && summary.observations.gitHeadSha === query.gitHeadSha) {
+    return { tier: 4, kind: 'matched_head_sha' };
+  }
+
+  // Tier 5: exact or prefix match on git_branch
+  if (query.gitBranch && summary.observations.gitBranch) {
+    if (summary.observations.gitBranch === query.gitBranch) {
+      return { tier: 5, kind: 'matched_branch', matchType: 'exact' };
     }
-    // Tier 5 also: fuzzy/partial match on workflow id
-    const ratio = fuzzyQueryTokenMatchRatio(queryTokens, workflowTokens);
-    if (ratio >= MIN_PARTIAL_MATCH_RATIO) {
-      return { tier: 5, kind: 'matched_workflow_id' };
+    if (
+      summary.observations.gitBranch.startsWith(query.gitBranch) ||
+      query.gitBranch.startsWith(summary.observations.gitBranch)
+    ) {
+      return { tier: 5, kind: 'matched_branch', matchType: 'prefix' };
     }
   }
 
@@ -311,12 +514,20 @@ export interface RankedResumeCandidate {
   readonly workflowHash: WorkflowHash;
   /** Non-nullable: required to identify the workflow for session resumption. */
   readonly workflowId: WorkflowId;
+  /** Human-readable identity hint for the session. */
+  readonly sessionTitle: string | null;
+  /** Git branch observed for the session, if known. */
+  readonly gitBranch: string | null;
   /** Current pending step ID (e.g. "phase-3-implement"), null if unknown or complete. */
   readonly pendingStepId: string | null;
   /** Whether the workflow run has completed. */
   readonly isComplete: boolean;
   /** Filesystem modification time (epoch ms), null if unavailable. */
   readonly lastModifiedMs: number | null;
+  /** Coarse confidence band for agent-facing recommendation quality. */
+  readonly confidence: 'strong' | 'medium' | 'weak';
+  /** Short natural-language explanation of the ranking outcome. */
+  readonly matchExplanation: string;
 }
 
 /** Max candidates returned (locked §2.3). */
@@ -329,11 +540,16 @@ export const MAX_RESUME_CANDIDATES = 5;
 /**
  * Rank session summaries against a query using the 7-tier algorithm.
  *
- * Lock §2.3: Strict tiered matching, deterministic ordering.
+ * Query-bearing signals are ranked ahead of passive git-context signals.
+ * Deterministic ordering is preserved within each tier.
  *
  * Within a tier, order by:
- * 1. lastActivityEventIndex desc (most recent first)
- * 2. sessionId lex (deterministic tie-breaker)
+ * 1. same repo as current workspace
+ * 2. in-progress over completed
+ * 3. query relevance score desc
+ * 4. partial-match ratio desc (for partial text matches)
+ * 5. lastActivityEventIndex desc
+ * 6. sessionId lex
  *
  * Returns at most MAX_RESUME_CANDIDATES candidates.
  */
@@ -342,21 +558,28 @@ export function rankResumeCandidates(
   query: ResumeQuery,
 ): readonly RankedResumeCandidate[] {
   // Assign tier to each summary
-  const withTier = summaries.map((summary) => ({
-    summary,
-    tier: assignTier(summary, query),
-  }));
+  const withTier = summaries
+    .filter((summary) => shouldKeepSummary(summary, query))
+    .map((summary) => ({
+      summary,
+      tier: assignTier(summary, query),
+      queryScore: computeQueryRelevanceScore(summary, query),
+    }));
 
   // Sort: tier asc, then completed after in-progress within same tier,
-  // matchRatio desc (for partial matches), lastActivityEventIndex desc, sessionId lex.
+  // queryScore desc, matchRatio desc (for partial matches), lastActivityEventIndex desc, sessionId lex.
   // Note: tier takes priority over completion status so that a completed session
   // with an exact ID match (tier 0) still ranks above an in-progress recency fallback (tier 6).
   const sorted = [...withTier].sort((a, b) => {
     if (a.tier.tier !== b.tier.tier) return a.tier.tier - b.tier.tier;
+    const aSameRepo = repoScopeMatches(a.summary, query);
+    const bSameRepo = repoScopeMatches(b.summary, query);
+    if (aSameRepo !== bSameRepo) return aSameRepo ? -1 : 1;
     // Within the same tier, completed sessions sort after in-progress ones
     if (a.summary.isComplete !== b.summary.isComplete) {
       return a.summary.isComplete ? 1 : -1;
     }
+    if (a.queryScore !== b.queryScore) return b.queryScore - a.queryScore;
     // Within partial notes tier, higher match ratio wins
     if (a.tier.kind === 'matched_notes_partial' && b.tier.kind === 'matched_notes_partial') {
       if (a.tier.matchRatio !== b.tier.matchRatio) return b.tier.matchRatio - a.tier.matchRatio;
@@ -368,18 +591,25 @@ export function rankResumeCandidates(
   });
 
   // Take top N and map to output
-  return sorted.slice(0, MAX_RESUME_CANDIDATES).map(({ summary, tier }) => ({
-    sessionId: summary.sessionId,
-    runId: summary.runId,
-    preferredTipNodeId: summary.preferredTip.nodeId,
-    snippet: summary.recapSnippet ?? '',
-    whyMatched: [tierToWhyMatched(tier)],
-    tierAssignment: tier,
-    lastActivityEventIndex: summary.preferredTip.lastActivityEventIndex,
-    workflowHash: summary.workflow.workflowHash,
-    workflowId: summary.workflow.workflowId,
-    pendingStepId: summary.pendingStepId,
-    isComplete: summary.isComplete,
-    lastModifiedMs: summary.lastModifiedMs,
-  }));
+  return sorted.slice(0, MAX_RESUME_CANDIDATES).map(({ summary, tier }) => {
+    const whyMatched = collectMatchReasons(summary, query, tier);
+    return {
+      sessionId: summary.sessionId,
+      runId: summary.runId,
+      preferredTipNodeId: summary.preferredTip.nodeId,
+      snippet: buildPreviewSnippet(summary, query),
+      whyMatched,
+      tierAssignment: tier,
+      lastActivityEventIndex: summary.preferredTip.lastActivityEventIndex,
+      workflowHash: summary.workflow.workflowHash,
+      workflowId: summary.workflow.workflowId,
+      sessionTitle: summary.sessionTitle,
+      gitBranch: summary.observations.gitBranch,
+      pendingStepId: summary.pendingStepId,
+      isComplete: summary.isComplete,
+      lastModifiedMs: summary.lastModifiedMs,
+      confidence: deriveConfidence(tier, whyMatched),
+      matchExplanation: buildMatchExplanation(tier, whyMatched, summary),
+    };
+  });
 }

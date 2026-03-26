@@ -6,6 +6,7 @@ import * as fs from 'fs/promises';
 
 import { handleV2ContinueWorkflow } from '../../src/mcp/handlers/v2-execution.js';
 import type { ToolContext, V2Dependencies } from '../../src/mcp/types.js';
+import { V2ContinueWorkflowInput } from '../../src/mcp/v2/tools.js';
 
 import { LocalDataDirV2 } from '../../src/v2/infra/local/data-dir/index.js';
 import { NodeFileSystemV2 } from '../../src/v2/infra/local/fs/index.js';
@@ -136,13 +137,25 @@ describe('v2 execution placeholder handlers (Slice 3.2 boundary validation)', ()
         attemptId: mkId('attempt', 4),
         workflowHashRef: 'deadbeef',
       });
-      const res = await handleV2ContinueWorkflow({ continueToken, intent: 'rehydrate' } as any, ctx);
+      const res = await handleV2ContinueWorkflow({ continueToken, intent: 'rehydrate', workspacePath: root } as any, ctx);
 
       expect(res.type).toBe('error');
       if (res.type !== 'error') return;
       expect(res.code).toBe('TOKEN_UNKNOWN_NODE');
     } finally {
       process.env.WORKRAIL_DATA_DIR = prev;
+    }
+  });
+
+  it('returns VALIDATION_ERROR with a helpful message when rehydrate omits workspacePath', async () => {
+    const parsed = V2ContinueWorkflowInput.safeParse({
+      continueToken: 'ct_test_123',
+      intent: 'rehydrate',
+    });
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(JSON.stringify(parsed.error.issues)).toContain('workspacePath');
+      expect(JSON.stringify(parsed.error.issues)).toContain('Shared WorkRail servers cannot safely infer your current workspace');
     }
   });
 

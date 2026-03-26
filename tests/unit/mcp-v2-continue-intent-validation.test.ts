@@ -65,6 +65,7 @@ describe('V2ContinueWorkflowInput boundary validation', () => {
     const result = V2ContinueWorkflowInput.safeParse({
       continueToken: 'ct_abc123',
       intent: 'rehydrate',
+      workspacePath: '/Users/dev/project',
     });
     expect(result.success).toBe(true);
     if (result.success) {
@@ -193,6 +194,7 @@ describe('V2ContinueWorkflowInput boundary validation', () => {
     const result = V2ContinueWorkflowInput.safeParse({
       continueToken: 'st_ABCDEFGHIJKLMNOPQRSTUVWX',
       intent: 'rehydrate',
+      workspacePath: '/Users/dev/project',
     });
     expect(result.success).toBe(true);
     if (result.success) {

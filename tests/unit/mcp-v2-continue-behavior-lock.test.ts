@@ -125,7 +125,7 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null, v2 };
 
     // Start
-    const start = await handleV2StartWorkflow({ workflowId: 'behavior-lock-wf' } as any, ctx);
+    const start = await handleV2StartWorkflow({ workflowId: 'behavior-lock-wf', workspacePath: root } as any, ctx);
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
     const startR = unwrapResponse(start.data);
@@ -166,7 +166,7 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     const v2 = await mkV2Deps();
     const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null, v2 };
 
-    const start = await handleV2StartWorkflow({ workflowId: 'behavior-lock-wf' } as any, ctx);
+    const start = await handleV2StartWorkflow({ workflowId: 'behavior-lock-wf', workspacePath: root } as any, ctx);
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
     const startR = unwrapResponse(start.data);
@@ -202,7 +202,7 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     const v2 = await mkV2Deps();
     const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null, v2 };
 
-    const start = await handleV2StartWorkflow({ workflowId: 'behavior-lock-wf' } as any, ctx);
+    const start = await handleV2StartWorkflow({ workflowId: 'behavior-lock-wf', workspacePath: root } as any, ctx);
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
     const startR = unwrapResponse(start.data);
@@ -237,7 +237,7 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     const v2 = await mkV2Deps();
     const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null, v2 };
 
-    const start = await handleV2StartWorkflow({ workflowId: 'behavior-lock-wf' } as any, ctx);
+    const start = await handleV2StartWorkflow({ workflowId: 'behavior-lock-wf', workspacePath: root } as any, ctx);
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
     const startR = unwrapResponse(start.data);
@@ -248,7 +248,7 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     if (adv1.type !== 'success') return;
 
     // Rehydrate root to get fresh ackToken
-    const rehydrate = await handleV2ContinueWorkflow({ continueToken: startR.continueToken, intent: 'rehydrate' } as any, ctx);
+    const rehydrate = await handleV2ContinueWorkflow({ continueToken: startR.continueToken, intent: 'rehydrate' , workspacePath: root } as any, ctx);
     expect(rehydrate.type).toBe('success');
     if (rehydrate.type !== 'success') return;
     const rehydrateR = unwrapResponse(rehydrate.data);
@@ -304,7 +304,7 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
       workflowHashRef: String(wfRef),
     });
 
-    const res = await handleV2ContinueWorkflow({ continueToken: token , intent: 'rehydrate' } as any, ctx);
+    const res = await handleV2ContinueWorkflow({ continueToken: token , intent: 'rehydrate' , workspacePath: root } as any, ctx);
     expect(res.type).toBe('error');
     if (res.type !== 'error') return;
     expect(res.code).toBe('TOKEN_UNKNOWN_NODE');

@@ -113,7 +113,7 @@ describe('MCP contract: v2 start_workflow / continue_workflow (Slice 3)', () => 
   it('start -> rehydrate -> ack replay is deterministic and idempotent', async () => {
     const ctx = await createV2Context();
 
-    const start = await handleV2StartWorkflow({ workflowId: 'v2-exec-contract' } as any, ctx);
+    const start = await handleV2StartWorkflow({ workflowId: 'v2-exec-contract' , workspacePath: root , workspacePath: root } as any, ctx);
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
 
@@ -127,13 +127,13 @@ describe('MCP contract: v2 start_workflow / continue_workflow (Slice 3)', () => 
     expect(start.data.pending?.stepId).toBe('triage');
     expect(start.data.isComplete).toBe(false);
 
-    const rehydrate1 = await handleV2ContinueWorkflow({ continueToken: start.data.continueToken, intent: 'rehydrate' } as any, ctx);
+    const rehydrate1 = await handleV2ContinueWorkflow({ continueToken: start.data.continueToken, intent: 'rehydrate' , workspacePath: root } as any, ctx);
     expect(rehydrate1.type).toBe('success');
     if (rehydrate1.type !== 'success') return;
     expect(rehydrate1.data.kind).toBe('ok');
     expect(rehydrate1.data.pending?.stepId).toBe('triage');
 
-    const rehydrate2 = await handleV2ContinueWorkflow({ continueToken: start.data.continueToken, intent: 'rehydrate' } as any, ctx);
+    const rehydrate2 = await handleV2ContinueWorkflow({ continueToken: start.data.continueToken, intent: 'rehydrate' , workspacePath: root } as any, ctx);
     expect(rehydrate2.type).toBe('success');
     if (rehydrate2.type !== 'success') return;
     // Rehydrate is side-effect-free and deterministic in content, but mints fresh continueToken each call (new attemptId).

@@ -101,7 +101,7 @@ describe('v2 execution: SESSION_NOT_HEALTHY error response', () => {
       const ctx = await mkCtxWithWorkflow(workflowId);
 
       // Create a healthy session initially
-      const started = await handleV2StartWorkflow({ workflowId } as any, ctx);
+      const started = await handleV2StartWorkflow({ workflowId , workspacePath: root } as any, ctx);
       expect(started.type).toBe('success');
       if (started.type !== 'success') return;
 
@@ -120,7 +120,7 @@ describe('v2 execution: SESSION_NOT_HEALTHY error response', () => {
       await fd.close();
 
       // Try to load the session - should fail with SESSION_NOT_HEALTHY
-      const result = await handleV2ContinueWorkflow({ continueToken, intent: 'rehydrate' } as any, ctx);
+      const result = await handleV2ContinueWorkflow({ continueToken, intent: 'rehydrate' , workspacePath: root } as any, ctx);
 
       // Assert: error response
       expect(result.type).toBe('error');
@@ -170,7 +170,7 @@ describe('v2 execution: SESSION_NOT_HEALTHY error response', () => {
       const ctx = await mkCtxWithWorkflow(workflowId);
 
       // Create and corrupt session
-      const started = await handleV2StartWorkflow({ workflowId } as any, ctx);
+      const started = await handleV2StartWorkflow({ workflowId , workspacePath: root } as any, ctx);
       expect(started.type).toBe('success');
       if (started.type !== 'success') return;
 
@@ -187,7 +187,7 @@ describe('v2 execution: SESSION_NOT_HEALTHY error response', () => {
       await fd.close();
 
       // Get error
-      const result = await handleV2ContinueWorkflow({ continueToken, intent: 'rehydrate' } as any, ctx);
+      const result = await handleV2ContinueWorkflow({ continueToken, intent: 'rehydrate' , workspacePath: root } as any, ctx);
       expect(result.type).toBe('error');
       if (result.type !== 'error') return;
 

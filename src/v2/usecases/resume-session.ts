@@ -22,7 +22,7 @@ export interface ResumeSessionResult {
  * Resume session use case (thin orchestrator).
  *
  * 1. Load healthy session summaries from the provider
- * 2. Rank them using the pure 5-tier algorithm
+ * 2. Rank them using the pure tiered resume algorithm
  * 3. Return bounded candidate list AND the pre-cap total
  *
  * The orchestrator is thin because the provider and ranking are separate concerns.
