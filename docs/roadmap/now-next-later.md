@@ -7,6 +7,7 @@ This is the lightweight cross-cutting roadmap view for WorkRail.
 - ~~Complete v2 sign-off and cleanup~~ (done -- v2 is default-on; stale docs cleaned up)
 - ~~Expand lifecycle validation coverage to a realistic target~~ (done -- auto-walk smoke test covers all bundled workflows)
 - ~~Finish prompt vs supplement boundary alignment across runtime, docs, and planning~~ (done -- boundary is documented consistently across authoring locks, execution contract, and planning docs)
+- Modernize `workflow-for-workflows.v2.json` so one canonical authoring workflow supports both creating and modernizing workflows (active -- issue `#151`)
 
 ## Next
 
@@ -17,5 +18,6 @@ This is the lightweight cross-cutting roadmap view for WorkRail.
 
 ## Later
 
+- Dashboard artifacts: replace file-based docs with session-scoped structured outputs rendered in the console (design exists in `workflow-execution-contract.md`, blocked on console UI)
 - Platform evolution: discovery, sharing, portable references, MCP resources/prompts, agent-driven setup (see `docs/plans/workrail-platform-vision.md`)
 - Multi-tenancy and running-workflow upgrades
