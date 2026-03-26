@@ -27,7 +27,7 @@
 - Session observations: `git_branch: "main"`, `git_head_sha: "b419857..."` (workrail's main)
 - E2: Agent searches for session in Firebender workspace A (zillow repo)
 - `resume_session`: Filters by git context → no match (workrail main ≠ zillow branch)
-- Result: ❌ Session not found despite being in the same client workspace
+- Result: Session not found despite being in the same client workspace
 
 **Impact**: Cross-chat resumption is broken for multi-workspace users.
 
@@ -263,7 +263,7 @@ for this call), falls back to server CWD for clients that don't support roots/li
 
 ### Status
 
-✅ **Implemented** (2026-02-18). Core implementation shipped; integration + unit tests for resolver remain pending.
+**Implemented** (2026-02-18). Core implementation shipped; integration + unit tests for resolver remain pending.
 
 ---
 
@@ -341,9 +341,9 @@ if (progressToken) {
    exclude `blocked_attempt` and `checkpoint` nodes, which are in the same DAG post-ADR 008.
 
 **Philosophy**:
-- ✅ Pure projection (DAG → progress count)
-- ✅ Side effect at edge (notification send)
-- ✅ Opt-in (only if client provides progressToken)
+- Pure projection (DAG -> progress count)
+- Side effect at edge (notification send)
+- Opt-in (only if client provides progressToken)
 
 ---
 
@@ -431,7 +431,7 @@ Structured server logs sent to clients:
 - Keyring initialization failures
 - Feature flag changes
 
-**Philosophy**: ✅ Errors as data, observability at edges
+**Philosophy**: Errors as data, observability at edges
 
 ---
 
@@ -439,7 +439,7 @@ Structured server logs sent to clients:
 
 ### Problem
 
-Feature flags control which tools are available (`WORKRAIL_ENABLE_V2_TOOLS`). Changing a flag requires agent reconnect to see new tools.
+Feature flags control which tools are available. Changing a flag requires agent reconnect to see new tools. (Note: `WORKRAIL_ENABLE_V2_TOOLS` has been removed -- v2 is default-on. This priority applies to any future feature flags.)
 
 ### Solution: `notifications/tools/list_changed`
 
@@ -494,12 +494,12 @@ Long workflows block the agent's tool call. A 50-step workflow might take 10+ mi
 
 | Enhancement | Priority | Status | Blocks | Philosophy Aligned |
 |-------------|----------|--------|--------|-------------------|
-| MCP Roots Protocol | P1 (bug fix) | ✅ Implemented (2026-02-18) | Cross-workspace resume | ✅ Pure functions, immutable |
-| Progress Notifications | P2 | 🔲 Planned (3 open design issues) | Agent UX for long workflows | ✅ Side effects at edges |
-| Resource Update Notifications | P3 | ⏸ Deferred (no UI) | Console auto-refresh | ✅ Event-driven |
-| Logging Notifications | P4 | ⏸ Deferred | Operator visibility | ✅ Errors as data |
-| Tool List Change Notifications | P5 | ⏸ Deferred | Runtime flag changes | ⚠️ Requires mutable flags |
-| Async Workflows via Tasks | P6 | ⏸ Deferred (YAGNI) | 10min+ workflows | ⚠️ Requires background threads |
+| MCP Roots Protocol | P1 (bug fix) | Implemented (2026-02-18) | Cross-workspace resume | Yes -- pure functions, immutable |
+| Progress Notifications | P2 | Planned (3 open design issues) | Agent UX for long workflows | Yes -- side effects at edges |
+| Resource Update Notifications | P3 | Deferred (no UI) | Console auto-refresh | Yes -- event-driven |
+| Logging Notifications | P4 | Deferred | Operator visibility | Yes -- errors as data |
+| Tool List Change Notifications | P5 | Deferred | Runtime flag changes | Partial -- requires mutable flags |
+| Async Workflows via Tasks | P6 | Deferred (YAGNI) | 10min+ workflows | Partial -- requires background threads |
 
 ---
 
@@ -509,20 +509,20 @@ From the "unfleshed v2 ideas" inventory:
 
 ### Already Addressed This Session
 
-- ✅ **MCP Roots Protocol** — Per-request workspace anchor resolution; `RootsReader`/`RootsWriter` capability split; `fileURLToPath` URI handling; `resolvedRootUris` snapshot at CallTool boundary (2026-02-18)
-- ✅ **Workflow migration** — All while-loops migrated to `wr.contracts.loop_control` (PR #69)
-- ✅ **ADR 008 completion** — Terminal block path + projection query (this session)
-- ✅ **Deprecated path removal** — `advance_recorded.outcome.kind='blocked'` removed from builder (this session, PR #70)
-- ✅ **SessionManager Result refactoring** — All methods return `Result`, no throws (this session, PR #70)
-- ✅ **V2ToolContext + requireV2 guard** — Eliminated `ctx.v2!` assertions (this session, PR #70)
-- ✅ **Branded contractRef** — `ArtifactContractRef` type instead of `string` (this session, PR #70)
-- ✅ **Compiler contract validation** — Compile-time check for unknown contract refs (this session, PR #70)
-- ✅ **Manual test plan** — 23 scenarios for slices 4b, 4c, ADR 008, loop artifacts (this session)
-- ✅ **Optimistic pre-lock dedup** — Checkpoint replay skips gate (this session, PR #73)
+- **MCP Roots Protocol** -- Per-request workspace anchor resolution; `RootsReader`/`RootsWriter` capability split; `fileURLToPath` URI handling; `resolvedRootUris` snapshot at CallTool boundary (2026-02-18)
+- **Workflow migration** -- All while-loops migrated to `wr.contracts.loop_control` (PR #69)
+- **ADR 008 completion** -- Terminal block path + projection query (this session)
+- **Deprecated path removal** -- `advance_recorded.outcome.kind='blocked'` removed from builder (this session, PR #70)
+- **SessionManager Result refactoring** -- All methods return `Result`, no throws (this session, PR #70)
+- **V2ToolContext + requireV2 guard** -- Eliminated `ctx.v2!` assertions (this session, PR #70)
+- **Branded contractRef** -- `ArtifactContractRef` type instead of `string` (this session, PR #70)
+- **Compiler contract validation** -- Compile-time check for unknown contract refs (this session, PR #70)
+- **Manual test plan** -- 23 scenarios for slices 4b, 4c, ADR 008, loop artifacts (this session)
+- **Optimistic pre-lock dedup** -- Checkpoint replay skips gate (this session, PR #73)
 
 ### Still Open
 
-1. **Unflag v2 tools** — Remove `WORKRAIL_ENABLE_V2_TOOLS` gate (waiting on more testing)
+1. ~~**Unflag v2 tools**~~ (done -- v2 is default-on, feature flag gate removed)
 2. **Console/Dashboard UI** — Zero UI exists, substrate complete
 3. **Agent Cascade Protocol** — Cross-IDE delegation model, design complete
 4. **Enforceable verification contracts** — `verify` block is instructional-only
@@ -534,7 +534,7 @@ From the "unfleshed v2 ideas" inventory:
 
 ## Decision: What to Do Next
 
-### ✅ Done: MCP Roots Protocol
+### Done: MCP Roots Protocol
 
 Implemented 2026-02-18. Per-request workspace anchor resolution, correct `listRoots()` flow,
 `fileURLToPath` URI handling, `resolvedRootUris` snapshot at CallTool boundary.
@@ -544,11 +544,9 @@ Implemented 2026-02-18. Per-request workspace anchor resolution, correct `listRo
 Run all 23 scenarios from `docs/testing/v2-slices-4b-4c-adr008-loops-manual-test-plan.md` with
 the roots fix in place. Specifically verify E1+E2 (cross-workspace resume) now work correctly.
 
-### Then: Unflag v2 tools (Production Readiness)
+### Done: Unflag v2 tools (Production Readiness)
 
-- **Impact**: Makes v2 default for all users
-- **Effort**: 1 line change + documentation
-- **Risk**: Medium (needs manual test sign-off first)
+V2 is default-on. Feature flag gate removed.
 
 ### Later: Progress Notifications (UX Improvement)
 
@@ -561,9 +559,9 @@ the roots fix in place. Specifically verify E1+E2 (cross-workspace resume) now w
 
 ### Recommended Sequence
 
-1. ~~**MCP Roots**~~ ✅ Done
+1. ~~**MCP Roots**~~ (done)
 2. **Complete manual test plan validation** (run all 23 scenarios with roots fix)
-3. **Unflag v2 tools** (make default)
+3. ~~**Unflag v2 tools**~~ (done)
 4. **Resolve P2 design issues** then implement progress notifications
 
 ---

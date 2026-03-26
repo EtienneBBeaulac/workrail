@@ -54,4 +54,5 @@ temp/
 .worktrees/
 
 # Memory MCP artifacts
-.memory/ 
+.memory/
+undefined/ 

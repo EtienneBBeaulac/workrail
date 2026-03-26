@@ -6,17 +6,16 @@ These are the **groomed near-term tickets**. They are the clearest current candi
 
 ### Problem
 
-WorkRail v2 is stable enough to be default-on, but readiness and rollout cleanup are still split across stale docs and incomplete sign-off.
+WorkRail v2 is default-on and the feature flag gate has been removed, but stale docs and remaining cleanup work have not been fully closed out.
 
 ### Goal
 
-Finish the remaining validation/sign-off work and decide what rollout cleanup should happen now versus later.
+Finish the remaining doc cleanup and confirm all validation scenarios are recorded.
 
 ### Acceptance criteria
 
+- Stale rollout/status docs no longer reference `WORKRAIL_ENABLE_V2_TOOLS` or pretend older rollout assumptions are current truth
 - The remaining relevant manual v2 scenarios are reviewed and their outcome is recorded
-- The decision on v2 rollout cleanup is explicit
-- Stale rollout/status docs no longer pretend older rollout assumptions are current truth
 
 ### Non-goals
 
@@ -55,29 +54,13 @@ Define a realistic lifecycle coverage target and expand tests toward it.
 - `docs/plans/workflow-validation-design.md`
 - `docs/roadmap/open-work-inventory.md`
 
-## Ticket 3: Finish prompt vs supplement boundary alignment
+## ~~Ticket 3: Finish prompt vs supplement boundary alignment~~ (done)
 
-### Problem
+All acceptance criteria met -- the boundary is documented consistently:
 
-The runtime now supports clean response formatting and supplements, but the product/documentation boundary between authored prompts and delivery-owned guidance is still being normalized.
-
-### Goal
-
-Make the boundary explicit enough that future tooling and workflow authoring do not drift.
-
-### Acceptance criteria
-
-- Runtime behavior, docs, and planning docs describe the same ownership model
-- Response supplements are clearly documented as runtime-owned today
-- The path toward authorable supplements is treated as a future typed feature, not implied current behavior
-
-### Non-goals
-
-- Making supplements authorable immediately
-- Adding new workflow schema without a dedicated design pass
-
-### Related files/docs
-
-- `src/mcp/response-supplements.ts`
-- `docs/authoring-v2.md`
-- `spec/authoring-spec.json`
+- `authoring.md` lock rules enforce separation (keep-boundary-owned-guidance-out-of-step-prompts, one-time-supplements-are-policy-not-durable-state)
+- `authoring-v2.md` has clear "when to use" / "when not to use" guidance with how-to instructions
+- `workflow-execution-contract.md` describes the 3-tier content structure (prompt, references, supplements)
+- `spec/authoring-spec.json` mirrors the lock rules
+- `agentic-orchestration-roadmap.md` treats authorable supplements as a future backlog item, not current behavior
+- Runtime code (`response-supplements.ts`, `step-content-envelope.ts`) is clean and matches the docs

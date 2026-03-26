@@ -14,26 +14,20 @@ For explicit status on the major older planning docs themselves, see `docs/roadm
 
 ## Active partials
 
-### 1. Clean response formatting and supplement hardening
+### ~~1. Clean response formatting and supplement hardening~~ (done)
 
-- **Status**: partial
-- **Why it is here**: the clean format and supplement system now exist, but the broader product boundary is still being clarified
-- **Still open**:
-  - finish clarifying the boundary between workflow-authored prompts and response-boundary supplements
-  - align runtime, docs, tooling, and authoring guidance around that boundary
-  - decide how far this remains runtime-owned versus becoming authorable later
+- **Status**: complete
+- **What was done**: the boundary between workflow-authored prompts and runtime-owned response supplements is documented consistently across authoring locks (`authoring.md`), the execution contract (`workflow-execution-contract.md`), and the authoring guide (`authoring-v2.md`). Supplements are runtime-owned today; authorable supplements are tracked as a future typed feature in the Next bucket.
 - **Source docs**:
-  - `docs/roadmap/now-next-later.md`
-  - `docs/plans/agentic-orchestration-roadmap.md`
+  - `docs/authoring.md` (lock rules: `keep-boundary-owned-guidance-out-of-step-prompts`, `one-time-supplements-are-policy-not-durable-state`)
+  - `docs/authoring-v2.md` (response supplements section)
+  - `docs/reference/workflow-execution-contract.md` (response content structure)
+  - `docs/plans/agentic-orchestration-roadmap.md` (authorable supplements as future backlog)
 
-### 2. V2 production readiness and sign-off
+### ~~2. V2 production readiness and sign-off~~ (done)
 
-- **Status**: partial
-- **Why it is here**: v2 is stable enough to be default-on, but the follow-up plan still has unfinished readiness work
-- **Still open**:
-  - complete manual validation/sign-off for the relevant v2 scenarios
-  - decide whether the remaining v2 feature-flag cleanup should happen now or later
-  - normalize stale docs that still describe older rollout assumptions
+- **Status**: complete
+- **What was done**: v2 is default-on (`v2Tools` flag defaults to `true` since 0.9.0). Stale docs referencing `WORKRAIL_ENABLE_V2_TOOLS` as a prerequisite have been updated with historical notes. Planning/roadmap docs no longer assume v2 needs unflagging.
 - **Source docs**:
   - `docs/plans/workflow-v2-roadmap.md`
   - `docs/plans/workflow-v2-design.md`
@@ -154,14 +148,11 @@ For explicit status on the major older planning docs themselves, see `docs/roadm
 - **Status**: unimplemented
 - **What is missing**:
   - tenant/workspace isolation model beyond current local/workspace scoping
-- **Source doc**: `docs/implementation/03-development-phases.md`
-
 ### Running-workflow upgrades
 
 - **Status**: unimplemented
 - **What is missing**:
   - workflow migration story for running sessions across schema/definition changes
-- **Source doc**: `docs/implementation/03-development-phases.md`
 
 ## Ideas / parked directions
 
@@ -174,7 +165,6 @@ For explicit status on the major older planning docs themselves, see `docs/roadm
   - the nearer-term sharing problems (team setup, cross-repo discovery, portable references) are now addressed in the platform vision
   - a true marketplace remains a later-stage concern
 - **Source docs**:
-  - `docs/implementation/03-development-phases.md`
   - `docs/features/external-workflow-repositories.md`
   - `docs/plans/workrail-platform-vision.md`
 
@@ -184,6 +174,16 @@ For explicit status on the major older planning docs themselves, see `docs/roadm
 - **Why parked**:
   - mentioned as future adapter direction, but not currently close to delivery
 - **Source doc**: `docs/plans/agentic-orchestration-roadmap.md`
+
+### Standup Status Generator workflow
+
+- **Status**: idea
+- **Summary**: a workflow that generates daily standup status by aggregating activity across the user's tools (git history, GitLab MRs, Jira tickets, etc.) since the last standup date
+- **What would need design**:
+  - tool-agnostic integration discovery (detect available MCP tools at runtime)
+  - lightweight persistence for last-standup timestamp
+  - output categorization (did / doing / blockers) and configurable format
+- **Source doc**: `docs/ideas/backlog.md`
 
 ### Derived / overlay workflows for bundled workflow specialization
 
@@ -206,16 +206,16 @@ For explicit status on the major older planning docs themselves, see `docs/roadm
 
 ### Next to groom into tickets
 
-1. **Complete v2 sign-off and cleanup**
-2. **Expand lifecycle validation coverage**
-3. **Finish prompt/supplement boundary alignment**
+1. **Composition and middleware engine**
+2. **Progress notifications**
+3. **Authorable response supplements** (design first, not direct implementation)
 
-### After that
+### Recently completed
 
-1. ~~**Content coherence and linked references**~~ (done — project-attached refs can be groomed separately)
-2. **Composition and middleware engine**
-3. **Progress notifications**
-4. **Authorable response supplements** (design first, not direct implementation)
+- ~~**Complete v2 sign-off and cleanup**~~ (done)
+- ~~**Expand lifecycle validation coverage**~~ (done -- auto-walk smoke test)
+- ~~**Finish prompt/supplement boundary alignment**~~ (done)
+- ~~**Content coherence and linked references**~~ (done)
 
 ### Keep later
 

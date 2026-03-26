@@ -414,7 +414,7 @@ Steps can include `validationCriteria` to validate agent output. This is a v1 fe
 
 When agents see validation requirements (via prompt enhancement, error messages, or guidance fields), they may optimize for **passing validation** rather than **doing quality work**. Prevent this with evidence-based validation.
 
-#### Anti-Pattern: Flag-Only Validation ❌
+#### Anti-Pattern: Flag-Only Validation
 
 ```json
 {
@@ -428,7 +428,7 @@ When agents see validation requirements (via prompt enhancement, error messages,
 
 **Problem**: Agent writes `analysisComplete = true` without analysis. Passes validation, produces no value.
 
-#### Good Pattern: Evidence-Based Validation ✅
+#### Good Pattern: Evidence-Based Validation
 
 ```json
 {
@@ -448,16 +448,16 @@ When agents see validation requirements (via prompt enhancement, error messages,
 #### Design Guidelines
 
 **DO**:
-- ✅ Check for work products ("Finding N:", "file:line", "rationale:")
-- ✅ Require patterns that indicate substance (not just keywords)
-- ✅ Use multiple independent criteria (cross-validation)
-- ✅ Set reasonable length bounds (ensures substance, prevents spam)
+- Check for work products ("Finding N:", "file:line", "rationale:")
+- Require patterns that indicate substance (not just keywords)
+- Use multiple independent criteria (cross-validation)
+- Set reasonable length bounds (ensures substance, prevents spam)
 
 **DON'T**:
-- ❌ Validate single boolean flags (`complete = true`, `done = yes`)
-- ❌ Check for magic phrases alone (`must contain 'finished'`)
-- ❌ Make validation trivially satisfiable with minimal text
-- ❌ Rely on agent honesty without verification
+- Validate single boolean flags (`complete = true`, `done = yes`)
+- Check for magic phrases alone (`must contain 'finished'`)
+- Make validation trivially satisfiable with minimal text
+- Rely on agent honesty without verification
 
 ### Migration Note
 

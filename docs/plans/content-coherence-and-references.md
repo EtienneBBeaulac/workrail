@@ -102,25 +102,25 @@ The Zod schema boundary (`V2StartWorkflowOutputSchema.parse`) only knows about `
 
 > All slices 1–6 are implemented. Slice 5 (project-attached references) was deferred as future work.
 
-### Slice 1: StepContentEnvelope type and render envelope extension ✅
+### Slice 1: StepContentEnvelope type and render envelope extension (done)
 
 Define the `StepContentEnvelope` type. Extend `V2ExecutionRenderEnvelope` to carry it. Have the handler assemble it from renderer output + handler-level knowledge. Formatter consumes it. **No behavioral change**: the formatter produces identical output, sourced from a typed representation instead of ad-hoc shape detection.
 
 **Key files**: `render-envelope.ts`, `prompt-renderer.ts`, `v2-response-formatter.ts`, `v2-execution/start.ts`, `v2-execution/continue-rehydrate.ts`, `v2-execution/continue-advance.ts`
 
-### Slice 2: Reference declarations ✅
+### Slice 2: Reference declarations (done)
 
 Add `references` as an optional array on `WorkflowDefinition` and `workflow.schema.json`. Structural validation in the validation engine (unique IDs, non-empty paths). Compiler includes declarations in workflow hash. Surfaced in `inspect_workflow` output.
 
 **Key files**: `workflow-definition.ts`, `workflow.schema.json`, `validation-engine.ts`, `v2-workflow.ts` (inspect handler)
 
-### Slice 3: Reference resolution at start-time ✅
+### Slice 3: Reference resolution at start-time (done)
 
 I/O phase at `start_workflow` validates reference paths against the workspace, stores resolved references as observation events. Handler populates the envelope's reference section.
 
 **Key files**: `v2-execution/start.ts`, `v2-workspace-resolution.ts`, observation event schema
 
-### Slice 4: Reference delivery ✅
+### Slice 4: Reference delivery (done)
 
 Formatter renders resolved references as a dedicated MCP content item on `start` (full set) and `rehydrate` (compact reminder). Separate from the authored prompt and from supplements.
 
@@ -132,7 +132,7 @@ Formatter renders resolved references as a dedicated MCP content item on `start`
 
 **Key files**: new `reference-registry.ts`, `v2-execution/continue-rehydrate.ts` (drift detection), `v2-response-formatter.ts` (drift warnings)
 
-### Slice 6: metaGuidance clarification ✅
+### Slice 6: metaGuidance clarification (done)
 
 Either make metaGuidance delivery explicit through the envelope (a supplement or dedicated content section with clear lifecycle semantics) or deprecate it with a migration path to references + prompt composition.
 

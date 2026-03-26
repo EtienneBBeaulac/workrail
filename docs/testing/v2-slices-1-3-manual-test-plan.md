@@ -1,5 +1,7 @@
 # WorkRail v2 Slices 1-3 Manual Test Plan (Agent-Executable)
 
+> **Historical note**: This test plan was written when v2 tools required `WORKRAIL_ENABLE_V2_TOOLS=true`. V2 is now default-on (the flag defaults to `true` since 0.9.0). Prerequisites referencing that flag can be ignored.
+
 **Purpose**: Systematically verify v2 Slices 1-3 (read-only tools, append-only substrate, token orchestration) work correctly with existing v1 workflows.
 
 **Test Strategy**: Each test scenario runs in a **separate chat** to prevent information leakage and ensure clean agent state.

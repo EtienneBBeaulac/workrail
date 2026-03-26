@@ -21,8 +21,8 @@ This doc records the status of the **major older planning initiatives and planni
 | `docs/plans/native-context-management-epic.md` | **dropped** | We are not planning to pursue native context management; keeping it in active planning would be misleading. | Do not treat it as roadmap work. |
 | `docs/plans/v2-followup-enhancements.md` | **partial** | Some items are shipped, but progress notifications, stronger verification contracts, and other follow-ups remain open. | Keep as a source initiative doc, but track active work through tickets and roadmap docs. |
 | `docs/generated/v2-lock-closure-plan.md` | **done** | This generated closure plan appears complete. | Keep as completion evidence only. |
-| `docs/implementation/03-development-phases.md` | **historical** | Old phase model with mixed stale assumptions; only a few ideas still matter. | Do not use for current planning. |
-| `docs/implementation/11-implementation-planning-guide.md` | **historical** | Spec-era process guidance, not a live implementation tracker. | Do not use for current planning. |
+| ~~`docs/implementation/03-development-phases.md`~~ | **deleted** | Was a superseded stub. Old phase model ideas now tracked in `open-work-inventory.md`. | Removed. |
+| ~~`docs/implementation/11-implementation-planning-guide.md`~~ | **deleted** | Was a superseded stub. | Removed. |
 | `docs/plans/workflow-validation-roadmap.md` | **partial** | Canonical roadmap/status doc for the validation initiative. | Prefer this over the old god-tier planning cluster. |
 | `docs/plans/workflow-validation-design.md` | **partial** | Canonical durable design doc for the validation initiative. | Prefer this over the old god-tier design cluster. |
 | `docs/plans/workflow-v2-roadmap.md` | **partial** | Canonical roadmap/status doc for WorkRail v2. | Prefer this over older v2 one-pager/resumption docs. |
@@ -53,7 +53,7 @@ The older multi-doc validation pack has been replaced by a simpler canonical pai
 
 | Idea source | Status | Notes |
 | --- | --- | --- |
-| Marketplace / workflow sharing from `03-development-phases.md` | **parked** | Should live as an idea until there is clear product pull. |
+| Marketplace / workflow sharing | **parked** | Should live as an idea until there is clear product pull. See `docs/ideas/backlog.md`. |
 | Cloud adapter direction from `agentic-orchestration-roadmap.md` | **parked** | Keep visible as a future adapter concept, not current roadmap work. |
 
 ## Workflow v2 initiative
