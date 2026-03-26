@@ -1,5 +1,7 @@
 # WorkRail v2 Slices 4b, 4c + ADR 008 + Loop Artifacts Manual Test Plan
 
+> **Historical note**: This test plan was written when v2 tools required `WORKRAIL_ENABLE_V2_TOOLS=true`. V2 is now default-on (the flag defaults to `true` since 0.9.0). Prerequisites referencing that flag can be ignored.
+
 **Purpose**: Systematically verify Slice 4b (export/import bundles), Slice 4c-i (checkpoint_workflow), Slice 4c-ii (resume_session), ADR 008 (blocked node retry), and loop control artifacts work correctly.
 
 **Test Strategy**: Each scenario runs in a **separate chat** to prevent information leakage and ensure clean agent state. The human operator reviews all tool call responses directly in the chat -- agents do NOT need to record or paste responses.

@@ -1,5 +1,7 @@
 # WorkRail v2 Slice 4a + Agent Guidance Manual Test Plan
 
+> **Historical note**: This test plan was written when v2 tools required `WORKRAIL_ENABLE_V2_TOOLS=true`. V2 is now default-on (the flag defaults to `true` since 0.9.0). Prerequisites referencing that flag can be ignored.
+
 **Purpose**: Validate Slice 4a semantics (autonomy modes, blocked/gaps, preferences, nextIntent) AND agent execution guidance improvements (improved descriptions, validation requirement injection).
 
 **Test Strategy**: Each scenario runs in a **separate chat** to prevent information leakage and ensure clean agent state.

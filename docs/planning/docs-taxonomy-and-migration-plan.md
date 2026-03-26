@@ -107,13 +107,9 @@ Do **not** let `plans/` become a graveyard of old entrypoints.
 
 #### Recommended moves
 
-- `docs/architecture/agent-cascade-protocol.md`
-  - **Move to**: `docs/design/agent-cascade-protocol.md`
-  - **Why**: durable protocol/design material
+- ~~`docs/architecture/agent-cascade-protocol.md`~~ (done -- moved to `docs/design/`, stub deleted)
 
-- `docs/architecture/subagent-design-principles.md`
-  - **Move to**: `docs/design/subagent-design-principles.md`
-  - **Why**: durable design/principles doc
+- ~~`docs/architecture/subagent-design-principles.md`~~ (done -- moved to `docs/design/`, stub deleted)
 
 - `docs/architecture/refactor-audit.md`
   - **Likely outcome**: retire from the live taxonomy, not a canonical design doc
@@ -165,17 +161,12 @@ Do **not** let `plans/` become a graveyard of old entrypoints.
 
 #### Already retired / not live
 
-- `03-development-phases.md`
-- `11-implementation-planning-guide.md`
+- ~~`03-development-phases.md`~~ (deleted)
+- ~~`11-implementation-planning-guide.md`~~ (deleted)
 
 #### Recommendation
 
-Either:
-
-- keep `implementation/` as a smaller live guide bucket, or
-- later split it into `guides/` plus a smaller set of clearly retired docs
-
-Short-term, keeping it is acceptable once the dead docs stop competing.
+Keep `implementation/` as a smaller live guide bucket now that the dead docs have been removed.
 
 ### 4. `docs/features/` → split by actual doc type
 
@@ -221,12 +212,17 @@ Short-term, keeping it is acceptable once the dead docs stop competing.
 - `workflow-v2-design.md`
 - `prompt-fragments.md`
 
-#### Retire from the live surface
+#### Retired from the live surface (deleted)
 
-- old validation cluster entrypoints
-- old prompt fragments trio
-- old v2 one-pager/resumption docs
-- `BRANCH_STRATEGY.md`
+- old validation cluster entrypoints (7 stubs deleted)
+- old prompt fragments trio (3 stubs deleted)
+- old v2 one-pager/resumption docs (2 stubs deleted)
+- `BRANCH_STRATEGY.md` (deleted)
+- `START_HERE.md` (deleted)
+- `IMPLEMENTATION_STATUS.md` (deleted)
+
+#### Still in `plans/` but not live
+
 - `native-context-management-epic.md`
 
 #### Recommendation
