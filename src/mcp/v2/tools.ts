@@ -8,24 +8,25 @@ import {
 
 const workspacePathField = z.string()
   .refine((p) => p.startsWith('/'), 'workspacePath must be an absolute path (starting with /)')
-  .optional()
   .describe('Absolute path to your current workspace directory (e.g. the "Workspace:" value from your system parameters). Used to resolve project-scoped workflow variants against the correct workspace. If omitted, WorkRail uses MCP roots when available, then falls back to the server process directory.');
 
+const optionalWorkspacePathField = workspacePathField.optional();
+
 export const V2ListWorkflowsInput = z.object({
-  workspacePath: workspacePathField,
+  workspacePath: optionalWorkspacePathField,
 });
 export type V2ListWorkflowsInput = z.infer<typeof V2ListWorkflowsInput>;
 
 export const V2InspectWorkflowInput = z.object({
   workflowId: z.string().min(1).regex(/^[A-Za-z0-9_-]+$/, 'Workflow ID must contain only letters, numbers, hyphens, and underscores').describe('The workflow ID to inspect'),
   mode: z.enum(['metadata', 'preview']).default('preview').describe('Detail level: metadata (name and description only) or preview (full step-by-step breakdown, default)'),
-  workspacePath: workspacePathField,
+  workspacePath: optionalWorkspacePathField,
 });
 export type V2InspectWorkflowInput = z.infer<typeof V2InspectWorkflowInput>;
 
 export const V2StartWorkflowInput = z.object({
   workflowId: z.string().min(1).regex(/^[A-Za-z0-9_-]+$/, 'Workflow ID must contain only letters, numbers, hyphens, and underscores').describe('The workflow ID to start'),
-  workspacePath: workspacePathField.describe('Absolute path to your current workspace directory (e.g. the "Workspace:" value from your system parameters). Used to resolve the correct project-scoped workflow variant and to anchor this session to your workspace for future resume_session discovery. Pass this on every start_workflow call. If omitted, WorkRail uses MCP roots when available, then falls back to the server process directory.'),
+  workspacePath: workspacePathField.describe('Required. Absolute path to your current workspace directory (e.g. the "Workspace:" value from your system parameters). WorkRail uses this to resolve the correct project-scoped workflow variant and to anchor the session to the correct repo for future resume_session discovery. Shared MCP servers cannot infer this safely.'),
 });
 export type V2StartWorkflowInput = z.infer<typeof V2StartWorkflowInput>;
 
@@ -41,7 +42,7 @@ export type V2StartWorkflowInput = z.infer<typeof V2StartWorkflowInput>;
  * @canonical
  */
 export const V2ContinueWorkflowInputShape = z.object({
-  workspacePath: workspacePathField,
+  workspacePath: optionalWorkspacePathField,
   continueToken: z.string().min(1).describe(
     'The token for your next continue_workflow call. Two valid token kinds: ' +
     '(1) A continueToken (ct_...) from start_workflow or a previous continue_workflow — carries session identity AND advance authority. ' +
@@ -110,6 +111,14 @@ export const V2ContinueWorkflowInput = V2ContinueWorkflowInputShape
           'Rehydration is read-only state recovery — it does not accept output.',
       });
     }
+    if (data.intent === 'rehydrate' && data.workspacePath === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['workspacePath'],
+        message:
+          'workspacePath is required for rehydration. Shared WorkRail servers cannot safely infer your current workspace, so pass the absolute "Workspace:" path from your system parameters.',
+      });
+    }
   })
   .transform((data) => {
     const normalized = CONTINUE_WORKFLOW_PROTOCOL.aliasMap
@@ -146,10 +155,13 @@ export const V2ResumeSessionInput = z.object({
   gitHeadSha: z.string().regex(/^[0-9a-f]{40}$/).optional().describe(
     'Git HEAD SHA to match against session observations. Overrides auto-detected HEAD.'
   ),
-  workspacePath: z.string()
-    .refine((p) => p.startsWith('/'), 'workspacePath must be an absolute path (starting with /)')
-    .optional()
-    .describe('Absolute path to your current workspace directory (e.g. the "Workspace:" value from your system parameters). Used to resolve your git branch and HEAD SHA for workspace-aware session matching. Pass the same path used in the original start_workflow call. If omitted, WorkRail uses the server process directory which may not match your workspace.'),
+  workspacePath: workspacePathField.describe(
+    'Required. Absolute path to your current workspace directory (e.g. the "Workspace:" value from your system parameters). WorkRail uses this to identify the current repo and resume the correct session on shared MCP servers.'
+  ),
+  sameWorkspaceOnly: z.boolean().optional().describe(
+    'If true, only sessions from the same repo/workspace are considered when repo_root_hash is available. ' +
+    'Use this when the user clearly means "resume work from this repo only".'
+  ),
 }).strict();
 export type V2ResumeSessionInput = z.infer<typeof V2ResumeSessionInput>;
 

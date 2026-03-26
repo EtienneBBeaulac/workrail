@@ -109,7 +109,7 @@ describe('v2 fork detection (Phase 5)', () => {
       const ctx = await mkCtxWithWorkflow(workflowId, root);
 
       // Start workflow and advance once.
-      const start = await handleV2StartWorkflow({ workflowId } as any, ctx);
+      const start = await handleV2StartWorkflow({ workflowId , workspacePath: root } as any, ctx);
       expect(start.type).toBe('success');
       if (start.type !== 'success') return;
 
@@ -121,7 +121,7 @@ describe('v2 fork detection (Phase 5)', () => {
 
       // To simulate a rewind/fork, we need to call rehydrate on the ORIGINAL resumeToken to get a fresh ackToken.
       // (Reusing the same ackToken would be an idempotent replay, not a fork.)
-      const rehydrate = await handleV2ContinueWorkflow({ continueToken: unwrapResponse(start.data).continueToken, intent: 'rehydrate' } as any, ctx);
+      const rehydrate = await handleV2ContinueWorkflow({ continueToken: unwrapResponse(start.data).continueToken, intent: 'rehydrate' , workspacePath: root } as any, ctx);
       expect(rehydrate.type).toBe('success');
       if (rehydrate.type !== 'success') return;
 

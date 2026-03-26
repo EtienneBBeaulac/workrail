@@ -6,6 +6,7 @@ import * as fs from 'fs/promises';
 
 import { handleV2ContinueWorkflow, handleV2StartWorkflow } from '../../src/mcp/handlers/v2-execution.js';
 import type { ToolContext } from '../../src/mcp/types.js';
+import { V2StartWorkflowInput } from '../../src/mcp/v2/tools.js';
 import { unwrapResponse } from '../helpers/unwrap-response.js';
 import { EnvironmentFeatureFlagProvider } from '../../src/config/feature-flags.js';
 
@@ -235,13 +236,13 @@ describe('v2 start_workflow (Slice 3.5)', () => {
       const workflowId = 'test-workflow';
       const { ctx } = await mkCtxWithWorkflow(workflowId);
 
-      const start = await handleV2StartWorkflow({ workflowId } as any, ctx);
+      const start = await handleV2StartWorkflow({ workflowId, workspacePath: root } as any, ctx);
       expect(start.type).toBe('success');
       if (start.type !== 'success') return;
 
       const big = 'a'.repeat(262_200);
       const startResponse = unwrapResponse(start.data);
-      const res = await handleV2ContinueWorkflow({ continueToken: startResponse.continueToken, intent: 'rehydrate', context: { big } } as any, ctx);
+      const res = await handleV2ContinueWorkflow({ continueToken: startResponse.continueToken, intent: 'rehydrate', workspacePath: root, context: { big } } as any, ctx);
       expect(res.type).toBe('error');
       if (res.type !== 'error') return;
 
@@ -351,7 +352,7 @@ describe('v2 start_workflow (Slice 3.5)', () => {
       const workflowId = 'invalid-workflow';
       const ctx = await mkCtxWithInvalidWorkflow(workflowId);
 
-      const res = await handleV2StartWorkflow({ workflowId } as any, ctx);
+      const res = await handleV2StartWorkflow({ workflowId, workspacePath: root } as any, ctx);
 
       // Must fail before session creation — not later at continue_workflow
       expect(res.type).toBe('error');
@@ -376,7 +377,7 @@ describe('v2 start_workflow (Slice 3.5)', () => {
         const workflowId = 'test-workflow';
         const { ctx, aliasStore } = await mkCtxWithWorkflow(workflowId);
 
-      const res = await handleV2StartWorkflow({ workflowId } as any, ctx);
+      const res = await handleV2StartWorkflow({ workflowId, workspacePath: root } as any, ctx);
       expect(res.type).toBe('success');
       if (res.type === 'error') {
         console.error('ERROR:', res.code, res.message);
@@ -432,6 +433,15 @@ describe('v2 start_workflow (Slice 3.5)', () => {
       expect(snap).not.toBeNull();
     } finally {
       process.env.WORKRAIL_DATA_DIR = prev;
+    }
+  });
+
+  it('returns VALIDATION_ERROR with a helpful message when workspacePath is missing', async () => {
+    const parsed = V2StartWorkflowInput.safeParse({ workflowId: 'test-workflow' });
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(JSON.stringify(parsed.error.issues)).toContain('workspacePath');
+      expect(JSON.stringify(parsed.error.issues)).toContain('Required');
     }
   });
 });

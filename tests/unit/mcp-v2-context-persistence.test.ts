@@ -112,7 +112,7 @@ describe('v2 context persistence (S8)', () => {
       const workflowId = 'bug-investigation';
       const ctx = await mkCtxWithWorkflow(workflowId);
 
-      const result = await handleV2StartWorkflow({ workflowId } as any, ctx);
+      const result = await handleV2StartWorkflow({ workflowId , workspacePath: root } as any, ctx);
 
       expect(result.type).toBe('success');
       if (result.type !== 'success') return;

@@ -19,9 +19,13 @@ function mkCandidate(overrides: Partial<{
   sessionId: string;
   runId: string;
   workflowId: string;
+  sessionTitle: string | null;
+  gitBranch: string | null;
   resumeToken: string;
   snippet: string;
   whyMatched: string[];
+  confidence: 'strong' | 'medium' | 'weak';
+  matchExplanation: string;
   pendingStepId: string | null;
   isComplete: boolean;
   lastModifiedMs: number | null;
@@ -31,9 +35,13 @@ function mkCandidate(overrides: Partial<{
     sessionId: overrides.sessionId ?? 'sess_test1',
     runId: overrides.runId ?? 'run_test1',
     workflowId: overrides.workflowId ?? 'coding-task-workflow-agentic',
+    sessionTitle: overrides.sessionTitle ?? null,
+    gitBranch: overrides.gitBranch ?? null,
     resumeToken: token,
     snippet: overrides.snippet ?? 'Working on MR ownership feature',
     whyMatched: overrides.whyMatched ?? ['recency_fallback'],
+    confidence: overrides.confidence ?? 'weak',
+    matchExplanation: overrides.matchExplanation ?? 'Recent session with no stronger explicit match',
     pendingStepId: overrides.pendingStepId ?? null,
     isComplete: overrides.isComplete ?? false,
     lastModifiedMs: overrides.lastModifiedMs ?? null,
@@ -189,13 +197,17 @@ describe('formatV2ResumeResponse - strong match', () => {
 // ---------------------------------------------------------------------------
 
 describe('formatV2ResumeResponse - candidate details', () => {
-  it('includes session ID, run ID, workflow ID, and match reason', () => {
+  it('includes session ID, run ID, workflow ID, confidence, and match reason', () => {
     const data = {
       candidates: [mkCandidate({
         sessionId: 'sess_abc',
         runId: 'run_xyz',
         workflowId: 'my-workflow',
-        whyMatched: ['matched_head_sha'],
+        sessionTitle: 'Task dev for MR ownership',
+        gitBranch: 'feature/mr-ownership',
+        whyMatched: ['matched_head_sha', 'matched_repo_root'],
+        confidence: 'medium',
+        matchExplanation: 'Matched current git commit; same workspace',
       })],
       totalEligible: 1,
     };
@@ -205,7 +217,12 @@ describe('formatV2ResumeResponse - candidate details', () => {
     expect(text).toContain('sess_abc');
     expect(text).toContain('run_xyz');
     expect(text).toContain('my-workflow');
+    expect(text).toContain('Task dev for MR ownership');
+    expect(text).toContain('feature/mr-ownership');
     expect(text).toContain('Same git commit');
+    expect(text).toContain('Same workspace/repository');
+    expect(text).toContain('Confidence');
+    expect(text).toContain('Matched current git commit; same workspace');
   });
 
   it('includes snippet preview', () => {
@@ -251,6 +268,8 @@ describe('formatV2ResumeResponse - candidate details', () => {
     expect(text).toContain('st1_mytoken');
     // Should NOT contain "tool" as a JSON key (it's mentioned in prose but not in the JSON block)
     expect(text).not.toContain('"tool"');
+    expect(text).toContain('inspect or resume this candidate');
+    expect(text).toContain('rehydrate');
   });
 
   it('marks weak matches with (weak match) label', () => {
@@ -313,5 +332,25 @@ describe('formatV2ResumeResponse - candidate details', () => {
     };
     const result = formatV2ResumeResponse(data)!;
     expect(result.primary).toContain('Workflow completed');
+  });
+
+  it('shows workspace-driven ranking note when candidates are matched only by git context', () => {
+    const data = {
+      candidates: [
+        mkCandidate({ whyMatched: ['matched_head_sha'] }),
+        mkCandidate({ sessionId: 'sess_2', runId: 'run_2', whyMatched: ['matched_branch'] }),
+      ],
+      totalEligible: 2,
+    };
+
+    const result = formatV2ResumeResponse(data)!;
+    expect(result.primary).toContain('ranked primarily from current workspace git context');
+    expect(result.primary).toContain('continue_workflow(..., intent: "rehydrate")');
+  });
+
+  it('shows sameWorkspaceOnly in narrowing help', () => {
+    const data = { candidates: [], totalEligible: 0 };
+    const result = formatV2ResumeResponse(data)!;
+    expect(result.primary).toContain('sameWorkspaceOnly');
   });
 });

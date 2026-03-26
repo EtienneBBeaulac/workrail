@@ -224,4 +224,96 @@ describe('session-summary-provider: aggregate recap from ancestor nodes', () => 
 
     expect(summaries[0]!.recapSnippet).toBeNull();
   });
+
+  it('derives sessionTitle from the selected run context, not another run in the same session', async () => {
+    const sessionId = 'sess_test_selected_run_title';
+    const events = [
+      {
+        kind: 'session_created',
+        eventId: 'evt_session',
+        eventIndex: 0,
+        sessionId,
+        v: 1,
+        data: {},
+        dedupeKey: `session_created:${sessionId}`,
+      },
+      {
+        kind: 'run_started',
+        eventId: 'evt_run_old',
+        eventIndex: 1,
+        sessionId,
+        v: 1,
+        scope: { runId: 'run_old' },
+        data: { workflowId: 'test-workflow', workflowHash: TEST_WORKFLOW_HASH },
+        dedupeKey: `run_started:${sessionId}:run_old`,
+      },
+      {
+        kind: 'context_set',
+        eventId: 'evt_ctx_old',
+        eventIndex: 2,
+        sessionId,
+        v: 1,
+        scope: { runId: 'run_old' },
+        data: {
+          contextId: 'ctx_old',
+          context: { goal: 'Old run title should not win' },
+          source: 'initial',
+        },
+        dedupeKey: `context_set:${sessionId}:run_old:ctx_old`,
+      },
+      {
+        kind: 'node_created',
+        eventId: 'evt_node_old',
+        eventIndex: 3,
+        sessionId,
+        v: 1,
+        scope: { runId: 'run_old', nodeId: 'node_old' },
+        data: { nodeKind: 'step', parentNodeId: null, workflowHash: TEST_WORKFLOW_HASH, snapshotRef: 'snap_old' },
+        dedupeKey: `node_created:${sessionId}:node_old`,
+      },
+      {
+        kind: 'run_started',
+        eventId: 'evt_run_new',
+        eventIndex: 4,
+        sessionId,
+        v: 1,
+        scope: { runId: 'run_new' },
+        data: { workflowId: 'test-workflow', workflowHash: TEST_WORKFLOW_HASH },
+        dedupeKey: `run_started:${sessionId}:run_new`,
+      },
+      {
+        kind: 'context_set',
+        eventId: 'evt_ctx_new',
+        eventIndex: 5,
+        sessionId,
+        v: 1,
+        scope: { runId: 'run_new' },
+        data: {
+          contextId: 'ctx_new',
+          context: { goal: 'New run title should win' },
+          source: 'initial',
+        },
+        dedupeKey: `context_set:${sessionId}:run_new:ctx_new`,
+      },
+      {
+        kind: 'node_created',
+        eventId: 'evt_node_new',
+        eventIndex: 6,
+        sessionId,
+        v: 1,
+        scope: { runId: 'run_new', nodeId: 'node_new' },
+        data: { nodeKind: 'step', parentNodeId: null, workflowHash: TEST_WORKFLOW_HASH, snapshotRef: 'snap_new' },
+        dedupeKey: `node_created:${sessionId}:node_new`,
+      },
+    ];
+
+    const provider = buildProvider(sessionId, events);
+    const result = await provider.loadHealthySummaries();
+
+    expect(result.isOk()).toBe(true);
+    const summaries = result._unsafeUnwrap();
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]!.runId).toBe('run_new');
+    expect(summaries[0]!.sessionTitle).toBe('New run title should win');
+  });
 });

@@ -109,6 +109,7 @@ describe('v2 tool schema field snapshots (anti-drift)', () => {
       'gitHeadSha',
       'query',
       'runId',
+      'sameWorkspaceOnly',
       'sessionId',
       'workspacePath',
     ]);

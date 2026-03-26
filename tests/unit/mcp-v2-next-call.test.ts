@@ -218,7 +218,7 @@ describe('nextCall in live execution responses', () => {
 
   it('start_workflow returns nextCall with continue template', async () => {
     const ctx = await mkCtx();
-    const start = await handleV2StartWorkflow({ workflowId: 'two-step' } as any, ctx);
+    const start = await handleV2StartWorkflow({ workflowId: 'two-step' , workspacePath: root , workspacePath: root } as any, ctx);
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
     const startResponse = unwrapResponse(start.data);
@@ -231,7 +231,7 @@ describe('nextCall in live execution responses', () => {
 
   it('rehydrate returns nextCall with continue template (for when agent finishes the step)', async () => {
     const ctx = await mkCtx();
-    const start = await handleV2StartWorkflow({ workflowId: 'two-step' } as any, ctx);
+    const start = await handleV2StartWorkflow({ workflowId: 'two-step' , workspacePath: root , workspacePath: root } as any, ctx);
     if (start.type !== 'success') return;
     const startResponse = unwrapResponse(start.data);
 
@@ -249,7 +249,7 @@ describe('nextCall in live execution responses', () => {
 
   it('advance to next step returns nextCall for the next advance', async () => {
     const ctx = await mkCtx();
-    const start = await handleV2StartWorkflow({ workflowId: 'two-step' } as any, ctx);
+    const start = await handleV2StartWorkflow({ workflowId: 'two-step' , workspacePath: root , workspacePath: root } as any, ctx);
     if (start.type !== 'success') return;
     const startResponse = unwrapResponse(start.data);
 
@@ -268,7 +268,7 @@ describe('nextCall in live execution responses', () => {
 
   it('advance past last step returns nextCall: null (workflow complete)', async () => {
     const ctx = await mkCtx();
-    const start = await handleV2StartWorkflow({ workflowId: 'two-step' } as any, ctx);
+    const start = await handleV2StartWorkflow({ workflowId: 'two-step' , workspacePath: root , workspacePath: root } as any, ctx);
     if (start.type !== 'success') return;
     const startResponse = unwrapResponse(start.data);
 
@@ -294,7 +294,7 @@ describe('nextCall in live execution responses', () => {
 
   it('nextCall params can be used directly as continue_workflow input', async () => {
     const ctx = await mkCtx();
-    const start = await handleV2StartWorkflow({ workflowId: 'two-step' } as any, ctx);
+    const start = await handleV2StartWorkflow({ workflowId: 'two-step' , workspacePath: root , workspacePath: root } as any, ctx);
     if (start.type !== 'success') return;
     const startResponse = unwrapResponse(start.data);
 
@@ -311,7 +311,7 @@ describe('nextCall in live execution responses', () => {
 
   it('formatted nextToken block can be used directly as continue_workflow input', async () => {
     const ctx = await mkCtx();
-    const start = await handleV2StartWorkflow({ workflowId: 'two-step' } as any, ctx);
+    const start = await handleV2StartWorkflow({ workflowId: 'two-step' , workspacePath: root , workspacePath: root } as any, ctx);
     if (start.type !== 'success') return;
     const startResponse = unwrapResponse(start.data);
 

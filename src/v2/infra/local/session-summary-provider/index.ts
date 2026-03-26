@@ -12,6 +12,7 @@ import { enumerateSessionsByRecency, type SessionWithMtime } from '../../../usec
 import { projectSessionHealthV2 } from '../../../projections/session-health.js';
 import { projectRunDagV2 } from '../../../projections/run-dag.js';
 import { projectNodeOutputsV2, type NodeOutputsProjectionV2 } from '../../../projections/node-outputs.js';
+import { projectRunContextV2 } from '../../../projections/run-context.js';
 import { derivePendingStep, deriveIsComplete } from '../../../durable-core/projections/snapshot-state.js';
 import type { DomainEventV1 } from '../../../durable-core/schemas/session/index.js';
 import type { SessionId, SnapshotRef } from '../../../durable-core/ids/index.js';
@@ -84,6 +85,9 @@ const EMPTY_OBSERVATIONS: SessionObservations = {
   gitBranch: null,
   repoRootHash: null,
 };
+
+/** Well-known persisted context keys that often describe the task/session. */
+const TITLE_CONTEXT_KEYS = ['goal', 'taskDescription', 'mrTitle', 'prTitle', 'ticketTitle', 'problem'] as const;
 
 
 
@@ -258,6 +262,7 @@ function projectSessionSummary(
       recapSnippet,
       observations: extractObservations(truth.events),
       workflow,
+      sessionTitle: deriveSessionTitle(truth.events, bestRun.run.runId),
       lastModifiedMs: mtimeMs,
       // Defaults; enriched by snapshot store if available
       pendingStepId: null,
@@ -346,6 +351,94 @@ function extractWorkflowIdentity(events: readonly DomainEventV1[], runId: string
     workflowId: asWorkflowId(event.data.workflowId),
     workflowHash: asWorkflowHash(asSha256Digest(event.data.workflowHash)),
   };
+}
+
+/**
+ * Derive a descriptive session title from persisted run context or early recap text.
+ *
+ * Priority:
+ * 1. Explicit context fields (goal, taskDescription, mrTitle, ...)
+ * 2. First descriptive line from the earliest recap
+ * 3. null (caller falls back to workflowId/sessionId)
+ */
+function deriveSessionTitle(events: readonly DomainEventV1[], runId: string): string | null {
+  const contextRes = projectRunContextV2(events);
+  if (contextRes.isOk()) {
+    const runCtx = contextRes.value.byRunId[runId];
+    if (runCtx) {
+      for (const key of TITLE_CONTEXT_KEYS) {
+        const val = runCtx.context[key];
+        if (typeof val === 'string' && val.trim().length > 0) {
+          return truncateTitle(val.trim());
+        }
+      }
+    }
+  }
+
+  return extractTitleFromFirstRecap(events);
+}
+
+/** Extract a short descriptive title from the earliest recap note in the session. */
+function extractTitleFromFirstRecap(events: readonly DomainEventV1[]): string | null {
+  const outputsRes = projectNodeOutputsV2(events);
+  if (outputsRes.isErr()) return null;
+
+  let rootNodeId: string | null = null;
+  let minIndex = Infinity;
+  for (const e of events) {
+    if (e.kind === EVENT_KIND.NODE_CREATED && e.eventIndex < minIndex) {
+      minIndex = e.eventIndex;
+      rootNodeId = e.scope.nodeId;
+    }
+  }
+  if (!rootNodeId) return null;
+
+  const nodeOutputs = outputsRes.value.nodesById[rootNodeId];
+  if (!nodeOutputs) return null;
+
+  const recaps = nodeOutputs.currentByChannel[OUTPUT_CHANNEL.RECAP];
+  const first = recaps?.[0];
+  if (!first || first.payload.payloadKind !== PAYLOAD_KIND.NOTES) return null;
+
+  return extractDescriptiveText(first.payload.notesMarkdown);
+}
+
+/** Extract the first substantive descriptive line from markdown-like notes. */
+function extractDescriptiveText(markdown: string): string | null {
+  const lines = markdown
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  for (const line of lines) {
+    if (/^#{1,3}\s/.test(line)) continue;
+    if (/^[-_*]{3,}$/.test(line)) continue;
+    if (line.startsWith('|')) continue;
+
+    const boldLabel = line.match(/^\*{2}[^*]+\*{2}:?\s*(.*)/);
+    if (boldLabel) {
+      const value = boldLabel[1]?.trim();
+      if (value && value.length > 10) return truncateTitle(value);
+      continue;
+    }
+
+    const listBoldLabel = line.match(/^-\s+\*{2}[^*]+\*{2}:?\s*(.*)/);
+    if (listBoldLabel) {
+      const value = listBoldLabel[1]?.trim();
+      if (value && value.length > 10) return truncateTitle(value);
+      continue;
+    }
+
+    if (line.length > 10) return truncateTitle(line);
+  }
+
+  return null;
+}
+
+/** Truncate a title-ish string to a compact display-safe length. */
+function truncateTitle(text: string, maxLen = 120): string {
+  if (text.length <= maxLen) return text;
+  return text.slice(0, maxLen - 1) + '…';
 }
 
 // ---------------------------------------------------------------------------

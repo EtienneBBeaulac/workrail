@@ -35,4 +35,27 @@ describe('V2ContinueWorkflowInput alias normalization', () => {
       expect(result.error.issues[0]?.message).toContain('Canonical field: "context"');
     }
   });
+
+  it('requires workspacePath for explicit rehydrate intent', () => {
+    const result = V2ContinueWorkflowInput.safeParse({
+      continueToken: 'ct_test_123',
+      intent: 'rehydrate',
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((issue) => issue.path.join('.') === 'workspacePath')).toBe(true);
+      expect(result.error.issues.some((issue) => issue.message.includes('Shared WorkRail servers cannot safely infer your current workspace'))).toBe(true);
+    }
+  });
+
+  it('allows advance without workspacePath', () => {
+    const result = V2ContinueWorkflowInput.safeParse({
+      continueToken: 'ct_test_123',
+      intent: 'advance',
+      output: { notesMarkdown: 'Done.' },
+    });
+
+    expect(result.success).toBe(true);
+  });
 });
