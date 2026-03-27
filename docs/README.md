@@ -29,6 +29,7 @@
 - **[Workflow Validation Design](plans/workflow-validation-design.md)** - Canonical durable design for the validation initiative
 - **[Workflow v2 Roadmap](plans/workflow-v2-roadmap.md)** - Canonical planning/status doc for WorkRail v2
 - **[Workflow v2 Design](plans/workflow-v2-design.md)** - Canonical durable design for WorkRail v2
+- **[Workflow Source Setup Phase 1](plans/workflow-source-setup-phase-1.md)** - Canonical durable plan/design for the near-term workflow-source setup initiative
 - **[Prompt Fragments](plans/prompt-fragments.md)** - Canonical finished summary for the prompt fragments feature
 - **[Agent-Managed Ticketing Design](plans/agent-managed-ticketing-design.md)** - Live design doc for a single-dev GitHub ticketing system that works well with agents
 

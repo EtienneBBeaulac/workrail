@@ -31,6 +31,7 @@ import type { SessionSummaryProviderPortV2 } from '../v2/ports/session-summary-p
 import type { ValidationPipelineDepsPhase1a } from '../application/services/workflow-validation-pipeline.js';
 import type { TokenAliasStorePortV2 } from '../v2/ports/token-alias-store.port.js';
 import type { RandomEntropyPortV2 } from '../v2/ports/random-entropy.port.js';
+import type { RememberedRootsStorePortV2 } from '../v2/ports/remembered-roots-store.port.js';
 
 // Note: JsonValue type is imported from output-schemas.js above
 
@@ -216,6 +217,10 @@ export interface V2Dependencies {
   // Token alias store for v2 short token registration and resolution.
   // Required: must be present and have loadIndex() called before any v2 tool runs.
   readonly tokenAliasStore: TokenAliasStorePortV2;
+
+  // Remembered workspace roots for workflow-source setup phase 1.
+  // Optional during migration so repo-controlled tests can opt in incrementally.
+  readonly rememberedRootsStore?: RememberedRootsStorePortV2;
 
   // Random entropy source — used for minting short token nonces.
   readonly entropy: RandomEntropyPortV2;

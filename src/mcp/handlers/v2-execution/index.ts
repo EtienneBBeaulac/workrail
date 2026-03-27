@@ -28,6 +28,7 @@ import { handleRehydrateIntent, type RehydrateResult } from './continue-rehydrat
 import { handleAdvanceIntent } from './continue-advance.js';
 import { attachV2ExecutionRenderMetadata } from '../../render-envelope.js';
 import type { StepContentEnvelope } from '../../step-content-envelope.js';
+import { rememberExplicitWorkspaceRoot } from '../shared/remembered-roots.js';
 
 /** Unified result for continue_workflow — envelope present on rehydrate with pending step. */
 interface ContinueWorkflowResult {
@@ -80,6 +81,8 @@ export async function handleV2StartWorkflow(
 ): Promise<ToolResult<unknown>> {
   const guard = requireV2Context(ctx);
   if (!guard.ok) return guard.error;
+  const rememberedRootFailure = await rememberExplicitWorkspaceRoot(input.workspacePath, guard.ctx.v2.rememberedRootsStore);
+  if (rememberedRootFailure) return rememberedRootFailure;
 
   return executeStartWorkflow(input, guard.ctx).match(
     (result) => success(attachV2ExecutionRenderMetadata({

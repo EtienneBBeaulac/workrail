@@ -72,3 +72,94 @@ Workflow and feature ideas that are worth capturing but not yet planned or desig
   - `docs/plans/workrail-platform-vision.md` (already discusses grouped discovery by source)
   - `docs/roadmap/open-work-inventory.md` (legacy workflow modernization increases the need for better discovery)
   - current implementation: `src/mcp/handlers/v2-workflow.ts`, `src/mcp/v2/tools.ts`, `src/mcp/output-schemas.ts`
+
+### Multi-root workflow discovery and setup UX
+
+- **Status**: designing
+- **Summary**: Simplify third-party and team workflow hookup by requiring explicit `workspacePath`, silently remembering repo roots in user-level `~/.workrail/config.json`, recursively discovering team/module `.workrail/workflows/` folders under remembered roots, and improving grouped source visibility / precedence explanations. Use workspace-aware ranking, cross-repo surfacing, and later console integration as the control plane for inspecting remembered roots, discovered workflow sources, and precedence. For remote repositories, prefer **managed sync by default** so users experience remote workflow repos as connected and kept current while WorkRail still reasons over a local effective state. Avoid trusting MCP roots and avoid requiring workflow config to live at the main repo root.
+- **Current recommendation**:
+  - phase 1: `Rooted Team Sharing + minimal Source Control Tower`
+  - require explicit workspace identity
+  - silently persist repo roots at the user level
+  - support cross-repo workflows from remembered roots
+  - make remote repos default to managed-sync mode rather than pinned snapshots or live-remote behavior
+  - treat Slack/chat/file/zip sharing as an ingestion path that classifies into repo, file, pack, or snippet flows
+  - design the backend so the console can eventually manage and explain the remembered/discovered source model
+- **Additional idea**:
+  - explore enterprise auth / SSO integration for private repo access, such as Okta-backed flows for GitHub Enterprise, GitLab, or other self-hosted providers
+  - likely shape: WorkRail detects that a private repo uses org-managed auth and guides the user through the right browser/device-code/credential flow instead of assuming raw personal-access-token setup
+  - main question: should WorkRail integrate directly with identity providers like Okta, or should it integrate one layer lower with Git hosts / credential helpers that are already SSO-aware?
+- **Design doc**: `docs/ideas/third-party-workflow-setup-design-thinking.md`
+
+### Workflow rewind / re-scope support
+
+- **Status**: idea
+- **Summary**: Allow an in-progress workflow session to go back to an earlier point when new information changes scope understanding, invalidates assumptions, or reveals that the current execution path is wrong.
+- **Why this seems useful**:
+  - agents and users often learn important scope information only after work has already started
+  - current step-by-step enforcement is strong, but it can feel rigid if the original framing turns out to be wrong
+  - a first-class rewind / re-scope mechanism could make workflows feel safer and more adaptable without abandoning structure
+- **Possible phase 1 shape**:
+  - allow rewind to a prior checkpoint or earlier decision node with an explicit reason
+  - record a short “why we rewound” note in session history
+  - make the resumed path visible in the console/session timeline
+- **Possible phase 2 shape**:
+  - support scope-change prompts like:
+    - “our understanding changed”
+    - “the task is broader/narrower than we thought”
+    - “we need to revisit planning before implementation”
+  - let workflows declare safe rewind points or re-scope checkpoints explicitly
+  - support branch-aware comparison between abandoned and current paths
+- **Design questions**:
+  - should rewind be limited to explicit checkpoints, or should WorkRail support arbitrary node-level rewind?
+  - how should the system preserve durable notes and outputs from abandoned paths?
+  - should some workflow steps be marked as non-rewindable once external side effects have happened?
+  - how should the agent explain to the user what changed and why a rewind is appropriate?
+- **Risks / tradeoffs**:
+  - rewind power could make workflows feel less deterministic if used too casually
+  - durable session history gets more complex when abandoned paths and resumed paths coexist
+  - workflows with real-world side effects may need stricter rollback / compensation rules
+
+### Console engine-trace visibility and phase UX
+
+- **Status**: idea
+- **Summary**: Evolve the console from a node-only DAG viewer into an execution-aware surface that shows both created nodes and the engine decisions that explain how the run got there. This should make fast paths, skipped phases, condition evaluation, loop entry/exit, and branch selection legible instead of looking like missing DAG nodes or broken rendering.
+- **Why this seems useful**:
+  - users currently see only `node_created` / `edge_created`, which makes legitimate engine behavior look like missing workflow phases
+  - workflows use authoring concepts like phases, fast paths, run conditions, and loop gates, but the console does not show those decisions today
+  - sessions like small-task fast paths can appear to “jump” from phase 0 to phase 5 even when the engine is behaving correctly
+- **Current gap**:
+  - engine event log records `decision_trace_appended`, `context_set`, and related runtime decisions
+  - console DTOs expose only run status plus DAG nodes/edges and node detail
+  - there is no first-class UI for “why the engine chose this path”
+- **Recommended direction**:
+  - keep phases as authoring / workflow-organization concepts
+  - stop treating the rendered DAG as the whole execution story
+  - add an engine-trace / decision layer that can show:
+    - selected next step
+    - evaluated conditions
+    - entered/exited loops
+    - important run context variables such as `taskComplexity`
+    - skipped / bypassed planning paths such as small-task fast paths
+- **Possible phase 1 shape**:
+  - extend console service / DTOs with a run-scoped execution-trace summary
+  - show a compact “engine decisions” strip or timeline above the DAG
+  - annotate jumps such as “small-task fast path selected” so sparse DAGs do not look broken
+- **Possible phase 2 shape**:
+  - richer explainability timeline with branches, skipped authoring phases, and condition results
+  - allow toggling between “execution DAG” and “engine trace” views, or combine them in one unified run narrative
+  - surface effective run context and selected branch/loop decisions in node detail or run detail
+- **Design questions**:
+  - should the console continue using phase-oriented labels in the primary UI, or should it prefer step titles / execution narrative labels?
+  - should trace events appear as first-class timeline items, DAG annotations, or a separate run-explanation panel?
+  - what subset of run context variables is useful enough to surface without becoming noisy?
+  - how do we distinguish authoring structure from runtime execution structure cleanly in the UX?
+- **Risks / tradeoffs**:
+  - exposing too much raw engine state could make the console noisier and harder to scan
+  - mixing authoring structure and runtime trace without clear separation could create more confusion, not less
+  - DTO growth needs care so the console does not become tightly coupled to every low-level event detail
+- **Related docs / context**:
+  - `docs/reference/workflow-execution-contract.md`
+  - `docs/design/v2-core-design-locks.md`
+  - `docs/plans/workrail-platform-vision.md`
+  - current implementation: `src/v2/usecases/console-service.ts`, `src/v2/projections/run-context.ts`, `console/src/api/types.ts`

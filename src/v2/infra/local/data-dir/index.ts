@@ -22,6 +22,14 @@ export class LocalDataDirV2 implements DataDirPortV2 {
     return configured ? configured : path.join(os.homedir(), '.workrail', 'data');
   }
 
+  rememberedRootsPath(): string {
+    return path.join(this.root(), 'workflow-sources', 'remembered-roots.json');
+  }
+
+  rememberedRootsLockPath(): string {
+    return path.join(this.root(), 'workflow-sources', 'remembered-roots.lock');
+  }
+
   snapshotsDir(): string {
     return path.join(this.root(), 'snapshots');
   }

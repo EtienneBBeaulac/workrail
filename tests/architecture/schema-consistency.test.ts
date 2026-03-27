@@ -373,6 +373,16 @@ describe('Description-schema alignment', () => {
       requiredParams: ['workflowId'],
       description: DESCRIPTIONS.standard.preview_workflow,
     },
+    {
+      tool: 'list_workflows',
+      requiredParams: ['workspacePath'],
+      description: DESCRIPTIONS.standard.list_workflows,
+    },
+    {
+      tool: 'inspect_workflow',
+      requiredParams: ['workflowId', 'workspacePath'],
+      description: DESCRIPTIONS.standard.inspect_workflow,
+    },
   ];
 
   it('tool descriptions must mention all required parameters', () => {

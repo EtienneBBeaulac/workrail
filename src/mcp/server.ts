@@ -144,6 +144,8 @@ export async function createToolContext(): Promise<ToolContext> {
         console.error(`[V2Init] Token alias index load warning: ${aliasLoadResult.error.message}`);
       }
 
+      const rememberedRootsStore = container.resolve<any>(DI.V2.RememberedRootsStore);
+
       v2 = {
         gate,
         sessionStore,
@@ -155,6 +157,7 @@ export async function createToolContext(): Promise<ToolContext> {
         idFactory,
         tokenCodecPorts,
         tokenAliasStore,
+        rememberedRootsStore,
         validationPipelineDeps,
         // resolvedRootUris starts empty; overridden per-request at the CallTool boundary
         // with a snapshot of the current MCP client roots (see transport entry points).
@@ -372,5 +375,4 @@ export async function composeServer(): Promise<ComposedServerInternal> {
 
   return { server, ctx, rootsManager, rootsReader: rootsManager, tools, handlers };
 }
-
 
