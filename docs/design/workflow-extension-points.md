@@ -127,6 +127,48 @@ The child produces **evidence and recommendations**.
 
 The parent still interprets the result and decides what to do next.
 
+## When to expose an extension point
+
+Extension points are powerful, but they should stay **bounded and high-value**.
+
+A slot earns its place when customization would materially improve one of these:
+
+- domain-specific judgment
+- team-specific policy or philosophy alignment
+- final verification quality
+- reusable review/generation policy that multiple teams may want to swap
+
+Avoid creating slots for:
+
+- generic utility delegations
+- low-value one-off steps
+- phases where the parent should obviously keep full ownership with no meaningful team variation
+
+Good default rule:
+
+- expose customization where teams genuinely differ
+- keep utility cognition hardcoded where variation would mostly add complexity
+
+Examples:
+
+- **good slot**: `final_verification`, where teams may want different release/readiness standards
+- **good slot**: `philosophy_review`, where repo-specific principles genuinely vary
+- **bad slot**: generic capability probing, because the variation is low and the utility behavior should stay standardized
+- **bad slot**: parent loop decision logic, because parent-owned control flow should remain canonical
+
+## Structured freedom at the extension boundary
+
+Extension points should preserve the same balance as the parent workflow:
+
+- **rigid on contracts and parent-owned control flow**
+- **adaptive inside the bounded child implementation**
+
+That means:
+
+- the parent owns sequencing, loop control, canonical synthesis, and final decisions
+- the child owns bounded reasoning inside the slot contract
+- the child returns evidence/recommendations, not parent workflow truth
+
 ## Extension point declaration
 
 The parent workflow declares extension points as a top-level field alongside `steps`:
@@ -632,4 +674,3 @@ The bounded phase implementation framing leads to a better system design.
 7. Convert `coding-task-workflow-agentic` prompt text to use `{{wr.bindings.*}}` refs for the initial 3 slots
 8. Add slot compatibility metadata to routines/workflows
 9. Implement contract validation (required inputs available, required outputs produced)
-

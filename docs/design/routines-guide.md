@@ -37,16 +37,16 @@ or when delegation overhead isn't justified.
 
 ## Mode 3: Injection (Compile-Time Template Expansion)
 
-A workflow references a routine via `templateCall`, and the **compiler expands the routine's
+A workflow references a routine via a `type: "template_call"` step, and the **compiler expands the routine's
 steps inline** at compile time. The routine's steps become first-class workflow steps.
 
 **When to use**: when routine steps should be visible in the workflow's step list, participate
 in confirmation gates, and be tracked individually in the session.
 
 **How it works**:
-1. A workflow step declares a `templateCall` with the routine's template ID and args
+1. A workflow step declares a `type: "template_call"` step with the routine's template ID and args
 2. At compile time, the template registry expands the routine into real steps
-3. The expanded steps replace the templateCall step in the compiled workflow
+3. The expanded steps replace the template call step in the compiled workflow
 4. `{arg}` placeholders in prompts are substituted; `{{contextVar}}` is preserved for runtime
 
 **Template ID convention**:
@@ -56,27 +56,24 @@ in confirmation gates, and be tracked individually in the session.
 **Example** (in workflow JSON):
 ```json
 {
-  "id": "phase-1-design",
-  "title": "Phase 1: Design",
-  "templateCall": {
-    "templateId": "wr.templates.routine.tension-driven-design",
-    "args": {
-      "deliverableName": "design-candidates.md"
-    }
+  "type": "template_call",
+  "templateId": "wr.templates.routine.tension-driven-design",
+  "args": {
+    "deliverableName": "design-candidates.md"
   }
 }
 ```
 
 **What happens at compile time**:
 - The step above is replaced by the routine's 5 steps (step-discover-philosophy, step-understand-deeply, etc.)
-- Each expanded step ID is prefixed: `phase-1-design.step-discover-philosophy`
+- Each expanded step ID is prefixed using the compiler's provenance/step identity rules
 - `{deliverableName}` in prompts becomes `design-candidates.md`
 - The routine's `metaGuidance` is injected as step-level `guidance` on each expanded step
 - `preconditions` and `clarificationPrompts` are NOT included (parent workflow handles those)
 
 **Constraints**:
-- Routine steps must NOT contain `templateCall` (no recursive injection)
-- All `{arg}` placeholders must be satisfied by `templateCall.args`
+- Routine steps must NOT contain nested `template_call` usage (no recursive injection)
+- All `{arg}` placeholders must be satisfied by the template call's `args`
 - Arg values must be primitives (string, number, boolean) — objects/arrays are rejected
 
 ## Comparison
@@ -89,6 +86,96 @@ in confirmation gates, and be tracked individually in the session.
 | Confirmation gates | Subagent only | Agent decides | Per-step as authored |
 | Session tracking | Separate session | Same session | Same session, per-step |
 | Arg substitution | Via context | Via context | `{arg}` → compile-time |
+
+## Selection guidance
+
+Choosing the right consumption mode matters as much as choosing the right routine.
+
+### Prefer delegation when
+
+- an independent cognitive perspective adds value
+- the parent can continue useful work in parallel
+- the routine is acting as an auditor, challenger, or verifier
+- the routine's internal steps do not need to be visible as first-class parent workflow steps
+
+Common examples:
+
+- context completeness / depth audits
+- adversarial hypothesis challenge
+- philosophy alignment review
+- final verification from a fresh perspective
+
+### Prefer direct execution when
+
+- delegation overhead is not justified
+- the current agent is already the natural executor
+- step visibility is unnecessary
+- the routine is mainly a reusable thinking scaffold, not a separate perspective
+
+### Prefer injection when
+
+- the routine's steps should be visible in the parent workflow
+- confirmation behavior should apply per injected step
+- session traceability matters
+- the routine is central enough to the parent workflow that hiding it behind opaque delegation would reduce debuggability
+
+Common examples:
+
+- reusable design-generation cores
+- reusable final-verification skeletons
+- bounded reusable subflows the author wants Studio/session visibility for
+
+## Auditor-first guidance
+
+For many high-value routines, the best default mental model is **auditor**, not **task owner**.
+
+That means the parent workflow:
+
+- gathers or synthesizes the current state
+- delegates a bounded audit/challenge/verification package
+- interprets the returned artifact as evidence
+
+not as canonical truth.
+
+This is often a better fit than executor-style delegation for:
+
+- review workflows
+- planning workflows
+- verification-heavy workflows
+
+## High-value routine defaults
+
+The current routine catalog suggests these default uses:
+
+- `routine-context-gathering`: completeness/depth audit or bounded context expansion
+- `routine-hypothesis-challenge`: adversarial challenge against the current leading story
+- `routine-execution-simulation`: bounded runtime/flow reasoning where mental execution adds value
+- `routine-philosophy-alignment`: review against user/repo principles
+- `routine-final-verification`: proof-oriented end-state validation
+
+## Good and bad fits
+
+### Good fit for delegation
+
+- an adversarial reviewer challenging the current recommendation
+- a philosophy/policy auditor checking alignment against repo rules
+- a fresh final verifier evaluating whether evidence really supports the conclusion
+
+### Bad fit for delegation
+
+- tiny deterministic transformations that the parent can do faster directly
+- parent-owned loop decisions or canonical synthesis
+- work where hiding the internal steps would make the session harder to debug
+
+### Good fit for injection
+
+- a reusable multi-step authoring scaffold the parent wants visible in the step list
+- a reusable verification sequence that should honor parent confirmation gates
+
+### Bad fit for injection
+
+- every small repeated instruction block
+- routines whose value comes mainly from independent perspective rather than visible sub-steps
 
 ## See Also
 
