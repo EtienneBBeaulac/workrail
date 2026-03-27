@@ -1,3 +1,4 @@
+import * as os from 'os';
 import path from 'path';
 import { describe, expect, it } from 'vitest';
 import { createWorkflow } from '../../../src/types/workflow.js';
@@ -39,7 +40,7 @@ describe('workflow-source-visibility', () => {
   });
 
   it('derives rooted-sharing context for custom workflow directories under remembered roots', () => {
-    const rootPath = '/tmp/repo';
+    const rootPath = path.join(os.tmpdir(), 'repo');
     const sourcePath = path.join(rootPath, 'packages', 'tools', '.workrail', 'workflows');
 
     const result = toWorkflowVisibility(
@@ -63,8 +64,8 @@ describe('workflow-source-visibility', () => {
 
   it('does not derive rooted-sharing context for custom workflow directories outside remembered roots', () => {
     const result = toWorkflowVisibility(
-      workflow('custom.test', createCustomDirectorySource('/tmp/other/custom-workflows', 'custom-workflows')),
-      [{ path: '/tmp/repo', addedAtMs: 1, lastSeenAtMs: 1, source: 'explicit_workspace_path' }]
+      workflow('custom.test', createCustomDirectorySource(path.join(os.tmpdir(), 'other', 'custom-workflows'), 'custom-workflows')),
+      [{ path: path.join(os.tmpdir(), 'repo'), addedAtMs: 1, lastSeenAtMs: 1, source: 'explicit_workspace_path' }]
     );
 
     expect(result).toEqual({
@@ -77,11 +78,11 @@ describe('workflow-source-visibility', () => {
   });
 
   it('does not attach rooted-sharing context to project workflows even if their path is under a remembered root', () => {
-    const sourcePath = '/tmp/repo/workflows';
+    const sourcePath = path.join(os.tmpdir(), 'repo', 'workflows');
 
     const result = toWorkflowVisibility(
       workflow('project.test', createProjectDirectorySource(sourcePath)),
-      [{ path: '/tmp/repo', addedAtMs: 1, lastSeenAtMs: 1, source: 'explicit_workspace_path' }]
+      [{ path: path.join(os.tmpdir(), 'repo'), addedAtMs: 1, lastSeenAtMs: 1, source: 'explicit_workspace_path' }]
     );
 
     expect(result).toEqual({
@@ -94,7 +95,7 @@ describe('workflow-source-visibility', () => {
   });
 
   it('detects migration guidance when a project workflow shadows a rooted-sharing workflow with the same id', async () => {
-    const tempRoot = path.join('/tmp', `wr-visibility-${Date.now()}`);
+    const tempRoot = path.join(os.tmpdir(), `wr-visibility-${Date.now()}`);
     const rootPath = path.join(tempRoot, 'repo');
     const rootedPath = path.join(rootPath, 'packages', 'tools', '.workrail', 'workflows');
     const projectPath = path.join(tempRoot, 'workspace', 'workflows');

@@ -17,19 +17,19 @@ describe('v2 remembered roots store', () => {
     const fsPort = new NodeFileSystemV2();
 
     const storeA = new LocalRememberedRootsStoreV2(dataDir, fsPort);
-    const rememberResult = await storeA.rememberRoot('/tmp/project-a');
+    const rememberResult = await storeA.rememberRoot(path.join(os.tmpdir(), 'project-a'));
     expect(rememberResult.isOk()).toBe(true);
 
     const storeB = new LocalRememberedRootsStoreV2(dataDir, fsPort);
     const rootsResult = await storeB.listRoots();
     expect(rootsResult.isOk()).toBe(true);
-    expect(rootsResult._unsafeUnwrap()).toEqual([path.resolve('/tmp/project-a')]);
+    expect(rootsResult._unsafeUnwrap()).toEqual([path.resolve(path.join(os.tmpdir(), 'project-a'))]);
 
     const recordsResult = await storeB.listRootRecords();
     expect(recordsResult.isOk()).toBe(true);
     expect(recordsResult._unsafeUnwrap()).toMatchObject([
       {
-        path: path.resolve('/tmp/project-a'),
+        path: path.resolve(path.join(os.tmpdir(), 'project-a')),
         source: 'explicit_workspace_path',
       },
     ]);
@@ -41,13 +41,13 @@ describe('v2 remembered roots store', () => {
     const fsPort = new NodeFileSystemV2();
     const store = new LocalRememberedRootsStoreV2(dataDir, fsPort);
 
-    expect((await store.rememberRoot('/tmp/project-a')).isOk()).toBe(true);
-    expect((await store.rememberRoot('/tmp/project-a')).isOk()).toBe(true);
-    expect((await store.rememberRoot(path.resolve('/tmp/project-a'))).isOk()).toBe(true);
+    expect((await store.rememberRoot(path.join(os.tmpdir(), 'project-a'))).isOk()).toBe(true);
+    expect((await store.rememberRoot(path.join(os.tmpdir(), 'project-a'))).isOk()).toBe(true);
+    expect((await store.rememberRoot(path.resolve(path.join(os.tmpdir(), 'project-a')))).isOk()).toBe(true);
 
     const rootsResult = await store.listRoots();
     expect(rootsResult.isOk()).toBe(true);
-    expect(rootsResult._unsafeUnwrap()).toEqual([path.resolve('/tmp/project-a')]);
+    expect(rootsResult._unsafeUnwrap()).toEqual([path.resolve(path.join(os.tmpdir(), 'project-a'))]);
 
     const recordsResult = await store.listRootRecords();
     expect(recordsResult.isOk()).toBe(true);
@@ -77,7 +77,7 @@ describe('v2 remembered roots store', () => {
     await fs.writeFile(filePath, 'locked', 'utf8');
 
     const store = new LocalRememberedRootsStoreV2(dataDir, new NodeFileSystemV2());
-    const result = await store.rememberRoot('/tmp/project-a');
+    const result = await store.rememberRoot(path.join(os.tmpdir(), 'project-a'));
     expect(result.isErr()).toBe(true);
     expect(result._unsafeUnwrapErr().code).toBe('REMEMBERED_ROOTS_BUSY');
   });

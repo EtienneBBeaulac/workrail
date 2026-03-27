@@ -10,6 +10,8 @@
  * - Contract tests verify response shape at the MCP boundary
  * - When a contract breaks, the failure message should say "contract" not "protocol"
  */
+import * as os from 'os';
+import * as path from 'path';
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import {
@@ -68,7 +70,7 @@ describe('list_workflows response contract', () => {
             source: { kind: 'custom', displayName: 'workflows' },
             rootedSharing: {
               kind: 'remembered_root',
-              rootPath: '/tmp/repo',
+              rootPath: path.join(os.tmpdir(), 'repo'),
               groupLabel: 'tools',
             },
           },
