@@ -78,4 +78,24 @@ describe('v2 data directory (Slice 2 locks)', () => {
     expect(pinnedDir).toContain('pinned');
     expect(pinnedDir).toBe(path.join(customRoot, 'workflows', 'pinned'));
   });
+
+  it('data-dir-workrail-owned: provides remembered roots state under WorkRail-owned data root', () => {
+    const customRoot = path.join(os.tmpdir(), 'workrail-test');
+    const env = { WORKRAIL_DATA_DIR: customRoot };
+
+    const dataDir = new LocalDataDirV2(env);
+    const rememberedRootsPath = dataDir.rememberedRootsPath();
+
+    expect(rememberedRootsPath).toBe(path.join(customRoot, 'workflow-sources', 'remembered-roots.json'));
+  });
+
+  it('data-dir-workrail-owned: provides remembered roots lock path under WorkRail-owned data root', () => {
+    const customRoot = path.join(os.tmpdir(), 'workrail-test');
+    const env = { WORKRAIL_DATA_DIR: customRoot };
+
+    const dataDir = new LocalDataDirV2(env);
+    const rememberedRootsLockPath = dataDir.rememberedRootsLockPath();
+
+    expect(rememberedRootsLockPath).toBe(path.join(customRoot, 'workflow-sources', 'remembered-roots.lock'));
+  });
 });

@@ -18,14 +18,18 @@ const workspacePathField = z.string()
 const optionalWorkspacePathField = workspacePathField.optional();
 
 export const V2ListWorkflowsInput = z.object({
-  workspacePath: optionalWorkspacePathField,
+  workspacePath: workspacePathField.describe(
+    'Required. Absolute path to your current workspace directory (e.g. the "Workspace:" value from your system parameters). WorkRail uses this to resolve project-scoped workflow variants against the correct workspace for discovery-sensitive workflow listing. Shared MCP servers cannot infer this safely.'
+  ),
 });
 export type V2ListWorkflowsInput = z.infer<typeof V2ListWorkflowsInput>;
 
 export const V2InspectWorkflowInput = z.object({
   workflowId: z.string().min(1).regex(/^[A-Za-z0-9_-]+$/, 'Workflow ID must contain only letters, numbers, hyphens, and underscores').describe('The workflow ID to inspect'),
   mode: z.enum(['metadata', 'preview']).default('preview').describe('Detail level: metadata (name and description only) or preview (full step-by-step breakdown, default)'),
-  workspacePath: optionalWorkspacePathField,
+  workspacePath: workspacePathField.describe(
+    'Required. Absolute path to your current workspace directory (e.g. the "Workspace:" value from your system parameters). WorkRail uses this to resolve the correct project-scoped workflow variant for discovery-sensitive workflow inspection. Shared MCP servers cannot infer this safely.'
+  ),
 });
 export type V2InspectWorkflowInput = z.infer<typeof V2InspectWorkflowInput>;
 

@@ -12,6 +12,8 @@ This is the lightweight cross-cutting roadmap view for WorkRail.
 ## Next
 
 - ~~Content coherence: introduce StepContentEnvelope and linked references~~ (done -- see `docs/plans/content-coherence-and-references.md`)
+- ~~Workflow-source setup phase 1: rooted team sharing, remembered roots, grouped source visibility, and migration-aware precedence explanation~~ (done -- phase-1 workflow-source setup landed across `#160`–`#164`; see `docs/plans/workflow-source-setup-phase-1.md`)
+- Design console execution-trace UX so runs explain fast paths, conditions, and skipped authoring phases instead of only showing created DAG nodes
 - Build a concrete plan for composition and middleware
 - Resolve progress notification design issues and decide whether it is worth doing now
 - Design authorable response supplements as a narrow typed feature, without implementing it yet
@@ -19,5 +21,6 @@ This is the lightweight cross-cutting roadmap view for WorkRail.
 ## Later
 
 - Dashboard artifacts: replace file-based docs with session-scoped structured outputs rendered in the console (design exists in `workflow-execution-contract.md`, blocked on console UI)
+- Broaden the console from a node-only dashboard into a richer control-plane surface for engine state, execution trace, and decision explanation
 - Platform evolution: discovery, sharing, portable references, MCP resources/prompts, agent-driven setup (see `docs/plans/workrail-platform-vision.md`)
 - Multi-tenancy and running-workflow upgrades

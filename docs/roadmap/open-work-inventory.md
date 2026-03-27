@@ -85,6 +85,24 @@ For explicit status on the major older planning docs themselves, see `docs/roadm
   - design resolution for notification sending and node counting
 - **Source doc**: `docs/plans/v2-followup-enhancements.md`
 
+### Console execution trace and engine explainability
+
+- **Status**: unimplemented
+- **What is missing**:
+  - console DTOs that expose engine-level decisions alongside DAG nodes/edges
+  - a run-level trace/explanation surface for `selected_next_step`, condition evaluation, loop entry/exit, and important run context
+  - UX that distinguishes authoring phases from actual created execution nodes so fast paths do not look like missing steps
+  - a clear console story for why the engine skipped, branched, or fast-pathed instead of only what node was created next
+- **Why it is here**:
+  - the engine already records decision and context events, but the console currently projects mostly node/edge state
+  - this creates real user confusion when legitimate workflow behavior looks like a broken DAG
+  - recent console work proved that a node-only view is not sufficient for understanding execution
+- **Source docs**:
+  - `docs/ideas/backlog.md`
+  - `docs/plans/workrail-platform-vision.md`
+  - `docs/reference/workflow-execution-contract.md`
+  - `docs/design/v2-core-design-locks.md`
+
 ### Enforceable verification contracts
 
 - **Status**: unimplemented
@@ -194,6 +212,26 @@ For explicit status on the major older planning docs themselves, see `docs/roadm
   - `docs/authoring.md`
   - `docs/ideas/backlog.md`
 
+### Workflow-source setup phase 1
+
+- **Status**: implemented (phase-1 rooted-sharing slice delivered across `#160`–`#164`)
+- **What now exists**:
+  - discovery-sensitive workflow surfaces require and use explicit `workspacePath`
+  - WorkRail remembers repo/workspace roots at user scope
+  - request-scoped workflow discovery recursively loads repo/module `.workrail/workflows/` under remembered roots
+  - `list_workflows` / `inspect_workflow` expose source-aware visibility for built-in, personal, legacy project, rooted-sharing, and external workflows
+  - legacy `./workflows` overlap with rooted-sharing now carries minimal precedence / migration explanation
+- **What is intentionally deferred**:
+  - generalized guided install for arbitrary third-party sources
+  - full canonical source catalog work
+  - final long-term `.workrail/*` config ownership split
+- **Verification / evidence**:
+  - focused workflow-source setup tests cover request-rooted discovery, remembered roots persistence, visibility outputs, and MCP schema contracts
+  - current local verification passed with `npm run build` plus focused vitest coverage
+- **Source docs**:
+  - `docs/plans/workflow-source-setup-phase-1.md`
+  - `docs/plans/workrail-platform-vision.md`
+
 ### Multi-tenancy
 
 - **Status**: unimplemented
@@ -242,6 +280,22 @@ For explicit status on the major older planning docs themselves, see `docs/roadm
   - migration path for existing workflows that write markdown files
 - **Source doc**: `docs/reference/workflow-execution-contract.md`
 
+### Console engine-trace visibility and phase UX
+
+- **Status**: active idea / not yet designed into a ticket
+- **Why parked here**:
+  - the console currently emphasizes created nodes but hides the engine choices that explain sparse or surprising DAG shapes
+  - workflows still use phase-oriented authoring language, and the console currently does not explain skipped phases or fast-path branches
+  - there is likely a real UX redesign here around “execution DAG vs engine trace” rather than a single missing component
+- **What would need design**:
+  - whether phases stay visible in the console primary UI or become secondary authoring metadata
+  - what run-context variables and decision-trace entries should be elevated into first-class console DTOs
+  - how to present trace events without making the run surface noisy
+  - whether to use a timeline, annotations, combined run narrative, or separate explainability mode
+- **Source docs**:
+  - `docs/ideas/backlog.md`
+  - `docs/plans/workrail-platform-vision.md`
+
 ### Standup Status Generator workflow
 
 - **Status**: idea
@@ -273,9 +327,10 @@ For explicit status on the major older planning docs themselves, see `docs/roadm
 
 ### Next to groom into tickets
 
-1. **Composition and middleware engine**
-2. **Progress notifications**
-3. **Authorable response supplements** (design first, not direct implementation)
+1. **Workflow-source setup phase 1**
+2. **Composition and middleware engine**
+3. **Progress notifications**
+4. **Authorable response supplements** (design first, not direct implementation)
 
 ### Recently completed
 

@@ -87,6 +87,24 @@ export const V2WorkflowListItemSchema = z.object({
   version: z.string().min(1),
   kind: z.literal('workflow'),
   workflowHash: z.string().nullable(),
+  visibility: z.object({
+    category: z.enum(['built_in', 'personal', 'legacy_project', 'rooted_sharing', 'external']),
+    source: z.object({
+      kind: z.enum(['bundled', 'user', 'project', 'custom', 'git', 'remote', 'plugin']),
+      displayName: z.string().min(1),
+    }),
+    rootedSharing: z.object({
+      kind: z.literal('remembered_root'),
+      rootPath: z.string().min(1),
+      groupLabel: z.string().min(1),
+    }).optional(),
+    migration: z.object({
+      preferredSource: z.literal('rooted_sharing'),
+      currentSource: z.literal('legacy_project'),
+      reason: z.literal('legacy_project_precedence'),
+      summary: z.string().min(1),
+    }).optional(),
+  }).optional(),
 });
 
 export const V2WorkflowListOutputSchema = z.object({
@@ -98,6 +116,7 @@ export const V2WorkflowInspectOutputSchema = z.object({
   workflowHash: z.string().min(1),
   mode: z.enum(['metadata', 'preview']),
   compiled: JsonValueSchema,
+  visibility: V2WorkflowListItemSchema.shape.visibility.optional(),
   references: z.array(z.object({
     id: z.string().min(1),
     title: z.string().min(1),
