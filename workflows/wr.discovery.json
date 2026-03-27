@@ -1,0 +1,559 @@
+{
+  "id": "wr.discovery",
+  "name": "Discovery Workflow (Bundled • Exploration + Design Synthesis)",
+  "version": "3.0.0",
+  "description": "Use this when you want the agent to help you think something through end to end. It should combine the old exploration and design-thinking behaviors into one adaptive notes-first flow, moving between landscape exploration, problem framing, candidate generation, challenge, and uncertainty-resolution through landscape-first, full-spectrum, and design-first paths.",
+  "recommendedPreferences": {
+    "recommendedAutonomy": "guided",
+    "recommendedRiskPolicy": "conservative"
+  },
+  "features": [
+    "wr.features.mode_guidance",
+    "wr.features.durable_recap_guidance",
+    "wr.features.capabilities",
+    "wr.features.output_contracts",
+    "wr.features.subagent_guidance"
+  ],
+  "extensionPoints": [
+    {
+      "slotId": "candidate_generation",
+      "purpose": "Let me swap in a different way of generating candidate directions without forking the whole workflow.",
+      "default": "routine-tension-driven-design",
+      "acceptedKinds": ["routine", "workflow"]
+    },
+    {
+      "slotId": "direction_review",
+      "purpose": "Let me swap in a different way of pressure-testing the selected direction without giving up parent workflow synthesis.",
+      "default": "routine-design-review",
+      "acceptedKinds": ["routine", "workflow"]
+    },
+    {
+      "slotId": "final_validation",
+      "purpose": "Let me swap in a different final challenge or validation pass before handoff.",
+      "default": "routine-hypothesis-challenge",
+      "acceptedKinds": ["routine", "workflow"]
+    }
+  ],
+  "preconditions": [
+    "I can tell you what problem, opportunity, or decision I want help thinking through.",
+    "You can keep durable state in `output.notesMarkdown` and `continue_workflow` context keys.",
+    "You can create and maintain a human-facing design document when the work is substantial enough to need one."
+  ],
+  "clarificationPrompts": [
+    "What exactly do I want help thinking through?",
+    "What kind of outcome am I looking for: understanding, a recommendation, a prototype direction, or a decision memo?",
+    "What constraints, anti-goals, principles, or boundaries do you need to respect?",
+    "Who are the users, stakeholders, or systems that matter most here?",
+    "Do I already have candidate approaches, precedents, or concerns you should take into account?"
+  ],
+  "metaGuidance": [
+    "Default behavior: use tools and keep moving. Only stop to ask me for things you cannot responsibly infer, verify, or access yourself.",
+    "Durability: keep the durable truth in `output.notesMarkdown` and explicit `continue_workflow` context keys. Do not rely on the design doc alone as memory.",
+    "Artifact strategy: treat `designDocPath` as the human-facing canonical artifact. Keep it readable and current, but keep execution truth in notes and structured context.",
+    "Own the synthesis yourself. Delegated output is evidence, not a decision. You own framing, comparison, challenge adjudication, selection, uncertainty-resolution, and final handoff.",
+    "Positioning: treat this as the canonical successor to the old exploration and design-thinking workflows. If I ask for either of those by name, this is the workflow I mean.",
+    "Path model: pick one emphasis path early, but do not skip the shared core. Every path still needs some landscape understanding, some problem or stakeholder understanding, some candidate generation, some challenge, and either a recommendation or a learning artifact.",
+    "Paths: use `landscape_first` when the main need is current-state understanding and comparison. Use `full_spectrum` when the problem is important or ambiguous enough to need the fullest pass. Use `design_first` when reframing, tensions, and prototype-driven learning matter most.",
+    "Re-triage: treat the initial path choice as provisional. If early context shows the center of gravity is somewhere else, change course deliberately.",
+    "Anti-anchoring: do not let the first framing or favorite option dominate the work. Generate at least one materially different direction and challenge the leading one directly.",
+    "Parallelism: parallelize independent research lenses, stakeholder lenses, and bounded cognitive routines. Serialize synthesis, recommendation decisions, and canonical document writes.",
+    "Capability fallbacks: if web browsing is unavailable, use repo context, user context, and internal knowledge, then record the evidence gaps explicitly. If delegation is unavailable, do the passes yourself in sequence.",
+    "Doc discipline: keep append-only decision reasoning in the design doc. Record assumptions, contradictions, abandoned paths, and why the selected direction won.",
+    "Boundary: this workflow can end with a recommendation memo, prototype or test plan, or a research-informed direction. It should not implement production code."
+  ],
+  "functionDefinitions": [
+    {
+      "name": "landscapePacketTemplate",
+      "definition": "When you write the landscape packet in `designDocPath`, use this shape:\n## Landscape Packet\n- Current state summary\n- Existing approaches / precedents\n- Option categories\n- Contradictions / disagreements\n- Evidence gaps\n- Why this matters for path selection and recommendation"
+    },
+    {
+      "name": "problemFrameTemplate",
+      "definition": "When you write the problem frame packet in `designDocPath`, use this shape:\n## Problem Frame Packet\n- Users / stakeholders\n- Jobs, goals, or outcomes\n- Pains / tensions / constraints\n- Success criteria\n- Assumptions\n- Reframes / HMW questions\n- What would make this framing wrong"
+    },
+    {
+      "name": "prototypeSpecTemplate",
+      "definition": "When you create a lightweight prototype or validation artifact, use this shape:\n## Goal\n## Non-goals\n## Learning question\n## Artifact type\n## What will be exercised\n## Falsification criteria\n## Test scenarios\n## Expected signals\n## Pivot / stop rule"
+    }
+  ],
+  "steps": [
+    {
+      "id": "phase-0-understand-and-select-path",
+      "title": "Phase 0: Understand, Classify, and Recommend a Path",
+      "promptBlocks": {
+        "goal": "Figure out what I actually need help with, then recommend the best path through this workflow.",
+        "constraints": [
+          [
+            { "kind": "ref", "refId": "wr.refs.notes_first_durability" }
+          ],
+          "Use tools to answer your own questions whenever possible.",
+          "Recommend a path with rationale instead of making me pick cold.",
+          "If the task is important, ambiguous, or easy to misframe, default to `full_spectrum` unless a narrower path will still answer the real question."
+        ],
+        "procedure": [
+          "Capture: `problemStatement`, `desiredOutcome`, `coreConstraints`, `antiGoals`, `primaryUncertainty`, `knownApproaches`, `importantStakeholders`, `rigorMode`, `automationLevel`, `pathRecommendation`, `pathRationale`, `designDocPath`.",
+          "Choose `landscape_first` when my dominant need is understanding the current landscape or comparing options. Choose `full_spectrum` when both landscape grounding and reframing are needed. Choose `design_first` when the dominant risk is solving the wrong problem or shaping the wrong concept.",
+          "Create or update `designDocPath` with sections for Context / Ask, Path Recommendation, Constraints / Anti-goals, Landscape Packet, Problem Frame Packet, Candidate Directions, Challenge Notes, Resolution Notes, Decision Log, and Final Summary.",
+          "Set these keys in the next `continue_workflow` call's `context` object: `problemStatement`, `desiredOutcome`, `coreConstraints`, `antiGoals`, `primaryUncertainty`, `knownApproaches`, `importantStakeholders`, `rigorMode`, `automationLevel`, `pathRecommendation`, `pathRationale`, `designDocPath`."
+        ],
+        "verify": [
+          "The chosen path is justified against the other two, not just named.",
+          "The design doc exists and the path recommendation is recorded there."
+        ]
+      },
+      "requireConfirmation": {
+        "or": [
+          { "var": "pathRecommendation", "equals": "full_spectrum" },
+          { "var": "rigorMode", "equals": "THOROUGH" }
+        ]
+      }
+    },
+    {
+      "id": "phase-0b-capabilities-and-artifact-setup",
+      "title": "Phase 0b: Capability and Artifact Setup",
+      "promptBlocks": {
+        "goal": "Figure out what capabilities are actually available and set up the human artifact strategy I need.",
+        "constraints": [
+          [
+            { "kind": "ref", "refId": "wr.refs.notes_first_durability" }
+          ],
+          "Probe capability availability through real work or explicit checks, then record the result structurally.",
+          "If web browsing or delegation is unavailable, keep going with the best fallback and record the gap."
+        ],
+        "procedure": [
+          "Observe and record `delegationAvailable` and `webBrowsingAvailable`.",
+          "Record `needsLandscapeBreadth` and `needsDesignDepth` based on the selected path and the uncertainty in my request.",
+          "Update `designDocPath` with the chosen artifact strategy: this doc is for people to read; notes/context remain execution truth.",
+          "Set these keys in the next `continue_workflow` call's `context` object: `delegationAvailable`, `webBrowsingAvailable`, `needsLandscapeBreadth`, `needsDesignDepth`, `retriageNeeded`."
+        ],
+        "verify": [
+          "Capability fallbacks are explicit.",
+          "The design doc states what it is for and what it is not for."
+        ]
+      },
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-1-landscape-understanding",
+      "title": "Phase 1: Landscape Understanding",
+      "promptBlocks": {
+        "goal": "Build the minimum trustworthy landscape understanding needed for the path you chose for me.",
+        "constraints": [
+          [
+            { "kind": "ref", "refId": "wr.refs.parallelize_cognition_serialize_synthesis" }
+          ],
+          "If web browsing is available, use it for current-state grounding; otherwise fall back explicitly and mark the evidence gap.",
+          "If delegation is available and independent research lenses exist, run them in parallel; otherwise do the passes yourself in sequence."
+        ],
+        "procedure": [
+          "Use a deep scan for `landscape_first`, a strong but bounded scan for `full_spectrum`, and the lightest scan for `design_first` that still surfaces the main existing approaches, hard constraints, and obvious contradictions.",
+          "Gather a current-state summary, existing approaches or precedents, option categories, notable contradictions, strong constraints from the world, and evidence gaps.",
+          "If `delegationAvailable = true` and (`pathRecommendation = landscape_first` or `rigorMode != QUICK`), decide whether parallel research is likely to give you a better read here. If yes, spawn TWO WorkRail Executors SIMULTANEOUSLY running `routine-context-gathering` with focus=COMPLETENESS and focus=DEPTH, then synthesize the outputs yourself. If not, keep going yourself and record why solo work is enough.",
+          "Update `designDocPath` using `landscapePacketTemplate`.",
+          "Set these keys in the next `continue_workflow` call's `context` object: `landscapeSummary`, `landscapeGapCount`, `contradictionCount`, `precedentCount`, `retriageNeeded`."
+        ],
+        "verify": [
+          "Important contradictions or evidence gaps are explicit.",
+          "Landscape work depth matches the selected path instead of defaulting to maximal research."
+        ]
+      },
+      "functionReferences": [
+        "landscapePacketTemplate()"
+      ],
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-1b-problem-frame-and-stakeholders",
+      "title": "Phase 1b: Problem Frame and Stakeholder Understanding",
+      "promptBlocks": {
+        "goal": "Understand the people, tensions, and framing risks that should shape the recommendation you give me.",
+        "constraints": [
+          [
+            { "kind": "ref", "refId": "wr.refs.parallelize_cognition_serialize_synthesis" }
+          ],
+          "Do not silently promote assumptions into facts.",
+          "Go deep on framing for `design_first`, do strong framing for `full_spectrum`, and keep it lean for `landscape_first` without skipping the core tension, primary stakeholders, success criteria, and what could make the framing wrong."
+        ],
+        "procedure": [
+          "Capture users or stakeholders, jobs or outcomes, pains or tensions, constraints that matter in lived use, success criteria, assumptions, and at least 2 reframes or HMW questions.",
+          "If `delegationAvailable = true`, decide whether parallel stakeholder lenses would actually sharpen the result. If yes, run them in parallel. If not, keep going yourself. In either case, you must synthesize the result yourself.",
+          "Update `designDocPath` using `problemFrameTemplate`.",
+          "Set these keys in the next `continue_workflow` call's `context` object: `problemFrame`, `primaryUsers`, `tensionCount`, `successCriteriaCount`, `framingRiskCount`, `needsChallenge`, `retriageNeeded`."
+        ],
+        "verify": [
+          "The framing names what could still be wrong.",
+          "Even on `landscape_first`, the stakeholder/problem packet still covers the core tension, primary stakeholders, success criteria, and framing risk."
+        ]
+      },
+      "functionReferences": [
+        "problemFrameTemplate()"
+      ],
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-1c-retriage-after-context",
+      "title": "Phase 1c: Re-Triage After Early Context",
+      "runCondition": {
+        "var": "retriageNeeded",
+        "equals": true
+      },
+      "promptBlocks": {
+        "goal": "Reassess the path now that you have real landscape and framing context instead of just my initial wording.",
+        "constraints": [
+          "Base the re-triage on actual evidence gathered so far, not on the original default path alone.",
+          "Only change the path or rigor when the center of gravity has materially shifted."
+        ],
+        "procedure": [
+          "Review whether the dominant uncertainty is still what you thought it was at the start.",
+          "Review whether `landscapeGapCount`, `contradictionCount`, or `framingRiskCount` materially change the center of gravity.",
+          "Review whether the task now clearly needs a prototype, more research, or a broader synthesis pass.",
+          "Confirm or adjust `pathRecommendation` and `rigorMode`.",
+          "Set `pathChangedAfterContext`, `needsPrototype`, and `needsFurtherResearch`.",
+          "Set these keys in the next `continue_workflow` call's `context` object: `pathRecommendation`, `rigorMode`, `pathChangedAfterContext`, `needsPrototype`, `needsFurtherResearch`."
+        ],
+        "verify": [
+          "Any path change is justified by the evidence gathered so far.",
+          "Prototype and research needs are called explicitly rather than left implicit."
+        ]
+      },
+      "requireConfirmation": {
+        "or": [
+          { "var": "pathChangedAfterContext", "equals": true },
+          { "var": "rigorMode", "equals": "THOROUGH" }
+        ]
+      }
+    },
+    {
+      "id": "phase-2-synthesize-opportunity",
+      "title": "Phase 2: Synthesize the Opportunity and Decision Shape",
+      "promptBlocks": {
+        "goal": "Combine the landscape packet and problem frame into a coherent decision shape before you generate candidates.",
+        "constraints": [
+          [
+            { "kind": "ref", "refId": "wr.refs.synthesis_under_disagreement" }
+          ],
+          "If the landscape and framing stories disagree, treat that disagreement as first-class work.",
+          "State what kind of uncertainty remains: recommendation uncertainty, research uncertainty, or prototype-learning uncertainty."
+        ],
+        "procedure": [
+          "Produce a concise synthesis of the opportunity, the 3-5 criteria the final direction must satisfy, the strongest framing risk, and the current best explanation of what success looks like.",
+          "If `needsChallenge = true`, produce the strongest case against the current framing yourself. If `delegationAvailable = true` and `rigorMode != QUICK`, decide whether a delegated challenge is likely to sharpen the work enough to be worth it. If yes, spawn ONE WorkRail Executor running `routine-hypothesis-challenge` against the current framing or leading interpretation, then synthesize it yourself. If not, record why your direct challenge is sufficient.",
+          "Set `candidateCountTarget` adaptively: QUICK = 2-3, STANDARD = 3-4, THOROUGH = 4-5.",
+          "Set these keys in the next `continue_workflow` call's `context` object: `decisionCriteria`, `riskiestAssumption`, `candidateCountTarget`, `needsPrototype`, `needsFurtherResearch`, `pathReady`."
+        ],
+        "verify": [
+          "You can explain why this is the right path and what a good answer must satisfy.",
+          "Remaining uncertainty is categorized explicitly instead of left fuzzy."
+        ]
+      },
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-3a-candidate-generation-quick",
+      "title": "Phase 3a: Candidate Generation (QUICK)",
+      "runCondition": {
+        "var": "rigorMode",
+        "equals": "QUICK"
+      },
+      "prompt": "Generate enough genuinely distinct candidates for me to support a real choice and write `design-candidates.md`.\n\nRequirements:\n- create at least 2 materially different candidates, and add another if the set still clusters too tightly\n- include one simplest plausible direction and one direction that better serves the selected path's emphasis\n- for each candidate: summary, why it fits the path, strongest evidence for it, strongest risk against it, and when it should win\n- include at least one runner-up strong enough that switching to it would feel real, not hypothetical\n- update `designDocPath` with a short Candidate Directions section that points to the candidate set\n\nBefore finishing, say what would change your mind between the top two candidates.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-3b-candidate-generation-deep",
+      "title": "Phase 3b: Candidate Generation (Injected Routine — Tension-Driven Design)",
+      "runCondition": {
+        "var": "rigorMode",
+        "not_equals": "QUICK"
+      },
+      "promptBlocks": {
+        "goal": "Run the configured candidate-generation approach and produce `design-candidates.md` for me.",
+        "constraints": [
+          "Candidate generation is a bounded cognitive phase. You still own selection and synthesis at the parent workflow level.",
+          "The generated candidate set should reflect the selected path and current decision criteria."
+        ],
+        "procedure": [
+          "Choose the execution mode that is most likely to produce a strong candidate set here. If you can get there well yourself, follow the bounded candidate-generation implementation referenced by `{{wr.bindings.candidate_generation}}` and produce `design-candidates.md` directly.",
+          "If delegation is likely to give you a clearly better spread of options or a stronger challenge pass, spawn ONE WorkRail Executor running `{{wr.bindings.candidate_generation}}` with the current path, tensions, landscape packet, problem frame, and decision criteria, then capture the resulting candidate set in `design-candidates.md`. If you do not delegate, keep going yourself and record why that is enough."
+        ],
+        "verify": [
+          "`design-candidates.md` exists and contains a genuinely differentiated candidate set rather than minor variations on one idea."
+        ]
+      }
+    },
+    {
+      "id": "phase-3c-challenge-and-select-direction",
+      "title": "Phase 3c: Challenge and Select Direction",
+      "promptBlocks": {
+        "goal": "Read `design-candidates.md`, challenge the leading option, and make the final workflow-owned selection for me.",
+        "constraints": [
+          [
+            { "kind": "ref", "refId": "wr.refs.adversarial_challenge_rules" }
+          ],
+          "You own the selection. Candidate generation output is evidence, not the final decision.",
+          "If the leading option no longer looks best after challenge, switch deliberately rather than defending sunk cost."
+        ],
+        "procedure": [
+          "Compare candidates against `pathRecommendation` and `decisionCriteria`: which candidate best fits, which candidate is the strongest alternative, and what evidence or stakeholder tension the top candidate still risks missing.",
+          "Self-produce the strongest argument against the leading option.",
+          "If `delegationAvailable = true` and (`rigorMode != QUICK` or `pathRecommendation = full_spectrum`), decide whether a delegated challenge is likely to sharpen the decision enough to be worth the extra step. If yes, spawn ONE WorkRail Executor running `{{wr.bindings.final_validation}}` against the leading option. If not, keep the challenge in your own hands and say why.",
+          "If `delegationAvailable = true`, `rigorMode = THOROUGH`, and the decision has meaningful runtime or adoption risk, you may also spawn ONE WorkRail Executor running `routine-execution-simulation`.",
+          "Choose `selectedDirection` and `runnerUpDirection`.",
+          "Record `acceptedTradeoffs`, `identifiedFailureModes`, and what would trigger a switch.",
+          "Update `designDocPath` Decision Log with why the winner won and why the runner-up lost.",
+          "Set these keys in the next `continue_workflow` call's `context` object: `selectedDirection`, `runnerUpDirection`, `acceptedTradeoffs`, `identifiedFailureModes`, `hasStrongAlternative`, `needsPrototype`, `needsFurtherResearch`, `recommendationConfidenceBand`."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Explain the winning direction for me, the strongest alternative, and what challenge pressure changed or failed to change."
+        },
+        "verify": [
+          "The strongest alternative was developed enough that switching to it would feel real, not just imaginable.",
+          "Tradeoffs, failure modes, and switch triggers are explicit."
+        ]
+      },
+      "requireConfirmation": {
+        "or": [
+          { "var": "automationLevel", "equals": "Low" },
+          { "var": "pathRecommendation", "equals": "full_spectrum" }
+        ]
+      }
+    },
+    {
+      "id": "phase-4-direction-review-loop",
+      "type": "loop",
+      "title": "Phase 4: Direction Review Loop",
+      "runCondition": {
+        "or": [
+          { "var": "rigorMode", "not_equals": "QUICK" },
+          { "var": "pathRecommendation", "equals": "full_spectrum" },
+          { "var": "pathRecommendation", "equals": "design_first" }
+        ]
+      },
+      "loop": {
+        "type": "while",
+        "conditionSource": {
+          "kind": "artifact_contract",
+          "contractRef": "wr.contracts.loop_control",
+          "loopId": "discovery_direction_review_loop"
+        },
+        "maxIterations": 2
+      },
+      "body": [
+        {
+          "id": "phase-4a-direction-review-core",
+          "title": "Direction Review Core",
+          "promptBlocks": {
+        "goal": "Run the configured direction review approach and produce `design-review-findings.md`.",
+            "constraints": [
+              "You remain responsible for interpreting the findings.",
+              "Treat the selected direction and its known tradeoffs as input context, not as guaranteed truth."
+            ],
+            "procedure": [
+              "Choose the execution mode that is most likely to produce a useful review here. If direct execution is enough, follow the bounded review implementation referenced by `{{wr.bindings.direction_review}}` and produce `design-review-findings.md`.",
+              "If delegation is likely to surface better weaknesses or hidden tradeoffs, spawn ONE WorkRail Executor running `{{wr.bindings.direction_review}}` with the selected direction, accepted tradeoffs, failure modes, and path context, then capture the resulting findings in `design-review-findings.md`. If you do not delegate, record why direct review is enough."
+            ],
+            "verify": [
+              "`design-review-findings.md` exists and reflects an actual review pass, not a placeholder."
+            ]
+          },
+          "requireConfirmation": false
+        },
+        {
+          "id": "phase-4b-synthesize-direction-review",
+          "title": "Synthesize Direction Review",
+          "promptBlocks": {
+            "goal": "Read `design-review-findings.md` and decide whether the selected direction you would give me should change.",
+            "constraints": [
+              "Interpret review findings yourself rather than adopting them wholesale.",
+              "If the review surfaces bounded issues but not a direction change, record them as residual concerns instead of pretending the design is perfect."
+            ],
+            "procedure": [
+              "Compare the review findings to your own prior reasoning.",
+              "State what changed your mind, what did not, and why.",
+              "If issues are real, update `selectedDirection`, `runnerUpDirection`, `acceptedTradeoffs`, `identifiedFailureModes`, and the Decision Log in `designDocPath`.",
+              "Set these keys in the next `continue_workflow` call's `context` object: `directionFindings`, `directionRevised`, `needsPrototype`, `needsFurtherResearch`, `recommendationConfidenceBand`."
+            ],
+            "verify": [
+          "Your decision reflects synthesized judgment, not copied review output."
+            ]
+          },
+          "requireConfirmation": false
+        },
+        {
+          "id": "phase-4c-direction-review-loop-decision",
+          "title": "Direction Review Loop Decision",
+          "promptBlocks": {
+            "goal": "Decide whether the direction review loop should continue.",
+            "constraints": [
+              "Base the decision on whether the selected direction materially changed or still needs another review pass."
+            ],
+            "procedure": [
+              "If `directionFindings` is non-empty and `directionRevised = true`, continue.",
+              "If review findings are only residual concerns, stop.",
+              "If max iterations are reached, stop and document the remaining concerns clearly.",
+              "Provide a `wr.loop_control` artifact with decision `continue` or `stop`."
+            ],
+            "outputRequired": {
+              "artifacts": "Provide a valid `wr.loop_control` artifact for the active loop."
+            },
+            "verify": [
+              "The loop decision matches the actual review outcome."
+            ]
+          },
+          "requireConfirmation": false,
+          "outputContract": {
+            "contractRef": "wr.contracts.loop_control"
+          }
+        }
+      ]
+    },
+    {
+      "id": "phase-5-resolution-strategy",
+      "title": "Phase 5: Choose the Uncertainty-Resolution Strategy",
+      "promptBlocks": {
+        "goal": "Decide whether you should end with a recommendation for me, a targeted research follow-up, or a prototype/test artifact.",
+        "constraints": [
+          [
+            { "kind": "ref", "refId": "wr.refs.adversarial_challenge_rules" }
+          ],
+          "Do the least work that can still resolve the most important remaining uncertainty. If a lighter pass would leave the main risk unresolved, do not choose it.",
+          "A prototype exists to falsify a direction, not to decorate it."
+        ],
+        "procedure": [
+          "Choose `resolutionMode` as one of: `direct_recommendation`, `research_followup`, `prototype_test`.",
+          "Choose `direct_recommendation` when confidence is already strong. Choose `research_followup` when the main gap is still external or current-state evidence. Choose `prototype_test` when uncertainty is best resolved by simulating the selected direction or testing reactions and behavior.",
+          "Set `needsResolutionLoop` to true only for `research_followup` or `prototype_test`.",
+          "Set `iterationBudget`: QUICK = 1, STANDARD = 2, THOROUGH = 3.",
+          "Set these keys in the next `continue_workflow` call's `context` object: `resolutionMode`, `needsResolutionLoop`, `iterationBudget`, `remainingGapCount`."
+        ],
+        "verify": [
+          "The chosen resolution mode matches the actual remaining uncertainty.",
+          "You are not forcing a prototype when a recommendation is already sufficiently grounded."
+        ]
+      },
+      "requireConfirmation": {
+        "or": [
+          { "var": "resolutionMode", "equals": "prototype_test" },
+          { "var": "remainingGapCount", "gt": 0 }
+        ]
+      }
+    },
+    {
+      "id": "phase-5b-resolution-loop",
+      "type": "loop",
+      "title": "Phase 5b: Resolution Loop",
+      "runCondition": {
+        "var": "needsResolutionLoop",
+        "equals": true
+      },
+      "loop": {
+        "type": "while",
+        "conditionSource": {
+          "kind": "artifact_contract",
+          "contractRef": "wr.contracts.loop_control",
+          "loopId": "discovery_resolution_loop"
+        },
+        "maxIterations": 3
+      },
+      "body": [
+        {
+          "id": "phase-5b-run-resolution-pass",
+          "title": "Run Resolution Pass",
+          "promptBlocks": {
+        "goal": "Resolve the remaining uncertainty according to `resolutionMode`.",
+            "constraints": [
+              "Do the smallest pass that materially reduces the remaining uncertainty.",
+              "When using prototype-oriented validation, favor falsification over persuasion."
+            ],
+            "procedure": [
+              "If `resolutionMode = research_followup`, gather only the missing evidence that could actually change the recommendation and update the Landscape Packet and Decision Log in `designDocPath`.",
+              "If `resolutionMode = prototype_test`, create or update a minimal prototype/test spec in `designDocPath` using `prototypeSpecTemplate`, then run the cheapest test that can still falsify the direction or give it real support. Capture what worked, what failed, and what would falsify it.",
+              "For either mode, update assumptions, confidence, and the recommended next action for me.",
+              "Set these keys in the next `continue_workflow` call's `context` object: `resolutionInsightCount`, `invalidatedAssumptionCount`, `remainingGapCount`, `resolutionContinueRecommended`, `recommendationConfidenceBand`."
+            ],
+            "outputRequired": {
+              "notesMarkdown": "Summarize what was learned in this resolution pass and how it changed the confidence behind the recommendation."
+            },
+            "verify": [
+              "The pass materially addressed the selected remaining uncertainty."
+            ]
+          },
+          "functionReferences": [
+            "prototypeSpecTemplate()"
+          ],
+          "requireConfirmation": false
+        },
+        {
+          "id": "phase-5b-resolution-loop-decision",
+          "title": "Resolution Loop Decision",
+          "promptBlocks": {
+            "goal": "Decide whether the resolution loop should continue.",
+            "constraints": [
+              "Continue only when a meaningful remaining gap still exists and cheap learning remains available."
+            ],
+            "procedure": [
+              "Continue if `resolutionContinueRecommended = true`, `remainingGapCount > 0`, and budget remains.",
+              "Stop if confidence is now sufficient, the top direction was falsified, or more cheap learning is not realistically available.",
+              "Provide a `wr.loop_control` artifact with decision `continue` or `stop`."
+            ],
+            "outputRequired": {
+              "artifacts": "Provide a valid `wr.loop_control` artifact for the active loop."
+            },
+            "verify": [
+              "The loop decision reflects both remaining uncertainty and budget reality."
+            ]
+          },
+          "requireConfirmation": false,
+          "outputContract": {
+            "contractRef": "wr.contracts.loop_control"
+          }
+        }
+      ]
+    },
+    {
+      "id": "phase-6-final-validation",
+      "title": "Phase 6: Final Validation",
+      "promptBlocks": {
+        "goal": "Validate that you are ending with the right level of confidence and the right caveats for me.",
+        "constraints": [
+          [
+            { "kind": "ref", "refId": "wr.refs.synthesis_under_disagreement" }
+          ],
+          "Do not claim certainty you do not have.",
+          "If important contradictions or gaps remain, downgrade confidence and say so explicitly."
+        ],
+        "procedure": [
+          "Validate that the selected path still makes sense in hindsight, the chosen direction still beats the strongest alternative, the remaining uncertainty is named honestly, and the design doc is complete enough for a human to use.",
+          "If a serious unresolved concern remains and `delegationAvailable = true`, decide whether a delegated final challenge is likely to change the result or sharpen the caveats. If yes, spawn ONE WorkRail Executor running `{{wr.bindings.final_validation}}` against the final recommendation. If not, keep the challenge in your own hands and record why.",
+          "Set these keys in the next `continue_workflow` call's `context` object: `finalConfidenceBand`, `residualRiskCount`, `handoffReady`."
+        ],
+        "verify": [
+          "The confidence band matches the evidence quality and remaining risks.",
+          "The handoff is recommendation-ready, not just thought-complete."
+        ]
+      },
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-7-final-handoff",
+      "title": "Phase 7: Final Handoff",
+      "promptBlocks": {
+        "goal": "Finalize the design doc and deliver a clear recommendation, artifact, or next-step direction to me.",
+        "constraints": [
+          [
+            { "kind": "ref", "refId": "wr.refs.notes_first_durability" }
+          ],
+          "Keep the final chat output concise.",
+          "Do not drift into production implementation planning beyond high-level next actions."
+        ],
+        "procedure": [
+          "Update `designDocPath` with a final summary containing the selected path, problem framing, landscape takeaways, chosen direction, strongest alternative, why it lost, confidence band, residual risks, and next actions.",
+          "In the final chat output, tell me the selected path, the chosen direction, the key reason it won, and where to find `designDocPath`."
+        ],
+        "verify": [
+          "The design doc reads like a coherent human artifact.",
+          "The final answer tells me what to do next or what was learned."
+        ]
+      },
+      "requireConfirmation": true
+    }
+  ]
+}

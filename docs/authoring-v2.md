@@ -39,6 +39,58 @@ For detailed JSON syntax and examples, see: `docs/design/workflow-authoring-v2.m
 - The default durable output is a short recap in `output.notesMarkdown` (recorded by the agent when advancing or checkpointing).
 - Structured artifacts are **optional** and must never be required for a workflow to be usable.
 
+### Rigor vs rigidity
+
+Workflows should provide a **strong skeleton, not a straitjacket**.
+
+- Be strict about the things that protect quality:
+  - required outcomes
+  - important decision points
+  - evidence and uncertainty accounting
+  - final validation or challenge passes
+- Be flexible about the things LLMs are good at:
+  - synthesis order
+  - framing moves
+  - idea generation
+  - creative problem decomposition
+
+Author for **what must be accomplished**, not for an exact internal choreography of thought.
+
+### Anti-lazy wording
+
+Adaptive workflows should leave room for judgment without creating easy escape hatches.
+
+Be careful with wording like:
+
+- `if appropriate`
+- `minimal pass`
+- `light scan`
+- `you may`
+- `smallest`
+- `cheapest`
+
+These phrases are often useful, but they become lazy when they are not paired with a quality floor.
+
+Prefer wording like:
+
+- "do the lightest pass that still surfaces the main approaches, hard constraints, and obvious contradictions"
+- "choose the lighter path only if it still answers the real question"
+- "if you do not delegate, record why solo execution is enough"
+
+Good adaptive wording gives the agent freedom in method while still requiring it to **earn confidence**.
+
+### User-voice prose
+
+For bundled and user-facing workflows, prefer prose that often feels like **the user is directly instructing the agent**.
+
+This usually works better than detached author or framework narration because it:
+
+- keeps the workflow grounded in user intent
+- makes prompts feel less like internal boilerplate
+- encourages the agent to treat the workflow as an expression of the user's will
+
+Neutral/system-style prose is still fine for internal or infrastructural workflows, but user-facing flows generally benefit from a clearer user voice.
+
 ### Builtins (no user-defined plugins)
 
 WorkRail v2 provides **built-in** building blocks that workflows (including external workflows) can reference:

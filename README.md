@@ -174,7 +174,7 @@ The agent will find the workflow, start at step 1, and proceed systematically.
 | `coding-task-workflow-agentic` | Feature development with notes-first durability and audit loops |
 | `bug-investigation-agentic` | Systematic debugging with evidence-based analysis |
 | `mr-review-workflow-agentic` | Code review with parallel reviewer families |
-| `exploration-workflow` | Understanding an unfamiliar codebase |
+| `wr.discovery` | Upstream exploration, framing, and design synthesis |
 | `document-creation-workflow` | Technical documentation with structure |
 
 Workflows adapt to complexity - simple tasks get fast-tracked, complex tasks get full rigor.

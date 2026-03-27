@@ -121,14 +121,14 @@ An intelligent workflow for creating high-quality Jira tickets. Uses LLM-driven 
 - **Steps**: 9
 - **File**: `workflows/adaptive-ticket-creation.json`
 
-### `exploration-workflow`
+### `wr.discovery`
 
-**Comprehensive Adaptive Exploration Workflow** (v0.1.0)
+**Discovery Workflow (Bundled • Exploration + Design Synthesis)** (v3.0.0)
 
-An enterprise-grade exploration workflow featuring multi-phase research loops with saturation detection, evidence-based validation, diverse solution generation, and adversarial challenge patterns. Adapts methodology based on domain type (technical/business/creative) while ensuring depth through triangulation, confidence scoring, and systematic quality gates.
+A bundled upstream thinking workflow that merges the old exploration and design-thinking workflows into one adaptive flow. It chooses between landscape-first, full-spectrum, and design-first paths while preserving a shared notes-first structure for framing, synthesis, challenge, and recommendation or prototype-driven learning.
 
-- **Steps**: 17
-- **File**: `workflows/exploration-workflow.json`
+- **Steps**: 12
+- **File**: `workflows/wr.discovery.json`
 
 ### `intelligent-test-case-generation`
 

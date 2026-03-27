@@ -20,7 +20,7 @@
     },
     "description": {
       "type": "string",
-      "description": "What this workflow accomplishes",
+      "description": "What this workflow accomplishes. Prefer clear user-facing language for bundled/user-facing workflows; schema does not enforce prose style.",
       "minLength": 1,
       "maxLength": 512
     },
@@ -42,7 +42,7 @@
     },
     "clarificationPrompts": {
       "type": "array",
-      "description": "Questions to ask upfront to resolve ambiguities",
+      "description": "Questions to ask upfront to resolve ambiguities. Prefer direct, user-grounded wording over abstract framework narration.",
       "items": {
         "type": "string",
         "minLength": 1,
@@ -67,7 +67,7 @@
     },
     "metaGuidance": {
       "type": "array",
-      "description": "Persistent behavioral rules surfaced on start and resume. Not repeated on every step advance. For external document pointers, use 'references' instead.",
+      "description": "Persistent behavioral rules surfaced on start and resume. Not repeated on every step advance. Use this to define quality bars and anti-failure guidance without rigidly scripting every thought. For external document pointers, use 'references' instead.",
       "items": {
         "type": "string",
         "minLength": 1,
@@ -127,7 +127,7 @@
     },
     "features": {
       "type": "array",
-      "description": "Compiler features to apply to this workflow (e.g. wr.features.memory_context). Features inject content into promptBlocks at compile time.",
+      "description": "Compiler features to apply to this workflow (e.g. wr.features.memory_context). Features inject content into promptBlocks at compile time and work best when the workflow uses structured promptBlocks instead of relying entirely on raw prompt prose.",
       "items": {
         "type": "string",
         "minLength": 1,
@@ -137,7 +137,7 @@
     },
     "extensionPoints": {
       "type": "array",
-      "description": "Bounded cognitive slots that users can customize via .workrail/bindings.json. Each slot is referenced in step prompts via {{wr.bindings.slotId}} and resolved at compile time.",
+      "description": "Bounded cognitive slots that users can customize via .workrail/bindings.json. Each slot is referenced in step prompts via {{wr.bindings.slotId}} and resolved at compile time. Use extension points for bounded cognitive units, not for core orchestration or final synthesis ownership.",
       "items": {
         "$ref": "#/$defs/extensionPoint"
       },
@@ -163,7 +163,7 @@
   "$defs": {
     "extensionPoint": {
       "type": "object",
-      "description": "A bounded cognitive slot that can be customized via .workrail/bindings.json",
+      "description": "A bounded cognitive slot that can be customized via .workrail/bindings.json. Good uses include candidate generation, review, and validation passes; poor uses include replacing the parent workflow's core orchestration contract.",
       "properties": {
         "slotId": {
           "type": "string",
@@ -283,7 +283,7 @@
       "properties": {
         "id": { "$ref": "#/$defs/stepId", "description": "Unique identifier for the step" },
         "title": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "prompt": { "type": "string", "minLength": 1, "maxLength": 8192 },
+        "prompt": { "type": "string", "minLength": 1, "maxLength": 8192, "description": "Traditional single-string prompt. Use when structure is simple; prefer promptBlocks when you need stronger quality bars without over-scripting cognition." },
         "promptBlocks": { "$ref": "#/$defs/promptBlocks" },
         "agentRole": { "type": "string", "minLength": 10, "maxLength": 1024 },
         "guidance": { "type": "array", "items": { "type": "string" } },
