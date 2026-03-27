@@ -32,6 +32,12 @@ import type { SessionId, WorkflowHash, SnapshotRef } from '../durable-core/ids/i
  * ```
  */
 export interface DataDirPortV2 {
+  /** Absolute path to remembered workspace roots state. */
+  rememberedRootsPath(): string;
+
+  /** Absolute path to remembered workspace roots lock file. */
+  rememberedRootsLockPath(): string;
+
   /** Root directory for pinned compiled workflows. */
   pinnedWorkflowsDir(): string;
   /** Absolute path for pinned workflow file for given hash. */

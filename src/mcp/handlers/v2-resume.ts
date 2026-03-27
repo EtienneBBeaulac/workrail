@@ -23,6 +23,7 @@ import { asRunId, asNodeId, deriveWorkflowHashRef } from '../../v2/durable-core/
 import type { TokenCodecPorts } from '../../v2/durable-core/tokens/index.js';
 import { resumeSession } from '../../v2/usecases/resume-session.js';
 import { resolveWorkspaceAnchors } from './v2-workspace-resolution.js';
+import { rememberExplicitWorkspaceRoot } from './shared/remembered-roots.js';
 
 type ResumeInput = z.infer<typeof V2ResumeSessionInput>;
 type ResumeOutput = z.infer<typeof V2ResumeSessionOutputSchema>;
@@ -63,6 +64,9 @@ export async function handleV2ResumeSession(
   if (!v2.sessionSummaryProvider) {
     return errNotRetryable('INTERNAL_ERROR', 'resume_session requires sessionSummaryProvider port');
   }
+
+  const rememberedRootFailure = await rememberExplicitWorkspaceRoot(input.workspacePath, v2.rememberedRootsStore);
+  if (rememberedRootFailure) return rememberedRootFailure;
 
   // Resolve workspace anchors (graceful: empty on failure).
   // Priority: explicit workspacePath input > MCP roots URI > server process CWD.

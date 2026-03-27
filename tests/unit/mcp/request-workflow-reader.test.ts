@@ -6,9 +6,12 @@ import { describe, expect, it } from 'vitest';
 import { StaticFeatureFlagProvider } from '../../../src/config/feature-flags.js';
 import {
   createWorkflowReaderForRequest,
+  discoverRootedWorkflowDirectories,
   resolveRequestWorkspaceDirectory,
   toProjectWorkflowDirectory,
 } from '../../../src/mcp/handlers/shared/request-workflow-reader.js';
+import type { RememberedRootsStorePortV2 } from '../../../src/v2/ports/remembered-roots-store.port.js';
+import { okAsync } from 'neverthrow';
 
 function writeWorkflow(workspaceDir: string, name: string): void {
   const workflowsDir = path.join(workspaceDir, 'workflows');
@@ -30,6 +33,43 @@ function writeWorkflow(workspaceDir: string, name: string): void {
     }, null, 2),
     'utf8',
   );
+}
+
+function writeRootedWorkflow(rootDir: string, segments: readonly string[], id: string, name: string): void {
+  const workflowsDir = path.join(rootDir, ...segments, '.workrail', 'workflows');
+  fs.mkdirSync(workflowsDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(workflowsDir, `${id}.v2.json`),
+    JSON.stringify({
+      id,
+      name,
+      description: `${name} description`,
+      version: '0.0.1',
+      steps: [
+        {
+          id: 'step-1',
+          title: 'Step 1',
+          prompt: 'Do the thing',
+        },
+      ],
+    }, null, 2),
+    'utf8',
+  );
+}
+
+function rememberedRootsStore(...roots: readonly string[]): RememberedRootsStorePortV2 {
+  return {
+    listRoots: () => okAsync([...roots]),
+    listRootRecords: () => okAsync(
+      roots.map((root, index) => ({
+        path: root,
+        addedAtMs: index,
+        lastSeenAtMs: index,
+        source: 'explicit_workspace_path' as const,
+      }))
+    ),
+    rememberRoot: () => okAsync(undefined),
+  };
 }
 
 describe('request-workflow-reader', () => {
@@ -83,7 +123,7 @@ describe('request-workflow-reader', () => {
     writeWorkflow(workspaceA, 'Workspace A');
     writeWorkflow(workspaceB, 'Workspace B');
 
-    const reader = createWorkflowReaderForRequest({
+    const reader = await createWorkflowReaderForRequest({
       featureFlags: new StaticFeatureFlagProvider({
         v2Tools: true,
         leanWorkflows: false,
@@ -99,5 +139,66 @@ describe('request-workflow-reader', () => {
     expect(workflow?.source.kind).toBe('project');
     expect((workflow?.source.kind === 'project' ? workflow.source.directoryPath : undefined))
       .toBe(path.join(workspaceA, 'workflows'));
+  });
+
+  it('discovers rooted workflow directories under remembered roots in deterministic order', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-rooted-reader-'));
+    const rememberedRoot = path.join(tempRoot, 'repo');
+    writeRootedWorkflow(rememberedRoot, ['packages', 'b'], 'pkg-b-workflow', 'Package B');
+    writeRootedWorkflow(rememberedRoot, ['packages', 'a'], 'pkg-a-workflow', 'Package A');
+    writeRootedWorkflow(rememberedRoot, [], 'repo-root-workflow', 'Repo Root');
+
+    const discovered = await discoverRootedWorkflowDirectories([rememberedRoot]);
+    expect(discovered).toEqual([
+      path.join(rememberedRoot, '.workrail', 'workflows'),
+      path.join(rememberedRoot, 'packages', 'a', '.workrail', 'workflows'),
+      path.join(rememberedRoot, 'packages', 'b', '.workrail', 'workflows'),
+    ]);
+  });
+
+  it('loads workflows from rooted .workrail/workflows under remembered roots', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-rooted-reader-'));
+    const workspace = path.join(tempRoot, 'workspace');
+    const rememberedRoot = path.join(tempRoot, 'repo');
+    fs.mkdirSync(workspace, { recursive: true });
+    writeRootedWorkflow(rememberedRoot, ['packages', 'tools'], 'rooted-workflow', 'Rooted Workflow');
+
+    const reader = await createWorkflowReaderForRequest({
+      featureFlags: new StaticFeatureFlagProvider({
+        v2Tools: true,
+        leanWorkflows: false,
+        agenticRoutines: false,
+        experimentalWorkflows: false,
+      }),
+      workspacePath: workspace,
+      rememberedRootsStore: rememberedRootsStore(rememberedRoot),
+    });
+
+    const workflow = await reader.getWorkflowById('rooted-workflow');
+    expect(workflow?.definition.name).toBe('Rooted Workflow');
+    expect(workflow?.source.kind).toBe('custom');
+  });
+
+  it('preserves legacy request workflows precedence over rooted discovery during migration', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-rooted-reader-'));
+    const workspace = path.join(tempRoot, 'workspace');
+    const rememberedRoot = path.join(tempRoot, 'repo');
+    writeWorkflow(workspace, 'Legacy Request Workflow');
+    writeRootedWorkflow(rememberedRoot, ['packages', 'tools'], 'workspace-scoped-workflow', 'Rooted Workflow');
+
+    const reader = await createWorkflowReaderForRequest({
+      featureFlags: new StaticFeatureFlagProvider({
+        v2Tools: true,
+        leanWorkflows: false,
+        agenticRoutines: false,
+        experimentalWorkflows: false,
+      }),
+      workspacePath: workspace,
+      rememberedRootsStore: rememberedRootsStore(rememberedRoot),
+    });
+
+    const workflow = await reader.getWorkflowById('workspace-scoped-workflow');
+    expect(workflow?.definition.name).toBe('Legacy Request Workflow');
+    expect(workflow?.source.kind).toBe('project');
   });
 });
