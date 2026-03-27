@@ -1,4 +1,5 @@
 const allowMajorRelease = process.env.WORKRAIL_ALLOW_MAJOR_RELEASE === "true";
+const breakingReleaseType = allowMajorRelease ? "major" : "minor";
 
 module.exports = {
   branches: ["main"],
@@ -21,12 +22,9 @@ module.exports = {
           { type: "test", release: false },
           { type: "build", release: false },
           { type: "ci", release: false },
-          {
-            breaking: true,
-            release: allowMajorRelease ? "major" : "minor",
-          },
-        ],
-      },
+          { breaking: true, release: breakingReleaseType }
+        ]
+      }
     ],
     [
       "@semantic-release/release-notes-generator",
@@ -44,18 +42,18 @@ module.exports = {
             { type: "refactor", section: "Code Refactoring", hidden: true },
             { type: "test", section: "Tests", hidden: true },
             { type: "build", section: "Build System", hidden: true },
-            { type: "ci", section: "Continuous Integration", hidden: true },
-          ],
-        },
-      },
+            { type: "ci", section: "Continuous Integration", hidden: true }
+          ]
+        }
+      }
     ],
     [
       "@semantic-release/exec",
       {
         prepareCmd: "npm pkg set version=${nextRelease.version}",
-        publishCmd: "npm publish --access public",
-      },
+        publishCmd: "npm publish --access public"
+      }
     ],
-    "@semantic-release/github",
-  ],
+    "@semantic-release/github"
+  ]
 };
