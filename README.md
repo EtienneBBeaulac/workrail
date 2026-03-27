@@ -157,6 +157,7 @@ The agent will find the workflow, start at step 1, and proceed systematically.
 - **Lockfile is enforced**: `package-lock.json` is canonical and CI will fail if `npm ci` would modify it. Commit lockfile changes intentionally.
 - **Release authority**: releases are produced by **semantic-release** in GitHub Actions (don’t bump versions/tags locally).
 - **Major releases are approval-gated**: breaking changes become **minor by default** and only become **major** when `WORKRAIL_ALLOW_MAJOR_RELEASE=true`.
+- **Release type comes from the commit on `main`**: for squash merges, the PR title / squash commit title controls whether the release is patch, minor, major, or untagged. See `docs/reference/releases.md`.
 - **Preview a release (dry-run)**:
   - **Locally**: `npx semantic-release --dry-run --no-ci`
   - **Locally (major allowed)**: `WORKRAIL_ALLOW_MAJOR_RELEASE=true npx semantic-release --dry-run --no-ci`

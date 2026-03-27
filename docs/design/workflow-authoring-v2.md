@@ -404,6 +404,212 @@ Templates are WorkRail-owned builtins that expand into one or more steps.
 
 **Best practice**: keep short; rely on templates/features for reusable stance content.
 
+## Reusable authoring patterns for adaptive workflows
+
+These patterns are emerging as the most reusable v2 design techniques for workflows that need both determinism and adaptive reasoning.
+
+### 1. Constrain outcomes, not cognition
+
+Author phases so they specify:
+
+- what must be established before the phase can end
+- what must be recorded if it cannot be established
+- what control-flow or confidence changes follow
+
+Do **not** over-prescribe the exact reasoning order unless the order itself is critical for correctness.
+
+This should also influence wording. Avoid soft escape-hatch phrases like `if appropriate`, `minimal pass`, `light scan`, or `you may` unless you also say what still must be achieved and when the lighter path is actually enough.
+
+### 2. Locate → Bound → Enrich → Classify front-half
+
+For workflows that investigate an external or partially-known target, a strong default front-half pattern is:
+
+1. **Locate** the true target
+2. **Bound** the correct scope / boundary
+3. **Enrich** with all realistically available context
+4. **Classify** risk, confidence, shape, and routing needs
+
+This is often better than splitting triage, input gating, context gathering, and re-triage into many smaller phases.
+
+### 3. Confidence-aware orchestration
+
+Treat confidence as workflow state, not hand-wavy prose.
+
+Common confidence dimensions:
+
+- boundary confidence
+- context / intent confidence
+- policy-context confidence
+- evidence confidence
+- validation confidence
+
+Authors should define:
+
+- which dimensions the workflow tracks
+- which ones cap final conclusions
+- which ones trigger deeper follow-up versus only downgrade the handoff
+
+#### Example confidence matrix
+
+| Dimension | High | Medium | Low |
+|---|---|---|---|
+| Boundary confidence | True scope/base is clear | Likely scope with some ambiguity | Scope may be wrong |
+| Context confidence | Intent and constraints are well-supported | Partial intent reconstruction | Intent mostly inferred or missing |
+| Policy-context confidence | Repo/user rules are clear | Some rules known, some gaps | Rules/preferences mostly unknown |
+| Evidence confidence | Findings are directly supported | Mostly reasoned with some missing proof | Major inference gaps |
+| Validation confidence | Strong challenge/verification happened | Some verification happened | Little meaningful verification |
+
+#### Example confidence cap rules
+
+- if **boundary confidence = Low**, final recommendation confidence should not exceed **Low**
+- if **evidence confidence = Low**, Major/Critical claims should be softened or reopened
+- if **policy-context confidence = Low**, style/philosophy findings should be framed more cautiously than correctness findings
+
+### 4. Non-blocking enrichment with durable disclosure
+
+Preferred capabilities and enrichment sources should usually follow this pattern:
+
+- try to use them
+- record what happened durably
+- degrade gracefully if unavailable
+- disclose the limitation in the final handoff
+
+Only block when the target is not meaningfully reviewable/executable or when a truly required capability/output is missing in blocking modes.
+
+#### Example gap semantics
+
+| Situation | Blocking mode | Never-stop mode |
+|---|---|---|
+| Preferred capability unavailable | degrade + disclose | degrade + record gap |
+| Supporting docs missing | continue + disclose | continue + record gap if material |
+| Boundary remains ambiguous | continue with downgraded confidence | continue with downgraded confidence + gap |
+| Required contract output missing | blocked | continue + critical gap |
+
+### 5. Artifact vs context split
+
+Use **context** for routing-critical fields that later phases, loops, and conditions need to inspect cheaply and deterministically.
+
+Use **artifacts** for richer synthesis, human-readable ledgers, and review/handoff material.
+
+Rule of thumb:
+
+- **context** = drives control flow
+- **artifact** = drives reading, synthesis, and handoff
+
+Authoring implication:
+
+- the agent should compute and record route-driving facts in `context`
+- the workflow/engine should evaluate those facts through conditions, loops, and branching constructs
+- avoid leaving material path decisions to free-form prompt wording such as "choose the best next path" when the route can be made declarative
+
+#### Example split
+
+Keep in **context**:
+
+- `boundaryConfidence`
+- `needsFollowup`
+- `reviewMode`
+- `shapeProfile`
+
+Keep as **artifacts**:
+
+- human-readable review/source ledgers
+- boundary-analysis summaries
+- synthesized findings reports
+
+### 6. Shape/type routing as semi-structured guidance
+
+Routing guidance should help the agent classify the work, but material pathing should still be encoded in workflow structure wherever practical.
+
+Good pattern:
+
+- agent classifies shape, risk, or confidence
+- agent records the route-driving outputs in context
+- engine/workflow uses those outputs for branching, loops, or gates
+
+Weaker pattern:
+
+- prompt prose leaves the next branch to implicit agent choice without a condition, route-driving field, or declared control-flow rule
+
+### 7. Prompt wording should resist shallow compliance
+
+Prompts should not only be valid or well-structured. They should also be hard to satisfy with shallow compliance.
+
+Good prompt wording:
+
+- makes success conditions concrete
+- asks for evidence, alternatives, tradeoffs, or uncertainty disclosure when those matter
+- avoids vague opt-out language unless paired with a real quality floor
+
+Weak:
+
+- "Do a light review."
+- "If appropriate, delegate."
+- "Generate 2-3 ideas."
+
+Stronger:
+
+- "Do the lightest review that still surfaces the main risks, contradictions, and missing context."
+- "Delegate only if it is likely to improve the result enough to be worth the extra step. Otherwise continue yourself and record why."
+- "Generate enough distinct ideas to support a real choice. If they cluster too tightly, add another pass."
+
+### 8. Choose prose stance deliberately
+
+Workflow prose has a stance, whether authors choose it consciously or not.
+
+Common options:
+
+- **user-voice**: sounds like the user directly instructing the agent
+- **neutral system prose**: detached but clear
+- **internal-author prose**: suitable for highly technical or maintenance-oriented workflows
+
+For bundled and user-facing workflows, user-voice is often the strongest default. For deeply internal or infrastructural workflows, neutral/system prose may be a better fit. The important thing is to choose deliberately rather than drifting into accidental framework boilerplate.
+
+Shape and type classifications are often valuable, but they should remain compact and behavior-linked.
+
+Use them to influence:
+
+- reviewer-family selection
+- validation depth
+- simulation need
+- false-positive suppression
+- partitioning and follow-up depth
+
+Avoid large taxonomies that do not change behavior.
+
+#### Example routing table
+
+| Shape / Type | Strong default behavior |
+|---|---|
+| tiny isolated + test/docs only | lighter review depth, stronger false-positive suppression |
+| broad cross-cutting + API/contract change | stronger architecture/runtime review and deeper validation |
+| stacked/ambiguous boundary | boundary follow-up before high-confidence conclusions |
+| migration-heavy | stronger rollout, compatibility, and simulation scrutiny |
+
+### 7. Auditor-first delegation
+
+When using subagents/routines, prefer auditor-style use when the main agent should remain the owner of truth and synthesis.
+
+Good uses:
+
+- completeness audit
+- depth audit
+- adversarial challenge
+- philosophy alignment review
+- final verification
+
+Executor-style delegation is still useful for bounded independent work, but should not silently replace workflow-owned judgment.
+
+## Compact end-to-end example
+
+For a workflow reviewing an external artifact:
+
+1. **Phase 0** establishes target, boundary, context, and confidence fields
+2. **Context keys** store routing-critical outputs such as `boundaryConfidence` and `needsFollowup`
+3. **Artifacts** store richer synthesis such as a `source-ledger` or `boundary-analysis`
+4. An **auditor routine** challenges the current hypothesis
+5. Final confidence is capped by weak boundary/evidence state even if the prose summary sounds strong
+
 ## Validation Criteria (v1 compatibility, design guidance)
 
 Steps can include `validationCriteria` to validate agent output. This is a v1 feature maintained for backward compatibility.
