@@ -332,10 +332,11 @@ export function executeStartWorkflow(
   const workflowReader = shouldUseRequestReader
     ? {
         getWorkflowById: async (workflowId: string) => {
-          const requestReader = createWorkflowReaderForRequest({
+          const requestReader = await createWorkflowReaderForRequest({
             featureFlags: ctx.featureFlags,
             workspacePath: input.workspacePath,
             resolvedRootUris: ctx.v2.resolvedRootUris,
+            rememberedRootsStore: ctx.v2.rememberedRootsStore,
           });
           const requestResult = await requestReader.getWorkflowById(workflowId);
           if (requestResult != null) return requestResult;

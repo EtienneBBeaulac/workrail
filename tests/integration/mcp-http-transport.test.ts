@@ -81,6 +81,7 @@ describe('MCP HTTP transport integration', () => {
   });
 
   it('can call list_workflows over HTTP', async () => {
+    const workspacePath = process.cwd();
     const response = await fetch(`http://localhost:${HTTP_PORT}/mcp`, {
       method: 'POST',
       headers: { 
@@ -94,7 +95,9 @@ describe('MCP HTTP transport integration', () => {
         method: 'tools/call',
         params: {
           name: 'list_workflows',
-          arguments: {},
+          arguments: {
+            workspacePath,
+          },
         },
       }),
     });
@@ -109,6 +112,7 @@ describe('MCP HTTP transport integration', () => {
     expect(data.jsonrpc).toBe('2.0');
     expect(data.id).toBe(1);
     expect(data.result).toBeDefined();
+    expect(data.result.isError).not.toBe(true);
     expect(data.result.content).toBeDefined();
     expect(Array.isArray(data.result.content)).toBe(true);
   });

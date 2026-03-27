@@ -83,17 +83,22 @@ This tool provides:
 
 Use this to discover workflows before attempting multi-step tasks. When a workflow exists for the user's request, following it means following the user's structured instructions.
 
-Pass workspacePath when available so project-scoped workflow variants are resolved against the correct workspace instead of the server's fallback directory.`,
+Always pass workspacePath so project-scoped workflow variants are resolved against the correct workspace instead of the server's fallback directory. Shared MCP servers cannot infer this safely.`,
 
     inspect_workflow: `Inspect a workflow structure before starting it (WorkRail v2, feature-flagged).
 
 Use this to understand what steps the workflow will guide you through. The workflow is a step-by-step plan the user (or workflow author) created for this type of task.
 
+Parameters:
+- workflowId: The workflow to inspect
+- mode: metadata mode shows name/description only; preview mode shows the full step breakdown
+- workspacePath: absolute workspace path for correct project-scoped workflow resolution
+
 Returns:
 - metadata mode: Just name and description
 - preview mode: Full step-by-step breakdown (default)
 
-Pass workspacePath when available so project-scoped workflow variants are resolved against the correct workspace.
+Always pass workspacePath so project-scoped workflow variants are resolved against the correct workspace. Shared MCP servers cannot infer this safely.
 
 Remember: inspecting is read-only. Call start_workflow when ready to begin.`,
 
@@ -177,7 +182,7 @@ Workflows are the user's pre-defined instructions for complex tasks. When a work
 
 Returns stable workflow metadata and pinned snapshot hashes (workflowHash) for deterministic execution.
 
-Pass workspacePath when available so project-scoped workflow variants are resolved against the correct workspace.`,
+Pass workspacePath on every call so project-scoped workflow variants are resolved against the correct workspace. Shared MCP servers cannot infer this safely.`,
 
     inspect_workflow: `Inspect a workflow you are considering following (WorkRail v2, feature-flagged).
 
@@ -186,7 +191,7 @@ Use this to understand the workflow's structure before starting. The workflow is
 Parameters:
 - workflowId: The workflow to inspect
 - mode: 'metadata' (name/description only) or 'preview' (full step breakdown)
-- workspacePath: optional absolute workspace path for correct project-scoped workflow resolution
+- workspacePath: absolute workspace path for correct project-scoped workflow resolution
 
 This is read-only. Call start_workflow when ready to commit to following the workflow.`,
 

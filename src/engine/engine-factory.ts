@@ -348,6 +348,7 @@ export async function createWorkRailEngine(
 
   // Resolve the token alias store from DI (same instance as the rest of the container).
   const tokenAliasStore = container.resolve<any>(DI.V2.TokenAliasStore);
+  const rememberedRootsStore = container.resolve<any>(DI.V2.RememberedRootsStore);
   const aliasLoadResult = await tokenAliasStore.loadIndex();
   if (aliasLoadResult.isErr()) {
     // Non-fatal: treat as empty index (fresh install, or index file doesn't exist yet).
@@ -366,6 +367,7 @@ export async function createWorkRailEngine(
     idFactory,
     tokenCodecPorts,
     tokenAliasStore,
+    rememberedRootsStore,
     validationPipelineDeps,
     resolvedRootUris: [],
     dataDir,

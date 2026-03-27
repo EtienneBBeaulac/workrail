@@ -89,6 +89,7 @@ export const DI = {
     
     // Token alias store (Level 2: global JSONL index for v2 short token resolution)
     TokenAliasStore: Symbol('V2.TokenAliasStore'),
+    RememberedRootsStore: Symbol('V2.RememberedRootsStore'),
 
     // Orchestration (Level 3: depends on stores)
     ExecutionGate: Symbol('V2.ExecutionGate'),

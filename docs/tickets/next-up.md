@@ -27,7 +27,35 @@ Finish the remaining doc cleanup and confirm all validation scenarios are record
 - `docs/plans/v2-followup-enhancements.md`
 - `docs/roadmap/open-work-inventory.md`
 
-## Ticket 2: Expand lifecycle validation coverage
+## ~~Ticket 2: Workflow-source setup phase 1~~ (done)
+
+### Problem
+
+WorkRail now has a canonical phase-1 plan for workflow-source setup, but the preferred team-sharing path is still not reflected in shipped discovery/setup behavior. Users still have to reason about legacy paths, env-first setup, and weak source visibility instead of a clear rooted-sharing model.
+
+All acceptance criteria met across the child execution stack:
+
+- `#160` — workspace anchoring for workflow-source setup
+- `#161` — remembered roots for workflow-source setup
+- `#162` — rooted discovery for repo and module workflows
+- `#163` — grouped source visibility for workflow discovery
+- `#164` — precedence and migration explanation for workflow sources
+
+Delivered outcomes:
+
+- discovery-sensitive workflow surfaces now require and use `workspacePath`
+- WorkRail remembers repo/workspace roots at user scope
+- request-scoped rooted `.workrail/workflows/` discovery works under remembered roots
+- `list_workflows` / `inspect_workflow` now expose source-aware visibility
+- legacy-over-rooted overlap now has minimal migration/preference explanation
+
+Verification:
+
+- focused workflow-source setup tests pass
+- current local `npm run build` passes
+- planning docs now reflect the delivered phase-1 state
+
+## Ticket 3: Expand lifecycle validation coverage
 
 ### Problem
 
@@ -54,7 +82,39 @@ Define a realistic lifecycle coverage target and expand tests toward it.
 - `docs/plans/workflow-validation-design.md`
 - `docs/roadmap/open-work-inventory.md`
 
-## ~~Ticket 3: Finish prompt vs supplement boundary alignment~~ (done)
+## Ticket 4: Design console execution-trace explainability
+
+### Problem
+
+The console currently shows the execution DAG as if it were the full runtime story, but the engine records important decisions outside `node_created` / `edge_created`. Fast paths, evaluated conditions, selected next steps, and other engine choices can make a legitimate run look broken or incomplete in the UI.
+
+### Goal
+
+Design the DTO and UX changes needed so the console explains why the engine took a path, not just which node was created next.
+
+### Acceptance criteria
+
+- A concrete console design exists for showing engine decisions alongside the DAG
+- The design explicitly distinguishes authoring phases from actual execution nodes
+- The proposed DTO shape identifies which engine events and run-context fields must be projected to the console
+- The design includes at least one clear UX for fast paths / skipped phases that currently look like broken graphs
+
+### Non-goals
+
+- Implementing the full console redesign
+- Exposing every raw event type directly in the UI
+- Removing phases from workflow authoring
+
+### Related files/docs
+
+- `docs/ideas/backlog.md`
+- `docs/roadmap/open-work-inventory.md`
+- `docs/plans/workrail-platform-vision.md`
+- `docs/reference/workflow-execution-contract.md`
+- `src/v2/usecases/console-service.ts`
+- `console/src/api/types.ts`
+
+## ~~Ticket 5: Finish prompt vs supplement boundary alignment~~ (done)
 
 All acceptance criteria met -- the boundary is documented consistently:
 

@@ -10,6 +10,8 @@
  * - Contract tests verify response shape at the MCP boundary
  * - When a contract breaks, the failure message should say "contract" not "protocol"
  */
+import * as os from 'os';
+import * as path from 'path';
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import {
@@ -25,7 +27,11 @@ import {
   V2NextIntentSchema,
   V2BlockerReportSchema,
 } from '../../src/mcp/output-schemas.js';
-import { V2ResumeSessionInput } from '../../src/mcp/v2/tools.js';
+import {
+  V2InspectWorkflowInput,
+  V2ListWorkflowsInput,
+  V2ResumeSessionInput,
+} from '../../src/mcp/v2/tools.js';
 
 // ---------------------------------------------------------------------------
 // Helpers: minimal valid response shapes (boundary-only, no runtime deps)
@@ -52,7 +58,23 @@ describe('list_workflows response contract', () => {
   it('accepts valid workflow list', () => {
     const response = {
       workflows: [
-        { workflowId: 'test.wf', name: 'Test', description: 'Desc', version: '1.0.0', kind: 'workflow', workflowHash: 'sha256:abc123' },
+        {
+          workflowId: 'test.wf',
+          name: 'Test',
+          description: 'Desc',
+          version: '1.0.0',
+          kind: 'workflow',
+          workflowHash: 'sha256:abc123',
+          visibility: {
+            category: 'rooted_sharing',
+            source: { kind: 'custom', displayName: 'workflows' },
+            rootedSharing: {
+              kind: 'remembered_root',
+              rootPath: path.join(os.tmpdir(), 'repo'),
+              groupLabel: 'tools',
+            },
+          },
+        },
         { workflowId: 'test.wf2', name: 'Test 2', description: 'Desc 2', version: '1.0.0', kind: 'workflow', workflowHash: null },
       ],
     };
@@ -71,6 +93,20 @@ describe('list_workflows response contract', () => {
   });
 });
 
+describe('list_workflows input contract', () => {
+  it('requires workspacePath', () => {
+    expect(V2ListWorkflowsInput.safeParse({}).success).toBe(false);
+  });
+
+  it('accepts absolute workspacePath', () => {
+    expect(V2ListWorkflowsInput.safeParse({ workspacePath: '/Users/dev/my-project' }).success).toBe(true);
+  });
+
+  it('rejects relative workspacePath', () => {
+    expect(V2ListWorkflowsInput.safeParse({ workspacePath: 'relative/path' }).success).toBe(false);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // inspect_workflow response contract
 // ---------------------------------------------------------------------------
@@ -82,6 +118,16 @@ describe('inspect_workflow response contract', () => {
       workflowHash: 'sha256:abc',
       mode: 'metadata',
       compiled: { schemaVersion: 1, sourceKind: 'v1_preview', workflowId: 'test.wf' },
+      visibility: {
+        category: 'legacy_project',
+        source: { kind: 'project', displayName: 'Project' },
+        migration: {
+          preferredSource: 'rooted_sharing',
+          currentSource: 'legacy_project',
+          reason: 'legacy_project_precedence',
+          summary: 'Prefer rooted sharing.',
+        },
+      },
     };
     expect(V2WorkflowInspectOutputSchema.safeParse(response).success).toBe(true);
   });
@@ -112,6 +158,34 @@ describe('inspect_workflow response contract', () => {
       compiled: {},
     };
     expect(V2WorkflowInspectOutputSchema.safeParse(response).success).toBe(false);
+  });
+});
+
+describe('inspect_workflow input contract', () => {
+  it('requires workspacePath', () => {
+    const result = V2InspectWorkflowInput.safeParse({
+      workflowId: 'test_workflow',
+      mode: 'preview',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts absolute workspacePath', () => {
+    const result = V2InspectWorkflowInput.safeParse({
+      workflowId: 'test_workflow',
+      mode: 'preview',
+      workspacePath: '/Users/dev/my-project',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects relative workspacePath', () => {
+    const result = V2InspectWorkflowInput.safeParse({
+      workflowId: 'test_workflow',
+      mode: 'preview',
+      workspacePath: 'relative/path',
+    });
+    expect(result.success).toBe(false);
   });
 });
 
