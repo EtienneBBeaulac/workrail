@@ -31,7 +31,7 @@ Work follows a deliberate progression. Do not skip steps or assume what comes ne
 3. **Discuss and decide** -- present options, tradeoffs, and your honest assessment. The user will tell you which direction to go. Do not make architectural decisions unilaterally.
 4. **Plan** -- once direction is agreed, capture the idea in `docs/ideas/backlog.md` if it is new. When it is concrete enough to execute, create a GitHub issue with `gh issue create`. Update `now-next-later.md` and `open-work-inventory.md` as needed.
 5. **Implement** -- only after the user says to proceed. Create a branch, write the code, run tests.
-6. **Verify** -- run `npx vitest run`, check for linter errors, confirm the change does what it should.
+6. **Verify** -- run `npx vitest run`, check for linter errors, confirm the change does what it should. If you are in a fresh worktree and dependencies are not installed yet, install them and still run the required verification rather than treating missing dependencies as a stopping point.
 7. **Ship** -- only when the user asks. Create a PR, wait for CI, merge when told to.
 8. **Update planning docs** -- after shipping, mark work as done in the roadmap and inventory docs.
 
@@ -137,6 +137,8 @@ Test directories:
 - `tests/architecture/` -- structural invariant tests (schema snapshots, import boundaries)
 
 Run all tests: `npx vitest run`. Run a specific file: `npx vitest run tests/path/to/file.test.ts`.
+
+If you are working in a fresh worktree and `node_modules` or other required dependencies are missing, install them first and then run the necessary validation anyway. Missing dependencies in a new worktree are setup work, not a reason to skip verification.
 
 ## Building and reloading
 
