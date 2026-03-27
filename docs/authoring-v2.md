@@ -12,6 +12,132 @@ WorkRail v2 authoring is **JSON-first** and is designed for **determinism**, **r
 
 ## v2 authoring principles (high level)
 
+### Structured freedom over rigid scripts
+
+WorkRail workflows should constrain **outcomes and invariants**, not micromanage cognition.
+
+Material branching, pathing, loop continuation, and gating should live in the workflow/engine as declarative control flow whenever possible, not in implicit agent judgment hidden inside prompt prose.
+
+Authors should aim for:
+
+- **rigid on invariants**: required outputs, loop decisions, confidence disclosure, blocked vs never-stop behavior, final handoff structure
+- **semi-structured on heuristics**: routing matrices, severity guidance, confidence combination rules, artifact vs context split
+- **adaptive on reasoning**: exploration order, clue prioritization, synthesis, finding phrasing, and unusual-case handling
+
+The goal is **structured freedom**:
+
+- not "trust the model" vagueness
+- not bureaucratic form-filling
+
+The agent should usually determine and record the route-driving facts. The engine should usually decide what node, branch, or loop state comes next.
+
+Prefer asking:
+
+- what must be known before leaving this phase?
+- what must be disclosed if it is not known?
+
+over prescribing the exact internal thought sequence the agent must follow.
+
+### Never-stop by default for enrichment and confidence gaps
+
+For most workflows, missing enrichment sources or weak confidence should **degrade and disclose**, not block.
+
+Typical examples:
+
+- preferred capability unavailable
+- missing ticket or supporting docs
+- weak boundary confidence
+- incomplete policy/context discovery
+
+Blocking should be reserved for cases where:
+
+- the review/task target is not meaningfully available
+- a truly required capability is unavailable
+- a required output contract is missing in blocking modes
+
+### Confidence is multi-dimensional
+
+Avoid a single vague "confidence" concept when different uncertainty sources matter differently.
+
+Reusable confidence dimensions often include:
+
+- boundary confidence
+- context / intent confidence
+- policy-context confidence
+- evidence confidence
+- validation confidence
+
+Authors should explicitly decide:
+
+- which confidence dimensions matter for this workflow
+- which ones cap final conclusions
+- which ones trigger follow-up loops versus just downgrade the final handoff
+
+### Use structure only when it earns its place
+
+A matrix, field, ledger, or classification should exist only if it does at least one of these:
+
+- prevents a real recurring failure mode
+- improves deterministic control flow or resumability
+- improves user-visible honesty / explainability
+- materially changes routing or rigor
+
+If it does none of those, it should be removed or downgraded to advisory guidance.
+
+Practical example:
+
+- a `boundaryConfidence` field earns its place because it can cap conclusions and trigger follow-up
+- a five-level taxonomy that never changes routing probably does not
+
+### Anti-lazy wording
+
+Structured freedom should not become vague permission for shallow work.
+
+Be careful with wording like:
+
+- `if appropriate`
+- `minimal pass`
+- `light scan`
+- `you may`
+- `smallest`
+- `cheapest`
+
+These phrases are often useful, but they should usually be paired with a clear floor for what still must be achieved.
+
+Prefer wording like:
+
+- "do the lightest pass that still surfaces the main approaches, hard constraints, and obvious contradictions"
+- "if you do not delegate, record why solo execution is enough"
+- "generate enough distinct options to support a real choice"
+
+The goal is freedom in method, not softness in rigor.
+
+### User-voice prose is a real option
+
+For bundled and user-facing workflows, authors should consider prose that often sounds like the user is directly instructing the agent.
+
+This is often better than detached framework narration for exploratory, advisory, or design-heavy workflows because it:
+
+- keeps the workflow grounded in user intent
+- reduces internal-boilerplate tone
+- makes the workflow feel more like an expression of the user's will
+
+Neutral/system-style prose is still appropriate for internal, infrastructural, or highly mechanical workflows. Choose deliberately.
+
+### Auditor-first delegation is often the better default
+
+When using subagents or routines, prefer bounded **audits** of the main agent's work over delegating broad task ownership.
+
+Good auditor uses:
+
+- context completeness audit
+- depth audit
+- adversarial challenge
+- philosophy alignment review
+- final verification
+
+Executor-style delegation still makes sense for bounded independent work, but the parent workflow should usually remain the canonical synthesizer and decision-maker.
+
 ### JSON-first authoring
 
 WorkRail v2 uses **JSON** as the canonical authoring format. DSL and YAML remain possible future input formats, but for v2 we optimize for determinism and straightforward validation.
