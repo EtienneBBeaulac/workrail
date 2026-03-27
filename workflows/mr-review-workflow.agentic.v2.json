@@ -7,13 +7,8 @@
     "recommendedAutonomy": "guided",
     "recommendedRiskPolicy": "conservative"
   },
-  "capabilities": {
-    "delegation": "preferred"
-  },
   "features": [
-    "wr.features.subagent_guidance",
-    "wr.features.mode_guidance",
-    "wr.features.durable_recap_guidance"
+    "wr.features.subagent_guidance"
   ],
   "preconditions": [
     "User provides an MR/PR objective, diff, patch, branch, or equivalent review target.",
