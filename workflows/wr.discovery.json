@@ -42,8 +42,8 @@
     "Artifact strategy: treat `designDocPath` as the human-facing canonical artifact. Keep it readable and current, but keep execution truth in notes and structured context.",
     "Own the synthesis yourself. Delegated output is evidence, not a decision. You own framing, comparison, challenge adjudication, selection, uncertainty-resolution, and final handoff.",
     "Positioning: treat this as the canonical successor to the old exploration and design-thinking workflows. If I ask for either of those by name, this is the workflow I mean.",
-    "Path model: pick one emphasis path early, but do not skip the shared core. Every path still needs some landscape understanding, some problem or stakeholder understanding, some candidate generation, some challenge, and either a recommendation or a learning artifact.",
-    "Paths: use `landscape_first` when the main need is current-state understanding and comparison. Use `full_spectrum` when the problem is important or ambiguous enough to need the fullest pass. Use `design_first` when reframing, tensions, and prototype-driven learning matter most.",
+    "Path model: pick one emphasis path early, but keep the shared core. Every path still needs landscape understanding, problem or stakeholder understanding, candidate generation, challenge, and a recommendation or learning artifact.",
+    "Paths: use `landscape_first` for current-state understanding and comparison. Use `full_spectrum` for important or ambiguous problems. Use `design_first` when reframing, tensions, and prototype-driven learning matter most.",
     "Re-triage: treat the initial path choice as provisional. If early context shows the center of gravity is somewhere else, change course deliberately.",
     "Anti-anchoring: do not let the first framing or favorite option dominate the work. Generate at least one materially different direction and challenge the leading one directly.",
     "Parallelism: parallelize independent research lenses, stakeholder lenses, and bounded cognitive routines. Serialize synthesis, recommendation decisions, and canonical document writes.",
@@ -54,20 +54,20 @@
   "functionDefinitions": [
     {
       "name": "landscapePacketTemplate",
-      "definition": "When you write the landscape packet in `designDocPath`, use this shape:\n## Landscape Packet\n- Current state summary\n- Existing approaches / precedents\n- Option categories\n- Contradictions / disagreements\n- Evidence gaps\n- Why this matters for path selection and recommendation"
+      "definition": "Use this shape for the landscape packet in `designDocPath`:\n## Landscape Packet\n- Current state summary\n- Existing approaches / precedents\n- Option categories\n- Contradictions / disagreements\n- Evidence gaps\n- Why this matters for path selection and recommendation"
     },
     {
       "name": "problemFrameTemplate",
-      "definition": "When you write the problem frame packet in `designDocPath`, use this shape:\n## Problem Frame Packet\n- Users / stakeholders\n- Jobs, goals, or outcomes\n- Pains / tensions / constraints\n- Success criteria\n- Assumptions\n- Reframes / HMW questions\n- What would make this framing wrong"
+      "definition": "Use this shape for the problem frame packet in `designDocPath`:\n## Problem Frame Packet\n- Users / stakeholders\n- Jobs, goals, or outcomes\n- Pains / tensions / constraints\n- Success criteria\n- Assumptions\n- Reframes / HMW questions\n- What would make this framing wrong"
     },
     {
       "name": "prototypeSpecTemplate",
-      "definition": "When you create a lightweight prototype or validation artifact, use this shape:\n## Goal\n## Non-goals\n## Learning question\n## Artifact type\n## What will be exercised\n## Falsification criteria\n## Test scenarios\n## Expected signals\n## Pivot / stop rule"
+      "definition": "Use this shape for a lightweight prototype or validation artifact:\n## Goal\n## Non-goals\n## Learning question\n## Artifact type\n## What will be exercised\n## Falsification criteria\n## Test scenarios\n## Expected signals\n## Pivot / stop rule"
     }
   ],
   "steps": [
     {
-      "id": "phase-0-understand-and-select-path",
+      "id": "phase-0-select-path",
       "title": "Phase 0: Understand, Classify, and Recommend a Path",
       "promptBlocks": {
         "goal": "Figure out what I actually need help with, then recommend the best path through this workflow.",
@@ -98,7 +98,7 @@
       }
     },
     {
-      "id": "phase-0b-capabilities-and-artifact-setup",
+      "id": "phase-0b-capability-setup",
       "title": "Phase 0b: Capability and Artifact Setup",
       "promptBlocks": {
         "goal": "Figure out what capabilities are actually available and set up the human artifact strategy I need.",
@@ -122,7 +122,7 @@
       "requireConfirmation": false
     },
     {
-      "id": "phase-1a-landscape-understanding-landscape-first",
+      "id": "phase-1a-landscape-first",
       "title": "Phase 1a: Landscape Understanding (Landscape-first)",
       "runCondition": {
         "var": "pathRecommendation",
@@ -154,7 +154,7 @@
       "requireConfirmation": false
     },
     {
-      "id": "phase-1b-landscape-understanding-full-spectrum",
+      "id": "phase-1b-landscape-full",
       "title": "Phase 1b: Landscape Understanding (Full-spectrum)",
       "runCondition": {
         "var": "pathRecommendation",
@@ -186,7 +186,7 @@
       "requireConfirmation": false
     },
     {
-      "id": "phase-1c-landscape-understanding-design-first",
+      "id": "phase-1c-landscape-design",
       "title": "Phase 1c: Landscape Understanding (Design-first)",
       "runCondition": {
         "var": "pathRecommendation",
@@ -218,7 +218,7 @@
       "requireConfirmation": false
     },
     {
-      "id": "phase-1d-problem-frame-landscape-first",
+      "id": "phase-1d-frame-landscape",
       "title": "Phase 1d: Problem Frame and Stakeholders (Landscape-first)",
       "runCondition": {
         "var": "pathRecommendation",
@@ -250,7 +250,7 @@
       "requireConfirmation": false
     },
     {
-      "id": "phase-1e-problem-frame-full-spectrum",
+      "id": "phase-1e-frame-full",
       "title": "Phase 1e: Problem Frame and Stakeholders (Full-spectrum)",
       "runCondition": {
         "var": "pathRecommendation",
@@ -282,7 +282,7 @@
       "requireConfirmation": false
     },
     {
-      "id": "phase-1f-problem-frame-design-first",
+      "id": "phase-1f-frame-design",
       "title": "Phase 1f: Problem Frame and Stakeholders (Design-first)",
       "runCondition": {
         "var": "pathRecommendation",
@@ -314,7 +314,7 @@
       "requireConfirmation": false
     },
     {
-      "id": "phase-1g-retriage-after-context",
+      "id": "phase-1g-retriage",
       "title": "Phase 1g: Re-Triage After Early Context",
       "runCondition": {
         "var": "retriageNeeded",
@@ -347,7 +347,7 @@
       }
     },
     {
-      "id": "phase-2-synthesize-opportunity",
+      "id": "phase-2-synthesize",
       "title": "Phase 2: Synthesize the Opportunity and Decision Shape",
       "promptBlocks": {
         "goal": "Combine the landscape packet and problem frame into a coherent decision shape before you generate candidates.",
@@ -370,7 +370,7 @@
       },
       "promptFragments": [
         {
-          "id": "phase-2.challenge-needed",
+          "id": "p2-challenge-needed",
           "when": {
             "var": "needsChallenge",
             "equals": true
@@ -378,7 +378,7 @@
           "text": "Because the framing still needs challenge, produce the strongest case against it yourself before moving on."
         },
         {
-          "id": "phase-2.challenge-delegation",
+          "id": "p2-challenge-deleg",
           "when": {
             "and": [
               { "var": "needsChallenge", "equals": true },
@@ -386,10 +386,10 @@
               { "var": "rigorMode", "not_equals": "QUICK" }
             ]
           },
-          "text": "Also decide whether a delegated challenge is likely to sharpen the work enough to be worth it. If yes, spawn ONE WorkRail Executor running `routine-hypothesis-challenge` against the current framing or leading interpretation, then synthesize it yourself. If not, record why your direct challenge is sufficient."
+          "text": "Also decide whether a delegated challenge is worth the extra step. If yes, spawn ONE WorkRail Executor running `routine-hypothesis-challenge` against the current framing, then synthesize it yourself. If not, record why your own challenge is enough."
         },
         {
-          "id": "phase-2.full-spectrum-balance",
+          "id": "p2-full-balance",
           "when": {
             "var": "pathRecommendation",
             "equals": "full_spectrum"
@@ -397,7 +397,7 @@
           "text": "Because this is a `full_spectrum` pass, make sure the decision criteria reflect both landscape truth and stakeholder truth rather than letting one dominate the other."
         },
         {
-          "id": "phase-2.design-first-criteria",
+          "id": "p2-design-criteria",
           "when": {
             "var": "pathRecommendation",
             "equals": "design_first"
@@ -408,7 +408,7 @@
       "requireConfirmation": false
     },
     {
-      "id": "phase-3a-candidate-generation-quick",
+      "id": "phase-3a-candidates-quick",
       "title": "Phase 3a: Candidate Generation (QUICK)",
       "runCondition": {
         "var": "rigorMode",
@@ -433,7 +433,7 @@
       },
       "promptFragments": [
         {
-          "id": "phase-3a.design-first-bias",
+          "id": "p3a-design-bias",
           "when": {
             "var": "pathRecommendation",
             "equals": "design_first"
@@ -441,7 +441,7 @@
           "text": "Because this is `design_first`, bias at least one candidate toward a stronger reframe or learning-oriented direction instead of staying too close to the current shape."
         },
         {
-          "id": "phase-3a.landscape-first-grounding",
+          "id": "p3a-landscape-ground",
           "when": {
             "var": "pathRecommendation",
             "equals": "landscape_first"
@@ -452,7 +452,7 @@
       "requireConfirmation": false
     },
     {
-      "id": "phase-3b-candidate-generation-deep",
+      "id": "phase-3b-candidates-deep",
       "title": "Phase 3b: Candidate Generation (Injected Routine)",
       "runCondition": {
         "var": "rigorMode",
@@ -474,7 +474,7 @@
       },
       "promptFragments": [
         {
-          "id": "phase-3b.design-first-reframe",
+          "id": "p3b-design-reframe",
           "when": {
             "var": "pathRecommendation",
             "equals": "design_first"
@@ -482,7 +482,7 @@
           "text": "Because this is `design_first`, make sure the candidate set includes at least one direction that meaningfully reframes the problem instead of only packaging obvious solutions."
         },
         {
-          "id": "phase-3b.landscape-first-grounding",
+          "id": "p3b-landscape-ground",
           "when": {
             "var": "pathRecommendation",
             "equals": "landscape_first"
@@ -490,7 +490,7 @@
           "text": "Because this is `landscape_first`, make sure the candidate set clearly reflects landscape precedents, constraints, and contradictions rather than drifting into free invention."
         },
         {
-          "id": "phase-3b.thorough-depth",
+          "id": "p3b-thorough-depth",
           "when": {
             "var": "rigorMode",
             "equals": "THOROUGH"
@@ -501,7 +501,7 @@
       "requireConfirmation": false
     },
     {
-      "id": "phase-3c-challenge-and-select-direction",
+      "id": "phase-3c-select-direction",
       "title": "Phase 3c: Challenge and Select Direction",
       "promptBlocks": {
         "goal": "Read `design-candidates.md`, challenge the leading option, and make the final selection for me.",
@@ -532,7 +532,7 @@
       },
       "promptFragments": [
         {
-          "id": "phase-3c.full-spectrum-balance",
+          "id": "p3c-full-balance",
           "when": {
             "var": "pathRecommendation",
             "equals": "full_spectrum"
@@ -540,7 +540,7 @@
           "text": "Because this is `full_spectrum`, do not let the final choice overfit either the landscape or the framing. Make the winner earn both."
         },
         {
-          "id": "phase-3c.prototype-testability",
+          "id": "p3c-prototype-test",
           "when": {
             "var": "needsPrototype",
             "equals": true
@@ -556,7 +556,7 @@
       }
     },
     {
-      "id": "phase-4-direction-review-loop",
+      "id": "phase-4-review-loop",
       "type": "loop",
       "title": "Phase 4: Direction Review Loop",
       "runCondition": {
@@ -577,7 +577,7 @@
       },
       "body": [
         {
-          "id": "phase-4a-direction-review-core",
+          "id": "phase-4a-review-core",
           "title": "Direction Review Core",
           "promptBlocks": {
             "goal": "Run the configured direction review approach and produce `design-review-findings.md`.",
@@ -596,7 +596,7 @@
           "requireConfirmation": false
         },
         {
-          "id": "phase-4b-synthesize-direction-review",
+          "id": "phase-4b-review-synthesis",
           "title": "Synthesize Direction Review",
           "promptBlocks": {
             "goal": "Read `design-review-findings.md` and decide whether the selected direction you would give me should change.",
@@ -617,7 +617,7 @@
           "requireConfirmation": false
         },
         {
-          "id": "phase-4c-direction-review-loop-decision",
+          "id": "phase-4c-review-loop-decision",
           "title": "Direction Review Loop Decision",
           "promptBlocks": {
             "goal": "Decide whether the direction review loop should continue.",
@@ -645,7 +645,7 @@
       ]
     },
     {
-      "id": "phase-5-resolution-strategy",
+      "id": "phase-5-resolution",
       "title": "Phase 5: Choose the Uncertainty-Resolution Strategy",
       "promptBlocks": {
         "goal": "Decide whether you should end with a recommendation for me, a targeted research follow-up, or a prototype/test artifact.",
@@ -675,7 +675,7 @@
       }
     },
     {
-      "id": "phase-5b-direct-recommendation",
+      "id": "phase-5b-direct",
       "title": "Phase 5b: Direct Recommendation",
       "runCondition": {
         "var": "resolutionMode",
@@ -699,7 +699,7 @@
       "requireConfirmation": false
     },
     {
-      "id": "phase-5c-research-followup-loop",
+      "id": "phase-5c-research-loop",
       "type": "loop",
       "title": "Phase 5c: Research Follow-up Loop",
       "runCondition": {
@@ -717,7 +717,7 @@
       },
       "body": [
         {
-          "id": "phase-5c-run-research-followup-pass",
+          "id": "phase-5c-research-pass",
           "title": "Run Research Follow-up Pass",
           "promptBlocks": {
             "goal": "Resolve the remaining uncertainty through targeted follow-up research.",
@@ -740,7 +740,7 @@
           "requireConfirmation": false
         },
         {
-          "id": "phase-5c-research-followup-loop-decision",
+          "id": "phase-5c-research-decision",
           "title": "Research Follow-up Loop Decision",
           "promptBlocks": {
             "goal": "Decide whether the research follow-up loop should continue.",
@@ -767,7 +767,7 @@
       ]
     },
     {
-      "id": "phase-5d-prototype-test-loop",
+      "id": "phase-5d-prototype-loop",
       "type": "loop",
       "title": "Phase 5d: Prototype/Test Loop",
       "runCondition": {
@@ -785,7 +785,7 @@
       },
       "body": [
         {
-          "id": "phase-5d-run-prototype-test-pass",
+          "id": "phase-5d-prototype-pass",
           "title": "Run Prototype/Test Pass",
           "promptBlocks": {
             "goal": "Resolve the remaining uncertainty through a prototype or test pass.",
@@ -812,7 +812,7 @@
           "requireConfirmation": false
         },
         {
-          "id": "phase-5d-prototype-test-loop-decision",
+          "id": "phase-5d-prototype-decision",
           "title": "Prototype/Test Loop Decision",
           "promptBlocks": {
             "goal": "Decide whether the prototype/test loop should continue.",
@@ -839,7 +839,7 @@
       ]
     },
     {
-      "id": "phase-6-final-validation",
+      "id": "phase-6-validate",
       "title": "Phase 6: Final Validation",
       "promptBlocks": {
         "goal": "Validate that you are ending with the right level of confidence and the right caveats for me.",
@@ -862,7 +862,7 @@
       },
       "promptFragments": [
         {
-          "id": "phase-6.prototype-caveats",
+          "id": "p6-prototype-caveats",
           "when": {
             "var": "resolutionMode",
             "equals": "prototype_test"
@@ -870,7 +870,7 @@
           "text": "Because this recommendation came through a prototype/test path, make sure the final caveats clearly distinguish what was learned from what is still inferred."
         },
         {
-          "id": "phase-6.research-caveats",
+          "id": "p6-research-caveats",
           "when": {
             "var": "resolutionMode",
             "equals": "research_followup"
@@ -878,7 +878,7 @@
           "text": "Because this recommendation came through a research-follow-up path, make sure the final caveats clearly distinguish what is grounded in evidence from what still rests on interpretation."
         },
         {
-          "id": "phase-6.design-first-grounding",
+          "id": "p6-design-grounding",
           "when": {
             "var": "pathRecommendation",
             "equals": "design_first"
@@ -889,7 +889,7 @@
       "requireConfirmation": false
     },
     {
-      "id": "phase-7-final-handoff",
+      "id": "phase-7-handoff",
       "title": "Phase 7: Final Handoff",
       "promptBlocks": {
         "goal": "Finalize the design doc and deliver a clear recommendation, artifact, or next-step direction to me.",
