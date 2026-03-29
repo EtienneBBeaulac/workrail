@@ -33,6 +33,29 @@ WorkRail v2 introduces several primitives for expressive workflows:
 
 For detailed JSON syntax and examples, see: `docs/design/workflow-authoring-v2.md`.
 
+### Choosing the right authoring mechanism
+
+Use different primitives for different jobs. A good rule of thumb is:
+
+- **Different flow** → use `runCondition`
+- **Same flow, different wording** → use `promptFragments`
+
+| Mechanism | What it does | When it applies | Best for |
+|---|---|---|---|
+| **`features`** | Inject reusable guidance into `promptBlocks` sections | **Compile time** | Cross-cutting rules like memory or subagent discipline |
+| **`promptFragments`** | Add small conditional prompt text to an existing step | **Render/runtime** | Context-sensitive nudges without branching the DAG |
+| **`templateCall`** | Insert reusable step structure or step sequences | **Compile time** | Reusing standard routines or audits |
+| **`extensionPoints`** | Let a workflow reference customizable bounded seams via `{{wr.bindings.*}}` | **Compile time** | Swap candidate generation, review, or validation behavior without forking |
+| **`runCondition`** | Decide whether a step runs | **Runtime** | Real branching, pathing, or routing |
+
+Use these as the default choice rules:
+
+- **Use `runCondition`** when the workflow should actually take a different path.
+- **Use `promptFragments`** when the step stays the same but needs small context-sensitive additions.
+- **Use `templateCall`** when you want reusable standard structure.
+- **Use `extensionPoints`** when you want reusable structure that teams can override.
+- **Use `features`** for workflow-wide repeated guidance.
+
 ### Baseline (Tier 0): notes-first
 
 - **You can write workflows with no special authoring features.**

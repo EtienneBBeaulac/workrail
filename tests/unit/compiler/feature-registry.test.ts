@@ -29,6 +29,19 @@ describe('FeatureRegistry', () => {
     expect(def.verify!.length).toBeGreaterThan(0);
   });
 
+  it('resolves wr.features.capabilities', () => {
+    const result = registry.resolve('wr.features.capabilities');
+    expect(result.isOk()).toBe(true);
+    const def = result._unsafeUnwrap();
+    expect(def.id).toBe('wr.features.capabilities');
+    expect(def.constraints).toBeDefined();
+    expect(def.constraints!.length).toBeGreaterThan(0);
+    expect(def.procedure).toBeDefined();
+    expect(def.procedure!.length).toBeGreaterThan(0);
+    expect(def.verify).toBeDefined();
+    expect(def.verify!.length).toBeGreaterThan(0);
+  });
+
   it('subagent_guidance feature injects a ref to wr.refs.parallelize_cognition_serialize_synthesis', () => {
     const def = registry.resolve('wr.features.subagent_guidance')._unsafeUnwrap();
     const refConstraint = def.constraints!.find(c => Array.isArray(c)) as readonly { kind: string; refId?: string }[] | undefined;
@@ -52,6 +65,7 @@ describe('FeatureRegistry', () => {
 
   it('has() returns true for known features', () => {
     expect(registry.has('wr.features.memory_context')).toBe(true);
+    expect(registry.has('wr.features.capabilities')).toBe(true);
     expect(registry.has('wr.features.subagent_guidance')).toBe(true);
   });
 
@@ -62,8 +76,9 @@ describe('FeatureRegistry', () => {
   it('knownIds() returns all registered feature IDs', () => {
     const ids = registry.knownIds();
     expect(ids).toContain('wr.features.memory_context');
+    expect(ids).toContain('wr.features.capabilities');
     expect(ids).toContain('wr.features.subagent_guidance');
-    expect(ids.length).toBe(2);
+    expect(ids.length).toBe(3);
   });
 
   it('memory_context feature injects a ref to wr.refs.memory_usage', () => {
