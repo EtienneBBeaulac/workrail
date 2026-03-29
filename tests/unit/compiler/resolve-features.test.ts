@@ -49,6 +49,27 @@ describe('resolveFeaturesPass', () => {
     expect(resolved.promptBlocks!.constraints![0]).toBe('Follow the mode.');
   });
 
+  it('injects capabilities guidance into constraints, procedure, and verify', () => {
+    const steps: WorkflowStepDefinition[] = [
+      {
+        id: 'step-1',
+        title: 'Step 1',
+        promptBlocks: {
+          goal: 'Do the thing.',
+          constraints: ['Stay grounded.'],
+          procedure: ['Start from the known context.'],
+          verify: ['The result is honest.'],
+        },
+      },
+    ];
+    const result = resolveFeaturesPass(steps, ['wr.features.capabilities'], registry);
+    expect(result.isOk()).toBe(true);
+    const resolved = result._unsafeUnwrap()[0] as WorkflowStepDefinition;
+    expect(resolved.promptBlocks!.constraints!.length).toBeGreaterThan(1);
+    expect(resolved.promptBlocks!.procedure!.length).toBeGreaterThan(1);
+    expect(resolved.promptBlocks!.verify!.length).toBeGreaterThan(1);
+  });
+
   it('creates constraints array when step had none', () => {
     const steps: WorkflowStepDefinition[] = [
       {

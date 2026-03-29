@@ -63,6 +63,24 @@ const FEATURE_DEFINITIONS: readonly FeatureDefinition[] = [
     ],
   },
   {
+    id: 'wr.features.capabilities',
+    constraints: [
+      'Do not assume optional capabilities are available just because this workflow can use them.',
+      'If delegation, web access, or another optional capability matters here, verify it through a real probe or attempt before relying on it.',
+      'If a capability is unavailable, degrade explicitly instead of silently acting as if it existed.',
+    ],
+    procedure: [
+      'When an optional capability would materially affect the quality of this step, decide whether using it is worth it here.',
+      'If you take a capability-dependent path, record the observation or attempt that justified it.',
+      'If you skip delegation or another optional capability, keep going yourself and record why the fallback path is sufficient.',
+    ],
+    verify: [
+      'No capability-dependent path was taken without an explicit observation, probe, or attempted use.',
+      'If a capability was unavailable or skipped, the fallback path and its limitation were made explicit.',
+      'The main agent still owns synthesis and final judgment.',
+    ],
+  },
+  {
     id: 'wr.features.subagent_guidance',
     constraints: [
       'Use the WorkRail Executor as the only subagent model. Do not refer to or rely on named Builder, Researcher, or other identities.',

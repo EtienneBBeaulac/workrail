@@ -307,6 +307,97 @@ Or using structured blocks:
 - WorkRail renders blocks in deterministic order into a text-first `pending.prompt`
 - Features can inject/override specific blocks (e.g., mode guidance → constraints)
 
+## Authoring for intelligence instead of compliance theater
+
+The point of a strong workflow is not to script every thought. The point is to create a structure that preserves quality while still letting the agent use its intelligence well.
+
+### Strong skeleton, not a straitjacket
+
+Good workflows are rigid about:
+
+- required outputs
+- important decision points
+- evidence and uncertainty accounting
+- explicit challenge or validation
+- durable state and handoff expectations
+
+Good workflows stay flexible about:
+
+- reasoning order
+- synthesis moves
+- ideation style
+- how the agent reaches a sound answer inside the phase boundary
+
+In practice: constrain the **failure modes**, not the entire cognitive path.
+
+### Anti-lazy wording patterns
+
+Adaptive wording is powerful, but it can also make it too easy for the agent to do shallow work.
+
+Be careful with phrases like:
+
+- `if appropriate`
+- `minimal pass`
+- `light scan`
+- `you may`
+- `smallest`
+- `cheapest`
+
+These phrases usually need a quality floor.
+
+Bad:
+
+- "Do a light landscape scan."
+- "If appropriate, delegate."
+- "Generate 2-3 options."
+
+Better:
+
+- "Do the lightest landscape scan that still surfaces the main existing approaches, hard constraints, and obvious contradictions."
+- "Delegate if it is likely to improve the result enough to be worth the extra step. If not, keep going yourself and record why."
+- "Generate enough genuinely distinct options to support a real choice. If they cluster too tightly, add another pass."
+
+The pattern to aim for is:
+
+- creative freedom
+- plus a clear quality floor
+- plus accountability when choosing the lighter path
+
+### User-voice prose
+
+For bundled, user-facing workflows, prefer prose that often sounds like the user is directly telling the agent what to do.
+
+This usually works better than detached author or framework narration for exploratory, creative, or advisory workflows.
+
+Less effective:
+
+- "The agent should gather stakeholder input and synthesize next actions."
+
+More effective:
+
+- "Figure out what I actually need, gather the missing context, and then tell me what you think I should do next."
+
+This is not a hard rule for every workflow. Internal, infrastructural, or highly mechanical workflows may still read better in neutral system prose. But user-voice should be considered a first-class authoring option.
+
+### Extension point ownership
+
+Extension points work best when they customize a bounded cognitive unit, not the entire workflow's reasoning contract.
+
+Recommended pattern:
+
+- parent workflow owns:
+  - orchestration
+  - synthesis
+  - final decision
+  - loop exits
+  - handoff
+- extension slot owns:
+  - bounded candidate generation
+  - bounded review or audit
+  - bounded challenge or validation pass
+
+This preserves customization without letting the core workflow become incoherent.
+
 ### Prompt references (`wr.refs.*`) (initial v2 authoring)
 Workflows may inject small, canonical WorkRail-owned snippets inline (e.g., “WorkRail v2 definition”, “append-only truth”, “modes semantics”) to avoid copy/paste and keep prompts consistent.
 
