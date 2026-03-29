@@ -163,3 +163,27 @@ Workflow and feature ideas that are worth capturing but not yet planned or desig
   - `docs/design/v2-core-design-locks.md`
   - `docs/plans/workrail-platform-vision.md`
   - current implementation: `src/v2/usecases/console-service.ts`, `src/v2/projections/run-context.ts`, `console/src/api/types.ts`
+
+### Workflow previewer for compiled and runtime behavior
+
+- **Status**: idea
+- **Summary**: Add a workflow previewer for the `workflows/` directory that shows what a workflow actually compiles to and how the engine can traverse it at runtime.
+- **Why this seems useful**:
+  - authors currently have to mentally reconstruct branching, loops, blocked-node behavior, and other runtime structure from authored JSON plus tests
+  - advanced workflow authoring gets much easier when the compiled DAG and runtime edges are visible
+  - it would help explain engine behavior to both contributors and workflow authors
+- **What it should show**:
+  - the compiled step graph / DAG
+  - branch points and condition-driven paths
+  - loop structure and loop-control edges
+  - blocked / resumed / checkpoint-related node shapes where applicable
+  - template/routine expansion boundaries or provenance
+  - the gap between authored JSON structure and runtime execution structure
+- **Initial scope**:
+  - start as a read-only preview for bundled workflows
+  - optimize for accuracy over polish
+  - do not require full execution simulation in phase 1
+- **Design questions**:
+  - should this live in the existing Console, as a dev-only page, or as a local authoring utility?
+  - should it show only the compiled DAG, or also annotate likely runtime transitions such as blocked attempts, rewinds, and loop continuations?
+  - how much provenance should it expose for injected routines/templates?
