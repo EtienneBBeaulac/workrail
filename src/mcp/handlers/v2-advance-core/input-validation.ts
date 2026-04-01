@@ -11,7 +11,7 @@ import type { V2ContinueWorkflowInput } from '../../v2/tools.js';
 import type { AssessmentDefinition, OutputContract, WorkflowStepDefinition } from '../../../types/workflow-definition.js';
 import type { ValidationCriteria } from '../../../types/validation.js';
 import type { AssessmentArtifactV1 } from '../../../v2/durable-core/schemas/artifacts/index.js';
-import type { RecordedAssessmentV1 } from './assessment-validation.js';
+import type { RecordedAssessmentV1 } from '../../../v2/durable-core/domain/assessment-record.js';
 import type { TriggeredAssessmentConsequenceV1 } from './assessment-consequences.js';
 
 import { getStepById } from '../../../types/workflow.js';

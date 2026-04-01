@@ -13,6 +13,19 @@ export const testArtifactLoopControlFixture: WorkflowFixture = {
     name: 'Test Artifact Loop Control',
     description: 'Test workflow demonstrating typed artifact loop control (Phase 3 migration pattern)',
     version: '1.0.0',
+    assessments: [
+      {
+        id: 'readiness_gate',
+        purpose: 'Assess whether the loop result is ready to publish.',
+        dimensions: [
+          {
+            id: 'confidence',
+            purpose: 'How confident the agent is that the loop result is complete and correct.',
+            levels: ['low', 'high'],
+          },
+        ],
+      },
+    ],
     metaGuidance: [
       'This workflow demonstrates the new artifact-based loop control pattern.',
       "Instead of prose validation (checking for 'continuePlanning = true' in text),",
@@ -65,8 +78,21 @@ export const testArtifactLoopControlFixture: WorkflowFixture = {
       {
         id: 'complete',
         title: 'Complete',
-        prompt: 'The iteration loop has completed. Summarize what was accomplished.',
+        prompt: 'The iteration loop has completed. Assess whether the loop result is ready to publish.\n\nProvide an assessment artifact for readiness.',
         requireConfirmation: false,
+        assessmentRefs: ['readiness_gate'],
+        assessmentConsequences: [
+          {
+            when: {
+              dimensionId: 'confidence',
+              equalsLevel: 'low',
+            },
+            effect: {
+              kind: 'require_followup',
+              guidance: 'Review the loop result one more time and confirm the outcome before completing this step.',
+            },
+          },
+        ],
       },
     ],
   },
@@ -95,7 +121,19 @@ export const testArtifactLoopControlFixture: WorkflowFixture = {
           ],
         };
       case 'complete':
-        return { notesMarkdown: 'Loop execution completed' };
+        return {
+          notesMarkdown: ctx.stepVisitCount === 0 ? 'Loop execution completed, but double-checking readiness' : 'Loop execution completed and readiness confirmed',
+          artifacts: [
+            {
+              kind: 'wr.assessment',
+              assessmentId: 'readiness_gate',
+              dimensions: {
+                confidence: ctx.stepVisitCount === 0 ? 'low' : 'high',
+              },
+              summary: ctx.stepVisitCount === 0 ? 'Need one more review pass' : 'Ready to publish',
+            },
+          ],
+        };
       default:
         return undefined;
     }

@@ -9,6 +9,10 @@ import {
   parseAssessmentArtifact,
   type AssessmentArtifactV1,
 } from '../../../v2/durable-core/schemas/artifacts/index.js';
+import type {
+  RecordedAssessmentDimensionV1,
+  RecordedAssessmentV1,
+} from '../../../v2/durable-core/domain/assessment-record.js';
 
 export interface AssessmentValidationOutcome {
   readonly contractRef: typeof ASSESSMENT_CONTRACT_REF;
@@ -16,20 +20,6 @@ export interface AssessmentValidationOutcome {
   readonly acceptedArtifact: AssessmentArtifactV1 | undefined;
   readonly acceptedArtifactIndex: number | undefined;
   readonly recordedAssessment: RecordedAssessmentV1 | undefined;
-}
-
-export interface RecordedAssessmentDimensionV1 {
-  readonly dimensionId: string;
-  readonly level: string;
-  readonly rationale?: string;
-  readonly normalization: 'exact' | 'normalized';
-}
-
-export interface RecordedAssessmentV1 {
-  readonly assessmentId: string;
-  readonly summary?: string;
-  readonly dimensions: readonly RecordedAssessmentDimensionV1[];
-  readonly normalizationNotes: readonly string[];
 }
 
 function normalizeLevel(level: string, allowedLevels: readonly string[]): { readonly kind: 'exact'; readonly value: string } | { readonly kind: 'normalized'; readonly value: string; readonly note: string } | { readonly kind: 'ambiguous'; readonly message: string } | { readonly kind: 'invalid'; readonly message: string } {

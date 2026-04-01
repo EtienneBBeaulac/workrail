@@ -1,5 +1,5 @@
 import type { AssessmentConsequenceDefinition, WorkflowStepDefinition } from '../../../types/workflow-definition.js';
-import type { RecordedAssessmentV1 } from './assessment-validation.js';
+import type { RecordedAssessmentV1 } from '../../../v2/durable-core/domain/assessment-record.js';
 
 export interface TriggeredAssessmentConsequenceV1 {
   readonly kind: 'require_followup';

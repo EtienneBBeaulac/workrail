@@ -1,7 +1,7 @@
 import { err, ok, type Result } from 'neverthrow';
 import type { DomainEventV1 } from '../schemas/session/index.js';
 import { EVENT_KIND } from '../constants.js';
-import type { RecordedAssessmentV1 } from '../../../mcp/handlers/v2-advance-core/assessment-validation.js';
+import type { RecordedAssessmentV1 } from './assessment-record.js';
 
 type EventToAppendV1 = Omit<DomainEventV1, 'eventIndex' | 'sessionId'>;
 
