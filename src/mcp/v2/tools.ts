@@ -25,7 +25,7 @@ export const V2ListWorkflowsInput = z.object({
 export type V2ListWorkflowsInput = z.infer<typeof V2ListWorkflowsInput>;
 
 export const V2InspectWorkflowInput = z.object({
-  workflowId: z.string().min(1).regex(/^[A-Za-z0-9_-]+$/, 'Workflow ID must contain only letters, numbers, hyphens, and underscores').describe('The workflow ID to inspect'),
+  workflowId: z.string().min(1).regex(/^([a-z0-9_-]+|[a-z][a-z0-9_-]+\.[a-z][a-z0-9_-]+)$/, 'Workflow ID must be a valid legacy ID (e.g. my-workflow) or namespaced ID (e.g. wr.discovery)').describe('The workflow ID to inspect'),
   mode: z.enum(['metadata', 'preview']).default('preview').describe('Detail level: metadata (name and description only) or preview (full step-by-step breakdown, default)'),
   workspacePath: workspacePathField.describe(
     'Required. Absolute path to your current workspace directory (e.g. the "Workspace:" value from your system parameters). WorkRail uses this to resolve the correct project-scoped workflow variant for discovery-sensitive workflow inspection. Shared MCP servers cannot infer this safely.'
@@ -34,7 +34,7 @@ export const V2InspectWorkflowInput = z.object({
 export type V2InspectWorkflowInput = z.infer<typeof V2InspectWorkflowInput>;
 
 export const V2StartWorkflowInput = z.object({
-  workflowId: z.string().min(1).regex(/^[A-Za-z0-9_-]+$/, 'Workflow ID must contain only letters, numbers, hyphens, and underscores').describe('The workflow ID to start'),
+  workflowId: z.string().min(1).regex(/^([a-z0-9_-]+|[a-z][a-z0-9_-]+\.[a-z][a-z0-9_-]+)$/, 'Workflow ID must be a valid legacy ID (e.g. my-workflow) or namespaced ID (e.g. wr.discovery)').describe('The workflow ID to start'),
   workspacePath: workspacePathField.describe('Required. Absolute path to your current workspace directory (e.g. the "Workspace:" value from your system parameters). WorkRail uses this to resolve the correct project-scoped workflow variant and to anchor the session to the correct repo for future resume_session discovery. Shared MCP servers cannot infer this safely.'),
 });
 export type V2StartWorkflowInput = z.infer<typeof V2StartWorkflowInput>;
