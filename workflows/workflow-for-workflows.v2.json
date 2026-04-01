@@ -1,25 +1,30 @@
 {
   "id": "workflow-for-workflows",
-  "name": "Workflow Authoring Workflow (Lean, References-First)",
-  "version": "2.0.0",
-  "description": "Guides an agent through authoring or modernizing a WorkRail workflow: understand the task, choose the shape, draft or revise the JSON, validate with real validators, review the method, and optionally refine.",
+  "name": "Workflow Authoring Workflow (Quality Gate v2)",
+  "version": "2.1.0",
+  "description": "Guides an agent through authoring or modernizing a WorkRail workflow with a stronger quality gate: understand the task, define effectiveness targets, design both workflow and quality architecture, draft, validate, simulate execution, run adversarial review, redesign if needed, and only then hand off.",
   "recommendedPreferences": {
     "recommendedAutonomy": "guided",
     "recommendedRiskPolicy": "conservative"
   },
+  "features": [
+    "wr.features.subagent_guidance"
+  ],
   "preconditions": [
     "User has a recurring task or problem a workflow should solve, or an existing workflow that should be modernized.",
     "Agent has access to file creation, editing, and terminal tools.",
-    "Agent can run workflow validators (npm run validate:registry or equivalent)."
+    "Agent can run workflow validators such as `npm run validate:registry` or equivalent."
   ],
   "metaGuidance": [
     "REFERENCE HIERARCHY: treat workflow-schema as legal truth for structure. Treat authoring-spec as canonical current guidance for what makes a workflow good. Treat authoring-provenance as optional maintainer context only.",
     "META DISTINCTION: you are authoring or modernizing a workflow, not executing one. Keep the authored workflow's concerns separate from this meta-workflow's execution.",
+    "QUALITY-GATE ROLE: this workflow is the trust gate for other workflows. It must optimize not only for validity and modern authoring, but also for task effectiveness, false-confidence resistance, and future maintainability.",
     "DEFAULT BEHAVIOR: self-execute with tools. Only ask the user for business decisions about the workflow being authored or modernized, not things you can learn from the schema, authoring spec, or example workflows.",
     "AUTHORED VOICE: prompts in the authored workflow must be user-voiced. No middleware narration, no pseudo-DSL, no tutorial framing, no teaching-product language.",
-    "VOICE ADAPTATION: the lean coding workflow is one voice example, not the universal template. Copy structural patterns, not domain language. Adapt vocabulary and tone to the authored workflow's domain.",
-    "VOICE EXAMPLES: Coding: 'Review the changes in this MR.' Ops: 'Check whether the pipeline is healthy.' Content: 'Read the draft and check the argument.' NOT: 'The system will now perform a comprehensive analysis of...'",
+    "BASELINE DISCIPLINE: choose both an authoring baseline and an outcome baseline whenever possible. Copy structural patterns, not domain language.",
     "VALIDATION GATE: validate with real validators, not regex approximations. When validator output and authoring assumptions conflict, runtime wins.",
+    "DEEP REVIEW: authoring integrity and outcome effectiveness are separate concerns. A workflow is not ready unless both pass.",
+    "THOROUGH MODE: for complex or high-trust workflow work, prefer the deepest review path: state economy audit, execution simulation, adversarial review, and redesign if hard gates fail.",
     "ARTIFACT STRATEGY: the workflow JSON file is the primary output. Intermediate notes go in output.notesMarkdown. Do not create extra planning artifacts unless the workflow is genuinely complex.",
     "V2 DURABILITY: use output.notesMarkdown as the primary durable record. Do not mirror execution state into CONTEXT.md or markdown checkpoint files.",
     "ANTI-PATTERNS TO AVOID IN AUTHORED WORKFLOWS: no pseudo-function metaGuidance, no learning-path branching, no satisfaction-score loops, no heavy clarification batteries, no regex-as-primary-validation, no celebration phases.",
@@ -76,28 +81,120 @@
     },
     {
       "id": "lean-coding-workflow",
-      "title": "Lean Coding Workflow (Modern Example)",
+      "title": "Lean Coding Workflow (Modern Authoring Baseline)",
       "source": "workflows/coding-task-workflow-agentic.lean.v2.json",
       "resolveFrom": "package",
-      "purpose": "Current modern example of a well-authored workflow. Inspect for patterns, voice, loop semantics, prompt fragments, and delegation policy.",
+      "purpose": "Strong modern example for engine-native authoring patterns, loop semantics, prompt density, and bounded delegation.",
+      "authoritative": false
+    },
+    {
+      "id": "mr-review-workflow",
+      "title": "MR Review Workflow (Outcome Baseline Example)",
+      "source": "workflows/mr-review-workflow.agentic.v2.json",
+      "resolveFrom": "package",
+      "purpose": "Strong example of hypothesis, neutral fact packet, reviewer families, contradiction synthesis, and final validation.",
+      "authoritative": false
+    },
+    {
+      "id": "readiness-audit-workflow",
+      "title": "Production Readiness Audit (Audit Baseline Example)",
+      "source": "workflows/production-readiness-audit.json",
+      "resolveFrom": "package",
+      "purpose": "Example of a thorough evidence-driven audit workflow with explicit reviewer-family structure and confidence handling.",
       "authoritative": false
     }
   ],
   "steps": [
     {
-      "id": "phase-0-understand",
-      "title": "Phase 0: Understand the Workflow to Author or Modernize",
-      "prompt": "Before you write anything, understand what you're working on.\n\nStart by reading:\n- `workflow-schema` reference (legal structure)\n- `authoring-spec` reference (canonical authoring rules)\n- `authoring-guide-v2` reference (current v2 authoring principles)\n- `workflow-authoring-reference` reference (detailed structure patterns)\n- `lean-coding-workflow` reference (modern example to inspect)\n\nRead `routines-guide` too if you think the authored workflow may need delegation or template injection.\n\nThen decide what kind of authoring task this is:\n- `authoringMode`: `create` or `modernize_existing`\n\nIf `authoringMode = create`, understand:\n- What recurring task or problem should this workflow solve?\n- Who runs it and how often?\n- What does success look like?\n- What constraints exist (tools, permissions, domain rules)?\n\nIf `authoringMode = modernize_existing`, understand:\n- Which workflow file is being updated?\n- What should stay the same about its purpose?\n- What feels stale, legacy, repetitive, or misaligned with current authoring guidance?\n- What constraints apply to the modernization (keep file path, preserve compatibility, avoid broad rewrites, etc.)?\n- Which modern example should act as the primary baseline, if any?\n\nFor `modernize_existing`, make an explicit baseline decision before architecture work:\n- choose exactly one `primaryBaseline` when a single modern example fits well\n- optional `secondaryBaselines` may be used for supporting patterns only\n- if no single baseline fits, set `primaryBaseline = none` and explain whether you are using a hybrid baseline or reasoning directly from schema + authoring guidance\n- list `patternsToBorrow` and `patternsToAvoid`\n\nRule:\n- baselines are models, not templates. Copy structural patterns, not another workflow's domain voice.\n\nExplore first. Use tools to understand the existing workflow, surrounding docs, and relevant domain context. Ask the user only what you genuinely cannot figure out yourself.\n\nThen classify:\n- `workflowComplexity`: Simple (linear, few steps) / Medium (branches, loops, or moderate step count) / Complex (multiple loops, delegation, extension points, many steps)\n- `rigorMode`: QUICK (simple linear workflow, low risk) / STANDARD (moderate complexity or domain risk) / THOROUGH (complex architecture, high stakes, needs review loops)\n\nCapture:\n- `authoringMode`\n- `workflowComplexity`\n- `rigorMode`\n- `taskDescription`\n- `intendedAudience`\n- `successCriteria`\n- `domainConstraints`\n- `targetWorkflowPath` (required for `modernize_existing`, otherwise empty)\n- `modernizationGoals` (required for `modernize_existing`, otherwise empty)\n- `primaryBaseline` (for `modernize_existing`, otherwise empty)\n- `secondaryBaselines` (for `modernize_existing`, otherwise empty)\n- `baselineDecisionRationale` (for `modernize_existing`, otherwise empty)\n- `patternsToBorrow` (for `modernize_existing`, otherwise empty)\n- `patternsToAvoid` (for `modernize_existing`, otherwise empty)\n- `openQuestions` (only real questions that need user input)",
+      "id": "phase-0-understand-and-classify",
+      "title": "Phase 0: Understand and Classify the Authoring Task",
+      "promptBlocks": {
+        "goal": "Understand what workflow you are authoring or modernizing, and classify the task before you design anything.",
+        "constraints": [
+          [
+            { "kind": "ref", "refId": "wr.refs.notes_first_durability" }
+          ],
+          "Explore first. Ask the user only what you genuinely cannot determine with tools and references.",
+          "Choose baselines as models, not templates. Copy structural patterns, not another workflow's domain voice."
+        ],
+        "procedure": [
+          "Read the schema, authoring spec, v2 authoring guides, and the strongest relevant example workflows.",
+          "Decide `authoringMode`: `create` or `modernize_existing`.",
+          "Classify the target workflow archetype: `review_audit`, `coding_execution`, `diagnostic_investigation`, `planning_design`, `linear_operational`, or `content_analysis`.",
+          "Classify `workflowComplexity`: Simple, Medium, or Complex. Classify `rigorMode`: QUICK, STANDARD, or THOROUGH.",
+          "Choose an `authoringBaseline` for engine-native authoring quality and an `outcomeBaseline` for the kind of job the authored workflow should perform. If no good baseline exists for one of them, set it to `none` and explain why.",
+          "If `authoringMode = modernize_existing`, identify what must stay the same about purpose, what feels stale, and what modernization constraints apply."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Task understanding, baseline choices, patterns to borrow or avoid, and any real open questions.",
+          "context": "Capture authoringMode, workflowArchetype, workflowComplexity, rigorMode, taskDescription, intendedAudience, successCriteria, domainConstraints, targetWorkflowPath, modernizationGoals, authoringBaseline, outcomeBaseline, baselineDecisionRationale, authoringPatternsToBorrow, outcomePatternsToBorrow, patternsToAvoid, openQuestions."
+        },
+        "verify": [
+          "The task is understood well enough to design the workflow without guessing blindly.",
+          "Both authoring and outcome baselines are explicit, or their absence is justified."
+        ]
+      },
       "requireConfirmation": true
     },
     {
-      "id": "phase-1-shape",
-      "title": "Phase 1: Choose the Workflow Shape",
+      "id": "phase-1-define-effectiveness-target",
+      "title": "Phase 1: Define the Effectiveness Target",
+      "promptBlocks": {
+        "goal": "Define what success should feel like for the authored workflow, not just what fields it should contain.",
+        "constraints": [
+          "Be specific about user satisfaction and dangerous false-confidence outcomes.",
+          "Distinguish a technically valid workflow from a satisfying one."
+        ],
+        "procedure": [
+          "State what result the authored workflow should reliably produce for its user.",
+          "List the criteria that would make the workflow feel genuinely satisfying in practice.",
+          "Name the biggest likely failure mode and the most dangerous false-confidence mode.",
+          "State what would make the workflow technically correct but still disappointing."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Effectiveness target, satisfaction criteria, failure modes, and false-confidence risks.",
+          "context": "Capture effectivenessTarget, userSatisfactionCriteria, primaryFailureMode, dangerousFalseConfidenceModes, likelyWeakOutcomeModes, and trustRisk."
+        },
+        "verify": [
+          "The authored workflow now has a clear outcome bar, not just an authoring bar."
+        ]
+      },
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-2-design-workflow-architecture",
+      "title": "Phase 2: Design the Workflow Architecture",
       "runCondition": {
         "var": "workflowComplexity",
         "not_equals": "Simple"
       },
-      "prompt": "Decide the architecture before you write JSON.\n\nBased on what you learned in Phase 0, decide:\n\n1. **Step structure**: how many phases, what each one does, what order\n2. **Loops**: does any phase need iteration? If so, what are the exit rules and max iterations?\n\nLoop design heuristics:\n- Add a loop ONLY when: (a) a quality gate may fail on first pass (validation, review), (b) each pass adds measurable value (progressive refinement), or (c) external feedback requires re-execution.\n- Do NOT loop when: (a) the agent can get it right in one pass with sufficient context, or (b) the full workflow is cheap enough to re-run entirely.\n- Every loop needs: an explicit exit condition (not vibes), a bounded maxIterations, and a decision step with outputContract.\n- Sensible defaults: validation ≈ 2-3, review/refinement ≈ 2, user-feedback ≈ 2-3 with confirmation gate. Go higher only with explicit justification in your notes.\n3. **Confirmation gates**: where does the user genuinely need to approve before proceeding? Don't add confirmations as ceremony.\n4. **Delegation and reuse**: for each phase, decide between direct execution, routine delegation, template injection, or no special mechanism. If a routine or template is not used, say why not. Keep delegation bounded and keep ownership with the main agent.\n5. **Prompt composition**: will any steps need promptFragments for rigor-mode branching? Will any steps share enough structure to use templates?\n6. **Extension points**: are there customizable slots that projects might want to override (e.g., a verification routine, a review routine)?\n7. **References**: should the authored workflow declare its own references to external docs?\n8. **Artifacts**: what does each step produce? Which artifact is canonical for which concern?\n9. **metaGuidance**: what persistent behavioral rules should the agent see on start and resume?\n\nIf `authoringMode = modernize_existing`, also decide:\n- should this workflow be preserved mostly in place, restructured selectively, or rewritten more substantially?\n- which existing steps, loops, references, or metaGuidance should stay because they still fit the workflow's purpose?\n- which legacy patterns or repetitive sections should be removed or reshaped?\n- whether the file path should stay the same or whether a new variant/file is genuinely warranted\n- how each major old phase or behavior maps to the new workflow: `keep`, `merge`, `remove`, or `replace`\n\nFor `modernize_existing`, create a compact legacy mapping in your notes. For each major old phase or behavior, record:\n- source step or behavior\n- disposition: `keep` / `merge` / `remove` / `replace`\n- rationale\n- destination in the new workflow, if any\n\nFor routine and template decisions, create a compact audit in your notes. For each meaningful phase or concern, record:\n- chosen mechanism: direct / routine / template / none\n- why it helps or why it would be overkill\n- the ownership boundary that stays with the main agent\n\nWrite the shape as a structured outline in your notes. Include:\n- Phase list with titles and one-line goals\n- Which phases loop and why\n- Which phases have confirmation gates and why\n- Context variables that flow between phases\n- Artifact ownership (which artifact is canonical for what)\n- for `modernize_existing`: whether the plan is preserve-in-place, restructure, or rewrite-biased and why\n\nDon't write JSON yet.\n\nCapture:\n- `workflowOutline`\n- `loopDesign`\n- `confirmationDesign`\n- `delegationDesign`\n- `artifactPlan`\n- `contextModel` (the context variables the workflow will use and where they're set)\n- `voiceStrategy` (domain vocabulary, authority posture: directive/collaborative/supervisory, density calibration)\n- `routineAudit`\n- `delegationBoundaries`\n- `templateInjectionPlan`\n- `modernizationStrategy` (for `modernize_existing`: preserve_in_place / restructure / rewrite, otherwise empty)\n- `legacyMapping` (for `modernize_existing`, otherwise empty)\n- `behaviorPreservationNotes` (for `modernize_existing`, otherwise empty)",
+      "promptBlocks": {
+        "goal": "Decide the workflow architecture before you write JSON.",
+        "constraints": [
+          "Separate workflow architecture from quality-gate architecture. This phase is about the authored workflow itself.",
+          "Keep delegation bounded and keep ownership with the main agent."
+        ],
+        "procedure": [
+          "Decide the phase list, one-line goal for each phase, and overall ordering.",
+          "Design loops with explicit exit rules, bounded maxIterations, and real reasons for another pass.",
+          "Decide confirmation gates, delegation vs template injection vs direct execution, promptFragments, references, artifacts, and metaGuidance.",
+          "If `authoringMode = modernize_existing`, decide whether the plan is preserve-in-place, restructure, or rewrite, and map legacy behaviors as `keep`, `merge`, `remove`, or `replace`."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Structured workflow outline, loop design, confirmation design, delegation design, artifact plan, and modernization mapping.",
+          "context": "Capture workflowOutline, loopDesign, confirmationDesign, delegationDesign, artifactPlan, contextModel, voiceStrategy, routineAudit, delegationBoundaries, templateInjectionPlan, modernizationStrategy, legacyMapping, and behaviorPreservationNotes."
+        },
+        "verify": [
+          "The authored workflow architecture is coherent before JSON drafting begins."
+        ]
+      },
+      "promptFragments": [
+        {
+          "id": "phase-2-simple-direct",
+          "when": { "var": "workflowComplexity", "equals": "Simple" },
+          "text": "For Simple workflows, keep the architecture linear and compact. Do not invent loops or ceremony unless the task truly needs them."
+        }
+      ],
       "requireConfirmation": {
         "or": [
           { "var": "workflowComplexity", "not_equals": "Simple" },
@@ -106,22 +203,71 @@
       }
     },
     {
-      "id": "phase-2-draft",
-      "title": "Phase 2: Draft or Revise the Workflow",
-      "prompt": "Write the workflow JSON file.\n\nUse the outline from Phase 1 and produce the best first pass you can. If `authoringMode = create`, draft a new workflow. If `authoringMode = modernize_existing`, revise the existing workflow so it keeps the right intent while removing stale structure, legacy patterns, or unnecessary repetition. Phase 3 will catch structural issues, so focus on getting the shape and voice right. Follow these rules:\n\n1. The schema (`workflow-schema` reference) defines what is structurally legal. Do not invent fields.\n2. The authoring spec (`authoring-spec` reference) defines what is good. Follow its active rules.\n3. Write prompts in the user's voice. The opening sentence of each step should sound like a direct ask, not system narration.\n4. Calibrate prompt density to the step's needs. Not all steps need the same level of detail:\n   - Sparse (expert audience, clear task): direct ask + capture footer only.\n   - Focused (expert audience, ambiguous task): direct ask + key criteria or trade-offs + capture.\n   - Guided (broad audience, clear task): direct ask + enumerated sub-steps + capture.\n   - Scaffolded (broad audience, ambiguous task): direct ask + context frame + sub-steps + heuristic + capture.\n   Default to Focused if unsure. Vary density across steps -- uniform density is a smell.\n5. Keep protocol requirements explicit. If a step must emit a specific artifact or capture specific context, say that plainly.\n6. Use promptFragments for conditional rigor-mode branches instead of duplicating entire steps.\n7. Loop decision steps must use `outputContract` with `wr.contracts.loop_control` and allow both `continue` and `stop` in the output example.\n8. Loops must have explicit exit rules, bounded maxIterations, and a clear reason for another pass.\n9. Confirmation gates are for real human decisions, not routine ceremony.\n10. metaGuidance should be clean behavioral rules, not pseudo-functions or teaching prose.\n11. Do not use regex validationCriteria as the primary quality gate. Use real validators.\n12. If you are modernizing, preserve what still fits the workflow's purpose. Do not rewrite just because a workflow is old.\n\nIf `authoringMode = create`, ask the user what filename to use if they haven't specified one.\nIf `authoringMode = modernize_existing`, default to editing `targetWorkflowPath` unless there is a strong reason to create a new variant or file.\n\nWrite the file. Do not explain the JSON back to the user field by field.\n\nCapture:\n- `workflowFilePath`\n- `draftComplete`",
+      "id": "phase-3-design-quality-architecture",
+      "title": "Phase 3: Design the Quality-Gate Architecture",
+      "promptBlocks": {
+        "goal": "Design how the authored workflow will avoid shallow results, false confidence, and state bloat.",
+        "constraints": [
+          "This phase is about the authored workflow's quality model, not its basic phase list.",
+          "Prefer explicit quality structure over hoping the agent will infer it."
+        ],
+        "procedure": [
+          "Decide whether the authored workflow needs a hypothesis step, neutral fact packet, reviewer or validator families, contradiction loop, final validation bundle, or explicit blind-spot handling.",
+          "Design the confidence model, blind-spot model, and state economy plan.",
+          "Decide the hard-gate dimensions that would make the authored workflow unsafe or unsatisfying if they fail.",
+          "Write the redesign triggers that should force architectural revision rather than cosmetic refinement."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Quality architecture, confidence model, blind-spot model, state economy plan, and hard-gate triggers.",
+          "context": "Capture qualityArchitecture, confidenceModel, blindSpotModel, stateEconomyPlan, reviewBundlePlan, qualityGateTriggers, and hardGateModel."
+        },
+        "verify": [
+          "The authored workflow has an explicit plan for false-confidence resistance and quality review."
+        ]
+      },
+      "requireConfirmation": {
+        "or": [
+          { "var": "rigorMode", "equals": "THOROUGH" },
+          { "var": "workflowComplexity", "equals": "Complex" }
+        ]
+      }
+    },
+    {
+      "id": "phase-4-draft-or-revise",
+      "title": "Phase 4: Draft or Revise the Workflow",
+      "promptBlocks": {
+        "goal": "Write the workflow JSON file using the architecture and quality model you already chose.",
+        "constraints": [
+          "The schema defines what is legal. The authoring spec defines what is good.",
+          "Write prompts in the user's voice. Vary prompt density by step needs rather than using one density everywhere.",
+          "If you are modernizing, preserve what still fits the workflow's purpose. Do not rewrite just because a workflow is old."
+        ],
+        "procedure": [
+          "If `authoringMode = create` and no filename was specified, ask the user for the filename before writing.",
+          "If `authoringMode = modernize_existing`, default to editing `targetWorkflowPath` unless there is a strong reason to create a new variant or file.",
+          "Write the workflow file. Keep protocol requirements explicit, loops bounded, confirmations meaningful, and metaGuidance clean."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Draft status and any notable authoring choices that are important to later review.",
+          "context": "Capture workflowFilePath and draftComplete."
+        },
+        "verify": [
+          "The workflow file exists and reflects the chosen architecture rather than an improvised one."
+        ]
+      },
       "promptFragments": [
         {
-          "id": "phase-2-simple-fast",
+          "id": "phase-4-simple-fast",
           "when": { "var": "workflowComplexity", "equals": "Simple" },
-          "text": "No shape outline exists for Simple workflows -- Phase 1 was skipped. Decide the step list now and draft directly. Keep it linear, 3-5 steps, no loops unless the task genuinely needs iteration. metaGuidance is optional for Simple workflows."
+          "text": "For Simple workflows, keep the file compact and linear. Do not create extra metaGuidance or loops unless the task truly needs them."
         }
       ],
       "requireConfirmation": false
     },
     {
-      "id": "phase-3-validate",
+      "id": "phase-5-validate",
       "type": "loop",
-      "title": "Phase 3: Validate and Fix",
+      "title": "Phase 5: Structural Validation Loop",
       "loop": {
         "type": "while",
         "conditionSource": {
@@ -133,76 +279,267 @@
       },
       "body": [
         {
-          "id": "phase-3a-run-validation",
+          "id": "phase-5a-run-validation",
           "title": "Run Validation",
-          "prompt": "Run the real workflow validators against the drafted workflow.\n\nUse the available validation tools or commands (e.g., `npm run validate:registry`, schema validation, or the MCP validation surface). Do not rely on reading the JSON and eyeballing it.\n\nIf validation passes cleanly, say so and move to the loop decision.\n\nIf validation fails:\n1. List the actual errors.\n2. Fix each one in the workflow file.\n3. Re-run validation to confirm the fixes worked.\n\nIf the validator reports something that conflicts with your authoring assumptions, the validator (runtime) wins. Update your understanding.\n\nCapture:\n- `validationErrors`\n- `validationPassed`",
+          "promptBlocks": {
+            "goal": "Run the real workflow validators against the drafted workflow.",
+            "constraints": [
+              "Do not rely on reading the JSON and eyeballing it.",
+              "If runtime and authoring assumptions conflict, runtime wins."
+            ],
+            "procedure": [
+              "Run the available validation tools or commands such as `npm run validate:registry`, schema validation, or the MCP validation surface.",
+              "If validation fails, list the actual errors, fix them in the workflow file, and re-run validation.",
+              "If validation passes cleanly, say so plainly."
+            ],
+            "outputRequired": {
+              "notesMarkdown": "Validation results, actual errors if any, and what was fixed.",
+              "context": "Capture validationErrors and validationPassed."
+            },
+            "verify": [
+              "Validation results are based on real validators, not approximations."
+            ]
+          },
           "promptFragments": [
             {
-              "id": "phase-3a-thorough",
+              "id": "phase-5a-thorough",
               "when": { "var": "rigorMode", "equals": "THOROUGH" },
-              "text": "After fixing structural errors, also check the workflow against the authoring spec rules manually. Score each active required-level rule as pass/fail and fix any failures before moving on."
+              "text": "After structural validation passes, also check the workflow manually against required-level authoring-spec rules and fix any failures before moving on."
             }
           ],
           "requireConfirmation": false
         },
         {
-          "id": "phase-3b-loop-decision",
+          "id": "phase-5b-loop-decision",
           "title": "Validation Loop Decision",
-          "prompt": "Decide whether validation needs another pass.\n\n- If all errors are fixed and validation passes: stop.\n- If you fixed errors but haven't re-validated yet: continue.\n- If you've hit the iteration limit: stop and record what remains.\n\nEmit the loop-control artifact in this shape (`decision` must be `continue` or `stop`):\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue or stop\"\n  }]\n}\n```",
-          "requireConfirmation": false,
+          "promptBlocks": {
+            "goal": "Decide whether structural validation needs another pass.",
+            "constraints": [
+              "Use validator state, not vibes."
+            ],
+            "procedure": [
+              "If all errors are fixed and validation passes, stop.",
+              "If you fixed errors but have not re-validated yet, continue.",
+              "If you hit the iteration limit, stop and record what remains."
+            ],
+            "outputRequired": {
+              "artifact": "Emit a `wr.loop_control` artifact for `validation_loop` with `decision` set to `continue` or `stop`."
+            },
+            "verify": [
+              "The loop decision matches the actual validation state."
+            ]
+          },
           "outputContract": {
             "contractRef": "wr.contracts.loop_control"
-          }
+          },
+          "requireConfirmation": false
         }
       ]
     },
     {
-      "id": "phase-3-escalation",
+      "id": "phase-5-escalation",
       "title": "Validation Escalation",
       "runCondition": {
         "var": "validationPassed",
         "equals": false
       },
-      "prompt": "Validation did not pass after the maximum number of attempts.\n\nCheck whether the last validation run actually passed. If `validationPassed` is false or if you're uncertain, list the remaining errors and your assessment of their severity.\n\nThen present the options:\n1. Proceed with known issues documented in handoff notes.\n2. Stop here so the user can intervene manually.\n\nDo not silently continue with a broken workflow.",
+      "promptBlocks": {
+        "goal": "Do not silently continue with a structurally broken workflow.",
+        "constraints": [
+          "Present the situation honestly."
+        ],
+        "procedure": [
+          "List the remaining validation errors and assess their severity.",
+          "Present the options: proceed with known issues documented, or stop so the user can intervene manually."
+        ]
+      },
       "requireConfirmation": true
     },
     {
-      "id": "phase-4-review",
-      "title": "Phase 4: Method Review",
-      "prompt": "The workflow is valid. Now check whether it's actually good.\n\nScore each dimension 0-2 with one sentence of evidence:\n\n- `voiceClarity`: 0 = prompts are direct user-voiced asks in the workflow's domain vocabulary, 1 = mostly user-voiced but borrows vocabulary from other domains or has middleware narration, 2 = reads like system documentation or sounds like a different domain\n- `ceremonyLevel`: 0 = confirmations only at real decision points, 1 = one or two unnecessary gates, 2 = over-asks the user or adds routine ceremony\n- `loopSoundness`: 0 = loops have explicit exit rules, bounded iterations, and real decision steps, 1 = minor issues with exit clarity, 2 = vibes-only exit conditions or unbounded loops (score 0 if no loops)\n- `delegationBoundedness`: 0 = delegation is bounded and explicit or absent, 1 = one delegation could be tighter or a good routine/template opportunity was missed, 2 = open-ended or ownership-transferring delegation, or routine/template choices are unjustified (score 0 if no delegation and no reuse need exists)\n- `legacyPatterns`: 0 = no legacy anti-patterns, 1 = minor legacy residue, 2 = pseudo-DSL, learning paths, satisfaction loops, or regex-as-gate present\n- `artifactClarity`: 0 = clear what each artifact is for and which is canonical, 1 = mostly clear, 2 = ambiguous artifact ownership\n- `modeFit`: 0 = the workflow fits the selected `authoringMode`, 1 = minor creation/modernization mismatch remains, 2 = the workflow still reads like the wrong mode entirely\n- `modernizationDiscipline`: 0 = valuable behavior was preserved and legacy structure was removed cleanly, 1 = minor mismatch or over/under-preservation, 2 = either valuable behavior was lost or legacy structure still dominates (score 0 for `create` mode)\n\nIf the total score is 0-3: the workflow is ready.\nIf the total score is 4-6: fix the worst dimensions before proceeding.\nIf the total score is 7+: this needs significant rework. Fix the worst dimensions here, re-validate, and record what you would change if you could redraft from scratch.\n\nIf `authoringMode = modernize_existing`, check explicitly:\n- does the updated workflow preserve the right purpose?\n- did you remove legacy structure without rewriting valuable behavior away?\n- does the final workflow still align with `primaryBaseline` and `patternsToBorrow` without copying domain language?\n- does the final workflow respect the `legacyMapping`, especially for anything marked keep or merge?\n- do the routine/template choices still match the `routineAudit` and stay bounded?\n- do any prompts, captures, or handoff notes still assume this was a brand-new workflow?\n\nFix any issues directly in the workflow file. Re-run validation if you changed structure.\n\nCapture:\n- `reviewScores`\n- `reviewPassed`\n- `fixesApplied`",
-      "promptFragments": [
-        {
-          "id": "phase-4-quick-skip",
-          "when": { "var": "rigorMode", "equals": "QUICK" },
-          "text": "For QUICK rigor, do a fast pass on voiceClarity and legacyPatterns only. Skip the full rubric unless something looks off."
+      "id": "phase-6-quality-gate-loop",
+      "type": "loop",
+      "title": "Phase 6: Quality-Gate Loop",
+      "loop": {
+        "type": "while",
+        "conditionSource": {
+          "kind": "artifact_contract",
+          "contractRef": "wr.contracts.loop_control",
+          "loopId": "quality_gate_loop"
         },
-        {
-          "id": "phase-4-thorough-extra",
-          "when": { "var": "rigorMode", "equals": "THOROUGH" },
-          "text": "Also review:\n- Are the context captures complete and correctly named?\n- Do runConditions and promptFragment conditions use the right variables?\n- Is the metaGuidance minimal and non-redundant?\n- Would this workflow make sense to an agent that has never seen it before?"
-        },
-        {
-          "id": "phase-4-trace-walkthrough",
-          "when": { "var": "rigorMode", "not_equals": "QUICK" },
-          "text": "After scoring the rubric, trace through the workflow with the user's original task as the test scenario. For each step:\n- What context variables does it need? Are they available from prior steps?\n- What would the agent actually do given only the prompt and references?\n- What does it produce? Does the next step have everything it needs?\n\nFlag any context flow gaps, naming mismatches, or steps where the agent wouldn't know what to do. Fix them in the workflow file."
-        }
-      ],
-      "requireConfirmation": false
-    },
-    {
-      "id": "phase-5-refine",
-      "title": "Phase 5: Refinement",
-      "runCondition": {
-        "var": "rigorMode",
-        "not_equals": "QUICK"
+        "maxIterations": 2
       },
-      "prompt": "The workflow is valid and reviewed. Check whether any of these improvements are worth making:\n\n1. **Prompt fragments**: are there steps with near-identical prompts that differ only by rigor mode or `authoringMode`? Extract the differences into promptFragments.\n2. **Extension points**: are there slots that different teams or projects would want to customize? Declare them.\n3. **References**: should the workflow point at external documents the agent should be aware of during execution?\n4. **Deduplication**: is there repeated prose across steps that could be moved to metaGuidance or a shared pattern?\n5. **Context templates**: are there simple variable substitutions that would make prompts cleaner?\n\nOnly make changes that genuinely improve the workflow. Do not refine for the sake of refining.\n\nIf `authoringMode = modernize_existing`, prefer refinements that remove leftover legacy wording or mismatched structure over cosmetic rewrites.\n\nIf you change anything, re-run validation.\n\nCapture:\n- `refinementsApplied`\n- `finalValidationPassed`",
-      "requireConfirmation": false
+      "body": [
+        {
+          "id": "phase-6a-state-economy-audit",
+          "title": "State Economy Audit",
+          "promptBlocks": {
+            "goal": "Check whether every context field in the authored workflow earns its keep.",
+            "constraints": [
+              "A field is justified only if it materially affects routing, synthesis, confidence, or handoff quality.",
+              "Do not keep bookkeeping fields just because they sound organized."
+            ],
+            "procedure": [
+              "For each meaningful captured context field, record where it is set, where it is consumed, what decision or outcome it influences, and what gets worse if it is removed.",
+              "Classify each field as `keep`, `wire`, or `remove`.",
+              "Fix weak or unused fields directly in the workflow file."
+            ],
+            "outputRequired": {
+              "notesMarkdown": "State field audit with keep/wire/remove decisions and any fixes applied.",
+              "context": "Capture stateFieldAudit, unusedOrWeakFields, and stateEconomyPassed."
+            },
+            "verify": [
+              "Weak or unused fields are either wired meaningfully or removed."
+            ]
+          },
+          "requireConfirmation": false
+        },
+        {
+          "id": "phase-6b-execution-simulation",
+          "title": "Execution Simulation",
+          "promptBlocks": {
+            "goal": "Simulate what would happen if the authored workflow ran on the user's real task.",
+            "constraints": [
+              "This is about practical utility, not only context-flow correctness.",
+              "Flag places where the workflow would produce paperwork, generic output, or false confidence instead of value."
+            ],
+            "procedure": [
+              "Trace the authored workflow step by step against the user's actual task or the closest realistic scenario.",
+              "For each step, ask: what would the agent actually do, what context would it have, what would it likely produce, and what would the next step inherit?",
+              "Identify likely weak steps, likely unsatisfying outputs, and likely false-confidence modes.",
+              "Fix issues directly in the workflow file when the right improvement is clear."
+            ],
+            "outputRequired": {
+              "notesMarkdown": "Execution simulation findings, likely weak steps, unsatisfying outputs, false-confidence risks, and any fixes applied.",
+              "context": "Capture simulationFindings, likelyWeakSteps, likelyUnsatisfyingOutputs, falseConfidenceFindings, and outcomeEffectivenessPassed."
+            },
+            "verify": [
+              "The simulation judges likely usefulness, not just structural legality."
+            ]
+          },
+          "promptFragments": [
+            {
+              "id": "phase-6b-quick",
+              "when": { "var": "rigorMode", "equals": "QUICK" },
+              "text": "For QUICK rigor, keep the simulation compact but still answer where the workflow would likely disappoint the user if it disappointed them at all."
+            }
+          ],
+          "requireConfirmation": false
+        },
+        {
+          "id": "phase-6c-adversarial-quality-review",
+          "title": "Adversarial Quality Review",
+          "promptBlocks": {
+            "goal": "Review the authored workflow as a quality gate, not just as a valid JSON file.",
+            "constraints": [
+              "Authoring integrity and outcome effectiveness are separate concerns. Score both.",
+              "Reviewer-family or validator output is evidence, not authority."
+            ],
+            "procedure": [
+              "Score these dimensions 0-2 with one sentence of evidence each: `voiceClarity`, `ceremonyLevel`, `loopSoundness`, `delegationBoundedness`, `artifactClarity`, `taskEffectiveness`, `falseConfidenceResistance`, `stateMinimality`, `coverageSharpness`, `domainFit`, `handoffUtility`, and `modernizationDiscipline`.",
+              "If delegation is available and rigor is THOROUGH, run an adversarial review bundle with these lenses: `engine_native_reviewer`, `task_effectiveness_reviewer`, `state_economy_reviewer`, `false_confidence_reviewer`, `domain_fit_reviewer`, and `maintainer_reviewer`.",
+              "Synthesize what the review confirmed, what it challenged, and what changed your mind.",
+              "Set hard-gate failures whenever any of these are materially weak: `taskEffectiveness`, `falseConfidenceResistance`, `stateMinimality`, `coverageSharpness`, `domainFit`, or `handoffUtility`.",
+              "Set `authoringIntegrityPassed = true` only if structural and authoring-quality dimensions are all acceptable. Set `outcomeEffectivenessPassed = true` only if the workflow is likely to achieve satisfying results for the user."
+            ],
+            "outputRequired": {
+              "notesMarkdown": "Quality review scores, adversarial review findings, hard-gate failures, and the current redesign severity.",
+              "context": "Capture reviewScores, hardGateFailures, authoringIntegrityPassed, outcomeEffectivenessPassed, qualityReviewSummary, and redesignSeverity."
+            },
+            "verify": [
+              "Hard gates reflect real user-trust risk, not cosmetic imperfections."
+            ]
+          },
+          "promptFragments": [
+            {
+              "id": "phase-6c-standard",
+              "when": { "var": "rigorMode", "equals": "STANDARD" },
+              "text": "For STANDARD rigor, you may keep the review self-executed unless uncertainty remains material. If you do delegate, prefer a small adversarial bundle."
+            },
+            {
+              "id": "phase-6c-thorough",
+              "when": { "var": "rigorMode", "equals": "THOROUGH" },
+              "text": "For THOROUGH rigor, assume the first review is not enough. Use adversarial reviewer lanes unless a hard limitation makes them impossible."
+            }
+          ],
+          "requireConfirmation": false
+        },
+        {
+          "id": "phase-6d-redesign-and-revalidate",
+          "title": "Redesign and Revalidate",
+          "promptBlocks": {
+            "goal": "If hard gates fail, redesign the workflow instead of polishing around the problem.",
+            "constraints": [
+              "Minor cosmetic refinement is not enough when task effectiveness or false-confidence resistance is weak.",
+              "If structure changes, re-run real validators before leaving this step."
+            ],
+            "procedure": [
+              "If `authoringIntegrityPassed` and `outcomeEffectivenessPassed` are both true and `hardGateFailures` is empty, say that no redesign is needed.",
+              "Otherwise classify the needed redesign severity as `minor`, `architectural`, or `unsafe_to_ship` and apply the necessary fixes directly to the workflow file.",
+              "If the redesign changed structure, run the real validators again and update the validation state before leaving this step."
+            ],
+            "outputRequired": {
+              "notesMarkdown": "Redesign actions taken, why they were needed, and whether revalidation passed.",
+              "context": "Capture redesignApplied, validationPassed, and remainingConcerns."
+            },
+            "verify": [
+              "Structural redesign problems are handled as redesign problems, not cosmetic ones."
+            ]
+          },
+          "requireConfirmation": false
+        },
+        {
+          "id": "phase-6e-quality-loop-decision",
+          "title": "Quality Loop Decision",
+          "promptBlocks": {
+            "goal": "Decide whether the quality-gate loop needs another pass.",
+            "constraints": [
+              "Use hard gates and actual remaining concerns, not vibes."
+            ],
+            "procedure": [
+              "Continue if `authoringIntegrityPassed = false`.",
+              "Otherwise continue if `outcomeEffectivenessPassed = false`.",
+              "Otherwise continue if `hardGateFailures` is not empty.",
+              "Otherwise continue if `redesignSeverity` is `architectural` or `unsafe_to_ship` and you have not yet re-reviewed the redesigned workflow.",
+              "Otherwise continue if `validationPassed = false` after redesign.",
+              "Otherwise stop."
+            ],
+            "outputRequired": {
+              "artifact": "Emit a `wr.loop_control` artifact for `quality_gate_loop` with `decision` set to `continue` or `stop`."
+            },
+            "verify": [
+              "The workflow does not stop while hard trust problems remain."
+            ]
+          },
+          "outputContract": {
+            "contractRef": "wr.contracts.loop_control"
+          },
+          "requireConfirmation": false
+        }
+      ]
     },
     {
-      "id": "phase-6-handoff",
-      "title": "Phase 6: Handoff",
-      "prompt": "Summarize what you authored or updated.\n\nInclude:\n- workflow file path and name\n- whether you created a new workflow or modernized an existing one\n- what the workflow does (one sentence)\n- step count and structure overview\n- loops, confirmations, and delegation if any\n- validation status\n- for modernization: the main improvements and any legacy residue still left intentionally\n- any known limitations or future improvements\n- how to test it: where to place the file and how to run it\n\nKeep it concise. The workflow file is the deliverable, not the summary.",
+      "id": "phase-7-final-trust-handoff",
+      "title": "Phase 7: Final Trust Handoff",
+      "promptBlocks": {
+        "goal": "Summarize the authored or modernized workflow as a trust decision, not just a file edit.",
+        "constraints": [
+          "Keep it concise. The workflow file is the deliverable, not the summary."
+        ],
+        "procedure": [
+          "State the workflow file path and name, whether it was created or modernized, and what it does in one sentence.",
+          "Summarize the step structure, loops, confirmations, and delegation profile.",
+          "Report validation status, authoring-integrity status, and outcome-effectiveness status.",
+          "Set a final `workflowReadinessVerdict`: `ready`, `ready_with_conditions`, or `not_ready`.",
+          "List the main improvements, residual weaknesses, trust risks if any, and how to test the workflow."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Final trust handoff covering readiness verdict, validation status, strengths, residual weaknesses, and testing guidance.",
+          "context": "Capture workflowReadinessVerdict, trustRiskSummary, knownFailureModes, and residualWeaknesses."
+        },
+        "verify": [
+          "The final handoff makes clear whether WorkRail should trust this workflow."
+        ]
+      },
       "notesOptional": true,
       "requireConfirmation": false
     }

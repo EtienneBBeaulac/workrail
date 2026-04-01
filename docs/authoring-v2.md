@@ -154,7 +154,7 @@ WorkRail v2 introduces several primitives for expressive workflows:
 - **Contract packs**: WorkRail-owned output schemas for structured artifacts (e.g., `wr.contracts.capability_observation`).
 - **PromptBlocks** (optional): structure step prompts as blocks (goal/constraints/procedure/outputRequired/verify) which compile to deterministic text.
 - **AgentRole**: workflow and/or step-level stance/persona (not system prompt control).
-- **Extension points**: named slots declared with `extensionPoints` and referenced via `{{wr.bindings.slotId}}` tokens; resolved at compile time from project `.workrail/bindings.json` overrides or workflow defaults. Enables team customization without forking workflow JSON.
+- **Extension points**: named slots declared with `extensionPoints` and referenced via `{{wr.bindings.slotId}}` tokens; resolved at compile time from project `.workrail/bindings.json` overrides or workflow defaults. Enables project-overridable delegation seams without forking workflow JSON.
 - **References**: workflow-declared pointers to external documents (schemas, specs, guides). Resolved at start time, delivered as a separate MCP content item. The agent reads the files itself if needed. See "Workflow references" section below.
 - **Assessments**: workflow-declared assessment shapes (`assessments`) that steps can reference with `assessmentRefs` and, in v1, use for one exact-match `require_followup` consequence via `assessmentConsequences`.
 
@@ -171,17 +171,45 @@ Use different primitives for different jobs. A good rule of thumb is:
 |---|---|---|---|
 | **`features`** | Inject reusable guidance into `promptBlocks` sections | **Compile time** | Cross-cutting rules like memory or subagent discipline |
 | **`promptFragments`** | Add small conditional prompt text to an existing step | **Render/runtime** | Context-sensitive nudges without branching the DAG |
-| **`templateCall`** | Insert reusable step structure or step sequences | **Compile time** | Reusing standard routines or audits |
-| **`extensionPoints`** | Let a workflow reference customizable bounded seams via `{{wr.bindings.*}}` | **Compile time** | Swap candidate generation, review, or validation behavior without forking |
+| **`templateCall`** | Insert reusable step structure or step sequences inline | **Compile time** | Reusing standard routines or audits as first-class parent steps |
+| **`extensionPoints`** | Resolve overridable bound routine/workflow IDs in prompt text | **Compile time** | Swapping delegated bounded seams without forking |
 | **`runCondition`** | Decide whether a step runs | **Runtime** | Real branching, pathing, or routing |
 
 Use these as the default choice rules:
 
 - **Use `runCondition`** when the workflow should actually take a different path.
 - **Use `promptFragments`** when the step stays the same but needs small context-sensitive additions.
-- **Use `templateCall`** when you want reusable standard structure.
-- **Use `extensionPoints`** when you want reusable structure that teams can override.
+- **Use `templateCall`** when you want reusable standard structure or routine injection.
+- **Use `extensionPoints`** when you want a project-overridable delegated seam, not inline structure.
 - **Use `features`** for workflow-wide repeated guidance.
+
+#### References are for execution-time companion material, not authoring provenance
+
+Use workflow `references` sparingly.
+
+- **Good use**: documents the running workflow may genuinely need while doing its job, such as a shipped rubric, a target-system spec, or a project policy document.
+- **Bad use**: authoring-only material about how the workflow was designed, including the workflow schema, authoring spec, or maintainer provenance, unless the workflow is itself about authoring or validating workflows.
+
+Practical test:
+
+- If the reference helps the agent perform the workflow's **runtime task**, keep it.
+- If it only helps a maintainer justify or inspect the workflow's design, remove it from normal execution workflows.
+
+#### Strong default: inject first, override only when delegation is intentional
+
+When choosing between `templateCall` and `extensionPoints`, prefer this rule:
+
+- **If the routine should be part of the parent workflow's visible step structure, use `templateCall`.**
+- **If the routine should remain an opaque bounded implementation that the parent may delegate to, use delegation.**
+- **If that delegated seam should be customizable per project, wrap that delegation seam in `extensionPoints`.**
+
+Do **not** use `extensionPoints` as a generic substitute for routine injection.
+
+Important implementation detail:
+
+- `templateCall` expands routines into real steps during the compiler's template pass.
+- `{{wr.bindings.*}}` tokens are resolved later, during binding resolution.
+- Therefore, **extension points cannot currently choose which routine gets injected by a `templateCall`**.
 
 ### Baseline (Tier 0): notes-first
 
@@ -308,6 +336,8 @@ When something needs to be injected at a specific point (“run an audit here”
 - Explicit at the callsite (less hidden magic).
 - Deterministic and debuggable.
 - Avoids tag-taxonomy sprawl.
+
+If what you want is **team-overridable delegation**, use `extensionPoints` instead — but treat that as a different mechanism with different runtime behavior, not another form of injection.
 
 Tags can still exist as optional **classification** metadata (for UI organization and search), but should not be the primary injection mechanism.
 

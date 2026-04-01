@@ -151,36 +151,36 @@ Design the DTO and UX changes needed so the console explains why the engine took
 - `src/v2/usecases/console-service.ts`
 - `console/src/api/types.ts`
 
-## Ticket 6: Adopt assessment-gate follow-up in MR review
+## Ticket 6: Trial the workflow quality gate and readiness audit on real tasks
 
 ### Problem
 
-The assessment-gate engine feature now exists and is exercised by a bundled pilot in `bug-investigation.agentic.v2.json`, but it has not yet been adopted in a higher-value workflow where the product fit is strongest.
+`workflow-for-workflows.v2.json` and `production-readiness-audit.json` are now structurally much stronger, but they have mostly been tuned through authoring-time reasoning and validator passes rather than repeated real-world use. The remaining risk is no longer legality; it is whether `STANDARD` vs `THOROUGH` produces the right depth, issue-finding power, and amount of ceremony on actual tasks.
 
 ### Goal
 
-Adopt the narrow v1 assessment-gate follow-up model in `mr-review-workflow.agentic.v2.json` at a semantically appropriate boundary, and verify that the resulting follow-up UX, durable traces, and workflow behavior hold up in a real user-facing workflow.
+Run both workflows on several realistic tasks and tune them from evidence so the quality gate stays convergent and the readiness audit stays satisfying, skeptical, and useful.
 
 ### Acceptance criteria
 
-- `mr-review-workflow.agentic.v2.json` declares one narrow assessment gate / follow-up consequence at an appropriate review-readiness boundary
-- the lifecycle/smoke coverage exercises the MR-review adoption without adding bespoke per-workflow harness complexity
-- the blocked follow-up wording remains semantic and same-step retry oriented
-- durable assessment interpretation and applied consequence remain inspectable through the current event/projection surfaces
+- `workflow-for-workflows.v2.json` is exercised on multiple distinct authoring tasks spanning at least two archetypes
+- `production-readiness-audit.json` is exercised on multiple realistic audit targets with different scope/risk shapes
+- Observed weaknesses are classified into authoring-integrity, outcome-effectiveness, or ceremony/depth tuning buckets
+- Any resulting workflow edits are revalidated with `npm run validate:registry` and `npm run validate:workflow-discovery`
+- Planning docs capture the tuned follow-up state rather than leaving trialing implicit
 
 ### Non-goals
 
-- expanding the assessment consequence model beyond the current exact-match `require_followup` v1 shape
-- introducing redo subflows, score systems, or generic policy DSL behavior
-- broad rollout across multiple high-traffic workflows in one pass
+- Rewriting the workflows from scratch again without evidence from runs
+- Expanding the engine/runtime surface itself as part of this ticket
+- Broad modernization of unrelated bundled workflows
 
 ### Related files/docs
 
-- `workflows/mr-review-workflow.agentic.v2.json`
-- `workflows/bug-investigation.agentic.v2.json`
-- `docs/plans/mr-review-workflow-redesign.md`
+- `workflows/workflow-for-workflows.v2.json`
+- `workflows/production-readiness-audit.json`
 - `docs/roadmap/open-work-inventory.md`
-- `docs/ideas/backlog.md`
+- `docs/roadmap/now-next-later.md`
 
 ## ~~Ticket 7: Finish prompt vs supplement boundary alignment~~ (done)
 

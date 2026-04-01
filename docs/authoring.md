@@ -281,22 +281,89 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 - **Level**: recommended
 - **Status**: active
 - **Scope**: workflow.extension-points, prompt.composition, workflow.definition
-- **Rule**: Use extension points when a workflow wants stable customization slots rather than hardcoding routine or binding references inline.
-- **Why**: Extension points make customization explicit, inspectable, and project-overridable.
+- **Rule**: Use extension points when a workflow wants stable project-overridable delegation seams rather than hardcoding bound routine or workflow names inline.
+- **Why**: Extension points make delegated customization explicit, inspectable, and project-overridable without conflating rebinding with routine injection.
 - **Enforced by**: advisory
 
 **Checks**
 - Declare extension points at the workflow level when bindings are part of the contract.
 - Avoid hidden or undocumented binding slots in prompts.
+- Prefer `templateCall` when the real goal is reusable inline routine structure, visible injected steps, or parent-step confirmation behavior.
+- Use extension points only when the seam is intentionally delegated and may need project-level rebinding.
 
 **Anti-patterns**
 - Hardcoding team-customizable routine names in prompt text without an extension-point declaration
 - Using `{{wr.bindings.*}}` tokens in a workflow that declares no extension points
+- Using extension points where `templateCall` would better represent the parent workflow's real structure
+- Expecting `{{wr.bindings.*}}` to change which routine gets injected inline
 
 **Source refs**
 - `docs/authoring.md` (documentation) — Extension points are documented for workflow authors.
 - `src/application/services/compiler/resolve-bindings.ts` (runtime) — Binding resolution depends on declared extension points.
 - `src/application/services/validation-engine.ts` (validator) — Extension point declarations and binding-token usage are validated.
+
+
+## Compiler features (middleware)
+### declare-features-for-cross-cutting-concerns
+- **Level**: recommended
+- **Status**: active
+- **Scope**: workflow.features, workflow.definition
+- **Rule**: Declare compiler features when a workflow uses cross-cutting capabilities that benefit from systematic injection across all steps.
+- **Why**: Features inject constraints, procedure steps, and verification checks at compile time. Declaring them ensures consistent behavior across every step without repeating guidance in each prompt.
+- **Enforced by**: advisory
+
+**Checks**
+- If the workflow delegates work to subagents, declare `wr.features.subagent_guidance`.
+- If the workflow uses Memory MCP for context recall or persistence, declare `wr.features.memory_context`.
+- Do not duplicate feature-injected guidance in metaGuidance or step prompts. Let the compiler handle it.
+
+**Anti-patterns**
+- Hand-writing delegation discipline rules in metaGuidance when `wr.features.subagent_guidance` would inject them systematically
+- Repeating Memory MCP usage instructions in every step instead of declaring `wr.features.memory_context`
+- Declaring features the workflow does not actually use
+
+**Source refs**
+- `src/application/services/compiler/feature-registry.ts` (runtime) — Canonical closed-set feature definitions and injection logic.
+- `spec/workflow.schema.json` (schema) — The features array field on the workflow definition.
+
+### features-are-closed-set
+- **Level**: required
+- **Status**: active
+- **Scope**: workflow.features
+- **Rule**: Only declare features from the closed set owned by WorkRail. Do not invent feature IDs.
+- **Why**: Features modify compiled content that becomes part of the workflow hash. User-defined features would break deterministic compilation.
+- **Enforced by**: runtime, validator
+
+**Checks**
+- Every feature ID in the `features` array must resolve in the feature registry.
+- Unknown feature IDs cause a compile-time error.
+- Known features: `wr.features.subagent_guidance` (delegation discipline for workflows that spawn subagents), `wr.features.memory_context` (Memory MCP usage constraints for cross-step/cross-session recall).
+
+**Anti-patterns**
+- Inventing feature IDs like `wr.features.my_custom_thing`
+
+**Source refs**
+- `src/application/services/compiler/feature-registry.ts` (runtime) — The registry rejects unknown feature IDs at compile time.
+
+
+## Workflow references
+### references-are-for-runtime-companion-material
+- **Level**: recommended
+- **Status**: active
+- **Scope**: workflow.references, workflow.definition
+- **Rule**: Declare references only for documents the running workflow may genuinely need while executing its task.
+- **Why**: References are surfaced to the agent at workflow start and become part of the workflow hash. Maintainer-only or authoring-only references add cognitive load and hash churn without improving runtime execution.
+- **Enforced by**: advisory
+
+**Checks**
+- Keep references that materially help the running workflow perform its task.
+- Prefer rubrics, target-system specs, policies, or playbooks that constrain runtime judgment.
+- If removing a reference would not make the running workflow materially worse at execution, remove it.
+
+**Anti-patterns**
+- Adding workflow-schema references to ordinary execution workflows that are not authoring or validation workflows
+- Adding authoring-spec or provenance references to workflows whose runtime task is unrelated to workflow authoring
+- Using references to justify a workflow's design to maintainers instead of helping the running agent do the task
 
 
 ## Response supplements and delivery-owned guidance
@@ -731,6 +798,7 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 - `workflow.description`: Top-level workflow description text
 - `workflow.meta-guidance`: Workflow-level meta guidance
 - `workflow.extension-points`: Workflow-level extension point declarations and binding slots
+- `workflow.features`: Compiler feature declarations (closed-set middleware injected at compile time)
 - `step.prompt`: Primary step prompt text
 - `step.prompt-fragment`: Conditional prompt fragment text
 - `step.prompt-blocks`: Structured prompt blocks or shared prompt composition structures

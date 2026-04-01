@@ -1,0 +1,354 @@
+{
+  "id": "production-readiness-audit",
+  "name": "Production Readiness Audit (v2 • Evidence-Driven Readiness Review)",
+  "version": "0.1.0",
+  "description": "Audit a bounded codebase scope for debugging risk, runtime readiness, stale or misleading implementation surfaces, technical debt, and anything else that would keep it from being honestly production-ready.",
+  "recommendedPreferences": {
+    "recommendedAutonomy": "guided",
+    "recommendedRiskPolicy": "conservative"
+  },
+  "features": [
+    "wr.features.subagent_guidance"
+  ],
+  "references": [
+    {
+      "id": "audit-rubric",
+      "title": "Production Readiness Audit Rubric",
+      "source": "./spec/production-readiness-audit-rubric.md",
+      "purpose": "Canonical coverage, evidence, confidence, and verdict rubric for this workflow.",
+      "authoritative": true,
+      "resolveFrom": "package"
+    }
+  ],
+  "preconditions": [
+    "The user provides a target scope or the agent can infer a bounded scope from the request.",
+    "The agent can inspect the code, surrounding context, and deterministic evidence needed to assess readiness honestly.",
+    "A human will consume the final verdict, findings, or remediation order."
+  ],
+  "metaGuidance": [
+    "DEFAULT BEHAVIOR: self-execute with tools. Ask only for true scope decisions, missing external artifacts, or permissions you cannot resolve yourself.",
+    "V2 DURABILITY: keep workflow truth in output.notesMarkdown and explicit context fields. Human-facing markdown artifacts are optional companions only.",
+    "OWNERSHIP: the main agent owns the fact packet, synthesis, severity calibration, verdict, and remediation order. Delegated work is evidence, not authority.",
+    "SUBAGENT DISCIPLINE: use a few explicit fan-out and fan-in checkpoints rather than scattered optional subagent calls.",
+    "READINESS MODEL: first understand and bound the scope, then state a readiness hypothesis, then freeze a neutral readiness fact packet, then let reviewer families challenge it in parallel, then reconcile contradictions explicitly.",
+    "COVERAGE LEDGER: track audit domains as `checked`, `uncertain`, `not_applicable`, `contradicted`, or `needs_followup`. Do not finalize with unresolved material gaps unless you name them clearly.",
+    "VERDICTS: allow `ready`, `ready_with_conditions`, `not_ready`, and `inconclusive`. Do not force a cleaner answer than the evidence supports.",
+    "BOUNDARY: this workflow audits and prioritizes. It must not drift into implementation planning or patch sequencing unless the user explicitly asks."
+  ],
+  "steps": [
+    {
+      "id": "phase-0-understand-and-classify",
+      "title": "Phase 0: Understand and Classify",
+      "promptBlocks": {
+        "goal": "Build the minimum complete understanding needed to audit readiness honestly.",
+        "constraints": [
+          [
+            { "kind": "ref", "refId": "wr.refs.notes_first_durability" }
+          ],
+          "Use tools first. Ask only for true scope or permission gaps you cannot resolve yourself.",
+          "Separate in-scope code from adjacent noise before you classify rigor or risk."
+        ],
+        "procedure": [
+          "Locate the real target surface, likely entry points, critical paths, public contracts, invariants, data or runtime surfaces, and affected consumers that matter.",
+          "Find the repo patterns and philosophy sources that should shape the audit, and state what production-ready should mean for this scope instead of assuming a generic bar.",
+          "Classify `scopeShape`, `riskLevel`, `rigorMode`, `criticalSurfaceTouched`, and `needsSimulation` after exploration, not before.",
+          "Run a context-clarity check with concrete scores for boundary clarity, production-bar clarity, philosophy clarity, and verification clarity.",
+          "If rigor and uncertainty justify it, spawn TWO WorkRail Executors in parallel running `routine-context-gathering` with complementary completeness/depth focus, then synthesize what changed."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Audit scope, production bar, classification, clarity scores, and what is still unknown.",
+          "context": "Capture scopeShape, riskLevel, rigorMode, contextSummary, candidateFiles, criticalPaths, productionBar, contextUnknownCount, criticalSurfaceTouched, needsSimulation, and openQuestions."
+        },
+        "verify": [
+          "The classification is driven by evidence, not vibes.",
+          "Open questions are real human-decision gaps only.",
+          "If scope is whole-codebase or risk is High, treat confirmation as a real review barrier."
+        ]
+      },
+      "requireConfirmation": {
+        "or": [
+          { "var": "scopeShape", "equals": "whole_codebase" },
+          { "var": "riskLevel", "equals": "High" }
+        ]
+      }
+    },
+    {
+      "id": "phase-1-state-readiness-hypothesis",
+      "title": "Phase 1: State Readiness Hypothesis",
+      "promptBlocks": {
+        "goal": "State your current readiness hypothesis before the reviewer families challenge it.",
+        "constraints": [
+          "Keep this short and falsifiable.",
+          "This is a reference point, not a position to defend."
+        ],
+        "procedure": [
+          "Write your current best guess about the likely readiness verdict direction.",
+          "Name the issue category or failure mode you are most worried about right now.",
+          "Say what would most likely make your current view wrong."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Current readiness hypothesis and the strongest reason it might be wrong.",
+          "context": "Capture readinessHypothesis."
+        },
+        "verify": [
+          "The hypothesis is concrete enough that later synthesis can say what changed your mind."
+        ]
+      },
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-2-freeze-fact-packet-and-select-reviewers",
+      "title": "Phase 2: Freeze Fact Packet and Select Reviewer Families",
+      "promptBlocks": {
+        "goal": "Freeze a neutral readiness fact packet and decide how much reviewer-family parallelism is warranted.",
+        "constraints": [
+          [
+            { "kind": "ref", "refId": "wr.refs.notes_first_durability" }
+          ],
+          "The fact packet is the primary truth for downstream reviewer families.",
+          "Keep `readinessHypothesis` as a hypothesis to challenge, not a frame to defend.",
+          "Keep any live audit artifact optional. Workflow truth lives in notes and context."
+        ],
+        "procedure": [
+          "Create a neutral `readinessFactPacket` containing: scope purpose and expected behavior, key entry points and runtime surfaces, critical invariants and failure costs, data and deployment assumptions, changed or risky seams, test/observability posture, repo patterns and philosophy constraints, and explicit open unknowns.",
+          "Include realism signals directly in the fact packet: likely dead code paths, fixture or fake-data dependence, placeholder behavior, stale comments or docs, and any seams that look misleadingly complete.",
+          "Initialize `coverageLedger` for these domains: `debugging_correctness`, `runtime_operability`, `artifact_realism`, `maintainability_debt`, `tests_observability`, `philosophy_patterns`, `security_performance`.",
+          "Perform a preliminary self-audit from the fact packet before choosing reviewer families.",
+          "Reviewer family options: `correctness_debugging`, `runtime_operability`, `artifact_realism`, `maintainability_debt`, `tests_observability`, `philosophy_patterns`, `security_performance`, `false_positive_skeptic`, `missed_issue_hunter`.",
+          "Selection guidance: QUICK = no bundle by default unless ambiguity still feels material; STANDARD = 4 or 5 families by default; THOROUGH = 6 or 7 families by default.",
+          "Always include `correctness_debugging`, `runtime_operability`, and `artifact_realism` unless clearly not applicable. Include `security_performance` when the scope touches auth, permissions, input trust boundaries, secrets, network surfaces, data exposure, resource intensity, latency-sensitive flows, or unbounded work. Include `tests_observability` in STANDARD and THOROUGH unless clearly not applicable. Include `philosophy_patterns` when the repo or user philosophy is strong enough to judge honestly. Include `missed_issue_hunter` in THOROUGH. Include `false_positive_skeptic` when blocker or major-grade findings already look plausible or severity inflation risk is non-trivial.",
+          "Set `needsReviewerBundle` explicitly. Set `coverageUncertainCount` as the number of coverage domains not yet safely closed: `uncertain` + `contradicted` + `needs_followup`. Initialize `contradictionCount`, `blindSpotCount`, and `falsePositiveRiskCount` to `0` if no reviewer-family bundle will run."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Neutral readiness fact packet, preliminary self-audit, selected reviewer families, and why the bundle is sized the way it is.",
+          "context": "Capture readinessFactPacket, coverageLedger, selectedReviewerFamilies, needsReviewerBundle, coverageUncertainCount, contradictionCount, blindSpotCount, falsePositiveRiskCount, needsSimulation."
+        },
+        "verify": [
+          "The fact packet is concrete enough that downstream reviewer families can use it without regathering broad context.",
+          "The workflow has a clear reason for whether `needsReviewerBundle` is true or false."
+        ]
+      },
+      "promptFragments": [
+        {
+          "id": "phase-2-quick",
+          "when": { "var": "rigorMode", "equals": "QUICK" },
+          "text": "Keep the fact packet compact. QUICK should not manufacture a giant ceremony layer."
+        },
+        {
+          "id": "phase-2-thorough",
+          "when": { "var": "rigorMode", "equals": "THOROUGH" },
+          "text": "For THOROUGH rigor, make the hidden-risk surfaces explicit: blind spots, fake confidence vectors, and production assumptions that would hurt if wrong."
+        }
+      ],
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-3-reviewer-family-bundle",
+      "title": "Phase 3: Parallel Reviewer Family Bundle",
+      "runCondition": {
+        "var": "needsReviewerBundle",
+        "equals": true
+      },
+      "promptBlocks": {
+        "goal": "Run the selected reviewer families in parallel from the same readiness fact packet, then synthesize their output as evidence rather than conclusions.",
+        "constraints": [
+          [
+            { "kind": "ref", "refId": "wr.refs.notes_first_durability" }
+          ],
+          [
+            { "kind": "ref", "refId": "wr.refs.synthesis_under_disagreement" }
+          ],
+          "Each reviewer family must use `readinessFactPacket` as primary truth.",
+          "Use `readinessHypothesis` only as comparison context.",
+          "Reviewer-family outputs are raw evidence, not canonical audit state."
+        ],
+        "procedure": [
+          "Before delegating, restate the current `readinessHypothesis` and say which reviewer family is most likely to challenge it.",
+          "Each reviewer family must return: top findings, strongest evidence, biggest uncertainty, likely false-confidence vector, and what would most likely falsify its current conclusion.",
+          "Family missions: `correctness_debugging` = logic defects, contradictory state, failure paths, unsafe assumptions, and strongest debugging leads; `runtime_operability` = production behavior, concurrency/state flow, deployment assumptions, resilience, rollback pain, and observability under failure; `artifact_realism` = stale code, dead seams, placeholder behavior, misleading comments/docs, fake-data dependence, and surfaces that look complete but are not; `maintainability_debt` = complexity, duplication, brittle seams, drift, and future-change cost; `tests_observability` = test adequacy, verification blind spots, logging/monitoring gaps, hidden failure modes, and rollout confidence; `philosophy_patterns` = architectural consistency, repo-pattern drift, and principle tension; `security_performance` = trust boundaries, auth/permission mistakes, secrets handling, unsafe inputs, data exposure, expensive paths, unbounded work, and performance cliffs likely to matter in production; `false_positive_skeptic` = challenge overreach, weak evidence, or severity inflation; `missed_issue_hunter` = search for an important issue family the others may miss.",
+          "Mode-adaptive parallelism: STANDARD = spawn FOUR WorkRail Executors simultaneously for the selected families; THOROUGH = spawn SIX WorkRail Executors simultaneously for the selected families.",
+          "After receiving outputs, explicitly synthesize: what reviewer families confirmed, what was genuinely new, what appeared weak or overreached, and what changed your mind or did not.",
+          "Build a compact `familyEvidenceLedger` for each selected family covering its strongest concern, strongest evidence, biggest uncertainty, and what could make it wrong."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Reviewer-family synthesis, contradictions, blind spots, false-positive challenges, and the family evidence ledger.",
+          "context": "Capture familyEvidenceLedger, familyFindingsSummary, contradictionCount, blindSpotCount, falsePositiveRiskCount, coverageUncertainCount, and needsSimulation."
+        },
+        "verify": [
+          "The same fact packet was used as primary truth across reviewer families.",
+          "Reviewer-family output is not treated as self-finalizing.",
+          "Contradictions, blind spots, and false-positive risks are reflected structurally in context."
+        ]
+      },
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-4-evidence-and-contradiction-loop",
+      "type": "loop",
+      "title": "Phase 4: Evidence and Contradiction Loop",
+      "loop": {
+        "type": "while",
+        "conditionSource": {
+          "kind": "artifact_contract",
+          "contractRef": "wr.contracts.loop_control",
+          "loopId": "readiness_synthesis_loop"
+        },
+        "maxIterations": 4
+      },
+      "body": [
+        {
+          "id": "phase-4a-targeted-follow-up",
+          "title": "Targeted Follow-Up Bundle",
+          "promptBlocks": {
+            "goal": "If contradictions, blind spots, or important coverage gaps remain, run only the smallest targeted follow-up needed.",
+            "constraints": [
+              [
+                { "kind": "ref", "refId": "wr.refs.parallelize_cognition_serialize_synthesis" }
+              ],
+              "Prefer one compact targeted bundle over repeated broad delegation moments.",
+              "Do not regather broad context unless a contradiction proves the original fact packet is insufficient.",
+              "Targeted follow-up output is evidence only and must still be synthesized by the main agent."
+            ],
+            "procedure": [
+              "Before delegating, state the current likely readiness verdict, the strongest unresolved concern, and what result would change your mind.",
+              "If `contradictionCount > 0`, run targeted challenge or validation aimed at the specific disagreement.",
+              "If `coverageUncertainCount > 0` or `blindSpotCount > 0`, run the smallest reviewer-family or context follow-up needed to close the gap.",
+              "If `needsSimulation = true`, include `routine-execution-simulation`.",
+              "If `falsePositiveRiskCount > 0`, include `routine-hypothesis-challenge`.",
+              "If philosophy tension is materially affecting severity or verdict quality, include `routine-philosophy-alignment`.",
+              "If no trigger fires, do not delegate this step."
+            ],
+            "outputRequired": {
+              "notesMarkdown": "What targeted follow-up ran, why it was needed, and what it resolved or failed to resolve."
+            },
+            "verify": [
+              "Only the smallest targeted bundle needed was run.",
+              "No broad context regather happened without an explicit contradiction-driven reason."
+            ]
+          },
+          "requireConfirmation": false
+        },
+        {
+          "id": "phase-4b-canonical-synthesis",
+          "title": "Canonical Synthesis and Coverage Update",
+          "promptBlocks": {
+            "goal": "Turn reviewer-family evidence and follow-up work into one canonical readiness state.",
+            "constraints": [
+              "If a blocker-grade or major-grade finding is still only plausible, say so plainly instead of silently upgrading it.",
+              "If a domain remains uncertain, carry that uncertainty into the final verdict."
+            ],
+            "procedure": [
+              "Revisit `readinessHypothesis`: say what the evidence confirmed, what it challenged, what changed your mind, what held firm, and what you explicitly reject.",
+              "Apply this decision table: if multiple reviewer families independently surface the same serious issue with compatible evidence, treat it as strongly supported; if severities disagree, default upward only when the lower-severity position lacks concrete counter-evidence; if one family says false positive and another says valid issue, explicitly adjudicate the disagreement in notes before finalization; if simulation reveals a new operational risk, add a new finding and re-evaluate verdict confidence.",
+              "Update the findings ledger and classify each material finding as Confirmed, Plausible, or Rejected.",
+              "Update the coverage ledger honestly: move a domain to `checked` only when evidence is materially adequate; keep it `uncertain` if disagreement or missing evidence still affects verdict quality; use `not_applicable` only when the scope truly does not engage that area; clear `contradicted` only when the contradiction is explicitly resolved.",
+              "Cap `finalConfidenceBand` downward when unresolved blind spots still cover materially risky space, and prefer `inconclusive` later if those blind spots remain decision-relevant without a cheap next check."
+            ],
+            "outputRequired": {
+              "notesMarkdown": "Canonical findings ledger update, readiness-hypothesis comparison, coverage update, and confidence update.",
+              "context": "Capture findingsLedger, confirmedFindingsCount, plausibleFindingsCount, rejectedFindingsCount, blockerCount, majorGapCount, coverageLedger, coverageUncertainCount, contradictionCount, blindSpotCount, falsePositiveRiskCount, finalConfidenceBand, needsEvidenceRefinement."
+            },
+            "verify": [
+              "Decision-driving findings are explicitly classified.",
+              "Coverage status matches the actual evidence quality."
+            ]
+          },
+          "requireConfirmation": false
+        },
+        {
+          "id": "phase-4c-loop-decision",
+          "title": "Synthesis Loop Decision",
+          "promptBlocks": {
+            "goal": "Decide whether the evidence-and-contradiction loop should continue.",
+            "constraints": [
+              "Use the trigger rules, not vibes."
+            ],
+            "procedure": [
+              "Continue if `contradictionCount > 0`.",
+              "Otherwise continue if `coverageUncertainCount > 0` and the uncertainty materially affects the verdict.",
+              "Otherwise continue if `falsePositiveRiskCount > 0` for a serious finding, or if `blindSpotCount > 0` for uncovered materially risky space.",
+              "Otherwise continue if `needsEvidenceRefinement = true`.",
+              "Otherwise stop."
+            ],
+            "outputRequired": {
+              "artifact": "Emit a `wr.loop_control` artifact for `readiness_synthesis_loop` with `decision` set to `continue` or `stop`."
+            },
+            "verify": [
+              "The output preserves the loop-control contract without forcing one decision in the example."
+            ]
+          },
+          "outputContract": {
+            "contractRef": "wr.contracts.loop_control"
+          },
+          "requireConfirmation": false
+        }
+      ]
+    },
+    {
+      "id": "phase-5-final-validation",
+      "title": "Phase 5: Final Validation",
+      "promptBlocks": {
+        "goal": "Stress-test the current readiness verdict before final handoff.",
+        "constraints": [
+          [
+            { "kind": "ref", "refId": "wr.refs.adversarial_challenge_rules" }
+          ],
+          [
+            { "kind": "ref", "refId": "wr.refs.synthesis_under_disagreement" }
+          ],
+          "Validation output is evidence to synthesize, not automatic authority."
+        ],
+        "procedure": [
+          "Run final validation if any of these are true: `criticalSurfaceTouched = true`, `needsSimulation = true`, `falsePositiveRiskCount > 0`, `blindSpotCount > 0`, `coverageUncertainCount > 0`, or `finalConfidenceBand != High`.",
+          "Before delegating, state: what is your current verdict, where are you least confident, and what finding would most likely change your mind now.",
+          "Set the current readiness verdict first: `ready`, `ready_with_conditions`, `not_ready`, or `inconclusive`.",
+          "Use `inconclusive` deliberately when material coverage uncertainty or unresolved blind spots remain and there is no bounded next check that would resolve them cheaply.",
+          "Mode-adaptive validation: QUICK = self-validate and optionally spawn ONE WorkRail Executor running `routine-hypothesis-challenge` if a serious uncertainty remains; STANDARD = if validation is required and delegation is available, spawn TWO WorkRail Executors simultaneously running `routine-hypothesis-challenge` and either `routine-execution-simulation` or `routine-final-verification`; THOROUGH = if validation is required and delegation is available, spawn THREE WorkRail Executors simultaneously running `routine-hypothesis-challenge`, `routine-execution-simulation` when needed, and `routine-final-verification`.",
+          "After receiving validator output, explicitly synthesize what was confirmed, what was new, what appears weak, and whether your verdict changed.",
+          "State explicitly whether the verdict is being limited by unresolved contradictions, unresolved false-positive risk, blind spots, or coverage uncertainty."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Validation synthesis, verdict stress test, and any conditions the verdict still depends on.",
+          "context": "Capture finalVerdict, finalConfidenceBand, validationSummary, followUpCount, and verdictConditions."
+        },
+        "verify": [
+          "If multiple validators still raise serious concerns, confidence is downgraded and synthesis is reopened.",
+          "If exactly one validator raises a concern, it is adjudicated before finalization.",
+          "If no validator can materially break the current verdict and the evidence is internally consistent, proceed to handoff."
+        ]
+      },
+      "requireConfirmation": {
+        "or": [
+          { "var": "finalConfidenceBand", "equals": "Low" },
+          { "var": "finalVerdict", "equals": "inconclusive" }
+        ]
+      }
+    },
+    {
+      "id": "phase-6-final-handoff",
+      "title": "Phase 6: Final Handoff",
+      "promptBlocks": {
+        "goal": "Deliver the final production-readiness handoff for a human decision-maker.",
+        "constraints": [
+          "This workflow informs a decision. It does not approve a release or make code changes by itself.",
+          "Do not drift into implementation planning, patch sequencing, or PR execution unless the user explicitly asks."
+        ],
+        "procedure": [
+          "Summarize the target scope, audit intent, final verdict, and confidence band.",
+          "List blocker-grade findings, major gaps, strongest remaining uncertainties, top confirmed findings, and plausible but unresolved findings that still matter.",
+          "Call out the strongest debugging leads, runtime or operational risks, artifact-realism concerns such as stale code or fake completeness, and the most important technical-debt themes.",
+          "Summarize the coverage ledger, especially any domains still uncertain or needing follow-up.",
+          "Give a remediation order and verification or monitoring follow-ups. Mention human-facing companion artifacts only if you actually created them."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Decision-ready final handoff covering verdict, confidence, findings, coverage gaps, and recommended remediation order."
+        },
+        "verify": [
+          "The handoff is verdict-first and evidence-aware.",
+          "Open uncertainty is disclosed rather than hidden."
+        ]
+      },
+      "requireConfirmation": false
+    }
+  ]
+}
