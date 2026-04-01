@@ -187,3 +187,43 @@ Workflow and feature ideas that are worth capturing but not yet planned or desig
   - should this live in the existing Console, as a dev-only page, or as a local authoring utility?
   - should it show only the compiled DAG, or also annotate likely runtime transitions such as blocked attempts, rewinds, and loop continuations?
   - how much provenance should it expose for injected routines/templates?
+
+### Native assessment / decision gates for workflows
+
+- **Status**: idea
+- **Summary**: Add a first-class workflow primitive for structured assessments that can drive routing. The agent would assess a small set of named dimensions, give short rationales, and let the engine use explicit aggregation / gate rules to influence continuation, follow-up, branching, or final confidence.
+- **Why this seems useful**:
+  - some workflow decisions are clearer and more auditable as small assessment matrices than as long prompt prose
+  - confidence computation is a strong example: workflows may want to derive final confidence from dimensions like boundary, intent, evidence, coverage, and disagreement
+  - explicit assessment gates would let the engine drive loops/branches without relying entirely on prose interpretation
+- **Near-term shape**:
+  - keep the reasoning with the agent, but let the workflow declare named assessment dimensions and allowed levels such as `High | Medium | Low`
+  - let the agent provide one short rationale per dimension
+  - let the engine compute caps / next actions / routing outcomes from explicit gate rules
+- **Ownership split**:
+  - the **agent** assesses each dimension and gives the short rationale
+  - the **engine** applies declared gate rules such as caps, routing outcomes, or follow-up triggers
+- **Longer-term shape**:
+  - add a first-class authoring primitive such as `assessmentGate`, `assessmentRef`, or similar
+  - optionally allow reusable built-in or repo-owned assessment schemas/matrices
+  - optionally validate assessment shape against WorkRail-owned schemas
+- **Good early use cases**:
+  - MR review confidence assessment
+  - planning readiness / confidence gates
+  - debugging confidence and next-step routing
+  - block-vs-continue / revisit-earlier-step decisions
+- **Design questions**:
+  - should this be a narrow `assessmentGate` primitive or a more generic structured decision-table feature?
+  - should reusable matrices be inline first, or backed by repo-owned refs from the start?
+  - how much aggregation logic should the engine support directly versus leaving to workflow-defined rules?
+  - how should assessment provenance and rationales appear in compiled/runtime traces?
+
+### Engine-injected note scaffolding
+
+- **Status**: related follow-on idea
+- **Summary**: Add an opt-in execution-contract or note-structure feature that helps agents produce compact notes useful to both humans and future resume agents.
+- **Why it may matter**:
+  - some workflows want notes to consistently capture current understanding, key findings, decisions, uncertainties, and next-step implications
+  - this is related to assessment-driven routing, but it is a different product concern
+- **Open question**:
+  - should note scaffolding live as a separate execution-contract feature, or share any underlying primitives with assessment gates?
