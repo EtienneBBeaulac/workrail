@@ -34,13 +34,11 @@ function WorktreeCard({ wt, onSelectBranch }: { wt: ConsoleWorktreeSummary; onSe
     ? 'border-yellow-500/40'
     : 'border-[var(--border)]';
 
-  const isClickable = !isDetached;
-
   return (
     <div
-      className={`rounded-lg border ${borderColor} bg-[var(--bg-secondary)] p-4 flex flex-col gap-2 ${isClickable ? 'cursor-pointer hover:border-[var(--accent)] transition-colors' : ''}`}
-      onClick={isClickable ? () => onSelectBranch(wt.branch!) : undefined}
-      title={isClickable ? `View sessions for ${wt.branch}` : undefined}
+      className={`rounded-lg border ${borderColor} bg-[var(--bg-secondary)] p-4 flex flex-col gap-2 ${!isDetached ? 'cursor-pointer hover:border-[var(--accent)] transition-colors' : ''}`}
+      onClick={!isDetached ? () => onSelectBranch(wt.branch!) : undefined}
+      title={!isDetached ? `View sessions for ${wt.branch}` : undefined}
     >
       {/* Header row: branch + worktree name */}
       <div className="flex items-start justify-between gap-3">

@@ -16,11 +16,18 @@ import type { ConsoleWorktreeSummary, ConsoleWorktreeListResponse, ConsoleRunSta
 // Git helpers
 // ---------------------------------------------------------------------------
 
-function git(cwd: string, args: readonly string[]): string {
+/**
+ * Run a git command and return stdout, or null if the command fails.
+ *
+ * null is an explicit failure signal — callers must handle it rather than
+ * silently treating a failed command as empty output. Empty string is a
+ * valid result (e.g. `git status --short` on a clean repo).
+ */
+function git(cwd: string, args: readonly string[]): string | null {
   try {
     return execFileSync('git', [...args], { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   } catch {
-    return '';
+    return null;
   }
 }
 
@@ -70,20 +77,22 @@ interface WorktreeEnrichment {
 }
 
 function enrichWorktree(wt: RawWorktree): WorktreeEnrichment {
-  // Last commit: short hash, subject, unix timestamp
+  // Last commit: short hash, subject, unix timestamp — null if git fails
   const logRaw = git(wt.path, ['log', '-1', '--format=%h%n%s%n%ct']);
-  const [hashLine, messageLine, timestampLine] = logRaw.split('\n');
+  const [hashLine, messageLine, timestampLine] = logRaw?.split('\n') ?? [];
   const headHash = hashLine?.trim() || wt.head.slice(0, 7);
-  const headMessage = messageLine?.trim() || '';
+  const headMessage = messageLine?.trim() ?? '';
   const headTimestampMs = timestampLine ? parseInt(timestampLine.trim(), 10) * 1000 : 0;
 
-  // Changed files: staged + unstaged (count non-empty lines of --short output)
+  // Changed files: staged + unstaged. null = git failed; 0 = genuinely clean.
   const statusRaw = git(wt.path, ['status', '--short']);
-  const changedCount = statusRaw ? statusRaw.split('\n').filter(l => l.trim()).length : 0;
+  const changedCount = statusRaw !== null
+    ? statusRaw.split('\n').filter(l => l.trim()).length
+    : 0;
 
-  // Commits ahead of origin/main
+  // Commits ahead of origin/main. null = git failed (e.g. no remote); treat as 0.
   const aheadRaw = git(wt.path, ['rev-list', '--count', 'origin/main..HEAD']);
-  const aheadCount = aheadRaw ? parseInt(aheadRaw, 10) : 0;
+  const aheadCount = aheadRaw !== null ? parseInt(aheadRaw, 10) : 0;
 
   return { headHash, headMessage, headTimestampMs, changedCount, aheadCount };
 }
@@ -121,21 +130,14 @@ export function getWorktreeList(
   cwd: string,
   activeSessions: ActiveSessionsByBranch,
 ): ConsoleWorktreeListResponse {
-  // Find repo root from cwd
   const repoRoot = git(cwd, ['rev-parse', '--show-toplevel']);
-  if (!repoRoot) return { worktrees: [] };
+  if (repoRoot === null) return { worktrees: [] };
 
   const porcelain = git(repoRoot, ['worktree', 'list', '--porcelain']);
-  if (!porcelain) return { worktrees: [] };
+  if (porcelain === null) return { worktrees: [] };
 
-  const raw = parseWorktreePorcelain(porcelain);
-
-  const worktrees: ConsoleWorktreeSummary[] = raw.map(wt => {
+  const worktrees: ConsoleWorktreeSummary[] = parseWorktreePorcelain(porcelain).map(wt => {
     const enrichment = enrichWorktree(wt);
-    const activeSessionCount = wt.branch
-      ? (activeSessions.counts.get(wt.branch) ?? 0)
-      : 0;
-
     return {
       path: wt.path,
       name: basename(wt.path),
@@ -145,11 +147,11 @@ export function getWorktreeList(
       headTimestampMs: enrichment.headTimestampMs,
       changedCount: enrichment.changedCount,
       aheadCount: enrichment.aheadCount,
-      activeSessionCount,
+      activeSessionCount: wt.branch ? (activeSessions.counts.get(wt.branch) ?? 0) : 0,
     };
   });
 
-  // Sort: in-progress sessions first, then dirty, then by recency
+  // Sort: active sessions first, then dirty, then by recency
   worktrees.sort((a, b) => {
     if (b.activeSessionCount !== a.activeSessionCount) return b.activeSessionCount - a.activeSessionCount;
     if (b.changedCount !== a.changedCount) return b.changedCount - a.changedCount;
