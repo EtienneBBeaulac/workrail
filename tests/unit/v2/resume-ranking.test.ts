@@ -6,6 +6,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
+  MAX_RESUME_PREVIEW_BYTES,
   rankResumeCandidates,
   assignTier,
   computeQueryRelevanceScore,
@@ -109,11 +110,11 @@ describe('asRecapSnippet', () => {
     expect(String(snippet)).toBe('Some text');
   });
 
-  it('truncates text exceeding 1024 bytes', () => {
+  it('truncates text exceeding the shared resume preview budget', () => {
     const longText = 'a'.repeat(2000);
     const snippet = asRecapSnippet(longText);
     const bytes = new TextEncoder().encode(String(snippet));
-    expect(bytes.length).toBeLessThanOrEqual(1024);
+    expect(bytes.length).toBeLessThanOrEqual(MAX_RESUME_PREVIEW_BYTES);
   });
 });
 
@@ -731,6 +732,56 @@ describe('rankResumeCandidates - new output fields', () => {
 
     const ranked = rankResumeCandidates(summaries, { freeTextQuery: 'ownership' });
     expect(ranked[0]!.snippet.toLowerCase()).toContain('ownership');
+  });
+
+  it('includes identity context in the preview when a session title is present', () => {
+    const summaries = [
+      mkSummary({
+        sessionId: 'sess_identity',
+        runId: 'run_identity',
+        sessionTitle: 'Task dev for MR ownership',
+        recapSnippet: asRecapSnippet('Implemented ownership-aware resume ranking and branch filtering.'),
+      }),
+    ];
+
+    const ranked = rankResumeCandidates(summaries, {});
+    expect(ranked[0]!.snippet).toContain('Task dev for MR ownership');
+    expect(ranked[0]!.snippet).toContain('Implemented ownership-aware resume ranking');
+  });
+
+  it('keeps previews bounded by the shared resume preview budget', () => {
+    const summaries = [
+      mkSummary({
+        sessionId: 'sess_bounded',
+        runId: 'run_bounded',
+        sessionTitle: 'Task dev for MR ownership and broader recovery architecture',
+        recapSnippet: asRecapSnippet('A'.repeat(5000)),
+      }),
+    ];
+
+    const ranked = rankResumeCandidates(summaries, {});
+    const bytes = new TextEncoder().encode(ranked[0]!.snippet);
+    expect(bytes.length).toBeLessThanOrEqual(MAX_RESUME_PREVIEW_BYTES);
+  });
+
+  it('preserves more recap detail under the larger preview budget', () => {
+    const summaries = [
+      mkSummary({
+        sessionId: 'sess_detail',
+        runId: 'run_detail',
+        sessionTitle: 'Task dev for MR ownership and retrieval contracts',
+        recapSnippet: asRecapSnippet(
+          'Initial setup and generic work. ' +
+          'Then we implemented deterministic tiered retrieval for rehydrate and resume previews, ' +
+          'including ownership-aware matching, tail-tier dropping, and bounded rendering.'
+        ),
+      }),
+    ];
+
+    const ranked = rankResumeCandidates(summaries, { freeTextQuery: 'ownership retrieval bounded' });
+    expect(ranked[0]!.snippet.toLowerCase()).toContain('ownership');
+    expect(ranked[0]!.snippet.toLowerCase()).toContain('bounded');
+    expect(ranked[0]!.snippet.length).toBeGreaterThan(120);
   });
 
   it('assigns strong confidence to exact ID matches', () => {
