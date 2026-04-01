@@ -1,5 +1,11 @@
 import type { SessionId, WorkflowHash, WorkflowId } from '../durable-core/ids/index.js';
-import { TRUNCATION_MARKER } from '../durable-core/constants.js';
+import { MAX_RESUME_PREVIEW_BYTES, TRUNCATION_MARKER } from '../durable-core/constants.js';
+import {
+  createRecapPreviewSegment,
+  createSessionTitlePreviewSegment,
+  renderBudgetedResumePreview,
+} from '../durable-core/domain/retrieval-contract.js';
+export { MAX_RESUME_PREVIEW_BYTES } from '../durable-core/constants.js';
 
 // ---------------------------------------------------------------------------
 // Domain types — make illegal states unrepresentable
@@ -12,7 +18,7 @@ import { TRUNCATION_MARKER } from '../durable-core/constants.js';
 export type RecapSnippet = string & { readonly __brand: 'RecapSnippet' };
 
 /** Max bytes per snippet (locked §2.3). */
-const MAX_SNIPPET_BYTES = 1024;
+const MAX_SNIPPET_BYTES = MAX_RESUME_PREVIEW_BYTES;
 
 /**
  * Construct a RecapSnippet from raw text.
@@ -320,28 +326,15 @@ function collectMatchReasons(summary: HealthySessionSummary, query: ResumeQuery,
 }
 
 function buildPreviewSnippet(summary: HealthySessionSummary, query: ResumeQuery): string {
-  const previewSource = buildSearchableSessionText(summary);
-  if (!previewSource) return '';
+  const segments = [
+    summary.sessionTitle ? createSessionTitlePreviewSegment(summary.sessionTitle) : null,
+    summary.recapSnippet ? createRecapPreviewSegment(summary.recapSnippet) : null,
+  ].filter((segment): segment is NonNullable<typeof segment> => segment !== null);
 
-  const queryTokens = query.freeTextQuery ? [...normalizeToTokens(query.freeTextQuery)] : [];
-  if (queryTokens.length === 0) return summary.recapSnippet ?? previewSource;
+  if (segments.length === 0) return '';
 
-  const lower = previewSource.toLowerCase();
-  let bestIndex = -1;
-  for (const token of queryTokens) {
-    if (token.length < 3) continue;
-    const idx = lower.indexOf(token);
-    if (idx !== -1 && (bestIndex === -1 || idx < bestIndex)) bestIndex = idx;
-  }
-
-  if (bestIndex === -1) return summary.recapSnippet ?? previewSource;
-
-  const start = Math.max(0, bestIndex - 100);
-  const end = Math.min(previewSource.length, bestIndex + 180);
-  const slice = previewSource.slice(start, end).trim();
-  const prefix = start > 0 ? '...' : '';
-  const suffix = end < previewSource.length ? '...' : '';
-  return `${prefix}${slice}${suffix}`;
+  const focusTerms = query.freeTextQuery ? [...normalizeToTokens(query.freeTextQuery)] : [];
+  return renderBudgetedResumePreview({ segments, focusTerms }).text;
 }
 
 function deriveConfidence(tier: TierAssignment, reasons: readonly WhyMatched[]): 'strong' | 'medium' | 'weak' {

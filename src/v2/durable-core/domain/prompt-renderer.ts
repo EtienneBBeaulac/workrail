@@ -13,13 +13,21 @@ import { projectNodeOutputsV2 } from '../../projections/node-outputs.js';
 import type { NodeOutputsProjectionV2 } from '../../projections/node-outputs.js';
 import { collectAncestryRecap, collectDownstreamRecap, buildChildSummary } from './recap-recovery.js';
 import { expandFunctionDefinitions, formatFunctionDef } from './function-definition-expander.js';
-import { EVENT_KIND, OUTPUT_CHANNEL, PAYLOAD_KIND, RECOVERY_BUDGET_BYTES, TRUNCATION_MARKER } from '../constants.js';
+import { EVENT_KIND, OUTPUT_CHANNEL, PAYLOAD_KIND } from '../constants.js';
 import { extractValidationRequirements } from './validation-requirements-extractor.js';
 import { LOOP_CONTROL_CONTRACT_REF } from '../schemas/artifacts/index.js';
 import { projectRunContextV2 } from '../../projections/run-context.js';
 import { evaluateCondition } from '../../../utils/condition-evaluator.js';
 import { resolveContextTemplates } from './context-template-resolver.js';
 import type { LoopStepDefinition } from '../../../types/workflow-definition.js';
+import {
+  createAncestryRecapSegment,
+  createBranchSummarySegment,
+  createDownstreamRecapSegment,
+  createFunctionDefinitionsSegment,
+  renderBudgetedRehydrateRecovery,
+  type RetrievalPackSegment,
+} from './retrieval-contract.js';
 
 export type PromptRenderError = {
   readonly code: 'RENDER_FAILED';
@@ -27,18 +35,19 @@ export type PromptRenderError = {
 };
 
 /**
- * Build non-tip recovery sections (child summaries + downstream recap).
+ * Build non-tip recovery segments (child summaries + downstream recap).
  */
-function buildNonTipSections(args: {
+function buildNonTipSegments(args: {
   readonly nodeId: NodeId;
   readonly run: RunDagRunV2;
   readonly outputs: NodeOutputsProjectionV2;
-}): readonly string[] {
-  const sections: string[] = [];
+}): readonly RetrievalPackSegment[] {
+  const segments: RetrievalPackSegment[] = [];
 
   const childSummary = buildChildSummary({ nodeId: args.nodeId, dag: args.run });
-  if (childSummary) {
-    sections.push(`### Branch Summary\n${childSummary}`);
+  const childSummarySegment = createBranchSummarySegment(childSummary);
+  if (childSummarySegment) {
+    segments.push(childSummarySegment);
   }
 
   if (args.run.preferredTipNodeId && args.run.preferredTipNodeId !== String(args.nodeId)) {
@@ -49,21 +58,24 @@ function buildNonTipSections(args: {
       outputs: args.outputs,
     });
     if (downstreamRes.isOk() && downstreamRes.value.length > 0) {
-      sections.push(`### Downstream Recap (Preferred Branch)\n${downstreamRes.value.join('\n\n')}`);
+      const downstreamSegment = createDownstreamRecapSegment(downstreamRes.value.join('\n\n'));
+      if (downstreamSegment) {
+        segments.push(downstreamSegment);
+      }
     }
   }
 
-  return sections;
+  return segments;
 }
 
 /**
- * Build ancestry recap section.
+ * Build ancestry recap segment.
  */
-function buildAncestrySections(args: {
+function buildAncestrySegments(args: {
   readonly nodeId: NodeId;
   readonly run: RunDagRunV2;
   readonly outputs: NodeOutputsProjectionV2;
-}): readonly string[] {
+}): readonly RetrievalPackSegment[] {
   const ancestryRes = collectAncestryRecap({
     nodeId: args.nodeId,
     dag: args.run,
@@ -72,21 +84,22 @@ function buildAncestrySections(args: {
   });
 
   if (ancestryRes.isOk() && ancestryRes.value.length > 0) {
-    return [`### Ancestry Recap\n${ancestryRes.value.join('\n\n')}`];
+    const ancestrySegment = createAncestryRecapSegment(ancestryRes.value.join('\n\n'));
+    return ancestrySegment ? [ancestrySegment] : [];
   }
 
   return [];
 }
 
 /**
- * Build function definitions section.
+ * Build function definitions segment.
  */
-function buildFunctionDefsSections(args: {
+function buildFunctionDefsSegments(args: {
   readonly workflow: Workflow;
   readonly stepId: string;
   readonly loopPath: readonly LoopPathFrameV1[];
   readonly functionReferences: readonly string[];
-}): readonly string[] {
+}): readonly RetrievalPackSegment[] {
   const funcsRes = expandFunctionDefinitions({
     workflow: args.workflow,
     stepId: args.stepId,
@@ -96,7 +109,8 @@ function buildFunctionDefsSections(args: {
 
   if (funcsRes.isOk() && funcsRes.value.length > 0) {
     const formatted = funcsRes.value.map(formatFunctionDef).join('\n\n');
-    return [`### Function Definitions\n\`\`\`\n${formatted}\n\`\`\``];
+    const functionDefinitionsSegment = createFunctionDefinitionsSegment(`\`\`\`\n${formatted}\n\`\`\``);
+    return functionDefinitionsSegment ? [functionDefinitionsSegment] : [];
   }
 
   return [];
@@ -115,108 +129,30 @@ function hasPriorNotesInRun(args: {
 }
 
 /**
- * Build recovery sections (tip/non-tip aware).
+ * Build recovery segments (tip/non-tip aware).
  * Pure function extracting recovery logic.
  */
-function buildRecoverySections(args: {
+function buildRecoverySegments(args: {
   readonly nodeId: NodeId;
-  readonly dag: RunDagRunV2;
   readonly run: RunDagRunV2;
   readonly outputs: NodeOutputsProjectionV2;
   readonly workflow: Workflow;
   readonly stepId: string;
   readonly loopPath: readonly LoopPathFrameV1[];
   readonly functionReferences: readonly string[];
-}): readonly string[] {
+}): readonly RetrievalPackSegment[] {
   const isTip = args.run.tipNodeIds.includes(String(args.nodeId));
 
   return [
-    ...(isTip ? [] : buildNonTipSections({ nodeId: args.nodeId, run: args.run, outputs: args.outputs })),
-    ...buildAncestrySections({ nodeId: args.nodeId, run: args.run, outputs: args.outputs }),
-    ...buildFunctionDefsSections({
+    ...(isTip ? [] : buildNonTipSegments({ nodeId: args.nodeId, run: args.run, outputs: args.outputs })),
+    ...buildAncestrySegments({ nodeId: args.nodeId, run: args.run, outputs: args.outputs }),
+    ...buildFunctionDefsSegments({
       workflow: args.workflow,
       stepId: args.stepId,
       loopPath: args.loopPath,
       functionReferences: args.functionReferences,
     }),
   ];
-}
-
-/**
- * Trim bytes to UTF-8 boundary (O(1) algorithm, always returns valid UTF-8).
- * 
- * Analyzes UTF-8 byte patterns directly to find incomplete trailing characters.
- * - Scans last 4 bytes max (UTF-8 chars are 1-4 bytes)
- * - Identifies lead byte and expected character length
- * - Drops incomplete character if found
- * 
- * Algorithm from notes-markdown.ts (battle-tested).
- * Lock: UTF-8 safe truncation for deterministic budgeting.
- */
-function trimToUtf8Boundary(bytes: Uint8Array): Uint8Array {
-  const n = bytes.length;
-  if (n === 0) return bytes;
-
-  // Count continuation bytes at end (10xxxxxx pattern)
-  let cont = 0;
-  for (let i = n - 1; i >= 0 && i >= n - 4; i--) {
-    const b = bytes[i]!;
-    if ((b & 0b1100_0000) === 0b1000_0000) {
-      cont++;
-    } else {
-      break;
-    }
-  }
-
-  if (cont === 0) return bytes; // No continuation bytes at end
-
-  const leadByteIndex = n - cont - 1;
-  if (leadByteIndex < 0) {
-    // All bytes at end are continuation bytes (invalid)
-    return new Uint8Array(0);
-  }
-
-  const leadByte = bytes[leadByteIndex]!;
-
-  // Determine expected character length from lead byte
-  const expectedLen =
-    (leadByte & 0b1000_0000) === 0 ? 1 : // 0xxxxxxx = 1-byte (ASCII)
-    (leadByte & 0b1110_0000) === 0b1100_0000 ? 2 : // 110xxxxx = 2-byte
-    (leadByte & 0b1111_0000) === 0b1110_0000 ? 3 : // 1110xxxx = 3-byte
-    (leadByte & 0b1111_1000) === 0b1111_0000 ? 4 : // 11110xxx = 4-byte
-    0; // Invalid lead byte
-
-  // If the last character is incomplete or invalid, drop it
-  const actualLen = cont + 1;
-  if (expectedLen === 0 || expectedLen !== actualLen) {
-    return bytes.subarray(0, leadByteIndex);
-  }
-
-  return bytes;
-}
-
-/**
- * Apply recovery budget and truncate if needed.
- * Pure function handling deterministic truncation.
- */
-function applyPromptBudget(combinedPrompt: string): string {
-  const encoder = new TextEncoder();
-  const promptBytes = encoder.encode(combinedPrompt);
-
-  if (promptBytes.length <= RECOVERY_BUDGET_BYTES) {
-    return combinedPrompt;
-  }
-
-  // Over budget: truncate deterministically
-  const markerText = TRUNCATION_MARKER;
-  const omissionNote = `\nOmitted recovery content due to budget constraints.`;
-  const suffixBytes = encoder.encode(markerText + omissionNote);
-  const maxContentBytes = RECOVERY_BUDGET_BYTES - suffixBytes.length;
-
-  // Trim to UTF-8 boundary
-  const truncatedBytes = trimToUtf8Boundary(promptBytes.subarray(0, maxContentBytes));
-  const decoder = new TextDecoder('utf-8');
-  return decoder.decode(truncatedBytes) + markerText + omissionNote;
 }
 
 /**
@@ -648,10 +584,9 @@ export function renderPendingPrompt(args: {
 
   const { run, outputs } = projectionsRes.value;
 
-  // Build recovery sections (extracted helper)
-  const sections = buildRecoverySections({
+  // Build recovery segments (extracted helper)
+  const segments = buildRecoverySegments({
     nodeId: args.nodeId,
-    dag: run,
     run,
     outputs,
     workflow: args.workflow,
@@ -661,15 +596,17 @@ export function renderPendingPrompt(args: {
   });
 
   // No recovery content
-  if (sections.length === 0) {
+  if (segments.length === 0) {
     return ok({ stepId: args.stepId, title: baseTitle, prompt: enhancedPrompt, agentRole, requireConfirmation });
   }
 
-  // Combine and apply budget (extracted helpers)
+  // Combine and apply budget with tier-aware recovery rendering.
   const recoveryHeader = cleanResponseFormat ? 'Your previous work:' : '## Recovery Context';
-  const recoveryText = `${recoveryHeader}\n\n${sections.join('\n\n')}`;
-  const combinedPrompt = `${enhancedPrompt}\n\n${recoveryText}`;
-  const finalPrompt = applyPromptBudget(combinedPrompt);
+  const recoveryText = renderBudgetedRehydrateRecovery({
+    header: recoveryHeader,
+    segments,
+  }).text;
+  const finalPrompt = `${enhancedPrompt}\n\n${recoveryText}`;
 
   return ok({ stepId: args.stepId, title: baseTitle, prompt: finalPrompt, agentRole, requireConfirmation });
 }

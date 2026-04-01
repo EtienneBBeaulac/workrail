@@ -24,6 +24,8 @@ describe('v2 constants module', () => {
       'MAX_OUTPUT_NOTES_MARKDOWN_BYTES',
       'MAX_CONTEXT_BYTES',
       'MAX_CONTEXT_DEPTH',
+      'RECOVERY_BUDGET_BYTES',
+      'MAX_RESUME_PREVIEW_BYTES',
       'MAX_OBSERVATION_SHORT_STRING_LENGTH',
       'SESSION_LOCK_RETRY_AFTER_MS',
       'DEFAULT_RETRY_AFTER_MS',
@@ -48,6 +50,8 @@ describe('v2 constants module', () => {
     expect(constants.MAX_OUTPUT_NOTES_MARKDOWN_BYTES).toBe(4096);
     expect(constants.MAX_CONTEXT_BYTES).toBe(256 * 1024);
     expect(constants.MAX_CONTEXT_DEPTH).toBe(64);
+    expect(constants.RECOVERY_BUDGET_BYTES).toBe(24 * 1024);
+    expect(constants.MAX_RESUME_PREVIEW_BYTES).toBe(2 * 1024);
     expect(constants.MAX_OBSERVATION_SHORT_STRING_LENGTH).toBe(80);
   });
 

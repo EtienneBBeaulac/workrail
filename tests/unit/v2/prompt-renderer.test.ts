@@ -106,12 +106,64 @@ describe('renderPendingPrompt', () => {
   });
 
   describe('budget constraints', () => {
-    it('applies budget to recovery context when over limit', () => {
-      // Note: Budget applies to recovery context, not base prompt
-      // For this test, we'd need a rehydrateOnly=true scenario with large recovery
-      // Skipping for now as it requires complex DAG setup
-      // The budget logic is tested via UTF-8 boundary handling in prompt-renderer.ts:158-168
-      expect(true).toBe(true);
+    it('preserves structural recovery context while dropping tail reference material under pressure', () => {
+      const workflowWithFunctions = createWorkflow(
+        {
+          id: 'test-recovery-budget',
+          name: 'Recovery Budget',
+          description: 'Recovery Budget',
+          version: '1.0.0',
+          functionDefinitions: [
+            {
+              name: 'hugeHelper',
+              scope: 'workflow',
+              definition: 'does a very large amount of helper work\n' + 'B'.repeat(30000),
+            },
+          ],
+          steps: [{
+            id: 'step1',
+            title: 'Step 1',
+            prompt: 'Do step 1',
+            requireConfirmation: false,
+            functionReferences: ['hugeHelper'],
+          }],
+        } as any,
+        createBundledSource()
+      );
+
+      const largeRecap = 'A'.repeat(26000);
+      const truth = {
+        events: [
+          { v: 1, eventId: 'e0', eventIndex: 0, sessionId: 's1', kind: 'session_created', dedupeKey: 'session_created:s1', data: {} },
+          { v: 1, eventId: 'e1', eventIndex: 1, sessionId: 's1', kind: 'run_started', dedupeKey: 'run_started:s1:run_1', scope: { runId: 'run_1' }, data: { workflowId: 'test', workflowHash: 'sha256:abc123' + '0'.repeat(58), workflowSourceKind: 'bundled', workflowSourceRef: '(bundled)' } },
+          { v: 1, eventId: 'e2', eventIndex: 2, sessionId: 's1', kind: 'node_created', dedupeKey: 'node_created:s1:run_1:node_root', scope: { runId: 'run_1', nodeId: 'node_root' }, data: { nodeKind: 'step', parentNodeId: null, workflowHash: 'sha256:abc123' + '0'.repeat(58), snapshotRef: 'sha256:def456' + '0'.repeat(58) } },
+          { v: 1, eventId: 'e3', eventIndex: 3, sessionId: 's1', kind: 'node_output_appended', dedupeKey: 'node_output_appended:s1:run_1:node_root:1', scope: { runId: 'run_1', nodeId: 'node_root' }, data: { outputChannel: 'recap', payload: { payloadKind: 'notes', notesMarkdown: largeRecap } } },
+          { v: 1, eventId: 'e4', eventIndex: 4, sessionId: 's1', kind: 'node_created', dedupeKey: 'node_created:s1:run_1:node_1', scope: { runId: 'run_1', nodeId: 'node_1' }, data: { nodeKind: 'step', parentNodeId: 'node_root', workflowHash: 'sha256:abc123' + '0'.repeat(58), snapshotRef: 'sha256:ghi789' + '0'.repeat(58) } },
+          { v: 1, eventId: 'e5', eventIndex: 5, sessionId: 's1', kind: 'edge_created', dedupeKey: 'edge_created:s1:run_1:node_root:node_1', scope: { runId: 'run_1', edgeId: 'edge_1' }, data: { fromNodeId: 'node_root', toNodeId: 'node_1', edgeKind: 'acked_step', cause: 'intentional_fork' } },
+          { v: 1, eventId: 'e6', eventIndex: 6, sessionId: 's1', kind: 'node_output_appended', dedupeKey: 'node_output_appended:s1:run_1:node_1:1', scope: { runId: 'run_1', nodeId: 'node_1' }, data: { outputChannel: 'recap', payload: { payloadKind: 'notes', notesMarkdown: 'Child branch recap with the most relevant downstream details.' } } },
+        ] as any,
+        manifest: [],
+      };
+
+      const result = renderPendingPrompt({
+        workflow: workflowWithFunctions,
+        stepId: 'step1',
+        loopPath: [],
+        truth,
+        runId: 'run_1',
+        nodeId: 'node_root',
+        rehydrateOnly: true,
+      });
+
+      expect(result.isOk()).toBe(true);
+      if (result.isOk()) {
+        expect(result.value.prompt).toContain('## Recovery Context');
+        expect(result.value.prompt).toContain('### Branch Summary');
+        expect(result.value.prompt).toContain('### Downstream Recap (Preferred Branch)');
+        expect(result.value.prompt).not.toContain('### Function Definitions');
+        expect(result.value.prompt).toContain('[TRUNCATED]');
+        expect(result.value.prompt).toContain('Omitted 1 lower-priority tier due to budget constraints.');
+      }
     });
   });
 
