@@ -22,7 +22,7 @@ function relativeTime(epochMs: number): string {
 // Worktree card
 // ---------------------------------------------------------------------------
 
-function WorktreeCard({ wt }: { wt: ConsoleWorktreeSummary }) {
+function WorktreeCard({ wt, onSelectBranch }: { wt: ConsoleWorktreeSummary; onSelectBranch: (branch: string) => void }) {
   const isDetached = wt.branch === null;
   const isClean = wt.changedCount === 0;
   const isUpToDate = wt.aheadCount === 0;
@@ -34,8 +34,14 @@ function WorktreeCard({ wt }: { wt: ConsoleWorktreeSummary }) {
     ? 'border-yellow-500/40'
     : 'border-[var(--border)]';
 
+  const isClickable = !isDetached;
+
   return (
-    <div className={`rounded-lg border ${borderColor} bg-[var(--bg-secondary)] p-4 flex flex-col gap-2`}>
+    <div
+      className={`rounded-lg border ${borderColor} bg-[var(--bg-secondary)] p-4 flex flex-col gap-2 ${isClickable ? 'cursor-pointer hover:border-[var(--accent)] transition-colors' : ''}`}
+      onClick={isClickable ? () => onSelectBranch(wt.branch!) : undefined}
+      title={isClickable ? `View sessions for ${wt.branch}` : undefined}
+    >
       {/* Header row: branch + worktree name */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-col gap-0.5 min-w-0">
@@ -99,7 +105,7 @@ function WorktreeCard({ wt }: { wt: ConsoleWorktreeSummary }) {
 // Main view
 // ---------------------------------------------------------------------------
 
-export function WorktreeList() {
+export function WorktreeList({ onSelectBranch }: { onSelectBranch: (branch: string) => void }) {
   const { data, isLoading, error } = useWorktreeList();
 
   if (isLoading) {
@@ -152,7 +158,7 @@ export function WorktreeList() {
             Active sessions
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {activeSessions.map(wt => <WorktreeCard key={wt.path} wt={wt} />)}
+            {activeSessions.map(wt => <WorktreeCard key={wt.path} wt={wt} onSelectBranch={onSelectBranch} />)}
           </div>
         </section>
       )}
@@ -163,7 +169,7 @@ export function WorktreeList() {
             In progress (dirty)
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {dirty.map(wt => <WorktreeCard key={wt.path} wt={wt} />)}
+            {dirty.map(wt => <WorktreeCard key={wt.path} wt={wt} onSelectBranch={onSelectBranch} />)}
           </div>
         </section>
       )}
@@ -174,7 +180,7 @@ export function WorktreeList() {
             Clean
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {clean.map(wt => <WorktreeCard key={wt.path} wt={wt} />)}
+            {clean.map(wt => <WorktreeCard key={wt.path} wt={wt} onSelectBranch={onSelectBranch} />)}
           </div>
         </section>
       )}

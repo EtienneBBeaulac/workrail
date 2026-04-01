@@ -6,6 +6,8 @@ import type { ConsoleSessionSummary, ConsoleRunStatus } from '../api/types';
 
 interface Props {
   onSelectSession: (sessionId: string) => void;
+  /** Pre-seed the search field (e.g. branch name from worktree click-through). */
+  initialSearch?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -145,10 +147,10 @@ function formatRelativeTime(ms: number): string {
 // Components
 // ---------------------------------------------------------------------------
 
-export function SessionList({ onSelectSession }: Props) {
+export function SessionList({ onSelectSession, initialSearch = '' }: Props) {
   const { data, isLoading, error } = useSessionList();
 
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(initialSearch);
   const [sort, setSort] = useState<SortField>('recent');
   const [groupBy, setGroupBy] = useState<GroupBy>('none');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
