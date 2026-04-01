@@ -578,8 +578,8 @@
             "prompt.composition",
             "workflow.definition"
           ],
-          "rule": "Use extension points when a workflow wants stable customization slots rather than hardcoding routine or binding references inline.",
-          "why": "Extension points make customization explicit, inspectable, and project-overridable.",
+          "rule": "Use extension points when a workflow wants stable project-overridable delegation seams rather than hardcoding bound routine or workflow names inline.",
+          "why": "Extension points make delegated customization explicit, inspectable, and project-overridable without conflating rebinding with routine injection.",
           "enforcement": [
             "advisory"
           ],
@@ -602,11 +602,15 @@
           ],
           "checks": [
             "Declare extension points at the workflow level when bindings are part of the contract.",
-            "Avoid hidden or undocumented binding slots in prompts."
+            "Avoid hidden or undocumented binding slots in prompts.",
+            "Prefer `templateCall` when the real goal is reusable inline routine structure, visible injected steps, or parent-step confirmation behavior.",
+            "Use extension points only when the seam is intentionally delegated and may need project-level rebinding."
           ],
           "antiPatterns": [
             "Hardcoding team-customizable routine names in prompt text without an extension-point declaration",
-            "Using `{{wr.bindings.*}}` tokens in a workflow that declares no extension points"
+            "Using `{{wr.bindings.*}}` tokens in a workflow that declares no extension points",
+            "Using extension points where `templateCall` would better represent the parent workflow's real structure",
+            "Expecting `{{wr.bindings.*}}` to change which routine gets injected inline"
           ]
         }
       ]
@@ -678,6 +682,36 @@
           ],
           "antiPatterns": [
             "Inventing feature IDs like `wr.features.my_custom_thing`"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "references",
+      "title": "Workflow references",
+      "rules": [
+        {
+          "id": "references-are-for-runtime-companion-material",
+          "status": "active",
+          "level": "recommended",
+          "scope": [
+            "workflow.references",
+            "workflow.definition"
+          ],
+          "rule": "Declare references only for documents the running workflow may genuinely need while executing its task.",
+          "why": "References are surfaced to the agent at workflow start and become part of the workflow hash. Maintainer-only or authoring-only references add cognitive load and hash churn without improving runtime execution.",
+          "enforcement": [
+            "advisory"
+          ],
+          "checks": [
+            "Keep references that materially help the running workflow perform its task.",
+            "Prefer rubrics, target-system specs, policies, or playbooks that constrain runtime judgment.",
+            "If removing a reference would not make the running workflow materially worse at execution, remove it."
+          ],
+          "antiPatterns": [
+            "Adding workflow-schema references to ordinary execution workflows that are not authoring or validation workflows",
+            "Adding authoring-spec or provenance references to workflows whose runtime task is unrelated to workflow authoring",
+            "Using references to justify a workflow's design to maintainers instead of helping the running agent do the task"
           ]
         }
       ]

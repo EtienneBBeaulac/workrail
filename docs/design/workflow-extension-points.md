@@ -280,6 +280,17 @@ The compiler replaces these refs with the resolved routine/workflow ID during th
 - resolved bindings are automatically included in the compiled hash
 - no new compiler infrastructure is needed beyond a new ref kind in `ref-registry.ts`
 
+### What extension points are not
+
+Extension points are **not** a routine-injection mechanism.
+
+- They do **not** expand a child routine into inline parent steps.
+- They do **not** create step-level visibility, confirmation behavior, or session traceability for the child implementation.
+- They do **not** currently choose which routine a `templateCall` injects, because template expansion happens before binding resolution.
+
+If the parent workflow wants reusable inline structure, use **`templateCall`** instead.
+Use extension points only when the seam is intentionally delegated and the delegated implementation should remain swappable per project.
+
 ### What is rebindable
 
 Only routines/workflows listed in `extensionPoints` are rebindable. All other routine references (e.g., `routine-context-gathering`, `routine-execution-simulation`) remain hardcoded. The distinction between extension points and utility delegations must be explicit.

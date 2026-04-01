@@ -138,14 +138,44 @@ References let a workflow point at authoritative external documents (schemas, sp
 - Reference declarations are included in the `workflowHash` (the declarations, not the file contents), so changing which references a workflow declares creates a new hash.
 
 **When to use references vs metaGuidance:**
-- Use **references** to point at external documents the agent should consult.
+- Use **references** only for external documents the agent may genuinely need while **executing the workflow**.
 - Use **metaGuidance** for short behavioral rules surfaced on start and resume (e.g., "always maintain CONTEXT.md", "use Memory MCP for persistence").
+
+Good fits for **references**:
+- a shipped rubric the running workflow must consult
+- a workspace spec, policy, schema, or playbook that constrains the task being executed
+- a package-shipped companion document that materially affects runtime judgment
+
+Bad fits for **references** in ordinary execution workflows:
+- authoring-only provenance about how the workflow itself was designed
+- the workflow JSON schema, unless the workflow is explicitly a workflow-authoring or validation workflow
+- authoring guides/specs that only matter to workflow maintainers, not to the running agent
+
+Rule of thumb:
+- If removing the reference would not make the running workflow materially worse at doing its job, it probably should not be a workflow reference.
 
 References are surfaced in `inspect_workflow` output for discoverability before starting execution.
 
 ## Steps
 
 Steps can be either normal steps or template calls.
+
+### Template calls versus extension points
+
+These mechanisms solve different problems:
+
+- **`templateCall`** is for **routine injection**. The compiler expands the called routine into real parent-workflow steps.
+- **`extensionPoints`** are for **project-overridable delegation seams**. The compiler resolves `{{wr.bindings.slotId}}` to a routine/workflow ID in prompt text, but the parent agent still decides whether to call or follow that implementation.
+
+Use this default rule:
+
+- If you want **visible inline structure**, **confirmation behavior**, or **step-level session traceability**, use **`templateCall`**.
+- If you want an intentionally opaque bounded implementation that a team may swap per project, use **delegation + `extensionPoints`**.
+
+Important compiler ordering:
+
+- Template expansion runs before binding resolution.
+- Therefore, **extension points cannot currently select which routine a `templateCall` injects**.
 
 ### Identifier constraints (authoring-time validation, locked)
 To keep execution deterministic and avoid escaping footguns, step and loop identifiers used in execution state must be delimiter-safe.

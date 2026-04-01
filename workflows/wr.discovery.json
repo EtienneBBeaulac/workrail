@@ -11,26 +11,6 @@
     "wr.features.capabilities",
     "wr.features.subagent_guidance"
   ],
-  "extensionPoints": [
-    {
-      "slotId": "candidate_generation",
-      "purpose": "Let me swap in a different way of generating candidate directions without forking the whole workflow.",
-      "default": "routine-tension-driven-design",
-      "acceptedKinds": ["routine", "workflow"]
-    },
-    {
-      "slotId": "direction_review",
-      "purpose": "Let me swap in a different way of pressure-testing the selected direction without giving up parent workflow synthesis.",
-      "default": "routine-design-review",
-      "acceptedKinds": ["routine", "workflow"]
-    },
-    {
-      "slotId": "final_validation",
-      "purpose": "Let me swap in a different final challenge or validation pass before handoff.",
-      "default": "routine-hypothesis-challenge",
-      "acceptedKinds": ["routine", "workflow"]
-    }
-  ],
   "preconditions": [
     "I can tell you what problem, opportunity, or decision I want help thinking through.",
     "You can keep durable state in `output.notesMarkdown` and `continue_workflow` context keys.",
@@ -453,56 +433,48 @@
     },
     {
       "id": "phase-3b-candidates-deep",
-      "title": "Phase 3b: Candidate Generation (Injected Routine)",
+      "title": "Phase 3b: Candidate Generation Setup",
       "runCondition": {
         "var": "rigorMode",
         "not_equals": "QUICK"
       },
       "promptBlocks": {
-        "goal": "Run the configured candidate-generation approach and produce `design-candidates.md` for me.",
+        "goal": "Set up the injected candidate-generation pass so it produces the right kind of candidate set for this path.",
         "constraints": [
-          "Candidate generation is a bounded cognitive phase. You still own selection and synthesis at the parent workflow level.",
-          "The generated candidate set should reflect the selected path and current decision criteria."
+          "The next step injects the reusable candidate-generation routine inline.",
+          "Record any path-specific bias or extra rigor expectation before the injected routine runs."
         ],
         "procedure": [
-          "Choose the execution mode that is most likely to produce a strong candidate set here. If you can get there well yourself, follow the bounded candidate-generation implementation referenced by `{{wr.bindings.candidate_generation}}` and produce `design-candidates.md` directly.",
-          "If delegation is likely to give you a clearly better spread of options or a stronger challenge pass, spawn ONE WorkRail Executor running `{{wr.bindings.candidate_generation}}` with the current path, tensions, landscape packet, problem frame, and decision criteria, then capture the resulting candidate set in `design-candidates.md`. If you do not delegate, keep going yourself and record why that is enough."
+          "State what the injected candidate-generation routine must emphasize for this path and why.",
+          "For `design_first`, require at least one direction that meaningfully reframes the problem instead of only packaging obvious solutions.",
+          "For `landscape_first`, require the candidate set to clearly reflect landscape precedents, constraints, and contradictions rather than drifting into free invention.",
+          "For `THOROUGH`, require one extra push if the first spread still feels clustered or too safe.",
+          "Write these expectations into `designDocPath` so the later synthesis can judge whether the injected routine met them."
         ],
         "verify": [
-          "`design-candidates.md` exists and contains a genuinely differentiated candidate set rather than minor variations on one idea."
+          "The path-specific expectations for candidate generation are explicit before the injected routine runs."
         ]
       },
-      "promptFragments": [
-        {
-          "id": "p3b-design-reframe",
-          "when": {
-            "var": "pathRecommendation",
-            "equals": "design_first"
-          },
-          "text": "Because this is `design_first`, make sure the candidate set includes at least one direction that meaningfully reframes the problem instead of only packaging obvious solutions."
-        },
-        {
-          "id": "p3b-landscape-ground",
-          "when": {
-            "var": "pathRecommendation",
-            "equals": "landscape_first"
-          },
-          "text": "Because this is `landscape_first`, make sure the candidate set clearly reflects landscape precedents, constraints, and contradictions rather than drifting into free invention."
-        },
-        {
-          "id": "p3b-thorough-depth",
-          "when": {
-            "var": "rigorMode",
-            "equals": "THOROUGH"
-          },
-          "text": "Because this is a `THOROUGH` pass, do not stop at the first good spread. Push once more if the set still feels clustered or too safe."
-        }
-      ],
       "requireConfirmation": false
     },
     {
-      "id": "phase-3c-select-direction",
-      "title": "Phase 3c: Challenge and Select Direction",
+      "id": "phase-3c-candidates-deep-core",
+      "title": "Phase 3c: Candidate Generation (Injected Routine)",
+      "runCondition": {
+        "var": "rigorMode",
+        "not_equals": "QUICK"
+      },
+      "templateCall": {
+        "templateId": "wr.templates.routine.tension-driven-design",
+        "args": {
+          "deliverableName": "design-candidates.md"
+        }
+      },
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-3d-select-direction",
+      "title": "Phase 3d: Challenge and Select Direction",
       "promptBlocks": {
         "goal": "Read `design-candidates.md`, challenge the leading option, and make the final selection for me.",
         "constraints": [
@@ -515,7 +487,7 @@
         "procedure": [
           "Compare candidates against `pathRecommendation` and `decisionCriteria`: which candidate best fits, which candidate is the strongest alternative, and what evidence or stakeholder tension the top candidate still risks missing.",
           "Self-produce the strongest argument against the leading option.",
-          "If `delegationAvailable = true` and (`rigorMode != QUICK` or `pathRecommendation = full_spectrum`), decide whether a delegated challenge is likely to sharpen the decision enough to be worth the extra step. If yes, spawn ONE WorkRail Executor running `{{wr.bindings.final_validation}}` against the leading option. If not, keep the challenge in your own hands and say why.",
+          "If `delegationAvailable = true` and (`rigorMode != QUICK` or `pathRecommendation = full_spectrum`), decide whether a delegated challenge is likely to sharpen the decision enough to be worth the extra step. If yes, spawn ONE WorkRail Executor running `routine-hypothesis-challenge` against the leading option. If not, keep the challenge in your own hands and say why.",
           "If `delegationAvailable = true` and `rigorMode = THOROUGH`, decide whether an execution simulation would materially sharpen the decision. If yes, you may also spawn ONE WorkRail Executor running `routine-execution-simulation`.",
           "Choose `selectedDirection` and `runnerUpDirection`.",
           "Record `acceptedTradeoffs`, `identifiedFailureModes`, and what would trigger a switch.",
@@ -579,19 +551,11 @@
         {
           "id": "phase-4a-review-core",
           "title": "Direction Review Core",
-          "promptBlocks": {
-            "goal": "Run the configured direction review approach and produce `design-review-findings.md`.",
-            "constraints": [
-              "You remain responsible for interpreting the findings.",
-              "Treat the selected direction and its known tradeoffs as input context, not as guaranteed truth."
-            ],
-            "procedure": [
-              "Choose the execution mode that is most likely to produce a useful review here. If direct execution is enough, follow the bounded review implementation referenced by `{{wr.bindings.direction_review}}` and produce `design-review-findings.md`.",
-              "If delegation is likely to surface better weaknesses or hidden tradeoffs, spawn ONE WorkRail Executor running `{{wr.bindings.direction_review}}` with the selected direction, accepted tradeoffs, failure modes, and path context, then capture the resulting findings in `design-review-findings.md`. If you do not delegate, record why direct review is enough."
-            ],
-            "verify": [
-              "`design-review-findings.md` exists and reflects an actual review pass, not a placeholder."
-            ]
+          "templateCall": {
+            "templateId": "wr.templates.routine.design-review",
+            "args": {
+              "deliverableName": "design-review-findings.md"
+            }
           },
           "requireConfirmation": false
         },
@@ -852,7 +816,7 @@
         ],
         "procedure": [
           "Validate that the selected path still makes sense in hindsight, the chosen direction still beats the strongest alternative, the remaining uncertainty is named honestly, and the design doc is complete enough for a human to use.",
-          "If a serious unresolved concern remains and `delegationAvailable = true`, decide whether a delegated final challenge is likely to change the result or sharpen the caveats. If yes, spawn ONE WorkRail Executor running `{{wr.bindings.final_validation}}` against the final recommendation. If not, keep the challenge in your own hands and record why.",
+          "If a serious unresolved concern remains and `delegationAvailable = true`, decide whether a delegated final challenge is likely to change the result or sharpen the caveats. If yes, spawn ONE WorkRail Executor running `routine-hypothesis-challenge` against the final recommendation. If not, keep the challenge in your own hands and record why.",
           "Set these keys in the next `continue_workflow` call's `context` object: `finalConfidenceBand`, `residualRiskCount`, `handoffReady`."
         ],
         "verify": [

@@ -91,6 +91,28 @@ in confirmation gates, and be tracked individually in the session.
 
 Choosing the right consumption mode matters as much as choosing the right routine.
 
+### Default decision rule
+
+Use this order unless you have a strong reason not to:
+
+- **Use injection (`templateCall`) by default** when the routine is part of the parent workflow's authored structure.
+- **Use delegation** when the routine's value comes from an independent perspective, parallelism, or an intentionally opaque bounded audit.
+- **Use extension points only to make delegation seams overridable**, not as a substitute for routine injection.
+
+A good litmus test:
+
+- If you want the routine's **steps to appear in the parent workflow**, use **injection**.
+- If you want the routine's **result but not its internal steps**, use **delegation**.
+- If you want a team to **swap which delegated implementation is called** without forking the parent workflow, add an **extension point** around that delegated seam.
+
+### What extension points do not do
+
+`extensionPoints` and `{{wr.bindings.*}}` do **not** inject a routine into the parent workflow.
+
+They only resolve a slot to a routine/workflow ID in prompt text at compile time. The parent agent still decides whether to call or follow that bound implementation at runtime.
+
+Because binding resolution runs **after** template expansion, extension points cannot currently choose which routine gets injected via `templateCall`.
+
 ### Prefer delegation when
 
 - an independent cognitive perspective adds value
@@ -118,6 +140,7 @@ Common examples:
 - confirmation behavior should apply per injected step
 - session traceability matters
 - the routine is central enough to the parent workflow that hiding it behind opaque delegation would reduce debuggability
+- the author wants the engine, not the agent, to own that reusable subflow
 
 Common examples:
 
@@ -176,6 +199,18 @@ The current routine catalog suggests these default uses:
 
 - every small repeated instruction block
 - routines whose value comes mainly from independent perspective rather than visible sub-steps
+
+### Prefer extension points when
+
+- the parent workflow intentionally delegates a bounded seam
+- teams may want to replace that delegated implementation per project
+- the parent workflow still owns synthesis, loop control, and final decisions
+
+### Bad fit for extension points
+
+- using `{{wr.bindings.*}}` where the real goal is inline routine structure
+- hiding a core parent subflow behind a rebinding slot just to avoid hardcoding a routine ID
+- expecting project bindings to change which routine a `templateCall` injects
 
 ## See Also
 
