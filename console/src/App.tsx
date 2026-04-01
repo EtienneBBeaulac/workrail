@@ -1,9 +1,26 @@
 import { useState } from 'react';
 import { SessionList } from './views/SessionList';
 import { SessionDetail } from './views/SessionDetail';
+import { WorktreeList } from './views/WorktreeList';
+
+type Tab = 'sessions' | 'worktrees';
 
 export function App() {
+  const [activeTab, setActiveTab] = useState<Tab>('sessions');
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+
+  const handleSelectSession = (id: string) => {
+    setSelectedSessionId(id);
+  };
+
+  const handleBack = () => {
+    setSelectedSessionId(null);
+  };
+
+  const handleTabChange = (tab: Tab) => {
+    setActiveTab(tab);
+    setSelectedSessionId(null);
+  };
 
   return (
     <div className="min-h-screen bg-[var(--bg-primary)]">
@@ -11,7 +28,7 @@ export function App() {
         <div className="flex items-center gap-4">
           {selectedSessionId && (
             <button
-              onClick={() => setSelectedSessionId(null)}
+              onClick={handleBack}
               className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
             >
               &larr; Back
@@ -25,14 +42,35 @@ export function App() {
               {selectedSessionId}
             </span>
           )}
+
+          {/* Tab nav — hidden when viewing session detail */}
+          {!selectedSessionId && (
+            <nav className="ml-4 flex gap-1">
+              {(['sessions', 'worktrees'] as Tab[]).map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => handleTabChange(tab)}
+                  className={`px-3 py-1 rounded text-sm font-medium transition-colors capitalize ${
+                    activeTab === tab
+                      ? 'bg-[var(--bg-tertiary)] text-[var(--text-primary)]'
+                      : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
+                  }`}
+                >
+                  {tab}
+                </button>
+              ))}
+            </nav>
+          )}
         </div>
       </header>
 
       <main className="p-6">
         {selectedSessionId ? (
           <SessionDetail sessionId={selectedSessionId} />
+        ) : activeTab === 'worktrees' ? (
+          <WorktreeList />
         ) : (
-          <SessionList onSelectSession={setSelectedSessionId} />
+          <SessionList onSelectSession={handleSelectSession} />
         )}
       </main>
     </div>

@@ -115,6 +115,39 @@ export interface ConsoleArtifact {
   readonly content: unknown;
 }
 
+// ---------------------------------------------------------------------------
+// Worktree List
+// ---------------------------------------------------------------------------
+
+export interface ConsoleWorktreeSummary {
+  /** Absolute path to the worktree directory. */
+  readonly path: string;
+  /** Directory basename — used as display name. */
+  readonly name: string;
+  /** Branch name, or null if detached HEAD. */
+  readonly branch: string | null;
+  /** Short commit hash of HEAD. */
+  readonly headHash: string;
+  /** First line of the HEAD commit message. */
+  readonly headMessage: string;
+  /** Unix epoch ms of the HEAD commit. */
+  readonly headTimestampMs: number;
+  /** Number of files with uncommitted changes (staged + unstaged). */
+  readonly changedCount: number;
+  /** Number of commits ahead of origin/main. */
+  readonly aheadCount: number;
+  /** Number of in_progress workflow sessions on this branch. */
+  readonly activeSessionCount: number;
+}
+
+export interface ConsoleWorktreeListResponse {
+  readonly worktrees: readonly ConsoleWorktreeSummary[];
+}
+
+// ---------------------------------------------------------------------------
+// Node Detail
+// ---------------------------------------------------------------------------
+
 export interface ConsoleNodeDetail {
   readonly nodeId: string;
   readonly nodeKind: 'step' | 'checkpoint' | 'blocked_attempt';

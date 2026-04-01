@@ -10,6 +10,7 @@ import type { Application, Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
 import type { ConsoleService } from './console-service.js';
+import { getWorktreeList, buildActiveSessionCounts } from './worktree-service.js';
 
 /**
  * Resolve the console dist directory.
@@ -41,6 +42,19 @@ export function mountConsoleRoutes(app: Application, consoleService: ConsoleServ
       (data) => res.json({ success: true, data }),
       (error) => res.status(500).json({ success: false, error: error.message }),
     );
+  });
+
+  // List git worktrees with enriched status and active session counts
+  app.get('/api/v2/worktrees', async (_req: Request, res: Response) => {
+    try {
+      const sessionResult = await consoleService.getSessionList();
+      const sessions = sessionResult.isOk() ? sessionResult.value.sessions : [];
+      const activeSessions = buildActiveSessionCounts(sessions);
+      const data = getWorktreeList(process.cwd(), activeSessions);
+      res.json({ success: true, data });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+    }
   });
 
   // Get session detail with full DAG
