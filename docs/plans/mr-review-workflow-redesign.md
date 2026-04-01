@@ -1164,3 +1164,288 @@ Once the open questions are narrowed, the next step should be a second-pass revi
 - defines what Phase 0 must output before the workflow can advance
 
 Only after that should `mr-review-workflow.agentic.v2.json` be updated.
+
+## Next Implementation Slice (Recommended)
+
+The best next implementation pass should be **narrow, high-leverage, and compatibility-aware**.
+
+Do **not** try to land the entire future-state redesign at once.
+
+The recommended slice is:
+
+1. **replace the current Phase 0 with a real Locate / Bound / Enrich / Classify front phase**
+2. **strengthen the fact packet so it includes review surface and discovered intent**
+3. **add final environment-status disclosure**
+4. **add minimal shape/type-aware routing where it clearly changes reviewer-family choice**
+
+This slice should intentionally **not** try to solve every remaining elite-review gap in the same pass.
+
+This section should be treated as the **canonical near-term implementation plan** for the redesign. If it conflicts with earlier broad design material, prefer this narrower slice for the next real workflow update.
+
+### Why this slice is best
+
+It directly addresses the largest correctness and usefulness gaps:
+
+- wrong review-boundary risk
+- weak MR/ticket/doc discovery
+- insufficient graceful degradation visibility
+- under-specified review-surface hygiene
+
+without forcing the workflow into a giant taxonomy or a schema-fighting rewrite.
+
+## Engine vs Agent Responsibility Split
+
+The next implementation slice should use WorkRail for **control, durability, and accountability**, while leaving investigation and synthesis flexible.
+
+### Engine should enforce
+
+- phase boundaries
+- minimum required outputs
+- confidence/follow-up routing
+- durable disclosure of missing context and uncertainty
+- final handoff structure
+
+### Agent should own
+
+- discovery path
+- source prioritization
+- tool choice
+- evidence synthesis
+- non-obvious issue detection
+
+This redesign should constrain **what must be established or admitted**, not prescribe exact commands or investigative choreography.
+
+## Minimum Phase 0 Contract
+
+The next pass should stop treating Phase 0 as mostly prose and make it a compact execution contract.
+
+### Minimum required context before advancing
+
+These fields should always be set before Phase 0 completes:
+
+- `reviewTargetKind` - enum-like classification such as `pr`, `branch`, `diff`, `patch`, or `unknown`
+- `reviewTargetSource` - short provenance label such as `user_link`, `gh_discovery`, `git_branch`, or `local_diff`
+- `reviewSurfaceSummary` - one compact prose summary of what is actually being reviewed
+- `reviewMode`
+- `riskLevel`
+- `boundaryConfidence`
+- `contextConfidence`
+- `shapeProfile`
+- `changeTypeProfile`
+- `needsReviewerBundle`
+- `needsBoundaryFollowup`
+- `needsContextFollowup`
+- `reviewScopeWarnings` - short list of warnings, not a large ledger
+
+### Required-if-known context
+
+These fields should be set when they can be discovered without blocking:
+
+- `prUrl`
+- `prNumber`
+- `baseCandidate`
+- `mergeBaseRef`
+- `ticketRefs` - list of ticket/issue identifiers when discoverable
+- `supportingDocsFound` - compact list of discovered supporting docs, not a boolean
+- `policySourcesFound` - compact list of repo/user policy sources, not a boolean
+
+### Minimum review-surface outputs
+
+Phase 0 should also classify the visible change into a minimal review-surface shape.
+
+It does **not** need a large ledger in the next slice, but it should at least distinguish:
+
+- `coreReviewSurface`
+- `likelyNoiseOrMechanicalChurn`
+- `likelyInheritedOrOutOfScopeChanges`
+
+This can stay compact. The important thing is that the workflow does not treat every visible changed file as equally worthy of deep review by default.
+
+### Minimum advance rule
+
+Phase 0 may advance when all of these are true:
+
+- there is a meaningful review target
+- there is inspectable material
+- `boundaryConfidence` is set
+- `contextConfidence` is set
+- `shapeProfile` is set
+- `changeTypeProfile` is set
+- the workflow has explicitly recorded whether boundary/context follow-up is needed
+
+This keeps the workflow **non-blocking by default** while still making the phase structurally complete.
+
+### Explicit fallback behavior
+
+The next implementation slice should make these fallback behaviors explicit:
+
+| Situation | Expected Phase 0 behavior |
+|---|---|
+| PR/MR not found, but branch/diff is inspectable | continue with branch/diff review, lower context confidence, disclose missing PR context later |
+| branch exists, but merge-base / ancestor is ambiguous | continue with downgraded boundary confidence, record boundary follow-up need, disclose the uncertainty later |
+| no ticket or supporting docs found | continue, lower context confidence, avoid overclaiming intent-sensitive findings |
+| only a patch/diff is available | continue if inspectable, but keep lower confidence on intent/boundary-dependent conclusions |
+| inspectable target is missing entirely | ask for the missing review artifact and stop |
+
+## Narrow Artifact vs Context Decision
+
+The next implementation slice should prefer **context-first** rather than introducing multiple new artifacts immediately.
+
+### Keep in context
+
+Use context for routing-critical state:
+
+- boundary confidence
+- context confidence
+- shape/type classification
+- follow-up triggers
+- base candidate / merge-base outcome
+- whether PR/ticket/docs were found
+
+### Add at most one optional artifact
+
+If the workflow needs a human-readable artifact in the next pass, add only one optional artifact:
+
+- `boundary-analysis`
+
+Do **not** add multiple ledgers in the next implementation slice unless they clearly improve execution quality.
+
+## Minimal Routing Matrix
+
+The next pass should use a **small routing table**, not a giant decision taxonomy.
+
+For the next slice, keep these classifications intentionally small:
+
+- `shapeProfile`: `isolated_change`, `crosscutting_change`, `mechanically_noisy_change`, `ambiguous_boundary`
+- `changeTypeProfile`: `api_contract_change`, `data_model_or_migration`, `security_sensitive`, `test_only`, `general_code_change`
+
+Anything more detailed should stay out of the workflow until it clearly changes behavior enough to justify itself.
+
+| Situation | Reviewer / follow-up bias |
+|---|---|
+| `boundaryConfidence = Low` | boundary/context follow-up before strong recommendation confidence |
+| `changeTypeProfile = api_contract_change` | stronger contract/consumer/backward-compatibility scrutiny |
+| `changeTypeProfile = data_model_or_migration` | stronger rollout / compatibility / simulation lens |
+| `changeTypeProfile = security_sensitive` | stronger adversarial/runtime-risk scrutiny and lower tolerance for weak evidence |
+| `changeTypeProfile = test_only` | lighter architecture scrutiny, stronger false-positive suppression |
+| `shapeProfile = mechanically_noisy_change` | stronger noise filtering, lower appetite for style-only findings |
+| `criticalSurfaceTouched = true` | include runtime/production-risk reviewer path |
+
+If a classification does not change behavior at least this much, it should stay out of the workflow.
+
+## Minimal Confidence Rules
+
+The next implementation slice should use a small **self-assessment matrix** so the agent can gauge confidence dimension by dimension instead of picking a vague overall feeling.
+
+### Use a 5-dimension confidence assessment in the prompt
+
+The next pass does **not** need a scoring engine. A compact assessment block in the prompt is enough for the near-term workflow update.
+
+Longer term, this is a strong candidate for a native WorkRail **assessment / decision gate** primitive so the engine, not the agent, can apply the aggregation and routing rules deterministically.
+
+This assessment should be treated as **decision support**, not automatic truth. It should help the agent gauge uncertainty consistently, cap or guide conclusions, and trigger follow-up when needed, but it should not replace synthesis judgment.
+
+Recommended dimensions:
+
+- `boundaryConfidence`
+- `intentConfidence`
+- `evidenceConfidence`
+- `coverageConfidence`
+- `consensusConfidence`
+
+Recommended levels:
+
+- `High`
+- `Medium`
+- `Low`
+
+Recommended prompt shape:
+
+- rate each dimension
+- explain each in one sentence
+- apply the aggregation rules
+- state final recommendation confidence and why
+
+### Anchors for each dimension
+
+- **High**: strong direct support, little ambiguity
+- **Medium**: partial support, some important uncertainty
+- **Low**: weak support, major ambiguity, or likely missing context
+
+### Aggregation rules
+
+- if `boundaryConfidence = Low`, final recommendation confidence = `Low`
+- else if `evidenceConfidence = Low`, final recommendation confidence = `Low`
+- else if 2 or more dimensions are `Medium`, final recommendation confidence = `Medium`
+- else if all key dimensions are `High`, final recommendation confidence = `High`
+- unresolved disagreement can only lower confidence, never raise it
+
+### Hard rules around the assessment
+
+- if important supporting sources were unavailable, the final handoff must say so explicitly
+- if intent confidence is weak and a finding depends heavily on inferred intent, prefer the lower-confidence interpretation
+- if coverage confidence is weak, findings should be framed as more tentative even when local code evidence looks strong
+- if evidence later proves stronger or weaker than the initial read, synthesis may lower confidence further, but should not exceed what the assessment justifies without an explicit reason
+
+### Follow-up triggers
+
+- low boundary confidence -> boundary follow-up
+- low intent confidence with intent-sensitive findings -> context follow-up
+- low evidence confidence on a serious finding -> more validation or follow-up
+- low coverage confidence -> targeted coverage-expansion follow-up
+- unresolved contradictory reviewer output -> synthesis/follow-up loop
+
+This should remain a **prompt-level self-assessment** in the next slice, not a large new workflow-state subsystem.
+
+## Explicit Deferrals
+
+The next implementation slice should **defer** these items unless the user explicitly wants a broader redesign:
+
+- large-MR partitioning
+- historical reasoning / blame-style context
+- a full severity calibration framework
+- broad extension-point authoring
+- a multi-artifact ledger system
+- feature-config / capability-probe authoring that depends on unsupported schema/compiler support
+
+These are still good ideas, but they are not the highest-leverage next landing.
+
+## Current Engine-Compatibility Constraint
+
+The redesign doc is still intentionally ahead of the current engine in some places.
+
+For the next real workflow update, avoid depending on authoring constructs that the current schema/compiler does not yet accept cleanly.
+
+In particular:
+
+- do not assume top-level `capabilities` is available unless schema support is added first
+- do not assume every v2 feature flag discussed in docs is currently accepted by the compiler
+
+The next implementation slice should prefer current-schema-compatible prompts, context fields, and supported contracts unless the user explicitly wants engine/schema work as part of the same change.
+
+## Notes Quality Requirement
+
+The workflow's notes should be useful for both:
+
+- the user reading what happened
+- another agent resuming the review later
+
+That means notes should read like compact **decision memos**, not raw logs or vague diary entries.
+
+At minimum, the notes for important phases should make clear:
+
+- what was learned
+- what was decided
+- what remains uncertain
+- what should happen next
+
+## Success Criteria for the Next Pass
+
+The next MR-review workflow update should be considered successful if it lands all of these:
+
+1. it attempts to find the real PR/MR when available
+2. it attempts merge-base / ancestor reasoning and reports confidence honestly
+3. it discovers ticket/docs/policy context opportunistically without blocking by default
+4. it separates review surface from obvious noise at least at a basic level
+5. it adds a final environment-status summary that explains what was and was not accessible
+6. it does all of the above without introducing bureaucratic over-structure or schema-incompatible authoring
