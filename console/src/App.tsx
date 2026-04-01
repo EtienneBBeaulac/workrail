@@ -8,6 +8,7 @@ type Tab = 'sessions' | 'worktrees';
 export function App() {
   const [activeTab, setActiveTab] = useState<Tab>('sessions');
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [sessionSearch, setSessionSearch] = useState('');
 
   const handleSelectSession = (id: string) => {
     setSelectedSessionId(id);
@@ -19,6 +20,13 @@ export function App() {
 
   const handleTabChange = (tab: Tab) => {
     setActiveTab(tab);
+    setSelectedSessionId(null);
+    if (tab === 'sessions') setSessionSearch('');
+  };
+
+  const handleSelectBranch = (branch: string) => {
+    setSessionSearch(branch);
+    setActiveTab('sessions');
     setSelectedSessionId(null);
   };
 
@@ -68,9 +76,9 @@ export function App() {
         {selectedSessionId ? (
           <SessionDetail sessionId={selectedSessionId} />
         ) : activeTab === 'worktrees' ? (
-          <WorktreeList />
+          <WorktreeList onSelectBranch={handleSelectBranch} />
         ) : (
-          <SessionList onSelectSession={handleSelectSession} />
+          <SessionList onSelectSession={handleSelectSession} initialSearch={sessionSearch} />
         )}
       </main>
     </div>
