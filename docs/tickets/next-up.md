@@ -2,7 +2,44 @@
 
 These are the **groomed near-term tickets**. They are the clearest current candidates for actual execution.
 
-## Ticket 1: Complete v2 sign-off and cleanup
+## Ticket 1: Strengthen retrieval budgets and recovery surfaces
+
+### Problem
+
+The old budget system was too conservative on the agent-facing recovery path. `rehydrate` and `resume_session` were bounded, but the bounded surfaces were too small and too weakly structured to preserve enough useful context.
+
+### Goal
+
+Strengthen retrieval by using deterministic typed recovery contracts, larger but still bounded budgets, and verification that proves useful context survives before low-value tail material.
+
+### Acceptance criteria
+
+- `rehydrate` uses an explicit deterministic retrieval contract with ordered tiers and bounded rendering
+- `resume_session` preview rendering uses an explicit bounded preview contract rather than ad hoc snippet logic
+- recovery and preview budgets are increased to more useful values while remaining deterministic and schema-bounded
+- worst-case tests cover tier dropping, bounded rendering, and usefulness-oriented scenarios
+- runtime constants, MCP schemas, and design-lock docs agree on the new budget values
+
+### Verification
+
+- `npx vitest run`
+- `npm run typecheck`
+
+### Non-goals
+
+- Making retrieval literally unbounded
+- Introducing a new durable memory substrate in the first move
+- Redesigning checkpoint semantics as part of this slice
+
+### Related files/docs
+
+- `src/v2/durable-core/domain/retrieval-contract.ts`
+- `src/v2/durable-core/domain/prompt-renderer.ts`
+- `src/v2/projections/resume-ranking.ts`
+- `src/mcp/output-schemas.ts`
+- `docs/design/v2-core-design-locks.md`
+
+## Ticket 2: Complete v2 sign-off and cleanup
 
 ### Problem
 
@@ -27,7 +64,7 @@ Finish the remaining doc cleanup and confirm all validation scenarios are record
 - `docs/plans/v2-followup-enhancements.md`
 - `docs/roadmap/open-work-inventory.md`
 
-## ~~Ticket 2: Workflow-source setup phase 1~~ (done)
+## ~~Ticket 3: Workflow-source setup phase 1~~ (done)
 
 ### Problem
 
@@ -55,7 +92,7 @@ Verification:
 - current local `npm run build` passes
 - planning docs now reflect the delivered phase-1 state
 
-## Ticket 3: Expand lifecycle validation coverage
+## Ticket 4: Expand lifecycle validation coverage
 
 ### Problem
 
@@ -82,7 +119,7 @@ Define a realistic lifecycle coverage target and expand tests toward it.
 - `docs/plans/workflow-validation-design.md`
 - `docs/roadmap/open-work-inventory.md`
 
-## Ticket 4: Design console execution-trace explainability
+## Ticket 5: Design console execution-trace explainability
 
 ### Problem
 
@@ -114,7 +151,7 @@ Design the DTO and UX changes needed so the console explains why the engine took
 - `src/v2/usecases/console-service.ts`
 - `console/src/api/types.ts`
 
-## ~~Ticket 5: Finish prompt vs supplement boundary alignment~~ (done)
+## ~~Ticket 6: Finish prompt vs supplement boundary alignment~~ (done)
 
 All acceptance criteria met -- the boundary is documented consistently:
 

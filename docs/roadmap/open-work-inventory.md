@@ -14,7 +14,24 @@ For explicit status on the major older planning docs themselves, see `docs/roadm
 
 ## Active partials
 
-### ~~1. Clean response formatting and supplement hardening~~ (done)
+### 1. Retrieval budget and recovery-surface strengthening
+
+- **Status**: active
+- **Why it is here**: the old budget system was too conservative for agent usefulness, especially on `rehydrate` and `resume_session`
+- **What was delivered so far**:
+  - explicit retrieval contracts for rehydrate and resume preview surfaces
+  - deterministic tiering with `core` vs `tail` retention behavior
+  - larger bounded budgets for recovery packs and resume previews
+  - stronger behavior tests covering tier dropping, bounded rendering, and usefulness-oriented scenarios
+- **Still open**:
+  - decide whether the current tier model needs refinement after more real usage
+  - finish broader doc/spec cleanup wherever the old budget story still leaks through
+  - decide whether checkpoint-related retrieval should stay as-is or follow the same contract pattern later
+- **Source docs**:
+  - `docs/design/v2-core-design-locks.md`
+  - `docs/reference/workflow-execution-contract.md`
+
+### ~~2. Clean response formatting and supplement hardening~~ (done)
 
 - **Status**: complete
 - **What was done**: the boundary between workflow-authored prompts and runtime-owned response supplements is documented consistently across authoring locks (`authoring.md`), the execution contract (`workflow-execution-contract.md`), and the authoring guide (`authoring-v2.md`). Supplements are runtime-owned today; authorable supplements are tracked as a future typed feature in the Next bucket.
@@ -24,7 +41,7 @@ For explicit status on the major older planning docs themselves, see `docs/roadm
   - `docs/reference/workflow-execution-contract.md` (response content structure)
   - `docs/plans/agentic-orchestration-roadmap.md` (authorable supplements as future backlog)
 
-### ~~2. V2 production readiness and sign-off~~ (done)
+### ~~3. V2 production readiness and sign-off~~ (done)
 
 - **Status**: complete
 - **What was done**: v2 is default-on (`v2Tools` flag defaults to `true` since 0.9.0). Stale docs referencing `WORKRAIL_ENABLE_V2_TOOLS` as a prerequisite have been updated with historical notes. Planning/roadmap docs no longer assume v2 needs unflagging.
@@ -33,7 +50,7 @@ For explicit status on the major older planning docs themselves, see `docs/roadm
   - `docs/plans/workflow-v2-design.md`
   - `docs/plans/v2-followup-enhancements.md`
 
-### 3. God-tier validation lifecycle coverage
+### 4. God-tier validation lifecycle coverage
 
 - **Status**: partial
 - **Why it is here**: the validation pipeline and registry validation are largely shipped, but the lifecycle-harness ambition is not fully closed
@@ -45,7 +62,7 @@ For explicit status on the major older planning docs themselves, see `docs/roadm
   - `docs/plans/workflow-validation-roadmap.md`
   - `docs/plans/workflow-validation-design.md`
 
-### 4. Planning system adoption
+### 5. Planning system adoption
 
 - **Status**: partial
 - **Why it is here**: the planning taxonomy now exists, but old initiative docs still dominate the repo and the new system has not been fully adopted yet

@@ -8,11 +8,13 @@ This is the lightweight cross-cutting roadmap view for WorkRail.
 - ~~Expand lifecycle validation coverage to a realistic target~~ (done -- auto-walk smoke test covers all bundled workflows)
 - ~~Finish prompt vs supplement boundary alignment across runtime, docs, and planning~~ (done -- boundary is documented consistently across authoring locks, execution contract, and planning docs)
 - ~~Modernize `workflow-for-workflows.v2.json` so one canonical authoring workflow supports both creating and modernizing workflows~~ (done -- shipped in `#152`, tracked from issue `#151`)
+- Strengthen rehydrate and resume retrieval budgets with deterministic retrieval contracts and broader verification
 
 ## Next
 
 - ~~Content coherence: introduce StepContentEnvelope and linked references~~ (done -- see `docs/plans/content-coherence-and-references.md`)
 - ~~Workflow-source setup phase 1: rooted team sharing, remembered roots, grouped source visibility, and migration-aware precedence explanation~~ (done -- phase-1 workflow-source setup landed across `#160`–`#164`; see `docs/plans/workflow-source-setup-phase-1.md`)
+- Decide whether the current retrieval tier model needs another refinement pass after broader usage, or whether the next move should be doc/spec consolidation only
 - Design console execution-trace UX so runs explain fast paths, conditions, and skipped authoring phases instead of only showing created DAG nodes
 - Build a concrete plan for composition and middleware
 - Resolve progress notification design issues and decide whether it is worth doing now
