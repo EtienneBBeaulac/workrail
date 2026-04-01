@@ -657,7 +657,7 @@ Within a tier, order by:
 
 ### Response budget (locked)
 - max candidates: 5
-- max snippet bytes per candidate: 1024 (UTF-8, with canonical truncation marker)
+- max snippet bytes per candidate: 2048 (UTF-8, with canonical truncation marker)
 
 ### Match explanations (locked intent)
 Each candidate includes a closed-set `whyMatched[]`, e.g.:

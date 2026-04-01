@@ -5,6 +5,7 @@ import {
   CHECKPOINT_TOKEN_PATTERN,
   CONTINUE_TOKEN_PATTERN,
 } from '../v2/durable-core/tokens/token-patterns.js';
+import { MAX_RESUME_PREVIEW_BYTES } from '../v2/durable-core/constants.js';
 
 // -----------------------------------------------------------------------------
 // JSON-safe value schema (prevents undefined / functions leaking across boundary)
@@ -370,7 +371,7 @@ export const V2ResumeSessionOutputSchema = z.object({
      * nextCall is the action interface. Use nextCall, not resumeToken, to resume.
      */
     resumeToken: z.string().regex(STATE_TOKEN_PATTERN, 'Invalid resumeToken format'),
-    snippet: z.string().max(1024),
+    snippet: z.string().max(MAX_RESUME_PREVIEW_BYTES),
     confidence: z.enum(['strong', 'medium', 'weak']).describe(
       'Coarse confidence band for how likely this candidate is the intended session.'
     ),

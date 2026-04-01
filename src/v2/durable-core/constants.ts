@@ -195,11 +195,20 @@ export const TRUNCATION_MARKER = '\n\n[TRUNCATED]';
 /**
  * Recovery budget for rehydrate-only responses (recap + function definitions combined).
  * 
- * Lock: Midpoint of contract §340 guidance "8-16 KB" for deterministic budgeting.
+ * Lock: Generous but still bounded rehydrate budget for deterministic recovery packs.
  * 
- * Why 12 KB: Balances context recovery needs with token budget constraints.
+ * Why 24 KB: Preserves substantially more durable recap context and structural guidance
+ * before trimming, while remaining comfortably bounded for tool transport.
  */
-export const RECOVERY_BUDGET_BYTES = 12288; // 12 KB
+export const RECOVERY_BUDGET_BYTES = 24 * 1024; // 24 KB
+
+/**
+ * Resume preview budget for ranked resume_session candidates.
+ *
+ * Why 2 KB: Allows identity context plus a materially more informative recap
+ * preview than the old 1 KB ceiling, while keeping candidate lists compact.
+ */
+export const MAX_RESUME_PREVIEW_BYTES = 2 * 1024; // 2 KB
 
 // =============================================================================
 // Regex Patterns
