@@ -61,6 +61,11 @@ interface V2Validation {
   readonly suggestions: readonly string[];
 }
 
+interface V2AssessmentFollowupSupplement {
+  readonly title: string;
+  readonly guidance: string;
+}
+
 interface V2BindingDriftWarning {
   readonly code: 'BINDING_DRIFT';
   readonly slotId: string;
@@ -85,6 +90,7 @@ interface V2Blocked extends V2ExecutionBase {
   readonly retryable?: boolean;
   readonly retryContinueToken?: string;
   readonly validation?: V2Validation;
+  readonly assessmentFollowup?: V2AssessmentFollowupSupplement;
 }
 
 type V2ExecutionResponse = V2ExecutionBase | (V2ExecutionBase & { readonly kind: 'ok' }) | V2Blocked;
@@ -282,7 +288,14 @@ function formatBlockedRetryable(data: V2Blocked): string {
     }
   }
 
-  lines.push('Retry with corrected output:');
+  if (data.assessmentFollowup) {
+    lines.push('**Follow-up required before retrying this step:**');
+    lines.push(`- ${data.assessmentFollowup.title}`);
+    lines.push(`- ${data.assessmentFollowup.guidance}`);
+    lines.push('');
+  }
+
+  lines.push('Retry the same step with improved output:');
   lines.push('');
   lines.push(formatTokenBlock(data));
 

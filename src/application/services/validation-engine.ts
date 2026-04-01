@@ -791,6 +791,65 @@ export class ValidationEngine {
       }
     }
 
+    // Validate assessments (structural + step reference cross-check)
+    const assessments = workflow.definition.assessments ?? [];
+    const declaredAssessmentIds = new Set<string>();
+    if (assessments.length > 0) {
+      for (const assessment of assessments) {
+        if (!assessment.id || typeof assessment.id !== 'string') {
+          issues.push(`Assessment definition has missing or empty id`);
+          continue;
+        }
+        if (declaredAssessmentIds.has(assessment.id)) {
+          issues.push(`assessments has duplicate id '${assessment.id}'`);
+          suggestions.push('Each assessment id must be unique within assessments');
+        }
+        declaredAssessmentIds.add(assessment.id);
+
+        if (!assessment.purpose || typeof assessment.purpose !== 'string') {
+          issues.push(`Assessment '${assessment.id}': purpose must be a non-empty string`);
+        }
+        if (!Array.isArray(assessment.dimensions) || assessment.dimensions.length === 0) {
+          issues.push(`Assessment '${assessment.id}': dimensions must contain at least one dimension`);
+          continue;
+        }
+
+        const seenDimensionIds = new Set<string>();
+        for (const dimension of assessment.dimensions) {
+          if (!dimension.id || typeof dimension.id !== 'string') {
+            issues.push(`Assessment '${assessment.id}': dimension has missing or empty id`);
+            continue;
+          }
+          if (seenDimensionIds.has(dimension.id)) {
+            issues.push(`Assessment '${assessment.id}': dimensions has duplicate id '${dimension.id}'`);
+            suggestions.push(`Each dimension id must be unique within assessment '${assessment.id}'`);
+          }
+          seenDimensionIds.add(dimension.id);
+
+          if (!dimension.purpose || typeof dimension.purpose !== 'string') {
+            issues.push(`Assessment '${assessment.id}' dimension '${dimension.id}': purpose must be a non-empty string`);
+          }
+          if (!Array.isArray(dimension.levels) || dimension.levels.length < 2) {
+            issues.push(`Assessment '${assessment.id}' dimension '${dimension.id}': levels must contain at least two values`);
+            continue;
+          }
+
+          const seenLevels = new Set<string>();
+          for (const level of dimension.levels) {
+            if (!level || typeof level !== 'string') {
+              issues.push(`Assessment '${assessment.id}' dimension '${dimension.id}': levels must be non-empty strings`);
+              continue;
+            }
+            if (seenLevels.has(level)) {
+              issues.push(`Assessment '${assessment.id}' dimension '${dimension.id}': levels has duplicate value '${level}'`);
+              suggestions.push(`Each level must be unique within assessment '${assessment.id}' dimension '${dimension.id}'`);
+            }
+            seenLevels.add(level);
+          }
+        }
+      }
+    }
+
     // Check for duplicate step IDs
     const stepIds = new Set<string>();
     for (const step of workflow.definition.steps) {
@@ -800,6 +859,97 @@ export class ValidationEngine {
       }
       stepIds.add(step.id);
     }
+
+    const validateAssessmentRefsForStep = (step: WorkflowStepDefinition, stepLabel: string) => {
+      if (step.assessmentRefs === undefined) return;
+
+      if (step.assessmentRefs.length === 0) {
+        issues.push(`${stepLabel}: assessmentRefs must not be empty when declared`);
+      }
+
+      if (declaredAssessmentIds.size === 0) {
+        issues.push(`${stepLabel}: declares assessmentRefs but workflow declares no assessments`);
+        suggestions.push('Add an assessments array to the workflow definition');
+        return;
+      }
+
+      const seenAssessmentRefs = new Set<string>();
+      for (const assessmentRef of step.assessmentRefs) {
+        if (!assessmentRef || typeof assessmentRef !== 'string') {
+          issues.push(`${stepLabel}: assessmentRefs must contain non-empty strings`);
+          continue;
+        }
+        if (seenAssessmentRefs.has(assessmentRef)) {
+          issues.push(`${stepLabel}: assessmentRefs has duplicate value '${assessmentRef}'`);
+          suggestions.push(`Each assessmentRef must be unique within ${stepLabel}`);
+        }
+        seenAssessmentRefs.add(assessmentRef);
+
+        if (!declaredAssessmentIds.has(assessmentRef)) {
+          issues.push(
+            `${stepLabel}: assessmentRef '${assessmentRef}' references undeclared assessment. Declared assessments: [${[...declaredAssessmentIds].join(', ')}]`
+          );
+          suggestions.push(`Add an assessment with id '${assessmentRef}' to the workflow definition`);
+        }
+      }
+    };
+
+    const validateAssessmentConsequencesForStep = (step: WorkflowStepDefinition, stepLabel: string) => {
+      if (step.assessmentConsequences === undefined) return;
+
+      if (step.assessmentConsequences.length === 0) {
+        issues.push(`${stepLabel}: assessmentConsequences must not be empty when declared`);
+        return;
+      }
+
+      if (!step.assessmentRefs || step.assessmentRefs.length !== 1) {
+        issues.push(`${stepLabel}: assessmentConsequences require exactly one assessmentRef on the same step`);
+        suggestions.push(`Add exactly one assessmentRef to ${stepLabel} before declaring assessmentConsequences`);
+        return;
+      }
+
+      if (step.assessmentConsequences.length > 1) {
+        issues.push(`${stepLabel}: v1 assessment support allows exactly one assessment consequence per step`);
+        suggestions.push(`Reduce assessmentConsequences on ${stepLabel} to a single declaration`);
+      }
+
+      const assessmentDefinition = assessments.find(assessment => assessment.id === step.assessmentRefs?.[0]);
+      if (!assessmentDefinition) return;
+
+      for (const consequence of step.assessmentConsequences) {
+        const trigger = consequence.when;
+        const effect = consequence.effect;
+        const dimension = assessmentDefinition.dimensions.find(candidate => candidate.id === trigger.dimensionId);
+
+        if (!dimension) {
+          issues.push(
+            `${stepLabel}: assessment consequence references unknown dimension '${trigger.dimensionId}' for assessment '${assessmentDefinition.id}'`
+          );
+          suggestions.push(
+            `Use one of the declared dimensions for assessment '${assessmentDefinition.id}': ${assessmentDefinition.dimensions.map(d => d.id).join(', ')}`
+          );
+          continue;
+        }
+
+        if (!dimension.levels.includes(trigger.equalsLevel)) {
+          issues.push(
+            `${stepLabel}: assessment consequence references undeclared level '${trigger.equalsLevel}' for dimension '${trigger.dimensionId}'`
+          );
+          suggestions.push(
+            `Use one of the declared levels for dimension '${trigger.dimensionId}': ${dimension.levels.join(', ')}`
+          );
+        }
+
+        if (effect.kind !== 'require_followup') {
+          issues.push(`${stepLabel}: unsupported assessment consequence effect '${String((effect as { kind?: unknown }).kind)}'`);
+          suggestions.push(`Use the supported v1 effect kind 'require_followup'`);
+        }
+
+        if (!effect.guidance || typeof effect.guidance !== 'string') {
+          issues.push(`${stepLabel}: assessment consequence guidance must be a non-empty string`);
+        }
+      }
+    };
 
     // Validate each step
     for (const step of workflow.definition.steps) {
@@ -816,6 +966,12 @@ export class ValidationEngine {
 
         // Lint loop body inline steps + loop-scoped validationCriteria (if present in body steps)
         this.collectQuotedJsonValidationMessageWarnings(step as any, `Step '${step.id}'`, warnings);
+        if (Array.isArray(step.body)) {
+          for (const inlineStep of step.body) {
+            validateAssessmentRefsForStep(inlineStep, `Loop body step '${inlineStep.id}' in loop '${step.id}'`);
+            validateAssessmentConsequencesForStep(inlineStep, `Loop body step '${inlineStep.id}' in loop '${step.id}'`);
+          }
+        }
       } else {
         // Basic step validation
         if (!step.id) {
@@ -864,6 +1020,14 @@ export class ValidationEngine {
             }
           }
         }
+
+        // Validate assessmentRefs (cross-check against workflow-level declarations)
+        validateAssessmentRefsForStep(typedStep, `Step '${step.id}'`);
+        if (typedStep.assessmentRefs !== undefined && typedStep.assessmentRefs.length > 1) {
+          issues.push(`Step '${step.id}': v1 assessment support allows exactly one assessmentRef per step`);
+          suggestions.push(`Reduce assessmentRefs on step '${step.id}' to a single assessment id`);
+        }
+        validateAssessmentConsequencesForStep(typedStep, `Step '${step.id}'`);
 
         // Validate function calls for standard steps using workflow + step scopes
         const callValidation = this.validateStepFunctionCalls(

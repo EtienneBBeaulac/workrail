@@ -41,6 +41,7 @@ type BuildAppendPlanArgs = {
       readonly kind: 'blocked';
       readonly blockers: import('../../../v2/durable-core/domain/reason-model.js').BlockerReportV1;
       readonly snapshotRef: import('../../../v2/durable-core/ids/index.js').SnapshotRef;
+      readonly outputsToAppend?: readonly OutputToAppend[];
     }
   | {
       readonly kind: 'advanced';
@@ -61,6 +62,7 @@ export function buildAndAppendPlan(args: BuildAppendPlanArgs): RA<void, Internal
     const toNodeId = String(idFactory.mintNodeId());
     const evtNodeCreated = idFactory.mintEventId();
     const evtEdgeCreated = idFactory.mintEventId();
+    const outputEventIds = (args.outputsToAppend ?? []).map(() => idFactory.mintEventId());
 
     const hasChildren = truth.events.some(
       (e): e is Extract<DomainEventV1, { kind: 'edge_created' }> =>
@@ -85,9 +87,9 @@ export function buildAndAppendPlan(args: BuildAppendPlanArgs): RA<void, Internal
         advanceRecordedEventId: evtAdvanceRecorded,
         nodeCreatedEventId: evtNodeCreated,
         edgeCreatedEventId: evtEdgeCreated,
-        outputEventIds: [],
+        outputEventIds,
       },
-      outputsToAppend: [],
+      outputsToAppend: args.outputsToAppend ?? [],
     });
     if (planRes.isErr()) return neErrorAsync({ kind: 'invariant_violation' as const, message: planRes.error.message });
     return sessionStore.append(lock, planRes.value);

@@ -2,7 +2,7 @@ import type { Result } from 'neverthrow';
 import { err, ok } from 'neverthrow';
 import type { Workflow } from '../../../types/workflow.js';
 import { getStepById, isLoopStepDefinition } from '../../../types/workflow.js';
-import type { PromptFragment } from '../../../types/workflow-definition.js';
+import type { AssessmentDefinition, PromptFragment } from '../../../types/workflow-definition.js';
 import type { LoadedSessionTruthV2 } from '../../ports/session-event-log-store.port.js';
 import type { LoopPathFrameV1 } from '../schemas/execution-snapshot/index.js';
 import type { NodeId, RunId } from '../ids/index.js';
@@ -378,6 +378,23 @@ function formatOutputContractRequirements(
   }
 }
 
+function formatAssessmentRequirements(
+  assessments: readonly AssessmentDefinition[]
+): readonly string[] {
+  if (assessments.length === 0) return [];
+
+  const requirements: string[] = [];
+  for (const assessment of assessments) {
+    requirements.push('Provide an artifact with kind: "wr.assessment"');
+    requirements.push(`Assessment target: "${assessment.id}"`);
+    requirements.push(
+      `Dimensions: ${assessment.dimensions.map((dimension) => `${dimension.id} (${dimension.levels.join(' | ')})`).join(', ')}`
+    );
+    requirements.push('Use only canonical dimension levels. If the engine rejects the artifact, correct the submitted levels instead of inventing new ones.');
+  }
+  return requirements;
+}
+
 /**
  * Assemble fragment texts whose `when` conditions match the given context.
  *
@@ -469,6 +486,12 @@ export function renderPendingPrompt(args: {
   const outputContract = 'outputContract' in step
     ? (step as { outputContract?: { contractRef?: string } }).outputContract
     : undefined;
+  const stepAssessmentRefs = 'assessmentRefs' in step
+    ? (step as { assessmentRefs?: readonly string[] }).assessmentRefs
+    : undefined;
+  const stepAssessments = stepAssessmentRefs && stepAssessmentRefs.length > 0
+    ? (args.workflow.definition.assessments ?? []).filter((assessment) => stepAssessmentRefs.includes(assessment.id))
+    : [];
   const isExitStep = outputContract?.contractRef === LOOP_CONTROL_CONTRACT_REF;
 
   // Single traversal resolves the parent loop step — used for both context template
@@ -526,6 +549,13 @@ export function renderPendingPrompt(args: {
     ? cleanResponseFormat
       ? `\n\n${contractRequirements.map(r => `- ${r}`).join('\n')}`
       : `\n\n**OUTPUT REQUIREMENTS (System):**\n${contractRequirements.map(r => `- ${r}`).join('\n')}`
+    : '';
+
+  const assessmentRequirements = formatAssessmentRequirements(stepAssessments);
+  const assessmentSection = assessmentRequirements.length > 0
+    ? cleanResponseFormat
+      ? `\n\n${assessmentRequirements.map(r => `- ${r}`).join('\n')}`
+      : `\n\n**ASSESSMENT REQUIREMENTS (System):**\n${assessmentRequirements.map(r => `- ${r}`).join('\n')}`
     : '';
 
   // Notes requirement (system-injected): all steps require notes unless the step declares
@@ -596,7 +626,7 @@ export function renderPendingPrompt(args: {
     ? assembleFragmentedPrompt(promptFragments, renderContext)
     : '';
 
-  const enhancedPrompt = loopBanner + basePrompt + requirementsSection + contractSection + notesSection
+  const enhancedPrompt = loopBanner + basePrompt + requirementsSection + contractSection + assessmentSection + notesSection
     + (fragmentSuffix ? '\n\n' + fragmentSuffix : '');
 
   // If not rehydrate-only, return enhanced prompt (no recovery needed for advance/start)

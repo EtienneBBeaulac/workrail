@@ -40,6 +40,40 @@ describe('buildBlockedNodeSnapshot', () => {
     }
   });
 
+  it('builds retryable_block without validationRef for assessment follow-up blocks', () => {
+    const result = buildBlockedNodeSnapshot({
+      priorSnapshot: runningSnapshot,
+      primaryReason: {
+        kind: 'assessment_followup_required',
+        assessmentId: 'readiness_gate',
+        dimensionId: 'confidence',
+        level: 'low',
+        guidance: 'Gather more context before proceeding.',
+      },
+      attemptId: asAttemptId('attempt_1'),
+      validationRef: undefined,
+      blockers: {
+        blockers: [
+          {
+            code: 'ASSESSMENT_FOLLOWUP_REQUIRED',
+            pointer: { kind: 'assessment_dimension', assessmentId: 'readiness_gate', dimensionId: 'confidence' },
+            message: 'Follow-up required.',
+          },
+        ],
+      },
+      sha256,
+    });
+
+    expect(result.isOk()).toBe(true);
+    const snapshot = result._unsafeUnwrap();
+    expect(snapshot.enginePayload.engineState.kind).toBe('blocked');
+    if (snapshot.enginePayload.engineState.kind === 'blocked') {
+      expect(snapshot.enginePayload.engineState.blocked.kind).toBe('retryable_block');
+      expect(snapshot.enginePayload.engineState.blocked.reason.kind).toBe('assessment_followup_required');
+      expect(snapshot.enginePayload.engineState.blocked.validationRef).toBeUndefined();
+    }
+  });
+
   it('builds terminal_block for user-only dependency', () => {
     const result = buildBlockedNodeSnapshot({
       priorSnapshot: runningSnapshot,

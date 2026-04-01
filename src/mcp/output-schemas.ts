@@ -207,6 +207,11 @@ const V2BlockerPointerSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('output_contract'), contractRef: z.string().min(1) }),
   z.object({ kind: z.literal('capability'), capability: z.enum(['delegation', 'web_browsing']) }),
   z.object({
+    kind: z.literal('assessment_dimension'),
+    assessmentId: z.string().min(1),
+    dimensionId: z.string().min(1).regex(DELIMITER_SAFE_ID_PATTERN, 'dimensionId must be delimiter-safe: [a-z0-9_-]+'),
+  }),
+  z.object({
     kind: z.literal('workflow_step'),
     stepId: z.string().min(1).regex(DELIMITER_SAFE_ID_PATTERN, 'stepId must be delimiter-safe: [a-z0-9_-]+'),
   }),
@@ -217,6 +222,7 @@ const V2BlockerSchema = z.object({
     'USER_ONLY_DEPENDENCY',
     'MISSING_REQUIRED_OUTPUT',
     'INVALID_REQUIRED_OUTPUT',
+    'ASSESSMENT_FOLLOWUP_REQUIRED',
     'MISSING_REQUIRED_NOTES',
     'MISSING_CONTEXT_KEY',
     'CONTEXT_BUDGET_EXCEEDED',
@@ -258,6 +264,9 @@ export const V2BlockerReportSchema = z
           break;
         case 'capability':
           ptrStable = p.capability;
+          break;
+        case 'assessment_dimension':
+          ptrStable = `${p.assessmentId}|${p.dimensionId}`;
           break;
         case 'workflow_step':
           ptrStable = p.stepId;
@@ -339,6 +348,12 @@ const V2ContinueWorkflowBlockedSchema = z.object({
     .object({
       issues: z.array(z.string()),
       suggestions: z.array(z.string()),
+    })
+    .optional(),
+  assessmentFollowup: z
+    .object({
+      title: z.string().min(1),
+      guidance: z.string().min(1),
     })
     .optional(),
 });

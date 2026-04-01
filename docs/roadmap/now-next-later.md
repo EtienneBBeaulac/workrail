@@ -13,6 +13,7 @@ This is the lightweight cross-cutting roadmap view for WorkRail.
 
 - ~~Content coherence: introduce StepContentEnvelope and linked references~~ (done -- see `docs/plans/content-coherence-and-references.md`)
 - ~~Workflow-source setup phase 1: rooted team sharing, remembered roots, grouped source visibility, and migration-aware precedence explanation~~ (done -- phase-1 workflow-source setup landed across `#160`–`#164`; see `docs/plans/workflow-source-setup-phase-1.md`)
+- Promote assessment-gate follow-up from the current `bug-investigation.agentic.v2.json` pilot into a higher-value workflow such as `mr-review-workflow.agentic.v2.json`
 - Design console execution-trace UX so runs explain fast paths, conditions, and skipped authoring phases instead of only showing created DAG nodes
 - Build a concrete plan for composition and middleware
 - Resolve progress notification design issues and decide whether it is worth doing now

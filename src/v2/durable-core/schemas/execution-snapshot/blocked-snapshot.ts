@@ -18,6 +18,7 @@ const BlockerCodeSchema = z.enum([
   'USER_ONLY_DEPENDENCY',
   'MISSING_REQUIRED_OUTPUT',
   'INVALID_REQUIRED_OUTPUT',
+  'ASSESSMENT_FOLLOWUP_REQUIRED',
   'MISSING_REQUIRED_NOTES',
   'MISSING_CONTEXT_KEY',
   'CONTEXT_BUDGET_EXCEEDED',
@@ -32,6 +33,7 @@ const BlockerPointerSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('context_budget') }).strict(),
   z.object({ kind: z.literal('output_contract'), contractRef: z.string().min(1) }).strict(),
   z.object({ kind: z.literal('capability'), capability: CapabilityV2Schema }).strict(),
+  z.object({ kind: z.literal('assessment_dimension'), assessmentId: z.string().min(1), dimensionId: DelimiterSafeIdSchema }).strict(),
   z.object({ kind: z.literal('workflow_step'), stepId: DelimiterSafeIdSchema }).strict(),
 ]);
 
@@ -60,6 +62,13 @@ const BlockerReportV1Schema = z.object({
 export const ContractViolationReasonV1Schema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('invalid_required_output'), contractRef: z.string().min(1) }).strict(),
   z.object({ kind: z.literal('missing_required_output'), contractRef: z.string().min(1) }).strict(),
+  z.object({
+    kind: z.literal('assessment_followup_required'),
+    assessmentId: z.string().min(1),
+    dimensionId: DelimiterSafeIdSchema,
+    level: z.string().min(1),
+    guidance: z.string().min(1),
+  }).strict(),
   z.object({ kind: z.literal('missing_context_key'), key: DelimiterSafeIdSchema }).strict(),
   z.object({ kind: z.literal('context_budget_exceeded') }).strict(),
   z.object({ kind: z.literal('missing_notes'), stepId: DelimiterSafeIdSchema }).strict(),
@@ -90,7 +99,7 @@ export const BlockedSnapshotV1Schema = z.discriminatedUnion('kind', [
     kind: z.literal('retryable_block'),
     reason: ContractViolationReasonV1Schema,
     retryAttemptId: z.string().min(1),
-    validationRef: z.string().min(1),
+    validationRef: z.string().min(1).optional(),
     blockers: BlockerReportV1Schema,
   }).strict(),
   z.object({

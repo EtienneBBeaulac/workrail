@@ -85,6 +85,35 @@ const AdvanceRecordedDataV1Schema = z.object({
   outcome: AdvanceRecordedOutcomeV1Schema,
 });
 
+const AssessmentRecordedDimensionV1Schema = z.object({
+  dimensionId: z.string().min(1),
+  level: z.string().min(1),
+  rationale: z.string().min(1).optional(),
+  normalization: z.enum(['exact', 'normalized']),
+});
+
+const AssessmentRecordedDataV1Schema = z.object({
+  assessmentId: z.string().min(1),
+  attemptId: z.string().min(1),
+  artifactOutputId: z.string().min(1),
+  summary: z.string().min(1).optional(),
+  normalizationNotes: z.array(z.string().min(1)).readonly(),
+  dimensions: z.array(AssessmentRecordedDimensionV1Schema).min(1).readonly(),
+});
+
+const AssessmentConsequenceAppliedDataV1Schema = z.object({
+  attemptId: z.string().min(1),
+  assessmentId: z.string().min(1),
+  trigger: z.object({
+    dimensionId: z.string().min(1),
+    level: z.string().min(1),
+  }),
+  effect: z.object({
+    kind: z.literal('require_followup'),
+    guidance: z.string().min(1),
+  }),
+});
+
 const PreferencesChangedDataV1Schema = z
   .object({
     changeId: z.string().min(1),
@@ -160,6 +189,16 @@ export const DomainEventV1Schema = z.discriminatedUnion('kind', [
     kind: z.literal('node_output_appended'),
     scope: z.object({ runId: z.string().min(1), nodeId: z.string().min(1) }),
     data: NodeOutputAppendedDataV1Schema,
+  }),
+  DomainEventEnvelopeV1Schema.extend({
+    kind: z.literal('assessment_recorded'),
+    scope: z.object({ runId: z.string().min(1), nodeId: z.string().min(1) }),
+    data: AssessmentRecordedDataV1Schema,
+  }),
+  DomainEventEnvelopeV1Schema.extend({
+    kind: z.literal('assessment_consequence_applied'),
+    scope: z.object({ runId: z.string().min(1), nodeId: z.string().min(1) }),
+    data: AssessmentConsequenceAppliedDataV1Schema,
   }),
   DomainEventEnvelopeV1Schema.extend({
     kind: z.literal('preferences_changed'),

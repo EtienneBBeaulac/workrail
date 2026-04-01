@@ -232,10 +232,14 @@ export function executeAdvanceCore(args: {
       const computed: ComputedAdvanceResults = { reasons: effectiveReasons, outputRequirement, validation: evalValidation };
       const portsLocal: AdvanceCorePorts = { snapshotStore, sessionStore, sha256, idFactory };
 
-      return buildBlockedOutcome({ mode, snap, ctx, computed, lock, ports: portsLocal });
+      return buildBlockedOutcome({ mode, snap, ctx, computed, v, lock, ports: portsLocal });
     }
 
     const validation = phase.validation;
+    const effectiveValidation =
+      v.assessmentValidation && !v.assessmentValidation.validation.valid
+        ? v.assessmentValidation.validation
+        : validation;
 
     // ── 4. Detect blocking reasons + guardrails ─────────────────────────
 
@@ -243,8 +247,9 @@ export function executeAdvanceCore(args: {
       outputContract: v.outputContract,
       artifacts: v.artifacts,
       validationCriteria: v.validationCriteria,
+      assessmentValidation: v.assessmentValidation?.validation,
       notesMarkdown: v.notesMarkdown,
-      validation,
+      validation: effectiveValidation,
     });
 
     // Missing notes: required unless the step declares notesOptional (outputContract steps
@@ -255,11 +260,22 @@ export function executeAdvanceCore(args: {
         ? { stepId: v.pendingStep.stepId }
         : undefined;
 
-    const rawReasonsRes = detectBlockingReasonsV1({ outputRequirement, missingNotes });
-    if (rawReasonsRes.isErr()) {
-      return errAsync({ kind: 'invariant_violation' as const, message: rawReasonsRes.error.message } as const);
+    const rawReasonsWithAssessmentRes = detectBlockingReasonsV1({
+      outputRequirement,
+      missingNotes,
+      assessmentFollowupRequired: v.triggeredAssessmentConsequence
+        ? {
+            assessmentId: v.triggeredAssessmentConsequence.assessmentId,
+            dimensionId: v.triggeredAssessmentConsequence.triggerDimensionId,
+            level: v.triggeredAssessmentConsequence.triggerLevel,
+            guidance: v.triggeredAssessmentConsequence.guidance,
+          }
+        : undefined,
+    });
+    if (rawReasonsWithAssessmentRes.isErr()) {
+      return errAsync({ kind: 'invariant_violation' as const, message: rawReasonsWithAssessmentRes.error.message } as const);
     }
-    const rawReasons = rawReasonsRes.value;
+    const rawReasons = rawReasonsWithAssessmentRes.value;
 
     // Apply guardrails: post-guardrail reasons are the single source of truth for all
     // blocking decisions. Using effectiveReasons everywhere (not rawReasons) prevents
@@ -268,13 +284,13 @@ export function executeAdvanceCore(args: {
     const shouldBlockNow = reasons.length > 0 && shouldBlock(v.autonomy, reasons);
 
     const ctx: AdvanceContext = { truth, sessionId, runId, currentNodeId, attemptId, workflowHash, inputOutput, pinnedWorkflow, engineState, pendingStep };
-    const computed: ComputedAdvanceResults = { reasons, outputRequirement, validation };
+    const computed: ComputedAdvanceResults = { reasons, outputRequirement, validation: effectiveValidation };
     const ports: AdvanceCorePorts = { snapshotStore, sessionStore, sha256, idFactory };
 
     // ── 5. Blocked path ─────────────────────────────────────────────────
 
     if (shouldBlockNow) {
-      return buildBlockedOutcome({ mode, snap, ctx, computed, lock, ports });
+      return buildBlockedOutcome({ mode, snap, ctx, computed, v, lock, ports });
     }
 
     // ── 6. Success path ─────────────────────────────────────────────────

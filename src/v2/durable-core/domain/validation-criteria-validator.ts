@@ -2,6 +2,7 @@ import type { ValidationCriteria, ValidationResult } from '../../../types/valida
 import type { OutputContract } from '../../../types/workflow-definition.js';
 import type { OutputRequirementStatus } from './blocking-decision.js';
 import { validateArtifactContract } from './artifact-contract-validator.js';
+import { ASSESSMENT_CONTRACT_REF } from '../schemas/artifacts/index.js';
 
 export const VALIDATION_CRITERIA_CONTRACT_REF = 'wr.validationCriteria' as const;
 
@@ -72,6 +73,7 @@ export function getOutputRequirementStatusWithArtifactsV1(args: {
   readonly outputContract: OutputContract | undefined;
   readonly artifacts: readonly unknown[];
   readonly validationCriteria: ValidationCriteria | undefined;
+  readonly assessmentValidation?: ValidationResult;
   readonly notesMarkdown: string | undefined;
   readonly validation: ValidationResult | undefined;
 }): OutputRequirementStatus {
@@ -103,6 +105,18 @@ export function getOutputRequirementStatusWithArtifactsV1(args: {
     }
     
     // Artifact validation passed
+    return { kind: 'satisfied' };
+  }
+
+  // Priority 1.5: Assessment validation on the existing artifact channel
+  if (args.assessmentValidation) {
+    if (!args.assessmentValidation.valid) {
+      return {
+        kind: 'invalid',
+        contractRef: ASSESSMENT_CONTRACT_REF,
+        validation: args.assessmentValidation,
+      };
+    }
     return { kind: 'satisfied' };
   }
   

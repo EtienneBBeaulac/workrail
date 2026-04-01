@@ -2,6 +2,7 @@ import type { AutonomyV2 } from '../schemas/session/preferences.js';
 import { AUTONOMY_MODE, DELIMITER_SAFE_ID_PATTERN, MAX_BLOCKERS, MAX_BLOCKER_MESSAGE_BYTES, MAX_BLOCKER_SUGGESTED_FIX_BYTES } from '../constants.js';
 import { err, ok, type Result } from 'neverthrow';
 import { utf8ByteLength } from '../schemas/lib/utf8-byte-length.js';
+import { ASSESSMENT_CONTRACT_REF } from '../schemas/artifacts/index.js';
 
 export type CapabilityV2 = 'delegation' | 'web_browsing';
 export type GapSeverityV1 = 'info' | 'warning' | 'critical';
@@ -16,7 +17,7 @@ export type UserOnlyDependencyReasonV1 =
 
 export type GapReasonV1 =
   | { readonly category: 'user_only_dependency'; readonly detail: UserOnlyDependencyReasonV1 }
-  | { readonly category: 'contract_violation'; readonly detail: 'missing_required_output' | 'invalid_required_output' | 'missing_required_notes' }
+  | { readonly category: 'contract_violation'; readonly detail: 'missing_required_output' | 'invalid_required_output' | 'missing_required_notes' | 'assessment_followup_required' }
   | { readonly category: 'capability_missing'; readonly detail: 'required_capability_unavailable' | 'required_capability_unknown' }
   | { readonly category: 'unexpected'; readonly detail: 'invariant_violation' | 'storage_corruption_detected' | 'evaluation_error' };
 
@@ -24,6 +25,7 @@ export type BlockerCodeV1 =
   | 'USER_ONLY_DEPENDENCY'
   | 'MISSING_REQUIRED_OUTPUT'
   | 'INVALID_REQUIRED_OUTPUT'
+  | 'ASSESSMENT_FOLLOWUP_REQUIRED'
   | 'MISSING_REQUIRED_NOTES'
   | 'MISSING_CONTEXT_KEY'
   | 'CONTEXT_BUDGET_EXCEEDED'
@@ -37,6 +39,7 @@ export type BlockerPointerV1 =
   | { readonly kind: 'context_budget' }
   | { readonly kind: 'output_contract'; readonly contractRef: string }
   | { readonly kind: 'capability'; readonly capability: CapabilityV2 }
+  | { readonly kind: 'assessment_dimension'; readonly assessmentId: string; readonly dimensionId: string }
   | { readonly kind: 'workflow_step'; readonly stepId: string };
 
 export type BlockerV1 = {
@@ -55,6 +58,7 @@ export type ReasonV1 =
   | { readonly kind: 'context_budget_exceeded' }
   | { readonly kind: 'missing_required_output'; readonly contractRef: string }
   | { readonly kind: 'invalid_required_output'; readonly contractRef: string }
+  | { readonly kind: 'assessment_followup_required'; readonly assessmentId: string; readonly dimensionId: string; readonly level: string; readonly guidance: string }
   | { readonly kind: 'missing_notes'; readonly stepId: string }
   | { readonly kind: 'required_capability_unknown'; readonly capability: CapabilityV2 }
   | { readonly kind: 'required_capability_unavailable'; readonly capability: CapabilityV2 }
@@ -126,6 +130,12 @@ export function reasonToGap(reason: ReasonV1): { readonly severity: GapSeverityV
         reason: { category: 'contract_violation', detail: 'invalid_required_output' },
         summary: `Invalid required output for contractRef=${reason.contractRef}`,
       };
+    case 'assessment_followup_required':
+      return {
+        severity: 'critical',
+        reason: { category: 'contract_violation', detail: 'assessment_followup_required' },
+        summary: `Assessment follow-up required: ${reason.assessmentId}.${reason.dimensionId} == ${reason.level}`,
+      };
     case 'missing_notes':
       return {
         severity: 'critical',
@@ -194,6 +204,9 @@ export function blockerSortKey(b: BlockerV1): string {
     case 'capability':
       ptrStable = p.capability;
       break;
+    case 'assessment_dimension':
+      ptrStable = `${p.assessmentId}|${p.dimensionId}`;
+      break;
     case 'workflow_step':
       ptrStable = p.stepId;
       break;
@@ -234,7 +247,10 @@ export function reasonToBlocker(reason: ReasonV1): Result<BlockerV1, ReasonModel
           code: 'MISSING_REQUIRED_OUTPUT' as const,
           pointer: { kind: 'output_contract' as const, contractRef },
           message: `Missing required output (contractRef=${contractRef}).`,
-          suggestedFix: 'Call continue_workflow without output to rehydrate the current step, then retry with output.notesMarkdown that satisfies the step output requirements.',
+          suggestedFix:
+            contractRef === ASSESSMENT_CONTRACT_REF
+              ? 'Call continue_workflow without output to rehydrate the current step, then retry with an assessment artifact under output.artifacts using kind "wr.assessment" and the required canonical dimension levels.'
+              : 'Call continue_workflow without output to rehydrate the current step, then retry with output.notesMarkdown that satisfies the step output requirements.',
         }))
         .andThen(ensureBlockerTextBudgets);
 
@@ -244,9 +260,24 @@ export function reasonToBlocker(reason: ReasonV1): Result<BlockerV1, ReasonModel
           code: 'INVALID_REQUIRED_OUTPUT' as const,
           pointer: { kind: 'output_contract' as const, contractRef },
           message: `Invalid output for contractRef=${contractRef}.`,
-          suggestedFix: 'Update output.notesMarkdown to satisfy validation. Then call continue_workflow without output to rehydrate the current step and retry advance with the corrected output. Replaying the same invalid advance will keep returning this blocked result.',
+          suggestedFix:
+            contractRef === ASSESSMENT_CONTRACT_REF
+              ? 'Update the assessment artifact in output.artifacts so it uses the expected assessment ID and canonical dimension levels. Then call continue_workflow without output to rehydrate the current step and retry with the corrected artifact.'
+              : 'Update output.notesMarkdown to satisfy validation. Then call continue_workflow without output to rehydrate the current step and retry advance with the corrected output. Replaying the same invalid advance will keep returning this blocked result.',
         }))
         .andThen(ensureBlockerTextBudgets);
+
+    case 'assessment_followup_required':
+      return ensureBlockerTextBudgets({
+        code: 'ASSESSMENT_FOLLOWUP_REQUIRED',
+        pointer: {
+          kind: 'assessment_dimension',
+          assessmentId: reason.assessmentId,
+          dimensionId: reason.dimensionId,
+        },
+        message: `Follow-up required before this step can proceed: ${reason.assessmentId}.${reason.dimensionId} matched "${reason.level}".`,
+        suggestedFix: `Stay on this step, address this follow-up, and retry with updated output: ${reason.guidance}`,
+      });
 
     case 'missing_notes':
       return ensureDelimiterSafeId('workflow_step.stepId', reason.stepId)

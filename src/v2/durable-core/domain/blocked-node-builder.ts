@@ -16,6 +16,14 @@ function toContractViolationReason(reason: ReasonV1): ContractViolationReasonV1 
       return { kind: 'invalid_required_output', contractRef: reason.contractRef };
     case 'missing_required_output':
       return { kind: 'missing_required_output', contractRef: reason.contractRef };
+    case 'assessment_followup_required':
+      return {
+        kind: 'assessment_followup_required',
+        assessmentId: reason.assessmentId,
+        dimensionId: reason.dimensionId,
+        level: reason.level,
+        guidance: reason.guidance,
+      };
     case 'missing_context_key':
       return { kind: 'missing_context_key', key: reason.key };
     case 'context_budget_exceeded':
@@ -49,7 +57,7 @@ function toTerminalReason(reason: ReasonV1): TerminalReasonV1 | null {
 function buildBlockedPayload(args: {
   readonly primaryReason: ReasonV1;
   readonly attemptId: AttemptId;
-  readonly validationRef: string;
+  readonly validationRef?: string;
   readonly blockers: BlockerReportV1;
   readonly sha256: Sha256PortV2;
 }): Result<BlockedSnapshotV1, BlockedNodeBuildError> {
@@ -91,7 +99,7 @@ export function buildBlockedNodeSnapshot(args: {
   readonly priorSnapshot: ExecutionSnapshotFileV1;
   readonly primaryReason: ReasonV1;
   readonly attemptId: AttemptId;
-  readonly validationRef: string;
+  readonly validationRef?: string;
   readonly blockers: BlockerReportV1;
   readonly sha256: Sha256PortV2;
 }): Result<ExecutionSnapshotFileV1, BlockedNodeBuildError> {

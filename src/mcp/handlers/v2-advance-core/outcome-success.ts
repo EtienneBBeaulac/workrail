@@ -31,6 +31,7 @@ import {
 import type { AdvanceMode, AdvanceContext, ComputedAdvanceResults, AdvanceCorePorts } from './index.js';
 import type { ValidatedAdvanceInputs } from './input-validation.js';
 import { buildAndAppendPlan, buildNotesOutputs, buildArtifactOutputs } from './event-builders.js';
+import { buildAssessmentRecordedEvent } from '../../../v2/durable-core/domain/assessment-recorded-event-builder.js';
 
 type PartialEvent = Omit<DomainEventV1, 'eventIndex' | 'sessionId'>;
 
@@ -189,6 +190,29 @@ export function buildSuccessOutcome(args: {
     const artifactOutputsRes = buildArtifactOutputs(inputOutput?.artifacts ?? [], attemptId, sha256);
     if (artifactOutputsRes.isErr()) {
       return errAsync(artifactOutputsRes.error);
+    }
+
+    if (v.recordedAssessment && v.assessmentArtifact && v.assessmentValidation?.acceptedArtifactIndex !== undefined) {
+      const assessmentOutput = artifactOutputsRes.value[v.assessmentValidation.acceptedArtifactIndex];
+      if (!assessmentOutput || assessmentOutput.outputChannel !== 'artifact') {
+        return errAsync({
+          kind: 'invariant_violation',
+          message: 'Accepted assessment artifact did not produce a matching artifact output.',
+        });
+      }
+
+      const assessmentEventRes = buildAssessmentRecordedEvent({
+        sessionId: String(sessionId),
+        attemptId: String(attemptId),
+        artifactOutputId: String(assessmentOutput.outputId),
+        scope: { runId: String(runId), nodeId: String(currentNodeId) },
+        assessment: v.recordedAssessment,
+        minted: { eventId: idFactory.mintEventId() },
+      });
+      if (assessmentEventRes.isErr()) {
+        return errAsync({ kind: 'invariant_violation', message: assessmentEventRes.error.message });
+      }
+      extraEventsToAppend.push(assessmentEventRes.value);
     }
 
     const outputsToAppend = [...notesOutputs, ...artifactOutputsRes.value];

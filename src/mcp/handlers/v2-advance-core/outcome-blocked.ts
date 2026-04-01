@@ -16,16 +16,21 @@ import type { ValidationResult } from '../../../types/validation.js';
 import { buildBlockerReport } from '../../../v2/durable-core/domain/reason-model.js';
 import { buildValidationPerformedEvent } from '../../../v2/durable-core/domain/validation-event-builder.js';
 import { buildBlockedNodeSnapshot } from '../../../v2/durable-core/domain/blocked-node-builder.js';
+import { buildAssessmentRecordedEvent } from '../../../v2/durable-core/domain/assessment-recorded-event-builder.js';
+import { buildAssessmentConsequenceAppliedEvent } from '../../../v2/durable-core/domain/assessment-consequence-event-builder.js';
+import type { DomainEventV1 } from '../../../v2/durable-core/schemas/session/index.js';
 import type { InternalError } from '../v2-error-mapping.js';
 import type { AdvanceMode } from './index.js';
-import { buildAndAppendPlan } from './event-builders.js';
+import { buildAndAppendPlan, buildArtifactOutputs } from './event-builders.js';
 import type { AdvanceContext, ComputedAdvanceResults, AdvanceCorePorts } from './index.js';
+import type { ValidatedAdvanceInputs } from './input-validation.js';
 
 export function buildBlockedOutcome(args: {
   readonly mode: AdvanceMode;
   readonly snap: ExecutionSnapshotFileV1;
   readonly ctx: AdvanceContext;
   readonly computed: ComputedAdvanceResults;
+  readonly v: ValidatedAdvanceInputs;
   readonly lock: WithHealthySessionLock;
   readonly ports: AdvanceCorePorts;
 }): RA<void, InternalError | SessionEventLogStoreError | SnapshotStoreError> {
@@ -41,30 +46,23 @@ export function buildBlockedOutcome(args: {
     return errAsync({ kind: 'invariant_violation' as const, message: blockersRes.error.message } as const);
   }
 
-  // Build validation event
-  const validationEventId = idFactory.mintEventId();
-  const validationId = `validation_${String(attemptId)}`;
-  const contractRefForEvent = (outputRequirement.kind !== 'not_required' && outputRequirement.kind !== 'satisfied') ? outputRequirement.contractRef : 'none';
-  const validationForEvent: ValidationResult =
-    validation ??
-    (outputRequirement.kind === 'missing'
-      ? { valid: false, issues: [`Missing required output for contractRef=${contractRefForEvent}`], suggestions: [], warnings: undefined }
-      : { valid: false, issues: ['Validation result missing'], suggestions: [], warnings: undefined });
-
-  const validationEventRes = buildValidationPerformedEvent({
-    sessionId: String(sessionId),
-    validationId,
-    attemptId: String(attemptId),
-    contractRef: contractRefForEvent,
-    scope: { runId: String(runId), nodeId: String(currentNodeId) },
-    minted: { eventId: validationEventId },
-    result: validationForEvent,
-  });
-  if (validationEventRes.isErr()) {
-    return errAsync({ kind: 'invariant_violation' as const, message: validationEventRes.error.message } as const);
+  const validationId = validation ? `validation_${String(attemptId)}` : undefined;
+  const extraEventsToAppend: Array<Omit<DomainEventV1, 'eventIndex' | 'sessionId'>> = [];
+  if (validation && outputRequirement.kind !== 'not_required' && outputRequirement.kind !== 'satisfied') {
+    const validationEventRes = buildValidationPerformedEvent({
+      sessionId: String(sessionId),
+      validationId: validationId!,
+      attemptId: String(attemptId),
+      contractRef: outputRequirement.contractRef,
+      scope: { runId: String(runId), nodeId: String(currentNodeId) },
+      minted: { eventId: idFactory.mintEventId() },
+      result: validation,
+    });
+    if (validationEventRes.isErr()) {
+      return errAsync({ kind: 'invariant_violation' as const, message: validationEventRes.error.message } as const);
+    }
+    extraEventsToAppend.push(validationEventRes.value);
   }
-
-  const extraEventsToAppend = [validationEventRes.value];
   const primaryReason = reasons[0];
   if (!primaryReason) {
     // Invariant: shouldBlockNow=true requires reasons.length > 0 (checked at call site).
@@ -84,11 +82,67 @@ export function buildBlockedOutcome(args: {
     return errAsync({ kind: 'invariant_violation' as const, message: blockedSnapshotRes.error.message } as const);
   }
 
+  const outputAppendResult = args.ctx.inputOutput?.artifacts
+    ? (() => {
+        const outputsRes = buildArtifactOutputs(args.ctx.inputOutput.artifacts, attemptId, sha256);
+        if (outputsRes.isErr()) {
+          return outputsRes;
+        }
+        return outputsRes;
+      })()
+    : undefined;
+  if (outputAppendResult?.isErr()) {
+    return errAsync(outputAppendResult.error);
+  }
+  const outputsToAppend =
+    outputAppendResult && outputAppendResult.isOk()
+      ? outputAppendResult.value
+      : [];
+
+  const validated = args.v;
+  if (validated?.recordedAssessment && validated.assessmentValidation?.acceptedArtifactIndex !== undefined) {
+    const assessmentOutput = outputsToAppend[validated.assessmentValidation.acceptedArtifactIndex];
+    if (!assessmentOutput || assessmentOutput.outputChannel !== 'artifact') {
+      return errAsync({ kind: 'invariant_violation' as const, message: 'Accepted assessment artifact did not produce a matching artifact output on blocked path.' } as const);
+    }
+
+    const assessmentEventRes = buildAssessmentRecordedEvent({
+      sessionId: String(sessionId),
+      attemptId: String(attemptId),
+      artifactOutputId: String(assessmentOutput.outputId),
+      scope: { runId: String(runId), nodeId: String(currentNodeId) },
+      assessment: validated.recordedAssessment,
+      minted: { eventId: idFactory.mintEventId() },
+    });
+    if (assessmentEventRes.isErr()) {
+      return errAsync({ kind: 'invariant_violation' as const, message: assessmentEventRes.error.message } as const);
+    }
+    extraEventsToAppend.push(assessmentEventRes.value);
+  }
+
+  if (validated?.triggeredAssessmentConsequence) {
+    const consequenceEventRes = buildAssessmentConsequenceAppliedEvent({
+      sessionId: String(sessionId),
+      attemptId: String(attemptId),
+      scope: { runId: String(runId), nodeId: String(currentNodeId) },
+      assessmentId: validated.triggeredAssessmentConsequence.assessmentId,
+      dimensionId: validated.triggeredAssessmentConsequence.triggerDimensionId,
+      level: validated.triggeredAssessmentConsequence.triggerLevel,
+      guidance: validated.triggeredAssessmentConsequence.guidance,
+      minted: { eventId: idFactory.mintEventId() },
+    });
+    if (consequenceEventRes.isErr()) {
+      return errAsync({ kind: 'invariant_violation' as const, message: consequenceEventRes.error.message } as const);
+    }
+    extraEventsToAppend.push(consequenceEventRes.value);
+  }
+
   return snapshotStore.putExecutionSnapshotV1(blockedSnapshotRes.value).andThen((blockedSnapshotRef) => {
     return buildAndAppendPlan({
       kind: 'blocked',
       truth, sessionId, runId, currentNodeId, attemptId, workflowHash,
       extraEventsToAppend, blockers: blockersRes.value, snapshotRef: blockedSnapshotRef,
+      outputsToAppend,
       sessionStore, idFactory, lock,
     });
   });

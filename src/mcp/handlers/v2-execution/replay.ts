@@ -105,6 +105,13 @@ export function buildAdvancedReplayResponse(args: {
       : okAsync(undefined);
 
     const validation = loadValidationResultV1(truth.events, String(blocked.validationRef)).unwrapOr(null) ?? undefined;
+    const assessmentFollowup =
+      blocked.reason.kind === 'assessment_followup_required'
+        ? {
+            title: `Assessment follow-up matched ${blocked.reason.assessmentId}.${blocked.reason.dimensionId} == ${blocked.reason.level}`,
+            guidance: blocked.reason.guidance,
+          }
+        : undefined;
 
     // S9: Render pending step — fail explicitly on missing step (no silent fallback)
     let blockedMeta: StepMetadata | null = null;
@@ -142,6 +149,7 @@ export function buildAdvancedReplayResponse(args: {
           retryable,
           retryContinueToken,
           validation,
+          assessmentFollowup,
         }))
       )
     );

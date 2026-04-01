@@ -161,6 +161,26 @@ For explicit status on the major older planning docs themselves, see `docs/roadm
   - `docs/plans/agentic-orchestration-roadmap.md`
   - `docs/ideas/backlog.md`
 
+### Assessment-gate follow-up consequences
+
+- **Status**: partial
+- **What was delivered**:
+  - workflow-level assessment declarations and step-level assessment refs / consequence declarations
+  - boundary validation and canonical normalization for assessment artifacts on the existing output path
+  - durable `assessment_recorded` and `assessment_consequence_applied` events plus projections
+  - retryable same-step follow-up blocking with engine-owned framing and semantic guidance
+  - one real bundled workflow pilot in `workflows/bug-investigation.agentic.v2.json`
+- **What remains**:
+  - broader adoption in a higher-value workflow, with `workflows/mr-review-workflow.agentic.v2.json` as the clearest next target
+  - product UX calibration around follow-up wording and consequence visibility in a more widely used workflow
+  - later-tier follow-up behavior beyond the narrow v1 same-step retry model
+- **Why it is here**:
+  - the engine feature is now real, but adoption is still intentionally narrow
+  - the next decision is about rollout and workflow fit, not core engine feasibility
+- **Source docs**:
+  - `docs/ideas/backlog.md`
+  - `docs/plans/mr-review-workflow-redesign.md`
+
 ### Legacy workflow modernization
 
 - **Status**: partial / in progress
@@ -328,9 +348,10 @@ For explicit status on the major older planning docs themselves, see `docs/roadm
 ### Next to groom into tickets
 
 1. **Workflow-source setup phase 1**
-2. **Composition and middleware engine**
-3. **Progress notifications**
-4. **Authorable response supplements** (design first, not direct implementation)
+2. **Assessment-gate adoption in MR review**
+3. **Composition and middleware engine**
+4. **Progress notifications**
+5. **Authorable response supplements** (design first, not direct implementation)
 
 ### Recently completed
 

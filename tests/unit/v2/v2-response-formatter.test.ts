@@ -256,7 +256,7 @@ describe('formatV2ExecutionResponse — blocked retryable', () => {
 
   it('includes retry instruction', () => {
     const result = formatPrimary(continueBlockedResponse())!;
-    expect(result).toContain('Retry with corrected output:');
+    expect(result).toContain('Retry the same step with improved output:');
   });
 
   it('uses retryContinueToken as continueToken in the JSON block for retryable blocks', () => {
@@ -280,6 +280,30 @@ describe('formatV2ExecutionResponse — blocked retryable', () => {
     expect(result).toContain('- notesMarkdown must contain a heading');
     expect(result).toContain('**Suggestions:**');
     expect(result).toContain('- Include a summary under ## Summary');
+  });
+
+  it('renders assessment follow-up framing for retryable assessment blocks', () => {
+    const result = formatPrimary(continueBlockedResponse({
+      blockers: {
+        blockers: [
+          {
+            code: 'ASSESSMENT_FOLLOWUP_REQUIRED',
+            pointer: { kind: 'assessment_dimension', assessmentId: 'readiness_gate', dimensionId: 'confidence' },
+            message: 'Follow-up required before this step can proceed: readiness_gate.confidence matched "low".',
+            suggestedFix: 'Stay on this step, address this follow-up, and retry with updated output: Gather more context before proceeding.',
+          },
+        ],
+      },
+      assessmentFollowup: {
+        title: 'Assessment follow-up matched readiness_gate.confidence == low',
+        guidance: 'Gather more context before proceeding.',
+      },
+    }))!;
+
+    expect(result).toContain('**Follow-up required before retrying this step:**');
+    expect(result).toContain('Assessment follow-up matched readiness_gate.confidence == low');
+    expect(result).toContain('Gather more context before proceeding.');
+    expect(result).toContain('Retry the same step with improved output:');
   });
 });
 

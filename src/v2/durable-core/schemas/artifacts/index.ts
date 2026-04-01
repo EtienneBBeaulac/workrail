@@ -8,6 +8,17 @@
  */
 
 export {
+  // Assessment
+  ASSESSMENT_CONTRACT_REF,
+  AssessmentArtifactV1Schema,
+  AssessmentDimensionSubmissionSchema,
+  isAssessmentArtifact,
+  parseAssessmentArtifact,
+  type AssessmentArtifactV1,
+  type AssessmentDimensionSubmission,
+} from './assessment.js';
+
+export {
   // Loop Control
   LOOP_CONTROL_CONTRACT_REF,
   LoopControlDecisionSchema,
@@ -26,6 +37,7 @@ export {
  * Used for validation and documentation.
  */
 export const ARTIFACT_CONTRACT_REFS = [
+  'wr.contracts.assessment',
   'wr.contracts.loop_control',
 ] as const;
 
