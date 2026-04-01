@@ -78,7 +78,7 @@ export function App() {
         ) : activeTab === 'worktrees' ? (
           <WorktreeList onSelectBranch={handleSelectBranch} />
         ) : (
-          <SessionList onSelectSession={handleSelectSession} initialSearch={sessionSearch} />
+          <SessionList key={sessionSearch} onSelectSession={handleSelectSession} initialSearch={sessionSearch} />
         )}
       </main>
     </div>
