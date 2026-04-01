@@ -157,6 +157,19 @@ Design the DTO and UX changes needed so the console explains why the engine took
 
 `workflow-for-workflows.v2.json` and `production-readiness-audit.json` are now structurally much stronger, but they have mostly been tuned through authoring-time reasoning and validator passes rather than repeated real-world use. The remaining risk is no longer legality; it is whether `STANDARD` vs `THOROUGH` produces the right depth, issue-finding power, and amount of ceremony on actual tasks.
 
+### Current status
+
+- Core engine support is shipped:
+  - workflow-level `assessments`
+  - step-level `assessmentRefs`
+  - step-level `assessmentConsequences`
+  - durable assessment and consequence events/projections
+  - same-step retryable follow-up blocking
+- Current adoption is intentionally narrow:
+  - bundled pilot in `bug-investigation.agentic.v2.json`
+- This ticket is specifically about the next rollout step:
+  - adopt the same narrow v1 model in `mr-review-workflow.agentic.v2.json`
+
 ### Goal
 
 Run both workflows on several realistic tasks and tune them from evidence so the quality gate stays convergent and the readiness audit stays satisfying, skeptical, and useful.
