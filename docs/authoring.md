@@ -100,6 +100,52 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 **Source refs**
 - `spec/workflow.schema.json` (schema) — Legal workflow structure lives here.
 
+### assessment-definitions-hold-vocabulary-not-policy
+- **Level**: recommended
+- **Status**: active
+- **Scope**: workflow.assessments, step.assessment-refs, step.assessment-consequences
+- **Rule**: Put reusable judgment vocabulary in `assessments`, and put execution behavior in step-level `assessmentConsequences`.
+- **Why**: Shared assessment definitions should describe what can be judged, while step-local declarations decide what the workflow does with that judgment.
+- **Enforced by**: validator, compiler, advisory
+
+**Checks**
+- Use `assessments` for dimensions, levels, and purpose only.
+- Use `assessmentRefs` to opt a step into one declared assessment.
+- Use `assessmentConsequences` only on the step that should react to the assessment result.
+
+**Anti-patterns**
+- Encoding step-specific follow-up policy into a shared assessment definition
+- Reusing one assessment definition and expecting all referencing steps to inherit the same behavior implicitly
+
+**Source refs**
+- `spec/workflow.schema.json` (schema) — Assessment declarations and step usage fields.
+- `src/application/services/validation-engine.ts` (validator) — Enforces valid assessment refs and consequence shapes.
+- `src/application/services/workflow-compiler.ts` (runtime) — Fails fast on invalid assessment consequence declarations.
+
+### assessment-consequences-stay-narrow-in-v1
+- **Level**: required
+- **Status**: active
+- **Scope**: step.assessment-consequences, workflow.authoring, documentation.authoring
+- **Rule**: Author assessment consequences using only the shipped v1 shape: one exact-match trigger and one `require_followup` effect.
+- **Why**: The engine supports a deliberately narrow assessment consequence model today. Authoring ahead of that model would create drift and false expectations.
+- **Enforced by**: validator, compiler, advisory
+
+**Checks**
+- Declare at most one `assessmentRefs` entry per step.
+- Declare at most one `assessmentConsequences` entry per step.
+- Use one declared dimension and one declared canonical level for the trigger.
+- Use `require_followup` guidance that keeps the same step pending and retryable.
+
+**Anti-patterns**
+- Multiple consequence rules on one step
+- Scoring ladders or severity tables encoded as pseudo-policy
+- Follow-up wording that implies rewind or a new subflow when the engine still expects same-step retry
+
+**Source refs**
+- `spec/workflow.schema.json` (schema) — V1 legal assessment consequence structure.
+- `src/mcp/handlers/v2-advance-core/assessment-consequences.ts` (runtime) — Exact-match evaluation semantics.
+- `src/v2/durable-core/domain/reason-model.ts` (runtime) — Same-step follow-up blocker framing.
+
 ### runtime-behavior-beats-prose
 - **Level**: required
 - **Status**: active
@@ -719,4 +765,3 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 - `delegation.context-packet`: Structured context passed to subagents
 - `delegation.result-envelope`: Structured result shape returned by subagents
 - `legacy.patterns`: Older authoring patterns that should now be discouraged or avoided
-

@@ -151,7 +151,38 @@ Design the DTO and UX changes needed so the console explains why the engine took
 - `src/v2/usecases/console-service.ts`
 - `console/src/api/types.ts`
 
-## ~~Ticket 6: Finish prompt vs supplement boundary alignment~~ (done)
+## Ticket 6: Adopt assessment-gate follow-up in MR review
+
+### Problem
+
+The assessment-gate engine feature now exists and is exercised by a bundled pilot in `bug-investigation.agentic.v2.json`, but it has not yet been adopted in a higher-value workflow where the product fit is strongest.
+
+### Goal
+
+Adopt the narrow v1 assessment-gate follow-up model in `mr-review-workflow.agentic.v2.json` at a semantically appropriate boundary, and verify that the resulting follow-up UX, durable traces, and workflow behavior hold up in a real user-facing workflow.
+
+### Acceptance criteria
+
+- `mr-review-workflow.agentic.v2.json` declares one narrow assessment gate / follow-up consequence at an appropriate review-readiness boundary
+- the lifecycle/smoke coverage exercises the MR-review adoption without adding bespoke per-workflow harness complexity
+- the blocked follow-up wording remains semantic and same-step retry oriented
+- durable assessment interpretation and applied consequence remain inspectable through the current event/projection surfaces
+
+### Non-goals
+
+- expanding the assessment consequence model beyond the current exact-match `require_followup` v1 shape
+- introducing redo subflows, score systems, or generic policy DSL behavior
+- broad rollout across multiple high-traffic workflows in one pass
+
+### Related files/docs
+
+- `workflows/mr-review-workflow.agentic.v2.json`
+- `workflows/bug-investigation.agentic.v2.json`
+- `docs/plans/mr-review-workflow-redesign.md`
+- `docs/roadmap/open-work-inventory.md`
+- `docs/ideas/backlog.md`
+
+## ~~Ticket 7: Finish prompt vs supplement boundary alignment~~ (done)
 
 All acceptance criteria met -- the boundary is documented consistently:
 

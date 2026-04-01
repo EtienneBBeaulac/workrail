@@ -146,6 +146,39 @@ describe('Validate Workflow JSON Use Case', () => {
       expect(result.issues).toHaveLength(0);
       expect(result.suggestions).toHaveLength(0);
     });
+
+    it('should validate workflow JSON with declared assessments', async () => {
+      const validWorkflow = {
+        id: 'assessment-workflow',
+        name: 'Assessment Workflow',
+        description: 'A workflow with declared assessments.',
+        version: '1.0.0',
+        assessments: [
+          {
+            id: 'readiness_gate',
+            purpose: 'Assess readiness before continuing.',
+            dimensions: [
+              {
+                id: 'confidence',
+                purpose: 'How confident the agent is.',
+                levels: ['low', 'medium', 'high']
+              }
+            ]
+          }
+        ],
+        steps: [{
+          id: 'step-1',
+          title: 'Assessment Step',
+          prompt: 'Assess the situation',
+          assessmentRefs: ['readiness_gate']
+        }]
+      };
+
+      const result = await validateWorkflowJsonUseCase(JSON.stringify(validWorkflow));
+      expect(result.valid).toBe(true);
+      expect(result.issues).toHaveLength(0);
+      expect(result.suggestions).toHaveLength(0);
+    });
   });
 
   describe('invalid workflow validation', () => {

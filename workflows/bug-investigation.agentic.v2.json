@@ -31,6 +31,19 @@
     "TRIGGERS: WorkRail can only react to explicit outputs. Use structural fields like `contextUnknownCount`, `hypothesesConsideredCount`, `hasStrongAlternative`, `contradictionCount`, `unresolvedEvidenceGapCount`, and `diagnosisConfidenceBand`.",
     "BOUNDARY: this workflow investigates and proves root cause. It may describe high-level fix direction and likely files, but must not create implementation plans, patch sequencing, PR plans, or code-writing momentum."
   ],
+  "assessments": [
+    {
+      "id": "diagnosis_readiness_gate",
+      "purpose": "Assess whether the diagnosis is ready to hand off after validation.",
+      "dimensions": [
+        {
+          "id": "confidence",
+          "purpose": "How confident the agent is that the diagnosis is ready for final handoff.",
+          "levels": ["low", "high"]
+        }
+      ]
+    }
+  ],
   "steps": [
     {
       "id": "phase-0-triage-and-intake",
@@ -116,7 +129,20 @@
     {
       "id": "phase-5-diagnosis-validation",
       "title": "Phase 5: Diagnosis Validation Bundle",
-      "prompt": "Stress-test the current diagnosis before handoff.\n\nSet `diagnosisConfidenceBand` using these rules:\n- High = all symptoms explained, no material contradictions, no unresolved evidence gaps\n- Medium = likely diagnosis, but one bounded uncertainty remains\n- Low = multiple viable explanations remain or contradictions are unresolved\n\nMode-adaptive validation:\n- QUICK: self-challenge; if `diagnosisConfidenceBand != High` or contradictions remain, optionally spawn ONE WorkRail Executor running `routine-hypothesis-challenge`\n- STANDARD: if delegation is available, spawn TWO WorkRail Executors SIMULTANEOUSLY running `routine-hypothesis-challenge` and `routine-execution-simulation`\n- THOROUGH: if delegation is available, spawn THREE WorkRail Executors SIMULTANEOUSLY running `routine-hypothesis-challenge`, `routine-execution-simulation`, and an additional `routine-hypothesis-challenge` pass focused on breaking the current diagnosis from a different angle\n\nParallel-output synthesis rules:\n- if 2+ validators raise serious concerns, reopen evidence or shortlist work\n- if exactly one validator raises a concern, investigate it before escalating\n- if no validator can materially break the diagnosis and `contradictionCount = 0`, proceed to handoff\n\nSet context variables:\n- `diagnosisConfidenceBand`\n- `validationFindingsCountBySeverity`\n- `validationSummary`\n\nBoundary rule:\n- allowed: high-level fix direction, likely files involved, verification recommendations\n- not allowed: implementation plan, patch sequencing, PR plan, or code-writing momentum",
+      "prompt": "Stress-test the current diagnosis before handoff.\n\nSet `diagnosisConfidenceBand` using these rules:\n- High = all symptoms explained, no material contradictions, no unresolved evidence gaps\n- Medium = likely diagnosis, but one bounded uncertainty remains\n- Low = multiple viable explanations remain or contradictions are unresolved\n\nMode-adaptive validation:\n- QUICK: self-challenge; if `diagnosisConfidenceBand != High` or contradictions remain, optionally spawn ONE WorkRail Executor running `routine-hypothesis-challenge`\n- STANDARD: if delegation is available, spawn TWO WorkRail Executors SIMULTANEOUSLY running `routine-hypothesis-challenge` and `routine-execution-simulation`\n- THOROUGH: if delegation is available, spawn THREE WorkRail Executors SIMULTANEOUSLY running `routine-hypothesis-challenge`, `routine-execution-simulation`, and an additional `routine-hypothesis-challenge` pass focused on breaking the current diagnosis from a different angle\n\nParallel-output synthesis rules:\n- if 2+ validators raise serious concerns, reopen evidence or shortlist work\n- if exactly one validator raises a concern, investigate it before escalating\n- if no validator can materially break the diagnosis and `contradictionCount = 0`, proceed to handoff\n\nAfter synthesizing the validation result, assess whether the diagnosis is ready for final handoff.\n\nSet context variables:\n- `diagnosisConfidenceBand`\n- `validationFindingsCountBySeverity`\n- `validationSummary`\n\nBoundary rule:\n- allowed: high-level fix direction, likely files involved, verification recommendations\n- not allowed: implementation plan, patch sequencing, PR plan, or code-writing momentum",
+      "assessmentRefs": ["diagnosis_readiness_gate"],
+      "assessmentConsequences": [
+        {
+          "when": {
+            "dimensionId": "confidence",
+            "equalsLevel": "low"
+          },
+          "effect": {
+            "kind": "require_followup",
+            "guidance": "Resolve the remaining diagnosis uncertainty, tighten the evidence summary, and retry this validation step before handing off."
+          }
+        }
+      ],
       "requireConfirmation": {
         "or": [
           { "var": "diagnosisConfidenceBand", "equals": "Low" },

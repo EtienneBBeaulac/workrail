@@ -53,8 +53,34 @@
     {
       "id": "complete",
       "title": "Complete",
-      "prompt": "The iteration loop has completed. Summarize what was accomplished.",
-      "requireConfirmation": false
+      "prompt": "The iteration loop has completed. Assess whether the loop result is ready to publish.\n\nProvide an assessment artifact for readiness.",
+      "requireConfirmation": false,
+      "assessmentRefs": ["readiness_gate"],
+      "assessmentConsequences": [
+        {
+          "when": {
+            "dimensionId": "confidence",
+            "equalsLevel": "low"
+          },
+          "effect": {
+            "kind": "require_followup",
+            "guidance": "Review the loop result one more time and confirm the outcome before completing this step."
+          }
+        }
+      ]
+    }
+  ],
+  "assessments": [
+    {
+      "id": "readiness_gate",
+      "purpose": "Assess whether the loop result is ready to publish.",
+      "dimensions": [
+        {
+          "id": "confidence",
+          "purpose": "How confident the agent is that the loop result is complete and correct.",
+          "levels": ["low", "high"]
+        }
+      ]
     }
   ]
 }

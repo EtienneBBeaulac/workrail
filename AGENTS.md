@@ -32,8 +32,9 @@ Work follows a deliberate progression. Do not skip steps or assume what comes ne
 4. **Plan** -- once direction is agreed, capture the idea in `docs/ideas/backlog.md` if it is new. When it is concrete enough to execute, create a GitHub issue with `gh issue create`. Update `now-next-later.md` and `open-work-inventory.md` as needed.
 5. **Implement** -- only after the user says to proceed. Create a branch, write the code, run tests.
 6. **Verify** -- run `npx vitest run`, check for linter errors, confirm the change does what it should. If you are in a fresh worktree and dependencies are not installed yet, install them and still run the required verification rather than treating missing dependencies as a stopping point.
-7. **Ship** -- only when the user asks. Create a PR, wait for CI, merge when told to.
-8. **Update planning docs** -- after shipping, mark work as done in the roadmap and inventory docs.
+7. **Update authoring docs before merge when engine behavior changes** -- if engine or schema work changes workflow authoring behavior, update `docs/authoring-v2.md` and `docs/authoring.md` before merging. Do not let shipped runtime behavior get ahead of author guidance.
+8. **Ship** -- only when the user asks. Create a PR, wait for CI, merge when told to.
+9. **Update planning docs** -- after shipping, mark work as done in the roadmap and inventory docs.
 
 Key principles of this flow:
 - **The user drives decisions.** You propose, analyze, and execute -- but the user decides when to move from one phase to the next. "What's next?" is a prompt for you to suggest, not a blanket authorization to proceed.

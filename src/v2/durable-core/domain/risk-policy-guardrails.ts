@@ -30,6 +30,7 @@ function isNeverDowngradable(reason: ReasonV1): boolean {
     // Contract violations: lock says "disallowed: bypassing contracts"
     case 'missing_required_output':
     case 'invalid_required_output':
+    case 'assessment_followup_required':
     case 'missing_notes':
       return true;
     // User-only deps: lock says "disallowed: redefining user-only deps"

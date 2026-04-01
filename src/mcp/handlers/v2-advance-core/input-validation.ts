@@ -8,8 +8,11 @@ import type { RunId, NodeId } from '../../../v2/durable-core/ids/index.js';
 import type { LoadedSessionTruthV2 } from '../../../v2/ports/session-event-log-store.port.js';
 import type { JsonValue, JsonObject } from '../../../v2/durable-core/canonical/json-types.js';
 import type { V2ContinueWorkflowInput } from '../../v2/tools.js';
-import type { OutputContract } from '../../../types/workflow-definition.js';
+import type { AssessmentDefinition, OutputContract, WorkflowStepDefinition } from '../../../types/workflow-definition.js';
 import type { ValidationCriteria } from '../../../types/validation.js';
+import type { AssessmentArtifactV1 } from '../../../v2/durable-core/schemas/artifacts/index.js';
+import type { RecordedAssessmentV1 } from '../../../v2/durable-core/domain/assessment-record.js';
+import type { TriggeredAssessmentConsequenceV1 } from './assessment-consequences.js';
 
 import { getStepById } from '../../../types/workflow.js';
 import { projectRunContextV2 } from '../../../v2/projections/run-context.js';
@@ -17,6 +20,8 @@ import { projectPreferencesV2 } from '../../../v2/projections/preferences.js';
 import { mergeContext } from '../../../v2/durable-core/domain/context-merge.js';
 import type { InternalError } from '../v2-error-mapping.js';
 import { EVENT_KIND } from '../../../v2/durable-core/constants.js';
+import { validateAssessmentForStep } from './assessment-validation.js';
+import { evaluateAssessmentConsequences } from './assessment-consequences.js';
 
 /**
  * Result of validating advance inputs at the boundary.
@@ -27,9 +32,14 @@ export interface ValidatedAdvanceInputs {
   readonly mergedContext: Record<string, unknown>;
   readonly inputContextObj: JsonObject | undefined;
   readonly validationCriteria: ValidationCriteria | undefined;
+  readonly assessmentValidation: import('./assessment-validation.js').AssessmentValidationOutcome | undefined;
   readonly outputContract: OutputContract | undefined;
   readonly notesMarkdown: string | undefined;
   readonly artifacts: readonly unknown[];
+  readonly assessmentArtifact: AssessmentArtifactV1 | undefined;
+  readonly recordedAssessment: RecordedAssessmentV1 | undefined;
+  readonly triggeredAssessmentConsequence: TriggeredAssessmentConsequenceV1 | undefined;
+  readonly stepAssessments: readonly AssessmentDefinition[];
   readonly autonomy: 'guided' | 'full_auto_stop_on_user_deps' | 'full_auto_never_stop';
   readonly riskPolicy: 'conservative' | 'balanced' | 'aggressive';
   readonly effectivePrefs: { readonly autonomy: string; readonly riskPolicy: string } | undefined;
@@ -72,8 +82,23 @@ export function validateAdvanceInputs(args: {
   // Step metadata — getStepById returns WorkflowStepDefinition | LoopStepDefinition | null,
   // both of which carry validationCriteria? and outputContract? as typed fields.
   const step = getStepById(pinnedWorkflow, pendingStep.stepId);
-  const validationCriteria = step?.validationCriteria;
-  const outputContract = step?.outputContract;
+  const typedStep = step && !('type' in step && step.type === 'loop') ? step as WorkflowStepDefinition : undefined;
+  const validationCriteria = typedStep?.validationCriteria;
+  const outputContract = typedStep?.outputContract;
+  const stepAssessments = (pinnedWorkflow.definition.assessments ?? []).filter((assessment) =>
+    typedStep?.assessmentRefs?.includes(assessment.id)
+  );
+  const assessmentValidation = typedStep
+    ? validateAssessmentForStep({
+        step: typedStep,
+        assessments: pinnedWorkflow.definition.assessments,
+        artifacts: inputOutput?.artifacts ?? [],
+      })
+    : undefined;
+  const triggeredAssessmentConsequence = evaluateAssessmentConsequences({
+    step: typedStep,
+    recordedAssessment: assessmentValidation?.recordedAssessment,
+  });
 
   // Auto-derive notesOptional.
   // outputContract steps: artifact is primary evidence → notes are supplemental (no enforcement).
@@ -114,9 +139,14 @@ export function validateAdvanceInputs(args: {
     mergedContext: mergedContextRes.value as Record<string, unknown>,
     inputContextObj,
     validationCriteria,
+    assessmentValidation,
     outputContract,
     notesMarkdown: inputOutput?.notesMarkdown,
     artifacts: inputOutput?.artifacts ?? [],
+    assessmentArtifact: assessmentValidation?.acceptedArtifact,
+    recordedAssessment: assessmentValidation?.recordedAssessment,
+    triggeredAssessmentConsequence,
+    stepAssessments,
     autonomy,
     riskPolicy,
     effectivePrefs,

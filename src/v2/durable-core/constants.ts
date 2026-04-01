@@ -254,6 +254,8 @@ export const EVENT_KIND = {
   ADVANCE_RECORDED: 'advance_recorded',
   VALIDATION_PERFORMED: 'validation_performed',
   NODE_OUTPUT_APPENDED: 'node_output_appended',
+  ASSESSMENT_RECORDED: 'assessment_recorded',
+  ASSESSMENT_CONSEQUENCE_APPLIED: 'assessment_consequence_applied',
   PREFERENCES_CHANGED: 'preferences_changed',
   CAPABILITY_OBSERVED: 'capability_observed',
   GAP_RECORDED: 'gap_recorded',

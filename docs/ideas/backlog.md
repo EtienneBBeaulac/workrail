@@ -120,6 +120,38 @@ Workflow and feature ideas that are worth capturing but not yet planned or desig
   - durable session history gets more complex when abandoned paths and resumed paths coexist
   - workflows with real-world side effects may need stricter rollback / compensation rules
 
+### Assessment-gate follow-up tiers beyond v1
+
+- **Status**: idea
+- **Summary**: Capture the likely progression of assessment-triggered redo / follow-up behavior so the engine can grow beyond the narrow v1 same-step follow-up model without losing the conceptual roadmap.
+- **Why this seems useful**:
+  - assessment-triggered follow-up is likely to want richer behavior over time
+  - the v1 consequence model is intentionally narrow, but the design pressure already points toward stronger redo semantics
+  - writing the tiers down now reduces the chance that future work jumps straight to a subflow design without acknowledging the intermediate options
+- **Tier 1: same-step follow-up retry**
+  - consequence keeps the same step pending
+  - engine returns semantic follow-up guidance
+  - agent retries the same step after improving its work / evidence
+  - this is the current intended v1 behavior
+- **Tier 2: structured redo recipe on the same step**
+  - same step still remains the logical unit of work
+  - engine can surface a bounded checklist or structured follow-up actions
+  - no new DAG nodes or true subflow yet
+  - likely useful if “retry” is too vague but full subflow control flow would be too heavy
+- **Tier 3: assessment-triggered redo subflow**
+  - matched assessment consequence routes into an explicit sequence of follow-up steps
+  - subflow has its own durable progress and then returns to the original step or onward path
+  - this is a significantly larger feature because it introduces assessment-driven control-flow behavior rather than just a blocked follow-up requirement
+- **Design questions**:
+  - when does Tier 2 become necessary instead of plain semantic retry guidance?
+  - what durable model would Tier 3 need for entering, progressing through, and returning from a redo subflow?
+  - how should the engine distinguish “redo the same step better” from “enter a dedicated recovery path”?
+  - can Tier 3 reuse existing workflow / routine primitives, or would it need dedicated assessment-triggered topology support?
+- **Risks / tradeoffs**:
+  - jumping straight from Tier 1 to Tier 3 could create a hidden mini control-flow DSL
+  - Tier 2 may be enough for many real cases and should not be skipped without evidence
+  - Tier 3 likely changes authoring, durability, replay, and console explainability at the same time
+
 ### Console engine-trace visibility and phase UX
 
 - **Status**: idea

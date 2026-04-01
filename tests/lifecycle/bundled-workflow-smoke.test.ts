@@ -47,6 +47,11 @@ const LOOP_CONTROL_STOP_ARTIFACT = {
 
 interface StepInfo {
   readonly hasLoopControlOutput: boolean;
+  readonly hasAssessmentOutput: boolean;
+  readonly assessmentId?: string;
+  readonly firstAssessmentDimensionId?: string;
+  readonly firstAssessmentLowLevel?: string;
+  readonly firstAssessmentHighLevel?: string;
 }
 
 interface WorkflowAnalysis {
@@ -55,21 +60,53 @@ interface WorkflowAnalysis {
   readonly forEachContextVars: Set<string>;
 }
 
-/**
- * Walk the step tree to extract auto-fixture-relevant metadata:
- * - Which steps produce loop control artifacts (need continue/stop fixtures)
- * - Which context variables forEach loops consume (need dummy arrays)
- */
-function analyzeWorkflow(steps: readonly StepDefinition[]): WorkflowAnalysis {
+function buildWorkflowAssessmentMap(definition: WorkflowDefinition): Map<string, {
+  readonly firstDimensionId: string;
+  readonly lowLevel: string;
+  readonly highLevel: string;
+}> {
+  const assessmentMap = new Map<string, {
+    readonly firstDimensionId: string;
+    readonly lowLevel: string;
+    readonly highLevel: string;
+  }>();
+
+  const assessments = (definition as any).assessments as Array<any> | undefined;
+  for (const assessment of assessments ?? []) {
+    const dimension = assessment?.dimensions?.[0];
+    const levels = Array.isArray(dimension?.levels) ? dimension.levels : [];
+    if (!assessment?.id || !dimension?.id || levels.length < 2) continue;
+    assessmentMap.set(assessment.id, {
+      firstDimensionId: dimension.id,
+      lowLevel: levels[0],
+      highLevel: levels[levels.length - 1],
+    });
+  }
+
+  return assessmentMap;
+}
+
+function analyzeWorkflowWithAssessments(definition: WorkflowDefinition): WorkflowAnalysis {
   const stepInfo = new Map<string, StepInfo>();
   const forEachContextVars = new Set<string>();
+  const workflowAssessmentMap = buildWorkflowAssessmentMap(definition);
 
   function walk(stepsToWalk: readonly StepDefinition[]): void {
     for (const step of stepsToWalk) {
       const outputContract = (step as any).outputContract ?? (step as any).output;
       const hasLoopControlOutput =
         outputContract?.contractRef === 'wr.contracts.loop_control';
-      stepInfo.set(step.id, { hasLoopControlOutput });
+      const hasAssessmentOutput = Array.isArray((step as any).assessmentRefs) && (step as any).assessmentRefs.length > 0;
+      const assessmentId = hasAssessmentOutput ? (step as any).assessmentRefs[0] : undefined;
+      const assessmentMeta = assessmentId ? workflowAssessmentMap.get(assessmentId) : undefined;
+      stepInfo.set(step.id, {
+        hasLoopControlOutput,
+        hasAssessmentOutput,
+        assessmentId,
+        firstAssessmentDimensionId: assessmentMeta?.firstDimensionId,
+        firstAssessmentLowLevel: assessmentMeta?.lowLevel,
+        firstAssessmentHighLevel: assessmentMeta?.highLevel,
+      });
 
       const loopDef = (step as any).loop;
       if (loopDef) {
@@ -84,7 +121,7 @@ function analyzeWorkflow(steps: readonly StepDefinition[]): WorkflowAnalysis {
     }
   }
 
-  walk(steps);
+  walk(definition.steps);
   return { stepInfo, forEachContextVars };
 }
 
@@ -112,7 +149,7 @@ function usesTemplateCalls(steps: readonly StepDefinition[]): boolean {
 function buildAutoFixtureResolver(
   definition: WorkflowDefinition,
 ): (stepId: string, loopContext: LoopContext) => StepFixture | undefined {
-  const { stepInfo, forEachContextVars } = analyzeWorkflow(definition.steps);
+  const { stepInfo, forEachContextVars } = analyzeWorkflowWithAssessments(definition);
 
   // Build a base context that satisfies all forEach loops with a single-element array.
   // The interpreter checks Array.isArray(context[items]) before entering forEach.
@@ -124,6 +161,7 @@ function buildAutoFixtureResolver(
   return (stepId: string, loopContext: LoopContext): StepFixture => {
     const info = stepInfo.get(stepId);
     const hasLoopControlOutput = info?.hasLoopControlOutput ?? false;
+    const hasAssessmentOutput = info?.hasAssessmentOutput ?? false;
 
     if (hasLoopControlOutput) {
       // First visit: continue. All subsequent visits: stop.
@@ -131,6 +169,28 @@ function buildAutoFixtureResolver(
         loopContext.stepVisitCount === 0
           ? LOOP_CONTROL_CONTINUE_ARTIFACT
           : LOOP_CONTROL_STOP_ARTIFACT;
+      return { notesMarkdown: '', artifacts: [artifact], context: baseContext };
+    }
+
+    if (hasAssessmentOutput) {
+      const assessmentId = info?.assessmentId;
+      const dimensionId = info?.firstAssessmentDimensionId;
+      const lowLevel = info?.firstAssessmentLowLevel;
+      const highLevel = info?.firstAssessmentHighLevel;
+      if (!assessmentId || !dimensionId || !lowLevel || !highLevel) {
+        return { notesMarkdown: '', context: baseContext };
+      }
+      const artifact = {
+        kind: 'wr.assessment' as const,
+        assessmentId,
+        dimensions: {
+          [dimensionId]: loopContext.stepVisitCount === 0 ? lowLevel : highLevel,
+        },
+        summary:
+          loopContext.stepVisitCount === 0
+            ? 'auto-fixture: trigger follow-up once'
+            : 'auto-fixture: clear follow-up on retry',
+      };
       return { notesMarkdown: '', artifacts: [artifact], context: baseContext };
     }
 

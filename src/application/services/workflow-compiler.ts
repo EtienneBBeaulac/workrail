@@ -284,6 +284,66 @@ export class WorkflowCompiler {
       }
     }
 
+    // Validate step assessmentRefs against workflow-level declarations
+    const declaredAssessmentIds = new Set((workflow.definition.assessments ?? []).map(assessment => assessment.id));
+    for (const step of steps) {
+      const assessmentRefs = (step as WorkflowStepDefinition).assessmentRefs;
+      if (!assessmentRefs) continue;
+
+      for (const assessmentRef of assessmentRefs) {
+        if (!declaredAssessmentIds.has(assessmentRef)) {
+          return err(Err.invalidState(
+            `Step '${step.id}' declares unknown assessmentRef '${assessmentRef}'. ` +
+            `Declared assessments: ${[...declaredAssessmentIds].join(', ')}`
+          ));
+        }
+      }
+    }
+
+    for (const step of steps) {
+      const typedStep = step as WorkflowStepDefinition;
+      const assessmentConsequences = typedStep.assessmentConsequences;
+      if (!assessmentConsequences) continue;
+
+      if (!typedStep.assessmentRefs || typedStep.assessmentRefs.length !== 1) {
+        return err(Err.invalidState(
+          `Step '${step.id}' declares assessmentConsequences but does not declare exactly one assessmentRef`
+        ));
+      }
+
+      const assessment = (workflow.definition.assessments ?? []).find(candidate => candidate.id === typedStep.assessmentRefs?.[0]);
+      if (!assessment) {
+        return err(Err.invalidState(
+          `Step '${step.id}' declares assessmentConsequences for unknown assessmentRef '${typedStep.assessmentRefs[0]}'`
+        ));
+      }
+
+      if (assessmentConsequences.length > 1) {
+        return err(Err.invalidState(
+          `Step '${step.id}' declares ${assessmentConsequences.length} assessment consequences. V1 supports exactly one assessment consequence per step.`
+        ));
+      }
+
+      for (const consequence of assessmentConsequences) {
+        const dimension = assessment.dimensions.find(candidate => candidate.id === consequence.when.dimensionId);
+        if (!dimension) {
+          return err(Err.invalidState(
+            `Step '${step.id}' declares consequence on unknown dimension '${consequence.when.dimensionId}' for assessment '${assessment.id}'`
+          ));
+        }
+        if (!dimension.levels.includes(consequence.when.equalsLevel)) {
+          return err(Err.invalidState(
+            `Step '${step.id}' declares consequence on unsupported level '${consequence.when.equalsLevel}' for dimension '${consequence.when.dimensionId}'. Declared levels: ${dimension.levels.join(', ')}`
+          ));
+        }
+        if (consequence.effect.kind !== 'require_followup') {
+          return err(Err.invalidState(
+            `Step '${step.id}' declares unsupported assessment consequence effect '${String((consequence.effect as { kind?: unknown }).kind)}'`
+          ));
+        }
+      }
+    }
+
     const compiledLoops = new Map<string, CompiledLoop>();
     const loopBodyStepIds = new Set<string>();
 
@@ -303,6 +363,26 @@ export class WorkflowCompiler {
             `Loop body step '${bodyStep.id}' in loop '${loop.id}' declares unknown outputContract.contractRef '${ref}'. ` +
             `Known contracts: ${LOOP_CONTROL_CONTRACT_REF}`
           ));
+        }
+
+        const assessmentRefs = bodyStep.assessmentRefs;
+        if (assessmentRefs) {
+          for (const assessmentRef of assessmentRefs) {
+            if (!declaredAssessmentIds.has(assessmentRef)) {
+              return err(Err.invalidState(
+                `Loop body step '${bodyStep.id}' in loop '${loop.id}' declares unknown assessmentRef '${assessmentRef}'. ` +
+                `Declared assessments: ${[...declaredAssessmentIds].join(', ')}`
+              ));
+            }
+          }
+        }
+
+        if (bodyStep.assessmentConsequences) {
+          if (!bodyStep.assessmentRefs || bodyStep.assessmentRefs.length !== 1) {
+            return err(Err.invalidState(
+              `Loop body step '${bodyStep.id}' in loop '${loop.id}' declares assessmentConsequences but does not declare exactly one assessmentRef`
+            ));
+          }
         }
       }
 

@@ -221,6 +221,54 @@ describe('renderPendingPrompt', () => {
       }
     });
 
+    it('appends ASSESSMENT REQUIREMENTS section when step declares assessments', () => {
+      const workflowWithAssessment = createWorkflow(
+        {
+          id: 'test-assessment',
+          name: 'Test Assessment',
+          description: 'Test with assessment requirements',
+          version: '1.0.0',
+          assessments: [
+            {
+              id: 'readiness_gate',
+              purpose: 'Assess readiness.',
+              dimensions: [
+                { id: 'confidence', purpose: 'Confidence', levels: ['low', 'medium', 'high'] },
+                { id: 'scope', purpose: 'Scope', levels: ['partial', 'complete'] },
+              ],
+            },
+          ],
+          steps: [{
+            id: 'assessment-step',
+            title: 'Assessment Step',
+            prompt: 'Assess the current state',
+            requireConfirmation: false,
+            assessmentRefs: ['readiness_gate'],
+          }],
+        } as any,
+        createBundledSource()
+      );
+
+      const result = renderPendingPrompt({
+        workflow: workflowWithAssessment,
+        stepId: 'assessment-step',
+        loopPath: [],
+        truth: { events: [], manifest: [] },
+        runId: 'run_1',
+        nodeId: 'node_1',
+        rehydrateOnly: false,
+      });
+
+      expect(result.isOk()).toBe(true);
+      if (result.isOk()) {
+        expect(result.value.prompt).toContain('**ASSESSMENT REQUIREMENTS (System):**');
+        expect(result.value.prompt).toContain('Provide an artifact with kind: "wr.assessment"');
+        expect(result.value.prompt).toContain('Assessment target: "readiness_gate"');
+        expect(result.value.prompt).toContain('confidence (low | medium | high)');
+        expect(result.value.prompt).toContain('scope (partial | complete)');
+      }
+    });
+
     it('appends OUTPUT REQUIREMENTS section when validationCriteria present (regex)', () => {
       const workflowWithRegex = createWorkflow(
         {

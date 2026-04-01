@@ -135,6 +135,14 @@
       },
       "uniqueItems": true
     },
+    "assessments": {
+      "type": "array",
+      "description": "Workflow-declared assessment definitions. Steps reference these by ID via assessmentRefs instead of embedding assessment structure inline repeatedly.",
+      "items": {
+        "$ref": "#/$defs/assessmentDefinition"
+      },
+      "uniqueItems": true
+    },
     "extensionPoints": {
       "type": "array",
       "description": "Bounded cognitive slots that users can customize via .workrail/bindings.json. Each slot is referenced in step prompts via {{wr.bindings.slotId}} and resolved at compile time. Use extension points for bounded cognitive units, not for core orchestration or final synthesis ownership.",
@@ -293,6 +301,21 @@
         "runCondition": { "$ref": "#/$defs/condition" },
         "validationCriteria": { "oneOf": [ { "type": "array", "items": { "$ref": "#/$defs/validationRule" } }, { "$ref": "#/$defs/validationComposition" } ] },
         "outputContract": { "$ref": "#/$defs/outputContract" },
+        "assessmentRefs": {
+          "type": "array",
+          "description": "References to workflow-level assessment definitions expected for this step. V1 supports exactly one assessmentRef per step.",
+          "items": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "minItems": 1,
+          "maxItems": 1,
+          "uniqueItems": true
+        },
+        "assessmentConsequences": {
+          "type": "array",
+          "description": "Step-local assessment consequence declarations. V1 supports at most one exact-match follow-up consequence.",
+          "items": { "$ref": "#/$defs/assessmentConsequence" },
+          "minItems": 1,
+          "maxItems": 1
+        },
         "notesOptional": { "type": "boolean", "description": "When true, output.notesMarkdown is not required for this step. Steps with outputContract are automatically exempt. Use sparingly for mechanical steps with no substantive work to document." },
         "functionDefinitions": { "type": "array", "items": { "$ref": "#/$defs/functionDefinition" } },
         "functionCalls": { "type": "array", "items": { "$ref": "#/$defs/functionCall" } },
@@ -725,6 +748,93 @@
         }
       },
       "required": ["contractRef"],
+      "additionalProperties": false
+    },
+    "assessmentDimension": {
+      "type": "object",
+      "description": "A bounded dimension within a workflow-declared assessment definition.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "purpose": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "levels": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "minItems": 2,
+          "uniqueItems": true
+        },
+        "required": {
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "required": ["id", "purpose", "levels"],
+      "additionalProperties": false
+    },
+    "assessmentDefinition": {
+      "type": "object",
+      "description": "Workflow-declared assessment definition referenced by steps.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "purpose": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "dimensions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/assessmentDimension"
+          },
+          "minItems": 1
+        }
+      },
+      "required": ["id", "purpose", "dimensions"],
+      "additionalProperties": false
+    },
+    "assessmentConsequenceTrigger": {
+      "type": "object",
+      "description": "Exact-match trigger on one declared assessment dimension and one declared canonical level.",
+      "properties": {
+        "dimensionId": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "equalsLevel": { "type": "string", "minLength": 1, "maxLength": 64 }
+      },
+      "required": ["dimensionId", "equalsLevel"],
+      "additionalProperties": false
+    },
+    "assessmentConsequenceEffect": {
+      "type": "object",
+      "description": "V1 assessment consequence effect. Keeps the same step pending and requires follow-up before retry.",
+      "properties": {
+        "kind": { "const": "require_followup" },
+        "guidance": { "type": "string", "minLength": 1, "maxLength": 512 }
+      },
+      "required": ["kind", "guidance"],
+      "additionalProperties": false
+    },
+    "assessmentConsequence": {
+      "type": "object",
+      "description": "Step-local assessment consequence declaration. V1 supports one exact-match follow-up consequence only.",
+      "properties": {
+        "when": { "$ref": "#/$defs/assessmentConsequenceTrigger" },
+        "effect": { "$ref": "#/$defs/assessmentConsequenceEffect" }
+      },
+      "required": ["when", "effect"],
       "additionalProperties": false
     },
     "functionCall": {

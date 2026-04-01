@@ -52,6 +52,65 @@ export interface PromptFragment {
   readonly text: string;
 }
 
+/**
+ * Declared assessment dimension for a workflow-owned assessment shape.
+ *
+ * Dimensions define the bounded axes the engine will later classify.
+ * This slice only adds declaration + compile-time validation shape.
+ */
+export interface AssessmentDimensionDefinition {
+  /** Stable identifier referenced within the assessment definition. */
+  readonly id: string;
+  /** Human purpose shown to workflow authors and operators. */
+  readonly purpose: string;
+  /** Closed set of allowed canonical levels for this dimension. */
+  readonly levels: readonly string[];
+  /** Whether the dimension must be supplied when the assessment is used. Default: true. */
+  readonly required?: boolean;
+}
+
+/**
+ * Workflow-declared assessment definition.
+ *
+ * Assessments are declared at workflow scope and referenced by steps via
+ * `assessmentRefs`. Runtime semantics land in later slices; this slice only
+ * establishes the explicit authoring and compiler-validation surface.
+ */
+export interface AssessmentDefinition {
+  /** Stable workflow-local identifier referenced by steps. */
+  readonly id: string;
+  /** Human-readable summary of what this assessment captures. */
+  readonly purpose: string;
+  /** Bounded dimensions that make up this assessment. */
+  readonly dimensions: readonly AssessmentDimensionDefinition[];
+}
+
+export interface AssessmentConsequenceTriggerDefinition {
+  /** Declared dimension to inspect in the accepted canonical assessment. */
+  readonly dimensionId: string;
+  /** Canonical level that triggers the consequence. */
+  readonly equalsLevel: string;
+}
+
+export interface AssessmentFollowupRequiredEffectDefinition {
+  /** Closed-set effect kind for v1 consequence behavior. */
+  readonly kind: 'require_followup';
+  /** Semantic guidance shown when follow-up is required before retrying the same step. */
+  readonly guidance: string;
+}
+
+export interface AssessmentConsequenceDefinition {
+  /**
+   * Closed-set step-level assessment consequence declaration for v1.
+   *
+   * Lock: v1 supports exactly one consequence family:
+   * - trigger: exact-match on one declared dimension level
+   * - effect: require_followup with semantic guidance
+   */
+  readonly when: AssessmentConsequenceTriggerDefinition;
+  readonly effect: AssessmentFollowupRequiredEffectDefinition;
+}
+
 export interface WorkflowStepDefinition {
   readonly id: string;
   readonly title: string;
@@ -82,6 +141,23 @@ export interface WorkflowStepDefinition {
    * Replaces validationCriteria with machine-checkable artifacts.
    */
   readonly outputContract?: OutputContract;
+  /**
+   * References to workflow-level assessment definitions expected for this step.
+   *
+   * Assessments are declared at workflow scope (`workflow.definition.assessments`)
+   * and steps opt into them by reference. Unknown refs fail fast during
+   * validation/compilation.
+   */
+  readonly assessmentRefs?: readonly string[];
+  /**
+   * Step-local consequence declarations for the referenced assessment.
+   *
+   * Assessment definitions declare vocabulary only. Consequences live on the
+   * step usage so execution behavior stays step-local and explicit.
+   *
+   * Lock: v1 supports at most one exact-match follow-up consequence.
+   */
+  readonly assessmentConsequences?: readonly AssessmentConsequenceDefinition[];
   /**
    * When true, notes (output.notesMarkdown) are NOT required for this step.
    *
@@ -320,6 +396,13 @@ export interface WorkflowDefinition {
    */
   readonly features?: readonly string[];
   /**
+   * Workflow-declared assessment definitions.
+   *
+   * Steps reference these definitions via `assessmentRefs` instead of
+   * embedding assessment structure inline repeatedly.
+   */
+  readonly assessments?: readonly AssessmentDefinition[];
+  /**
    * Extension points: bounded cognitive slots that users can customize
    * via .workrail/bindings.json without forking the workflow.
    *
@@ -412,11 +495,34 @@ export function createWorkflowDefinition(
 ): WorkflowDefinition {
   return Object.freeze({
     ...definition,
-    steps: Object.freeze(definition.steps.map(step => Object.freeze({ ...step }))),
+    steps: Object.freeze(
+      definition.steps.map(step =>
+        Object.freeze({
+          ...step,
+          assessmentConsequences: 'assessmentConsequences' in step && step.assessmentConsequences
+            ? Object.freeze(step.assessmentConsequences.map(consequence => Object.freeze({
+                ...consequence,
+                when: Object.freeze({ ...consequence.when }),
+                effect: Object.freeze({ ...consequence.effect }),
+              })))
+            : undefined,
+        })
+      )
+    ),
     preconditions: definition.preconditions ? Object.freeze([...definition.preconditions]) : undefined,
     clarificationPrompts: definition.clarificationPrompts ? Object.freeze([...definition.clarificationPrompts]) : undefined,
     metaGuidance: definition.metaGuidance ? Object.freeze([...definition.metaGuidance]) : undefined,
     functionDefinitions: definition.functionDefinitions ? Object.freeze([...definition.functionDefinitions]) : undefined,
+    assessments: definition.assessments
+      ? Object.freeze(
+          definition.assessments.map(assessment =>
+            Object.freeze({
+              ...assessment,
+              dimensions: Object.freeze(assessment.dimensions.map(dimension => Object.freeze({ ...dimension }))),
+            })
+          )
+        )
+      : undefined,
     extensionPoints: definition.extensionPoints ? Object.freeze([...definition.extensionPoints]) : undefined,
     references: definition.references ? Object.freeze(definition.references.map(ref => Object.freeze({ ...ref }))) : undefined,
   }) as WorkflowDefinition;

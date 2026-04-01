@@ -52,6 +52,12 @@ export function detectBlockingReasonsV1(args: {
    * Absent when notes are optional (outputContract steps, or notesOptional: true).
    */
   readonly missingNotes?: { readonly stepId: string };
+  readonly assessmentFollowupRequired?: {
+    readonly assessmentId: string;
+    readonly dimensionId: string;
+    readonly level: string;
+    readonly guidance: string;
+  };
 }): Result<readonly ReasonV1[], BlockingDecisionError> {
   const reasons: ReasonV1[] = [];
 
@@ -117,6 +123,22 @@ export function detectBlockingReasonsV1(args: {
       });
     }
     reasons.push({ kind: 'missing_notes', stepId: args.missingNotes.stepId });
+  }
+
+  if (args.assessmentFollowupRequired) {
+    if (!DELIMITER_SAFE_ID_PATTERN.test(args.assessmentFollowupRequired.dimensionId)) {
+      return err({
+        code: 'INVALID_DELIMITER_SAFE_ID',
+        message: `assessment dimension ID must be delimiter-safe: [a-z0-9_-]+ (got: ${args.assessmentFollowupRequired.dimensionId})`,
+      });
+    }
+    reasons.push({
+      kind: 'assessment_followup_required',
+      assessmentId: args.assessmentFollowupRequired.assessmentId,
+      dimensionId: args.assessmentFollowupRequired.dimensionId,
+      level: args.assessmentFollowupRequired.level,
+      guidance: args.assessmentFollowupRequired.guidance,
+    });
   }
 
   return ok(reasons);

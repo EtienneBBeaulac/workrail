@@ -156,6 +156,7 @@ WorkRail v2 introduces several primitives for expressive workflows:
 - **AgentRole**: workflow and/or step-level stance/persona (not system prompt control).
 - **Extension points**: named slots declared with `extensionPoints` and referenced via `{{wr.bindings.slotId}}` tokens; resolved at compile time from project `.workrail/bindings.json` overrides or workflow defaults. Enables team customization without forking workflow JSON.
 - **References**: workflow-declared pointers to external documents (schemas, specs, guides). Resolved at start time, delivered as a separate MCP content item. The agent reads the files itself if needed. See "Workflow references" section below.
+- **Assessments**: workflow-declared assessment shapes (`assessments`) that steps can reference with `assessmentRefs` and, in v1, use for one exact-match `require_followup` consequence via `assessmentConsequences`.
 
 For detailed JSON syntax and examples, see: `docs/design/workflow-authoring-v2.md`.
 
@@ -187,6 +188,56 @@ Use these as the default choice rules:
 - **You can write workflows with no special authoring features.**
 - The default durable output is a short recap in `output.notesMarkdown` (recorded by the agent when advancing or checkpointing).
 - Structured artifacts are **optional** and must never be required for a workflow to be usable.
+
+### Assessment-gate authoring (v1)
+
+Assessment gates are now a shipped authoring/runtime feature, but the first slice is intentionally narrow.
+
+Use them when:
+
+- the workflow needs the agent to submit a bounded judgment explicitly
+- that judgment should be durably recorded
+- one specific result should keep the same step pending and require follow-up before retry
+
+The v1 shape is:
+
+- declare a workflow-level assessment in `assessments`
+- reference it from a step with exactly one `assessmentRefs` entry
+- optionally declare one step-level `assessmentConsequences` rule
+- if the accepted canonical assessment exactly matches that rule, the engine returns a retryable same-step follow-up block
+
+Important limits in v1:
+
+- one `assessmentRefs` entry per step
+- at most one `assessmentConsequences` entry per step
+- one supported effect only: `require_followup`
+- exact-match trigger only: one declared dimension equals one declared canonical level
+
+Keep the responsibility split clean:
+
+- **assessment definition** = reusable vocabulary (`dimensions`, allowed `levels`, purpose)
+- **step usage** = local execution behavior (`assessmentRefs`, `assessmentConsequences`)
+
+Do not put execution-policy meaning into the assessment definition itself.
+
+Practical guidance:
+
+- use assessments for **bounded judgment**, not generic scoring
+- keep dimensions small and semantically meaningful
+- use canonical level names authors and agents can understand easily
+- write follow-up guidance as **same-step retry guidance**, not as a subflow or rewind instruction
+- prefer one strong follow-up trigger over multiple weak ones
+
+Good fit:
+
+- "Before handing off, assess whether the diagnosis is ready."
+- "If confidence is low, require follow-up and retry the same validation step."
+
+Bad fit:
+
+- generic five-level scores that never affect workflow behavior
+- multiple interacting rule chains that really want a policy DSL
+- subflow-style recovery sequences masquerading as a single follow-up consequence
 
 ### Rigor vs rigidity
 
