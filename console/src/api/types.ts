@@ -1,6 +1,11 @@
 // Mirror of console-types.ts from the backend (Console DTOs)
 
+/** Status of an individual run within a session (execution-level). */
 export type ConsoleRunStatus = 'in_progress' | 'complete' | 'complete_with_gaps' | 'blocked';
+
+/** Status of a session as a whole (projection-level). Extends ConsoleRunStatus with
+ * dormant, which is computed from inactivity and cannot apply to individual runs. */
+export type ConsoleSessionStatus = ConsoleRunStatus | 'dormant';
 
 export interface ConsoleWorktreeSummary {
   readonly path: string;
@@ -32,7 +37,7 @@ export interface ConsoleSessionSummary {
   readonly workflowName: string | null;
   readonly workflowHash: string | null;
   readonly runId: string | null;
-  readonly status: ConsoleRunStatus;
+  readonly status: ConsoleSessionStatus;
   readonly health: ConsoleSessionHealth;
   readonly nodeCount: number;
   readonly edgeCount: number;
@@ -40,6 +45,8 @@ export interface ConsoleSessionSummary {
   readonly hasUnresolvedGaps: boolean;
   readonly recapSnippet: string | null;
   readonly gitBranch: string | null;
+  /** Absolute repo root path, or null for sessions recorded before this field was introduced. */
+  readonly repoRoot: string | null;
   readonly lastModifiedMs: number;
 }
 

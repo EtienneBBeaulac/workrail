@@ -16,7 +16,7 @@ import type {
   ConsoleWorktreeSummary,
   ConsoleRepoWorktrees,
   ConsoleWorktreeListResponse,
-  ConsoleRunStatus,
+  ConsoleSessionStatus,
 } from './console-types.js';
 
 const execFileAsync = promisify(execFile);
@@ -217,7 +217,7 @@ export interface ActiveSessionsByBranch {
  * Extracted so callers can pass in pre-fetched session data.
  */
 export function buildActiveSessionCounts(
-  sessions: ReadonlyArray<{ gitBranch: string | null; status: ConsoleRunStatus }>,
+  sessions: ReadonlyArray<{ gitBranch: string | null; status: ConsoleSessionStatus }>,
 ): ActiveSessionsByBranch {
   const counts = new Map<string, number>();
   for (const s of sessions) {

@@ -40,6 +40,7 @@ import type {
   ConsoleDagNode,
   ConsoleDagEdge,
   ConsoleRunStatus,
+  ConsoleSessionStatus,
   ConsoleSessionHealth,
   ConsoleNodeDetail,
   ConsoleValidationResult,
@@ -71,6 +72,14 @@ export interface ConsoleServicePorts {
 // ---------------------------------------------------------------------------
 
 const MAX_SESSIONS_TO_LOAD = 500;
+
+// ---------------------------------------------------------------------------
+// Dormancy
+// ---------------------------------------------------------------------------
+
+/** Sessions in_progress with no activity for this long are considered dormant.
+ * 3 days covers the "started on Friday, not coming back Monday" scenario. */
+const DORMANCY_THRESHOLD_MS = 3 * 24 * 60 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // Run completion map — keyed by runId, true when preferred tip snapshot
@@ -184,8 +193,11 @@ export class ConsoleService {
     sessionIds: readonly SessionId[],
     mtimeBySessionId: ReadonlyMap<string, number>,
   ): ResultAsync<ConsoleSessionListResponse, ConsoleServiceError> {
+    // Capture nowMs once per list request so all sessions are evaluated against
+    // the same point in time — consistent snapshot and deterministic per call.
+    const nowMs = Date.now();
     const tasks = sessionIds.map((id) =>
-      this.loadSessionSummary(id, mtimeBySessionId.get(id) ?? 0)
+      this.loadSessionSummary(id, mtimeBySessionId.get(id) ?? 0, nowMs)
     );
     return RA.combine(tasks).map((results) => {
       const sessions = results.filter((s): s is ConsoleSessionSummary => s !== null);
@@ -196,6 +208,7 @@ export class ConsoleService {
   private loadSessionSummary(
     sessionId: SessionId,
     lastModifiedMs: number,
+    nowMs: number,
   ): ResultAsync<ConsoleSessionSummary | null, never> {
     return this.ports.sessionStore
       .load(sessionId)
@@ -209,7 +222,7 @@ export class ConsoleService {
           resolveRunCompletion(truth.events, this.ports.snapshotStore),
           workflowNamesRA,
         ] as const).map(([completionMap, workflowNames]) =>
-          projectSessionSummary(sessionId, truth, completionMap, workflowNames, lastModifiedMs)
+          projectSessionSummary(sessionId, truth, completionMap, workflowNames, lastModifiedMs, nowMs)
         );
       })
       .orElse(() => okAsync(null));
@@ -552,6 +565,7 @@ function projectSessionSummary(
   completionByRunId: RunCompletionMap,
   workflowNames: WorkflowNameMap,
   lastModifiedMs: number,
+  nowMs: number,
 ): ConsoleSessionSummary | null {
   const { events } = truth;
   const health = projectSessionHealthV2(truth);
@@ -574,6 +588,8 @@ function projectSessionSummary(
   const runs = Object.values(dag.runsById);
   const run = runs[0];
   if (!run) {
+    const noRunStatus: ConsoleSessionStatus =
+      nowMs - lastModifiedMs > DORMANCY_THRESHOLD_MS ? 'dormant' : 'in_progress';
     return {
       sessionId,
       sessionTitle,
@@ -581,7 +597,7 @@ function projectSessionSummary(
       workflowName: null,
       workflowHash: null,
       runId: null,
-      status: 'in_progress',
+      status: noRunStatus,
       health: sessionHealth,
       nodeCount: 0,
       edgeCount: 0,
@@ -600,11 +616,15 @@ function projectSessionSummary(
   const workflowName = workflowHash ? (workflowNames[workflowHash] ?? null) : null;
 
   const statusSignals = statusRes.isOk() ? statusRes.value.byRunId[run.runId] : undefined;
-  const status = deriveRunStatus(
+  const runStatus = deriveRunStatus(
     statusSignals?.isBlocked ?? false,
     statusSignals?.hasUnresolvedCriticalGaps ?? false,
     completionByRunId[run.runId] ?? false,
   );
+  const status: ConsoleSessionStatus =
+    runStatus === 'in_progress' && nowMs - lastModifiedMs > DORMANCY_THRESHOLD_MS
+      ? 'dormant'
+      : runStatus;
 
   const hasUnresolvedGaps = gapsRes.isOk()
     ? Object.keys(gapsRes.value.unresolvedCriticalByRunId).length > 0

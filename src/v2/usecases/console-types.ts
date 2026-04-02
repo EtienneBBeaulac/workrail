@@ -9,7 +9,12 @@
 // Session List
 // ---------------------------------------------------------------------------
 
+/** Status of an individual run within a session (execution-level). */
 export type ConsoleRunStatus = 'in_progress' | 'complete' | 'complete_with_gaps' | 'blocked';
+
+/** Status of a session as a whole (projection-level). Extends ConsoleRunStatus with
+ * dormant, which is computed from inactivity and cannot apply to individual runs. */
+export type ConsoleSessionStatus = ConsoleRunStatus | 'dormant';
 
 export type ConsoleSessionHealth = 'healthy' | 'corrupt';
 
@@ -20,7 +25,7 @@ export interface ConsoleSessionSummary {
   readonly workflowName: string | null;
   readonly workflowHash: string | null;
   readonly runId: string | null;
-  readonly status: ConsoleRunStatus;
+  readonly status: ConsoleSessionStatus;
   readonly health: ConsoleSessionHealth;
   readonly nodeCount: number;
   readonly edgeCount: number;
