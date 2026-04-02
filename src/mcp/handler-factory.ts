@@ -15,6 +15,7 @@
 import { z } from 'zod';
 import type { ToolContext, ToolResult, ToolError } from './types.js';
 import { errNotRetryable } from './types.js';
+import { coerceJsonStringObjectFields } from './boundary-coercion.js';
 import {
   generateSuggestions,
   formatSuggestionDetails,
@@ -113,13 +114,19 @@ export function createHandler<TInput extends z.ZodType, TOutput>(
   aliasMap?: Readonly<Record<string, string>>,
 ): WrappedToolHandler {
   return async (args: unknown, ctx: ToolContext): Promise<McpCallToolResult> => {
-    const parseResult = schema.safeParse(args);
+    // Normalize JSON-encoded string values to objects before Zod validation.
+    // Some MCP clients serialize complex parameters as JSON strings rather than
+    // inline objects. The shape schema identifies which fields expect objects.
+    const normalizedArgs = shapeSchema !== undefined
+      ? coerceJsonStringObjectFields(args, shapeSchema, aliasMap)
+      : args;
+    const parseResult = schema.safeParse(normalizedArgs);
     if (!parseResult.success) {
       // Use shape schema for introspection (interface segregation), validation schema as fallback
       const introspectionSchema = shapeSchema ?? schema;
 
       // Generate suggestions for self-correction (pure, deterministic)
-      const suggestionResult = generateSuggestions(args, introspectionSchema, DEFAULT_SUGGESTION_CONFIG, aliasMap);
+      const suggestionResult = generateSuggestions(normalizedArgs, introspectionSchema, DEFAULT_SUGGESTION_CONFIG, aliasMap);
       const suggestionDetails = formatSuggestionDetails(suggestionResult);
 
       // Restore optional fields that the agent provided with the wrong type.
@@ -127,7 +134,7 @@ export function createHandler<TInput extends z.ZodType, TOutput>(
       // and infer they should drop it entirely on retry — exactly the wrong move.
       const patchedTemplate = patchTemplateForFailedOptionals(
         (suggestionDetails.correctTemplate as Readonly<Record<string, unknown>> | null) ?? null,
-        args,
+        normalizedArgs,
         parseResult.error.errors,
         introspectionSchema,
         DEFAULT_SUGGESTION_CONFIG.maxTemplateDepth,
@@ -173,15 +180,23 @@ export function createHandler<TInput extends z.ZodType, TOutput>(
  * @param schema - Zod schema for input validation
  * @param preValidate - Pre-validation function
  * @param handler - Raw handler function (takes typed input)
+ * @param shapeSchema - Optional bare ZodObject for introspection and JSON-string coercion
+ * @param aliasMap - Optional alias-to-canonical field name map
  * @returns Wrapped handler ready for MCP dispatch
  */
 export function createValidatingHandler<TInput extends z.ZodType, TOutput>(
   schema: TInput,
   preValidate: (args: unknown) => PreValidateResult,
-  handler: (input: z.infer<TInput>, ctx: ToolContext) => Promise<ToolResult<TOutput>>
+  handler: (input: z.infer<TInput>, ctx: ToolContext) => Promise<ToolResult<TOutput>>,
+  shapeSchema?: z.ZodObject<z.ZodRawShape>,
+  aliasMap?: Readonly<Record<string, string>>,
 ): WrappedToolHandler {
   return async (args: unknown, ctx: ToolContext): Promise<McpCallToolResult> => {
-    const pre = preValidate(args);
+    // Normalize JSON-encoded string fields before pre-validation and Zod parsing.
+    const normalizedArgs = shapeSchema !== undefined
+      ? coerceJsonStringObjectFields(args, shapeSchema, aliasMap)
+      : args;
+    const pre = preValidate(normalizedArgs);
     if (!pre.ok) {
       const error = pre.error;
 
@@ -207,7 +222,8 @@ export function createValidatingHandler<TInput extends z.ZodType, TOutput>(
       return toMcpResult(error);
     }
 
-    // Fall back to the standard Zod + handler pipeline
-    return createHandler(schema, handler)(args, ctx);
+    // Fall back to the standard Zod + handler pipeline.
+    // Pass normalizedArgs so coercion is not applied twice.
+    return createHandler(schema, handler, shapeSchema, aliasMap)(normalizedArgs, ctx);
   };
 }
