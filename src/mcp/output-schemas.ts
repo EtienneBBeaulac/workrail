@@ -346,6 +346,12 @@ export const V2StepContextSchema = z.object({
           rationale: z.string().optional(),
         })
       ),
+      /**
+       * Non-empty when WorkRail normalized the agent's submitted levels (e.g. "HIGH" -> "high").
+       * Each entry explains one normalization applied. Empty array means all levels matched exactly.
+       * Agents can use this to correct their submissions in future steps.
+       */
+      normalizationNotes: z.array(z.string()).readonly(),
     })
     .optional(),
 });

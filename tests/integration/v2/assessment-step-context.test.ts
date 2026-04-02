@@ -173,6 +173,86 @@ describe('stepContext on continue_workflow ok response', () => {
     }
   });
 
+  it('includes normalizationNotes when the submitted level was normalized', async () => {
+    const root = await mkTempDataDir();
+    process.env.WORKRAIL_DATA_DIR = root;
+    try {
+      const workflowId = 'step-context-normalization';
+      const ctx = await mkCtxWithWorkflow(workflowId, { id: workflowId, name: 'Step context normalization test', description: 'Tests normalizationNotes when level is normalized.', version: '1.0.0', ...BASE_WORKFLOW });
+
+      const startRes = await handleV2StartWorkflow({ workflowId } as V2StartWorkflowInput, ctx);
+      expect(startRes.type).toBe('success');
+      if (startRes.type !== 'success') return;
+
+      // Submit "HIGH" (uppercase) - WorkRail should normalize to "high" and record a normalization note
+      const advanceRes = await handleV2ContinueWorkflow(
+        {
+          continueToken: startRes.data.continueToken,
+          output: {
+            notesMarkdown: 'Assessment complete.',
+            artifacts: [
+              {
+                kind: 'wr.assessment',
+                assessmentId: 'readiness_gate',
+                dimensions: { confidence: 'HIGH' },
+              },
+            ],
+          },
+        } as V2ContinueWorkflowInput,
+        ctx
+      );
+
+      expect(advanceRes.type).toBe('success');
+      if (advanceRes.type !== 'success') return;
+      expect(advanceRes.data.kind).toBe('ok');
+      if (advanceRes.data.kind !== 'ok') return;
+
+      expect(advanceRes.data.stepContext?.assessments?.dimensions[0]?.level).toBe('high');
+      expect(advanceRes.data.stepContext?.assessments?.normalizationNotes.length).toBeGreaterThan(0);
+    } finally {
+      delete process.env.WORKRAIL_DATA_DIR;
+    }
+  });
+
+  it('has empty normalizationNotes when submitted level matched exactly', async () => {
+    const root = await mkTempDataDir();
+    process.env.WORKRAIL_DATA_DIR = root;
+    try {
+      const workflowId = 'step-context-exact-match';
+      const ctx = await mkCtxWithWorkflow(workflowId, { id: workflowId, name: 'Step context exact match test', description: 'Tests normalizationNotes empty when level matches exactly.', version: '1.0.0', ...BASE_WORKFLOW });
+
+      const startRes = await handleV2StartWorkflow({ workflowId } as V2StartWorkflowInput, ctx);
+      expect(startRes.type).toBe('success');
+      if (startRes.type !== 'success') return;
+
+      const advanceRes = await handleV2ContinueWorkflow(
+        {
+          continueToken: startRes.data.continueToken,
+          output: {
+            notesMarkdown: 'Assessment complete.',
+            artifacts: [
+              {
+                kind: 'wr.assessment',
+                assessmentId: 'readiness_gate',
+                dimensions: { confidence: 'high' },
+              },
+            ],
+          },
+        } as V2ContinueWorkflowInput,
+        ctx
+      );
+
+      expect(advanceRes.type).toBe('success');
+      if (advanceRes.type !== 'success') return;
+      expect(advanceRes.data.kind).toBe('ok');
+      if (advanceRes.data.kind !== 'ok') return;
+
+      expect(advanceRes.data.stepContext?.assessments?.normalizationNotes).toHaveLength(0);
+    } finally {
+      delete process.env.WORKRAIL_DATA_DIR;
+    }
+  });
+
   it('omits stepContext when the completed step had no assessmentRef', async () => {
     const root = await mkTempDataDir();
     process.env.WORKRAIL_DATA_DIR = root;
