@@ -73,7 +73,6 @@ function WorktreeCard({ wt, onSelectBranch }: { wt: ConsoleWorktreeSummary; onSe
 
       {/* Footer: status badges + time */}
       <div className="flex items-center gap-2 flex-wrap pt-1">
-        {/* Changed files */}
         {isClean ? (
           <span className="text-xs px-1.5 py-0.5 rounded bg-green-500/10 text-green-400 border border-green-500/20">
             clean
@@ -84,14 +83,12 @@ function WorktreeCard({ wt, onSelectBranch }: { wt: ConsoleWorktreeSummary; onSe
           </span>
         )}
 
-        {/* Ahead of main */}
         {!isUpToDate && (
           <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
             {wt.aheadCount} ahead
           </span>
         )}
 
-        {/* Commit time — pushed to right */}
         <span className="text-xs text-[var(--text-muted)] ml-auto">
           {relativeTime(wt.headTimestampMs)}
         </span>
@@ -101,45 +98,28 @@ function WorktreeCard({ wt, onSelectBranch }: { wt: ConsoleWorktreeSummary; onSe
 }
 
 // ---------------------------------------------------------------------------
-// Main view
+// WorktreeGrid — receives valid data, all hooks called unconditionally
 // ---------------------------------------------------------------------------
 
-export function WorktreeList({ onSelectBranch }: { onSelectBranch: (branch: string) => void }) {
-  const { data, isLoading, error } = useWorktreeList();
-
-  if (isLoading) {
-    return (
-      <div className="text-[var(--text-muted)] text-sm py-12 text-center">
-        Loading worktrees…
-      </div>
-    );
-  }
-
-  if (error || !data) {
-    return (
-      <div className="text-red-400 text-sm py-12 text-center">
-        {error instanceof Error ? error.message : 'Failed to load worktrees'}
-      </div>
-    );
-  }
-
-  const { worktrees } = data;
-
+/**
+ * Renders worktrees grouped into Active / Dirty / Clean sections.
+ *
+ * Separated from WorktreeList so that all hooks (useMemo) are called
+ * unconditionally on every render — the parent handles the async boundary
+ * and only mounts this component when data is available.
+ */
+function WorktreeGrid({
+  worktrees,
+  onSelectBranch,
+}: {
+  worktrees: readonly ConsoleWorktreeSummary[];
+  onSelectBranch: (branch: string) => void;
+}) {
   const groups = useMemo(() => ({
     activeSessions: worktrees.filter(w => w.activeSessionCount > 0),
     dirty: worktrees.filter(w => w.activeSessionCount === 0 && w.changedCount > 0),
     clean: worktrees.filter(w => w.activeSessionCount === 0 && w.changedCount === 0),
   }), [worktrees]);
-
-  if (worktrees.length === 0) {
-    return (
-      <div className="text-[var(--text-muted)] text-sm py-12 text-center">
-        No worktrees found. Run{' '}
-        <code className="font-mono bg-[var(--bg-tertiary)] px-1 rounded">git worktree list</code>{' '}
-        to verify.
-      </div>
-    );
-  }
 
   const { activeSessions, dirty, clean } = groups;
 
@@ -197,4 +177,45 @@ export function WorktreeList({ onSelectBranch }: { onSelectBranch: (branch: stri
       )}
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// WorktreeList — async boundary: loading / error / empty / data
+// ---------------------------------------------------------------------------
+
+/**
+ * Handles the async boundary for worktree data. Delegates all rendering
+ * to WorktreeGrid once data is available so that WorktreeGrid's hooks
+ * are always called unconditionally.
+ */
+export function WorktreeList({ onSelectBranch }: { onSelectBranch: (branch: string) => void }) {
+  const { data, isLoading, error } = useWorktreeList();
+
+  if (isLoading) {
+    return (
+      <div className="text-[var(--text-muted)] text-sm py-12 text-center">
+        Loading worktrees…
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-red-400 text-sm py-12 text-center">
+        {error instanceof Error ? error.message : 'Failed to load worktrees'}
+      </div>
+    );
+  }
+
+  if (!data || data.worktrees.length === 0) {
+    return (
+      <div className="text-[var(--text-muted)] text-sm py-12 text-center">
+        No worktrees found. Run{' '}
+        <code className="font-mono bg-[var(--bg-tertiary)] px-1 rounded">git worktree list</code>{' '}
+        to verify.
+      </div>
+    );
+  }
+
+  return <WorktreeGrid worktrees={data.worktrees} onSelectBranch={onSelectBranch} />;
 }
