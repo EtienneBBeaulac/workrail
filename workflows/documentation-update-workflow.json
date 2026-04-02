@@ -23,7 +23,10 @@
       "id": "phase-0-assess",
       "title": "Phase 0: Assess Documentation & Establish Git Baseline",
       "prompt": "Locate the target documentation and establish an evidence-based staleness assessment before you decide anything.\n\n**Step 1: Locate and inventory target docs**\n- Identify all documentation files in scope\n- Note file formats, structure, and rough section organization\n- Infer the code paths these docs reference (scopePaths)\n\n**Step 2: Git baseline**\n- Run `git log -1 <docPath>` for each target doc to get the last commit SHA and date\n- Run `git log <lastCommitSha>..HEAD -- <scopePaths>` to get all code changes since the doc was last updated\n- For each commit, classify impact: API/breaking (new exports, changed interfaces, removed functions), behavioral (changed logic), config (schema/option changes), or minor (refactor, rename, test-only)\n\n**Step 3: Staleness classification (rubric-based)**\n\nScore these three dimensions:\n- **Impact**: any API/breaking changes? any behavioral or config changes?\n- **Volume**: how many commits changed the relevant scope since last doc update?\n- **Age**: how many days since the doc was last committed?\n\nDerive `stalenessLevel`:\n- `high`: any API/breaking impact, OR volume > 5 commits AND age > 90 days\n- `medium`: volume > 2 commits, OR age > 60 days, OR behavioral/config changes present\n- `low`: few changes, nothing impacting documented behavior, age < 60 days\n- If git history is unavailable: `medium` — note what is missing\n\nDerive `updateUrgency`:\n- `high` staleness → `immediate`\n- `medium` staleness → `scheduled`\n- `low` staleness → `monitor` — if user did not request a forced update, document why and offer to exit\n\n**Capture:**\n- `targetDocPaths`, `scopePaths`\n- `gitLastDocCommitSha`, `gitLastDocCommitDate`\n- `stalenessLevel`, `updateUrgency`\n- `gitChangeSummary` — prose summary of what changed and why it matters for the docs",
-      "requireConfirmation": false
+      "requireConfirmation": {
+        "var": "updateUrgency",
+        "equals": "monitor"
+      }
     },
     {
       "id": "phase-1-analyze",
@@ -42,16 +45,19 @@
       "type": "loop",
       "title": "Phase 3: Systematic Documentation Updates",
       "loop": {
-        "type": "for",
-        "count": 15,
-        "maxIterations": 15,
-        "iterationVar": "sectionIndex"
+        "type": "while",
+        "conditionSource": {
+          "kind": "artifact_contract",
+          "contractRef": "wr.contracts.loop_control",
+          "loopId": "documentation_update_loop"
+        },
+        "maxIterations": 15
       },
       "body": [
         {
           "id": "select-section",
           "title": "Select Next Section",
-          "prompt": "Choose the next section from `updatePlan` (follow the priority order). If `sectionsRemaining` is 0, note this and the loop will exit.\n\nIdentify:\n- The section to update (name, location in doc)\n- The update type and what specifically needs to change\n- What content in this section to preserve unchanged\n\n**Capture:** `currentSection`, `currentUpdateType`, `currentUpdateDescription`, `currentPreservationNotes`",
+          "prompt": "Choose the next section from `updatePlan` (follow the priority order).\n\nIdentify:\n- The section to update (name, location in doc)\n- The update type and what specifically needs to change\n- What content in this section to preserve unchanged\n\n**Capture:** `currentSection`, `currentUpdateType`, `currentUpdateDescription`, `currentPreservationNotes`",
           "requireConfirmation": false
         },
         {
@@ -64,6 +70,15 @@
           "id": "verify-section",
           "title": "Verify the Updated Section",
           "prompt": "Verify that the update to `currentSection` is correct before moving on.\n\nCheck:\n1. **Technical accuracy** — does every technical claim match the current codebase? Check the code directly if needed.\n2. **Code examples** — are all code blocks in this section syntactically valid and behaviorally correct against current APIs?\n3. **Preservation** — what did you keep unchanged? Confirm the preserved content is still present and intact.\n4. **Cross-references** — are any internal links pointing to or from this section still working?\n\nDecrement `sectionsRemaining` by 1.\n\nRecord findings in notes: what you changed, what you preserved, any issues found.\n\n**Capture:** updated `sectionsRemaining`",
+          "requireConfirmation": false
+        },
+        {
+          "id": "phase-3-loop-decision",
+          "title": "Continue or Stop",
+          "prompt": "Decide whether to update another section.\n\n- If `sectionsRemaining` > 0: continue.\n- If `sectionsRemaining` = 0: stop.\n\nEmit a `wr.loop_control` artifact for `documentation_update_loop` with `decision` set to `continue` or `stop`.",
+          "outputContract": {
+            "contractRef": "wr.contracts.loop_control"
+          },
           "requireConfirmation": false
         }
       ],
