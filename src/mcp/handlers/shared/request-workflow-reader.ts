@@ -3,7 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import type { IWorkflowReader } from '../../../types/storage.js';
 import type { IFeatureFlagProvider } from '../../../config/feature-flags.js';
-import { EnhancedMultiSourceWorkflowStorage } from '../../../infrastructure/storage/enhanced-multi-source-workflow-storage.js';
+import { createEnhancedMultiSourceWorkflowStorage } from '../../../infrastructure/storage/enhanced-multi-source-workflow-storage.js';
 import { SchemaValidatingCompositeWorkflowStorage } from '../../../infrastructure/storage/schema-validating-workflow-storage.js';
 import type { RememberedRootsStorePortV2 } from '../../../v2/ports/remembered-roots-store.port.js';
 
@@ -91,12 +91,20 @@ export async function createWorkflowReaderForRequest(
   const rememberedRoots = await listRememberedRoots(options.rememberedRootsStore);
   const { discovered: rootedWorkflowDirectories, stale: stalePaths } = await discoverRootedWorkflowDirectories(rememberedRoots);
   const customPaths = rootedWorkflowDirectories.filter((directory) => directory !== projectWorkflowDirectory);
-  const storage = new EnhancedMultiSourceWorkflowStorage(
+  // Use the factory (rather than `new EnhancedMultiSourceWorkflowStorage`) so that
+  // env-configured sources (WORKFLOW_GIT_REPOS, WORKFLOW_STORAGE_PATH, etc.) are included
+  // in every request-scoped reader. This keeps the source catalog (list_workflows
+  // includeSources=true) consistent with the regular workflow listing.
+  //
+  // NOTE: createEnhancedMultiSourceWorkflowStorage is marked @deprecated for the DI-managed
+  // production bootstrap path. Using it here is intentional -- request-scoped readers are
+  // created per-call with workspace overrides and must pick up runtime env configuration.
+  const storage = createEnhancedMultiSourceWorkflowStorage(
     {
       customPaths,
       projectPath: projectWorkflowDirectory,
     },
-    options.featureFlags,
+    options.featureFlags ?? undefined,
   );
   const reader = new SchemaValidatingCompositeWorkflowStorage(storage);
   return { reader, stalePaths };
