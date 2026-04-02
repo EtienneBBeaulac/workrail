@@ -28,6 +28,10 @@ export interface ConsoleSessionSummary {
   readonly hasUnresolvedGaps: boolean;
   readonly recapSnippet: string | null;
   readonly gitBranch: string | null;
+  /** Absolute filesystem path to the git repo root, or null for sessions
+   * recorded before this field was introduced. Used by the worktrees view
+   * to group sessions and discover worktrees by repo. */
+  readonly repoRoot: string | null;
   /** Filesystem mtime of the session directory (epoch ms). */
   readonly lastModifiedMs: number;
 }
@@ -140,8 +144,16 @@ export interface ConsoleWorktreeSummary {
   readonly activeSessionCount: number;
 }
 
-export interface ConsoleWorktreeListResponse {
+export interface ConsoleRepoWorktrees {
+  /** Directory basename of the repo root (e.g. 'workrail', 'zillow-android-2'). */
+  readonly repoName: string;
+  /** Absolute filesystem path to the repo root. */
+  readonly repoRoot: string;
   readonly worktrees: readonly ConsoleWorktreeSummary[];
+}
+
+export interface ConsoleWorktreeListResponse {
+  readonly repos: readonly ConsoleRepoWorktrees[];
 }
 
 // ---------------------------------------------------------------------------

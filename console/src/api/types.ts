@@ -14,8 +14,14 @@ export interface ConsoleWorktreeSummary {
   readonly activeSessionCount: number;
 }
 
-export interface ConsoleWorktreeListResponse {
+export interface ConsoleRepoWorktrees {
+  readonly repoName: string;
+  readonly repoRoot: string;
   readonly worktrees: readonly ConsoleWorktreeSummary[];
+}
+
+export interface ConsoleWorktreeListResponse {
+  readonly repos: readonly ConsoleRepoWorktrees[];
 }
 export type ConsoleSessionHealth = 'healthy' | 'corrupt';
 

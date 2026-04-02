@@ -1,5 +1,5 @@
 import type { WorkspaceAnchor } from '../../ports/workspace-anchor.port.js';
-import { MAX_OBSERVATION_SHORT_STRING_LENGTH } from '../constants.js';
+import { MAX_OBSERVATION_SHORT_STRING_LENGTH, MAX_OBSERVATION_PATH_LENGTH } from '../constants.js';
 
 /**
  * Observation event data shape (matches DomainEventV1 observation_recorded payload).
@@ -7,11 +7,12 @@ import { MAX_OBSERVATION_SHORT_STRING_LENGTH } from '../constants.js';
  * Lock: §1 observation_recorded — closed-set keys + tagged scalar values.
  */
 export interface ObservationEventData {
-  readonly key: 'git_branch' | 'git_head_sha' | 'repo_root_hash';
+  readonly key: 'git_branch' | 'git_head_sha' | 'repo_root_hash' | 'repo_root';
   readonly value:
     | { readonly type: 'short_string'; readonly value: string }
     | { readonly type: 'git_sha1'; readonly value: string }
-    | { readonly type: 'sha256'; readonly value: string };
+    | { readonly type: 'sha256'; readonly value: string }
+    | { readonly type: 'path'; readonly value: string };
   readonly confidence: 'low' | 'med' | 'high';
 }
 
@@ -22,9 +23,12 @@ export interface ObservationEventData {
  * per the locked observation_recorded schema.
  *
  * Lock: §1 observation_recorded
- * - git_branch → short_string (bounded to 80 chars)
- * - git_head_sha → git_sha1 (40 hex chars)
+ * - git_branch     → short_string (bounded to 80 chars)
+ * - git_head_sha   → git_sha1 (40 hex chars)
  * - repo_root_hash → sha256 (sha256:<64 hex chars>)
+ * - repo_root      → path (bounded to 512 chars); human-readable path for
+ *                    console grouping. Stored alongside repo_root_hash which
+ *                    is used for fast identity matching.
  *
  * Returns empty array for empty input (graceful: no observations is valid).
  */
@@ -59,6 +63,18 @@ export function anchorsToObservations(anchors: readonly WorkspaceAnchor[]): read
         observations.push({
           key: 'repo_root_hash',
           value: { type: 'sha256', value: anchor.value },
+          confidence: 'high',
+        });
+        break;
+
+      case 'repo_root':
+        // Lock: path max 512 chars. Paths exceeding this are skipped silently —
+        // the repo_root_hash anchor still provides identity; only the human-readable
+        // form is lost. short_string (max 80) would truncate valid paths.
+        if (anchor.value.length > MAX_OBSERVATION_PATH_LENGTH) break;
+        observations.push({
+          key: 'repo_root',
+          value: { type: 'path', value: anchor.value },
           confidence: 'high',
         });
         break;

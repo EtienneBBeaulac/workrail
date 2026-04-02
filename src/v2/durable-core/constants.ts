@@ -148,12 +148,23 @@ export const MAX_CONTEXT_DEPTH = 64;
 
 /**
  * Maximum length for observation value (type: short_string).
- * 
+ *
  * Lock: docs/design/v2-core-design-locks.md Section 1.1 (observation_recorded)
- * 
+ *
  * Why 80: Git branch names, short workspace paths. Not for large text.
  */
 export const MAX_OBSERVATION_SHORT_STRING_LENGTH = 80;
+
+/**
+ * Maximum length for observation value (type: path).
+ *
+ * Lock: docs/design/v2-core-design-locks.md Section 1.1 (observation_recorded)
+ *
+ * Why 512: Filesystem paths can exceed 80 chars on deeply nested repos or
+ * long usernames. 512 accommodates all realistic paths while remaining bounded.
+ * short_string (max 80) would silently truncate valid paths.
+ */
+export const MAX_OBSERVATION_PATH_LENGTH = 512;
 
 // =============================================================================
 // Retry Timing
