@@ -1,7 +1,7 @@
 {
     "id": "personal-learning-materials-creation-branched",
     "name": "Personal Learning Materials Creation Workflow (Branched)",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "A systematic workflow for creating high-quality learning materials with three thoroughness paths: Quick Start (essential materials), Balanced (comprehensive system), and Comprehensive (enterprise-grade). Adapts depth and features based on user time constraints and quality goals.",
     "clarificationPrompts": [
         "Do you have a completed learning plan with defined objectives and modules?",
@@ -84,11 +84,6 @@
             ],
             "validationCriteria": [
                 {
-                    "type": "regex",
-                    "pattern": "\\b(prerequisite|dependency|sequence)\\b",
-                    "message": "Must analyze learning dependencies and sequencing"
-                },
-                {
                     "type": "contains",
                     "value": "assessment",
                     "message": "Must include assessment strategy planning"
@@ -117,11 +112,6 @@
                 "Design for scalability and continuous improvement"
             ],
             "validationCriteria": [
-                {
-                    "type": "regex",
-                    "pattern": "\\b(taxonomy|cognitive|architecture)\\b",
-                    "message": "Must apply advanced learning science principles"
-                },
                 {
                     "type": "contains",
                     "value": "effectiveness",
@@ -157,11 +147,6 @@
                     "message": "Must include template design for efficiency"
                 },
                 {
-                    "type": "regex",
-                    "pattern": "\\b(efficient|quick|simple)\\b",
-                    "message": "Must emphasize efficiency and simplicity"
-                },
-                {
                     "type": "length",
                     "min": 300,
                     "max": 900,
@@ -185,11 +170,6 @@
                 "Design for scalability and enterprise deployment"
             ],
             "validationCriteria": [
-                {
-                    "type": "regex",
-                    "pattern": "\\b(integration|optimization|analytics)\\b",
-                    "message": "Must include advanced integration and optimization planning"
-                },
                 {
                     "type": "contains",
                     "value": "effectiveness",

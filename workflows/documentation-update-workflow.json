@@ -1,350 +1,100 @@
 {
   "id": "documentation-update-workflow",
   "name": "Documentation Update & Maintenance Workflow",
-  "version": "1.0.0",
-  "description": "UPDATE and MAINTAIN existing documentation. Analyzes Git history to detect staleness, identifies outdated sections, and systematically refreshes docs while preserving valuable content. Perfect for: refreshing docs after code changes, scheduled maintenance, addressing feedback. NOT for creating new docs - use scoped-documentation-workflow or document-creation-workflow for new documentation.",
-  "clarificationPrompts": [
-    "Which existing documentation needs to be updated? (provide file paths or scope description)",
-    "When was this documentation last updated? (approximate date or 'unknown')",
-    "What prompted this update? (code changes, new requirements, feedback, scheduled maintenance)",
-    "Are there specific sections you know need updating, or should I perform a comprehensive analysis?",
-    "Should I preserve the existing structure and style, or are you open to improvements?",
-    "What level of change validation do you need? (minimal review, standard validation, comprehensive verification)"
-  ],
+  "version": "2.0.0",
+  "description": "Update and maintain existing documentation. Uses git history to detect staleness, maps sections to current code, and systematically refreshes outdated content while preserving valuable accurate sections. For updating existing docs — not for creating new documentation.",
   "preconditions": [
-    "Existing documentation files are accessible and identifiable",
-    "Agent has access to codebase analysis tools and git history",
-    "Agent can read, analyze, and modify documentation files",
+    "Target documentation files are accessible",
+    "Agent has git access to the repository containing both docs and code",
+    "Agent can read and modify the documentation files",
     "The related codebase scope is accessible for analysis"
   ],
   "metaGuidance": [
-    "**FUNCTION DEFINITIONS:**",
-    "fun analyzeDocumentationCurrency(docPath, scope) = 'Analyze {docPath} against current {scope} implementation. Check: accuracy, completeness, outdated references, missing features, deprecated content. Score currency 1-10.'",
-    "fun identifyChanges(scope, since) = 'Analyze codebase changes in {scope} since {since}. Find: new files, modified APIs, architectural changes, deprecated features. Create change impact assessment.'",
-    "fun mapDocToCode(docPath, scope) = 'Map sections of {docPath} to specific code locations in {scope}. Identify which documentation sections correspond to which code areas for targeted updates.'",
-    "fun preserveValidContent(docPath) = 'Identify sections in {docPath} that are still accurate and valuable. Mark for preservation during update process. Include: well-written explanations, accurate examples, valid references.'",
-    "fun createUpdatePlan(docPath, changes, outdated) = 'Create systematic update plan for {docPath} based on {changes} and {outdated} analysis. Prioritize: critical inaccuracies, missing features, structural improvements.'",
-    "fun updateDocSection(docPath, section, newContent) = 'Update {section} in {docPath} with {newContent}. Preserve formatting style, maintain navigation links, update cross-references as needed.'",
-    "fun validateUpdatedDoc(docPath, scope) = 'Validate updated {docPath} against {scope}: technical accuracy, completeness, consistency, navigation integrity, examples validity.'",
-    "fun updateDocContext(section, content) = 'Update UPDATE_CONTEXT.md {section} with {content}. Track update progress, decisions, and validation results.'",
-    "fun addResumptionJson(phase) = 'Update UPDATE_CONTEXT.md resumption section with: workflowId, completedSteps to {phase}, context variables for workflow_next.'",
-    "fun trackUpdateProgress(completed, current) = 'Update progress: \u2705 {completed}, \ud83d\udd04 {current}, \u23f3 Remaining phases. Include sections updated and validation status.'",
-    "**PROGRESS TRACKING FUNCTIONS:**",
-    "fun initUpdateProgressTracking(scope, docs) = 'Create live progress doc: <YYYY-MM-DD>--<scope>--update-progress.md. Initialize sections: Section Registry, Update Matrix, Quality Gates, Progress Log, Validation Results. Set updateProgressDocPath context",
-    "variable.'",
-    "fun registerDocumentSections(docs) = 'Catalog all sections across {docs}: Section | Document | Status | Priority | Complexity | UpdateType. Status starts as \"identified\". Set totalSections context variable.'",
-    "fun updateSectionStatus(section, status, quality, findings) = 'Update matrix: {section} | {status} | {quality}/10 | {findings} | timestamp. Status: identified/analyzing/updating/validated/complete.'",
-    "fun checkUpdateGate(gate) = 'Validate update gate: {gate}. Gates: assessment-complete, planning-complete, updates-complete, validation-complete. Update Quality Gates section with \u2705/\u274c status.'",
-    "fun enforceUpdateGates() = 'Before proceeding, verify ALL required gates passed. Cannot advance if any \u274c status in Quality Gates. List specific blockers and required actions.'",
-    "fun calculateUpdateMetrics() = 'Compute and update: sectionsAnalyzed%, sectionsUpdated%, overallQualityScore, sectionsAtRisk. Set context variables for validation.'",
-    "fun logUpdateStep(phase, section, action) = 'Append to Progress Log: [{timestamp}] Phase {phase}: {section} - {action}. Include: findings, issues, time invested, decisions made.'",
-    "fun appendUpdateEvidence(validation, result, evidence) = 'Log validation result with evidence: {validation} validation = {result}. Evidence: content checked, examples tested, references verified.'",
-    "**GIT CHANGE DETECTION FUNCTIONS:**",
-    "fun mapDocumentationScope(docPath) = 'Extract referenced code paths from {docPath} and infer scopePaths[]'",
-    "fun getDocLastCommit(docPath) = 'Run git log -1 for {docPath}; set gitDocLastCommitSha and gitDocLastCommitTs'",
-    "fun getChangesSince(scopePaths, sinceSha) = 'Run git log/diff since {sinceSha} across {scopePaths}; populate gitChanges[] with file, sha, date, message'",
-    "fun classifyCommitImpact(commit) = 'Use message/diff heuristics \u2192 critical/high/medium/low'",
-    "fun detectAPISurfaceChanges(diff) = 'Detect export/interface/class signature changes to determine breaking or high-impact changes'",
-    "fun detectConfigSchemaChanges(diff) = 'Detect config/descriptor/schema option additions/removals or type changes'",
-    "fun computeStalenessScore(changes, lastTs) = 'Weighted score by impact, volume, and age; set stalenessScore (0-100)'",
-    "fun decideUpdateUrgency(score) = 'Map stalenessScore to updateUrgency: immediate (\u226540) / scheduled (20-39) / monitor (<20)'",
-    "fun recordGitEvidence(changes) = 'Append commit SHAs, messages, and rationale to UPDATE_CONTEXT.md and progress doc'",
-    "fun verifyNoMissedPaths(scopePaths) = 'Ensure scopePaths cover actually changed paths; expand if needed'",
-    "fun finalizeUpdateReport() = 'Complete progress document with final metrics, lessons learned, maintenance recommendations, handoff checklist. Mark status=COMPLETE.'",
-    "**UPDATE PRINCIPLES:**",
-    "PRESERVATION FIRST: Preserve valuable existing content that remains accurate and well-written.",
-    "TARGETED CHANGES: Focus updates on specific outdated or inaccurate sections rather than wholesale rewrites.",
-    "CONSISTENCY MAINTENANCE: Maintain existing style, structure, and navigation patterns unless improvements are clearly needed.",
-    "INCREMENTAL IMPROVEMENT: Make the documentation better while updating, but avoid scope creep beyond the core update needs.",
-    "VALIDATION RIGOR: All updated technical content must be verified against current codebase state.",
-    "**UPDATE STRATEGIES:**",
-    "ADDITIVE: Add new sections for new features or concepts",
-    "CORRECTIVE: Fix inaccurate information and outdated references",
-    "EXPANSIVE: Expand thin sections with more detail where needed",
-    "REDUCTIVE: Remove or deprecate content for removed features",
-    "STRUCTURAL: Improve organization while preserving content",
-    "**QUALITY GATES:**",
-    "Every updated section must pass technical accuracy validation against current code.",
-    "Cross-references and navigation must remain intact after updates.",
-    "Examples and code snippets must be tested for current validity.",
-    "Tone and style should remain consistent with preserved sections.",
-    "**EFFICIENCY FOCUS:**",
-    "Prioritize high-impact updates that provide maximum value for effort invested.",
-    "Leverage existing good content rather than recreating from scratch.",
-    "Focus on sections that are most critical for users or most outdated.",
-    "Use git history to understand what has actually changed rather than analyzing everything."
+    "NOTES-FIRST DURABILITY: use output.notesMarkdown as the primary durable record. Do NOT create UPDATE_CONTEXT.md, progress tracking files, or any sidecar markdown. Notes survive rewinds; sidecar files may not.",
+    "GIT-EVIDENCE-FIRST: staleness judgment must be grounded in actual git log output. Do not assert a doc is stale based on reading it alone. Run git log; record commit SHAs and messages as evidence.",
+    "PRESERVATION-FIRST: keep accurate, well-written content unchanged. Only update what is demonstrably stale or incorrect. Targeted updates are better than wholesale rewrites.",
+    "VERIFY AGAINST CODE: all updated technical content must be checked against current codebase state. Code examples and API references must match what is actually in the code today.",
+    "DEGRADE AND DISCLOSE: if git history is unavailable or shallow for some paths, classify staleness as medium and note what evidence is missing. Never block — proceed with what is available.",
+    "SELF-EXECUTE: explore first with tools. Ask the user only what you genuinely cannot determine from the codebase and git history. The one real confirmation gate is the update plan before executing edits.",
+    "LOOP DISCIPLINE: the update loop runs without per-section gates — the plan was approved in phase-2. Only pause if a section requires changes beyond what the approved plan covers; note the deviation and ask."
   ],
   "steps": [
     {
-      "id": "phase-0-update-assessment",
-      "title": "Phase 0: Update Assessment & Planning",
-      "prompt": "**UPDATE ASSESSMENT** - Analyze existing documentation and determine update scope and strategy.\n\n**STEP 1: Documentation Inventory**\n- Locate and catalog all existing documentation files\n- Identify the scope/codebase areas these documents cover\n- Note file formats, structure, and current organization\n- Check for documentation metadata (last updated dates, authors, etc.)\n\n**STEP 2: Currency Analysis** \nUse analyzeDocumentationCurrency() for each document:\n- **Technical Accuracy**: How much of the technical content is still correct?\n- **Completeness**: What features or components are missing from documentation?\n- **Reference Validity**: Are code examples, file paths, and API references current?\n- **Structural Soundness**: Is the organization still logical and helpful?\n\n**STEP 3: Change Impact Assessment**\nUse identifyChanges() to analyze:\n- **Code Changes**: What has changed in the codebase since last documentation update?\n- **New Features**: What new functionality needs documentation?\n- **Deprecated Elements**: What documented features are no longer valid?\n- **Architectural Shifts**: Have there been structural changes affecting documentation?\n\n**STEP 4: Update Strategy Classification**\n- **Minor Update**: Small corrections and additions (< 20% content change)\n- **Moderate Update**: Significant sections need refresh (20-50% content change)\n- **Major Update**: Substantial restructuring or content overhaul (> 50% content change)\n- **Hybrid Approach**: Different sections need different levels of update\n\n**STEP 5: Priority Assessment**\nRank update needs by:\n- **Critical**: Inaccurate information that could cause problems\n- **Important**: Missing information for new features or significant gaps\n- **Beneficial**: Improvements that would add value but aren't essential\n\n**OUTPUT**: \n- Set `updateScope`, `updateStrategy`, `updatePriority` context variables\n- Create preliminary update plan with effort estimates",
-      "agentRole": "You are a documentation assessment specialist with expertise in evaluating existing documentation quality and determining optimal update strategies. Your strength lies in efficiently identifying what needs updating while preserving valuable existing content.",
-      "guidance": [
-        "Focus on identifying real changes and gaps, not just potential improvements",
-        "Consider the effort/value ratio - not everything needs to be perfect",
-        "Preserve high-quality existing content wherever possible",
-        "Use git history and codebase analysis to understand actual changes"
-      ],
-      "requireConfirmation": true
+      "id": "phase-0-assess",
+      "title": "Phase 0: Assess Documentation & Establish Git Baseline",
+      "prompt": "Locate the target documentation and establish an evidence-based staleness assessment before you decide anything.\n\n**Step 1: Locate and inventory target docs**\n- Identify all documentation files in scope\n- Note file formats, structure, and rough section organization\n- Infer the code paths these docs reference (scopePaths)\n\n**Step 2: Git baseline**\n- Run `git log -1 <docPath>` for each target doc to get the last commit SHA and date\n- Run `git log <lastCommitSha>..HEAD -- <scopePaths>` to get all code changes since the doc was last updated\n- For each commit, classify impact: API/breaking (new exports, changed interfaces, removed functions), behavioral (changed logic), config (schema/option changes), or minor (refactor, rename, test-only)\n\n**Step 3: Staleness classification (rubric-based)**\n\nScore these three dimensions:\n- **Impact**: any API/breaking changes? any behavioral or config changes?\n- **Volume**: how many commits changed the relevant scope since last doc update?\n- **Age**: how many days since the doc was last committed?\n\nDerive `stalenessLevel`:\n- `high`: any API/breaking impact, OR volume > 5 commits AND age > 90 days\n- `medium`: volume > 2 commits, OR age > 60 days, OR behavioral/config changes present\n- `low`: few changes, nothing impacting documented behavior, age < 60 days\n- If git history is unavailable: `medium` — note what is missing\n\nDerive `updateUrgency`:\n- `high` staleness → `immediate`\n- `medium` staleness → `scheduled`\n- `low` staleness → `monitor` — if user did not request a forced update, document why and offer to exit\n\n**Capture:**\n- `targetDocPaths`, `scopePaths`\n- `gitLastDocCommitSha`, `gitLastDocCommitDate`\n- `stalenessLevel`, `updateUrgency`\n- `gitChangeSummary` — prose summary of what changed and why it matters for the docs",
+      "requireConfirmation": {
+        "var": "updateUrgency",
+        "equals": "monitor"
+      }
     },
     {
-      "id": "phase-0a-update-context-setup",
-      "title": "Phase 0a: Initialize Update Context",
-      "prompt": "**CREATE UPDATE CONTEXT** - Set up tracking and coordination for the update process.\n\nCreate UPDATE_CONTEXT.md with:\n\n## 1. UPDATE SUMMARY\n- **Target Documentation**: Files and scope being updated\n- **Update Trigger**: What prompted this update\n- **Strategy**: {updateStrategy} with {updatePriority} priority\n- **Timeline**: Expected effort and completion target\n\n## 2. CURRENT STATE ANALYSIS\n- **Currency Assessment**: Technical accuracy and completeness scores\n- **Change Analysis**: Key code changes since last update\n- **Impact Assessment**: Which sections need which types of updates\n- **Preservation Plan**: High-quality content to maintain\n\n## 3. UPDATE PLAN\n- **Priority Order**: Which sections to update first\n- **Update Types**: Additive, corrective, expansive, reductive, structural\n- **Validation Strategy**: How updates will be verified\n- **Risk Mitigation**: Backup and rollback plans\n\n## 4. PROGRESS TRACKING\n- trackUpdateProgress('Phase 0', 'Phase 1')\n- \u2705 Completed: Assessment, Context Setup\n- \ud83d\udd04 Current: Detailed Analysis\n- \u23f3 Remaining: Change Analysis, Updates, Validation\n\n## 5. FUNCTION DEFINITIONS\n{Include all function definitions from metaGuidance}\n\n## 6. RESUMPTION INSTRUCTIONS\n**How to Resume:**\n1. Call workflow_get with id: \"documentation-update-workflow\", mode: \"preview\"\n2. Call workflow_next with JSON from addResumptionJson(phase-0a)\n\n**Set updateContextInitialized = true**",
-      "agentRole": "You are setting up the coordination framework for a systematic documentation update process.",
-      "guidance": [
-        "Create clear tracking of what needs to be updated and why",
-        "Establish baseline for measuring update progress",
-        "Set up structure for tracking validation and quality"
-      ],
+      "id": "phase-1-analyze",
+      "title": "Phase 1: Section-by-Section Gap Analysis",
+      "prompt": "Now map each documentation section to current code and classify what needs to change.\n\nFor each section in the target docs:\n1. **Map to code** — which files, functions, APIs, or behaviors does this section describe?\n2. **Assess accuracy** — does the current code match what the section says? Check API signatures, config options, behavioral descriptions, examples, and file paths.\n3. **Classify the section action**:\n   - `preserve` — still accurate, well-written; keep unchanged\n   - `update` — needs correction or expansion; note specifically what changed\n   - `remove` — describes something that no longer exists\n\n4. **Assign update type** for sections marked `update`:\n   - `corrective` — fix inaccurate information\n   - `additive` — add missing coverage for new features\n   - `expansive` — expand thin explanations\n   - `reductive` — remove deprecated or removed content\n   - `structural` — reorganize while preserving content\n\n5. **Assign priority** for sections marked `update`:\n   - `critical` — inaccurate content that would cause errors or confusion for users\n   - `important` — missing or outdated content for significant features or workflows\n   - `beneficial` — improvements that add value but aren't blocking\n\n**Capture:**\n- `sectionInventory` — list of all sections with: sectionId, action (preserve/update/remove), updateType, priority, and a one-line reason\n\nEvery section must be classified before moving on.",
       "requireConfirmation": false
     },
     {
-      "id": "phase-0z-git-baseline-triage",
-      "title": "Phase 0z: Git Baseline & Staleness Triage",
-      "prompt": "**GIT TRIAGE** - Establish documentation freshness relative to code.\n\n**BASELINE STEPS**:\n1) mapDocumentationScope(docPaths) \u2192 derive scopePaths[] from referenced code in docs\n2) getDocLastCommit(docPaths) \u2192 set gitDocLastCommitSha/Ts\n3) getChangesSince(scopePaths, gitDocLastCommitSha) \u2192 populate gitChanges[]\n4) classifyCommitImpact(commit) for each change; detectAPISurfaceChanges/detectConfigSchemaChanges via diffs\n5) computeStalenessScore(gitChanges, gitDocLastCommitTs); decideUpdateUrgency(stalenessScore)\n6) recordGitEvidence(gitChanges) into UPDATE_CONTEXT.md and progress doc\n\n**THRESHOLDS**:\n- immediate: stalenessScore \u2265 40\n- scheduled: 20\u201339\n- monitor: < 20\n\n**OUTPUT**:\n- Set stalenessScore, updateUrgency, gitChanges[]; add evidence links",
-      "agentRole": "You are establishing a deterministic, evidence-based triage of documentation freshness using Git history.",
-      "guidance": [
-        "Prefer commit evidence over subjective judgment",
-        "Classify impact using message and diff heuristics",
-        "Capture commit SHAs and rationale in UPDATE_CONTEXT.md"
-      ],
-      "requireConfirmation": false
-    },
-    {
-      "id": "phase-0z1-git-triage-gate",
-      "title": "Phase 0z1: Git Triage Gate",
-      "prompt": "**GIT TRIAGE GATE** - Block unless triage indicates work is needed or monitoring is justified.\n\n**GATE VALIDATION**:\n- \u2705 stalenessScore computed and updateUrgency set\n- \u2705 gitChanges[] recorded with evidence\n\n**BLOCKING CONDITIONS**:\n- If updateUrgency == 'monitor' AND user did not request a forced update \u2192 document in UPDATE_CONTEXT.md and proceed to exit or reassess scheduling.\n- Otherwise proceed to Phase 0b.",
-      "agentRole": "You are enforcing deterministic entry criteria based on Git-derived staleness.",
-      "validationCriteria": [
-        {
-          "type": "contains",
-          "value": "stalenessScore",
-          "message": "Triage must set stalenessScore"
-        },
-        {
-          "type": "contains",
-          "value": "updateUrgency",
-          "message": "Triage must set updateUrgency"
-        }
-      ],
+      "id": "phase-2-plan",
+      "title": "Phase 2: Update Plan",
+      "prompt": "Build the ordered update plan based on the section inventory, then confirm it with me before you start editing anything.\n\nFrom `sectionInventory`, create `updatePlan` as an ordered list:\n1. All `critical` updates first\n2. `important` updates next\n3. `beneficial` updates last (may defer if scope is large)\n\nFor each entry in the plan:\n- Section name and location\n- Update type (corrective / additive / expansive / reductive / structural)\n- Specific description of what to change and why\n- What content to preserve unchanged\n\nAlso note:\n- Total sections to update vs total sections to preserve\n- Any `remove` entries that need explicit deletion\n- Any sections that are `beneficial` you recommend deferring\n\n**This step requires confirmation** — I need to review the plan before you make edits to the documentation files.\n\n**Capture:**\n- `updatePlan` — ordered list as described above\n- `sectionsRemaining` — total count of sections to update (for loop tracking)",
       "requireConfirmation": true
     },
     {
-      "id": "phase-0b-initialize-progress-tracking",
-      "title": "Phase 0b: Initialize Progress Tracking System",
-      "prompt": "**INITIALIZE PROGRESS TRACKING** - Set up comprehensive progress monitoring and enforcement for update process.\n\n**STEP 1: Create Live Progress Document**\nUse initUpdateProgressTracking(scope, docs) to create timestamped progress file:\n- File: `<YYYY-MM-DD>--<scope>--update-progress.md`\n- Sections: Section Registry, Update Matrix, Quality Gates, Progress Log, Validation Results\n- Set `updateProgressDocPath` context variable\n\n**STEP 2: Discover and Register All Documentation Sections**\nUse registerDocumentSections(docs) to:\n- Systematically catalog all sections across documentation files\n- Create Section Registry table with: Section | Document | Status | Priority | Complexity | UpdateType\n- Set `totalSections` context variable for tracking\n- Initialize all sections with status 'identified'\n\n**STEP 3: Initialize Quality Gates**\nSet up enforcement checkpoints:\n- **Assessment Gates**: Gap Analysis Complete, Priority Classification, Risk Assessment\n- **Planning Gates**: Update Plan Validated, Resource Allocation, Timeline Confirmed\n- **Update Gates**: Section Updates Complete, Quality Validation, Cross-Reference Integrity\n- **Completion Gates**: Final Validation, Handoff Ready\n\n**STEP 4: Set Baseline Metrics**\nUse calculateUpdateMetrics() to establish:\n- `sectionsAnalyzed` = 0%\n- `sectionsUpdated` = 0%\n- `overallQualityScore` = current baseline score\n- `sectionsAtRisk` = sections requiring critical updates\n\n**OUTPUT**: Live progress document created with systematic tracking ready for update process",
-      "agentRole": "You are setting up a comprehensive progress tracking and enforcement system that will ensure systematic coverage and prevent incomplete updates.",
-      "guidance": [
-        "This creates the enforcement mechanism for thorough documentation updates",
-        "All sections must be registered before systematic updates can begin",
-        "Progress document will be updated throughout the workflow",
-        "Quality gates will block progression until requirements are met"
-      ],
-      "requireConfirmation": false
-    },
-    {
-      "id": "phase-0c-assessment-completion-gate",
-      "title": "Phase 0c: Assessment Completion Gate",
-      "prompt": "**ASSESSMENT COMPLETION GATE** - Verify all sections are discovered and classified before proceeding to detailed analysis.\n\n**GATE VALIDATION**:\nUse checkUpdateGate('assessment-complete') to verify:\n- \u2705 All documentation sections identified and registered\n- \u2705 Section Registry table complete with all required fields\n- \u2705 `totalSections` context variable is set\n- \u2705 All sections have status 'identified' with initial priority classification\n\n**ENFORCEMENT**:\nUse enforceUpdateGates() - Cannot proceed to analysis until:\n- Section discovery is 100% complete\n- No sections have status 'unknown' or 'missing'\n- Quality gate shows \u2705 Assessment Complete\n\n**METRICS UPDATE**:\nUse calculateUpdateMetrics() to update baseline:\n- Total sections discovered: {totalSections}\n- Analysis readiness: \u2705/\u274c\n- Ready for detailed analysis: \u2705/\u274c\n\n**OUTPUT**: Assessment gate validation with clear proceed/block decision",
-      "agentRole": "You are enforcing systematic section discovery completion before allowing detailed gap analysis to begin.",
-      "guidance": [
-        "This gate prevents incomplete discovery from propagating through analysis",
-        "All sections must be registered with proper classification",
-        "Cannot proceed until section discovery is verified complete",
-        "Update progress document with gate status"
-      ],
-      "validationCriteria": [
-        {
-          "type": "contains",
-          "value": "Assessment Complete: \u2705",
-          "message": "Cannot proceed until assessment completion gate passes"
-        }
-      ],
-      "requireConfirmation": true
-    },
-    {
-      "id": "phase-1-detailed-gap-analysis",
-      "title": "Phase 1: Detailed Gap & Change Analysis",
-      "prompt": "**DETAILED ANALYSIS** - Deep dive into specific gaps and changes requiring documentation updates.\n\n**ANALYSIS TASKS:**\n\n1. **Section-by-Section Mapping**:\n   Use mapDocToCode() for each documentation file:\n   - Map each documentation section to specific code areas\n   - Identify sections that no longer have corresponding code\n   - Find code areas that lack documentation coverage\n   - Note sections where code has significantly changed\n\n2. **Content Quality Assessment**:\n   Use preserveValidContent() to identify:\n   - **Excellent Content**: Well-written, accurate, comprehensive sections to preserve\n   - **Good Content**: Mostly accurate but needs minor updates\n   - **Outdated Content**: Requires significant revision or replacement\n   - **Invalid Content**: No longer relevant and should be removed\n\n3. **Change Impact Deep Dive**:\n   For each identified change:\n   - **API Changes**: New methods, changed signatures, deprecated functions\n   - **Behavioral Changes**: Different functionality or workflows\n   - **Architectural Changes**: New patterns, moved components, refactored structure\n   - **Configuration Changes**: New settings, changed defaults, deprecated options\n\n4. **Example and Reference Validation**:\n   - Test all code examples for current validity\n   - Verify file paths and references are accurate\n   - Check external links and resources\n   - Validate configuration examples and settings\n\n5. **User Journey Impact**:\n   - How do changes affect documented workflows?\n   - Are setup/getting started guides still accurate?\n   - Do troubleshooting sections address current issues?\n   - Are integration examples still valid?\n\n**CREATE DETAILED UPDATE MATRIX**:\n```\n| Section | Current Quality | Code Alignment | Update Type | Priority | Effort |\n|---------|----------------|---------------|-------------|----------|--------|\n| API Ref | 6/10           | Outdated      | Corrective  | High     | Medium |\n| Setup   | 9/10           | Good          | Minor       | Low      | Low    |\n```\n\n**OUTPUT**: \n- Comprehensive gap analysis with specific update requirements\n- Validated list of content to preserve vs content to update\n- Prioritized update plan with effort estimates",
-      "agentRole": "You are conducting detailed analysis to create a precise, actionable update plan based on actual code changes and documentation gaps.",
-      "guidance": [
-        "Be specific about what needs updating and why",
-        "Focus on user-impacting changes first",
-        "Preserve high-quality existing content wherever possible",
-        "Create actionable update requirements, not just observations"
-      ],
-      "requireConfirmation": false
-    },
-    {
-      "id": "phase-2-update-prioritization",
-      "title": "Phase 2: Update Planning & Prioritization",
-      "prompt": "**UPDATE PLANNING** - Create systematic plan for implementing documentation updates.\n\n**PRIORITIZATION FRAMEWORK**:\n\n1. **Critical Priority** (must update immediately):\n   - Inaccurate information that could cause errors or confusion\n   - Security-related changes or deprecated practices\n   - Breaking changes that affect user workflows\n   - Completely incorrect examples or references\n\n2. **High Priority** (should update soon):\n   - New features that users need to know about\n   - Significant API or behavior changes\n   - Missing documentation for commonly used functionality\n   - Outdated setup or integration instructions\n\n3. **Medium Priority** (valuable but not urgent):\n   - Clarifications and expansions of existing content\n   - Minor API changes and additions\n   - Improved examples or additional use cases\n   - Better organization or navigation\n\n4. **Low Priority** (nice to have):\n   - Style and formatting improvements\n   - Additional context or background information\n   - Enhanced examples or alternative approaches\n   - Proactive documentation for edge cases\n\n**UPDATE SEQUENCING**:\n1. **Foundation First**: Core concepts and setup instructions\n2. **User Journey**: Critical path functionality and common use cases\n3. **Reference Material**: API documentation and comprehensive coverage\n4. **Enhancement**: Examples, troubleshooting, advanced topics\n\n**RESOURCE ALLOCATION**:\n- Estimate effort required for each section update\n- Consider dependencies between sections\n- Plan for validation and review time\n- Account for cross-reference updates\n\n**RISK MITIGATION**:\n- Create backup of existing documentation\n- Plan incremental updates to minimize disruption\n- Identify rollback points if issues arise\n- Schedule validation checkpoints\n\n**CREATE IMPLEMENTATION PLAN**:\nUse createUpdatePlan() to generate:\n- Ordered list of updates with specific tasks\n- Success criteria for each update\n- Validation requirements and checkpoints\n- Timeline with milestones\n\n**OUTPUT**: \n- Detailed implementation plan with clear priorities\n- Resource and timeline estimates\n- Risk mitigation and quality assurance plan",
-      "agentRole": "You are creating a practical, actionable plan that efficiently addresses the most important documentation updates while managing risk and resources effectively.",
-      "guidance": [
-        "Focus on user impact when prioritizing updates",
-        "Balance comprehensiveness with practical resource constraints",
-        "Plan for validation and quality assurance throughout the process",
-        "Consider dependencies and logical update sequences"
-      ],
-      "requireConfirmation": true
-    },
-    {
-      "id": "phase-2a-planning-completion-gate",
-      "title": "Phase 2a: Planning Completion Gate",
-      "prompt": "**PLANNING COMPLETION GATE** - Verify comprehensive planning is complete before beginning systematic updates.\n\n**GATE VALIDATION**:\nUse checkUpdateGate('planning-complete') to verify:\n- \u2705 All sections have assigned priorities and update types\n- \u2705 Implementation plan created with specific tasks and timelines\n- \u2705 Resource allocation and effort estimates completed\n- \u2705 Risk mitigation and quality assurance plans established\n\n**ENFORCEMENT**:\nUse enforceUpdateGates() - Cannot proceed to updates until:\n- Planning coverage is 100% complete\n- All high-priority sections have detailed update plans\n- Quality gate shows \u2705 Planning Complete\n\n**METRICS UPDATE**:\nUse calculateUpdateMetrics() to update baseline:\n- Sections planned: {totalSections}\n- Planning quality score: \u22658/10 required\n- Ready for systematic updates: \u2705/\u274c\n\n**OUTPUT**: Planning gate validation with clear proceed/block decision",
-      "agentRole": "You are enforcing comprehensive planning completion before allowing systematic updates to begin. No section can be updated without proper planning.",
-      "guidance": [
-        "This gate prevents poorly planned updates from creating quality issues",
-        "All sections must have detailed update requirements",
-        "Cannot proceed until planning quality meets standards",
-        "Update progress document with planning gate status"
-      ],
-      "validationCriteria": [
-        {
-          "type": "contains",
-          "value": "Planning Complete: \u2705",
-          "message": "Cannot proceed until planning completion gate passes"
-        }
-      ],
-      "requireConfirmation": true
-    },
-    {
-      "id": "phase-2b-git-plan-verification",
-      "title": "Phase 2b: Git-Based Plan Verification",
-      "prompt": "**PLAN VERIFICATION (GIT)** - Ensure the implementation plan covers all high/critical Git-identified changes.\n\n**VERIFICATION TASKS**:\n- verifyNoMissedPaths(scopePaths) \u2192 expand monitored scope if needed\n- Cross-check gitChanges[] (critical/high) against implementation plan entries\n- Ensure each critical/high change maps to a concrete update task with success criteria\n- Record any uncovered changes and add them to plan\n\n**OUTPUT**:\n- Updated implementation plan with guaranteed coverage for high-impact changes\n- Evidence in UPDATE_CONTEXT.md of verification and adjustments",
-      "agentRole": "You are validating that the update plan addresses all high-impact Git-detected changes before execution.",
-      "guidance": [
-        "Nothing critical/high can be unplanned",
-        "Prefer explicit mapping from commit impact to update task",
-        "Record rationale for any intentionally deferred items"
-      ],
-      "requireConfirmation": true
-    },
-    {
-      "id": "phase-3-systematic-updates",
+      "id": "phase-3-update-loop",
       "type": "loop",
       "title": "Phase 3: Systematic Documentation Updates",
       "loop": {
-        "type": "for",
-        "count": 10,
-        "maxIterations": 10,
-        "iterationVar": "updateIteration"
+        "type": "while",
+        "conditionSource": {
+          "kind": "artifact_contract",
+          "contractRef": "wr.contracts.loop_control",
+          "loopId": "documentation_update_loop"
+        },
+        "maxIterations": 15
       },
       "body": [
         {
-          "id": "select-and-validate-update",
-          "title": "Select and Validate Next Update",
-          "prompt": "**SELECT AND VALIDATE UPDATE** - Choose and prepare the next priority update.\n\n**UPDATE SELECTION**:\n- Choose highest priority remaining update from implementation plan\n- Verify prerequisites and dependencies are completed\n- Review specific requirements and success criteria\n\n**PRE-UPDATE VALIDATION**:\n- Re-verify current code state for this section\n- Confirm the update is still needed and plan is still valid\n- Check for any new changes that might affect the update\n\n**PROGRESS TRACKING**:\n- Call updateSectionStatus(selectedSection, 'updating', 0, 'update initiated')\n- Call logUpdateStep('3-Selection', selectedSection, 'selected for update and pre-validated')\n\n**OUTPUT**: Validated update ready for implementation with clear requirements",
-          "agentRole": "You are selecting and validating the next documentation update to ensure it's ready for implementation.",
-          "guidance": [
-            "Choose updates based on priority and dependencies",
-            "Validate that the update is still needed and relevant",
-            "Ensure prerequisites are met before proceeding",
-            "Document any changes to requirements or scope"
-          ],
+          "id": "select-section",
+          "title": "Select Next Section",
+          "prompt": "Choose the next section from `updatePlan` (follow the priority order).\n\nIdentify:\n- The section to update (name, location in doc)\n- The update type and what specifically needs to change\n- What content in this section to preserve unchanged\n\n**Capture:** `currentSection`, `currentUpdateType`, `currentUpdateDescription`, `currentPreservationNotes`",
           "requireConfirmation": false
         },
         {
-          "id": "implement-content-update",
-          "title": "Implement Content Update",
-          "prompt": "**IMPLEMENT CONTENT UPDATE** - Execute the validated update with quality standards.\n\n**CONTENT UPDATE**: Use updateDocSection() to implement changes:\n- **Preserve Style**: Maintain existing tone, format, and structure\n- **Update Accuracy**: Correct technical information and references\n- **Expand Coverage**: Add missing information for new features\n- **Improve Clarity**: Enhance explanations while preserving good content\n- **Update Examples**: Refresh code samples and references\n\n**CROSS-REFERENCE MAINTENANCE**:\n- Update internal links affected by changes\n- Verify external references are still valid\n- Maintain table of contents and navigation\n- Update related sections that reference changed content\n\n**PROGRESS TRACKING**:\n- Call logUpdateStep('3-Implementation', selectedSection, 'content update executed with quality preservation')\n- Update Section Registry with implementation details and quality status\n\n**OUTPUT**: Updated documentation section with preserved style and improved content",
-          "agentRole": "You are implementing the content update while preserving quality and maintaining consistency.",
-          "guidance": [
-            "Focus on preserving valuable existing content and style",
-            "Maintain technical accuracy with current codebase",
-            "Update cross-references and navigation as needed",
-            "Balance improvements with content preservation"
-          ],
+          "id": "implement-update",
+          "title": "Implement the Update",
+          "prompt": "Make the update to `currentSection` in the documentation file.\n\nApply the update type:\n- **corrective**: fix the inaccurate content; verify the correction against current code\n- **additive**: add the missing section or content; keep style consistent with surrounding content\n- **expansive**: expand the thin explanation; do not rewrite well-written surrounding text\n- **reductive**: remove or deprecate the outdated content; update any internal links that referenced it\n- **structural**: reorganize; preserve all content, only change structure\n\nFor every update:\n- Preserve the existing tone, formatting, and style of the target doc\n- Update any internal cross-references affected by the change\n- Do NOT rewrite sections that are working well just because you are editing nearby",
           "requireConfirmation": false
         },
         {
-          "id": "validate-update-quality",
-          "title": "Validate Update Quality",
-          "prompt": "**VALIDATE UPDATE QUALITY** - Verify the update meets professional standards.\n\n**QUALITY VALIDATION**:\n- **Technical Accuracy**: All technical information verified against current code\n- **Examples Testing**: Code examples tested and confirmed working\n- **Style Consistency**: Tone and format consistent with preserved sections\n- **Integration Quality**: Good integration with surrounding content\n- **Cross-Reference Integrity**: All internal links working correctly\n\n**PROGRESS TRACKING**:\n- Document what was updated and why\n- Note any discoveries or additional needs identified\n- Update completion percentage and remaining work\n- Flag any issues or blockers encountered\n\n**ENHANCED PROGRESS TRACKING**:\n- Call updateSectionStatus(selectedSection, 'validated', qualityScore, 'update completed and validated')\n- Call appendUpdateEvidence('section-validation', qualityScore + '/10', 'quality checklist completed')\n- Use calculateUpdateMetrics() to update overall completion percentage\n\n**OUTPUT**: Quality-validated update with progress tracking and next steps",
-          "agentRole": "You are ensuring the implemented update meets professional quality standards before continuing.",
-          "guidance": [
-            "Be thorough but practical in quality assessment",
-            "Focus on issues that would impact user experience",
-            "Document patterns to improve future updates",
-            "Track progress systematically for transparency"
-          ],
+          "id": "verify-section",
+          "title": "Verify the Updated Section",
+          "prompt": "Verify that the update to `currentSection` is correct before moving on.\n\nCheck:\n1. **Technical accuracy** — does every technical claim match the current codebase? Check the code directly if needed.\n2. **Code examples** — are all code blocks in this section syntactically valid and behaviorally correct against current APIs?\n3. **Preservation** — what did you keep unchanged? Confirm the preserved content is still present and intact.\n4. **Cross-references** — are any internal links pointing to or from this section still working?\n\nDecrement `sectionsRemaining` by 1.\n\nRecord findings in notes: what you changed, what you preserved, any issues found.\n\n**Capture:** updated `sectionsRemaining`",
+          "requireConfirmation": false
+        },
+        {
+          "id": "phase-3-loop-decision",
+          "title": "Continue or Stop",
+          "prompt": "Decide whether to update another section.\n\n- If `sectionsRemaining` > 0: continue.\n- If `sectionsRemaining` = 0: stop.\n\nEmit a `wr.loop_control` artifact for `documentation_update_loop` with `decision` set to `continue` or `stop`.",
+          "outputContract": {
+            "contractRef": "wr.contracts.loop_control"
+          },
           "requireConfirmation": false
         }
       ],
       "requireConfirmation": false
     },
     {
-      "id": "phase-3a-updates-completion-gate",
-      "title": "Phase 3a: Updates Completion Gate",
-      "prompt": "**UPDATES COMPLETION GATE** - Verify all critical and high-priority sections have been systematically updated before comprehensive validation.\n\n**GATE VALIDATION**:\nUse checkUpdateGate('updates-complete') to verify:\n- \u2705 Critical Priority Sections: 100% updated and validated\n- \u2705 High Priority Sections: \u226595% updated and validated\n- \u2705 Section Status: All completed sections have status 'validated'\n- \u2705 Quality Threshold: Average section quality score \u22658/10\n\n**ENFORCEMENT**:\nUse enforceUpdateGates() - Cannot proceed to comprehensive validation until:\n- All critical sections completed successfully\n- High-priority coverage meets minimum threshold\n- Quality gate shows \u2705 Updates Complete\n\n**METRICS CALCULATION**:\nUse calculateUpdateMetrics() to compute:\n- `sectionsUpdated` = percentage of planned sections completed\n- `overallQualityScore` = weighted average across updated sections\n- `sectionsAtRisk` = count of sections below quality threshold\n\n**BLOCKING CONDITIONS**:\nCannot proceed if:\n- Any critical priority section incomplete\n- High-priority coverage < 95%\n- Average quality score < 8.0\n- Any updated section has validation issues\n\n**OUTPUT**: Updates completion gate status with specific blockers if any",
-      "agentRole": "You are enforcing systematic update completion with quality standards before allowing comprehensive validation.",
-      "guidance": [
-        "This gate prevents incomplete updates from reaching final validation",
-        "Critical and high-priority sections must meet quality standards",
-        "Cannot proceed until update coverage and quality thresholds met",
-        "Progress document must show comprehensive update completion"
-      ],
-      "validationCriteria": [
-        {
-          "type": "contains",
-          "value": "Updates Complete: \u2705",
-          "message": "Cannot proceed until updates completion gate passes"
-        },
-        {
-          "type": "contains",
-          "value": "Quality Threshold: \u2705",
-          "message": "Cannot proceed until quality standards met (avg \u22658/10)"
-        }
-      ],
-      "requireConfirmation": true
+      "id": "phase-4-validate",
+      "title": "Phase 4: End-to-End Validation",
+      "prompt": "Read through all updated documentation as a fresh reader and validate it as a whole.\n\n1. **End-to-end consistency** — read the docs in order. Is terminology consistent? Does the logical flow make sense? Do sections refer to each other correctly?\n\n2. **Technical accuracy pass** — for any section you feel uncertain about, verify it against current code now. If verification reveals a remaining inaccuracy, note it explicitly: what is wrong, where it is, and what the correct information should be. Do not silently pass a section you are unsure about.\n\n3. **User journey test** — walk through the key documented workflows from start to finish using only the documentation. Do setup instructions work? Are the most important use cases covered correctly?\n\n4. **Navigation and structure** — are all cross-references working? Is the table of contents (if present) accurate? Can a user find what they need?\n\n5. **Completeness check** — look back at the original gap analysis. Were all critical and important updates completed? Note explicitly if any were deferred.\n\nDocument what you found: any remaining issues, any sections that still need work, and your overall assessment of the documentation quality after the update.",
+      "requireConfirmation": false
     },
     {
-      "id": "phase-4-comprehensive-validation",
-      "title": "Phase 4: Comprehensive Documentation Validation",
-      "prompt": "**COMPREHENSIVE VALIDATION** - Validate all updated documentation as an integrated whole.\n\n**VALIDATION SCOPE**:\n\n1. **End-to-End Consistency**:\n   - Read through all updated documentation as a user would\n   - Check for consistent terminology and concepts\n   - Verify logical flow between sections\n   - Ensure cross-references work bidirectionally\n\n2. **Technical Accuracy Verification**:\n   Use validateUpdatedDoc() for each document:\n   - Re-verify all technical claims against current codebase\n   - Test all code examples in sequence\n   - Validate configuration examples and settings\n   - Check API references and method signatures\n\n3. **User Journey Validation**:\n   - Walk through documented workflows from start to finish\n   - Verify setup and getting started instructions\n   - Test integration examples and use cases\n   - Confirm troubleshooting guidance addresses current issues\n\n4. **Navigation and Structure**:\n   - Test all internal links and cross-references\n   - Verify table of contents accuracy\n   - Check that document structure serves user needs\n   - Ensure search and navigation work effectively\n\n5. **Completeness Assessment**:\n   - Compare against original gap analysis to ensure all critical issues addressed\n   - Identify any new gaps discovered during updates\n   - Verify that update goals have been achieved\n   - Assess whether documentation now serves its intended purpose\n\n**VALIDATION TESTS**:\n- **Fresh Eyes Test**: Review as if seeing documentation for the first time\n- **Expert Review**: Validate technical depth and accuracy\n- **User Scenario Test**: Follow common user workflows using only the documentation\n- **Cross-Reference Test**: Verify all links and references work correctly\n\n**QUALITY METRICS**:\n- Technical accuracy score (1-10)\n- User experience rating (1-10) \n- Completeness assessment (% of identified gaps addressed)\n- Consistency rating (1-10)\n\n**IMPROVEMENT IDENTIFICATION**:\n- Note any remaining issues or enhancement opportunities\n- Identify patterns for future documentation maintenance\n- Document lessons learned from this update process\n- Create recommendations for ongoing documentation practices\n\n**OUTPUT**: \n- Comprehensive validation report with quality metrics\n- List of any remaining issues and recommended actions\n- Assessment of update success against original goals",
-      "agentRole": "You are conducting final comprehensive validation to ensure the updated documentation meets professional standards and serves user needs effectively.",
-      "guidance": [
-        "Take a fresh perspective - review as if seeing the docs for the first time",
-        "Focus on user experience and practical usability",
-        "Be thorough but recognize that perfection isn't always necessary",
-        "Document insights that will improve future maintenance processes"
-      ],
-      "requireConfirmation": true
-    },
-    {
-      "id": "phase-4a-validation-completion-gate",
-      "title": "Phase 4a: Validation Completion Gate",
-      "prompt": "**VALIDATION COMPLETION GATE** - Verify comprehensive validation is complete before final handoff.\n\n**GATE VALIDATION**:\nUse checkUpdateGate('validation-complete') to verify:\n- \u2705 Technical Accuracy: All updated content verified against current codebase\n- \u2705 User Experience: Documentation tested with realistic user scenarios\n- \u2705 Cross-Reference Integrity: All internal and external links validated\n- \u2705 Quality Standards: Overall documentation meets professional standards\n\n**ENFORCEMENT**:\nUse enforceUpdateGates() - Cannot proceed to handoff until:\n- Comprehensive validation completed successfully\n- All validation tests passed with acceptable scores\n- Quality gate shows \u2705 Validation Complete\n\n**FINAL METRICS CALCULATION**:\nUse calculateUpdateMetrics() to compute final results:\n- `sectionsUpdated` = final completion percentage\n- `overallQualityScore` = final quality assessment\n- `validationEvidence` = comprehensive validation documentation\n\n**OUTPUT**: Validation completion gate status confirming readiness for handoff",
-      "agentRole": "You are conducting final validation gate check to ensure the updated documentation is ready for professional handoff.",
-      "guidance": [
-        "This is the final quality gate - ensure all validation criteria met",
-        "Documentation must meet professional standards for handoff",
-        "All validation evidence must be properly documented",
-        "Cannot proceed until validation completion confirmed"
-      ],
-      "validationCriteria": [
-        {
-          "type": "contains",
-          "value": "Validation Complete: \u2705",
-          "message": "Cannot proceed until validation completion gate passes"
-        }
-      ],
-      "requireConfirmation": true
-    },
-    {
-      "id": "phase-5-update-completion",
-      "title": "Phase 5: Update Completion & Handoff",
-      "prompt": "**UPDATE COMPLETION** - Finalize the documentation update process and prepare for handoff.\n\n**COMPLETION TASKS**:\n\n1. **Final Documentation Package**:\n   - Organize all updated documentation files\n   - Create or update index/navigation files\n   - Ensure consistent formatting and style\n   - Add metadata about update date and scope\n\n2. **Update Summary Creation**:\n   Create DOCUMENTATION_UPDATE_SUMMARY.md with:\n   - **What Was Updated**: Specific sections and files changed\n   - **Why Updates Were Needed**: Original issues and gaps addressed\n   - **Key Changes Made**: Summary of major updates and improvements\n   - **Validation Results**: Quality metrics and testing outcomes\n   - **Remaining Items**: Any identified but unaddressed issues\n\n3. **Maintenance Guidance**:\n   - **Next Update Triggers**: When to consider future updates\n   - **Monitoring Approach**: How to detect when updates are needed\n   - **Update Process**: Lessons learned and recommended approach\n   - **Contact Information**: Who to consult for future updates\n\n4. **Process Documentation**:\n   - Document the update process used for future reference\n   - Note what worked well and what could be improved\n   - Create template or checklist for future updates\n   - Record time invested and efficiency metrics\n\n5. **Final Validation**:\n   - Confirm all planned updates completed successfully\n   - Verify documentation package is complete and usable\n   - Ensure handoff materials are clear and comprehensive\n   - Test final documentation from user perspective\n\n**HANDOFF DELIVERABLES**:\n- Updated documentation files with consistent quality\n- Comprehensive update summary and change log\n- Maintenance guidance for future updates\n- Process documentation and lessons learned\n- Quality metrics and validation results\n\n**SUCCESS METRICS**:\n- Percentage of identified gaps addressed\n- Technical accuracy improvement (before/after scores)\n- User experience enhancement (measurable improvements)\n- Process efficiency (time/effort invested vs value delivered)\n\n**FINAL CONTEXT UPDATE**:\n- Complete UPDATE_CONTEXT.md with final status\n- Document total effort invested and outcomes achieved\n- Include recommendations for future documentation maintenance\n- Provide clear resumption instructions if further work needed\n\n**FINAL PROGRESS COMPLETION**:\n- Call finalizeUpdateReport() to complete progress document\n- Mark all Quality Gates as \u2705 COMPLETE\n- Set final context variables: sectionsUpdated=100%, validationComplete=100%\n- Generate comprehensive handoff metrics and recommendations\n\n**OUTPUT**: \n- Complete updated documentation package ready for use\n- Comprehensive handoff documentation\n- Clear assessment of update success and remaining opportunities",
-      "agentRole": "You are completing a professional documentation update project with comprehensive handoff materials and success metrics.",
-      "guidance": [
-        "Focus on delivering value and clear outcomes",
-        "Provide practical guidance for future maintenance",
-        "Document lessons learned to improve future processes",
-        "Ensure the updated documentation truly serves its intended purpose"
-      ],
-      "requireConfirmation": true
+      "id": "phase-5-complete",
+      "title": "Phase 5: Completion & Handoff",
+      "prompt": "Summarize the completed documentation update and provide maintenance guidance.\n\n**Summary to include in notes:**\n- Which files were updated\n- Total sections updated vs preserved vs removed\n- Key changes made (especially corrections to inaccurate content)\n- Validation results from phase 4\n- Any items intentionally deferred with a brief rationale\n\n**Maintenance recommendations:**\n- What triggers should prompt the next update? (e.g., specific code areas that change frequently, upcoming planned changes)\n- Are there any sections that remain at risk of going stale quickly?\n- Any structural improvements to consider for a future update pass?\n\nThe notes from this step serve as the handoff record for future maintainers.",
+      "requireConfirmation": false
     }
   ]
 }

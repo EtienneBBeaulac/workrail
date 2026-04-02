@@ -28,6 +28,7 @@ const LOCKED_V2_CORE_TOOLS = [
   'continue_workflow',
   'checkpoint_workflow',
   'resume_session',
+  'manage_workflow_source',
 ] as const;
 
 /**

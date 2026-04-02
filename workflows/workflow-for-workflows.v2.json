@@ -408,7 +408,9 @@
             "procedure": [
               "Trace the authored workflow step by step against the user's actual task or the closest realistic scenario.",
               "For each step, ask: what would the agent actually do, what context would it have, what would it likely produce, and what would the next step inherit?",
+              "Also trace at least one degraded or edge-case path — not just the happy path. Ask: what happens when a condition evaluates unexpectedly, a loop has nothing to iterate, a runCondition skips a phase, or the user provides minimal input? Quality gates that only protect the happy path are not quality gates.",
               "Identify likely weak steps, likely unsatisfying outputs, and likely false-confidence modes.",
+              "For any loop in the workflow, explicitly check: does the exit condition have structural teeth (artifact contract, bounded maxIterations), or does it rely on prose instructions the engine cannot enforce?",
               "Fix issues directly in the workflow file when the right improvement is clear."
             ],
             "outputRequired": {
@@ -446,7 +448,8 @@
               "Score these dimensions 0-2 with one sentence of evidence each: `voiceClarity`, `ceremonyLevel`, `loopSoundness`, `delegationBoundedness`, `artifactClarity`, `taskEffectiveness`, `falseConfidenceResistance`, `stateMinimality`, `coverageSharpness`, `domainFit`, `handoffUtility`, `rigorAdaptability` (0 = adapts to complexity/rigor levels, 2 = single-weight), `enforcementStrength` (0 = behavioral rules have structural teeth; 2 = important rules are prose-only with no enforcement mechanism), and `modernizationDiscipline` (0 = every valueInventory item preserved, equivalently replaced with justification, or dropped with justification; 2 = items missing or replaced with weaker versions without justification — score 0 for create mode).",
               "If delegation is available and rigor is THOROUGH, run an adversarial review bundle with these lenses: `engine_native_reviewer`, `task_effectiveness_reviewer`, `state_economy_reviewer`, `false_confidence_reviewer`, `domain_fit_reviewer`, and `maintainer_reviewer`.",
               "Synthesize what the review confirmed, what it challenged, and what changed your mind.",
-              "Set hard-gate failures whenever any of these are materially weak: `taskEffectiveness`, `falseConfidenceResistance`, `stateMinimality`, `coverageSharpness`, `domainFit`, `handoffUtility`, or (for modernize_existing) `enforcementStrength` or `modernizationDiscipline`.",
+              "When scoring `falseConfidenceResistance`, explicitly check: do the workflow's quality gates protect edge cases and degraded paths, or only the happy path? A workflow that passes its own checks on ideal input but fails silently on minimal or unexpected input scores 2.",
+              "Set hard-gate failures whenever any of these are materially weak: `taskEffectiveness`, `falseConfidenceResistance`, `stateMinimality`, `coverageSharpness`, `domainFit`, or `handoffUtility`.",
               "Set `authoringIntegrityPassed = true` only if structural and authoring-quality dimensions are all acceptable. Set `outcomeEffectivenessPassed = true` only if the workflow is likely to achieve satisfying results for the user."
             ],
             "outputRequired": {

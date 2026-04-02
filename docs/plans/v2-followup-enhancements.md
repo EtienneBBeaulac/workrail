@@ -263,7 +263,7 @@ for this call), falls back to server CWD for clients that don't support roots/li
 
 ### Status
 
-**Implemented** (2026-02-18). Core implementation shipped; integration + unit tests for resolver remain pending.
+**Complete** (2026-02-18, tests tightened 2026-03-26 in #147). Full implementation shipped including integration and unit tests covering all workspace resolution variants and edge cases (26+ tests).
 
 ---
 
@@ -494,7 +494,7 @@ Long workflows block the agent's tool call. A 50-step workflow might take 10+ mi
 
 | Enhancement | Priority | Status | Blocks | Philosophy Aligned |
 |-------------|----------|--------|--------|-------------------|
-| MCP Roots Protocol | P1 (bug fix) | Implemented (2026-02-18) | Cross-workspace resume | Yes -- pure functions, immutable |
+| MCP Roots Protocol | P1 (bug fix) | Complete (2026-02-18, #75/#78/#147) | Cross-workspace resume | Yes -- pure functions, immutable |
 | Progress Notifications | P2 | Planned (3 open design issues) | Agent UX for long workflows | Yes -- side effects at edges |
 | Resource Update Notifications | P3 | Deferred (no UI) | Console auto-refresh | Yes -- event-driven |
 | Logging Notifications | P4 | Deferred | Operator visibility | Yes -- errors as data |
@@ -541,8 +541,9 @@ Implemented 2026-02-18. Per-request workspace anchor resolution, correct `listRo
 
 ### Next: Complete manual test plan validation
 
-Run all 23 scenarios from `docs/testing/v2-slices-4b-4c-adr008-loops-manual-test-plan.md` with
-the roots fix in place. Specifically verify E1+E2 (cross-workspace resume) now work correctly.
+Run the E1+E2 cross-workspace resume scenarios to verify the roots fix works end-to-end.
+Manual test plans from the v2 phases have been archived; verification is now covered by the
+26+ automated tests added with the roots fix.
 
 ### Done: Unflag v2 tools (Production Readiness)
 

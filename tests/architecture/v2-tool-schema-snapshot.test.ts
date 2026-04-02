@@ -10,6 +10,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  V2ManageWorkflowSourceInput,
   V2ListWorkflowsInput,
   V2InspectWorkflowInput,
   V2StartWorkflowInput,
@@ -104,6 +105,13 @@ describe('v2 tool schema field snapshots (anti-drift)', () => {
     ]);
   });
 
+  it('manage_workflow_source: exact field set', () => {
+    expect(extractFieldNames(V2ManageWorkflowSourceInput)).toEqual([
+      'action',
+      'path',
+    ]);
+  });
+
   it('resume_session: exact field set', () => {
     expect(extractFieldNames(V2ResumeSessionInput)).toEqual([
       'gitBranch',
@@ -122,6 +130,7 @@ describe('v2 tool schema field snapshots (anti-drift)', () => {
       'continue_workflow',
       'inspect_workflow',
       'list_workflows',
+      'manage_workflow_source',
       'resume_session',
       'start_workflow',
     ]);
