@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import type { ApiResponse, ConsoleSessionListResponse, ConsoleSessionDetail, ConsoleNodeDetail } from './types';
+import type { ApiResponse, ConsoleSessionListResponse, ConsoleSessionDetail, ConsoleNodeDetail, ConsoleWorktreeListResponse } from './types';
 
 async function fetchApi<T>(url: string): Promise<T> {
   const res = await fetch(url);
@@ -29,5 +29,13 @@ export function useNodeDetail(sessionId: string, nodeId: string | null) {
     queryKey: ['node', sessionId, nodeId],
     queryFn: () => fetchApi<ConsoleNodeDetail>(`/api/v2/sessions/${sessionId}/nodes/${nodeId}`),
     enabled: !!nodeId,
+  });
+}
+
+export function useWorktreeList() {
+  return useQuery({
+    queryKey: ['worktrees'],
+    queryFn: () => fetchApi<ConsoleWorktreeListResponse>('/api/v2/worktrees'),
+    refetchInterval: 10_000, // refresh every 10s so status stays current
   });
 }

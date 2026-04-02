@@ -1,6 +1,28 @@
 // Mirror of console-types.ts from the backend (Console DTOs)
 
 export type ConsoleRunStatus = 'in_progress' | 'complete' | 'complete_with_gaps' | 'blocked';
+
+export interface ConsoleWorktreeSummary {
+  readonly path: string;
+  readonly name: string;
+  readonly branch: string | null;
+  readonly headHash: string;
+  readonly headMessage: string;
+  readonly headTimestampMs: number;
+  readonly changedCount: number;
+  readonly aheadCount: number;
+  readonly activeSessionCount: number;
+}
+
+export interface ConsoleRepoWorktrees {
+  readonly repoName: string;
+  readonly repoRoot: string;
+  readonly worktrees: readonly ConsoleWorktreeSummary[];
+}
+
+export interface ConsoleWorktreeListResponse {
+  readonly repos: readonly ConsoleRepoWorktrees[];
+}
 export type ConsoleSessionHealth = 'healthy' | 'corrupt';
 
 export interface ConsoleSessionSummary {

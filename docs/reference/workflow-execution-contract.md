@@ -633,6 +633,43 @@ Notes:
 }
 ```
 
+### `continue_workflow` response with stepContext (example)
+
+When the completed step recorded structured execution facts (e.g. an accepted assessment), the response includes `stepContext`:
+
+```json
+{
+  "kind": "ok",
+  "continueToken": "ct_...",
+  "checkpointToken": "chk_...",
+  "isComplete": false,
+  "pending": { "stepId": "phase-3-implement", "title": "Phase 3: Implement", "prompt": "..." },
+  "stepContext": {
+    "assessments": {
+      "assessmentId": "diagnosis_readiness_gate",
+      "dimensions": [
+        { "dimensionId": "confidence", "level": "high", "rationale": "Root cause confirmed by stack trace and reproducer." }
+      ]
+    }
+  }
+}
+```
+
+`stepContext` is absent (not null, not empty object) when the completed step had no recorded facts. Consumers MUST treat its absence as equivalent to no step-level facts.
+
+### `stepContext` (normative)
+
+`stepContext` is an optional backward-looking envelope on `continue_workflow` ok responses. It records structured facts about the step that just completed. It is distinct from all other top-level response fields, which are forward-looking (next pending step, tokens, intent).
+
+**Invariants:**
+- Present only when the completed step recorded at least one structured fact.
+- Absent (not null) when no facts were recorded.
+- `assessments` is present when the step declared an `assessmentRef` and the agent submitted a valid assessment that was accepted by the engine. Contains the assessmentId, each dimension's normalized level and optional rationale, and `normalizationNotes`.
+- `assessments.normalizationNotes` is an array of human-readable strings explaining any level normalization WorkRail applied (e.g. "HIGH" accepted as "high"). Empty array means all levels matched exactly. Agents SHOULD check this to self-correct future submissions.
+- The internal `normalization` enum per dimension (exact vs normalized) is an engine implementation detail and is NOT exposed in `stepContext`.
+- `stepContext` is only present in the immediate tool response. It does NOT flow automatically into future pending steps. Agents that need assessment results in later steps MUST copy relevant values into `context` variables when calling `continue_workflow`.
+- On assessment projection error (malformed event log), `stepContext` will be absent and a warning will be logged server-side. The advance is NOT rolled back - the durable event record is authoritative.
+
 ### `checkpoint_workflow` request (example)
 
 ```json

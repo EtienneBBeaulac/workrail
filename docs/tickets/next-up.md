@@ -165,6 +165,7 @@ Design the DTO and UX changes needed so the console explains why the engine took
   - step-level `assessmentConsequences`
   - durable assessment and consequence events/projections
   - same-step retryable follow-up blocking
+  - `stepContext` on the `continue_workflow` ok response: accepted assessments (assessmentId, dimensions, levels, rationales) and `normalizationNotes` are now visible to agents on the success path
 - Current adoption is intentionally narrow:
   - bundled pilot in `bug-investigation.agentic.v2.json`
 - This ticket is specifically about the next rollout step:

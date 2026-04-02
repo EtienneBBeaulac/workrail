@@ -28,6 +28,10 @@ export interface ConsoleSessionSummary {
   readonly hasUnresolvedGaps: boolean;
   readonly recapSnippet: string | null;
   readonly gitBranch: string | null;
+  /** Absolute filesystem path to the git repo root, or null for sessions
+   * recorded before this field was introduced. Used by the worktrees view
+   * to group sessions and discover worktrees by repo. */
+  readonly repoRoot: string | null;
   /** Filesystem mtime of the session directory (epoch ms). */
   readonly lastModifiedMs: number;
 }
@@ -114,6 +118,47 @@ export interface ConsoleArtifact {
   readonly byteLength: number;
   readonly content: unknown;
 }
+
+// ---------------------------------------------------------------------------
+// Worktree List
+// ---------------------------------------------------------------------------
+
+export interface ConsoleWorktreeSummary {
+  /** Absolute path to the worktree directory. */
+  readonly path: string;
+  /** Directory basename — used as display name. */
+  readonly name: string;
+  /** Branch name, or null if detached HEAD. */
+  readonly branch: string | null;
+  /** Short commit hash of HEAD. */
+  readonly headHash: string;
+  /** First line of the HEAD commit message. */
+  readonly headMessage: string;
+  /** Unix epoch ms of the HEAD commit. */
+  readonly headTimestampMs: number;
+  /** Number of files with uncommitted changes (staged + unstaged). */
+  readonly changedCount: number;
+  /** Number of commits ahead of origin/main. */
+  readonly aheadCount: number;
+  /** Number of in_progress workflow sessions on this branch. */
+  readonly activeSessionCount: number;
+}
+
+export interface ConsoleRepoWorktrees {
+  /** Directory basename of the repo root (e.g. 'workrail', 'zillow-android-2'). */
+  readonly repoName: string;
+  /** Absolute filesystem path to the repo root. */
+  readonly repoRoot: string;
+  readonly worktrees: readonly ConsoleWorktreeSummary[];
+}
+
+export interface ConsoleWorktreeListResponse {
+  readonly repos: readonly ConsoleRepoWorktrees[];
+}
+
+// ---------------------------------------------------------------------------
+// Node Detail
+// ---------------------------------------------------------------------------
 
 export interface ConsoleNodeDetail {
   readonly nodeId: string;

@@ -60,6 +60,11 @@ describe('explicit_path source', () => {
 
       const repoRootHash = anchors.find((a) => a.key === 'repo_root_hash');
       expect(repoRootHash?.value).toMatch(/^sha256:[0-9a-f]{64}$/);
+
+      const repoRoot = anchors.find((a) => a.key === 'repo_root');
+      expect(repoRoot).toBeDefined();
+      expect(typeof repoRoot?.value).toBe('string');
+      expect((repoRoot?.value as string).length).toBeGreaterThan(0);
     }
   });
 

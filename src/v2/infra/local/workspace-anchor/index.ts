@@ -71,6 +71,10 @@ export class LocalWorkspaceAnchorV2 implements WorkspaceContextResolverPortV2 {
       anchors.push({ key: 'repo_root_hash', value: repoRootHash });
     }
 
+    // Emit the human-readable path alongside the hash so the console can group
+    // sessions and worktrees by repo without needing a reverse-hash lookup.
+    anchors.push({ key: 'repo_root', value: repoRoot });
+
     // git branch: read symbolic ref (graceful: empty on detached HEAD or non-git)
     const branch = await this.gitCommand('git rev-parse --abbrev-ref HEAD', cwd);
     if (branch && branch !== 'HEAD') {
