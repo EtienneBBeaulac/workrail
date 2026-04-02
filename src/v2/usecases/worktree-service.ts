@@ -155,22 +155,32 @@ export async function getWorktreeList(
   const rawWorktrees = parseWorktreePorcelain(porcelain);
 
   // Enrich all worktrees in parallel — each enrichWorktree itself parallelizes
-  // its three git calls, so total latency ≈ max single-worktree enrichment time
-  const enrichments = await Promise.all(rawWorktrees.map(wt => enrichWorktree(wt)));
+  // its three git calls, so total latency ≈ max single-worktree enrichment time.
+  //
+  // Promise.allSettled so a single broken worktree (unexpected JS error, not a
+  // git failure — those are already handled in git()) does not silently fail the
+  // entire response. Rejected entries are logged and excluded from the result
+  // rather than swallowed: surface information, don't hide it.
+  const results = await Promise.allSettled(rawWorktrees.map(wt => enrichWorktree(wt)));
 
-  const worktrees: ConsoleWorktreeSummary[] = rawWorktrees.map((wt, i) => {
-    const enrichment = enrichments[i]!;
-    return {
+  const worktrees: ConsoleWorktreeSummary[] = rawWorktrees.flatMap((wt, i) => {
+    const result = results[i]!;
+    if (result.status === 'rejected') {
+      console.warn(`[WorktreeService] Failed to enrich worktree at ${wt.path}:`, result.reason);
+      return [];
+    }
+    const e = result.value;
+    return [{
       path: wt.path,
       name: basename(wt.path),
       branch: wt.branch,
-      headHash: enrichment.headHash,
-      headMessage: enrichment.headMessage,
-      headTimestampMs: enrichment.headTimestampMs,
-      changedCount: enrichment.changedCount,
-      aheadCount: enrichment.aheadCount,
+      headHash: e.headHash,
+      headMessage: e.headMessage,
+      headTimestampMs: e.headTimestampMs,
+      changedCount: e.changedCount,
+      aheadCount: e.aheadCount,
       activeSessionCount: wt.branch ? (activeSessions.counts.get(wt.branch) ?? 0) : 0,
-    };
+    }];
   });
 
   // Sort: active sessions first, then dirty, then by recency
