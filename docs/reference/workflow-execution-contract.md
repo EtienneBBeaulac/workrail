@@ -664,9 +664,11 @@ When the completed step recorded structured execution facts (e.g. an accepted as
 **Invariants:**
 - Present only when the completed step recorded at least one structured fact.
 - Absent (not null) when no facts were recorded.
-- `assessments` is present when the step declared an `assessmentRef` and the agent submitted a valid assessment that was accepted by the engine. Contains the assessmentId and each dimension's normalized level and optional rationale.
-- `normalization` (whether the level was exact or normalized from a variant) is an internal implementation detail and is NOT exposed in `stepContext`.
-- Downstream steps MAY reference `stepContext` from the previous advance for cross-step reasoning, but MUST NOT depend on it for correctness (the durable record is authoritative).
+- `assessments` is present when the step declared an `assessmentRef` and the agent submitted a valid assessment that was accepted by the engine. Contains the assessmentId, each dimension's normalized level and optional rationale, and `normalizationNotes`.
+- `assessments.normalizationNotes` is an array of human-readable strings explaining any level normalization WorkRail applied (e.g. "HIGH" accepted as "high"). Empty array means all levels matched exactly. Agents SHOULD check this to self-correct future submissions.
+- The internal `normalization` enum per dimension (exact vs normalized) is an engine implementation detail and is NOT exposed in `stepContext`.
+- `stepContext` is only present in the immediate tool response. It does NOT flow automatically into future pending steps. Agents that need assessment results in later steps MUST copy relevant values into `context` variables when calling `continue_workflow`.
+- On assessment projection error (malformed event log), `stepContext` will be absent and a warning will be logged server-side. The advance is NOT rolled back - the durable event record is authoritative.
 
 ### `checkpoint_workflow` request (example)
 

@@ -201,13 +201,20 @@ export function buildAdvancedReplayResponse(args: {
 /**
  * Build the stepContext for the completed node by projecting assessment events.
  * Returns undefined when no step-level facts were recorded (non-assessment steps).
+ *
+ * On projection error (malformed event log), logs a warning and returns undefined
+ * rather than failing the advance — the durable event is authoritative; stepContext
+ * is a convenience projection and must not block a successful advance.
  */
 function buildStepContext(
   events: readonly DomainEventV1[],
   completedNodeId: NodeId,
-): { assessments?: { assessmentId: string; dimensions: { dimensionId: string; level: string; rationale?: string }[] } } | undefined {
+): { assessments?: { assessmentId: string; dimensions: { dimensionId: string; level: string; rationale?: string }[]; normalizationNotes: readonly string[] } } | undefined {
   const projection = projectAssessmentsV2(events);
-  if (projection.isErr()) return undefined;
+  if (projection.isErr()) {
+    console.warn(`[workrail:replay] stepContext projection failed for node '${String(completedNodeId)}' — stepContext will be absent: ${projection.error.message}`);
+    return undefined;
+  }
 
   const recorded = getLatestAssessmentForNode(projection.value, String(completedNodeId));
   if (!recorded) return undefined;
@@ -220,6 +227,7 @@ function buildStepContext(
         level: d.level,
         ...(d.rationale !== undefined ? { rationale: d.rationale } : {}),
       })),
+      normalizationNotes: recorded.normalizationNotes,
     },
   };
 }
