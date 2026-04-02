@@ -294,7 +294,7 @@ For explicit status on the major older planning docs themselves, see `docs/roadm
   - the nearer-term sharing problems (team setup, cross-repo discovery, portable references) are now addressed in the platform vision
   - a true marketplace remains a later-stage concern
 - **Source docs**:
-  - `docs/features/external-workflow-repositories.md`
+  - `docs/reference/external-workflow-repositories.md`
   - `docs/plans/workrail-platform-vision.md`
 
 ### Cloud adapter / cloud execution
@@ -360,7 +360,7 @@ For explicit status on the major older planning docs themselves, see `docs/roadm
 - **Source docs**:
   - `docs/ideas/backlog.md`
   - `docs/plans/content-coherence-and-references.md`
-  - `docs/features/external-workflow-repositories.md`
+  - `docs/reference/external-workflow-repositories.md`
   - `docs/plans/workrail-platform-vision.md`
 
 ## Recommended grooming order

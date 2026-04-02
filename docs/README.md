@@ -11,14 +11,10 @@
 ## Development Guides
 
 - **[Testing Strategy](implementation/04-testing-strategy.md)** - Testing approach and quality assurance
-- **[Security Guide](implementation/05-security-guide.md)** - Security model and practices
-- **[Performance Guide](implementation/06-performance-guide.md)** - Performance optimization strategies
-- **[Deployment Guide](implementation/07-deployment-guide.md)** - Deployment strategies and operations
 
 ## Planning
 
 - **[Planning System](planning/README.md)** - How ideas, roadmap items, tickets, and focused plans fit together
-- **[Docs Taxonomy and Migration Plan](planning/docs-taxonomy-and-migration-plan.md)** - Concrete plan for consolidating `docs/` directories over time
 - **[GitHub Ticketing Playbook](planning/github-ticketing-playbook.md)** - Phase 1 operating playbook for the single-dev, agent-assisted GitHub workflow
 - **[Ideas Backlog](ideas/backlog.md)** - Low-friction inbox for raw product and system ideas
 - **[Now / Next / Later](roadmap/now-next-later.md)** - Lightweight cross-cutting roadmap view
@@ -47,7 +43,10 @@
 
 ## Reference
 
-- **[Loop Documentation](features/loops.md)** - Loop support and patterns
+- **[Loop Documentation](reference/loops.md)** - Loop support and patterns
+- **[Loop Optimization](reference/loop-optimization.md)** - Loop performance and context optimization
+- **[Feature Flags](reference/feature-flags.md)** - Feature flag usage and architecture
+- **[External Workflow Repositories](reference/external-workflow-repositories.md)** - Loading workflows from external sources
 - **[API Specification](../spec/mcp-api-v1.0.md)** - Complete API documentation
 - **[Configuration Reference](configuration.md)** - Environment variables, Git repos, paths
 - **[Release Policy](reference/releases.md)** - Semantic-release behavior, major-version approval, and dry-run flows
