@@ -569,6 +569,7 @@ describe('Locked v2 tool surface (Section 16.5D)', () => {
     'continue_workflow',
     'checkpoint_workflow',
     'resume_session',
+    'manage_workflow_source',
   ] as const;
 
   it('v2 tool registry must match exactly the locked core tool list', () => {

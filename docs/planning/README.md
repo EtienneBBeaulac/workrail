@@ -52,6 +52,12 @@ Default flow:
 Not every idea must become a roadmap item.  
 Not every roadmap item must become a ticket immediately.
 
+## Status ownership
+
+**Status lives in exactly two places**: `docs/roadmap/open-work-inventory.md` and `docs/roadmap/now-next-later.md`.
+
+Plan docs in `docs/plans/` describe **design and intent** -- not current status. When work ships, update the roadmap docs, not the plan doc. Plan docs that carry their own status blocks create a second source of truth that drifts.
+
 ## Rules of thumb
 
 - **Idea**: "This might be valuable."

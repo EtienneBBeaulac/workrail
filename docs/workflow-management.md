@@ -199,7 +199,7 @@ Define reusable functions to reduce duplication:
 
 Loops with no items are automatically skipped, improving performance.
 
-For detailed information, see [Loop Optimization Guide](features/loop-optimization.md).
+For detailed information, see [Loop Optimization Guide](reference/loop-optimization.md).
 
 ## Advanced Configuration
 

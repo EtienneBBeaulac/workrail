@@ -41,6 +41,7 @@ export const WORKFLOW_TOOL_NAMES = [
   'continue_workflow',
   'checkpoint_workflow',
   'resume_session',
+  'manage_workflow_source',
 ] as const;
 
 export type WorkflowToolName = typeof WORKFLOW_TOOL_NAMES[number];

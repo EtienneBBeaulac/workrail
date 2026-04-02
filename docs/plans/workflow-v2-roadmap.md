@@ -44,9 +44,7 @@ If a user or client rewinds chat state, WorkRail should preserve execution integ
 
 ## Still partial
 
-- v2 production sign-off and cleanup
-- cleanup of stale rollout/status language across older v2 docs
-- deciding how much remaining flag cleanup should happen now versus later
+- lifecycle validation coverage breadth (see `docs/plans/workflow-validation-roadmap.md`)
 
 ## Still open
 
@@ -61,15 +59,12 @@ See `docs/plans/v2-followup-enhancements.md` for the detailed open follow-up ini
 
 ### Near-term
 
-1. **Complete v2 sign-off and cleanup**
-2. **Normalize the remaining v2 planning/docs surface**
-3. **Decide whether remaining v2 flag cleanup should happen now**
+1. **Progress notifications**
+2. **Verification/evidence contract improvements**
 
 ### After that
 
-1. **Progress notifications**
-2. **Verification/evidence contract improvements**
-3. **Parallel loop execution and richer delegated composition**
+1. **Parallel loop execution and richer delegated composition**
 
 ## Canonical companions
 

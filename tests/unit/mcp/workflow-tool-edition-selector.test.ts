@@ -40,6 +40,7 @@ describe('selectWorkflowToolEdition', () => {
     'continue_workflow',
     'checkpoint_workflow',
     'resume_session',
+    'manage_workflow_source',
   ] as const;
 
   it('returns v1 edition when v2Tools flag is disabled', () => {

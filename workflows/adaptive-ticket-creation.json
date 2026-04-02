@@ -1,291 +1,285 @@
 {
-    "id": "adaptive-ticket-creation",
-    "name": "Adaptive Ticket Creation Workflow",
-    "version": "0.1.0",
-    "description": "An intelligent workflow for creating high-quality Jira tickets. Uses LLM-driven path selection to automatically choose between Simple, Standard, or Epic complexity paths based on request analysis.",
-    "preconditions": [
-        "User has provided a clear objective for the ticket(s) to be created",
-        "Agent has access to relevant context (PRDs, Figma links, etc.) if available",
-        "Agent has file system access for persistent feedback mechanism",
-        "Agent can maintain context variables throughout the workflow"
-    ],
-    "clarificationPrompts": [
-        "What is the main feature or task you want to implement?",
-        "Do you have any supporting documentation (PRDs, designs, specs)?",
-        "What are your team's Jira conventions or preferences?",
-        "Are there any specific constraints or requirements?",
-        "What is the expected timeline or priority level?"
-    ],
-    "steps": [
-        {
-            "id": "phase-0-intelligent-triage",
-            "title": "Phase 0: Intelligent Triage & Path Selection",
-            "prompt": "**PREP**: Analyze the user's request to determine the appropriate complexity path.\n\n**IMPLEMENT**: Evaluate the request for complexity indicators:\n- **Simple Path**: Single ticket, clear requirements, minimal dependencies, straightforward implementation\n- **Standard Path**: Multiple related tickets, moderate complexity, some analysis needed, clear scope\n- **Epic Path**: Complex feature requiring decomposition, extensive planning, multiple teams/dependencies\n\n**VERIFY**: Document your path selection reasoning and set the pathComplexity context variable. Load any existing rules from `./.workflow_rules/ticket_creation.md` to follow team preferences.",
-            "agentRole": "You are an expert Product Manager and Mobile Tech Lead with extensive experience in feature scoping and project complexity assessment. Your role is to quickly and accurately classify requests based on scope, dependencies, and team impact while considering business priorities and technical constraints.",
-            "guidance": [
-                "Look for complexity indicators: scope size, unknowns, dependencies, team impact",
-                "Make the decision autonomously based on the request analysis",
-                "Set context variables that will be used in subsequent conditional steps"
-            ],
-            "requireConfirmation": true
+  "id": "adaptive-ticket-creation",
+  "name": "Adaptive Ticket Creation Workflow",
+  "version": "1.0.0",
+  "description": "Create high-quality Jira tickets by automatically selecting the right complexity path (Simple, Standard, or Epic) based on request analysis. One polished ticket for simple requests; structured decomposition with estimates for epics.",
+  "preconditions": [
+    "User has provided a description of the feature, task, or work to be ticketed.",
+    "Agent has file system access for loading team preferences and persisting rules."
+  ],
+  "metaGuidance": [
+    "ROLE: expert Product Manager and Mobile Tech Lead. Triage autonomously, write developer-ready tickets with full context, and produce objectively testable acceptance criteria — not user-story paraphrases.",
+    "EXPLORE FIRST: use tools to gather context before asking the user anything. Ask only for information you genuinely cannot determine with tools or from the request itself.",
+    "TEAM RULES: load and follow ./.workflow_rules/ticket_creation.md when it exists. Preferences there override your defaults. Rules are captured only on the Epic path — complex sessions are where durable conventions emerge and where the investment pays off.",
+    "AUTONOMOUS TRIAGE: decide pathComplexity (Simple / Standard / Epic) yourself from the request. Surface your reasoning, then wait for confirmation.",
+    "QUALITY FLOOR: every ticket must have a context-rich description, checkbox-style acceptance criteria that are objectively testable, and an effort estimate."
+  ],
+  "steps": [
+    {
+      "id": "phase-0-triage",
+      "title": "Phase 0: Intelligent Triage and Path Selection",
+      "promptBlocks": {
+        "goal": "Analyze the request, gather available context, and select the right complexity path before doing any ticket work.",
+        "constraints": [
+          "Decide the path yourself — do not ask the user to choose.",
+          "Load ./.workflow_rules/ticket_creation.md if it exists and let it influence your triage. If the file does not exist, note this explicitly in your output so the user knows team conventions were not applied.",
+          "Set pathComplexity to exactly one of: Simple, Standard, or Epic."
+        ],
+        "procedure": [
+          "Read any attached documents, linked PRDs, or referenced specs.",
+          "Identify complexity signals: scope breadth, number of distinct deliverables, cross-team dependencies, technical unknowns, and estimated ticket count.",
+          "Apply the triage rubric: Simple = single ticket, clear requirements, no blocking unknowns, minimal dependencies. Standard = multiple related tickets, moderate scope, some analysis needed. Epic = complex feature requiring decomposition, multiple teams or significant unknowns, likely 6+ tickets.",
+          "Upgrade triggers — escalate to Standard if: request implies more than one clearly separate work item. Escalate to Epic if: multiple teams are involved, architecture decisions are unresolved, or you estimate more than five tickets.",
+          "State your selected path and the top three reasons. Capture pathComplexity in context."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Selected path (Simple/Standard/Epic), top three triage reasons, any complexity upgrade triggers observed."
         },
-        {
-            "id": "phase-a1-simple-ticket-gen",
-            "title": "Path A: Simple Ticket Generation",
-            "runCondition": {
-                "var": "pathComplexity",
-                "equals": "Simple"
-            },
-            "prompt": "**PREP**: Since this is a simple request, focus on creating a single high-quality ticket.\n\n**IMPLEMENT**: Generate a complete ticket with:\n- Clear, descriptive title following team conventions\n- Detailed description with sufficient context\n- Specific, testable acceptance criteria\n- Appropriate labels, priority, and story points\n- Any relevant links or attachments\n\n**VERIFY**: Review the ticket for completeness and clarity. This completes the Simple path workflow.",
-            "agentRole": "You are a skilled Product Manager focused on creating clear, actionable tickets for development teams. Your expertise lies in writing comprehensive ticket descriptions that provide developers with all necessary context while maintaining clarity and brevity.",
-            "validationCriteria": [
-                {
-                    "type": "regex",
-                    "pattern": "(?i)##?\\s*Title:?",
-                    "message": "Ticket must include a clear title (e.g., 'Title:' or '## Title')"
-                },
-                {
-                    "type": "regex",
-                    "pattern": "(?i)##?\\s*Description:?",
-                    "message": "Ticket must include a detailed description (e.g., 'Description:' or '## Description')"
-                },
-                {
-                    "type": "regex",
-                    "pattern": "(?i)##?\\s*Acceptance Criteria:?",
-                    "message": "Ticket must include specific acceptance criteria (e.g., 'Acceptance Criteria:' or '## Acceptance Criteria')"
-                },
-                {
-                    "type": "regex",
-                    "pattern": "\\[\\s*\\].{5,}",
-                    "message": "Acceptance criteria should include checkboxes followed by descriptive text (at least 5 characters)."
-                },
-                {
-                    "type": "length",
-                    "min": 300,
-                    "max": 2000,
-                    "message": "Ticket should be between 300-2000 characters for adequate detail"
-                }
-            ],
-            "guidance": [
-                "This is the complete fast track - workflow ends after this step",
-                "Focus on quality over quantity - one excellent ticket",
-                "Include all necessary context for the developer"
-            ],
-            "requireConfirmation": true,
-            "hasValidation": true
+        "verify": [
+          "pathComplexity is set to Simple, Standard, or Epic.",
+          "Triage reasoning is explicit enough for the user to agree or push back.",
+          "Any loaded team rules are acknowledged if found."
+        ]
+      },
+      "requireConfirmation": true
+    },
+    {
+      "id": "phase-1-simple-ticket",
+      "title": "Path A: Generate Single Ticket",
+      "runCondition": {
+        "var": "pathComplexity",
+        "equals": "Simple"
+      },
+      "promptBlocks": {
+        "goal": "Generate one complete, developer-ready Jira ticket for this request.",
+        "constraints": [
+          "Acceptance criteria must be phrased as observable, testable conditions — not user-story restatements.",
+          "Follow any team conventions from ./.workflow_rules/ticket_creation.md.",
+          "Include all fields a developer needs to start work without asking follow-up questions."
+        ],
+        "procedure": [
+          "Write the ticket title: concise, action-oriented, following team naming conventions.",
+          "Write the description: what the feature/fix is, why it matters, any relevant context or constraints the developer should know.",
+          "Write acceptance criteria as a checkbox list. Each item must be verifiable: 'Given X, when Y, then Z' or an equivalent observable condition.",
+          "Add: priority, story points (Fibonacci or T-shirt size per team convention), relevant labels, and any links (PRD, design, related tickets).",
+          "Review the complete ticket. Would a developer who knows nothing about this request have everything needed to implement it?"
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Ticket title, brief summary of AC items, and story point estimate."
         },
-        {
-            "id": "phase-c0-context-priming",
-            "title": "Path C, Phase 0: Comprehensive Context Gathering",
-            "runCondition": {
-                "or": [
-                    {
-                        "var": "pathComplexity",
-                        "equals": "Standard"
-                    },
-                    {
-                        "var": "pathComplexity",
-                        "equals": "Epic"
-                    }
-                ]
-            },
-            "prompt": "**PREP**: Gather comprehensive context for this complex project.\n\n**IMPLEMENT**: Collect and analyze all available project materials:\n- Load existing rules from `./.workflow_rules/ticket_creation.md`\n- Review provided PRDs, technical specs, and design documents\n- Understand team conventions and Jira formatting preferences\n- Identify key stakeholders and dependencies\n- Note any constraints or special requirements\n\n**VERIFY**: Confirm you have sufficient context to proceed with analysis. Document any missing information that would be critical for planning.",
-            "agentRole": "You are a thorough business analyst specializing in requirements gathering and stakeholder management. Your expertise lies in comprehensively understanding project context, identifying information gaps, and ensuring all necessary documentation is available before proceeding with detailed planning.",
-            "guidance": [
-                "Thorough context gathering is critical for complex projects",
-                "Don't proceed without sufficient information",
-                "Set context variables for team conventions and project details"
-            ],
-            "askForFiles": true,
-            "requireConfirmation": true
+        "verify": [
+          "Title is present and follows conventions.",
+          "Description provides enough context to start work.",
+          "At least two checkbox-style acceptance criteria are present and objectively testable.",
+          "Story points and priority are set."
+        ]
+      },
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-1-context-and-gaps",
+      "title": "Path C, Phase 1: Gather Context and Surface Gaps",
+      "runCondition": {
+        "or": [
+          { "var": "pathComplexity", "equals": "Standard" },
+          { "var": "pathComplexity", "equals": "Epic" }
+        ]
+      },
+      "promptBlocks": {
+        "goal": "Collect all available project context and identify what is still missing before planning begins.",
+        "constraints": [
+          "Do not ask the user for things you can find with tools.",
+          "Ask only for information that is genuinely missing and would materially affect planning.",
+          "If the rules file exists, extract relevant conventions now."
+        ],
+        "procedure": [
+          "Read all linked or attached documents: PRDs, technical specs, design files, existing tickets.",
+          "Load ./.workflow_rules/ticket_creation.md and note any relevant team conventions.",
+          "Identify: key stakeholders, team dependencies, technical constraints, known risks, and any conflicting requirements.",
+          "Classify each gap as: Critical (blocks planning), Important (affects scope), or Nice-to-have (can proceed without it).",
+          "For Critical and Important gaps that tools cannot resolve, ask the user — in a single consolidated question block, not one at a time.",
+          "After receiving answers, check whether any response reveals scope that would change `pathComplexity` (e.g. the user confirms three teams are involved, or the feature is narrower than initially assessed). If so, state the new classification and reasoning, and ask the user to confirm before continuing to Phase 2."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Context sources reviewed, critical/important gaps found, any questions asked."
         },
-        {
-            "id": "phase-c1-analysis-and-questions",
-            "title": "Path C, Phase 1: Analysis & Risk Identification",
-            "runCondition": {
-                "or": [
-                    {
-                        "var": "pathComplexity",
-                        "equals": "Standard"
-                    },
-                    {
-                        "var": "pathComplexity",
-                        "equals": "Epic"
-                    }
-                ]
-            },
-            "prompt": "**PREP**: Analyze all provided context to identify ambiguities, risks, and missing information.\n\n**IMPLEMENT**: Create a structured analysis:\n- Identify unclear requirements or acceptance criteria\n- Highlight potential technical risks or blockers\n- Note missing information that could impact planning\n- Flag any conflicting requirements or constraints\n- Assess feasibility and effort implications\n\n**VERIFY**: Present findings as prioritized questions or clarifications needed. Only proceed when critical ambiguities are resolved.",
-            "agentRole": "You are a risk assessment specialist and requirements analyst with expertise in identifying project risks, ambiguities, and potential blockers. Your role is to proactively surface issues that could derail project success while ensuring all requirements are clearly understood.",
-            "guidance": [
-                "This is a critical risk reduction step",
-                "Better to ask questions now than discover issues later",
-                "Focus on blockers and high-impact unknowns"
-            ],
-            "requireConfirmation": true
+        "verify": [
+          "All provided documents and links have been read.",
+          "Any Critical gaps are surfaced before proceeding.",
+          "Questions, if any, are consolidated into a single block."
+        ]
+      },
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-2-high-level-plan",
+      "title": "Path C, Phase 2: Create High-Level Plan",
+      "runCondition": {
+        "or": [
+          { "var": "pathComplexity", "equals": "Standard" },
+          { "var": "pathComplexity", "equals": "Epic" }
+        ]
+      },
+      "promptBlocks": {
+        "goal": "Produce a structured plan that will drive ticket generation. This plan is the source of truth for scope.",
+        "constraints": [
+          "Be explicit about scope boundaries — ambiguous scope will produce ambiguous tickets.",
+          "Success criteria must be measurable, not just descriptive.",
+          "For Standard path: this plan feeds directly into batch ticket generation."
+        ],
+        "procedure": [
+          "Write: Project Summary (2-3 sentences, what is being built and why).",
+          "Write: Key Deliverables (bulleted list of distinct components or features).",
+          "Write: In-Scope (explicit list — prevents scope creep).",
+          "Write: Out-of-Scope (explicit exclusions — prevents misunderstandings).",
+          "Write: Success Criteria (measurable definition of done — each item verifiable).",
+          "Write: High-Level Timeline (phases or milestones with rough sizing).",
+          "Review: does every deliverable map clearly to implementable work? Is anything in scope that should be out?"
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Plan summary, deliverable count, any scope decisions made."
         },
-        {
-            "id": "phase-c2-high-level-plan",
-            "title": "Path C, Phase 2: Create High-Level Plan",
-            "runCondition": {
-                "or": [
-                    {
-                        "var": "pathComplexity",
-                        "equals": "Standard"
-                    },
-                    {
-                        "var": "pathComplexity",
-                        "equals": "Epic"
-                    }
-                ]
-            },
-            "prompt": "**PREP**: With clarified requirements, create a comprehensive high-level plan.\n\n**IMPLEMENT**: Generate a structured plan document:\n- **Project Summary**: Clear overview of the feature/project\n- **Key Deliverables**: Main components or features to be built\n- **In-Scope**: Explicitly defined scope boundaries\n- **Out-of-Scope**: Clear exclusions to prevent scope creep\n- **Success Criteria**: Measurable definition of done\n- **High-Level Timeline**: Major milestones and phases\n\n**VERIFY**: Ensure the plan is comprehensive and aligns with the original request. This plan will guide ticket creation.",
-            "agentRole": "You are a strategic Product Manager and project planner with expertise in feature decomposition and scope management. Your strength lies in creating comprehensive project plans that balance business objectives with technical feasibility while preventing scope creep.",
-            "validationCriteria": [
-                {
-                    "type": "regex",
-                    "pattern": "(?i)##?\\s*Project Summary:?",
-                    "message": "Plan must include a Project Summary section"
-                },
-                {
-                    "type": "regex",
-                    "pattern": "(?i)##?\\s*Key Deliverables:?",
-                    "message": "Plan must include a Key Deliverables section"
-                },
-                {
-                    "type": "regex",
-                    "pattern": "(?i)##?\\s*In-Scope:?",
-                    "message": "Plan must explicitly define In-Scope items"
-                },
-                {
-                    "type": "regex",
-                    "pattern": "(?i)##?\\s*Out-of-Scope:?",
-                    "message": "Plan must explicitly define Out-of-Scope items"
-                },
-                {
-                    "type": "regex",
-                    "pattern": "(?i)##?\\s*Success Criteria:?",
-                    "message": "Plan must include measurable Success Criteria"
-                },
-                {
-                    "type": "regex",
-                    "pattern": "(?i)##?\\s*High-Level Timeline:?",
-                    "message": "Plan must include a High-Level Timeline section"
-                },
-                {
-                    "type": "length",
-                    "min": 800,
-                    "message": "Plan should be at least 800 characters for comprehensive coverage"
-                }
-            ],
-            "guidance": [
-                "This plan becomes the foundation for all ticket generation",
-                "Be explicit about scope to prevent misunderstandings",
-                "For Standard path, this leads directly to ticket generation"
-            ],
-            "requireConfirmation": true,
-            "hasValidation": true
+        "verify": [
+          "All six sections are present: Summary, Deliverables, In-Scope, Out-of-Scope, Success Criteria, Timeline.",
+          "Success criteria are measurable.",
+          "Scope boundaries are explicit, not implied."
+        ]
+      },
+      "requireConfirmation": true
+    },
+    {
+      "id": "phase-3-epic-decompose",
+      "title": "Path E, Phase 3: Epic Decomposition",
+      "runCondition": {
+        "var": "pathComplexity",
+        "equals": "Epic"
+      },
+      "promptBlocks": {
+        "goal": "Break the approved plan into a logical work hierarchy that development teams can execute.",
+        "constraints": [
+          "Every item in the plan's In-Scope list must map to at least one work item in the hierarchy.",
+          "Dependencies must be explicit — not implied by ordering alone.",
+          "Oversized stories (more than one sprint of work) should be split."
+        ],
+        "procedure": [
+          "Define the top-level Epic: one ticket that is the container for all work, linked to the plan.",
+          "Identify Features or Story Groups: logical clusters of related functionality.",
+          "For each Story Group, list individual Stories: the smallest independently releasable work items.",
+          "For each Story, list any Tasks or sub-tasks if technical implementation steps are distinct enough to track.",
+          "Map dependencies: which stories must complete before others can start? Flag critical-path items.",
+          "Explain the grouping rationale: why are these stories together? Would the team organize them differently?"
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Epic name, story count, dependency summary, and any grouping decisions."
         },
-        {
-            "id": "phase-c3a-epic-decomposition",
-            "title": "Path C, Phase 3a: Epic Decomposition",
-            "runCondition": {
-                "var": "pathComplexity",
-                "equals": "Epic"
-            },
-            "prompt": "**PREP**: Decompose the approved high-level plan into a logical hierarchy.\n\n**IMPLEMENT**: Create a structured breakdown:\n- **Epic**: Main feature/project container\n- **Features/Stories**: Logical groupings of related functionality\n- **Tasks**: Specific implementation work items\n- **Dependencies**: Clear relationships between items\n- **Rationale**: Explain the decomposition logic and groupings\n\n**VERIFY**: Ensure the hierarchy is logical, dependencies are clear, and nothing is missed from the original plan.",
-            "agentRole": "You are a technical Product Manager specializing in epic decomposition and story mapping. Your expertise lies in breaking down complex features into logical, manageable work items while maintaining clear dependencies and ensuring nothing falls through the cracks.",
-            "guidance": [
-                "Epic path only - creates the story hierarchy",
-                "Focus on logical groupings that make sense for development",
-                "Consider team capacity and parallel work opportunities"
-            ],
-            "requireConfirmation": true
+        "verify": [
+          "Every In-Scope deliverable from the plan is represented in the hierarchy.",
+          "Dependencies are named, not just implied by order.",
+          "No story is so large it would span multiple sprints without a split."
+        ]
+      },
+      "requireConfirmation": true
+    },
+    {
+      "id": "phase-4-epic-estimate",
+      "title": "Path E, Phase 4: Estimation and Dependency Mapping",
+      "runCondition": {
+        "var": "pathComplexity",
+        "equals": "Epic"
+      },
+      "promptBlocks": {
+        "goal": "Add effort estimates, risk assessments, and team assignments to each story in the hierarchy.",
+        "constraints": [
+          "Conservative estimates are better than optimistic ones — note uncertainty explicitly.",
+          "Justify each estimate with one sentence of reasoning.",
+          "Flag stories on the critical path."
+        ],
+        "procedure": [
+          "For each Story, assign: effort estimate (Fibonacci or T-shirt size per team convention), brief justification.",
+          "Assess technical risk per story: Low / Medium / High, with one sentence of rationale.",
+          "Assign priority: must-have for MVP, should-have, nice-to-have.",
+          "Note suggested team or skill area for each story.",
+          "Identify critical path: which stories block the most downstream work? Surface these explicitly.",
+          "Flag any stories whose estimates feel uncertain — surface the unknowns rather than hiding them in a range."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Total story point estimate, critical path items, high-risk stories."
         },
-        {
-            "id": "phase-c3b-estimation-and-dependencies",
-            "title": "Path C, Phase 3b: Estimation & Dependency Mapping",
-            "runCondition": {
-                "var": "pathComplexity",
-                "equals": "Epic"
-            },
-            "prompt": "**PREP**: Add effort estimates and dependency mapping to the decomposed stories.\n\n**IMPLEMENT**: For each story, provide:\n- **Effort Estimate**: S/M/L/XL sizing with detailed justification\n- **Dependencies**: Prerequisites and blockers\n- **Risk Assessment**: Technical or business risks\n- **Priority Ranking**: Relative importance and sequencing\n- **Team Assignment**: Suggested team or skill requirements\n\n**VERIFY**: Review estimates for consistency and identify any oversized stories that need further breakdown.",
-            "agentRole": "You are a technical project manager with expertise in agile estimation and dependency management. Your strength lies in accurately sizing work items, identifying critical path dependencies, and ensuring realistic project planning that accounts for team capacity and technical constraints.",
-            "guidance": [
-                "Epic path only - adds planning details",
-                "Conservative estimates are better than optimistic ones",
-                "Identify critical path items and potential bottlenecks"
-            ],
-            "requireConfirmation": true
+        "verify": [
+          "Every story has an estimate and a one-sentence justification.",
+          "Critical path items are named.",
+          "High-risk or highly uncertain stories are called out."
+        ]
+      },
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-5-batch-tickets",
+      "title": "Path C/E, Phase 5: Batch Ticket Generation",
+      "runCondition": {
+        "or": [
+          { "var": "pathComplexity", "equals": "Standard" },
+          { "var": "pathComplexity", "equals": "Epic" }
+        ]
+      },
+      "promptBlocks": {
+        "goal": "Generate the complete set of Jira tickets from the approved plan and decomposition.",
+        "constraints": [
+          "Every In-Scope deliverable from the plan must have at least one ticket.",
+          "Acceptance criteria must be checkbox-style and objectively testable.",
+          "Follow team conventions from ./.workflow_rules/ticket_creation.md.",
+          "Epic path: include the parent Epic ticket and set epic-link on all child stories."
+        ],
+        "procedure": [
+          "For Epic path: generate the Epic ticket first (title, description, success criteria from the plan, no story points).",
+          "For each Story in the decomposition (or each deliverable for Standard): generate a complete ticket with title, description, checkbox-style AC, story points, priority, labels, and dependency links.",
+          "Verify coverage: compare generated tickets against the plan's In-Scope list. Every item should have a ticket.",
+          "Check consistency: ticket titles follow conventions, estimates are consistent with the estimation step, priorities are set.",
+          "Present the complete batch clearly labeled and organized."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Ticket count, coverage confirmation (all In-Scope items represented), any gaps noted."
         },
-        {
-            "id": "phase-c4-batch-ticket-generation",
-            "title": "Path C, Phase 4: Batch Ticket Generation",
-            "runCondition": {
-                "or": [
-                    {
-                        "var": "pathComplexity",
-                        "equals": "Standard"
-                    },
-                    {
-                        "var": "pathComplexity",
-                        "equals": "Epic"
-                    }
-                ]
-            },
-            "prompt": "**PREP**: Generate all necessary Jira tickets based on the approved plan.\n\n**IMPLEMENT**: Create comprehensive tickets for every story/task:\n- **Epic Ticket**: Overall project container (Epic path only)\n- **Feature/Story Tickets**: Individual work items with full details\n- **Consistent Formatting**: Follow team conventions and templates\n- **Complete Information**: Title, description, acceptance criteria, labels, estimates\n- **Proper Linking**: Dependencies and epic relationships\n\n**VERIFY**: Review all tickets for completeness, consistency, and accuracy. Present the full batch for approval.",
-            "agentRole": "You are an experienced Product Manager specializing in high-volume ticket creation and project organization. Your expertise lies in creating comprehensive, well-structured tickets that provide development teams with clear, actionable work items while maintaining consistency across large projects.",
-            "validationCriteria": [
-                {
-                    "type": "regex",
-                    "pattern": "(?i)##\\s*(Ticket\\s*\\d+|Epic)",
-                    "message": "Output must contain multiple numbered tickets (e.g., '## Ticket 1') or an Epic ('## Epic')"
-                },
-                {
-                    "type": "regex",
-                    "pattern": "(?i)Story Points?:",
-                    "message": "Tickets should include story point estimates"
-                },
-                {
-                    "type": "regex",
-                    "pattern": "(?i)Priority:",
-                    "message": "Tickets should include priority levels"
-                },
-                {
-                    "type": "length",
-                    "min": 1000,
-                    "message": "Batch ticket output should be substantial (1000+ characters) for multiple tickets"
-                }
-            ],
-            "guidance": [
-                "Automated batch generation saves significant time",
-                "Ensure consistency across all tickets",
-                "Include all necessary metadata and relationships"
-            ],
-            "requireConfirmation": true,
-            "hasValidation": true
+        "verify": [
+          "Every In-Scope plan item has at least one ticket.",
+          "All tickets have checkbox-style AC with at least two testable criteria each.",
+          "Story points and priorities are set on all tickets.",
+          "Epic tickets are present and child tickets reference the parent (Epic path)."
+        ]
+      },
+      "requireConfirmation": true
+    },
+    {
+      "id": "phase-6-capture-rules",
+      "title": "Path E, Phase 6: Capture Team Rules",
+      "runCondition": {
+        "var": "pathComplexity",
+        "equals": "Epic"
+      },
+      "promptBlocks": {
+        "goal": "Extract actionable team preferences from this session and persist them so future runs use them automatically.",
+        "constraints": [
+          "Only write rules that are genuinely reusable across future tickets — skip one-off project specifics.",
+          "Keep rules concise and actionable, not narrative.",
+          "Append to ./.workflow_rules/ticket_creation.md rather than replacing it."
+        ],
+        "procedure": [
+          "Review what conventions, preferences, or requirements emerged during this session.",
+          "Identify patterns worth preserving: naming conventions, field usage, AC format preferences, estimation approach, labeling rules.",
+          "Draft new rules as short, imperative statements (e.g., 'Use T-shirt sizing not Fibonacci', 'Always include a Figma link in design tickets').",
+          "Check against existing rules — avoid duplicates or contradictions.",
+          "Append new rules to ./.workflow_rules/ticket_creation.md, creating the file if it does not exist."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "New rules added (count and examples), rules file location."
         },
-        {
-            "id": "phase-c5-continuous-improvement",
-            "title": "Path C, Phase 5: Continuous Improvement & Learning",
-            "runCondition": {
-                "var": "pathComplexity",
-                "equals": "Epic"
-            },
-            "prompt": "**PREP**: Capture lessons learned and improve future ticket creation.\n\n**IMPLEMENT**: Based on feedback from the ticket review:\n- **Identify Patterns**: What worked well vs. what could be improved\n- **Extract Rules**: Formulate specific operational guidelines\n- **Document Preferences**: Team-specific conventions and requirements\n- **Update Rules File**: Append new rules to `./.workflow_rules/ticket_creation.md`\n- **Validate Learning**: Confirm the new rules make sense for future projects\n\n**VERIFY**: Ensure the persistent rules will improve future ticket creation quality and consistency.",
-            "agentRole": "You are a process improvement specialist and organizational learning expert. Your role is to extract actionable insights from project experiences and codify them into reusable guidelines that improve team efficiency and consistency over time.",
-            "guidance": [
-                "Epic path only - creates persistent learning",
-                "Focus on actionable, specific rules",
-                "This makes the AI smarter over time"
-            ],
-            "requireConfirmation": true
-        }
-    ],
-    "metaGuidance": [
-        "Maintain the persona of an expert Product Manager and Mobile Tech Lead",
-        "Make autonomous decisions based on context analysis rather than asking users to choose",
-        "Always load and follow team-specific rules from ./.workflow_rules/ticket_creation.md when available",
-        "Focus on creating tickets that provide clear value to development teams",
-        "Ensure all tickets have measurable acceptance criteria and appropriate estimates"
-    ]
+        "verify": [
+          "Rules file has been updated or created.",
+          "New rules are actionable and reusable.",
+          "No contradictions introduced with existing rules."
+        ]
+      },
+      "requireConfirmation": false
+    }
+  ]
 }
