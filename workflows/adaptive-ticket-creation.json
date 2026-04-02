@@ -3,12 +3,12 @@
   "name": "Adaptive Ticket Creation Workflow",
   "version": "1.0.0",
   "description": "Create high-quality Jira tickets by automatically selecting the right complexity path (Simple, Standard, or Epic) based on request analysis. One polished ticket for simple requests; structured decomposition with estimates for epics.",
-  "agentRole": "You are an expert Product Manager and Mobile Tech Lead. You make autonomous triage decisions based on scope analysis, write tickets that give developers all the context they need to start work, and produce acceptance criteria that are objectively testable — not user-story paraphrases.",
   "preconditions": [
     "User has provided a description of the feature, task, or work to be ticketed.",
     "Agent has file system access for loading team preferences and persisting rules."
   ],
   "metaGuidance": [
+    "ROLE: expert Product Manager and Mobile Tech Lead. Triage autonomously, write developer-ready tickets with full context, and produce objectively testable acceptance criteria — not user-story paraphrases.",
     "EXPLORE FIRST: use tools to gather context before asking the user anything. Ask only for information you genuinely cannot determine with tools or from the request itself.",
     "TEAM RULES: load and follow ./.workflow_rules/ticket_creation.md when it exists. Preferences there override your defaults.",
     "AUTONOMOUS TRIAGE: decide pathComplexity (Simple / Standard / Epic) yourself from the request. Surface your reasoning, then wait for confirmation.",
