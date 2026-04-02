@@ -1,235 +1,114 @@
 {
   "id": "document-creation-workflow",
   "name": "Document Creation Workflow",
-  "version": "0.0.1",
-  "description": "Create BROAD or COMPREHENSIVE documentation spanning multiple components/systems. Perfect for: project READMEs, complete API documentation, user guides covering multiple features, technical specifications for systems. Uses complexity triage (Simple/Standard/Complex) to adapt rigor. For SINGLE, BOUNDED subjects (one class, one integration), use scoped-documentation-workflow instead for better scope discipline.",
-  "clarificationPrompts": [
-    "What type of document do you need? (README, API documentation, user guide, technical specification, or custom)",
-    "What's the document's purpose and target audience?",
-    "Do you have existing documentation that should inform style/structure?",
-    "What's your automation preference? (High: auto-approve low-risk decisions, Medium: standard confirmations, Low: extra safety checks)",
-    "Are there specific constraints, templates, or organizational standards to follow?"
-  ],
+  "version": "1.0.0",
+  "description": "Create broad or comprehensive documentation spanning multiple components or systems. Suited for project READMEs, complete API documentation, user guides covering multiple features, and technical specifications. Uses complexity triage (Simple/Standard/Complex) to adapt rigor. For single, bounded subjects (one class, one integration), use scoped-documentation-workflow instead.",
   "preconditions": [
-    "User has a clear idea of the document type and purpose",
-    "Relevant project files or information are available for reference",
-    "Agent has access to file reading, editing, and analysis tools",
-    "Git repository recommended for version control (workflow degrades gracefully if unavailable)"
+    "User has a clear idea of the document type and purpose.",
+    "Relevant project files or information are available for reference.",
+    "Agent has access to file reading, editing, and analysis tools.",
+    "Git repository recommended for version control (workflow degrades gracefully if unavailable)."
   ],
   "metaGuidance": [
-    "This workflow follows TRIAGE -> ANALYZE -> PLAN -> CREATE -> REVIEW -> FINALIZE with dynamic complexity adaptation.",
-    "Automation levels (Low/Medium/High) control confirmation requirements to balance autonomy with quality assurance.",
-    "Context documentation maintained throughout for seamless handoffs between chat sessions.",
-    "Failure bounds prevent resource waste: word limits (2000), step tracking (>15), and escalation protocols.",
-    "Git integration with branching, commits, and fallback strategies for version control.",
-    "Deep project analysis informs documentation style, structure, and content accuracy.",
-    "Validation criteria ensure output quality and completeness before finalization.",
-    "Devil's advocate review strengthens content through systematic critique.",
-    "Tool integration leverages codebase analysis, existing documentation discovery, and automated operations."
+    "NOTES-FIRST DURABILITY: use output.notesMarkdown as the primary durable record. Do NOT create CONTEXT.md, doc_spec.md, or content_plan.md as workflow memory.",
+    "DISCOVER BEFORE ASKING: use tools to explore the project before asking clarification questions. Only ask what tools cannot answer.",
+    "COMPLEXITY DRIVES BRANCHING: docComplexity=Simple uses the fast path; Standard/Complex uses the full path. If complexity changes during work, note it in notesMarkdown and adapt — no retriage ceremony needed.",
+    "CONTENT-FIRST: the deliverable is the document, not planning artifacts. Keep planning proportional to scope.",
+    "EVIDENCE-BASED QUALITY: each quality dimension in the review step requires a one-sentence evidence statement and a pass or needs-work verdict — not a numeric score."
   ],
   "steps": [
     {
-      "id": "phase-0-intelligent-triage",
-      "title": "Phase 0: Intelligent Document Triage & Setup",
-      "prompt": "**ANALYZE**: Evaluate the documentation request for complexity indicators:\n\n**Simple Path Indicators:**\n- Single document type with clear requirements\n- Straightforward content (basic README, simple user guide)\n- Existing templates or examples available\n- Minimal research or analysis needed\n\n**Standard Path Indicators:**\n- Moderate complexity documentation\n- Some analysis of existing codebase/systems required\n- Multiple sections or integration points\n- Standard business documentation needs\n\n**Complex Path Indicators:**\n- Comprehensive technical documentation\n- Requires deep system analysis\n- Multiple stakeholders or use cases\n- Integration with existing documentation ecosystem\n- Custom or specialized documentation needs\n\n**IMPLEMENT**:\n1. Analyze the request for complexity indicators\n2. Recommend complexity level (Simple/Standard/Complex) with reasoning\n3. Set `docComplexity` context variable\n4. Ask: \"What automation level? High (auto-approve confidence >8), Medium (standard), Low (extra confirmations)?\"\n5. Set `automationLevel` context variable\n6. Ask for confirmation of classification\n\n**VERIFY**: Confirm complexity and automation settings before proceeding.",
-      "agentRole": "You are a documentation strategy specialist with expertise in assessing documentation complexity and risk. Your role is to accurately classify documentation needs based on technical depth, stakeholder impact, and integration requirements.",
-      "guidance": [
-        "Consider both content complexity and organizational impact",
-        "Set these keys in the next `continue_workflow` call's `context` object that drive conditional workflow execution",
-        "When uncertain, err toward higher complexity for better quality",
-        "Automation levels: High=auto-approve confidence >8, Medium=standard, Low=extra confirmations"
+      "id": "phase-0-triage",
+      "title": "Phase 0: Triage and Classify",
+      "prompt": "Analyze this documentation request and classify its complexity.\n\n**Simple** indicators:\n- Single document type with clear requirements\n- Straightforward content (basic README, simple user guide)\n- Existing templates or examples available\n- Minimal research needed\n\n**Standard** indicators:\n- Moderate complexity documentation\n- Some codebase or system analysis required\n- Multiple sections or integration points\n- Standard business documentation needs\n\n**Complex** indicators:\n- Comprehensive technical documentation\n- Requires deep system analysis\n- Multiple stakeholders or use cases\n- Integration with an existing documentation ecosystem\n- Custom or specialized documentation needs\n\nIf uncertain, classify upward.\n\nCapture:\n- `docComplexity`: Simple / Standard / Complex",
+      "requireConfirmation": {
+        "var": "docComplexity",
+        "equals": "Complex"
+      }
+    },
+    {
+      "id": "phase-1-analyze",
+      "title": "Phase 1: Project Analysis",
+      "runCondition": {
+        "or": [
+          { "var": "docComplexity", "equals": "Standard" },
+          { "var": "docComplexity", "equals": "Complex" }
+        ]
+      },
+      "prompt": "Analyze the project to inform documentation strategy. Limit this analysis to 1500 words; prioritize documentation-relevant insights.\n\nCover:\n1. **Existing documentation landscape** — current docs, style patterns, gaps\n2. **Project architecture** — key components relevant to this document\n3. **User or developer workflows** — how documentation fits into user journeys\n4. **Technical constraints** — APIs, systems, integrations to document\n5. **Style conventions** — terminology, formatting, naming patterns to follow\n6. **Audience** — who will use this documentation and what they need to accomplish\n\nNote any complexity indicators that might warrant reclassifying `docComplexity` upward.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-2-requirements",
+      "title": "Phase 2: Targeted Requirements",
+      "runCondition": {
+        "or": [
+          { "var": "docComplexity", "equals": "Standard" },
+          { "var": "docComplexity", "equals": "Complex" }
+        ]
+      },
+      "prompt": "Based on your project analysis, ask 2 to 4 targeted questions that you genuinely cannot answer from the codebase or project files.\n\nFocus on clarifications that materially affect content or structure:\n- Specific scope boundaries (what to include or exclude)\n- Audience-specific requirements not evident from the code\n- Constraints, templates, or organizational standards to follow\n- Integration requirements with existing documentation systems\n\nDo not ask questions the analysis already answered.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-3-plan",
+      "title": "Phase 3: Content Plan",
+      "runCondition": {
+        "or": [
+          { "var": "docComplexity", "equals": "Standard" },
+          { "var": "docComplexity", "equals": "Complex" }
+        ]
+      },
+      "prompt": "Create a content plan for this documentation in your notes.\n\nThe plan should cover:\n1. Document purpose and success criteria\n2. Target audience and their primary goals\n3. Section outline with one-line descriptions\n4. Writing strategy — tone, technical depth, key terminology\n5. Visual elements or code examples needed\n\nKeep the plan proportional to scope. The goal is a clear outline to execute against, not a heavyweight specification.",
+      "promptFragments": [
+        {
+          "id": "phase-3-plan-complex",
+          "when": { "var": "docComplexity", "equals": "Complex" },
+          "text": "For Complex documentation, also include: integration strategy (how this doc connects to the existing documentation ecosystem), maintenance ownership, and any stakeholder review requirements."
+        }
       ],
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-4-create",
+      "title": "Phase 4: Content Creation",
+      "prompt": "Write the documentation following your content plan.\n\nBefore writing, check for any templates or existing documentation patterns to follow.\n\nWork section by section. After each major section:\n- Verify accuracy against actual project files or code\n- Ensure consistency with established style and terminology\n\n**Git integration** (if git is available):\n- Create a feature branch: `git checkout -b docs/[document-type]-[brief-description]`\n- Capture the branch name as `featureBranch`\n- Commit after completing major sections: `docs([type]): [section description]`\n- If git is unavailable, proceed without it\n\nKeep writing until all planned sections are complete.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-5-quality-review",
+      "title": "Phase 5: Quality Review",
+      "runCondition": {
+        "or": [
+          { "var": "docComplexity", "equals": "Standard" },
+          { "var": "docComplexity", "equals": "Complex" }
+        ]
+      },
+      "prompt": "Review the documentation you just wrote using this rubric. For each dimension, provide a one-sentence evidence statement and a verdict of `pass` or `needs-work`.\n\n1. **Accuracy** — Does the content correctly describe the actual project or system? *(Evidence: cite one verified fact.)*\n2. **Completeness** — Does it cover all planned sections? *(Evidence: list planned vs completed sections.)*\n3. **Audience fit** — Is the technical depth right for the target reader? *(Evidence: identify one audience-appropriate choice made.)*\n4. **Usability** — Could a reader actually accomplish their goal using this doc? *(Evidence: trace one user journey through the doc.)*\n5. **Consistency** — Does it match project conventions for style, terminology, and format? *(Evidence: cite one convention followed.)*\n\nIf any dimension is `needs-work`, fix the issue immediately and re-assert the dimension as `pass` in your notes before continuing.",
+      "promptFragments": [
+        {
+          "id": "phase-5-quality-review-complex",
+          "when": { "var": "docComplexity", "equals": "Complex" },
+          "text": "Also review a sixth dimension:\n6. **Integration coherence** — Does the doc integrate correctly with the existing documentation ecosystem? *(Evidence: describe how it cross-links or relates to existing docs.)*"
+        }
+      ],
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-6-finalize",
+      "title": "Phase 6: Finalize and Deliver",
+      "prompt": "Save the final documentation with an appropriate filename:\n- `README.md` for project documentation\n- `API.md` for API documentation\n- `UserGuide.md` for user guides\n- `TechnicalSpec.md` for technical specifications\n- A descriptive name for other types\n\n**Git finalization** (if a feature branch was created):\n- Final commit: `docs(complete): [document type] documentation`\n- Merge: `git checkout main && git merge --squash {{featureBranch}}`\n- Cleanup: `git branch -d {{featureBranch}}`\n\nProvide a delivery summary covering:\n- What was created and who it serves\n- Quality review results (all dimensions passed)\n- Maintenance recommendations\n- Any follow-up documentation needs",
       "requireConfirmation": true
     },
     {
-      "id": "phase-1-project-analysis-mandatory",
+      "id": "phase-simple-create",
+      "title": "Phase Simple: Direct Creation",
       "runCondition": {
-        "or": [
-          {"var": "docComplexity", "equals": "Standard"},
-          {"var": "docComplexity", "equals": "Complex"}
-        ]
+        "var": "docComplexity",
+        "equals": "Simple"
       },
-      "title": "Phase 1: Deep Project Analysis",
-      "prompt": "**SYSTEMATIC PROJECT INVESTIGATION** - Analyze the project to inform documentation strategy.\n\n**ANALYSIS BOUNDS: Limit output to 1500 words; prioritize documentation-relevant insights.**\n\n**Your analysis must include:**\n1. **Existing Documentation Landscape**: Current docs, style patterns, gaps\n2. **Project Architecture**: Key components relevant to documentation\n3. **User/Developer Workflows**: How documentation fits into user journeys\n4. **Technical Constraints**: APIs, systems, integrations to document\n5. **Style Conventions**: Existing patterns for consistency\n6. **Content Sources**: Code comments, READMEs, specs to reference\n7. **Audience Analysis**: Who will use this documentation and how\n8. **Complexity Indicators**: Factors that might affect initial assessment\n\nThis analysis will inform all subsequent requirements gathering, content planning, and quality standards.",
-      "agentRole": "You are an expert documentation analyst specializing in understanding project ecosystems and documentation needs. Your expertise lies in quickly assessing technical landscapes and identifying optimal documentation strategies.",
-      "askForFiles": true,
-      "guidance": [
-        "Focus on documentation-relevant aspects of the project",
-        "Identify existing patterns and standards to maintain consistency",
-        "Note any discoveries that might warrant complexity re-assessment",
-        "Use tools to explore codebase, existing docs, and project structure"
-      ],
-      "requireConfirmation": false
-    },
-    {
-      "id": "phase-2-requirements-clarification",
-      "runCondition": {"var": "docComplexity", "not_equals": "Simple"},
-      "title": "Phase 2: Informed Requirements Clarification",
-      "prompt": "Based on your project analysis, ask intelligent, targeted questions to clarify documentation requirements:\n\n**Technical Clarifications:**\n- Content scope and depth based on discovered architecture\n- Integration with existing documentation systems\n- Specific technical details to include/exclude\n- Audience-specific customization needs\n\n**Quality Standards:**\n- Validation criteria and acceptance requirements\n- Review processes and stakeholder approvals\n- Maintenance and update responsibilities\n\n**Operational Considerations:**\n- Documentation toolchain and publishing workflow\n- Version control and change management\n- Timeline and milestone requirements\n\n**Present 3-7 specific questions that will significantly improve documentation quality and implementability.**",
-      "agentRole": "You are a senior documentation consultant specializing in requirements elicitation. Your expertise lies in translating project understanding into precise documentation requirements that eliminate ambiguity.",
-      "guidance": [
-        "Ask questions that could only be formulated after understanding the project",
-        "Focus on clarifications that significantly impact content and structure",
-        "Address both technical content and operational requirements",
-        "Consider validation and maintenance aspects"
-      ],
-      "requireConfirmation": {
-        "or": [
-          {"var": "automationLevel", "equals": "Low"},
-          {"var": "automationLevel", "equals": "Medium"}
-        ]
-      }
-    },
-    {
-      "id": "phase-2b-dynamic-complexity-retriage",
-      "runCondition": {"var": "docComplexity", "not_equals": "Simple"},
-      "title": "Phase 2b: Dynamic Complexity Re-Assessment",
-      "prompt": "Based on project analysis and requirements clarification, re-evaluate the initial complexity classification:\n\n**EVALUATE:**\n1. Review original `docComplexity` classification\n2. Consider new insights from project analysis and clarifications\n3. Assess if complexity should be upgraded or downgraded\n\n**If recommending complexity upgrade:**\n- Explain what discoveries led to this recommendation\n- Describe additional complexity or risk factors\n- Request user confirmation to change `docComplexity`\n\n**If recommending complexity downgrade:**\n- Set `proposedDowngrade` context variable to true\n- Explain what simplifies the documentation task\n- Provide evidence of reduced scope/complexity\n- Require confirmation unless automationLevel=High and confidence >8\n\n**If classification remains appropriate:**\n- Briefly confirm assessment is still accurate\n- Proceed without changes\n\n**Both upgrades and downgrades allowed with proper justification.**",
-      "agentRole": "You are a technical risk assessor specializing in documentation complexity evaluation. Your expertise lies in identifying complexity factors that emerge during analysis phases and ensuring optimal workflow rigor.",
-      "guidance": [
-        "Only change complexity with clear, justifiable reasons",
-        "For downgrades, require explicit approval unless high automation and confidence",
-        "Document reasoning for any complexity changes",
-        "Reset proposedDowngrade flag after user decision"
-      ],
-      "requireConfirmation": {
-        "or": [
-          {"var": "automationLevel", "equals": "Low"},
-          {"var": "automationLevel", "equals": "Medium"},
-          {"var": "proposedDowngrade", "equals": true}
-        ]
-      }
-    },
-    {
-      "id": "phase-3-specification-creation",
-      "runCondition": {"var": "docComplexity", "not_equals": "Simple"},
-      "title": "Phase 3: Create Documentation Specification",
-      "prompt": "Using project analysis and clarified requirements, create a comprehensive documentation specification:\n\n**Documentation Specification (`doc_spec.md`):**\n1. **Objectives & Success Criteria**: What the documentation will achieve\n2. **Content Architecture**: Structure, sections, information hierarchy  \n3. **Audience & Use Cases**: Who will use it and how\n4. **Quality Standards**: Validation criteria, review processes\n5. **Integration Requirements**: How it fits with existing documentation\n6. **Maintenance Strategy**: Update processes and ownership\n7. **Technical Constraints**: Tools, formats, publishing requirements\n\n**The specification must:**\n- Align with discovered project patterns and conventions\n- Address all clarifications from Phase 2\n- Provide clear implementation guidance\n- Include measurable quality criteria\n\nOutput markdown content; use edit_file tool to create `doc_spec.md` if available.",
-      "agentRole": "You are a senior documentation architect specializing in comprehensive specification creation. Your expertise lies in translating requirements into detailed, implementable documentation plans.",
-      "guidance": [
-        "Create actionable specification that drives implementation",
-        "Incorporate all project analysis insights and clarifications",
-        "Define clear quality standards and success metrics",
-        "Consider integration with existing documentation ecosystem"
-      ],
-      "requireConfirmation": false
-    },
-    {
-      "id": "phase-3b-context-documentation",
-      "runCondition": {"var": "docComplexity", "not_equals": "Simple"},
-      "title": "Phase 3b: Create Context Documentation",
-      "prompt": "Create comprehensive context documentation (`CONTEXT.md`) for workflow continuity:\n\n**For automationLevel=High: limit 1000 words; otherwise full documentation (limit 2000 words).**\n\n## 1. ORIGINAL REQUEST CONTEXT\n- Document type and requirements\n- Complexity classification and reasoning\n- Automation level and implications\n\n## 2. PROJECT ANALYSIS SUMMARY\n- Key architectural patterns and documentation standards\n- Existing documentation landscape and gaps\n- Relevant technical components and workflows\n- Style conventions and quality standards\n\n## 3. REQUIREMENTS & CLARIFICATIONS\n- Questions asked and answers received\n- Scope boundaries and constraints\n- Quality standards and validation criteria\n\n## 4. SPECIFICATION SUMMARY\n- Core objectives and success criteria\n- Content architecture and structure\n- Integration and maintenance requirements\n\n## 5. WORKFLOW PROGRESS\n- ✅ Completed phases (0, 1, 2, 2b, 3, 3b)\n- 🔄 Current: Content Planning (Phase 4)\n- ⏳ Remaining: 4, 5, 6, 7, 8\n- 📋 Context variables: docComplexity, automationLevel, etc.\n\n## 6. HANDOFF INSTRUCTIONS\n- Files to attach when resuming\n- Critical decisions and constraints\n- Next phase requirements",
-      "agentRole": "You are a meticulous documentation specialist focused on comprehensive project handoff documentation. Your expertise lies in capturing all critical context for seamless workflow continuation.",
-      "guidance": [
-        "Enable seamless handoff to new agent/session",
-        "Include specific technical details and decisions",
-        "Reference all key files and project insights",
-        "Make progress tracking very clear for continuation"
-      ],
-      "requireConfirmation": false
-    },
-    {
-      "id": "phase-4-content-planning",
-      "runCondition": {"var": "docComplexity", "not_equals": "Simple"},
-      "title": "Phase 4: Content Planning & Architecture",
-      "prompt": "Create detailed content plan based on the specification:\n\n**Content Plan (`content_plan.md`):**\n1. **Information Architecture**: Detailed outline with sections, subsections\n2. **Content Sources**: Where information will come from (code, specs, interviews)\n3. **Writing Strategy**: Tone, style, technical depth for target audience\n4. **Visual Elements**: Diagrams, screenshots, code examples needed\n5. **Quality Assurance**: Review checkpoints and validation criteria\n6. **Dependencies**: External inputs or approvals required\n\n**The plan must:**\n- Follow specification requirements precisely\n- Leverage project analysis insights\n- Address all identified audience needs\n- Include measurable completion criteria\n\nOutput content plan; use edit_file tool to create `content_plan.md`.",
-      "agentRole": "You are a content strategy expert specializing in technical documentation planning. Your expertise lies in creating detailed, actionable content plans that ensure high-quality documentation delivery.",
-      "guidance": [
-        "Create implementable plan with clear action items",
-        "Reference specification and project analysis throughout",
-        "Include quality checkpoints and validation steps",
-        "Consider visual elements and technical examples"
-      ],
-      "requireConfirmation": false
-    },
-    {
-      "id": "phase-5-content-creation",
-      "title": "Phase 5: Iterative Content Creation",
-      "prompt": "Execute the content plan with systematic creation and verification:\n\n**GIT SETUP**: Check git availability with 'git status'. If available, create feature branch 'git checkout -b doc-[unique-id]' and track in `featureBranch` variable. If git unavailable, log changes in CONTEXT.md with timestamps.\n\n**ITERATIVE CREATION PROCESS**:\n1. **PREP**: Review content plan section, gather required inputs\n2. **CREATE**: Write content following specification and quality standards\n3. **VERIFY**: Check against plan requirements and quality criteria\n\n**STEP TRACKING**: Track progress; if >15 steps without completion, pause for user guidance.\n\n**CONTEXT UPDATES**: Update CONTEXT.md every 3 steps, on issues, or user interventions with:\n- Progress summary and current status\n- Content sections completed\n- Issues encountered and resolutions\n- Quality validation results\n- Remaining work overview\n\n**COMMIT STRATEGY**: \n- High automation: Auto-commit after successful sections\n- Medium/Low: Suggest commits for approval\n- Use format: 'docs(type): section description'\n- Commit on completion of major sections\n\nExecute content plan systematically until all sections complete.",
-      "agentRole": "You are a meticulous technical writer focused on high-quality content creation. Your approach emphasizes systematic execution, quality verification, and thorough documentation of progress.",
-      "guidance": [
-        "Follow content plan precisely while maintaining quality standards",
-        "Use project analysis insights to inform content accuracy",
-        "Commit regularly for version control and progress tracking",
-        "Update context documentation for workflow continuity"
-      ],
-      "requireConfirmation": false
-    },
-    {
-      "id": "phase-6-quality-review",
-      "runCondition": {"var": "docComplexity", "not_equals": "Simple"},
-      "title": "Phase 6: Devil's Advocate Quality Review",
-      "prompt": "Perform rigorous critique of the created documentation to strengthen quality:\n\n**Analyze the documentation through these lenses:**\n\n1. **Accuracy & Completeness**: Are there gaps, inaccuracies, or missing critical information?\n2. **Audience Alignment**: Does it truly serve the target audience's needs and skill level?\n3. **Clarity & Usability**: Could users actually accomplish their goals with this documentation?\n4. **Consistency & Standards**: Does it maintain consistency with project conventions?\n5. **Maintenance Burden**: Is it structured for easy updates and long-term maintenance?\n\n**For each critique point, provide:**\n- Specific evidence from the documentation\n- Concrete suggestions for improvement\n- Assessment of impact severity\n\n**Conclude with:**\n- Balanced summary of strengths and weaknesses\n- Prioritized improvement recommendations\n- **Set `qualityScore` variable (1-10)** for documentation quality\n\n**CRITICAL**: All critique must be evidence-based with specific citations.",
-      "agentRole": "You are a skeptical but constructive senior documentation reviewer with expertise in technical communication. Your role is to identify weaknesses and improvement opportunities while recognizing strengths.",
-      "guidance": [
-        "Focus on substantive quality issues, not minor style preferences",
-        "Provide actionable improvement suggestions with clear reasoning",
-        "Balance critique with recognition of strong elements",
-        "Set qualityScore variable for automation decisions"
-      ],
-      "requireConfirmation": {
-        "or": [
-          {"var": "automationLevel", "equals": "Low"},
-          {"var": "automationLevel", "equals": "Medium"},
-          {"and": [
-            {"var": "automationLevel", "equals": "High"},
-            {"var": "qualityScore", "lt": 8}
-          ]}
-        ]
-      },
-      "validationCriteria": [
-        {
-          "type": "contains",
-          "value": "qualityScore",
-          "message": "Must include qualityScore variable (1-10) for documentation quality assessment"
-        },
-        {
-          "type": "regex",
-          "pattern": "(accuracy|completeness|clarity|consistency|maintenance)",
-          "message": "Must address key quality dimensions in the review"
-        }
-      ],
-      "hasValidation": true
-    },
-    {
-      "id": "phase-7-finalization",
-      "title": "Phase 7: Documentation Finalization & Delivery",
-      "prompt": "Finalize documentation based on quality review and prepare for delivery:\n\n**IMPROVEMENTS**: Implement approved improvements from quality review.\n\n**FINAL VALIDATION**: Verify against specification requirements:\n- All sections complete and accurate\n- Quality standards met\n- Style consistency maintained\n- Integration requirements satisfied\n\n**FILE ORGANIZATION**: Save final documentation with appropriate naming:\n- README.md for project documentation\n- API.md for API documentation  \n- UserGuide.md for user guides\n- TechnicalSpec.md for technical specifications\n- [Custom].md for custom documentation\n\n**GIT FINALIZATION** (if available):\n- Final commit: 'docs(complete): [doc type] documentation'\n- Merge strategy: 'git checkout main && git merge --squash [featureBranch]'\n- Cleanup: 'git branch -d [featureBranch]'\n- Log commit hash in CONTEXT.md\n\n**DELIVERY SUMMARY**:\n- Document purpose and audience served\n- Quality metrics and validation results\n- Maintenance recommendations\n- Next steps or follow-up documentation needs",
-      "agentRole": "You are a delivery specialist focused on professional documentation finalization and comprehensive handoff. Your expertise lies in ensuring deliverables meet all requirements and are properly documented for future maintenance.",
-      "guidance": [
-        "Ensure all specification requirements are fully met",
-        "Complete git workflow properly with appropriate commit messages",
-        "Provide comprehensive delivery documentation for maintainers",
-        "Include quantitative quality metrics in final summary"
-      ],
-      "requireConfirmation": true,
-      "validationCriteria": [
-        {
-          "type": "contains",
-          "value": "final",
-          "message": "Must include final documentation delivery"
-        },
-        {
-          "type": "length",
-          "min": 200,
-          "message": "Delivery summary must be comprehensive (at least 200 characters)"
-        }
-      ],
-      "hasValidation": true
-    },
-    {
-      "id": "phase-simple-execution",
-      "runCondition": {"var": "docComplexity", "equals": "Simple"},
-      "title": "Phase Simple: Streamlined Documentation Creation",
-      "prompt": "For simple documentation, execute streamlined creation process:\n\n**QUICK VALIDATION**:\n- Confirm document type and basic requirements\n- Verify any templates or examples available\n- Check for existing documentation patterns to follow\n\n**RAPID CREATION**:\n1. Create basic outline based on document type\n2. Draft content following established patterns\n3. Review for accuracy and completeness\n4. Save with appropriate filename\n\n**QUALITY CHECK**:\n- Verify against basic requirements\n- Ensure readability and accuracy\n- Confirm style consistency\n\n**If complexity discovered during creation:**\n- Recommend upgrading to Standard/Complex via phase-2b\n- Provide reasoning for complexity increase\n\n**DELIVERABLE**: Complete simple documentation ready for use.",
-      "agentRole": "You are an efficient documentation creator specializing in straightforward documentation tasks. Your strength lies in quickly producing quality documentation while recognizing when tasks exceed their scope.",
-      "guidance": [
-        "Focus on essential content without over-engineering",
-        "Use established patterns and templates when available",
-        "Escalate to higher complexity if needed rather than compromise quality",
-        "Maintain quality standards despite streamlined process"
-      ],
+      "prompt": "Create this documentation directly.\n\nBefore writing:\n- Check for any existing templates or documentation patterns to follow\n- Confirm the document type, target audience, and basic requirements\n\nCreate a brief outline, then write the content. Review for accuracy and readability before saving.\n\nSave with an appropriate filename and provide a brief summary of what was created.\n\nIf during creation you discover the task is more complex than Simple, note it and adapt your approach inline.",
       "requireConfirmation": false
     }
   ]
-} 
+}
