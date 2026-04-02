@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useWorktreeList } from '../api/hooks';
 import type { ConsoleWorktreeSummary, ConsoleRepoWorktrees } from '../api/types';
 
@@ -19,11 +19,24 @@ function relativeTime(epochMs: number): string {
   return `${Math.floor(days / 30)}mo ago`;
 }
 
+function shortTime(epochMs: number): string {
+  if (!epochMs) return '';
+  return new Date(epochMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
 // ---------------------------------------------------------------------------
 // Worktree card
 // ---------------------------------------------------------------------------
 
-function WorktreeCard({ wt, onSelectBranch }: { wt: ConsoleWorktreeSummary; onSelectBranch: (branch: string) => void }) {
+function WorktreeCard({
+  wt,
+  repoRoot,
+  onSelectBranch,
+}: {
+  wt: ConsoleWorktreeSummary;
+  repoRoot: string;
+  onSelectBranch: (branch: string, repoRoot: string) => void;
+}) {
   const isDetached = wt.branch === null;
   const isClean = wt.changedCount === 0;
   const isUpToDate = wt.aheadCount === 0;
@@ -35,12 +48,16 @@ function WorktreeCard({ wt, onSelectBranch }: { wt: ConsoleWorktreeSummary; onSe
     ? 'border-yellow-500/40'
     : 'border-[var(--border)]';
 
+  const tooltip = isDetached
+    ? 'Detached HEAD — not on any branch. Check out a branch to enable session filtering.'
+    : `View sessions for ${wt.branch}`;
+
   return (
     <button
       type="button"
       disabled={isDetached}
-      onClick={!isDetached ? () => onSelectBranch(wt.branch!) : undefined}
-      title={!isDetached ? `View sessions for ${wt.branch}` : undefined}
+      onClick={!isDetached ? () => onSelectBranch(wt.branch!, repoRoot) : undefined}
+      title={tooltip}
       className={`w-full text-left rounded-lg border ${borderColor} bg-[var(--bg-secondary)] p-4 flex flex-col gap-2 transition-colors ${!isDetached ? 'cursor-pointer hover:border-[var(--accent)]' : 'cursor-default opacity-80'}`}
     >
       {/* Header row: branch + worktree name */}
@@ -105,18 +122,23 @@ function WorktreeCard({ wt, onSelectBranch }: { wt: ConsoleWorktreeSummary; onSe
 
 /**
  * Renders worktrees grouped into Active / Dirty / Clean sections.
+ * The Clean section is collapsed by default to reduce noise — most clean
+ * worktrees are done or dormant and don't need immediate attention.
  *
- * Separated from WorktreeList so that all hooks (useMemo) are called
- * unconditionally on every render — the parent handles the async boundary
- * and only mounts this component when data is available.
+ * Separated from WorktreeList so that all hooks (useMemo, useState) are
+ * called unconditionally on every render.
  */
 function WorktreeGrid({
   worktrees,
+  repoRoot,
   onSelectBranch,
 }: {
   worktrees: readonly ConsoleWorktreeSummary[];
-  onSelectBranch: (branch: string) => void;
+  repoRoot: string;
+  onSelectBranch: (branch: string, repoRoot: string) => void;
 }) {
+  const [cleanExpanded, setCleanExpanded] = useState(false);
+
   const groups = useMemo(() => ({
     activeSessions: worktrees.filter(w => w.activeSessionCount > 0),
     dirty: worktrees.filter(w => w.activeSessionCount === 0 && w.changedCount > 0),
@@ -133,7 +155,9 @@ function WorktreeGrid({
             Active sessions
           </h4>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {activeSessions.map(wt => <WorktreeCard key={wt.path} wt={wt} onSelectBranch={onSelectBranch} />)}
+            {activeSessions.map(wt => (
+              <WorktreeCard key={wt.path} wt={wt} repoRoot={repoRoot} onSelectBranch={onSelectBranch} />
+            ))}
           </div>
         </section>
       )}
@@ -144,19 +168,36 @@ function WorktreeGrid({
             In progress (dirty)
           </h4>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {dirty.map(wt => <WorktreeCard key={wt.path} wt={wt} onSelectBranch={onSelectBranch} />)}
+            {dirty.map(wt => (
+              <WorktreeCard key={wt.path} wt={wt} repoRoot={repoRoot} onSelectBranch={onSelectBranch} />
+            ))}
           </div>
         </section>
       )}
 
       {clean.length > 0 && (
-        <section className="flex flex-col gap-2">
-          <h4 className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">
-            Clean
-          </h4>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {clean.map(wt => <WorktreeCard key={wt.path} wt={wt} onSelectBranch={onSelectBranch} />)}
-          </div>
+        <section className="flex flex-col gap-1">
+          {/* Collapsible header — collapsed by default to reduce noise */}
+          <button
+            type="button"
+            onClick={() => setCleanExpanded(e => !e)}
+            className="flex items-center gap-2 text-left group"
+          >
+            <span className={`text-[var(--text-muted)] text-[10px] transition-transform duration-150 ${cleanExpanded ? 'rotate-90' : ''}`}>
+              ▶
+            </span>
+            <h4 className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider group-hover:text-[var(--text-secondary)] transition-colors">
+              Clean
+            </h4>
+            <span className="text-xs text-[var(--text-muted)]">({clean.length})</span>
+          </button>
+          {cleanExpanded && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-1">
+              {clean.map(wt => (
+                <WorktreeCard key={wt.path} wt={wt} repoRoot={repoRoot} onSelectBranch={onSelectBranch} />
+              ))}
+            </div>
+          )}
         </section>
       )}
     </div>
@@ -164,16 +205,21 @@ function WorktreeGrid({
 }
 
 // ---------------------------------------------------------------------------
-// RepoSection — one collapsible section per repo
+// RepoSection — one section per repo
 // ---------------------------------------------------------------------------
 
-function RepoSection({ repo, onSelectBranch }: { repo: ConsoleRepoWorktrees; onSelectBranch: (branch: string) => void }) {
+function RepoSection({
+  repo,
+  onSelectBranch,
+}: {
+  repo: ConsoleRepoWorktrees;
+  onSelectBranch: (branch: string, repoRoot: string) => void;
+}) {
   const activeCount = repo.worktrees.filter(w => w.activeSessionCount > 0).length;
   const dirtyCount = repo.worktrees.filter(w => w.activeSessionCount === 0 && w.changedCount > 0).length;
 
   return (
     <section className="flex flex-col gap-3">
-      {/* Repo header */}
       <div className="flex items-center gap-2 border-b border-[var(--border)] pb-2">
         <h3 className="text-sm font-semibold text-[var(--text-primary)] font-mono">
           {repo.repoName}
@@ -189,12 +235,19 @@ function RepoSection({ repo, onSelectBranch }: { repo: ConsoleRepoWorktrees; onS
             · {dirtyCount} dirty
           </span>
         )}
-        <span className="text-xs text-[var(--text-muted)] ml-auto font-mono truncate max-w-[240px]" title={repo.repoRoot}>
+        <span
+          className="text-xs text-[var(--text-muted)] ml-auto font-mono truncate max-w-[240px]"
+          title={repo.repoRoot}
+        >
           {repo.repoRoot}
         </span>
       </div>
 
-      <WorktreeGrid worktrees={repo.worktrees} onSelectBranch={onSelectBranch} />
+      <WorktreeGrid
+        worktrees={repo.worktrees}
+        repoRoot={repo.repoRoot}
+        onSelectBranch={onSelectBranch}
+      />
     </section>
   );
 }
@@ -207,13 +260,13 @@ function RepoSection({ repo, onSelectBranch }: { repo: ConsoleRepoWorktrees; onS
  * Handles the async boundary for worktree data. Delegates all rendering
  * to RepoSection + WorktreeGrid once data is available so that those
  * components' hooks are always called unconditionally.
- *
- * Note: onSelectBranch filters sessions by branch name only, not branch+repo.
- * User-prefixed branch names (feature/user/foo) are practically unique in
- * multi-repo setups, so this is acceptable for MVP.
  */
-export function WorktreeList({ onSelectBranch }: { onSelectBranch: (branch: string) => void }) {
-  const { data, isLoading, error } = useWorktreeList();
+export function WorktreeList({
+  onSelectBranch,
+}: {
+  onSelectBranch: (branch: string, repoRoot: string) => void;
+}) {
+  const { data, isLoading, error, dataUpdatedAt, isFetching } = useWorktreeList();
 
   if (isLoading) {
     return (
@@ -263,7 +316,13 @@ export function WorktreeList({ onSelectBranch }: { onSelectBranch: (branch: stri
             </span>
           )}
         </h2>
-        <span className="text-xs text-[var(--text-muted)]">auto-refreshes every 10s</span>
+        <span className="text-xs text-[var(--text-muted)]">
+          {isFetching
+            ? 'refreshing…'
+            : dataUpdatedAt
+            ? `updated ${shortTime(dataUpdatedAt)}`
+            : ''}
+        </span>
       </div>
 
       {/* One section per repo */}

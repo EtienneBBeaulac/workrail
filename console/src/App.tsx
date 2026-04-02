@@ -9,8 +9,9 @@ export function App() {
   const [activeTab, setActiveTab] = useState<Tab>('sessions');
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [sessionSearch, setSessionSearch] = useState('');
+  const [sessionRepoRoot, setSessionRepoRoot] = useState<string | null>(null);
   // Incremented on every handleSelectBranch call so SessionList remounts even
-  // when the same branch is clicked twice (key must change to force remount).
+  // when the same branch/repo is clicked twice (key must change to force remount).
   const [sessionSearchNonce, setSessionSearchNonce] = useState(0);
 
   const handleSelectSession = (id: string) => {
@@ -24,11 +25,15 @@ export function App() {
   const handleTabChange = (tab: Tab) => {
     setActiveTab(tab);
     setSelectedSessionId(null);
-    if (tab === 'sessions') setSessionSearch('');
+    if (tab === 'sessions') {
+      setSessionSearch('');
+      setSessionRepoRoot(null);
+    }
   };
 
-  const handleSelectBranch = (branch: string) => {
+  const handleSelectBranch = (branch: string, repoRoot: string) => {
     setSessionSearch(branch);
+    setSessionRepoRoot(repoRoot);
     setSessionSearchNonce(n => n + 1);
     setActiveTab('sessions');
     setSelectedSessionId(null);
@@ -82,7 +87,12 @@ export function App() {
         ) : activeTab === 'worktrees' ? (
           <WorktreeList onSelectBranch={handleSelectBranch} />
         ) : (
-          <SessionList key={sessionSearchNonce} onSelectSession={handleSelectSession} initialSearch={sessionSearch} />
+          <SessionList
+            key={sessionSearchNonce}
+            onSelectSession={handleSelectSession}
+            initialSearch={sessionSearch}
+            initialRepoRoot={sessionRepoRoot}
+          />
         )}
       </main>
     </div>
