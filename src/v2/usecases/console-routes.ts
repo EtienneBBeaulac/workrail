@@ -10,7 +10,7 @@ import type { Application, Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
 import type { ConsoleService } from './console-service.js';
-import { getWorktreeList, buildActiveSessionCounts } from './worktree-service.js';
+import { getWorktreeList, buildActiveSessionCounts, resolveRepoRoot } from './worktree-service.js';
 
 /**
  * Resolve the console dist directory.
@@ -44,13 +44,27 @@ export function mountConsoleRoutes(app: Application, consoleService: ConsoleServ
     );
   });
 
-  // List git worktrees with enriched status and active session counts
+  // List git worktrees grouped by repo, with enriched status and active session counts.
+  // Repo roots are derived from session observations (repo_root anchor) so the view
+  // covers all repos agents have worked in, not just the current CWD's repo.
   app.get('/api/v2/worktrees', async (_req: Request, res: Response) => {
     try {
       const sessionResult = await consoleService.getSessionList();
       const sessions = sessionResult.isOk() ? sessionResult.value.sessions : [];
       const activeSessions = buildActiveSessionCounts(sessions);
-      const data = await getWorktreeList(process.cwd(), activeSessions);
+
+      // Collect unique repo roots from session observations.
+      // Use Set for dedup; filter(Boolean) removes nulls from old sessions.
+      const repoRootSet = new Set<string>(
+        sessions.map(s => s.repoRoot).filter((r): r is string => r !== null),
+      );
+
+      // Always include the CWD's repo root so the current project appears
+      // even if it has no sessions yet (graceful: silently skipped if not a git repo).
+      const cwdRoot = await resolveRepoRoot(process.cwd());
+      if (cwdRoot !== null) repoRootSet.add(cwdRoot);
+
+      const data = await getWorktreeList([...repoRootSet], activeSessions);
       res.json({ success: true, data });
     } catch (e) {
       res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });

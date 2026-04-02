@@ -7,6 +7,7 @@ import {
   MAX_DECISION_TRACE_ENTRY_SUMMARY_BYTES,
   MAX_DECISION_TRACE_TOTAL_BYTES,
   MAX_OBSERVATION_SHORT_STRING_LENGTH,
+  MAX_OBSERVATION_PATH_LENGTH,
   SHA256_DIGEST_PATTERN,
 } from '../../constants.js';
 import { DecisionTraceRefsV1Schema } from '../lib/decision-trace-ref.js';
@@ -151,11 +152,12 @@ export const DomainEventV1Schema = z.discriminatedUnion('kind', [
     kind: z.literal('observation_recorded'),
     scope: z.undefined(),
     data: z.object({
-      key: z.enum(['git_branch', 'git_head_sha', 'repo_root_hash']),
+      key: z.enum(['git_branch', 'git_head_sha', 'repo_root_hash', 'repo_root']),
       value: z.discriminatedUnion('type', [
         z.object({ type: z.literal('short_string'), value: z.string().min(1).max(MAX_OBSERVATION_SHORT_STRING_LENGTH) }),
         z.object({ type: z.literal('git_sha1'), value: z.string().regex(/^[0-9a-f]{40}$/) }),
         z.object({ type: z.literal('sha256'), value: sha256DigestSchema }),
+        z.object({ type: z.literal('path'), value: z.string().min(1).max(MAX_OBSERVATION_PATH_LENGTH) }),
       ]),
       confidence: z.enum(['low', 'med', 'high']),
     }),

@@ -2,7 +2,8 @@
  * Worktree Service — reads git worktree state for the Console UI.
  *
  * Pure read-only. No DI needed — git is a stable external tool.
- * Runs git commands against the repo containing the CWD (or the provided root).
+ * Accepts multiple repo roots (derived from session observations) so the console
+ * can group worktrees by project rather than only showing the current CWD's repo.
  *
  * Why not a port: git is not an application boundary we need to mock in tests.
  * The console is a dev-time tool; a real git repo is always present.
@@ -11,7 +12,12 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { basename } from 'path';
-import type { ConsoleWorktreeSummary, ConsoleWorktreeListResponse, ConsoleRunStatus } from './console-types.js';
+import type {
+  ConsoleWorktreeSummary,
+  ConsoleRepoWorktrees,
+  ConsoleWorktreeListResponse,
+  ConsoleRunStatus,
+} from './console-types.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -133,46 +139,29 @@ async function enrichWorktree(wt: RawWorktree): Promise<WorktreeEnrichment> {
 }
 
 // ---------------------------------------------------------------------------
-// Public API
+// Per-repo enrichment
 // ---------------------------------------------------------------------------
 
-export interface ActiveSessionsByBranch {
-  /** branch name -> count of in_progress sessions */
-  readonly counts: ReadonlyMap<string, number>;
+/**
+ * Resolve the git root for a given path, or null if it is not a git repo.
+ * Used by the route to canonicalize the CWD before adding it to the repo list.
+ */
+export async function resolveRepoRoot(path: string): Promise<string | null> {
+  return git(path, ['rev-parse', '--show-toplevel']);
 }
 
 /**
- * Build active session counts from session summaries.
- * Extracted so callers can pass in pre-fetched session data.
+ * Enrich all worktrees for a single repo root.
+ * Returns null if the repo root is inaccessible (not a git repo, deleted, etc.).
+ * Returns an empty array if the repo is valid but has no worktrees to enrich
+ * (all enrichments failed) — callers filter out empty repos.
  */
-export function buildActiveSessionCounts(
-  sessions: ReadonlyArray<{ gitBranch: string | null; status: ConsoleRunStatus }>,
-): ActiveSessionsByBranch {
-  const counts = new Map<string, number>();
-  for (const s of sessions) {
-    if (s.gitBranch && s.status === 'in_progress') {
-      counts.set(s.gitBranch, (counts.get(s.gitBranch) ?? 0) + 1);
-    }
-  }
-  return { counts };
-}
-
-/**
- * Return all git worktrees for the repo rooted at (or containing) `cwd`,
- * enriched with git status and joined with session data.
- *
- * All per-worktree enrichment runs in parallel — no serialization needed
- * since each worktree's git commands are independent of one another.
- */
-export async function getWorktreeList(
-  cwd: string,
+async function enrichRepo(
+  repoRoot: string,
   activeSessions: ActiveSessionsByBranch,
-): Promise<ConsoleWorktreeListResponse> {
-  const repoRoot = await git(cwd, ['rev-parse', '--show-toplevel']);
-  if (repoRoot === null) return { worktrees: [] };
-
+): Promise<readonly ConsoleWorktreeSummary[] | null> {
   const porcelain = await git(repoRoot, ['worktree', 'list', '--porcelain']);
-  if (porcelain === null) return { worktrees: [] };
+  if (porcelain === null) return null;
 
   const rawWorktrees = parseWorktreePorcelain(porcelain);
 
@@ -181,8 +170,7 @@ export async function getWorktreeList(
   //
   // Promise.allSettled so a single broken worktree (unexpected JS error, not a
   // git failure — those are already handled in git()) does not silently fail the
-  // entire response. Rejected entries are logged and excluded from the result
-  // rather than swallowed: surface information, don't hide it.
+  // entire repo. Rejected entries are logged and excluded: surface info, don't hide it.
   const results = await Promise.allSettled(rawWorktrees.map(wt => enrichWorktree(wt)));
 
   const worktrees: ConsoleWorktreeSummary[] = rawWorktrees.flatMap((wt, i) => {
@@ -212,5 +200,76 @@ export async function getWorktreeList(
     return b.headTimestampMs - a.headTimestampMs;
   });
 
-  return { worktrees };
+  return worktrees;
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+export interface ActiveSessionsByBranch {
+  /** branch name -> count of in_progress sessions */
+  readonly counts: ReadonlyMap<string, number>;
+}
+
+/**
+ * Build active session counts from session summaries.
+ * Extracted so callers can pass in pre-fetched session data.
+ */
+export function buildActiveSessionCounts(
+  sessions: ReadonlyArray<{ gitBranch: string | null; status: ConsoleRunStatus }>,
+): ActiveSessionsByBranch {
+  const counts = new Map<string, number>();
+  for (const s of sessions) {
+    if (s.gitBranch && s.status === 'in_progress') {
+      counts.set(s.gitBranch, (counts.get(s.gitBranch) ?? 0) + 1);
+    }
+  }
+  return { counts };
+}
+
+/**
+ * Return worktrees for each of the given repo roots, grouped per repo.
+ *
+ * Repos are enriched in parallel. Repos with 0 worktrees (inaccessible root,
+ * or all enrichments failed) are omitted from the result — an empty section
+ * header would be confusing when the repo's path no longer exists.
+ *
+ * Results are sorted by repo name for deterministic display order.
+ */
+export async function getWorktreeList(
+  repoRoots: readonly string[],
+  activeSessions: ActiveSessionsByBranch,
+): Promise<ConsoleWorktreeListResponse> {
+  const repoResults = await Promise.allSettled(
+    repoRoots.map(async (repoRoot) => {
+      const worktrees = await enrichRepo(repoRoot, activeSessions);
+      return { repoRoot, worktrees };
+    }),
+  );
+
+  const repos: ConsoleRepoWorktrees[] = repoResults.flatMap((result) => {
+    if (result.status === 'rejected') {
+      console.warn(`[WorktreeService] Failed to enrich repo:`, result.reason);
+      return [];
+    }
+    const { repoRoot, worktrees } = result.value;
+    // Omit repos with null (inaccessible) or 0 worktrees
+    if (!worktrees || worktrees.length === 0) return [];
+    return [{
+      repoName: basename(repoRoot),
+      repoRoot,
+      worktrees,
+    }];
+  });
+
+  // Deterministic display order: repos with active sessions first, then alphabetical
+  repos.sort((a, b) => {
+    const aActive = a.worktrees.some(w => w.activeSessionCount > 0) ? 0 : 1;
+    const bActive = b.worktrees.some(w => w.activeSessionCount > 0) ? 0 : 1;
+    if (aActive !== bActive) return aActive - bActive;
+    return a.repoName.localeCompare(b.repoName);
+  });
+
+  return { repos };
 }

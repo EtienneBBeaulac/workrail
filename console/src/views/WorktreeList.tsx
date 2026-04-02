@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useWorktreeList } from '../api/hooks';
-import type { ConsoleWorktreeSummary } from '../api/types';
+import type { ConsoleWorktreeSummary, ConsoleRepoWorktrees } from '../api/types';
 
 // ---------------------------------------------------------------------------
 // Time formatting
@@ -126,30 +126,12 @@ function WorktreeGrid({
   const { activeSessions, dirty, clean } = groups;
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-[var(--text-primary)] font-semibold flex items-center gap-2 flex-wrap">
-          Worktrees
-          <span className="text-[var(--text-muted)] font-normal text-sm">{worktrees.length}</span>
-          {activeSessions.length > 0 && (
-            <span className="text-xs font-medium text-[var(--status-in-progress)]">
-              · {activeSessions.length} active
-            </span>
-          )}
-          {dirty.length > 0 && (
-            <span className="text-xs font-medium text-orange-400">
-              · {dirty.length} dirty
-            </span>
-          )}
-        </h2>
-        <span className="text-xs text-[var(--text-muted)]">auto-refreshes every 10s</span>
-      </div>
-
+    <div className="flex flex-col gap-4">
       {activeSessions.length > 0 && (
         <section className="flex flex-col gap-2">
-          <h3 className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">
+          <h4 className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">
             Active sessions
-          </h3>
+          </h4>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {activeSessions.map(wt => <WorktreeCard key={wt.path} wt={wt} onSelectBranch={onSelectBranch} />)}
           </div>
@@ -158,9 +140,9 @@ function WorktreeGrid({
 
       {dirty.length > 0 && (
         <section className="flex flex-col gap-2">
-          <h3 className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">
+          <h4 className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">
             In progress (dirty)
-          </h3>
+          </h4>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {dirty.map(wt => <WorktreeCard key={wt.path} wt={wt} onSelectBranch={onSelectBranch} />)}
           </div>
@@ -169,9 +151,9 @@ function WorktreeGrid({
 
       {clean.length > 0 && (
         <section className="flex flex-col gap-2">
-          <h3 className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">
+          <h4 className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">
             Clean
-          </h3>
+          </h4>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {clean.map(wt => <WorktreeCard key={wt.path} wt={wt} onSelectBranch={onSelectBranch} />)}
           </div>
@@ -182,13 +164,53 @@ function WorktreeGrid({
 }
 
 // ---------------------------------------------------------------------------
+// RepoSection — one collapsible section per repo
+// ---------------------------------------------------------------------------
+
+function RepoSection({ repo, onSelectBranch }: { repo: ConsoleRepoWorktrees; onSelectBranch: (branch: string) => void }) {
+  const activeCount = repo.worktrees.filter(w => w.activeSessionCount > 0).length;
+  const dirtyCount = repo.worktrees.filter(w => w.activeSessionCount === 0 && w.changedCount > 0).length;
+
+  return (
+    <section className="flex flex-col gap-3">
+      {/* Repo header */}
+      <div className="flex items-center gap-2 border-b border-[var(--border)] pb-2">
+        <h3 className="text-sm font-semibold text-[var(--text-primary)] font-mono">
+          {repo.repoName}
+        </h3>
+        <span className="text-xs text-[var(--text-muted)]">{repo.worktrees.length}</span>
+        {activeCount > 0 && (
+          <span className="text-xs font-medium text-[var(--status-in-progress)]">
+            · {activeCount} active
+          </span>
+        )}
+        {dirtyCount > 0 && (
+          <span className="text-xs font-medium text-orange-400">
+            · {dirtyCount} dirty
+          </span>
+        )}
+        <span className="text-xs text-[var(--text-muted)] ml-auto font-mono truncate max-w-[240px]" title={repo.repoRoot}>
+          {repo.repoRoot}
+        </span>
+      </div>
+
+      <WorktreeGrid worktrees={repo.worktrees} onSelectBranch={onSelectBranch} />
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // WorktreeList — async boundary: loading / error / empty / data
 // ---------------------------------------------------------------------------
 
 /**
  * Handles the async boundary for worktree data. Delegates all rendering
- * to WorktreeGrid once data is available so that WorktreeGrid's hooks
- * are always called unconditionally.
+ * to RepoSection + WorktreeGrid once data is available so that those
+ * components' hooks are always called unconditionally.
+ *
+ * Note: onSelectBranch filters sessions by branch name only, not branch+repo.
+ * User-prefixed branch names (feature/user/foo) are practically unique in
+ * multi-repo setups, so this is acceptable for MVP.
  */
 export function WorktreeList({ onSelectBranch }: { onSelectBranch: (branch: string) => void }) {
   const { data, isLoading, error } = useWorktreeList();
@@ -209,7 +231,7 @@ export function WorktreeList({ onSelectBranch }: { onSelectBranch: (branch: stri
     );
   }
 
-  if (!data || data.worktrees.length === 0) {
+  if (!data || data.repos.length === 0) {
     return (
       <div className="text-[var(--text-muted)] text-sm py-12 text-center">
         No worktrees found. Run{' '}
@@ -219,5 +241,35 @@ export function WorktreeList({ onSelectBranch }: { onSelectBranch: (branch: stri
     );
   }
 
-  return <WorktreeGrid worktrees={data.worktrees} onSelectBranch={onSelectBranch} />;
+  const totalWorktrees = data.repos.reduce((n, r) => n + r.worktrees.length, 0);
+  const totalActive = data.repos.reduce((n, r) => n + r.worktrees.filter(w => w.activeSessionCount > 0).length, 0);
+  const totalDirty = data.repos.reduce((n, r) => n + r.worktrees.filter(w => w.activeSessionCount === 0 && w.changedCount > 0).length, 0);
+
+  return (
+    <div className="flex flex-col gap-6">
+      {/* Global header */}
+      <div className="flex items-center justify-between">
+        <h2 className="text-[var(--text-primary)] font-semibold flex items-center gap-2 flex-wrap">
+          Worktrees
+          <span className="text-[var(--text-muted)] font-normal text-sm">{totalWorktrees}</span>
+          {totalActive > 0 && (
+            <span className="text-xs font-medium text-[var(--status-in-progress)]">
+              · {totalActive} active
+            </span>
+          )}
+          {totalDirty > 0 && (
+            <span className="text-xs font-medium text-orange-400">
+              · {totalDirty} dirty
+            </span>
+          )}
+        </h2>
+        <span className="text-xs text-[var(--text-muted)]">auto-refreshes every 10s</span>
+      </div>
+
+      {/* One section per repo */}
+      {data.repos.map(repo => (
+        <RepoSection key={repo.repoRoot} repo={repo} onSelectBranch={onSelectBranch} />
+      ))}
+    </div>
+  );
 }
