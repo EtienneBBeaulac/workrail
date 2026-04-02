@@ -541,8 +541,9 @@ Implemented 2026-02-18. Per-request workspace anchor resolution, correct `listRo
 
 ### Next: Complete manual test plan validation
 
-Run all 23 scenarios from `docs/testing/v2-slices-4b-4c-adr008-loops-manual-test-plan.md` with
-the roots fix in place. Specifically verify E1+E2 (cross-workspace resume) now work correctly.
+Run the E1+E2 cross-workspace resume scenarios to verify the roots fix works end-to-end.
+Manual test plans from the v2 phases have been archived; verification is now covered by the
+26+ automated tests added with the roots fix.
 
 ### Done: Unflag v2 tools (Production Readiness)
 
