@@ -50,7 +50,7 @@ export function mountConsoleRoutes(app: Application, consoleService: ConsoleServ
       const sessionResult = await consoleService.getSessionList();
       const sessions = sessionResult.isOk() ? sessionResult.value.sessions : [];
       const activeSessions = buildActiveSessionCounts(sessions);
-      const data = getWorktreeList(process.cwd(), activeSessions);
+      const data = await getWorktreeList(process.cwd(), activeSessions);
       res.json({ success: true, data });
     } catch (e) {
       res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
