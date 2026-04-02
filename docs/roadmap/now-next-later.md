@@ -8,7 +8,7 @@ This is the lightweight cross-cutting roadmap view for WorkRail.
 - ~~Expand lifecycle validation coverage to a realistic target~~ (done -- auto-walk smoke test covers all bundled workflows)
 - ~~Finish prompt vs supplement boundary alignment across runtime, docs, and planning~~ (done -- boundary is documented consistently across authoring locks, execution contract, and planning docs)
 - ~~Modernize `workflow-for-workflows.v2.json` so one canonical authoring workflow supports both creating and modernizing workflows~~ (done -- shipped in `#152`, tracked from issue `#151`)
-- Strengthen rehydrate and resume retrieval budgets with deterministic retrieval contracts and broader verification
+- ~~Strengthen rehydrate and resume retrieval budgets with deterministic retrieval contracts and broader verification~~ (done -- explicit tiered contracts, 24 KB recovery budget, 2 KB resume preview budget, tier-drop tests; shipped in `#144161e`)
 - ~~Modernize `workflow-for-workflows.v2.json` so one canonical authoring workflow supports both creating and modernizing workflows~~ (done -- modernization support landed earlier; the workflow has now been pushed further into a deeper quality gate with effectiveness, simulation, adversarial review, and redesign-loop phases)
 
 ## Next

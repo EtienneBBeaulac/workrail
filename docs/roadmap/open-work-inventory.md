@@ -14,22 +14,18 @@ For explicit status on the major older planning docs themselves, see `docs/roadm
 
 ## Active partials
 
-### 1. Retrieval budget and recovery-surface strengthening
+### ~~1. Retrieval budget and recovery-surface strengthening~~ (done)
 
-- **Status**: active
-- **Why it is here**: the old budget system was too conservative for agent usefulness, especially on `rehydrate` and `resume_session`
-- **What was delivered so far**:
+- **Status**: complete
+- **What was delivered**:
   - explicit retrieval contracts for rehydrate and resume preview surfaces
   - deterministic tiering with `core` vs `tail` retention behavior
-  - larger bounded budgets for recovery packs and resume previews
+  - 24 KB recovery budget, 2 KB resume preview budget
   - stronger behavior tests covering tier dropping, bounded rendering, and usefulness-oriented scenarios
-- **Still open**:
-  - decide whether the current tier model needs refinement after more real usage
-  - finish broader doc/spec cleanup wherever the old budget story still leaks through
-  - decide whether checkpoint-related retrieval should stay as-is or follow the same contract pattern later
-- **Source docs**:
-  - `docs/design/v2-core-design-locks.md`
-  - `docs/reference/workflow-execution-contract.md`
+  - design-lock docs and MCP schema updated to match new budget values
+- **Remaining decisions** (parked, not blocking):
+  - whether the current tier model needs refinement after more real usage
+  - whether checkpoint-related retrieval should follow the same contract pattern later
 
 ### ~~2. Clean response formatting and supplement hardening~~ (done)
 
