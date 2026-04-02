@@ -69,4 +69,10 @@ export interface DataDirPortV2 {
 
   /** Absolute path to the global token alias index (v2 short token → session position map). */
   tokenIndexPath(): string;
+
+  // Slice 2: managed-source persistence seam
+  /** Absolute path to managed workflow source records file. */
+  managedSourcesPath(): string;
+  /** Absolute path to managed workflow source records lock file. */
+  managedSourcesLockPath(): string;
 }

@@ -145,6 +145,7 @@ export async function createToolContext(): Promise<ToolContext> {
       }
 
       const rememberedRootsStore = container.resolve<any>(DI.V2.RememberedRootsStore);
+      const managedSourceStore = container.resolve<any>(DI.V2.ManagedSourceStore);
 
       v2 = {
         gate,
@@ -158,6 +159,7 @@ export async function createToolContext(): Promise<ToolContext> {
         tokenCodecPorts,
         tokenAliasStore,
         rememberedRootsStore,
+        managedSourceStore,
         validationPipelineDeps,
         // resolvedRootUris starts empty; overridden per-request at the CallTool boundary
         // with a snapshot of the current MCP client roots (see transport entry points).

@@ -15,6 +15,7 @@ import { LocalSessionLockV2 } from '../../src/v2/infra/local/session-lock/index.
 import { LocalSessionEventLogStoreV2 } from '../../src/v2/infra/local/session-store/index.js';
 import { LocalSnapshotStoreV2 } from '../../src/v2/infra/local/snapshot-store/index.js';
 import { LocalPinnedWorkflowStoreV2 } from '../../src/v2/infra/local/pinned-workflow-store/index.js';
+import { LocalManagedSourceStoreV2 } from '../../src/v2/infra/local/managed-source-store/index.js';
 import { ExecutionSessionGateV2 } from '../../src/v2/usecases/execution-session-gate.js';
 import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
 import { Base32AdapterV2 } from '../../src/v2/infra/local/base32/index.js';
@@ -136,7 +137,8 @@ export async function createV2Dependencies(dataDir: LocalDataDirV2): Promise<V2D
   const gate = new ExecutionSessionGateV2(sessionLock, sessionStore);
   const snapshotStore = new LocalSnapshotStoreV2(dataDir, fsPort, crypto);
   const pinnedStore = new LocalPinnedWorkflowStoreV2(dataDir, fsPort);
-  
+  const managedSourceStore = new LocalManagedSourceStoreV2(dataDir, fsPort);
+
   const keyringPort = new LocalKeyringV2(dataDir, fsPort, base64url, entropy);
   const keyring = await keyringPort.loadOrCreate().match(
     (v) => v,
@@ -167,6 +169,7 @@ export async function createV2Dependencies(dataDir: LocalDataDirV2): Promise<V2D
     idFactory,
     tokenCodecPorts,
     tokenAliasStore,
+    managedSourceStore,
     validationPipelineDeps: createTestValidationPipelineDeps(),
   };
 }

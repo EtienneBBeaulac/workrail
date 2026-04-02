@@ -396,15 +396,103 @@ For a `legacy_project` catalog entry: apply migration guidance if ANY other stor
 
 ## 14. Execution Summary
 
-The implementation should now begin with the **smallest slice that makes the source catalog real**.
+Slice 1 is complete (PR #192 merged). The source catalog seam is real and tested.
 
-Do **not** start with:
+Slice 2 begins next: establish the managed-source persistence seam so Slice 3 can build attach/enable behavior on top of it.
 
-- managed attach proof
-- persistence-first control state
-- richer lifecycle behavior
-- broader onboarding breadth
-- console/control-tower UX
-- generalized platform abstractions
+## 16. Slice 2 Technical Specification
 
-Start by making the catalog seam honest in code, because every later Phase 2A step depends on it.
+### Status
+Complete. PR merged.
+
+### Files to create/change (9)
+
+1. `src/v2/ports/managed-source-store.port.ts` -- new port: domain types + interface
+2. `src/v2/infra/local/managed-source-store/index.ts` -- new local adapter (mirrors remembered-roots-store)
+3. `src/v2/ports/data-dir.port.ts` -- add `managedSourcesPath()` and `managedSourcesLockPath()`
+4. `src/v2/infra/local/data-dir/index.ts` -- implement the two new methods
+5. `src/mcp/types.ts` -- add `managedSourceStore?: ManagedSourceStorePortV2` to `V2Dependencies`
+6. `src/di/tokens.ts` -- add `ManagedSourceStore: Symbol('V2.ManagedSourceStore')` under `V2` group
+7. `src/di/container.ts` -- register `LocalManagedSourceStoreV2` in `registerV2Services()` Level 2
+8. `src/mcp/server.ts` -- resolve `DI.V2.ManagedSourceStore` and wire into `v2` object
+9. `tests/unit/v2/managed-source-store.test.ts` -- new unit tests
+
+### Domain types (port file)
+
+```typescript
+export type ManagedSourceStoreError =
+  | {
+      readonly code: 'MANAGED_SOURCE_BUSY';
+      readonly message: string;
+      readonly retry: { readonly kind: 'retryable_after_ms'; readonly afterMs: number };
+      readonly lockPath: string;
+    }
+  | { readonly code: 'MANAGED_SOURCE_IO_ERROR'; readonly message: string }
+  | { readonly code: 'MANAGED_SOURCE_CORRUPTION'; readonly message: string };
+
+export interface ManagedSourceRecordV2 {
+  readonly path: string;       // absolute, normalized filesystem path
+  readonly addedAtMs: number;  // epoch ms when attached
+}
+
+export interface ManagedSourceStorePortV2 {
+  list(): ResultAsync<readonly ManagedSourceRecordV2[], ManagedSourceStoreError>;
+  attach(path: string): ResultAsync<void, ManagedSourceStoreError>;
+  detach(path: string): ResultAsync<void, ManagedSourceStoreError>;
+}
+```
+
+### File format
+
+```json
+{ "v": 1, "sources": [{ "path": "/abs/path", "addedAtMs": 0 }] }
+```
+
+File location: `<dataRoot>/managed-sources/managed-sources.json`
+Lock location: `<dataRoot>/managed-sources/managed-sources.lock`
+
+### Adapter behavior
+
+- `list()`: read file; FS_NOT_FOUND -> return []; parse and validate with Zod; normalize paths
+- `attach(path)`: withLock -> list -> dedup by resolved path -> append if new -> persist
+- `detach(path)`: withLock -> list -> filter out resolved path -> persist
+- `persist()`: same crash-safe write as remembered-roots (mkdirp -> openWriteTruncate(tmp) -> writeAll -> fsyncFile -> closeFile -> rename -> fsyncDir)
+- `withLock()`: same openExclusive pattern as remembered-roots
+
+### Type cast rule (architecture lock)
+
+`v2-type-safety.test.ts` enforces no `as any` in `src/v2/**`. When passing the file value to `toCanonicalBytes`, use the `as unknown as JsonValue` double-cast pattern (not `as any`). This matches the pattern in `LocalRememberedRootsStoreV2` and is the only permitted escape hatch.
+
+### Idempotency invariant
+
+`attach()` for an already-present path is a no-op (does not update addedAtMs). This keeps the timestamp semantically accurate (it means "when first attached").
+
+### DataDir new methods
+
+```typescript
+managedSourcesPath(): string {
+  return path.join(this.root(), 'managed-sources', 'managed-sources.json');
+}
+
+managedSourcesLockPath(): string {
+  return path.join(this.root(), 'managed-sources', 'managed-sources.lock');
+}
+```
+
+### Test cases (unit, tests/unit/v2/managed-source-store.test.ts)
+
+1. persists and reloads attached sources across store instances
+2. attach is idempotent -- duplicate path does not add a second entry
+3. detach removes a source; second detach is a no-op (does not fail)
+4. list returns empty array when file does not exist yet
+5. returns MANAGED_SOURCE_CORRUPTION for invalid JSON
+6. returns MANAGED_SOURCE_BUSY when lock file already exists
+
+### Acceptance criteria
+
+- `ManagedSourceStorePortV2` port exists and is importable
+- `LocalManagedSourceStoreV2` adapts the port with crash-safe local file persistence
+- `DataDirPortV2` declares the two new path methods; `LocalDataDirV2` implements them
+- `V2Dependencies.managedSourceStore` is optional and wired in production bootstrap
+- All 6 unit tests pass
+- `npm run build` passes with no type errors
