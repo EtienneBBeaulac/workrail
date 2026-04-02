@@ -1,0 +1,317 @@
+{
+  "id": "architecture-scalability-audit",
+  "name": "Architecture Scalability Audit (v1 • Evidence-Driven • Dimension-Scoped • rigorMode-Adaptive)",
+  "version": "0.1.0",
+  "description": "Audit a bounded codebase scope for architecture scalability. The user declares which scalability dimensions matter (load, data volume, team/org, feature extensibility, operational); the workflow audits only those dimensions and produces per-dimension verdicts grounded in actual code, not generic advice.",
+  "recommendedPreferences": {
+    "recommendedAutonomy": "guided",
+    "recommendedRiskPolicy": "conservative"
+  },
+  "features": [
+    "wr.features.subagent_guidance"
+  ],
+  "preconditions": [
+    "The user provides a bounded scope (project, feature, or explicitly named component boundary).",
+    "The user can identify which scalability dimensions they care about for this scope.",
+    "The agent can inspect the codebase, architecture patterns, and design decisions in the scope.",
+    "A human will consume the final per-dimension verdicts and prioritized concerns."
+  ],
+  "metaGuidance": [
+    "DEFAULT BEHAVIOR: self-execute with tools. Ask only for true scope or dimension decisions you cannot resolve yourself.",
+    "V2 DURABILITY: keep workflow truth in output.notesMarkdown and explicit context fields. Human-facing markdown artifacts are optional companions only.",
+    "OWNERSHIP: the main agent owns the fact packet, synthesis, verdict calibration, and final handoff. Delegated dimension audits are evidence, not authority.",
+    "DIMENSION DISCIPLINE: audit only the dimensions the user declared. Do not add dimensions the user did not select, even if they look relevant — surface them as advisory notes instead.",
+    "EVIDENCE FIRST: every risk or will_break finding must cite a specific file, class, method, or pattern in the codebase. Technology name alone is not evidence.",
+    "GROWTH SCENARIO: every concern must name a growth scenario (e.g. 10x traffic, 100x records, 3x team size). Generic 'won't scale' findings are not acceptable.",
+    "VERDICT TIERS: use will_break / risk / fine. Do not force a cleaner answer than the evidence supports.",
+    "BOUNDARY: this workflow audits and prioritizes. It must not drift into implementation planning or remediation design unless the user explicitly asks."
+  ],
+  "steps": [
+    {
+      "id": "phase-0-bound-scope-and-declare-dimensions",
+      "title": "Phase 0: Bound the Scope and Declare Dimensions",
+      "promptBlocks": {
+        "goal": "Establish a precise bounded scope and confirm which scalability dimensions this audit will cover.",
+        "constraints": [
+          [{ "kind": "ref", "refId": "wr.refs.notes_first_durability" }],
+          "Scope must be bounded before investigation begins. Unbounded scope produces generic findings.",
+          "Dimension selection is the user's decision. Explore the codebase to inform the conversation, but the user declares which dimensions matter."
+        ],
+        "procedure": [
+          "Read the codebase to understand the architecture: key components, entry points, data flows, and main patterns within the declared scope.",
+          "Present the five scalability dimensions and ask the user to select which apply: (1) load — handles more requests, users, or throughput; (2) data_volume — handles more records, storage, or query size; (3) team_org — more teams or developers working on this scope; (4) feature_extensibility — more features added without rearchitecting; (5) operational — more deployments, environments, or operational complexity.",
+          "Ask the user to confirm the scope boundary — what is explicitly in and explicitly out.",
+          "Classify audit complexity: Simple (1–2 dimensions, small scope), Medium (2–3 dimensions, moderate scope), Complex (4–5 dimensions or large scope).",
+          "Run a context-clarity check: score boundary_clarity, dimension_clarity, and codebase_familiarity 1–3. If any score is 1, gather more context before advancing."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Scope boundary (in and out), declared dimensions with rationale, audit complexity classification, and any open boundary questions.",
+          "context": "Capture scope, scopeDescription, declaredDimensions, auditComplexity, contextSummary, candidateFiles, and openQuestions."
+        },
+        "verify": [
+          "Declared dimensions are explicit and user-confirmed.",
+          "Scope boundary is concrete enough that an auditor who has never seen this codebase knows what to examine.",
+          "No dimensions were added by the agent without user confirmation."
+        ]
+      },
+      "requireConfirmation": true
+    },
+    {
+      "id": "phase-1-state-scalability-hypothesis",
+      "title": "Phase 1: State Scalability Hypothesis",
+      "promptBlocks": {
+        "goal": "State your current hypothesis about where scalability risks likely live before detailed investigation begins.",
+        "constraints": [
+          "Keep this short and falsifiable.",
+          "This is a reference point, not a position to defend."
+        ],
+        "procedure": [
+          "Based on your initial codebase scan, write your best guess about which dimension and which component is most likely to be the main scalability concern.",
+          "Name the specific architectural pattern or design decision you are most worried about.",
+          "Say what would most likely make your current hypothesis wrong."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Scalability hypothesis, most-worried-about pattern, and what could falsify it.",
+          "context": "Capture scalabilityHypothesis."
+        },
+        "verify": [
+          "The hypothesis names a specific dimension and component, not a generic concern.",
+          "The hypothesis is concrete enough that later synthesis can say what changed your mind."
+        ]
+      },
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-2-freeze-fact-packet-and-select-reviewers",
+      "title": "Phase 2: Freeze Fact Packet and Select Dimension Reviewer Families",
+      "promptBlocks": {
+        "goal": "Freeze a neutral scalability fact packet and assign one reviewer family per declared dimension.",
+        "constraints": [
+          [{ "kind": "ref", "refId": "wr.refs.notes_first_durability" }],
+          "The fact packet is the primary truth for all dimension reviewer families.",
+          "Keep the scalability hypothesis as a reference to challenge, not a frame to defend.",
+          "One reviewer family per declared dimension only. Do not add families for undeclared dimensions."
+        ],
+        "procedure": [
+          "Create a neutral `scalabilityFactPacket` containing: scope boundary (in and out), declared dimensions, key architectural patterns found, main components and their roles, data flow and storage patterns, concurrency and state management approach, dependency boundaries and coupling, deployment and runtime assumptions, and explicit open unknowns.",
+          "Include realism signals: code that looks scalable at a glance but may have hidden limits (e.g. in-memory state, synchronous choke points, missing pagination, tight coupling between components).",
+          "For each declared dimension, assign a reviewer family mission: load = examine request handling, concurrency, session/state management, caching, connection pools, and horizontal scaling readiness — check whether session state is in-memory or distributed, whether connection pools are bounded, whether synchronous bottlenecks exist in hot paths; data_volume = examine query patterns, pagination, indexing, result set bounds, storage growth, and data access layer scalability — check for unbounded queries (missing LIMIT/pagination), missing indexes on filtered columns, N+1 patterns in repository/service layers, and data structures that grow unboundedly; team_org = examine module coupling, shared state, and parallel development friction — specifically check import graphs for cross-module dependencies that would cause merge conflicts, identify shared mutable singletons or global state, look for test setup that requires spinning up adjacent modules, and check whether public interfaces change frequently or are stable; feature_extensibility = examine how much code changes when a new variant of a core concept is added — specifically look for switch/when/if-else chains on type discriminators that would need a new branch per feature, hardcoded business-rule constants, direct concrete dependencies instead of interfaces or abstractions, and files that are edited for every new feature; operational = examine deployment complexity, environment-specific behavior, observability, configuration surface, and operational runbook needs — specifically check for environment-specific code paths (if/switch on env vars that create different behavior per environment), configuration that must be updated in multiple places per deployment, whether logs and metrics cover the main operational failure modes, and whether a new deployment of this scope would require manual steps beyond a standard deploy.",
+          "Set selectedReviewerFamilies to the list of assigned families (one per declared dimension). Set contradictionCount and blindSpotCount to 0."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Neutral scalability fact packet, assigned reviewer families per dimension, and any realism signals surfaced.",
+          "context": "Capture scalabilityFactPacket, selectedReviewerFamilies, contradictionCount, blindSpotCount."
+        },
+        "verify": [
+          "The fact packet is concrete enough that a reviewer family can audit its dimension without regathering broad context.",
+          "Exactly one reviewer family is assigned per declared dimension."
+        ]
+      },
+      "promptFragments": [
+        {
+          "id": "phase-2-quick",
+          "when": { "var": "auditComplexity", "equals": "Simple" },
+          "text": "For a Simple audit, keep the fact packet compact — scope summary, key patterns, and declared dimensions only. Skip exhaustive realism signal enumeration."
+        }
+      ],
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-3-parallel-dimension-audit",
+      "title": "Phase 3: Parallel Dimension Audit Bundle",
+      "promptBlocks": {
+        "goal": "Run one reviewer family per declared dimension in parallel, then synthesize their findings as evidence rather than verdicts.",
+        "constraints": [
+          [{ "kind": "ref", "refId": "wr.refs.notes_first_durability" }],
+          [{ "kind": "ref", "refId": "wr.refs.synthesis_under_disagreement" }],
+          "Each reviewer family uses scalabilityFactPacket as primary truth.",
+          "Reviewer-family outputs are raw evidence. The main agent owns synthesis and verdict assignment.",
+          "Each reviewer family audits only its declared dimension — no cross-dimension scope creep."
+        ],
+        "procedure": [
+          "Before investigating, restate your scalabilityHypothesis and name which dimension is most likely to challenge it.",
+          "Run one investigation per declared dimension. For each dimension, the investigation must return: top findings, evidence for each finding (specific file, class, method, or pattern references — not just technology names), verdict tier per finding (will_break / risk / fine), growth scenario for each concern (e.g. 10x traffic, 100x records, 3x team size), biggest uncertainty, and likely false-confidence vector for this dimension.",
+          "After completing all dimension investigations, synthesize explicitly: what was confirmed, what was genuinely new, what looks weak or overstated, and what changed your current hypothesis.",
+          "Build dimensionFindings keyed by dimension containing: findings list, verdict summary, evidence quality assessment, and open questions.",
+          "Identify cross-cutting concerns: architectural patterns or components that appear in findings from multiple dimensions."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Per-dimension audit synthesis, hypothesis comparison, evidence quality notes, and cross-cutting concerns identified.",
+          "context": "Capture dimensionFindings, contradictionCount, blindSpotCount, crossCuttingConcerns."
+        },
+        "verify": [
+          "Every declared dimension has findings in dimensionFindings.",
+          "Reviewer-family outputs were synthesized by the main agent, not adopted verbatim.",
+          "Each will_break or risk finding in dimensionFindings has at least one specific code reference."
+        ]
+      },
+      "promptFragments": [
+        {
+          "id": "phase-3-quick",
+          "when": { "var": "auditComplexity", "equals": "Simple" },
+          "text": "For a Simple audit, self-execute each dimension investigation directly without spawning WorkRail Executors. One dimension at a time, using tools to inspect the codebase. This keeps the audit proportionate to the scope."
+        },
+        {
+          "id": "phase-3-thorough",
+          "when": { "var": "auditComplexity", "equals": "Complex" },
+          "text": "For a Complex audit, spawn all dimension executors simultaneously, then after synthesis run routine-hypothesis-challenge against any will_break finding before closing this phase. This adds an adversarial check on the most serious findings."
+        }
+      ],
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-4-synthesis-loop",
+      "type": "loop",
+      "title": "Phase 4: Contradiction and Synthesis Loop",
+      "loop": {
+        "type": "while",
+        "conditionSource": {
+          "kind": "artifact_contract",
+          "contractRef": "wr.contracts.loop_control",
+          "loopId": "scalability_synthesis_loop"
+        },
+        "maxIterations": 3
+      },
+      "body": [
+        {
+          "id": "phase-4a-resolve-contradictions",
+          "title": "Resolve Contradictions and Cross-Cutting Concerns",
+          "promptBlocks": {
+            "goal": "Resolve contradictions between dimension findings and sharpen cross-cutting concerns.",
+            "constraints": [
+              [{ "kind": "ref", "refId": "wr.refs.parallelize_cognition_serialize_synthesis" }],
+              "Contradiction resolution is main-agent work. Do not delegate synthesis.",
+              "A cross-cutting concern that spans multiple dimensions is its own finding."
+            ],
+            "procedure": [
+              "List any contradictions: cases where two dimension reviewers disagreed about the same component, or where one reviewer's finding undermines another's.",
+              "Adjudicate each contradiction explicitly: which evidence is stronger, and what is the resolved finding?",
+              "For any finding that lacks a specific code reference, either locate the evidence yourself or downgrade the verdict to risk and flag evidenceWeak = true.",
+              "Update dimensionFindings with resolved contradictions. Update crossCuttingConcerns with any newly identified cross-dimension patterns.",
+              "Update contradictionCount to 0 when all are resolved, or to the remaining unresolved count."
+            ],
+            "outputRequired": {
+              "notesMarkdown": "Contradictions resolved (or still open), cross-cutting concerns updated, evidence-weak findings flagged.",
+              "context": "Capture contradictionCount, crossCuttingConcerns, evidenceWeakCount, dimensionFindings."
+            },
+            "verify": [
+              "Each resolved contradiction names which evidence won and why.",
+              "Evidence-weak findings are explicitly flagged."
+            ]
+          },
+          "requireConfirmation": false
+        },
+        {
+          "id": "phase-4b-blind-spot-check",
+          "title": "Blind-Spot Check",
+          "promptBlocks": {
+            "goal": "Check for the four most dangerous blind spots before closing synthesis.",
+            "constraints": [
+              "This is a structured four-item check, not a free-form review."
+            ],
+            "procedure": [
+              "Check 1 — Technology-vs-usage: did any reviewer identify a scalable technology without checking actual usage patterns in the code? (e.g. Postgres was identified as the DB, but were N+1 queries, missing indexes, or unbounded result sets actually checked?) Fix any instances found.",
+              "Check 2 — Scope drift: did any reviewer audit components outside the declared scope boundary? Remove out-of-scope findings.",
+              "Check 3 — Undeclared relevant dimensions: does the codebase have patterns suggesting a declared-out dimension actually matters for this scope? If so, surface it as an advisory note without adding it to the audit verdict.",
+              "Check 4 — Growth scenario vagueness: does every concern name a specific growth scenario? If not, assign one now based on the most realistic growth pattern for this scope.",
+              "Set blindSpotCount to the number of blind spots found across all four checks."
+            ],
+            "outputRequired": {
+              "notesMarkdown": "Results for all four blind spot checks, fixes applied, and any advisory notes for undeclared dimensions.",
+              "context": "Capture blindSpotCount."
+            },
+            "verify": [
+              "All four blind spot categories were explicitly checked.",
+              "Every remaining concern has a growth scenario after this step."
+            ]
+          },
+          "requireConfirmation": false
+        },
+        {
+          "id": "phase-4c-synthesis-loop-decision",
+          "title": "Synthesis Loop Decision",
+          "promptBlocks": {
+            "goal": "Decide whether the synthesis loop needs another pass.",
+            "constraints": [
+              "Use the trigger rules, not vibes."
+            ],
+            "procedure": [
+              "Continue if contradictionCount > 0.",
+              "Otherwise continue if evidenceWeakCount > 0 for any will_break finding.",
+              "Otherwise continue if blindSpotCount > 0 and the blind spot affects a risk or will_break finding.",
+              "Otherwise stop."
+            ],
+            "outputRequired": {
+              "artifact": "Emit a `wr.loop_control` artifact for `scalability_synthesis_loop` with `decision` set to `continue` or `stop`."
+            },
+            "verify": [
+              "The loop does not stop while contradictions or evidence-weak will_break findings remain."
+            ]
+          },
+          "outputContract": {
+            "contractRef": "wr.contracts.loop_control"
+          },
+          "requireConfirmation": false
+        }
+      ]
+    },
+    {
+      "id": "phase-5-final-validation",
+      "title": "Phase 5: Final Validation",
+      "promptBlocks": {
+        "goal": "Verify all four hard gates before the final handoff.",
+        "constraints": [
+          "This is a structured checklist pass. If any hard gate fails, fix it before advancing.",
+          "Do not advance to handoff with known hard gate failures."
+        ],
+        "procedure": [
+          "Verdict aggregation — derive scalabilityVerdict from dimensionFindings using these explicit rules: (1) at_risk if any declared dimension has a will_break finding; (2) conditional if no will_break findings exist but at least one dimension has a risk finding; (3) ready_to_scale if all declared dimensions have only fine findings; (4) inconclusive if any dimension still has evidenceWeak = true after the synthesis loop, making a reliable verdict impossible. Capture verdictRationale naming the specific dimension and finding that drove the verdict.",
+          "Hard gate 1 — Evidence grounding: for every will_break and risk finding in dimensionFindings, confirm it cites a specific file, class, method, or code pattern. Technology name alone fails this gate. Fix by locating the code evidence or downgrading to risk with an evidence-needed note.",
+          "Hard gate 2 — Dimension coverage: confirm every declared dimension has at least one substantive finding. A verdict of fine with supporting evidence counts. A dimension with no findings at all fails this gate.",
+          "Hard gate 3 — Hypothesis revisited: confirm that scalabilityHypothesis from Phase 1 is either confirmed or explicitly revised in synthesis notes. If it was never addressed, address it now.",
+          "Hard gate 4 — Growth scenario specificity: confirm every concern in dimensionFindings names a growth scenario. If any do not, assign one now.",
+          "Set hardGatesPassed = true only when the verdict aggregation and all four gates pass. Set hardGateFailures to the list of any that needed fixing."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Verdict aggregation result, hard gate results: which passed, which failed, what was fixed.",
+          "context": "Capture hardGatesPassed, hardGateFailures, scalabilityVerdict, verdictRationale."
+        },
+        "verify": [
+          "All four hard gates were checked explicitly.",
+          "hardGatesPassed reflects the actual state after any fixes."
+        ]
+      },
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-6-scalability-handoff",
+      "title": "Phase 6: Scalability Handoff",
+      "promptBlocks": {
+        "goal": "Deliver the final scalability audit verdict for a human decision-maker.",
+        "constraints": [
+          "This workflow informs a decision. It does not make architectural changes by itself.",
+          "Do not drift into implementation planning or remediation design unless the user explicitly asks."
+        ],
+        "procedure": [
+          "Open with the overall scalability readiness verdict (ready_to_scale / conditional / at_risk / inconclusive) and the verdictRationale — name the specific dimension and finding that drove it.",
+          "For each declared dimension, give: dimension name, verdict tier (will_break / risk / fine), top finding with specific code reference, growth scenario, and severity.",
+          "List cross-cutting concerns: patterns that create scalability risk across multiple dimensions.",
+          "Revisit scalabilityHypothesis from Phase 1: was it confirmed or revised? What evidence changed your view?",
+          "Give a prioritized concern list ordered by: (1) will_break findings first, (2) risk findings by severity, (3) cross-cutting concerns, (4) fine findings worth noting as already solid.",
+          "Surface any advisory notes for undeclared dimensions that may be worth considering.",
+          "State what is already well-designed for scale — not everything should be a concern."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Decision-ready scalability handoff: overall verdict, per-dimension summary with code references, prioritized concerns, cross-cutting concerns, hypothesis outcome, and what is already solid."
+        },
+        "verify": [
+          "The handoff is verdict-first and evidence-grounded.",
+          "Every concern is tied to a specific code reference and growth scenario.",
+          "The hypothesis from Phase 1 is explicitly addressed.",
+          "What is already well-designed is stated — not just the concerns."
+        ]
+      },
+      "requireConfirmation": false
+    }
+  ]
+}
