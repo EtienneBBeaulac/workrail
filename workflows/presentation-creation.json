@@ -1,330 +1,165 @@
 {
     "id": "presentation-creation",
-    "name": "Dynamic Presentation Creation Workflow",
-    "version": "0.1.0",
-    "description": "A comprehensive workflow for creating dynamic, interesting, and insightful presentations. Guides users through audience analysis, content strategy, visual design, and delivery preparation to create compelling presentations that engage and inform.",
+    "name": "Presentation Creation Workflow",
+    "version": "1.0.0",
+    "description": "Guides you through creating a compelling, audience-grounded presentation. Covers audience analysis, content strategy, slide structure, content development, and delivery preparation. Tool-agnostic: output works with PowerPoint, Google Slides, Keynote, or any other presentation tool.",
     "preconditions": [
-        "User has a clear presentation topic or objective",
-        "User has access to relevant source materials or research",
-        "User has identified their target audience",
-        "User has a rough timeline for presentation delivery"
+        "You have a clear presentation topic or objective.",
+        "You know roughly who your audience is.",
+        "You have access to any source materials or data you plan to reference."
     ],
     "clarificationPrompts": [
         "What is the main objective or key message of your presentation?",
-        "Who is your target audience and what is their expertise level?",
-        "What is the presentation format (conference, meeting, webinar, etc.)?",
-        "How much time do you have for the presentation?",
-        "What supporting materials or data do you have available?",
-        "Are there any specific constraints or requirements to consider?"
+        "Who is your target audience and what is their professional context?"
+    ],
+    "metaGuidance": [
+        "Ground every decision in your audience profile. Generic presentations fail because they are not written for anyone specific.",
+        "Each step should explicitly reference outputs from the previous step to avoid boilerplate drift.",
+        "Prioritize clarity over completeness. A tight presentation that lands one message beats a comprehensive one that loses the audience.",
+        "Build in engagement moments throughout, not just at the opening.",
+        "Every section should pass the 'so what?' test: if the audience cannot articulate why they should care, cut or reframe.",
+        "Always have a clear call-to-action. Tell the audience what you want them to do or believe after your presentation.",
+        "Test all technical elements well before your presentation day.",
+        "Prepare contingency plans for common problems: technology failures, timing overruns, tough questions."
     ],
     "steps": [
         {
             "id": "audience-and-context-analysis",
             "title": "Audience & Context Analysis",
-            "prompt": "**PREP**: Thoroughly analyze your audience and presentation context to ensure maximum impact.\n\n**IMPLEMENT**: Create a detailed audience profile:\n- **Audience Demographics**: Professional background, expertise level, role/seniority\n- **Audience Motivations**: What they want to learn, their pain points, success criteria\n- **Context Analysis**: Event type, setting, time constraints, follow-up expectations\n- **Engagement Preferences**: Interactive vs. presentation style, Q&A expectations\n- **Success Metrics**: How will you measure if the presentation achieved its goals?\n\n**VERIFY**: Confirm you have a clear understanding of who you're presenting to and what success looks like.",
-            "agentRole": "You are an audience research specialist and presentation strategist with expertise in understanding diverse professional audiences. Your strength lies in identifying audience needs, motivations, and preferences to ensure presentations resonate and achieve their intended impact.",
-            "guidance": [
-                "The better you understand your audience, the more you can tailor your message",
-                "Consider both explicit and implicit audience needs",
-                "Think about the broader context - what happens before and after your presentation?"
-            ],
-            "requireConfirmation": true,
-            "validationCriteria": [
-                {
-                    "type": "regex",
-                    "pattern": "(?i)##?\\s*Audience Demographics:?",
-                    "message": "Analysis must include audience demographics section"
+            "promptBlocks": {
+                "goal": "Build a concrete audience profile and context map that every downstream step will rely on. Shallow audience analysis is the root cause of generic presentations.",
+                "constraints": [
+                    "Be specific, not categorical. 'Senior engineers at a fintech startup' is useful; 'technical professionals' is not.",
+                    "Address both explicit needs (what they asked for) and implicit needs (what they actually need to hear).",
+                    "Consider the broader context: what happens before and after your presentation? What mood will the audience be in?"
+                ],
+                "procedure": [
+                    "Define the audience: professional background, expertise level, role and seniority mix, and any relevant cultural or organizational context.",
+                    "Identify audience motivations: what do they want to learn or decide? What pain points or pressures are they carrying into the room?",
+                    "Analyze the presentation context: event type (conference, internal meeting, client pitch, webinar), setting (in-person, remote, hybrid), time constraints, and follow-up expectations.",
+                    "Define success: what does a successful outcome look like for both you and the audience? What specific action or belief shift are you aiming for?",
+                    "Identify risks: what might cause the audience to disengage, push back, or leave confused?"
+                ],
+                "outputRequired": {
+                    "audienceProfile": "A concise profile covering: demographics and expertise, motivations and pain points, context and setting, success definition, and key engagement risks."
                 },
-                {
-                    "type": "regex",
-                    "pattern": "(?i)##?\\s*Audience Motivations:?",
-                    "message": "Analysis must include audience motivations section"
-                },
-                {
-                    "type": "length",
-                    "min": 400,
-                    "message": "Analysis should be at least 400 characters for comprehensive coverage"
-                }
-            ],
-            "hasValidation": true
+                "verify": [
+                    "Does every section contain specific, actionable detail rather than generic categories?",
+                    "Could you use this profile to make a real content decision right now?"
+                ]
+            },
+            "requireConfirmation": true
         },
         {
-            "id": "content-strategy-and-structure",
-            "title": "Content Strategy & Structure Development",
-            "prompt": "**PREP**: Develop a compelling content strategy that aligns with your audience analysis.\n\n**IMPLEMENT**: Create a structured content plan:\n- **Core Message**: One clear, memorable takeaway (elevator pitch version)\n- **Supporting Arguments**: 3-5 key points that reinforce your core message\n- **Narrative Arc**: How will you take the audience on a journey? (problem \u2192 solution \u2192 impact)\n- **Evidence Strategy**: Data, examples, stories, and visuals that support each point\n- **Engagement Hooks**: Surprising statistics, thought-provoking questions, interactive elements\n- **Call-to-Action**: What specific action do you want the audience to take?\n\n**VERIFY**: Ensure your content strategy creates a logical flow that serves your audience's needs while achieving your objectives.",
-            "agentRole": "You are a presentation design expert and storytelling specialist with extensive experience in crafting compelling content strategies. Your expertise lies in transforming complex information into engaging narratives that drive audience action and understanding.",
-            "guidance": [
-                "Start with your core message - everything else should support it",
-                "Use the 'So What?' test for each section - why should the audience care?",
-                "Plan for multiple learning styles - visual, auditory, kinesthetic",
-                "Include moments of high engagement throughout, not just at the beginning"
-            ],
-            "requireConfirmation": true,
-            "validationCriteria": [
-                {
-                    "type": "regex",
-                    "pattern": "(?i)##?\\s*Core Message:?",
-                    "message": "Strategy must include a clear core message"
+            "id": "content-strategy",
+            "title": "Content Strategy",
+            "promptBlocks": {
+                "goal": "Define the core message and argument structure that will guide every slide and talking point. Using your audience profile from the previous step, build a content strategy grounded in their specific needs.",
+                "constraints": [
+                    "Start with one core message — a single, memorable sentence. Everything else should support it.",
+                    "Supporting arguments should directly address the audience motivations and pain points you identified.",
+                    "The narrative arc should feel natural for this audience in this context — not a generic template unless it actually fits."
+                ],
+                "procedure": [
+                    "State your core message: one clear, memorable sentence that captures the single most important thing you want the audience to take away.",
+                    "Define 3-5 supporting arguments that reinforce your core message. For each, identify the key evidence, example, or story you will use.",
+                    "Design the narrative arc: how will you take the audience from where they are now to where you want them to be? Map the logical and emotional journey.",
+                    "Plan your engagement hooks: surprising statistics, thought-provoking questions, or moments of genuine interaction that break up information delivery.",
+                    "Define your call-to-action: what specific thing do you want the audience to do, believe, or decide after your presentation?"
+                ],
+                "outputRequired": {
+                    "contentStrategy": "Core message (one sentence), supporting arguments with evidence, narrative arc description, engagement hooks, and call-to-action."
                 },
-                {
-                    "type": "regex",
-                    "pattern": "(?i)##?\\s*Supporting Arguments:?",
-                    "message": "Strategy must include supporting arguments"
-                },
-                {
-                    "type": "regex",
-                    "pattern": "(?i)##?\\s*Call-to-Action:?",
-                    "message": "Strategy must include a call-to-action"
-                },
-                {
-                    "type": "length",
-                    "min": 600,
-                    "message": "Strategy should be at least 600 characters for comprehensive planning"
-                }
-            ],
-            "hasValidation": true
+                "verify": [
+                    "Does every supporting argument trace back to a specific audience need from your audience profile?",
+                    "Does the narrative arc feel designed for this audience, or does it feel like a template?"
+                ]
+            },
+            "requireConfirmation": false
         },
         {
-            "id": "slide-structure-and-flow",
-            "title": "Slide Structure & Flow Design",
-            "prompt": "**PREP**: Transform your content strategy into a detailed slide-by-slide structure.\n\n**IMPLEMENT**: Create a comprehensive slide outline:\n- **Opening Hook** (1-2 slides): Attention grabber, context setting, agenda preview\n- **Main Content Blocks** (8-15 slides): Each supporting argument with evidence and examples\n- **Transition Slides**: Smooth connections between major sections\n- **Interaction Points**: Polls, Q&A moments, discussion breaks\n- **Visual Hierarchy**: Which slides need charts, images, diagrams, or minimal text\n- **Pacing Strategy**: Balance of information density vs. breathing room\n- **Closing Impact** (2-3 slides): Summary, call-to-action, next steps\n\n**VERIFY**: Review the flow for logical progression, appropriate pacing, and engagement variety.",
-            "agentRole": "You are a presentation structure architect with expertise in information design and audience engagement flow. Your specialty is creating logical, well-paced slide sequences that maintain audience attention while effectively conveying complex information.",
-            "guidance": [
-                "Follow the 6x6 rule: max 6 bullet points with 6 words each",
-                "Plan for one key idea per slide",
-                "Include slide numbers and estimated timing",
-                "Consider how slides will work both in-person and if shared later"
-            ],
-            "requireConfirmation": true,
-            "validationCriteria": [
-                {
-                    "type": "regex",
-                    "pattern": "(?i)slide\\s*\\d+",
-                    "message": "Outline must include numbered slides (e.g., 'Slide 1', 'Slide 2')"
+            "id": "slide-structure",
+            "title": "Slide Structure & Flow",
+            "promptBlocks": {
+                "goal": "Turn your content strategy into a numbered slide outline with clear purpose, content type, and rough timing for each slide. This becomes the blueprint for content development.",
+                "constraints": [
+                    "One key idea per slide. If a slide is trying to say two things, split it.",
+                    "Plan for pacing: balance information-dense slides with breathing room and interaction moments.",
+                    "Think about how the slides will work if someone reads them later without you — titles should be informative, not just labels."
+                ],
+                "procedure": [
+                    "Opening (1-3 slides): attention-grabbing hook, context framing, and agenda or roadmap.",
+                    "Core content blocks: group your supporting arguments into logical sections. For each slide, specify: title, main content type (bullets, chart, image, diagram, quote), and whether it has an interaction moment.",
+                    "Transitions between major sections: a single bridging slide that signals the shift and re-grounds the audience.",
+                    "Closing (2-3 slides): synthesis of core message, call-to-action, next steps or contact information.",
+                    "For each slide, add an estimated time in minutes and mark which slides need significant visual design work."
+                ],
+                "outputRequired": {
+                    "slideOutline": "A numbered slide outline. Each entry: slide number, title, content type, estimated time, and any special notes."
                 },
-                {
-                    "type": "regex",
-                    "pattern": "(?i)(opening|hook|introduction)",
-                    "message": "Outline must include opening/hook slides"
-                },
-                {
-                    "type": "regex",
-                    "pattern": "(?i)(closing|conclusion|summary)",
-                    "message": "Outline must include closing/summary slides"
-                },
-                {
-                    "type": "length",
-                    "min": 800,
-                    "message": "Slide outline should be at least 800 characters for detailed planning"
-                }
-            ],
-            "hasValidation": true
+                "verify": [
+                    "Does the outline tell a coherent story from opening to close?",
+                    "Does the pacing feel right for the stated time budget?",
+                    "Is there at least one engagement moment in the first third of the presentation?"
+                ]
+            },
+            "requireConfirmation": true
         },
         {
-            "id": "visual-design-and-engagement",
-            "title": "Visual Design & Engagement Elements",
-            "prompt": "**PREP**: Design the visual and interactive elements that will make your presentation dynamic and memorable.\n\n**IMPLEMENT**: Plan comprehensive visual and engagement strategy:\n- **Visual Theme**: Color scheme, typography, consistent design language\n- **Data Visualization**: Chart types, infographic concepts, before/after comparisons\n- **Multimedia Elements**: Video clips, animations, interactive demos\n- **Storytelling Visuals**: Metaphors, analogies, journey maps\n- **Engagement Techniques**: Live polls, breakout discussions, hands-on activities\n- **Memory Aids**: Mnemonics, repeated visual themes, callback references\n- **Accessibility**: Readable fonts, color contrast, alternative text descriptions\n\n**VERIFY**: Ensure visual elements enhance rather than distract from your message, and engagement techniques fit naturally into your flow.",
-            "agentRole": "You are a UX/visual design consultant and engagement specialist with expertise in presentation design and audience interaction. Your strength lies in creating cohesive visual experiences that enhance message delivery while maintaining accessibility and professional standards.",
-            "guidance": [
-                "Visuals should simplify complex ideas, not complicate simple ones",
-                "Use consistent visual language throughout the presentation",
-                "Plan interactive elements that serve your learning objectives",
-                "Consider how visual elements will reproduce in different formats (print, mobile, etc.)"
-            ],
-            "requireConfirmation": true,
-            "validationCriteria": [
-                {
-                    "type": "regex",
-                    "pattern": "(?i)##?\\s*Visual Theme:?",
-                    "message": "Design plan must include visual theme section"
+            "id": "content-development",
+            "title": "Content Development",
+            "promptBlocks": {
+                "goal": "Write the actual presentation content — slide text and speaker notes — following the approved outline. Every piece of content should be grounded in your audience profile and core message.",
+                "constraints": [
+                    "Write for the ear, not the eye. Slide text should be sparse; speaker notes should sound natural when spoken aloud.",
+                    "Use active voice and concrete language. Replace abstractions with specific examples.",
+                    "Prepare backup content for questions or extended time: 2-3 extra slides that can be shown if needed."
+                ],
+                "procedure": [
+                    "For each slide in your outline, write the visible slide content: headline, key bullets or visual description, and any data or quotes.",
+                    "Write speaker notes for each slide: talking points, transitions to the next slide, and timing cues.",
+                    "Develop your key stories and examples in full: the narrative, the specific detail that makes it vivid, and the connection back to your core message.",
+                    "Prepare interaction scripts: questions for audience polls or discussion, expected responses, and how you will synthesize them back into your presentation.",
+                    "Write backup slides for anticipated deep-dive questions on your most complex or contentious points."
+                ],
+                "outputRequired": {
+                    "slideContent": "Full slide content and speaker notes for every slide in the outline.",
+                    "backupSlides": "Backup slides for anticipated deep-dive questions."
                 },
-                {
-                    "type": "regex",
-                    "pattern": "(?i)##?\\s*Engagement Techniques:?",
-                    "message": "Design plan must include engagement techniques"
-                },
-                {
-                    "type": "length",
-                    "min": 500,
-                    "message": "Visual design plan should be at least 500 characters for comprehensive coverage"
-                }
-            ],
-            "hasValidation": true
-        },
-        {
-            "id": "content-development-and-refinement",
-            "title": "Content Development & Refinement",
-            "prompt": "**PREP**: Develop the actual presentation content, focusing on clarity, impact, and memorability.\n\n**IMPLEMENT**: Create polished presentation content:\n- **Slide Content**: Write clear, concise text for each slide following your outline\n- **Speaker Notes**: Detailed talking points, transitions, and timing cues\n- **Stories and Examples**: Develop compelling narratives that illustrate your points\n- **Data Presentation**: Create clear, impactful visualizations of key statistics\n- **Interaction Scripts**: Prepare questions, poll options, and facilitation guidance\n- **Backup Content**: Extra slides for deep-dive questions or extended time\n- **Handout Materials**: Summary sheets, resource lists, contact information\n\n**VERIFY**: Review content for clarity, accuracy, and alignment with your core message. Test that examples resonate with your target audience.",
-            "agentRole": "You are a professional content developer and presentation writer with expertise in translating complex ideas into clear, engaging presentation content. Your strength lies in crafting compelling narratives, developing relevant examples, and creating speaker-friendly materials that ensure confident delivery.",
-            "guidance": [
-                "Write for the ear, not the eye - content should sound natural when spoken",
-                "Use active voice and concrete language",
-                "Prepare for different scenarios (early finish, running long, technical difficulties)",
-                "Include personal anecdotes or case studies when appropriate"
-            ],
+                "verify": [
+                    "Does every slide's content trace back to the core message and the audience's needs?",
+                    "Do the speaker notes sound like something you would actually say?"
+                ]
+            },
             "askForFiles": true,
-            "requireConfirmation": true,
-            "validationCriteria": [
-                {
-                    "type": "regex",
-                    "pattern": "(?i)##?\\s*Slide Content:?",
-                    "message": "Content must include slide content section"
-                },
-                {
-                    "type": "regex",
-                    "pattern": "(?i)##?\\s*Speaker Notes:?",
-                    "message": "Content must include speaker notes section"
-                },
-                {
-                    "type": "length",
-                    "min": 1000,
-                    "message": "Content development should be at least 1000 characters for comprehensive coverage"
-                }
-            ],
-            "hasValidation": true
+            "requireConfirmation": false
         },
         {
-            "id": "marp-markdown-generation",
-            "title": "Generate Marp Markdown Presentation",
-            "prompt": "**PREP**: Using the detailed content, structure, visuals, and engagement elements from previous steps, create the full presentation as a Marp-flavored Markdown file.\n\n**IMPLEMENT**: Generate a complete Markdown file in Marp format:\n- Start with Marp directives (e.g., --- marp: true, theme, etc.) for styling and layout.\n- Create slides based on the outlined structure, including titles, bullet points, images, code blocks, and diagrams.\n- Incorporate speaker notes using Marp's note syntax.\n- Add engagement elements like polls or questions as annotated slides.\n- Ensure accessibility with alt text for images and proper heading structure.\n- Export the full Markdown content ready for rendering in Marp.\n\n**VERIFY**: Confirm the Markdown is valid, renders correctly in Marp, and faithfully represents the planned content without unnecessary complexity.",
-            "agentRole": "You are a Marp expert and Markdown presentation specialist with expertise in converting structured content into clean, visually appealing, and interactive Markdown-based slides. Your strength lies in using Marp features like themes, pagination, and notes to create professional presentations that are easy to edit and render.",
-            "guidance": [
-                "Reference Marp documentation for advanced features like custom CSS or slide transitions",
-                "Keep slides concise: aim for one main idea per slide with minimal text",
-                "Use relative paths for any embedded images or assets",
-                "Test rendering locally to ensure no syntax errors",
-                "Include a title slide and ending slide with call-to-action"
-            ],
-            "requireConfirmation": true,
-            "askForFiles": true,
-            "validationCriteria": [
-                {
-                    "type": "regex",
-                    "pattern": "^---\\nmarp: true",
-                    "message": "Markdown must start with Marp header directive (e.g., --- marp: true)"
+            "id": "delivery-preparation",
+            "title": "Delivery Preparation",
+            "promptBlocks": {
+                "goal": "Create a delivery preparation plan tailored to your specific presentation context: the format (in-person, remote, recorded), the venue, and your personal readiness.",
+                "constraints": [
+                    "Adapt this plan to the actual delivery context. Remote and in-person presentations have very different risk profiles.",
+                    "Practice advice should be actionable, not generic. 'Practice out loud three times with slides' is useful; 'be confident' is not.",
+                    "Q&A preparation matters as much as the main content for high-stakes presentations."
+                ],
+                "procedure": [
+                    "Define your practice schedule: how many run-throughs you need, at what level of realism (slides only vs. full setup), and target dates.",
+                    "Set timing benchmarks: target time for each major section with acceptable variance. Identify which sections you can expand or compress if needed.",
+                    "Prepare for technical setup: what equipment you need, what to test in advance, and what backup plans you have if something fails.",
+                    "Anticipate the top 5-10 questions you are likely to receive and draft short, confident responses for each.",
+                    "Plan your post-presentation follow-up: how will you share materials, continue conversations, and measure whether your call-to-action was effective?"
+                ],
+                "outputRequired": {
+                    "deliveryPlan": "Practice schedule, timing benchmarks, technical setup and backup plans, Q&A preparation, and follow-up plan."
                 },
-                {
-                    "type": "regex",
-                    "pattern": "---",
-                    "message": "Markdown must include slide separators (---) to divide slides"
-                },
-                {
-                    "type": "length",
-                    "min": 1000,
-                    "message": "Generated Markdown should be at least 1000 characters for a comprehensive presentation"
-                }
-            ],
-            "hasValidation": true
-        },
-        {
-            "id": "marp-presentation-generation",
-            "title": "Generate Final Presentation from Marp Markdown",
-            "prompt": "**PREP**: Using the Marp Markdown file generated in the previous step, convert it into the user's preferred output format using the optimal tool for each format.\n\n**IMPLEMENT**: \n- First, confirm the desired output format with the user:\n  - **HTML**: Use Marp CLI for web viewing and presentations with full theme support\n  - **PDF**: Use Marp CLI for printing/sharing with preserved styling\n  - **PPTX**: Use Pandoc for fully editable PowerPoint format (recommended over Marp's experimental PPTX)\n- For HTML/PDF: Use Marp CLI commands (e.g., `marp slides.md --html` or `marp slides.md --pdf`)\n- For PPTX: Use Pandoc for native, editable PowerPoint elements (`pandoc slides.md -o slides.pptx -s`)\n- If user has a custom PowerPoint template, use `--reference-doc=template.pptx` with Pandoc\n- Note: Keep Markdown simple for PPTX conversion - avoid Marp-specific CSS or advanced directives\n- Use standard Markdown image syntax (`![alt](path)`) rather than Marp-specific image features\n- Add speaker notes using HTML comments (`<!-- Speaker note here -->`) - these become PowerPoint notes\n- Verify the output renders correctly and maintains editability (especially for PPTX)\n- Provide the generated file with format-specific usage instructions\n\n**VERIFY**: Ensure the generated file is complete, error-free, and optimized for the chosen format with full editability where expected.",
-            "agentRole": "You are a presentation file conversion expert with deep knowledge of both Marp CLI and Pandoc tools. Your expertise includes selecting the optimal conversion tool for each format, troubleshooting rendering issues, and ensuring maximum editability and cross-platform compatibility for presentations.",
-            "guidance": [
-                "Use Marp CLI for HTML and PDF outputs to preserve themes and styling",
-                "Use Pandoc for PPTX to ensure fully editable text, lists, and native PowerPoint elements",
-                "Install Pandoc via 'brew install pandoc' on macOS, 'choco install pandoc' on Windows, or package manager on Linux",
-                "For PPTX: Use 'pandoc slides.md -o slides.pptx -s' for basic conversion, add '--reference-doc=template.pptx' for custom themes",
-                "Create reference templates by saving a styled blank PPTX with your desired fonts, colors, and slide masters",
-                "Test PPTX output in both PowerPoint and Google Slides - text should be selectable and editable, not images",
-                "Pandoc may not support all Marp-specific features (custom CSS, advanced directives) - keep Markdown simple for PPTX",
-                "For images: Use standard Markdown syntax ![alt](path) - Pandoc handles these better than Marp-specific image directives",
-                "Speaker notes in Markdown comments <!-- --> will become PowerPoint speaker notes in PPTX output",
-                "If conversion fails, check for unsupported Marp features and simplify the Markdown syntax"
-            ],
-            "requireConfirmation": true,
-            "askForFiles": true,
-            "validationCriteria": [
-                {
-                    "type": "regex",
-                    "pattern": "(?i)(html|pdf|pptx)",
-                    "message": "Output must specify and confirm one of the supported formats: HTML, PDF, or PPTX"
-                },
-                {
-                    "type": "regex",
-                    "pattern": "(?i)(generated.*file|marp|pandoc)",
-                    "message": "Response must reference the generated presentation file and the tool used"
-                },
-                {
-                    "type": "length",
-                    "min": 400,
-                    "message": "Generation summary and instructions should be at least 400 characters for comprehensive tool guidance"
-                }
-            ],
-            "hasValidation": true
-        },
-        {
-            "id": "practice-and-timing",
-            "title": "Practice & Timing Optimization",
-            "prompt": "**PREP**: Develop a practice strategy to ensure confident, well-timed delivery.\n\n**IMPLEMENT**: Create a comprehensive practice plan:\n- **Run-Through Schedule**: Multiple practice sessions with increasing realism\n- **Timing Benchmarks**: Target time for each section with buffer zones\n- **Difficult Transitions**: Extra practice on challenging sections or technical demonstrations\n- **Q&A Preparation**: Anticipated questions with prepared responses\n- **Contingency Planning**: Backup plans for technical issues, timing problems, or unexpected situations\n- **Feedback Integration**: Plan for getting feedback and making final adjustments\n- **Confidence Building**: Techniques for managing nerves and maintaining energy\n\n**VERIFY**: Ensure you have a realistic practice schedule that will prepare you for confident delivery.",
-            "agentRole": "You are a presentation coach and performance specialist with expertise in helping speakers develop confidence and delivery skills. Your focus is on practical preparation strategies that ensure speakers can deliver their content effectively under various conditions.",
-            "guidance": [
-                "Practice out loud - silent review is not enough",
-                "Time each section and the overall presentation",
-                "Practice with your actual slides and equipment when possible",
-                "Rehearse transitions between slides and topics"
-            ],
-            "requireConfirmation": true,
-            "validationCriteria": [
-                {
-                    "type": "regex",
-                    "pattern": "(?i)##?\\s*Run-Through Schedule:?",
-                    "message": "Practice plan must include run-through schedule"
-                },
-                {
-                    "type": "regex",
-                    "pattern": "(?i)##?\\s*Q&A Preparation:?",
-                    "message": "Practice plan must include Q&A preparation"
-                },
-                {
-                    "type": "length",
-                    "min": 400,
-                    "message": "Practice plan should be at least 400 characters for comprehensive preparation"
-                }
-            ],
-            "hasValidation": true
-        },
-        {
-            "id": "delivery-preparation-and-logistics",
-            "title": "Delivery Preparation & Logistics",
-            "prompt": "**PREP**: Finalize all logistical and technical aspects for smooth presentation delivery.\n\n**IMPLEMENT**: Complete pre-delivery checklist:\n- **Technical Setup**: Test all equipment, backup plans, file compatibility\n- **Materials Preparation**: Printed notes, handouts, business cards, feedback forms\n- **Venue Familiarization**: Room layout, microphone, lighting, seating arrangement\n- **Personal Preparation**: Wardrobe, arrival time, pre-presentation routine\n- **Follow-up Planning**: How to share slides, continue conversations, measure impact\n- **Emergency Protocols**: Contact information, backup equipment, alternative delivery methods\n- **Final Review**: Last-minute content updates, current examples, pronunciation check\n\n**VERIFY**: Confirm all logistical elements are in place and you have contingency plans for potential issues.",
-            "agentRole": "You are an event logistics coordinator and presentation delivery specialist with expertise in ensuring flawless presentation execution. Your focus is on comprehensive preparation that anticipates and mitigates potential issues while ensuring professional delivery standards.",
-            "guidance": [
-                "Arrive early to test technology and get comfortable with the space",
-                "Have multiple backup options for critical technical components",
-                "Prepare a 'presentation day' checklist",
-                "Plan how you'll handle unexpected questions or technical difficulties"
-            ],
-            "requireConfirmation": true,
-            "validationCriteria": [
-                {
-                    "type": "regex",
-                    "pattern": "(?i)##?\\s*Technical Setup:?",
-                    "message": "Preparation must include technical setup section"
-                },
-                {
-                    "type": "regex",
-                    "pattern": "(?i)##?\\s*Follow-up Planning:?",
-                    "message": "Preparation must include follow-up planning"
-                },
-                {
-                    "type": "length",
-                    "min": 300,
-                    "message": "Delivery preparation should be at least 300 characters for comprehensive planning"
-                }
-            ],
-            "hasValidation": true
+                "verify": [
+                    "Is this plan specific to your actual delivery context, or would it apply to any presentation?",
+                    "Have you accounted for the most likely failure modes given your setting?"
+                ]
+            },
+            "requireConfirmation": false
         }
-    ],
-    "metaGuidance": [
-        "Focus on your audience's needs and interests throughout the entire process",
-        "Prioritize clarity over complexity - your audience should easily follow your logic",
-        "Build in engagement opportunities to maintain attention and encourage participation",
-        "Practice storytelling techniques to make your content memorable and relatable",
-        "Plan for different learning styles and attention spans in your audience",
-        "Always have a clear call-to-action that tells your audience what to do next",
-        "Test all technical elements well before your presentation",
-        "Prepare for the unexpected - have backup plans for common presentation challenges"
     ]
 }
