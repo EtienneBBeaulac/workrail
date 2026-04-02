@@ -108,12 +108,42 @@ export const V2WorkflowListItemSchema = z.object({
   }).optional(),
 });
 
+export const V2WorkflowSourceCatalogEntrySchema = z.object({
+  sourceKey: z.string().min(1).describe(
+    'Stable identifier for this source. Format: "{kind}:{absolutePath}" for filesystem sources (e.g. "project:/path/to/workflows", "custom:/path/to/.workrail/workflows"), or "built_in" for bundled sources.'
+  ),
+  category: z.enum(['built_in', 'personal', 'legacy_project', 'rooted_sharing', 'external']),
+  source: z.object({
+    kind: z.enum(['bundled', 'user', 'project', 'custom', 'git', 'remote', 'plugin']),
+    displayName: z.string().min(1),
+  }),
+  sourceMode: z.enum(['built_in', 'personal', 'legacy_project', 'rooted_sharing', 'live_directory']),
+  effectiveWorkflowCount: z.number().int().min(0),
+  totalWorkflowCount: z.number().int().min(0),
+  shadowedWorkflowCount: z.number().int().min(0),
+  rootedSharing: z.object({
+    kind: z.literal('remembered_root'),
+    rootPath: z.string().min(1),
+    groupLabel: z.string().min(1),
+  }).optional(),
+  migration: z.object({
+    preferredSource: z.literal('rooted_sharing'),
+    currentSource: z.literal('legacy_project'),
+    reason: z.literal('legacy_project_precedence'),
+    summary: z.string().min(1),
+  }).optional(),
+});
+
 export const V2WorkflowListOutputSchema = z.object({
   workflows: z.array(V2WorkflowListItemSchema),
   staleRoots: z.array(z.string()).optional().describe(
     'Remembered workspace roots that were inaccessible during workflow discovery. ' +
     'Workflows from these roots were not included in this response. ' +
     'These roots will be retried on the next call.'
+  ),
+  sources: z.array(V2WorkflowSourceCatalogEntrySchema).optional().describe(
+    'Source catalog for this workspace. Only present when includeSources was true in the request. ' +
+    'Shows where workflows come from with effective and shadowed counts per source.'
   ),
 });
 

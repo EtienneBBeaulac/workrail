@@ -1,3 +1,4 @@
+import path from 'path';
 import { ResultAsync, okAsync, errAsync } from 'neverthrow';
 import type { ToolContext, ToolResult } from '../types.js';
 import { success, errNotRetryable, requireV2Context } from '../types.js';
@@ -9,7 +10,7 @@ import type { RememberedRootRecordV2 } from '../../v2/ports/remembered-roots-sto
 import type { CryptoPortV2 } from '../../v2/durable-core/canonical/hashing.js';
 import type { PinnedWorkflowStorePortV2 } from '../../v2/ports/pinned-workflow-store.port.js';
 import type { Workflow } from '../../types/workflow.js';
-import type { IWorkflowReader } from '../../types/storage.js';
+import type { IWorkflowReader, ICompositeWorkflowStorage } from '../../types/storage.js';
 
 import { compileV1WorkflowToV2PreviewSnapshot } from '../../v2/read-only/v1-to-v2-shim.js';
 import { workflowHashForCompiledSnapshot } from '../../v2/durable-core/canonical/hashing.js';
@@ -23,6 +24,8 @@ import { listRememberedRootRecords, rememberExplicitWorkspaceRoot } from './shar
 import {
   detectWorkflowMigrationGuidance,
   toWorkflowVisibility,
+  isCompositeWorkflowReader,
+  deriveGroupLabel,
 } from './shared/workflow-source-visibility.js';
 
 interface WorkflowLookupReader {
@@ -87,12 +90,35 @@ export async function handleV2ListWorkflows(
         )
       )
     )
-    .map((compiled) => {
-      const payload = V2WorkflowListOutputSchema.parse({
-        workflows: compiled.sort((a, b) => a.workflowId.localeCompare(b.workflowId)),
-        ...(stalePaths.length > 0 ? { staleRoots: [...stalePaths] } : {}),
+    .andThen((compiled) => {
+      if (!input.includeSources) {
+        const payload = V2WorkflowListOutputSchema.parse({
+          workflows: compiled.sort((a, b) => a.workflowId.localeCompare(b.workflowId)),
+          ...(stalePaths.length > 0 ? { staleRoots: [...stalePaths] } : {}),
+        });
+        return okAsync(success(payload) as ToolResult<unknown>);
+      }
+      // Reuse workflowReader directly -- it already uses the same factory as the
+      // source catalog, so catalog and listing show the same set of sources.
+      if (!isCompositeWorkflowReader(workflowReader)) {
+        const payload = V2WorkflowListOutputSchema.parse({
+          workflows: compiled.sort((a, b) => a.workflowId.localeCompare(b.workflowId)),
+          ...(stalePaths.length > 0 ? { staleRoots: [...stalePaths] } : {}),
+          sources: [],
+        });
+        return okAsync(success(payload) as ToolResult<unknown>);
+      }
+      return ResultAsync.fromPromise(
+        withTimeout(buildSourceCatalog(workflowReader, rememberedRootRecords), TIMEOUT_MS, 'list_workflow_sources'),
+        (err) => mapUnknownErrorToToolError(err),
+      ).map((sources) => {
+        const payload = V2WorkflowListOutputSchema.parse({
+          workflows: compiled.sort((a, b) => a.workflowId.localeCompare(b.workflowId)),
+          ...(stalePaths.length > 0 ? { staleRoots: [...stalePaths] } : {}),
+          sources,
+        });
+        return success(payload) as ToolResult<unknown>;
       });
-      return success(payload) as ToolResult<unknown>;
     })
     .match(
       (result) => Promise.resolve(result),
@@ -272,4 +298,134 @@ async function buildV2WorkflowListItem(options: {
     kind: 'workflow' as const,
     visibility,
   };
+}
+
+// -----------------------------------------------------------------------------
+// Source catalog helpers (used by handleV2ListWorkflows when includeSources=true)
+// -----------------------------------------------------------------------------
+
+type WorkflowSource = import('../../types/workflow-source.js').WorkflowSource;
+type RootedSharingContext = import('./shared/workflow-source-visibility.js').RootedSharingContext;
+
+interface SourceEntryData {
+  readonly source: WorkflowSource;
+  readonly allIds: readonly string[];
+  readonly effectiveIds: readonly string[];
+}
+
+async function buildSourceCatalog(
+  workflowReader: import('../../types/storage.js').ICompositeWorkflowStorage,
+  rememberedRootRecords: readonly RememberedRootRecordV2[],
+): Promise<ReadonlyArray<Record<string, unknown>>> {
+  const instances = workflowReader.getStorageInstances();
+
+  // EnhancedMultiSourceWorkflowStorage uses last-wins deduplication:
+  // "highest priority last -- overwrites earlier sources" (Priority 7 = project = last).
+  // Iterate from highest priority (last) to lowest (first) with a seenIds set, so
+  // each instance's effectiveIds = workflows not yet claimed by a higher-priority instance.
+  const seenIds = new Set<string>();
+  const sourceEntryDataReversed: SourceEntryData[] = [];
+
+  for (let i = instances.length - 1; i >= 0; i--) {
+    const instance = instances[i]!;
+    const summaries = await instance.listWorkflowSummaries();
+    const allIds = summaries.map((s) => s.id);
+    const effectiveIds = allIds.filter((id) => !seenIds.has(id));
+    for (const id of allIds) seenIds.add(id);
+    sourceEntryDataReversed.push({ source: instance.source, allIds, effectiveIds });
+  }
+
+  // Restore original order so the catalog output matches storage instance order.
+  const sourceEntryData = sourceEntryDataReversed.reverse();
+
+  return sourceEntryData.map((data) =>
+    deriveSourceCatalogEntry({ ...data, rememberedRootRecords, sourceEntryData }),
+  );
+}
+
+function deriveSourceCatalogEntry(options: {
+  readonly source: WorkflowSource;
+  readonly allIds: readonly string[];
+  readonly effectiveIds: readonly string[];
+  readonly rememberedRootRecords: readonly RememberedRootRecordV2[];
+  readonly sourceEntryData: readonly SourceEntryData[];
+}): Record<string, unknown> {
+  const { source, allIds, effectiveIds, rememberedRootRecords, sourceEntryData } = options;
+  const total = allIds.length;
+  const effective = effectiveIds.length;
+  const shadowed = total - effective;
+  const sourceKey = deriveSourceKey(source);
+  const displayName = deriveDisplayName(source);
+
+  switch (source.kind) {
+    case 'bundled':
+      return { sourceKey, category: 'built_in', source: { kind: source.kind, displayName }, sourceMode: 'built_in', effectiveWorkflowCount: effective, totalWorkflowCount: total, shadowedWorkflowCount: shadowed };
+
+    case 'user':
+      return { sourceKey, category: 'personal', source: { kind: source.kind, displayName }, sourceMode: 'personal', effectiveWorkflowCount: effective, totalWorkflowCount: total, shadowedWorkflowCount: shadowed };
+
+    case 'project': {
+      const thisIds = new Set(allIds);
+      const hasMigrationOverlap = sourceEntryData.some((e) => {
+        if (e.source === source || e.source.kind !== 'custom') return false;
+        const rootedSharing = deriveRootedSharingForPath(e.source.directoryPath, rememberedRootRecords);
+        return rootedSharing != null && e.allIds.some((id) => thisIds.has(id));
+      });
+      const migration = hasMigrationOverlap
+        ? { preferredSource: 'rooted_sharing' as const, currentSource: 'legacy_project' as const, reason: 'legacy_project_precedence' as const, summary: 'Project-scoped ./workflows currently overrides rooted .workrail/workflows during migration. Prefer rooted sharing for new team-shared workflows.' }
+        : undefined;
+      return { sourceKey, category: 'legacy_project', source: { kind: source.kind, displayName }, sourceMode: 'legacy_project', effectiveWorkflowCount: effective, totalWorkflowCount: total, shadowedWorkflowCount: shadowed, ...(migration ? { migration } : {}) };
+    }
+
+    case 'custom': {
+      const rootedSharing = deriveRootedSharingForPath(source.directoryPath, rememberedRootRecords);
+      const category = rootedSharing ? 'rooted_sharing' : 'external';
+      const sourceMode = rootedSharing ? 'rooted_sharing' : 'live_directory';
+      return { sourceKey, category, source: { kind: source.kind, displayName }, sourceMode, effectiveWorkflowCount: effective, totalWorkflowCount: total, shadowedWorkflowCount: shadowed, ...(rootedSharing ? { rootedSharing } : {}) };
+    }
+
+    case 'git':
+    case 'remote':
+    case 'plugin':
+      return { sourceKey, category: 'external', source: { kind: source.kind, displayName }, sourceMode: 'live_directory', effectiveWorkflowCount: effective, totalWorkflowCount: total, shadowedWorkflowCount: shadowed };
+  }
+}
+
+function deriveSourceKey(source: WorkflowSource): string {
+  switch (source.kind) {
+    case 'bundled': return 'built_in';
+    case 'user': return `user:${source.directoryPath}`;
+    case 'project': return `project:${source.directoryPath}`;
+    case 'custom': return `custom:${source.directoryPath}`;
+    case 'git': return `git:${source.repositoryUrl}`;
+    case 'remote': return `remote:${source.registryUrl}`;
+    case 'plugin': return `plugin:${source.pluginName}`;
+  }
+}
+
+function deriveDisplayName(source: WorkflowSource): string {
+  switch (source.kind) {
+    case 'bundled': return 'Built-in';
+    case 'user': return 'User Library';
+    case 'project': return 'Project';
+    case 'custom': return source.label ?? path.basename(source.directoryPath);
+    case 'git': return source.repositoryUrl;
+    case 'remote': return source.registryUrl;
+    case 'plugin': return source.pluginName;
+  }
+}
+
+function deriveRootedSharingForPath(
+  sourcePath: string,
+  rememberedRoots: readonly RememberedRootRecordV2[],
+): RootedSharingContext | undefined {
+  const resolved = path.resolve(sourcePath);
+  for (const record of rememberedRoots) {
+    const rootPath = path.resolve(record.path);
+    const relative = path.relative(rootPath, resolved);
+    const isUnderRoot = relative.length === 0 || (!relative.startsWith('..') && !path.isAbsolute(relative));
+    if (!isUnderRoot) continue;
+    return { kind: 'remembered_root', rootPath, groupLabel: deriveGroupLabel(rootPath, resolved) };
+  }
+  return undefined;
 }

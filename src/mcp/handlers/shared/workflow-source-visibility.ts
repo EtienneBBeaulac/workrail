@@ -100,12 +100,14 @@ export async function detectWorkflowMigrationGuidance(options: {
   return undefined;
 }
 
-function isCompositeWorkflowReader(
-  workflowReader: IWorkflowReader,
-): workflowReader is ICompositeWorkflowStorage {
+export function isCompositeWorkflowReader(
+  reader: unknown,
+): reader is ICompositeWorkflowStorage {
   return (
-    (workflowReader as { kind?: unknown }).kind === 'composite' &&
-    typeof (workflowReader as { getStorageInstances?: unknown }).getStorageInstances === 'function'
+    typeof reader === 'object' &&
+    reader !== null &&
+    (reader as Record<string, unknown>).kind === 'composite' &&
+    typeof (reader as Record<string, unknown>).getStorageInstances === 'function'
   );
 }
 
@@ -155,7 +157,7 @@ function deriveVisibilityCategory(
   }
 }
 
-function deriveGroupLabel(rootPath: string, sourcePath: string): string {
+export function deriveGroupLabel(rootPath: string, sourcePath: string): string {
   const relative = path.relative(rootPath, sourcePath);
   if (!relative || relative === '.workrail/workflows') {
     return path.basename(rootPath);

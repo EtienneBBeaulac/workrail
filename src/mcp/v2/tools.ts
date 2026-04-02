@@ -21,6 +21,9 @@ export const V2ListWorkflowsInput = z.object({
   workspacePath: workspacePathField.describe(
     'Required. Absolute path to your current workspace directory (e.g. the "Workspace:" value from your system parameters). WorkRail uses this to resolve project-scoped workflow variants against the correct workspace for discovery-sensitive workflow listing. Shared MCP servers cannot infer this safely.'
   ),
+  includeSources: z.boolean().optional().describe(
+    'When true, includes a source catalog in the response showing where workflows come from (built-in, project-scoped, rooted-sharing, external), with effective and shadowed workflow counts per source. Omit or set false for the default workflow-list-only response.'
+  ),
 });
 export type V2ListWorkflowsInput = z.infer<typeof V2ListWorkflowsInput>;
 
