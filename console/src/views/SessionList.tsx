@@ -2,12 +2,15 @@ import { useState, useMemo, useCallback } from 'react';
 import { useSessionList } from '../api/hooks';
 import { StatusBadge } from '../components/StatusBadge';
 import { HealthBadge } from '../components/HealthBadge';
-import type { ConsoleSessionSummary, ConsoleRunStatus } from '../api/types';
+import type { ConsoleSessionSummary, ConsoleSessionStatus } from '../api/types';
 
 interface Props {
   onSelectSession: (sessionId: string) => void;
   /** Pre-seed the search field (e.g. branch name from worktree click-through). */
   initialSearch?: string;
+  /** Restrict results to sessions from this repo root. Sessions without a
+   * repoRoot (recorded before the field was introduced) are always included. */
+  initialRepoRoot?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -16,7 +19,7 @@ interface Props {
 
 type SortField = 'recent' | 'status' | 'workflow' | 'nodes';
 type GroupBy = 'none' | 'workflow' | 'status' | 'branch';
-type StatusFilter = 'all' | ConsoleRunStatus;
+type StatusFilter = 'all' | ConsoleSessionStatus;
 
 const SORT_OPTIONS: { value: SortField; label: string }[] = [
   { value: 'recent', label: 'Recent' },
@@ -35,6 +38,7 @@ const GROUP_OPTIONS: { value: GroupBy; label: string }[] = [
 const STATUS_FILTER_OPTIONS: { value: StatusFilter; label: string }[] = [
   { value: 'all', label: 'All' },
   { value: 'in_progress', label: 'In Progress' },
+  { value: 'dormant', label: 'Dormant' },
   { value: 'complete', label: 'Complete' },
   { value: 'complete_with_gaps', label: 'Gaps' },
   { value: 'blocked', label: 'Blocked' },
@@ -42,11 +46,12 @@ const STATUS_FILTER_OPTIONS: { value: StatusFilter; label: string }[] = [
 
 const PAGE_SIZE = 25;
 
-const STATUS_SORT_ORDER: Record<ConsoleRunStatus, number> = {
+const STATUS_SORT_ORDER: Record<ConsoleSessionStatus, number> = {
   in_progress: 0,
   blocked: 1,
-  complete_with_gaps: 2,
-  complete: 3,
+  dormant: 2,
+  complete_with_gaps: 3,
+  complete: 4,
 };
 
 // ---------------------------------------------------------------------------
@@ -57,11 +62,18 @@ function filterSessions(
   sessions: readonly ConsoleSessionSummary[],
   search: string,
   statusFilter: StatusFilter,
+  repoRoot: string | null,
 ): ConsoleSessionSummary[] {
   let filtered = [...sessions];
 
   if (statusFilter !== 'all') {
     filtered = filtered.filter((s) => s.status === statusFilter);
+  }
+
+  // Repo filter: sessions without repoRoot predate the field and are always
+  // included — we don't know which repo they belong to.
+  if (repoRoot !== null) {
+    filtered = filtered.filter((s) => s.repoRoot === repoRoot || s.repoRoot === null);
   }
 
   if (search.trim()) {
@@ -147,10 +159,11 @@ function formatRelativeTime(ms: number): string {
 // Components
 // ---------------------------------------------------------------------------
 
-export function SessionList({ onSelectSession, initialSearch = '' }: Props) {
+export function SessionList({ onSelectSession, initialSearch = '', initialRepoRoot = null }: Props) {
   const { data, isLoading, error } = useSessionList();
 
   const [search, setSearch] = useState(initialSearch);
+  const [repoRoot] = useState(initialRepoRoot);
   const [sort, setSort] = useState<SortField>('recent');
   const [groupBy, setGroupBy] = useState<GroupBy>('none');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -164,11 +177,11 @@ export function SessionList({ onSelectSession, initialSearch = '' }: Props) {
 
   const processed = useMemo(() => {
     if (!data) return { groups: [], total: 0, filtered: 0 };
-    const filtered = filterSessions(data.sessions, search, statusFilter);
+    const filtered = filterSessions(data.sessions, search, statusFilter, repoRoot);
     const sorted = sortSessions(filtered, sort);
     const groups = groupSessions(sorted, groupBy);
     return { groups, total: data.sessions.length, filtered: filtered.length };
-  }, [data, search, statusFilter, sort, groupBy]);
+  }, [data, search, statusFilter, repoRoot, sort, groupBy]);
 
   // Status counts for filter pills
   const statusCounts = useMemo(() => {
