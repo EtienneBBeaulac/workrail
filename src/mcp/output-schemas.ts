@@ -326,6 +326,30 @@ export const V2BindingDriftWarningSchema = z.object({
   // Presentation is the formatter's responsibility, not the domain type's.
 });
 
+/**
+ * Step-scoped execution facts recorded during the completed step.
+ * Backward-looking: describes what happened during the step that just advanced.
+ * Distinct from top-level fields, which are forward-looking (next pending step, tokens, intent).
+ *
+ * assessments: the assessment submitted and accepted for this step, if the step declared an
+ * assessmentRef. Absent when no assessment was involved. Dimensions carry the normalized level
+ * and optional rationale the agent recorded.
+ */
+export const V2StepContextSchema = z.object({
+  assessments: z
+    .object({
+      assessmentId: z.string().min(1),
+      dimensions: z.array(
+        z.object({
+          dimensionId: z.string().min(1),
+          level: z.string().min(1),
+          rationale: z.string().optional(),
+        })
+      ),
+    })
+    .optional(),
+});
+
 const V2ContinueWorkflowOkSchema = z.object({
   kind: z.literal('ok'),
   continueToken: continueTokenSchema,
@@ -341,6 +365,12 @@ const V2ContinueWorkflowOkSchema = z.object({
    * compiled values — start a new session to pick up new bindings.
    */
   warnings: z.array(V2BindingDriftWarningSchema).optional(),
+  /**
+   * Step-scoped execution facts for the step that just completed.
+   * Present when the completed step recorded structured data (e.g. an accepted assessment).
+   * Absent when no step-level facts were recorded.
+   */
+  stepContext: V2StepContextSchema.optional(),
 });
 
 const V2ContinueWorkflowBlockedSchema = z.object({

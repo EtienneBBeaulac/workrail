@@ -31,6 +31,7 @@ import { attemptIdForNextNode, mintContinueAndCheckpointTokens } from '../v2-tok
 import { deriveNextIntent } from '../v2-state-conversion.js';
 import { EVENT_KIND } from '../../../v2/durable-core/constants.js';
 import { buildNextCall } from './index.js';
+import { projectAssessmentsV2, getLatestAssessmentForNode } from '../../../v2/projections/assessments.js';
 
 
 
@@ -52,7 +53,7 @@ export function buildAdvancedReplayResponse(args: {
   readonly aliasStore: import('../../../v2/ports/token-alias-store.port.js').TokenAliasStorePortV2;
   readonly entropy: import('../../../v2/ports/random-entropy.port.js').RandomEntropyPortV2;
 }): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, ContinueWorkflowError> {
-  const { sessionId, runId, toNodeId, attemptId, toSnapshot, workflow, truth, workflowHash, ports, sha256, aliasStore, entropy } = args;
+  const { sessionId, runId, fromNodeId, toNodeId, attemptId, toSnapshot, workflow, truth, workflowHash, ports, sha256, aliasStore, entropy } = args;
   
   const toNodeIdBranded = asNodeId(String(toNodeId));
   const pending = derivePendingStep(toSnapshot.enginePayload.engineState);
@@ -176,6 +177,10 @@ export function buildAdvancedReplayResponse(args: {
   const preferences = derivePreferencesOrDefault({ truth, runId, nodeId: toNodeIdBranded });
   const nextIntent = deriveNextIntent({ rehydrateOnly: false, isComplete, pending: okMeta });
 
+  // Collect step-scoped execution facts for the step that just completed (fromNodeId).
+  // Assessment was submitted and accepted on fromNodeId, not toNodeId.
+  const stepContext = buildStepContext(truth.events, fromNodeId);
+
   return nextTokensMint.andThen((nextTokens) =>
     okAsync(
       V2ContinueWorkflowOutputSchema.parse({
@@ -187,9 +192,36 @@ export function buildAdvancedReplayResponse(args: {
         preferences,
         nextIntent,
         nextCall: buildNextCall({ continueToken: pending ? nextTokens.continueToken : undefined, isComplete, pending: okMeta }),
+        stepContext,
       })
     )
   );
+}
+
+/**
+ * Build the stepContext for the completed node by projecting assessment events.
+ * Returns undefined when no step-level facts were recorded (non-assessment steps).
+ */
+function buildStepContext(
+  events: readonly DomainEventV1[],
+  completedNodeId: NodeId,
+): { assessments?: { assessmentId: string; dimensions: { dimensionId: string; level: string; rationale?: string }[] } } | undefined {
+  const projection = projectAssessmentsV2(events);
+  if (projection.isErr()) return undefined;
+
+  const recorded = getLatestAssessmentForNode(projection.value, String(completedNodeId));
+  if (!recorded) return undefined;
+
+  return {
+    assessments: {
+      assessmentId: recorded.assessmentId,
+      dimensions: recorded.dimensions.map((d) => ({
+        dimensionId: d.dimensionId,
+        level: d.level,
+        ...(d.rationale !== undefined ? { rationale: d.rationale } : {}),
+      })),
+    },
+  };
 }
 
 /**
