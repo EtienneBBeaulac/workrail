@@ -93,18 +93,27 @@ function WorktreeCard({
       {/* Footer: status badges + time */}
       <div className="flex items-center gap-2 flex-wrap pt-1">
         {isClean ? (
-          <span className="text-xs px-1.5 py-0.5 rounded bg-green-500/10 text-green-400 border border-green-500/20">
-            clean
+          <span
+            title="No uncommitted changes — working tree matches the last commit"
+            className="text-xs px-1.5 py-0.5 rounded bg-green-500/10 text-green-400 border border-green-500/20"
+          >
+            nothing to commit
           </span>
         ) : (
-          <span className="text-xs px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-400 border border-orange-500/20">
-            {wt.changedCount} changed
+          <span
+            title={`${wt.changedCount} file${wt.changedCount === 1 ? '' : 's'} edited but not yet committed`}
+            className="text-xs px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-400 border border-orange-500/20"
+          >
+            {wt.changedCount} uncommitted
           </span>
         )}
 
         {!isUpToDate && (
-          <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
-            {wt.aheadCount} ahead
+          <span
+            title={`${wt.aheadCount} commit${wt.aheadCount === 1 ? '' : 's'} not yet on main — needs to be pushed or merged`}
+            className="text-xs px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20"
+          >
+            {wt.aheadCount} unpushed
           </span>
         )}
 
@@ -165,7 +174,7 @@ function WorktreeGrid({
       {dirty.length > 0 && (
         <section className="flex flex-col gap-2">
           <h4 className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">
-            In progress (dirty)
+            Uncommitted changes
           </h4>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {dirty.map(wt => (
@@ -232,7 +241,7 @@ function RepoSection({
         )}
         {dirtyCount > 0 && (
           <span className="text-xs font-medium text-orange-400">
-            · {dirtyCount} dirty
+            · {dirtyCount} uncommitted
           </span>
         )}
         <span
@@ -312,7 +321,7 @@ export function WorktreeList({
           )}
           {totalDirty > 0 && (
             <span className="text-xs font-medium text-orange-400">
-              · {totalDirty} dirty
+              · {totalDirty} uncommitted
             </span>
           )}
         </h2>
