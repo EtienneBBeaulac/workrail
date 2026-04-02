@@ -110,6 +110,11 @@ export const V2WorkflowListItemSchema = z.object({
 
 export const V2WorkflowListOutputSchema = z.object({
   workflows: z.array(V2WorkflowListItemSchema),
+  staleRoots: z.array(z.string()).optional().describe(
+    'Remembered workspace roots that were inaccessible during workflow discovery. ' +
+    'Workflows from these roots were not included in this response. ' +
+    'These roots will be retried on the next call.'
+  ),
 });
 
 export const V2WorkflowInspectOutputSchema = z.object({
@@ -118,6 +123,11 @@ export const V2WorkflowInspectOutputSchema = z.object({
   mode: z.enum(['metadata', 'preview']),
   compiled: JsonValueSchema,
   visibility: V2WorkflowListItemSchema.shape.visibility.optional(),
+  staleRoots: z.array(z.string()).optional().describe(
+    'Remembered workspace roots that were inaccessible during workflow discovery. ' +
+    'Workflows from these roots were not included in this response. ' +
+    'These roots will be retried on the next call.'
+  ),
   references: z.array(z.object({
     id: z.string().min(1),
     title: z.string().min(1),
@@ -457,6 +467,11 @@ export const V2StartWorkflowOutputSchema = z.object({
   preferences: V2PreferencesSchema,
   nextIntent: V2NextIntentSchema,
   nextCall: V2NextCallSchema,
+  staleRoots: z.array(z.string()).optional().describe(
+    'Remembered workspace roots that were inaccessible during workflow discovery. ' +
+    'Workflows from these roots were not included in this response. ' +
+    'These roots will be retried on the next call.'
+  ),
 }).refine(
   (data) => (data.pending ? data.continueToken != null : true),
   { message: 'continueToken is required when a pending step exists' }
