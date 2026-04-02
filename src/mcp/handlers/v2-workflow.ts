@@ -1,4 +1,5 @@
 import path from 'path';
+import fs from 'fs';
 import { ResultAsync, okAsync, errAsync } from 'neverthrow';
 import type { ToolContext, ToolResult } from '../types.js';
 import { success, errNotRetryable, requireV2Context } from '../types.js';
@@ -6,6 +7,7 @@ import { mapUnknownErrorToToolError } from '../error-mapper.js';
 import { internalSuggestion } from './v2-execution-helpers.js';
 import type { V2InspectWorkflowInput, V2ListWorkflowsInput } from '../v2/tools.js';
 import { V2WorkflowInspectOutputSchema, V2WorkflowListOutputSchema } from '../output-schemas.js';
+import type { StalenessSummary } from '../output-schemas.js';
 import type { RememberedRootRecordV2 } from '../../v2/ports/remembered-roots-store.port.js';
 import type { CryptoPortV2 } from '../../v2/durable-core/canonical/hashing.js';
 import type { PinnedWorkflowStorePortV2 } from '../../v2/ports/pinned-workflow-store.port.js';
@@ -17,6 +19,67 @@ import { workflowHashForCompiledSnapshot } from '../../v2/durable-core/canonical
 import type { JsonValue } from '../../v2/durable-core/canonical/json-types.js';
 
 const TIMEOUT_MS = 30_000;
+
+// ---------------------------------------------------------------------------
+// Staleness detection
+// ---------------------------------------------------------------------------
+
+function readCurrentSpecVersion(): number | null {
+  try {
+    const specPath = path.resolve(__dirname, '../../../spec/authoring-spec.json');
+    const raw = fs.readFileSync(specPath, 'utf-8');
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed === 'object' && parsed !== null && 'version' in parsed) {
+      const v = (parsed as Record<string, unknown>)['version'];
+      if (typeof v === 'number' && Number.isInteger(v) && v >= 1) return v;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+const CURRENT_SPEC_VERSION: number | null = readCurrentSpecVersion();
+
+/**
+ * When set to '1', surfaces staleness for all workflow categories (including built-in
+ * and legacy_project). Intended for maintainer use only — not documented publicly.
+ */
+const DEV_STALENESS: boolean = process.env['WORKRAIL_DEV_STALENESS'] === '1';
+
+/**
+ * Whether to surface the staleness field for a given workflow visibility category.
+ * By default only user-owned/imported workflows get the signal; DEV_STALENESS bypasses this.
+ */
+function shouldShowStaleness(category: string | undefined): boolean {
+  if (DEV_STALENESS) return true;
+  return category === 'personal' || category === 'rooted_sharing' || category === 'external';
+}
+
+export function computeWorkflowStaleness(
+  stamp: number | undefined,
+  currentVersion: number | null,
+): StalenessSummary | undefined {
+  if (currentVersion === null) return undefined;
+  if (stamp === undefined) {
+    return {
+      level: 'possible',
+      reason: 'This workflow has not been validated against the authoring spec via workflow-for-workflows.',
+    };
+  }
+  if (stamp === currentVersion) {
+    return {
+      level: 'none',
+      reason: `Workflow validated against current authoring spec (v${currentVersion}).`,
+      specVersionAtLastReview: stamp,
+    };
+  }
+  return {
+    level: 'likely',
+    reason: `Authoring spec updated from v${stamp} to v${currentVersion} since this workflow was last reviewed.`,
+    specVersionAtLastReview: stamp,
+  };
+}
 
 import { withTimeout } from './shared/with-timeout.js';
 import { createWorkflowReaderForRequest, hasRequestWorkspaceSignal } from './shared/request-workflow-reader.js';
@@ -206,6 +269,12 @@ export async function handleV2InspectWorkflow(
               ...(visibility ? { visibility } : {}),
               ...(stalePaths.length > 0 ? { staleRoots: [...stalePaths] } : {}),
               ...(references != null && references.length > 0 ? { references } : {}),
+              ...(() => {
+                const s = shouldShowStaleness(visibility?.category)
+                  ? computeWorkflowStaleness(workflow.definition.validatedAgainstSpecVersion, CURRENT_SPEC_VERSION)
+                  : undefined;
+                return s !== undefined ? { staleness: s } : {};
+              })(),
             });
             return okAsync(success(payload) as ToolResult<unknown>);
           })
@@ -289,6 +358,9 @@ async function buildV2WorkflowListItem(options: {
     }
   }
 
+  const staleness = shouldShowStaleness(visibility?.category)
+    ? computeWorkflowStaleness(workflow.definition.validatedAgainstSpecVersion, CURRENT_SPEC_VERSION)
+    : undefined;
   return {
     workflowId: summary.id,
     name: summary.name,
@@ -297,6 +369,7 @@ async function buildV2WorkflowListItem(options: {
     workflowHash: hash,
     kind: 'workflow' as const,
     visibility,
+    ...(staleness !== undefined ? { staleness } : {}),
   };
 }
 

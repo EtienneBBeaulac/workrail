@@ -81,6 +81,13 @@ export const WorkflowGetSchemaOutputSchema = z.object({
 // v2 tool outputs (Slice 1)
 // -----------------------------------------------------------------------------
 
+export const StalenessSummarySchema = z.object({
+  level: z.enum(['none', 'possible', 'likely']),
+  reason: z.string().min(1),
+  specVersionAtLastReview: z.number().int().positive().optional(),
+});
+export type StalenessSummary = z.infer<typeof StalenessSummarySchema>;
+
 export const V2WorkflowListItemSchema = z.object({
   workflowId: z.string().min(1),
   name: z.string().min(1),
@@ -106,6 +113,7 @@ export const V2WorkflowListItemSchema = z.object({
       summary: z.string().min(1),
     }).optional(),
   }).optional(),
+  staleness: StalenessSummarySchema.optional(),
 });
 
 export const V2WorkflowSourceCatalogEntrySchema = z.object({
@@ -166,6 +174,7 @@ export const V2WorkflowInspectOutputSchema = z.object({
     authoritative: z.boolean(),
     resolveFrom: z.enum(['workspace', 'package']).optional(),
   })).optional(),
+  staleness: StalenessSummarySchema.optional(),
 });
 
 // -----------------------------------------------------------------------------

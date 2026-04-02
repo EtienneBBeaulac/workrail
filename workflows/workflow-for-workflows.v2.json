@@ -114,7 +114,10 @@
         "goal": "Understand what workflow you are authoring or modernizing, and classify the task before you design anything.",
         "constraints": [
           [
-            { "kind": "ref", "refId": "wr.refs.notes_first_durability" }
+            {
+              "kind": "ref",
+              "refId": "wr.refs.notes_first_durability"
+            }
           ],
           "Explore first. Ask the user only what you genuinely cannot determine with tools and references.",
           "Choose baselines as models, not templates. Copy structural patterns, not another workflow's domain voice."
@@ -181,7 +184,7 @@
           "Decide the phase list, one-line goal for each phase, and overall ordering.",
           "Design loops with explicit exit rules, bounded maxIterations, and real reasons for another pass.",
           "Decide confirmation gates, delegation vs template injection vs direct execution, promptFragments, references, artifacts, and metaGuidance.",
-          "If `authoringMode = modernize_existing`, decide preserve-in-place, restructure, or rewrite. For each item in valueInventory, record: `preserved` (structurally present with equivalent enforcement), `replaced` (new mechanism prevents same failure mode — justify equivalence), or `dropped` (intentionally removed — justify the loss). Phase-level mapping alone is insufficient; track what was inside each restructured or removed phase."
+          "If `authoringMode = modernize_existing`, decide preserve-in-place, restructure, or rewrite. For each item in valueInventory, record: `preserved` (structurally present with equivalent enforcement), `replaced` (new mechanism prevents same failure mode \u2014 justify equivalence), or `dropped` (intentionally removed \u2014 justify the loss). Phase-level mapping alone is insufficient; track what was inside each restructured or removed phase."
         ],
         "outputRequired": {
           "notesMarkdown": "Structured workflow outline, loop design, confirmation design, delegation design, artifact plan, and modernization mapping.",
@@ -194,14 +197,23 @@
       "promptFragments": [
         {
           "id": "phase-2-simple-direct",
-          "when": { "var": "workflowComplexity", "equals": "Simple" },
+          "when": {
+            "var": "workflowComplexity",
+            "equals": "Simple"
+          },
           "text": "For Simple workflows, keep the architecture linear and compact. Do not invent loops or ceremony unless the task truly needs them."
         }
       ],
       "requireConfirmation": {
         "or": [
-          { "var": "workflowComplexity", "not_equals": "Simple" },
-          { "var": "rigorMode", "not_equals": "QUICK" }
+          {
+            "var": "workflowComplexity",
+            "not_equals": "Simple"
+          },
+          {
+            "var": "rigorMode",
+            "not_equals": "QUICK"
+          }
         ]
       }
     },
@@ -230,8 +242,14 @@
       },
       "requireConfirmation": {
         "or": [
-          { "var": "rigorMode", "equals": "THOROUGH" },
-          { "var": "workflowComplexity", "equals": "Complex" }
+          {
+            "var": "rigorMode",
+            "equals": "THOROUGH"
+          },
+          {
+            "var": "workflowComplexity",
+            "equals": "Complex"
+          }
         ]
       }
     },
@@ -261,7 +279,10 @@
       "promptFragments": [
         {
           "id": "phase-4-simple-fast",
-          "when": { "var": "workflowComplexity", "equals": "Simple" },
+          "when": {
+            "var": "workflowComplexity",
+            "equals": "Simple"
+          },
           "text": "For Simple workflows, keep the file compact and linear. Do not create extra metaGuidance or loops unless the task truly needs them."
         }
       ],
@@ -306,7 +327,10 @@
           "promptFragments": [
             {
               "id": "phase-5a-thorough",
-              "when": { "var": "rigorMode", "equals": "THOROUGH" },
+              "when": {
+                "var": "rigorMode",
+                "equals": "THOROUGH"
+              },
               "text": "After structural validation passes, also check the workflow manually against required-level authoring-spec rules and fix any failures before moving on."
             }
           ],
@@ -408,7 +432,7 @@
             "procedure": [
               "Trace the authored workflow step by step against the user's actual task or the closest realistic scenario.",
               "For each step, ask: what would the agent actually do, what context would it have, what would it likely produce, and what would the next step inherit?",
-              "Also trace at least one degraded or edge-case path — not just the happy path. Ask: what happens when a condition evaluates unexpectedly, a loop has nothing to iterate, a runCondition skips a phase, or the user provides minimal input? Quality gates that only protect the happy path are not quality gates.",
+              "Also trace at least one degraded or edge-case path \u2014 not just the happy path. Ask: what happens when a condition evaluates unexpectedly, a loop has nothing to iterate, a runCondition skips a phase, or the user provides minimal input? Quality gates that only protect the happy path are not quality gates.",
               "Identify likely weak steps, likely unsatisfying outputs, and likely false-confidence modes.",
               "For any loop in the workflow, explicitly check: does the exit condition have structural teeth (artifact contract, bounded maxIterations), or does it rely on prose instructions the engine cannot enforce?",
               "Fix issues directly in the workflow file when the right improvement is clear."
@@ -424,13 +448,19 @@
           "promptFragments": [
             {
               "id": "phase-6b-quick",
-              "when": { "var": "rigorMode", "equals": "QUICK" },
+              "when": {
+                "var": "rigorMode",
+                "equals": "QUICK"
+              },
               "text": "For QUICK rigor, keep the simulation compact but still answer where the workflow would likely disappoint the user if it disappointed them at all."
             },
             {
               "id": "phase-6b-modernize-check",
-              "when": { "var": "authoringMode", "equals": "modernize_existing" },
-              "text": "For modernize_existing: after tracing the workflow forward, check each item in valueInventory. For each enforcement mechanism and domain knowledge item: would the modernized workflow produce the same behavior? Any item where the answer is no or weaker is a loss — fix it directly or record the accepted tradeoff with justification."
+              "when": {
+                "var": "authoringMode",
+                "equals": "modernize_existing"
+              },
+              "text": "For modernize_existing: after tracing the workflow forward, check each item in valueInventory. For each enforcement mechanism and domain knowledge item: would the modernized workflow produce the same behavior? Any item where the answer is no or weaker is a loss \u2014 fix it directly or record the accepted tradeoff with justification."
             }
           ],
           "requireConfirmation": false
@@ -445,7 +475,7 @@
               "Reviewer-family or validator output is evidence, not authority."
             ],
             "procedure": [
-              "Score these dimensions 0-2 with one sentence of evidence each: `voiceClarity`, `ceremonyLevel`, `loopSoundness`, `delegationBoundedness`, `artifactClarity`, `taskEffectiveness`, `falseConfidenceResistance`, `stateMinimality`, `coverageSharpness`, `domainFit`, `handoffUtility`, `rigorAdaptability` (0 = adapts to complexity/rigor levels, 2 = single-weight), `enforcementStrength` (0 = behavioral rules have structural teeth; 2 = important rules are prose-only with no enforcement mechanism), and `modernizationDiscipline` (0 = every valueInventory item preserved, equivalently replaced with justification, or dropped with justification; 2 = items missing or replaced with weaker versions without justification — score 0 for create mode).",
+              "Score these dimensions 0-2 with one sentence of evidence each: `voiceClarity`, `ceremonyLevel`, `loopSoundness`, `delegationBoundedness`, `artifactClarity`, `taskEffectiveness`, `falseConfidenceResistance`, `stateMinimality`, `coverageSharpness`, `domainFit`, `handoffUtility`, `rigorAdaptability` (0 = adapts to complexity/rigor levels, 2 = single-weight), `enforcementStrength` (0 = behavioral rules have structural teeth; 2 = important rules are prose-only with no enforcement mechanism), and `modernizationDiscipline` (0 = every valueInventory item preserved, equivalently replaced with justification, or dropped with justification; 2 = items missing or replaced with weaker versions without justification \u2014 score 0 for create mode).",
               "If delegation is available and rigor is THOROUGH, run an adversarial review bundle with these lenses: `engine_native_reviewer`, `task_effectiveness_reviewer`, `state_economy_reviewer`, `false_confidence_reviewer`, `domain_fit_reviewer`, and `maintainer_reviewer`.",
               "Synthesize what the review confirmed, what it challenged, and what changed your mind.",
               "When scoring `falseConfidenceResistance`, explicitly check: do the workflow's quality gates protect edge cases and degraded paths, or only the happy path? A workflow that passes its own checks on ideal input but fails silently on minimal or unexpected input scores 2.",
@@ -463,18 +493,27 @@
           "promptFragments": [
             {
               "id": "phase-6c-standard",
-              "when": { "var": "rigorMode", "equals": "STANDARD" },
+              "when": {
+                "var": "rigorMode",
+                "equals": "STANDARD"
+              },
               "text": "For STANDARD rigor, you may keep the review self-executed unless uncertainty remains material. If you do delegate, prefer a small adversarial bundle."
             },
             {
               "id": "phase-6c-thorough",
-              "when": { "var": "rigorMode", "equals": "THOROUGH" },
+              "when": {
+                "var": "rigorMode",
+                "equals": "THOROUGH"
+              },
               "text": "For THOROUGH rigor, assume the first review is not enough. Use adversarial reviewer lanes unless a hard limitation makes them impossible."
             },
             {
               "id": "phase-6c-heritage-review",
-              "when": { "var": "authoringMode", "equals": "modernize_existing" },
-              "text": "For modernize_existing: add a heritage_reviewer to the adversarial bundle. Its job is to check each valueInventory item and find what was lost or weakened — it ignores format improvements. It must answer: which enforcement mechanisms are now prose-only? Which domain knowledge items are absent? Which behavioral rules were removed without equivalent replacement? Heritage_reviewer findings drive enforcementStrength and modernizationDiscipline scores."
+              "when": {
+                "var": "authoringMode",
+                "equals": "modernize_existing"
+              },
+              "text": "For modernize_existing: add a heritage_reviewer to the adversarial bundle. Its job is to check each valueInventory item and find what was lost or weakened \u2014 it ignores format improvements. It must answer: which enforcement mechanisms are now prose-only? Which domain knowledge items are absent? Which behavioral rules were removed without equivalent replacement? Heritage_reviewer findings drive enforcementStrength and modernizationDiscipline scores."
             }
           ],
           "requireConfirmation": false
@@ -542,6 +581,7 @@
           "Keep it concise. The workflow file is the deliverable, not the summary."
         ],
         "procedure": [
+          "Stamp the workflow file: read the current `version` from `spec/authoring-spec.json` and write `validatedAgainstSpecVersion: <N>` as a top-level field in the workflow JSON. Commit the change \u2014 the stamp has no effect if only saved locally.",
           "State the workflow file path and name, whether it was created or modernized, and what it does in one sentence.",
           "Summarize the step structure, loops, confirmations, and delegation profile.",
           "Report validation status, authoring-integrity status, and outcome-effectiveness status.",

@@ -292,6 +292,62 @@ function printVariantSummary(variantName: string, report: RegistryValidationRepo
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Staleness Advisory
+// ─────────────────────────────────────────────────────────────────────────────
+
+function printStalenessAdvisory(repoRoot: string): void {
+  // Read current spec version
+  let currentSpecVersion: number | null = null;
+  try {
+    const specPath = path.join(repoRoot, 'spec', 'authoring-spec.json');
+    const specData: unknown = JSON.parse(fs.readFileSync(specPath, 'utf-8'));
+    if (typeof specData === 'object' && specData !== null && 'version' in specData) {
+      const v = (specData as Record<string, unknown>)['version'];
+      if (typeof v === 'number' && Number.isInteger(v) && v >= 1) currentSpecVersion = v;
+    }
+  } catch {
+    return; // Can't read spec version — skip advisory
+  }
+
+  if (currentSpecVersion === null) return;
+
+  const workflowsDir = path.join(repoRoot, 'workflows');
+  if (!fs.existsSync(workflowsDir)) return;
+
+  const stale: string[] = [];
+  const unstamped: string[] = [];
+
+  for (const file of fs.readdirSync(workflowsDir)) {
+    if (!file.endsWith('.json')) continue;
+    try {
+      const wf: unknown = JSON.parse(fs.readFileSync(path.join(workflowsDir, file), 'utf-8'));
+      if (typeof wf !== 'object' || wf === null || !('id' in wf)) continue;
+      const def = wf as Record<string, unknown>;
+      const stamp = def['validatedAgainstSpecVersion'];
+      if (stamp === undefined || stamp === null) {
+        unstamped.push(String(def['id'] ?? file));
+      } else if (typeof stamp === 'number' && stamp < currentSpecVersion) {
+        stale.push(`${String(def['id'] ?? file)} (v${stamp} → v${currentSpecVersion})`);
+      }
+    } catch {
+      // Skip unparseable files — schema validation will catch them
+    }
+  }
+
+  if (stale.length === 0 && unstamped.length === 0) return;
+
+  console.log();
+  console.log('Staleness advisory (authoring spec v' + currentSpecVersion + '):');
+  for (const id of stale) {
+    console.log(`  [stale]     ${id}`);
+  }
+  for (const id of unstamped) {
+    console.log(`  [unstamped] ${id}`);
+  }
+  console.log(`  Run workflow-for-workflows on these to clear the flag.`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Main
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -457,6 +513,9 @@ async function main(): Promise<void> {
     console.log(JSON.stringify(jsonReport, null, 2));
     process.exit(totalFailures > 0 ? 1 : 0);
   } else {
+    // Staleness advisory (human-readable only, never affects exit code)
+    printStalenessAdvisory(repoRoot);
+
     // Human-readable summary
     console.log('='.repeat(60));
     if (totalFailures === 0) {
