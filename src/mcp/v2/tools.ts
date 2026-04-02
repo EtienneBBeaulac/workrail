@@ -185,6 +185,17 @@ export const V2CheckpointWorkflowInput = z.object({
 }).strict();
 export type V2CheckpointWorkflowInput = z.infer<typeof V2CheckpointWorkflowInput>;
 
+export const V2ManageWorkflowSourceInput = z.object({
+  action: z.enum(['attach', 'detach']).describe(
+    '"attach": add a workflow directory as a managed source so its workflows appear in list_workflows. ' +
+    '"detach": remove a previously attached managed source. Both operations are idempotent.'
+  ),
+  path: z.string()
+    .refine((p) => path.isAbsolute(p), 'path must be an absolute filesystem path')
+    .describe('Absolute path to the workflow directory to attach or detach.'),
+}).strict();
+export type V2ManageWorkflowSourceInput = z.infer<typeof V2ManageWorkflowSourceInput>;
+
 export const V2_TOOL_TITLES = {
   list_workflows: 'List Workflows (v2)',
   inspect_workflow: 'Inspect Workflow (v2)',
@@ -192,6 +203,7 @@ export const V2_TOOL_TITLES = {
   continue_workflow: 'Continue Workflow (v2)',
   checkpoint_workflow: 'Checkpoint Workflow (v2)',
   resume_session: 'Resume Session (v2)',
+  manage_workflow_source: 'Manage Workflow Source (v2)',
 } as const;
 
 export const V2_TOOL_ANNOTATIONS: Readonly<Record<keyof typeof V2_TOOL_TITLES, ToolAnnotations>> = {
@@ -201,4 +213,5 @@ export const V2_TOOL_ANNOTATIONS: Readonly<Record<keyof typeof V2_TOOL_TITLES, T
   continue_workflow: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
   checkpoint_workflow: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
   resume_session: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+  manage_workflow_source: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
 } as const;

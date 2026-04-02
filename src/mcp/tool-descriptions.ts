@@ -109,6 +109,17 @@ Remember: inspecting is read-only. Call start_workflow when ready to begin.`,
     checkpoint_workflow: renderProtocolDescription(CHECKPOINT_WORKFLOW_PROTOCOL, 'standard'),
 
     resume_session: renderProtocolDescription(RESUME_SESSION_PROTOCOL, 'standard'),
+
+    manage_workflow_source: `Attach or detach a workflow directory as a managed source.
+
+Use this to explicitly add a directory containing workflow files so its workflows appear in list_workflows as managed entries.
+
+Parameters:
+- action: "attach" to add a directory, "detach" to remove it. Both are idempotent.
+- path: absolute filesystem path to the workflow directory
+
+Attach is idempotent: attaching an already-attached path is a no-op.
+Detach is idempotent: detaching an absent path is a no-op.`,
   },
 
   // ─────────────────────────────────────────────────────────────────
@@ -202,5 +213,16 @@ This is read-only. Call start_workflow when ready to commit to following the wor
     checkpoint_workflow: renderProtocolDescription(CHECKPOINT_WORKFLOW_PROTOCOL, 'authoritative'),
 
     resume_session: renderProtocolDescription(RESUME_SESSION_PROTOCOL, 'authoritative'),
+
+    manage_workflow_source: `Attach or detach a workflow directory as a managed source.
+
+Use this to explicitly add a directory containing workflow files so its workflows appear in list_workflows as managed entries.
+
+Parameters:
+- action: "attach" to add a directory, "detach" to remove it. Both are idempotent.
+- path: absolute filesystem path to the workflow directory
+
+Attach is idempotent: attaching an already-attached path is a no-op.
+Detach is idempotent: detaching an absent path is a no-op.`,
   },
 } as const;
