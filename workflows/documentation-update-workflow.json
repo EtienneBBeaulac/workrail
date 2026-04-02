@@ -15,7 +15,8 @@
     "PRESERVATION-FIRST: keep accurate, well-written content unchanged. Only update what is demonstrably stale or incorrect. Targeted updates are better than wholesale rewrites.",
     "VERIFY AGAINST CODE: all updated technical content must be checked against current codebase state. Code examples and API references must match what is actually in the code today.",
     "DEGRADE AND DISCLOSE: if git history is unavailable or shallow for some paths, classify staleness as medium and note what evidence is missing. Never block — proceed with what is available.",
-    "SELF-EXECUTE: explore first with tools. Ask the user only what you genuinely cannot determine from the codebase and git history. The one real confirmation gate is the update plan before executing edits."
+    "SELF-EXECUTE: explore first with tools. Ask the user only what you genuinely cannot determine from the codebase and git history. The one real confirmation gate is the update plan before executing edits.",
+    "LOOP DISCIPLINE: the update loop runs without per-section gates — the plan was approved in phase-2. Only pause if a section requires changes beyond what the approved plan covers; note the deviation and ask."
   ],
   "steps": [
     {
@@ -71,7 +72,7 @@
     {
       "id": "phase-4-validate",
       "title": "Phase 4: End-to-End Validation",
-      "prompt": "Read through all updated documentation as a fresh reader and validate it as a whole.\n\n1. **End-to-end consistency** — read the docs in order. Is terminology consistent? Does the logical flow make sense? Do sections refer to each other correctly?\n\n2. **Technical accuracy pass** — for any section you feel uncertain about, verify it against current code now. Better to catch it here than in production.\n\n3. **User journey test** — walk through the key documented workflows from start to finish using only the documentation. Do setup instructions work? Are the most important use cases covered correctly?\n\n4. **Navigation and structure** — are all cross-references working? Is the table of contents (if present) accurate? Can a user find what they need?\n\n5. **Completeness check** — look back at the original gap analysis. Were all critical and important updates completed? Note explicitly if any were deferred.\n\nDocument what you found: any remaining issues, any sections that still need work, and your overall assessment of the documentation quality after the update.",
+      "prompt": "Read through all updated documentation as a fresh reader and validate it as a whole.\n\n1. **End-to-end consistency** — read the docs in order. Is terminology consistent? Does the logical flow make sense? Do sections refer to each other correctly?\n\n2. **Technical accuracy pass** — for any section you feel uncertain about, verify it against current code now. If verification reveals a remaining inaccuracy, note it explicitly: what is wrong, where it is, and what the correct information should be. Do not silently pass a section you are unsure about.\n\n3. **User journey test** — walk through the key documented workflows from start to finish using only the documentation. Do setup instructions work? Are the most important use cases covered correctly?\n\n4. **Navigation and structure** — are all cross-references working? Is the table of contents (if present) accurate? Can a user find what they need?\n\n5. **Completeness check** — look back at the original gap analysis. Were all critical and important updates completed? Note explicitly if any were deferred.\n\nDocument what you found: any remaining issues, any sections that still need work, and your overall assessment of the documentation quality after the update.",
       "requireConfirmation": false
     },
     {

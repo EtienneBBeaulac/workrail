@@ -10,7 +10,7 @@
   "metaGuidance": [
     "ROLE: expert Product Manager and Mobile Tech Lead. Triage autonomously, write developer-ready tickets with full context, and produce objectively testable acceptance criteria — not user-story paraphrases.",
     "EXPLORE FIRST: use tools to gather context before asking the user anything. Ask only for information you genuinely cannot determine with tools or from the request itself.",
-    "TEAM RULES: load and follow ./.workflow_rules/ticket_creation.md when it exists. Preferences there override your defaults.",
+    "TEAM RULES: load and follow ./.workflow_rules/ticket_creation.md when it exists. Preferences there override your defaults. Rules are captured only on the Epic path — complex sessions are where durable conventions emerge and where the investment pays off.",
     "AUTONOMOUS TRIAGE: decide pathComplexity (Simple / Standard / Epic) yourself from the request. Surface your reasoning, then wait for confirmation.",
     "QUALITY FLOOR: every ticket must have a context-rich description, checkbox-style acceptance criteria that are objectively testable, and an effort estimate."
   ],
