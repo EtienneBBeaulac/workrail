@@ -90,14 +90,15 @@ describe('coerceJsonStringObjectFields', () => {
     expect(result.context).toBe('42');
   });
 
-  it('leaves a JSON string that parses to a non-object (array) unchanged', () => {
-    // Arrays are not plain objects — context expects a record
+  it('leaves a JSON string that parses to an array unchanged', () => {
+    // Arrays are typeof 'object' but are not valid ZodRecord/ZodObject values.
+    // Coercing "[1,2,3]" to an array would swap "Expected object, received string"
+    // for "Expected object, received array" — no improvement. Leave the original
+    // string so Zod reports the error against the actual input the client sent.
     const args = { token: 'ct_abc', context: '[1,2,3]' };
-    // JSON.parse('[1,2,3]') is an object (typeof === 'object'), so it IS coerced.
-    // This is intentional: arrays pass the object check and Zod will then validate
-    // whether an array satisfies z.record(), which it does not — giving a clear error.
     const result = coerceJsonStringObjectFields(args, schema) as Record<string, unknown>;
-    expect(Array.isArray(result.context)).toBe(true);
+    expect(result.context).toBe('[1,2,3]');
+    expect(result).toBe(args); // no allocation
   });
 
   it('returns original args reference when no coercion occurs (no allocation)', () => {

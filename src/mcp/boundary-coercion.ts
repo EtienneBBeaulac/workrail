@@ -130,9 +130,13 @@ export function coerceJsonStringObjectFields(
     if (typeof value !== 'string') return;
 
     const parsed = tryParseJson(value);
-    // Leave as-is if JSON.parse failed (returns original string) or produced
-    // a non-object primitive (e.g. "123" -> 123, '"foo"' -> "foo").
-    if (typeof parsed !== 'object' || parsed === null) return;
+    // Leave as-is if JSON.parse failed (returns original string), produced a
+    // non-object primitive (e.g. "123" -> 123, '"foo"' -> "foo"), or produced
+    // an array. Arrays are typeof 'object' but are not valid ZodObject/ZodRecord
+    // values. Passing them through would swap "Expected object, received string"
+    // for "Expected object, received array" — no improvement. Leave the original
+    // string so Zod reports the error against the actual input the client sent.
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return;
 
     if (result === null) result = { ...input };
     result[key] = parsed;

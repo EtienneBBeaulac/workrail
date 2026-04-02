@@ -180,15 +180,23 @@ export function createHandler<TInput extends z.ZodType, TOutput>(
  * @param schema - Zod schema for input validation
  * @param preValidate - Pre-validation function
  * @param handler - Raw handler function (takes typed input)
+ * @param shapeSchema - Optional bare ZodObject for introspection and JSON-string coercion
+ * @param aliasMap - Optional alias-to-canonical field name map
  * @returns Wrapped handler ready for MCP dispatch
  */
 export function createValidatingHandler<TInput extends z.ZodType, TOutput>(
   schema: TInput,
   preValidate: (args: unknown) => PreValidateResult,
-  handler: (input: z.infer<TInput>, ctx: ToolContext) => Promise<ToolResult<TOutput>>
+  handler: (input: z.infer<TInput>, ctx: ToolContext) => Promise<ToolResult<TOutput>>,
+  shapeSchema?: z.ZodObject<z.ZodRawShape>,
+  aliasMap?: Readonly<Record<string, string>>,
 ): WrappedToolHandler {
   return async (args: unknown, ctx: ToolContext): Promise<McpCallToolResult> => {
-    const pre = preValidate(args);
+    // Normalize JSON-encoded string fields before pre-validation and Zod parsing.
+    const normalizedArgs = shapeSchema !== undefined
+      ? coerceJsonStringObjectFields(args, shapeSchema, aliasMap)
+      : args;
+    const pre = preValidate(normalizedArgs);
     if (!pre.ok) {
       const error = pre.error;
 
@@ -214,7 +222,8 @@ export function createValidatingHandler<TInput extends z.ZodType, TOutput>(
       return toMcpResult(error);
     }
 
-    // Fall back to the standard Zod + handler pipeline
-    return createHandler(schema, handler)(args, ctx);
+    // Fall back to the standard Zod + handler pipeline.
+    // Pass normalizedArgs so coercion is not applied twice.
+    return createHandler(schema, handler, shapeSchema, aliasMap)(normalizedArgs, ctx);
   };
 }
