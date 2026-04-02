@@ -193,14 +193,14 @@ async function enrichRepo(
     }];
   });
 
-  // Sort: active sessions first, then dirty, then by recency
-  worktrees.sort((a, b) => {
+  // Sort: active sessions first, then dirty, then by recency.
+  // Spread before sorting — keeps the mutation local rather than mutating
+  // a fresh flatMap result in place before handing it out as readonly.
+  return [...worktrees].sort((a, b) => {
     if (b.activeSessionCount !== a.activeSessionCount) return b.activeSessionCount - a.activeSessionCount;
     if (b.changedCount !== a.changedCount) return b.changedCount - a.changedCount;
     return b.headTimestampMs - a.headTimestampMs;
   });
-
-  return worktrees;
 }
 
 // ---------------------------------------------------------------------------
@@ -235,7 +235,7 @@ export function buildActiveSessionCounts(
  * or all enrichments failed) are omitted from the result — an empty section
  * header would be confusing when the repo's path no longer exists.
  *
- * Results are sorted by repo name for deterministic display order.
+ * Sort order: repos with active sessions first, then alphabetical by repo name.
  */
 export async function getWorktreeList(
   repoRoots: readonly string[],
@@ -263,13 +263,14 @@ export async function getWorktreeList(
     }];
   });
 
-  // Deterministic display order: repos with active sessions first, then alphabetical
-  repos.sort((a, b) => {
+  // Sort: repos with active sessions first, then alphabetical by name.
+  // Spread before sorting — same immutability rationale as enrichRepo.
+  const sortedRepos = [...repos].sort((a, b) => {
     const aActive = a.worktrees.some(w => w.activeSessionCount > 0) ? 0 : 1;
     const bActive = b.worktrees.some(w => w.activeSessionCount > 0) ? 0 : 1;
     if (aActive !== bActive) return aActive - bActive;
     return a.repoName.localeCompare(b.repoName);
   });
 
-  return { repos };
+  return { repos: sortedRepos };
 }
