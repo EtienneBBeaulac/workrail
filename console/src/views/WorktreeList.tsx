@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useWorktreeList } from '../api/hooks';
 import type { ConsoleWorktreeSummary } from '../api/types';
 
@@ -124,6 +125,12 @@ export function WorktreeList({ onSelectBranch }: { onSelectBranch: (branch: stri
 
   const { worktrees } = data;
 
+  const groups = useMemo(() => ({
+    activeSessions: worktrees.filter(w => w.activeSessionCount > 0),
+    dirty: worktrees.filter(w => w.activeSessionCount === 0 && w.changedCount > 0),
+    clean: worktrees.filter(w => w.activeSessionCount === 0 && w.changedCount === 0),
+  }), [worktrees]);
+
   if (worktrees.length === 0) {
     return (
       <div className="text-[var(--text-muted)] text-sm py-12 text-center">
@@ -134,18 +141,24 @@ export function WorktreeList({ onSelectBranch }: { onSelectBranch: (branch: stri
     );
   }
 
-  const activeSessions = worktrees.filter(w => w.activeSessionCount > 0);
-  const dirty = worktrees.filter(w => w.activeSessionCount === 0 && w.changedCount > 0);
-  const clean = worktrees.filter(w => w.activeSessionCount === 0 && w.changedCount === 0);
+  const { activeSessions, dirty, clean } = groups;
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-[var(--text-primary)] font-semibold">
+        <h2 className="text-[var(--text-primary)] font-semibold flex items-center gap-2 flex-wrap">
           Worktrees
-          <span className="text-[var(--text-muted)] font-normal ml-2 text-sm">
-            {worktrees.length}
-          </span>
+          <span className="text-[var(--text-muted)] font-normal text-sm">{worktrees.length}</span>
+          {activeSessions.length > 0 && (
+            <span className="text-xs font-medium text-[var(--status-in-progress)]">
+              · {activeSessions.length} active
+            </span>
+          )}
+          {dirty.length > 0 && (
+            <span className="text-xs font-medium text-orange-400">
+              · {dirty.length} dirty
+            </span>
+          )}
         </h2>
         <span className="text-xs text-[var(--text-muted)]">auto-refreshes every 10s</span>
       </div>
