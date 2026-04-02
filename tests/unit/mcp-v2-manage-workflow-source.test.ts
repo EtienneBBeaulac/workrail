@@ -263,7 +263,7 @@ describe('manage_workflow_source: error handling', () => {
         code: 'MANAGED_SOURCE_BUSY',
         message: 'locked',
         retry: { kind: 'retryable_after_ms', afterMs: 250 },
-        lockPath: '/tmp/managed-sources.lock',
+        lockPath: path.join(os.tmpdir(), 'managed-sources.lock'),
       } as ManagedSourceStoreError),
       detach: () => okAsync(undefined),
     };
