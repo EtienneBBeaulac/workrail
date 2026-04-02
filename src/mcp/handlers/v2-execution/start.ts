@@ -329,24 +329,34 @@ export function executeStartWorkflow(
       workspacePath: input.workspacePath,
       resolvedRootUris: ctx.v2.resolvedRootUris,
     });
-  const workflowReader = shouldUseRequestReader
-    ? {
-        getWorkflowById: async (workflowId: string) => {
-          const requestReader = await createWorkflowReaderForRequest({
-            featureFlags: ctx.featureFlags,
-            workspacePath: input.workspacePath,
-            resolvedRootUris: ctx.v2.resolvedRootUris,
-            rememberedRootsStore: ctx.v2.rememberedRootsStore,
-          });
-          const requestResult = await requestReader.getWorkflowById(workflowId);
-          if (requestResult != null) return requestResult;
-          return ctx.workflowService.getWorkflowById(workflowId);
+
+  // Eagerly resolve the request reader to capture stale paths before starting the workflow.
+  const readerRA = shouldUseRequestReader
+    ? RA.fromPromise(
+        createWorkflowReaderForRequest({
+          featureFlags: ctx.featureFlags,
+          workspacePath: input.workspacePath,
+          resolvedRootUris: ctx.v2.resolvedRootUris,
+          rememberedRootsStore: ctx.v2.rememberedRootsStore,
+        }),
+        (err): StartWorkflowError => ({
+          kind: 'precondition_failed',
+          message: `Failed to initialize workflow reader: ${String(err)}`,
+        })
+      ).map(({ reader, stalePaths }) => ({
+        workflowReader: {
+          getWorkflowById: async (workflowId: string) => {
+            const requestResult = await reader.getWorkflowById(workflowId);
+            if (requestResult != null) return requestResult;
+            return ctx.workflowService.getWorkflowById(workflowId);
+          },
         },
-      }
-    : ctx.workflowService;
+        stalePaths,
+      }))
+    : okAsync({ workflowReader: ctx.workflowService, stalePaths: [] as readonly string[] });
 
   // 1. Load, validate (Phase 1a pipeline), and pin workflow
-  return loadAndPinWorkflow({
+  return readerRA.andThen(({ workflowReader, stalePaths }) => loadAndPinWorkflow({
     workflowId: input.workflowId,
     workflowReader,
     crypto,
@@ -480,10 +490,12 @@ export function executeStartWorkflow(
             preferences,
             nextIntent,
             nextCall: buildNextCall({ continueToken: tokens.continueToken, isComplete: false, pending }),
+            ...(stalePaths.length > 0 ? { staleRoots: [...stalePaths] } : {}),
           });
           return okAsync({ response: parsed, contentEnvelope });
       });
-    });
+    })
+  );
 }
 
 function enrichPinnedSnapshotWithResolvedReferences(

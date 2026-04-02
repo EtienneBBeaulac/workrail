@@ -48,16 +48,26 @@ export function toProjectWorkflowDirectory(workspaceDirectory: string): string {
     : path.join(workspaceDirectory, 'workflows');
 }
 
+export interface WorkflowRootDiscoveryResult {
+  readonly discovered: readonly string[];
+  readonly stale: readonly string[];
+}
+
 export async function discoverRootedWorkflowDirectories(
   roots: readonly string[],
-): Promise<readonly string[]> {
+): Promise<WorkflowRootDiscoveryResult> {
   const discoveredByPath = new Set<string>();
   const discoveredPaths: string[] = [];
+  const stalePaths: string[] = [];
 
   for (const root of roots) {
     const rootPath = path.resolve(root);
-    const nextPaths = await discoverWorkflowDirectoriesUnderRoot(rootPath);
-    for (const nextPath of nextPaths) {
+    const result = await discoverWorkflowDirectoriesUnderRoot(rootPath);
+    if (result.stale) {
+      stalePaths.push(rootPath);
+      continue;
+    }
+    for (const nextPath of result.discovered) {
       const normalizedPath = path.resolve(nextPath);
       if (discoveredByPath.has(normalizedPath)) continue;
       discoveredByPath.add(normalizedPath);
@@ -65,16 +75,21 @@ export async function discoverRootedWorkflowDirectories(
     }
   }
 
-  return discoveredPaths;
+  return { discovered: discoveredPaths, stale: stalePaths };
+}
+
+export interface WorkflowReaderForRequestResult {
+  readonly reader: IWorkflowReader;
+  readonly stalePaths: readonly string[];
 }
 
 export async function createWorkflowReaderForRequest(
   options: RequestWorkflowReaderOptions,
-): Promise<IWorkflowReader> {
+): Promise<WorkflowReaderForRequestResult> {
   const workspaceDirectory = resolveRequestWorkspaceDirectory(options);
   const projectWorkflowDirectory = toProjectWorkflowDirectory(workspaceDirectory);
   const rememberedRoots = await listRememberedRoots(options.rememberedRootsStore);
-  const rootedWorkflowDirectories = await discoverRootedWorkflowDirectories(rememberedRoots);
+  const { discovered: rootedWorkflowDirectories, stale: stalePaths } = await discoverRootedWorkflowDirectories(rememberedRoots);
   const customPaths = rootedWorkflowDirectories.filter((directory) => directory !== projectWorkflowDirectory);
   const storage = new EnhancedMultiSourceWorkflowStorage(
     {
@@ -83,7 +98,8 @@ export async function createWorkflowReaderForRequest(
     },
     options.featureFlags,
   );
-  return new SchemaValidatingCompositeWorkflowStorage(storage);
+  const reader = new SchemaValidatingCompositeWorkflowStorage(storage);
+  return { reader, stalePaths };
 }
 
 async function listRememberedRoots(
@@ -100,10 +116,22 @@ async function listRememberedRoots(
   return result.value.map((root) => path.resolve(root));
 }
 
-async function discoverWorkflowDirectoriesUnderRoot(rootPath: string): Promise<readonly string[]> {
+interface RootDiscoveryResult {
+  readonly discovered: readonly string[];
+  readonly stale: boolean;
+}
+
+async function discoverWorkflowDirectoriesUnderRoot(rootPath: string): Promise<RootDiscoveryResult> {
   const discoveredPaths: string[] = [];
-  await walkForRootedWorkflowDirectories(rootPath, discoveredPaths);
-  return discoveredPaths;
+  try {
+    await walkForRootedWorkflowDirectories(rootPath, discoveredPaths);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { discovered: [], stale: true };
+    }
+    throw err;
+  }
+  return { discovered: discoveredPaths, stale: false };
 }
 
 async function walkForRootedWorkflowDirectories(
@@ -127,7 +155,11 @@ async function walkForRootedWorkflowDirectories(
       continue;
     }
 
-    await walkForRootedWorkflowDirectories(entryPath, discoveredPaths);
+    // Guard recursive descent: a subdirectory may vanish between readdir and recurse.
+    // ENOENT here means the subdir disappeared mid-walk -- skip it, not the whole root.
+    await walkForRootedWorkflowDirectories(entryPath, discoveredPaths).catch((err) => {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    });
   }
 }
 

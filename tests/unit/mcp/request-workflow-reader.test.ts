@@ -123,7 +123,7 @@ describe('request-workflow-reader', () => {
     writeWorkflow(workspaceA, 'Workspace A');
     writeWorkflow(workspaceB, 'Workspace B');
 
-    const reader = await createWorkflowReaderForRequest({
+    const { reader } = await createWorkflowReaderForRequest({
       featureFlags: new StaticFeatureFlagProvider({
         v2Tools: true,
         leanWorkflows: false,
@@ -148,7 +148,8 @@ describe('request-workflow-reader', () => {
     writeRootedWorkflow(rememberedRoot, ['packages', 'a'], 'pkg-a-workflow', 'Package A');
     writeRootedWorkflow(rememberedRoot, [], 'repo-root-workflow', 'Repo Root');
 
-    const discovered = await discoverRootedWorkflowDirectories([rememberedRoot]);
+    const { discovered, stale } = await discoverRootedWorkflowDirectories([rememberedRoot]);
+    expect(stale).toEqual([]);
     expect(discovered).toEqual([
       path.join(rememberedRoot, '.workrail', 'workflows'),
       path.join(rememberedRoot, 'packages', 'a', '.workrail', 'workflows'),
@@ -163,7 +164,7 @@ describe('request-workflow-reader', () => {
     fs.mkdirSync(workspace, { recursive: true });
     writeRootedWorkflow(rememberedRoot, ['packages', 'tools'], 'rooted-workflow', 'Rooted Workflow');
 
-    const reader = await createWorkflowReaderForRequest({
+    const { reader, stalePaths } = await createWorkflowReaderForRequest({
       featureFlags: new StaticFeatureFlagProvider({
         v2Tools: true,
         leanWorkflows: false,
@@ -174,6 +175,7 @@ describe('request-workflow-reader', () => {
       rememberedRootsStore: rememberedRootsStore(rememberedRoot),
     });
 
+    expect(stalePaths).toEqual([]);
     const workflow = await reader.getWorkflowById('rooted-workflow');
     expect(workflow?.definition.name).toBe('Rooted Workflow');
     expect(workflow?.source.kind).toBe('custom');
@@ -186,7 +188,7 @@ describe('request-workflow-reader', () => {
     writeWorkflow(workspace, 'Legacy Request Workflow');
     writeRootedWorkflow(rememberedRoot, ['packages', 'tools'], 'workspace-scoped-workflow', 'Rooted Workflow');
 
-    const reader = await createWorkflowReaderForRequest({
+    const { reader, stalePaths } = await createWorkflowReaderForRequest({
       featureFlags: new StaticFeatureFlagProvider({
         v2Tools: true,
         leanWorkflows: false,
@@ -197,8 +199,102 @@ describe('request-workflow-reader', () => {
       rememberedRootsStore: rememberedRootsStore(rememberedRoot),
     });
 
+    expect(stalePaths).toEqual([]);
     const workflow = await reader.getWorkflowById('workspace-scoped-workflow');
     expect(workflow?.definition.name).toBe('Legacy Request Workflow');
     expect(workflow?.source.kind).toBe('project');
+  });
+
+  it('returns stale paths without throwing when a remembered root no longer exists', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-stale-roots-'));
+    const workspace = path.join(tempRoot, 'workspace');
+    const existingRoot = path.join(tempRoot, 'existing-repo');
+    const deletedRoot = path.join(tempRoot, 'deleted-worktree'); // never created
+    fs.mkdirSync(workspace, { recursive: true });
+    writeRootedWorkflow(existingRoot, [], 'existing-workflow', 'Existing Workflow');
+
+    const { reader, stalePaths } = await createWorkflowReaderForRequest({
+      featureFlags: new StaticFeatureFlagProvider({
+        v2Tools: true,
+        leanWorkflows: false,
+        agenticRoutines: false,
+        experimentalWorkflows: false,
+      }),
+      workspacePath: workspace,
+      rememberedRootsStore: rememberedRootsStore(existingRoot, deletedRoot),
+    });
+
+    // Stale root is reported, not thrown
+    expect(stalePaths).toEqual([path.resolve(deletedRoot)]);
+
+    // Accessible root workflows are still discovered
+    const workflow = await reader.getWorkflowById('existing-workflow');
+    expect(workflow?.definition.name).toBe('Existing Workflow');
+  });
+
+  it('returns all stale when every remembered root is gone', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-all-stale-'));
+    const workspace = path.join(tempRoot, 'workspace');
+    fs.mkdirSync(workspace, { recursive: true });
+    const gone1 = path.join(tempRoot, 'gone-1');
+    const gone2 = path.join(tempRoot, 'gone-2');
+
+    const { stalePaths } = await createWorkflowReaderForRequest({
+      featureFlags: new StaticFeatureFlagProvider({
+        v2Tools: true,
+        leanWorkflows: false,
+        agenticRoutines: false,
+        experimentalWorkflows: false,
+      }),
+      workspacePath: workspace,
+      rememberedRootsStore: rememberedRootsStore(gone1, gone2),
+    });
+
+    expect(stalePaths).toHaveLength(2);
+    expect(stalePaths).toContain(path.resolve(gone1));
+    expect(stalePaths).toContain(path.resolve(gone2));
+  });
+
+  it('marks root as stale when the root path does not exist (ENOENT)', async () => {
+    const { discovered, stale } = await discoverRootedWorkflowDirectories(['/nonexistent-path-xyz-123']);
+    expect(stale).toEqual(['/nonexistent-path-xyz-123']);
+    expect(discovered).toEqual([]);
+  });
+
+  it('propagates non-ENOENT errors from root walk without marking as stale', async () => {
+    // readdir on a file (not a directory) throws ENOTDIR -- should re-throw, not be treated as stale
+    const tempFile = path.join(os.tmpdir(), `wr-not-a-dir-${Date.now()}.txt`);
+    fs.writeFileSync(tempFile, 'not a directory');
+    try {
+      await expect(
+        discoverRootedWorkflowDirectories([tempFile])
+      ).rejects.toMatchObject({ code: 'ENOTDIR' });
+    } finally {
+      fs.unlinkSync(tempFile);
+    }
+  });
+
+  it('does not mark root as stale when a subdirectory disappears mid-walk', async () => {
+    // Verifies the recursive ENOENT guard: if a subdir is gone, the root is NOT stale.
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-midwalk-'));
+    const presentSubdir = path.join(tempRoot, 'present');
+    const vanishedSubdir = path.join(tempRoot, 'vanished');
+    fs.mkdirSync(presentSubdir);
+    // Write a workflow in the present subdirectory
+    const workflowsDir = path.join(presentSubdir, '.workrail', 'workflows');
+    fs.mkdirSync(workflowsDir, { recursive: true });
+    fs.writeFileSync(path.join(workflowsDir, 'sub-workflow.v2.json'), JSON.stringify({
+      id: 'sub-workflow', name: 'Sub', description: 'Sub', version: '0.1.0',
+      steps: [{ id: 's1', title: 'S1', prompt: 'Do it' }],
+    }));
+    // vanishedSubdir is never created -- simulates a directory that existed then was removed
+
+    const { discovered, stale } = await discoverRootedWorkflowDirectories([tempRoot]);
+
+    // Root is NOT stale -- it exists
+    expect(stale).toEqual([]);
+    // Workflow from present subdir is discovered
+    expect(discovered).toContain(path.resolve(workflowsDir));
+    // vanishedSubdir path is not in discovered (it didn't exist, was skipped silently)
   });
 });

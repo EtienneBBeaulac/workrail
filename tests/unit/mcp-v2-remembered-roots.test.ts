@@ -134,6 +134,83 @@ async function writeWorkspaceWorkflow(workspaceRoot: string): Promise<void> {
   );
 }
 
+describe('stale remembered roots in tool responses', () => {
+  it('list_workflows succeeds and includes staleRoots when a remembered root no longer exists', async () => {
+    const dataRoot = await mkTempDir('workrail-stale-list-data-');
+    const workspaceRoot = await mkTempDir('workrail-stale-list-ws-');
+    const { ctx, rememberedRootsStore } = await buildCtx(dataRoot);
+
+    const stalePath = path.join(os.tmpdir(), `wr-stale-${Date.now()}`); // never created
+    const rememberRes = await rememberedRootsStore.rememberRoot(stalePath);
+    expect(rememberRes.isOk()).toBe(true);
+
+    const result = await handleV2ListWorkflows({ workspacePath: workspaceRoot }, ctx);
+
+    expect(result.type).toBe('success');
+    const data = result.data as Record<string, unknown>;
+    expect(Array.isArray(data.staleRoots)).toBe(true);
+    expect(data.staleRoots as string[]).toContain(path.resolve(stalePath));
+  });
+
+  it('list_workflows does not include staleRoots when all remembered roots are accessible', async () => {
+    const dataRoot = await mkTempDir('workrail-nostale-list-data-');
+    const workspaceRoot = await mkTempDir('workrail-nostale-list-ws-');
+    const validRoot = await mkTempDir('workrail-nostale-list-root-');
+    const { ctx, rememberedRootsStore } = await buildCtx(dataRoot);
+
+    const rememberRes = await rememberedRootsStore.rememberRoot(validRoot);
+    expect(rememberRes.isOk()).toBe(true);
+
+    const result = await handleV2ListWorkflows({ workspacePath: workspaceRoot }, ctx);
+
+    expect(result.type).toBe('success');
+    const data = result.data as Record<string, unknown>;
+    expect(data.staleRoots).toBeUndefined();
+  });
+
+  it('inspect_workflow succeeds and includes staleRoots when a remembered root no longer exists', async () => {
+    const dataRoot = await mkTempDir('workrail-stale-inspect-data-');
+    const workspaceRoot = await mkTempDir('workrail-stale-inspect-ws-');
+    const { ctx, rememberedRootsStore } = await buildCtx(dataRoot, workspaceRoot);
+    await writeWorkspaceWorkflow(workspaceRoot);
+
+    const stalePath = path.join(os.tmpdir(), `wr-stale-${Date.now()}`); // never created
+    const rememberRes = await rememberedRootsStore.rememberRoot(stalePath);
+    expect(rememberRes.isOk()).toBe(true);
+
+    const result = await handleV2InspectWorkflow(
+      { workflowId: 'test-workflow', mode: 'metadata', workspacePath: workspaceRoot },
+      ctx,
+    );
+
+    expect(result.type).toBe('success');
+    const data = result.data as Record<string, unknown>;
+    expect(Array.isArray(data.staleRoots)).toBe(true);
+    expect(data.staleRoots as string[]).toContain(path.resolve(stalePath));
+  });
+
+  it('start_workflow succeeds and includes staleRoots when a remembered root no longer exists', async () => {
+    const dataRoot = await mkTempDir('workrail-stale-start-data-');
+    const workspaceRoot = await mkTempDir('workrail-stale-start-ws-');
+    const { ctx, rememberedRootsStore } = await buildCtx(dataRoot, workspaceRoot);
+    await writeWorkspaceWorkflow(workspaceRoot);
+
+    const stalePath = path.join(os.tmpdir(), `wr-stale-${Date.now()}`); // never created
+    const rememberRes = await rememberedRootsStore.rememberRoot(stalePath);
+    expect(rememberRes.isOk()).toBe(true);
+
+    const result = await handleV2StartWorkflow(
+      { workflowId: 'test-workflow', workspacePath: workspaceRoot },
+      ctx,
+    );
+
+    expect(result.type).toBe('success');
+    const data = result.data as Record<string, unknown>;
+    expect(Array.isArray(data.staleRoots)).toBe(true);
+    expect(data.staleRoots as string[]).toContain(path.resolve(stalePath));
+  });
+});
+
 describe('v2 remembered roots integration', () => {
   it('list_workflows remembers explicit workspacePath in the persistent store', async () => {
     const dataRoot = await mkTempDir('workrail-remembered-roots-data-');

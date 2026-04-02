@@ -53,7 +53,7 @@ export async function handleV2ListWorkflows(
   if (isToolErrorResult(rememberedRootRecordsResult)) return rememberedRootRecordsResult;
   const rememberedRootRecords = rememberedRootRecordsResult;
   const { crypto, pinnedStore } = guard.ctx.v2;
-  const workflowReader = hasRequestWorkspaceSignal({
+  const readerResult = hasRequestWorkspaceSignal({
     workspacePath: input.workspacePath,
     resolvedRootUris: guard.ctx.v2.resolvedRootUris,
   })
@@ -63,7 +63,9 @@ export async function handleV2ListWorkflows(
         resolvedRootUris: guard.ctx.v2.resolvedRootUris,
         rememberedRootsStore: guard.ctx.v2.rememberedRootsStore,
       })
-    : ctx.workflowService;
+    : { reader: ctx.workflowService, stalePaths: [] as string[] };
+  const workflowReader = readerResult.reader;
+  const stalePaths = readerResult.stalePaths;
 
   return ResultAsync.fromPromise(
     withTimeout(workflowReader.listWorkflowSummaries(), TIMEOUT_MS, 'list_workflows'),
@@ -88,6 +90,7 @@ export async function handleV2ListWorkflows(
     .map((compiled) => {
       const payload = V2WorkflowListOutputSchema.parse({
         workflows: compiled.sort((a, b) => a.workflowId.localeCompare(b.workflowId)),
+        ...(stalePaths.length > 0 ? { staleRoots: [...stalePaths] } : {}),
       });
       return success(payload) as ToolResult<unknown>;
     })
@@ -109,7 +112,7 @@ export async function handleV2InspectWorkflow(
   if (isToolErrorResult(rememberedRootRecordsResult)) return rememberedRootRecordsResult;
   const rememberedRootRecords = rememberedRootRecordsResult;
   const { crypto, pinnedStore } = guard.ctx.v2;
-  const workflowReader = hasRequestWorkspaceSignal({
+  const readerResult = hasRequestWorkspaceSignal({
     workspacePath: input.workspacePath,
     resolvedRootUris: guard.ctx.v2.resolvedRootUris,
   })
@@ -119,7 +122,9 @@ export async function handleV2InspectWorkflow(
         resolvedRootUris: guard.ctx.v2.resolvedRootUris,
         rememberedRootsStore: guard.ctx.v2.rememberedRootsStore,
       })
-    : ctx.workflowService;
+    : { reader: ctx.workflowService, stalePaths: [] as string[] };
+  const workflowReader = readerResult.reader;
+  const stalePaths = readerResult.stalePaths;
 
   return ResultAsync.fromPromise(
     withTimeout(workflowReader.getWorkflowById(input.workflowId), TIMEOUT_MS, 'inspect_workflow'),
@@ -173,6 +178,7 @@ export async function handleV2InspectWorkflow(
               mode: input.mode,
               compiled: body,
               ...(visibility ? { visibility } : {}),
+              ...(stalePaths.length > 0 ? { staleRoots: [...stalePaths] } : {}),
               ...(references != null && references.length > 0 ? { references } : {}),
             });
             return okAsync(success(payload) as ToolResult<unknown>);
