@@ -36,10 +36,12 @@ function WorktreeCard({ wt, onSelectBranch }: { wt: ConsoleWorktreeSummary; onSe
     : 'border-[var(--border)]';
 
   return (
-    <div
-      className={`rounded-lg border ${borderColor} bg-[var(--bg-secondary)] p-4 flex flex-col gap-2 ${!isDetached ? 'cursor-pointer hover:border-[var(--accent)] transition-colors' : ''}`}
+    <button
+      type="button"
+      disabled={isDetached}
       onClick={!isDetached ? () => onSelectBranch(wt.branch!) : undefined}
       title={!isDetached ? `View sessions for ${wt.branch}` : undefined}
+      className={`w-full text-left rounded-lg border ${borderColor} bg-[var(--bg-secondary)] p-4 flex flex-col gap-2 transition-colors ${!isDetached ? 'cursor-pointer hover:border-[var(--accent)]' : 'cursor-default opacity-80'}`}
     >
       {/* Header row: branch + worktree name */}
       <div className="flex items-start justify-between gap-3">
@@ -93,7 +95,7 @@ function WorktreeCard({ wt, onSelectBranch }: { wt: ConsoleWorktreeSummary; onSe
           {relativeTime(wt.headTimestampMs)}
         </span>
       </div>
-    </div>
+    </button>
   );
 }
 

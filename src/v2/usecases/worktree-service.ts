@@ -19,21 +19,43 @@ const execFileAsync = promisify(execFile);
 // Git helpers
 // ---------------------------------------------------------------------------
 
+/** 5 s ceiling per git command — prevents the endpoint hanging on credential
+ * prompts, network fetches, or a locked index. */
+const GIT_TIMEOUT_MS = 5_000;
+
 /**
- * Run a git command and return stdout, or null if the command fails.
+ * Discriminate child_process execution errors from programmer errors.
  *
- * null is an explicit failure signal — callers must handle it rather than
- * silently treating a failed command as empty output. Empty string is a
- * valid result (e.g. `git status --short` on a clean repo).
+ * Execution errors (non-zero exit, ENOENT, ETIMEDOUT) are set by Node's
+ * child_process module and always carry a `killed` property. TypeError,
+ * ReferenceError, etc. do not — those are bugs in our code and must
+ * propagate rather than being silently swallowed.
+ */
+function isExecError(e: unknown): boolean {
+  return e instanceof Error && 'killed' in e;
+}
+
+/**
+ * Run a git command and return stdout trimmed, or null on execution failure.
  *
- * Async so per-worktree enrichment can be parallelized with Promise.all.
+ * null is an explicit signal — callers must handle it rather than conflating
+ * a failed command with empty output (e.g. `git status --short` on a clean
+ * repo legitimately returns ''). Programmer errors (TypeError etc.) are
+ * re-thrown so they surface rather than being masked as missing git data.
+ *
+ * Async so per-worktree enrichment can be parallelized with Promise.allSettled.
  */
 async function git(cwd: string, args: readonly string[]): Promise<string | null> {
   try {
-    const { stdout } = await execFileAsync('git', [...args], { cwd, encoding: 'utf-8' });
+    const { stdout } = await execFileAsync('git', [...args], {
+      cwd,
+      encoding: 'utf-8',
+      timeout: GIT_TIMEOUT_MS,
+    });
     return stdout.trim();
-  } catch {
-    return null;
+  } catch (e: unknown) {
+    if (isExecError(e)) return null;
+    throw e;
   }
 }
 
