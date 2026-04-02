@@ -42,7 +42,8 @@ export type V2WorkflowToolName =
   | 'start_workflow'
   | 'continue_workflow'
   | 'checkpoint_workflow'
-  | 'resume_session';
+  | 'resume_session'
+  | 'manage_workflow_source';
 
 // -----------------------------------------------------------------------------
 // Wrapped Handler Type

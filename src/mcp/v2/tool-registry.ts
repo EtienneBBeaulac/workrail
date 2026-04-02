@@ -19,6 +19,7 @@ import {
   V2ContinueWorkflowInputShape,
   V2InspectWorkflowInput,
   V2ListWorkflowsInput,
+  V2ManageWorkflowSourceInput,
   V2ResumeSessionInput,
   V2StartWorkflowInput,
   V2_TOOL_ANNOTATIONS,
@@ -28,6 +29,7 @@ import { handleV2ContinueWorkflow, handleV2StartWorkflow } from '../handlers/v2-
 import { handleV2InspectWorkflow, handleV2ListWorkflows } from '../handlers/v2-workflow.js';
 import { handleV2CheckpointWorkflow } from '../handlers/v2-checkpoint.js';
 import { handleV2ResumeSession } from '../handlers/v2-resume.js';
+import { handleV2ManageWorkflowSource } from '../handlers/v2-manage-workflow-source.js';
 import { CONTINUE_WORKFLOW_PROTOCOL } from '../workflow-protocol-contracts.js';
 
 // -----------------------------------------------------------------------------
@@ -88,6 +90,12 @@ export function buildV2ToolRegistry(buildTool: ToolBuilder): V2ToolRegistration 
       inputSchema: V2ResumeSessionInput,
       annotations: V2_TOOL_ANNOTATIONS.resume_session,
     }),
+    buildTool({
+      name: 'manage_workflow_source',
+      title: V2_TOOL_TITLES.manage_workflow_source,
+      inputSchema: V2ManageWorkflowSourceInput,
+      annotations: V2_TOOL_ANNOTATIONS.manage_workflow_source,
+    }),
   ];
 
   // Build wrapped handlers (validation at boundary)
@@ -104,6 +112,7 @@ export function buildV2ToolRegistry(buildTool: ToolBuilder): V2ToolRegistration 
     ),
     checkpoint_workflow: createHandler(V2CheckpointWorkflowInput, handleV2CheckpointWorkflow),
     resume_session: createHandler(V2ResumeSessionInput, handleV2ResumeSession),
+    manage_workflow_source: createHandler(V2ManageWorkflowSourceInput, handleV2ManageWorkflowSource),
   };
 
   return { tools, handlers };

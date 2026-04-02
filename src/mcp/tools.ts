@@ -131,6 +131,11 @@ export const WORKFLOW_TOOL_ANNOTATIONS: Readonly<Record<WorkflowToolName, ToolAn
     destructiveHint: false,
     idempotentHint: true,
   },
+  manage_workflow_source: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+  },
 } as const;
 
 // -----------------------------------------------------------------------------
@@ -151,6 +156,7 @@ export const WORKFLOW_TOOL_TITLES: Readonly<Record<WorkflowToolName, string>> = 
   continue_workflow: 'Continue Workflow (v2)',
   checkpoint_workflow: 'Checkpoint Workflow (v2)',
   resume_session: 'Resume Session (v2)',
+  manage_workflow_source: 'Manage Workflow Source (v2)',
 } as const;
 
 // -----------------------------------------------------------------------------
