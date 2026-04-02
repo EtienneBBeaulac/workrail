@@ -288,6 +288,7 @@ async function registerV2Services(): Promise<void> {
   const { LocalKeyringV2 } = await import('../v2/infra/local/keyring/index.js');
   const { LocalTokenAliasStoreV2 } = await import('../v2/infra/local/token-alias-store/index.js');
   const { LocalRememberedRootsStoreV2 } = await import('../v2/infra/local/remembered-roots-store/index.js');
+  const { LocalManagedSourceStoreV2 } = await import('../v2/infra/local/managed-source-store/index.js');
   const { LocalSessionEventLogStoreV2 } = await import('../v2/infra/local/session-store/index.js');
   const { LocalSnapshotStoreV2 } = await import('../v2/infra/local/snapshot-store/index.js');
   const { LocalPinnedWorkflowStoreV2 } = await import('../v2/infra/local/pinned-workflow-store/index.js');
@@ -314,6 +315,13 @@ async function registerV2Services(): Promise<void> {
       const dataDir = c.resolve<any>(DI.V2.DataDir);
       const fs = c.resolve<any>(DI.V2.FileSystem);
       return new LocalRememberedRootsStoreV2(dataDir, fs);
+    }),
+  });
+  container.register(DI.V2.ManagedSourceStore, {
+    useFactory: instanceCachingFactory((c: DependencyContainer) => {
+      const dataDir = c.resolve<any>(DI.V2.DataDir);
+      const fs = c.resolve<any>(DI.V2.FileSystem);
+      return new LocalManagedSourceStoreV2(dataDir, fs);
     }),
   });
   container.register(DI.V2.SessionStore, {

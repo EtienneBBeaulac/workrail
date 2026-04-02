@@ -80,4 +80,12 @@ export class LocalDataDirV2 implements DataDirPortV2 {
     // artifacts that live outside the session tree.
     return path.join(this.keysDir(), 'token-index.jsonl');
   }
+
+  managedSourcesPath(): string {
+    return path.join(this.root(), 'managed-sources', 'managed-sources.json');
+  }
+
+  managedSourcesLockPath(): string {
+    return path.join(this.root(), 'managed-sources', 'managed-sources.lock');
+  }
 }

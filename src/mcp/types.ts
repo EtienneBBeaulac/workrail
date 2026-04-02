@@ -32,6 +32,7 @@ import type { ValidationPipelineDepsPhase1a } from '../application/services/work
 import type { TokenAliasStorePortV2 } from '../v2/ports/token-alias-store.port.js';
 import type { RandomEntropyPortV2 } from '../v2/ports/random-entropy.port.js';
 import type { RememberedRootsStorePortV2 } from '../v2/ports/remembered-roots-store.port.js';
+import type { ManagedSourceStorePortV2 } from '../v2/ports/managed-source-store.port.js';
 
 // Note: JsonValue type is imported from output-schemas.js above
 
@@ -221,6 +222,10 @@ export interface V2Dependencies {
   // Remembered workspace roots for workflow-source setup phase 1.
   // Optional during migration so repo-controlled tests can opt in incrementally.
   readonly rememberedRootsStore?: RememberedRootsStorePortV2;
+
+  // Managed workflow source store (Phase 2A Slice 2).
+  // Optional during migration; Slice 3 (attach/enable) builds on this seam.
+  readonly managedSourceStore?: ManagedSourceStorePortV2;
 
   // Random entropy source — used for minting short token nonces.
   readonly entropy: RandomEntropyPortV2;
