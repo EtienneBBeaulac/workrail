@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { pathToFileURL } from 'url';
 import { okAsync } from 'neverthrow';
 
 import { handleV2ListWorkflows } from '../../../src/mcp/handlers/v2-workflow.js';
@@ -155,7 +156,7 @@ describe('v2 workflow source catalog output', () => {
     writeWorkflow(envWorkflowsDir, 'env-configured-workflow', 'Env Configured Workflow');
 
     const previousGitRepos = process.env['WORKFLOW_GIT_REPOS'];
-    process.env['WORKFLOW_GIT_REPOS'] = `file://${envRepo}`;
+    process.env['WORKFLOW_GIT_REPOS'] = pathToFileURL(envRepo).href;
 
     try {
       const result = await handleV2ListWorkflows(
