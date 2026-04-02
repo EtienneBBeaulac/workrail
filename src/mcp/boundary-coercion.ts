@@ -1,17 +1,7 @@
 /**
- * MCP Boundary Input Coercion
- *
- * Normalizes raw MCP tool input before Zod validation runs.
- *
- * Why this exists: some MCP clients (e.g. Claude Code's tool call serializer)
- * send complex object parameters as JSON-encoded strings rather than inline
- * JSON objects. Zod's z.record() and z.object() validators reject string values
- * even when the string is a valid JSON representation of the expected type,
- * producing unhelpful "Expected object, received string" errors.
- *
- * The fix lives here at the boundary — the single entry point through which
- * all raw MCP input passes before reaching schema validation. No Zod schema
- * definitions are modified; the shape/validation schema split is preserved.
+ * MCP boundary coercion: normalizes JSON-encoded string fields to objects
+ * before Zod validation runs, so clients that serialize parameters as strings
+ * instead of inline objects do not produce spurious type errors.
  *
  * @module mcp/boundary-coercion
  */
@@ -54,17 +44,16 @@ function expectsObjectValue(fieldSchema: z.ZodType): boolean {
 }
 
 /**
- * Try to JSON-parse a string.
- *
- * Returns the parsed value on success. Returns the original string on failure
- * so that downstream Zod validation still produces a meaningful type error
- * ("Expected object, received string") rather than a silent no-op.
+ * Parse a JSON string and return the result only if it is a plain object.
+ * Returns null for invalid JSON, primitives, and arrays.
  */
-function tryParseJson(value: string): unknown {
+function tryParseJsonObject(value: string): Record<string, unknown> | null {
   try {
-    return JSON.parse(value);
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+    return parsed as Record<string, unknown>;
   } catch {
-    return value;
+    return null;
   }
 }
 
@@ -73,23 +62,9 @@ function tryParseJson(value: string): unknown {
 // -----------------------------------------------------------------------------
 
 /**
- * Normalize JSON-encoded string fields to objects at the MCP input boundary.
- *
- * Walks the shapeSchema to identify fields that expect ZodObject or ZodRecord
- * values. For any such field whose raw value is a JSON string, parses it to
- * an object before Zod validation runs. Aliased fields (via aliasMap) are
- * coerced alongside their canonical counterparts.
- *
- * Non-object string fields, non-string values, and strings that are not valid
- * JSON are left unchanged.
- *
- * This function is a pure transform: if no coercion is needed, it returns
- * the original args reference unchanged (no allocation).
- *
- * @param args - Raw input from the MCP client (unknown at the boundary)
- * @param shapeSchema - Canonical shape schema used for field-type introspection
- * @param aliasMap - Optional alias-to-canonical field name map
- * @returns args with JSON-string object fields replaced by their parsed values
+ * For each field in shapeSchema that expects a ZodObject or ZodRecord value,
+ * parse it from JSON if the raw value is a string. Aliased fields are included
+ * via aliasMap. Returns the original args reference when nothing needs coercion.
  */
 export function coerceJsonStringObjectFields(
   args: unknown,
@@ -128,16 +103,8 @@ export function coerceJsonStringObjectFields(
   const coerceField = (key: string): void => {
     const value = input[key];
     if (typeof value !== 'string') return;
-
-    const parsed = tryParseJson(value);
-    // Leave as-is if JSON.parse failed (returns original string), produced a
-    // non-object primitive (e.g. "123" -> 123, '"foo"' -> "foo"), or produced
-    // an array. Arrays are typeof 'object' but are not valid ZodObject/ZodRecord
-    // values. Passing them through would swap "Expected object, received string"
-    // for "Expected object, received array" — no improvement. Leave the original
-    // string so Zod reports the error against the actual input the client sent.
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return;
-
+    const parsed = tryParseJsonObject(value);
+    if (parsed === null) return;
     if (result === null) result = { ...input };
     result[key] = parsed;
   };
