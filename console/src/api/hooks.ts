@@ -36,6 +36,7 @@ export function useWorktreeList() {
   return useQuery({
     queryKey: ['worktrees'],
     queryFn: () => fetchApi<ConsoleWorktreeListResponse>('/api/v2/worktrees'),
-    refetchInterval: 10_000, // refresh every 10s so status stays current
+    refetchInterval: 30_000, // refresh every 30s — each request loads all sessions + runs git
+    staleTime: 20_000,       // keep showing previous data while refetching, no flash to loading
   });
 }
