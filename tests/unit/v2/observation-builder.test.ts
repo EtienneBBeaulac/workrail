@@ -112,6 +112,38 @@ describe('anchorsToObservations', () => {
     expect(result[1]!.key).toBe('git_head_sha');
   });
 
+  it('maps repo_root to path value with high confidence', () => {
+    const anchors: readonly WorkspaceAnchor[] = [
+      { key: 'repo_root', value: '/Users/etienneb/git/personal/workrail' },
+    ];
+    const result = anchorsToObservations(anchors);
+    expect(result).toEqual([
+      {
+        key: 'repo_root',
+        value: { type: 'path', value: '/Users/etienneb/git/personal/workrail' },
+        confidence: 'high',
+      },
+    ]);
+  });
+
+  it('skips repo_root longer than 512 chars', () => {
+    const anchors: readonly WorkspaceAnchor[] = [
+      { key: 'repo_root', value: '/x'.repeat(257) }, // 514 chars
+    ];
+    const result = anchorsToObservations(anchors);
+    expect(result).toEqual([]);
+  });
+
+  it('accepts repo_root exactly 512 chars', () => {
+    const anchors: readonly WorkspaceAnchor[] = [
+      { key: 'repo_root', value: 'x'.repeat(512) },
+    ];
+    const result = anchorsToObservations(anchors);
+    expect(result).toHaveLength(1);
+    expect(result[0]!.key).toBe('repo_root');
+    expect(result[0]!.value).toEqual({ type: 'path', value: 'x'.repeat(512) });
+  });
+
   it('skips invalid anchors while keeping valid ones', () => {
     const anchors: readonly WorkspaceAnchor[] = [
       { key: 'git_branch', value: 'main' },

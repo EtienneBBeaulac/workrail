@@ -10,6 +10,7 @@ import type { Application, Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
 import type { ConsoleService } from './console-service.js';
+import { getWorktreeList, buildActiveSessionCounts, resolveRepoRoot } from './worktree-service.js';
 
 /**
  * Resolve the console dist directory.
@@ -41,6 +42,39 @@ export function mountConsoleRoutes(app: Application, consoleService: ConsoleServ
       (data) => res.json({ success: true, data }),
       (error) => res.status(500).json({ success: false, error: error.message }),
     );
+  });
+
+  // List git worktrees grouped by repo, with enriched status and active session counts.
+  // Repo roots are derived from session observations (repo_root anchor) so the view
+  // covers all repos agents have worked in, not just the current CWD's repo.
+
+  // Cache the CWD's git root — process.cwd() is stable and resolveRepoRoot runs a
+  // git subprocess, so there is no reason to re-resolve it on every request.
+  let cwdRepoRootPromise: Promise<string | null> | null = null;
+
+  app.get('/api/v2/worktrees', async (_req: Request, res: Response) => {
+    try {
+      const sessionResult = await consoleService.getSessionList();
+      const sessions = sessionResult.isOk() ? sessionResult.value.sessions : [];
+      const activeSessions = buildActiveSessionCounts(sessions);
+
+      // Collect unique repo roots from session observations.
+      // Type predicate excludes nulls from sessions predating this feature.
+      const repoRootSet = new Set<string>(
+        sessions.map(s => s.repoRoot).filter((r): r is string => r !== null),
+      );
+
+      // Always include the CWD's repo root so the current project appears
+      // even if it has no sessions yet (graceful: silently skipped if not a git repo).
+      cwdRepoRootPromise ??= resolveRepoRoot(process.cwd());
+      const cwdRoot = await cwdRepoRootPromise;
+      if (cwdRoot !== null) repoRootSet.add(cwdRoot);
+
+      const data = await getWorktreeList([...repoRootSet], activeSessions);
+      res.json({ success: true, data });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+    }
   });
 
   // Get session detail with full DAG

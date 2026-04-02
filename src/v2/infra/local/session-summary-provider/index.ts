@@ -84,6 +84,7 @@ const EMPTY_OBSERVATIONS: SessionObservations = {
   gitHeadSha: null,
   gitBranch: null,
   repoRootHash: null,
+  repoRoot: null,
 };
 
 /** Well-known persisted context keys that often describe the task/session. */
@@ -319,12 +320,13 @@ function extractObservations(events: readonly DomainEventV1[]): SessionObservati
   return events
     .filter((e): e is ObservationEventV1 => e.kind === EVENT_KIND.OBSERVATION_RECORDED)
     .reduce((acc, e): SessionObservations => {
-      // e.data.key is 'git_branch' | 'git_head_sha' | 'repo_root_hash' — exhaustive switch,
+      // e.data.key is 'git_branch' | 'git_head_sha' | 'repo_root_hash' | 'repo_root' — exhaustive switch,
       // no default needed. TypeScript enforces all variants are handled.
       switch (e.data.key) {
-        case 'git_head_sha': return { ...acc, gitHeadSha: e.data.value.value };
-        case 'git_branch':   return { ...acc, gitBranch: e.data.value.value };
+        case 'git_head_sha':   return { ...acc, gitHeadSha: e.data.value.value };
+        case 'git_branch':     return { ...acc, gitBranch: e.data.value.value };
         case 'repo_root_hash': return { ...acc, repoRootHash: e.data.value.value };
+        case 'repo_root':      return { ...acc, repoRoot: e.data.value.value };
       }
     }, EMPTY_OBSERVATIONS);
 }
