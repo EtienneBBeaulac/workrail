@@ -48,9 +48,15 @@ export function mountConsoleRoutes(app: Application, consoleService: ConsoleServ
   // Repo roots are derived from session observations (repo_root anchor) so the view
   // covers all repos agents have worked in, not just the current CWD's repo.
 
-  // Cache the CWD's git root — process.cwd() is stable and resolveRepoRoot runs a
-  // git subprocess, so there is no reason to re-resolve it on every request.
+  // CWD root: stable for the lifetime of the process — resolve once, cache forever.
   let cwdRepoRootPromise: Promise<string | null> | null = null;
+
+  // Repo roots from sessions: changes only when new sessions appear from new repos.
+  // Cache with a TTL so we re-scan sessions infrequently rather than on every request.
+  // Active session counts (for worktree badges) still come from each full session scan.
+  const REPO_ROOTS_TTL_MS = 60_000;
+  let cachedRepoRoots: readonly string[] = [];
+  let repoRootsExpiresAt = 0;
 
   app.get('/api/v2/worktrees', async (_req: Request, res: Response) => {
     try {
@@ -58,19 +64,19 @@ export function mountConsoleRoutes(app: Application, consoleService: ConsoleServ
       const sessions = sessionResult.isOk() ? sessionResult.value.sessions : [];
       const activeSessions = buildActiveSessionCounts(sessions);
 
-      // Collect unique repo roots from session observations.
-      // Type predicate excludes nulls from sessions predating this feature.
-      const repoRootSet = new Set<string>(
-        sessions.map(s => s.repoRoot).filter((r): r is string => r !== null),
-      );
+      // Refresh the known-repos set at most once per TTL window.
+      if (Date.now() > repoRootsExpiresAt) {
+        cwdRepoRootPromise ??= resolveRepoRoot(process.cwd());
+        const cwdRoot = await cwdRepoRootPromise;
+        const repoRootSet = new Set<string>(
+          sessions.map(s => s.repoRoot).filter((r): r is string => r !== null),
+        );
+        if (cwdRoot !== null) repoRootSet.add(cwdRoot);
+        cachedRepoRoots = [...repoRootSet];
+        repoRootsExpiresAt = Date.now() + REPO_ROOTS_TTL_MS;
+      }
 
-      // Always include the CWD's repo root so the current project appears
-      // even if it has no sessions yet (graceful: silently skipped if not a git repo).
-      cwdRepoRootPromise ??= resolveRepoRoot(process.cwd());
-      const cwdRoot = await cwdRepoRootPromise;
-      if (cwdRoot !== null) repoRootSet.add(cwdRoot);
-
-      const data = await getWorktreeList([...repoRootSet], activeSessions);
+      const data = await getWorktreeList(cachedRepoRoots, activeSessions);
       res.json({ success: true, data });
     } catch (e) {
       res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
