@@ -568,14 +568,17 @@ Payload fields:
   - `git_branch`
   - `git_head_sha`
   - `repo_root_hash`
+  - `repo_root` — human-readable absolute repo path; stored alongside `repo_root_hash` for console grouping without reverse-hash lookup
 - `value` (tagged scalar closed set, initial):
   - `{ type: "short_string", value }` (bounded)
   - `{ type: "git_sha1", value }`
   - `{ type: "sha256", value }`
+  - `{ type: "path", value }` — filesystem path; higher length budget than `short_string`
 - `confidence`: `low | med | high`
 
 Budgets (locked):
 - for `value.type="short_string"`, max length: 80
+- for `value.type="path"`, max length: 512
 
 Example:
 
