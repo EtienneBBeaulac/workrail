@@ -22,7 +22,7 @@
         "goal": "Analyze the request, gather available context, and select the right complexity path before doing any ticket work.",
         "constraints": [
           "Decide the path yourself — do not ask the user to choose.",
-          "Load ./.workflow_rules/ticket_creation.md if it exists and let it influence your triage.",
+          "Load ./.workflow_rules/ticket_creation.md if it exists and let it influence your triage. If the file does not exist, note this explicitly in your output so the user knows team conventions were not applied.",
           "Set pathComplexity to exactly one of: Simple, Standard, or Epic."
         ],
         "procedure": [
@@ -97,7 +97,8 @@
           "Load ./.workflow_rules/ticket_creation.md and note any relevant team conventions.",
           "Identify: key stakeholders, team dependencies, technical constraints, known risks, and any conflicting requirements.",
           "Classify each gap as: Critical (blocks planning), Important (affects scope), or Nice-to-have (can proceed without it).",
-          "For Critical and Important gaps that tools cannot resolve, ask the user — in a single consolidated question block, not one at a time."
+          "For Critical and Important gaps that tools cannot resolve, ask the user — in a single consolidated question block, not one at a time.",
+          "After receiving answers, check whether any response reveals scope that would change `pathComplexity` (e.g. the user confirms three teams are involved, or the feature is narrower than initially assessed). If so, state the new classification and reasoning, and ask the user to confirm before continuing to Phase 2."
         ],
         "outputRequired": {
           "notesMarkdown": "Context sources reviewed, critical/important gaps found, any questions asked."
