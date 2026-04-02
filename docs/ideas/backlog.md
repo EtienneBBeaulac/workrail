@@ -26,6 +26,38 @@ Workflow and feature ideas that are worth capturing but not yet planned or desig
 
 ## Feature ideas
 
+### Declarative workflow composition engine
+
+- **Status**: idea
+- **Summary**: Instead of authoring full workflow JSON for every use case, users or agents fill out a declarative spec (dimensions, scope, rigor level, etc.) and the WorkRail engine assembles a workflow automatically from a library of pre-validated routines and step templates. The agent is a form-filler, not an architect - the composition logic lives in the engine.
+- **Why this is different from agent-generated workflows**:
+  - Agent-generated workflows have no quality gate - you're trusting the agent's judgment on structure, which is exactly what workflow-for-workflows exists to prevent
+  - Engine-composed workflows are assembled from pre-reviewed building blocks using deterministic rules - same spec always produces the same workflow shape
+  - Trustworthy because composition logic is owned by WorkRail, not improvised at runtime
+- **How it would work**:
+  - A composable routine library with well-defined inputs, outputs, and composition contracts
+  - A spec format that captures user intent declaratively (e.g. workflow type, dimensions to cover, scope, rigor mode)
+  - A composition engine that selects and wires the right routines based on the spec
+  - The assembled workflow is fully inspectable before execution - no black box
+- **Relationship to current authoring**:
+  - Full workflow JSON authoring remains the escape hatch for workflows that need custom shapes the composition engine can't express
+  - Composition covers the common cases; manual authoring covers the edge cases
+  - Routines built for composition also remain usable as standalone delegatable units in manually authored workflows
+- **Good early use cases**:
+  - Audit-style workflows (scalability audit, readiness audit, tech debt audit) - user picks dimensions, engine assembles the right auditor steps
+  - Review workflows - user picks scope and rigor, engine assembles reviewer family + synthesis
+  - Investigation workflows - user picks investigation type, engine assembles the right hypothesis + evidence + validation path
+- **Design questions**:
+  - What is the right spec format? Enums + variables + a workflow type identifier? A richer DSL?
+  - How does the engine handle dependencies between composed steps (context flow, artifact ownership)?
+  - Should composition happen at session-start time (assembled once, then executed) or be fully static (compiled to workflow JSON)?
+  - How does the console/dashboard show a composed workflow's structure vs a manually authored one?
+  - What is the governance model for the composable routine library - who can add to it, and what quality bar do new routines need to meet?
+- **Risks / tradeoffs**:
+  - A composition engine is a significant investment - the routine library needs enough coverage before composition is useful
+  - Composition rules can become their own form of complexity if not kept simple
+  - Need a clear story for when manual authoring is the right choice vs composition, so authors don't fight the system
+
 ### Dashboard artifacts (replace file-based docs)
 
 - **Status**: designed, not yet implemented
