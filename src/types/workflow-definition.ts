@@ -425,6 +425,8 @@ export interface WorkflowDefinition {
    * does not (hash remains stable when referenced files change).
    */
   readonly references?: readonly WorkflowReference[];
+  /** The authoring spec version this workflow was last validated against. */
+  readonly validatedAgainstSpecVersion?: number;
 }
 
 // =============================================================================

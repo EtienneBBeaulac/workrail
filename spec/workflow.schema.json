@@ -28,7 +28,11 @@
       "type": "string",
       "description": "Semantic version of the workflow (e.g., 0.0.1, 0.1.0)",
       "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$",
-      "examples": ["0.0.1", "0.1.0", "0.0.1-alpha.1"]
+      "examples": [
+        "0.0.1",
+        "0.1.0",
+        "0.0.1-alpha.1"
+      ]
     },
     "preconditions": {
       "type": "array",
@@ -99,11 +103,18 @@
           },
           "scope": {
             "type": "string",
-            "enum": ["workflow", "loop", "step"],
+            "enum": [
+              "workflow",
+              "loop",
+              "step"
+            ],
             "description": "Scope where this function is available"
           }
         },
-        "required": ["name", "definition"],
+        "required": [
+          "name",
+          "definition"
+        ],
         "additionalProperties": false
       },
       "uniqueItems": true
@@ -114,12 +125,20 @@
       "properties": {
         "recommendedAutonomy": {
           "type": "string",
-          "enum": ["guided", "full_auto_stop_on_user_deps", "full_auto_never_stop"],
+          "enum": [
+            "guided",
+            "full_auto_stop_on_user_deps",
+            "full_auto_never_stop"
+          ],
           "description": "Recommended autonomy level for this workflow"
         },
         "recommendedRiskPolicy": {
           "type": "string",
-          "enum": ["conservative", "balanced", "aggressive"],
+          "enum": [
+            "conservative",
+            "balanced",
+            "aggressive"
+          ],
           "description": "Recommended risk policy for this workflow"
         }
       },
@@ -153,11 +172,16 @@
     },
     "references": {
       "type": "array",
-      "description": "Workflow-declared references to external documents. Each reference is a pointer — content is never inlined. Declarations participate in the workflow hash; referenced file content does not.",
+      "description": "Workflow-declared references to external documents. Each reference is a pointer \u2014 content is never inlined. Declarations participate in the workflow hash; referenced file content does not.",
       "items": {
         "$ref": "#/$defs/workflowReference"
       },
       "uniqueItems": true
+    },
+    "validatedAgainstSpecVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The authoring spec version this workflow was last validated against."
     }
   },
   "required": [
@@ -197,17 +221,24 @@
           "description": "Allowed implementation kinds (informational in v1)",
           "items": {
             "type": "string",
-            "enum": ["routine", "workflow"]
+            "enum": [
+              "routine",
+              "workflow"
+            ]
           },
           "uniqueItems": true
         }
       },
-      "required": ["slotId", "purpose", "default"],
+      "required": [
+        "slotId",
+        "purpose",
+        "default"
+      ],
       "additionalProperties": false
     },
     "workflowReference": {
       "type": "object",
-      "description": "A pointer to an external document relevant to the workflow. Content is never inlined — the agent reads the file itself if needed.",
+      "description": "A pointer to an external document relevant to the workflow. Content is never inlined \u2014 the agent reads the file itself if needed.",
       "properties": {
         "id": {
           "type": "string",
@@ -240,12 +271,21 @@
         },
         "resolveFrom": {
           "type": "string",
-          "enum": ["workspace", "package"],
+          "enum": [
+            "workspace",
+            "package"
+          ],
           "description": "Resolution base for source path. 'workspace' (default) resolves against the user's project root. 'package' resolves against the workrail package root (for files shipped with the workflow).",
           "default": "workspace"
         }
       },
-      "required": ["id", "title", "source", "purpose", "authoritative"],
+      "required": [
+        "id",
+        "title",
+        "source",
+        "purpose",
+        "authoritative"
+      ],
       "additionalProperties": false
     },
     "stepId": {
@@ -258,53 +298,152 @@
       "type": "object",
       "description": "Specification for a single function parameter.",
       "properties": {
-        "name": { "type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$" },
-        "type": { "type": "string", "enum": ["string", "number", "boolean", "array", "object"] },
-        "required": { "type": "boolean" },
-        "description": { "type": "string" },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "string",
+            "number",
+            "boolean",
+            "array",
+            "object"
+          ]
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "description": {
+          "type": "string"
+        },
         "enum": {
           "type": "array",
-          "items": { "oneOf": [ {"type": "string"}, {"type": "number"}, {"type": "boolean"} ] },
+          "items": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              }
+            ]
+          },
           "minItems": 1
         },
         "default": {}
       },
-      "required": ["name", "type"],
+      "required": [
+        "name",
+        "type"
+      ],
       "additionalProperties": false
     },
     "functionDefinition": {
       "type": "object",
       "properties": {
-        "name": { "type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$" },
-        "definition": { "type": "string" },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+        },
+        "definition": {
+          "type": "string"
+        },
         "parameters": {
           "type": "array",
-          "items": { "$ref": "#/$defs/functionParameter" }
+          "items": {
+            "$ref": "#/$defs/functionParameter"
+          }
         },
-        "scope": { "type": "string", "enum": ["workflow", "loop", "step"] }
+        "scope": {
+          "type": "string",
+          "enum": [
+            "workflow",
+            "loop",
+            "step"
+          ]
+        }
       },
-      "required": ["name", "definition"],
+      "required": [
+        "name",
+        "definition"
+      ],
       "additionalProperties": false
     },
     "standardStep": {
       "type": "object",
       "properties": {
-        "id": { "$ref": "#/$defs/stepId", "description": "Unique identifier for the step" },
-        "title": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "prompt": { "type": "string", "minLength": 1, "maxLength": 8192, "description": "Traditional single-string prompt. Use when structure is simple; prefer promptBlocks when you need stronger quality bars without over-scripting cognition." },
-        "promptBlocks": { "$ref": "#/$defs/promptBlocks" },
-        "agentRole": { "type": "string", "minLength": 10, "maxLength": 1024 },
-        "guidance": { "type": "array", "items": { "type": "string" } },
-        "askForFiles": { "type": "boolean", "default": false },
-        "hasValidation": { "type": "boolean", "default": false },
-        "requireConfirmation": { "$ref": "#/$defs/confirmationRule" },
-        "runCondition": { "$ref": "#/$defs/condition" },
-        "validationCriteria": { "oneOf": [ { "type": "array", "items": { "$ref": "#/$defs/validationRule" } }, { "$ref": "#/$defs/validationComposition" } ] },
-        "outputContract": { "$ref": "#/$defs/outputContract" },
+        "id": {
+          "$ref": "#/$defs/stepId",
+          "description": "Unique identifier for the step"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192,
+          "description": "Traditional single-string prompt. Use when structure is simple; prefer promptBlocks when you need stronger quality bars without over-scripting cognition."
+        },
+        "promptBlocks": {
+          "$ref": "#/$defs/promptBlocks"
+        },
+        "agentRole": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 1024
+        },
+        "guidance": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "askForFiles": {
+          "type": "boolean",
+          "default": false
+        },
+        "hasValidation": {
+          "type": "boolean",
+          "default": false
+        },
+        "requireConfirmation": {
+          "$ref": "#/$defs/confirmationRule"
+        },
+        "runCondition": {
+          "$ref": "#/$defs/condition"
+        },
+        "validationCriteria": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/validationRule"
+              }
+            },
+            {
+              "$ref": "#/$defs/validationComposition"
+            }
+          ]
+        },
+        "outputContract": {
+          "$ref": "#/$defs/outputContract"
+        },
         "assessmentRefs": {
           "type": "array",
           "description": "References to workflow-level assessment definitions expected for this step. V1 supports exactly one assessmentRef per step.",
-          "items": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
           "minItems": 1,
           "maxItems": 1,
           "uniqueItems": true
@@ -312,23 +451,51 @@
         "assessmentConsequences": {
           "type": "array",
           "description": "Step-local assessment consequence declarations. V1 supports at most one exact-match follow-up consequence.",
-          "items": { "$ref": "#/$defs/assessmentConsequence" },
+          "items": {
+            "$ref": "#/$defs/assessmentConsequence"
+          },
           "minItems": 1,
           "maxItems": 1
         },
-        "notesOptional": { "type": "boolean", "description": "When true, output.notesMarkdown is not required for this step. Steps with outputContract are automatically exempt. Use sparingly for mechanical steps with no substantive work to document." },
-        "functionDefinitions": { "type": "array", "items": { "$ref": "#/$defs/functionDefinition" } },
-        "functionCalls": { "type": "array", "items": { "$ref": "#/$defs/functionCall" } },
-        "functionReferences": { "type": "array", "items": { "type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*\\(\\)$" } },
-        "templateCall": { "$ref": "#/$defs/templateCall" },
+        "notesOptional": {
+          "type": "boolean",
+          "description": "When true, output.notesMarkdown is not required for this step. Steps with outputContract are automatically exempt. Use sparingly for mechanical steps with no substantive work to document."
+        },
+        "functionDefinitions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/functionDefinition"
+          }
+        },
+        "functionCalls": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/functionCall"
+          }
+        },
+        "functionReferences": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*\\(\\)$"
+          }
+        },
+        "templateCall": {
+          "$ref": "#/$defs/templateCall"
+        },
         "promptFragments": {
           "type": "array",
           "description": "Conditional prompt fragments appended to the step's base prompt at render time. Each fragment is appended in declaration order when its 'when' condition matches the session context.",
-          "items": { "$ref": "#/$defs/promptFragment" },
+          "items": {
+            "$ref": "#/$defs/promptFragment"
+          },
           "minItems": 1
         }
       },
-      "required": ["id", "title"],
+      "required": [
+        "id",
+        "title"
+      ],
       "additionalProperties": false
     },
     "loopStep": {
@@ -399,7 +566,12 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["while", "until", "for", "forEach"],
+          "enum": [
+            "while",
+            "until",
+            "for",
+            "forEach"
+          ],
           "description": "The type of loop to execute"
         },
         "condition": {
@@ -452,53 +624,103 @@
             {
               "type": "object",
               "properties": {
-                "kind": { "const": "artifact_contract" },
-                "contractRef": { "type": "string", "minLength": 1 },
-                "loopId": { "type": "string", "minLength": 1 }
+                "kind": {
+                  "const": "artifact_contract"
+                },
+                "contractRef": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "loopId": {
+                  "type": "string",
+                  "minLength": 1
+                }
               },
-              "required": ["kind", "contractRef"],
+              "required": [
+                "kind",
+                "contractRef"
+              ],
               "additionalProperties": false
             },
             {
               "type": "object",
               "properties": {
-                "kind": { "const": "context_variable" },
-                "condition": { "$ref": "#/$defs/condition" }
+                "kind": {
+                  "const": "context_variable"
+                },
+                "condition": {
+                  "$ref": "#/$defs/condition"
+                }
               },
-              "required": ["kind", "condition"],
+              "required": [
+                "kind",
+                "condition"
+              ],
               "additionalProperties": false
             }
           ]
         }
       },
-      "required": ["type", "maxIterations"],
+      "required": [
+        "type",
+        "maxIterations"
+      ],
       "allOf": [
         {
           "if": {
-            "properties": { "type": { "enum": ["while", "until"] } },
-            "required": ["type"]
+            "properties": {
+              "type": {
+                "enum": [
+                  "while",
+                  "until"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
           },
           "then": {
             "anyOf": [
-              { "required": ["condition"] },
-              { "required": ["conditionSource"] }
+              {
+                "required": [
+                  "condition"
+                ]
+              },
+              {
+                "required": [
+                  "conditionSource"
+                ]
+              }
             ]
           }
         },
         {
           "if": {
-            "properties": { "type": { "const": "for" } }
+            "properties": {
+              "type": {
+                "const": "for"
+              }
+            }
           },
           "then": {
-            "required": ["count"]
+            "required": [
+              "count"
+            ]
           }
         },
         {
           "if": {
-            "properties": { "type": { "const": "forEach" } }
+            "properties": {
+              "type": {
+                "const": "forEach"
+              }
+            }
           },
           "then": {
-            "required": ["items"]
+            "required": [
+              "items"
+            ]
           }
         }
       ],
@@ -581,7 +803,10 @@
           "maxLength": 4096
         }
       },
-      "required": ["id", "text"],
+      "required": [
+        "id",
+        "text"
+      ],
       "additionalProperties": false
     },
     "confirmationRule": {
@@ -602,7 +827,12 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["contains", "regex", "length", "schema"],
+          "enum": [
+            "contains",
+            "regex",
+            "length",
+            "schema"
+          ],
           "description": "Type of validation rule"
         },
         "value": {
@@ -686,7 +916,10 @@
           "additionalProperties": false
         }
       },
-      "required": ["type", "message"],
+      "required": [
+        "type",
+        "message"
+      ],
       "additionalProperties": false
     },
     "validationComposition": {
@@ -702,7 +935,7 @@
           "minItems": 1
         },
         "or": {
-          "type": "array", 
+          "type": "array",
           "description": "Logical OR - at least one criteria must pass",
           "items": {
             "$ref": "#/$defs/validationCriteria"
@@ -716,9 +949,21 @@
       },
       "additionalProperties": false,
       "oneOf": [
-        {"required": ["and"]},
-        {"required": ["or"]},
-        {"required": ["not"]}
+        {
+          "required": [
+            "and"
+          ]
+        },
+        {
+          "required": [
+            "or"
+          ]
+        },
+        {
+          "required": [
+            "not"
+          ]
+        }
       ]
     },
     "validationCriteria": {
@@ -747,7 +992,9 @@
           "default": true
         }
       },
-      "required": ["contractRef"],
+      "required": [
+        "contractRef"
+      ],
       "additionalProperties": false
     },
     "assessmentDimension": {
@@ -779,7 +1026,11 @@
           "default": true
         }
       },
-      "required": ["id", "purpose", "levels"],
+      "required": [
+        "id",
+        "purpose",
+        "levels"
+      ],
       "additionalProperties": false
     },
     "assessmentDefinition": {
@@ -804,69 +1055,119 @@
           "minItems": 1
         }
       },
-      "required": ["id", "purpose", "dimensions"],
+      "required": [
+        "id",
+        "purpose",
+        "dimensions"
+      ],
       "additionalProperties": false
     },
     "assessmentConsequenceTrigger": {
       "type": "object",
       "description": "Exact-match trigger on one declared assessment dimension and one declared canonical level.",
       "properties": {
-        "dimensionId": { "type": "string", "minLength": 1, "maxLength": 64 },
-        "equalsLevel": { "type": "string", "minLength": 1, "maxLength": 64 }
+        "dimensionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "equalsLevel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
       },
-      "required": ["dimensionId", "equalsLevel"],
+      "required": [
+        "dimensionId",
+        "equalsLevel"
+      ],
       "additionalProperties": false
     },
     "assessmentConsequenceEffect": {
       "type": "object",
       "description": "V1 assessment consequence effect. Keeps the same step pending and requires follow-up before retry.",
       "properties": {
-        "kind": { "const": "require_followup" },
-        "guidance": { "type": "string", "minLength": 1, "maxLength": 512 }
+        "kind": {
+          "const": "require_followup"
+        },
+        "guidance": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
       },
-      "required": ["kind", "guidance"],
+      "required": [
+        "kind",
+        "guidance"
+      ],
       "additionalProperties": false
     },
     "assessmentConsequence": {
       "type": "object",
       "description": "Step-local assessment consequence declaration. V1 supports one exact-match follow-up consequence only.",
       "properties": {
-        "when": { "$ref": "#/$defs/assessmentConsequenceTrigger" },
-        "effect": { "$ref": "#/$defs/assessmentConsequenceEffect" }
+        "when": {
+          "$ref": "#/$defs/assessmentConsequenceTrigger"
+        },
+        "effect": {
+          "$ref": "#/$defs/assessmentConsequenceEffect"
+        }
       },
-      "required": ["when", "effect"],
+      "required": [
+        "when",
+        "effect"
+      ],
       "additionalProperties": false
     },
     "functionCall": {
       "type": "object",
       "properties": {
-        "name": { "type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$" },
-        "args": { "type": "object", "additionalProperties": true }
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+        },
+        "args": {
+          "type": "object",
+          "additionalProperties": true
+        }
       },
-      "required": ["name", "args"],
+      "required": [
+        "name",
+        "args"
+      ],
       "additionalProperties": false
     },
     "promptBlocks": {
       "type": "object",
       "description": "Structured prompt blocks. Alternative to raw prompt string. Rendered into prompt during compilation in deterministic order: goal, constraints, procedure, outputRequired, verify.",
       "properties": {
-        "goal": { "$ref": "#/$defs/promptValue" },
+        "goal": {
+          "$ref": "#/$defs/promptValue"
+        },
         "constraints": {
           "type": "array",
-          "items": { "$ref": "#/$defs/promptValue" }
+          "items": {
+            "$ref": "#/$defs/promptValue"
+          }
         },
         "procedure": {
           "type": "array",
-          "items": { "$ref": "#/$defs/promptValue" }
+          "items": {
+            "$ref": "#/$defs/promptValue"
+          }
         },
         "outputRequired": {
           "type": "object",
           "description": "Key-value pairs describing required outputs",
-          "additionalProperties": { "type": "string" }
+          "additionalProperties": {
+            "type": "string"
+          }
         },
         "verify": {
           "type": "array",
-          "items": { "$ref": "#/$defs/promptValue" }
+          "items": {
+            "$ref": "#/$defs/promptValue"
+          }
         }
       },
       "additionalProperties": false
@@ -874,10 +1175,14 @@
     "promptValue": {
       "description": "A prompt value: either a plain string or an array of prompt parts (text and refs).",
       "oneOf": [
-        { "type": "string" },
+        {
+          "type": "string"
+        },
         {
           "type": "array",
-          "items": { "$ref": "#/$defs/promptPart" }
+          "items": {
+            "$ref": "#/$defs/promptPart"
+          }
         }
       ]
     },
@@ -887,19 +1192,34 @@
         {
           "type": "object",
           "properties": {
-            "kind": { "const": "text" },
-            "text": { "type": "string" }
+            "kind": {
+              "const": "text"
+            },
+            "text": {
+              "type": "string"
+            }
           },
-          "required": ["kind", "text"],
+          "required": [
+            "kind",
+            "text"
+          ],
           "additionalProperties": false
         },
         {
           "type": "object",
           "properties": {
-            "kind": { "const": "ref" },
-            "refId": { "type": "string", "minLength": 1 }
+            "kind": {
+              "const": "ref"
+            },
+            "refId": {
+              "type": "string",
+              "minLength": 1
+            }
           },
-          "required": ["kind", "refId"],
+          "required": [
+            "kind",
+            "refId"
+          ],
           "additionalProperties": false
         }
       ]
@@ -920,7 +1240,9 @@
           "additionalProperties": true
         }
       },
-      "required": ["templateId"],
+      "required": [
+        "templateId"
+      ],
       "additionalProperties": false
     }
   }

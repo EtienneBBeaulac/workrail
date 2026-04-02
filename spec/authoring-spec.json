@@ -20,7 +20,8 @@
     "When a workflow feature lands or changes, update the schema and runtime first.",
     "Then update this authoring spec so guidance matches the shipped behavior.",
     "Then regenerate or update human-facing docs and examples derived from this spec.",
-    "Do not leave authoring guidance behind the runtime."
+    "Do not leave authoring guidance behind the runtime.",
+    "Increment `version` when any required-level rule is added, removed, or materially changed. Add a `changelog` entry for the new version."
   ],
   "ruleModel": {
     "levels": [
@@ -1402,6 +1403,12 @@
       ]
     }
   ],
-  "plannedRules": [
+  "plannedRules": [],
+  "changelog": [
+    {
+      "version": 3,
+      "date": "2026-03-21",
+      "summary": "Baseline version at staleness feature introduction."
+    }
   ]
 }
