@@ -141,24 +141,9 @@ export class HttpServer {
    * Setup Express routes
    */
   private setupRoutes(): void {
-    // Serve static dashboard UI from web directory
-    const webDir = path.join(__dirname, '../../../web');
-    
-    // Serve all static files from web root
-    this.app.use(express.static(webDir));
-    
-    // Dashboard home page
-    this.app.get('/', async (req: Request, res: Response) => {
-      try {
-        const indexPath = path.join(webDir, 'index.html');
-        res.sendFile(indexPath);
-      } catch (error) {
-        res.status(500).json({
-          error: 'Dashboard UI not found',
-          message: 'The dashboard web files are not yet built. This is expected during development.',
-          details: 'Web files will be available in a future step.'
-        });
-      }
+    // Root redirects to the console — the legacy web/ UI has been retired.
+    this.app.get('/', (_req: Request, res: Response) => {
+      res.redirect('/console');
     });
     
     // API: List all sessions (unified: all projects when primary, current project otherwise)
