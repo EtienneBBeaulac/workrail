@@ -137,6 +137,10 @@ export const V2WorkflowSourceCatalogEntrySchema = z.object({
   managed: z.object({
     addedAtMs: z.number().int().min(0),
   }).optional(),
+  stale: z.literal(true).optional().describe(
+    'Present and true when this source directory was not accessible during discovery. ' +
+    'The path is also included in staleRoots. Workflows from this source were not loaded.'
+  ),
   migration: z.object({
     preferredSource: z.literal('rooted_sharing'),
     currentSource: z.literal('legacy_project'),
@@ -148,9 +152,13 @@ export const V2WorkflowSourceCatalogEntrySchema = z.object({
 export const V2WorkflowListOutputSchema = z.object({
   workflows: z.array(V2WorkflowListItemSchema),
   staleRoots: z.array(z.string()).optional().describe(
-    'Remembered workspace roots that were inaccessible during workflow discovery. ' +
-    'Workflows from these roots were not included in this response. ' +
-    'These roots will be retried on the next call.'
+    'Workflow source paths that were inaccessible during discovery (missing remembered roots or missing managed source directories). ' +
+    'Workflows from these paths were not included in this response. ' +
+    'These paths will be rechecked on the next call.'
+  ),
+  warnings: z.array(z.string()).optional().describe(
+    'Advisory messages about infrastructure issues that did not prevent a response but may have caused incomplete results. ' +
+    'Example: the managed source store was temporarily unavailable and managed sources were not loaded.'
   ),
   sources: z.array(V2WorkflowSourceCatalogEntrySchema).optional().describe(
     'Source catalog for this workspace. Only present when includeSources was true in the request. ' +
@@ -165,9 +173,9 @@ export const V2WorkflowInspectOutputSchema = z.object({
   compiled: JsonValueSchema,
   visibility: V2WorkflowListItemSchema.shape.visibility.optional(),
   staleRoots: z.array(z.string()).optional().describe(
-    'Remembered workspace roots that were inaccessible during workflow discovery. ' +
-    'Workflows from these roots were not included in this response. ' +
-    'These roots will be retried on the next call.'
+    'Workflow source paths that were inaccessible during discovery (missing remembered roots or missing managed source directories). ' +
+    'Workflows from these paths were not included in this response. ' +
+    'These paths will be rechecked on the next call.'
   ),
   references: z.array(z.object({
     id: z.string().min(1),
@@ -546,9 +554,9 @@ export const V2StartWorkflowOutputSchema = z.object({
   nextIntent: V2NextIntentSchema,
   nextCall: V2NextCallSchema,
   staleRoots: z.array(z.string()).optional().describe(
-    'Remembered workspace roots that were inaccessible during workflow discovery. ' +
-    'Workflows from these roots were not included in this response. ' +
-    'These roots will be retried on the next call.'
+    'Workflow source paths that were inaccessible during discovery (missing remembered roots or missing managed source directories). ' +
+    'Workflows from these paths were not included in this response. ' +
+    'These paths will be rechecked on the next call.'
   ),
 }).refine(
   (data) => (data.pending ? data.continueToken != null : true),

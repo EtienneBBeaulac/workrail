@@ -83,7 +83,15 @@ export async function discoverRootedWorkflowDirectories(
 export interface WorkflowReaderForRequestResult {
   readonly reader: IWorkflowReader;
   readonly stalePaths: readonly string[];
+  /** Managed source records whose paths exist on disk and are included in composition. */
   readonly managedSourceRecords: readonly ManagedSourceRecordV2[];
+  /** Managed source records whose paths are missing on disk; surfaced in staleRoots + catalog. */
+  readonly staleManagedRecords: readonly ManagedSourceRecordV2[];
+  /**
+   * Set when the managed source store could not be read (busy, IO error, or corrupted).
+   * Callers should surface this as a warning so the agent knows managed sources were skipped.
+   */
+  readonly managedStoreError?: string;
 }
 
 export async function createWorkflowReaderForRequest(
@@ -96,14 +104,34 @@ export async function createWorkflowReaderForRequest(
   const rootedCustomPaths = rootedWorkflowDirectories.filter((directory) => directory !== projectWorkflowDirectory);
 
   // Include managed source paths, deduplicating against already-discovered custom paths.
-  // Managed paths are added after rooted discovery so they don't affect the stale detection
-  // mechanism (which operates on remembered roots, not managed paths).
-  const managedSourceRecords = await listManagedSourceRecords(options.managedSourceStore);
+  // Paths that exist on disk are added to customPaths; paths that are missing are tracked
+  // separately so callers can surface them in staleRoots and the source catalog.
+  const { records: allManagedRecords, storeError: managedStoreError } = await listManagedSourceRecords(options.managedSourceStore);
+  // NOTE: normalizedCustom only covers paths from remembered-root discovery and does not
+  // include env-configured paths (WORKFLOW_STORAGE_PATH). If a managed source path matches
+  // an env-configured custom path, the managed path will still be appended to customPaths,
+  // creating a duplicate storage instance. This is a known gap -- fixing it would require
+  // reading WORKFLOW_STORAGE_PATH before factory creation, duplicating env-var logic.
   const normalizedCustom = new Set(rootedCustomPaths.map((p) => path.resolve(p)));
-  const additionalManagedPaths = managedSourceRecords
-    .map((r) => r.path) // already normalized by the store
-    .filter((p) => !normalizedCustom.has(path.resolve(p)));
+  const additionalManagedPaths: string[] = [];
+  const activeManagedRecords: ManagedSourceRecordV2[] = [];
+  const staleManagedRecords: ManagedSourceRecordV2[] = [];
+  for (const record of allManagedRecords) {
+    if (normalizedCustom.has(path.resolve(record.path))) {
+      // Already covered by rooted discovery -- the path exists and is in customPaths.
+      // Still add to activeManagedRecords so the catalog annotates it as managed.
+      activeManagedRecords.push(record);
+      continue;
+    }
+    if (await isDirectory(record.path)) {
+      additionalManagedPaths.push(record.path);
+      activeManagedRecords.push(record);
+    } else {
+      staleManagedRecords.push(record);
+    }
+  }
   const customPaths = [...rootedCustomPaths, ...additionalManagedPaths];
+  const allStalePaths = [...stalePaths, ...staleManagedRecords.map((r) => r.path)];
 
   // Use the factory (rather than `new EnhancedMultiSourceWorkflowStorage`) so that
   // env-configured sources (WORKFLOW_GIT_REPOS, WORKFLOW_STORAGE_PATH, etc.) are included
@@ -121,21 +149,34 @@ export async function createWorkflowReaderForRequest(
     options.featureFlags ?? undefined,
   );
   const reader = new SchemaValidatingCompositeWorkflowStorage(storage);
-  return { reader, stalePaths, managedSourceRecords };
+  return {
+    reader,
+    stalePaths: allStalePaths,
+    managedSourceRecords: activeManagedRecords,
+    staleManagedRecords,
+    ...(managedStoreError !== undefined ? { managedStoreError } : {}),
+  };
+}
+
+interface ManagedSourceListResult {
+  readonly records: readonly ManagedSourceRecordV2[];
+  readonly storeError?: string;
 }
 
 async function listManagedSourceRecords(
   managedSourceStore: ManagedSourceStorePortV2 | undefined,
-): Promise<readonly ManagedSourceRecordV2[]> {
-  if (!managedSourceStore) return [];
+): Promise<ManagedSourceListResult> {
+  if (!managedSourceStore) return { records: [] };
 
   const result = await managedSourceStore.list();
   if (result.isErr()) {
-    const error = result.error;
-    throw new Error(`Failed to load managed workflow sources: ${error.code}: ${error.message}`);
+    // Graceful degradation: proceed without managed sources so the rest of list_workflows
+    // still returns built-in / rooted / project sources. The error is surfaced to the caller
+    // via storeError so it can add a warning to the response -- information is not silently lost.
+    return { records: [], storeError: `${result.error.code}: ${result.error.message}` };
   }
 
-  return result.value;
+  return { records: result.value };
 }
 
 async function listRememberedRoots(
