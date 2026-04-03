@@ -131,10 +131,15 @@ export async function handleV2ListWorkflows(
         rememberedRootsStore: guard.ctx.v2.rememberedRootsStore,
         managedSourceStore: guard.ctx.v2.managedSourceStore,
       })
-    : { reader: ctx.workflowService, stalePaths: [] as string[], managedSourceRecords: [] as ManagedSourceRecordV2[] };
+    : { reader: ctx.workflowService, stalePaths: [] as string[], managedSourceRecords: [] as ManagedSourceRecordV2[], staleManagedRecords: [] as ManagedSourceRecordV2[], managedStoreError: undefined as string | undefined };
   const workflowReader = readerResult.reader;
   const stalePaths = readerResult.stalePaths;
   const managedSourceRecords = readerResult.managedSourceRecords;
+  const staleManagedRecords = readerResult.staleManagedRecords;
+  const managedStoreError = readerResult.managedStoreError;
+  const warnings = managedStoreError
+    ? [`Managed workflow source store was temporarily unavailable (${managedStoreError}). Managed sources were not loaded.`]
+    : undefined;
 
   return ResultAsync.fromPromise(
     withTimeout(workflowReader.listWorkflowSummaries(), TIMEOUT_MS, 'list_workflows'),
@@ -161,26 +166,33 @@ export async function handleV2ListWorkflows(
         const payload = V2WorkflowListOutputSchema.parse({
           workflows: compiled.sort((a, b) => a.workflowId.localeCompare(b.workflowId)),
           ...(stalePaths.length > 0 ? { staleRoots: [...stalePaths] } : {}),
+          ...(warnings ? { warnings } : {}),
         });
         return okAsync(success(payload) as ToolResult<unknown>);
       }
       // Reuse workflowReader directly -- it already uses the same factory as the
       // source catalog, so catalog and listing show the same set of sources.
+      // NOTE: when !isCompositeWorkflowReader, staleManagedRecords is always [] because
+      // the fallback ctx.workflowService path sets it to [] and the factory always
+      // produces a composite reader. If this assumption ever breaks, stale managed entries
+      // would appear in staleRoots but NOT in sources -- an inconsistency worth knowing about.
       if (!isCompositeWorkflowReader(workflowReader)) {
         const payload = V2WorkflowListOutputSchema.parse({
           workflows: compiled.sort((a, b) => a.workflowId.localeCompare(b.workflowId)),
           ...(stalePaths.length > 0 ? { staleRoots: [...stalePaths] } : {}),
+          ...(warnings ? { warnings } : {}),
           sources: [],
         });
         return okAsync(success(payload) as ToolResult<unknown>);
       }
       return ResultAsync.fromPromise(
-        withTimeout(buildSourceCatalog(workflowReader, rememberedRootRecords, managedSourceRecords), TIMEOUT_MS, 'list_workflow_sources'),
+        withTimeout(buildSourceCatalog(workflowReader, rememberedRootRecords, managedSourceRecords, staleManagedRecords), TIMEOUT_MS, 'list_workflow_sources'),
         (err) => mapUnknownErrorToToolError(err),
       ).map((sources) => {
         const payload = V2WorkflowListOutputSchema.parse({
           workflows: compiled.sort((a, b) => a.workflowId.localeCompare(b.workflowId)),
           ...(stalePaths.length > 0 ? { staleRoots: [...stalePaths] } : {}),
+          ...(warnings ? { warnings } : {}),
           sources,
         });
         return success(payload) as ToolResult<unknown>;
@@ -215,9 +227,12 @@ export async function handleV2InspectWorkflow(
         rememberedRootsStore: guard.ctx.v2.rememberedRootsStore,
         managedSourceStore: guard.ctx.v2.managedSourceStore,
       })
-    : { reader: ctx.workflowService, stalePaths: [] as string[], managedSourceRecords: [] as ManagedSourceRecordV2[] };
+    : { reader: ctx.workflowService, stalePaths: [] as string[], managedSourceRecords: [] as ManagedSourceRecordV2[], staleManagedRecords: [] as ManagedSourceRecordV2[] };
   const workflowReader = readerResult.reader;
   const stalePaths = readerResult.stalePaths;
+  // inspect_workflow returns a single workflow, not a source catalog. staleRoots is surfaced
+  // in the response for parity with list_workflows, but staleManagedRecords is intentionally
+  // unused here -- there is no catalog output to append stale entries to.
 
   return ResultAsync.fromPromise(
     withTimeout(workflowReader.getWorkflowById(input.workflowId), TIMEOUT_MS, 'inspect_workflow'),
@@ -394,6 +409,7 @@ async function buildSourceCatalog(
   workflowReader: import('../../types/storage.js').ICompositeWorkflowStorage,
   rememberedRootRecords: readonly RememberedRootRecordV2[],
   managedSourceRecords: readonly ManagedSourceRecordV2[],
+  staleManagedRecords: readonly ManagedSourceRecordV2[],
 ): Promise<ReadonlyArray<Record<string, unknown>>> {
   const instances = workflowReader.getStorageInstances();
 
@@ -416,9 +432,26 @@ async function buildSourceCatalog(
   // Restore original order so the catalog output matches storage instance order.
   const sourceEntryData = sourceEntryDataReversed.reverse();
 
-  return sourceEntryData.map((data) =>
+  const activeEntries = sourceEntryData.map((data) =>
     deriveSourceCatalogEntry({ ...data, rememberedRootRecords, managedSourceRecords, sourceEntryData }),
   );
+
+  // Append catalog entries for managed source directories that are missing on disk.
+  // These give agents visibility into attached-but-inaccessible sources without requiring
+  // them to cross-reference staleRoots with the managed source list.
+  const staleEntries = staleManagedRecords.map((record) => ({
+    sourceKey: `custom:${record.path}`,
+    category: 'managed',
+    source: { kind: 'custom', displayName: path.basename(record.path) },
+    sourceMode: 'live_directory',
+    effectiveWorkflowCount: 0,
+    totalWorkflowCount: 0,
+    shadowedWorkflowCount: 0,
+    managed: { addedAtMs: record.addedAtMs },
+    stale: true,
+  }));
+
+  return [...activeEntries, ...staleEntries];
 }
 
 function deriveSourceCatalogEntry(options: {

@@ -15,6 +15,8 @@ import { LocalPinnedWorkflowStoreV2 } from '../../../src/v2/infra/local/pinned-w
 import { createTestValidationPipelineDeps } from '../../helpers/v2-test-helpers.js';
 import type { RememberedRootsStorePortV2 } from '../../../src/v2/ports/remembered-roots-store.port.js';
 import { InMemoryManagedSourceStoreV2 } from '../../../src/v2/infra/in-memory/managed-source-store/index.js';
+import { errAsync } from 'neverthrow';
+import type { ManagedSourceStorePortV2 } from '../../../src/v2/ports/managed-source-store.port.js';
 
 function writeWorkflow(dir: string, id: string, name: string): void {
   fs.mkdirSync(dir, { recursive: true });
@@ -312,5 +314,92 @@ describe('v2 workflow source catalog output', () => {
     expect(entry.rootedSharing).toBeDefined();
     expect((entry.rootedSharing as { kind: string }).kind).toBe('remembered_root');
     expect(entry.managed).toBeDefined();
+  });
+
+  it('surfaces missing managed source directory in staleRoots', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-v2-source-catalog-stale-managed-'));
+    const workspace = path.join(tempRoot, 'workspace');
+    const missingDir = path.join(tempRoot, 'nonexistent-workflows');
+
+    fs.mkdirSync(workspace, { recursive: true });
+    // Do NOT create missingDir -- it intentionally does not exist
+
+    const managedStore = new InMemoryManagedSourceStoreV2();
+    await managedStore.attach(missingDir);
+
+    const result = await handleV2ListWorkflows(
+      { workspacePath: workspace },
+      buildCtxWithManagedStore(rememberedRootsStore(), managedStore),
+    );
+
+    expect(result.type).toBe('success');
+    if (result.type !== 'success') return;
+
+    const data = result.data as { staleRoots?: string[] };
+    expect(data.staleRoots).toBeDefined();
+    expect(data.staleRoots).toContain(path.resolve(missingDir));
+  });
+
+  it('includes missing managed source as stale catalog entry when includeSources is true', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-v2-source-catalog-stale-entry-'));
+    const workspace = path.join(tempRoot, 'workspace');
+    const missingDir = path.join(tempRoot, 'gone-workflows');
+
+    fs.mkdirSync(workspace, { recursive: true });
+    // Do NOT create missingDir
+
+    const managedStore = new InMemoryManagedSourceStoreV2();
+    await managedStore.attach(missingDir);
+
+    const result = await handleV2ListWorkflows(
+      { workspacePath: workspace, includeSources: true },
+      buildCtxWithManagedStore(rememberedRootsStore(), managedStore),
+    );
+
+    expect(result.type).toBe('success');
+    if (result.type !== 'success') return;
+
+    const data = result.data as { staleRoots?: string[]; sources?: Array<Record<string, unknown>> };
+
+    // Stale path still appears in staleRoots
+    expect(data.staleRoots).toContain(path.resolve(missingDir));
+
+    // Stale path also appears in the catalog so agents don't need to cross-reference staleRoots
+    const staleEntry = data.sources!.find((s) => s.sourceKey === `custom:${path.resolve(missingDir)}`);
+    expect(staleEntry).toBeDefined();
+    expect(staleEntry!.category).toBe('managed');
+    expect(staleEntry!.stale).toBe(true);
+    expect(staleEntry!.effectiveWorkflowCount).toBe(0);
+    expect(staleEntry!.totalWorkflowCount).toBe(0);
+    expect((staleEntry!.managed as { addedAtMs: number }).addedAtMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('surfaces a warning when the managed source store fails, without failing the call', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-v2-source-catalog-store-err-'));
+    const workspace = path.join(tempRoot, 'workspace');
+    fs.mkdirSync(workspace, { recursive: true });
+
+    const failingStore: ManagedSourceStorePortV2 = {
+      list: () => errAsync({ code: 'MANAGED_SOURCE_IO_ERROR' as const, message: 'disk failure' }),
+      attach: () => errAsync({ code: 'MANAGED_SOURCE_IO_ERROR' as const, message: 'disk failure' }),
+      detach: () => errAsync({ code: 'MANAGED_SOURCE_IO_ERROR' as const, message: 'disk failure' }),
+    };
+
+    const ctx: ToolContext = {
+      ...buildCtx(rememberedRootsStore()),
+      v2: {
+        ...(buildCtx(rememberedRootsStore()).v2 as object),
+        managedSourceStore: failingStore,
+      },
+    } as any;
+
+    const result = await handleV2ListWorkflows({ workspacePath: workspace }, ctx);
+
+    expect(result.type).toBe('success');
+    if (result.type !== 'success') return;
+
+    const data = result.data as { warnings?: string[] };
+    expect(Array.isArray(data.warnings)).toBe(true);
+    expect(data.warnings!.some((w) => w.includes('MANAGED_SOURCE_IO_ERROR'))).toBe(true);
   });
 });
