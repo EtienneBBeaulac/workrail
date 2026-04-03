@@ -227,9 +227,12 @@ export async function handleV2InspectWorkflow(
         rememberedRootsStore: guard.ctx.v2.rememberedRootsStore,
         managedSourceStore: guard.ctx.v2.managedSourceStore,
       })
-    : { reader: ctx.workflowService, stalePaths: [] as string[], managedSourceRecords: [] as ManagedSourceRecordV2[], staleManagedRecords: [] as ManagedSourceRecordV2[] };
+    : { reader: ctx.workflowService, stalePaths: [] as string[], managedSourceRecords: [] as ManagedSourceRecordV2[], staleManagedRecords: [] as ManagedSourceRecordV2[], managedStoreError: undefined as string | undefined };
   const workflowReader = readerResult.reader;
   const stalePaths = readerResult.stalePaths;
+  const inspectWarnings = readerResult.managedStoreError
+    ? [`Managed workflow source store was temporarily unavailable (${readerResult.managedStoreError}). Managed sources were not loaded.`]
+    : undefined;
   // inspect_workflow returns a single workflow, not a source catalog. staleRoots is surfaced
   // in the response for parity with list_workflows, but staleManagedRecords is intentionally
   // unused here -- there is no catalog output to append stale entries to.
@@ -287,6 +290,7 @@ export async function handleV2InspectWorkflow(
               compiled: body,
               ...(visibility ? { visibility } : {}),
               ...(stalePaths.length > 0 ? { staleRoots: [...stalePaths] } : {}),
+              ...(inspectWarnings ? { warnings: inspectWarnings } : {}),
               ...(references != null && references.length > 0 ? { references } : {}),
               ...(() => {
                 const staleness = shouldShowStaleness(visibility?.category)

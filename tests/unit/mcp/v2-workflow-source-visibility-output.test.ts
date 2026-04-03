@@ -13,6 +13,8 @@ import { NodeCryptoV2 } from '../../../src/v2/infra/local/crypto/index.js';
 import { LocalPinnedWorkflowStoreV2 } from '../../../src/v2/infra/local/pinned-workflow-store/index.js';
 import { createTestValidationPipelineDeps } from '../../helpers/v2-test-helpers.js';
 import type { RememberedRootsStorePortV2 } from '../../../src/v2/ports/remembered-roots-store.port.js';
+import type { ManagedSourceStorePortV2 } from '../../../src/v2/ports/managed-source-store.port.js';
+import { errAsync } from 'neverthrow';
 import { createWorkflow } from '../../../src/types/workflow.js';
 import { createProjectDirectorySource } from '../../../src/types/workflow-source.js';
 
@@ -158,5 +160,37 @@ describe('v2 workflow source visibility outputs', () => {
           'Project-scoped ./workflows currently overrides rooted .workrail/workflows during migration. Prefer rooted sharing for new team-shared workflows.',
       },
     });
+  });
+
+  it('surfaces managed source store error as warnings in inspect_workflow response', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-v2-inspect-store-err-'));
+    const workspace = path.join(tempRoot, 'workspace');
+    writeProjectWorkflow(workspace, 'test-workflow', 'Test Workflow');
+
+    const failingStore: ManagedSourceStorePortV2 = {
+      list: () => errAsync({ code: 'MANAGED_SOURCE_IO_ERROR' as const, message: 'disk failure' }),
+      attach: () => errAsync({ code: 'MANAGED_SOURCE_IO_ERROR' as const, message: 'disk failure' }),
+      detach: () => errAsync({ code: 'MANAGED_SOURCE_IO_ERROR' as const, message: 'disk failure' }),
+    };
+
+    const ctx: ToolContext = {
+      ...buildCtx(rememberedRootsStore()),
+      v2: {
+        ...(buildCtx(rememberedRootsStore()).v2 as object),
+        managedSourceStore: failingStore,
+      },
+    } as any;
+
+    const result = await handleV2InspectWorkflow(
+      { workflowId: 'test-workflow', workspacePath: workspace, mode: 'metadata' },
+      ctx,
+    );
+
+    expect(result.type).toBe('success');
+    if (result.type !== 'success') return;
+
+    const data = result.data as { warnings?: string[] };
+    expect(Array.isArray(data.warnings)).toBe(true);
+    expect(data.warnings!.some((w) => w.includes('MANAGED_SOURCE_IO_ERROR'))).toBe(true);
   });
 });
