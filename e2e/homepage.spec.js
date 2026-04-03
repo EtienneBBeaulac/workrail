@@ -37,3 +37,4 @@ test.describe('Homepage', () => {
     ).toBeVisible({ timeout: 10_000 });
   });
 });
+
