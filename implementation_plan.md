@@ -496,3 +496,136 @@ managedSourcesLockPath(): string {
 - `V2Dependencies.managedSourceStore` is optional and wired in production bootstrap
 - All 6 unit tests pass
 - `npm run build` passes with no type errors
+
+## 17. Slice 4 Technical Specification
+
+### Status
+
+In progress.
+
+### Problem statement
+
+After Slices 1-3, managed sources exist in the persistence layer but are invisible to the rest of the system. Attaching a workflow directory via `manage_workflow_source` has no effect on:
+- workflow resolution (workflows from that directory do not appear in `list_workflows`)
+- the source catalog (the directory does not appear in `list_workflows` `sources` output)
+
+This means Slice 3's attach operation is currently a no-op from the user's perspective. Slice 4 closes this gap by:
+1. Wiring managed source paths into the workflow composition
+2. Annotating catalog entries with `category: 'managed'` when the source was explicitly attached
+3. Preventing dual truth when a managed path is also a rooted-sharing discovered path (show ONE entry with explicit relationship)
+
+### Acceptance criteria
+
+- After attaching a workflow directory via `manage_workflow_source`, its workflows appear in `list_workflows` (workflow resolution includes managed paths)
+- After attaching, `list_workflows` with `includeSources: true` includes a catalog entry with `category: 'managed'` for the attached directory
+- The catalog entry for a managed source includes `managed: { addedAtMs: <epoch_ms> }`
+- When the same path is both managed AND discovered via remembered-roots (rooted-sharing): ONE catalog entry with `category: 'managed'` and `rootedSharing` context present (no dual entry)
+- Existing catalog behavior is unchanged: rooted-sharing entries without managed attachment remain `category: 'rooted_sharing'`; migration guidance still surfaces
+- `npm run build` passes with no type errors
+- All new and existing tests pass
+
+### Non-goals
+
+- Per-workflow `visibility.category` showing `'managed'` (catalog-level annotation is sufficient)
+- New MCP tools for querying managed sources
+- Managed source lifecycle (update, health, sync)
+- Breaking changes to existing enum values
+
+### Selected approach
+
+**Handler-level record collection + factory path injection (Approach D)**
+
+1. Handler (`handleV2ListWorkflows`, `handleV2InspectWorkflow`) lists managed records from `guard.ctx.v2.managedSourceStore` using a new `listManagedSourceRecords` helper
+2. Passes path array via new `managedPaths?: readonly string[]` option to `createWorkflowReaderForRequest`
+3. Factory deduplicates managed paths against already-discovered custom paths and appends the net-new ones to `customPaths`
+4. Handler passes managed records to `buildSourceCatalog`
+5. `buildSourceCatalog` passes records to `deriveSourceCatalogEntry`
+6. `deriveSourceCatalogEntry` annotates custom sources whose path matches a managed record with `category: 'managed'` + `managed: { addedAtMs }`; if also rooted-sharing, includes `rootedSharing` context too
+
+**Why this approach**: Consistent with existing pattern where handler fetches all dependencies (e.g., `listRememberedRootRecords` is called at handler scope, not inside factory). Factory responsibility stays pure. `WorkflowReaderForRequestResult` type unchanged.
+
+**Runner-up**: Factory-owns-fetch (A) -- same outcome but factory owns record fetching and returns records in result. Slightly less consistent with existing handler-fetches-dependencies pattern.
+
+### Files to change (4)
+
+1. `src/mcp/handlers/shared/request-workflow-reader.ts`
+   - Add `managedPaths?: readonly string[]` to `RequestWorkflowReaderOptions`
+   - Add `listManagedSourceRecords(store)` helper (returns `readonly ManagedSourceRecordV2[]`, throws on error)
+   - In `createWorkflowReaderForRequest`: deduplicate managed paths against discovered customPaths; append net-new
+
+2. `src/mcp/handlers/v2-workflow.ts`
+   - In `handleV2ListWorkflows`: call `listManagedSourceRecords`, pass paths to `createWorkflowReaderForRequest`, pass records to `buildSourceCatalog`
+   - In `handleV2InspectWorkflow`: call `listManagedSourceRecords`, pass paths to `createWorkflowReaderForRequest` (no catalog here)
+   - Extend `buildSourceCatalog` signature to accept `managedSourceRecords`
+   - Extend `deriveSourceCatalogEntry` to accept + use managed records
+
+3. `src/mcp/output-schemas.ts`
+   - Add `'managed'` to `V2WorkflowSourceCatalogEntrySchema.category` enum
+   - Add `managed: z.object({ addedAtMs: z.number().int().min(0) }).optional()` field
+
+4. `tests/unit/mcp/v2-workflow-source-catalog-output.test.ts`
+   - New test: attached managed source appears in catalog with `category: 'managed'`, `managed: { addedAtMs }`; its workflows appear in listing
+   - New test: managed source that is also a remembered root shows ONE catalog entry with `category: 'managed'` and `rootedSharing` context (dedup)
+   - New tests must use a modified `buildCtx` that includes `managedSourceStore: new InMemoryManagedSourceStoreV2()` in `v2` deps (existing `buildCtx` helper does not set `managedSourceStore`; write a new `buildCtxWithManagedStore` or extend via `as any` cast using the existing minimal context shape)
+   - Existing tests must remain green (no regression)
+
+### Key invariants
+
+**Deduplication logic in factory**:
+```
+const normalizedCustom = new Set(customPaths.map(p => path.resolve(p)));
+const additionalManaged = (options.managedPaths ?? []).filter(p => !normalizedCustom.has(path.resolve(p)));
+allCustomPaths = [...customPaths, ...additionalManaged];
+```
+
+**Catalog annotation logic for custom sources**:
+```
+const managedRecord = managedRecords.find(r => path.resolve(r.path) === path.resolve(source.directoryPath));
+const rootedSharing = deriveRootedSharingForPath(source.directoryPath, rememberedRootRecords);
+if (managedRecord) {
+  return { ..., category: 'managed', managed: { addedAtMs: managedRecord.addedAtMs }, ...(rootedSharing ? { rootedSharing } : {}) };
+}
+// existing rooted_sharing / external logic unchanged
+```
+
+**listManagedSourceRecords** throws on error (same pattern as `listRememberedRoots`).
+
+### Test design
+
+#### New tests in `tests/unit/mcp/v2-workflow-source-catalog-output.test.ts`
+
+**Test 1: managed source visibility**
+- Create temp dir with workflow files
+- Build ctx with `InMemoryManagedSourceStoreV2` pre-attached to that dir
+- Call `handleV2ListWorkflows({ workspacePath, includeSources: true }, ctx)`
+- Assert: workflow from managed dir appears in `result.data.workflows`
+- Assert: `result.data.sources` has entry with `category: 'managed'`, `managed.addedAtMs >= 0`, `effectiveWorkflowCount: 1`
+
+**Test 2: managed + rooted-sharing dedup (the dual-truth test)**
+- Create temp dir with workflow files
+- Set dir as both a managed source AND a remembered root (so discovery would find it)
+- Call `handleV2ListWorkflows({ workspacePath, includeSources: true }, ctx)`
+- Assert: sources has exactly ONE entry for that path (not two)
+- Assert: that entry has `category: 'managed'` and `rootedSharing` present
+
+**Regression**: all 4 existing catalog tests must still pass.
+
+### Risk register
+
+**Low -- Path normalization inconsistency**: If path.resolve() is not called consistently in the dedup set and in the managed record lookup, a path could appear twice. Mitigation: always call path.resolve() at both sites.
+
+**Low -- managedSourceStore null/undefined in test ctx**: Existing tests use a minimal ctx that doesn't include managedSourceStore. If `listManagedSourceRecords` is called unconditionally and the store is absent, it should return `[]` gracefully (not throw). Mitigation: `if (!store) return []` guard.
+
+**Low -- Stale path detection gap for managed sources**: Managed paths are added to `customPaths` AFTER `discoverRootedWorkflowDirectories`, so they bypass the stale detection mechanism. Non-existent managed paths won't appear in `staleRoots`. Graceful degradation handles missing filesystem paths silently (0-count entries). Acceptable for Slice 4; managed stale detection is future work.
+
+### PR packaging
+
+Single PR. All changes are in 4 files, purely additive, no breaking changes.
+
+### Philosophy alignment
+
+- **Architectural fixes over patches** -> satisfied: wires managed sources into composition properly, not a metadata overlay
+- **Make illegal states unrepresentable** -> satisfied: `managed` category in schema exactly represents the new state; no ambiguity
+- **Validate at boundaries, trust inside** -> satisfied: managed paths normalized at boundary; catalog logic trusts normalized values
+- **YAGNI with discipline** -> satisfied: no per-workflow visibility change, no new MCP tools; smallest change that makes attach useful
+- **Determinism over cleverness** -> satisfied: dedup is deterministic (path.resolve normalization); catalog order preserved

@@ -120,7 +120,7 @@ export const V2WorkflowSourceCatalogEntrySchema = z.object({
   sourceKey: z.string().min(1).describe(
     'Stable identifier for this source. Format: "{kind}:{absolutePath}" for filesystem sources (e.g. "project:/path/to/workflows", "custom:/path/to/.workrail/workflows"), or "built_in" for bundled sources.'
   ),
-  category: z.enum(['built_in', 'personal', 'legacy_project', 'rooted_sharing', 'external']),
+  category: z.enum(['built_in', 'personal', 'legacy_project', 'rooted_sharing', 'external', 'managed']),
   source: z.object({
     kind: z.enum(['bundled', 'user', 'project', 'custom', 'git', 'remote', 'plugin']),
     displayName: z.string().min(1),
@@ -133,6 +133,9 @@ export const V2WorkflowSourceCatalogEntrySchema = z.object({
     kind: z.literal('remembered_root'),
     rootPath: z.string().min(1),
     groupLabel: z.string().min(1),
+  }).optional(),
+  managed: z.object({
+    addedAtMs: z.number().int().min(0),
   }).optional(),
   migration: z.object({
     preferredSource: z.literal('rooted_sharing'),
