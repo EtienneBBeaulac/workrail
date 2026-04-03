@@ -1,7 +1,7 @@
 {
   "id": "workflow-for-workflows",
   "name": "Workflow Authoring Workflow (Quality Gate v2)",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "Guides an agent through authoring or modernizing a WorkRail workflow with a stronger quality gate: understand the task, define effectiveness targets, design both workflow and quality architecture, draft, validate, simulate execution, run adversarial review, redesign if needed, and only then hand off.",
   "recommendedPreferences": {
     "recommendedAutonomy": "guided",
@@ -155,17 +155,41 @@
           "State what result the authored workflow should reliably produce for its user.",
           "List the criteria that would make the workflow feel genuinely satisfying in practice.",
           "Name the biggest likely failure mode and the most dangerous false-confidence mode.",
-          "State what would make the workflow technically correct but still disappointing."
+          "State what would make the workflow technically correct but still disappointing.",
+          "Trace the final handoff end-to-end: for every key output variable in the final step, confirm it has explicit allowed values and computation rules \u2014 not just a name. Flag any output named but not yet defined."
         ],
         "outputRequired": {
-          "notesMarkdown": "Effectiveness target, satisfaction criteria, failure modes, and false-confidence risks.",
-          "context": "Capture effectivenessTarget, userSatisfactionCriteria, primaryFailureMode, dangerousFalseConfidenceModes, likelyWeakOutcomeModes, and trustRisk."
+          "notesMarkdown": "Effectiveness target, satisfaction criteria, failure modes, false-confidence risks, and output completeness check.",
+          "context": "Capture effectivenessTarget, userSatisfactionCriteria, primaryFailureMode, dangerousFalseConfidenceModes, likelyWeakOutcomeModes, trustRisk, and domainResearch (when domain research was conducted)."
         },
         "verify": [
           "The authored workflow now has a clear outcome bar, not just an authoring bar."
         ]
       },
-      "requireConfirmation": false
+      "requireConfirmation": false,
+      "promptFragments": [
+        {
+          "id": "phase-1-domain-research",
+          "when": {
+            "and": [
+              {
+                "var": "rigorMode",
+                "equals": "THOROUGH"
+              },
+              {
+                "var": "workflowArchetype",
+                "in": [
+                  "planning_design",
+                  "review_audit",
+                  "content_analysis",
+                  "diagnostic_investigation"
+                ]
+              }
+            ]
+          },
+          "text": "Before defining the effectiveness target, research the domain. Use web search if available. Enumerate: (1) the specific ways agents fail at this type of task \u2014 domain-specific patterns, not generic LLM limitations; (2) domain knowledge agents possess but routinely misapply under time pressure; (3) existing frameworks that address this domain and what they protect against; (4) stakeholder tensions that must be balanced. Capture as domainResearch and let it ground the failure modes you name \u2014 cite those patterns specifically, not generic descriptions."
+        }
+      ]
     },
     {
       "id": "phase-2-design-workflow-architecture",
@@ -266,6 +290,7 @@
         "procedure": [
           "If `authoringMode = create` and no filename was specified, ask the user for the filename before writing.",
           "If `authoringMode = modernize_existing`, default to editing `targetWorkflowPath` unless there is a strong reason to create a new variant or file.",
+          "Use promptFragments for conditional content that varies by rigorMode, workflowComplexity, or authoringMode \u2014 do not duplicate entire steps for small conditional differences.",
           "Write the workflow file. Keep protocol requirements explicit, loops bounded, confirmations meaningful, and metaGuidance clean."
         ],
         "outputRequired": {
