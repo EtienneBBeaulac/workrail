@@ -233,16 +233,20 @@ export async function handleV2ListWorkflows(
 
       // Tag-first discovery: when tags filter is absent, return tagSummary + empty workflows.
       // When tags filter is present, return full filtered list.
+      // Tag-first discovery applies only to the default listing (no includeSources).
+      // When includeSources=true, return the full list for source catalog inspection.
       const tagFilteredCompiled = (() => {
+        if (input.includeSources) return sortedCompiled; // full list for source catalog
         if (!WORKFLOW_TAGS) return sortedCompiled;
         if (input.tags && input.tags.length > 0) {
           const filteredIds = new Set(filterByTags(WORKFLOW_TAGS, sortedIds, input.tags));
           return sortedCompiled.filter((w) => filteredIds.has(w.workflowId));
         }
-        return [];
+        return []; // default: empty list, tagSummary returned instead
       })();
 
       const tagSummaryEntry = (() => {
+        if (input.includeSources) return undefined; // no tagSummary for source catalog calls
         if (!WORKFLOW_TAGS || (input.tags && input.tags.length > 0)) return undefined;
         return buildTagSummary(WORKFLOW_TAGS, sortedIds);
       })();
