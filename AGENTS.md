@@ -128,6 +128,18 @@ Key authoring tools and references:
 - `tests/lifecycle/bundled-workflow-smoke.test.ts` -- auto-walk smoke test that covers all bundled workflows with zero per-workflow fixtures
 - Run all tests: `npx vitest run`
 
+### Staleness detection
+
+`validate:registry` prints a non-blocking advisory after each run listing workflows that are unstamped or outdated relative to the current authoring spec version. This is informational only and never causes CI to fail.
+
+To stamp a workflow after running `workflow-for-workflows` on it:
+
+```bash
+npm run stamp-workflow -- workflows/my-workflow.json
+```
+
+**Dev flag:** `WORKRAIL_DEV_STALENESS=1` surfaces staleness for all workflow categories (including built-in and legacy_project) through the MCP tools. This is set by default in the local MCP server config for development use. End users only see staleness for their own imported/personal workflows.
+
 ## Testing
 
 Test directories:
