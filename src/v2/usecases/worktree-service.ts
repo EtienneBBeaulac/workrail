@@ -108,6 +108,8 @@ interface WorktreeEnrichment {
   headTimestampMs: number;
   changedCount: number;
   aheadCount: number;
+  /** Content of `git config branch.<name>.description`, or empty string if unset. */
+  branchDescription: string;
 }
 
 /**
@@ -115,10 +117,15 @@ interface WorktreeEnrichment {
  * Each command is independent so there is no reason to serialize them.
  */
 async function enrichWorktree(wt: RawWorktree): Promise<WorktreeEnrichment> {
-  const [logRaw, statusRaw, aheadRaw] = await Promise.all([
+  // Branch description is stored in the repo's git config (not the worktree's
+  // local config), so it is readable from any linked worktree via the same
+  // `git config` call. Returns null when the key is unset -- git exits non-zero.
+  const descriptionKey = wt.branch ? `branch.${wt.branch}.description` : null;
+  const [logRaw, statusRaw, aheadRaw, descriptionRaw] = await Promise.all([
     git(wt.path, ['log', '-1', '--format=%h%n%s%n%ct']),
     git(wt.path, ['status', '--short']),
     git(wt.path, ['rev-list', '--count', 'origin/main..HEAD']),
+    descriptionKey ? git(wt.path, ['config', descriptionKey]) : Promise.resolve(null),
   ]);
 
   const [hashLine, messageLine, timestampLine] = logRaw?.split('\n') ?? [];
@@ -135,7 +142,9 @@ async function enrichWorktree(wt: RawWorktree): Promise<WorktreeEnrichment> {
   const parsedAhead = aheadRaw !== null ? parseInt(aheadRaw, 10) : NaN;
   const aheadCount = isNaN(parsedAhead) ? 0 : parsedAhead;
 
-  return { headHash, headMessage, headTimestampMs, changedCount, aheadCount };
+  const branchDescription = descriptionRaw?.trim() ?? '';
+
+  return { headHash, headMessage, headTimestampMs, changedCount, aheadCount, branchDescription };
 }
 
 // ---------------------------------------------------------------------------
@@ -190,6 +199,8 @@ async function enrichRepo(
       changedCount: e.changedCount,
       aheadCount: e.aheadCount,
       activeSessionCount: wt.branch ? (activeSessions.counts.get(wt.branch) ?? 0) : 0,
+      // Empty string means unset -- omit from the type so consumers can use simple truthiness checks
+      ...(e.branchDescription ? { description: e.branchDescription } : {}),
     }];
   });
 

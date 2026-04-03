@@ -110,7 +110,7 @@ describe('v2 continue_workflow: advance replay idempotency', () => {
 
     // 1. Start workflow
     const startRes = await handleV2StartWorkflow(
-      { workflowId: 'blocked-test-wf' } as V2StartWorkflowInput,
+      { workflowId: 'blocked-test-wf', goal: 'test blocked outcome' } as V2StartWorkflowInput,
       ctx
     );
     expect(startRes.type).toBe('success');
@@ -156,7 +156,7 @@ describe('v2 continue_workflow: advance replay idempotency', () => {
 
     // Start + advance
     const startRes = await handleV2StartWorkflow(
-      { workflowId: 'blocked-test-wf' } as V2StartWorkflowInput,
+      { workflowId: 'blocked-test-wf', goal: 'test blocked outcome' } as V2StartWorkflowInput,
       ctx
     );
     expect(startRes.type).toBe('success');

@@ -102,7 +102,7 @@ describe('v2 start_workflow emits baseline preferences_changed', () => {
       const workflowId = 'test-workflow';
       const ctx = await mkCtxWithWorkflow(workflowId);
 
-      const res = await handleV2StartWorkflow({ workflowId , workspacePath: root } as any, ctx);
+      const res = await handleV2StartWorkflow({ workflowId, workspacePath: root, goal: 'test workflow execution' } as any, ctx);
       expect(res.type).toBe('success');
       if (res.type !== 'success') return;
 

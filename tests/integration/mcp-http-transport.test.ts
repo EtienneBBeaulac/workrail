@@ -135,6 +135,7 @@ describe('MCP HTTP transport integration', () => {
           arguments: {
             workflowId: 'test-session-persistence',
             workspacePath: process.cwd(),
+            goal: 'test HTTP transport workflow start',
           },
         },
       }),

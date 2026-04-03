@@ -200,7 +200,7 @@ describe('stale remembered roots in tool responses', () => {
     expect(rememberRes.isOk()).toBe(true);
 
     const result = await handleV2StartWorkflow(
-      { workflowId: 'test-workflow', workspacePath: workspaceRoot },
+      { workflowId: 'test-workflow', workspacePath: workspaceRoot, goal: 'test workflow execution' },
       ctx,
     );
 
@@ -237,7 +237,7 @@ describe('v2 remembered roots integration', () => {
 
     const { ctx } = await buildCtx(dataRoot);
     const result = await handleV2StartWorkflow(
-      { workflowId: 'test-workflow', workspacePath: workspaceRoot },
+      { workflowId: 'test-workflow', workspacePath: workspaceRoot, goal: 'test workflow execution' },
       ctx,
     );
     expect(result.type).toBe('success');
