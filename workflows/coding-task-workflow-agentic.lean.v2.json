@@ -1,8 +1,8 @@
 {
   "id": "coding-task-workflow-agentic",
-  "name": "Agentic Task Dev Workflow (Lean • Notes-First • WorkRail Executor)",
+  "name": "Agentic Task Dev Workflow (Lean \u2022 Notes-First \u2022 WorkRail Executor)",
   "version": "1.0.0",
-  "description": "The user guides the agent through understanding the task, selecting an approach, planning in slices, implementing incrementally, and verifying the result through explicit review and validation checkpoints.",
+  "description": "Use this to implement a software feature or task. Follows a plan-then-execute approach with architecture decisions, invariant tracking, and final verification.",
   "recommendedPreferences": {
     "recommendedAutonomy": "guided",
     "recommendedRiskPolicy": "conservative"
@@ -21,7 +21,7 @@
     "SUBAGENT SYNTHESIS: treat subagent output as evidence, not conclusions. State your hypothesis before delegating, then interrogate what came back: what was missed, wrong, or new? Say what changed your mind or what you still reject, and why.",
     "PARALLELISM: when reads, audits, or delegations are independent, run them in parallel inside the phase. Parallelize cognition; serialize synthesis and canonical writes.",
     "PHILOSOPHY LENS: apply the user's coding philosophy (from active session rules) as the evaluation lens. Flag violations by principle name, not as generic feedback. If principles conflict, surface the tension explicitly instead of silently choosing.",
-    "VALIDATION: prefer static/compile-time safety over runtime checks. Use build, type-checking, and tests as the primary proof of correctness — in that order of reliability.",
+    "VALIDATION: prefer static/compile-time safety over runtime checks. Use build, type-checking, and tests as the primary proof of correctness \u2014 in that order of reliability.",
     "DRIFT HANDLING: when reality diverges from the plan, update the plan artifact and re-audit deliberately rather than accumulating undocumented drift.",
     "NEVER COMMIT MARKDOWN FILES UNLESS USER EXPLICITLY ASKS."
   ],
@@ -58,8 +58,14 @@
       "prompt": "Understand this before you touch anything.\n\nMake sure the expected behavior is clear enough to proceed. If it really isn't, ask me only what you can't answer yourself. Don't ask me things you can find with tools.\n\nThen dig through the code. Figure out:\n- where this starts and what the call chain looks like\n- which files, modules, and functions matter\n- what patterns this should follow\n- how this repo verifies similar work\n- what the real risks, invariants, and non-goals are\n\nFigure out what philosophy to use while doing the work. Prefer, in order: Memory MCP (`mcp_memory_conventions`, `mcp_memory_prefer`, `mcp_memory_recall`), active session/Firebender rules, repo patterns, then me only if those still conflict or aren't enough.\n\nRecord where that philosophy lives, not a summary. If the stated rules and repo patterns disagree, capture the conflict.\n\nOnce you actually understand the task, classify it:\n- `taskComplexity`: Small / Medium / Large\n- `riskLevel`: Low / Medium / High\n- `rigorMode`: QUICK / STANDARD / THOROUGH\n- `automationLevel`: High / Medium / Low\n- `prStrategy`: SinglePR / MultiPR\n\nUse this guidance:\n- QUICK: small, low-risk, clear path, little ambiguity\n- STANDARD: medium scope or moderate risk\n- THOROUGH: large scope, architectural uncertainty, or high-risk change\n\nThen force a context-clarity check. Score each from 0-2 and give one sentence of evidence for each score:\n- `entryPointClarity`: 0 = clear entry point and call chain, 1 = partial chain with gaps, 2 = still unclear where behavior starts or flows\n- `boundaryClarity`: 0 = clear boundary, 1 = likely boundary but some uncertainty, 2 = patch-vs-boundary decision still unclear\n- `invariantClarity`: 0 = important invariants are explicit, 1 = some are inferred or uncertain, 2 = important invariants are still unclear\n- `verificationClarity`: 0 = clear deterministic verification path, 1 = partial verification path, 2 = verification is still weak or unclear\n\nUse the rubric, not vibes:\n- QUICK: do not run the deeper context batch; if the rubric says you're missing too much context, your classification is probably wrong and you should reclassify upward before moving on\n- STANDARD: run the deeper context batch if the total score is 3 or more, or if `boundaryClarity`, `invariantClarity`, or `verificationClarity` is 2\n- THOROUGH: always run the deeper context batch\n\nThe deeper context batch is:\n- `routine-context-gathering` with `focus=COMPLETENESS`\n- `routine-context-gathering` with `focus=DEPTH`\n\nAfter the batch, synthesize what changed, what stayed the same, and what is still unknown. If the extra context changes the classification, update it before you leave this step.\n\nCapture:\n- `taskComplexity`\n- `riskLevel`\n- `rigorMode`\n- `automationLevel`\n- `prStrategy`\n- `contextSummary`\n- `candidateFiles`\n- `invariants`\n- `nonGoals`\n- `openQuestions` (only real human-decision questions)\n- `philosophySources`\n- `philosophyConflicts`",
       "requireConfirmation": {
         "or": [
-          { "var": "taskComplexity", "equals": "Large" },
-          { "var": "riskLevel", "equals": "High" }
+          {
+            "var": "taskComplexity",
+            "equals": "Large"
+          },
+          {
+            "var": "riskLevel",
+            "equals": "High"
+          }
         ]
       }
     },
@@ -68,8 +74,14 @@
       "title": "Phase 1a: State Hypothesis",
       "runCondition": {
         "and": [
-          { "var": "taskComplexity", "not_equals": "Small" },
-          { "var": "rigorMode", "not_equals": "QUICK" }
+          {
+            "var": "taskComplexity",
+            "not_equals": "Small"
+          },
+          {
+            "var": "rigorMode",
+            "not_equals": "QUICK"
+          }
         ]
       },
       "prompt": "Before you do design work, tell me your current best guess.\n\nKeep it short:\n1. what you think the right approach is\n2. what worries you about it\n3. what would most likely make it wrong\n\nCapture:\n- `initialHypothesis`",
@@ -80,8 +92,14 @@
       "title": "Phase 1b: Lightweight Design (QUICK)",
       "runCondition": {
         "and": [
-          { "var": "taskComplexity", "not_equals": "Small" },
-          { "var": "rigorMode", "equals": "QUICK" }
+          {
+            "var": "taskComplexity",
+            "not_equals": "Small"
+          },
+          {
+            "var": "rigorMode",
+            "equals": "QUICK"
+          }
         ]
       },
       "prompt": "Generate a lightweight design inline. QUICK rigor means the path is clear and risk is low.\n\nProduce two mandatory candidates:\n1. The simplest possible change that satisfies acceptance criteria\n2. Follow the existing repo pattern for this kind of change\n\nFor each candidate:\n- One-sentence summary\n- Which tensions it resolves and which it accepts\n- How it relates to existing repo patterns (follows / adapts / departs)\n- Failure mode to watch\n- Philosophy fit (name specific principles)\n\nCompare and recommend. If both converge on the same approach, say so honestly.\n\nWrite the output to `design-candidates.md` with this structure:\n- Problem Understanding (core tensions, what makes it hard)\n- Philosophy Constraints (which principles matter for this problem)\n- Candidates (each with: summary, tensions resolved/accepted, failure mode, philosophy fit)\n- Comparison and Recommendation\n- Open Questions (if any remain)",
@@ -89,11 +107,17 @@
     },
     {
       "id": "phase-1b-design-deep",
-      "title": "Phase 1b: Design Generation (Injected Routine — Tension-Driven Design)",
+      "title": "Phase 1b: Design Generation (Injected Routine \u2014 Tension-Driven Design)",
       "runCondition": {
         "and": [
-          { "var": "taskComplexity", "not_equals": "Small" },
-          { "var": "rigorMode", "not_equals": "QUICK" }
+          {
+            "var": "taskComplexity",
+            "not_equals": "Small"
+          },
+          {
+            "var": "rigorMode",
+            "not_equals": "QUICK"
+          }
         ]
       },
       "templateCall": {
@@ -110,24 +134,42 @@
         "var": "taskComplexity",
         "not_equals": "Small"
       },
-      "prompt": "Read `design-candidates.md`, compare it to your original guess, and make the call.\n\nBe explicit about three things:\n- what the design work confirmed\n- what changed your mind\n- what you missed the first time\n\nThen pressure-test the leading option:\n- what's the strongest case against it?\n- what assumption breaks it?\n\nAfter the challenge batch, say:\n- what changed your mind\n- what didn't\n- which findings you reject and why\n\nPick the approach yourself. Don't hide behind the artifact. If the simplest thing works, prefer it. If the front-runner stops looking right after challenge, switch.\n\nCapture:\n- `selectedApproach` — chosen design with rationale tied to tensions\n- `runnerUpApproach` — next-best option and why it lost\n- `architectureRationale` — tensions resolved vs accepted\n- `pivotTriggers` — conditions under which you'd switch to the runner-up\n- `keyRiskToMonitor` — failure mode of the selected approach\n- `acceptedTradeoffs`\n- `identifiedFailureModes`",
+      "prompt": "Read `design-candidates.md`, compare it to your original guess, and make the call.\n\nBe explicit about three things:\n- what the design work confirmed\n- what changed your mind\n- what you missed the first time\n\nThen pressure-test the leading option:\n- what's the strongest case against it?\n- what assumption breaks it?\n\nAfter the challenge batch, say:\n- what changed your mind\n- what didn't\n- which findings you reject and why\n\nPick the approach yourself. Don't hide behind the artifact. If the simplest thing works, prefer it. If the front-runner stops looking right after challenge, switch.\n\nCapture:\n- `selectedApproach` \u2014 chosen design with rationale tied to tensions\n- `runnerUpApproach` \u2014 next-best option and why it lost\n- `architectureRationale` \u2014 tensions resolved vs accepted\n- `pivotTriggers` \u2014 conditions under which you'd switch to the runner-up\n- `keyRiskToMonitor` \u2014 failure mode of the selected approach\n- `acceptedTradeoffs`\n- `identifiedFailureModes`",
       "promptFragments": [
         {
           "id": "phase-1c-challenge-standard",
-          "when": { "var": "rigorMode", "in": ["STANDARD", "THOROUGH"] },
-              "text": "Run `routine-hypothesis-challenge` on the leading option's failure modes before you decide."
+          "when": {
+            "var": "rigorMode",
+            "in": [
+              "STANDARD",
+              "THOROUGH"
+            ]
+          },
+          "text": "Run `routine-hypothesis-challenge` on the leading option's failure modes before you decide."
         },
         {
           "id": "phase-1c-challenge-thorough",
-          "when": { "var": "rigorMode", "equals": "THOROUGH" },
-              "text": "Also run `routine-execution-simulation` on the three most likely failure paths before you decide."
+          "when": {
+            "var": "rigorMode",
+            "equals": "THOROUGH"
+          },
+          "text": "Also run `routine-execution-simulation` on the three most likely failure paths before you decide."
         }
       ],
       "requireConfirmation": {
         "or": [
-          { "var": "automationLevel", "equals": "Low" },
-          { "var": "taskComplexity", "equals": "Large" },
-          { "var": "riskLevel", "equals": "High" }
+          {
+            "var": "automationLevel",
+            "equals": "Low"
+          },
+          {
+            "var": "taskComplexity",
+            "equals": "Large"
+          },
+          {
+            "var": "riskLevel",
+            "equals": "High"
+          }
         ]
       }
     },
@@ -173,7 +215,10 @@
           "promptFragments": [
             {
               "id": "phase-2c-challenge-thorough",
-              "when": { "var": "rigorMode", "equals": "THOROUGH" },
+              "when": {
+                "var": "rigorMode",
+                "equals": "THOROUGH"
+              },
               "text": "If the review surfaced materially non-empty or surprising findings, run `routine-hypothesis-challenge` on the most serious finding and `routine-execution-simulation` on the most dangerous failure mode before you finalize the revised design."
             }
           ],
@@ -197,7 +242,7 @@
         "var": "taskComplexity",
         "not_equals": "Small"
       },
-      "prompt": "Turn the decision into a plan someone else could execute without guessing.\n\nUpdate `implementation_plan.md`.\n\nIt should cover:\n1. Problem statement\n2. Acceptance criteria (mirror `spec.md` if it exists; `spec.md` owns observable behavior)\n3. Non-goals\n4. Philosophy-driven constraints\n5. Invariants\n6. Selected approach + rationale + runner-up\n7. Vertical slices\n8. Work packages only if they actually help\n9. Test design\n10. Risk register\n11. PR packaging strategy\n12. Philosophy alignment per slice:\n   - [principle] -> [satisfied / tension / violated + 1-line why]\n\nCapture:\n- `implementationPlan`\n- `slices`\n- `testDesign`\n- `estimatedPRCount`\n- `followUpTickets` (initialize if needed)\n- `unresolvedUnknownCount` — count of open issues that would materially affect implementation quality\n- `planConfidenceBand` — Low / Medium / High",
+      "prompt": "Turn the decision into a plan someone else could execute without guessing.\n\nUpdate `implementation_plan.md`.\n\nIt should cover:\n1. Problem statement\n2. Acceptance criteria (mirror `spec.md` if it exists; `spec.md` owns observable behavior)\n3. Non-goals\n4. Philosophy-driven constraints\n5. Invariants\n6. Selected approach + rationale + runner-up\n7. Vertical slices\n8. Work packages only if they actually help\n9. Test design\n10. Risk register\n11. PR packaging strategy\n12. Philosophy alignment per slice:\n   - [principle] -> [satisfied / tension / violated + 1-line why]\n\nCapture:\n- `implementationPlan`\n- `slices`\n- `testDesign`\n- `estimatedPRCount`\n- `followUpTickets` (initialize if needed)\n- `unresolvedUnknownCount` \u2014 count of open issues that would materially affect implementation quality\n- `planConfidenceBand` \u2014 Low / Medium / High",
       "requireConfirmation": false
     },
     {
@@ -205,11 +250,20 @@
       "title": "Phase 3b: Spec (Observable Behavior)",
       "runCondition": {
         "and": [
-          { "var": "taskComplexity", "not_equals": "Small" },
+          {
+            "var": "taskComplexity",
+            "not_equals": "Small"
+          },
           {
             "or": [
-              { "var": "taskComplexity", "equals": "Large" },
-              { "var": "riskLevel", "equals": "High" }
+              {
+                "var": "taskComplexity",
+                "equals": "Large"
+              },
+              {
+                "var": "riskLevel",
+                "equals": "High"
+              }
             ]
           }
         ]
@@ -223,8 +277,14 @@
       "title": "Phase 4: Plan Audit (Review, Fix, Decide)",
       "runCondition": {
         "and": [
-          { "var": "taskComplexity", "not_equals": "Small" },
-          { "var": "rigorMode", "not_equals": "QUICK" }
+          {
+            "var": "taskComplexity",
+            "not_equals": "Small"
+          },
+          {
+            "var": "rigorMode",
+            "not_equals": "QUICK"
+          }
         ]
       },
       "loop": {
@@ -244,17 +304,26 @@
           "promptFragments": [
             {
               "id": "phase-4a-delegation-quick",
-              "when": { "var": "rigorMode", "equals": "QUICK" },
+              "when": {
+                "var": "rigorMode",
+                "equals": "QUICK"
+              },
               "text": "Do this yourself."
             },
             {
               "id": "phase-4a-delegation-standard",
-              "when": { "var": "rigorMode", "equals": "STANDARD" },
+              "when": {
+                "var": "rigorMode",
+                "equals": "STANDARD"
+              },
               "text": "Run `routine-plan-analysis`, `routine-hypothesis-challenge`, and `routine-philosophy-alignment` in parallel before you decide whether the plan is good enough."
             },
             {
               "id": "phase-4a-delegation-thorough",
-              "when": { "var": "rigorMode", "equals": "THOROUGH" },
+              "when": {
+                "var": "rigorMode",
+                "equals": "THOROUGH"
+              },
               "text": "Run `routine-plan-analysis`, `routine-hypothesis-challenge`, `routine-execution-simulation`, and `routine-philosophy-alignment` in parallel before you decide whether the plan is good enough."
             }
           ],
@@ -263,7 +332,7 @@
         {
           "id": "phase-4b-loop-decision",
           "title": "Loop Exit Decision",
-          "prompt": "Decide whether the plan needs another pass.\n\nIf `planFindings` is non-empty, keep going.\nIf it's empty, stop — but say what you checked so the clean pass means something.\nIf you've hit the limit, stop and record what still bothers you.\n\nThen emit the required loop-control artifact in this shape (`decision` must be `continue` or `stop`):\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
+          "prompt": "Decide whether the plan needs another pass.\n\nIf `planFindings` is non-empty, keep going.\nIf it's empty, stop \u2014 but say what you checked so the clean pass means something.\nIf you've hit the limit, stop and record what still bothers you.\n\nThen emit the required loop-control artifact in this shape (`decision` must be `continue` or `stop`):\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
           "requireConfirmation": true,
           "outputContract": {
             "contractRef": "wr.contracts.loop_control"
@@ -314,29 +383,47 @@
           "promptFragments": [
             {
               "id": "phase-6b-delegation-quick",
-              "when": { "var": "rigorMode", "equals": "QUICK" },
+              "when": {
+                "var": "rigorMode",
+                "equals": "QUICK"
+              },
               "text": "Do the verification yourself."
             },
             {
               "id": "phase-6b-delegation-standard",
-              "when": { "var": "rigorMode", "equals": "STANDARD" },
+              "when": {
+                "var": "rigorMode",
+                "equals": "STANDARD"
+              },
               "text": "If any slice-risk trigger fired, run `routine-hypothesis-challenge` and `routine-philosophy-alignment` before you decide this slice is done."
             },
             {
               "id": "phase-6b-delegation-thorough",
-              "when": { "var": "rigorMode", "equals": "THOROUGH" },
+              "when": {
+                "var": "rigorMode",
+                "equals": "THOROUGH"
+              },
               "text": "If any slice-risk trigger fired, also run `routine-execution-simulation` before you decide this slice is done."
             },
             {
               "id": "phase-6b-multi-pr",
-              "when": { "var": "prStrategy", "equals": "MultiPR" },
+              "when": {
+                "var": "prStrategy",
+                "equals": "MultiPR"
+              },
               "text": "If this slice is verified and ready, stop here and package it for review before you move to the next slice."
             }
           ],
           "requireConfirmation": {
             "or": [
-              { "var": "verificationFailed", "equals": true },
-              { "var": "prStrategy", "equals": "MultiPR" }
+              {
+                "var": "verificationFailed",
+                "equals": true
+              },
+              {
+                "var": "prStrategy",
+                "equals": "MultiPR"
+              }
             ]
           }
         }

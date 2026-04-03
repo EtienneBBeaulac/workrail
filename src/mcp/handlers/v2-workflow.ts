@@ -57,6 +57,72 @@ export function shouldShowStaleness(category: string | undefined, devMode: boole
   return category === 'personal' || category === 'rooted_sharing' || category === 'external';
 }
 
+// ---------------------------------------------------------------------------
+// Tag-first discovery
+// ---------------------------------------------------------------------------
+
+interface WorkflowTagsFile {
+  readonly tags: ReadonlyArray<{
+    readonly id: string;
+    readonly displayName: string;
+    readonly when: readonly string[];
+    readonly examples: readonly string[];
+  }>;
+  readonly workflows: Readonly<Record<string, { readonly tags: readonly string[]; readonly hidden?: boolean }>>;
+}
+
+function readWorkflowTags(): WorkflowTagsFile | null {
+  try {
+    const tagsPath = path.resolve(__dirname, '../../../spec/workflow-tags.json');
+    const raw = fs.readFileSync(tagsPath, 'utf-8');
+    return JSON.parse(raw) as WorkflowTagsFile;
+  } catch {
+    return null;
+  }
+}
+
+const WORKFLOW_TAGS: WorkflowTagsFile | null = readWorkflowTags();
+
+/**
+ * Build a tag summary from the tag definitions and the compiled workflow list.
+ * Exported for unit testing.
+ */
+export function buildTagSummary(
+  tagsFile: WorkflowTagsFile,
+  compiledWorkflowIds: readonly string[],
+): Array<{ id: string; displayName: string; count: number; when: string[]; examples: string[] }> {
+  const idSet = new Set(compiledWorkflowIds);
+  return tagsFile.tags.map((tag) => {
+    const count = Object.entries(tagsFile.workflows)
+      .filter(([wid, meta]) => !meta.hidden && idSet.has(wid) && meta.tags.includes(tag.id))
+      .length;
+    return {
+      id: tag.id,
+      displayName: tag.displayName,
+      count,
+      when: [...tag.when],
+      examples: [...tag.examples],
+    };
+  });
+}
+
+/**
+ * Filter compiled workflow IDs to those matching any of the requested tags.
+ */
+function filterByTags(
+  tagsFile: WorkflowTagsFile,
+  compiledWorkflowIds: readonly string[],
+  requestedTags: readonly string[],
+): readonly string[] {
+  const tagSet = new Set(requestedTags);
+  const matching = new Set(
+    Object.entries(tagsFile.workflows)
+      .filter(([, meta]) => !meta.hidden && meta.tags.some((t) => tagSet.has(t)))
+      .map(([wid]) => wid)
+  );
+  return compiledWorkflowIds.filter((id) => matching.has(id));
+}
+
 export function computeWorkflowStaleness(
   stamp: number | undefined,
   currentVersion: number | null,
@@ -162,9 +228,29 @@ export async function handleV2ListWorkflows(
       )
     )
     .andThen((compiled) => {
+      const sortedIds = compiled.map((w) => w.workflowId).sort((a, b) => a.localeCompare(b));
+      const sortedCompiled = [...compiled].sort((a, b) => a.workflowId.localeCompare(b.workflowId));
+
+      // Tag-first discovery: when tags filter is absent, return tagSummary + empty workflows.
+      // When tags filter is present, return full filtered list.
+      const tagFilteredCompiled = (() => {
+        if (!WORKFLOW_TAGS) return sortedCompiled;
+        if (input.tags && input.tags.length > 0) {
+          const filteredIds = new Set(filterByTags(WORKFLOW_TAGS, sortedIds, input.tags));
+          return sortedCompiled.filter((w) => filteredIds.has(w.workflowId));
+        }
+        return [];
+      })();
+
+      const tagSummaryEntry = (() => {
+        if (!WORKFLOW_TAGS || (input.tags && input.tags.length > 0)) return undefined;
+        return buildTagSummary(WORKFLOW_TAGS, sortedIds);
+      })();
+
       if (!input.includeSources) {
         const payload = V2WorkflowListOutputSchema.parse({
-          workflows: compiled.sort((a, b) => a.workflowId.localeCompare(b.workflowId)),
+          workflows: tagFilteredCompiled,
+          ...(tagSummaryEntry ? { tagSummary: tagSummaryEntry } : {}),
           ...(stalePaths.length > 0 ? { staleRoots: [...stalePaths] } : {}),
           ...(warnings ? { warnings } : {}),
         });
@@ -178,7 +264,8 @@ export async function handleV2ListWorkflows(
       // would appear in staleRoots but NOT in sources -- an inconsistency worth knowing about.
       if (!isCompositeWorkflowReader(workflowReader)) {
         const payload = V2WorkflowListOutputSchema.parse({
-          workflows: compiled.sort((a, b) => a.workflowId.localeCompare(b.workflowId)),
+          workflows: tagFilteredCompiled,
+          ...(tagSummaryEntry ? { tagSummary: tagSummaryEntry } : {}),
           ...(stalePaths.length > 0 ? { staleRoots: [...stalePaths] } : {}),
           ...(warnings ? { warnings } : {}),
           sources: [],
@@ -190,7 +277,8 @@ export async function handleV2ListWorkflows(
         (err) => mapUnknownErrorToToolError(err),
       ).map((sources) => {
         const payload = V2WorkflowListOutputSchema.parse({
-          workflows: compiled.sort((a, b) => a.workflowId.localeCompare(b.workflowId)),
+          workflows: tagFilteredCompiled,
+          ...(tagSummaryEntry ? { tagSummary: tagSummaryEntry } : {}),
           ...(stalePaths.length > 0 ? { staleRoots: [...stalePaths] } : {}),
           ...(warnings ? { warnings } : {}),
           sources,
