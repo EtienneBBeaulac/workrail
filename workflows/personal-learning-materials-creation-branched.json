@@ -1,188 +1,188 @@
 {
-    "id": "personal-learning-materials-creation-branched",
-    "name": "Personal Learning Materials Creation Workflow (Branched)",
-    "version": "1.1.0",
-    "description": "A systematic workflow for creating high-quality learning materials with three thoroughness paths: Quick Start (essential materials), Balanced (comprehensive system), and Comprehensive (enterprise-grade). Adapts depth and features based on user time constraints and quality goals.",
-    "clarificationPrompts": [
-        "Do you have a completed learning plan with defined objectives and modules?",
-        "How much time can you dedicate weekly to materials creation?",
-        "What content creation tools do you have access to?",
-        "What material formats work best for your learning style?"
-    ],
-    "preconditions": [
-        "Completed learning plan or course design with clear objectives",
-        "Access to basic content creation tools (word processor, simple design software)",
-        "Time allocated for focused materials development sessions",
-        "Clear understanding of personal learning style preferences"
-    ],
-    "metaGuidance": [
-        "OBJECTIVE ALIGNMENT: Every material must directly support specific learning objectives",
-        "ADAPTIVE DEPTH: Adjust thoroughness based on selected path without compromising quality",
-        "IMMEDIATE USABILITY: Materials should be ready to use without additional setup",
-        "QUALITY OVER QUANTITY: Better fewer high-quality materials than many mediocre ones"
-    ],
-    "steps": [
+  "id": "personal-learning-materials-creation-branched",
+  "name": "Personal Learning Materials Creation Workflow (Branched)",
+  "version": "1.1.0",
+  "description": "Use this to create learning materials for a course or subject. Adapts depth and format to your time budget \u2014 Quick Start, Balanced, or Comprehensive.",
+  "clarificationPrompts": [
+    "Do you have a completed learning plan with defined objectives and modules?",
+    "How much time can you dedicate weekly to materials creation?",
+    "What content creation tools do you have access to?",
+    "What material formats work best for your learning style?"
+  ],
+  "preconditions": [
+    "Completed learning plan or course design with clear objectives",
+    "Access to basic content creation tools (word processor, simple design software)",
+    "Time allocated for focused materials development sessions",
+    "Clear understanding of personal learning style preferences"
+  ],
+  "metaGuidance": [
+    "OBJECTIVE ALIGNMENT: Every material must directly support specific learning objectives",
+    "ADAPTIVE DEPTH: Adjust thoroughness based on selected path without compromising quality",
+    "IMMEDIATE USABILITY: Materials should be ready to use without additional setup",
+    "QUALITY OVER QUANTITY: Better fewer high-quality materials than many mediocre ones"
+  ],
+  "steps": [
+    {
+      "id": "phase-0-select-thoroughness-path",
+      "title": "Phase 0: Select Your Materials Creation Path",
+      "prompt": "Choose your learning materials creation approach based on your time, goals, and quality needs:\n\n\ud83d\udcda **Quick Start Path**\n\u2022 Timeline: 2-3 weeks (5-8 hours total)\n\u2022 Materials: Study guides + basic exercises\n\u2022 Best for: Time-constrained learners, getting started quickly\n\u2022 Outcome: Functional materials for immediate use\n\n\ud83c\udfaf **Balanced Path**\n\u2022 Timeline: 4-6 weeks (12-20 hours total)\n\u2022 Materials: Study guides + exercises + assessments + spaced repetition\n\u2022 Best for: Comprehensive learning support, professional quality\n\u2022 Outcome: Complete learning system with proven effectiveness\n\n\ud83c\udfc6 **Comprehensive Path**\n\u2022 Timeline: 8-12 weeks (25-40 hours total)\n\u2022 Materials: All types + interactive elements + full testing\n\u2022 Best for: Professional educators, enterprise-grade projects\n\u2022 Outcome: Optimized learning ecosystem with maximum effectiveness\n\nWhich path best matches your timeline and quality goals?",
+      "agentRole": "You are a learning materials consultant specializing in helping users choose the right approach for their constraints and goals. Guide users toward the path that best fits their needs. Set the thoroughnessLevel context variable based on their selection.",
+      "guidance": [
+        "Help users make realistic choices based on their actual time availability",
+        "Explain the trade-offs between speed and comprehensiveness",
+        "Encourage users to start with a simpler path if uncertain"
+      ],
+      "requireConfirmation": true
+    },
+    {
+      "id": "analyze-learning-plan-quick",
+      "runCondition": {
+        "var": "thoroughnessLevel",
+        "equals": "Quick"
+      },
+      "title": "Phase 1: Essential Learning Plan Analysis (Quick Start)",
+      "prompt": "Extract the core elements from your learning plan for rapid materials creation:\n\n**STEP 1: Core Objectives**\n\u2022 Identify your 3-5 most important learning objectives\n\u2022 Note success criteria for each objective\n\u2022 Skip complex prerequisite analysis\n\n**STEP 2: Essential Materials Map**\n\u2022 For each objective, identify if you need: study guide, basic exercises, or both\n\u2022 Focus on immediate learning needs, not comprehensive coverage\n\u2022 Note existing resources that can supplement your materials\n\n**STEP 3: Quick Resource Assessment**\n\u2022 List available source materials (books, courses, notes)\n\u2022 Identify 2-3 key resources for each objective\n\u2022 Note time constraints and creation priorities\n\nGoal: Practical roadmap for essential materials creation in minimal time.",
+      "agentRole": "You are an efficient learning analyst focused on rapid materials development. Help users identify core needs quickly without over-analysis. Emphasize practical, immediately actionable insights.",
+      "guidance": [
+        "Keep analysis focused and action-oriented",
+        "Avoid perfectionism - good enough is good enough",
+        "Focus on high-impact materials that provide immediate value"
+      ],
+      "validationCriteria": [
         {
-            "id": "phase-0-select-thoroughness-path",
-            "title": "Phase 0: Select Your Materials Creation Path",
-            "prompt": "Choose your learning materials creation approach based on your time, goals, and quality needs:\n\n\ud83d\udcda **Quick Start Path**\n\u2022 Timeline: 2-3 weeks (5-8 hours total)\n\u2022 Materials: Study guides + basic exercises\n\u2022 Best for: Time-constrained learners, getting started quickly\n\u2022 Outcome: Functional materials for immediate use\n\n\ud83c\udfaf **Balanced Path**\n\u2022 Timeline: 4-6 weeks (12-20 hours total)\n\u2022 Materials: Study guides + exercises + assessments + spaced repetition\n\u2022 Best for: Comprehensive learning support, professional quality\n\u2022 Outcome: Complete learning system with proven effectiveness\n\n\ud83c\udfc6 **Comprehensive Path**\n\u2022 Timeline: 8-12 weeks (25-40 hours total)\n\u2022 Materials: All types + interactive elements + full testing\n\u2022 Best for: Professional educators, enterprise-grade projects\n\u2022 Outcome: Optimized learning ecosystem with maximum effectiveness\n\nWhich path best matches your timeline and quality goals?",
-            "agentRole": "You are a learning materials consultant specializing in helping users choose the right approach for their constraints and goals. Guide users toward the path that best fits their needs. Set the thoroughnessLevel context variable based on their selection.",
-            "guidance": [
-                "Help users make realistic choices based on their actual time availability",
-                "Explain the trade-offs between speed and comprehensiveness",
-                "Encourage users to start with a simpler path if uncertain"
-            ],
-            "requireConfirmation": true
+          "type": "contains",
+          "value": "learning objective",
+          "message": "Must identify core learning objectives"
         },
         {
-            "id": "analyze-learning-plan-quick",
-            "runCondition": {
-                "var": "thoroughnessLevel",
-                "equals": "Quick"
-            },
-            "title": "Phase 1: Essential Learning Plan Analysis (Quick Start)",
-            "prompt": "Extract the core elements from your learning plan for rapid materials creation:\n\n**STEP 1: Core Objectives**\n\u2022 Identify your 3-5 most important learning objectives\n\u2022 Note success criteria for each objective\n\u2022 Skip complex prerequisite analysis\n\n**STEP 2: Essential Materials Map**\n\u2022 For each objective, identify if you need: study guide, basic exercises, or both\n\u2022 Focus on immediate learning needs, not comprehensive coverage\n\u2022 Note existing resources that can supplement your materials\n\n**STEP 3: Quick Resource Assessment**\n\u2022 List available source materials (books, courses, notes)\n\u2022 Identify 2-3 key resources for each objective\n\u2022 Note time constraints and creation priorities\n\nGoal: Practical roadmap for essential materials creation in minimal time.",
-            "agentRole": "You are an efficient learning analyst focused on rapid materials development. Help users identify core needs quickly without over-analysis. Emphasize practical, immediately actionable insights.",
-            "guidance": [
-                "Keep analysis focused and action-oriented",
-                "Avoid perfectionism - good enough is good enough",
-                "Focus on high-impact materials that provide immediate value"
-            ],
-            "validationCriteria": [
-                {
-                    "type": "contains",
-                    "value": "learning objective",
-                    "message": "Must identify core learning objectives"
-                },
-                {
-                    "type": "contains",
-                    "value": "study guide",
-                    "message": "Must specify study guide requirements"
-                },
-                {
-                    "type": "length",
-                    "min": 200,
-                    "max": 800,
-                    "message": "Analysis should be concise but actionable (200-800 characters)"
-                }
-            ],
-            "hasValidation": true
+          "type": "contains",
+          "value": "study guide",
+          "message": "Must specify study guide requirements"
         },
         {
-            "id": "analyze-learning-plan-balanced",
-            "runCondition": {
-                "var": "thoroughnessLevel",
-                "equals": "Balanced"
-            },
-            "title": "Phase 1: Comprehensive Learning Plan Analysis (Balanced)",
-            "prompt": "Analyze your learning plan to guide professional-quality materials creation:\n\n**STEP 1: Objective Architecture**\n\u2022 Extract all learning objectives with success criteria\n\u2022 Identify prerequisite relationships between objectives\n\u2022 Note assessment strategies for each objective\n\u2022 Map objectives to modules and time allocations\n\n**STEP 2: Materials Requirements Matrix**\n\u2022 For each objective, determine needed materials: study guides, exercises, assessments\n\u2022 Identify concepts requiring multiple reinforcement approaches\n\u2022 Note which objectives need spaced repetition support\n\u2022 Flag areas requiring practical application or hands-on practice\n\n**STEP 3: Resource Integration Plan**\n\u2022 Evaluate existing resources for quality and coverage\n\u2022 Identify gaps where custom materials are essential\n\u2022 Plan integration between created materials and external resources\n\u2022 Design quality standards for materials consistency\n\nGoal: Strategic foundation for professional learning materials system.",
-            "agentRole": "You are a professional instructional designer specializing in systematic materials development. Help users create comprehensive yet practical plans that balance quality with efficiency. Focus on proven instructional design principles.",
-            "guidance": [
-                "Apply instructional design best practices systematically",
-                "Balance thoroughness with practical time constraints",
-                "Focus on materials that work together as a cohesive system"
-            ],
-            "validationCriteria": [
-                {
-                    "type": "contains",
-                    "value": "assessment",
-                    "message": "Must include assessment strategy planning"
-                },
-                {
-                    "type": "length",
-                    "min": 400,
-                    "max": 1200,
-                    "message": "Analysis should be comprehensive (400-1200 characters)"
-                }
-            ],
-            "hasValidation": true
-        },
-        {
-            "id": "analyze-learning-plan-comprehensive",
-            "runCondition": {
-                "var": "thoroughnessLevel",
-                "equals": "Comprehensive"
-            },
-            "title": "Phase 1: Expert Learning Plan Analysis (Comprehensive)",
-            "prompt": "Conduct thorough analysis of learning architecture for enterprise-grade materials:\n\n**STEP 1: Learning System Architecture**\n\u2022 Map complete learning objective hierarchy with dependencies\n\u2022 Analyze cognitive load and complexity progression\n\u2022 Identify multiple learning pathways and individual differences\n\u2022 Design assessment strategy aligned with learning taxonomies\n\n**STEP 2: Advanced Materials Strategy**\n\u2022 Determine optimal material types for each learning objective\n\u2022 Plan multi-modal approach for different learning styles\n\u2022 Design integration points for spaced repetition and active recall\n\u2022 Identify opportunities for interactive and adaptive elements\n\n**STEP 3: Quality & Effectiveness Framework**\n\u2022 Establish criteria for materials effectiveness measurement\n\u2022 Plan user testing and feedback integration\n\u2022 Design continuous improvement and iteration protocols\n\u2022 Create scalability and maintenance considerations\n\nGoal: Strategic foundation for optimized, enterprise-grade learning ecosystem.",
-            "agentRole": "You are an expert learning systems architect with deep expertise in advanced instructional design and learning optimization. Guide users in creating sophisticated materials that maximize learning effectiveness through evidence-based approaches.",
-            "guidance": [
-                "Apply advanced learning science principles and research",
-                "Focus on long-term effectiveness and optimization",
-                "Design for scalability and continuous improvement"
-            ],
-            "validationCriteria": [
-                {
-                    "type": "contains",
-                    "value": "effectiveness",
-                    "message": "Must include effectiveness measurement planning"
-                },
-                {
-                    "type": "length",
-                    "min": 600,
-                    "max": 1500,
-                    "message": "Analysis should be sophisticated and comprehensive (600-1500 characters)"
-                }
-            ],
-            "hasValidation": true
-        },
-        {
-            "id": "develop-materials-strategy-quick",
-            "runCondition": {
-                "var": "thoroughnessLevel",
-                "equals": "Quick"
-            },
-            "title": "Phase 2: Efficient Materials Strategy (Quick Start)",
-            "prompt": "Create a focused strategy for essential materials creation:\n\n**STEP 1: Format Selection**\n\u2022 Choose 1-2 primary formats based on your learning style\n\u2022 Prioritize formats you can create quickly (text-based, simple templates)\n\u2022 Plan minimal but consistent formatting approach\n\u2022 Focus on immediate usability over visual polish\n\n**STEP 2: Creation Workflow**\n\u2022 Design simple templates for study guides and exercises\n\u2022 Plan batch creation approach to maximize efficiency\n\u2022 Set realistic quality standards (functional over perfect)\n\u2022 Create basic organization system for easy access\n\n**STEP 3: Quality Framework**\n\u2022 Establish minimum viable product standards\n\u2022 Plan quick self-review process\n\u2022 Design simple feedback collection for future improvement\n\u2022 Focus on completion over perfection\n\nGoal: Practical strategy for rapid materials creation without sacrificing core functionality.",
-            "agentRole": "You are an efficiency expert specializing in rapid content creation. Help users design streamlined approaches that maximize output while maintaining essential quality. Focus on practical, time-saving strategies.",
-            "guidance": [
-                "Emphasize efficiency and speed over perfection",
-                "Choose simple, proven formats that work reliably",
-                "Design for immediate action and quick completion"
-            ],
-            "validationCriteria": [
-                {
-                    "type": "contains",
-                    "value": "template",
-                    "message": "Must include template design for efficiency"
-                },
-                {
-                    "type": "length",
-                    "min": 300,
-                    "max": 900,
-                    "message": "Strategy should be focused and actionable (300-900 characters)"
-                }
-            ],
-            "hasValidation": true
-        },
-        {
-            "id": "develop-materials-strategy-comprehensive",
-            "runCondition": {
-                "var": "thoroughnessLevel",
-                "equals": "Comprehensive"
-            },
-            "title": "Phase 2: Advanced Materials Strategy (Comprehensive)",
-            "prompt": "Develop sophisticated strategy for enterprise-grade materials:\n\n**STEP 1: Multi-Modal Format Strategy**\n\u2022 Design format variety to engage different learning modes\n\u2022 Plan advanced visual elements, interactive components, adaptive features\n\u2022 Create sophisticated template system with consistent branding\n\u2022 Consider accessibility, mobile optimization, and universal design\n\n**STEP 2: Integration Architecture**\n\u2022 Plan seamless connections between all material types\n\u2022 Design advanced spaced repetition integration with learning analytics\n\u2022 Create sophisticated cross-referencing and linking systems\n\u2022 Plan for collaborative features and social learning elements\n\n**STEP 3: Quality Excellence Framework**\n\u2022 Establish enterprise-grade quality standards and measurement\n\u2022 Design comprehensive user testing and feedback integration\n\u2022 Plan continuous optimization based on learning effectiveness data\n\u2022 Create scalable maintenance and update protocols\n\nGoal: Strategic foundation for learning materials that optimize effectiveness through sophisticated design.",
-            "agentRole": "You are a learning systems architect with expertise in enterprise-grade materials design. Help users create sophisticated strategies that maximize learning effectiveness through advanced features and optimization.",
-            "guidance": [
-                "Apply advanced instructional design and learning optimization principles",
-                "Focus on long-term effectiveness and continuous improvement",
-                "Design for scalability and enterprise deployment"
-            ],
-            "validationCriteria": [
-                {
-                    "type": "contains",
-                    "value": "effectiveness",
-                    "message": "Must focus on learning effectiveness measurement"
-                },
-                {
-                    "type": "length",
-                    "min": 600,
-                    "max": 1400,
-                    "message": "Strategy should be sophisticated and comprehensive (600-1400 characters)"
-                }
-            ],
-            "hasValidation": true
+          "type": "length",
+          "min": 200,
+          "max": 800,
+          "message": "Analysis should be concise but actionable (200-800 characters)"
         }
-    ]
+      ],
+      "hasValidation": true
+    },
+    {
+      "id": "analyze-learning-plan-balanced",
+      "runCondition": {
+        "var": "thoroughnessLevel",
+        "equals": "Balanced"
+      },
+      "title": "Phase 1: Comprehensive Learning Plan Analysis (Balanced)",
+      "prompt": "Analyze your learning plan to guide professional-quality materials creation:\n\n**STEP 1: Objective Architecture**\n\u2022 Extract all learning objectives with success criteria\n\u2022 Identify prerequisite relationships between objectives\n\u2022 Note assessment strategies for each objective\n\u2022 Map objectives to modules and time allocations\n\n**STEP 2: Materials Requirements Matrix**\n\u2022 For each objective, determine needed materials: study guides, exercises, assessments\n\u2022 Identify concepts requiring multiple reinforcement approaches\n\u2022 Note which objectives need spaced repetition support\n\u2022 Flag areas requiring practical application or hands-on practice\n\n**STEP 3: Resource Integration Plan**\n\u2022 Evaluate existing resources for quality and coverage\n\u2022 Identify gaps where custom materials are essential\n\u2022 Plan integration between created materials and external resources\n\u2022 Design quality standards for materials consistency\n\nGoal: Strategic foundation for professional learning materials system.",
+      "agentRole": "You are a professional instructional designer specializing in systematic materials development. Help users create comprehensive yet practical plans that balance quality with efficiency. Focus on proven instructional design principles.",
+      "guidance": [
+        "Apply instructional design best practices systematically",
+        "Balance thoroughness with practical time constraints",
+        "Focus on materials that work together as a cohesive system"
+      ],
+      "validationCriteria": [
+        {
+          "type": "contains",
+          "value": "assessment",
+          "message": "Must include assessment strategy planning"
+        },
+        {
+          "type": "length",
+          "min": 400,
+          "max": 1200,
+          "message": "Analysis should be comprehensive (400-1200 characters)"
+        }
+      ],
+      "hasValidation": true
+    },
+    {
+      "id": "analyze-learning-plan-comprehensive",
+      "runCondition": {
+        "var": "thoroughnessLevel",
+        "equals": "Comprehensive"
+      },
+      "title": "Phase 1: Expert Learning Plan Analysis (Comprehensive)",
+      "prompt": "Conduct thorough analysis of learning architecture for enterprise-grade materials:\n\n**STEP 1: Learning System Architecture**\n\u2022 Map complete learning objective hierarchy with dependencies\n\u2022 Analyze cognitive load and complexity progression\n\u2022 Identify multiple learning pathways and individual differences\n\u2022 Design assessment strategy aligned with learning taxonomies\n\n**STEP 2: Advanced Materials Strategy**\n\u2022 Determine optimal material types for each learning objective\n\u2022 Plan multi-modal approach for different learning styles\n\u2022 Design integration points for spaced repetition and active recall\n\u2022 Identify opportunities for interactive and adaptive elements\n\n**STEP 3: Quality & Effectiveness Framework**\n\u2022 Establish criteria for materials effectiveness measurement\n\u2022 Plan user testing and feedback integration\n\u2022 Design continuous improvement and iteration protocols\n\u2022 Create scalability and maintenance considerations\n\nGoal: Strategic foundation for optimized, enterprise-grade learning ecosystem.",
+      "agentRole": "You are an expert learning systems architect with deep expertise in advanced instructional design and learning optimization. Guide users in creating sophisticated materials that maximize learning effectiveness through evidence-based approaches.",
+      "guidance": [
+        "Apply advanced learning science principles and research",
+        "Focus on long-term effectiveness and optimization",
+        "Design for scalability and continuous improvement"
+      ],
+      "validationCriteria": [
+        {
+          "type": "contains",
+          "value": "effectiveness",
+          "message": "Must include effectiveness measurement planning"
+        },
+        {
+          "type": "length",
+          "min": 600,
+          "max": 1500,
+          "message": "Analysis should be sophisticated and comprehensive (600-1500 characters)"
+        }
+      ],
+      "hasValidation": true
+    },
+    {
+      "id": "develop-materials-strategy-quick",
+      "runCondition": {
+        "var": "thoroughnessLevel",
+        "equals": "Quick"
+      },
+      "title": "Phase 2: Efficient Materials Strategy (Quick Start)",
+      "prompt": "Create a focused strategy for essential materials creation:\n\n**STEP 1: Format Selection**\n\u2022 Choose 1-2 primary formats based on your learning style\n\u2022 Prioritize formats you can create quickly (text-based, simple templates)\n\u2022 Plan minimal but consistent formatting approach\n\u2022 Focus on immediate usability over visual polish\n\n**STEP 2: Creation Workflow**\n\u2022 Design simple templates for study guides and exercises\n\u2022 Plan batch creation approach to maximize efficiency\n\u2022 Set realistic quality standards (functional over perfect)\n\u2022 Create basic organization system for easy access\n\n**STEP 3: Quality Framework**\n\u2022 Establish minimum viable product standards\n\u2022 Plan quick self-review process\n\u2022 Design simple feedback collection for future improvement\n\u2022 Focus on completion over perfection\n\nGoal: Practical strategy for rapid materials creation without sacrificing core functionality.",
+      "agentRole": "You are an efficiency expert specializing in rapid content creation. Help users design streamlined approaches that maximize output while maintaining essential quality. Focus on practical, time-saving strategies.",
+      "guidance": [
+        "Emphasize efficiency and speed over perfection",
+        "Choose simple, proven formats that work reliably",
+        "Design for immediate action and quick completion"
+      ],
+      "validationCriteria": [
+        {
+          "type": "contains",
+          "value": "template",
+          "message": "Must include template design for efficiency"
+        },
+        {
+          "type": "length",
+          "min": 300,
+          "max": 900,
+          "message": "Strategy should be focused and actionable (300-900 characters)"
+        }
+      ],
+      "hasValidation": true
+    },
+    {
+      "id": "develop-materials-strategy-comprehensive",
+      "runCondition": {
+        "var": "thoroughnessLevel",
+        "equals": "Comprehensive"
+      },
+      "title": "Phase 2: Advanced Materials Strategy (Comprehensive)",
+      "prompt": "Develop sophisticated strategy for enterprise-grade materials:\n\n**STEP 1: Multi-Modal Format Strategy**\n\u2022 Design format variety to engage different learning modes\n\u2022 Plan advanced visual elements, interactive components, adaptive features\n\u2022 Create sophisticated template system with consistent branding\n\u2022 Consider accessibility, mobile optimization, and universal design\n\n**STEP 2: Integration Architecture**\n\u2022 Plan seamless connections between all material types\n\u2022 Design advanced spaced repetition integration with learning analytics\n\u2022 Create sophisticated cross-referencing and linking systems\n\u2022 Plan for collaborative features and social learning elements\n\n**STEP 3: Quality Excellence Framework**\n\u2022 Establish enterprise-grade quality standards and measurement\n\u2022 Design comprehensive user testing and feedback integration\n\u2022 Plan continuous optimization based on learning effectiveness data\n\u2022 Create scalable maintenance and update protocols\n\nGoal: Strategic foundation for learning materials that optimize effectiveness through sophisticated design.",
+      "agentRole": "You are a learning systems architect with expertise in enterprise-grade materials design. Help users create sophisticated strategies that maximize learning effectiveness through advanced features and optimization.",
+      "guidance": [
+        "Apply advanced instructional design and learning optimization principles",
+        "Focus on long-term effectiveness and continuous improvement",
+        "Design for scalability and enterprise deployment"
+      ],
+      "validationCriteria": [
+        {
+          "type": "contains",
+          "value": "effectiveness",
+          "message": "Must focus on learning effectiveness measurement"
+        },
+        {
+          "type": "length",
+          "min": 600,
+          "max": 1400,
+          "message": "Strategy should be sophisticated and comprehensive (600-1400 characters)"
+        }
+      ],
+      "hasValidation": true
+    }
+  ]
 }

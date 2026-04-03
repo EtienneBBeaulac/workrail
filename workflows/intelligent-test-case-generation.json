@@ -2,7 +2,7 @@
   "id": "intelligent-test-case-generation",
   "name": "Test Case Generation from Tickets",
   "version": "1.0.0",
-  "description": "Systematically extracts integration and end-to-end test cases from ticket requirements. Reads the ticket carefully, identifies boundary conditions and edge cases, traces affected code paths, and produces developer-readable test case descriptions ready for implementation.",
+  "description": "Use this to generate integration and end-to-end test cases from ticket requirements. Reads the ticket, traces affected code paths, identifies boundary conditions, and produces developer-readable test case descriptions.",
   "preconditions": [
     "User provides a ticket (title, description, acceptance criteria) in any standard format.",
     "Agent has read access to the codebase for tracing affected paths and finding existing test patterns.",
@@ -31,7 +31,7 @@
         "var": "ambiguities",
         "not_equals": []
       },
-      "prompt": "Before generating test scenarios, resolve the ambiguities you found.\n\nFor each ambiguity in `ambiguities`:\n1. State what is unclear and why it matters for test design\n2. Propose the most reasonable interpretation based on context\n3. Ask me to confirm, adjust, or provide the missing information\n\nKeep questions targeted. If the ticket, codebase, or docs can answer the question, answer it yourself first.\n\nIf the user's response significantly changes the scope or adds new acceptance criteria, revisit Phase 1 scenario identification before continuing — do not carry stale scenarios forward.\n\nCapture:\n- `resolvedAmbiguities` -- list of ambiguities with chosen interpretation\n- `openAmbiguities` -- ambiguities the user still needs to resolve (initialize as empty)",
+      "prompt": "Before generating test scenarios, resolve the ambiguities you found.\n\nFor each ambiguity in `ambiguities`:\n1. State what is unclear and why it matters for test design\n2. Propose the most reasonable interpretation based on context\n3. Ask me to confirm, adjust, or provide the missing information\n\nKeep questions targeted. If the ticket, codebase, or docs can answer the question, answer it yourself first.\n\nIf the user's response significantly changes the scope or adds new acceptance criteria, revisit Phase 1 scenario identification before continuing \u2014 do not carry stale scenarios forward.\n\nCapture:\n- `resolvedAmbiguities` -- list of ambiguities with chosen interpretation\n- `openAmbiguities` -- ambiguities the user still needs to resolve (initialize as empty)",
       "requireConfirmation": true
     },
     {

@@ -59,6 +59,7 @@ describe('v2 tool schema field snapshots (anti-drift)', () => {
   it('list_workflows: exact field set', () => {
     expect(extractFieldNames(V2ListWorkflowsInput)).toEqual([
       'includeSources',
+      'tags',
       'workspacePath',
     ]);
   });

@@ -358,6 +358,48 @@ function printStalenessAdvisory(repoRoot: string): void {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Tag Coverage Check
+// ─────────────────────────────────────────────────────────────────────────────
+
+function checkUntaggedWorkflows(repoRoot: string): string[] {
+  const tagsPath = path.join(repoRoot, 'spec', 'workflow-tags.json');
+  if (!fs.existsSync(tagsPath)) return []; // No tags file yet — skip
+
+  let taggedIds: Set<string>;
+  let hiddenIds: Set<string>;
+  try {
+    const data: unknown = JSON.parse(fs.readFileSync(tagsPath, 'utf-8'));
+    if (typeof data !== 'object' || data === null || !('workflows' in data)) return [];
+    const wfMap = (data as Record<string, unknown>)['workflows'] as Record<string, { tags: string[]; hidden?: boolean }>;
+    taggedIds = new Set(Object.keys(wfMap));
+    hiddenIds = new Set(Object.entries(wfMap).filter(([, v]) => v.hidden).map(([id]) => id));
+  } catch {
+    return [];
+  }
+
+  const workflowsDir = path.join(repoRoot, 'workflows');
+  if (!fs.existsSync(workflowsDir)) return [];
+
+  const untagged: string[] = [];
+  const seenIds = new Set<string>();
+  for (const file of fs.readdirSync(workflowsDir)) {
+    if (!file.endsWith('.json')) continue;
+    try {
+      const wf: unknown = JSON.parse(fs.readFileSync(path.join(workflowsDir, file), 'utf-8'));
+      if (typeof wf !== 'object' || wf === null || !('id' in wf)) continue;
+      const id = String((wf as Record<string, unknown>)['id'] ?? file);
+      if (seenIds.has(id)) continue;
+      seenIds.add(id);
+      if (id.startsWith('test-')) continue; // Test fixtures exempt
+      if (!taggedIds.has(id) && !hiddenIds.has(id)) {
+        untagged.push(id);
+      }
+    } catch { /* skip */ }
+  }
+  return untagged;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Main
 // ─────────────────────────────────────────────────────────────────────────────
 
