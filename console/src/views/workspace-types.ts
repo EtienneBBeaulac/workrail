@@ -12,11 +12,17 @@ import type {
 export type Scope = 'active' | 'all';
 
 /**
- * 'active'  -- has a running, stalled, or blocked workflow (featured card)
- * 'recent'  -- clean or uncommitted-only, touched recently (compact row)
+ * Whether a WorkspaceItem is shown in the current scope.
+ *
+ * 'visible' -- shown in the branch list within its repo section
  * 'hidden'  -- clean, done, no activity within 30 days (omitted in Active scope)
+ *
+ * This replaces the old SectionKind ('active' | 'recent' | 'hidden'). In the
+ * repo-sections model, within-section priority is expressed by sortPriority(),
+ * not by separate section headers -- so the only meaningful distinction is
+ * visible vs hidden.
  */
-export type SectionKind = 'active' | 'recent' | 'hidden';
+export type ItemVisibility = 'visible' | 'hidden';
 
 /**
  * One item per branch per repo -- the natural unit of work identity.
@@ -80,94 +86,82 @@ export function selectPrimarySession(
 }
 
 /**
- * Determines which section a WorkspaceItem belongs to.
+ * Determines whether a WorkspaceItem is visible in the current scope.
  *
- * Active  -- has in_progress, dormant, or blocked session
- * Recent  -- uncommitted/unpushed changes OR (clean+done, activity within 30d)
- * Hidden  -- clean, done, no activity within 30 days (omitted in Active scope)
+ * Items are hidden only when they are clean (no uncommitted/unpushed changes),
+ * have no active session, and have had no activity in the last 30 days while
+ * the scope is 'active'. Everything else is visible.
  */
-export function sectionFor(
+export function itemVisibility(
   item: WorkspaceItem,
   scope: Scope,
   nowMs: number,
-): SectionKind {
+): ItemVisibility {
   const status = item.primarySession?.status;
-  if (
-    status === 'in_progress' ||
-    status === 'dormant' ||
-    status === 'blocked'
-  ) {
-    return 'active';
+
+  // Active sessions are always visible regardless of age or cleanliness
+  if (status === 'in_progress' || status === 'dormant' || status === 'blocked') {
+    return 'visible';
   }
 
+  // Branches with uncommitted or unpushed work are always visible
   const hasUncommitted = (item.worktree?.changedCount ?? 0) > 0;
   const hasUnpushed = (item.worktree?.aheadCount ?? 0) > 0;
-  if (hasUncommitted || hasUnpushed) {
-    return 'recent';
-  }
+  if (hasUncommitted || hasUnpushed) return 'visible';
 
-  const isRecent = nowMs - item.activityMs < THIRTY_DAYS_MS;
-  if (isRecent) {
-    return 'recent';
-  }
+  // Within-30-day activity is always visible
+  if (nowMs - item.activityMs < THIRTY_DAYS_MS) return 'visible';
 
-  // Clean, done, no activity in 30 days
-  if (scope === 'all') {
-    // In All scope, include everything -- no time cutoff
-    return 'recent';
-  }
-  return 'hidden';
+  // Old, clean, done -- only hidden in 'active' scope
+  return scope === 'all' ? 'visible' : 'hidden';
 }
 
-/** Numeric sort key for a section: active first, recent second. */
-function sectionOrder(section: SectionKind): number {
-  switch (section) {
-    case 'active': return 0;
-    case 'recent': return 1;
-    case 'hidden': return 2;
-  }
-}
-
-/** Numeric sort key for an item within a section. */
-function itemSortKey(item: WorkspaceItem): number {
+/**
+ * Sort priority for a WorkspaceItem within a repo section.
+ *
+ * Lower number = higher in the list.
+ *   0: in_progress  (actively running)
+ *   1: blocked      (needs user intervention)
+ *   2: dormant      (stalled, incomplete -- distinct from done)
+ *   3: uncommitted or unpushed, no active session
+ *   4: everything else (complete, complete_with_gaps, no-session recently active)
+ *
+ * Note: complete_with_gaps is intentionally at priority 4 (same as complete).
+ * The gaps badge is surfaced inline on the row -- the sort position does not
+ * need to distinguish them.
+ */
+function sortPriority(item: WorkspaceItem): 0 | 1 | 2 | 3 | 4 {
   const status = item.primarySession?.status;
   switch (status) {
-    case 'in_progress':
-    case 'dormant':
-      return 0;
-    case 'blocked':
-      return 1;
+    case 'in_progress': return 0;
+    case 'blocked': return 1;
+    case 'dormant': return 2;
     default: {
       const hasChanges =
         (item.worktree?.changedCount ?? 0) > 0 ||
         (item.worktree?.aheadCount ?? 0) > 0;
-      return hasChanges ? 2 : 3;
+      return hasChanges ? 3 : 4;
     }
   }
 }
 
 /**
- * Sorts WorkspaceItems by section (active first) then by status group then by
- * activityMs descending (most recently touched first within group).
+ * Sorts and filters WorkspaceItems for display within a single repo section.
  *
- * Returns a new array -- does not mutate the input.
+ * - Filters out items hidden by the current scope (clean+done, >30 days, Active scope)
+ * - Sorts by sortPriority then activityMs descending within each priority tier
+ * - Returns a new array -- does not mutate the input
  */
-export function sortWorkspaceItems(
+export function sortItemsForRepo(
   items: readonly WorkspaceItem[],
   scope: Scope,
   nowMs: number,
 ): WorkspaceItem[] {
   return [...items]
-    .filter((item) => sectionFor(item, scope, nowMs) !== 'hidden')
+    .filter((item) => itemVisibility(item, scope, nowMs) === 'visible')
     .sort((a, b) => {
-      const sectionDiff =
-        sectionOrder(sectionFor(a, scope, nowMs)) -
-        sectionOrder(sectionFor(b, scope, nowMs));
-      if (sectionDiff !== 0) return sectionDiff;
-
-      const keyDiff = itemSortKey(a) - itemSortKey(b);
-      if (keyDiff !== 0) return keyDiff;
-
+      const priorityDiff = sortPriority(a) - sortPriority(b);
+      if (priorityDiff !== 0) return priorityDiff;
       return b.activityMs - a.activityMs;
     });
 }
