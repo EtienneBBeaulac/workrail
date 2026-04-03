@@ -149,6 +149,14 @@ export const V2WorkflowSourceCatalogEntrySchema = z.object({
   }).optional(),
 });
 
+export const TagSummaryItemSchema = z.object({
+  id: z.string().min(1).describe('Tag identifier, e.g. "coding" or "review_audit".'),
+  displayName: z.string().min(1).describe('Human-readable tag name.'),
+  count: z.number().int().min(0).describe('Number of workflows with this tag.'),
+  when: z.array(z.string()).describe('Intent phrases describing when to use workflows in this tag.'),
+  examples: z.array(z.string()).describe('Representative workflow IDs for this tag.'),
+});
+
 export const V2WorkflowListOutputSchema = z.object({
   workflows: z.array(V2WorkflowListItemSchema),
   staleRoots: z.array(z.string()).optional().describe(

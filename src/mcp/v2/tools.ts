@@ -24,6 +24,9 @@ export const V2ListWorkflowsInput = z.object({
   includeSources: z.boolean().optional().describe(
     'When true, includes a source catalog in the response showing where workflows come from (built-in, project-scoped, rooted-sharing, external), with effective and shadowed workflow counts per source. Omit or set false for the default workflow-list-only response.'
   ),
+  tags: z.array(z.string()).optional().describe(
+    'Filter by one or more domain tags (e.g. ["coding"], ["review_audit", "investigation"]). When present, returns the full workflow list for workflows matching any of the specified tags. When absent, returns a compact tagSummary instead of the full list — use this first to discover which tags exist, then call again with a specific tag. Valid tags: coding, review_audit, investigation, design, documentation, tickets, learning, routines, authoring.'
+  ),
 });
 export type V2ListWorkflowsInput = z.infer<typeof V2ListWorkflowsInput>;
 

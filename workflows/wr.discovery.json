@@ -1,8 +1,8 @@
 {
   "id": "wr.discovery",
-  "name": "Discovery Workflow (Bundled • Exploration + Design Synthesis)",
+  "name": "Discovery Workflow (Bundled \u2022 Exploration + Design Synthesis)",
   "version": "3.1.0",
-  "description": "Use this when you want the agent to help you think something through end to end. It should combine the old exploration and design-thinking behaviors into one adaptive notes-first flow, moving between landscape exploration, problem framing, candidate generation, challenge, and uncertainty-resolution through landscape-first, full-spectrum, and design-first paths.",
+  "description": "Use this to explore and think through a problem end-to-end. Moves between landscape exploration, problem framing, candidate generation, adversarial challenge, and uncertainty resolution.",
   "recommendedPreferences": {
     "recommendedAutonomy": "guided",
     "recommendedRiskPolicy": "conservative"
@@ -53,7 +53,10 @@
         "goal": "Figure out what I actually need help with, then recommend the best path through this workflow.",
         "constraints": [
           [
-            { "kind": "ref", "refId": "wr.refs.notes_first_durability" }
+            {
+              "kind": "ref",
+              "refId": "wr.refs.notes_first_durability"
+            }
           ],
           "Use tools to answer your own questions whenever possible.",
           "Recommend a path with rationale instead of making me pick cold.",
@@ -63,7 +66,8 @@
           "Capture: `problemStatement`, `desiredOutcome`, `coreConstraints`, `antiGoals`, `primaryUncertainty`, `knownApproaches`, `importantStakeholders`, `rigorMode`, `automationLevel`, `pathRecommendation`, `pathRationale`, `designDocPath`.",
           "Choose `landscape_first` when my dominant need is understanding the current landscape or comparing options. Choose `full_spectrum` when both landscape grounding and reframing are needed. Choose `design_first` when the dominant risk is solving the wrong problem or shaping the wrong concept.",
           "Create or update `designDocPath` with sections for Context / Ask, Path Recommendation, Constraints / Anti-goals, Landscape Packet, Problem Frame Packet, Candidate Directions, Challenge Notes, Resolution Notes, Decision Log, and Final Summary.",
-          "Set these keys in the next `continue_workflow` call's `context` object: `problemStatement`, `desiredOutcome`, `coreConstraints`, `antiGoals`, `primaryUncertainty`, `knownApproaches`, `importantStakeholders`, `rigorMode`, `automationLevel`, `pathRecommendation`, `pathRationale`, `designDocPath`."
+          "Set these keys in the next `continue_workflow` call's `context` object: `problemStatement`, `desiredOutcome`, `coreConstraints`, `antiGoals`, `primaryUncertainty`, `knownApproaches`, `importantStakeholders`, `rigorMode`, `automationLevel`, `pathRecommendation`, `pathRationale`, `designDocPath`.",
+          "Also set `goal` in the context object: one sentence describing what you are trying to accomplish. This populates the session title in the Workspace console immediately."
         ],
         "verify": [
           "The chosen path is justified against the other two, not just named.",
@@ -72,8 +76,14 @@
       },
       "requireConfirmation": {
         "or": [
-          { "var": "pathRecommendation", "equals": "full_spectrum" },
-          { "var": "rigorMode", "equals": "THOROUGH" }
+          {
+            "var": "pathRecommendation",
+            "equals": "full_spectrum"
+          },
+          {
+            "var": "rigorMode",
+            "equals": "THOROUGH"
+          }
         ]
       }
     },
@@ -84,7 +94,10 @@
         "goal": "Figure out what capabilities are actually available and set up the human artifact strategy I need.",
         "constraints": [
           [
-            { "kind": "ref", "refId": "wr.refs.notes_first_durability" }
+            {
+              "kind": "ref",
+              "refId": "wr.refs.notes_first_durability"
+            }
           ],
           "Probe capability availability through real work or explicit checks, then record the result structurally.",
           "If web browsing or delegation is unavailable, keep going with the best fallback and record the gap."
@@ -112,7 +125,10 @@
         "goal": "Build the landscape understanding needed for a landscape-first pass.",
         "constraints": [
           [
-            { "kind": "ref", "refId": "wr.refs.parallelize_cognition_serialize_synthesis" }
+            {
+              "kind": "ref",
+              "refId": "wr.refs.parallelize_cognition_serialize_synthesis"
+            }
           ],
           "If web browsing is available, use it for current-state grounding; otherwise fall back explicitly and mark the evidence gap.",
           "Surface the main existing approaches, hard constraints, notable contradictions, and strongest evidence gaps before moving on."
@@ -144,7 +160,10 @@
         "goal": "Build strong but bounded landscape understanding for a full-spectrum pass.",
         "constraints": [
           [
-            { "kind": "ref", "refId": "wr.refs.parallelize_cognition_serialize_synthesis" }
+            {
+              "kind": "ref",
+              "refId": "wr.refs.parallelize_cognition_serialize_synthesis"
+            }
           ],
           "If web browsing is available, use it for current-state grounding; otherwise fall back explicitly and mark the evidence gap.",
           "Go broad enough to avoid reinventing the obvious, but do not let research sprawl crowd out framing and synthesis."
@@ -176,7 +195,10 @@
         "goal": "Do the lightest landscape pass that still keeps the design-first work grounded.",
         "constraints": [
           [
-            { "kind": "ref", "refId": "wr.refs.parallelize_cognition_serialize_synthesis" }
+            {
+              "kind": "ref",
+              "refId": "wr.refs.parallelize_cognition_serialize_synthesis"
+            }
           ],
           "Do not skip the basics: surface the main existing approaches, hard constraints, and obvious contradictions.",
           "Keep this lean unless the evidence clearly says the landscape is more important than the framing."
@@ -208,7 +230,10 @@
         "goal": "Keep the framing lean, but do not skip the people and tensions that could change the recommendation.",
         "constraints": [
           [
-            { "kind": "ref", "refId": "wr.refs.parallelize_cognition_serialize_synthesis" }
+            {
+              "kind": "ref",
+              "refId": "wr.refs.parallelize_cognition_serialize_synthesis"
+            }
           ],
           "Do not silently promote assumptions into facts.",
           "Even in a landscape-first pass, capture the core tension, primary stakeholders, success criteria, and what could make the framing wrong."
@@ -240,7 +265,10 @@
         "goal": "Build a strong problem frame that can stand alongside the landscape work.",
         "constraints": [
           [
-            { "kind": "ref", "refId": "wr.refs.parallelize_cognition_serialize_synthesis" }
+            {
+              "kind": "ref",
+              "refId": "wr.refs.parallelize_cognition_serialize_synthesis"
+            }
           ],
           "Do not silently promote assumptions into facts.",
           "Go strong on framing here without bloating the work into ceremony."
@@ -272,7 +300,10 @@
         "goal": "Go deep on people, tensions, and framing risk before you move into solution shaping.",
         "constraints": [
           [
-            { "kind": "ref", "refId": "wr.refs.parallelize_cognition_serialize_synthesis" }
+            {
+              "kind": "ref",
+              "refId": "wr.refs.parallelize_cognition_serialize_synthesis"
+            }
           ],
           "Do not silently promote assumptions into facts.",
           "This is a deep framing pass. Surface the strongest tensions, success criteria, and what could make the framing wrong."
@@ -321,8 +352,14 @@
       },
       "requireConfirmation": {
         "or": [
-          { "var": "pathChangedAfterContext", "equals": true },
-          { "var": "rigorMode", "equals": "THOROUGH" }
+          {
+            "var": "pathChangedAfterContext",
+            "equals": true
+          },
+          {
+            "var": "rigorMode",
+            "equals": "THOROUGH"
+          }
         ]
       }
     },
@@ -333,7 +370,10 @@
         "goal": "Combine the landscape packet and problem frame into a coherent decision shape before you generate candidates.",
         "constraints": [
           [
-            { "kind": "ref", "refId": "wr.refs.synthesis_under_disagreement" }
+            {
+              "kind": "ref",
+              "refId": "wr.refs.synthesis_under_disagreement"
+            }
           ],
           "If the landscape and framing stories disagree, treat that disagreement as first-class work.",
           "State what kind of uncertainty remains: recommendation uncertainty, research uncertainty, or prototype-learning uncertainty."
@@ -361,9 +401,18 @@
           "id": "p2-challenge-deleg",
           "when": {
             "and": [
-              { "var": "needsChallenge", "equals": true },
-              { "var": "delegationAvailable", "equals": true },
-              { "var": "rigorMode", "not_equals": "QUICK" }
+              {
+                "var": "needsChallenge",
+                "equals": true
+              },
+              {
+                "var": "delegationAvailable",
+                "equals": true
+              },
+              {
+                "var": "rigorMode",
+                "not_equals": "QUICK"
+              }
             ]
           },
           "text": "Also decide whether a delegated challenge is worth the extra step. If yes, spawn ONE WorkRail Executor running `routine-hypothesis-challenge` against the current framing, then synthesize it yourself. If not, record why your own challenge is enough."
@@ -479,7 +528,10 @@
         "goal": "Read `design-candidates.md`, challenge the leading option, and make the final selection for me.",
         "constraints": [
           [
-            { "kind": "ref", "refId": "wr.refs.adversarial_challenge_rules" }
+            {
+              "kind": "ref",
+              "refId": "wr.refs.adversarial_challenge_rules"
+            }
           ],
           "You own the selection. Candidate generation output is evidence, not the final decision.",
           "If the leading option no longer looks best after challenge, switch deliberately rather than defending sunk cost."
@@ -522,8 +574,14 @@
       ],
       "requireConfirmation": {
         "or": [
-          { "var": "automationLevel", "equals": "Low" },
-          { "var": "pathRecommendation", "equals": "full_spectrum" }
+          {
+            "var": "automationLevel",
+            "equals": "Low"
+          },
+          {
+            "var": "pathRecommendation",
+            "equals": "full_spectrum"
+          }
         ]
       }
     },
@@ -533,9 +591,18 @@
       "title": "Phase 4: Direction Review Loop",
       "runCondition": {
         "or": [
-          { "var": "rigorMode", "not_equals": "QUICK" },
-          { "var": "pathRecommendation", "equals": "full_spectrum" },
-          { "var": "pathRecommendation", "equals": "design_first" }
+          {
+            "var": "rigorMode",
+            "not_equals": "QUICK"
+          },
+          {
+            "var": "pathRecommendation",
+            "equals": "full_spectrum"
+          },
+          {
+            "var": "pathRecommendation",
+            "equals": "design_first"
+          }
         ]
       },
       "loop": {
@@ -615,7 +682,10 @@
         "goal": "Decide whether you should end with a recommendation for me, a targeted research follow-up, or a prototype/test artifact.",
         "constraints": [
           [
-            { "kind": "ref", "refId": "wr.refs.adversarial_challenge_rules" }
+            {
+              "kind": "ref",
+              "refId": "wr.refs.adversarial_challenge_rules"
+            }
           ],
           "Do the least work that can still resolve the most important remaining uncertainty. If a lighter pass would leave the main risk unresolved, do not choose it.",
           "A prototype exists to falsify a direction, not to decorate it."
@@ -633,8 +703,14 @@
       },
       "requireConfirmation": {
         "or": [
-          { "var": "resolutionMode", "equals": "prototype_test" },
-          { "var": "remainingGapCount", "gt": 0 }
+          {
+            "var": "resolutionMode",
+            "equals": "prototype_test"
+          },
+          {
+            "var": "remainingGapCount",
+            "gt": 0
+          }
         ]
       }
     },
@@ -809,7 +885,10 @@
         "goal": "Validate that you are ending with the right level of confidence and the right caveats for me.",
         "constraints": [
           [
-            { "kind": "ref", "refId": "wr.refs.synthesis_under_disagreement" }
+            {
+              "kind": "ref",
+              "refId": "wr.refs.synthesis_under_disagreement"
+            }
           ],
           "Do not claim certainty you do not have.",
           "If important contradictions or gaps remain, downgrade confidence and say so explicitly."
@@ -859,7 +938,10 @@
         "goal": "Finalize the design doc and deliver a clear recommendation, artifact, or next-step direction to me.",
         "constraints": [
           [
-            { "kind": "ref", "refId": "wr.refs.notes_first_durability" }
+            {
+              "kind": "ref",
+              "refId": "wr.refs.notes_first_durability"
+            }
           ],
           "Keep the final chat output concise.",
           "Do not drift into production implementation planning beyond high-level next actions."

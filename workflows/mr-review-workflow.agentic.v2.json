@@ -1,14 +1,30 @@
 {
   "id": "mr-review-workflow-agentic",
-  "name": "MR Review Workflow (Lean v2 • Notes-First • Evidence-Driven Reviewer Families)",
-  "version": "2.2.0",
-  "description": "Lean v2 MR review workflow. Merges intake, missing-input gating, context gathering, and re-triage into one structured front phase, then drives review through a shared fact packet, parallel reviewer families, contradiction-driven synthesis, and evidence-first final validation.",
+  "name": "MR Review Workflow (Lean v2 \u2022 Notes-First \u2022 Evidence-Driven Reviewer Families)",
+  "version": "2.3.0",
+  "description": "Use this to review a merge request before merging. Gathers context, runs parallel reviewer families (security, correctness, style, tests), synthesizes contradictions, and produces evidence-backed findings.",
   "recommendedPreferences": {
     "recommendedAutonomy": "guided",
     "recommendedRiskPolicy": "conservative"
   },
   "features": [
     "wr.features.subagent_guidance"
+  ],
+  "assessments": [
+    {
+      "id": "review_readiness_gate",
+      "purpose": "Assess whether the review recommendation is ready for final handoff.",
+      "dimensions": [
+        {
+          "id": "confidence",
+          "purpose": "How confident the agent is that the recommendation is supported by sufficient evidence and coherent findings.",
+          "levels": [
+            "low",
+            "high"
+          ]
+        }
+      ]
+    }
   ],
   "preconditions": [
     "User provides an MR/PR objective, diff, patch, branch, or equivalent review target.",
@@ -34,11 +50,17 @@
     {
       "id": "phase-0-understand-and-classify",
       "title": "Phase 0: Locate, Bound, Enrich & Classify",
-      "prompt": "Build the review foundation in one pass.\n\nStep 1 — Early exit / minimum inputs:\nBefore exploring, verify that the review target is real and inspectable. If the diff, changed files, or equivalent review material are completely absent and cannot be inferred with tools, ask for the minimum missing artifact and stop. Do NOT ask questions you can resolve with tools.\n\nStep 2 — Locate and bound the review target:\nAttempt to determine the strongest available review target and boundary.\n\nAttempt to establish:\n- `reviewTargetKind` from the strongest available source such as PR/MR, branch, patch, diff, or local working tree changes\n- `reviewTargetSource` describing where the target came from\n- likely PR/MR identity when available (`prUrl`, `prNumber`)\n- likely base / ancestor reference (`baseCandidate`, `mergeBaseRef`) when available\n- whether the branch may include inherited or out-of-scope changes\n- `boundaryConfidence`: High / Medium / Low\n\nDo not over-prescribe your own investigation path. Use the strongest available evidence and record uncertainty honestly.\n\nStep 3 — Enrich with context:\nRecover the strongest available intent and policy context from whatever sources are actually available.\n\nAttempt to recover:\n- MR title and purpose\n- ticket / issue / acceptance context (`ticketRefs`, `ticketContext`)\n- supporting docs / specs / rollout context (`supportingDocsFound`)\n- repo or user policy/convention context when it is likely to affect review judgment (`policySourcesFound`)\n- `contextConfidence`: High / Medium / Low\n\nStep 4 — Review-surface hygiene:\nClassify the visible change into a minimal review surface.\n\nSet:\n- `coreReviewSurface`\n- `likelyNoiseOrMechanicalChurn`\n- `likelyInheritedOrOutOfScopeChanges`\n- `reviewSurfaceSummary`\n- `reviewScopeWarnings`\n\nThe goal is not a giant ledger. The goal is to avoid treating every visible changed file as equally worthy of deep review by default.\n\nStep 5 — Classify the review:\nAfter exploration, classify the work.\n\nSet:\n- `reviewMode`: QUICK / STANDARD / THOROUGH\n- `riskLevel`: Low / Medium / High\n- `shapeProfile`: choose the best primary label from `isolated_change`, `crosscutting_change`, `mechanically_noisy_change`, or `ambiguous_boundary`\n- `changeTypeProfile`: choose the best primary label from `general_code_change`, `api_contract_change`, `data_model_or_migration`, `security_sensitive`, or `test_only`\n- `maxParallelism`: 0 / 3 / 5\n- `criticalSurfaceTouched`: true / false\n- `needsSimulation`: true / false\n- `needsBoundaryFollowup`: true / false\n- `needsContextFollowup`: true / false\n- `needsReviewerBundle`: true / false\n\nDecision guidance:\n- QUICK: very small, isolated, low-risk changes with little ambiguity\n- STANDARD: typical feature or bug-fix reviews with moderate ambiguity or moderate risk\n- THOROUGH: critical surfaces, architectural novelty, high risk, broad change sets, or strong need for independent reviewer perspectives\n\nMinimal routing guidance:\n- if `boundaryConfidence = Low`, bias toward boundary/context follow-up before strong recommendation confidence\n- if `changeTypeProfile = api_contract_change`, bias toward contract/consumer/backward-compatibility scrutiny\n- if `changeTypeProfile = data_model_or_migration`, bias toward rollout / compatibility / simulation scrutiny\n- if `changeTypeProfile = security_sensitive`, bias toward adversarial/runtime-risk scrutiny and lower tolerance for weak evidence\n- if `changeTypeProfile = test_only`, bias toward stronger false-positive suppression\n- if `shapeProfile = mechanically_noisy_change`, bias toward stronger noise filtering and lower appetite for style-only findings\n\nStep 6 — Optional deeper context:\nIf `reviewMode` is STANDARD or THOROUGH and context remains incomplete, and delegation is available, spawn TWO WorkRail Executors SIMULTANEOUSLY running `routine-context-gathering` with focus=COMPLETENESS and focus=DEPTH. Synthesize both outputs before finishing this step.\n\nStep 7 — Human-facing artifact:\nChoose `reviewDocPath` only if a live artifact will materially improve human readability. Default suggestion: `mr-review.md` at the project root. This artifact is optional and never canonical workflow state.\n\nFallback behavior:\n- if PR/MR is not found but a branch/diff is inspectable, continue with downgraded context confidence and disclose missing PR context later\n- if the branch is inspectable but merge-base / ancestor remains ambiguous, continue with downgraded boundary confidence, set `needsBoundaryFollowup = true`, and disclose the uncertainty later\n- if ticket or supporting docs are missing, continue with downgraded context confidence and avoid overclaiming intent-sensitive findings\n- if only a patch/diff is available, continue if it is inspectable, but keep lower confidence on intent/boundary-dependent conclusions\n- if the review target itself is missing, ask only for that missing artifact and stop\n\nSet these keys in the next `continue_workflow` call's `context` object:\n- `reviewTargetKind`\n- `reviewTargetSource`\n- `prUrl`\n- `prNumber`\n- `baseCandidate`\n- `mergeBaseRef`\n- `boundaryConfidence`\n- `contextConfidence`\n- `mrTitle`\n- `mrPurpose`\n- `ticketRefs`\n- `ticketContext`\n- `supportingDocsFound`\n- `policySourcesFound`\n- `accessibleContextSources`\n- `missingContextSources`\n- `focusAreas`\n- `changedFileCount`\n- `criticalSurfaceTouched`\n- `reviewMode`\n- `riskLevel`\n- `shapeProfile`\n- `changeTypeProfile`\n- `maxParallelism`\n- `reviewDocPath`\n- `contextSummary`\n- `candidateFiles`\n- `moduleRoots`\n- `contextUnknownCount`\n- `coverageGapCount`\n- `authorIntentUnclear`\n- `needsSimulation`\n- `needsBoundaryFollowup`\n- `needsContextFollowup`\n- `needsReviewerBundle`\n- `coreReviewSurface`\n- `likelyNoiseOrMechanicalChurn`\n- `likelyInheritedOrOutOfScopeChanges`\n- `reviewSurfaceSummary`\n- `reviewScopeWarnings`\n- `openQuestions`\n\nRules:\n- answer your own questions with tools whenever possible\n- only keep true human-decision questions in `openQuestions`\n- keep `openQuestions` bounded to the minimum necessary\n- classify AFTER exploring, not before\n- before leaving this phase, either establish the likely review boundary or explicitly record why you could not",
+      "prompt": "Build the review foundation in one pass.\n\nStep 1 \u2014 Early exit / minimum inputs:\nBefore exploring, verify that the review target is real and inspectable. If the diff, changed files, or equivalent review material are completely absent and cannot be inferred with tools, ask for the minimum missing artifact and stop. Do NOT ask questions you can resolve with tools.\n\nStep 2 \u2014 Locate and bound the review target:\nAttempt to determine the strongest available review target and boundary.\n\nAttempt to establish:\n- `reviewTargetKind` from the strongest available source such as PR/MR, branch, patch, diff, or local working tree changes\n- `reviewTargetSource` describing where the target came from\n- likely PR/MR identity when available (`prUrl`, `prNumber`)\n- likely base / ancestor reference (`baseCandidate`, `mergeBaseRef`) when available\n- whether the branch may include inherited or out-of-scope changes\n- `boundaryConfidence`: High / Medium / Low\n\nDo not over-prescribe your own investigation path. Use the strongest available evidence and record uncertainty honestly.\n\nStep 3 \u2014 Enrich with context:\nRecover the strongest available intent and policy context from whatever sources are actually available.\n\nAttempt to recover:\n- MR title and purpose\n- ticket / issue / acceptance context (`ticketRefs`, `ticketContext`)\n- supporting docs / specs / rollout context (`supportingDocsFound`)\n- repo or user policy/convention context when it is likely to affect review judgment (`policySourcesFound`)\n- `contextConfidence`: High / Medium / Low\n\nStep 4 \u2014 Review-surface hygiene:\nClassify the visible change into a minimal review surface.\n\nSet:\n- `coreReviewSurface`\n- `likelyNoiseOrMechanicalChurn`\n- `likelyInheritedOrOutOfScopeChanges`\n- `reviewSurfaceSummary`\n- `reviewScopeWarnings`\n\nThe goal is not a giant ledger. The goal is to avoid treating every visible changed file as equally worthy of deep review by default.\n\nStep 5 \u2014 Classify the review:\nAfter exploration, classify the work.\n\nSet:\n- `reviewMode`: QUICK / STANDARD / THOROUGH\n- `riskLevel`: Low / Medium / High\n- `shapeProfile`: choose the best primary label from `isolated_change`, `crosscutting_change`, `mechanically_noisy_change`, or `ambiguous_boundary`\n- `changeTypeProfile`: choose the best primary label from `general_code_change`, `api_contract_change`, `data_model_or_migration`, `security_sensitive`, or `test_only`\n- `maxParallelism`: 0 / 3 / 5\n- `criticalSurfaceTouched`: true / false\n- `needsSimulation`: true / false\n- `needsBoundaryFollowup`: true / false\n- `needsContextFollowup`: true / false\n- `needsReviewerBundle`: true / false\n\nDecision guidance:\n- QUICK: very small, isolated, low-risk changes with little ambiguity\n- STANDARD: typical feature or bug-fix reviews with moderate ambiguity or moderate risk\n- THOROUGH: critical surfaces, architectural novelty, high risk, broad change sets, or strong need for independent reviewer perspectives\n\nMinimal routing guidance:\n- if `boundaryConfidence = Low`, bias toward boundary/context follow-up before strong recommendation confidence\n- if `changeTypeProfile = api_contract_change`, bias toward contract/consumer/backward-compatibility scrutiny\n- if `changeTypeProfile = data_model_or_migration`, bias toward rollout / compatibility / simulation scrutiny\n- if `changeTypeProfile = security_sensitive`, bias toward adversarial/runtime-risk scrutiny and lower tolerance for weak evidence\n- if `changeTypeProfile = test_only`, bias toward stronger false-positive suppression\n- if `shapeProfile = mechanically_noisy_change`, bias toward stronger noise filtering and lower appetite for style-only findings\n\nStep 6 \u2014 Optional deeper context:\nIf `reviewMode` is STANDARD or THOROUGH and context remains incomplete, and delegation is available, spawn TWO WorkRail Executors SIMULTANEOUSLY running `routine-context-gathering` with focus=COMPLETENESS and focus=DEPTH. Synthesize both outputs before finishing this step.\n\nStep 7 \u2014 Human-facing artifact:\nChoose `reviewDocPath` only if a live artifact will materially improve human readability. Default suggestion: `mr-review.md` at the project root. This artifact is optional and never canonical workflow state.\n\nFallback behavior:\n- if PR/MR is not found but a branch/diff is inspectable, continue with downgraded context confidence and disclose missing PR context later\n- if the branch is inspectable but merge-base / ancestor remains ambiguous, continue with downgraded boundary confidence, set `needsBoundaryFollowup = true`, and disclose the uncertainty later\n- if ticket or supporting docs are missing, continue with downgraded context confidence and avoid overclaiming intent-sensitive findings\n- if only a patch/diff is available, continue if it is inspectable, but keep lower confidence on intent/boundary-dependent conclusions\n- if the review target itself is missing, ask only for that missing artifact and stop\n\nSet these keys in the next `continue_workflow` call's `context` object:\n- `reviewTargetKind`\n- `reviewTargetSource`\n- `prUrl`\n- `prNumber`\n- `baseCandidate`\n- `mergeBaseRef`\n- `boundaryConfidence`\n- `contextConfidence`\n- `mrTitle`\n- `mrPurpose`\n- `ticketRefs`\n- `ticketContext`\n- `supportingDocsFound`\n- `policySourcesFound`\n- `accessibleContextSources`\n- `missingContextSources`\n- `focusAreas`\n- `changedFileCount`\n- `criticalSurfaceTouched`\n- `reviewMode`\n- `riskLevel`\n- `shapeProfile`\n- `changeTypeProfile`\n- `maxParallelism`\n- `reviewDocPath`\n- `contextSummary`\n- `candidateFiles`\n- `moduleRoots`\n- `contextUnknownCount`\n- `coverageGapCount`\n- `authorIntentUnclear`\n- `needsSimulation`\n- `needsBoundaryFollowup`\n- `needsContextFollowup`\n- `needsReviewerBundle`\n- `coreReviewSurface`\n- `likelyNoiseOrMechanicalChurn`\n- `likelyInheritedOrOutOfScopeChanges`\n- `reviewSurfaceSummary`\n- `reviewScopeWarnings`\n- `openQuestions`\n\nRules:\n- answer your own questions with tools whenever possible\n- only keep true human-decision questions in `openQuestions`\n- keep `openQuestions` bounded to the minimum necessary\n- classify AFTER exploring, not before\n- before leaving this phase, either establish the likely review boundary or explicitly record why you could not\n\nAlso set  in the context object: one sentence describing what you are trying to accomplish (e.g. \"implement OAuth refresh token rotation\", \"review PR #47 before merge\"). This populates the session title in the Workspace console immediately.",
       "requireConfirmation": {
         "or": [
-          { "var": "reviewMode", "equals": "THOROUGH" },
-          { "var": "riskLevel", "equals": "High" }
+          {
+            "var": "reviewMode",
+            "equals": "THOROUGH"
+          },
+          {
+            "var": "riskLevel",
+            "equals": "High"
+          }
         ]
       }
     },
@@ -55,7 +77,10 @@
         "goal": "Freeze a shared factual basis for review and decide how much reviewer-family parallelism is warranted.",
         "constraints": [
           [
-            { "kind": "ref", "refId": "wr.refs.notes_first_durability" }
+            {
+              "kind": "ref",
+              "refId": "wr.refs.notes_first_durability"
+            }
           ],
           "The fact packet is the primary truth for downstream reviewer families.",
           "Keep `recommendationHypothesis` as a secondary hypothesis to challenge, not a frame to defend."
@@ -89,10 +114,16 @@
         "goal": "Run the selected reviewer families in parallel from the same fact packet, then synthesize their output as evidence rather than conclusions.",
         "constraints": [
           [
-            { "kind": "ref", "refId": "wr.refs.notes_first_durability" }
+            {
+              "kind": "ref",
+              "refId": "wr.refs.notes_first_durability"
+            }
           ],
           [
-            { "kind": "ref", "refId": "wr.refs.synthesis_under_disagreement" }
+            {
+              "kind": "ref",
+              "refId": "wr.refs.synthesis_under_disagreement"
+            }
           ],
           "Each reviewer family must use `reviewFactPacket` as primary truth.",
           "Use `recommendationHypothesis` only as secondary comparison context.",
@@ -138,7 +169,10 @@
             "goal": "If contradictions, blind spots, or important coverage gaps remain, run only the smallest targeted follow-up needed.",
             "constraints": [
               [
-                { "kind": "ref", "refId": "wr.refs.parallelize_cognition_serialize_synthesis" }
+                {
+                  "kind": "ref",
+                  "refId": "wr.refs.parallelize_cognition_serialize_synthesis"
+                }
               ],
               "Prefer one compact targeted bundle over repeated broad delegation moments.",
               "Do not regather broad context unless a contradiction proves the original fact packet is insufficient.",
@@ -162,7 +196,7 @@
         {
           "id": "phase-4b-canonical-synthesis",
           "title": "Canonical Synthesis and Coverage Update",
-          "prompt": "Synthesize all reviewer-family outputs and targeted follow-up into one canonical review state.\n\nPart A — Compare against your hypothesis:\n- revisit `recommendationHypothesis`\n- what did the evidence confirm?\n- what did it challenge?\n- what changed your mind, what held firm, and what do you explicitly reject?\n\nPart B — Synthesis decision table:\n- if 2+ reviewer families flag the same serious issue with the same severity, treat it as validated\n- if the same issue is flagged with different severities, default to the higher severity unless the lower-severity position includes specific counter-evidence\n- if one family flags an issue and others are silent, investigate it but do not automatically block unless it is clearly critical or security-sensitive\n- if one family says false positive and another says valid issue, require explicit main-agent adjudication in notes before finalization\n- if recommendation spread shows material disagreement, findings override recommendation until reconciled\n- if simulation reveals a new production risk, add a new finding and re-evaluate recommendation confidence\n\nPart C — Coverage ledger rules:\n- move a domain from `uncertain` to `checked` only when evidence is materially adequate\n- keep a domain `uncertain` if disagreement or missing evidence still materially affects recommendation quality\n- mark `not_applicable` only when the MR genuinely does not engage that dimension\n- clear `contradicted` only when the contradiction is explicitly resolved by evidence or adjudication\n- clear `needs_followup` only when required follow-up has actually been completed or the domain is explicitly downgraded as non-material\n\nPart D — Recommendation confidence rules:\n- set `recommendationConfidenceBand = High` only if no unresolved material contradictions remain, no important coverage domains remain uncertain, false-positive risk is not material, and the evidence is strong enough for the current mode\n- set `recommendationConfidenceBand = Medium` when one bounded uncertainty remains but the recommendation is still directionally justified\n- set `recommendationConfidenceBand = Low` when multiple viable interpretations remain, major contradictions are unresolved, or important coverage gaps still weaken the recommendation\n\nSet these keys in the next `continue_workflow` call's `context` object:\n- `reviewFindings`\n- `criticalFindingsCount`\n- `majorFindingsCount`\n- `minorFindingsCount`\n- `nitFindingsCount`\n- `recommendation`\n- `recommendationConfidenceBand`\n- `recommendationDriftDetected`\n- `coverageLedger`\n- `coverageUncertainCount`\n- `docCompletenessConcernCount`\n\nIf `reviewDocPath` exists, keep it aligned for human readability only. Notes/context remain workflow truth.",
+          "prompt": "Synthesize all reviewer-family outputs and targeted follow-up into one canonical review state.\n\nPart A \u2014 Compare against your hypothesis:\n- revisit `recommendationHypothesis`\n- what did the evidence confirm?\n- what did it challenge?\n- what changed your mind, what held firm, and what do you explicitly reject?\n\nPart B \u2014 Synthesis decision table:\n- if 2+ reviewer families flag the same serious issue with the same severity, treat it as validated\n- if the same issue is flagged with different severities, default to the higher severity unless the lower-severity position includes specific counter-evidence\n- if one family flags an issue and others are silent, investigate it but do not automatically block unless it is clearly critical or security-sensitive\n- if one family says false positive and another says valid issue, require explicit main-agent adjudication in notes before finalization\n- if recommendation spread shows material disagreement, findings override recommendation until reconciled\n- if simulation reveals a new production risk, add a new finding and re-evaluate recommendation confidence\n\nPart C \u2014 Coverage ledger rules:\n- move a domain from `uncertain` to `checked` only when evidence is materially adequate\n- keep a domain `uncertain` if disagreement or missing evidence still materially affects recommendation quality\n- mark `not_applicable` only when the MR genuinely does not engage that dimension\n- clear `contradicted` only when the contradiction is explicitly resolved by evidence or adjudication\n- clear `needs_followup` only when required follow-up has actually been completed or the domain is explicitly downgraded as non-material\n\nPart D \u2014 Recommendation confidence rules:\n- set `recommendationConfidenceBand = High` only if no unresolved material contradictions remain, no important coverage domains remain uncertain, false-positive risk is not material, and the evidence is strong enough for the current mode\n- set `recommendationConfidenceBand = Medium` when one bounded uncertainty remains but the recommendation is still directionally justified\n- set `recommendationConfidenceBand = Low` when multiple viable interpretations remain, major contradictions are unresolved, or important coverage gaps still weaken the recommendation\n\nSet these keys in the next `continue_workflow` call's `context` object:\n- `reviewFindings`\n- `criticalFindingsCount`\n- `majorFindingsCount`\n- `minorFindingsCount`\n- `nitFindingsCount`\n- `recommendation`\n- `recommendationConfidenceBand`\n- `recommendationDriftDetected`\n- `coverageLedger`\n- `coverageUncertainCount`\n- `docCompletenessConcernCount`\n\nIf `reviewDocPath` exists, keep it aligned for human readability only. Notes/context remain workflow truth.",
           "requireConfirmation": false
         },
         {
@@ -183,10 +217,16 @@
         "goal": "Stress-test the current recommendation before final handoff.",
         "constraints": [
           [
-            { "kind": "ref", "refId": "wr.refs.adversarial_challenge_rules" }
+            {
+              "kind": "ref",
+              "refId": "wr.refs.adversarial_challenge_rules"
+            }
           ],
           [
-            { "kind": "ref", "refId": "wr.refs.synthesis_under_disagreement" }
+            {
+              "kind": "ref",
+              "refId": "wr.refs.synthesis_under_disagreement"
+            }
           ],
           "Validation output is evidence to synthesize, not an automatic reopen signal."
         ],
@@ -205,10 +245,31 @@
           "If no validator can materially break the current recommendation and findings are internally consistent, proceed to handoff."
         ]
       },
+      "assessmentRefs": [
+        "review_readiness_gate"
+      ],
+      "assessmentConsequences": [
+        {
+          "when": {
+            "dimensionId": "confidence",
+            "equalsLevel": "low"
+          },
+          "effect": {
+            "kind": "require_followup",
+            "guidance": "Resolve the remaining recommendation uncertainty before handing off: either strengthen the evidence for the key findings, explicitly reconcile unresolved contradictions, or downgrade the confidence band and disclose the limitations clearly."
+          }
+        }
+      ],
       "requireConfirmation": {
         "or": [
-          { "var": "validatorConsensusLevel", "equals": "Low" },
-          { "var": "recommendationConfidenceBand", "equals": "Low" }
+          {
+            "var": "validatorConsensusLevel",
+            "equals": "Low"
+          },
+          {
+            "var": "recommendationConfidenceBand",
+            "equals": "Low"
+          }
         ]
       }
     },

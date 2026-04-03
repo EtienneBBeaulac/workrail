@@ -1,8 +1,8 @@
 {
   "id": "bug-investigation-agentic",
-  "name": "Bug Investigation (v2 • Notes-First • WorkRail Executor)",
+  "name": "Bug Investigation (v2 \u2022 Notes-First \u2022 WorkRail Executor)",
   "version": "2.0.0",
-  "description": "A v2-first bug investigation workflow focused on moving from theory to proof with notes-first durability, explicit trigger fields, de-anchored fresh-eye review, and investigation-only handoff boundaries.",
+  "description": "Use this to diagnose a bug or unexpected behavior in code. Builds a hypothesis, gathers evidence, and proves or disproves the root cause before concluding.",
   "recommendedPreferences": {
     "recommendedAutonomy": "guided",
     "recommendedRiskPolicy": "conservative"
@@ -39,7 +39,10 @@
         {
           "id": "confidence",
           "purpose": "How confident the agent is that the diagnosis is ready for final handoff.",
-          "levels": ["low", "high"]
+          "levels": [
+            "low",
+            "high"
+          ]
         }
       ]
     }
@@ -47,7 +50,7 @@
   "steps": [
     {
       "id": "phase-0-triage-and-intake",
-      "title": "Phase 0: Triage (Bug Intake • Risk • Mode)",
+      "title": "Phase 0: Triage (Bug Intake \u2022 Risk \u2022 Mode)",
       "prompt": "Understand the bug report and choose the right rigor.\n\nCapture:\n- `bugSummary`: concise statement of the issue\n- `reproSummary`: repro steps, symptoms, expected behavior, environment notes\n- `investigationComplexity`: Small / Medium / Large\n- `riskLevel`: Low / Medium / High\n- `rigorMode`: QUICK / STANDARD / THOROUGH\n- `automationLevel`: High / Medium / Low\n- `maxParallelism`: 0 / 2 / 3\n\nDecision guidance:\n- QUICK: clear repro, narrow surface area, low ambiguity\n- STANDARD: moderate ambiguity, moderate system breadth, or meaningful risk\n- THOROUGH: high ambiguity, high-risk production impact, broad surface area, or multiple plausible causes\n\nSet context variables:\n- `bugSummary`\n- `reproSummary`\n- `investigationComplexity`\n- `riskLevel`\n- `rigorMode`\n- `automationLevel`\n- `maxParallelism`\n- `reproducibilityConfidence` (High / Medium / Low)\n\nAsk for confirmation only if the chosen rigor materially affects expectations or if critical repro details are still missing.",
       "requireConfirmation": true
     },
@@ -57,8 +60,14 @@
       "prompt": "If critical inputs are missing, ask only for the minimum needed to investigate.\n\nPossible asks:\n- missing repro steps or failing test command\n- missing expected behavior\n- missing environment constraints or permissions\n- missing logs or stack traces when the codebase alone cannot answer the gap\n\nDo NOT ask for information you can discover with tools.",
       "requireConfirmation": {
         "or": [
-          { "var": "automationLevel", "equals": "Low" },
-          { "var": "automationLevel", "equals": "Medium" }
+          {
+            "var": "automationLevel",
+            "equals": "Low"
+          },
+          {
+            "var": "automationLevel",
+            "equals": "Medium"
+          }
         ]
       }
     },
@@ -78,8 +87,14 @@
       "prompt": "Reassess investigation scope after real context is known.\n\nReview:\n- `contextUnknownCount`\n- `executionPathCount`\n- `suspiciousPointCount`\n- actual systems/components involved\n- whether risk or ambiguity is larger than originally assessed\n\nDo:\n- confirm or adjust `investigationComplexity`\n- confirm or adjust `riskLevel`\n- confirm or adjust `rigorMode`\n- confirm or adjust `maxParallelism`\n\nSet context variables:\n- `investigationComplexity`\n- `riskLevel`\n- `rigorMode`\n- `maxParallelism`\n- `retriageChanged`\n\nRule:\n- upgrade rigor when the real investigation surface is broader or riskier than expected",
       "requireConfirmation": {
         "or": [
-          { "var": "retriageChanged", "equals": true },
-          { "var": "automationLevel", "equals": "Low" }
+          {
+            "var": "retriageChanged",
+            "equals": true
+          },
+          {
+            "var": "automationLevel",
+            "equals": "Low"
+          }
         ]
       }
     },
@@ -118,7 +133,7 @@
         {
           "id": "phase-4b-loop-decision",
           "title": "Evidence Loop Decision",
-          "prompt": "Decide whether the evidence loop should continue.\n\nDecision rules:\n- if `contradictionCount > 0` → continue\n- else if `unresolvedEvidenceGapCount > 0` → continue\n- else if `hasStrongAlternative = true` and the alternative is not meaningfully weaker → continue\n- else if `diagnosisType = inconclusive_but_narrowed` and further evidence is not realistically available → stop with bounded uncertainty\n- else → stop\n\nOutput exactly:\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
+          "prompt": "Decide whether the evidence loop should continue.\n\nDecision rules:\n- if `contradictionCount > 0` \u2192 continue\n- else if `unresolvedEvidenceGapCount > 0` \u2192 continue\n- else if `hasStrongAlternative = true` and the alternative is not meaningfully weaker \u2192 continue\n- else if `diagnosisType = inconclusive_but_narrowed` and further evidence is not realistically available \u2192 stop with bounded uncertainty\n- else \u2192 stop\n\nOutput exactly:\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
           "requireConfirmation": true,
           "outputContract": {
             "contractRef": "wr.contracts.loop_control"
@@ -130,7 +145,9 @@
       "id": "phase-5-diagnosis-validation",
       "title": "Phase 5: Diagnosis Validation Bundle",
       "prompt": "Stress-test the current diagnosis before handoff.\n\nSet `diagnosisConfidenceBand` using these rules:\n- High = all symptoms explained, no material contradictions, no unresolved evidence gaps\n- Medium = likely diagnosis, but one bounded uncertainty remains\n- Low = multiple viable explanations remain or contradictions are unresolved\n\nMode-adaptive validation:\n- QUICK: self-challenge; if `diagnosisConfidenceBand != High` or contradictions remain, optionally spawn ONE WorkRail Executor running `routine-hypothesis-challenge`\n- STANDARD: if delegation is available, spawn TWO WorkRail Executors SIMULTANEOUSLY running `routine-hypothesis-challenge` and `routine-execution-simulation`\n- THOROUGH: if delegation is available, spawn THREE WorkRail Executors SIMULTANEOUSLY running `routine-hypothesis-challenge`, `routine-execution-simulation`, and an additional `routine-hypothesis-challenge` pass focused on breaking the current diagnosis from a different angle\n\nParallel-output synthesis rules:\n- if 2+ validators raise serious concerns, reopen evidence or shortlist work\n- if exactly one validator raises a concern, investigate it before escalating\n- if no validator can materially break the diagnosis and `contradictionCount = 0`, proceed to handoff\n\nAfter synthesizing the validation result, assess whether the diagnosis is ready for final handoff.\n\nSet context variables:\n- `diagnosisConfidenceBand`\n- `validationFindingsCountBySeverity`\n- `validationSummary`\n\nBoundary rule:\n- allowed: high-level fix direction, likely files involved, verification recommendations\n- not allowed: implementation plan, patch sequencing, PR plan, or code-writing momentum",
-      "assessmentRefs": ["diagnosis_readiness_gate"],
+      "assessmentRefs": [
+        "diagnosis_readiness_gate"
+      ],
       "assessmentConsequences": [
         {
           "when": {
@@ -145,8 +162,14 @@
       ],
       "requireConfirmation": {
         "or": [
-          { "var": "diagnosisConfidenceBand", "equals": "Low" },
-          { "var": "contradictionCount", "not_equals": 0 }
+          {
+            "var": "diagnosisConfidenceBand",
+            "equals": "Low"
+          },
+          {
+            "var": "contradictionCount",
+            "not_equals": 0
+          }
         ]
       }
     },

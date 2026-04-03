@@ -1,8 +1,8 @@
 {
   "id": "production-readiness-audit",
-  "name": "Production Readiness Audit (v2 • Evidence-Driven Readiness Review)",
+  "name": "Production Readiness Audit (v2 \u2022 Evidence-Driven Readiness Review)",
   "version": "0.1.0",
-  "description": "Audit a bounded codebase scope for debugging risk, runtime readiness, stale or misleading implementation surfaces, technical debt, and anything else that would keep it from being honestly production-ready.",
+  "description": "Use this to audit a codebase scope for production readiness. Checks debugging correctness, runtime operability, artifact realism, technical debt, and anything that would prevent honest production deployment.",
   "recommendedPreferences": {
     "recommendedAutonomy": "guided",
     "recommendedRiskPolicy": "conservative"
@@ -43,7 +43,10 @@
         "goal": "Build the minimum complete understanding needed to audit readiness honestly.",
         "constraints": [
           [
-            { "kind": "ref", "refId": "wr.refs.notes_first_durability" }
+            {
+              "kind": "ref",
+              "refId": "wr.refs.notes_first_durability"
+            }
           ],
           "Use tools first. Ask only for true scope or permission gaps you cannot resolve yourself.",
           "Separate in-scope code from adjacent noise before you classify rigor or risk."
@@ -67,8 +70,14 @@
       },
       "requireConfirmation": {
         "or": [
-          { "var": "scopeShape", "equals": "whole_codebase" },
-          { "var": "riskLevel", "equals": "High" }
+          {
+            "var": "scopeShape",
+            "equals": "whole_codebase"
+          },
+          {
+            "var": "riskLevel",
+            "equals": "High"
+          }
         ]
       }
     },
@@ -103,7 +112,10 @@
         "goal": "Freeze a neutral readiness fact packet and decide how much reviewer-family parallelism is warranted.",
         "constraints": [
           [
-            { "kind": "ref", "refId": "wr.refs.notes_first_durability" }
+            {
+              "kind": "ref",
+              "refId": "wr.refs.notes_first_durability"
+            }
           ],
           "The fact packet is the primary truth for downstream reviewer families.",
           "Keep `readinessHypothesis` as a hypothesis to challenge, not a frame to defend.",
@@ -131,12 +143,18 @@
       "promptFragments": [
         {
           "id": "phase-2-quick",
-          "when": { "var": "rigorMode", "equals": "QUICK" },
+          "when": {
+            "var": "rigorMode",
+            "equals": "QUICK"
+          },
           "text": "Keep the fact packet compact. QUICK should not manufacture a giant ceremony layer."
         },
         {
           "id": "phase-2-thorough",
-          "when": { "var": "rigorMode", "equals": "THOROUGH" },
+          "when": {
+            "var": "rigorMode",
+            "equals": "THOROUGH"
+          },
           "text": "For THOROUGH rigor, make the hidden-risk surfaces explicit: blind spots, fake confidence vectors, and production assumptions that would hurt if wrong."
         }
       ],
@@ -153,10 +171,16 @@
         "goal": "Run the selected reviewer families in parallel from the same readiness fact packet, then synthesize their output as evidence rather than conclusions.",
         "constraints": [
           [
-            { "kind": "ref", "refId": "wr.refs.notes_first_durability" }
+            {
+              "kind": "ref",
+              "refId": "wr.refs.notes_first_durability"
+            }
           ],
           [
-            { "kind": "ref", "refId": "wr.refs.synthesis_under_disagreement" }
+            {
+              "kind": "ref",
+              "refId": "wr.refs.synthesis_under_disagreement"
+            }
           ],
           "Each reviewer family must use `readinessFactPacket` as primary truth.",
           "Use `readinessHypothesis` only as comparison context.",
@@ -203,7 +227,10 @@
             "goal": "If contradictions, blind spots, or important coverage gaps remain, run only the smallest targeted follow-up needed.",
             "constraints": [
               [
-                { "kind": "ref", "refId": "wr.refs.parallelize_cognition_serialize_synthesis" }
+                {
+                  "kind": "ref",
+                  "refId": "wr.refs.parallelize_cognition_serialize_synthesis"
+                }
               ],
               "Prefer one compact targeted bundle over repeated broad delegation moments.",
               "Do not regather broad context unless a contradiction proves the original fact packet is insufficient.",
@@ -291,10 +318,16 @@
         "goal": "Stress-test the current readiness verdict before final handoff.",
         "constraints": [
           [
-            { "kind": "ref", "refId": "wr.refs.adversarial_challenge_rules" }
+            {
+              "kind": "ref",
+              "refId": "wr.refs.adversarial_challenge_rules"
+            }
           ],
           [
-            { "kind": "ref", "refId": "wr.refs.synthesis_under_disagreement" }
+            {
+              "kind": "ref",
+              "refId": "wr.refs.synthesis_under_disagreement"
+            }
           ],
           "Validation output is evidence to synthesize, not automatic authority."
         ],
@@ -319,8 +352,14 @@
       },
       "requireConfirmation": {
         "or": [
-          { "var": "finalConfidenceBand", "equals": "Low" },
-          { "var": "finalVerdict", "equals": "inconclusive" }
+          {
+            "var": "finalConfidenceBand",
+            "equals": "Low"
+          },
+          {
+            "var": "finalVerdict",
+            "equals": "inconclusive"
+          }
         ]
       }
     },

@@ -1,288 +1,288 @@
 {
-    "id": "personal-learning-course-design",
-    "name": "Personal Learning Course Design Workflow",
-    "version": "1.0.0",
-    "description": "A systematic workflow for designing effective personal learning courses with three thoroughness paths: Quick Start (3-5 days for essential structure), Balanced (1-2 weeks for comprehensive system), and Comprehensive (2-3 weeks for professional-grade pedagogical depth). Adapts complexity based on user time constraints and learning design experience.",
-    "clarificationPrompts": [
-        "What specific knowledge or skill do you want to master for yourself? (Be precise about the learning goal)",
-        "How will you know you've successfully learned this? What will you be able to do, create, or solve? (Define your personal success criteria)",
-        "What's your current level with this topic? (Complete beginner, some exposure, intermediate - helps determine starting point)",
-        "How much time can you realistically commit per week to structured learning? (Be honest about your schedule constraints)",
-        "What's your preferred learning style and what methods have worked best for you in the past? (Video, reading, hands-on practice, etc.)",
-        "What's your experience with creating learning plans? (Never done it, some experience, comfortable with instructional design)",
-        "How much time do you want to spend on the learning design process itself? (Quick structure: 3-5 days, Balanced system: 1-2 weeks, Comprehensive design: 2-3 weeks)"
-    ],
-    "preconditions": [
-        "Clear personal motivation for why you want to learn this topic",
-        "Realistic assessment of available time for learning",
-        "Access to quality learning resources (books, courses, online materials, practice opportunities)",
-        "Commitment to following a structured approach rather than random resource consumption"
-    ],
-    "metaGuidance": [
-        "START SMALL: Focus on one concrete sub-skill before expanding scope - master fundamentals first",
-        "ACTIVE LEARNING: Every learning session must include hands-on practice or application, not just passive consumption",
-        "SPACED REPETITION: Build in regular review and reinforcement of previously learned concepts",
-        "PROGRESS VALIDATION: Create checkpoints to assess your understanding before moving to advanced topics",
-        "SUSTAINABLE PACE: Design for consistency over intensity - small daily progress beats sporadic marathons"
-    ],
-    "steps": [
+  "id": "personal-learning-course-design",
+  "name": "Personal Learning Course Design Workflow",
+  "version": "1.0.0",
+  "description": "Use this to design a personal learning course. Creates structured learning objectives, sequencing, and a course outline suited to your time constraints.",
+  "clarificationPrompts": [
+    "What specific knowledge or skill do you want to master for yourself? (Be precise about the learning goal)",
+    "How will you know you've successfully learned this? What will you be able to do, create, or solve? (Define your personal success criteria)",
+    "What's your current level with this topic? (Complete beginner, some exposure, intermediate - helps determine starting point)",
+    "How much time can you realistically commit per week to structured learning? (Be honest about your schedule constraints)",
+    "What's your preferred learning style and what methods have worked best for you in the past? (Video, reading, hands-on practice, etc.)",
+    "What's your experience with creating learning plans? (Never done it, some experience, comfortable with instructional design)",
+    "How much time do you want to spend on the learning design process itself? (Quick structure: 3-5 days, Balanced system: 1-2 weeks, Comprehensive design: 2-3 weeks)"
+  ],
+  "preconditions": [
+    "Clear personal motivation for why you want to learn this topic",
+    "Realistic assessment of available time for learning",
+    "Access to quality learning resources (books, courses, online materials, practice opportunities)",
+    "Commitment to following a structured approach rather than random resource consumption"
+  ],
+  "metaGuidance": [
+    "START SMALL: Focus on one concrete sub-skill before expanding scope - master fundamentals first",
+    "ACTIVE LEARNING: Every learning session must include hands-on practice or application, not just passive consumption",
+    "SPACED REPETITION: Build in regular review and reinforcement of previously learned concepts",
+    "PROGRESS VALIDATION: Create checkpoints to assess your understanding before moving to advanced topics",
+    "SUSTAINABLE PACE: Design for consistency over intensity - small daily progress beats sporadic marathons"
+  ],
+  "steps": [
+    {
+      "id": "select-design-path",
+      "title": "Choose Your Learning Design Path",
+      "prompt": "Based on your time constraints and learning design experience, select the approach that best fits your needs:\n\n**\ud83d\ude80 QUICK START PATH (3-5 days)**\n- **Best for**: First-time course designers, tight timelines, simple learning goals\n- **What you get**: Essential structure with clear objectives, basic assessment, and simple schedule\n- **Time investment**: 3-5 days to complete design process\n- **Result**: Functional learning plan that covers the basics effectively\n\n**\u2696\ufe0f BALANCED PATH (1-2 weeks)**\n- **Best for**: Some learning design experience, moderate complexity goals, want good system without overwhelm\n- **What you get**: Solid instructional design plus engagement features, assessment strategy, and progress tracking\n- **Time investment**: 1-2 weeks to complete design process\n- **Result**: Comprehensive learning system with proven pedagogical principles\n\n**\ud83c\udf93 COMPREHENSIVE PATH (2-3 weeks)**\n- **Best for**: Complex learning goals, want professional-grade system, experienced with instructional design\n- **What you get**: Full pedagogical depth with spaced repetition, detailed accountability, and advanced monitoring\n- **Time investment**: 2-3 weeks to complete design process\n- **Result**: Professional-grade learning system with all advanced features\n\n**Please select your path:**\n- Type 'quick' for Quick Start Path (3-5 days)\n- Type 'balanced' for Balanced Path (1-2 weeks)\n- Type 'comprehensive' for Comprehensive Path (2-3 weeks)\n\nYour choice will customize the remaining steps to match your needs and time constraints.",
+      "agentRole": "You are a learning design consultant who helps users choose the right level of complexity for their learning design process. Guide them to select a path that matches their experience, time constraints, and learning goals without overwhelming them.",
+      "guidance": [
+        "Help users honestly assess their time availability and design experience",
+        "Explain that all paths produce effective learning plans - the difference is in depth and features",
+        "Reassure that paths can be upgraded later if needed",
+        "Focus on matching user needs rather than selling the most comprehensive option"
+      ]
+    },
+    {
+      "id": "define-learning-objectives-quick",
+      "title": "Quick Start: Define Core Learning Objectives",
+      "runCondition": {
+        "var": "designPath",
+        "equals": "quick"
+      },
+      "prompt": "Create focused, achievable learning objectives that match your time constraints.\n\n**STEP 1: Define Your Main Goal**\n- Write your specific learning goal in one clear sentence\n- Break it into 2-3 core sub-skills (keep it simple for quick start)\n- Each sub-skill should be achievable in 1-2 weeks of your stated time commitment\n\n**STEP 2: Quick Success Criteria**\n- For each sub-skill, write ONE specific thing you'll be able to do after learning it\n- Use simple action verbs: understand, explain, apply, create, solve\n- Focus on observable outcomes: 'I can solve X problem' or 'I can create Y'\n\n**STEP 3: Simple Priority Order**\n- Number your sub-skills 1-3 in learning order\n- Put essential prerequisites first\n- This becomes your basic learning sequence\n\n**QUICK START FOCUS**: Keep objectives concrete and limited. Better to master 2-3 things well than attempt everything.",
+      "agentRole": "You are a learning consultant specializing in rapid instructional design. Help users create focused, achievable objectives without overwhelming detail or complexity. Emphasize clarity and actionability over comprehensiveness.",
+      "guidance": [
+        "Keep it simple - 2-3 main objectives maximum for quick start",
+        "Focus on immediate actionable outcomes",
+        "Avoid complex taxonomies or detailed analysis",
+        "Prioritize clarity over completeness"
+      ]
+    },
+    {
+      "id": "define-learning-objectives-balanced",
+      "title": "Balanced: Define Structured Learning Objectives",
+      "runCondition": {
+        "var": "designPath",
+        "equals": "balanced"
+      },
+      "prompt": "Create well-structured learning objectives using proven instructional design principles.\n\n**STEP 1: Break Down Your Learning Goal**\n- Write your main learning goal from the clarification prompts\n- Break it into 3-5 specific sub-skills or knowledge areas\n- Each sub-skill should be achievable in 2-3 weeks of your stated time commitment\n- For each sub-skill, write what you'll be able to DO (not just know) after learning it\n\n**STEP 2: Define Success Criteria**\n- For each objective, define specific evidence that you've mastered it\n- Create observable outcomes: 'I can solve X type of problem', 'I can create Y without help'\n- Set both knowledge tests (can I explain this?) and application tests (can I use it?)\n- Validation check: Could you demonstrate this objective to someone in 15 minutes?\n\n**STEP 3: Prioritize & Sequence**\n- Rank objectives by: 1) Learning dependencies, 2) Personal priority, 3) Difficulty\n- Identify which objectives are prerequisites for others\n- Create your learning sequence with logical flow\n\n**BALANCED FOCUS**: Solid structure with clear objectives and practical assessment, without overwhelming complexity.",
+      "agentRole": "You are an instructional design specialist who creates well-structured learning objectives using backward design principles. Help users balance thoroughness with practical efficiency, focusing on clear outcomes and logical sequencing.",
+      "guidance": [
+        "Use backward design - start with outcomes, then plan how to achieve them",
+        "Include both knowledge and application components",
+        "Ensure objectives build logically on each other",
+        "Keep assessment criteria practical and observable"
+      ]
+    },
+    {
+      "id": "define-learning-objectives-comprehensive",
+      "title": "Comprehensive: Design Advanced Learning Objectives",
+      "runCondition": {
+        "var": "designPath",
+        "equals": "comprehensive"
+      },
+      "prompt": "Transform your learning goal into specific, measurable objectives using advanced instructional design principles.\n\n**STEP 1: Break Down Your Learning Goal**\n- Write your main learning goal from the clarification prompts\n- Break it into 3-5 specific sub-skills or knowledge areas\n- **CONSTRAINT**: Each sub-skill should be achievable in 2-4 weeks of your stated time commitment\n- For each sub-skill, write what you'll be able to DO (not just know) after learning it\n- Use action verbs matched to your learning level:\n  * **Beginner**: understand, explain, identify, describe, apply basic concepts\n  * **Intermediate**: analyze, compare, implement, solve problems, create simple projects\n  * **Advanced**: evaluate, design, optimize, synthesize, create complex solutions\n\n**STEP 2: Define Success Criteria**\n- For each objective, define specific evidence that you've mastered it\n- Create observable outcomes: 'I can solve X type of problem', 'I can create Y without help'\n- Set both knowledge tests (can I explain this?) and application tests (can I use it?)\n- **VALIDATION**: Could you demonstrate this objective to someone in 15 minutes or less?\n\n**STEP 3: Prioritize Objectives**\n- Rank your objectives by: 1) **Learning Dependencies** (what must come first), 2) Personal priority, 3) Difficulty level\n- **DEPENDENCY CHECK**: Does this objective build directly on skills you already have or earlier objectives?\n- Identify which objectives are prerequisites for others\n- This creates your learning sequence backbone\n\n**COMPREHENSIVE FOCUS**: Full Bloom's Taxonomy application with detailed prerequisite analysis and advanced assessment design.",
+      "agentRole": "You are an instructional design specialist with expertise in applying Bloom's Taxonomy and backward design principles. Help the user create clear, measurable learning objectives that prevent vague goals and scope creep. Focus on action-oriented outcomes and proper prerequisite sequencing.",
+      "guidance": [
+        "Use Bloom's Taxonomy action verbs to make objectives specific and measurable",
+        "Apply backward design: start with what you want to achieve, then design how to get there",
+        "Ensure each objective has both knowledge and application components",
+        "Keep objectives focused - better to master fewer things well than many things poorly",
+        "Match verb complexity to actual learning level - avoid verb inflation",
+        "Validate that objectives are achievable within stated time commitment",
+        "Check that each objective builds logically on previous knowledge or skills"
+      ]
+    },
+    {
+      "id": "assess-knowledge-quick",
+      "title": "Quick Start: Simple Knowledge Assessment",
+      "runCondition": {
+        "var": "designPath",
+        "equals": "quick"
+      },
+      "prompt": "Quickly identify your starting point and any major gaps.\n\n**STEP 1: Quick Knowledge Check**\n- For each learning objective, rate your current knowledge (1-5 scale)\n- Note what you already know vs. what's completely new\n- Identify any tools or resources you need access to\n\n**STEP 2: Essential Prerequisites**\n- List anything you must learn first before tackling your main objectives\n- Check if you have the basic background knowledge needed\n- Note any major gaps that need external resources\n\n**QUICK START FOCUS**: Simple assessment to identify major gaps without deep analysis.",
+      "agentRole": "You are a learning assessment consultant who helps users quickly identify their starting point and major knowledge gaps without overwhelming analysis. Focus on practical readiness and essential prerequisites.",
+      "guidance": [
+        "Keep assessment simple and action-oriented",
+        "Focus on identifying major gaps, not detailed analysis",
+        "Prioritize readiness to start learning over comprehensive mapping",
+        "Identify critical prerequisites that would block progress"
+      ]
+    },
+    {
+      "id": "assess-knowledge-balanced",
+      "title": "Balanced: Structured Knowledge Assessment",
+      "runCondition": {
+        "or": [
+          {
+            "var": "designPath",
+            "equals": "balanced"
+          },
+          {
+            "var": "designPath",
+            "equals": "comprehensive"
+          }
+        ]
+      },
+      "prompt": "Map your starting point and identify knowledge gaps using systematic assessment techniques.\n\n**STEP 1: Knowledge Audit**\n- For each learning objective, honestly assess your current level (0-10 scale)\n- Identify what you already know that's relevant\n- Note areas of complete ignorance vs. partial understanding\n- Document any misconceptions or gaps in foundational knowledge\n\n**STEP 2: Prerequisite Analysis**\n- For each objective, list what knowledge/skills are required before you can learn it\n- Identify missing prerequisites that need to be learned first\n- Check if you have access to practice opportunities for hands-on learning\n- Note any tools, software, or resources you'll need\n\n**STEP 3: Learning Path Dependencies**\n- Map which objectives depend on others (create a learning sequence)\n- Identify which can be learned in parallel vs. must be sequential\n- Flag any prerequisites you need to learn from external sources first",
+      "agentRole": "You are a learning assessment specialist who helps create realistic learning paths that build knowledge systematically. Guide users to be brutally honest about their current knowledge and help them avoid the common mistake of jumping to advanced topics without proper foundations.",
+      "guidance": [
+        "Be brutally honest about current knowledge - overestimating leads to frustration",
+        "Identify and fill prerequisite gaps before tackling main objectives",
+        "Consider both explicit prerequisites (you need X to learn Y) and implicit ones (background knowledge)",
+        "Map dependencies to create an efficient learning sequence"
+      ]
+    },
+    {
+      "id": "create-basic-plan-quick",
+      "title": "Quick Start: Create Basic Learning Plan",
+      "runCondition": {
+        "var": "designPath",
+        "equals": "quick"
+      },
+      "prompt": "Create a simple, actionable learning plan that you can start immediately.\n\n**STEP 1: Simple Schedule**\n- Based on your weekly time commitment, plan specific days and times for learning\n- Allocate time for: learning new material (70%), practice (20%), review (10%)\n- Create a realistic timeline for completing each objective\n\n**STEP 2: Resource List**\n- Identify 1-2 primary resources for each learning objective\n- Choose resources that match your learning style preferences\n- Focus on comprehensive, beginner-friendly materials\n\n**STEP 3: Basic Progress Tracking**\n- Create a simple checklist of objectives to complete\n- Plan weekly check-ins to assess progress\n- Identify 1-2 ways to test your understanding of each objective\n\n**DELIVERABLE: Quick Start Learning Plan**\nCreate a simple document with:\n- Your 2-3 learning objectives\n- Weekly schedule with specific time blocks\n- Resource list organized by objective\n- Simple progress checklist\n- Basic assessment methods\n\n**QUICK START FOCUS**: Get you learning quickly with a solid foundation you can build on later.",
+      "agentRole": "You are a learning consultant who creates simple, immediately actionable learning plans. Focus on getting users started quickly with a solid foundation they can build upon, avoiding analysis paralysis.",
+      "guidance": [
+        "Prioritize action over perfection - get them started quickly",
+        "Create plans that can be implemented immediately",
+        "Focus on essential elements that prevent learning sprawl",
+        "Design for easy modification and expansion later"
+      ],
+      "requireConfirmation": true,
+      "validationCriteria": [
         {
-            "id": "select-design-path",
-            "title": "Choose Your Learning Design Path",
-            "prompt": "Based on your time constraints and learning design experience, select the approach that best fits your needs:\n\n**\ud83d\ude80 QUICK START PATH (3-5 days)**\n- **Best for**: First-time course designers, tight timelines, simple learning goals\n- **What you get**: Essential structure with clear objectives, basic assessment, and simple schedule\n- **Time investment**: 3-5 days to complete design process\n- **Result**: Functional learning plan that covers the basics effectively\n\n**\u2696\ufe0f BALANCED PATH (1-2 weeks)**\n- **Best for**: Some learning design experience, moderate complexity goals, want good system without overwhelm\n- **What you get**: Solid instructional design plus engagement features, assessment strategy, and progress tracking\n- **Time investment**: 1-2 weeks to complete design process\n- **Result**: Comprehensive learning system with proven pedagogical principles\n\n**\ud83c\udf93 COMPREHENSIVE PATH (2-3 weeks)**\n- **Best for**: Complex learning goals, want professional-grade system, experienced with instructional design\n- **What you get**: Full pedagogical depth with spaced repetition, detailed accountability, and advanced monitoring\n- **Time investment**: 2-3 weeks to complete design process\n- **Result**: Professional-grade learning system with all advanced features\n\n**Please select your path:**\n- Type 'quick' for Quick Start Path (3-5 days)\n- Type 'balanced' for Balanced Path (1-2 weeks)\n- Type 'comprehensive' for Comprehensive Path (2-3 weeks)\n\nYour choice will customize the remaining steps to match your needs and time constraints.",
-            "agentRole": "You are a learning design consultant who helps users choose the right level of complexity for their learning design process. Guide them to select a path that matches their experience, time constraints, and learning goals without overwhelming them.",
-            "guidance": [
-                "Help users honestly assess their time availability and design experience",
-                "Explain that all paths produce effective learning plans - the difference is in depth and features",
-                "Reassure that paths can be upgraded later if needed",
-                "Focus on matching user needs rather than selling the most comprehensive option"
-            ]
+          "type": "contains",
+          "value": "objective",
+          "message": "Plan must include specific learning objectives"
         },
         {
-            "id": "define-learning-objectives-quick",
-            "title": "Quick Start: Define Core Learning Objectives",
-            "runCondition": {
-                "var": "designPath",
-                "equals": "quick"
-            },
-            "prompt": "Create focused, achievable learning objectives that match your time constraints.\n\n**STEP 1: Define Your Main Goal**\n- Write your specific learning goal in one clear sentence\n- Break it into 2-3 core sub-skills (keep it simple for quick start)\n- Each sub-skill should be achievable in 1-2 weeks of your stated time commitment\n\n**STEP 2: Quick Success Criteria**\n- For each sub-skill, write ONE specific thing you'll be able to do after learning it\n- Use simple action verbs: understand, explain, apply, create, solve\n- Focus on observable outcomes: 'I can solve X problem' or 'I can create Y'\n\n**STEP 3: Simple Priority Order**\n- Number your sub-skills 1-3 in learning order\n- Put essential prerequisites first\n- This becomes your basic learning sequence\n\n**QUICK START FOCUS**: Keep objectives concrete and limited. Better to master 2-3 things well than attempt everything.",
-            "agentRole": "You are a learning consultant specializing in rapid instructional design. Help users create focused, achievable objectives without overwhelming detail or complexity. Emphasize clarity and actionability over comprehensiveness.",
-            "guidance": [
-                "Keep it simple - 2-3 main objectives maximum for quick start",
-                "Focus on immediate actionable outcomes",
-                "Avoid complex taxonomies or detailed analysis",
-                "Prioritize clarity over completeness"
-            ]
+          "type": "contains",
+          "value": "schedule",
+          "message": "Plan must include a learning schedule"
         },
         {
-            "id": "define-learning-objectives-balanced",
-            "title": "Balanced: Define Structured Learning Objectives",
-            "runCondition": {
-                "var": "designPath",
-                "equals": "balanced"
-            },
-            "prompt": "Create well-structured learning objectives using proven instructional design principles.\n\n**STEP 1: Break Down Your Learning Goal**\n- Write your main learning goal from the clarification prompts\n- Break it into 3-5 specific sub-skills or knowledge areas\n- Each sub-skill should be achievable in 2-3 weeks of your stated time commitment\n- For each sub-skill, write what you'll be able to DO (not just know) after learning it\n\n**STEP 2: Define Success Criteria**\n- For each objective, define specific evidence that you've mastered it\n- Create observable outcomes: 'I can solve X type of problem', 'I can create Y without help'\n- Set both knowledge tests (can I explain this?) and application tests (can I use it?)\n- Validation check: Could you demonstrate this objective to someone in 15 minutes?\n\n**STEP 3: Prioritize & Sequence**\n- Rank objectives by: 1) Learning dependencies, 2) Personal priority, 3) Difficulty\n- Identify which objectives are prerequisites for others\n- Create your learning sequence with logical flow\n\n**BALANCED FOCUS**: Solid structure with clear objectives and practical assessment, without overwhelming complexity.",
-            "agentRole": "You are an instructional design specialist who creates well-structured learning objectives using backward design principles. Help users balance thoroughness with practical efficiency, focusing on clear outcomes and logical sequencing.",
-            "guidance": [
-                "Use backward design - start with outcomes, then plan how to achieve them",
-                "Include both knowledge and application components",
-                "Ensure objectives build logically on each other",
-                "Keep assessment criteria practical and observable"
-            ]
-        },
-        {
-            "id": "define-learning-objectives-comprehensive",
-            "title": "Comprehensive: Design Advanced Learning Objectives",
-            "runCondition": {
-                "var": "designPath",
-                "equals": "comprehensive"
-            },
-            "prompt": "Transform your learning goal into specific, measurable objectives using advanced instructional design principles.\n\n**STEP 1: Break Down Your Learning Goal**\n- Write your main learning goal from the clarification prompts\n- Break it into 3-5 specific sub-skills or knowledge areas\n- **CONSTRAINT**: Each sub-skill should be achievable in 2-4 weeks of your stated time commitment\n- For each sub-skill, write what you'll be able to DO (not just know) after learning it\n- Use action verbs matched to your learning level:\n  * **Beginner**: understand, explain, identify, describe, apply basic concepts\n  * **Intermediate**: analyze, compare, implement, solve problems, create simple projects\n  * **Advanced**: evaluate, design, optimize, synthesize, create complex solutions\n\n**STEP 2: Define Success Criteria**\n- For each objective, define specific evidence that you've mastered it\n- Create observable outcomes: 'I can solve X type of problem', 'I can create Y without help'\n- Set both knowledge tests (can I explain this?) and application tests (can I use it?)\n- **VALIDATION**: Could you demonstrate this objective to someone in 15 minutes or less?\n\n**STEP 3: Prioritize Objectives**\n- Rank your objectives by: 1) **Learning Dependencies** (what must come first), 2) Personal priority, 3) Difficulty level\n- **DEPENDENCY CHECK**: Does this objective build directly on skills you already have or earlier objectives?\n- Identify which objectives are prerequisites for others\n- This creates your learning sequence backbone\n\n**COMPREHENSIVE FOCUS**: Full Bloom's Taxonomy application with detailed prerequisite analysis and advanced assessment design.",
-            "agentRole": "You are an instructional design specialist with expertise in applying Bloom's Taxonomy and backward design principles. Help the user create clear, measurable learning objectives that prevent vague goals and scope creep. Focus on action-oriented outcomes and proper prerequisite sequencing.",
-            "guidance": [
-                "Use Bloom's Taxonomy action verbs to make objectives specific and measurable",
-                "Apply backward design: start with what you want to achieve, then design how to get there",
-                "Ensure each objective has both knowledge and application components",
-                "Keep objectives focused - better to master fewer things well than many things poorly",
-                "Match verb complexity to actual learning level - avoid verb inflation",
-                "Validate that objectives are achievable within stated time commitment",
-                "Check that each objective builds logically on previous knowledge or skills"
-            ]
-        },
-        {
-            "id": "assess-knowledge-quick",
-            "title": "Quick Start: Simple Knowledge Assessment",
-            "runCondition": {
-                "var": "designPath",
-                "equals": "quick"
-            },
-            "prompt": "Quickly identify your starting point and any major gaps.\n\n**STEP 1: Quick Knowledge Check**\n- For each learning objective, rate your current knowledge (1-5 scale)\n- Note what you already know vs. what's completely new\n- Identify any tools or resources you need access to\n\n**STEP 2: Essential Prerequisites**\n- List anything you must learn first before tackling your main objectives\n- Check if you have the basic background knowledge needed\n- Note any major gaps that need external resources\n\n**QUICK START FOCUS**: Simple assessment to identify major gaps without deep analysis.",
-            "agentRole": "You are a learning assessment consultant who helps users quickly identify their starting point and major knowledge gaps without overwhelming analysis. Focus on practical readiness and essential prerequisites.",
-            "guidance": [
-                "Keep assessment simple and action-oriented",
-                "Focus on identifying major gaps, not detailed analysis",
-                "Prioritize readiness to start learning over comprehensive mapping",
-                "Identify critical prerequisites that would block progress"
-            ]
-        },
-        {
-            "id": "assess-knowledge-balanced",
-            "title": "Balanced: Structured Knowledge Assessment",
-            "runCondition": {
-                "or": [
-                    {
-                        "var": "designPath",
-                        "equals": "balanced"
-                    },
-                    {
-                        "var": "designPath",
-                        "equals": "comprehensive"
-                    }
-                ]
-            },
-            "prompt": "Map your starting point and identify knowledge gaps using systematic assessment techniques.\n\n**STEP 1: Knowledge Audit**\n- For each learning objective, honestly assess your current level (0-10 scale)\n- Identify what you already know that's relevant\n- Note areas of complete ignorance vs. partial understanding\n- Document any misconceptions or gaps in foundational knowledge\n\n**STEP 2: Prerequisite Analysis**\n- For each objective, list what knowledge/skills are required before you can learn it\n- Identify missing prerequisites that need to be learned first\n- Check if you have access to practice opportunities for hands-on learning\n- Note any tools, software, or resources you'll need\n\n**STEP 3: Learning Path Dependencies**\n- Map which objectives depend on others (create a learning sequence)\n- Identify which can be learned in parallel vs. must be sequential\n- Flag any prerequisites you need to learn from external sources first",
-            "agentRole": "You are a learning assessment specialist who helps create realistic learning paths that build knowledge systematically. Guide users to be brutally honest about their current knowledge and help them avoid the common mistake of jumping to advanced topics without proper foundations.",
-            "guidance": [
-                "Be brutally honest about current knowledge - overestimating leads to frustration",
-                "Identify and fill prerequisite gaps before tackling main objectives",
-                "Consider both explicit prerequisites (you need X to learn Y) and implicit ones (background knowledge)",
-                "Map dependencies to create an efficient learning sequence"
-            ]
-        },
-        {
-            "id": "create-basic-plan-quick",
-            "title": "Quick Start: Create Basic Learning Plan",
-            "runCondition": {
-                "var": "designPath",
-                "equals": "quick"
-            },
-            "prompt": "Create a simple, actionable learning plan that you can start immediately.\n\n**STEP 1: Simple Schedule**\n- Based on your weekly time commitment, plan specific days and times for learning\n- Allocate time for: learning new material (70%), practice (20%), review (10%)\n- Create a realistic timeline for completing each objective\n\n**STEP 2: Resource List**\n- Identify 1-2 primary resources for each learning objective\n- Choose resources that match your learning style preferences\n- Focus on comprehensive, beginner-friendly materials\n\n**STEP 3: Basic Progress Tracking**\n- Create a simple checklist of objectives to complete\n- Plan weekly check-ins to assess progress\n- Identify 1-2 ways to test your understanding of each objective\n\n**DELIVERABLE: Quick Start Learning Plan**\nCreate a simple document with:\n- Your 2-3 learning objectives\n- Weekly schedule with specific time blocks\n- Resource list organized by objective\n- Simple progress checklist\n- Basic assessment methods\n\n**QUICK START FOCUS**: Get you learning quickly with a solid foundation you can build on later.",
-            "agentRole": "You are a learning consultant who creates simple, immediately actionable learning plans. Focus on getting users started quickly with a solid foundation they can build upon, avoiding analysis paralysis.",
-            "guidance": [
-                "Prioritize action over perfection - get them started quickly",
-                "Create plans that can be implemented immediately",
-                "Focus on essential elements that prevent learning sprawl",
-                "Design for easy modification and expansion later"
-            ],
-            "requireConfirmation": true,
-            "validationCriteria": [
-                {
-                    "type": "contains",
-                    "value": "objective",
-                    "message": "Plan must include specific learning objectives"
-                },
-                {
-                    "type": "contains",
-                    "value": "schedule",
-                    "message": "Plan must include a learning schedule"
-                },
-                {
-                    "type": "length",
-                    "min": 300,
-                    "message": "Plan should include essential details (at least 300 characters)"
-                }
-            ],
-            "hasValidation": true
-        },
-        {
-            "id": "design-assessment-balanced",
-            "title": "Balanced: Design Assessment Strategy",
-            "runCondition": {
-                "or": [
-                    {
-                        "var": "designPath",
-                        "equals": "balanced"
-                    },
-                    {
-                        "var": "designPath",
-                        "equals": "comprehensive"
-                    }
-                ]
-            },
-            "prompt": "Create a systematic approach to test your understanding and track progress throughout your learning journey.\n\n**STEP 1: Design Knowledge Checks**\n- For each objective, create specific ways to test your understanding\n- Include both recall tests (can you remember?) and application tests (can you use it?)\n- Design quick self-assessments you can do regularly\n- Create milestone assessments for major learning chunks\n\n**STEP 2: Create Practice Opportunities**\n- Design hands-on exercises that let you apply what you're learning\n- Create mini-projects that combine multiple concepts\n- Identify real-world problems you can practice solving\n- Plan how you'll get feedback on your practice attempts\n\n**STEP 3: Build Accountability Measures**\n- Decide how often you'll assess your progress (weekly, bi-weekly)\n- Create a simple tracking system for completed objectives\n- Design rewards for hitting learning milestones\n- Plan what you'll do if you get stuck or fall behind",
-            "agentRole": "You are an assessment design expert who creates robust systems that prevent the illusion of learning and ensure real mastery through active testing and application. Focus on multiple assessment types and practical accountability.",
-            "guidance": [
-                "Include both formative (ongoing) and summative (milestone) assessments",
-                "Design assessments that match your learning objectives",
-                "Build in multiple types of assessment - recall, application, synthesis",
-                "Create practical accountability measures that fit your lifestyle"
-            ]
-        },
-        {
-            "id": "create-balanced-plan",
-            "title": "Balanced: Create Comprehensive Learning Plan",
-            "runCondition": {
-                "var": "designPath",
-                "equals": "balanced"
-            },
-            "prompt": "Synthesize your work into a comprehensive learning plan that balances thoroughness with practical efficiency.\n\n**STEP 1: Learning Module Structure**\n- Organize your objectives into 2-4 logical learning modules\n- Each module should take 2-4 weeks to complete\n- Plan module sequence with proper dependencies\n- Include variety in each module (reading, practice, assessment)\n\n**STEP 2: Resource Organization & Schedule**\n- Select 2-3 high-quality resources per objective\n- Create a realistic weekly schedule with specific time blocks\n- Include time for: new learning (60%), practice (25%), review (15%)\n- Plan milestone checkpoints at the end of each module\n\n**STEP 3: Active Learning Integration**\n- Design hands-on activities for each learning session\n- Create mini-projects that combine multiple concepts\n- Plan regular self-testing and application exercises\n- Include reflection activities to consolidate learning\n\n**DELIVERABLE: Balanced Learning Plan**\nCreate a structured document with:\n- Learning modules with clear objectives and timelines\n- Weekly schedule with specific activities and time blocks\n- Resource list organized by module and objective\n- Assessment strategy with checkpoints and progress tracking\n- Active learning activities and practice exercises\n- Simple accountability measures and review schedule\n\n**BALANCED FOCUS**: Comprehensive system with proven pedagogical principles, practical to implement and maintain.",
-            "agentRole": "You are a learning design specialist who creates comprehensive yet practical learning plans. Focus on balancing thoroughness with efficiency, ensuring the plan is both pedagogically sound and realistically achievable.",
-            "guidance": [
-                "Create a plan that's comprehensive but not overwhelming",
-                "Balance structure with flexibility for different learning paces",
-                "Include multiple learning modalities and assessment types",
-                "Design for consistency and sustainability over time"
-            ],
-            "requireConfirmation": true,
-            "validationCriteria": [
-                {
-                    "type": "contains",
-                    "value": "module",
-                    "message": "Plan must include learning modules"
-                },
-                {
-                    "type": "contains",
-                    "value": "schedule",
-                    "message": "Plan must include detailed schedule"
-                },
-                {
-                    "type": "contains",
-                    "value": "assessment",
-                    "message": "Plan must include assessment strategy"
-                },
-                {
-                    "type": "length",
-                    "min": 500,
-                    "message": "Plan should be comprehensive (at least 500 characters)"
-                }
-            ],
-            "hasValidation": true
-        },
-        {
-            "id": "design-spaced-repetition-comprehensive",
-            "title": "Comprehensive: Design Spaced Repetition System",
-            "runCondition": {
-                "var": "designPath",
-                "equals": "comprehensive"
-            },
-            "prompt": "Build in systematic review and reinforcement to combat forgetting and strengthen long-term retention.\n\n**STEP 1: Plan Review Schedule**\n- Schedule initial review 1 day after learning new material\n- Plan subsequent reviews at 3 days, 1 week, 2 weeks, 1 month intervals\n- Adjust intervals based on difficulty and importance of material\n- Build review time into your overall learning schedule\n\n**STEP 2: Create Review Materials**\n- Design quick review activities for each major concept\n- Create flashcards, summary sheets, or quick quizzes\n- Build cumulative reviews that combine multiple topics\n- Plan how you'll review practical skills, not just knowledge\n\n**STEP 3: Integrate Review with New Learning**\n- Start each learning session with brief review of previous material\n- Connect new concepts to previously learned material\n- Plan periodic comprehensive reviews of all modules\n- Design ways to apply old concepts in new contexts",
-            "agentRole": "You are a memory and retention specialist who implements spaced repetition and interleaving to combat the forgetting curve and strengthen long-term retention. Focus on evidence-based spacing intervals and cumulative review strategies.",
-            "guidance": [
-                "Use the spacing effect - distributed practice beats massed practice",
-                "Apply interleaving - mix review of different topics rather than blocking",
-                "Implement the testing effect - active recall strengthens memory more than re-reading",
-                "Adjust spacing based on forgetting curve - review more frequently for difficult material"
-            ]
-        },
-        {
-            "id": "create-comprehensive-plan",
-            "title": "Comprehensive: Create Professional Learning System",
-            "runCondition": {
-                "var": "designPath",
-                "equals": "comprehensive"
-            },
-            "prompt": "Synthesize all your planning work into a comprehensive, professional-grade learning system.\n\n**STEP 1: Advanced Learning Architecture**\n- Create detailed learning modules with proper sequencing\n- Apply cognitive load theory and chunking principles\n- Design for both depth and breadth of understanding\n- Include multiple assessment layers and feedback loops\n\n**STEP 2: Resource Curation & Management**\n- Select premium resources with multiple perspectives\n- Create resource hierarchy: primary, supplementary, reference\n- Design resource rotation and variety strategies\n- Plan for different learning phases and skill levels\n\n**STEP 3: Advanced Monitoring & Analytics**\n- Create detailed progress tracking with learning metrics\n- Design early warning systems for learning difficulties\n- Plan regular optimization based on performance data\n- Include long-term retention and skill transfer measures\n\n**DELIVERABLE: Professional Learning System**\nCreate a comprehensive document with:\n- Complete learning architecture with detailed modules and dependencies\n- Advanced scheduling with spaced repetition and interleaving\n- Curated resource collection with quality ratings and use cases\n- Multi-layer assessment system with formative and summative components\n- Detailed progress analytics and optimization protocols\n- Professional accountability system with external validation\n- Long-term maintenance and skill transfer planning\n\n**COMPREHENSIVE FOCUS**: Professional-grade system with full pedagogical depth and advanced features for serious learners.",
-            "agentRole": "You are a professional learning system architect who creates comprehensive, research-based learning programs. Focus on advanced pedagogical principles, detailed analytics, and professional-grade implementation.",
-            "guidance": [
-                "Apply advanced instructional design principles throughout",
-                "Create systems that support both immediate learning and long-term retention",
-                "Include multiple feedback loops and optimization opportunities",
-                "Design for scalability and adaptation to different learning contexts"
-            ],
-            "requireConfirmation": true,
-            "validationCriteria": [
-                {
-                    "type": "contains",
-                    "value": "architecture",
-                    "message": "System must include learning architecture"
-                },
-                {
-                    "type": "contains",
-                    "value": "analytics",
-                    "message": "System must include progress analytics"
-                },
-                {
-                    "type": "contains",
-                    "value": "retention",
-                    "message": "System must include retention strategies"
-                },
-                {
-                    "type": "length",
-                    "min": 800,
-                    "message": "System should be comprehensive (at least 800 characters)"
-                }
-            ],
-            "hasValidation": true
+          "type": "length",
+          "min": 300,
+          "message": "Plan should include essential details (at least 300 characters)"
         }
-    ]
+      ],
+      "hasValidation": true
+    },
+    {
+      "id": "design-assessment-balanced",
+      "title": "Balanced: Design Assessment Strategy",
+      "runCondition": {
+        "or": [
+          {
+            "var": "designPath",
+            "equals": "balanced"
+          },
+          {
+            "var": "designPath",
+            "equals": "comprehensive"
+          }
+        ]
+      },
+      "prompt": "Create a systematic approach to test your understanding and track progress throughout your learning journey.\n\n**STEP 1: Design Knowledge Checks**\n- For each objective, create specific ways to test your understanding\n- Include both recall tests (can you remember?) and application tests (can you use it?)\n- Design quick self-assessments you can do regularly\n- Create milestone assessments for major learning chunks\n\n**STEP 2: Create Practice Opportunities**\n- Design hands-on exercises that let you apply what you're learning\n- Create mini-projects that combine multiple concepts\n- Identify real-world problems you can practice solving\n- Plan how you'll get feedback on your practice attempts\n\n**STEP 3: Build Accountability Measures**\n- Decide how often you'll assess your progress (weekly, bi-weekly)\n- Create a simple tracking system for completed objectives\n- Design rewards for hitting learning milestones\n- Plan what you'll do if you get stuck or fall behind",
+      "agentRole": "You are an assessment design expert who creates robust systems that prevent the illusion of learning and ensure real mastery through active testing and application. Focus on multiple assessment types and practical accountability.",
+      "guidance": [
+        "Include both formative (ongoing) and summative (milestone) assessments",
+        "Design assessments that match your learning objectives",
+        "Build in multiple types of assessment - recall, application, synthesis",
+        "Create practical accountability measures that fit your lifestyle"
+      ]
+    },
+    {
+      "id": "create-balanced-plan",
+      "title": "Balanced: Create Comprehensive Learning Plan",
+      "runCondition": {
+        "var": "designPath",
+        "equals": "balanced"
+      },
+      "prompt": "Synthesize your work into a comprehensive learning plan that balances thoroughness with practical efficiency.\n\n**STEP 1: Learning Module Structure**\n- Organize your objectives into 2-4 logical learning modules\n- Each module should take 2-4 weeks to complete\n- Plan module sequence with proper dependencies\n- Include variety in each module (reading, practice, assessment)\n\n**STEP 2: Resource Organization & Schedule**\n- Select 2-3 high-quality resources per objective\n- Create a realistic weekly schedule with specific time blocks\n- Include time for: new learning (60%), practice (25%), review (15%)\n- Plan milestone checkpoints at the end of each module\n\n**STEP 3: Active Learning Integration**\n- Design hands-on activities for each learning session\n- Create mini-projects that combine multiple concepts\n- Plan regular self-testing and application exercises\n- Include reflection activities to consolidate learning\n\n**DELIVERABLE: Balanced Learning Plan**\nCreate a structured document with:\n- Learning modules with clear objectives and timelines\n- Weekly schedule with specific activities and time blocks\n- Resource list organized by module and objective\n- Assessment strategy with checkpoints and progress tracking\n- Active learning activities and practice exercises\n- Simple accountability measures and review schedule\n\n**BALANCED FOCUS**: Comprehensive system with proven pedagogical principles, practical to implement and maintain.",
+      "agentRole": "You are a learning design specialist who creates comprehensive yet practical learning plans. Focus on balancing thoroughness with efficiency, ensuring the plan is both pedagogically sound and realistically achievable.",
+      "guidance": [
+        "Create a plan that's comprehensive but not overwhelming",
+        "Balance structure with flexibility for different learning paces",
+        "Include multiple learning modalities and assessment types",
+        "Design for consistency and sustainability over time"
+      ],
+      "requireConfirmation": true,
+      "validationCriteria": [
+        {
+          "type": "contains",
+          "value": "module",
+          "message": "Plan must include learning modules"
+        },
+        {
+          "type": "contains",
+          "value": "schedule",
+          "message": "Plan must include detailed schedule"
+        },
+        {
+          "type": "contains",
+          "value": "assessment",
+          "message": "Plan must include assessment strategy"
+        },
+        {
+          "type": "length",
+          "min": 500,
+          "message": "Plan should be comprehensive (at least 500 characters)"
+        }
+      ],
+      "hasValidation": true
+    },
+    {
+      "id": "design-spaced-repetition-comprehensive",
+      "title": "Comprehensive: Design Spaced Repetition System",
+      "runCondition": {
+        "var": "designPath",
+        "equals": "comprehensive"
+      },
+      "prompt": "Build in systematic review and reinforcement to combat forgetting and strengthen long-term retention.\n\n**STEP 1: Plan Review Schedule**\n- Schedule initial review 1 day after learning new material\n- Plan subsequent reviews at 3 days, 1 week, 2 weeks, 1 month intervals\n- Adjust intervals based on difficulty and importance of material\n- Build review time into your overall learning schedule\n\n**STEP 2: Create Review Materials**\n- Design quick review activities for each major concept\n- Create flashcards, summary sheets, or quick quizzes\n- Build cumulative reviews that combine multiple topics\n- Plan how you'll review practical skills, not just knowledge\n\n**STEP 3: Integrate Review with New Learning**\n- Start each learning session with brief review of previous material\n- Connect new concepts to previously learned material\n- Plan periodic comprehensive reviews of all modules\n- Design ways to apply old concepts in new contexts",
+      "agentRole": "You are a memory and retention specialist who implements spaced repetition and interleaving to combat the forgetting curve and strengthen long-term retention. Focus on evidence-based spacing intervals and cumulative review strategies.",
+      "guidance": [
+        "Use the spacing effect - distributed practice beats massed practice",
+        "Apply interleaving - mix review of different topics rather than blocking",
+        "Implement the testing effect - active recall strengthens memory more than re-reading",
+        "Adjust spacing based on forgetting curve - review more frequently for difficult material"
+      ]
+    },
+    {
+      "id": "create-comprehensive-plan",
+      "title": "Comprehensive: Create Professional Learning System",
+      "runCondition": {
+        "var": "designPath",
+        "equals": "comprehensive"
+      },
+      "prompt": "Synthesize all your planning work into a comprehensive, professional-grade learning system.\n\n**STEP 1: Advanced Learning Architecture**\n- Create detailed learning modules with proper sequencing\n- Apply cognitive load theory and chunking principles\n- Design for both depth and breadth of understanding\n- Include multiple assessment layers and feedback loops\n\n**STEP 2: Resource Curation & Management**\n- Select premium resources with multiple perspectives\n- Create resource hierarchy: primary, supplementary, reference\n- Design resource rotation and variety strategies\n- Plan for different learning phases and skill levels\n\n**STEP 3: Advanced Monitoring & Analytics**\n- Create detailed progress tracking with learning metrics\n- Design early warning systems for learning difficulties\n- Plan regular optimization based on performance data\n- Include long-term retention and skill transfer measures\n\n**DELIVERABLE: Professional Learning System**\nCreate a comprehensive document with:\n- Complete learning architecture with detailed modules and dependencies\n- Advanced scheduling with spaced repetition and interleaving\n- Curated resource collection with quality ratings and use cases\n- Multi-layer assessment system with formative and summative components\n- Detailed progress analytics and optimization protocols\n- Professional accountability system with external validation\n- Long-term maintenance and skill transfer planning\n\n**COMPREHENSIVE FOCUS**: Professional-grade system with full pedagogical depth and advanced features for serious learners.",
+      "agentRole": "You are a professional learning system architect who creates comprehensive, research-based learning programs. Focus on advanced pedagogical principles, detailed analytics, and professional-grade implementation.",
+      "guidance": [
+        "Apply advanced instructional design principles throughout",
+        "Create systems that support both immediate learning and long-term retention",
+        "Include multiple feedback loops and optimization opportunities",
+        "Design for scalability and adaptation to different learning contexts"
+      ],
+      "requireConfirmation": true,
+      "validationCriteria": [
+        {
+          "type": "contains",
+          "value": "architecture",
+          "message": "System must include learning architecture"
+        },
+        {
+          "type": "contains",
+          "value": "analytics",
+          "message": "System must include progress analytics"
+        },
+        {
+          "type": "contains",
+          "value": "retention",
+          "message": "System must include retention strategies"
+        },
+        {
+          "type": "length",
+          "min": 800,
+          "message": "System should be comprehensive (at least 800 characters)"
+        }
+      ],
+      "hasValidation": true
+    }
+  ]
 }

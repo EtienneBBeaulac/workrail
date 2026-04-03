@@ -1,8 +1,8 @@
 {
   "id": "coding-task-workflow-agentic",
-  "name": "Agentic Task Dev Workflow (v2 • Notes-First • WorkRail Executor)",
+  "name": "Agentic Task Dev Workflow (v2 \u2022 Notes-First \u2022 WorkRail Executor)",
   "version": "2.0.0",
-  "description": "A v2-first coding workflow that keeps the high-quality architecture and audit loops from the legacy task workflow while removing CONTEXT.md ceremony, Builder ownership, and unnecessary phase serialization. Uses notesMarkdown as the durable default, keeps implementation_plan.md as the human planning artifact, and applies the user's coding philosophy as the primary evaluation lens.",
+  "description": "Use this to implement a software feature or task. Follows a plan-then-execute approach with architecture decisions, invariant tracking, and final verification.",
   "recommendedPreferences": {
     "recommendedAutonomy": "guided",
     "recommendedRiskPolicy": "conservative"
@@ -40,8 +40,8 @@
   "steps": [
     {
       "id": "phase-0-triage-and-mode",
-      "title": "Phase 0: Triage (Complexity • Risk • PR Strategy)",
-      "prompt": "Analyze the task and choose the right rigor.\n\nClassify:\n- `taskComplexity`: Small / Medium / Large\n- `riskLevel`: Low / Medium / High\n- `rigorMode`: QUICK / STANDARD / THOROUGH\n- `automationLevel`: High / Medium / Low\n- `prStrategy`: SinglePR / MultiPR\n- `maxParallelism`: 0 / 3 / 4\n\nDecision guidance:\n- QUICK: small, low-risk, clear path, little ambiguity\n- STANDARD: medium scope or moderate risk\n- THOROUGH: large scope, architectural uncertainty, or high-risk change\n\nParallelism guidance:\n- QUICK: no delegation by default\n- STANDARD: few delegation moments, but allow multiple parallel executors at each moment\n- THOROUGH: same pattern, but with one extra delegation moment and broader parallel validation\n\nAlso capture `userRules` from the active session instructions and explicit philosophy. Keep them as a focused list of concrete, actionable rules.\n\nSet these keys in the next `continue_workflow` call's `context` object: `taskComplexity`, `riskLevel`, `rigorMode`, `automationLevel`, `prStrategy`, `maxParallelism`, `userRules`.\n\nAsk the user to confirm only if the rigor or PR strategy materially affects delivery expectations.",
+      "title": "Phase 0: Triage (Complexity \u2022 Risk \u2022 PR Strategy)",
+      "prompt": "Analyze the task and choose the right rigor.\n\nClassify:\n- `taskComplexity`: Small / Medium / Large\n- `riskLevel`: Low / Medium / High\n- `rigorMode`: QUICK / STANDARD / THOROUGH\n- `automationLevel`: High / Medium / Low\n- `prStrategy`: SinglePR / MultiPR\n- `maxParallelism`: 0 / 3 / 4\n\nDecision guidance:\n- QUICK: small, low-risk, clear path, little ambiguity\n- STANDARD: medium scope or moderate risk\n- THOROUGH: large scope, architectural uncertainty, or high-risk change\n\nParallelism guidance:\n- QUICK: no delegation by default\n- STANDARD: few delegation moments, but allow multiple parallel executors at each moment\n- THOROUGH: same pattern, but with one extra delegation moment and broader parallel validation\n\nAlso capture `userRules` from the active session instructions and explicit philosophy. Keep them as a focused list of concrete, actionable rules.\n\nSet these keys in the next `continue_workflow` call's `context` object: `taskComplexity`, `riskLevel`, `rigorMode`, `automationLevel`, `prStrategy`, `maxParallelism`, `userRules`.\n\nAsk the user to confirm only if the rigor or PR strategy materially affects delivery expectations.\n\nAlso set  in the context object: one sentence describing what you are trying to accomplish (e.g. \"implement OAuth refresh token rotation\", \"review PR #47 before merge\"). This populates the session title in the Workspace console immediately.",
       "requireConfirmation": true
     },
     {
@@ -50,8 +50,14 @@
       "prompt": "If critical information is missing, ask only for the minimum required to proceed.\n\nAsk for:\n- acceptance criteria or expected behavior (if absent)\n- non-goals (if unclear)\n- environment or permission constraints (if they materially block progress)\n- pointers to relevant code areas only if codebase search cannot answer it\n\nDo NOT ask questions you can resolve with tools.",
       "requireConfirmation": {
         "or": [
-          { "var": "automationLevel", "equals": "Low" },
-          { "var": "automationLevel", "equals": "Medium" }
+          {
+            "var": "automationLevel",
+            "equals": "Low"
+          },
+          {
+            "var": "automationLevel",
+            "equals": "Medium"
+          }
         ]
       }
     },
@@ -75,24 +81,39 @@
       "prompt": "Reassess the initial triage now that context is real instead of hypothetical.\n\nReview:\n- `contextUnknownCount`\n- number of systems/components actually involved\n- number of critical invariants discovered\n- whether the task now looks broader or riskier than Phase 0 suggested\n\nDo:\n- confirm or adjust `taskComplexity`\n- confirm or adjust `riskLevel`\n- confirm or adjust `rigorMode`\n- confirm or adjust `maxParallelism`\n\nRules:\n- upgrade rigor if the real architecture surface or uncertainty is larger than expected\n- downgrade only if the task is genuinely simpler than it first appeared\n- if you change the mode, explain why using concrete evidence from the context gathering step\n\nSet these keys in the next `continue_workflow` call's `context` object:\n- `taskComplexity`\n- `riskLevel`\n- `rigorMode`\n- `maxParallelism`\n- `retriageChanged` (true/false)",
       "requireConfirmation": {
         "or": [
-          { "var": "retriageChanged", "equals": true },
-          { "var": "automationLevel", "equals": "Low" }
+          {
+            "var": "retriageChanged",
+            "equals": true
+          },
+          {
+            "var": "automationLevel",
+            "equals": "Low"
+          }
         ]
       }
     },
     {
       "id": "phase-2-architecture-decision",
-      "title": "Phase 2: Architecture Decision (Generate • Compare • Challenge • Select)",
+      "title": "Phase 2: Architecture Decision (Generate \u2022 Compare \u2022 Challenge \u2022 Select)",
       "runCondition": {
         "var": "taskComplexity",
         "not_equals": "Small"
       },
-      "prompt": "Make the architecture decision in one coherent phase instead of serializing every thinking mode into a separate step.\n\nPart A — Prepare a neutral fact packet:\n- problem statement\n- acceptance criteria\n- non-goals\n- invariants\n- constraints\n- `userRules`\n- relevant files / pattern examples\n- current risks and unknowns\n\nPart B — Generate candidate plans:\n- QUICK: self-generate at least 3 genuinely different approaches\n- STANDARD: if delegation is available, spawn TWO or THREE WorkRail Executors SIMULTANEOUSLY running `routine-plan-generation` with different perspectives (for example simplicity, maintainability, pragmatic)\n- THOROUGH: if delegation is available, spawn THREE or FOUR WorkRail Executors SIMULTANEOUSLY running `routine-plan-generation` with different perspectives (for example simplicity, maintainability, architecture-first, rollback-safe)\n\nPart C — Diversity gate before commitment:\n- assign each candidate plan a short `candidatePlanFamily` label\n- check whether the candidates are materially different in shape, not just wording\n- if all candidates cluster on the same pattern family, generate at least one more plan from a deliberately different perspective before selecting\n- set `candidateDiversityAdequate = true|false`\n\nPart D — Compare candidate plans:\n- invariant fit\n- philosophy alignment (`userRules` as active lens)\n- risk profile\n- implementation shape\n- likely reviewability / PR shape\n\nPart E — Challenge the best one or two:\n- STANDARD: optionally challenge the leading candidate with ONE WorkRail Executor running `routine-hypothesis-challenge`\n- THOROUGH: challenge the top 1-2 candidate plans using ONE or TWO WorkRail Executors running `routine-hypothesis-challenge`\n\nPart F — Decide:\nSet these keys in the next `continue_workflow` call's `context` object:\n- `approaches`\n- `alternativesConsideredCount`\n- `candidatePlanFamilies`\n- `candidateDiversityAdequate`\n- `hasRunnerUp`\n- `selectedApproach`\n- `runnerUpApproach`\n- `architectureRationale`\n- `keyRiskToMonitor`\n- `pivotTriggers`\n- `architectureConfidenceBand`\n\nRules:\n- the main agent owns the final decision\n- subagents generate candidate plans; they do not decide the winner\n- if the challenged leading candidate no longer looks best, switch deliberately rather than defending sunk cost",
+      "prompt": "Make the architecture decision in one coherent phase instead of serializing every thinking mode into a separate step.\n\nPart A \u2014 Prepare a neutral fact packet:\n- problem statement\n- acceptance criteria\n- non-goals\n- invariants\n- constraints\n- `userRules`\n- relevant files / pattern examples\n- current risks and unknowns\n\nPart B \u2014 Generate candidate plans:\n- QUICK: self-generate at least 3 genuinely different approaches\n- STANDARD: if delegation is available, spawn TWO or THREE WorkRail Executors SIMULTANEOUSLY running `routine-plan-generation` with different perspectives (for example simplicity, maintainability, pragmatic)\n- THOROUGH: if delegation is available, spawn THREE or FOUR WorkRail Executors SIMULTANEOUSLY running `routine-plan-generation` with different perspectives (for example simplicity, maintainability, architecture-first, rollback-safe)\n\nPart C \u2014 Diversity gate before commitment:\n- assign each candidate plan a short `candidatePlanFamily` label\n- check whether the candidates are materially different in shape, not just wording\n- if all candidates cluster on the same pattern family, generate at least one more plan from a deliberately different perspective before selecting\n- set `candidateDiversityAdequate = true|false`\n\nPart D \u2014 Compare candidate plans:\n- invariant fit\n- philosophy alignment (`userRules` as active lens)\n- risk profile\n- implementation shape\n- likely reviewability / PR shape\n\nPart E \u2014 Challenge the best one or two:\n- STANDARD: optionally challenge the leading candidate with ONE WorkRail Executor running `routine-hypothesis-challenge`\n- THOROUGH: challenge the top 1-2 candidate plans using ONE or TWO WorkRail Executors running `routine-hypothesis-challenge`\n\nPart F \u2014 Decide:\nSet these keys in the next `continue_workflow` call's `context` object:\n- `approaches`\n- `alternativesConsideredCount`\n- `candidatePlanFamilies`\n- `candidateDiversityAdequate`\n- `hasRunnerUp`\n- `selectedApproach`\n- `runnerUpApproach`\n- `architectureRationale`\n- `keyRiskToMonitor`\n- `pivotTriggers`\n- `architectureConfidenceBand`\n\nRules:\n- the main agent owns the final decision\n- subagents generate candidate plans; they do not decide the winner\n- if the challenged leading candidate no longer looks best, switch deliberately rather than defending sunk cost",
       "requireConfirmation": {
         "or": [
-          { "var": "automationLevel", "equals": "Low" },
-          { "var": "taskComplexity", "equals": "Large" },
-          { "var": "riskLevel", "equals": "High" }
+          {
+            "var": "automationLevel",
+            "equals": "Low"
+          },
+          {
+            "var": "taskComplexity",
+            "equals": "Large"
+          },
+          {
+            "var": "riskLevel",
+            "equals": "High"
+          }
         ]
       }
     },
@@ -103,13 +124,13 @@
         "var": "taskComplexity",
         "not_equals": "Small"
       },
-      "prompt": "Create or update the human-facing implementation artifact: `implementation_plan.md`.\n\nThis phase combines slicing, plan drafting, philosophy alignment, and test design.\n\nThe plan must include:\n1. Problem statement\n2. Acceptance criteria\n3. Non-goals\n4. Applied `userRules` and philosophy-driven constraints\n5. Invariants\n6. Selected approach + rationale + runner-up\n7. Vertical slices\n8. Work packages only when they improve execution or enable safe parallelism\n9. Test design\n10. Risk register\n11. PR packaging strategy\n12. Philosophy alignment per slice:\n   - [principle] → [satisfied / tension / violated + 1-line why]\n\nSet these keys in the next `continue_workflow` call's `context` object:\n- `implementationPlan`\n- `slices`\n- `testDesign`\n- `estimatedPRCount`\n- `followUpTickets` (initialize if needed)\n- `unresolvedUnknownCount`\n- `planConfidenceBand`\n\nRules:\n- keep `implementation_plan.md` concrete enough for another engineer to implement without guessing\n- use work packages only when they create real clarity; do not over-fragment work\n- use the user's coding philosophy as the primary planning lens, and name tensions explicitly\n- set `unresolvedUnknownCount` to the number of still-open issues that would materially affect implementation quality\n- set `planConfidenceBand` to Low / Medium / High based on how ready the plan actually is",
+      "prompt": "Create or update the human-facing implementation artifact: `implementation_plan.md`.\n\nThis phase combines slicing, plan drafting, philosophy alignment, and test design.\n\nThe plan must include:\n1. Problem statement\n2. Acceptance criteria\n3. Non-goals\n4. Applied `userRules` and philosophy-driven constraints\n5. Invariants\n6. Selected approach + rationale + runner-up\n7. Vertical slices\n8. Work packages only when they improve execution or enable safe parallelism\n9. Test design\n10. Risk register\n11. PR packaging strategy\n12. Philosophy alignment per slice:\n   - [principle] \u2192 [satisfied / tension / violated + 1-line why]\n\nSet these keys in the next `continue_workflow` call's `context` object:\n- `implementationPlan`\n- `slices`\n- `testDesign`\n- `estimatedPRCount`\n- `followUpTickets` (initialize if needed)\n- `unresolvedUnknownCount`\n- `planConfidenceBand`\n\nRules:\n- keep `implementation_plan.md` concrete enough for another engineer to implement without guessing\n- use work packages only when they create real clarity; do not over-fragment work\n- use the user's coding philosophy as the primary planning lens, and name tensions explicitly\n- set `unresolvedUnknownCount` to the number of still-open issues that would materially affect implementation quality\n- set `planConfidenceBand` to Low / Medium / High based on how ready the plan actually is",
       "requireConfirmation": false
     },
     {
       "id": "phase-4-plan-iterations",
       "type": "loop",
-      "title": "Phase 4: Plan Audit Loop (Audit → Refocus → Decide)",
+      "title": "Phase 4: Plan Audit Loop (Audit \u2192 Refocus \u2192 Decide)",
       "runCondition": {
         "var": "taskComplexity",
         "not_equals": "Small"
@@ -139,7 +160,7 @@
         {
           "id": "phase-4c-loop-decision",
           "title": "Loop Exit Decision",
-          "prompt": "Provide a loop control artifact.\n\nDecision rules:\n- if `planFindings` is non-empty → continue\n- if `planFindings` is empty → stop, but enumerate what was checked to justify the clean pass\n- if max iterations reached → stop and document remaining concerns\n\nOutput exactly:\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
+          "prompt": "Provide a loop control artifact.\n\nDecision rules:\n- if `planFindings` is non-empty \u2192 continue\n- if `planFindings` is empty \u2192 stop, but enumerate what was checked to justify the clean pass\n- if max iterations reached \u2192 stop and document remaining concerns\n\nOutput exactly:\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
           "requireConfirmation": true,
           "outputContract": {
             "contractRef": "wr.contracts.loop_control"
@@ -157,9 +178,18 @@
       "prompt": "Verify that planning is complete enough to start implementation.\n\nRequired checks:\n- selected approach and rationale exist\n- runner-up exists\n- pivot triggers are concrete enough to act on\n- slices are defined with scope, verification, and boundaries\n- `implementation_plan.md` reflects the current intended work\n- no unresolved planning gaps remain that would block implementation\n- `alternativesConsideredCount` shows real exploration happened\n\nSet these keys in the next `continue_workflow` call's `context` object:\n- `planningGaps`\n- `planningComplete`\n\nRule:\n- if any gap can be fixed immediately, fix it now and do not carry it forward as a gap\n- only stop for user input when a true decision is missing",
       "requireConfirmation": {
         "or": [
-          { "var": "automationLevel", "equals": "Low" },
-          { "var": "taskComplexity", "equals": "Large" },
-          { "var": "riskLevel", "equals": "High" }
+          {
+            "var": "automationLevel",
+            "equals": "Low"
+          },
+          {
+            "var": "taskComplexity",
+            "equals": "Large"
+          },
+          {
+            "var": "riskLevel",
+            "equals": "High"
+          }
         ]
       }
     },
@@ -195,9 +225,18 @@
           "prompt": "Before implementing slice `{{currentSlice.name}}`, verify:\n- pivot triggers have not fired\n- the plan assumptions are still fresh enough\n- target files and symbols still match the plan\n- the slice remains reviewable and bounded\n\nSet these keys in the next `continue_workflow` call's `context` object:\n- `pivotTriggered`\n- `pivotSeverity`\n- `pivotReturnPhase`\n- `slicePlanStale`\n- `validationFailed`\n\nIf drift or invalid assumptions are discovered, stop and return to planning deliberately rather than coding through it.",
           "requireConfirmation": {
             "or": [
-              { "var": "pivotTriggered", "equals": true },
-              { "var": "slicePlanStale", "equals": true },
-              { "var": "validationFailed", "equals": true }
+              {
+                "var": "pivotTriggered",
+                "equals": true
+              },
+              {
+                "var": "slicePlanStale",
+                "equals": true
+              },
+              {
+                "var": "validationFailed",
+                "equals": true
+              }
             ]
           }
         },
@@ -213,8 +252,14 @@
           "prompt": "Verify slice `{{currentSlice.name}}`.\n\nAlways:\n- run planned verification commands\n- update or add tests when needed\n- ensure invariants still hold\n- check philosophy-alignment regressions introduced by the implementation\n\nFresh-eye validation triggers:\n- if `specialCaseIntroduced = true`\n- if `unplannedAbstractionIntroduced = true`\n- if this slice touched unexpected files\n- if runtime behavior still feels uncertain\n\nMode-adaptive validation:\n- QUICK: self-verify unless a fresh-eye trigger fires\n- STANDARD: if delegation is available and any fresh-eye trigger fires, spawn TWO or THREE WorkRail Executors SIMULTANEOUSLY running `routine-hypothesis-challenge`, `routine-execution-simulation`, and optionally `routine-philosophy-alignment`\n- THOROUGH + high-risk or any fresh-eye trigger: if delegation is available, spawn FOUR WorkRail Executors SIMULTANEOUSLY running `routine-hypothesis-challenge`, `routine-execution-simulation`, `routine-plan-analysis`, and `routine-philosophy-alignment`\n\nParallel-output synthesis rules:\n- if 2+ validators independently raise the same serious concern, treat it as blocking by default\n- if exactly one validator raises a concern, attempt to understand and resolve it before escalating\n- if validators disagree, record the disagreement explicitly and prefer the safer path when uncertainty remains high\n\nSet these keys in the next `continue_workflow` call's `context` object:\n- `sliceVerified`\n- `verificationFindings`\n- `verificationFailed`\n- `verificationApprovalRequired`\n- `verificationRetried`\n- `verificationConcernCount`\n- `verificationConsensusLevel`\n\nRule:\n- if 2+ independent validators raise serious concerns, stop and return to planning or ask the user which path to take",
           "requireConfirmation": {
             "or": [
-              { "var": "verificationApprovalRequired", "equals": true },
-              { "var": "verificationFailed", "equals": true }
+              {
+                "var": "verificationApprovalRequired",
+                "equals": true
+              },
+              {
+                "var": "verificationFailed",
+                "equals": true
+              }
             ]
           }
         },
@@ -224,9 +269,18 @@
           "prompt": "After a verified slice:\n- compare actual changed scope against the slice plan\n- if the slice drifted, update `implementation_plan.md` immediately and record the reason in notes\n- if `prStrategy = MultiPR`, stop here with a concise PR package for user review before continuing\n\nSet these keys in the next `continue_workflow` call's `context` object:\n- `planDrift`\n- `rulesDrift`\n- `changedFilesOutsidePlannedScope`\n- `scopeDriftDetected`\n\nRule:\n- do not rely on markdown sidecar state; notesMarkdown is the durable recap and `implementation_plan.md` is the human artifact",
           "requireConfirmation": {
             "or": [
-              { "var": "prStrategy", "equals": "MultiPR" },
-              { "var": "planDrift", "equals": true },
-              { "var": "rulesDrift", "equals": true }
+              {
+                "var": "prStrategy",
+                "equals": "MultiPR"
+              },
+              {
+                "var": "planDrift",
+                "equals": true
+              },
+              {
+                "var": "rulesDrift",
+                "equals": true
+              }
             ]
           }
         }
@@ -242,8 +296,14 @@
       "prompt": "Perform final integration verification.\n\nRequired:\n- verify acceptance criteria\n- map invariants to concrete proof (tests, build results, explicit reasoning)\n- run whole-task validation commands\n- identify any invariant violations or regressions\n- confirm the implemented result still aligns with the user's coding philosophy, naming any tensions explicitly\n- review cumulative drift across all slices, not just the current one\n- check whether repeated small compromises added up to a larger pattern problem\n\nSet these keys in the next `continue_workflow` call's `context` object:\n- `integrationVerificationPassed`\n- `integrationVerificationFailed`\n- `integrationVerificationFindings`\n- `regressionDetected`\n- `invariantViolations`\n- `crossSliceDriftDetected`",
       "requireConfirmation": {
         "or": [
-          { "var": "integrationVerificationFailed", "equals": true },
-          { "var": "regressionDetected", "equals": true }
+          {
+            "var": "integrationVerificationFailed",
+            "equals": true
+          },
+          {
+            "var": "regressionDetected",
+            "equals": true
+          }
         ]
       }
     },
