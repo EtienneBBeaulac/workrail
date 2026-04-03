@@ -317,17 +317,27 @@ function printStalenessAdvisory(repoRoot: string): void {
   const stale: string[] = [];
   const unstamped: string[] = [];
 
+  const seenIds = new Set<string>();
   for (const file of fs.readdirSync(workflowsDir)) {
     if (!file.endsWith('.json')) continue;
     try {
       const wf: unknown = JSON.parse(fs.readFileSync(path.join(workflowsDir, file), 'utf-8'));
       if (typeof wf !== 'object' || wf === null || !('id' in wf)) continue;
       const def = wf as Record<string, unknown>;
+      const id = String(def['id'] ?? file);
+
+      // Deduplicate by workflow ID (multiple files can share the same ID)
+      if (seenIds.has(id)) continue;
+      seenIds.add(id);
+
+      // Skip test fixture workflows — they are never run through workflow-for-workflows
+      if (id.startsWith('test-')) continue;
+
       const stamp = def['validatedAgainstSpecVersion'];
       if (stamp === undefined || stamp === null) {
-        unstamped.push(String(def['id'] ?? file));
+        unstamped.push(id);
       } else if (typeof stamp === 'number' && stamp < currentSpecVersion) {
-        stale.push(`${String(def['id'] ?? file)} (v${stamp} → v${currentSpecVersion})`);
+        stale.push(`${id} (v${stamp} → v${currentSpecVersion})`);
       }
     } catch {
       // Skip unparseable files — schema validation will catch them
