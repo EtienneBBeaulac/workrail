@@ -236,7 +236,7 @@ describe('v2 start_workflow (Slice 3.5)', () => {
       const workflowId = 'test-workflow';
       const { ctx } = await mkCtxWithWorkflow(workflowId);
 
-      const start = await handleV2StartWorkflow({ workflowId, workspacePath: root } as any, ctx);
+      const start = await handleV2StartWorkflow({ workflowId, workspacePath: root, goal: "test workflow execution" } as any, ctx);
       expect(start.type).toBe('success');
       if (start.type !== 'success') return;
 
@@ -297,7 +297,7 @@ describe('v2 start_workflow (Slice 3.5)', () => {
       );
 
       const ctx = await mkRequestCtx();
-      const start = await handleV2StartWorkflow({ workflowId, workspacePath: workspaceDir } as any, ctx);
+      const start = await handleV2StartWorkflow({ workflowId, workspacePath: workspaceDir, goal: "test workflow execution" } as any, ctx);
       expect(start.type).toBe('success');
       if (start.type !== 'success') return;
 
@@ -352,7 +352,7 @@ describe('v2 start_workflow (Slice 3.5)', () => {
       const workflowId = 'invalid-workflow';
       const ctx = await mkCtxWithInvalidWorkflow(workflowId);
 
-      const res = await handleV2StartWorkflow({ workflowId, workspacePath: root } as any, ctx);
+      const res = await handleV2StartWorkflow({ workflowId, workspacePath: root, goal: "test workflow execution" } as any, ctx);
 
       // Must fail before session creation — not later at continue_workflow
       expect(res.type).toBe('error');
@@ -377,7 +377,7 @@ describe('v2 start_workflow (Slice 3.5)', () => {
         const workflowId = 'test-workflow';
         const { ctx, aliasStore } = await mkCtxWithWorkflow(workflowId);
 
-      const res = await handleV2StartWorkflow({ workflowId, workspacePath: root } as any, ctx);
+      const res = await handleV2StartWorkflow({ workflowId, workspacePath: root, goal: "test workflow execution" } as any, ctx);
       expect(res.type).toBe('success');
       if (res.type === 'error') {
         console.error('ERROR:', res.code, res.message);

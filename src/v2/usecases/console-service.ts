@@ -105,6 +105,11 @@ type WorkflowNameMap = Readonly<Record<string, string>>;
 export class ConsoleService {
   constructor(private readonly ports: ConsoleServicePorts) {}
 
+  /** Returns the absolute path to the sessions directory -- used by the SSE watcher. */
+  getSessionsDir(): string {
+    return this.ports.dataDir.sessionsDir();
+  }
+
   getSessionList(): ResultAsync<ConsoleSessionListResponse, ConsoleServiceError> {
     return this.ports.directoryListing
       .readdirWithMtime(this.ports.dataDir.sessionsDir())
@@ -446,7 +451,9 @@ function deriveSessionTitle(events: readonly DomainEventV1[]): string | null {
       for (const key of TITLE_CONTEXT_KEYS) {
         const val = runCtx.context[key];
         if (typeof val === 'string' && val.trim().length > 0) {
-          return truncateTitle(val.trim());
+          // Context keys (goal, taskDescription, etc.) are explicitly set by the
+          // agent at session start -- return the full string without truncation.
+          return val.trim();
         }
       }
     }

@@ -17,6 +17,8 @@ export interface ConsoleWorktreeSummary {
   readonly changedCount: number;
   readonly aheadCount: number;
   readonly activeSessionCount: number;
+  /** Content of `git config branch.<name>.description`. Absent when unset. */
+  readonly description?: string;
 }
 
 export interface ConsoleRepoWorktrees {

@@ -120,7 +120,7 @@ describe('handleV2CheckpointWorkflow (integration)', () => {
 
   /** Start a workflow, assert success, return data */
   async function startWorkflow(ctx: ToolContext) {
-    const result = await handleV2StartWorkflow({ workflowId: 'checkpoint-test', workspacePath: root } as any, ctx);
+    const result = await handleV2StartWorkflow({ workflowId: 'checkpoint-test', workspacePath: root, goal: 'test checkpoint' } as any, ctx);
     expect(result.type).toBe('success');
     if (result.type !== 'success') throw new Error('start_workflow failed');
     const data = result.data;

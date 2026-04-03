@@ -101,7 +101,7 @@ describe('v2 execution: SESSION_NOT_HEALTHY error response', () => {
       const ctx = await mkCtxWithWorkflow(workflowId);
 
       // Create a healthy session initially
-      const started = await handleV2StartWorkflow({ workflowId , workspacePath: root } as any, ctx);
+      const started = await handleV2StartWorkflow({ workflowId, workspacePath: root, goal: 'test workflow execution' } as any, ctx);
       expect(started.type).toBe('success');
       if (started.type !== 'success') return;
 
@@ -170,7 +170,7 @@ describe('v2 execution: SESSION_NOT_HEALTHY error response', () => {
       const ctx = await mkCtxWithWorkflow(workflowId);
 
       // Create and corrupt session
-      const started = await handleV2StartWorkflow({ workflowId , workspacePath: root } as any, ctx);
+      const started = await handleV2StartWorkflow({ workflowId, workspacePath: root, goal: 'test workflow execution' } as any, ctx);
       expect(started.type).toBe('success');
       if (started.type !== 'success') return;
 

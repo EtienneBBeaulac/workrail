@@ -101,7 +101,7 @@ describe('v2 continue_workflow rehydrate-only is pure (no durable writes)', () =
       const workflowId = 'test-workflow';
       const ctx = await mkCtxWithWorkflow(workflowId);
 
-      const start = await handleV2StartWorkflow({ workflowId , workspacePath: root } as any, ctx);
+      const start = await handleV2StartWorkflow({ workflowId, workspacePath: root, goal: 'test workflow execution' } as any, ctx);
       expect(start.type).toBe('success');
       if (start.type !== 'success') return;
 

@@ -371,7 +371,10 @@ function deriveSessionTitle(events: readonly DomainEventV1[], runId: string): st
       for (const key of TITLE_CONTEXT_KEYS) {
         const val = runCtx.context[key];
         if (typeof val === 'string' && val.trim().length > 0) {
-          return truncateTitle(val.trim());
+          // Context keys (goal, taskDescription, etc.) are explicitly set by the agent
+          // or user at session start -- do not truncate them. Truncation only applies to
+          // titles inferred from recap text (extractTitleFromFirstRecap below).
+          return val.trim();
         }
       }
     }
