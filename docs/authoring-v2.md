@@ -440,6 +440,29 @@ To keep authoring simple:
 - The canonical pin is a **content hash** of the **fully expanded compiled workflow** (including template expansions, feature application, and contract pack selection), not a human-maintained `version` string.
 - Human `version` fields may exist as labels, but should not be the source of truth for determinism.
 
+### Workflow staleness
+
+Workflows can drift out of sync with the authoring spec they were written against. WorkRail surfaces this as a `staleness` signal in `list_workflows` and `inspect_workflow` output.
+
+**How it works:** Workflows carry an optional `validatedAgainstSpecVersion` field stamped by `workflow-for-workflows` after the quality gate passes. The engine compares this against the current `spec/authoring-spec.json` version at list/inspect time and returns:
+
+- `none` — workflow was validated against the current spec version
+- `likely` — spec was updated since the workflow was last reviewed
+- `possible` — workflow has never been run through `workflow-for-workflows`
+
+**Stamping a workflow:**
+
+```bash
+npm run stamp-workflow -- workflows/my-workflow.json
+git add workflows/my-workflow.json && git commit -m "chore: stamp workflow"
+```
+
+The stamp must be committed to take effect. The `workflow-for-workflows` Phase 7 step includes a reminder to do this.
+
+**Visibility:** By default, the staleness signal is only shown for user-owned/imported workflows (`personal`, `rooted_sharing`, `external`). Built-in and legacy_project workflows are excluded. Set `WORKRAIL_DEV_STALENESS=1` to see staleness for all categories (useful for catalog maintenance).
+
+**In `validate:registry`:** The validator prints a non-blocking advisory listing unstamped and outdated workflows after each run. This is always visible regardless of the dev flag.
+
 ### Debugging and auditing
 
 WorkRail v2 treats debugging/auditing as first-class:
