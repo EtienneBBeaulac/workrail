@@ -51,8 +51,8 @@ const DEV_STALENESS: boolean = process.env['WORKRAIL_DEV_STALENESS'] === '1';
  * Whether to surface the staleness field for a given workflow visibility category.
  * By default only user-owned/imported workflows get the signal; DEV_STALENESS bypasses this.
  */
-function shouldShowStaleness(category: string | undefined): boolean {
-  if (DEV_STALENESS) return true;
+export function shouldShowStaleness(category: string | undefined, devMode: boolean = DEV_STALENESS): boolean {
+  if (devMode) return true;
   return category === 'personal' || category === 'rooted_sharing' || category === 'external';
 }
 
@@ -270,10 +270,10 @@ export async function handleV2InspectWorkflow(
               ...(stalePaths.length > 0 ? { staleRoots: [...stalePaths] } : {}),
               ...(references != null && references.length > 0 ? { references } : {}),
               ...(() => {
-                const s = shouldShowStaleness(visibility?.category)
+                const staleness = shouldShowStaleness(visibility?.category)
                   ? computeWorkflowStaleness(workflow.definition.validatedAgainstSpecVersion, CURRENT_SPEC_VERSION)
                   : undefined;
-                return s !== undefined ? { staleness: s } : {};
+                return staleness !== undefined ? { staleness } : {};
               })(),
             });
             return okAsync(success(payload) as ToolResult<unknown>);
