@@ -177,6 +177,10 @@ export const V2WorkflowInspectOutputSchema = z.object({
     'Workflows from these paths were not included in this response. ' +
     'These paths will be rechecked on the next call.'
   ),
+  warnings: z.array(z.string()).optional().describe(
+    'Advisory messages about infrastructure issues that did not prevent a response but may have caused incomplete results. ' +
+    'Example: the managed source store was temporarily unavailable and managed sources were not loaded.'
+  ),
   references: z.array(z.object({
     id: z.string().min(1),
     title: z.string().min(1),

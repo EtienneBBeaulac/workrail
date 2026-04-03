@@ -107,12 +107,15 @@ export async function createWorkflowReaderForRequest(
   // Paths that exist on disk are added to customPaths; paths that are missing are tracked
   // separately so callers can surface them in staleRoots and the source catalog.
   const { records: allManagedRecords, storeError: managedStoreError } = await listManagedSourceRecords(options.managedSourceStore);
-  // NOTE: normalizedCustom only covers paths from remembered-root discovery and does not
-  // include env-configured paths (WORKFLOW_STORAGE_PATH). If a managed source path matches
-  // an env-configured custom path, the managed path will still be appended to customPaths,
-  // creating a duplicate storage instance. This is a known gap -- fixing it would require
-  // reading WORKFLOW_STORAGE_PATH before factory creation, duplicating env-var logic.
-  const normalizedCustom = new Set(rootedCustomPaths.map((p) => path.resolve(p)));
+  // Build a dedup set from all paths already covered: rooted-discovered paths AND
+  // env-configured paths from WORKFLOW_STORAGE_PATH. The factory (createEnhancedMultiSourceWorkflowStorage)
+  // adds WORKFLOW_STORAGE_PATH entries to customPaths internally, so we must mirror that
+  // resolution here to avoid appending duplicate managed paths.
+  const envCustomPaths = parseWorkflowStoragePathEnv();
+  const normalizedCustom = new Set([
+    ...rootedCustomPaths.map((p) => path.resolve(p)),
+    ...envCustomPaths.map((p) => path.resolve(p)),
+  ]);
   const additionalManagedPaths: string[] = [];
   const activeManagedRecords: ManagedSourceRecordV2[] = [];
   const staleManagedRecords: ManagedSourceRecordV2[] = [];
@@ -156,6 +159,17 @@ export async function createWorkflowReaderForRequest(
     staleManagedRecords,
     ...(managedStoreError !== undefined ? { managedStoreError } : {}),
   };
+}
+
+/**
+ * Returns paths from the WORKFLOW_STORAGE_PATH environment variable, using the
+ * same parsing logic as EnhancedMultiSourceWorkflowStorage so the dedup set
+ * stays in sync with what the factory adds internally.
+ */
+function parseWorkflowStoragePathEnv(): readonly string[] {
+  const raw = process.env['WORKFLOW_STORAGE_PATH'];
+  if (!raw) return [];
+  return raw.split(path.delimiter).map((p) => p.trim()).filter((p) => p.length > 0);
 }
 
 interface ManagedSourceListResult {
