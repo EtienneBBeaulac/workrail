@@ -125,7 +125,7 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null, v2 };
 
     // Start
-    const start = await handleV2StartWorkflow({ workflowId: 'behavior-lock-wf', workspacePath: root } as any, ctx);
+    const start = await handleV2StartWorkflow({ workflowId: 'behavior-lock-wf', workspacePath: root, goal: 'test behavior lock' } as any, ctx);
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
     const startR = unwrapResponse(start.data);
@@ -166,7 +166,7 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     const v2 = await mkV2Deps();
     const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null, v2 };
 
-    const start = await handleV2StartWorkflow({ workflowId: 'behavior-lock-wf', workspacePath: root } as any, ctx);
+    const start = await handleV2StartWorkflow({ workflowId: 'behavior-lock-wf', workspacePath: root, goal: 'test behavior lock' } as any, ctx);
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
     const startR = unwrapResponse(start.data);
@@ -202,7 +202,7 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     const v2 = await mkV2Deps();
     const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null, v2 };
 
-    const start = await handleV2StartWorkflow({ workflowId: 'behavior-lock-wf', workspacePath: root } as any, ctx);
+    const start = await handleV2StartWorkflow({ workflowId: 'behavior-lock-wf', workspacePath: root, goal: 'test behavior lock' } as any, ctx);
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
     const startR = unwrapResponse(start.data);
@@ -237,7 +237,7 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     const v2 = await mkV2Deps();
     const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null, v2 };
 
-    const start = await handleV2StartWorkflow({ workflowId: 'behavior-lock-wf', workspacePath: root } as any, ctx);
+    const start = await handleV2StartWorkflow({ workflowId: 'behavior-lock-wf', workspacePath: root, goal: 'test behavior lock' } as any, ctx);
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
     const startR = unwrapResponse(start.data);

@@ -389,9 +389,9 @@ export async function createWorkRailEngine(
   engineActive = true;
 
   const engine: WorkRailEngine = {
-    async startWorkflow(workflowId: string): Promise<EngineResult<StepResponse>> {
+    async startWorkflow(workflowId: string, goal: string): Promise<EngineResult<StepResponse>> {
       const workspacePath = process.cwd();
-      const result = await executeStartWorkflow({ workflowId, workspacePath }, v2Ctx);
+      const result = await executeStartWorkflow({ workflowId, workspacePath, goal }, v2Ctx);
       if (result.isErr()) {
         return engineErr(mapStartError(result.error));
       }

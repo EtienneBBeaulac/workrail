@@ -147,6 +147,8 @@ export interface ConsoleWorktreeSummary {
   readonly aheadCount: number;
   /** Number of in_progress workflow sessions on this branch. */
   readonly activeSessionCount: number;
+  /** Content of `git config branch.<name>.description`. Absent when unset. */
+  readonly description?: string;
 }
 
 export interface ConsoleRepoWorktrees {

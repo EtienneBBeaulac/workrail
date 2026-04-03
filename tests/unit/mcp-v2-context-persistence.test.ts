@@ -104,7 +104,7 @@ async function mkCtxWithWorkflow(workflowId: string): Promise<ToolContext> {
 }
 
 describe('v2 context persistence (S8)', () => {
-  it('start_workflow does not emit context_set (context is only accepted on continue_workflow)', async () => {
+  it('start_workflow emits exactly one context_set event with source=initial from the goal field', async () => {
     const root = await mkTempDataDir();
     const prev = process.env.WORKRAIL_DATA_DIR;
     process.env.WORKRAIL_DATA_DIR = root;
@@ -112,7 +112,7 @@ describe('v2 context persistence (S8)', () => {
       const workflowId = 'bug-investigation';
       const ctx = await mkCtxWithWorkflow(workflowId);
 
-      const result = await handleV2StartWorkflow({ workflowId , workspacePath: root } as any, ctx);
+      const result = await handleV2StartWorkflow({ workflowId, workspacePath: root, goal: 'test workflow execution' } as any, ctx);
 
       expect(result.type).toBe('success');
       if (result.type !== 'success') return;
@@ -130,7 +130,11 @@ describe('v2 context persistence (S8)', () => {
       );
 
       const contextSetEvents = truth.events.filter((e) => e.kind === 'context_set');
-      expect(contextSetEvents.length).toBe(0);
+      // start_workflow now emits one context_set:initial event from the goal field
+      expect(contextSetEvents.length).toBe(1);
+      const initialCtx = contextSetEvents[0] as any;
+      expect(initialCtx.data.source).toBe('initial');
+      expect((initialCtx.data.context as any).goal).toBe('test workflow execution');
     } finally {
       process.env.WORKRAIL_DATA_DIR = prev;
     }

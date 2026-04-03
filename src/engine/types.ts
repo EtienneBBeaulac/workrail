@@ -229,8 +229,10 @@ export interface EngineConfig {
  *   Library consumers drive the call sequence directly; they don't need tool templates.
  */
 export interface WorkRailEngine {
-  /** Start a workflow, get the first step. */
-  readonly startWorkflow: (workflowId: string) => Promise<EngineResult<StepResponse>>;
+  /** Start a workflow, get the first step.
+   * @param goal One sentence describing the task (e.g. "implement OAuth refresh token rotation").
+   *             Required. Populates sessionTitle immediately via context_set:initial event. */
+  readonly startWorkflow: (workflowId: string, goal: string) => Promise<EngineResult<StepResponse>>;
 
   /** Advance (ackToken present) or rehydrate (ackToken null). */
   readonly continueWorkflow: (

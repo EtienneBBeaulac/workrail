@@ -61,7 +61,7 @@ describe('WorkRail library engine', () => {
 
   it('starts a workflow and receives discriminated ok response', async () => {
     await withEngine(async (engine) => {
-      const startResult = await engine.startWorkflow('test-session-persistence');
+      const startResult = await engine.startWorkflow('test-session-persistence', 'test engine library session persistence');
       expect(startResult.ok).toBe(true);
       if (!startResult.ok) return;
 
@@ -93,7 +93,7 @@ describe('WorkRail library engine', () => {
 
   it('rehydrates (continue without ack) to recover current step', async () => {
     await withEngine(async (engine) => {
-      const startResult = await engine.startWorkflow('test-session-persistence');
+      const startResult = await engine.startWorkflow('test-session-persistence', 'test engine library session persistence');
       expect(startResult.ok).toBe(true);
       if (!startResult.ok) return;
 
@@ -112,7 +112,7 @@ describe('WorkRail library engine', () => {
 
   it('advances with ack and output', async () => {
     await withEngine(async (engine) => {
-      const startResult = await engine.startWorkflow('test-session-persistence');
+      const startResult = await engine.startWorkflow('test-session-persistence', 'test engine library session persistence');
       expect(startResult.ok).toBe(true);
       if (!startResult.ok) return;
 
@@ -141,7 +141,7 @@ describe('WorkRail library engine', () => {
   it('surfaces agentRole from workflow step definitions', async () => {
     await withEngine(async (engine) => {
       // workflow-diagnose-environment has agentRole on its steps
-      const startResult = await engine.startWorkflow('workflow-diagnose-environment');
+      const startResult = await engine.startWorkflow('workflow-diagnose-environment', 'test engine library workflow diagnosis');
       expect(startResult.ok).toBe(true);
       if (!startResult.ok) return;
 
@@ -154,7 +154,7 @@ describe('WorkRail library engine', () => {
 
   it('passes artifacts through continue_workflow for loop control', async () => {
     await withEngine(async (engine) => {
-      const startResult = await engine.startWorkflow('test-session-persistence');
+      const startResult = await engine.startWorkflow('test-session-persistence', 'test engine library session persistence');
       expect(startResult.ok).toBe(true);
       if (!startResult.ok) return;
 
@@ -174,7 +174,7 @@ describe('WorkRail library engine', () => {
 
   it('passes context through continue_workflow for durable recording', async () => {
     await withEngine(async (engine) => {
-      const startResult = await engine.startWorkflow('test-session-persistence');
+      const startResult = await engine.startWorkflow('test-session-persistence', 'test engine library session persistence');
       expect(startResult.ok).toBe(true);
       if (!startResult.ok) return;
 
@@ -196,7 +196,7 @@ describe('WorkRail library engine', () => {
 
   it('returns typed error for nonexistent workflow', async () => {
     await withEngine(async (engine) => {
-      const startResult = await engine.startWorkflow('nonexistent-workflow-12345');
+      const startResult = await engine.startWorkflow('nonexistent-workflow-12345', 'test nonexistent workflow error');
       expect(startResult.ok).toBe(false);
       if (startResult.ok) return;
 
@@ -219,7 +219,7 @@ describe('WorkRail library engine', () => {
 
   it('returns blocked response when advancing without required notes', async () => {
     await withEngine(async (engine) => {
-      const startResult = await engine.startWorkflow('test-session-persistence');
+      const startResult = await engine.startWorkflow('test-session-persistence', 'test engine library session persistence');
       expect(startResult.ok).toBe(true);
       if (!startResult.ok) return;
 

@@ -131,7 +131,7 @@ describe('Blocked node concurrent retries (idempotency + race safety)', () => {
         ],
       });
 
-      const startRes = await handleV2StartWorkflow({ workflowId , workspacePath: root } as V2StartWorkflowInput, ctx);
+      const startRes = await handleV2StartWorkflow({ workflowId, workspacePath: root, goal: 'test workflow execution' } as V2StartWorkflowInput, ctx);
       expect(startRes.type).toBe('success');
       if (startRes.type !== 'success') return;
 
@@ -224,7 +224,7 @@ describe('Blocked node concurrent retries (idempotency + race safety)', () => {
         ],
       });
 
-      const startRes = await handleV2StartWorkflow({ workflowId , workspacePath: root } as V2StartWorkflowInput, ctx);
+      const startRes = await handleV2StartWorkflow({ workflowId, workspacePath: root, goal: 'test workflow execution' } as V2StartWorkflowInput, ctx);
       expect(startRes.type).toBe('success');
       if (startRes.type !== 'success') return;
 
@@ -292,7 +292,7 @@ describe('Blocked node concurrent retries (idempotency + race safety)', () => {
         ],
       });
 
-      const startRes = await handleV2StartWorkflow({ workflowId , workspacePath: root } as V2StartWorkflowInput, ctx);
+      const startRes = await handleV2StartWorkflow({ workflowId, workspacePath: root, goal: 'test workflow execution' } as V2StartWorkflowInput, ctx);
       expect(startRes.type).toBe('success');
       if (startRes.type !== 'success') return;
 

@@ -109,7 +109,7 @@ describe('v2 fork detection (Phase 5)', () => {
       const ctx = await mkCtxWithWorkflow(workflowId, root);
 
       // Start workflow and advance once.
-      const start = await handleV2StartWorkflow({ workflowId , workspacePath: root } as any, ctx);
+      const start = await handleV2StartWorkflow({ workflowId, workspacePath: root, goal: 'test workflow execution' } as any, ctx);
       expect(start.type).toBe('success');
       if (start.type !== 'success') return;
 

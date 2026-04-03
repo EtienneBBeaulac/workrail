@@ -176,6 +176,10 @@ export function buildInitialEvents(args: {
   readonly snapshotRef: import('../../../v2/durable-core/ids/index.js').SnapshotRef;
   readonly observations: readonly ObservationEventData[];
   readonly idFactory: { readonly mintEventId: () => string };
+  /** One-sentence task description from start_workflow input. Emitted as an
+   * initial context_set event so sessionTitle is non-null from session creation,
+   * without waiting for the first checkpoint recap. */
+  readonly goal: string;
 }): readonly DomainEventV1[] {
   const {
     sessionId,
@@ -188,6 +192,7 @@ export function buildInitialEvents(args: {
     snapshotRef,
     observations,
     idFactory,
+    goal,
   } = args;
 
   const evtSessionCreated = idFactory.mintEventId();
@@ -260,6 +265,29 @@ export function buildInitialEvents(args: {
   ];
 
   const mutableEvents: DomainEventV1[] = [...baseEvents];
+
+  // Emit an initial context_set event so sessionTitle is populated immediately.
+  // Source is 'initial' (not 'agent_delta') -- indicates context set at session creation,
+  // not by an agent advance. Deduplication key is stable per session so replaying events
+  // never double-emits it.
+  {
+    const contextEventId = idFactory.mintEventId();
+    const contextId = idFactory.mintEventId();
+    mutableEvents.push({
+      v: 1,
+      eventId: contextEventId,
+      eventIndex: mutableEvents.length,
+      sessionId,
+      kind: EVENT_KIND.CONTEXT_SET,
+      dedupeKey: `context_set:${sessionId}:${String(runId)}:initial`,
+      scope: { runId: String(runId) },
+      data: {
+        contextId,
+        context: { goal } as Record<string, string>,
+        source: 'initial' as const,
+      },
+    } as DomainEventV1);
+  }
 
   // Emit observation_recorded events for workspace anchors (WU2: observability)
   // Note: observation_recorded has no scope (session-level, not run/node-level).
@@ -418,6 +446,7 @@ export function executeStartWorkflow(
               snapshotRef,
               observations,
               idFactory,
+              goal: input.goal,
             });
 
             return gate.withHealthySessionLock(sessionId, (lock) =>

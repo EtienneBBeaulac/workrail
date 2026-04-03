@@ -22,24 +22,19 @@ test.describe('Homepage', () => {
     await expect(page.locator('h1')).toContainText('WorkRail Console');
   });
 
-  test('should display the Sessions tab by default', async ({ page }) => {
+  test('should display the Workspace view by default', async ({ page }) => {
     await page.goto('/console');
 
-    // Sessions tab is the default active tab
-    await expect(page.getByRole('button', { name: 'sessions' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'worktrees' })).toBeVisible();
-  });
+    // Workspace is the sole view -- no tab buttons, just the heading
+    await expect(page.locator('h1')).toContainText('WorkRail Console');
 
-  test('should navigate to the Worktrees tab', async ({ page }) => {
-    await page.goto('/console');
-
-    await page.getByRole('button', { name: 'worktrees' }).click();
-
-    // Worktrees content loads (either the list or the empty state)
+    // Scope toggle (Active / All) confirms the Workspace view is loaded
     await expect(
-      page.locator('h2').filter({ hasText: 'Worktrees' })
-        .or(page.locator('text=No worktrees found'))
-        .or(page.locator('text=Loading worktrees'))
+      page.getByRole('button', { name: 'Active' })
+        .or(page.locator('text=Active'))
+        .or(page.locator('text=No branches match'))
+        .or(page.locator('text=Ready when you are'))
     ).toBeVisible({ timeout: 10_000 });
   });
 });
+

@@ -144,7 +144,7 @@ describe('Assessment follow-up retry flow (end-to-end)', () => {
       });
 
       const startRes = await handleV2StartWorkflow(
-        { workflowId } as V2StartWorkflowInput,
+        { workflowId, goal: 'test workflow execution' } as V2StartWorkflowInput,
         ctx
       );
       expect(startRes.type).toBe('success');

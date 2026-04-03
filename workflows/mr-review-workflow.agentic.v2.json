@@ -2,7 +2,7 @@
   "id": "mr-review-workflow-agentic",
   "name": "MR Review Workflow (Lean v2 \u2022 Notes-First \u2022 Evidence-Driven Reviewer Families)",
   "version": "2.3.0",
-  "description": "Use this to review a merge request before merging. Gathers context, runs parallel reviewer families (security, correctness, style, tests), synthesizes contradictions, and produces evidence-backed findings.",
+  "description": "Lean v2 MR review workflow. Merges intake, missing-input gating, context gathering, and re-triage into one structured front phase, then drives review through a shared fact packet, parallel reviewer families, contradiction-driven synthesis, and evidence-first final validation.",
   "recommendedPreferences": {
     "recommendedAutonomy": "guided",
     "recommendedRiskPolicy": "conservative"
