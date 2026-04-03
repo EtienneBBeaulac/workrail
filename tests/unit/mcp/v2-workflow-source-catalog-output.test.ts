@@ -402,4 +402,46 @@ describe('v2 workflow source catalog output', () => {
     expect(Array.isArray(data.warnings)).toBe(true);
     expect(data.warnings!.some((w) => w.includes('MANAGED_SOURCE_IO_ERROR'))).toBe(true);
   });
+
+  it('does not create duplicate catalog entry when managed source path matches WORKFLOW_STORAGE_PATH', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-v2-source-catalog-env-dedup-'));
+    const workspace = path.join(tempRoot, 'workspace');
+    const sharedDir = path.join(tempRoot, 'shared-workflows');
+
+    fs.mkdirSync(workspace, { recursive: true });
+    writeWorkflow(sharedDir, 'env-and-managed', 'Shared Workflow');
+
+    const managedStore = new InMemoryManagedSourceStoreV2();
+    await managedStore.attach(sharedDir);
+
+    const previousEnv = process.env['WORKFLOW_STORAGE_PATH'];
+    process.env['WORKFLOW_STORAGE_PATH'] = sharedDir;
+
+    try {
+      const result = await handleV2ListWorkflows(
+        { workspacePath: workspace, includeSources: true },
+        buildCtxWithManagedStore(rememberedRootsStore(), managedStore),
+      );
+
+      expect(result.type).toBe('success');
+      if (result.type !== 'success') return;
+
+      const data = result.data as { workflows: Array<{ workflowId: string }>; sources: Array<Record<string, unknown>> };
+
+      // Workflow appears exactly once in the listing (no duplicate)
+      const matches = data.workflows.filter((w) => w.workflowId === 'env-and-managed');
+      expect(matches).toHaveLength(1);
+
+      // Source catalog has exactly one entry for the shared dir
+      const sourceKey = `custom:${path.resolve(sharedDir)}`;
+      const catalogEntries = data.sources.filter((s) => s.sourceKey === sourceKey);
+      expect(catalogEntries).toHaveLength(1);
+    } finally {
+      if (previousEnv === undefined) {
+        delete process.env['WORKFLOW_STORAGE_PATH'];
+      } else {
+        process.env['WORKFLOW_STORAGE_PATH'] = previousEnv;
+      }
+    }
+  });
 });
