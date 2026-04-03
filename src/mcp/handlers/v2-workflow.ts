@@ -9,6 +9,7 @@ import type { V2InspectWorkflowInput, V2ListWorkflowsInput } from '../v2/tools.j
 import { V2WorkflowInspectOutputSchema, V2WorkflowListOutputSchema } from '../output-schemas.js';
 import type { StalenessSummary } from '../output-schemas.js';
 import type { RememberedRootRecordV2 } from '../../v2/ports/remembered-roots-store.port.js';
+import type { ManagedSourceRecordV2 } from '../../v2/ports/managed-source-store.port.js';
 import type { CryptoPortV2 } from '../../v2/durable-core/canonical/hashing.js';
 import type { PinnedWorkflowStorePortV2 } from '../../v2/ports/pinned-workflow-store.port.js';
 import type { Workflow } from '../../types/workflow.js';
@@ -128,10 +129,12 @@ export async function handleV2ListWorkflows(
         workspacePath: input.workspacePath,
         resolvedRootUris: guard.ctx.v2.resolvedRootUris,
         rememberedRootsStore: guard.ctx.v2.rememberedRootsStore,
+        managedSourceStore: guard.ctx.v2.managedSourceStore,
       })
-    : { reader: ctx.workflowService, stalePaths: [] as string[] };
+    : { reader: ctx.workflowService, stalePaths: [] as string[], managedSourceRecords: [] as ManagedSourceRecordV2[] };
   const workflowReader = readerResult.reader;
   const stalePaths = readerResult.stalePaths;
+  const managedSourceRecords = readerResult.managedSourceRecords;
 
   return ResultAsync.fromPromise(
     withTimeout(workflowReader.listWorkflowSummaries(), TIMEOUT_MS, 'list_workflows'),
@@ -172,7 +175,7 @@ export async function handleV2ListWorkflows(
         return okAsync(success(payload) as ToolResult<unknown>);
       }
       return ResultAsync.fromPromise(
-        withTimeout(buildSourceCatalog(workflowReader, rememberedRootRecords), TIMEOUT_MS, 'list_workflow_sources'),
+        withTimeout(buildSourceCatalog(workflowReader, rememberedRootRecords, managedSourceRecords), TIMEOUT_MS, 'list_workflow_sources'),
         (err) => mapUnknownErrorToToolError(err),
       ).map((sources) => {
         const payload = V2WorkflowListOutputSchema.parse({
@@ -210,8 +213,9 @@ export async function handleV2InspectWorkflow(
         workspacePath: input.workspacePath,
         resolvedRootUris: guard.ctx.v2.resolvedRootUris,
         rememberedRootsStore: guard.ctx.v2.rememberedRootsStore,
+        managedSourceStore: guard.ctx.v2.managedSourceStore,
       })
-    : { reader: ctx.workflowService, stalePaths: [] as string[] };
+    : { reader: ctx.workflowService, stalePaths: [] as string[], managedSourceRecords: [] as ManagedSourceRecordV2[] };
   const workflowReader = readerResult.reader;
   const stalePaths = readerResult.stalePaths;
 
@@ -389,6 +393,7 @@ interface SourceEntryData {
 async function buildSourceCatalog(
   workflowReader: import('../../types/storage.js').ICompositeWorkflowStorage,
   rememberedRootRecords: readonly RememberedRootRecordV2[],
+  managedSourceRecords: readonly ManagedSourceRecordV2[],
 ): Promise<ReadonlyArray<Record<string, unknown>>> {
   const instances = workflowReader.getStorageInstances();
 
@@ -412,7 +417,7 @@ async function buildSourceCatalog(
   const sourceEntryData = sourceEntryDataReversed.reverse();
 
   return sourceEntryData.map((data) =>
-    deriveSourceCatalogEntry({ ...data, rememberedRootRecords, sourceEntryData }),
+    deriveSourceCatalogEntry({ ...data, rememberedRootRecords, managedSourceRecords, sourceEntryData }),
   );
 }
 
@@ -421,9 +426,10 @@ function deriveSourceCatalogEntry(options: {
   readonly allIds: readonly string[];
   readonly effectiveIds: readonly string[];
   readonly rememberedRootRecords: readonly RememberedRootRecordV2[];
+  readonly managedSourceRecords: readonly ManagedSourceRecordV2[];
   readonly sourceEntryData: readonly SourceEntryData[];
 }): Record<string, unknown> {
-  const { source, allIds, effectiveIds, rememberedRootRecords, sourceEntryData } = options;
+  const { source, allIds, effectiveIds, rememberedRootRecords, managedSourceRecords, sourceEntryData } = options;
   const total = allIds.length;
   const effective = effectiveIds.length;
   const shadowed = total - effective;
@@ -452,6 +458,25 @@ function deriveSourceCatalogEntry(options: {
 
     case 'custom': {
       const rootedSharing = deriveRootedSharingForPath(source.directoryPath, rememberedRootRecords);
+      const managedRecord = managedSourceRecords.find(
+        (r) => path.resolve(r.path) === path.resolve(source.directoryPath),
+      );
+      if (managedRecord) {
+        // Explicitly attached managed source. Category is 'managed' regardless of whether
+        // it is also a rooted-sharing path. When both apply, include rootedSharing context
+        // so the relationship is visible without creating a second catalog entry (dual truth).
+        return {
+          sourceKey,
+          category: 'managed',
+          source: { kind: source.kind, displayName },
+          sourceMode: 'live_directory',
+          effectiveWorkflowCount: effective,
+          totalWorkflowCount: total,
+          shadowedWorkflowCount: shadowed,
+          managed: { addedAtMs: managedRecord.addedAtMs },
+          ...(rootedSharing ? { rootedSharing } : {}),
+        };
+      }
       const category = rootedSharing ? 'rooted_sharing' : 'external';
       const sourceMode = rootedSharing ? 'rooted_sharing' : 'live_directory';
       return { sourceKey, category, source: { kind: source.kind, displayName }, sourceMode, effectiveWorkflowCount: effective, totalWorkflowCount: total, shadowedWorkflowCount: shadowed, ...(rootedSharing ? { rootedSharing } : {}) };

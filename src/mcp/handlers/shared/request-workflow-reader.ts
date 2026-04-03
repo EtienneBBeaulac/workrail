@@ -6,6 +6,7 @@ import type { IFeatureFlagProvider } from '../../../config/feature-flags.js';
 import { createEnhancedMultiSourceWorkflowStorage } from '../../../infrastructure/storage/enhanced-multi-source-workflow-storage.js';
 import { SchemaValidatingCompositeWorkflowStorage } from '../../../infrastructure/storage/schema-validating-workflow-storage.js';
 import type { RememberedRootsStorePortV2 } from '../../../v2/ports/remembered-roots-store.port.js';
+import type { ManagedSourceRecordV2, ManagedSourceStorePortV2 } from '../../../v2/ports/managed-source-store.port.js';
 
 export interface RequestWorkflowReaderOptions {
   readonly featureFlags: IFeatureFlagProvider;
@@ -13,6 +14,7 @@ export interface RequestWorkflowReaderOptions {
   readonly resolvedRootUris?: readonly string[];
   readonly serverCwd?: string;
   readonly rememberedRootsStore?: RememberedRootsStorePortV2;
+  readonly managedSourceStore?: ManagedSourceStorePortV2;
 }
 
 export function hasRequestWorkspaceSignal(options: {
@@ -81,6 +83,7 @@ export async function discoverRootedWorkflowDirectories(
 export interface WorkflowReaderForRequestResult {
   readonly reader: IWorkflowReader;
   readonly stalePaths: readonly string[];
+  readonly managedSourceRecords: readonly ManagedSourceRecordV2[];
 }
 
 export async function createWorkflowReaderForRequest(
@@ -90,7 +93,18 @@ export async function createWorkflowReaderForRequest(
   const projectWorkflowDirectory = toProjectWorkflowDirectory(workspaceDirectory);
   const rememberedRoots = await listRememberedRoots(options.rememberedRootsStore);
   const { discovered: rootedWorkflowDirectories, stale: stalePaths } = await discoverRootedWorkflowDirectories(rememberedRoots);
-  const customPaths = rootedWorkflowDirectories.filter((directory) => directory !== projectWorkflowDirectory);
+  const rootedCustomPaths = rootedWorkflowDirectories.filter((directory) => directory !== projectWorkflowDirectory);
+
+  // Include managed source paths, deduplicating against already-discovered custom paths.
+  // Managed paths are added after rooted discovery so they don't affect the stale detection
+  // mechanism (which operates on remembered roots, not managed paths).
+  const managedSourceRecords = await listManagedSourceRecords(options.managedSourceStore);
+  const normalizedCustom = new Set(rootedCustomPaths.map((p) => path.resolve(p)));
+  const additionalManagedPaths = managedSourceRecords
+    .map((r) => r.path) // already normalized by the store
+    .filter((p) => !normalizedCustom.has(path.resolve(p)));
+  const customPaths = [...rootedCustomPaths, ...additionalManagedPaths];
+
   // Use the factory (rather than `new EnhancedMultiSourceWorkflowStorage`) so that
   // env-configured sources (WORKFLOW_GIT_REPOS, WORKFLOW_STORAGE_PATH, etc.) are included
   // in every request-scoped reader. This keeps the source catalog (list_workflows
@@ -107,7 +121,21 @@ export async function createWorkflowReaderForRequest(
     options.featureFlags ?? undefined,
   );
   const reader = new SchemaValidatingCompositeWorkflowStorage(storage);
-  return { reader, stalePaths };
+  return { reader, stalePaths, managedSourceRecords };
+}
+
+async function listManagedSourceRecords(
+  managedSourceStore: ManagedSourceStorePortV2 | undefined,
+): Promise<readonly ManagedSourceRecordV2[]> {
+  if (!managedSourceStore) return [];
+
+  const result = await managedSourceStore.list();
+  if (result.isErr()) {
+    const error = result.error;
+    throw new Error(`Failed to load managed workflow sources: ${error.code}: ${error.message}`);
+  }
+
+  return result.value;
 }
 
 async function listRememberedRoots(

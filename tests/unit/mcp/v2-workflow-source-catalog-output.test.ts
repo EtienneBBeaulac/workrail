@@ -14,6 +14,7 @@ import { NodeCryptoV2 } from '../../../src/v2/infra/local/crypto/index.js';
 import { LocalPinnedWorkflowStoreV2 } from '../../../src/v2/infra/local/pinned-workflow-store/index.js';
 import { createTestValidationPipelineDeps } from '../../helpers/v2-test-helpers.js';
 import type { RememberedRootsStorePortV2 } from '../../../src/v2/ports/remembered-roots-store.port.js';
+import { InMemoryManagedSourceStoreV2 } from '../../../src/v2/infra/in-memory/managed-source-store/index.js';
 
 function writeWorkflow(dir: string, id: string, name: string): void {
   fs.mkdirSync(dir, { recursive: true });
@@ -76,6 +77,20 @@ function buildCtx(rememberedRoots: RememberedRootsStorePortV2): ToolContext {
       rememberedRootsStore: rememberedRoots,
       validationPipelineDeps: createTestValidationPipelineDeps(),
       resolvedRootUris: [],
+    },
+  } as any;
+}
+
+function buildCtxWithManagedStore(
+  rememberedRoots: RememberedRootsStorePortV2,
+  managedStore: InMemoryManagedSourceStoreV2,
+): ToolContext {
+  const base = buildCtx(rememberedRoots);
+  return {
+    ...base,
+    v2: {
+      ...(base.v2 as object),
+      managedSourceStore: managedStore,
     },
   } as any;
 }
@@ -226,5 +241,76 @@ describe('v2 workflow source catalog output', () => {
     if (result.type !== 'success') return;
     const data = result.data as Record<string, unknown>;
     expect(data.sources).toBeUndefined();
+  });
+
+  it('shows attached managed source as category=managed in catalog and its workflows in listing', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-v2-source-catalog-managed-'));
+    const workspace = path.join(tempRoot, 'workspace');
+    const managedDir = path.join(tempRoot, 'managed-workflows');
+
+    fs.mkdirSync(workspace, { recursive: true });
+    writeWorkflow(managedDir, 'managed-workflow', 'Managed Workflow');
+
+    const managedStore = new InMemoryManagedSourceStoreV2();
+    await managedStore.attach(managedDir);
+
+    const result = await handleV2ListWorkflows(
+      { workspacePath: workspace, includeSources: true },
+      buildCtxWithManagedStore(rememberedRootsStore(), managedStore),
+    );
+
+    expect(result.type).toBe('success');
+    if (result.type !== 'success') return;
+
+    const data = result.data as { workflows: Array<{ workflowId: string }>; sources: Array<Record<string, unknown>> };
+
+    // Workflow from managed directory appears in listing
+    expect(data.workflows.some((w) => w.workflowId === 'managed-workflow')).toBe(true);
+
+    // Catalog has a managed entry for the attached directory
+    const managedEntry = data.sources.find((s) => s.category === 'managed');
+    expect(managedEntry).toBeDefined();
+    expect(managedEntry!.sourceKey).toBe(`custom:${path.resolve(managedDir)}`);
+    expect(managedEntry!.sourceMode).toBe('live_directory');
+    expect(managedEntry!.effectiveWorkflowCount).toBe(1);
+    expect((managedEntry!.managed as { addedAtMs: number }).addedAtMs).toBeGreaterThanOrEqual(0);
+    // Not rooted-sharing -- no rootedSharing context expected
+    expect(managedEntry!.rootedSharing).toBeUndefined();
+  });
+
+  it('shows managed source that is also a remembered root as single catalog entry with managed category and rootedSharing context', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-v2-source-catalog-managed-rooted-'));
+    const workspace = path.join(tempRoot, 'workspace');
+    const rememberedRoot = path.join(tempRoot, 'repo');
+    // The rooted workflow directory discovered by the remembered root walk
+    const rootedDir = path.join(rememberedRoot, '.workrail', 'workflows');
+
+    fs.mkdirSync(workspace, { recursive: true });
+    writeWorkflow(rootedDir, 'shared-workflow', 'Shared Workflow');
+
+    // Attach the same path as a managed source
+    const managedStore = new InMemoryManagedSourceStoreV2();
+    await managedStore.attach(rootedDir);
+
+    const result = await handleV2ListWorkflows(
+      { workspacePath: workspace, includeSources: true },
+      buildCtxWithManagedStore(rememberedRootsStore(rememberedRoot), managedStore),
+    );
+
+    expect(result.type).toBe('success');
+    if (result.type !== 'success') return;
+
+    const sources = (result.data as { sources: Array<Record<string, unknown>> }).sources;
+
+    // Exactly one entry for this path -- no dual truth
+    const entriesForPath = sources.filter((s) => s.sourceKey === `custom:${path.resolve(rootedDir)}`);
+    expect(entriesForPath).toHaveLength(1);
+
+    const entry = entriesForPath[0]!;
+    expect(entry.category).toBe('managed');
+    // rootedSharing context is present (the relationship is explicit)
+    expect(entry.rootedSharing).toBeDefined();
+    expect((entry.rootedSharing as { kind: string }).kind).toBe('remembered_root');
+    expect(entry.managed).toBeDefined();
   });
 });
