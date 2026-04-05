@@ -4,6 +4,7 @@ import {
   useEffect,
   useRef,
   useCallback,
+  type RefObject,
 } from 'react';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { useNavigate } from '@tanstack/react-router';
@@ -17,6 +18,7 @@ import {
   sortItemsForRepo,
   countNeedsAttention,
 } from './workspace-types';
+import { formatRelativeTime } from '../utils/time';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -97,23 +99,6 @@ function excerptRecap(md: string, maxLen = 220): string {
   return plain.slice(0, cut > 0 ? cut : maxLen) + '\u2026';
 }
 
-function formatRelativeTime(ms: number): string {
-  const delta = Date.now() - ms;
-  if (delta < 0) return 'just now';
-  const seconds = Math.floor(delta / 1000);
-  if (seconds < 60) return 'just now';
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  const weeks = Math.floor(days / 7);
-  if (weeks < 5) return `${weeks}w ago`;
-  const months = Math.floor(days / 30);
-  return `${months}mo ago`;
-}
-
 // ---------------------------------------------------------------------------
 // Archive state
 // ---------------------------------------------------------------------------
@@ -129,6 +114,18 @@ interface RepoGroup {
   readonly repoName: string;
   readonly sortedItems: readonly WorkspaceItem[];
 }
+
+/**
+ * Expand state for a single branch's collapsible panels.
+ * Stored in a ref map keyed by `branch + '\0' + repoRoot` so panels survive
+ * SSE-driven re-renders that unmount/remount BranchGroup and WorktreeOnlyRow.
+ */
+interface BranchExpandState {
+  filesExpanded: boolean;
+  unpushedExpanded: boolean;
+}
+
+type ExpandStateMap = Map<string, BranchExpandState>;
 
 // ---------------------------------------------------------------------------
 // Props
@@ -160,6 +157,12 @@ export function WorkspaceView({ hidden = false }: Props) {
   // restore on return. Sessions are always visible so no accordion key to restore.
   const scrollYRef = useRef<number>(0);
   const isFirstRender = useRef(true);
+
+  // Expand state for branch panels (changed files, unpushed commits).
+  // Hoisted here so SSE-driven re-renders that unmount/remount BranchGroup and
+  // WorktreeOnlyRow do not reset the user's open panels. Keyed by
+  // `branch + '\0' + repoRoot` -- same composite key used by the join.
+  const expandStateRef = useRef<ExpandStateMap>(new Map());
 
   const wrappedSelectSession = useCallback(
     (sessionId: string) => {
@@ -363,6 +366,7 @@ export function WorkspaceView({ hidden = false }: Props) {
                     groupOffset={groupOffset}
                     worktreesFetching={worktreesFetching}
                     onSelectSession={wrappedSelectSession}
+                    expandStateRef={expandStateRef}
                   />
                 );
               })}
@@ -395,6 +399,7 @@ function RepoSection({
   groupOffset,
   worktreesFetching,
   onSelectSession,
+  expandStateRef,
 }: {
   readonly group: RepoGroup;
   readonly showHeader: boolean;
@@ -402,6 +407,7 @@ function RepoSection({
   readonly groupOffset: number;
   readonly worktreesFetching: boolean;
   readonly onSelectSession: (sessionId: string) => void;
+  readonly expandStateRef: RefObject<ExpandStateMap>;
 }) {
   const [showAll, setShowAll] = useState(false);
   const visibleItems = showAll
@@ -419,7 +425,7 @@ function RepoSection({
   return (
     <section>
       {showHeader && (
-        <div style={{ position: 'sticky', top: 61, zIndex: 10 }} className="flex items-center gap-2 border-b border-[var(--border)] pb-2 mb-2 bg-[var(--bg-primary)]">
+        <div style={{ position: 'sticky', top: 'var(--app-header-height)', zIndex: 10 }} className="flex items-center gap-2 border-b border-[var(--border)] pb-2 mb-2 bg-[var(--bg-primary)]">
           <h3 className="text-sm font-semibold text-[var(--text-primary)] font-mono">
             {group.repoName}
           </h3>
@@ -448,6 +454,7 @@ function RepoSection({
                 item={item}
                 isFocused={isFocused}
                 worktreesFetching={worktreesFetching}
+                expandStateRef={expandStateRef}
               />
             );
           }
@@ -461,6 +468,7 @@ function RepoSection({
                 isFocused={isFocused}
                 worktreesFetching={worktreesFetching}
                 onSelectSession={onSelectSession}
+                expandStateRef={expandStateRef}
               />
             );
           }
@@ -513,17 +521,44 @@ function BranchGroup({
   isFocused,
   worktreesFetching,
   onSelectSession,
+  expandStateRef,
 }: {
   readonly item: WorkspaceItem;
   readonly isFocused: boolean;
   readonly worktreesFetching: boolean;
   readonly onSelectSession: (sessionId: string) => void;
+  readonly expandStateRef: RefObject<ExpandStateMap>;
 }) {
+  const expandKey = `${item.branch}\0${item.repoRoot}`;
+
+  // Read initial expand state from the hoisted ref map so panels survive
+  // SSE-driven re-renders that cause React to unmount/remount this component.
+  const getExpand = (): BranchExpandState =>
+    expandStateRef.current?.get(expandKey) ?? { filesExpanded: false, unpushedExpanded: false };
+
   const [historyExpanded, setHistoryExpanded] = useState(false);
-  const [filesExpanded, setFilesExpanded] = useState(false);
-  const [unpushedExpanded, setUnpushedExpanded] = useState(false);
+  const [filesExpanded, setFilesExpanded] = useState(() => getExpand().filesExpanded);
+  const [unpushedExpanded, setUnpushedExpanded] = useState(() => getExpand().unpushedExpanded);
   const [animateRef] = useAutoAnimate<HTMLDivElement>();
   const sorted = [...item.allSessions].sort(SESSION_SORT);
+
+  const handleToggleFiles = useCallback(() => {
+    setFilesExpanded((e) => {
+      const next = !e;
+      const current = expandStateRef.current?.get(expandKey) ?? { filesExpanded: false, unpushedExpanded: false };
+      expandStateRef.current?.set(expandKey, { ...current, filesExpanded: next });
+      return next;
+    });
+  }, [expandKey, expandStateRef]);
+
+  const handleToggleUnpushed = useCallback(() => {
+    setUnpushedExpanded((e) => {
+      const next = !e;
+      const current = expandStateRef.current?.get(expandKey) ?? { filesExpanded: false, unpushedExpanded: false };
+      expandStateRef.current?.set(expandKey, { ...current, unpushedExpanded: next });
+      return next;
+    });
+  }, [expandKey, expandStateRef]);
 
   // Active sessions (in_progress/blocked/dormant) are always visible.
   // Dormant = stalled but not done, so it stays visible alongside active work.
@@ -541,9 +576,9 @@ function BranchGroup({
         item={item}
         worktreesFetching={worktreesFetching}
         filesExpanded={filesExpanded}
-        onToggleFiles={() => setFilesExpanded((e) => !e)}
+        onToggleFiles={handleToggleFiles}
         unpushedExpanded={unpushedExpanded}
-        onToggleUnpushed={() => setUnpushedExpanded((e) => !e)}
+        onToggleUnpushed={handleToggleUnpushed}
       />
       {filesExpanded && item.worktree && item.worktree.changedFiles.length > 0 && (
         <ChangedFilesPanel files={item.worktree.changedFiles} />
@@ -723,15 +758,41 @@ function WorktreeOnlyRow({
   item,
   isFocused,
   worktreesFetching,
+  expandStateRef,
 }: {
   readonly item: WorkspaceItem;
   readonly isFocused: boolean;
   readonly worktreesFetching: boolean;
+  readonly expandStateRef: RefObject<ExpandStateMap>;
 }) {
-  const [filesExpanded, setFilesExpanded] = useState(false);
-  const [unpushedExpanded, setUnpushedExpanded] = useState(false);
+  const expandKey = `${item.branch}\0${item.repoRoot}`;
+
+  const getExpand = (): BranchExpandState =>
+    expandStateRef.current?.get(expandKey) ?? { filesExpanded: false, unpushedExpanded: false };
+
+  const [filesExpanded, setFilesExpanded] = useState(() => getExpand().filesExpanded);
+  const [unpushedExpanded, setUnpushedExpanded] = useState(() => getExpand().unpushedExpanded);
   const [animateRef] = useAutoAnimate<HTMLDivElement>();
   const timeAgo = formatRelativeTime(item.activityMs);
+
+  const handleToggleFiles = useCallback(() => {
+    setFilesExpanded((e) => {
+      const next = !e;
+      const current = expandStateRef.current?.get(expandKey) ?? { filesExpanded: false, unpushedExpanded: false };
+      expandStateRef.current?.set(expandKey, { ...current, filesExpanded: next });
+      return next;
+    });
+  }, [expandKey, expandStateRef]);
+
+  const handleToggleUnpushed = useCallback(() => {
+    setUnpushedExpanded((e) => {
+      const next = !e;
+      const current = expandStateRef.current?.get(expandKey) ?? { filesExpanded: false, unpushedExpanded: false };
+      expandStateRef.current?.set(expandKey, { ...current, unpushedExpanded: next });
+      return next;
+    });
+  }, [expandKey, expandStateRef]);
+
   return (
     // Outer wrapper enables the file panel to be a sibling of the flex row.
     // The isFocused ring stays on the inner flex row so it does not wrap the panel.
@@ -751,9 +812,9 @@ function WorktreeOnlyRow({
           fetching={worktreesFetching}
           compact
           filesExpanded={filesExpanded}
-          onToggleFiles={() => setFilesExpanded((e) => !e)}
+          onToggleFiles={handleToggleFiles}
           unpushedExpanded={unpushedExpanded}
-          onToggleUnpushed={() => setUnpushedExpanded((e) => !e)}
+          onToggleUnpushed={handleToggleUnpushed}
         />
         {item.worktree?.headMessage && (
           <span className="text-[10px] text-[var(--text-muted)] truncate hidden sm:block max-w-[200px] opacity-60">

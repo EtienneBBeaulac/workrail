@@ -152,8 +152,11 @@ interface WorktreeEnrichment {
   branchDescription: string;
 }
 
+// Hardcoded to origin/main -- repos using master/trunk will silently degrade (badges disappear, no crash)
+const MAIN_BRANCH_REF = 'origin/main';
+
 /**
- * Enrich a single worktree by running its three git commands in parallel.
+ * Enrich a single worktree by running its git commands in parallel.
  * Each command is independent so there is no reason to serialize them.
  */
 async function enrichWorktree(wt: RawWorktree): Promise<WorktreeEnrichment> {
@@ -161,12 +164,16 @@ async function enrichWorktree(wt: RawWorktree): Promise<WorktreeEnrichment> {
   // local config), so it is readable from any linked worktree via the same
   // `git config` call. Returns null when the key is unset -- git exits non-zero.
   const descriptionKey = wt.branch ? `branch.${wt.branch}.description` : null;
-  const [logRaw, statusRaw, aheadRaw, descriptionRaw, unpushedLogRaw] = await Promise.all([
+  const [logRaw, statusRaw, aheadRaw, descriptionRaw, unpushedLogRaw, mergedBranchesRaw] = await Promise.all([
     git(wt.path, ['log', '-1', '--format=%h%n%s%n%ct']),
     git(wt.path, ['status', '--short']),
-    git(wt.path, ['rev-list', '--count', 'origin/main..HEAD']),
+    git(wt.path, ['rev-list', '--count', `${MAIN_BRANCH_REF}..HEAD`]),
     descriptionKey ? git(wt.path, ['config', descriptionKey]) : Promise.resolve(null),
-    git(wt.path, ['log', 'origin/main..HEAD', '--oneline']),
+    git(wt.path, ['log', `${MAIN_BRANCH_REF}..HEAD`, '--oneline']),
+    // git branch --merged uses merge-base comparison, so it correctly handles
+    // squash-merges. The badge shows when the branch tip is reachable from
+    // origin/main OR when the branch's changes have been squash-merged.
+    wt.branch && wt.branch !== 'main' ? git(wt.path, ['branch', '--merged', MAIN_BRANCH_REF]) : Promise.resolve(null),
   ]);
 
   const [hashLine, messageLine, timestampLine] = logRaw?.split('\n') ?? [];
@@ -191,9 +198,15 @@ async function enrichWorktree(wt: RawWorktree): Promise<WorktreeEnrichment> {
         }))
       : [];
 
-  // A branch is considered merged when git log shows no commits ahead of origin/main,
-  // it is not the main branch itself, and HEAD is not detached.
-  const isMerged = unpushedLogRaw === '' && wt.branch !== 'main' && wt.branch !== null;
+  // Use `git branch --merged origin/main` to detect squash-merges correctly.
+  // The output lists all branches whose tips are reachable from origin/main after
+  // squash-merge. If the current branch name appears in the output, it is merged.
+  // Never true for main itself, detached HEAD (null branch), or when the git command failed.
+  const isMerged =
+    wt.branch !== null &&
+    wt.branch !== 'main' &&
+    mergedBranchesRaw !== null &&
+    mergedBranchesRaw.split('\n').some(line => line.trim() === wt.branch);
 
   const branchDescription = descriptionRaw?.trim() ?? '';
 

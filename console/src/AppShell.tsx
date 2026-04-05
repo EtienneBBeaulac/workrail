@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import { useNavigate, useMatchRoute } from '@tanstack/react-router';
 import { WorkspaceView } from './views/WorkspaceView';
 import { SessionDetail } from './views/SessionDetail';
@@ -25,7 +26,8 @@ export function AppShell() {
   };
 
   return (
-    <div className="min-h-screen bg-[var(--bg-primary)]">
+    // Keep --app-header-height in sync with header py-4 + text-lg line-height + 1px border
+    <div className="min-h-screen bg-[var(--bg-primary)]" style={{ '--app-header-height': '61px' } as CSSProperties}>
       <header className="sticky top-0 z-20 border-b border-[var(--border)] px-6 py-4 bg-[var(--bg-primary)]">
         <div className="flex items-center gap-4">
           {isInSessionDetail && (
