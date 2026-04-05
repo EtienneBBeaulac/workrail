@@ -209,7 +209,13 @@ async function enrichWorktree(wt: RawWorktree): Promise<WorktreeEnrichment> {
  * Used by the route to canonicalize the CWD before adding it to the repo list.
  */
 export async function resolveRepoRoot(path: string): Promise<string | null> {
-  return git(path, ['rev-parse', '--show-toplevel']);
+  // Use --git-common-dir to resolve linked worktrees back to the main repo root.
+  // For the main worktree this returns ".git" (relative); for a linked worktree
+  // it returns an absolute path like /repo/.git. Stripping the .git suffix gives
+  // the canonical repo root, deduplicating all worktrees of the same repo.
+  const commonDir = await git(path, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+  if (commonDir === null) return null;
+  return commonDir.replace(/\/\.git\/?$/, '') || null;
 }
 
 /**
