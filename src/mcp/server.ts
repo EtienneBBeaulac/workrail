@@ -310,6 +310,8 @@ export async function composeServer(): Promise<ComposedServerInternal> {
   const {
     CallToolRequestSchema,
     ListToolsRequestSchema,
+    ListResourcesRequestSchema,
+    ReadResourceRequestSchema,
   } = await import('@modelcontextprotocol/sdk/types.js');
 
   // Create server
@@ -321,6 +323,7 @@ export async function composeServer(): Promise<ComposedServerInternal> {
     {
       capabilities: {
         tools: {},
+        resources: {},
       },
     }
   );
@@ -373,6 +376,58 @@ export async function composeServer(): Promise<ComposedServerInternal> {
       : ctx;
 
     return handler(args ?? {}, requestCtx);
+  });
+
+  // Register ListResources handler — exposes the workrail://tags catalog resource.
+  // Agents can read tag definitions without calling list_workflows at all (~500 tokens
+  // vs 3-5K for the full workflow list).
+  server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+    resources: [
+      {
+        uri: 'workrail://tags',
+        name: 'WorkRail Tag Catalog',
+        description:
+          'Closed-set tag definitions for workflow discovery. ' +
+          'Read this before calling list_workflows — it tells you which tags exist ' +
+          'and when to use each one, so you can call list_workflows with tags=[...] ' +
+          'instead of loading all 36+ workflows into context.',
+        mimeType: 'application/json',
+      },
+    ],
+  }));
+
+  // Register ReadResource handler — serves spec/workflow-tags.json verbatim.
+  server.setRequestHandler(ReadResourceRequestSchema, async (request: any): Promise<any> => {
+    const uri: string = request.params?.uri ?? '';
+    if (uri !== 'workrail://tags') {
+      return {
+        contents: [],
+        isError: true,
+        _meta: { error: `Unknown resource: ${uri}` },
+      };
+    }
+    try {
+      const fs = await import('fs');
+      const path = await import('path');
+      const tagsPath = path.resolve(__dirname, '../../spec/workflow-tags.json');
+      const raw = fs.readFileSync(tagsPath, 'utf-8');
+      return {
+        contents: [
+          {
+            uri: 'workrail://tags',
+            mimeType: 'application/json',
+            text: raw,
+          },
+        ],
+      };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        contents: [],
+        isError: true,
+        _meta: { error: `Failed to read tag catalog: ${message}` },
+      };
+    }
   });
 
   return { server, ctx, rootsManager, rootsReader: rootsManager, tools, handlers };
