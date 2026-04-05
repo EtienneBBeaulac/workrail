@@ -919,24 +919,14 @@ export class ValidationEngine {
       for (const consequence of step.assessmentConsequences) {
         const trigger = consequence.when;
         const effect = consequence.effect;
-        const dimension = assessmentDefinition.dimensions.find(candidate => candidate.id === trigger.dimensionId);
 
-        if (!dimension) {
+        const allLevels = assessmentDefinition.dimensions.flatMap(d => d.levels);
+        if (!allLevels.includes(trigger.anyEqualsLevel)) {
           issues.push(
-            `${stepLabel}: assessment consequence references unknown dimension '${trigger.dimensionId}' for assessment '${assessmentDefinition.id}'`
+            `${stepLabel}: assessment consequence anyEqualsLevel '${trigger.anyEqualsLevel}' is not declared in any dimension of assessment '${assessmentDefinition.id}'`
           );
           suggestions.push(
-            `Use one of the declared dimensions for assessment '${assessmentDefinition.id}': ${assessmentDefinition.dimensions.map(d => d.id).join(', ')}`
-          );
-          continue;
-        }
-
-        if (!dimension.levels.includes(trigger.equalsLevel)) {
-          issues.push(
-            `${stepLabel}: assessment consequence references undeclared level '${trigger.equalsLevel}' for dimension '${trigger.dimensionId}'`
-          );
-          suggestions.push(
-            `Use one of the declared levels for dimension '${trigger.dimensionId}': ${dimension.levels.join(', ')}`
+            `Use a level declared in one of the dimensions: ${[...new Set(allLevels)].join(', ')}`
           );
         }
 

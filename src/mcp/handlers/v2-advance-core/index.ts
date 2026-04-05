@@ -266,7 +266,7 @@ export function executeAdvanceCore(args: {
       assessmentFollowupRequired: v.triggeredAssessmentConsequence
         ? {
             assessmentId: v.triggeredAssessmentConsequence.assessmentId,
-            dimensionId: v.triggeredAssessmentConsequence.triggerDimensionId,
+            dimensionId: v.triggeredAssessmentConsequence.firstMatchedDimensionId,
             level: v.triggeredAssessmentConsequence.triggerLevel,
             guidance: v.triggeredAssessmentConsequence.guidance,
           }

@@ -4,7 +4,7 @@ import type { RecordedAssessmentV1 } from '../../../v2/durable-core/domain/asses
 export interface TriggeredAssessmentConsequenceV1 {
   readonly kind: 'require_followup';
   readonly assessmentId: string;
-  readonly triggerDimensionId: string;
+  readonly firstMatchedDimensionId: string;
   readonly triggerLevel: string;
   readonly guidance: string;
 }
@@ -19,18 +19,14 @@ export function evaluateAssessmentConsequences(args: {
   const consequence = args.step.assessmentConsequences[0];
   if (!consequence) return undefined;
 
-  const matchedDimension = args.recordedAssessment.dimensions.find(
-    dimension =>
-      dimension.dimensionId === consequence.when.dimensionId &&
-      dimension.level === consequence.when.equalsLevel,
-  );
-  if (!matchedDimension) return undefined;
+  const matched = args.recordedAssessment.dimensions.find(d => d.level === consequence.when.anyEqualsLevel);
+  if (!matched) return undefined;
 
   return {
     kind: 'require_followup',
     assessmentId: args.recordedAssessment.assessmentId,
-    triggerDimensionId: consequence.when.dimensionId,
-    triggerLevel: consequence.when.equalsLevel,
+    firstMatchedDimensionId: matched.dimensionId,
+    triggerLevel: consequence.when.anyEqualsLevel,
     guidance: consequence.effect.guidance,
   };
 }

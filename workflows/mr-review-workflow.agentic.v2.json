@@ -1,7 +1,7 @@
 {
   "id": "mr-review-workflow-agentic",
   "name": "MR Review Workflow (Lean v2 \u2022 Notes-First \u2022 Evidence-Driven Reviewer Families)",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "Lean v2 MR review workflow. Merges intake, missing-input gating, context gathering, and re-triage into one structured front phase, then drives review through a shared fact packet, parallel reviewer families, contradiction-driven synthesis, and evidence-first final validation.",
   "recommendedPreferences": {
     "recommendedAutonomy": "guided",
@@ -13,15 +13,22 @@
   "assessments": [
     {
       "id": "review_readiness_gate",
-      "purpose": "Assess whether the review recommendation is ready for final handoff.",
+      "purpose": "Assess whether the review is ready to hand off across three orthogonal dimensions. Each must be high independently -- strength in one cannot compensate for weakness in another.",
       "dimensions": [
         {
-          "id": "confidence",
-          "purpose": "How confident the agent is that the recommendation is supported by sufficient evidence and coherent findings.",
-          "levels": [
-            "low",
-            "high"
-          ]
+          "id": "evidence_quality",
+          "purpose": "Key findings are backed by specific code references, line numbers, or concrete observations -- not intuition or pattern-matching alone.",
+          "levels": ["low", "high"]
+        },
+        {
+          "id": "coverage_completeness",
+          "purpose": "All relevant review domains have been adequately checked for this change. No material blind spots remain unacknowledged.",
+          "levels": ["low", "high"]
+        },
+        {
+          "id": "contradiction_resolution",
+          "purpose": "Material contradictions and competing interpretations are resolved or explicitly acknowledged with a clear rationale for the chosen position.",
+          "levels": ["low", "high"]
         }
       ]
     }
@@ -251,12 +258,11 @@
       "assessmentConsequences": [
         {
           "when": {
-            "dimensionId": "confidence",
-            "equalsLevel": "low"
+            "anyEqualsLevel": "low"
           },
           "effect": {
             "kind": "require_followup",
-            "guidance": "Resolve the remaining recommendation uncertainty before handing off: either strengthen the evidence for the key findings, explicitly reconcile unresolved contradictions, or downgrade the confidence band and disclose the limitations clearly."
+            "guidance": "Address whichever dimensions scored low: evidence_quality low -- anchor each finding to a specific file, function, or line; remove findings without concrete grounding. coverage_completeness low -- investigate uncovered domains or explicitly acknowledge gaps in the ledger. contradiction_resolution low -- resolve each contradiction or explicitly state your position with rationale."
           }
         }
       ],

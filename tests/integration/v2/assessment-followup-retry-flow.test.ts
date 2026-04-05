@@ -134,7 +134,7 @@ describe('Assessment follow-up retry flow (end-to-end)', () => {
             assessmentRefs: ['readiness_gate'],
             assessmentConsequences: [
               {
-                when: { dimensionId: 'confidence', equalsLevel: 'low' },
+                when: { anyEqualsLevel: 'low' },
                 effect: { kind: 'require_followup', guidance: 'Gather more context before proceeding.' },
               },
             ],
