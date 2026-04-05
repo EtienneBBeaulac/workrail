@@ -105,7 +105,7 @@ describe('v2 workflow source visibility outputs', () => {
     writeRootedWorkflow(rememberedRoot, ['packages', 'tools'], 'rooted-workflow', 'Rooted Workflow');
 
     const result = await handleV2ListWorkflows(
-      { workspacePath: workspace },
+      { workspacePath: workspace, includeSources: true },
       buildCtx(rememberedRootsStore(rememberedRoot)),
     );
 

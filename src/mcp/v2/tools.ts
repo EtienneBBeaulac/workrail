@@ -42,7 +42,7 @@ export type V2InspectWorkflowInput = z.infer<typeof V2InspectWorkflowInput>;
 export const V2StartWorkflowInput = z.object({
   workflowId: z.string().min(1).regex(/^([a-z0-9_-]+|[a-z][a-z0-9_-]+\.[a-z][a-z0-9_-]+)$/, 'Workflow ID must be a valid legacy ID (e.g. my-workflow) or namespaced ID (e.g. wr.discovery)').describe('The workflow ID to start'),
   workspacePath: workspacePathField.describe('Required. Absolute path to your current workspace directory (e.g. the "Workspace:" value from your system parameters). WorkRail uses this to resolve the correct project-scoped workflow variant and to anchor the session to the correct repo for future resume_session discovery. Shared MCP servers cannot infer this safely.'),
-  goal: z.string().min(1).describe('Required. One sentence describing what you are trying to accomplish (e.g. "implement OAuth refresh token rotation", "review PR #47 before merge", "investigate why the build fails on CI"). Populates the session title immediately so the Workspace view shows it before the first checkpoint fires.'),
+  goal: z.string().min(1).describe('A short sentence describing what you are trying to accomplish (e.g. "implement OAuth refresh token rotation", "review PR #47 before merge", "investigate why the build fails on CI").'),
 });
 export type V2StartWorkflowInput = z.infer<typeof V2StartWorkflowInput>;
 

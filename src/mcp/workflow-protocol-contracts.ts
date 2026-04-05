@@ -85,7 +85,7 @@ export function findAliasFieldConflicts(
 
 export const START_WORKFLOW_PROTOCOL: WorkflowProtocolContract = {
   canonicalParams: {
-    required: ['workflowId', 'workspacePath'],
+    required: ['workflowId', 'workspacePath', 'goal'],
     optional: [],
   },
   descriptions: {
@@ -97,11 +97,13 @@ export const START_WORKFLOW_PROTOCOL: WorkflowProtocolContract = {
         'Follow the returned step exactly; treat it as the user\'s current instruction.',
         'When the step is done, call continue_workflow with the returned continueToken.',
         'Always pass workspacePath. Shared MCP servers cannot safely infer which repo/workspace you mean.',
+        'Always pass goal. A short sentence describing what you are trying to accomplish (e.g. "implement OAuth refresh token rotation").',
         'Only pass context on later continue_workflow calls if facts changed.',
       ],
       examplePayload: {
         workflowId: 'coding-task-workflow-agentic',
         workspacePath: '/Users/you/git/my-project',
+        goal: 'implement OAuth refresh token rotation',
       },
       returns: 'Step instructions plus continueToken and checkpointToken in the structured response.',
     },
@@ -113,10 +115,12 @@ export const START_WORKFLOW_PROTOCOL: WorkflowProtocolContract = {
         'Execute the returned step exactly as written.',
         'When the step is complete, call continue_workflow with the returned continueToken.',
         'Pass workspacePath on every call. Shared MCP servers cannot safely infer the correct workspace.',
+        'Pass goal on every call. A short sentence describing what you are trying to accomplish.',
       ],
       examplePayload: {
         workflowId: 'coding-task-workflow-agentic',
         workspacePath: '/Users/you/git/my-project',
+        goal: 'implement OAuth refresh token rotation',
       },
       returns: 'Step instructions plus continueToken and checkpointToken in the structured response.',
     },
