@@ -1,0 +1,47 @@
+import {
+  createRouter,
+  createHashHistory,
+  createRootRoute,
+  createRoute,
+} from '@tanstack/react-router';
+import { AppShell } from './AppShell';
+
+// ---------------------------------------------------------------------------
+// Route definitions
+// ---------------------------------------------------------------------------
+// Route components are null -- AppShell owns all view rendering directly,
+// keeping WorkspaceView permanently mounted for scroll position preservation.
+
+const rootRoute = createRootRoute({
+  component: AppShell,
+});
+
+const workspaceRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/',
+  component: () => null,
+});
+
+const sessionRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/session/$sessionId',
+  component: () => null,
+});
+
+// ---------------------------------------------------------------------------
+// Router
+// ---------------------------------------------------------------------------
+
+const routeTree = rootRoute.addChildren([workspaceRoute, sessionRoute]);
+
+export const router = createRouter({
+  routeTree,
+  history: createHashHistory(),
+});
+
+// Register router for type-safety across the app
+declare module '@tanstack/react-router' {
+  interface Register {
+    router: typeof router;
+  }
+}

@@ -3,6 +3,7 @@ import { useSessionList } from '../api/hooks';
 import { StatusBadge } from '../components/StatusBadge';
 import { HealthBadge } from '../components/HealthBadge';
 import type { ConsoleSessionSummary, ConsoleSessionStatus } from '../api/types';
+import { formatRelativeTime } from '../utils/time';
 
 interface Props {
   onSelectSession: (sessionId: string) => void;
@@ -138,21 +139,6 @@ function groupSessions(
   return Array.from(groups.entries())
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([label, sessions]) => ({ label, sessions }));
-}
-
-function formatRelativeTime(ms: number): string {
-  const delta = Date.now() - ms;
-  if (delta < 0) return 'just now';
-  const seconds = Math.floor(delta / 1000);
-  if (seconds < 60) return 'just now';
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  const months = Math.floor(days / 30);
-  return `${months}mo ago`;
 }
 
 // ---------------------------------------------------------------------------

@@ -128,6 +128,21 @@ export interface ConsoleArtifact {
 // Worktree List
 // ---------------------------------------------------------------------------
 
+/**
+ * The status kind of a single changed file, derived from git status XY codes.
+ *
+ * Closed union so the console UI can exhaustively map to colors without
+ * falling through on unknown values at runtime.
+ */
+export type FileChangeStatus = 'modified' | 'added' | 'deleted' | 'untracked' | 'renamed' | 'other';
+
+/** A single file with uncommitted changes, as reported by `git status --short`. */
+export interface ChangedFile {
+  readonly status: FileChangeStatus;
+  /** File path relative to the worktree root. For renamed files, includes arrow notation (e.g. `old -> new`). */
+  readonly path: string;
+}
+
 export interface ConsoleWorktreeSummary {
   /** Absolute path to the worktree directory. */
   readonly path: string;
@@ -143,8 +158,14 @@ export interface ConsoleWorktreeSummary {
   readonly headTimestampMs: number;
   /** Number of files with uncommitted changes (staged + unstaged). */
   readonly changedCount: number;
+  /** Individual files with uncommitted changes, in git status --short order. */
+  readonly changedFiles: readonly ChangedFile[];
   /** Number of commits ahead of origin/main. */
   readonly aheadCount: number;
+  /** Individual unpushed commits (git log origin/main..HEAD --oneline). */
+  readonly unpushedCommits: readonly { readonly hash: string; readonly message: string }[];
+  /** True when the branch has been merged into main (0 unpushed commits, not main, not detached). */
+  readonly isMerged: boolean;
   /** Number of in_progress workflow sessions on this branch. */
   readonly activeSessionCount: number;
   /** Content of `git config branch.<name>.description`. Absent when unset. */

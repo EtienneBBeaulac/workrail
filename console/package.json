@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@formkit/auto-animate": "^0.9.0",
     "@tanstack/react-query": "^5.62.0",
     "@tanstack/react-router": "^1.92.0",
     "@xyflow/react": "^12.4.0",

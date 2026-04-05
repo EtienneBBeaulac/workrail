@@ -4,10 +4,13 @@ import {
   useEffect,
   useRef,
   useCallback,
+  type RefObject,
 } from 'react';
+import { useAutoAnimate } from '@formkit/auto-animate/react';
+import { useNavigate } from '@tanstack/react-router';
 import { useSessionList, useWorktreeList, useWorkspaceEvents } from '../api/hooks';
 import { SessionList } from './SessionList';
-import type { ConsoleSessionSummary, ConsoleSessionStatus } from '../api/types';
+import type { ConsoleSessionSummary, ConsoleSessionStatus, FileChangeStatus, ChangedFile } from '../api/types';
 import {
   type WorkspaceItem,
   type Scope,
@@ -15,6 +18,7 @@ import {
   sortItemsForRepo,
   countNeedsAttention,
 } from './workspace-types';
+import { formatRelativeTime } from '../utils/time';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -95,23 +99,6 @@ function excerptRecap(md: string, maxLen = 220): string {
   return plain.slice(0, cut > 0 ? cut : maxLen) + '\u2026';
 }
 
-function formatRelativeTime(ms: number): string {
-  const delta = Date.now() - ms;
-  if (delta < 0) return 'just now';
-  const seconds = Math.floor(delta / 1000);
-  if (seconds < 60) return 'just now';
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  const weeks = Math.floor(days / 7);
-  if (weeks < 5) return `${weeks}w ago`;
-  const months = Math.floor(days / 30);
-  return `${months}mo ago`;
-}
-
 // ---------------------------------------------------------------------------
 // Archive state
 // ---------------------------------------------------------------------------
@@ -128,12 +115,23 @@ interface RepoGroup {
   readonly sortedItems: readonly WorkspaceItem[];
 }
 
+/**
+ * Expand state for a single branch's collapsible panels.
+ * Stored in a ref map keyed by `branch + '\0' + repoRoot` so panels survive
+ * SSE-driven re-renders that unmount/remount BranchGroup and WorktreeOnlyRow.
+ */
+interface BranchExpandState {
+  filesExpanded: boolean;
+  unpushedExpanded: boolean;
+}
+
+type ExpandStateMap = Map<string, BranchExpandState>;
+
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
 interface Props {
-  onSelectSession: (sessionId: string) => void;
   /** When true, the view is hidden (parent navigated to SessionDetail). Kept
    * mounted so state is preserved for scroll restoration on back-nav. */
   hidden?: boolean;
@@ -143,7 +141,8 @@ interface Props {
 // WorkspaceView
 // ---------------------------------------------------------------------------
 
-export function WorkspaceView({ onSelectSession, hidden = false }: Props) {
+export function WorkspaceView({ hidden = false }: Props) {
+  const navigate = useNavigate();
   const { data: sessionData, isLoading: sessionsLoading, error: sessionsError, refetch } = useSessionList();
   const { data: worktreeData, isFetching: worktreesFetching } = useWorktreeList();
   // Subscribe to server-sent events -- triggers immediate refetch when sessions change
@@ -159,12 +158,18 @@ export function WorkspaceView({ onSelectSession, hidden = false }: Props) {
   const scrollYRef = useRef<number>(0);
   const isFirstRender = useRef(true);
 
+  // Expand state for branch panels (changed files, unpushed commits).
+  // Hoisted here so SSE-driven re-renders that unmount/remount BranchGroup and
+  // WorktreeOnlyRow do not reset the user's open panels. Keyed by
+  // `branch + '\0' + repoRoot` -- same composite key used by the join.
+  const expandStateRef = useRef<ExpandStateMap>(new Map());
+
   const wrappedSelectSession = useCallback(
     (sessionId: string) => {
       scrollYRef.current = window.scrollY;
-      onSelectSession(sessionId);
+      navigate({ to: '/session/$sessionId', params: { sessionId } });
     },
-    [onSelectSession],
+    [navigate],
   );
 
   // Restore scroll position when returning from SessionDetail.
@@ -361,6 +366,7 @@ export function WorkspaceView({ onSelectSession, hidden = false }: Props) {
                     groupOffset={groupOffset}
                     worktreesFetching={worktreesFetching}
                     onSelectSession={wrappedSelectSession}
+                    expandStateRef={expandStateRef}
                   />
                 );
               })}
@@ -393,6 +399,7 @@ function RepoSection({
   groupOffset,
   worktreesFetching,
   onSelectSession,
+  expandStateRef,
 }: {
   readonly group: RepoGroup;
   readonly showHeader: boolean;
@@ -400,6 +407,7 @@ function RepoSection({
   readonly groupOffset: number;
   readonly worktreesFetching: boolean;
   readonly onSelectSession: (sessionId: string) => void;
+  readonly expandStateRef: RefObject<ExpandStateMap>;
 }) {
   const [showAll, setShowAll] = useState(false);
   const visibleItems = showAll
@@ -417,7 +425,7 @@ function RepoSection({
   return (
     <section>
       {showHeader && (
-        <div className="flex items-center gap-2 border-b border-[var(--border)] pb-2 mb-2">
+        <div style={{ position: 'sticky', top: 'var(--app-header-height)', zIndex: 10 }} className="flex items-center gap-2 border-b border-[var(--border)] pb-2 mb-2 bg-[var(--bg-primary)]">
           <h3 className="text-sm font-semibold text-[var(--text-primary)] font-mono">
             {group.repoName}
           </h3>
@@ -446,6 +454,7 @@ function RepoSection({
                 item={item}
                 isFocused={isFocused}
                 worktreesFetching={worktreesFetching}
+                expandStateRef={expandStateRef}
               />
             );
           }
@@ -459,6 +468,7 @@ function RepoSection({
                 isFocused={isFocused}
                 worktreesFetching={worktreesFetching}
                 onSelectSession={onSelectSession}
+                expandStateRef={expandStateRef}
               />
             );
           }
@@ -511,14 +521,44 @@ function BranchGroup({
   isFocused,
   worktreesFetching,
   onSelectSession,
+  expandStateRef,
 }: {
   readonly item: WorkspaceItem;
   readonly isFocused: boolean;
   readonly worktreesFetching: boolean;
   readonly onSelectSession: (sessionId: string) => void;
+  readonly expandStateRef: RefObject<ExpandStateMap>;
 }) {
+  const expandKey = `${item.branch}\0${item.repoRoot}`;
+
+  // Read initial expand state from the hoisted ref map so panels survive
+  // SSE-driven re-renders that cause React to unmount/remount this component.
+  const getExpand = (): BranchExpandState =>
+    expandStateRef.current?.get(expandKey) ?? { filesExpanded: false, unpushedExpanded: false };
+
   const [historyExpanded, setHistoryExpanded] = useState(false);
+  const [filesExpanded, setFilesExpanded] = useState(() => getExpand().filesExpanded);
+  const [unpushedExpanded, setUnpushedExpanded] = useState(() => getExpand().unpushedExpanded);
+  const [animateRef] = useAutoAnimate<HTMLDivElement>();
   const sorted = [...item.allSessions].sort(SESSION_SORT);
+
+  const handleToggleFiles = useCallback(() => {
+    setFilesExpanded((e) => {
+      const next = !e;
+      const current = expandStateRef.current?.get(expandKey) ?? { filesExpanded: false, unpushedExpanded: false };
+      expandStateRef.current?.set(expandKey, { ...current, filesExpanded: next });
+      return next;
+    });
+  }, [expandKey, expandStateRef]);
+
+  const handleToggleUnpushed = useCallback(() => {
+    setUnpushedExpanded((e) => {
+      const next = !e;
+      const current = expandStateRef.current?.get(expandKey) ?? { filesExpanded: false, unpushedExpanded: false };
+      expandStateRef.current?.set(expandKey, { ...current, unpushedExpanded: next });
+      return next;
+    });
+  }, [expandKey, expandStateRef]);
 
   // Active sessions (in_progress/blocked/dormant) are always visible.
   // Dormant = stalled but not done, so it stays visible alongside active work.
@@ -531,8 +571,24 @@ function BranchGroup({
   );
 
   return (
-    <div className={isFocused ? 'ring-2 ring-[var(--accent)] ring-offset-1 rounded' : ''}>
-      <BranchLabel item={item} worktreesFetching={worktreesFetching} />
+    <div ref={animateRef} className={isFocused ? 'ring-2 ring-[var(--accent)] ring-offset-1 rounded' : ''}>
+      <BranchLabel
+        item={item}
+        worktreesFetching={worktreesFetching}
+        filesExpanded={filesExpanded}
+        onToggleFiles={handleToggleFiles}
+        unpushedExpanded={unpushedExpanded}
+        onToggleUnpushed={handleToggleUnpushed}
+      />
+      {filesExpanded && item.worktree && item.worktree.changedFiles.length > 0 && (
+        <ChangedFilesPanel files={item.worktree.changedFiles} />
+      )}
+      {unpushedExpanded && item.worktree && (
+        <UnpushedCommitsPanel
+          commits={item.worktree.unpushedCommits}
+          count={item.worktree.aheadCount}
+        />
+      )}
       {activeSessions.map((session) => (
         <SessionRow
           key={session.sessionId}
@@ -628,6 +684,9 @@ function SessionRow({
               {item.branch}
             </span>
           )}
+          {showBranch && item?.worktree?.isMerged && item.worktree.branch !== null && item.worktree.branch !== 'main' && (
+            <MergedBadge />
+          )}
           {!showBranch && workflowLabel && (
             <span className="text-[10px] text-[var(--text-muted)] shrink-0">
               {workflowLabel}
@@ -656,9 +715,17 @@ function SessionRow({
 function BranchLabel({
   item,
   worktreesFetching,
+  filesExpanded,
+  onToggleFiles,
+  unpushedExpanded,
+  onToggleUnpushed,
 }: {
   readonly item: WorkspaceItem;
   readonly worktreesFetching: boolean;
+  readonly filesExpanded?: boolean;
+  readonly onToggleFiles?: () => void;
+  readonly unpushedExpanded?: boolean;
+  readonly onToggleUnpushed?: () => void;
 }) {
   const timeAgo = formatRelativeTime(item.activityMs);
   return (
@@ -666,7 +733,18 @@ function BranchLabel({
       <span className="font-mono text-xs font-medium text-[var(--text-secondary)] truncate flex-1">
         {item.branch}
       </span>
-      <GitBadges item={item} fetching={worktreesFetching} compact />
+      {item.worktree?.isMerged && item.worktree.branch !== null && item.worktree.branch !== 'main' && (
+        <MergedBadge />
+      )}
+      <GitBadges
+        item={item}
+        fetching={worktreesFetching}
+        compact
+        filesExpanded={filesExpanded}
+        onToggleFiles={onToggleFiles}
+        unpushedExpanded={unpushedExpanded}
+        onToggleUnpushed={onToggleUnpushed}
+      />
       <span className="text-[10px] text-[var(--text-muted)] tabular-nums shrink-0">{timeAgo}</span>
     </div>
   );
@@ -680,27 +758,80 @@ function WorktreeOnlyRow({
   item,
   isFocused,
   worktreesFetching,
+  expandStateRef,
 }: {
   readonly item: WorkspaceItem;
   readonly isFocused: boolean;
   readonly worktreesFetching: boolean;
+  readonly expandStateRef: RefObject<ExpandStateMap>;
 }) {
+  const expandKey = `${item.branch}\0${item.repoRoot}`;
+
+  const getExpand = (): BranchExpandState =>
+    expandStateRef.current?.get(expandKey) ?? { filesExpanded: false, unpushedExpanded: false };
+
+  const [filesExpanded, setFilesExpanded] = useState(() => getExpand().filesExpanded);
+  const [unpushedExpanded, setUnpushedExpanded] = useState(() => getExpand().unpushedExpanded);
+  const [animateRef] = useAutoAnimate<HTMLDivElement>();
   const timeAgo = formatRelativeTime(item.activityMs);
+
+  const handleToggleFiles = useCallback(() => {
+    setFilesExpanded((e) => {
+      const next = !e;
+      const current = expandStateRef.current?.get(expandKey) ?? { filesExpanded: false, unpushedExpanded: false };
+      expandStateRef.current?.set(expandKey, { ...current, filesExpanded: next });
+      return next;
+    });
+  }, [expandKey, expandStateRef]);
+
+  const handleToggleUnpushed = useCallback(() => {
+    setUnpushedExpanded((e) => {
+      const next = !e;
+      const current = expandStateRef.current?.get(expandKey) ?? { filesExpanded: false, unpushedExpanded: false };
+      expandStateRef.current?.set(expandKey, { ...current, unpushedExpanded: next });
+      return next;
+    });
+  }, [expandKey, expandStateRef]);
+
   return (
-    <div
-      className={`flex items-center gap-3 px-3 py-2 rounded ${isFocused ? 'ring-2 ring-[var(--accent)] ring-offset-1' : ''}`}
-    >
-      <div className="w-1.5 h-1.5 rounded-full shrink-0 bg-[var(--border)]" title="No sessions" />
-      <span className="font-mono text-xs text-[var(--text-muted)] truncate flex-1">
-        {item.branch}
-      </span>
-      <GitBadges item={item} fetching={worktreesFetching} compact />
-      {item.worktree?.headMessage && (
-        <span className="text-[10px] text-[var(--text-muted)] truncate hidden sm:block max-w-[200px] opacity-60">
-          {item.worktree.headMessage}
+    // Outer wrapper enables the file panel to be a sibling of the flex row.
+    // The isFocused ring stays on the inner flex row so it does not wrap the panel.
+    <div ref={animateRef}>
+      <div
+        className={`flex items-center gap-3 px-3 py-2 rounded ${isFocused ? 'ring-2 ring-[var(--accent)] ring-offset-1' : ''}`}
+      >
+        <div className="w-1.5 h-1.5 rounded-full shrink-0 bg-[var(--border)]" title="No sessions" />
+        <span className="font-mono text-xs text-[var(--text-muted)] truncate flex-1">
+          {item.branch}
         </span>
+        {item.worktree?.isMerged && item.worktree.branch !== null && item.worktree.branch !== 'main' && (
+          <MergedBadge />
+        )}
+        <GitBadges
+          item={item}
+          fetching={worktreesFetching}
+          compact
+          filesExpanded={filesExpanded}
+          onToggleFiles={handleToggleFiles}
+          unpushedExpanded={unpushedExpanded}
+          onToggleUnpushed={handleToggleUnpushed}
+        />
+        {item.worktree?.headMessage && (
+          <span className="text-[10px] text-[var(--text-muted)] truncate hidden sm:block max-w-[200px] opacity-60">
+            {item.worktree.headMessage}
+          </span>
+        )}
+        <span className="text-[10px] text-[var(--text-muted)] tabular-nums shrink-0">{timeAgo}</span>
+      </div>
+      {filesExpanded && item.worktree && item.worktree.changedFiles.length > 0 && (
+        <ChangedFilesPanel files={item.worktree.changedFiles} />
       )}
-      <span className="text-[10px] text-[var(--text-muted)] tabular-nums shrink-0">{timeAgo}</span>
+      {unpushedExpanded && item.worktree && (
+        <UnpushedCommitsPanel
+          commits={item.worktree.unpushedCommits}
+          count={item.worktree.aheadCount}
+        />
+      )}
     </div>
   );
 }
@@ -713,10 +844,20 @@ function GitBadges({
   item,
   fetching,
   compact = false,
+  filesExpanded,
+  onToggleFiles,
+  unpushedExpanded,
+  onToggleUnpushed,
 }: {
   readonly item: WorkspaceItem;
   readonly fetching: boolean;
   readonly compact?: boolean;
+  /** When provided, the uncommitted badge becomes a toggle button. */
+  readonly filesExpanded?: boolean;
+  readonly onToggleFiles?: () => void;
+  /** When provided, the unpushed badge becomes a toggle button. */
+  readonly unpushedExpanded?: boolean;
+  readonly onToggleUnpushed?: () => void;
 }) {
   if (fetching && item.worktree === undefined) {
     // Show skeleton shimmer while worktree data loads
@@ -738,24 +879,157 @@ function GitBadges({
     return null;
   }
 
+  const badgeClass = `text-xs px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-400 border border-orange-500/20 tabular-nums${compact ? ' text-[10px]' : ''}`;
+
   return (
     <span className="flex items-center gap-1">
       {changedCount > 0 && (
-        <span
-          title={`${changedCount} file${changedCount === 1 ? '' : 's'} edited but not yet committed`}
-          className={`text-xs px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-400 border border-orange-500/20 tabular-nums${compact ? ' text-[10px]' : ''}`}
-        >
-          {changedCount} uncommitted
-        </span>
+        onToggleFiles ? (
+          // Clickable toggle: badge becomes a button that expands the file list panel.
+          // aria-expanded signals current state to screen readers.
+          <button
+            type="button"
+            aria-expanded={filesExpanded ?? false}
+            aria-label={`Show ${changedCount} uncommitted file${changedCount === 1 ? '' : 's'}`}
+            title={`${changedCount} file${changedCount === 1 ? '' : 's'} edited but not yet committed — click to expand`}
+            onClick={onToggleFiles}
+            className={`${badgeClass} cursor-pointer hover:bg-orange-500/20 transition-colors focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1${filesExpanded ? ' ring-1 ring-orange-500/40' : ''}`}
+          >
+            {changedCount} uncommitted
+          </button>
+        ) : (
+          <span
+            title={`${changedCount} file${changedCount === 1 ? '' : 's'} edited but not yet committed`}
+            className={badgeClass}
+          >
+            {changedCount} uncommitted
+          </span>
+        )
       )}
       {aheadCount > 0 && (
-        <span
-          title={`${aheadCount} commit${aheadCount === 1 ? '' : 's'} not yet pushed`}
-          className={`text-xs px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 tabular-nums${compact ? ' text-[10px]' : ''}`}
-        >
-          {aheadCount} unpushed
-        </span>
+        onToggleUnpushed ? (
+          // Clickable toggle: badge becomes a button that expands the unpushed commits panel.
+          <button
+            type="button"
+            aria-expanded={unpushedExpanded ?? false}
+            aria-label={`Show ${aheadCount} unpushed commit${aheadCount === 1 ? '' : 's'}`}
+            title={`${aheadCount} commit${aheadCount === 1 ? '' : 's'} not yet pushed -- click to expand`}
+            onClick={onToggleUnpushed}
+            className={`text-xs px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 cursor-pointer hover:bg-blue-500/20 transition-colors focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 tabular-nums${compact ? ' text-[10px]' : ''}${unpushedExpanded ? ' ring-1 ring-blue-500/40' : ''}`}
+          >
+            {aheadCount} unpushed
+          </button>
+        ) : (
+          <span
+            title={`${aheadCount} commit${aheadCount === 1 ? '' : 's'} not yet pushed`}
+            className={`text-xs px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 tabular-nums${compact ? ' text-[10px]' : ''}`}
+          >
+            {aheadCount} unpushed
+          </span>
+        )
       )}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Changed files panel -- expanded inline file list for uncommitted changes
+// ---------------------------------------------------------------------------
+
+/**
+ * Maps FileChangeStatus to a CSS color value for the status indicator dot.
+ *
+ * untracked and other use #a0a0a0 (text-secondary equivalent) rather than
+ * text-muted (#666) to meet contrast requirements.
+ */
+const FILE_STATUS_COLOR: Record<FileChangeStatus, string> = {
+  modified: 'var(--warning)',
+  added: 'var(--success)',
+  deleted: 'var(--error)',
+  untracked: '#a0a0a0',
+  renamed: 'var(--accent)',
+  other: '#a0a0a0',
+};
+
+const FILE_STATUS_LABEL: Record<FileChangeStatus, string> = {
+  modified: 'M',
+  added: 'A',
+  deleted: 'D',
+  untracked: '?',
+  renamed: 'R',
+  other: '~',
+};
+
+function ChangedFilesPanel({ files }: { readonly files: readonly ChangedFile[] }) {
+  return (
+    <div className="mx-3 mb-1 max-h-48 overflow-y-auto rounded border border-[var(--border)] bg-[var(--bg-card)]">
+      {files.map((file, i) => (
+        <div key={i} className="flex items-center gap-2 px-2 py-0.5 hover:bg-[var(--bg-tertiary)]">
+          <span
+            className="text-[10px] font-mono font-semibold w-3 shrink-0 tabular-nums"
+            style={{ color: FILE_STATUS_COLOR[file.status] }}
+            title={file.status}
+          >
+            {FILE_STATUS_LABEL[file.status]}
+          </span>
+          <span className="font-mono text-[11px] text-[var(--text-secondary)] truncate">
+            {file.path}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Unpushed commits panel -- expanded inline commit list for unpushed commits
+// ---------------------------------------------------------------------------
+
+function UnpushedCommitsPanel({
+  commits,
+  count,
+}: {
+  readonly commits: readonly { hash: string; message: string }[];
+  readonly count?: number;
+}) {
+  if (commits.length === 0) {
+    return (
+      <div className="mx-3 mb-1 px-2 py-1.5 rounded border border-[var(--border)] bg-[var(--bg-card)]">
+        <span className="text-[11px] text-[var(--text-muted)] italic">
+          {count !== undefined && count > 0
+            ? `${count} commit${count === 1 ? '' : 's'} ahead -- details unavailable`
+            : 'No unpushed commits'}
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="mx-3 mb-1 max-h-48 overflow-y-auto rounded border border-[var(--border)] bg-[var(--bg-card)]">
+      {commits.map((commit, i) => (
+        <div key={i} className="flex items-center gap-2 px-2 py-0.5 hover:bg-[var(--bg-tertiary)]">
+          <span className="font-mono text-[10px] text-[var(--text-muted)] shrink-0 tabular-nums w-14">
+            {commit.hash}
+          </span>
+          <span className="font-mono text-[11px] text-[var(--text-secondary)] truncate">
+            {commit.message}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Merged badge
+// ---------------------------------------------------------------------------
+
+function MergedBadge() {
+  return (
+    <span
+      title="Merged into main"
+      className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-400 border border-green-500/20 shrink-0"
+    >
+      merged
     </span>
   );
 }
@@ -971,7 +1245,7 @@ interface KeyboardOptions {
   readonly items: readonly WorkspaceItem[];
   readonly focusedIndex: number;
   readonly setFocusedIndex: (i: number) => void;
-  /** Called when Enter/Space is pressed on a focused item -- opens primary session */
+  /** Called when Enter/Space is pressed on a focused item -- navigates to session detail */
   readonly onSelectSession: (sessionId: string) => void;
   readonly scope: Scope;
   readonly setScope: (scope: Scope) => void;
