@@ -17,6 +17,8 @@ import type {
   ConsoleRepoWorktrees,
   ConsoleWorktreeListResponse,
   ConsoleSessionStatus,
+  ChangedFile,
+  FileChangeStatus,
 } from './console-types.js';
 
 const execFileAsync = promisify(execFile);
@@ -102,18 +104,59 @@ function parseWorktreePorcelain(raw: string): RawWorktree[] {
 // Per-worktree enrichment
 // ---------------------------------------------------------------------------
 
+/**
+ * Map a git status XY code to a FileChangeStatus.
+ *
+ * XY codes: X = index (staged), Y = worktree (unstaged). Both columns are
+ * checked because we report a file as changed regardless of whether the change
+ * is staged, unstaged, or both. '??' is the special untracked marker.
+ */
+function parseFileStatus(xy: string): FileChangeStatus {
+  if (xy === '??') return 'untracked';
+  const x = xy[0] ?? ' ';
+  const y = xy[1] ?? ' ';
+  if (x === 'R') return 'renamed';
+  if (x === 'A') return 'added';
+  if (x === 'D' || y === 'D') return 'deleted';
+  if (x === 'M' || y === 'M') return 'modified';
+  return 'other';
+}
+
+/**
+ * Parse `git status --short` output into individual ChangedFile entries.
+ *
+ * Each line is formatted as `XY path` where XY is a two-character status code
+ * and path starts at the third character. Blank lines are skipped.
+ */
+function parseChangedFiles(statusRaw: string): readonly ChangedFile[] {
+  if (!statusRaw) return [];
+  return statusRaw
+    .split('\n')
+    .filter(line => line.trim().length > 0)
+    .map(line => ({
+      status: parseFileStatus(line.slice(0, 2)),
+      path: line.slice(3),
+    }));
+}
+
 interface WorktreeEnrichment {
   headHash: string;
   headMessage: string;
   headTimestampMs: number;
   changedCount: number;
+  changedFiles: readonly ChangedFile[];
   aheadCount: number;
+  unpushedCommits: readonly { readonly hash: string; readonly message: string }[];
+  isMerged: boolean;
   /** Content of `git config branch.<name>.description`, or empty string if unset. */
   branchDescription: string;
 }
 
+// Hardcoded to origin/main -- repos using master/trunk will silently degrade (badges disappear, no crash)
+const MAIN_BRANCH_REF = 'origin/main';
+
 /**
- * Enrich a single worktree by running its three git commands in parallel.
+ * Enrich a single worktree by running its git commands in parallel.
  * Each command is independent so there is no reason to serialize them.
  */
 async function enrichWorktree(wt: RawWorktree): Promise<WorktreeEnrichment> {
@@ -121,11 +164,16 @@ async function enrichWorktree(wt: RawWorktree): Promise<WorktreeEnrichment> {
   // local config), so it is readable from any linked worktree via the same
   // `git config` call. Returns null when the key is unset -- git exits non-zero.
   const descriptionKey = wt.branch ? `branch.${wt.branch}.description` : null;
-  const [logRaw, statusRaw, aheadRaw, descriptionRaw] = await Promise.all([
+  const [logRaw, statusRaw, aheadRaw, descriptionRaw, unpushedLogRaw, mergedBranchesRaw] = await Promise.all([
     git(wt.path, ['log', '-1', '--format=%h%n%s%n%ct']),
     git(wt.path, ['status', '--short']),
-    git(wt.path, ['rev-list', '--count', 'origin/main..HEAD']),
+    git(wt.path, ['rev-list', '--count', `${MAIN_BRANCH_REF}..HEAD`]),
     descriptionKey ? git(wt.path, ['config', descriptionKey]) : Promise.resolve(null),
+    git(wt.path, ['log', `${MAIN_BRANCH_REF}..HEAD`, '--oneline']),
+    // git branch --merged uses merge-base comparison, so it correctly handles
+    // squash-merges. The badge shows when the branch tip is reachable from
+    // origin/main OR when the branch's changes have been squash-merged.
+    wt.branch && wt.branch !== 'main' ? git(wt.path, ['branch', '--merged', MAIN_BRANCH_REF]) : Promise.resolve(null),
   ]);
 
   const [hashLine, messageLine, timestampLine] = logRaw?.split('\n') ?? [];
@@ -134,17 +182,35 @@ async function enrichWorktree(wt: RawWorktree): Promise<WorktreeEnrichment> {
   const headTimestampMs = timestampLine ? parseInt(timestampLine.trim(), 10) * 1000 : 0;
 
   // statusRaw === null means git failed; '' means clean — do not conflate them
-  const changedCount = statusRaw !== null
-    ? statusRaw.split('\n').filter(l => l.trim()).length
-    : 0;
+  const changedFiles = statusRaw !== null ? parseChangedFiles(statusRaw) : [];
+  const changedCount = changedFiles.length;
 
   // parseInt can return NaN if aheadRaw is '' (unexpected but possible)
   const parsedAhead = aheadRaw !== null ? parseInt(aheadRaw, 10) : NaN;
   const aheadCount = isNaN(parsedAhead) ? 0 : parsedAhead;
 
+  // null or '' means no unpushed commits (or git failed)
+  const unpushedCommits: readonly { readonly hash: string; readonly message: string }[] =
+    unpushedLogRaw
+      ? unpushedLogRaw.split('\n').filter(l => l.trim().length > 0).map(line => ({
+          hash: line.slice(0, 7),
+          message: line.slice(8),
+        }))
+      : [];
+
+  // Use `git branch --merged origin/main` to detect squash-merges correctly.
+  // The output lists all branches whose tips are reachable from origin/main after
+  // squash-merge. If the current branch name appears in the output, it is merged.
+  // Never true for main itself, detached HEAD (null branch), or when the git command failed.
+  const isMerged =
+    wt.branch !== null &&
+    wt.branch !== 'main' &&
+    mergedBranchesRaw !== null &&
+    mergedBranchesRaw.split('\n').some(line => line.trim() === wt.branch);
+
   const branchDescription = descriptionRaw?.trim() ?? '';
 
-  return { headHash, headMessage, headTimestampMs, changedCount, aheadCount, branchDescription };
+  return { headHash, headMessage, headTimestampMs, changedCount, changedFiles, aheadCount, unpushedCommits, isMerged, branchDescription };
 }
 
 // ---------------------------------------------------------------------------
@@ -156,7 +222,13 @@ async function enrichWorktree(wt: RawWorktree): Promise<WorktreeEnrichment> {
  * Used by the route to canonicalize the CWD before adding it to the repo list.
  */
 export async function resolveRepoRoot(path: string): Promise<string | null> {
-  return git(path, ['rev-parse', '--show-toplevel']);
+  // Use --git-common-dir to resolve linked worktrees back to the main repo root.
+  // For the main worktree this returns ".git" (relative); for a linked worktree
+  // it returns an absolute path like /repo/.git. Stripping the .git suffix gives
+  // the canonical repo root, deduplicating all worktrees of the same repo.
+  const commonDir = await git(path, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+  if (commonDir === null) return null;
+  return commonDir.replace(/\/\.git\/?$/, '') || null;
 }
 
 /**
@@ -197,7 +269,10 @@ async function enrichRepo(
       headMessage: e.headMessage,
       headTimestampMs: e.headTimestampMs,
       changedCount: e.changedCount,
+      changedFiles: e.changedFiles,
       aheadCount: e.aheadCount,
+      unpushedCommits: e.unpushedCommits,
+      isMerged: e.isMerged,
       activeSessionCount: wt.branch ? (activeSessions.counts.get(wt.branch) ?? 0) : 0,
       // Empty string means unset -- omit from the type so consumers can use simple truthiness checks
       ...(e.branchDescription ? { description: e.branchDescription } : {}),

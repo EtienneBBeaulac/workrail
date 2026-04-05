@@ -148,9 +148,11 @@ export function mountConsoleRoutes(app: Application, consoleService: ConsoleServ
       if (Date.now() > repoRootsExpiresAt) {
         cwdRepoRootPromise ??= resolveRepoRoot(process.cwd());
         const cwdRoot = await cwdRepoRootPromise;
-        const repoRootSet = new Set<string>(
-          sessions.map(s => s.repoRoot).filter((r): r is string => r !== null),
-        );
+        // Normalize each session repoRoot through resolveRepoRoot so linked worktrees
+        // collapse to their main repo root rather than appearing as separate repos.
+        const rawRoots = sessions.map(s => s.repoRoot).filter((r): r is string => r !== null);
+        const resolvedRoots = await Promise.all(rawRoots.map(r => resolveRepoRoot(r)));
+        const repoRootSet = new Set<string>(resolvedRoots.filter((r): r is string => r !== null));
         if (cwdRoot !== null) repoRootSet.add(cwdRoot);
         cachedRepoRoots = [...repoRootSet];
         repoRootsExpiresAt = Date.now() + REPO_ROOTS_TTL_MS;
