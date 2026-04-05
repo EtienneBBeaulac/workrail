@@ -3,7 +3,7 @@
   "version": 3,
   "title": "WorkRail Authoring Rules",
   "purpose": "Canonical current rules for authoring good WorkRail workflows. workflow.schema.json remains the source of truth for legal structure.",
-  "lastReviewed": "2026-03-21",
+  "lastReviewed": "2026-04-04",
   "principles": [
     "Schema defines what is valid. These rules define what is good.",
     "Prefer current authoring rules over design rationale or historical notes.",
@@ -927,6 +927,87 @@
           "antiPatterns": [
             "Confirming every draft or artifact creation by default",
             "Using requireConfirmation as a substitute for clear loop or rigor policy"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "assessment-gates",
+      "title": "Assessment gates",
+      "rules": [
+        {
+          "id": "assessment-use-for-bounded-judgment",
+          "status": "active",
+          "level": "recommended",
+          "scope": [
+            "workflow.assessments",
+            "step.assessmentRefs",
+            "step.assessmentConsequences"
+          ],
+          "rule": "Use assessment gates when a step needs the agent to submit a bounded, durable judgment before the workflow can safely advance -- not for generic scoring or ceremony.",
+          "why": "Assessment gates force explicit structured reasoning at a decision point and durably record the result. Generic scoring that never affects routing adds noise without value.",
+          "enforcement": ["advisory"],
+          "sourceRefs": [
+            {
+              "kind": "example",
+              "path": "workflows/mr-review-workflow.agentic.v2.json",
+              "note": "Uses a three-dimension readiness gate on the final validation step."
+            },
+            {
+              "kind": "example",
+              "path": "workflows/bug-investigation.agentic.v2.json",
+              "note": "Uses a single-dimension diagnosis readiness gate before handoff."
+            }
+          ],
+          "checks": [
+            "The assessment is at a step where a wrong answer would produce a bad handoff.",
+            "At least one dimension has a consequence that keeps the step pending and requires follow-up.",
+            "The assessment result is durably recorded and useful to a future resume agent."
+          ],
+          "antiPatterns": [
+            "Using assessments as a generic five-level scoring rubric with no routing consequence",
+            "Declaring an assessment but never referencing it from any step"
+          ]
+        },
+        {
+          "id": "assessment-dimension-orthogonality",
+          "status": "active",
+          "level": "required",
+          "scope": [
+            "workflow.assessments"
+          ],
+          "rule": "Each dimension in an assessment must capture a distinct failure mode that the other dimensions cannot catch. A dimension that restates existing workflow state (such as a generic 'confidence' dimension that mirrors the workflow's confidence band) adds ceremony without structure.",
+          "why": "The value of multiple dimensions is that each one independently blocks advancement for a different reason. Correlated or vague dimensions collapse to a single gate with extra steps.",
+          "enforcement": ["advisory"],
+          "checks": [
+            "Each dimension is independently checkable without needing to know the result of the others.",
+            "No dimension restates a context variable the workflow already computes (e.g. recommendationConfidenceBand).",
+            "A 'low' rating on any one dimension alone justifies a follow-up, regardless of the others."
+          ],
+          "antiPatterns": [
+            "A single 'confidence' dimension that mirrors the workflow's existing confidence band",
+            "Multiple dimensions that all reduce to 'did I do a good job overall'",
+            "Dimensions so correlated that one being low always means the others are low too"
+          ]
+        },
+        {
+          "id": "assessment-v1-constraints",
+          "status": "active",
+          "level": "required",
+          "scope": [
+            "step.assessmentRefs",
+            "step.assessmentConsequences"
+          ],
+          "rule": "V1 supports exactly one assessmentRef per step and at most one assessmentConsequences entry per step. Use anyEqualsLevel as the trigger -- the engine checks all submitted dimensions and fires if any equals that level.",
+          "why": "anyEqualsLevel is the only trigger form. It works for both single-dimension and multi-dimension assessments without requiring the author to choose between two forms.",
+          "enforcement": ["schema"],
+          "checks": [
+            "No more than one assessmentRefs entry per step.",
+            "No more than one assessmentConsequences entry per step.",
+            "The consequence uses anyEqualsLevel to declare which level blocks -- not a named dimension."
+          ],
+          "antiPatterns": [
+            "Trying to encode multiple consequences via workarounds"
           ]
         }
       ]

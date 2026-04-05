@@ -325,15 +325,11 @@ export class WorkflowCompiler {
       }
 
       for (const consequence of assessmentConsequences) {
-        const dimension = assessment.dimensions.find(candidate => candidate.id === consequence.when.dimensionId);
-        if (!dimension) {
+        const trigger = consequence.when;
+        const allLevels = assessment.dimensions.flatMap(d => d.levels);
+        if (!allLevels.includes(trigger.anyEqualsLevel)) {
           return err(Err.invalidState(
-            `Step '${step.id}' declares consequence on unknown dimension '${consequence.when.dimensionId}' for assessment '${assessment.id}'`
-          ));
-        }
-        if (!dimension.levels.includes(consequence.when.equalsLevel)) {
-          return err(Err.invalidState(
-            `Step '${step.id}' declares consequence on unsupported level '${consequence.when.equalsLevel}' for dimension '${consequence.when.dimensionId}'. Declared levels: ${dimension.levels.join(', ')}`
+            `Step '${step.id}' declares consequence with anyEqualsLevel '${trigger.anyEqualsLevel}' that is not declared in any dimension of assessment '${assessment.id}'`
           ));
         }
         if (consequence.effect.kind !== 'require_followup') {

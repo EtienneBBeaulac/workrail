@@ -256,14 +256,47 @@ Practical guidance:
 - write follow-up guidance as **same-step retry guidance**, not as a subflow or rewind instruction
 - prefer one strong follow-up trigger over multiple weak ones
 
+**Dimension design: orthogonality matters**
+
+The value of multi-dimensional assessments is that each dimension independently blocks advancement for a different reason. A dimension that restates existing workflow state adds ceremony without structure.
+
+Good dimensions are:
+- **Orthogonal**: each captures a distinct failure mode the others don't catch
+- **Independently checkable**: a `low` rating on one dimension alone justifies follow-up, regardless of the others
+- **Specific**: about a concrete, observable thing -- not "is the overall result good"
+
+Bad dimensions:
+- A single `confidence` dimension that mirrors the workflow's existing `recommendationConfidenceBand` -- it just restates what the workflow already knows
+- Multiple dimensions that all reduce to the same question phrased differently
+- Dimensions so correlated that one being low always implies the others are low too
+
+Example of orthogonal dimensions for an MR review handoff:
+- `evidence_quality` -- are findings grounded in specific code locations? (catches: weak analysis)
+- `coverage_completeness` -- are all relevant domains checked? (catches: blind spots)
+- `contradiction_resolution` -- are competing interpretations resolved? (catches: premature synthesis)
+
+Each catches a distinct failure mode. A review can have strong evidence but miss whole domains, or have good coverage with unresolved contradictions.
+
+**Consequence trigger**: use `anyEqualsLevel` to specify which level should block. WorkRail checks all submitted dimensions and fires the consequence if any of them equals that level. For single-dimension assessments this works the same as an exact match.
+
+```json
+{
+  "when": { "anyEqualsLevel": "low" },
+  "effect": { "kind": "require_followup", "guidance": "..." }
+}
+```
+
+**V1 limit**: at most one consequence per step.
+
 Good fit:
 
-- "Before handing off, assess whether the diagnosis is ready."
-- "If confidence is low, require follow-up and retry the same validation step."
+- "Before handing off, assess whether the diagnosis is ready -- coverage is complete, evidence is grounded, and contradictions are resolved."
+- "If evidence quality is low, require follow-up to anchor findings to specific code before retry."
 
 Bad fit:
 
 - generic five-level scores that never affect workflow behavior
+- a single `confidence` dimension that mirrors a confidence band the workflow already tracks
 - multiple interacting rule chains that really want a policy DSL
 - subflow-style recovery sequences masquerading as a single follow-up consequence
 

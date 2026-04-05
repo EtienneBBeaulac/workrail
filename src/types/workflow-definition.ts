@@ -85,11 +85,16 @@ export interface AssessmentDefinition {
   readonly dimensions: readonly AssessmentDimensionDefinition[];
 }
 
+/**
+ * Trigger condition for an assessment consequence.
+ * Fires when ANY dimension in the submitted assessment equals anyEqualsLevel.
+ */
 export interface AssessmentConsequenceTriggerDefinition {
-  /** Declared dimension to inspect in the accepted canonical assessment. */
-  readonly dimensionId: string;
-  /** Canonical level that triggers the consequence. */
-  readonly equalsLevel: string;
+  /**
+   * Fires when ANY dimension in the submitted assessment equals this level.
+   * For single-dimension assessments this is equivalent to an exact match.
+   */
+  readonly anyEqualsLevel: string;
 }
 
 export interface AssessmentFollowupRequiredEffectDefinition {
