@@ -1,20 +1,24 @@
-import { Outlet, useNavigate, useMatchRoute } from '@tanstack/react-router';
+import { useNavigate, useMatchRoute } from '@tanstack/react-router';
+import { WorkspaceView } from './views/WorkspaceView';
+import { SessionDetail } from './views/SessionDetail';
 
 /**
- * AppShell renders the persistent chrome (header) and the active route's
- * content via <Outlet>. Navigation state is derived from the URL instead
- * of React state so browser back/forward work correctly.
+ * AppShell is the root route component. It owns both WorkspaceView and
+ * SessionDetail directly -- WorkspaceView is always mounted and hidden via CSS
+ * when navigating to a session, preserving scroll position on back-navigation.
+ *
+ * Navigation state is derived from the URL so browser back/forward work
+ * correctly without any React state synchronization.
  */
 export function AppShell() {
   const navigate = useNavigate();
   const matchRoute = useMatchRoute();
 
-  // Determine whether we are on a session detail route
   const sessionMatch = matchRoute({ to: '/session/$sessionId' });
   const isInSessionDetail = sessionMatch !== false;
-  const sessionId = isInSessionDetail && sessionMatch
-    ? (sessionMatch as { sessionId: string }).sessionId
-    : null;
+  // useMatchRoute returns Record<string, string> when matched; sessionId is
+  // always present and typed as string by the router registration
+  const sessionId = isInSessionDetail ? (sessionMatch as Record<string, string>).sessionId : null;
 
   const handleBack = () => {
     navigate({ to: '/' });
@@ -44,7 +48,12 @@ export function AppShell() {
       </header>
 
       <main className="p-6">
-        <Outlet />
+        {/* WorkspaceView is always mounted -- hidden via CSS only so scroll
+            position in scrollYRef survives back-navigation */}
+        <WorkspaceView hidden={isInSessionDetail} />
+        {isInSessionDetail && sessionId && (
+          <SessionDetail sessionId={sessionId} />
+        )}
       </main>
     </div>
   );
