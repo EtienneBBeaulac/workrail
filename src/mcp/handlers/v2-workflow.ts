@@ -252,11 +252,25 @@ export async function handleV2ListWorkflows(
         return buildTagSummary(WORKFLOW_TAGS, sortedIds);
       })();
 
+      // _nextStep: guide the agent when tagSummary is returned (no tags filter).
+      // staleRoots: maintenance signal — only surface in source catalog mode (includeSources).
+      // In tag-discovery mode it is noise: the agent cannot act on stale source paths.
+      const nextStepHint = tagSummaryEntry
+        ? 'Pick a tag from tagSummary that fits the user\'s goal, then call list_workflows with tags=["<tagId>"]. ' +
+          'If a workflow ID in examples[] already matches, call start_workflow directly — no second list call needed. ' +
+          'If multiple tags could apply, pick the most specific one.'
+        : undefined;
+
       if (!input.includeSources) {
+        // staleRoots is suppressed when tagSummary is present (compact first-call mode):
+        // the agent is just discovering tags, not looking for specific workflows, so stale
+        // source paths are noise it cannot act on. Emit staleRoots on filtered calls only.
+        const includeStaleRoots = !tagSummaryEntry && stalePaths.length > 0;
         const payload = V2WorkflowListOutputSchema.parse({
           workflows: tagFilteredCompiled,
           ...(tagSummaryEntry ? { tagSummary: tagSummaryEntry } : {}),
-          ...(stalePaths.length > 0 ? { staleRoots: [...stalePaths] } : {}),
+          ...(nextStepHint ? { _nextStep: nextStepHint } : {}),
+          ...(includeStaleRoots ? { staleRoots: [...stalePaths] } : {}),
           ...(warnings ? { warnings } : {}),
         });
         return okAsync(success(payload) as ToolResult<unknown>);
@@ -271,6 +285,7 @@ export async function handleV2ListWorkflows(
         const payload = V2WorkflowListOutputSchema.parse({
           workflows: tagFilteredCompiled,
           ...(tagSummaryEntry ? { tagSummary: tagSummaryEntry } : {}),
+          ...(nextStepHint ? { _nextStep: nextStepHint } : {}),
           ...(stalePaths.length > 0 ? { staleRoots: [...stalePaths] } : {}),
           ...(warnings ? { warnings } : {}),
           sources: [],
@@ -284,6 +299,7 @@ export async function handleV2ListWorkflows(
         const payload = V2WorkflowListOutputSchema.parse({
           workflows: tagFilteredCompiled,
           ...(tagSummaryEntry ? { tagSummary: tagSummaryEntry } : {}),
+          ...(nextStepHint ? { _nextStep: nextStepHint } : {}),
           ...(stalePaths.length > 0 ? { staleRoots: [...stalePaths] } : {}),
           ...(warnings ? { warnings } : {}),
           sources,

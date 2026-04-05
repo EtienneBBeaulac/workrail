@@ -328,7 +328,7 @@ describe('v2 workflow source catalog output', () => {
     await managedStore.attach(missingDir);
 
     const result = await handleV2ListWorkflows(
-      { workspacePath: workspace },
+      { workspacePath: workspace, tags: ['coding'] },
       buildCtxWithManagedStore(rememberedRootsStore(), managedStore),
     );
 
