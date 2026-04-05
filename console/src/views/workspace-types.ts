@@ -192,11 +192,26 @@ export function joinSessionsAndWorktrees(
     }
   }
 
-  // Group sessions by join key, excluding null-repoRoot sessions
+  // Build a map from any worktree path -> canonical main repo root.
+  // Sessions store the worktree path they were started from as repoRoot, but the
+  // worktrees API normalizes linked worktrees to the main repo root. Without this
+  // map, sessions from linked worktrees would never join with their worktree entry
+  // and would appear as separate spurious repos (named after the worktree dir).
+  const worktreePathToRepoRoot = new Map<string, string>();
+  for (const repo of worktreeRepos) {
+    for (const wt of repo.worktrees) {
+      worktreePathToRepoRoot.set(wt.path, repo.repoRoot);
+    }
+  }
+
+  // Group sessions by join key, excluding null-repoRoot sessions.
+  // Normalize session repoRoot via worktreePathToRepoRoot so sessions started
+  // from a linked worktree collapse to the main repo root.
   const sessionsByKey = new Map<string, ConsoleSessionSummary[]>();
   for (const session of sessions) {
     if (session.repoRoot === null || session.gitBranch === null) continue;
-    const key = `${session.gitBranch}\0${session.repoRoot}`;
+    const normalizedRoot = worktreePathToRepoRoot.get(session.repoRoot) ?? session.repoRoot;
+    const key = `${session.gitBranch}\0${normalizedRoot}`;
     const existing = sessionsByKey.get(key);
     if (existing) {
       existing.push(session);
