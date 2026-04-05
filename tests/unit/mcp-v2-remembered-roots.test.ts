@@ -135,7 +135,7 @@ async function writeWorkspaceWorkflow(workspaceRoot: string): Promise<void> {
 }
 
 describe('stale remembered roots in tool responses', () => {
-  it('list_workflows succeeds and includes staleRoots when a remembered root no longer exists', async () => {
+  it('list_workflows suppresses staleRoots in tagSummary (compact) mode, surfaces them in filtered mode', async () => {
     const dataRoot = await mkTempDir('workrail-stale-list-data-');
     const workspaceRoot = await mkTempDir('workrail-stale-list-ws-');
     const { ctx, rememberedRootsStore } = await buildCtx(dataRoot);
@@ -144,12 +144,19 @@ describe('stale remembered roots in tool responses', () => {
     const rememberRes = await rememberedRootsStore.rememberRoot(stalePath);
     expect(rememberRes.isOk()).toBe(true);
 
-    const result = await handleV2ListWorkflows({ workspacePath: workspaceRoot }, ctx);
+    // No tags filter → tagSummary mode. staleRoots suppressed (noise for tag discovery).
+    const compactResult = await handleV2ListWorkflows({ workspacePath: workspaceRoot }, ctx);
+    expect(compactResult.type).toBe('success');
+    const compactData = compactResult.data as Record<string, unknown>;
+    expect(compactData.staleRoots).toBeUndefined();
+    expect(Array.isArray(compactData.tagSummary)).toBe(true);
 
-    expect(result.type).toBe('success');
-    const data = result.data as Record<string, unknown>;
-    expect(Array.isArray(data.staleRoots)).toBe(true);
-    expect(data.staleRoots as string[]).toContain(path.resolve(stalePath));
+    // tags filter → filtered mode. staleRoots surfaced so agent knows why workflows may be missing.
+    const filteredResult = await handleV2ListWorkflows({ workspacePath: workspaceRoot, tags: ['coding'] }, ctx);
+    expect(filteredResult.type).toBe('success');
+    const filteredData = filteredResult.data as Record<string, unknown>;
+    expect(Array.isArray(filteredData.staleRoots)).toBe(true);
+    expect(filteredData.staleRoots as string[]).toContain(path.resolve(stalePath));
   });
 
   it('list_workflows does not include staleRoots when all remembered roots are accessible', async () => {

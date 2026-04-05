@@ -78,14 +78,19 @@ This tool provides:
 - Examples of valid patterns and formats
 - Schema version and metadata information`,
 
-    // v2 tools (feature-flagged)
-    list_workflows: `Lists available workflows using WorkRail v2 (feature-flagged). Returns workflow metadata plus pinned snapshot hashes for deterministic execution.
+    // v2 tools
+    list_workflows: `Lists available workflows. When a workflow exists for the user's request, following it means following the user's structured instructions.
 
-Use this to discover workflows before attempting multi-step tasks. When a workflow exists for the user's request, following it means following the user's structured instructions.
+Discovery pattern (token-efficient — do this):
+- Preferred: read the workrail://tags MCP resource — tag definitions with no tool call.
+- Or: call with no tags → returns tagSummary (~500 tokens) with when-to-use phrases per tag.
+- Then: call with tags=["<tagId>"] → returns the filtered workflow list for that tag.
+- Shortcut: if a workflow ID in tagSummary examples[] already matches, call start_workflow directly — skip the second list call.
+- Multiple tags: if more than one tag fits, pick the most specific one.
 
-Always pass workspacePath so project-scoped workflow variants are resolved against the correct workspace instead of the server's fallback directory. Shared MCP servers cannot infer this safely.`,
+Always pass workspacePath so project-scoped workflow variants are resolved against the correct workspace. Shared MCP servers cannot infer this safely.`,
 
-    inspect_workflow: `Inspect a workflow structure before starting it (WorkRail v2, feature-flagged).
+    inspect_workflow: `Inspect a workflow structure before starting it.
 
 Use this to understand what steps the workflow will guide you through. The workflow is a step-by-step plan the user (or workflow author) created for this type of task.
 
@@ -186,16 +191,19 @@ Returns validation result with specific errors and suggestions if invalid.`,
 
 Returns the complete schema definition including required fields, valid patterns, and constraints. Use this as reference when authoring workflow JSON.`,
 
-    // v2 tools (feature-flagged)
-    list_workflows: `List available workflows via WorkRail v2 (feature-flagged).
+    // v2 tools
+    list_workflows: `Lists available workflows. When a workflow exists for the user's request, you MUST use it instead of improvising your own approach.
 
-Workflows are the user's pre-defined instructions for complex tasks. When a workflow exists for the user's request, you MUST use it instead of improvising your own approach.
-
-Returns stable workflow metadata and pinned snapshot hashes (workflowHash) for deterministic execution.
+Discovery pattern (token-efficient — do this):
+- Preferred: read the workrail://tags MCP resource — tag definitions with no tool call.
+- Or: call with no tags → returns tagSummary (~500 tokens) with when-to-use phrases per tag.
+- Then: call with tags=["<tagId>"] → returns the filtered workflow list for that tag.
+- Shortcut: if a workflow ID in tagSummary examples[] already matches, call start_workflow directly — skip the second list call.
+- Multiple tags: if more than one tag fits, pick the most specific one.
 
 Pass workspacePath on every call so project-scoped workflow variants are resolved against the correct workspace. Shared MCP servers cannot infer this safely.`,
 
-    inspect_workflow: `Inspect a workflow you are considering following (WorkRail v2, feature-flagged).
+    inspect_workflow: `Inspect a workflow you are considering following.
 
 Use this to understand the workflow's structure before starting. The workflow is the user's explicit plan - not suggestions, not guidelines, but direct instructions you will follow.
 

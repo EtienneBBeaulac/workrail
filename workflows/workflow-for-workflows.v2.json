@@ -1,8 +1,8 @@
 {
   "id": "workflow-for-workflows",
   "name": "Workflow Authoring Workflow (Quality Gate v2)",
-  "version": "2.3.0",
-  "description": "Use this to author or modernize a WorkRail workflow. Guides through understanding the task, defining effectiveness targets, designing architecture and quality gates, drafting, validating, and handing off.",
+  "version": "2.4.0",
+  "description": "Use this to author or modernize a WorkRail workflow. Guides through understanding the task, defining effectiveness targets, designing architecture and quality gates, drafting, validating, assigning tags, and handing off.",
   "recommendedPreferences": {
     "recommendedAutonomy": "guided",
     "recommendedRiskPolicy": "conservative"
@@ -184,7 +184,7 @@
           "Decide the phase list, one-line goal for each phase, and overall ordering.",
           "Design loops with explicit exit rules, bounded maxIterations, and real reasons for another pass.",
           "Decide confirmation gates, delegation vs template injection vs direct execution, promptFragments, references, artifacts, and metaGuidance.",
-          "If `authoringMode = modernize_existing`, decide preserve-in-place, restructure, or rewrite. For each item in valueInventory, record: `preserved` (structurally present with equivalent enforcement), `replaced` (new mechanism prevents same failure mode \u2014 justify equivalence), or `dropped` (intentionally removed \u2014 justify the loss). Phase-level mapping alone is insufficient; track what was inside each restructured or removed phase."
+          "If `authoringMode = modernize_existing`, decide preserve-in-place, restructure, or rewrite. For each item in valueInventory, record: `preserved` (structurally present with equivalent enforcement), `replaced` (new mechanism prevents same failure mode — justify equivalence), or `dropped` (intentionally removed — justify the loss). Phase-level mapping alone is insufficient; track what was inside each restructured or removed phase."
         ],
         "outputRequired": {
           "notesMarkdown": "Structured workflow outline, loop design, confirmation design, delegation design, artifact plan, and modernization mapping.",
@@ -432,7 +432,7 @@
             "procedure": [
               "Trace the authored workflow step by step against the user's actual task or the closest realistic scenario.",
               "For each step, ask: what would the agent actually do, what context would it have, what would it likely produce, and what would the next step inherit?",
-              "Also trace at least one degraded or edge-case path \u2014 not just the happy path. Ask: what happens when a condition evaluates unexpectedly, a loop has nothing to iterate, a runCondition skips a phase, or the user provides minimal input? Quality gates that only protect the happy path are not quality gates.",
+              "Also trace at least one degraded or edge-case path — not just the happy path. Ask: what happens when a condition evaluates unexpectedly, a loop has nothing to iterate, a runCondition skips a phase, or the user provides minimal input? Quality gates that only protect the happy path are not quality gates.",
               "Identify likely weak steps, likely unsatisfying outputs, and likely false-confidence modes.",
               "For any loop in the workflow, explicitly check: does the exit condition have structural teeth (artifact contract, bounded maxIterations), or does it rely on prose instructions the engine cannot enforce?",
               "Fix issues directly in the workflow file when the right improvement is clear."
@@ -460,7 +460,7 @@
                 "var": "authoringMode",
                 "equals": "modernize_existing"
               },
-              "text": "For modernize_existing: after tracing the workflow forward, check each item in valueInventory. For each enforcement mechanism and domain knowledge item: would the modernized workflow produce the same behavior? Any item where the answer is no or weaker is a loss \u2014 fix it directly or record the accepted tradeoff with justification."
+              "text": "For modernize_existing: after tracing the workflow forward, check each item in valueInventory. For each enforcement mechanism and domain knowledge item: would the modernized workflow produce the same behavior? Any item where the answer is no or weaker is a loss — fix it directly or record the accepted tradeoff with justification."
             }
           ],
           "requireConfirmation": false
@@ -475,7 +475,7 @@
               "Reviewer-family or validator output is evidence, not authority."
             ],
             "procedure": [
-              "Score these dimensions 0-2 with one sentence of evidence each: `voiceClarity`, `ceremonyLevel`, `loopSoundness`, `delegationBoundedness`, `artifactClarity`, `taskEffectiveness`, `falseConfidenceResistance`, `stateMinimality`, `coverageSharpness`, `domainFit`, `handoffUtility`, `rigorAdaptability` (0 = adapts to complexity/rigor levels, 2 = single-weight), `enforcementStrength` (0 = behavioral rules have structural teeth; 2 = important rules are prose-only with no enforcement mechanism), and `modernizationDiscipline` (0 = every valueInventory item preserved, equivalently replaced with justification, or dropped with justification; 2 = items missing or replaced with weaker versions without justification \u2014 score 0 for create mode).",
+              "Score these dimensions 0-2 with one sentence of evidence each: `voiceClarity`, `ceremonyLevel`, `loopSoundness`, `delegationBoundedness`, `artifactClarity`, `taskEffectiveness`, `falseConfidenceResistance`, `stateMinimality`, `coverageSharpness`, `domainFit`, `handoffUtility`, `rigorAdaptability` (0 = adapts to complexity/rigor levels, 2 = single-weight), `enforcementStrength` (0 = behavioral rules have structural teeth; 2 = important rules are prose-only with no enforcement mechanism), and `modernizationDiscipline` (0 = every valueInventory item preserved, equivalently replaced with justification, or dropped with justification; 2 = items missing or replaced with weaker versions without justification — score 0 for create mode).",
               "If delegation is available and rigor is THOROUGH, run an adversarial review bundle with these lenses: `engine_native_reviewer`, `task_effectiveness_reviewer`, `state_economy_reviewer`, `false_confidence_reviewer`, `domain_fit_reviewer`, and `maintainer_reviewer`.",
               "Synthesize what the review confirmed, what it challenged, and what changed your mind.",
               "When scoring `falseConfidenceResistance`, explicitly check: do the workflow's quality gates protect edge cases and degraded paths, or only the happy path? A workflow that passes its own checks on ideal input but fails silently on minimal or unexpected input scores 2.",
@@ -513,7 +513,7 @@
                 "var": "authoringMode",
                 "equals": "modernize_existing"
               },
-              "text": "For modernize_existing: add a heritage_reviewer to the adversarial bundle. Its job is to check each valueInventory item and find what was lost or weakened \u2014 it ignores format improvements. It must answer: which enforcement mechanisms are now prose-only? Which domain knowledge items are absent? Which behavioral rules were removed without equivalent replacement? Heritage_reviewer findings drive enforcementStrength and modernizationDiscipline scores."
+              "text": "For modernize_existing: add a heritage_reviewer to the adversarial bundle. Its job is to check each valueInventory item and find what was lost or weakened — it ignores format improvements. It must answer: which enforcement mechanisms are now prose-only? Which domain knowledge items are absent? Which behavioral rules were removed without equivalent replacement? Heritage_reviewer findings drive enforcementStrength and modernizationDiscipline scores."
             }
           ],
           "requireConfirmation": false
@@ -573,6 +573,29 @@
       ]
     },
     {
+      "id": "phase-7a-assign-tags",
+      "title": "Phase 7a: Assign Tags",
+      "promptBlocks": {
+        "goal": "Register the workflow in spec/workflow-tags.json by assigning 1-3 tags from the closed tag set.",
+        "procedure": [
+          "Read spec/workflow-tags.json to see the available tags and their 'when' phrases.",
+          "Based on the workflow's purpose and description, select 1-3 tags from the closed set (coding, review_audit, investigation, design, documentation, tickets, learning, routines, authoring).",
+          "Add the workflow ID as a new entry under 'workflows' in spec/workflow-tags.json: { \"tags\": [\"<tag1>\"] }.",
+          "If the workflow is a test fixture or internal utility not meant for end-user discovery, add 'hidden': true.",
+          "Save the file. Do not modify any other field in the tags file."
+        ],
+        "constraints": [
+          "Only use tags from the closed set. Do not invent new tags.",
+          "If the workflow already has an entry, update it rather than adding a duplicate.",
+          "Tags should reflect what the workflow does, not what it is named."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "List the assigned tags and a one-line justification for each."
+        }
+      },
+      "requireConfirmation": false
+    },
+    {
       "id": "phase-7-final-trust-handoff",
       "title": "Phase 7: Final Trust Handoff",
       "promptBlocks": {
@@ -581,7 +604,7 @@
           "Keep it concise. The workflow file is the deliverable, not the summary."
         ],
         "procedure": [
-          "Stamp the workflow file: read the current `version` from `spec/authoring-spec.json` and write `validatedAgainstSpecVersion: <N>` as a top-level field in the workflow JSON. Commit the change \u2014 the stamp has no effect if only saved locally.",
+          "Stamp the workflow file: read the current `version` from `spec/authoring-spec.json` and write `validatedAgainstSpecVersion: <N>` as a top-level field in the workflow JSON. Commit the change — the stamp has no effect if only saved locally.",
           "State the workflow file path and name, whether it was created or modernized, and what it does in one sentence.",
           "Summarize the step structure, loops, confirmations, and delegation profile.",
           "Report validation status, authoring-integrity status, and outcome-effectiveness status.",
@@ -599,5 +622,6 @@
       "notesOptional": true,
       "requireConfirmation": false
     }
-  ]
+  ],
+  "validatedAgainstSpecVersion": 3
 }
