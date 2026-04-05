@@ -17,6 +17,8 @@ import type {
   ConsoleRepoWorktrees,
   ConsoleWorktreeListResponse,
   ConsoleSessionStatus,
+  ChangedFile,
+  FileChangeStatus,
 } from './console-types.js';
 
 const execFileAsync = promisify(execFile);
@@ -102,11 +104,47 @@ function parseWorktreePorcelain(raw: string): RawWorktree[] {
 // Per-worktree enrichment
 // ---------------------------------------------------------------------------
 
+/**
+ * Map a git status XY code to a FileChangeStatus.
+ *
+ * XY codes: X = index (staged), Y = worktree (unstaged). Both columns are
+ * checked because we report a file as changed regardless of whether the change
+ * is staged, unstaged, or both. '??' is the special untracked marker.
+ */
+function parseFileStatus(xy: string): FileChangeStatus {
+  if (xy === '??') return 'untracked';
+  const x = xy[0] ?? ' ';
+  const y = xy[1] ?? ' ';
+  if (x === 'R') return 'renamed';
+  if (x === 'A') return 'added';
+  if (x === 'D' || y === 'D') return 'deleted';
+  if (x === 'M' || y === 'M') return 'modified';
+  return 'other';
+}
+
+/**
+ * Parse `git status --short` output into individual ChangedFile entries.
+ *
+ * Each line is formatted as `XY path` where XY is a two-character status code
+ * and path starts at the third character. Blank lines are skipped.
+ */
+function parseChangedFiles(statusRaw: string): readonly ChangedFile[] {
+  if (!statusRaw) return [];
+  return statusRaw
+    .split('\n')
+    .filter(line => line.trim().length > 0)
+    .map(line => ({
+      status: parseFileStatus(line.slice(0, 2)),
+      path: line.slice(3),
+    }));
+}
+
 interface WorktreeEnrichment {
   headHash: string;
   headMessage: string;
   headTimestampMs: number;
   changedCount: number;
+  changedFiles: readonly ChangedFile[];
   aheadCount: number;
   /** Content of `git config branch.<name>.description`, or empty string if unset. */
   branchDescription: string;
@@ -134,9 +172,8 @@ async function enrichWorktree(wt: RawWorktree): Promise<WorktreeEnrichment> {
   const headTimestampMs = timestampLine ? parseInt(timestampLine.trim(), 10) * 1000 : 0;
 
   // statusRaw === null means git failed; '' means clean — do not conflate them
-  const changedCount = statusRaw !== null
-    ? statusRaw.split('\n').filter(l => l.trim()).length
-    : 0;
+  const changedFiles = statusRaw !== null ? parseChangedFiles(statusRaw) : [];
+  const changedCount = changedFiles.length;
 
   // parseInt can return NaN if aheadRaw is '' (unexpected but possible)
   const parsedAhead = aheadRaw !== null ? parseInt(aheadRaw, 10) : NaN;
@@ -144,7 +181,7 @@ async function enrichWorktree(wt: RawWorktree): Promise<WorktreeEnrichment> {
 
   const branchDescription = descriptionRaw?.trim() ?? '';
 
-  return { headHash, headMessage, headTimestampMs, changedCount, aheadCount, branchDescription };
+  return { headHash, headMessage, headTimestampMs, changedCount, changedFiles, aheadCount, branchDescription };
 }
 
 // ---------------------------------------------------------------------------
@@ -197,6 +234,7 @@ async function enrichRepo(
       headMessage: e.headMessage,
       headTimestampMs: e.headTimestampMs,
       changedCount: e.changedCount,
+      changedFiles: e.changedFiles,
       aheadCount: e.aheadCount,
       activeSessionCount: wt.branch ? (activeSessions.counts.get(wt.branch) ?? 0) : 0,
       // Empty string means unset -- omit from the type so consumers can use simple truthiness checks

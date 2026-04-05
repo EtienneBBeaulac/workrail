@@ -7,6 +7,21 @@ export type ConsoleRunStatus = 'in_progress' | 'complete' | 'complete_with_gaps'
  * dormant, which is computed from inactivity and cannot apply to individual runs. */
 export type ConsoleSessionStatus = ConsoleRunStatus | 'dormant';
 
+/**
+ * The status kind of a single changed file, derived from git status XY codes.
+ *
+ * Closed union so the UI can exhaustively map to colors without falling through
+ * on unknown values at runtime.
+ */
+export type FileChangeStatus = 'modified' | 'added' | 'deleted' | 'untracked' | 'renamed' | 'other';
+
+/** A single file with uncommitted changes, as reported by `git status --short`. */
+export interface ChangedFile {
+  readonly status: FileChangeStatus;
+  /** File path relative to the worktree root. For renamed files, includes arrow notation (e.g. `old -> new`). */
+  readonly path: string;
+}
+
 export interface ConsoleWorktreeSummary {
   readonly path: string;
   readonly name: string;
@@ -15,6 +30,8 @@ export interface ConsoleWorktreeSummary {
   readonly headMessage: string;
   readonly headTimestampMs: number;
   readonly changedCount: number;
+  /** Individual files with uncommitted changes, in git status --short order. */
+  readonly changedFiles: readonly ChangedFile[];
   readonly aheadCount: number;
   readonly activeSessionCount: number;
   /** Content of `git config branch.<name>.description`. Absent when unset. */

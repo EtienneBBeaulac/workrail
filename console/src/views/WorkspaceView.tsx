@@ -8,7 +8,7 @@ import {
 import { useNavigate } from '@tanstack/react-router';
 import { useSessionList, useWorktreeList, useWorkspaceEvents } from '../api/hooks';
 import { SessionList } from './SessionList';
-import type { ConsoleSessionSummary, ConsoleSessionStatus } from '../api/types';
+import type { ConsoleSessionSummary, ConsoleSessionStatus, FileChangeStatus, ChangedFile } from '../api/types';
 import {
   type WorkspaceItem,
   type Scope,
@@ -519,6 +519,7 @@ function BranchGroup({
   readonly onSelectSession: (sessionId: string) => void;
 }) {
   const [historyExpanded, setHistoryExpanded] = useState(false);
+  const [filesExpanded, setFilesExpanded] = useState(false);
   const sorted = [...item.allSessions].sort(SESSION_SORT);
 
   // Active sessions (in_progress/blocked/dormant) are always visible.
@@ -533,7 +534,15 @@ function BranchGroup({
 
   return (
     <div className={isFocused ? 'ring-2 ring-[var(--accent)] ring-offset-1 rounded' : ''}>
-      <BranchLabel item={item} worktreesFetching={worktreesFetching} />
+      <BranchLabel
+        item={item}
+        worktreesFetching={worktreesFetching}
+        filesExpanded={filesExpanded}
+        onToggleFiles={() => setFilesExpanded((e) => !e)}
+      />
+      {filesExpanded && item.worktree && item.worktree.changedFiles.length > 0 && (
+        <ChangedFilesPanel files={item.worktree.changedFiles} />
+      )}
       {activeSessions.map((session) => (
         <SessionRow
           key={session.sessionId}
@@ -657,9 +666,13 @@ function SessionRow({
 function BranchLabel({
   item,
   worktreesFetching,
+  filesExpanded,
+  onToggleFiles,
 }: {
   readonly item: WorkspaceItem;
   readonly worktreesFetching: boolean;
+  readonly filesExpanded?: boolean;
+  readonly onToggleFiles?: () => void;
 }) {
   const timeAgo = formatRelativeTime(item.activityMs);
   return (
@@ -667,7 +680,13 @@ function BranchLabel({
       <span className="font-mono text-xs font-medium text-[var(--text-secondary)] truncate flex-1">
         {item.branch}
       </span>
-      <GitBadges item={item} fetching={worktreesFetching} compact />
+      <GitBadges
+        item={item}
+        fetching={worktreesFetching}
+        compact
+        filesExpanded={filesExpanded}
+        onToggleFiles={onToggleFiles}
+      />
       <span className="text-[10px] text-[var(--text-muted)] tabular-nums shrink-0">{timeAgo}</span>
     </div>
   );
@@ -686,22 +705,36 @@ function WorktreeOnlyRow({
   readonly isFocused: boolean;
   readonly worktreesFetching: boolean;
 }) {
+  const [filesExpanded, setFilesExpanded] = useState(false);
   const timeAgo = formatRelativeTime(item.activityMs);
   return (
-    <div
-      className={`flex items-center gap-3 px-3 py-2 rounded ${isFocused ? 'ring-2 ring-[var(--accent)] ring-offset-1' : ''}`}
-    >
-      <div className="w-1.5 h-1.5 rounded-full shrink-0 bg-[var(--border)]" title="No sessions" />
-      <span className="font-mono text-xs text-[var(--text-muted)] truncate flex-1">
-        {item.branch}
-      </span>
-      <GitBadges item={item} fetching={worktreesFetching} compact />
-      {item.worktree?.headMessage && (
-        <span className="text-[10px] text-[var(--text-muted)] truncate hidden sm:block max-w-[200px] opacity-60">
-          {item.worktree.headMessage}
+    // Outer wrapper enables the file panel to be a sibling of the flex row.
+    // The isFocused ring stays on the inner flex row so it does not wrap the panel.
+    <div>
+      <div
+        className={`flex items-center gap-3 px-3 py-2 rounded ${isFocused ? 'ring-2 ring-[var(--accent)] ring-offset-1' : ''}`}
+      >
+        <div className="w-1.5 h-1.5 rounded-full shrink-0 bg-[var(--border)]" title="No sessions" />
+        <span className="font-mono text-xs text-[var(--text-muted)] truncate flex-1">
+          {item.branch}
         </span>
+        <GitBadges
+          item={item}
+          fetching={worktreesFetching}
+          compact
+          filesExpanded={filesExpanded}
+          onToggleFiles={() => setFilesExpanded((e) => !e)}
+        />
+        {item.worktree?.headMessage && (
+          <span className="text-[10px] text-[var(--text-muted)] truncate hidden sm:block max-w-[200px] opacity-60">
+            {item.worktree.headMessage}
+          </span>
+        )}
+        <span className="text-[10px] text-[var(--text-muted)] tabular-nums shrink-0">{timeAgo}</span>
+      </div>
+      {filesExpanded && item.worktree && item.worktree.changedFiles.length > 0 && (
+        <ChangedFilesPanel files={item.worktree.changedFiles} />
       )}
-      <span className="text-[10px] text-[var(--text-muted)] tabular-nums shrink-0">{timeAgo}</span>
     </div>
   );
 }
@@ -714,10 +747,15 @@ function GitBadges({
   item,
   fetching,
   compact = false,
+  filesExpanded,
+  onToggleFiles,
 }: {
   readonly item: WorkspaceItem;
   readonly fetching: boolean;
   readonly compact?: boolean;
+  /** When provided, the uncommitted badge becomes a toggle button. */
+  readonly filesExpanded?: boolean;
+  readonly onToggleFiles?: () => void;
 }) {
   if (fetching && item.worktree === undefined) {
     // Show skeleton shimmer while worktree data loads
@@ -739,15 +777,32 @@ function GitBadges({
     return null;
   }
 
+  const badgeClass = `text-xs px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-400 border border-orange-500/20 tabular-nums${compact ? ' text-[10px]' : ''}`;
+
   return (
     <span className="flex items-center gap-1">
       {changedCount > 0 && (
-        <span
-          title={`${changedCount} file${changedCount === 1 ? '' : 's'} edited but not yet committed`}
-          className={`text-xs px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-400 border border-orange-500/20 tabular-nums${compact ? ' text-[10px]' : ''}`}
-        >
-          {changedCount} uncommitted
-        </span>
+        onToggleFiles ? (
+          // Clickable toggle: badge becomes a button that expands the file list panel.
+          // aria-expanded signals current state to screen readers.
+          <button
+            type="button"
+            aria-expanded={filesExpanded ?? false}
+            aria-label={`Show ${changedCount} uncommitted file${changedCount === 1 ? '' : 's'}`}
+            title={`${changedCount} file${changedCount === 1 ? '' : 's'} edited but not yet committed — click to expand`}
+            onClick={onToggleFiles}
+            className={`${badgeClass} cursor-pointer hover:bg-orange-500/20 transition-colors${filesExpanded ? ' ring-1 ring-orange-500/40' : ''}`}
+          >
+            {changedCount} uncommitted
+          </button>
+        ) : (
+          <span
+            title={`${changedCount} file${changedCount === 1 ? '' : 's'} edited but not yet committed`}
+            className={badgeClass}
+          >
+            {changedCount} uncommitted
+          </span>
+        )
       )}
       {aheadCount > 0 && (
         <span
@@ -758,6 +813,55 @@ function GitBadges({
         </span>
       )}
     </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Changed files panel -- expanded inline file list for uncommitted changes
+// ---------------------------------------------------------------------------
+
+/**
+ * Maps FileChangeStatus to a CSS color value for the status indicator dot.
+ *
+ * untracked and other use #a0a0a0 (text-secondary equivalent) rather than
+ * text-muted (#666) to meet contrast requirements.
+ */
+const FILE_STATUS_COLOR: Record<FileChangeStatus, string> = {
+  modified: 'var(--warning)',
+  added: 'var(--success)',
+  deleted: 'var(--error)',
+  untracked: '#a0a0a0',
+  renamed: 'var(--accent)',
+  other: '#a0a0a0',
+};
+
+const FILE_STATUS_LABEL: Record<FileChangeStatus, string> = {
+  modified: 'M',
+  added: 'A',
+  deleted: 'D',
+  untracked: '?',
+  renamed: 'R',
+  other: '~',
+};
+
+function ChangedFilesPanel({ files }: { readonly files: readonly ChangedFile[] }) {
+  return (
+    <div className="mx-3 mb-1 max-h-48 overflow-y-auto rounded border border-[var(--border)] bg-[var(--bg-card)]">
+      {files.map((file, i) => (
+        <div key={i} className="flex items-center gap-2 px-2 py-0.5 hover:bg-[var(--bg-tertiary)]">
+          <span
+            className="text-[10px] font-mono font-semibold w-3 shrink-0 tabular-nums"
+            style={{ color: FILE_STATUS_COLOR[file.status] }}
+            title={file.status}
+          >
+            {FILE_STATUS_LABEL[file.status]}
+          </span>
+          <span className="font-mono text-[11px] text-[var(--text-secondary)] truncate">
+            {file.path}
+          </span>
+        </div>
+      ))}
+    </div>
   );
 }
 
