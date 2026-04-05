@@ -63,7 +63,15 @@ export class LocalWorkspaceAnchorV2 implements WorkspaceContextResolverPortV2 {
   private async runGitCommands(cwd: string): Promise<readonly WorkspaceAnchor[]> {
     const anchors: WorkspaceAnchor[] = [];
 
-    const repoRoot = await this.gitCommand('git rev-parse --show-toplevel', cwd);
+    // Use --git-common-dir to resolve linked worktrees to the main repo root.
+    // --show-toplevel returns the worktree's own directory, so sessions started
+    // from a linked worktree would store a per-worktree path rather than the
+    // canonical repo root, causing them to appear as separate repos in the console.
+    // --git-common-dir always points to the main .git directory regardless of
+    // which worktree the agent is running in.
+    const gitCommonDir = await this.gitCommand('git rev-parse --path-format=absolute --git-common-dir', cwd);
+    if (!gitCommonDir) return anchors;
+    const repoRoot = gitCommonDir.replace(/\/\.git\/?$/, '').trim() || null;
     if (!repoRoot) return anchors;
 
     const repoRootHash = hashRepoRoot(repoRoot);
