@@ -126,7 +126,7 @@ export function buildBlockedOutcome(args: {
       attemptId: String(attemptId),
       scope: { runId: String(runId), nodeId: String(currentNodeId) },
       assessmentId: validated.triggeredAssessmentConsequence.assessmentId,
-      dimensionId: validated.triggeredAssessmentConsequence.triggerDimensionId,
+      dimensionId: validated.triggeredAssessmentConsequence.firstMatchedDimensionId,
       level: validated.triggeredAssessmentConsequence.triggerLevel,
       guidance: validated.triggeredAssessmentConsequence.guidance,
       minted: { eventId: idFactory.mintEventId() },

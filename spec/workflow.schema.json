@@ -1064,23 +1064,15 @@
     },
     "assessmentConsequenceTrigger": {
       "type": "object",
-      "description": "Exact-match trigger on one declared assessment dimension and one declared canonical level.",
+      "description": "Fires when ANY dimension in the submitted assessment equals the given level. The consequence blocks advancement until the agent addresses all dimensions that scored at that level.",
       "properties": {
-        "dimensionId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 64
-        },
-        "equalsLevel": {
+        "anyEqualsLevel": {
           "type": "string",
           "minLength": 1,
           "maxLength": 64
         }
       },
-      "required": [
-        "dimensionId",
-        "equalsLevel"
-      ],
+      "required": ["anyEqualsLevel"],
       "additionalProperties": false
     },
     "assessmentConsequenceEffect": {

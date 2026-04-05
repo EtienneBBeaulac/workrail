@@ -94,7 +94,15 @@
       "title": "MR Review Workflow (Outcome Baseline Example)",
       "source": "workflows/mr-review-workflow.agentic.v2.json",
       "resolveFrom": "package",
-      "purpose": "Strong example of hypothesis, neutral fact packet, reviewer families, contradiction synthesis, and final validation.",
+      "purpose": "Strong example of hypothesis, neutral fact packet, reviewer families, contradiction synthesis, final validation, and a three-dimension orthogonal assessment gate.",
+      "authoritative": false
+    },
+    {
+      "id": "bug-investigation-workflow",
+      "title": "Bug Investigation Workflow (Assessment Gate Example)",
+      "source": "workflows/bug-investigation.agentic.v2.json",
+      "resolveFrom": "package",
+      "purpose": "Simpler example of a single-dimension assessment gate on a final validation step before handoff.",
       "authoritative": false
     },
     {
@@ -229,7 +237,7 @@
         "procedure": [
           "Decide whether the authored workflow needs a hypothesis step, neutral fact packet, reviewer or validator families, contradiction loop, final validation bundle, or explicit blind-spot handling.",
           "Design the confidence model, blind-spot model, and state economy plan.",
-          "Decide the hard-gate dimensions that would make the authored workflow unsafe or unsatisfying if they fail.",
+          "Decide the hard-gate dimensions that would make the authored workflow unsafe or unsatisfying if they fail. If hard gates exist, implement them using the native `assessments` + `assessmentRefs` + `assessmentConsequences` schema fields rather than informal notes or `requireConfirmation` alone. Each dimension should capture a distinct orthogonal failure mode -- not restate the workflow's existing confidence band. See `mr-review-workflow.agentic.v2.json` and `bug-investigation.agentic.v2.json` as exemplars.",
           "Write the redesign triggers that should force architectural revision rather than cosmetic refinement."
         ],
         "outputRequired": {

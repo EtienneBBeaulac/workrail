@@ -84,8 +84,7 @@ export const testArtifactLoopControlFixture: WorkflowFixture = {
         assessmentConsequences: [
           {
             when: {
-              dimensionId: 'confidence',
-              equalsLevel: 'low',
+              anyEqualsLevel: 'low',
             },
             effect: {
               kind: 'require_followup',

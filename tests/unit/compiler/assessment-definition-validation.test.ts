@@ -152,7 +152,7 @@ describe('assessment declarations — validation engine', () => {
           assessmentRefs: ['readiness_gate'],
           assessmentConsequences: [
             {
-              when: { dimensionId: 'confidence', equalsLevel: 'low' },
+              when: { anyEqualsLevel: 'low' },
               effect: { kind: 'require_followup', guidance: 'Gather more context before proceeding.' },
             },
           ],
@@ -164,7 +164,7 @@ describe('assessment declarations — validation engine', () => {
     expect(result.valid).toBe(true);
   });
 
-  it('rejects a consequence that references an unknown assessment dimension', () => {
+  it('rejects a consequence that references an undeclared level', () => {
     const workflow = mkWorkflow({
       assessments: [
         {
@@ -181,7 +181,7 @@ describe('assessment declarations — validation engine', () => {
           assessmentRefs: ['readiness_gate'],
           assessmentConsequences: [
             {
-              when: { dimensionId: 'scope', equalsLevel: 'low' },
+              when: { anyEqualsLevel: 'unknown_level' },
               effect: { kind: 'require_followup', guidance: 'Gather more context before proceeding.' },
             },
           ],
@@ -192,7 +192,7 @@ describe('assessment declarations — validation engine', () => {
     const result = new ValidationEngine(new EnhancedLoopValidator()).validateWorkflow(workflow);
     expect(result.valid).toBe(false);
     expect(result.issues).toEqual(
-      expect.arrayContaining([expect.stringContaining("references unknown dimension 'scope'")])
+      expect.arrayContaining([expect.stringContaining("anyEqualsLevel 'unknown_level'")])
     );
   });
 });
@@ -303,7 +303,7 @@ describe('assessment declarations — workflow compiler', () => {
           assessmentRefs: ['readiness_gate'],
           assessmentConsequences: [
             {
-              when: { dimensionId: 'confidence', equalsLevel: 'medium' },
+              when: { anyEqualsLevel: 'medium' },
               effect: { kind: 'require_followup', guidance: 'Gather more context before proceeding.' },
             },
           ],
@@ -313,6 +313,6 @@ describe('assessment declarations — workflow compiler', () => {
 
     const result = compiler.compile(workflow);
     expect(result.isErr()).toBe(true);
-    expect(result._unsafeUnwrapErr().message).toContain("unsupported level 'medium'");
+    expect(result._unsafeUnwrapErr().message).toContain("anyEqualsLevel 'medium'");
   });
 });
