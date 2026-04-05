@@ -39,7 +39,7 @@
     "dev": "npm run build && node dist/mcp-server.js",
     "watch": "tsc --watch",
     "validate:workflows": "bash scripts/validate-workflows.sh",
-    "validate:registry": "node scripts/validate-workflows-registry.ts",
+    "validate:registry": "node --experimental-strip-types scripts/validate-workflows-registry.ts",
     "stamp-workflow": "node scripts/stamp-workflow.ts",
     "validate:authoring-spec": "node scripts/validate-authoring-spec.js",
     "validate:authoring-docs": "node scripts/generate-authoring-docs.js --check",
