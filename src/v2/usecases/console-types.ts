@@ -162,6 +162,10 @@ export interface ConsoleWorktreeSummary {
   readonly changedFiles: readonly ChangedFile[];
   /** Number of commits ahead of origin/main. */
   readonly aheadCount: number;
+  /** Individual unpushed commits (git log origin/main..HEAD --oneline). */
+  readonly unpushedCommits: readonly { readonly hash: string; readonly message: string }[];
+  /** True when the branch has been merged into main (0 unpushed commits, not main, not detached). */
+  readonly isMerged: boolean;
   /** Number of in_progress workflow sessions on this branch. */
   readonly activeSessionCount: number;
   /** Content of `git config branch.<name>.description`. Absent when unset. */

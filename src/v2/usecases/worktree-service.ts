@@ -146,6 +146,8 @@ interface WorktreeEnrichment {
   changedCount: number;
   changedFiles: readonly ChangedFile[];
   aheadCount: number;
+  unpushedCommits: readonly { readonly hash: string; readonly message: string }[];
+  isMerged: boolean;
   /** Content of `git config branch.<name>.description`, or empty string if unset. */
   branchDescription: string;
 }
@@ -159,11 +161,12 @@ async function enrichWorktree(wt: RawWorktree): Promise<WorktreeEnrichment> {
   // local config), so it is readable from any linked worktree via the same
   // `git config` call. Returns null when the key is unset -- git exits non-zero.
   const descriptionKey = wt.branch ? `branch.${wt.branch}.description` : null;
-  const [logRaw, statusRaw, aheadRaw, descriptionRaw] = await Promise.all([
+  const [logRaw, statusRaw, aheadRaw, descriptionRaw, unpushedLogRaw] = await Promise.all([
     git(wt.path, ['log', '-1', '--format=%h%n%s%n%ct']),
     git(wt.path, ['status', '--short']),
     git(wt.path, ['rev-list', '--count', 'origin/main..HEAD']),
     descriptionKey ? git(wt.path, ['config', descriptionKey]) : Promise.resolve(null),
+    git(wt.path, ['log', 'origin/main..HEAD', '--oneline']),
   ]);
 
   const [hashLine, messageLine, timestampLine] = logRaw?.split('\n') ?? [];
@@ -179,9 +182,22 @@ async function enrichWorktree(wt: RawWorktree): Promise<WorktreeEnrichment> {
   const parsedAhead = aheadRaw !== null ? parseInt(aheadRaw, 10) : NaN;
   const aheadCount = isNaN(parsedAhead) ? 0 : parsedAhead;
 
+  // null or '' means no unpushed commits (or git failed)
+  const unpushedCommits: readonly { readonly hash: string; readonly message: string }[] =
+    unpushedLogRaw
+      ? unpushedLogRaw.split('\n').filter(l => l.trim().length > 0).map(line => ({
+          hash: line.slice(0, 7),
+          message: line.slice(8),
+        }))
+      : [];
+
+  // A branch is considered merged when git log shows no commits ahead of origin/main,
+  // it is not the main branch itself, and HEAD is not detached.
+  const isMerged = unpushedLogRaw === '' && wt.branch !== 'main' && wt.branch !== null;
+
   const branchDescription = descriptionRaw?.trim() ?? '';
 
-  return { headHash, headMessage, headTimestampMs, changedCount, changedFiles, aheadCount, branchDescription };
+  return { headHash, headMessage, headTimestampMs, changedCount, changedFiles, aheadCount, unpushedCommits, isMerged, branchDescription };
 }
 
 // ---------------------------------------------------------------------------
@@ -236,6 +252,8 @@ async function enrichRepo(
       changedCount: e.changedCount,
       changedFiles: e.changedFiles,
       aheadCount: e.aheadCount,
+      unpushedCommits: e.unpushedCommits,
+      isMerged: e.isMerged,
       activeSessionCount: wt.branch ? (activeSessions.counts.get(wt.branch) ?? 0) : 0,
       // Empty string means unset -- omit from the type so consumers can use simple truthiness checks
       ...(e.branchDescription ? { description: e.branchDescription } : {}),

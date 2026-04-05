@@ -5,6 +5,7 @@ import {
   useRef,
   useCallback,
 } from 'react';
+import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { useNavigate } from '@tanstack/react-router';
 import { useSessionList, useWorktreeList, useWorkspaceEvents } from '../api/hooks';
 import { SessionList } from './SessionList';
@@ -520,6 +521,8 @@ function BranchGroup({
 }) {
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [filesExpanded, setFilesExpanded] = useState(false);
+  const [unpushedExpanded, setUnpushedExpanded] = useState(false);
+  const [animateRef] = useAutoAnimate<HTMLDivElement>();
   const sorted = [...item.allSessions].sort(SESSION_SORT);
 
   // Active sessions (in_progress/blocked/dormant) are always visible.
@@ -533,15 +536,23 @@ function BranchGroup({
   );
 
   return (
-    <div className={isFocused ? 'ring-2 ring-[var(--accent)] ring-offset-1 rounded' : ''}>
+    <div ref={animateRef} className={isFocused ? 'ring-2 ring-[var(--accent)] ring-offset-1 rounded' : ''}>
       <BranchLabel
         item={item}
         worktreesFetching={worktreesFetching}
         filesExpanded={filesExpanded}
         onToggleFiles={() => setFilesExpanded((e) => !e)}
+        unpushedExpanded={unpushedExpanded}
+        onToggleUnpushed={() => setUnpushedExpanded((e) => !e)}
       />
       {filesExpanded && item.worktree && item.worktree.changedFiles.length > 0 && (
         <ChangedFilesPanel files={item.worktree.changedFiles} />
+      )}
+      {unpushedExpanded && item.worktree && (
+        <UnpushedCommitsPanel
+          commits={item.worktree.unpushedCommits}
+          count={item.worktree.aheadCount}
+        />
       )}
       {activeSessions.map((session) => (
         <SessionRow
@@ -638,6 +649,9 @@ function SessionRow({
               {item.branch}
             </span>
           )}
+          {showBranch && item?.worktree?.isMerged && item.worktree.branch !== null && item.worktree.branch !== 'main' && (
+            <MergedBadge />
+          )}
           {!showBranch && workflowLabel && (
             <span className="text-[10px] text-[var(--text-muted)] shrink-0">
               {workflowLabel}
@@ -668,11 +682,15 @@ function BranchLabel({
   worktreesFetching,
   filesExpanded,
   onToggleFiles,
+  unpushedExpanded,
+  onToggleUnpushed,
 }: {
   readonly item: WorkspaceItem;
   readonly worktreesFetching: boolean;
   readonly filesExpanded?: boolean;
   readonly onToggleFiles?: () => void;
+  readonly unpushedExpanded?: boolean;
+  readonly onToggleUnpushed?: () => void;
 }) {
   const timeAgo = formatRelativeTime(item.activityMs);
   return (
@@ -680,12 +698,17 @@ function BranchLabel({
       <span className="font-mono text-xs font-medium text-[var(--text-secondary)] truncate flex-1">
         {item.branch}
       </span>
+      {item.worktree?.isMerged && item.worktree.branch !== null && item.worktree.branch !== 'main' && (
+        <MergedBadge />
+      )}
       <GitBadges
         item={item}
         fetching={worktreesFetching}
         compact
         filesExpanded={filesExpanded}
         onToggleFiles={onToggleFiles}
+        unpushedExpanded={unpushedExpanded}
+        onToggleUnpushed={onToggleUnpushed}
       />
       <span className="text-[10px] text-[var(--text-muted)] tabular-nums shrink-0">{timeAgo}</span>
     </div>
@@ -706,11 +729,13 @@ function WorktreeOnlyRow({
   readonly worktreesFetching: boolean;
 }) {
   const [filesExpanded, setFilesExpanded] = useState(false);
+  const [unpushedExpanded, setUnpushedExpanded] = useState(false);
+  const [animateRef] = useAutoAnimate<HTMLDivElement>();
   const timeAgo = formatRelativeTime(item.activityMs);
   return (
     // Outer wrapper enables the file panel to be a sibling of the flex row.
     // The isFocused ring stays on the inner flex row so it does not wrap the panel.
-    <div>
+    <div ref={animateRef}>
       <div
         className={`flex items-center gap-3 px-3 py-2 rounded ${isFocused ? 'ring-2 ring-[var(--accent)] ring-offset-1' : ''}`}
       >
@@ -718,12 +743,17 @@ function WorktreeOnlyRow({
         <span className="font-mono text-xs text-[var(--text-muted)] truncate flex-1">
           {item.branch}
         </span>
+        {item.worktree?.isMerged && item.worktree.branch !== null && item.worktree.branch !== 'main' && (
+          <MergedBadge />
+        )}
         <GitBadges
           item={item}
           fetching={worktreesFetching}
           compact
           filesExpanded={filesExpanded}
           onToggleFiles={() => setFilesExpanded((e) => !e)}
+          unpushedExpanded={unpushedExpanded}
+          onToggleUnpushed={() => setUnpushedExpanded((e) => !e)}
         />
         {item.worktree?.headMessage && (
           <span className="text-[10px] text-[var(--text-muted)] truncate hidden sm:block max-w-[200px] opacity-60">
@@ -734,6 +764,12 @@ function WorktreeOnlyRow({
       </div>
       {filesExpanded && item.worktree && item.worktree.changedFiles.length > 0 && (
         <ChangedFilesPanel files={item.worktree.changedFiles} />
+      )}
+      {unpushedExpanded && item.worktree && (
+        <UnpushedCommitsPanel
+          commits={item.worktree.unpushedCommits}
+          count={item.worktree.aheadCount}
+        />
       )}
     </div>
   );
@@ -749,6 +785,8 @@ function GitBadges({
   compact = false,
   filesExpanded,
   onToggleFiles,
+  unpushedExpanded,
+  onToggleUnpushed,
 }: {
   readonly item: WorkspaceItem;
   readonly fetching: boolean;
@@ -756,6 +794,9 @@ function GitBadges({
   /** When provided, the uncommitted badge becomes a toggle button. */
   readonly filesExpanded?: boolean;
   readonly onToggleFiles?: () => void;
+  /** When provided, the unpushed badge becomes a toggle button. */
+  readonly unpushedExpanded?: boolean;
+  readonly onToggleUnpushed?: () => void;
 }) {
   if (fetching && item.worktree === undefined) {
     // Show skeleton shimmer while worktree data loads
@@ -791,7 +832,7 @@ function GitBadges({
             aria-label={`Show ${changedCount} uncommitted file${changedCount === 1 ? '' : 's'}`}
             title={`${changedCount} file${changedCount === 1 ? '' : 's'} edited but not yet committed — click to expand`}
             onClick={onToggleFiles}
-            className={`${badgeClass} cursor-pointer hover:bg-orange-500/20 transition-colors${filesExpanded ? ' ring-1 ring-orange-500/40' : ''}`}
+            className={`${badgeClass} cursor-pointer hover:bg-orange-500/20 transition-colors focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1${filesExpanded ? ' ring-1 ring-orange-500/40' : ''}`}
           >
             {changedCount} uncommitted
           </button>
@@ -805,12 +846,26 @@ function GitBadges({
         )
       )}
       {aheadCount > 0 && (
-        <span
-          title={`${aheadCount} commit${aheadCount === 1 ? '' : 's'} not yet pushed`}
-          className={`text-xs px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 tabular-nums${compact ? ' text-[10px]' : ''}`}
-        >
-          {aheadCount} unpushed
-        </span>
+        onToggleUnpushed ? (
+          // Clickable toggle: badge becomes a button that expands the unpushed commits panel.
+          <button
+            type="button"
+            aria-expanded={unpushedExpanded ?? false}
+            aria-label={`Show ${aheadCount} unpushed commit${aheadCount === 1 ? '' : 's'}`}
+            title={`${aheadCount} commit${aheadCount === 1 ? '' : 's'} not yet pushed -- click to expand`}
+            onClick={onToggleUnpushed}
+            className={`text-xs px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 cursor-pointer hover:bg-blue-500/20 transition-colors focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 tabular-nums${compact ? ' text-[10px]' : ''}${unpushedExpanded ? ' ring-1 ring-blue-500/40' : ''}`}
+          >
+            {aheadCount} unpushed
+          </button>
+        ) : (
+          <span
+            title={`${aheadCount} commit${aheadCount === 1 ? '' : 's'} not yet pushed`}
+            className={`text-xs px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 tabular-nums${compact ? ' text-[10px]' : ''}`}
+          >
+            {aheadCount} unpushed
+          </span>
+        )
       )}
     </span>
   );
@@ -862,6 +917,59 @@ function ChangedFilesPanel({ files }: { readonly files: readonly ChangedFile[] }
         </div>
       ))}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Unpushed commits panel -- expanded inline commit list for unpushed commits
+// ---------------------------------------------------------------------------
+
+function UnpushedCommitsPanel({
+  commits,
+  count,
+}: {
+  readonly commits: readonly { hash: string; message: string }[];
+  readonly count?: number;
+}) {
+  if (commits.length === 0) {
+    return (
+      <div className="mx-3 mb-1 px-2 py-1.5 rounded border border-[var(--border)] bg-[var(--bg-card)]">
+        <span className="text-[11px] text-[var(--text-muted)] italic">
+          {count !== undefined && count > 0
+            ? `${count} commit${count === 1 ? '' : 's'} ahead -- details unavailable`
+            : 'No unpushed commits'}
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="mx-3 mb-1 max-h-48 overflow-y-auto rounded border border-[var(--border)] bg-[var(--bg-card)]">
+      {commits.map((commit, i) => (
+        <div key={i} className="flex items-center gap-2 px-2 py-0.5 hover:bg-[var(--bg-tertiary)]">
+          <span className="font-mono text-[10px] text-[var(--text-muted)] shrink-0 tabular-nums w-14">
+            {commit.hash}
+          </span>
+          <span className="font-mono text-[11px] text-[var(--text-secondary)] truncate">
+            {commit.message}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Merged badge
+// ---------------------------------------------------------------------------
+
+function MergedBadge() {
+  return (
+    <span
+      title="Merged into main"
+      className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-400 border border-green-500/20 shrink-0"
+    >
+      merged
+    </span>
   );
 }
 
