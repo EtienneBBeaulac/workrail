@@ -160,9 +160,12 @@ export const TagSummaryItemSchema = z.object({
 export const V2WorkflowListOutputSchema = z.object({
   workflows: z.array(V2WorkflowListItemSchema),
   tagSummary: z.array(TagSummaryItemSchema).optional().describe(
-    'Tag summary for the workflow catalog. Present on every list_workflows call when no tags filter is applied. ' +
+    'Tag summary for the workflow catalog. Present when no tags filter was applied. ' +
     'Each entry covers one domain tag with a workflow count, intent phrases (when to use), and representative workflow IDs. ' +
     'Use tags=[\"<id>\"] to get the full workflow list for a specific tag. Absent when a tags filter was applied.'
+  ),
+  _nextStep: z.string().optional().describe(
+    'Guidance on what to do next. Present when tagSummary is returned (no tags filter applied).'
   ),
   staleRoots: z.array(z.string()).optional().describe(
     'Workflow source paths that were inaccessible during discovery (missing remembered roots or missing managed source directories). ' +
