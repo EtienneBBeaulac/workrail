@@ -5,6 +5,7 @@ import {
   useRef,
   useCallback,
 } from 'react';
+import { useNavigate } from '@tanstack/react-router';
 import { useSessionList, useWorktreeList, useWorkspaceEvents } from '../api/hooks';
 import { SessionList } from './SessionList';
 import type { ConsoleSessionSummary, ConsoleSessionStatus } from '../api/types';
@@ -133,7 +134,6 @@ interface RepoGroup {
 // ---------------------------------------------------------------------------
 
 interface Props {
-  onSelectSession: (sessionId: string) => void;
   /** When true, the view is hidden (parent navigated to SessionDetail). Kept
    * mounted so state is preserved for scroll restoration on back-nav. */
   hidden?: boolean;
@@ -143,7 +143,8 @@ interface Props {
 // WorkspaceView
 // ---------------------------------------------------------------------------
 
-export function WorkspaceView({ onSelectSession, hidden = false }: Props) {
+export function WorkspaceView({ hidden = false }: Props) {
+  const navigate = useNavigate();
   const { data: sessionData, isLoading: sessionsLoading, error: sessionsError, refetch } = useSessionList();
   const { data: worktreeData, isFetching: worktreesFetching } = useWorktreeList();
   // Subscribe to server-sent events -- triggers immediate refetch when sessions change
@@ -162,9 +163,9 @@ export function WorkspaceView({ onSelectSession, hidden = false }: Props) {
   const wrappedSelectSession = useCallback(
     (sessionId: string) => {
       scrollYRef.current = window.scrollY;
-      onSelectSession(sessionId);
+      navigate({ to: '/session/$sessionId', params: { sessionId } });
     },
-    [onSelectSession],
+    [navigate],
   );
 
   // Restore scroll position when returning from SessionDetail.
@@ -971,7 +972,7 @@ interface KeyboardOptions {
   readonly items: readonly WorkspaceItem[];
   readonly focusedIndex: number;
   readonly setFocusedIndex: (i: number) => void;
-  /** Called when Enter/Space is pressed on a focused item -- opens primary session */
+  /** Called when Enter/Space is pressed on a focused item -- navigates to session detail */
   readonly onSelectSession: (sessionId: string) => void;
   readonly scope: Scope;
   readonly setScope: (scope: Scope) => void;
