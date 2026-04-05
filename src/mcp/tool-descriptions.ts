@@ -79,11 +79,15 @@ This tool provides:
 - Schema version and metadata information`,
 
     // v2 tools (feature-flagged)
-    list_workflows: `Lists available workflows using WorkRail v2 (feature-flagged). Returns workflow metadata plus pinned snapshot hashes for deterministic execution.
+    list_workflows: `Lists available workflows using WorkRail v2 (feature-flagged). When a workflow exists for the user's request, following it means following the user's structured instructions.
 
-Use this to discover workflows before attempting multi-step tasks. When a workflow exists for the user's request, following it means following the user's structured instructions.
+Discovery pattern (token-efficient — do this):
+1. Call with no tags → returns tagSummary (~500 tokens): 9 tags with counts and when-to-use phrases. Identify which tag fits.
+2. Call with tags=["<tag>"] → returns the filtered workflow list for that tag.
 
-Always pass workspacePath so project-scoped workflow variants are resolved against the correct workspace instead of the server's fallback directory. Shared MCP servers cannot infer this safely.`,
+Alternatively, read the workrail://tags MCP resource for tag definitions without any tool call.
+
+Always pass workspacePath so project-scoped workflow variants are resolved against the correct workspace. Shared MCP servers cannot infer this safely.`,
 
     inspect_workflow: `Inspect a workflow structure before starting it (WorkRail v2, feature-flagged).
 
@@ -187,11 +191,13 @@ Returns validation result with specific errors and suggestions if invalid.`,
 Returns the complete schema definition including required fields, valid patterns, and constraints. Use this as reference when authoring workflow JSON.`,
 
     // v2 tools (feature-flagged)
-    list_workflows: `List available workflows via WorkRail v2 (feature-flagged).
+    list_workflows: `List available workflows via WorkRail v2 (feature-flagged). When a workflow exists for the user's request, you MUST use it instead of improvising your own approach.
 
-Workflows are the user's pre-defined instructions for complex tasks. When a workflow exists for the user's request, you MUST use it instead of improvising your own approach.
+Discovery pattern (token-efficient — do this):
+1. Call with no tags → returns tagSummary (~500 tokens): 9 tags with counts and when-to-use phrases. Identify which tag fits.
+2. Call with tags=["<tag>"] → returns the filtered workflow list for that tag.
 
-Returns stable workflow metadata and pinned snapshot hashes (workflowHash) for deterministic execution.
+Alternatively, read the workrail://tags MCP resource for tag definitions without any tool call.
 
 Pass workspacePath on every call so project-scoped workflow variants are resolved against the correct workspace. Shared MCP servers cannot infer this safely.`,
 
