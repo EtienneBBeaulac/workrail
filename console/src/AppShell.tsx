@@ -26,7 +26,7 @@ export function AppShell() {
 
   return (
     <div className="min-h-screen bg-[var(--bg-primary)]">
-      <header className="border-b border-[var(--border)] px-6 py-4">
+      <header className="sticky top-0 z-20 border-b border-[var(--border)] px-6 py-4 bg-[var(--bg-primary)]">
         <div className="flex items-center gap-4">
           {isInSessionDetail && (
             <button

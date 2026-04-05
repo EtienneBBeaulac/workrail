@@ -419,7 +419,7 @@ function RepoSection({
   return (
     <section>
       {showHeader && (
-        <div className="flex items-center gap-2 border-b border-[var(--border)] pb-2 mb-2">
+        <div style={{ position: 'sticky', top: 61, zIndex: 10 }} className="flex items-center gap-2 border-b border-[var(--border)] pb-2 mb-2 bg-[var(--bg-primary)]">
           <h3 className="text-sm font-semibold text-[var(--text-primary)] font-mono">
             {group.repoName}
           </h3>
