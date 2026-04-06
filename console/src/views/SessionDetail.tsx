@@ -4,6 +4,7 @@ import { RunLineageDag } from '../components/RunLineageDag';
 import { StatusBadge } from '../components/StatusBadge';
 import { HealthBadge } from '../components/HealthBadge';
 import { NodeDetailSection } from '../components/NodeDetailSection';
+import { CutCornerBox } from '../components/CutCornerBox';
 import type { ConsoleDagRun } from '../api/types';
 
 interface Props {
@@ -78,55 +79,39 @@ export function SessionDetail({ sessionId }: Props) {
         )}
       </div>
 
-      {/* Floating detail panel -- inset from all edges, angled top-left corner.
-          Shadow wrapper: filter:drop-shadow works with clip-path (box-shadow is clipped).
-          Border layer: clip-path + accent-tinted border as background.
-          Content layer: 1px inset with matching polygon. */}
-      <div
+      {/* Floating node detail panel */}
+      <CutCornerBox
+        cut={18}
+        borderColor="rgba(0, 240, 255, 0.28)"
+        background="color-mix(in srgb, var(--bg-card) 92%, var(--accent) 8%)"
+        dropShadow="drop-shadow(0 16px 48px rgba(0,0,0,0.8)) drop-shadow(0 2px 8px rgba(0,0,0,0.55))"
         className="fixed top-3 right-3 bottom-3 w-[560px] max-w-[calc(92vw-12px)] transition-transform duration-200 ease-out"
         style={{
           zIndex: 40,
           transform: selectedNode ? 'translateX(0)' : 'translateX(calc(100% + 12px))',
-          filter: 'drop-shadow(0 16px 48px rgba(0,0,0,0.8)) drop-shadow(0 2px 8px rgba(0,0,0,0.6))',
         }}
       >
-        <div
-          className="absolute inset-0"
-          style={{
-            background: 'rgba(0, 240, 255, 0.25)',
-            clipPath: 'polygon(18px 0, 100% 0, 100% 100%, 0 100%, 0 18px)',
-          }}
-        />
-        <div
-          className="absolute flex flex-col"
-          style={{
-            inset: '1px',
-            clipPath: 'polygon(17px 0, 100% 0, 100% 100%, 0 100%, 0 17px)',
-            background: 'color-mix(in srgb, var(--bg-card) 92%, var(--accent) 8%)',
-          }}
-        >
-          <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] shrink-0 console-blueprint-grid">
-            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
-              Node detail
-            </span>
-            <button
-              onClick={() => setSelectedNode(null)}
-              className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-xl leading-none px-1"
-              aria-label="Close"
-            >
-              ×
-            </button>
-          </div>
-          <div className="flex-1 overflow-auto">
-            <NodeDetailSection
-              sessionId={sessionId}
-              nodeId={selectedNode?.nodeId ?? null}
-              runStatus={selectedRun?.status ?? 'complete'}
-              currentNodeId={selectedRun?.preferredTipNodeId ?? null}
-            />
-          </div>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] shrink-0 console-blueprint-grid">
+          <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+            Node detail
+          </span>
+          <button
+            onClick={() => setSelectedNode(null)}
+            className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-xl leading-none px-1"
+            aria-label="Close"
+          >
+            ×
+          </button>
         </div>
-      </div>
+        <div className="flex-1 overflow-auto">
+          <NodeDetailSection
+            sessionId={sessionId}
+            nodeId={selectedNode?.nodeId ?? null}
+            runStatus={selectedRun?.status ?? 'complete'}
+            currentNodeId={selectedRun?.preferredTipNodeId ?? null}
+          />
+        </div>
+      </CutCornerBox>
     </>
   );
 }
@@ -141,8 +126,15 @@ function RunCard({
   onNodeClick: (runId: string, nodeId: string) => void;
 }) {
   return (
-    <div className="bg-[var(--bg-card)] border border-[var(--border)] overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
+    // CutCornerBox requires explicit height (absolute inner layers).
+    // Header: py-3 (24px) + text-sm line-height (20px) = 44px.
+    // DAG: 460px. Inset: 2px. Total: 506px.
+    <CutCornerBox
+      cut={10}
+      className="relative"
+      style={{ height: '506px' }}
+    >
+      <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] shrink-0">
         <div className="flex items-center gap-3">
           <span className="text-sm font-medium text-[var(--text-primary)]">
             {run.workflowName ?? run.workflowId ?? 'Run'}
@@ -158,13 +150,13 @@ function RunCard({
           <StatusBadge status={run.status} />
         </div>
       </div>
-      <div className="h-[460px]">
+      <div className="flex-1">
         <RunLineageDag
           run={run}
           selectedNodeId={selectedNodeId}
           onNodeClick={(nodeId) => onNodeClick(run.runId, nodeId)}
         />
       </div>
-    </div>
+    </CutCornerBox>
   );
 }
