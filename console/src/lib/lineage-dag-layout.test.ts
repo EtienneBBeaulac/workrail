@@ -157,6 +157,91 @@ describe('side branches', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Compression: only visible window nodes are rendered
+// ---------------------------------------------------------------------------
+
+describe('compression rendering', () => {
+  it('excludes compressed active-lineage nodes from model.nodes', () => {
+    // 10-node chain, window=8, compressedBeforeCount=2 (n0 and n1 are compressed)
+    _eventIndex = 0;
+    const nodes: ConsoleDagNode[] = [];
+    let prev: string | null = null;
+    for (let i = 0; i < 10; i++) {
+      nodes.push(makeNode(`n${i}`, prev));
+      prev = `n${i}`;
+    }
+    nodes[9] = { ...nodes[9], isTip: true };
+    const model = buildLineageDagModel(makeRun(nodes, 'n9'));
+    const renderedIds = new Set(model.nodes.map((n) => n.node.nodeId));
+
+    expect(model.compressedBeforeCount).toBe(2);
+    // n0 and n1 are compressed -- must not appear in rendered nodes
+    expect(renderedIds.has('n0')).toBe(false);
+    expect(renderedIds.has('n1')).toBe(false);
+    // n2 through n9 are in the visible window
+    for (let i = 2; i <= 9; i++) {
+      expect(renderedIds.has(`n${i}`)).toBe(true);
+    }
+  });
+
+  it('excludes edges to/from compressed nodes', () => {
+    _eventIndex = 0;
+    const nodes: ConsoleDagNode[] = [];
+    let prev: string | null = null;
+    for (let i = 0; i < 10; i++) {
+      nodes.push(makeNode(`n${i}`, prev));
+      prev = `n${i}`;
+    }
+    nodes[9] = { ...nodes[9], isTip: true };
+    const model = buildLineageDagModel(makeRun(nodes, 'n9'));
+
+    // No edge should reference a compressed node
+    for (const edge of model.edges) {
+      expect(['n0', 'n1']).not.toContain(edge.fromNodeId);
+      expect(['n0', 'n1']).not.toContain(edge.toNodeId);
+    }
+  });
+
+  it('does not render side branches of compressed nodes', () => {
+    // 10-node chain (n0-n9), plus a side branch off n1 (compressed)
+    _eventIndex = 0;
+    const nodes: ConsoleDagNode[] = [];
+    let prev: string | null = null;
+    for (let i = 0; i < 10; i++) {
+      nodes.push(makeNode(`n${i}`, prev));
+      prev = `n${i}`;
+    }
+    nodes[9] = { ...nodes[9], isTip: true };
+    const side = makeNode('side-of-compressed', 'n1');
+    const model = buildLineageDagModel(makeRun([...nodes, side], 'n9'));
+    const renderedIds = new Set(model.nodes.map((n) => n.node.nodeId));
+
+    expect(renderedIds.has('side-of-compressed')).toBe(false);
+  });
+
+  it('all rendered nodes have monotonically increasing x left-to-right', () => {
+    // The core visual invariant: no node should be to the RIGHT of a later-depth node.
+    // This catches the original "edges from both sides" bug.
+    _eventIndex = 0;
+    const nodes: ConsoleDagNode[] = [];
+    let prev: string | null = null;
+    for (let i = 0; i < 37; i++) {
+      nodes.push(makeNode(`n${i}`, prev));
+      prev = `n${i}`;
+    }
+    nodes[36] = { ...nodes[36], isTip: true };
+    const model = buildLineageDagModel(makeRun(nodes, 'n36'));
+    const activeNodes = model.nodes
+      .filter((n) => n.isActiveLineage)
+      .sort((a, b) => a.depth - b.depth);
+
+    for (let i = 1; i < activeNodes.length; i++) {
+      expect(activeNodes[i]!.x).toBeGreaterThan(activeNodes[i - 1]!.x);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Side branch x alignment (F1 bug -- the critical regression)
 // ---------------------------------------------------------------------------
 

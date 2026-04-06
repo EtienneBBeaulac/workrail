@@ -196,23 +196,46 @@ export function buildLineageDagModel(run: ConsoleDagRun): LineageDagModel {
     compressedBeforeCount,
   );
 
-  const maxVisibleDepth = Math.max(...run.nodes.map((node) => visibleDepthById.get(node.nodeId) ?? 0));
+  // Compressed active-lineage nodes (those before the visible window) must not
+  // be rendered. Their raw depths place them FAR to the right of the visible
+  // window, so edges from a compressed node to the first visible node render
+  // right-to-left, causing the "connected from both sides" visual glitch.
+  //
+  // We build a renderable set: visible active lineage nodes + any side branches
+  // that originate from within the visible window. Side branches of compressed
+  // nodes are also excluded -- their parent is hidden, so showing them in the
+  // middle of the visible window would be confusing.
+  const renderableIds = new Set<string>(visibleLineageIds);
+  const bfsQueue = [...visibleLineageIds];
+  while (bfsQueue.length > 0) {
+    const nodeId = bfsQueue.shift()!;
+    for (const child of childrenByParent.get(nodeId) ?? []) {
+      if (!activeLineageIds.has(child.nodeId) && !renderableIds.has(child.nodeId)) {
+        renderableIds.add(child.nodeId);
+        bfsQueue.push(child.nodeId);
+      }
+    }
+  }
 
-  const positionedNodes: PositionedLineageNode[] = run.nodes.map((node) => {
-    const isActiveLineage = activeLineageIds.has(node.nodeId);
-    const visibleDepth = visibleDepthById.get(node.nodeId) ?? 0;
-    return {
-      node,
-      depth: visibleDepth,
-      lane: laneById.get(node.nodeId) ?? 0,
-      x: LINEAGE_PADDING + visibleDepth * LINEAGE_COLUMN_WIDTH,
-      y: LINEAGE_PADDING + ((laneById.get(node.nodeId) ?? 0) - minLane) * LINEAGE_ROW_HEIGHT,
-      isActiveLineage,
-      isCurrent: node.nodeId === currentNodeId,
-      branchKind: branchKindById.get(node.nodeId) ?? 'alternate',
-      branchIndex: branchIndexById.get(node.nodeId) ?? null,
-    };
-  });
+  const positionedNodes: PositionedLineageNode[] = run.nodes
+    .filter((node) => renderableIds.has(node.nodeId))
+    .map((node) => {
+      const isActiveLineage = activeLineageIds.has(node.nodeId);
+      const visibleDepth = visibleDepthById.get(node.nodeId) ?? 0;
+      return {
+        node,
+        depth: visibleDepth,
+        lane: laneById.get(node.nodeId) ?? 0,
+        x: LINEAGE_PADDING + visibleDepth * LINEAGE_COLUMN_WIDTH,
+        y: LINEAGE_PADDING + ((laneById.get(node.nodeId) ?? 0) - minLane) * LINEAGE_ROW_HEIGHT,
+        isActiveLineage,
+        isCurrent: node.nodeId === currentNodeId,
+        branchKind: branchKindById.get(node.nodeId) ?? 'alternate',
+        branchIndex: branchIndexById.get(node.nodeId) ?? null,
+      };
+    });
+
+  const maxVisibleDepth = positionedNodes.reduce((max, n) => Math.max(max, n.depth), 0);
 
   const currentNode = currentNodeId ? nodeById.get(currentNodeId) ?? null : null;
   const latestBranchRootNode = [...alternateBranchRootIds, ...blockedBranchRootIds]
@@ -228,9 +251,13 @@ export function buildLineageDagModel(run: ConsoleDagRun): LineageDagModel {
     blockedAttemptCount: run.nodes.filter((node) => node.nodeKind === 'blocked_attempt').length,
   };
 
+  const renderableEdges = run.edges.filter(
+    (e) => renderableIds.has(e.fromNodeId) && renderableIds.has(e.toNodeId),
+  );
+
   return {
     nodes: positionedNodes,
-    edges: run.edges,
+    edges: renderableEdges,
     graphWidth: LINEAGE_PADDING * 2 + maxVisibleDepth * LINEAGE_COLUMN_WIDTH + ACTIVE_NODE_WIDTH,
     graphHeight: LINEAGE_PADDING * 2 + (maxLane - minLane) * LINEAGE_ROW_HEIGHT + ACTIVE_NODE_HEIGHT,
     currentNodeId,
