@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ReactFlow,
   type Edge,
@@ -33,6 +33,14 @@ export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props
   // would re-trigger the scroll (because focusNodeInViewport depends on nodeById
   // which is rebuilt on every nodes change).
   const hasAutoScrolledRef = useRef(false);
+
+  // Hover tooltip: a single tooltip rendered at the DAG container root to avoid
+  // ReactFlow's overflow:hidden clipping that prevents per-node tooltips from showing.
+  const [hoveredLabel, setHoveredLabel] = useState<string | null>(null);
+  const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
+  // Delay timer stored in a ref to avoid causing extra renders on set/clear.
+  const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const model = useMemo(() => buildLineageDagModel(run), [run]);
   const nodeById = useMemo(
     () => new Map(model.nodes.map((positionedNode) => [positionedNode.node.nodeId, positionedNode] as const)),
@@ -168,6 +176,34 @@ export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props
     [onNodeClick],
   );
 
+  const handleNodeMouseEnter: NodeMouseHandler = useCallback((event, node) => {
+    // Only show tooltip when the label is long enough to be truncated.
+    const label = nodeById.get(node.id)?.node.stepLabel ?? null;
+    if (!label || label.length <= 35) return;
+
+    const containerRect = scrollContainerRef.current?.getBoundingClientRect();
+    if (!containerRect) return;
+
+    // Position relative to the scroll container so the tooltip stays within bounds.
+    const x = event.clientX - containerRect.left + 12;
+    const y = event.clientY - containerRect.top + 16;
+
+    if (tooltipTimerRef.current !== null) clearTimeout(tooltipTimerRef.current);
+    tooltipTimerRef.current = setTimeout(() => {
+      setHoveredLabel(label);
+      setTooltipPos({ x, y });
+    }, 300);
+  }, [nodeById]);
+
+  const handleNodeMouseLeave: NodeMouseHandler = useCallback(() => {
+    if (tooltipTimerRef.current !== null) {
+      clearTimeout(tooltipTimerRef.current);
+      tooltipTimerRef.current = null;
+    }
+    setHoveredLabel(null);
+    setTooltipPos(null);
+  }, []);
+
   return (
     <div className="h-full flex flex-col bg-[var(--bg-primary)]">
       <div className="border-b border-[var(--border)] px-4 py-3 console-blueprint-grid">
@@ -195,7 +231,7 @@ export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props
 
       <div
         ref={scrollContainerRef}
-        className="flex-1 overflow-auto lineage-scroll-surface"
+        className="relative flex-1 overflow-auto lineage-scroll-surface"
       >
         <div
           style={{
@@ -219,9 +255,33 @@ export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props
             preventScrolling={false}
             colorMode="dark"
             onNodeClick={handleNodeClick}
+            onNodeMouseEnter={handleNodeMouseEnter}
+            onNodeMouseLeave={handleNodeMouseLeave}
             style={{ background: 'transparent' }}
           />
         </div>
+        {hoveredLabel && tooltipPos && (
+          <div
+            style={{
+              position: 'absolute',
+              left: tooltipPos.x,
+              top: tooltipPos.y,
+              pointerEvents: 'none',
+              zIndex: 50,
+              maxWidth: 260,
+              background: 'rgba(10, 12, 20, 0.96)',
+              border: '1px solid rgba(123, 141, 167, 0.35)',
+              padding: '6px 10px',
+              fontSize: 12,
+              lineHeight: 1.5,
+              color: 'var(--text-primary)',
+              wordWrap: 'break-word',
+              boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+            }}
+          >
+            {hoveredLabel}
+          </div>
+        )}
       </div>
     </div>
   );
