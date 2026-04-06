@@ -98,6 +98,8 @@ export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props
               branchKind={positionedNode.branchKind}
               branchIndex={positionedNode.branchIndex}
               displayLabel={displayLabel}
+              stepNumber={isActiveLineage ? positionedNode.depth + 1 : null}
+              totalSteps={isActiveLineage ? model.summary.lineageNodeCount : null}
             />
           ),
         },
@@ -234,6 +236,8 @@ function NodeLabel({
   branchKind,
   branchIndex,
   displayLabel,
+  stepNumber,
+  totalSteps,
 }: {
   node: ConsoleDagNode;
   isActiveLineage: boolean;
@@ -243,6 +247,8 @@ function NodeLabel({
   branchKind: 'active' | 'blocked' | 'alternate';
   branchIndex: number | null;
   displayLabel: string;
+  stepNumber: number | null;
+  totalSteps: number | null;
 }) {
   return (
     <div
@@ -295,7 +301,9 @@ function NodeLabel({
 
       <div className="flex items-center justify-between gap-2 border-t border-[rgba(255,255,255,0.06)] bg-[rgba(0,0,0,0.18)] px-3 py-2">
         <span className="min-w-0 truncate font-mono text-[11px] text-[var(--text-secondary)]">
-          {shortNodeId(node.nodeId)}
+          {stepNumber !== null && totalSteps !== null
+            ? `${stepNumber} / ${totalSteps}`
+            : `evt ${node.createdAtEventIndex}`}
         </span>
         {node.isTip ? (
           <span
