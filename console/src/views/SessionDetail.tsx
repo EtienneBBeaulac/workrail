@@ -78,10 +78,15 @@ export function SessionDetail({ sessionId }: Props) {
         )}
       </div>
 
-      {/* Floating detail panel -- slides in from the right over everything */}
+      {/* Floating detail panel -- inset from all edges, angled top-left corner */}
       <div
-        className="fixed top-0 right-0 bottom-0 w-[560px] max-w-[92vw] flex flex-col bg-[var(--bg-card)] border-l border-[var(--border)] shadow-2xl transition-transform duration-200 ease-out"
-        style={{ zIndex: 40, transform: selectedNode ? 'translateX(0)' : 'translateX(100%)' }}
+        className="fixed top-3 right-3 bottom-3 w-[560px] max-w-[calc(92vw-12px)] flex flex-col bg-[var(--bg-card)] border border-[var(--border)] transition-transform duration-200 ease-out"
+        style={{
+          zIndex: 40,
+          transform: selectedNode ? 'translateX(0)' : 'translateX(calc(100% + 12px))',
+          boxShadow: '0 8px 40px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.3)',
+          clipPath: 'polygon(18px 0, 100% 0, 100% 100%, 0 100%, 0 18px)',
+        }}
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] shrink-0 console-blueprint-grid">
           <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
