@@ -313,12 +313,24 @@ export function mountConsoleRoutes(app: Application, consoleService: ConsoleServ
 
   const consoleDist = resolveConsoleDist();
   if (consoleDist) {
-    // Serve console static assets under /console
-    app.use('/console', express.static(consoleDist));
+    // Serve console static assets under /console.
+    // index.html is served with no-cache so the browser always revalidates on
+    // version upgrades. Versioned asset files (JS/CSS with content hashes) can
+    // still be cached aggressively by the browser via their hash-in-filename.
+    app.use('/console', express.static(consoleDist, {
+      setHeaders(res, filePath) {
+        if (path.basename(filePath) === 'index.html') {
+          res.setHeader('Cache-Control', 'no-cache');
+        }
+      }
+    }));
 
     // SPA catch-all: any /console/* route serves index.html
     // (lets React handle client-side routing)
+    // Cache-Control: no-cache ensures the browser always revalidates index.html
+    // so a WorkRail upgrade is reflected immediately without a hard refresh.
     app.get('/console/*path', (_req: Request, res: Response) => {
+      res.setHeader('Cache-Control', 'no-cache');
       res.sendFile(path.join(consoleDist, 'index.html'));
     });
 

@@ -366,24 +366,152 @@ describe('Bug #4: Lock File Atomic Operations', () => {
       startedAt?: string;
       lastHeartbeat?: string;
     }
-    
+
     const shouldReclaimLock = (lockData: DashboardLock): { reclaim: boolean; reason: string } => {
       if (!lockData.pid || !lockData.port || !lockData.startedAt) {
         return { reclaim: true, reason: 'invalid lock structure' };
       }
       return { reclaim: false, reason: 'valid' };
     };
-    
+
     // Test invalid lock (missing pid)
     const invalidLock: DashboardLock = {
       port: 3456,
       startedAt: new Date().toISOString(),
       lastHeartbeat: new Date().toISOString(),
     };
-    
+
     const invalidResult = shouldReclaimLock(invalidLock);
     expect(invalidResult.reclaim).toBe(true);
     expect(invalidResult.reason).toBe('invalid lock structure');
+  });
+
+  // ---- Version-aware reclaim tests (added to cover the version field) ----
+
+  it('should reclaim lock when version field differs from current version', () => {
+    const CURRENT_VERSION = '2.0.0';
+
+    interface DashboardLockWithVersion {
+      pid: number;
+      port: number;
+      startedAt: string;
+      lastHeartbeat: string;
+      version?: string;
+    }
+
+    const shouldReclaimLock = (lockData: DashboardLockWithVersion): { reclaim: boolean; reason: string } => {
+      if (!lockData.pid || !lockData.port || !lockData.startedAt) {
+        return { reclaim: true, reason: 'invalid lock structure' };
+      }
+      // Reclaim when version is absent (old lock file) or differs from current.
+      if (lockData.version !== CURRENT_VERSION) {
+        return { reclaim: true, reason: `version mismatch (lock=${lockData.version}, current=${CURRENT_VERSION})` };
+      }
+      const lastHeartbeat = new Date(lockData.lastHeartbeat || lockData.startedAt);
+      const ageMinutes = (Date.now() - lastHeartbeat.getTime()) / 60000;
+      if (ageMinutes > 2) {
+        return { reclaim: true, reason: `stale (${ageMinutes.toFixed(1)}min old)` };
+      }
+      return { reclaim: false, reason: 'valid' };
+    };
+
+    const versionMismatchLock: DashboardLockWithVersion = {
+      pid: 12345,
+      port: 3456,
+      startedAt: new Date().toISOString(),
+      lastHeartbeat: new Date().toISOString(),
+      version: '1.0.0', // Different from CURRENT_VERSION
+    };
+
+    const result = shouldReclaimLock(versionMismatchLock);
+    expect(result.reclaim).toBe(true);
+    expect(result.reason).toContain('version mismatch');
+    expect(result.reason).toContain('1.0.0');
+    expect(result.reason).toContain('2.0.0');
+  });
+
+  it('should not reclaim lock when version matches current version', () => {
+    const CURRENT_VERSION = '2.0.0';
+
+    interface DashboardLockWithVersion {
+      pid: number;
+      port: number;
+      startedAt: string;
+      lastHeartbeat: string;
+      version?: string;
+    }
+
+    const shouldReclaimLock = (lockData: DashboardLockWithVersion): { reclaim: boolean; reason: string } => {
+      if (!lockData.pid || !lockData.port || !lockData.startedAt) {
+        return { reclaim: true, reason: 'invalid lock structure' };
+      }
+      // Reclaim when version is absent (old lock file) or differs from current.
+      if (lockData.version !== CURRENT_VERSION) {
+        return { reclaim: true, reason: `version mismatch (lock=${lockData.version}, current=${CURRENT_VERSION})` };
+      }
+      const lastHeartbeat = new Date(lockData.lastHeartbeat || lockData.startedAt);
+      const ageMinutes = (Date.now() - lastHeartbeat.getTime()) / 60000;
+      if (ageMinutes > 2) {
+        return { reclaim: true, reason: `stale (${ageMinutes.toFixed(1)}min old)` };
+      }
+      return { reclaim: false, reason: 'valid' };
+    };
+
+    const sameVersionLock: DashboardLockWithVersion = {
+      pid: 12345,
+      port: 3456,
+      startedAt: new Date().toISOString(),
+      lastHeartbeat: new Date().toISOString(),
+      version: '2.0.0', // Same as CURRENT_VERSION
+    };
+
+    const result = shouldReclaimLock(sameVersionLock);
+    expect(result.reclaim).toBe(false);
+    expect(result.reason).toBe('valid');
+  });
+
+  it('should reclaim lock when version field is absent (old lock file written before version tracking)', () => {
+    const CURRENT_VERSION = '2.0.0';
+
+    interface DashboardLockWithVersion {
+      pid: number;
+      port: number;
+      startedAt: string;
+      lastHeartbeat: string;
+      version?: string;
+    }
+
+    const shouldReclaimLock = (lockData: DashboardLockWithVersion): { reclaim: boolean; reason: string } => {
+      if (!lockData.pid || !lockData.port || !lockData.startedAt) {
+        return { reclaim: true, reason: 'invalid lock structure' };
+      }
+      // Reclaim when version is absent (old lock file) or differs from current.
+      // undefined means the lock was written before version tracking was added --
+      // treat it as "wrong version" so the fix takes effect on first deployment.
+      if (lockData.version !== CURRENT_VERSION) {
+        return { reclaim: true, reason: `version mismatch (lock=${lockData.version}, current=${CURRENT_VERSION})` };
+      }
+      const lastHeartbeat = new Date(lockData.lastHeartbeat || lockData.startedAt);
+      const ageMinutes = (Date.now() - lastHeartbeat.getTime()) / 60000;
+      if (ageMinutes > 2) {
+        return { reclaim: true, reason: `stale (${ageMinutes.toFixed(1)}min old)` };
+      }
+      return { reclaim: false, reason: 'valid' };
+    };
+
+    // Old lock file written before version field was introduced
+    const oldFormatLock: DashboardLockWithVersion = {
+      pid: 12345,
+      port: 3456,
+      startedAt: new Date().toISOString(),
+      lastHeartbeat: new Date().toISOString(),
+      // version is absent
+    };
+
+    const result = shouldReclaimLock(oldFormatLock);
+    // Should reclaim: undefined version means pre-fix process owns the lock
+    expect(result.reclaim).toBe(true);
+    expect(result.reason).toContain('version mismatch');
   });
 });
 
