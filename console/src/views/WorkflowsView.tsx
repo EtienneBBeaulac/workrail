@@ -13,6 +13,65 @@ interface Props {
 }
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+interface WorkflowGroup {
+  readonly tagId: string | null;
+  readonly label: string;
+  readonly workflows: readonly ConsoleWorkflowSummary[];
+}
+
+/**
+ * Groups workflows by their first recognized non-routines tag, in CATALOG_TAGS order.
+ * Workflows with no recognized tag are placed in an "Other" group at the end.
+ */
+function groupWorkflowsByTag(workflows: readonly ConsoleWorkflowSummary[]): WorkflowGroup[] {
+  const knownTagIds = new Set(CATALOG_TAGS.map((t) => t.id));
+
+  const buckets = new Map<string, ConsoleWorkflowSummary[]>();
+  const other: ConsoleWorkflowSummary[] = [];
+
+  for (const w of workflows) {
+    const firstKnownTag = w.tags.find((t) => t !== 'routines' && knownTagIds.has(t));
+    if (firstKnownTag) {
+      const bucket = buckets.get(firstKnownTag) ?? [];
+      bucket.push(w);
+      buckets.set(firstKnownTag, bucket);
+    } else {
+      other.push(w);
+    }
+  }
+
+  const groups: WorkflowGroup[] = CATALOG_TAGS
+    .filter((t) => buckets.has(t.id))
+    .map((t) => ({ tagId: t.id, label: t.label, workflows: buckets.get(t.id)! }));
+
+  if (other.length > 0) {
+    groups.push({ tagId: null, label: 'Other', workflows: other });
+  }
+
+  return groups;
+}
+
+/**
+ * Returns a short teaser string from the workflow summary:
+ * - First 80 chars of `about` (if present), or
+ * - First example wrapped in quotes (if present), or
+ * - null
+ */
+function getTeaserText(workflow: ConsoleWorkflowSummary): string | null {
+  if (workflow.about && workflow.about.length > 0) {
+    const trimmed = workflow.about.slice(0, 80);
+    return trimmed.length < workflow.about.length ? `${trimmed}...` : trimmed;
+  }
+  if (workflow.examples && workflow.examples.length > 0) {
+    return `"${workflow.examples[0]}"`;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // WorkflowsView
 // ---------------------------------------------------------------------------
 
@@ -66,17 +125,66 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow }: Pr
         <p className="text-sm text-[var(--text-muted)] py-8 text-center">
           No workflows in this category.
         </p>
+      ) : selectedTag !== null ? (
+        // Single selected tag: one section header + flat list
+        <div className="space-y-2">
+          <SectionHeader
+            label={TAG_DISPLAY[selectedTag] ?? selectedTag}
+            count={visibleWorkflows.length}
+            showRule={false}
+          />
+          <div className="space-y-2">
+            {visibleWorkflows.map((workflow) => (
+              <WorkflowCard
+                key={workflow.id}
+                workflow={workflow}
+                onSelect={() => onSelectWorkflow(workflow.id)}
+              />
+            ))}
+          </div>
+        </div>
       ) : (
-        <div className="space-y-px">
-          {visibleWorkflows.map((workflow) => (
-            <WorkflowCard
-              key={workflow.id}
-              workflow={workflow}
-              onSelect={() => onSelectWorkflow(workflow.id)}
-            />
+        // All: grouped by tag with section headers
+        <div className="space-y-6">
+          {groupWorkflowsByTag(visibleWorkflows).map((group) => (
+            <div key={group.tagId ?? '__other__'} className="space-y-2">
+              <SectionHeader label={group.label} count={group.workflows.length} showRule />
+              <div className="space-y-2">
+                {group.workflows.map((workflow) => (
+                  <WorkflowCard
+                    key={workflow.id}
+                    workflow={workflow}
+                    onSelect={() => onSelectWorkflow(workflow.id)}
+                  />
+                ))}
+              </div>
+            </div>
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Section header
+// ---------------------------------------------------------------------------
+
+function SectionHeader({
+  label,
+  count,
+  showRule,
+}: {
+  readonly label: string;
+  readonly count: number;
+  readonly showRule: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-3 mb-3 mt-2">
+      <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+        {label}&nbsp;&nbsp;·&nbsp;&nbsp;{count} workflow{count !== 1 ? 's' : ''}
+      </span>
+      {showRule && <div className="flex-1 h-px bg-[var(--border)]" />}
     </div>
   );
 }
@@ -103,11 +211,11 @@ function TagPill({
       disabled={disabled}
       aria-pressed={isActive}
       className={[
-        'px-3 py-2 min-w-[44px] rounded-full text-xs font-medium transition-colors',
+        'px-3 py-2 min-w-[44px] rounded-none text-xs font-medium transition-colors',
         'disabled:opacity-50 disabled:cursor-not-allowed',
         isActive
-          ? 'bg-[var(--bg-tertiary)] text-[var(--text-primary)]'
-          : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]',
+          ? 'bg-[var(--accent)] text-white'
+          : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-card)]',
       ].join(' ')}
     >
       {label}
@@ -131,6 +239,8 @@ function WorkflowCard({
     .filter((t) => t !== 'routines')
     .map((t) => TAG_DISPLAY[t] ?? t);
 
+  const teaserText = getTeaserText(workflow);
+
   const accessibleName = [
     workflow.name,
     workflow.description,
@@ -145,34 +255,37 @@ function WorkflowCard({
       type="button"
       onClick={onSelect}
       aria-label={accessibleName}
-      className="w-full text-left flex items-start gap-3 px-3 py-2.5 rounded hover:bg-[var(--bg-card)] transition-colors group"
+      className="w-full text-left flex items-stretch gap-0 bg-[var(--bg-card)] border border-[var(--border)] hover:border-[var(--accent)] transition-colors group focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:outline-none"
     >
-      <div className="flex-1 min-w-0 space-y-1">
+      {/* Left accent stripe */}
+      <div className="w-[3px] shrink-0 self-stretch bg-[var(--accent)] opacity-40 group-hover:opacity-100 transition-opacity" />
+
+      <div className="flex-1 min-w-0 px-4 py-3">
         {/* Name */}
-        <p className="text-sm text-[var(--text-primary)] group-hover:text-[var(--accent)] transition-colors leading-snug truncate">
+        <p className="text-sm font-medium text-[var(--text-primary)] group-hover:text-[var(--accent)] transition-colors leading-snug mb-1">
           {workflow.name}
         </p>
 
-        {/* Description */}
-        <p className="text-xs text-[var(--text-secondary)] truncate">
+        {/* Description -- 2 lines */}
+        <p className="text-xs text-[var(--text-secondary)] line-clamp-2 leading-relaxed mb-2">
           {workflow.description}
         </p>
 
-        {/* Badges row -- non-interactive display only */}
-        <div className="flex items-center gap-2">
+        {/* About teaser (first 80 chars of about, or first example in quotes) */}
+        {teaserText && (
+          <p className="text-xs italic text-[var(--text-muted)] truncate mb-2">
+            {teaserText}
+          </p>
+        )}
+
+        {/* Badges row */}
+        <div className="flex items-center gap-2 flex-wrap">
           {displayTags.map((label) => (
-            <span
-              key={label}
-              aria-hidden="true"
-              className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-secondary)] text-[var(--text-muted)]"
-            >
+            <span key={label} className="font-mono text-[10px] px-1.5 py-0.5 bg-[var(--bg-secondary)] text-[var(--text-muted)]">
               {label}
             </span>
           ))}
-          <span
-            aria-hidden="true"
-            className="text-[10px] px-1.5 py-0.5 rounded border border-[var(--border)] text-[var(--text-muted)]"
-          >
+          <span className="font-mono text-[10px] px-1.5 py-0.5 border border-[var(--border)] text-[var(--text-muted)] max-w-[120px] truncate">
             {workflow.source.displayName}
           </span>
         </div>
@@ -187,15 +300,29 @@ function WorkflowCard({
 
 function WorkflowListSkeleton() {
   return (
-    <div className="space-y-px animate-pulse" aria-busy="true" aria-label="Loading workflows">
-      {Array.from({ length: 8 }).map((_, i) => (
-        <div key={i} className="px-3 py-3 space-y-1.5">
-          <div className="h-4 w-2/3 rounded bg-[var(--bg-tertiary)]" />
-          <div className="h-3 w-full rounded bg-[var(--bg-tertiary)]" />
-          <div className="flex gap-1.5">
-            <div className="h-4 w-14 rounded bg-[var(--bg-tertiary)]" />
-            <div className="h-4 w-16 rounded bg-[var(--bg-tertiary)]" />
+    <div className="space-y-6 animate-pulse" aria-busy="true" aria-label="Loading workflows">
+      {[0, 1].map((section) => (
+        <div key={section} className="space-y-2">
+          {/* Section header skeleton */}
+          <div className="flex items-center gap-3 mb-3">
+            <div className="h-3 w-24 rounded bg-[var(--bg-tertiary)]" />
+            <div className="flex-1 h-px bg-[var(--bg-tertiary)]" />
           </div>
+          {/* Card skeletons */}
+          {[0, 1, 2].map((card) => (
+            <div key={card} className="flex bg-[var(--bg-card)] border border-[var(--border)]">
+              <div className="w-[3px] bg-[var(--bg-tertiary)]" />
+              <div className="flex-1 px-4 py-3 space-y-2">
+                <div className="h-4 w-2/3 rounded bg-[var(--bg-tertiary)]" />
+                <div className="h-3 w-full rounded bg-[var(--bg-tertiary)]" />
+                <div className="h-3 w-4/5 rounded bg-[var(--bg-tertiary)]" />
+                <div className="flex gap-1.5">
+                  <div className="h-4 w-14 rounded bg-[var(--bg-tertiary)]" />
+                  <div className="h-4 w-16 rounded bg-[var(--bg-tertiary)]" />
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       ))}
     </div>

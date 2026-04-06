@@ -18,7 +18,7 @@ interface Props {
 // WorkflowDetail
 // ---------------------------------------------------------------------------
 
-export function WorkflowDetail({ workflowId, activeTag, onBack }: Props) {
+export function WorkflowDetail({ workflowId, onBack }: Props) {
   const queryClient = useQueryClient();
 
   // Optimistic partial data: use cached list entry while detail fetch completes.
@@ -29,9 +29,7 @@ export function WorkflowDetail({ workflowId, activeTag, onBack }: Props) {
 
   const { data: detail, isLoading, isError, error, refetch } = useWorkflowDetail(workflowId);
 
-  const backLabel = activeTag && TAG_DISPLAY[activeTag]
-    ? `Back to Workflows: ${TAG_DISPLAY[activeTag]}`
-    : 'Back to Workflows';
+  const backLabel = 'Back to Workflows';
 
   // Use detail data when available, fall back to cached list data for header fields.
   const name = detail?.name ?? cached?.name ?? workflowId;
@@ -52,18 +50,18 @@ export function WorkflowDetail({ workflowId, activeTag, onBack }: Props) {
       </button>
 
       {/* Header */}
-      <div className="space-y-2">
-        <h2 className="text-xl font-semibold text-[var(--text-primary)] leading-snug">
+      <div className="border border-[var(--border)] px-5 py-4 console-blueprint-grid">
+        <h2 className="text-lg font-semibold text-[var(--text-primary)] leading-snug mb-2">
           {name}
         </h2>
 
         {/* Badges row */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 mb-2">
           {tags.filter((t) => t !== 'routines').map((tag) => (
             <span
               key={tag}
               aria-hidden="true"
-              className="text-[10px] px-2 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--text-secondary)]"
+              className="font-mono text-[10px] px-1.5 py-0.5 bg-[var(--bg-secondary)] text-[var(--text-muted)]"
             >
               {TAG_DISPLAY[tag] ?? tag}
             </span>
@@ -71,14 +69,14 @@ export function WorkflowDetail({ workflowId, activeTag, onBack }: Props) {
           {source && (
             <span
               aria-hidden="true"
-              className="text-[10px] px-2 py-0.5 rounded bg-[var(--bg-secondary)] text-[var(--text-muted)] border border-[var(--border)]"
+              className="font-mono text-[10px] px-1.5 py-0.5 border border-[var(--border)] text-[var(--text-muted)]"
             >
               {source.displayName}
             </span>
           )}
-          {detail && (
-            <span className="text-[10px] text-[var(--text-muted)]">
-              {detail.stepCount} {detail.stepCount === 1 ? 'step' : 'steps'}
+          {detail && detail.stepCount != null && (
+            <span className="font-mono text-[10px] px-1.5 py-0.5 bg-[var(--bg-secondary)] text-[var(--text-muted)]">
+              {detail.stepCount} step{detail.stepCount !== 1 ? 's' : ''}
             </span>
           )}
         </div>
@@ -130,7 +128,7 @@ function DetailContent({
   if (!hasAnyContent) {
     return (
       <p className="text-sm text-[var(--text-muted)] italic">
-        No extended description available for this workflow.
+        No additional documentation available.
       </p>
     );
   }
