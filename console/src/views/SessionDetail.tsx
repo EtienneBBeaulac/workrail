@@ -111,19 +111,25 @@ function RunCard({
           <StatusBadge status={run.status} />
         </div>
       </div>
-      <div className="h-[460px] border-b border-[var(--border)]">
-        <RunLineageDag
-          run={run}
-          selectedNodeId={selectedNodeId}
-          onNodeClick={(nodeId) => onNodeClick(run.runId, nodeId)}
-        />
+      {/* On xl screens: side-by-side split with DAG on the left and detail on the right.
+          On narrow screens: stacked (DAG on top, detail below). */}
+      <div className="xl:flex xl:flex-row xl:h-[600px]">
+        <div className="h-[460px] border-b border-[var(--border)] xl:h-full xl:w-[520px] xl:shrink-0 xl:border-b-0 xl:border-r">
+          <RunLineageDag
+            run={run}
+            selectedNodeId={selectedNodeId}
+            onNodeClick={(nodeId) => onNodeClick(run.runId, nodeId)}
+          />
+        </div>
+        <div className="xl:flex-1 xl:overflow-auto">
+          <NodeDetailSection
+            sessionId={sessionId}
+            nodeId={selectedNodeId}
+            runStatus={run.status}
+            currentNodeId={run.preferredTipNodeId}
+          />
+        </div>
       </div>
-      <NodeDetailSection
-        sessionId={sessionId}
-        nodeId={selectedNodeId}
-        runStatus={run.status}
-        currentNodeId={run.preferredTipNodeId}
-      />
     </div>
   );
 }
