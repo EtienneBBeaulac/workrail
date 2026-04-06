@@ -13,6 +13,7 @@ import type { ConsoleService } from './console-service.js';
 import { getWorktreeList, buildActiveSessionCounts, resolveRepoRoot } from './worktree-service.js';
 import type { WorkflowService } from '../../application/services/workflow-service.js';
 import type { ToolCallTimingRingBuffer } from '../../mcp/tool-call-timing.js';
+import { DEV_MODE } from '../../mcp/dev-mode.js';
 
 // ---------------------------------------------------------------------------
 // Workspace SSE broadcast
@@ -164,20 +165,23 @@ export function mountConsoleRoutes(
   // GET /api/v2/perf/tool-calls?limit=N
   //
   // Returns the most recent N tool call timing observations from the ring buffer
-  // (newest first, max 100). When WORKRAIL_DEV_PERF=1, this endpoint lets the
-  // browser console display latency data without restarting the server.
+  // (newest first, max 100). Only mounted when WORKRAIL_DEV=1 so this endpoint
+  // is never reachable in production servers.
   //
-  // The ring buffer is optional: if the server was not started with perf tracing
-  // wired in (e.g. unit tests), the endpoint returns an empty array rather than
-  // 404 so clients can always query it unconditionally.
+  // The ring buffer is optional: if not wired in, the endpoint returns an empty
+  // array rather than 404 so clients can always query it unconditionally.
+  // The devMode field lets consumers distinguish "no calls happened" from
+  // "DEV_MODE is off and the buffer was never wired in".
   // ---------------------------------------------------------------------------
-  app.get('/api/v2/perf/tool-calls', (req: Request, res: Response) => {
-    const rawLimit = req.query['limit'];
-    const limit = typeof rawLimit === 'string' ? parseInt(rawLimit, 10) : undefined;
-    const safeLimit = (limit !== undefined && Number.isFinite(limit) && limit > 0) ? limit : undefined;
-    const observations = timingRingBuffer ? timingRingBuffer.recent(safeLimit) : [];
-    res.json({ success: true, data: { observations, total: timingRingBuffer?.size ?? 0 } });
-  });
+  if (DEV_MODE) {
+    app.get('/api/v2/perf/tool-calls', (req: Request, res: Response) => {
+      const rawLimit = req.query['limit'];
+      const limit = typeof rawLimit === 'string' ? parseInt(rawLimit, 10) : undefined;
+      const safeLimit = (limit !== undefined && Number.isFinite(limit) && limit > 0) ? limit : undefined;
+      const observations = timingRingBuffer ? timingRingBuffer.recent(safeLimit) : [];
+      res.json({ success: true, data: { observations, total: timingRingBuffer?.size ?? 0, devMode: DEV_MODE } });
+    });
+  }
 
   // List all v2 sessions
   app.get('/api/v2/sessions', async (_req: Request, res: Response) => {
