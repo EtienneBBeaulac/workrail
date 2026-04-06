@@ -31,6 +31,7 @@ import { projectNodeOutputsV2 } from '../projections/node-outputs.js';
 import { projectAdvanceOutcomesV2 } from '../projections/advance-outcomes.js';
 import { projectArtifactsV2 } from '../projections/artifacts.js';
 import { projectRunContextV2 } from '../projections/run-context.js';
+import { projectRunExecutionTraceV2 } from '../projections/run-execution-trace.js';
 import { OUTPUT_CHANNEL, PAYLOAD_KIND, EVENT_KIND } from '../durable-core/constants.js';
 import type {
   ConsoleSessionListResponse,
@@ -691,6 +692,30 @@ function projectSessionDetail(
 
   const statusRes = projectRunStatusSignalsV2(events);
   const gapsRes = projectGapsV2(events);
+  const executionTraceRes = projectRunExecutionTraceV2(events);
+
+  // Richness projections -- used to populate summary boolean flags on each node.
+  // All projections are called once here; per-node lookup is O(1) map access.
+  const outputsRes = projectNodeOutputsV2(events);
+  const artifactsRes = projectArtifactsV2(events);
+
+  // Validations have no standalone projection; build a nodeId set in one pass.
+  const failedValidationNodeIds = new Set<string>();
+  for (const e of events) {
+    if (e.kind !== EVENT_KIND.VALIDATION_PERFORMED) continue;
+    if (!e.data.result.valid) {
+      failedValidationNodeIds.add(e.scope.nodeId);
+    }
+  }
+
+  // Build a per-node gap presence map from the gap projection (byGapId is the
+  // only index; gaps store their nodeId directly).
+  const gapNodeIds = new Set<string>();
+  if (gapsRes.isOk()) {
+    for (const gap of Object.values(gapsRes.value.byGapId)) {
+      gapNodeIds.add(gap.nodeId);
+    }
+  }
 
   const runs: ConsoleDagRun[] = Object.values(dagRes.value.runsById).map((run) => {
     const statusSignals = statusRes.isOk() ? statusRes.value.byRunId[run.runId] : undefined;
@@ -701,15 +726,23 @@ function projectSessionDetail(
     );
 
     const tipSet = new Set(run.tipNodeIds);
-    const nodes: ConsoleDagNode[] = Object.values(run.nodesById).map((node) => ({
-      nodeId: node.nodeId,
-      nodeKind: node.nodeKind,
-      parentNodeId: node.parentNodeId,
-      createdAtEventIndex: node.createdAtEventIndex,
-      isPreferredTip: node.nodeId === run.preferredTipNodeId,
-      isTip: tipSet.has(node.nodeId),
-      stepLabel: stepLabels[node.nodeId] ?? null,
-    }));
+    const nodes: ConsoleDagNode[] = Object.values(run.nodesById).map((node) => {
+      const nodeOutputs = outputsRes.isOk() ? outputsRes.value.nodesById[node.nodeId] : undefined;
+      const nodeArtifacts = artifactsRes.isOk() ? artifactsRes.value.byNodeId[node.nodeId] : undefined;
+      return {
+        nodeId: node.nodeId,
+        nodeKind: node.nodeKind,
+        parentNodeId: node.parentNodeId,
+        createdAtEventIndex: node.createdAtEventIndex,
+        isPreferredTip: node.nodeId === run.preferredTipNodeId,
+        isTip: tipSet.has(node.nodeId),
+        stepLabel: stepLabels[node.nodeId] ?? null,
+        hasRecap: (nodeOutputs?.currentByChannel.recap.length ?? 0) > 0,
+        hasFailedValidations: failedValidationNodeIds.has(node.nodeId),
+        hasGaps: gapNodeIds.has(node.nodeId),
+        hasArtifacts: (nodeArtifacts?.artifacts.length ?? 0) > 0,
+      };
+    });
 
     const edges: ConsoleDagEdge[] = run.edges.map((edge) => ({
       edgeKind: edge.edgeKind,
@@ -734,6 +767,9 @@ function projectSessionDetail(
       hasUnresolvedCriticalGaps: gapsRes.isOk()
         ? (gapsRes.value.unresolvedCriticalByRunId[run.runId]?.length ?? 0) > 0
         : false,
+      executionTraceSummary: executionTraceRes.isOk()
+        ? (executionTraceRes.value.byRunId[run.runId] ?? null)
+        : null,
     };
   });
 
@@ -773,6 +809,8 @@ function projectNodeDetail(
 
   const tipSet = new Set(run.tipNodeIds);
 
+  // Each call below is O(n-events). For sessions with large event logs, consider
+  // caching projection results at the session level. Acceptable at current scale.
   const recapMarkdown = extractRecapMarkdown(events, nodeId);
   const artifacts = extractArtifacts(events, nodeId);
   const advanceOutcome = extractAdvanceOutcome(events, nodeId);
