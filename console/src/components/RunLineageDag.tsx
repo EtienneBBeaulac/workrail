@@ -27,6 +27,11 @@ type FlowNodeData = {
 };
 
 export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props) {
+  // Ref on the outermost DAG wrapper div. Used to scroll the page to bring the
+  // DAG into view before scrolling the DAG canvas to a specific node (two-step
+  // scroll). Without this, clicking a rail dot when the page is scrolled down
+  // to the detail panel causes a canvas scroll that the user never sees.
+  const dagRootRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   // Tracks whether the initial auto-scroll to the current node has already fired.
   // Without this guard, every react-query refetch that rebuilds `model.nodes`
@@ -56,6 +61,12 @@ export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props
       const targetNode = nodeById.get(nodeId);
       if (!container || !targetNode) return;
 
+      // Step 1: bring the DAG component into the viewport if the page has been
+      // scrolled down to the detail panel. Without this, the canvas scroll happens
+      // offscreen and the user sees no feedback.
+      dagRootRef.current?.scrollIntoView({ behavior, block: 'nearest' });
+
+      // Step 2: scroll the DAG canvas to center the target node.
       const targetWidth = targetNode.isActiveLineage ? ACTIVE_NODE_WIDTH : SIDE_NODE_WIDTH;
       const targetHeight = targetNode.isActiveLineage ? ACTIVE_NODE_HEIGHT : SIDE_NODE_HEIGHT;
 
@@ -205,7 +216,7 @@ export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props
   }, []);
 
   return (
-    <div className="h-full flex flex-col bg-[var(--bg-primary)]">
+    <div ref={dagRootRef} className="h-full flex flex-col bg-[var(--bg-primary)]">
       <div className="border-b border-[var(--border)] px-4 py-3 console-blueprint-grid">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex flex-wrap gap-2">
