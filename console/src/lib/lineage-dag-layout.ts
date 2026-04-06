@@ -7,6 +7,10 @@ export const ACTIVE_NODE_WIDTH = 220;
 export const SIDE_NODE_WIDTH = 172;
 export const ACTIVE_NODE_HEIGHT = 124;
 export const SIDE_NODE_HEIGHT = 104;
+// Extra blank canvas on each side so the first and last nodes can be
+// scrolled to the center of the viewport rather than being flush with
+// the canvas edge. ~600px covers half a typical laptop viewport.
+export const LINEAGE_SCROLL_OVERHANG = 600;
 
 interface PositionedLineageNode {
   readonly node: ConsoleDagNode;
@@ -193,7 +197,7 @@ export function buildLineageDagModel(run: ConsoleDagRun): LineageDagModel {
         node,
         depth: visibleDepth,
         lane: laneById.get(node.nodeId) ?? 0,
-        x: LINEAGE_PADDING + visibleDepth * LINEAGE_COLUMN_WIDTH,
+        x: LINEAGE_SCROLL_OVERHANG + LINEAGE_PADDING + visibleDepth * LINEAGE_COLUMN_WIDTH,
         y: LINEAGE_PADDING + ((laneById.get(node.nodeId) ?? 0) - minLane) * LINEAGE_ROW_HEIGHT,
         isActiveLineage,
         isCurrent: node.nodeId === currentNodeId,
@@ -224,7 +228,7 @@ export function buildLineageDagModel(run: ConsoleDagRun): LineageDagModel {
   return {
     nodes: positionedNodes,
     edges: run.edges.filter((e) => positionedNodeIds.has(e.fromNodeId) && positionedNodeIds.has(e.toNodeId)),
-    graphWidth: LINEAGE_PADDING * 2 + maxVisibleDepth * LINEAGE_COLUMN_WIDTH + ACTIVE_NODE_WIDTH,
+    graphWidth: LINEAGE_SCROLL_OVERHANG * 2 + LINEAGE_PADDING * 2 + maxVisibleDepth * LINEAGE_COLUMN_WIDTH + ACTIVE_NODE_WIDTH,
     graphHeight: LINEAGE_PADDING * 2 + (maxLane - minLane) * LINEAGE_ROW_HEIGHT + ACTIVE_NODE_HEIGHT,
     currentNodeId,
     startNodeId: activeLineagePath[0] ?? rootNodes[0]?.nodeId ?? null,

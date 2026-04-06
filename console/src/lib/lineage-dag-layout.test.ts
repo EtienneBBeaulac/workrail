@@ -4,6 +4,7 @@ import {
   shortNodeId,
   LINEAGE_COLUMN_WIDTH,
   LINEAGE_PADDING,
+  LINEAGE_SCROLL_OVERHANG,
 } from './lineage-dag-layout';
 import type { ConsoleDagNode, ConsoleDagRun } from '../api/types';
 
@@ -99,8 +100,8 @@ describe('linear lineage', () => {
     const model = buildLineageDagModel(makeRun(nodes, 'b'));
     const byId = nodeByIdMap(model);
 
-    expect(byId.get('a')!.x).toBe(LINEAGE_PADDING);
-    expect(byId.get('b')!.x).toBe(LINEAGE_PADDING + LINEAGE_COLUMN_WIDTH);
+    expect(byId.get('a')!.x).toBe(LINEAGE_SCROLL_OVERHANG + LINEAGE_PADDING);
+    expect(byId.get('b')!.x).toBe(LINEAGE_SCROLL_OVERHANG + LINEAGE_PADDING + LINEAGE_COLUMN_WIDTH);
   });
 
   it('sets correct summary counts for a linear run', () => {
