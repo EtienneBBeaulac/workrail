@@ -81,7 +81,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.24.0",
-    "@scure/base": "1.1.9",
+    "@scure/base": "2.0.0",
     "ajv": "^8.17.1",
     "chalk": "^5.3.0",
     "commander": "^14.0.0",
@@ -89,13 +89,13 @@
     "dotenv": "^17.2.0",
     "express": "^5.1.0",
     "neverthrow": "^8.2.0",
-    "open": "^10.2.0",
+    "open": "^11.0.0",
     "reflect-metadata": "^0.2.0",
     "semver": "^7.7.2",
     "tsconfig-paths": "^4.2.0",
     "tslib": "^2.8.1",
     "tsyringe": "^4.8.0",
-    "zod": "^3.22.4"
+    "zod": "^4.3.6"
   },
   "keywords": [
     "mcp",
@@ -113,20 +113,20 @@
     "@semantic-release/github": "^12.0.2",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.3",
-    "@types/node": "^20.19.9",
+    "@types/node": "^25.5.2",
     "@types/semver": "^7.7.0",
-    "@vitest/ui": "^3.2.4",
+    "@vitest/ui": "^4.1.2",
     "conventional-changelog-conventionalcommits": "^9.1.0",
-    "fast-check": "^3.15.0",
+    "fast-check": "^4.6.0",
     "happy-dom": "^20.0.11",
-    "jsdom": "^27.0.0",
+    "jsdom": "^29.0.1",
     "lit": "^3.3.1",
-    "node-fetch": "^2.7.0",
-    "semantic-release": "^24.2.0",
+    "node-fetch": "^3.3.2",
+    "semantic-release": "^25.0.3",
     "ts-morph": "^27.0.2",
-    "typescript": "^5.9.3",
-    "vite": "^7.1.9",
-    "vitest": "^3.2.4"
+    "typescript": "^6.0.2",
+    "vite": "^8.0.5",
+    "vitest": "^4.1.2"
   },
   "engines": {
     "node": ">=20"
