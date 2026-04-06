@@ -15,6 +15,13 @@ import cors from 'cors';
 import open from 'open';
 import { execSync } from 'child_process';
 
+// Resolve package version at module load time.
+// __dirname is available in CommonJS (the compile target for this project).
+// The path resolves to src/infrastructure/session -> ../../../package.json.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const _pkg = require(path.join(__dirname, '../../../package.json')) as { version: string };
+const CURRENT_VERSION: string = _pkg.version;
+
 export type DashboardMode = { kind: 'unified' } | { kind: 'legacy' };
 export type BrowserBehavior = { kind: 'auto_open' } | { kind: 'manual' };
 
@@ -37,6 +44,8 @@ interface DashboardLock {
   lastHeartbeat: string; // Track last activity for TTL-based cleanup
   projectId: string;
   projectPath: string;
+  /** Package version of the process that owns the lock. Used to reclaim on upgrade. */
+  version?: string;
 }
 
 /**
@@ -439,7 +448,7 @@ export class HttpServer {
     });
     
     // Health check
-    this.app.get('/api/health', (req: Request, res: Response) => {
+    this.app.get('/api/health', (_req: Request, res: Response) => {
       res.json({
         success: true,
         status: 'healthy',
@@ -447,7 +456,8 @@ export class HttpServer {
         timestamp: new Date().toISOString(),
         isPrimary: this.isPrimary,
         pid: process.pid,
-        port: this.port
+        port: this.port,
+        version: CURRENT_VERSION
       });
     });
     
@@ -505,9 +515,10 @@ export class HttpServer {
         startedAt: new Date().toISOString(),
         lastHeartbeat: new Date().toISOString(),
         projectId: this.sessionManager.getProjectId(),
-        projectPath: this.sessionManager.getProjectPath()
+        projectPath: this.sessionManager.getProjectPath(),
+        version: CURRENT_VERSION
       };
-      
+
       await fs.writeFile(this.lockFile, JSON.stringify(lockData, null, 2), { flag: 'wx' });
       
       // Success! We are primary
@@ -539,7 +550,15 @@ export class HttpServer {
     if (!lockData.pid || !lockData.port || !lockData.startedAt) {
       return { reclaim: true, reason: 'invalid lock structure' };
     }
-    
+
+    // Version mismatch: a newer (or different) version should take over so the
+    // browser always gets up-to-date console assets from the running process.
+    // undefined means the lock was written by a pre-version-field build -- treat
+    // it the same as "wrong version" so the fix takes effect on first deployment.
+    if (lockData.version !== CURRENT_VERSION) {
+      return { reclaim: true, reason: `version mismatch (lock=${lockData.version}, current=${CURRENT_VERSION})` };
+    }
+
     // Stale by TTL (no heartbeat for 2+ minutes)
     const lastHeartbeat = new Date(lockData.lastHeartbeat || lockData.startedAt);
     const ageMinutes = (Date.now() - lastHeartbeat.getTime()) / 60000;
@@ -595,8 +614,21 @@ export class HttpServer {
         }
       } else {
         console.error(`[Dashboard] Lock reclaim needed: ${reason}`);
+
+        // SIGTERM the old process before reclaiming the port.
+        // Without this, the old process is still bound to port 3456 and
+        // startAsPrimary() throws EADDRINUSE, causing silent fallback to legacy mode.
+        // Mirror the graceful-shutdown pattern used in the !reclaim branch above.
+        try {
+          process.kill(lockData.pid, 0); // Throws if process is dead
+          console.error(`[Dashboard] Sending SIGTERM to old process (PID ${lockData.pid})`);
+          process.kill(lockData.pid, 'SIGTERM');
+          await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s for graceful exit
+        } catch {
+          // Process already dead -- proceed to reclaim
+        }
       }
-      
+
       // ATOMIC RECLAIM: Write new lock to temp file, then rename
       // This prevents race where multiple processes try to reclaim simultaneously
       const tempPath = `${this.lockFile}.${process.pid}.${Date.now()}`;
@@ -606,7 +638,8 @@ export class HttpServer {
         startedAt: new Date().toISOString(),
         lastHeartbeat: new Date().toISOString(),
         projectId: this.sessionManager.getProjectId(),
-        projectPath: this.sessionManager.getProjectPath()
+        projectPath: this.sessionManager.getProjectPath(),
+        version: CURRENT_VERSION
       };
       
       try {
@@ -631,7 +664,7 @@ export class HttpServer {
         }
         
         console.error('[Dashboard] Lock reclaimed successfully');
-this.isPrimary = true;
+        this.isPrimary = true;
         this.setupPrimaryCleanup();
         this.heartbeat.start();
         return true;

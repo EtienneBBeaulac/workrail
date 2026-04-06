@@ -86,6 +86,33 @@ describe('Unified Dashboard - Primary/Secondary Pattern', () => {
     expect(lockData.pid).toBe(process.pid);
   });
   
+  it('should reclaim lock when version field differs from current version', async () => {
+    // Write a lock file with a different version but a dead PID so that the
+    // SIGTERM branch is a no-op and the test completes without the 2-second wait.
+    const versionMismatchLock = {
+      pid: 999999, // Non-existent PID so kill() throws and we skip the 2s wait
+      port: 3456,
+      startedAt: new Date().toISOString(), // Fresh timestamp -- TTL would NOT trigger reclaim
+      lastHeartbeat: new Date().toISOString(),
+      projectId: 'test',
+      projectPath: path.join(os.tmpdir(), 'workrail-test'),
+      version: '0.0.0-old', // Deliberately different from the current package version
+    };
+
+    await fs.mkdir(path.dirname(lockFile), { recursive: true });
+    await fs.writeFile(lockFile, JSON.stringify(versionMismatchLock));
+
+    const url = await httpServer.start();
+
+    // Should reclaim the lock (version mismatch) and become primary
+    expect(url).toBe('http://localhost:3456');
+
+    // Verify the lock was overwritten with the current process info
+    const lockData = JSON.parse(await fs.readFile(lockFile, 'utf-8'));
+    expect(lockData.pid).toBe(process.pid);
+    expect(lockData.version).not.toBe('0.0.0-old');
+  });
+
   it('should fall back to legacy mode when unified dashboard disabled', async () => {
     // Force legacy mode
     httpServer.setConfig({
