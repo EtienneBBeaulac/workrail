@@ -182,6 +182,9 @@ export function mountConsoleRoutes(app: Application, consoleService: ConsoleServ
   let cachedRepoRoots: readonly string[] = [];
   let repoRootsExpiresAt = 0;
 
+  // Note: this handler triggers a full session event replay via getSessionList()
+  // as a side effect (to derive repo roots and active session counts). It is a
+  // candidate for caching when session count grows.
   app.get('/api/v2/worktrees', async (_req: Request, res: Response) => {
     try {
       const sessionResult = await consoleService.getSessionList();

@@ -3,6 +3,9 @@
  *
  * These types shape v2 projection data for the Console UI.
  * They are the boundary between internal projections and the HTTP/UI layer.
+ *
+ * These types are mirrored in console/src/api/types.ts. Keep both files in sync
+ * until a shared codegen solution exists.
  */
 
 // ---------------------------------------------------------------------------
@@ -58,6 +61,14 @@ export interface ConsoleDagNode {
   readonly isPreferredTip: boolean;
   readonly isTip: boolean;
   readonly stepLabel: string | null;
+  /** Node has a current recap output (node_output_appended with recap channel). */
+  readonly hasRecap: boolean;
+  /** Node has at least one failed validation (VALIDATION_PERFORMED with valid=false). */
+  readonly hasFailedValidations: boolean;
+  /** Node has at least one associated gap (resolved or unresolved). */
+  readonly hasGaps: boolean;
+  /** Node has at least one artifact output. */
+  readonly hasArtifacts: boolean;
 }
 
 export interface ConsoleDagEdge {
@@ -65,6 +76,37 @@ export interface ConsoleDagEdge {
   readonly fromNodeId: string;
   readonly toNodeId: string;
   readonly createdAtEventIndex: number;
+}
+
+export type ConsoleExecutionTraceItemKind =
+  | 'selected_next_step'
+  | 'evaluated_condition'
+  | 'entered_loop'
+  | 'exited_loop'
+  | 'detected_non_tip_advance'
+  | 'context_fact'
+  | 'divergence';
+
+export interface ConsoleExecutionTraceRef {
+  readonly kind: 'node_id' | 'step_id' | 'loop_id' | 'condition_id';
+  readonly value: string;
+}
+
+export interface ConsoleExecutionTraceItem {
+  readonly kind: ConsoleExecutionTraceItemKind;
+  readonly summary: string;
+  readonly recordedAtEventIndex: number;
+  readonly refs: readonly ConsoleExecutionTraceRef[];
+}
+
+export interface ConsoleExecutionTraceFact {
+  readonly key: string;
+  readonly value: string;
+}
+
+export interface ConsoleExecutionTraceSummary {
+  readonly items: readonly ConsoleExecutionTraceItem[];
+  readonly contextFacts: readonly ConsoleExecutionTraceFact[];
 }
 
 export interface ConsoleDagRun {
@@ -78,6 +120,8 @@ export interface ConsoleDagRun {
   readonly tipNodeIds: readonly string[];
   readonly status: ConsoleRunStatus;
   readonly hasUnresolvedCriticalGaps: boolean;
+  // Reserved: consumed by ExecutionTrace panel (not yet implemented)
+  readonly executionTraceSummary: ConsoleExecutionTraceSummary | null;
 }
 
 export interface ConsoleSessionDetail {
