@@ -4,6 +4,7 @@ import { RunLineageDag } from '../components/RunLineageDag';
 import { StatusBadge } from '../components/StatusBadge';
 import { HealthBadge } from '../components/HealthBadge';
 import { NodeDetailSection } from '../components/NodeDetailSection';
+import type { ConsoleDagRun } from '../api/types';
 
 interface Props {
   sessionId: string;
@@ -67,47 +68,62 @@ export function SessionDetail({ sessionId }: Props) {
       ) : (
         <div className="space-y-6">
           {data.runs.map((run) => (
-            <div key={run.runId} className="bg-[var(--bg-card)] border border-[var(--border)] overflow-hidden">
-              {(() => {
-                const selectedNodeId = selectedByRunId[run.runId] ?? null;
-                return (
-                  <>
-              <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
-                <div className="flex items-center gap-3">
-                  <span className="text-sm font-medium text-[var(--text-primary)]">
-                    {run.workflowName ?? run.workflowId ?? 'Run'}
-                  </span>
-                  <span className="font-mono text-xs text-[var(--text-muted)]">
-                    {run.runId}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  {run.hasUnresolvedCriticalGaps && (
-                    <span className="text-xs text-[var(--warning)]">Critical gaps</span>
-                  )}
-                  <StatusBadge status={run.status} />
-                </div>
-              </div>
-              <div className="h-[460px] border-b border-[var(--border)]">
-                <RunLineageDag
-                  run={run}
-                  selectedNodeId={selectedNodeId}
-                  onNodeClick={(nodeId) => handleNodeClick(run.runId, nodeId)}
-                />
-              </div>
-              <NodeDetailSection
-                sessionId={sessionId}
-                nodeId={selectedNodeId}
-                runStatus={run.status}
-                currentNodeId={run.preferredTipNodeId}
-              />
-                  </>
-                );
-              })()}
-            </div>
+            <RunCard
+              key={run.runId}
+              sessionId={sessionId}
+              run={run}
+              selectedNodeId={selectedByRunId[run.runId] ?? null}
+              onNodeClick={handleNodeClick}
+            />
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function RunCard({
+  sessionId,
+  run,
+  selectedNodeId,
+  onNodeClick,
+}: {
+  sessionId: string;
+  run: ConsoleDagRun;
+  selectedNodeId: string | null;
+  onNodeClick: (runId: string, nodeId: string) => void;
+}) {
+  return (
+    <div className="bg-[var(--bg-card)] border border-[var(--border)] overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-medium text-[var(--text-primary)]">
+            {run.workflowName ?? run.workflowId ?? 'Run'}
+          </span>
+          <span className="font-mono text-xs text-[var(--text-muted)]">
+            {run.runId}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          {run.hasUnresolvedCriticalGaps && (
+            <span className="text-xs text-[var(--warning)]">Critical gaps</span>
+          )}
+          <StatusBadge status={run.status} />
+        </div>
+      </div>
+      <div className="h-[460px] border-b border-[var(--border)]">
+        <RunLineageDag
+          run={run}
+          selectedNodeId={selectedNodeId}
+          onNodeClick={(nodeId) => onNodeClick(run.runId, nodeId)}
+        />
+      </div>
+      <NodeDetailSection
+        sessionId={sessionId}
+        nodeId={selectedNodeId}
+        runStatus={run.status}
+        currentNodeId={run.preferredTipNodeId}
+      />
     </div>
   );
 }

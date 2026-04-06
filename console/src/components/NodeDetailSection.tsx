@@ -90,36 +90,96 @@ function SectionHeader({ stepLabel, nodeId }: { stepLabel: string | null; nodeId
   );
 }
 
-function NodeDetailContent({
-  detail,
-  runStatus,
-  currentNodeId,
-}: {
+// ---------------------------------------------------------------------------
+// Section registry
+//
+// Adding a new section requires one entry here -- no edits to NodeDetailContent.
+// Each definition declares which grid column it belongs to ('primary' | 'secondary')
+// and a render function that returns null to hide the section.
+// ---------------------------------------------------------------------------
+
+interface NodeDetailContentProps {
   detail: ConsoleNodeDetail;
   runStatus: 'in_progress' | 'complete' | 'complete_with_gaps' | 'blocked';
   currentNodeId: string | null;
-}) {
-  const showInProgressState =
-    runStatus === 'in_progress' &&
-    detail.nodeId === currentNodeId &&
-    !detail.recapMarkdown;
+}
+
+interface SectionDef {
+  readonly id: string;
+  readonly column: 'primary' | 'secondary';
+  readonly render: (props: NodeDetailContentProps) => React.ReactNode;
+}
+
+const SECTION_REGISTRY: readonly SectionDef[] = [
+  {
+    id: 'recap',
+    column: 'primary',
+    render: ({ detail, runStatus, currentNodeId }) => {
+      if (detail.recapMarkdown) {
+        return <RecapSection key="recap" markdown={detail.recapMarkdown} />;
+      }
+      const showInProgress =
+        runStatus === 'in_progress' &&
+        detail.nodeId === currentNodeId &&
+        !detail.recapMarkdown;
+      if (showInProgress) {
+        return <InProgressRecapSection key="recap-in-progress" detail={detail} />;
+      }
+      return null;
+    },
+  },
+  {
+    id: 'validations',
+    column: 'primary',
+    render: ({ detail }) =>
+      detail.validations.length > 0
+        ? <ValidationsSection key="validations" validations={detail.validations} />
+        : null,
+  },
+  {
+    id: 'node-meta',
+    column: 'secondary',
+    render: ({ detail }) => <NodeMetaSection key="node-meta" detail={detail} />,
+  },
+  {
+    id: 'advance-outcome',
+    column: 'secondary',
+    render: ({ detail }) =>
+      detail.advanceOutcome
+        ? <AdvanceOutcomeSection key="advance-outcome" outcome={detail.advanceOutcome} />
+        : null,
+  },
+  {
+    id: 'gaps',
+    column: 'secondary',
+    render: ({ detail }) =>
+      detail.gaps.length > 0
+        ? <GapsSection key="gaps" gaps={detail.gaps} />
+        : null,
+  },
+  {
+    id: 'artifacts',
+    column: 'secondary',
+    render: ({ detail }) =>
+      detail.artifacts.length > 0
+        ? <ArtifactsSection key="artifacts" artifacts={detail.artifacts} />
+        : null,
+  },
+] as const;
+
+function NodeDetailContent(props: NodeDetailContentProps) {
+  const primarySections = SECTION_REGISTRY
+    .filter((def) => def.column === 'primary')
+    .map((def) => def.render(props));
+
+  const secondarySections = SECTION_REGISTRY
+    .filter((def) => def.column === 'secondary')
+    .map((def) => def.render(props));
 
   return (
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_320px]">
-      <div className="space-y-5">
-        {detail.recapMarkdown ? (
-          <RecapSection markdown={detail.recapMarkdown} />
-        ) : showInProgressState ? (
-          <InProgressRecapSection detail={detail} />
-        ) : null}
-        {detail.validations.length > 0 && <ValidationsSection validations={detail.validations} />}
-      </div>
-      <div className="space-y-5">
-        <NodeMetaSection detail={detail} />
-        {detail.advanceOutcome && <AdvanceOutcomeSection outcome={detail.advanceOutcome} />}
-        {detail.gaps.length > 0 && <GapsSection gaps={detail.gaps} />}
-        {detail.artifacts.length > 0 && <ArtifactsSection artifacts={detail.artifacts} />}
-      </div>
+      <div className="space-y-5">{primarySections}</div>
+      <div className="space-y-5">{secondarySections}</div>
     </div>
   );
 }
@@ -306,7 +366,7 @@ function ValidationCard({ validation }: { validation: ConsoleValidationResult })
         <span className="text-[var(--text-muted)] font-mono">{validation.contractRef}</span>
       </div>
       {validation.issues.length > 0 && (
-        <div className="space-y-5">
+        <div className="space-y-1">
           <div className="text-[var(--text-muted)] mb-1">Issues</div>
           <ul className="list-disc list-inside text-[var(--error)] space-y-0.5">
             {validation.issues.map((issue, index) => (
@@ -363,6 +423,63 @@ function GapsSection({ gaps }: { gaps: readonly ConsoleNodeGap[] }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Artifact renderer registry
+//
+// Keyed by content-type prefix (e.g. 'text/', 'application/json').
+// A renderer returns a ReactNode for the artifact content.
+// Artifacts over ARTIFACT_SIZE_LIMIT_BYTES are never passed to renderers --
+// a truncation notice is shown instead to avoid serialising large payloads.
+// ---------------------------------------------------------------------------
+
+const ARTIFACT_SIZE_LIMIT_BYTES = 100_000;
+
+type ArtifactRenderer = (content: unknown) => React.ReactNode;
+
+const ARTIFACT_RENDERERS: ReadonlyArray<{
+  readonly prefix: string;
+  readonly render: ArtifactRenderer;
+}> = [
+  {
+    prefix: 'text/',
+    render: (content) => (
+      <pre className="text-[var(--text-secondary)] whitespace-pre-wrap break-words font-mono max-h-40 overflow-y-auto">
+        {typeof content === 'string' ? content : String(content)}
+      </pre>
+    ),
+  },
+  {
+    prefix: 'application/json',
+    render: (content) => (
+      <pre className="text-[var(--text-secondary)] whitespace-pre-wrap break-words font-mono max-h-40 overflow-y-auto">
+        {typeof content === 'string' ? content : JSON.stringify(content, null, 2)}
+      </pre>
+    ),
+  },
+];
+
+function renderArtifactContent(artifact: ConsoleArtifact): React.ReactNode {
+  if (artifact.byteLength > ARTIFACT_SIZE_LIMIT_BYTES) {
+    return (
+      <div className="text-[var(--text-muted)] italic">
+        Content too large to display ({formatBytes(artifact.byteLength)} -- limit {formatBytes(ARTIFACT_SIZE_LIMIT_BYTES)})
+      </div>
+    );
+  }
+
+  const renderer = ARTIFACT_RENDERERS.find((r) => artifact.contentType.startsWith(r.prefix));
+  if (renderer) return renderer.render(artifact.content);
+
+  // Fallback: render as JSON if content is an object, otherwise as string.
+  return (
+    <pre className="text-[var(--text-secondary)] whitespace-pre-wrap break-words font-mono max-h-40 overflow-y-auto">
+      {typeof artifact.content === 'string'
+        ? artifact.content
+        : JSON.stringify(artifact.content, null, 2)}
+    </pre>
+  );
+}
+
 function ArtifactsSection({ artifacts }: { artifacts: readonly ConsoleArtifact[] }) {
   return (
     <Section title={`Artifacts (${artifacts.length})`}>
@@ -374,11 +491,7 @@ function ArtifactsSection({ artifacts }: { artifacts: readonly ConsoleArtifact[]
               <span>·</span>
               <span>{formatBytes(artifact.byteLength)}</span>
             </div>
-            <pre className="text-[var(--text-secondary)] whitespace-pre-wrap break-words font-mono max-h-40 overflow-y-auto">
-              {typeof artifact.content === 'string'
-                ? artifact.content
-                : JSON.stringify(artifact.content, null, 2)}
-            </pre>
+            {renderArtifactContent(artifact)}
           </div>
         ))}
       </div>
