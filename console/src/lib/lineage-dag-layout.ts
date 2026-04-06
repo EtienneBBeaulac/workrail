@@ -89,7 +89,6 @@ export function buildLineageDagModel(run: ConsoleDagRun): LineageDagModel {
   const blockedBranchRootIds = new Set<string>();
   let sideLaneCounter = 0;
   let branchCounter = 0;
-  const visibleLineageWindowSize = 8;
 
   const allocateSideLane = (): number => {
     sideLaneCounter += 1;
@@ -127,9 +126,10 @@ export function buildLineageDagModel(run: ConsoleDagRun): LineageDagModel {
   const activeLineagePath = [...activeLineageIds].sort(
     (left, right) => (depthById.get(left) ?? 0) - (depthById.get(right) ?? 0),
   );
-  const compressedBeforeCount = Math.max(0, activeLineagePath.length - visibleLineageWindowSize);
-  const visibleLineageIds = new Set(activeLineagePath.slice(-visibleLineageWindowSize));
-  const visibleLineageStartNodeId = activeLineagePath.slice(-visibleLineageWindowSize)[0] ?? activeLineagePath[0] ?? null;
+  // No windowing -- show the full lineage. compressedBeforeCount is always 0.
+  const compressedBeforeCount = 0;
+  const visibleLineageIds = new Set(activeLineagePath);
+  const visibleLineageStartNodeId = activeLineagePath[0] ?? null;
 
   for (const nodeId of activeLineagePath) {
     laneById.set(nodeId, 0);

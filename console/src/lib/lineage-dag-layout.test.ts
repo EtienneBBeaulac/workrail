@@ -157,34 +157,29 @@ describe('side branches', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Compression: only visible window nodes are rendered
+// All nodes rendered (no windowing)
 // ---------------------------------------------------------------------------
 
-describe('compression rendering', () => {
-  it('excludes compressed active-lineage nodes from model.nodes', () => {
-    // 10-node chain, window=8, compressedBeforeCount=2 (n0 and n1 are compressed)
+describe('all nodes rendered', () => {
+  it('renders all active-lineage nodes regardless of run length', () => {
     _eventIndex = 0;
     const nodes: ConsoleDagNode[] = [];
     let prev: string | null = null;
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 37; i++) {
       nodes.push(makeNode(`n${i}`, prev));
       prev = `n${i}`;
     }
-    nodes[9] = { ...nodes[9], isTip: true };
-    const model = buildLineageDagModel(makeRun(nodes, 'n9'));
+    nodes[36] = { ...nodes[36], isTip: true };
+    const model = buildLineageDagModel(makeRun(nodes, 'n36'));
     const renderedIds = new Set(model.nodes.map((n) => n.node.nodeId));
 
-    expect(model.compressedBeforeCount).toBe(2);
-    // n0 and n1 are compressed -- must not appear in rendered nodes
-    expect(renderedIds.has('n0')).toBe(false);
-    expect(renderedIds.has('n1')).toBe(false);
-    // n2 through n9 are in the visible window
-    for (let i = 2; i <= 9; i++) {
+    expect(model.compressedBeforeCount).toBe(0);
+    for (let i = 0; i < 37; i++) {
       expect(renderedIds.has(`n${i}`)).toBe(true);
     }
   });
 
-  it('excludes edges to/from compressed nodes', () => {
+  it('renders side branches of any active-lineage node', () => {
     _eventIndex = 0;
     const nodes: ConsoleDagNode[] = [];
     let prev: string | null = null;
@@ -193,35 +188,14 @@ describe('compression rendering', () => {
       prev = `n${i}`;
     }
     nodes[9] = { ...nodes[9], isTip: true };
-    const model = buildLineageDagModel(makeRun(nodes, 'n9'));
-
-    // No edge should reference a compressed node
-    for (const edge of model.edges) {
-      expect(['n0', 'n1']).not.toContain(edge.fromNodeId);
-      expect(['n0', 'n1']).not.toContain(edge.toNodeId);
-    }
-  });
-
-  it('does not render side branches of compressed nodes', () => {
-    // 10-node chain (n0-n9), plus a side branch off n1 (compressed)
-    _eventIndex = 0;
-    const nodes: ConsoleDagNode[] = [];
-    let prev: string | null = null;
-    for (let i = 0; i < 10; i++) {
-      nodes.push(makeNode(`n${i}`, prev));
-      prev = `n${i}`;
-    }
-    nodes[9] = { ...nodes[9], isTip: true };
-    const side = makeNode('side-of-compressed', 'n1');
+    const side = makeNode('side-of-n1', 'n1');
     const model = buildLineageDagModel(makeRun([...nodes, side], 'n9'));
     const renderedIds = new Set(model.nodes.map((n) => n.node.nodeId));
 
-    expect(renderedIds.has('side-of-compressed')).toBe(false);
+    expect(renderedIds.has('side-of-n1')).toBe(true);
   });
 
-  it('all rendered nodes have monotonically increasing x left-to-right', () => {
-    // The core visual invariant: no node should be to the RIGHT of a later-depth node.
-    // This catches the original "edges from both sides" bug.
+  it('active-lineage nodes have monotonically increasing x (regression: edges-from-both-sides bug)', () => {
     _eventIndex = 0;
     const nodes: ConsoleDagNode[] = [];
     let prev: string | null = null;
@@ -262,9 +236,8 @@ describe('side branch x alignment with compression', () => {
     expect(byId.get('side')!.x).toBe(byId.get('b')!.x + LINEAGE_COLUMN_WIDTH);
   });
 
-  it('side branch x aligns to compressed parent, not raw depth (F1)', () => {
-    // Build a lineage longer than the 8-node window so compression kicks in.
-    // Then attach a side branch to a node that gets compressed away from its raw depth.
+  it('side branch x == parent active-lineage x + COLUMN_WIDTH (long run)', () => {
+    // 10-node lineage, side branch off n5
     _eventIndex = 0;
     const lineage: ConsoleDagNode[] = [];
     let prev: string | null = null;
@@ -273,26 +246,18 @@ describe('side branch x alignment with compression', () => {
       lineage.push(makeNode(id, prev));
       prev = id;
     }
-    // Mark last node as current
     lineage[9] = { ...lineage[9], isTip: true, isPreferredTip: true };
 
-    // Attach a side branch to node n5 (raw depth 5, which will be compressed)
     const side = makeNode('side', 'n5');
-    const run = makeRun([...lineage, side], 'n9');
-    const model = buildLineageDagModel(run);
+    const model = buildLineageDagModel(makeRun([...lineage, side], 'n9'));
     const byId = nodeByIdMap(model);
 
-    expect(model.compressedBeforeCount).toBeGreaterThan(0);
-
-    // side branch must be exactly one column to the right of its parent n5
-    const n5Depth = byId.get('n5')!.depth;
-    const sideDepth = byId.get('side')!.depth;
-    expect(sideDepth).toBe(n5Depth + 1);
+    // side branch must be exactly one column to the right of n5
+    expect(byId.get('side')!.depth).toBe(byId.get('n5')!.depth + 1);
     expect(byId.get('side')!.x).toBe(byId.get('n5')!.x + LINEAGE_COLUMN_WIDTH);
   });
 
-  it('deeply nested side subtree aligns correctly under compression', () => {
-    // 10-node lineage (triggers compression) + 3-node side chain hanging off n4
+  it('deeply nested side subtree aligns correctly', () => {
     _eventIndex = 0;
     const lineage: ConsoleDagNode[] = [];
     let prev: string | null = null;
@@ -306,8 +271,7 @@ describe('side branch x alignment with compression', () => {
     const s1 = makeNode('s1', 'n4');
     const s2 = makeNode('s2', 's1');
     const s3 = makeNode('s3', 's2');
-    const run = makeRun([...lineage, s1, s2, s3], 'n9');
-    const model = buildLineageDagModel(run);
+    const model = buildLineageDagModel(makeRun([...lineage, s1, s2, s3], 'n9'));
     const byId = nodeByIdMap(model);
 
     expect(byId.get('s2')!.depth).toBe(byId.get('s1')!.depth + 1);
@@ -317,37 +281,26 @@ describe('side branch x alignment with compression', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Lineage compression (window = 8)
+// compressedBeforeCount is always 0 (no windowing)
 // ---------------------------------------------------------------------------
 
-describe('lineage compression', () => {
-  it('compressedBeforeCount is 0 for runs with <= 8 active nodes', () => {
-    _eventIndex = 0;
-    const nodes: ConsoleDagNode[] = [];
-    let prev: string | null = null;
-    for (let i = 0; i < 8; i++) {
-      nodes.push(makeNode(`n${i}`, prev));
-      prev = `n${i}`;
+describe('no windowing', () => {
+  it('compressedBeforeCount is always 0 regardless of run length', () => {
+    for (const length of [1, 8, 12, 37, 100]) {
+      _eventIndex = 0;
+      const nodes: ConsoleDagNode[] = [];
+      let prev: string | null = null;
+      for (let i = 0; i < length; i++) {
+        nodes.push(makeNode(`n${i}`, prev));
+        prev = `n${i}`;
+      }
+      nodes[length - 1] = { ...nodes[length - 1]!, isTip: true };
+      const model = buildLineageDagModel(makeRun(nodes, `n${length - 1}`));
+      expect(model.compressedBeforeCount).toBe(0);
     }
-    nodes[7] = { ...nodes[7], isTip: true };
-    const model = buildLineageDagModel(makeRun(nodes, 'n7'));
-    expect(model.compressedBeforeCount).toBe(0);
   });
 
-  it('compressedBeforeCount = lineageLength - 8 for runs longer than 8', () => {
-    _eventIndex = 0;
-    const nodes: ConsoleDagNode[] = [];
-    let prev: string | null = null;
-    for (let i = 0; i < 12; i++) {
-      nodes.push(makeNode(`n${i}`, prev));
-      prev = `n${i}`;
-    }
-    nodes[11] = { ...nodes[11], isTip: true };
-    const model = buildLineageDagModel(makeRun(nodes, 'n11'));
-    expect(model.compressedBeforeCount).toBe(4);
-  });
-
-  it('visible nodes start at depth 1 (not raw depth) when compressed', () => {
+  it('node depths equal raw depths (no offset applied)', () => {
     _eventIndex = 0;
     const nodes: ConsoleDagNode[] = [];
     let prev: string | null = null;
@@ -359,11 +312,9 @@ describe('lineage compression', () => {
     const model = buildLineageDagModel(makeRun(nodes, 'n9'));
     const byId = nodeByIdMap(model);
 
-    // With 10 nodes, compressedBeforeCount = 2.
-    // n2 is the first visible active node -- its visible depth should be 1.
-    expect(model.compressedBeforeCount).toBe(2);
-    expect(byId.get('n2')!.depth).toBe(1);
-    expect(byId.get('n9')!.depth).toBe(8);
+    for (let i = 0; i < 10; i++) {
+      expect(byId.get(`n${i}`)!.depth).toBe(i);
+    }
   });
 });
 
