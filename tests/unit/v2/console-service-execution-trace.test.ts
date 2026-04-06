@@ -7,6 +7,10 @@ import type { SessionEventLogReadonlyStorePortV2 } from '../../../src/v2/ports/s
 import type { SnapshotStorePortV2 } from '../../../src/v2/ports/snapshot-store.port.js';
 import type { PinnedWorkflowStorePortV2 } from '../../../src/v2/ports/pinned-workflow-store.port.js';
 import type { DomainEventV1 } from '../../../src/v2/durable-core/schemas/session/index.js';
+import * as os from 'os';
+import * as path from 'path';
+const tmp = os.tmpdir();
+
 
 describe('ConsoleService executionTraceSummary integration', () => {
   it('includes projected execution trace summary on session detail runs', async () => {
@@ -91,20 +95,20 @@ describe('ConsoleService executionTraceSummary integration', () => {
     };
 
     const dataDir: DataDirPortV2 = {
-      rememberedRootsPath: () => '/tmp/roots.json',
-      rememberedRootsLockPath: () => '/tmp/roots.lock',
-      pinnedWorkflowsDir: () => '/tmp/workflows',
-      pinnedWorkflowPath: () => '/tmp/workflow.json',
-      snapshotsDir: () => '/tmp/snapshots',
-      snapshotPath: () => '/tmp/snapshot.json',
-      keysDir: () => '/tmp/keys',
-      keyringPath: () => '/tmp/keyring.json',
-      sessionsDir: () => '/tmp/sessions',
-      sessionDir: () => '/tmp/session',
-      sessionEventsDir: () => '/tmp/session/events',
-      sessionManifestPath: () => '/tmp/session/manifest.jsonl',
-      sessionLockPath: () => '/tmp/session/lock',
-      tokenIndexPath: () => '/tmp/token-index.json',
+      rememberedRootsPath: () => path.join(tmp, 'roots.json'),
+      rememberedRootsLockPath: () => path.join(tmp, 'roots.lock'),
+      pinnedWorkflowsDir: () => path.join(tmp, 'workflows'),
+      pinnedWorkflowPath: () => path.join(tmp, 'workflow.json'),
+      snapshotsDir: () => path.join(tmp, 'snapshots'),
+      snapshotPath: () => path.join(tmp, 'snapshot.json'),
+      keysDir: () => path.join(tmp, 'keys'),
+      keyringPath: () => path.join(tmp, 'keyring.json'),
+      sessionsDir: () => path.join(tmp, 'sessions'),
+      sessionDir: () => path.join(tmp, 'session'),
+      sessionEventsDir: () => path.join(tmp, 'session/events'),
+      sessionManifestPath: () => path.join(tmp, 'session/manifest.jsonl'),
+      sessionLockPath: () => path.join(tmp, 'session/lock'),
+      tokenIndexPath: () => path.join(tmp, 'token-index.json'),
     };
 
     const sessionStore: SessionEventLogReadonlyStorePortV2 = {
@@ -250,20 +254,20 @@ describe('ConsoleService executionTraceSummary integration', () => {
     };
 
     const dataDir: DataDirPortV2 = {
-      rememberedRootsPath: () => '/tmp/roots.json',
-      rememberedRootsLockPath: () => '/tmp/roots.lock',
-      pinnedWorkflowsDir: () => '/tmp/workflows',
-      pinnedWorkflowPath: () => '/tmp/workflow.json',
-      snapshotsDir: () => '/tmp/snapshots',
-      snapshotPath: () => '/tmp/snapshot.json',
-      keysDir: () => '/tmp/keys',
-      keyringPath: () => '/tmp/keyring.json',
-      sessionsDir: () => '/tmp/sessions',
-      sessionDir: () => '/tmp/session',
-      sessionEventsDir: () => '/tmp/session/events',
-      sessionManifestPath: () => '/tmp/session/manifest.jsonl',
-      sessionLockPath: () => '/tmp/session/lock',
-      tokenIndexPath: () => '/tmp/token-index.json',
+      rememberedRootsPath: () => path.join(tmp, 'roots.json'),
+      rememberedRootsLockPath: () => path.join(tmp, 'roots.lock'),
+      pinnedWorkflowsDir: () => path.join(tmp, 'workflows'),
+      pinnedWorkflowPath: () => path.join(tmp, 'workflow.json'),
+      snapshotsDir: () => path.join(tmp, 'snapshots'),
+      snapshotPath: () => path.join(tmp, 'snapshot.json'),
+      keysDir: () => path.join(tmp, 'keys'),
+      keyringPath: () => path.join(tmp, 'keyring.json'),
+      sessionsDir: () => path.join(tmp, 'sessions'),
+      sessionDir: () => path.join(tmp, 'session'),
+      sessionEventsDir: () => path.join(tmp, 'session/events'),
+      sessionManifestPath: () => path.join(tmp, 'session/manifest.jsonl'),
+      sessionLockPath: () => path.join(tmp, 'session/lock'),
+      tokenIndexPath: () => path.join(tmp, 'token-index.json'),
     };
 
     const sessionStore: SessionEventLogReadonlyStorePortV2 = {
