@@ -31,7 +31,7 @@
     "VALIDATION: prefer static/compile-time safety over runtime checks. Use build, type-checking, and tests as the primary proof of correctness — in that order of reliability.",
     "DRIFT HANDLING: when reality diverges from the plan, update the plan artifact and re-audit deliberately rather than accumulating undocumented drift.",
     "NEVER COMMIT MARKDOWN FILES UNLESS USER EXPLICITLY ASKS.",
-    "SLICE DISCIPLINE: in Phase 6, implement exactly one slice per loop iteration -- no more. The plan exists so you can execute it in controlled steps, not so you can read it once and implement everything at once. If you catch yourself implementing multiple slices in a single step, stop. The verification loop exists for a reason: each slice must be proven before the next begins."
+    "SLICE DISCIPLINE: Phase 6 is a loop -- implement ONE slice per iteration. Do not implement multiple slices at once. The verification loop exists to catch drift per slice, not retroactively."
   ],
   "references": [
     {
