@@ -4,6 +4,9 @@ This is the lightweight cross-cutting roadmap view for WorkRail.
 
 ## Now
 
+- Fix console CPU spiral: decouple worktrees from SSE invalidation, cap git concurrency, filter watcher noise (EtienneBBeaulac/workrail#240)
+- Evict stale repo roots from remembered-roots-store to prevent worktree count inflation (EtienneBBeaulac/workrail#241)
+
 - ~~Workflows tab + `about`/`examples` schema fields~~ (done -- Workflows tab ships with TanStack Router, tag filter pills, detail panel; `about` and `examples` added to workflow schema, MCP output, and console REST endpoints; all bundled workflows backfilled; `workflow-for-workflows.v2.json` updated to prompt for both fields)
 - ~~Complete v2 sign-off and cleanup~~ (done -- v2 is default-on; stale docs cleaned up)
 - ~~Expand lifecycle validation coverage to a realistic target~~ (done -- auto-walk smoke test covers all bundled workflows)
@@ -26,6 +29,7 @@ This is the lightweight cross-cutting roadmap view for WorkRail.
 
 ## Later
 
+- Typed SSE events with server-side `.git/` watchers for true live worktree updates -- Candidate A from console performance discovery, follow-on to #240 (EtienneBBeaulac/workrail#242)
 - Dashboard artifacts: replace file-based docs with session-scoped structured outputs rendered in the console (design exists in `workflow-execution-contract.md`, blocked on console UI)
 - Broaden the console from a node-only dashboard into a richer control-plane surface for engine state, execution trace, and decision explanation
 - Platform evolution: discovery, sharing, portable references, MCP resources/prompts, agent-driven setup (see `docs/plans/workrail-platform-vision.md`)
