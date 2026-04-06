@@ -1,10 +1,18 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
-import type { ApiResponse, ConsoleSessionListResponse, ConsoleSessionDetail, ConsoleNodeDetail, ConsoleWorktreeListResponse } from './types';
+import type { ApiResponse, ConsoleSessionListResponse, ConsoleSessionDetail, ConsoleNodeDetail, ConsoleWorktreeListResponse, ConsoleWorkflowListResponse, ConsoleWorkflowDetail } from './types';
+
+// Typed HTTP error so callers can check status without brittle string parsing.
+export class HttpError extends Error {
+  constructor(public readonly status: number, statusText: string) {
+    super(`HTTP ${status}: ${statusText}`);
+    this.name = 'HttpError';
+  }
+}
 
 async function fetchApi<T>(url: string): Promise<T> {
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+  if (!res.ok) throw new HttpError(res.status, res.statusText);
   const json: ApiResponse<T> = await res.json();
   if (!json.success || !json.data) throw new Error(json.error ?? 'Unknown error');
   return json.data;
@@ -44,6 +52,25 @@ export function useWorktreeList() {
     queryFn: () => fetchApi<ConsoleWorktreeListResponse>('/api/v2/worktrees'),
     refetchInterval: 30_000, // refresh every 30s — each request loads all sessions + runs git
     staleTime: 20_000,       // keep showing previous data while refetching, no flash to loading
+  });
+}
+
+export function useWorkflowList() {
+  return useQuery({
+    queryKey: ['workflows'],
+    queryFn: () => fetchApi<ConsoleWorkflowListResponse>('/api/v2/workflows'),
+    staleTime: Infinity,
+    refetchInterval: false,
+  });
+}
+
+export function useWorkflowDetail(workflowId: string | null) {
+  return useQuery({
+    queryKey: ['workflow', workflowId],
+    queryFn: () => fetchApi<ConsoleWorkflowDetail>(`/api/v2/workflows/${workflowId}`),
+    enabled: workflowId !== null,
+    staleTime: Infinity,
+    refetchInterval: false,
   });
 }
 

@@ -11,6 +11,7 @@ import path from 'path';
 import fs from 'fs';
 import type { ConsoleService } from './console-service.js';
 import { getWorktreeList, buildActiveSessionCounts, resolveRepoRoot } from './worktree-service.js';
+import type { WorkflowService } from '../../application/services/workflow-service.js';
 
 // ---------------------------------------------------------------------------
 // Workspace SSE broadcast
@@ -87,7 +88,35 @@ function resolveConsoleDist(): string | null {
   return null;
 }
 
-export function mountConsoleRoutes(app: Application, consoleService: ConsoleService): void {
+// ---------------------------------------------------------------------------
+// Workflow tags cache
+// ---------------------------------------------------------------------------
+
+interface WorkflowTagEntry {
+  readonly tags: readonly string[];
+  readonly hidden?: boolean;
+}
+
+interface WorkflowTagsFile {
+  readonly version: number;
+  readonly tags: ReadonlyArray<{ readonly id: string; readonly displayName: string }>;
+  readonly workflows: Record<string, WorkflowTagEntry>;
+}
+
+let cachedWorkflowTags: WorkflowTagsFile | null = null;
+
+function loadWorkflowTags(): WorkflowTagsFile {
+  if (cachedWorkflowTags !== null) return cachedWorkflowTags;
+  const tagsPath = path.resolve(__dirname, '../../../spec/workflow-tags.json');
+  try {
+    cachedWorkflowTags = JSON.parse(fs.readFileSync(tagsPath, 'utf8')) as WorkflowTagsFile;
+    return cachedWorkflowTags;
+  } catch {
+    return { version: 0, tags: [], workflows: {} };
+  }
+}
+
+export function mountConsoleRoutes(app: Application, consoleService: ConsoleService, workflowService?: WorkflowService): void {
   // Start watching the sessions directory so SSE clients get notified of changes
   const stopWatcher = watchSessionsDir(consoleService.getSessionsDir());
   // Clean up watcher if the process exits gracefully
@@ -192,6 +221,69 @@ export function mountConsoleRoutes(app: Application, consoleService: ConsoleServ
       },
     );
   });
+
+  // Workflow catalog endpoints. Only mounted when a workflowService is provided.
+  // Uses loadAllWorkflows() to load all definitions in one pass (avoids N+1).
+  if (workflowService) {
+    app.get('/api/v2/workflows', async (_req: Request, res: Response) => {
+      try {
+        const tagsFile = loadWorkflowTags();
+        const allWorkflows = await workflowService.loadAllWorkflows();
+        const workflows = allWorkflows
+          .filter((w) => !tagsFile.workflows[w.definition.id]?.hidden)
+          .map((w) => {
+            const { definition, source } = w;
+            const tagEntry = tagsFile.workflows[definition.id];
+            return {
+              id: definition.id,
+              name: definition.name,
+              description: definition.description,
+              version: definition.version,
+              tags: tagEntry?.tags ?? [],
+              source,
+              ...(definition.about !== undefined ? { about: definition.about } : {}),
+              ...(definition.examples?.length ? { examples: [...definition.examples] } : {}),
+            };
+          });
+        res.json({ success: true, data: { workflows } });
+      } catch (e) {
+        res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+      }
+    });
+
+    app.get('/api/v2/workflows/:workflowId', async (req: Request, res: Response) => {
+      const { workflowId } = req.params;
+      try {
+        const workflow = await workflowService.getWorkflowById(workflowId);
+        if (!workflow) {
+          return res.status(404).json({ success: false, error: `Workflow not found: ${workflowId}` });
+        }
+        const tagsFile = loadWorkflowTags();
+        if (tagsFile.workflows[workflowId]?.hidden) {
+          return res.status(404).json({ success: false, error: `Workflow not found: ${workflowId}` });
+        }
+        const { definition, source } = workflow;
+        const tagEntry = tagsFile.workflows[workflowId];
+        return res.json({
+          success: true,
+          data: {
+            id: definition.id,
+            name: definition.name,
+            description: definition.description,
+            version: definition.version,
+            tags: tagEntry?.tags ?? [],
+            source,
+            stepCount: definition.steps.length,
+            ...(definition.about !== undefined ? { about: definition.about } : {}),
+            ...(definition.examples?.length ? { examples: [...definition.examples] } : {}),
+            ...(definition.preconditions?.length ? { preconditions: [...definition.preconditions] } : {}),
+          },
+        });
+      } catch (e) {
+        return res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+      }
+    });
+  }
 
   // --- Static file serving for Console UI ---
 

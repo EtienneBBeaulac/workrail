@@ -16,6 +16,7 @@ import { createLogger } from '../../utils/logger';
 export interface WorkflowService {
   listWorkflowSummaries(): Promise<readonly WorkflowSummary[]>;
   getWorkflowById(id: string): Promise<Workflow | null>;
+  loadAllWorkflows(): Promise<readonly Workflow[]>;
 
   getNextStep(
     workflowId: string,
@@ -55,6 +56,10 @@ export class DefaultWorkflowService implements WorkflowService {
 
   async getWorkflowById(id: string): Promise<Workflow | null> {
     return this.storage.getWorkflowById(id);
+  }
+
+  async loadAllWorkflows(): Promise<readonly Workflow[]> {
+    return this.storage.loadAllWorkflows();
   }
 
   async getNextStep(

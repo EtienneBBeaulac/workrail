@@ -3,6 +3,13 @@
   "name": "Presentation Creation Workflow",
   "version": "1.0.0",
   "description": "Use this to create a compelling presentation. Covers audience analysis, content strategy, slide structure, and delivery preparation. Output works with any presentation tool.",
+  "about": "## Presentation Creation Workflow\n\nUse this to build a compelling, audience-specific presentation from scratch -- whether for a conference talk, internal strategy review, client pitch, or team demo. The workflow grounds every content decision in a concrete audience profile, so the result is written for real people in a real context rather than a generic slide deck.\n\n### What it produces\n\n- An audience profile and context map.\n- A content strategy with a single core message, supporting arguments, and a call-to-action.\n- A numbered slide outline with content types and timing estimates.\n- Full slide content and speaker notes for every slide.\n- Backup slides for anticipated deep-dive questions.\n- A delivery preparation plan including practice schedule, Q&A prep, and technical checklist.\n\n### When to use it\n\n- You are building a presentation that needs to persuade, inform, or motivate a specific audience.\n- You want structured help moving from \"I have a topic\" to \"I have a complete, rehearsal-ready deck.\"\n- The presentation has real stakes -- a client pitch, a leadership review, a conference talk.\n\n### When NOT to use it\n\n- You just need to slap a few bullets onto slides quickly -- this workflow is for presentations where quality matters.\n\n### How to get good results\n\n- The more specific you are about your audience, the better the content strategy will be. \"Engineering managers at a Series B fintech\" beats \"technical people.\"\n- The workflow has two confirmation gates: after the audience profile and after the slide outline. Use these to redirect before content gets written.\n- Bring source materials, data, and any existing slides you want to incorporate -- the content development step can ingest these.",
+  "examples": [
+    "Create a 20-minute conference talk on migrating a monolith to microservices for a senior engineering audience",
+    "Build a 10-slide investor pitch deck for our Series A fundraise",
+    "Prepare a quarterly product roadmap presentation for internal stakeholders",
+    "Create a client workshop deck introducing our platform migration methodology"
+  ],
   "preconditions": [
     "You have a clear presentation topic or objective.",
     "You know roughly who your audience is.",
@@ -56,9 +63,9 @@
       "promptBlocks": {
         "goal": "Define the core message and argument structure that will guide every slide and talking point. Using your audience profile from the previous step, build a content strategy grounded in their specific needs.",
         "constraints": [
-          "Start with one core message \u2014 a single, memorable sentence. Everything else should support it.",
+          "Start with one core message — a single, memorable sentence. Everything else should support it.",
           "Supporting arguments should directly address the audience motivations and pain points you identified.",
-          "The narrative arc should feel natural for this audience in this context \u2014 not a generic template unless it actually fits."
+          "The narrative arc should feel natural for this audience in this context — not a generic template unless it actually fits."
         ],
         "procedure": [
           "State your core message: one clear, memorable sentence that captures the single most important thing you want the audience to take away.",
@@ -85,7 +92,7 @@
         "constraints": [
           "One key idea per slide. If a slide is trying to say two things, split it.",
           "Plan for pacing: balance information-dense slides with breathing room and interaction moments.",
-          "Think about how the slides will work if someone reads them later without you \u2014 titles should be informative, not just labels."
+          "Think about how the slides will work if someone reads them later without you — titles should be informative, not just labels."
         ],
         "procedure": [
           "Opening (1-3 slides): attention-grabbing hook, context framing, and agenda or roadmap.",
@@ -109,7 +116,7 @@
       "id": "content-development",
       "title": "Content Development",
       "promptBlocks": {
-        "goal": "Write the actual presentation content \u2014 slide text and speaker notes \u2014 following the approved outline. Every piece of content should be grounded in your audience profile and core message.",
+        "goal": "Write the actual presentation content — slide text and speaker notes — following the approved outline. Every piece of content should be grounded in your audience profile and core message.",
         "constraints": [
           "Write for the ear, not the eye. Slide text should be sparse; speaker notes should sound natural when spoken aloud.",
           "Use active voice and concrete language. Replace abstractions with specific examples.",

@@ -114,6 +114,11 @@ export const V2WorkflowListItemSchema = z.object({
     }).optional(),
   }).optional(),
   staleness: StalenessSummarySchema.optional(),
+  examples: z.array(z.string().min(10).max(120)).min(1).max(6).optional().describe(
+    'Short illustrative goal strings showing what this workflow is used for. ' +
+    'Present when the workflow author has provided examples. ' +
+    'Use these to help users understand what goals to provide when starting this workflow.'
+  ),
 });
 
 export const V2WorkflowSourceCatalogEntrySchema = z.object({
