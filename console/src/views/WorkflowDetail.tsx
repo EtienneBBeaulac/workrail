@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useWorkflowDetail, HttpError } from '../api/hooks';
 import { MarkdownView } from '../components/MarkdownView';
@@ -18,7 +19,7 @@ interface Props {
 // WorkflowDetail
 // ---------------------------------------------------------------------------
 
-export function WorkflowDetail({ workflowId, onBack }: Props) {
+export function WorkflowDetail({ workflowId, activeTag, onBack }: Props) {
   const queryClient = useQueryClient();
 
   // Optimistic partial data: use cached list entry while detail fetch completes.
@@ -29,7 +30,9 @@ export function WorkflowDetail({ workflowId, onBack }: Props) {
 
   const { data: detail, isLoading, isError, error, refetch } = useWorkflowDetail(workflowId);
 
-  const backLabel = 'Back to Workflows';
+  const backLabel = activeTag && TAG_DISPLAY[activeTag]
+    ? `Workflows / ${TAG_DISPLAY[activeTag]}`
+    : 'Workflows';
 
   // Use detail data when available, fall back to cached list data for header fields.
   const name = detail?.name ?? cached?.name ?? workflowId;
@@ -43,7 +46,6 @@ export function WorkflowDetail({ workflowId, onBack }: Props) {
       <button
         type="button"
         onClick={onBack}
-        aria-label={backLabel}
         className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors text-sm"
       >
         &larr; {backLabel}
@@ -54,6 +56,13 @@ export function WorkflowDetail({ workflowId, onBack }: Props) {
         <h2 className="text-lg font-semibold text-[var(--text-primary)] leading-snug mb-2">
           {name}
         </h2>
+
+        {/* stepCount as standalone metric */}
+        {detail && detail.stepCount != null && detail.stepCount > 0 && (
+          <p className="font-mono text-[11px] text-[var(--text-secondary)] mb-2">
+            {detail.stepCount} step{detail.stepCount !== 1 ? 's' : ''}
+          </p>
+        )}
 
         {/* Badges row */}
         <div className="flex flex-wrap items-center gap-2 mb-2">
@@ -71,12 +80,7 @@ export function WorkflowDetail({ workflowId, onBack }: Props) {
               aria-hidden="true"
               className="font-mono text-[10px] px-1.5 py-0.5 border border-[var(--border)] text-[var(--text-muted)]"
             >
-              {source.displayName}
-            </span>
-          )}
-          {detail && detail.stepCount != null && (
-            <span className="font-mono text-[10px] px-1.5 py-0.5 bg-[var(--bg-secondary)] text-[var(--text-muted)]">
-              {detail.stepCount} step{detail.stepCount !== 1 ? 's' : ''}
+              src: {source.displayName}
             </span>
           )}
         </div>
@@ -100,13 +104,22 @@ export function WorkflowDetail({ workflowId, onBack }: Props) {
           onBack={onBack}
         />
       ) : detail ? (
-        <DetailContent detail={detail} />
+        <DetailContent detail={detail} name={name} />
       ) : (
         // Optimistic state: cached partial data shown, detail still loading
         <div className="space-y-4">
           <SectionSkeleton />
         </div>
       )}
+
+      {/* Second back link at bottom */}
+      <button
+        type="button"
+        onClick={onBack}
+        className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors text-sm"
+      >
+        &larr; {backLabel}
+      </button>
     </div>
   );
 }
@@ -117,8 +130,10 @@ export function WorkflowDetail({ workflowId, onBack }: Props) {
 
 function DetailContent({
   detail,
+  name,
 }: {
   readonly detail: WorkflowDetailData;
+  readonly name: string;
 }) {
   const hasAbout = detail.about !== undefined && detail.about.length > 0;
   const hasExamples = detail.examples !== undefined && detail.examples.length > 0;
@@ -153,9 +168,10 @@ function DetailContent({
             {detail.examples!.map((example) => (
               <li
                 key={example}
-                className="flex items-start gap-3 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg px-4 py-3"
+                className="flex items-start gap-3 bg-[var(--bg-card)] border border-[var(--border)] rounded-none px-4 py-3"
               >
                 <div
+                  aria-hidden="true"
                   className="w-0.5 shrink-0 self-stretch rounded-full"
                   style={{ backgroundColor: 'var(--accent)' }}
                 />
@@ -183,7 +199,46 @@ function DetailContent({
           </ul>
         </section>
       )}
+
+      {/* Copy prompt CTA */}
+      <CopyPromptCta name={name} />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Copy prompt CTA
+// ---------------------------------------------------------------------------
+
+function CopyPromptCta({ name }: { readonly name: string }) {
+  const [copied, setCopied] = useState(false);
+  const prompt = `Use the ${name} to [your goal]`;
+
+  const handleCopy = () => {
+    void navigator.clipboard.writeText(prompt).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  return (
+    <section>
+      <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-3">
+        Start with this prompt
+      </h3>
+      <div className="flex items-center gap-3 border border-[var(--border)] px-4 py-3">
+        <span className="flex-1 text-sm text-[var(--text-secondary)] font-mono truncate">
+          &quot;{prompt}&quot;
+        </span>
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="shrink-0 text-xs font-mono text-[var(--accent)] hover:text-[var(--text-primary)] transition-colors"
+        >
+          {copied ? 'Copied!' : 'Copy'}
+        </button>
+      </div>
+    </section>
   );
 }
 

@@ -54,23 +54,6 @@ function groupWorkflowsByTag(workflows: readonly ConsoleWorkflowSummary[]): Work
   return groups;
 }
 
-/**
- * Returns a short teaser string from the workflow summary:
- * - First 80 chars of `about` (if present), or
- * - First example wrapped in quotes (if present), or
- * - null
- */
-function getTeaserText(workflow: ConsoleWorkflowSummary): string | null {
-  if (workflow.about && workflow.about.length > 0) {
-    const trimmed = workflow.about.slice(0, 80);
-    return trimmed.length < workflow.about.length ? `${trimmed}...` : trimmed;
-  }
-  if (workflow.examples && workflow.examples.length > 0) {
-    return `"${workflow.examples[0]}"`;
-  }
-  return null;
-}
-
 // ---------------------------------------------------------------------------
 // WorkflowsView
 // ---------------------------------------------------------------------------
@@ -84,9 +67,9 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow }: Pr
     ? allWorkflows.filter((w) => w.tags.includes(selectedTag))
     : allWorkflows;
 
-  // Derive which tag pills have at least one workflow (for future count badges).
-  // Computed here so pills can degrade gracefully if a category empties.
+  // Derive which tag pills have at least one workflow and count per tag.
   const tagsWithWorkflows = new Set(allWorkflows.flatMap((w) => w.tags));
+  const countByTag = new Map(CATALOG_TAGS.map((t) => [t.id, allWorkflows.filter((w) => w.tags.includes(t.id)).length]));
 
   return (
     <div className="space-y-4" aria-busy={isLoading}>
@@ -98,6 +81,7 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow }: Pr
       >
         <TagPill
           label="All"
+          count={allWorkflows.length}
           isActive={selectedTag === null}
           disabled={isLoading}
           onClick={() => onSelectTag(null)}
@@ -106,6 +90,7 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow }: Pr
           <TagPill
             key={tag.id}
             label={tag.label}
+            count={countByTag.get(tag.id) ?? 0}
             isActive={selectedTag === tag.id}
             disabled={isLoading}
             onClick={() => onSelectTag(selectedTag === tag.id ? null : tag.id)}
@@ -122,16 +107,27 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow }: Pr
           onRetry={() => void refetch()}
         />
       ) : visibleWorkflows.length === 0 ? (
-        <p className="text-sm text-[var(--text-muted)] py-8 text-center">
-          No workflows in this category.
-        </p>
+        <div className="py-8 text-center space-y-3">
+          <p className="text-sm text-[var(--text-muted)]">
+            No workflows in this category.
+          </p>
+          {selectedTag !== null && (
+            <button
+              type="button"
+              onClick={() => onSelectTag(null)}
+              className="text-sm text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors"
+            >
+              Clear filter
+            </button>
+          )}
+        </div>
       ) : selectedTag !== null ? (
         // Single selected tag: one section header + flat list
         <div className="space-y-2">
           <SectionHeader
             label={TAG_DISPLAY[selectedTag] ?? selectedTag}
             count={visibleWorkflows.length}
-            showRule={false}
+            showRule={true}
           />
           <div className="space-y-2">
             {visibleWorkflows.map((workflow) => (
@@ -181,7 +177,7 @@ function SectionHeader({
 }) {
   return (
     <div className="flex items-center gap-3 mb-3 mt-2">
-      <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+      <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
         {label}&nbsp;&nbsp;·&nbsp;&nbsp;{count} workflow{count !== 1 ? 's' : ''}
       </span>
       {showRule && <div className="flex-1 h-px bg-[var(--border)]" />}
@@ -195,11 +191,13 @@ function SectionHeader({
 
 function TagPill({
   label,
+  count,
   isActive,
   disabled,
   onClick,
 }: {
   readonly label: string;
+  readonly count: number;
   readonly isActive: boolean;
   readonly disabled: boolean;
   readonly onClick: () => void;
@@ -211,14 +209,15 @@ function TagPill({
       disabled={disabled}
       aria-pressed={isActive}
       className={[
-        'px-3 py-2 min-w-[44px] rounded-none text-xs font-medium transition-colors',
+        'px-3 py-2 min-w-[44px] min-h-[44px] rounded-none text-xs font-medium transition-colors',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2',
         'disabled:opacity-50 disabled:cursor-not-allowed',
         isActive
-          ? 'bg-[var(--accent)] text-white'
+          ? 'border border-[var(--accent)] text-[var(--accent)] bg-transparent'
           : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-card)]',
       ].join(' ')}
     >
-      {label}
+      {label} &middot; {count}
       {isActive && <span className="sr-only">(selected)</span>}
     </button>
   );
@@ -239,8 +238,6 @@ function WorkflowCard({
     .filter((t) => t !== 'routines')
     .map((t) => TAG_DISPLAY[t] ?? t);
 
-  const teaserText = getTeaserText(workflow);
-
   const accessibleName = [
     workflow.name,
     workflow.description,
@@ -258,7 +255,7 @@ function WorkflowCard({
       className="w-full text-left flex items-stretch gap-0 bg-[var(--bg-card)] border border-[var(--border)] hover:border-[var(--accent)] transition-colors group focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:outline-none"
     >
       {/* Left accent stripe */}
-      <div className="w-[3px] shrink-0 self-stretch bg-[var(--accent)] opacity-40 group-hover:opacity-100 transition-opacity" />
+      <div className="w-[3px] shrink-0 self-stretch bg-[var(--accent)] opacity-60 group-hover:opacity-100 transition-opacity" />
 
       <div className="flex-1 min-w-0 px-4 py-3">
         {/* Name */}
@@ -271,22 +268,15 @@ function WorkflowCard({
           {workflow.description}
         </p>
 
-        {/* About teaser (first 80 chars of about, or first example in quotes) */}
-        {teaserText && (
-          <p className="text-xs italic text-[var(--text-muted)] truncate mb-2">
-            {teaserText}
-          </p>
-        )}
-
         {/* Badges row */}
         <div className="flex items-center gap-2 flex-wrap">
           {displayTags.map((label) => (
-            <span key={label} className="font-mono text-[10px] px-1.5 py-0.5 bg-[var(--bg-secondary)] text-[var(--text-muted)]">
+            <span key={label} className="font-mono text-[10px] px-1.5 py-0.5 bg-[var(--bg-secondary)] text-[var(--text-secondary)]">
               {label}
             </span>
           ))}
-          <span className="font-mono text-[10px] px-1.5 py-0.5 border border-[var(--border)] text-[var(--text-muted)] max-w-[120px] truncate">
-            {workflow.source.displayName}
+          <span className="font-mono text-[10px] px-1.5 py-0.5 border border-[var(--border)] text-[var(--text-secondary)] max-w-[160px] truncate">
+            src: {workflow.source.displayName}
           </span>
         </div>
       </div>
@@ -300,25 +290,25 @@ function WorkflowCard({
 
 function WorkflowListSkeleton() {
   return (
-    <div className="space-y-6 animate-pulse" aria-busy="true" aria-label="Loading workflows">
-      {[0, 1].map((section) => (
+    <div className="space-y-6" aria-busy="true" aria-label="Loading workflows">
+      {[0, 1, 2].map((section) => (
         <div key={section} className="space-y-2">
           {/* Section header skeleton */}
           <div className="flex items-center gap-3 mb-3">
-            <div className="h-3 w-24 rounded bg-[var(--bg-tertiary)]" />
-            <div className="flex-1 h-px bg-[var(--bg-tertiary)]" />
+            <div className="h-3 w-24 rounded bg-[var(--bg-tertiary)] motion-safe:animate-pulse" />
+            <div className="flex-1 h-px bg-[var(--bg-tertiary)] motion-safe:animate-pulse" />
           </div>
           {/* Card skeletons */}
-          {[0, 1, 2].map((card) => (
+          {[0, 1, 2, 3].map((card) => (
             <div key={card} className="flex bg-[var(--bg-card)] border border-[var(--border)]">
-              <div className="w-[3px] bg-[var(--bg-tertiary)]" />
+              <div className="w-[3px] bg-[var(--bg-tertiary)] motion-safe:animate-pulse" />
               <div className="flex-1 px-4 py-3 space-y-2">
-                <div className="h-4 w-2/3 rounded bg-[var(--bg-tertiary)]" />
-                <div className="h-3 w-full rounded bg-[var(--bg-tertiary)]" />
-                <div className="h-3 w-4/5 rounded bg-[var(--bg-tertiary)]" />
+                <div className="h-4 w-2/3 rounded bg-[var(--bg-tertiary)] motion-safe:animate-pulse" />
+                <div className="h-3 w-full rounded bg-[var(--bg-tertiary)] motion-safe:animate-pulse" />
+                <div className="h-3 w-4/5 rounded bg-[var(--bg-tertiary)] motion-safe:animate-pulse" />
                 <div className="flex gap-1.5">
-                  <div className="h-4 w-14 rounded bg-[var(--bg-tertiary)]" />
-                  <div className="h-4 w-16 rounded bg-[var(--bg-tertiary)]" />
+                  <div className="h-4 w-14 rounded bg-[var(--bg-tertiary)] motion-safe:animate-pulse" />
+                  <div className="h-4 w-16 rounded bg-[var(--bg-tertiary)] motion-safe:animate-pulse" />
                 </div>
               </div>
             </div>
