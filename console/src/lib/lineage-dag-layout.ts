@@ -36,8 +36,6 @@ export interface LineageDagModel {
   readonly currentNodeId: string | null;
   readonly startNodeId: string | null;
   readonly latestBranchNodeId: string | null;
-  readonly compressedBeforeCount: number;
-  readonly visibleLineageStartNodeId: string | null;
   readonly summary: LineageSummary;
 }
 
@@ -51,8 +49,6 @@ export function buildLineageDagModel(run: ConsoleDagRun): LineageDagModel {
       currentNodeId: null,
       startNodeId: null,
       latestBranchNodeId: null,
-      compressedBeforeCount: 0,
-      visibleLineageStartNodeId: null,
       summary: {
         currentNodeLabel: 'No active node',
         lineageNodeCount: 0,
@@ -126,10 +122,6 @@ export function buildLineageDagModel(run: ConsoleDagRun): LineageDagModel {
   const activeLineagePath = [...activeLineageIds].sort(
     (left, right) => (depthById.get(left) ?? 0) - (depthById.get(right) ?? 0),
   );
-  // No windowing -- show the full lineage. compressedBeforeCount is always 0.
-  const compressedBeforeCount = 0;
-  const visibleLineageIds = new Set(activeLineagePath);
-  const visibleLineageStartNodeId = activeLineagePath[0] ?? null;
 
   for (const nodeId of activeLineagePath) {
     laneById.set(nodeId, 0);
@@ -188,37 +180,12 @@ export function buildLineageDagModel(run: ConsoleDagRun): LineageDagModel {
   const minLane = Math.min(...laneById.values());
   const maxLane = Math.max(...laneById.values());
 
-  const visibleDepthById = buildVisibleDepthMap(
-    run.nodes,
-    depthById,
-    nodeById,
-    visibleLineageIds,
-    compressedBeforeCount,
-  );
-
-  // Compressed active-lineage nodes (those before the visible window) must not
-  // be rendered. Their raw depths place them FAR to the right of the visible
-  // window, so edges from a compressed node to the first visible node render
-  // right-to-left, causing the "connected from both sides" visual glitch.
-  //
-  // We build a renderable set: visible active lineage nodes + any side branches
-  // that originate from within the visible window. Side branches of compressed
-  // nodes are also excluded -- their parent is hidden, so showing them in the
-  // middle of the visible window would be confusing.
-  const renderableIds = new Set<string>(visibleLineageIds);
-  const bfsQueue = [...visibleLineageIds];
-  while (bfsQueue.length > 0) {
-    const nodeId = bfsQueue.shift()!;
-    for (const child of childrenByParent.get(nodeId) ?? []) {
-      if (!activeLineageIds.has(child.nodeId) && !renderableIds.has(child.nodeId)) {
-        renderableIds.add(child.nodeId);
-        bfsQueue.push(child.nodeId);
-      }
-    }
-  }
+  // No windowing: all nodes are renderable. Depths are derived from parent-chain
+  // hop counts (raw depths), adjusted for side branches to align with their
+  // active-lineage anchor column.
+  const visibleDepthById = buildVisibleDepthMap(run.nodes, depthById, nodeById, activeLineageIds);
 
   const positionedNodes: PositionedLineageNode[] = run.nodes
-    .filter((node) => renderableIds.has(node.nodeId))
     .map((node) => {
       const isActiveLineage = activeLineageIds.has(node.nodeId);
       const visibleDepth = visibleDepthById.get(node.nodeId) ?? 0;
@@ -251,20 +218,17 @@ export function buildLineageDagModel(run: ConsoleDagRun): LineageDagModel {
     blockedAttemptCount: run.nodes.filter((node) => node.nodeKind === 'blocked_attempt').length,
   };
 
-  const renderableEdges = run.edges.filter(
-    (e) => renderableIds.has(e.fromNodeId) && renderableIds.has(e.toNodeId),
-  );
+  // All nodes are renderable (no windowing), so all edges between existing nodes are valid.
+  const positionedNodeIds = new Set(positionedNodes.map((n) => n.node.nodeId));
 
   return {
     nodes: positionedNodes,
-    edges: renderableEdges,
+    edges: run.edges.filter((e) => positionedNodeIds.has(e.fromNodeId) && positionedNodeIds.has(e.toNodeId)),
     graphWidth: LINEAGE_PADDING * 2 + maxVisibleDepth * LINEAGE_COLUMN_WIDTH + ACTIVE_NODE_WIDTH,
     graphHeight: LINEAGE_PADDING * 2 + (maxLane - minLane) * LINEAGE_ROW_HEIGHT + ACTIVE_NODE_HEIGHT,
     currentNodeId,
     startNodeId: activeLineagePath[0] ?? rootNodes[0]?.nodeId ?? null,
     latestBranchNodeId: latestBranchRootNode?.nodeId ?? null,
-    compressedBeforeCount,
-    visibleLineageStartNodeId,
     summary,
   };
 }
@@ -348,29 +312,29 @@ export function shortNodeId(nodeId: string): string {
   return nodeId.slice(-8);
 }
 
+// Assigns each node a display depth for layout purposes.
+//
+// Active-lineage nodes use their raw parent-chain hop depth (same as depthById).
+// Side-branch nodes anchor to their first active-lineage ancestor's depth, then
+// add the hop distance from that ancestor. This keeps side branches aligned with
+// the active-lineage column they branch off from.
+//
+// Cycle guard: `inProgressSide` tracks nodes currently on the call stack. If a
+// node is re-entered before its depth is resolved, a cycle exists -- break it by
+// falling back to raw depth.
 function buildVisibleDepthMap(
   nodes: readonly ConsoleDagNode[],
   depthById: ReadonlyMap<string, number>,
   nodeById: ReadonlyMap<string, ConsoleDagNode>,
-  visibleLineageIds: ReadonlySet<string>,
-  compressedBeforeCount: number,
+  activeLineageIds: ReadonlySet<string>,
 ): Map<string, number> {
   const visibleDepthById = new Map<string, number>();
 
-  // Active lineage nodes get compression offset applied.
-  for (const nodeId of visibleLineageIds) {
-    const rawDepth = depthById.get(nodeId) ?? 0;
-    visibleDepthById.set(nodeId, compressedBeforeCount === 0 ? rawDepth : rawDepth - compressedBeforeCount + 1);
+  // Active-lineage nodes: raw depth equals display depth (no compression offset).
+  for (const nodeId of activeLineageIds) {
+    visibleDepthById.set(nodeId, depthById.get(nodeId) ?? 0);
   }
 
-  // Side branch nodes: anchor to first active-lineage ancestor's visible depth,
-  // then add the hop distance from that ancestor. This ensures side branches stay
-  // aligned with the active lineage column they branch off from even when compressed.
-  //
-  // Cycle guard: `inProgressSide` tracks nodes currently on the call stack. If a
-  // node is re-entered before its depth is resolved, a cycle exists -- break it by
-  // falling back to raw depth. (visibleDepthById memoizes completed nodes only, so
-  // it cannot serve as a cycle guard on its own.)
   const inProgressSide = new Set<string>();
 
   const resolveSideDepth = (nodeId: string): number => {

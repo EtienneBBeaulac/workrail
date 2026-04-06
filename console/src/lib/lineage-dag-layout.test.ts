@@ -173,7 +173,6 @@ describe('all nodes rendered', () => {
     const model = buildLineageDagModel(makeRun(nodes, 'n36'));
     const renderedIds = new Set(model.nodes.map((n) => n.node.nodeId));
 
-    expect(model.compressedBeforeCount).toBe(0);
     for (let i = 0; i < 37; i++) {
       expect(renderedIds.has(`n${i}`)).toBe(true);
     }
@@ -281,25 +280,10 @@ describe('side branch x alignment with compression', () => {
 });
 
 // ---------------------------------------------------------------------------
-// compressedBeforeCount is always 0 (no windowing)
+// No windowing -- all nodes rendered
 // ---------------------------------------------------------------------------
 
 describe('no windowing', () => {
-  it('compressedBeforeCount is always 0 regardless of run length', () => {
-    for (const length of [1, 8, 12, 37, 100]) {
-      _eventIndex = 0;
-      const nodes: ConsoleDagNode[] = [];
-      let prev: string | null = null;
-      for (let i = 0; i < length; i++) {
-        nodes.push(makeNode(`n${i}`, prev));
-        prev = `n${i}`;
-      }
-      nodes[length - 1] = { ...nodes[length - 1]!, isTip: true };
-      const model = buildLineageDagModel(makeRun(nodes, `n${length - 1}`));
-      expect(model.compressedBeforeCount).toBe(0);
-    }
-  });
-
   it('node depths equal raw depths (no offset applied)', () => {
     _eventIndex = 0;
     const nodes: ConsoleDagNode[] = [];

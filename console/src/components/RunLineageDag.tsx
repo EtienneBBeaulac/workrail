@@ -339,15 +339,6 @@ function OverviewRail({
         <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
           Lineage rail
         </span>
-        {model.compressedBeforeCount > 0 && (
-          <button
-            type="button"
-            onClick={() => onSelectNode(model.visibleLineageStartNodeId)}
-            className="border border-[var(--border)] px-2 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent-strong)] hover:text-[var(--text-primary)]"
-          >
-            +{model.compressedBeforeCount} earlier nodes
-          </button>
-        )}
         {activeNodes.map((node) => (
           <RailDot
             key={node.node.nodeId}
