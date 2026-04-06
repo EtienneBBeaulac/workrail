@@ -809,6 +809,8 @@ function projectNodeDetail(
 
   const tipSet = new Set(run.tipNodeIds);
 
+  // Each call below is O(n-events). For sessions with large event logs, consider
+  // caching projection results at the session level. Acceptable at current scale.
   const recapMarkdown = extractRecapMarkdown(events, nodeId);
   const artifacts = extractArtifacts(events, nodeId);
   const advanceOutcome = extractAdvanceOutcome(events, nodeId);

@@ -3,6 +3,9 @@
  *
  * These types shape v2 projection data for the Console UI.
  * They are the boundary between internal projections and the HTTP/UI layer.
+ *
+ * These types are mirrored in console/src/api/types.ts. Keep both files in sync
+ * until a shared codegen solution exists.
  */
 
 // ---------------------------------------------------------------------------

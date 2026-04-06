@@ -588,17 +588,17 @@ function getNodeBorderColor(
   return isActiveLineage ? 'rgba(0, 240, 255, 0.55)' : 'rgba(123, 141, 167, 0.45)';
 }
 
-// Returns a CSS color string for the 3px left-border richness stripe on a node,
-// or null if no stripe should be shown. Priority (highest wins):
-//   var(--error)   -- failed validations (highest severity signal)
-//   var(--warning) -- gaps associated with this node
-//   var(--accent)  -- recap or artifacts (content worth reading)
-//   null           -- no content yet (in-progress or empty)
+// Rules for the 3px left-border richness stripe on a DAG node.
+// Evaluated in priority order (highest first); first match wins.
+// null color means no stripe (node has no content yet).
+const RICHNESS_STRIPE_RULES: readonly { readonly test: (node: ConsoleDagNode) => boolean; readonly color: string }[] = [
+  { test: (n) => n.hasFailedValidations, color: 'var(--error)' },
+  { test: (n) => n.hasGaps,              color: 'var(--warning)' },
+  { test: (n) => n.hasRecap || n.hasArtifacts, color: 'var(--accent)' },
+];
+
 function getRichnessStripeColor(node: ConsoleDagNode): string | null {
-  if (node.hasFailedValidations) return 'var(--error)';
-  if (node.hasGaps) return 'var(--warning)';
-  if (node.hasRecap || node.hasArtifacts) return 'var(--accent)';
-  return null;
+  return RICHNESS_STRIPE_RULES.find((rule) => rule.test(node))?.color ?? null;
 }
 
 function formatNodeKind(nodeKind: ConsoleDagNode['nodeKind']): string {
