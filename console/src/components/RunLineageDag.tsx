@@ -37,6 +37,10 @@ export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props
   // Without this guard, every react-query refetch that rebuilds `model.nodes`
   // would re-trigger the scroll (because focusNodeInViewport depends on nodeById
   // which is rebuilt on every nodes change).
+  //
+  // Tradeoff: once set, advancing live sessions won't auto-scroll to the new
+  // current node. This is intentional -- prevents snapping away from a node the
+  // user is actively inspecting.
   const hasAutoScrolledRef = useRef(false);
 
   // Single shared tooltip rendered in the scroll container wrapper, outside the
@@ -198,11 +202,13 @@ export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props
     // Position relative to the scroll container so the tooltip stays within bounds.
     const x = event.clientX - containerRect.left + 12;
     const y = event.clientY - containerRect.top + 16;
+    // Clamp x so the tooltip (maxWidth 260px + 12px margin) doesn't clip the right edge.
+    const clampedX = Math.min(x, (scrollContainerRef.current?.clientWidth ?? 9999) - 272);
 
     if (tooltipTimerRef.current !== null) clearTimeout(tooltipTimerRef.current);
     tooltipTimerRef.current = setTimeout(() => {
       setHoveredLabel(label);
-      setTooltipPos({ x, y });
+      setTooltipPos({ x: clampedX, y });
     }, 300);
   }, [nodeById]);
 
@@ -237,7 +243,7 @@ export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props
             <JumpButton onClick={() => focusNodeInViewport(model.latestBranchNodeId)}>Latest branch</JumpButton>
           </div>
         </div>
-        <OverviewRail model={model} selectedNodeId={selectedNodeId} onSelectNode={focusNodeInViewport} />
+        <OverviewRail model={model} selectedNodeId={selectedNodeId} onNavigateToNode={focusNodeInViewport} />
       </div>
 
       <div
@@ -410,11 +416,11 @@ function NodeLabel({
 function OverviewRail({
   model,
   selectedNodeId,
-  onSelectNode,
+  onNavigateToNode,
 }: {
   model: ReturnType<typeof buildLineageDagModel>;
   selectedNodeId: string | null;
-  onSelectNode: (nodeId: string | null) => void;
+  onNavigateToNode: (nodeId: string | null) => void;
 }) {
   const activeNodes = model.nodes.filter((node) => node.isActiveLineage);
   const sideNodes = model.nodes.filter((node) => !node.isActiveLineage).slice(-8);
@@ -432,7 +438,7 @@ function OverviewRail({
             isCurrent={node.isCurrent}
             isSelected={node.node.nodeId === selectedNodeId}
             tone="active"
-            onClick={() => onSelectNode(node.node.nodeId)}
+            onClick={() => onNavigateToNode(node.node.nodeId)}
           />
         ))}
         {sideNodes.length > 0 && (
@@ -445,7 +451,7 @@ function OverviewRail({
                 isCurrent={false}
                 isSelected={node.node.nodeId === selectedNodeId}
                 tone={node.branchKind === 'blocked' ? 'blocked' : 'side'}
-                onClick={() => onSelectNode(node.node.nodeId)}
+                onClick={() => onNavigateToNode(node.node.nodeId)}
               />
             ))}
           </>

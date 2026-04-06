@@ -351,9 +351,11 @@ export function SessionList({ onSelectSession, initialSearch = '', initialRepoRo
         <div className="space-y-6">
           {processed.groups.map((group) => (
             <SessionGroup
-              key={group.label}
+              key={group.label + '-' + sort + '-' + statusFilter}
               label={group.label}
               sessions={group.sessions}
+              sort={sort}
+              statusFilter={statusFilter}
               onSelectSession={onSelectSession}
             />
           ))}
@@ -418,14 +420,28 @@ function ToolbarSelect<T extends string>({
 function SessionGroup({
   label,
   sessions,
+  sort,
+  statusFilter,
   onSelectSession,
 }: {
   label: string;
   sessions: ConsoleSessionSummary[];
+  sort: SortField;
+  statusFilter: StatusFilter;
   onSelectSession: (id: string) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [page, setPage] = useState(0);
+
+  // Reset to page 0 when the sessions list shrinks (e.g. a filter reduces the
+  // group to fewer pages than the current page). Without this, the user sees a
+  // blank group after applying a filter that removes the last page they were on.
+  useEffect(() => setPage(0), [sessions.length]);
+
+  // Suppress the unused-variable lint warning -- sort and statusFilter are only
+  // used via the key prop on the SessionGroup instance to reset state.
+  void sort;
+  void statusFilter;
 
   const totalPages = Math.ceil(sessions.length / PAGE_SIZE);
   const pageStart = page * PAGE_SIZE;
