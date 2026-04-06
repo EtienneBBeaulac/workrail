@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useSessionList } from '../api/hooks';
 import { StatusBadge } from '../components/StatusBadge';
 import { HealthBadge } from '../components/HealthBadge';
@@ -15,26 +15,70 @@ interface Props {
 }
 
 // ---------------------------------------------------------------------------
-// Sort / filter / group types
+// Sort / group axis definitions
+//
+// Adding a new sort or group axis requires a single entry in SORT_AXES or
+// GROUP_AXES -- no edits to switch statements or separate type unions.
 // ---------------------------------------------------------------------------
 
-type SortField = 'recent' | 'status' | 'workflow' | 'nodes';
-type GroupBy = 'none' | 'workflow' | 'status' | 'branch';
 type StatusFilter = 'all' | ConsoleSessionStatus;
 
-const SORT_OPTIONS: { value: SortField; label: string }[] = [
-  { value: 'recent', label: 'Recent' },
-  { value: 'status', label: 'Status' },
-  { value: 'workflow', label: 'Workflow' },
-  { value: 'nodes', label: 'Node count' },
+const STATUS_SORT_ORDER: Record<ConsoleSessionStatus, number> = {
+  in_progress: 0,
+  blocked: 1,
+  dormant: 2,
+  complete_with_gaps: 3,
+  complete: 4,
+};
+
+interface SortAxisDef {
+  readonly value: string;
+  readonly label: string;
+  readonly compareFn: (a: ConsoleSessionSummary, b: ConsoleSessionSummary) => number;
+}
+
+interface GroupAxisDef {
+  readonly value: string;
+  readonly label: string;
+  // Returns the group key for a session, or null for the "ungrouped" sentinel.
+  readonly keyFn: ((s: ConsoleSessionSummary) => string) | null;
+}
+
+const SORT_AXES: readonly SortAxisDef[] = [
+  {
+    value: 'recent',
+    label: 'Recent',
+    compareFn: (a, b) => b.lastModifiedMs - a.lastModifiedMs,
+  },
+  {
+    value: 'status',
+    label: 'Status',
+    compareFn: (a, b) =>
+      STATUS_SORT_ORDER[a.status] - STATUS_SORT_ORDER[b.status] || b.lastModifiedMs - a.lastModifiedMs,
+  },
+  {
+    value: 'workflow',
+    label: 'Workflow',
+    compareFn: (a, b) =>
+      (a.workflowName ?? a.workflowId ?? '').localeCompare(b.workflowName ?? b.workflowId ?? '') ||
+      b.lastModifiedMs - a.lastModifiedMs,
+  },
+  {
+    value: 'nodes',
+    label: 'Node count',
+    compareFn: (a, b) => b.nodeCount - a.nodeCount || b.lastModifiedMs - a.lastModifiedMs,
+  },
 ];
 
-const GROUP_OPTIONS: { value: GroupBy; label: string }[] = [
-  { value: 'none', label: 'No grouping' },
-  { value: 'workflow', label: 'Workflow' },
-  { value: 'status', label: 'Status' },
-  { value: 'branch', label: 'Branch' },
+const GROUP_AXES: readonly GroupAxisDef[] = [
+  { value: 'none', label: 'No grouping', keyFn: null },
+  { value: 'workflow', label: 'Workflow', keyFn: (s) => s.workflowName ?? s.workflowId ?? 'Unknown workflow' },
+  { value: 'status', label: 'Status', keyFn: (s) => s.status },
+  { value: 'branch', label: 'Branch', keyFn: (s) => s.gitBranch ?? 'No branch' },
 ];
+
+type SortField = (typeof SORT_AXES)[number]['value'];
+type GroupBy = (typeof GROUP_AXES)[number]['value'];
 
 const STATUS_FILTER_OPTIONS: { value: StatusFilter; label: string }[] = [
   { value: 'all', label: 'All' },
@@ -46,14 +90,6 @@ const STATUS_FILTER_OPTIONS: { value: StatusFilter; label: string }[] = [
 ];
 
 const PAGE_SIZE = 25;
-
-const STATUS_SORT_ORDER: Record<ConsoleSessionStatus, number> = {
-  in_progress: 0,
-  blocked: 1,
-  dormant: 2,
-  complete_with_gaps: 3,
-  complete: 4,
-};
 
 // ---------------------------------------------------------------------------
 // Pure helpers
@@ -92,45 +128,21 @@ function filterSessions(
 }
 
 function sortSessions(sessions: ConsoleSessionSummary[], sort: SortField): ConsoleSessionSummary[] {
-  const sorted = [...sessions];
-  switch (sort) {
-    case 'recent':
-      sorted.sort((a, b) => b.lastModifiedMs - a.lastModifiedMs);
-      break;
-    case 'status':
-      sorted.sort((a, b) => STATUS_SORT_ORDER[a.status] - STATUS_SORT_ORDER[b.status] || b.lastModifiedMs - a.lastModifiedMs);
-      break;
-    case 'workflow':
-      sorted.sort((a, b) => (a.workflowName ?? a.workflowId ?? '').localeCompare(b.workflowName ?? b.workflowId ?? '') || b.lastModifiedMs - a.lastModifiedMs);
-      break;
-    case 'nodes':
-      sorted.sort((a, b) => b.nodeCount - a.nodeCount || b.lastModifiedMs - a.lastModifiedMs);
-      break;
-  }
-  return sorted;
+  const axis = SORT_AXES.find((a) => a.value === sort) ?? SORT_AXES[0];
+  return [...sessions].sort(axis.compareFn);
 }
 
 function groupSessions(
   sessions: ConsoleSessionSummary[],
   groupBy: GroupBy,
 ): { label: string; sessions: ConsoleSessionSummary[] }[] {
-  if (groupBy === 'none') return [{ label: '', sessions }];
+  const axis = GROUP_AXES.find((a) => a.value === groupBy) ?? GROUP_AXES[0];
+  if (!axis.keyFn) return [{ label: '', sessions }];
 
   const groups = new Map<string, ConsoleSessionSummary[]>();
 
   for (const s of sessions) {
-    let key: string;
-    switch (groupBy) {
-      case 'workflow':
-        key = s.workflowName ?? s.workflowId ?? 'Unknown workflow';
-        break;
-      case 'status':
-        key = s.status;
-        break;
-      case 'branch':
-        key = s.gitBranch ?? 'No branch';
-        break;
-    }
+    const key = axis.keyFn(s);
     const list = groups.get(key) ?? [];
     list.push(s);
     groups.set(key, list);
@@ -138,7 +150,28 @@ function groupSessions(
 
   return Array.from(groups.entries())
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([label, sessions]) => ({ label, sessions }));
+    .map(([label, groupedSessions]) => ({ label, sessions: groupedSessions }));
+}
+
+// ---------------------------------------------------------------------------
+// Debounce hook
+// Separates UI-responsive input state from the computationally expensive
+// filter/sort/group pipeline. Delays are applied only to the search field.
+// ---------------------------------------------------------------------------
+
+function useDebounce<T>(value: T, delayMs: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (timerRef.current !== null) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setDebouncedValue(value), delayMs);
+    return () => {
+      if (timerRef.current !== null) clearTimeout(timerRef.current);
+    };
+  }, [value, delayMs]);
+
+  return debouncedValue;
 }
 
 // ---------------------------------------------------------------------------
@@ -155,6 +188,11 @@ export function SessionList({ onSelectSession, initialSearch = '', initialRepoRo
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [page, setPage] = useState(0);
 
+  // Debounce the search input so that filter/sort/group computation does not
+  // fire on every keystroke. The raw `search` value drives the input display;
+  // `debouncedSearch` drives the data pipeline.
+  const debouncedSearch = useDebounce(search, 200);
+
   // Reset page when filters change
   const handleSearchChange = useCallback((v: string) => { setSearch(v); setPage(0); }, []);
   const handleSortChange = useCallback((v: SortField) => { setSort(v); setPage(0); }, []);
@@ -163,11 +201,11 @@ export function SessionList({ onSelectSession, initialSearch = '', initialRepoRo
 
   const processed = useMemo(() => {
     if (!data) return { groups: [], total: 0, filtered: 0 };
-    const filtered = filterSessions(data.sessions, search, statusFilter, repoRoot);
+    const filtered = filterSessions(data.sessions, debouncedSearch, statusFilter, repoRoot);
     const sorted = sortSessions(filtered, sort);
     const groups = groupSessions(sorted, groupBy);
     return { groups, total: data.sessions.length, filtered: filtered.length };
-  }, [data, search, statusFilter, repoRoot, sort, groupBy]);
+  }, [data, debouncedSearch, statusFilter, repoRoot, sort, groupBy]);
 
   // Status counts for filter pills
   const statusCounts = useMemo(() => {
@@ -251,7 +289,7 @@ export function SessionList({ onSelectSession, initialSearch = '', initialRepoRo
         <ToolbarSelect
           label="Sort"
           value={sort}
-          options={SORT_OPTIONS}
+          options={SORT_AXES}
           onChange={handleSortChange}
         />
 
@@ -259,7 +297,7 @@ export function SessionList({ onSelectSession, initialSearch = '', initialRepoRo
         <ToolbarSelect
           label="Group"
           value={groupBy}
-          options={GROUP_OPTIONS}
+          options={GROUP_AXES}
           onChange={handleGroupChange}
         />
       </div>
@@ -337,7 +375,7 @@ function ToolbarSelect<T extends string>({
 }: {
   label: string;
   value: T;
-  options: { value: T; label: string }[];
+  options: readonly { readonly value: T; readonly label: string }[];
   onChange: (v: T) => void;
 }) {
   return (
@@ -370,6 +408,12 @@ function SessionGroup({
   onSelectSession: (id: string) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
+  const [page, setPage] = useState(0);
+
+  const totalPages = Math.ceil(sessions.length / PAGE_SIZE);
+  const pageStart = page * PAGE_SIZE;
+  const pageEnd = pageStart + PAGE_SIZE;
+  const visibleSessions = sessions.slice(pageStart, pageEnd);
 
   return (
     <div>
@@ -388,14 +432,21 @@ function SessionGroup({
         <span className="text-xs text-[var(--text-muted)]">({sessions.length})</span>
       </button>
       {!collapsed && (
-        <div className="space-y-2 ml-4">
-          {sessions.map((session) => (
-            <SessionCard
-              key={session.sessionId}
-              session={session}
-              onClick={() => onSelectSession(session.sessionId)}
-            />
-          ))}
+        <div className="ml-4">
+          <div className="space-y-2">
+            {visibleSessions.map((session) => (
+              <SessionCard
+                key={session.sessionId}
+                session={session}
+                onClick={() => onSelectSession(session.sessionId)}
+              />
+            ))}
+          </div>
+          {totalPages > 1 && (
+            <div className="mt-2">
+              <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+            </div>
+          )}
         </div>
       )}
     </div>
