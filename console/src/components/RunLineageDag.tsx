@@ -39,8 +39,8 @@ export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props
   // which is rebuilt on every nodes change).
   const hasAutoScrolledRef = useRef(false);
 
-  // Hover tooltip: a single tooltip rendered at the DAG container root to avoid
-  // ReactFlow's overflow:hidden clipping that prevents per-node tooltips from showing.
+  // Single shared tooltip rendered in the scroll container wrapper, outside the
+  // ReactFlow canvas, to avoid overflow:hidden clipping.
   const [hoveredLabel, setHoveredLabel] = useState<string | null>(null);
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
   // Delay timer stored in a ref to avoid causing extra renders on set/clear.
@@ -325,7 +325,7 @@ function NodeLabel({
 
   return (
     <div
-      className={`flex h-full w-full flex-col text-left overflow-hidden ${
+      className={`relative flex h-full w-full flex-col text-left overflow-hidden ${
         isCurrent && isLiveRun ? 'workrail-current-lineage-node' : ''
       } ${isSelected ? 'workrail-selected-lineage-node' : ''}`}
     >

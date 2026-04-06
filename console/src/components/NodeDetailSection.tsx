@@ -2,6 +2,7 @@ import { useNodeDetail } from '../api/hooks';
 import { MarkdownView } from './MarkdownView';
 import type {
   ConsoleNodeDetail,
+  ConsoleRunStatus,
   ConsoleValidationResult,
   ConsoleAdvanceOutcome,
   ConsoleNodeGap,
@@ -11,7 +12,7 @@ import type {
 interface Props {
   sessionId: string;
   nodeId: string | null;
-  runStatus?: 'in_progress' | 'complete' | 'complete_with_gaps' | 'blocked';
+  runStatus?: ConsoleRunStatus;
   currentNodeId?: string | null;
 }
 
@@ -100,7 +101,7 @@ function SectionHeader({ stepLabel, nodeId }: { stepLabel: string | null; nodeId
 
 interface NodeDetailContentProps {
   detail: ConsoleNodeDetail;
-  runStatus: 'in_progress' | 'complete' | 'complete_with_gaps' | 'blocked';
+  runStatus: ConsoleRunStatus;
   currentNodeId: string | null;
 }
 

@@ -145,6 +145,7 @@ export interface ConsoleDagRun {
   readonly tipNodeIds: readonly string[];
   readonly status: ConsoleRunStatus;
   readonly hasUnresolvedCriticalGaps: boolean;
+  // Reserved: consumed by ExecutionTrace panel (not yet implemented)
   readonly executionTraceSummary: ConsoleExecutionTraceSummary | null;
 }
 
