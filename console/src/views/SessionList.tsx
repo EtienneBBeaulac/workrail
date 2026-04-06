@@ -31,51 +31,64 @@ const STATUS_SORT_ORDER: Record<ConsoleSessionStatus, number> = {
   complete: 4,
 };
 
-interface SortAxisDef {
-  readonly value: string;
+// Parameterised so that `value` is inferred as a literal type rather than
+// widened to `string`. This lets TypeScript catch typos in SortField/GroupBy
+// assignments at compile time.
+interface SortAxisDef<V extends string> {
+  readonly value: V;
   readonly label: string;
   readonly compareFn: (a: ConsoleSessionSummary, b: ConsoleSessionSummary) => number;
 }
 
-interface GroupAxisDef {
-  readonly value: string;
+interface GroupAxisDef<V extends string> {
+  readonly value: V;
   readonly label: string;
   // Returns the group key for a session, or null for the "ungrouped" sentinel.
   readonly keyFn: ((s: ConsoleSessionSummary) => string) | null;
+  // Optional comparator for group labels. Defaults to localeCompare.
+  readonly groupCompareFn?: (a: string, b: string) => number;
 }
 
-const SORT_AXES: readonly SortAxisDef[] = [
+const SORT_AXES = [
   {
-    value: 'recent',
+    value: 'recent' as const,
     label: 'Recent',
-    compareFn: (a, b) => b.lastModifiedMs - a.lastModifiedMs,
+    compareFn: (a: ConsoleSessionSummary, b: ConsoleSessionSummary) => b.lastModifiedMs - a.lastModifiedMs,
   },
   {
-    value: 'status',
+    value: 'status' as const,
     label: 'Status',
-    compareFn: (a, b) =>
+    compareFn: (a: ConsoleSessionSummary, b: ConsoleSessionSummary) =>
       STATUS_SORT_ORDER[a.status] - STATUS_SORT_ORDER[b.status] || b.lastModifiedMs - a.lastModifiedMs,
   },
   {
-    value: 'workflow',
+    value: 'workflow' as const,
     label: 'Workflow',
-    compareFn: (a, b) =>
+    compareFn: (a: ConsoleSessionSummary, b: ConsoleSessionSummary) =>
       (a.workflowName ?? a.workflowId ?? '').localeCompare(b.workflowName ?? b.workflowId ?? '') ||
       b.lastModifiedMs - a.lastModifiedMs,
   },
   {
-    value: 'nodes',
+    value: 'nodes' as const,
     label: 'Node count',
-    compareFn: (a, b) => b.nodeCount - a.nodeCount || b.lastModifiedMs - a.lastModifiedMs,
+    compareFn: (a: ConsoleSessionSummary, b: ConsoleSessionSummary) =>
+      b.nodeCount - a.nodeCount || b.lastModifiedMs - a.lastModifiedMs,
   },
-];
+] as const satisfies readonly SortAxisDef<string>[];
 
-const GROUP_AXES: readonly GroupAxisDef[] = [
-  { value: 'none', label: 'No grouping', keyFn: null },
-  { value: 'workflow', label: 'Workflow', keyFn: (s) => s.workflowName ?? s.workflowId ?? 'Unknown workflow' },
-  { value: 'status', label: 'Status', keyFn: (s) => s.status },
-  { value: 'branch', label: 'Branch', keyFn: (s) => s.gitBranch ?? 'No branch' },
-];
+const GROUP_AXES = [
+  { value: 'none' as const, label: 'No grouping', keyFn: null },
+  { value: 'workflow' as const, label: 'Workflow', keyFn: (s: ConsoleSessionSummary) => s.workflowName ?? s.workflowId ?? 'Unknown workflow' },
+  {
+    value: 'status' as const,
+    label: 'Status',
+    keyFn: (s: ConsoleSessionSummary) => s.status,
+    // Sort status groups by severity order rather than alphabetically.
+    groupCompareFn: (a: string, b: string) =>
+      (STATUS_SORT_ORDER[a as ConsoleRunStatus] ?? 99) - (STATUS_SORT_ORDER[b as ConsoleRunStatus] ?? 99),
+  },
+  { value: 'branch' as const, label: 'Branch', keyFn: (s: ConsoleSessionSummary) => s.gitBranch ?? 'No branch' },
+] as const satisfies readonly GroupAxisDef<string>[];
 
 type SortField = (typeof SORT_AXES)[number]['value'];
 type GroupBy = (typeof GROUP_AXES)[number]['value'];
@@ -148,8 +161,12 @@ function groupSessions(
     groups.set(key, list);
   }
 
+  // Cast to the base interface to access the optional groupCompareFn field.
+  // `as const satisfies` narrows each element to its exact literal shape, so
+  // the optional field is only present in the union members that define it.
+  const compareFn = (axis as GroupAxisDef<string>).groupCompareFn ?? ((a: string, b: string) => a.localeCompare(b));
   return Array.from(groups.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
+    .sort(([a], [b]) => compareFn(a, b))
     .map(([label, groupedSessions]) => ({ label, sessions: groupedSessions }));
 }
 

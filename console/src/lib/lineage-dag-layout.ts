@@ -264,6 +264,9 @@ function collectActiveLineageIds(
   let cursor: string | null = currentNodeId;
 
   while (cursor) {
+    // Cycle guard: if we've already visited this node, the parentNodeId chain
+    // contains a cycle. Break immediately rather than looping forever.
+    if (lineage.has(cursor)) break;
     lineage.add(cursor);
     const parentId: string | null = nodeById.get(cursor)?.parentNodeId ?? null;
     cursor = parentId && nodeById.has(parentId) ? parentId : null;
@@ -336,9 +339,24 @@ function buildVisibleDepthMap(
   // Side branch nodes: anchor to first active-lineage ancestor's visible depth,
   // then add the hop distance from that ancestor. This ensures side branches stay
   // aligned with the active lineage column they branch off from even when compressed.
+  //
+  // Cycle guard: `inProgressSide` tracks nodes currently on the call stack. If a
+  // node is re-entered before its depth is resolved, a cycle exists -- break it by
+  // falling back to raw depth. (visibleDepthById memoizes completed nodes only, so
+  // it cannot serve as a cycle guard on its own.)
+  const inProgressSide = new Set<string>();
+
   const resolveSideDepth = (nodeId: string): number => {
     const cached = visibleDepthById.get(nodeId);
     if (cached !== undefined) return cached;
+
+    if (inProgressSide.has(nodeId)) {
+      const depth = depthById.get(nodeId) ?? 0;
+      visibleDepthById.set(nodeId, depth);
+      return depth;
+    }
+
+    inProgressSide.add(nodeId);
 
     const node = nodeById.get(nodeId);
     const parentId: string | null = node?.parentNodeId ?? null;
@@ -347,12 +365,14 @@ function buildVisibleDepthMap(
       // Root node with no active ancestor -- fall back to raw depth.
       const depth = depthById.get(nodeId) ?? 0;
       visibleDepthById.set(nodeId, depth);
+      inProgressSide.delete(nodeId);
       return depth;
     }
 
     const parentVisibleDepth = resolveSideDepth(parentId);
     const depth = parentVisibleDepth + 1;
     visibleDepthById.set(nodeId, depth);
+    inProgressSide.delete(nodeId);
     return depth;
   };
 
