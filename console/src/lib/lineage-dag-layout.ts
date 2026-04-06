@@ -187,13 +187,20 @@ export function buildLineageDagModel(run: ConsoleDagRun): LineageDagModel {
 
   const minLane = Math.min(...laneById.values());
   const maxLane = Math.max(...laneById.values());
-  const maxVisibleDepth = Math.max(
-    ...run.nodes.map((node) => getVisibleDepth(node.nodeId, depthById, visibleLineageIds, compressedBeforeCount)),
+
+  const visibleDepthById = buildVisibleDepthMap(
+    run.nodes,
+    depthById,
+    nodeById,
+    visibleLineageIds,
+    compressedBeforeCount,
   );
+
+  const maxVisibleDepth = Math.max(...run.nodes.map((node) => visibleDepthById.get(node.nodeId) ?? 0));
 
   const positionedNodes: PositionedLineageNode[] = run.nodes.map((node) => {
     const isActiveLineage = activeLineageIds.has(node.nodeId);
-    const visibleDepth = getVisibleDepth(node.nodeId, depthById, visibleLineageIds, compressedBeforeCount);
+    const visibleDepth = visibleDepthById.get(node.nodeId) ?? 0;
     return {
       node,
       depth: visibleDepth,
@@ -270,20 +277,33 @@ function buildDepthMap(
   nodeById: ReadonlyMap<string, ConsoleDagNode>,
 ): Map<string, number> {
   const depthById = new Map<string, number>();
+  // Guard against cycles: tracks nodes whose depth resolution is currently in progress.
+  // If a node appears here on re-entry, a cycle exists and we break it by returning 0.
+  const inProgress = new Set<string>();
 
   const resolveDepth = (nodeId: string): number => {
     const existingDepth = depthById.get(nodeId);
     if (existingDepth !== undefined) return existingDepth;
 
+    // Cycle detected -- break by assigning depth 0 to the re-entered node.
+    if (inProgress.has(nodeId)) {
+      depthById.set(nodeId, 0);
+      return 0;
+    }
+
+    inProgress.add(nodeId);
+
     const node = nodeById.get(nodeId);
     const parentId: string | null = node?.parentNodeId ?? null;
     if (!parentId || !nodeById.has(parentId)) {
       depthById.set(nodeId, 0);
+      inProgress.delete(nodeId);
       return 0;
     }
 
     const depth = resolveDepth(parentId) + 1;
     depthById.set(nodeId, depth);
+    inProgress.delete(nodeId);
     return depth;
   };
 
@@ -294,18 +314,53 @@ function buildDepthMap(
   return depthById;
 }
 
-function shortNodeId(nodeId: string): string {
+export function shortNodeId(nodeId: string): string {
   return nodeId.slice(-8);
 }
 
-function getVisibleDepth(
-  nodeId: string,
+function buildVisibleDepthMap(
+  nodes: readonly ConsoleDagNode[],
   depthById: ReadonlyMap<string, number>,
+  nodeById: ReadonlyMap<string, ConsoleDagNode>,
   visibleLineageIds: ReadonlySet<string>,
   compressedBeforeCount: number,
-): number {
-  const depth = depthById.get(nodeId) ?? 0;
-  if (compressedBeforeCount === 0) return depth;
-  if (!visibleLineageIds.has(nodeId)) return depth;
-  return depth - compressedBeforeCount + 1;
+): Map<string, number> {
+  const visibleDepthById = new Map<string, number>();
+
+  // Active lineage nodes get compression offset applied.
+  for (const nodeId of visibleLineageIds) {
+    const rawDepth = depthById.get(nodeId) ?? 0;
+    visibleDepthById.set(nodeId, compressedBeforeCount === 0 ? rawDepth : rawDepth - compressedBeforeCount + 1);
+  }
+
+  // Side branch nodes: anchor to first active-lineage ancestor's visible depth,
+  // then add the hop distance from that ancestor. This ensures side branches stay
+  // aligned with the active lineage column they branch off from even when compressed.
+  const resolveSideDepth = (nodeId: string): number => {
+    const cached = visibleDepthById.get(nodeId);
+    if (cached !== undefined) return cached;
+
+    const node = nodeById.get(nodeId);
+    const parentId: string | null = node?.parentNodeId ?? null;
+
+    if (!parentId || !nodeById.has(parentId)) {
+      // Root node with no active ancestor -- fall back to raw depth.
+      const depth = depthById.get(nodeId) ?? 0;
+      visibleDepthById.set(nodeId, depth);
+      return depth;
+    }
+
+    const parentVisibleDepth = resolveSideDepth(parentId);
+    const depth = parentVisibleDepth + 1;
+    visibleDepthById.set(nodeId, depth);
+    return depth;
+  };
+
+  for (const node of nodes) {
+    if (!visibleDepthById.has(node.nodeId)) {
+      resolveSideDepth(node.nodeId);
+    }
+  }
+
+  return visibleDepthById;
 }

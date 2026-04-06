@@ -11,6 +11,7 @@ import {
   ACTIVE_NODE_HEIGHT,
   ACTIVE_NODE_WIDTH,
   buildLineageDagModel,
+  shortNodeId,
   SIDE_NODE_HEIGHT,
   SIDE_NODE_WIDTH,
 } from '../lib/lineage-dag-layout';
@@ -27,6 +28,11 @@ type FlowNodeData = {
 
 export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  // Tracks whether the initial auto-scroll to the current node has already fired.
+  // Without this guard, every react-query refetch that rebuilds `model.nodes`
+  // would re-trigger the scroll (because focusNodeInViewport depends on nodeById
+  // which is rebuilt on every nodes change).
+  const hasAutoScrolledRef = useRef(false);
   const model = useMemo(() => buildLineageDagModel(run), [run]);
   const nodeById = useMemo(
     () => new Map(model.nodes.map((positionedNode) => [positionedNode.node.nodeId, positionedNode] as const)),
@@ -55,8 +61,14 @@ export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props
   );
 
   useEffect(() => {
+    if (hasAutoScrolledRef.current) return;
+    if (!model.currentNodeId) return;
+    hasAutoScrolledRef.current = true;
     focusNodeInViewport(model.currentNodeId, 'auto');
-  }, [focusNodeInViewport, model.currentNodeId]);
+    // Intentionally omit focusNodeInViewport and model.currentNodeId from deps
+    // so this fires only once on mount, not on every refetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const { nodes, edges } = useMemo(() => {
     const currentIncomingEdgeId = model.currentNodeId
@@ -524,10 +536,6 @@ function formatRunStatus(status: ConsoleDagRun['status']): string {
     case 'in_progress':
       return 'In progress';
   }
-}
-
-function shortNodeId(nodeId: string): string {
-  return nodeId.slice(-8);
 }
 
 function getDisplayLabel(
