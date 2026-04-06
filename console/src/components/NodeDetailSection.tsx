@@ -26,30 +26,18 @@ export function NodeDetailSection({
 
   if (!nodeId) {
     return (
-      <section className="bg-[var(--bg-card)] border border-[var(--border)] overflow-hidden min-h-[420px]">
-        <div className="px-4 py-3 border-b border-[var(--border)] console-blueprint-grid">
-          <h3 className="font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
-            Selected node
-          </h3>
-        </div>
-        <div className="px-5 py-8 text-sm text-[var(--text-secondary)] min-h-[360px] flex items-start">
-          <div>
-            Select a node in the lineage to inspect its recap, validations, gaps, and artifacts.
-          </div>
-        </div>
-      </section>
+      <div className="px-5 py-8 text-sm text-[var(--text-secondary)]">
+        Select a node in the lineage to inspect its recap, validations, gaps, and artifacts.
+      </div>
     );
   }
 
   return (
-    <section className="bg-[var(--bg-card)] border border-[var(--border)] overflow-hidden min-h-[420px]">
-      <SectionHeader
-        stepLabel={data?.stepLabel ?? null}
-        nodeId={nodeId}
-      />
-      <div className="p-5 space-y-5 min-h-[360px]">
+    <div>
+      <SectionHeader stepLabel={data?.stepLabel ?? null} nodeId={nodeId} />
+      <div className="p-4 space-y-4">
         {isLoading && (
-          <div className="text-[var(--text-secondary)] text-sm">Loading selected node...</div>
+          <div className="text-[var(--text-secondary)] text-sm">Loading...</div>
         )}
         {error && (
           <div className="text-[var(--error)] text-sm bg-[var(--bg-primary)] border border-[var(--border)] px-4 py-3">
@@ -64,28 +52,18 @@ export function NodeDetailSection({
           />
         )}
       </div>
-    </section>
+    </div>
   );
 }
 
 function SectionHeader({ stepLabel, nodeId }: { stepLabel: string | null; nodeId: string }) {
   return (
-    <div className="flex items-end justify-between gap-4 px-5 py-4 border-b border-[var(--border)] console-blueprint-grid">
-      <div className="min-w-0">
-        <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
-          Selected node
-        </div>
-        <div className="mt-2 text-xl font-semibold text-[var(--text-primary)] leading-tight">
-          {stepLabel ?? 'Untitled node'}
-        </div>
+    <div className="px-5 py-4 border-b border-[var(--border)] console-blueprint-grid">
+      <div className="text-base font-semibold text-[var(--text-primary)] leading-tight">
+        {stepLabel ?? 'Untitled node'}
       </div>
-      <div className="min-w-0 text-right">
-        <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
-          Node id
-        </div>
-        <div className="mt-2 font-mono text-xs text-[var(--text-secondary)] truncate">
-          {nodeId}
-        </div>
+      <div className="mt-1 font-mono text-[11px] text-[var(--text-muted)] truncate">
+        {nodeId}
       </div>
     </div>
   );
@@ -111,6 +89,7 @@ interface SectionDef {
   readonly render: (props: NodeDetailContentProps) => React.ReactNode;
 }
 
+// Sections render top-to-bottom in this order. Return null to hide a section.
 const SECTION_REGISTRY: readonly SectionDef[] = [
   {
     id: 'recap',
@@ -138,49 +117,40 @@ const SECTION_REGISTRY: readonly SectionDef[] = [
         : null,
   },
   {
-    id: 'node-meta',
-    column: 'secondary',
-    render: ({ detail }) => <NodeMetaSection key="node-meta" detail={detail} />,
-  },
-  {
-    id: 'advance-outcome',
-    column: 'secondary',
-    render: ({ detail }) =>
-      detail.advanceOutcome
-        ? <AdvanceOutcomeSection key="advance-outcome" outcome={detail.advanceOutcome} />
-        : null,
-  },
-  {
     id: 'gaps',
-    column: 'secondary',
+    column: 'primary',
     render: ({ detail }) =>
       detail.gaps.length > 0
         ? <GapsSection key="gaps" gaps={detail.gaps} />
         : null,
   },
   {
+    id: 'advance-outcome',
+    column: 'primary',
+    render: ({ detail }) =>
+      detail.advanceOutcome
+        ? <AdvanceOutcomeSection key="advance-outcome" outcome={detail.advanceOutcome} />
+        : null,
+  },
+  {
     id: 'artifacts',
-    column: 'secondary',
+    column: 'primary',
     render: ({ detail }) =>
       detail.artifacts.length > 0
         ? <ArtifactsSection key="artifacts" artifacts={detail.artifacts} />
         : null,
   },
+  {
+    id: 'node-meta',
+    column: 'primary',
+    render: ({ detail }) => <NodeMetaSection key="node-meta" detail={detail} />,
+  },
 ] as const;
 
 function NodeDetailContent(props: NodeDetailContentProps) {
-  const primarySections = SECTION_REGISTRY
-    .filter((def) => def.column === 'primary')
-    .map((def) => def.render(props));
-
-  const secondarySections = SECTION_REGISTRY
-    .filter((def) => def.column === 'secondary')
-    .map((def) => def.render(props));
-
   return (
-    <div className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_320px]">
-      <div className="space-y-5">{primarySections}</div>
-      <div className="space-y-5">{secondarySections}</div>
+    <div className="space-y-4">
+      {SECTION_REGISTRY.map((def) => def.render(props))}
     </div>
   );
 }
@@ -502,13 +472,13 @@ function ArtifactsSection({ artifacts }: { artifacts: readonly ConsoleArtifact[]
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="bg-[var(--bg-card)] border border-[var(--border)] overflow-hidden">
-      <div className="px-4 py-3 border-b border-[var(--border)]">
-        <h3 className="font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+    <div>
+      <div className="mb-2">
+        <h3 className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
           {title}
         </h3>
       </div>
-      <div className="p-4">{children}</div>
+      {children}
     </div>
   );
 }
