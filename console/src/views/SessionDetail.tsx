@@ -78,35 +78,47 @@ export function SessionDetail({ sessionId }: Props) {
         )}
       </div>
 
-      {/* Floating detail panel -- inset from all edges, angled top-left corner */}
+      {/* Floating detail panel -- inset from all edges, angled top-left corner.
+          Outer div = border layer (clip-path + border color as background).
+          Inner div = content layer (1px inset, matching polygon so border
+          follows the diagonal cut rather than being clipped away). */}
       <div
-        className="fixed top-3 right-3 bottom-3 w-[560px] max-w-[calc(92vw-12px)] flex flex-col bg-[var(--bg-card)] border border-[var(--border)] transition-transform duration-200 ease-out"
+        className="fixed top-3 right-3 bottom-3 w-[560px] max-w-[calc(92vw-12px)] transition-transform duration-200 ease-out"
         style={{
           zIndex: 40,
           transform: selectedNode ? 'translateX(0)' : 'translateX(calc(100% + 12px))',
-          boxShadow: '0 8px 40px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.3)',
+          background: 'var(--border)',
           clipPath: 'polygon(18px 0, 100% 0, 100% 100%, 0 100%, 0 18px)',
+          boxShadow: '0 8px 40px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.3)',
         }}
       >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] shrink-0 console-blueprint-grid">
-          <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
-            Node detail
-          </span>
-          <button
-            onClick={() => setSelectedNode(null)}
-            className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-xl leading-none px-1"
-            aria-label="Close"
-          >
-            ×
-          </button>
-        </div>
-        <div className="flex-1 overflow-auto">
-          <NodeDetailSection
-            sessionId={sessionId}
-            nodeId={selectedNode?.nodeId ?? null}
-            runStatus={selectedRun?.status ?? 'complete'}
-            currentNodeId={selectedRun?.preferredTipNodeId ?? null}
-          />
+        <div
+          className="absolute flex flex-col bg-[var(--bg-card)]"
+          style={{
+            inset: '1px',
+            clipPath: 'polygon(17px 0, 100% 0, 100% 100%, 0 100%, 0 17px)',
+          }}
+        >
+          <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] shrink-0 console-blueprint-grid">
+            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+              Node detail
+            </span>
+            <button
+              onClick={() => setSelectedNode(null)}
+              className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-xl leading-none px-1"
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </div>
+          <div className="flex-1 overflow-auto">
+            <NodeDetailSection
+              sessionId={sessionId}
+              nodeId={selectedNode?.nodeId ?? null}
+              runStatus={selectedRun?.status ?? 'complete'}
+              currentNodeId={selectedRun?.preferredTipNodeId ?? null}
+            />
+          </div>
         </div>
       </div>
     </>
