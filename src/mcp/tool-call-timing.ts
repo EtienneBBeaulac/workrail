@@ -8,7 +8,7 @@
  * - Sink interface (not global mutable) -- DI for I/O boundaries
  * - Best-effort: sink errors never affect handler results (immutability of correctness)
  * - Ring buffer for console API: bounded, deterministic, zero dynamic growth
- * - `WORKRAIL_DEV_PERF=1` dev flag mirrors the `WORKRAIL_DEV_STALENESS=1` pattern
+ * - `WORKRAIL_DEV=1` unified dev flag (see dev-mode.ts)
  *
  * @module mcp/tool-call-timing
  */
@@ -52,17 +52,6 @@ export type ToolCallTimingSink = (timing: ToolCallTiming) => void;
 export const noopToolCallTimingSink: ToolCallTimingSink = () => {};
 
 // ---------------------------------------------------------------------------
-// Dev flag
-// ---------------------------------------------------------------------------
-
-/**
- * When set to '1', writes structured timing to stderr after each tool call.
- * Intended for local development and performance investigation.
- * Not documented for production use.
- */
-export const DEV_PERF: boolean = process.env['WORKRAIL_DEV_PERF'] === '1';
-
-// ---------------------------------------------------------------------------
 // Ring buffer
 // ---------------------------------------------------------------------------
 
@@ -86,7 +75,11 @@ export class ToolCallTimingRingBuffer {
     this.buffer = new Array<ToolCallTiming | undefined>(capacity).fill(undefined);
   }
 
-  /** Add a timing observation. Overwrites the oldest entry when full. */
+  /**
+   * Add a timing observation. Overwrites the oldest entry when full.
+   * Safe without locking: Node.js single-threaded event loop means two-field
+   * mutation (head + count) is never observed in a torn state by another caller.
+   */
   push(timing: ToolCallTiming): void {
     this.buffer[this.head] = timing;
     this.head = (this.head + 1) % this.capacity;
@@ -119,7 +112,11 @@ export class ToolCallTimingRingBuffer {
 // Sink factories
 // ---------------------------------------------------------------------------
 
-/** Default ring buffer capacity for the console API endpoint. */
+/**
+ * Default ring buffer capacity for the console API endpoint.
+ * 100 entries covers ~10 minutes of typical agent activity (one call every ~6s)
+ * while keeping memory overhead negligible (each entry is <200 bytes).
+ */
 export const DEFAULT_RING_BUFFER_CAPACITY = 100;
 
 /**
@@ -135,7 +132,7 @@ export function createRingBufferSink(
 }
 
 /**
- * Create a sink that logs to stderr (for WORKRAIL_DEV_PERF=1).
+ * Create a sink that logs to stderr (enabled when WORKRAIL_DEV=1).
  * Output format is designed for easy scanning in a terminal.
  */
 export function createDevPerfSink(): ToolCallTimingSink {
@@ -147,17 +144,16 @@ export function createDevPerfSink(): ToolCallTimingSink {
 }
 
 /**
- * Compose two sinks into one.
- * Both sinks receive every observation independently.
- * If either throws, the exception is swallowed (timing is observability, not correctness).
+ * Compose any number of sinks into one.
+ * All sinks receive every observation independently.
+ * If any sink throws, the exception is swallowed (timing is observability, not correctness).
+ * Binary usage (composeSinks(a, b)) continues to work unchanged.
  */
-export function composeSinks(
-  a: ToolCallTimingSink,
-  b: ToolCallTimingSink,
-): ToolCallTimingSink {
+export function composeSinks(...sinks: ToolCallTimingSink[]): ToolCallTimingSink {
   return (timing) => {
-    try { a(timing); } catch { /* observability must not affect correctness */ }
-    try { b(timing); } catch { /* observability must not affect correctness */ }
+    for (const sink of sinks) {
+      try { sink(timing); } catch { /* observability must not affect correctness */ }
+    }
   };
 }
 
@@ -183,7 +179,10 @@ export async function withToolCallTiming<T>(
   const startedAtMs = Date.now();
   const startHr = performance.now();
 
-  let outcome: ToolCallOutcome = 'unknown_tool';
+  // Initial value is 'error': if something fails before the try block assigns
+  // a real outcome (impossible today but defensively correct), 'error' is the
+  // honest fallback. 'unknown_tool' would be wrong here since the tool is known.
+  let outcome: ToolCallOutcome = 'error';
 
   try {
     const result = await handler();

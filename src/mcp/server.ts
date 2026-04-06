@@ -32,8 +32,8 @@ import { LocalDirectoryListingV2 } from '../v2/infra/local/directory-listing/ind
 import { LocalSessionSummaryProviderV2 } from '../v2/infra/local/session-summary-provider/index.js';
 
 import { createToolFactory, type ToolAnnotations, type ToolDefinition } from './tool-factory.js';
+import { DEV_MODE } from './dev-mode.js';
 import {
-  DEV_PERF,
   DEFAULT_RING_BUFFER_CAPACITY,
   ToolCallTimingRingBuffer,
   composeSinks,
@@ -377,14 +377,14 @@ export async function composeServer(): Promise<ComposedServerInternal> {
   // Tool call timing sink
   //
   // Observations flow into the ring buffer created above (shared with console route).
-  // When WORKRAIL_DEV_PERF=1, stderr output is composed in as a second sink.
+  // When WORKRAIL_DEV=1, stderr output is composed in as a second sink.
   // ---------------------------------------------------------------------------
-  const timingSink: ToolCallTimingSink = DEV_PERF
+  const timingSink: ToolCallTimingSink = DEV_MODE
     ? composeSinks(createRingBufferSink(timingRingBuffer), createDevPerfSink())
     : createRingBufferSink(timingRingBuffer);
 
-  if (DEV_PERF) {
-    console.error('[PerfTrace] WORKRAIL_DEV_PERF=1 -- tool call timing active');
+  if (DEV_MODE) {
+    console.error('[PerfTrace] WORKRAIL_DEV=1 -- tool call timing active');
   }
 
   // Register CallTool handler.
@@ -392,6 +392,9 @@ export async function composeServer(): Promise<ComposedServerInternal> {
   // receive deterministic, immutable input for their duration.
   server.setRequestHandler(CallToolRequestSchema, async (request: any): Promise<any> => {
     const { name, arguments: args } = request.params;
+    // Capture start time at the very top so unknown-tool elapsed time is accurate.
+    const handlerStartMs = Date.now();
+    const handlerStartHr = performance.now();
 
     const handler = handlers[name];
     if (!handler) {
@@ -400,8 +403,12 @@ export async function composeServer(): Promise<ComposedServerInternal> {
         content: [{ type: 'text', text: `Unknown tool: ${name}` }],
         isError: true,
       };
-      // Emit a zero-duration observation for unknown tools (no handler to time)
-      timingSink({ toolName: name ?? '(unknown)', startedAtMs: Date.now(), durationMs: 0, outcome: 'unknown_tool' });
+      const durationMs = Math.round((performance.now() - handlerStartHr) * 100) / 100;
+      try {
+        timingSink({ toolName: name ?? '(unknown)', startedAtMs: handlerStartMs, durationMs, outcome: 'unknown_tool' });
+      } catch {
+        // Timing is observability, not correctness.
+      }
       return unknownResult;
     }
 
