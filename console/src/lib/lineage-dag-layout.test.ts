@@ -26,6 +26,10 @@ function makeNode(
     isPreferredTip: false,
     isTip: false,
     stepLabel: null,
+    hasRecap: false,
+    hasFailedValidations: false,
+    hasGaps: false,
+    hasArtifacts: false,
     ...overrides,
   };
 }
@@ -343,16 +347,16 @@ describe('cycle safety', () => {
   it('does not hang when parentNodeId forms a cycle (collectActiveLineageIds)', () => {
     // a -> b -> a  (cycle)
     _eventIndex = 0;
-    const a: ConsoleDagNode = { nodeId: 'a', nodeKind: 'step', parentNodeId: 'b', createdAtEventIndex: 0, isPreferredTip: false, isTip: false, stepLabel: null };
-    const b: ConsoleDagNode = { nodeId: 'b', nodeKind: 'step', parentNodeId: 'a', createdAtEventIndex: 1, isPreferredTip: true, isTip: true, stepLabel: null };
+    const a: ConsoleDagNode = { nodeId: 'a', nodeKind: 'step', parentNodeId: 'b', createdAtEventIndex: 0, isPreferredTip: false, isTip: false, stepLabel: null, hasRecap: false, hasFailedValidations: false, hasGaps: false, hasArtifacts: false };
+    const b: ConsoleDagNode = { nodeId: 'b', nodeKind: 'step', parentNodeId: 'a', createdAtEventIndex: 1, isPreferredTip: true, isTip: true, stepLabel: null, hasRecap: false, hasFailedValidations: false, hasGaps: false, hasArtifacts: false };
     // Should complete without stack overflow
     expect(() => buildLineageDagModel(makeRun([a, b], 'b'))).not.toThrow();
   });
 
   it('does not hang when parentNodeId forms a cycle (resolveDepth)', () => {
     _eventIndex = 0;
-    const x: ConsoleDagNode = { nodeId: 'x', nodeKind: 'step', parentNodeId: 'y', createdAtEventIndex: 0, isPreferredTip: false, isTip: false, stepLabel: null };
-    const y: ConsoleDagNode = { nodeId: 'y', nodeKind: 'step', parentNodeId: 'x', createdAtEventIndex: 1, isPreferredTip: true, isTip: true, stepLabel: null };
+    const x: ConsoleDagNode = { nodeId: 'x', nodeKind: 'step', parentNodeId: 'y', createdAtEventIndex: 0, isPreferredTip: false, isTip: false, stepLabel: null, hasRecap: false, hasFailedValidations: false, hasGaps: false, hasArtifacts: false };
+    const y: ConsoleDagNode = { nodeId: 'y', nodeKind: 'step', parentNodeId: 'x', createdAtEventIndex: 1, isPreferredTip: true, isTip: true, stepLabel: null, hasRecap: false, hasFailedValidations: false, hasGaps: false, hasArtifacts: false };
     expect(() => buildLineageDagModel(makeRun([x, y], 'y'))).not.toThrow();
   });
 
@@ -362,8 +366,8 @@ describe('cycle safety', () => {
     const a = makeNode('a', null);
     const b = makeNode('b', 'a');
     const c = makeNode('c', 'b', { isTip: true });
-    const s1: ConsoleDagNode = { nodeId: 's1', nodeKind: 'step', parentNodeId: 's2', createdAtEventIndex: _eventIndex++, isPreferredTip: false, isTip: false, stepLabel: null };
-    const s2: ConsoleDagNode = { nodeId: 's2', nodeKind: 'step', parentNodeId: 's1', createdAtEventIndex: _eventIndex++, isPreferredTip: false, isTip: false, stepLabel: null };
+    const s1: ConsoleDagNode = { nodeId: 's1', nodeKind: 'step', parentNodeId: 's2', createdAtEventIndex: _eventIndex++, isPreferredTip: false, isTip: false, stepLabel: null, hasRecap: false, hasFailedValidations: false, hasGaps: false, hasArtifacts: false };
+    const s2: ConsoleDagNode = { nodeId: 's2', nodeKind: 'step', parentNodeId: 's1', createdAtEventIndex: _eventIndex++, isPreferredTip: false, isTip: false, stepLabel: null, hasRecap: false, hasFailedValidations: false, hasGaps: false, hasArtifacts: false };
     expect(() => buildLineageDagModel(makeRun([a, b, c, s1, s2], 'c'))).not.toThrow();
   });
 });

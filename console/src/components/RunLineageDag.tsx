@@ -321,12 +321,27 @@ function NodeLabel({
   stepNumber: number | null;
   totalSteps: number | null;
 }) {
+  const stripeColor = getRichnessStripeColor(node);
+
   return (
     <div
       className={`flex h-full w-full flex-col text-left overflow-hidden ${
         isCurrent && isLiveRun ? 'workrail-current-lineage-node' : ''
       } ${isSelected ? 'workrail-selected-lineage-node' : ''}`}
     >
+      {stripeColor && (
+        <div
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: 3,
+            background: stripeColor,
+            pointerEvents: 'none',
+          }}
+        />
+      )}
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-3 py-3">
         <div className="flex items-start justify-between gap-2">
           <span
@@ -565,6 +580,19 @@ function getNodeBorderColor(
   if (node.nodeKind === 'blocked_attempt') return isActiveLineage ? 'var(--error)' : 'rgba(239, 68, 68, 0.5)';
   if (node.nodeKind === 'checkpoint') return isActiveLineage ? 'var(--success)' : 'rgba(34, 197, 94, 0.45)';
   return isActiveLineage ? 'rgba(0, 240, 255, 0.55)' : 'rgba(123, 141, 167, 0.45)';
+}
+
+// Returns a CSS color string for the 3px left-border richness stripe on a node,
+// or null if no stripe should be shown. Priority (highest wins):
+//   var(--error)   -- failed validations (highest severity signal)
+//   var(--warning) -- gaps associated with this node
+//   var(--accent)  -- recap or artifacts (content worth reading)
+//   null           -- no content yet (in-progress or empty)
+function getRichnessStripeColor(node: ConsoleDagNode): string | null {
+  if (node.hasFailedValidations) return 'var(--error)';
+  if (node.hasGaps) return 'var(--warning)';
+  if (node.hasRecap || node.hasArtifacts) return 'var(--accent)';
+  return null;
 }
 
 function formatNodeKind(nodeKind: ConsoleDagNode['nodeKind']): string {
