@@ -85,7 +85,7 @@ const GROUP_AXES = [
     keyFn: (s: ConsoleSessionSummary) => s.status,
     // Sort status groups by severity order rather than alphabetically.
     groupCompareFn: (a: string, b: string) =>
-      (STATUS_SORT_ORDER[a as ConsoleRunStatus] ?? 99) - (STATUS_SORT_ORDER[b as ConsoleRunStatus] ?? 99),
+      (STATUS_SORT_ORDER[a as ConsoleSessionStatus] ?? 99) - (STATUS_SORT_ORDER[b as ConsoleSessionStatus] ?? 99),
   },
   { value: 'branch' as const, label: 'Branch', keyFn: (s: ConsoleSessionSummary) => s.gitBranch ?? 'No branch' },
 ] as const satisfies readonly GroupAxisDef<string>[];
