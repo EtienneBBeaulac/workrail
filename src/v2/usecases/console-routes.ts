@@ -58,8 +58,16 @@ function watchSessionsDir(sessionsDir: string): (() => void) {
 
   let watcher: fs.FSWatcher | null = null;
   try {
-    watcher = fs.watch(sessionsDir, { recursive: true }, () => {
-      broadcastChange();
+    watcher = fs.watch(sessionsDir, { recursive: true }, (_eventType, filename) => {
+      // Only broadcast on .jsonl writes (session event log files).
+      // Session event logs are the canonical signal that a workflow step
+      // has advanced. Ignoring other file types (temp files, lock files,
+      // snapshot JSON, recaps) prevents spurious SSE events that would
+      // otherwise trigger unnecessary session refetches.
+      // filename can be null on some platforms -- guard required.
+      if (filename !== null && filename.endsWith('.jsonl')) {
+        broadcastChange();
+      }
     });
     watcher.on('error', () => { /* ignore watch errors -- polling fallback covers gaps */ });
   } catch {
@@ -164,6 +172,13 @@ export function mountConsoleRoutes(app: Application, consoleService: ConsoleServ
   // Cache with a TTL so we re-scan sessions infrequently rather than on every request.
   // Active session counts (for worktree badges) still come from each full session scan.
   const REPO_ROOTS_TTL_MS = 60_000;
+
+  // Sessions older than this threshold do not contribute repo roots to worktree discovery.
+  // Without this bound, a single stale session from a large repo (e.g. one with 79 worktrees)
+  // permanently inflates the worktree enrichment cost for the lifetime of the MCP server process.
+  // 30 days is conservative: any session not touched in a month is almost certainly inactive.
+  const REPO_ROOT_SESSION_STALENESS_MS = 30 * 24 * 60 * 60 * 1000;
+
   let cachedRepoRoots: readonly string[] = [];
   let repoRootsExpiresAt = 0;
 
@@ -179,7 +194,13 @@ export function mountConsoleRoutes(app: Application, consoleService: ConsoleServ
         const cwdRoot = await cwdRepoRootPromise;
         // Normalize each session repoRoot through resolveRepoRoot so linked worktrees
         // collapse to their main repo root rather than appearing as separate repos.
-        const rawRoots = sessions.map(s => s.repoRoot).filter((r): r is string => r !== null);
+        // Only include sessions touched within the staleness window -- stale sessions
+        // from inactive repos inflate the worktree count without providing useful signal.
+        const cutoffMs = Date.now() - REPO_ROOT_SESSION_STALENESS_MS;
+        const rawRoots = sessions
+          .filter(s => s.lastModifiedMs >= cutoffMs)
+          .map(s => s.repoRoot)
+          .filter((r): r is string => r !== null);
         const resolvedRoots = await Promise.all(rawRoots.map(r => resolveRepoRoot(r)));
         const repoRootSet = new Set<string>(resolvedRoots.filter((r): r is string => r !== null));
         if (cwdRoot !== null) repoRootSet.add(cwdRoot);

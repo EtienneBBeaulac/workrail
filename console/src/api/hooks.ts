@@ -75,9 +75,16 @@ export function useWorkflowDetail(workflowId: string | null) {
 }
 
 /**
- * Subscribes to the workspace SSE stream and invalidates sessions + worktrees
- * queries immediately when the server detects a change. This gives near-instant
- * UI updates when a workflow advances, a status changes, or a new session starts.
+ * Subscribes to the workspace SSE stream and invalidates the sessions query
+ * immediately when the server detects a change. This gives near-instant UI
+ * updates when a workflow advances, a status changes, or a new session starts.
+ *
+ * Worktrees are intentionally NOT invalidated here. Session writes (high
+ * frequency -- every continue_workflow step) are semantically unrelated to
+ * git worktree state (low frequency -- developer branch switches, commits).
+ * Coupling them caused a CPU death spiral: session write -> SSE -> worktrees
+ * refetch (606 concurrent git subprocesses, 12.5s) -> more session writes ->
+ * repeat. Worktrees are now governed solely by their refetchInterval.
  *
  * Falls back to polling if the SSE connection drops or is unavailable.
  */
@@ -95,9 +102,8 @@ export function useWorkspaceEvents(): void {
         try {
           const msg = JSON.parse(event.data) as { type: string };
           if (msg.type === 'change') {
-            // Invalidate both queries so they refetch immediately
+            // Only invalidate sessions -- worktrees are governed by refetchInterval.
             void queryClient.invalidateQueries({ queryKey: ['sessions'] });
-            void queryClient.invalidateQueries({ queryKey: ['worktrees'] });
           }
         } catch { /* ignore malformed messages */ }
       };

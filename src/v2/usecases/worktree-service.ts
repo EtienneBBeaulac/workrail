@@ -101,6 +101,43 @@ function parseWorktreePorcelain(raw: string): RawWorktree[] {
 }
 
 // ---------------------------------------------------------------------------
+// Semaphore: limit concurrent git subprocess batches
+//
+// enrichWorktree runs 6 git commands in parallel per worktree via Promise.all.
+// Without a cap, a repo with 101 worktrees spawns 606 concurrent subprocesses
+// per /api/v2/worktrees request, saturating the OS process table and causing
+// 12.5s response times and 140%+ CPU usage.
+//
+// With MAX_CONCURRENT_ENRICHMENTS=8: at most 48 concurrent git processes
+// (8 worktrees x 6 commands). Total latency for 101 worktrees becomes
+// ~ceil(101/8) x single-worktree-time rather than max single-worktree-time.
+// ---------------------------------------------------------------------------
+
+const MAX_CONCURRENT_ENRICHMENTS = 8;
+let activeEnrichments = 0;
+const enrichmentQueue: Array<() => void> = [];
+
+function acquireEnrichmentSlot(): Promise<void> {
+  return new Promise((resolve) => {
+    if (activeEnrichments < MAX_CONCURRENT_ENRICHMENTS) {
+      activeEnrichments++;
+      resolve();
+    } else {
+      enrichmentQueue.push(() => { activeEnrichments++; resolve(); });
+    }
+  });
+}
+
+function releaseEnrichmentSlot(): void {
+  const next = enrichmentQueue.shift();
+  if (next) {
+    next();
+  } else {
+    activeEnrichments--;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Per-worktree enrichment
 // ---------------------------------------------------------------------------
 
@@ -246,13 +283,24 @@ async function enrichRepo(
 
   const rawWorktrees = parseWorktreePorcelain(porcelain);
 
-  // Enrich all worktrees in parallel — each enrichWorktree itself parallelizes
-  // its three git calls, so total latency ≈ max single-worktree enrichment time.
+  // Enrich all worktrees in parallel, gated by the process-level semaphore.
+  // Each enrichWorktree call runs 6 git commands concurrently; the semaphore
+  // limits how many worktrees are enriched at once so we don't fan out to
+  // hundreds of simultaneous git subprocesses across multiple repo roots.
   //
   // Promise.allSettled so a single broken worktree (unexpected JS error, not a
-  // git failure — those are already handled in git()) does not silently fail the
+  // git failure -- those are already handled in git()) does not silently fail the
   // entire repo. Rejected entries are logged and excluded: surface info, don't hide it.
-  const results = await Promise.allSettled(rawWorktrees.map(wt => enrichWorktree(wt)));
+  const results = await Promise.allSettled(
+    rawWorktrees.map(async (wt) => {
+      await acquireEnrichmentSlot();
+      try {
+        return await enrichWorktree(wt);
+      } finally {
+        releaseEnrichmentSlot();
+      }
+    }),
+  );
 
   const worktrees: ConsoleWorktreeSummary[] = rawWorktrees.flatMap((wt, i) => {
     const result = results[i]!;
