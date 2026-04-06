@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# commit-msg: quality gate for every commit.
+#
+# ALWAYS blocks and shows the quality checklist, even when the message
+# looks fine. This forces a conscious quality review before any commit lands.
+#
+# To confirm the message is good and proceed: re-run with --no-verify.
+# To fix the message first: edit it, then re-run with --no-verify.
+#
+# Note: --no-verify skips ALL hooks, including pre-commit workflow validation.
+# Only use it once you have genuinely reviewed the message quality.
+#
+# Install: run scripts/setup-hooks.sh
+
+COMMIT_MSG_FILE="$1"
+COMMIT_MSG=$(cat "$COMMIT_MSG_FILE")
+FIRST_LINE=$(echo "$COMMIT_MSG" | head -1)
+
+# ---------------------------------------------------------------------------
+# Skip automated commits that have their own standard format
+# ---------------------------------------------------------------------------
+
+if echo "$FIRST_LINE" | grep -qE "^Merge "; then exit 0; fi
+if echo "$FIRST_LINE" | grep -qE "^Revert \""; then exit 0; fi
+if echo "$FIRST_LINE" | grep -qE "^(fixup|squash)!"; then exit 0; fi
+
+# ---------------------------------------------------------------------------
+# Quality checklist (always shown)
+# ---------------------------------------------------------------------------
+
+CHECKLIST=$(cat << 'CHECKLIST'
+Quality checklist
+=================
+
+Before re-running with --no-verify, confirm YES to all of these:
+
+  1. SPECIFIC     The subject describes exactly what changed -- not just
+                  that something changed.
+                  Bad:  "fix console bug"
+                  Good: "fix scroll position not restored on SessionDetail back-nav"
+
+  2. USER-FACING  A user reading the release notes would understand why
+                  they care. No internal labels (phase2a, slice4, task-123).
+
+  3. CORRECT TYPE feat=new feature  fix=user bug  chore=everything else
+                  Use chore for CI/deps/build/tooling -- not fix(ci).
+
+  4. VALID SCOPE  Product area only, or omit.
+                  Allowed:     console  mcp  workflows  engine  schema  docs
+                  Not allowed: phase2a  ci  deps  build  slice*  task*
+
+  5. FORMAT       <type>(<scope>): <subject>  -- max 72 chars, no period at end.
+
+Once all YES: re-run the same git commit command with --no-verify appended.
+
+Note: --no-verify also skips the pre-commit workflow file validation hook.
+Only bypass once you have reviewed both the message quality AND any workflow
+JSON changes in this commit.
+CHECKLIST
+)
+
+VALID_TYPES="feat|fix|chore|docs|refactor|test|perf|revert"
+INTERNAL_SCOPES="phase|slice|task|sprint|ticket|ci|deps|build|wip"
+
+# ---------------------------------------------------------------------------
+# Format check -- show a specific error before the checklist if format is wrong
+# ---------------------------------------------------------------------------
+
+FORMAT_ERROR=""
+
+if ! echo "$FIRST_LINE" | grep -qE "^($VALID_TYPES)(\([^)]+\))?: .+"; then
+  FORMAT_ERROR="Format error: does not match <type>(<scope>): <subject>"
+fi
+
+if [ -z "$FORMAT_ERROR" ] && echo "$FIRST_LINE" | grep -qiE "^($VALID_TYPES)\(($INTERNAL_SCOPES)[^)]*\):"; then
+  FORMAT_ERROR="Format error: scope looks like an internal label, not a product area."
+fi
+
+if [ -z "$FORMAT_ERROR" ] && echo "$FIRST_LINE" | grep -qiE "^fix\((ci|deps|build|lint|tooling)[^)]*\):"; then
+  FORMAT_ERROR="Format error: use 'chore' for CI/deps/build changes, not 'fix'."
+fi
+
+if [ -z "$FORMAT_ERROR" ] && [ "${#FIRST_LINE}" -gt 72 ]; then
+  FORMAT_ERROR="Format error: first line is ${#FIRST_LINE} chars (max 72)."
+fi
+
+# ---------------------------------------------------------------------------
+# Always block -- show format error (if any) then quality checklist
+# ---------------------------------------------------------------------------
+
+echo ""
+
+if [ -n "$FORMAT_ERROR" ]; then
+  echo "  $FORMAT_ERROR"
+  echo "  Fix the format, then re-run with --no-verify once quality is confirmed."
+  echo ""
+fi
+
+echo "Your message: $FIRST_LINE"
+echo ""
+echo "$CHECKLIST"
+
+exit 1
