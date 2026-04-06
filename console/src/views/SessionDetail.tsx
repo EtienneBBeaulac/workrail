@@ -79,24 +79,30 @@ export function SessionDetail({ sessionId }: Props) {
       </div>
 
       {/* Floating detail panel -- inset from all edges, angled top-left corner.
-          Outer div = border layer (clip-path + border color as background).
-          Inner div = content layer (1px inset, matching polygon so border
-          follows the diagonal cut rather than being clipped away). */}
+          Shadow wrapper: filter:drop-shadow works with clip-path (box-shadow is clipped).
+          Border layer: clip-path + accent-tinted border as background.
+          Content layer: 1px inset with matching polygon. */}
       <div
         className="fixed top-3 right-3 bottom-3 w-[560px] max-w-[calc(92vw-12px)] transition-transform duration-200 ease-out"
         style={{
           zIndex: 40,
           transform: selectedNode ? 'translateX(0)' : 'translateX(calc(100% + 12px))',
-          background: 'var(--border)',
-          clipPath: 'polygon(18px 0, 100% 0, 100% 100%, 0 100%, 0 18px)',
-          boxShadow: '0 8px 40px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.3)',
+          filter: 'drop-shadow(0 16px 48px rgba(0,0,0,0.8)) drop-shadow(0 2px 8px rgba(0,0,0,0.6))',
         }}
       >
         <div
-          className="absolute flex flex-col bg-[var(--bg-card)]"
+          className="absolute inset-0"
+          style={{
+            background: 'rgba(0, 240, 255, 0.25)',
+            clipPath: 'polygon(18px 0, 100% 0, 100% 100%, 0 100%, 0 18px)',
+          }}
+        />
+        <div
+          className="absolute flex flex-col"
           style={{
             inset: '1px',
             clipPath: 'polygon(17px 0, 100% 0, 100% 100%, 0 100%, 0 17px)',
+            background: 'color-mix(in srgb, var(--bg-card) 92%, var(--accent) 8%)',
           }}
         >
           <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] shrink-0 console-blueprint-grid">
