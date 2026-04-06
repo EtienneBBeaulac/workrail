@@ -7,6 +7,9 @@
 # To confirm the message is good and proceed: re-run with --no-verify.
 # To fix the message first: edit it, then re-run with --no-verify.
 #
+# Note: --no-verify skips ALL hooks, including pre-commit workflow validation.
+# Only use it once you have genuinely reviewed the message quality.
+#
 # Install: run scripts/setup-hooks.sh
 
 COMMIT_MSG_FILE="$1"
@@ -48,7 +51,11 @@ Before re-running with --no-verify, confirm YES to all of these:
 
   5. FORMAT       <type>(<scope>): <subject>  -- max 72 chars, no period at end.
 
-Once all YES: git commit ... --no-verify
+Once all YES: re-run the same git commit command with --no-verify appended.
+
+Note: --no-verify also skips the pre-commit workflow file validation hook.
+Only bypass once you have reviewed both the message quality AND any workflow
+JSON changes in this commit.
 CHECKLIST
 )
 
