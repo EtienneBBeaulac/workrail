@@ -12,6 +12,7 @@ import fs from 'fs';
 import type { ConsoleService } from './console-service.js';
 import { getWorktreeList, buildActiveSessionCounts, resolveRepoRoot } from './worktree-service.js';
 import type { WorkflowService } from '../../application/services/workflow-service.js';
+import type { ToolCallTimingRingBuffer } from '../../mcp/tool-call-timing.js';
 
 // ---------------------------------------------------------------------------
 // Workspace SSE broadcast
@@ -124,7 +125,12 @@ function loadWorkflowTags(): WorkflowTagsFile {
   }
 }
 
-export function mountConsoleRoutes(app: Application, consoleService: ConsoleService, workflowService?: WorkflowService): void {
+export function mountConsoleRoutes(
+  app: Application,
+  consoleService: ConsoleService,
+  workflowService?: WorkflowService,
+  timingRingBuffer?: ToolCallTimingRingBuffer,
+): void {
   // Start watching the sessions directory so SSE clients get notified of changes
   const stopWatcher = watchSessionsDir(consoleService.getSessionsDir());
   // Clean up watcher if the process exits gracefully
@@ -150,6 +156,27 @@ export function mountConsoleRoutes(app: Application, consoleService: ConsoleServ
     // Remove client on disconnect
     req.on('close', () => { sseClients.delete(res); });
     res.on('close', () => { sseClients.delete(res); }); // F4: catch external res.end() immediately
+  });
+
+  // ---------------------------------------------------------------------------
+  // Perf: recent tool call timings
+  //
+  // GET /api/v2/perf/tool-calls?limit=N
+  //
+  // Returns the most recent N tool call timing observations from the ring buffer
+  // (newest first, max 100). When WORKRAIL_DEV_PERF=1, this endpoint lets the
+  // browser console display latency data without restarting the server.
+  //
+  // The ring buffer is optional: if the server was not started with perf tracing
+  // wired in (e.g. unit tests), the endpoint returns an empty array rather than
+  // 404 so clients can always query it unconditionally.
+  // ---------------------------------------------------------------------------
+  app.get('/api/v2/perf/tool-calls', (req: Request, res: Response) => {
+    const rawLimit = req.query['limit'];
+    const limit = typeof rawLimit === 'string' ? parseInt(rawLimit, 10) : undefined;
+    const safeLimit = (limit !== undefined && Number.isFinite(limit) && limit > 0) ? limit : undefined;
+    const observations = timingRingBuffer ? timingRingBuffer.recent(safeLimit) : [];
+    res.json({ success: true, data: { observations, total: timingRingBuffer?.size ?? 0 } });
   });
 
   // List all v2 sessions

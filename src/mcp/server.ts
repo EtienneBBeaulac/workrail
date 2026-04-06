@@ -32,6 +32,16 @@ import { LocalDirectoryListingV2 } from '../v2/infra/local/directory-listing/ind
 import { LocalSessionSummaryProviderV2 } from '../v2/infra/local/session-summary-provider/index.js';
 
 import { createToolFactory, type ToolAnnotations, type ToolDefinition } from './tool-factory.js';
+import {
+  DEV_PERF,
+  DEFAULT_RING_BUFFER_CAPACITY,
+  ToolCallTimingRingBuffer,
+  composeSinks,
+  createDevPerfSink,
+  createRingBufferSink,
+  withToolCallTiming,
+  type ToolCallTimingSink,
+} from './tool-call-timing.js';
 import type { IToolDescriptionProvider } from './tool-description-provider.js';
 import { createHandler } from './handler-factory.js';
 import type { WrappedToolHandler } from './types/workflow-tool-edition.js';
@@ -256,6 +266,12 @@ export async function composeServer(): Promise<ComposedServerInternal> {
   // Create tool context with all dependencies
   const ctx = await createToolContext();
 
+  // ---------------------------------------------------------------------------
+  // Timing ring buffer -- created here so it can be shared between the
+  // CallTool handler (write side) and the console API route (read side).
+  // ---------------------------------------------------------------------------
+  const timingRingBuffer = new ToolCallTimingRingBuffer(DEFAULT_RING_BUFFER_CAPACITY);
+
   // Mount v2 Console API routes (read-only, if v2 + httpServer available)
   if (ctx.v2 && ctx.httpServer && ctx.v2.dataDir && ctx.v2.directoryListing) {
     const { ConsoleService } = await import('../v2/usecases/console-service.js');
@@ -267,7 +283,7 @@ export async function composeServer(): Promise<ComposedServerInternal> {
       snapshotStore: ctx.v2.snapshotStore,
       pinnedWorkflowStore: ctx.v2.pinnedStore,
     });
-    ctx.httpServer.mountRoutes((app) => mountConsoleRoutes(app, consoleService, ctx.workflowService));
+    ctx.httpServer.mountRoutes((app) => mountConsoleRoutes(app, consoleService, ctx.workflowService, timingRingBuffer));
     console.error('[Console] v2 Console API routes mounted at /api/v2/');
   }
 
@@ -357,6 +373,20 @@ export async function composeServer(): Promise<ComposedServerInternal> {
     tools,
   }));
 
+  // ---------------------------------------------------------------------------
+  // Tool call timing sink
+  //
+  // Observations flow into the ring buffer created above (shared with console route).
+  // When WORKRAIL_DEV_PERF=1, stderr output is composed in as a second sink.
+  // ---------------------------------------------------------------------------
+  const timingSink: ToolCallTimingSink = DEV_PERF
+    ? composeSinks(createRingBufferSink(timingRingBuffer), createDevPerfSink())
+    : createRingBufferSink(timingRingBuffer);
+
+  if (DEV_PERF) {
+    console.error('[PerfTrace] WORKRAIL_DEV_PERF=1 -- tool call timing active');
+  }
+
   // Register CallTool handler.
   // Snapshots workspace root URIs once at the request boundary so handlers
   // receive deterministic, immutable input for their duration.
@@ -365,17 +395,25 @@ export async function composeServer(): Promise<ComposedServerInternal> {
 
     const handler = handlers[name];
     if (!handler) {
-      return {
+      // Record unknown tool as a timing observation so gaps are visible in perf data
+      const unknownResult = {
         content: [{ type: 'text', text: `Unknown tool: ${name}` }],
         isError: true,
       };
+      // Emit a zero-duration observation for unknown tools (no handler to time)
+      timingSink({ toolName: name ?? '(unknown)', startedAtMs: Date.now(), durationMs: 0, outcome: 'unknown_tool' });
+      return unknownResult;
     }
 
     const requestCtx: ToolContext = ctx.v2
       ? { ...ctx, v2: { ...ctx.v2, resolvedRootUris: rootsManager.getCurrentRootUris() } }
       : ctx;
 
-    return handler(args ?? {}, requestCtx);
+    return withToolCallTiming(
+      name,
+      () => handler(args ?? {}, requestCtx),
+      timingSink,
+    );
   });
 
   // Register ListResources handler — exposes the workrail://tags catalog resource.
