@@ -1,0 +1,23 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      dependencies:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: npm
+    directory: /console
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      console-dependencies:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 5
