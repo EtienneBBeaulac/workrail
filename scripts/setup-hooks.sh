@@ -1,48 +1,32 @@
-#!/bin/bash
-# Setup git hooks for workflow validation
+#!/usr/bin/env bash
+# Configures git to use the tracked .git-hooks/ directory.
+#
+# Run once after cloning: ./scripts/setup-hooks.sh
+#
+# Using core.hooksPath keeps hooks in sync with the repo automatically --
+# no copying required. Any update to .git-hooks/ takes effect immediately.
+
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-GIT_DIR="$PROJECT_ROOT/.git"
-HOOKS_DIR="$GIT_DIR/hooks"
 
-# Check if we're in a git repository
-if [ ! -d "$GIT_DIR" ]; then
-    # Try parent directory (monorepo case)
-    GIT_DIR="$(dirname "$PROJECT_ROOT")/.git"
-    HOOKS_DIR="$GIT_DIR/hooks"
-    
-    if [ ! -d "$GIT_DIR" ]; then
-        echo "❌ Not in a git repository. Skipping hook installation."
-        exit 0
-    fi
+cd "$PROJECT_ROOT"
+
+if ! git rev-parse --git-dir > /dev/null 2>&1; then
+  echo "Not in a git repository. Skipping hook setup."
+  exit 0
 fi
 
-echo "🔧 Setting up git hooks..."
+# Point git at the tracked hooks directory
+git config core.hooksPath .git-hooks
 
-# Create hooks directory if it doesn't exist
-mkdir -p "$HOOKS_DIR"
-
-# Copy pre-commit hook
-cp "$PROJECT_ROOT/.git-hooks/pre-commit" "$HOOKS_DIR/pre-commit"
-chmod +x "$HOOKS_DIR/pre-commit"
-
-echo "✅ Git hooks installed!"
+echo "Git hooks configured (core.hooksPath = .git-hooks)."
 echo ""
-echo "Pre-commit hook will validate workflow files before each commit."
-echo "To skip validation: git commit --no-verify (not recommended)"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+echo "Active hooks:"
+for hook in .git-hooks/*; do
+  name=$(basename "$hook")
+  echo "  $name"
+done
+echo ""
+echo "To skip a hook on a specific commit: git commit --no-verify"

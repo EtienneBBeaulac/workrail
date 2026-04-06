@@ -175,10 +175,60 @@ Do not attempt to restart the MCP server programmatically -- the user will toggl
 
 ## Branch and commit conventions
 
-- Branch naming: `feature/etienneb/<name>`, `fix/etienneb/<name>`, `docs/etienneb/<name>`
-- Commit messages: conventional commits (`feat:`, `fix:`, `docs:`, `chore:`, `test:`, `refactor:`)
-- PRs are squash-merged to main
-- Prefer rebasing on main over merge commits when resolving conflicts
+Branch naming: `feature/etienneb/<name>`, `fix/etienneb/<name>`, `docs/etienneb/<name>`
+
+PRs are squash-merged to main. Prefer rebasing on main over merge commits when resolving conflicts.
+
+### Commit message format
+
+```
+<type>(<scope>): <subject>
+
+<optional body>
+```
+
+**A `commit-msg` hook enforces these rules.** If your commit message is rejected, the hook prints the full rules. Run `./scripts/setup-hooks.sh` once after cloning to activate it.
+
+#### Types
+
+| Type | When to use | Release effect |
+|---|---|---|
+| `feat` | New user-visible feature or capability | minor bump |
+| `fix` | Bug fix that affects users | patch bump |
+| `perf` | Performance improvement | patch bump |
+| `revert` | Reverts a previous commit | patch bump |
+| `chore` | CI, deps, build, tooling, internal cleanup | no release |
+| `refactor` | Code restructuring with no behavior change | no release |
+| `docs` | Documentation only | no release |
+| `test` | Adding or updating tests | no release |
+
+**Use `chore` for CI/deps/build changes -- not `fix`.** `fix(ci)`, `fix(deps)`, `fix(build)` are wrong: they create a release entry that users do not care about.
+
+#### Scopes
+
+Scopes must be **product areas**, not implementation tracking labels.
+
+Allowed: `console` `mcp` `workflows` `engine` `schema` `docs`
+
+Not allowed: `phase2a`, `slice4`, `task-123`, `sprint`, `ci`, `deps`, `build`
+
+If the change does not fit a named product area cleanly, omit the scope entirely.
+
+#### Subject line
+
+Write for a user reading the release changelog -- not for a developer tracking implementation work.
+
+| Bad | Why | Good |
+|---|---|---|
+| `fix phase2a slice 4 dedup gap` | Internal jargon | `fix(engine): deduplicate env path roots on source scan` |
+| `fix(ci): update validate:registry` | Should be chore | `chore: replace deprecated validate:workflows script` |
+| `add stuff for console tab` | Vague | `feat(console): add Workflows tab with tag filter and detail panel` |
+| `WIP` | Not a commit message | Finish the work first |
+
+Rules:
+- 72 characters max on the first line
+- No period at the end of the subject
+- The subject completes the sentence: "If merged, this commit will..."
 
 ## Pull requests and merging
 
