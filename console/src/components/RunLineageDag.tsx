@@ -256,7 +256,7 @@ function NodeLabel({
         isCurrent && isLiveRun ? 'workrail-current-lineage-node' : ''
       } ${isSelected ? 'workrail-selected-lineage-node' : ''}`}
     >
-      <div className="flex min-h-0 flex-1 flex-col gap-2 px-3 py-3">
+      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-3 py-3">
         <div className="flex items-start justify-between gap-2">
           <span
             className="font-mono text-[10px] uppercase tracking-[0.18em]"
@@ -292,7 +292,6 @@ function NodeLabel({
             WebkitLineClamp: isActiveLineage ? 4 : 3,
             WebkitBoxOrient: 'vertical',
             overflow: 'hidden',
-            minHeight: isActiveLineage ? '4.9em' : '3.9em',
           }}
         >
           {displayLabel}
