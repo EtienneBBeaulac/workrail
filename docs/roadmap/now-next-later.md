@@ -4,6 +4,7 @@ This is the lightweight cross-cutting roadmap view for WorkRail.
 
 ## Now
 
+- ~~Workflows tab + `about`/`examples` schema fields~~ (done -- Workflows tab ships with TanStack Router, tag filter pills, detail panel; `about` and `examples` added to workflow schema, MCP output, and console REST endpoints; all bundled workflows backfilled; `workflow-for-workflows.v2.json` updated to prompt for both fields)
 - ~~Complete v2 sign-off and cleanup~~ (done -- v2 is default-on; stale docs cleaned up)
 - ~~Expand lifecycle validation coverage to a realistic target~~ (done -- auto-walk smoke test covers all bundled workflows)
 - ~~Finish prompt vs supplement boundary alignment across runtime, docs, and planning~~ (done -- boundary is documented consistently across authoring locks, execution contract, and planning docs)

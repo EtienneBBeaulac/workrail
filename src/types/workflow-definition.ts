@@ -432,6 +432,20 @@ export interface WorkflowDefinition {
   readonly references?: readonly WorkflowReference[];
   /** The authoring spec version this workflow was last validated against. */
   readonly validatedAgainstSpecVersion?: number;
+  /**
+   * Human-readable overview for display in the console and other UIs.
+   * Markdown is supported. Written for a user deciding whether to use this
+   * workflow -- what it does, when to use it, what it produces, and how to
+   * get good results. User-facing surface; not an agent instruction (use
+   * metaGuidance for that).
+   */
+  readonly about?: string;
+  /**
+   * Short illustrative goal strings showing what this workflow is used for.
+   * Useful both for humans browsing the catalog and for agents selecting the
+   * right workflow.
+   */
+  readonly examples?: readonly string[];
 }
 
 // =============================================================================

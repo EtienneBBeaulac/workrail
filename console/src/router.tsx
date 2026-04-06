@@ -28,11 +28,34 @@ const sessionRoute = createRoute({
   component: () => null,
 });
 
+const workflowsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/workflows',
+  validateSearch: (search: Record<string, unknown>) => ({
+    tag: typeof search.tag === 'string' ? search.tag : undefined,
+  }),
+  component: () => null,
+});
+
+const workflowDetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/workflows/$workflowId',
+  validateSearch: (search: Record<string, unknown>) => ({
+    tag: typeof search.tag === 'string' ? search.tag : undefined,
+  }),
+  component: () => null,
+});
+
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
 
-const routeTree = rootRoute.addChildren([workspaceRoute, sessionRoute]);
+const routeTree = rootRoute.addChildren([
+  workspaceRoute,
+  sessionRoute,
+  workflowsRoute,
+  workflowDetailRoute,
+]);
 
 export const router = createRouter({
   routeTree,

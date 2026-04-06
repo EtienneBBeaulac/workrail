@@ -2,7 +2,14 @@
   "id": "document-creation-workflow",
   "name": "Document Creation Workflow",
   "version": "1.0.0",
-  "description": "Use this to create broad or comprehensive documentation spanning multiple components or systems \u2014 project READMEs, complete API docs, user guides, or technical specifications.",
+  "description": "Use this to create broad or comprehensive documentation spanning multiple components or systems — project READMEs, complete API docs, user guides, or technical specifications.",
+  "about": "## Document Creation Workflow\n\nThis workflow guides you through creating new documentation from scratch -- ranging from a simple project README to a full technical specification spanning multiple systems. It automatically calibrates depth to match the complexity of your request: simple tasks go straight to writing, while complex documentation gets a full analysis-and-planning phase first.\n\n### What it produces\n\nA complete, saved documentation file ready for use. Depending on complexity, it may also include a quality review pass covering accuracy, completeness, audience fit, usability, and style consistency.\n\n### When to use it\n\n- You need to create a **new** document (not update an existing one -- see the Documentation Update workflow for that).\n- The document spans one or more systems, components, or audiences.\n- Examples: project READMEs, API reference docs, user guides, onboarding docs, technical specifications, architecture overviews.\n\n### When NOT to use it\n\n- You want to update or refresh an existing doc -- use the Documentation Update workflow instead.\n- You need tight scope discipline for a single class or mechanism -- the Scoped Documentation workflow is better suited.\n\n### How to get good results\n\n- Be specific about the document type and intended audience upfront. The workflow probes for these, but the clearer your initial goal, the less back-and-forth.\n- If your project has existing documentation or style conventions, mention them -- the workflow will follow them.\n- For complex documentation, the workflow asks a small number of targeted questions it cannot answer from the codebase. Answer these concisely to keep momentum.",
+  "examples": [
+    "Create a README for the payments-service repo with setup, config, and deployment instructions",
+    "Write a full API reference for the new notifications SDK, including all endpoints and error codes",
+    "Create a user guide for the self-serve onboarding flow targeting non-technical customers",
+    "Write a technical specification for the proposed event-sourcing migration"
+  ],
   "preconditions": [
     "User has a clear idea of the document type and purpose.",
     "Relevant project files or information are available for reference.",
@@ -12,9 +19,9 @@
   "metaGuidance": [
     "NOTES-FIRST DURABILITY: use output.notesMarkdown as the primary durable record. Do NOT create CONTEXT.md, doc_spec.md, or content_plan.md as workflow memory.",
     "DISCOVER BEFORE ASKING: use tools to explore the project before asking clarification questions. Only ask what tools cannot answer.",
-    "COMPLEXITY DRIVES BRANCHING: docComplexity=Simple uses the fast path; Standard/Complex uses the full path. If complexity changes during work, note it in notesMarkdown and adapt \u2014 no retriage ceremony needed.",
+    "COMPLEXITY DRIVES BRANCHING: docComplexity=Simple uses the fast path; Standard/Complex uses the full path. If complexity changes during work, note it in notesMarkdown and adapt — no retriage ceremony needed.",
     "CONTENT-FIRST: the deliverable is the document, not planning artifacts. Keep planning proportional to scope.",
-    "EVIDENCE-BASED QUALITY: each quality dimension in the review step requires a one-sentence evidence statement and a pass or needs-work verdict \u2014 not a numeric score."
+    "EVIDENCE-BASED QUALITY: each quality dimension in the review step requires a one-sentence evidence statement and a pass or needs-work verdict — not a numeric score."
   ],
   "steps": [
     {
@@ -41,7 +48,7 @@
           }
         ]
       },
-      "prompt": "Analyze the project to inform documentation strategy. Limit this analysis to 1500 words; prioritize documentation-relevant insights.\n\nCover:\n1. **Existing documentation landscape** \u2014 current docs, style patterns, gaps\n2. **Project architecture** \u2014 key components relevant to this document\n3. **User or developer workflows** \u2014 how documentation fits into user journeys\n4. **Technical constraints** \u2014 APIs, systems, integrations to document\n5. **Style conventions** \u2014 terminology, formatting, naming patterns to follow\n6. **Audience** \u2014 who will use this documentation and what they need to accomplish\n\nNote any complexity indicators that might warrant reclassifying `docComplexity` upward.",
+      "prompt": "Analyze the project to inform documentation strategy. Limit this analysis to 1500 words; prioritize documentation-relevant insights.\n\nCover:\n1. **Existing documentation landscape** — current docs, style patterns, gaps\n2. **Project architecture** — key components relevant to this document\n3. **User or developer workflows** — how documentation fits into user journeys\n4. **Technical constraints** — APIs, systems, integrations to document\n5. **Style conventions** — terminology, formatting, naming patterns to follow\n6. **Audience** — who will use this documentation and what they need to accomplish\n\nNote any complexity indicators that might warrant reclassifying `docComplexity` upward.",
       "requireConfirmation": false
     },
     {
@@ -77,7 +84,7 @@
           }
         ]
       },
-      "prompt": "Create a content plan for this documentation in your notes.\n\nThe plan should cover:\n1. Document purpose and success criteria\n2. Target audience and their primary goals\n3. Section outline with one-line descriptions\n4. Writing strategy \u2014 tone, technical depth, key terminology\n5. Visual elements or code examples needed\n\nKeep the plan proportional to scope. The goal is a clear outline to execute against, not a heavyweight specification.",
+      "prompt": "Create a content plan for this documentation in your notes.\n\nThe plan should cover:\n1. Document purpose and success criteria\n2. Target audience and their primary goals\n3. Section outline with one-line descriptions\n4. Writing strategy — tone, technical depth, key terminology\n5. Visual elements or code examples needed\n\nKeep the plan proportional to scope. The goal is a clear outline to execute against, not a heavyweight specification.",
       "promptFragments": [
         {
           "id": "phase-3-plan-complex",
@@ -111,7 +118,7 @@
           }
         ]
       },
-      "prompt": "Review the documentation you just wrote using this rubric. For each dimension, provide a one-sentence evidence statement and a verdict of `pass` or `needs-work`.\n\n1. **Accuracy** \u2014 Does the content correctly describe the actual project or system? *(Evidence: cite one verified fact.)*\n2. **Completeness** \u2014 Does it cover all planned sections? *(Evidence: list planned vs completed sections.)*\n3. **Audience fit** \u2014 Is the technical depth right for the target reader? *(Evidence: identify one audience-appropriate choice made.)*\n4. **Usability** \u2014 Could a reader actually accomplish their goal using this doc? *(Evidence: trace one user journey through the doc.)*\n5. **Consistency** \u2014 Does it match project conventions for style, terminology, and format? *(Evidence: cite one convention followed.)*\n\nIf any dimension is `needs-work`, fix the issue immediately and re-assert the dimension as `pass` in your notes before continuing.",
+      "prompt": "Review the documentation you just wrote using this rubric. For each dimension, provide a one-sentence evidence statement and a verdict of `pass` or `needs-work`.\n\n1. **Accuracy** — Does the content correctly describe the actual project or system? *(Evidence: cite one verified fact.)*\n2. **Completeness** — Does it cover all planned sections? *(Evidence: list planned vs completed sections.)*\n3. **Audience fit** — Is the technical depth right for the target reader? *(Evidence: identify one audience-appropriate choice made.)*\n4. **Usability** — Could a reader actually accomplish their goal using this doc? *(Evidence: trace one user journey through the doc.)*\n5. **Consistency** — Does it match project conventions for style, terminology, and format? *(Evidence: cite one convention followed.)*\n\nIf any dimension is `needs-work`, fix the issue immediately and re-assert the dimension as `pass` in your notes before continuing.",
       "promptFragments": [
         {
           "id": "phase-5-quality-review-complex",
@@ -119,7 +126,7 @@
             "var": "docComplexity",
             "equals": "Complex"
           },
-          "text": "Also review a sixth dimension:\n6. **Integration coherence** \u2014 Does the doc integrate correctly with the existing documentation ecosystem? *(Evidence: describe how it cross-links or relates to existing docs.)*"
+          "text": "Also review a sixth dimension:\n6. **Integration coherence** — Does the doc integrate correctly with the existing documentation ecosystem? *(Evidence: describe how it cross-links or relates to existing docs.)*"
         }
       ],
       "requireConfirmation": false

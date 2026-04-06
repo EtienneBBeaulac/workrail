@@ -267,7 +267,7 @@ export async function composeServer(): Promise<ComposedServerInternal> {
       snapshotStore: ctx.v2.snapshotStore,
       pinnedWorkflowStore: ctx.v2.pinnedStore,
     });
-    ctx.httpServer.mountRoutes((app) => mountConsoleRoutes(app, consoleService));
+    ctx.httpServer.mountRoutes((app) => mountConsoleRoutes(app, consoleService, ctx.workflowService));
     console.error('[Console] v2 Console API routes mounted at /api/v2/');
   }
 

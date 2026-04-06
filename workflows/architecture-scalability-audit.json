@@ -1,8 +1,15 @@
 {
   "id": "architecture-scalability-audit",
-  "name": "Architecture Scalability Audit (v1 \u2022 Evidence-Driven \u2022 Dimension-Scoped \u2022 rigorMode-Adaptive)",
+  "name": "Architecture Scalability Audit (v1 • Evidence-Driven • Dimension-Scoped • rigorMode-Adaptive)",
   "version": "0.1.0",
   "description": "Use this to audit a bounded codebase scope for architecture scalability. Declare which scalability dimensions matter (load, data volume, team size, feature extensibility, operational); the workflow investigates each and produces evidence-grounded findings.",
+  "about": "## Architecture Scalability Audit\n\nThis workflow audits a bounded codebase scope for scalability across the dimensions you care about. It does not produce generic \"won't scale\" warnings -- every finding must cite a specific file, class, method, or pattern, and every concern must name a concrete growth scenario (e.g. 10x traffic, 100x records, 3x team size).\n\n**What it does:**\nYou declare the scope boundary and the scalability dimensions that matter for your context. The workflow reads the codebase to understand the architecture, assigns one dedicated reviewer family per dimension, runs them in parallel from a shared fact packet, reconciles contradictions and blind spots through a synthesis loop, and delivers a per-dimension verdict (will_break / risk / fine) with an overall scalability readiness verdict.\n\n**The five scalability dimensions you can select:**\n- **load** -- handles more requests, users, or throughput\n- **data_volume** -- handles more records, storage, or query size\n- **team_org** -- more teams or developers working on this scope without friction\n- **feature_extensibility** -- more features added without rearchitecting\n- **operational** -- more deployments, environments, or operational complexity\n\n**When to use it:**\n- Before investing significantly in a component you expect to grow\n- When planning capacity for a new traffic tier or data volume increase\n- When evaluating a codebase acquired through a merger, partnership, or open-source adoption\n- When a team is growing and you want to know if the architecture will hold under parallel development\n\n**What it produces:**\nAn overall scalability verdict, per-dimension findings with specific code references and growth scenarios, cross-cutting concerns that span multiple dimensions, a prioritized concern list, and explicit callouts of what is already well-designed for scale.\n\n**How to get good results:**\nBe specific about the scope boundary -- name the service, module, or feature explicitly and say what is out of scope. Choose the dimensions relevant to your actual growth pressures; the workflow will not add dimensions you did not select. If you know a specific growth target (e.g. \"we expect 50x user growth in 18 months\"), mention it.",
+  "examples": [
+    "Audit the search service for load and data_volume scalability before the Black Friday traffic ramp",
+    "Check the analytics pipeline for data_volume and operational scalability -- we are moving from 1M to 100M events/day",
+    "Scalability audit of the user management module for team_org and feature_extensibility as we split into three squads",
+    "Audit the cart and checkout services for load scalability -- scope is /cart and /checkout only"
+  ],
   "recommendedPreferences": {
     "recommendedAutonomy": "guided",
     "recommendedRiskPolicy": "conservative"
@@ -20,7 +27,7 @@
     "DEFAULT BEHAVIOR: self-execute with tools. Ask only for true scope or dimension decisions you cannot resolve yourself.",
     "V2 DURABILITY: keep workflow truth in output.notesMarkdown and explicit context fields. Human-facing markdown artifacts are optional companions only.",
     "OWNERSHIP: the main agent owns the fact packet, synthesis, verdict calibration, and final handoff. Delegated dimension audits are evidence, not authority.",
-    "DIMENSION DISCIPLINE: audit only the dimensions the user declared. Do not add dimensions the user did not select, even if they look relevant \u2014 surface them as advisory notes instead.",
+    "DIMENSION DISCIPLINE: audit only the dimensions the user declared. Do not add dimensions the user did not select, even if they look relevant — surface them as advisory notes instead.",
     "EVIDENCE FIRST: every risk or will_break finding must cite a specific file, class, method, or pattern in the codebase. Technology name alone is not evidence.",
     "GROWTH SCENARIO: every concern must name a growth scenario (e.g. 10x traffic, 100x records, 3x team size). Generic 'won't scale' findings are not acceptable.",
     "VERDICT TIERS: use will_break / risk / fine. Do not force a cleaner answer than the evidence supports.",
@@ -44,10 +51,10 @@
         ],
         "procedure": [
           "Read the codebase to understand the architecture: key components, entry points, data flows, and main patterns within the declared scope.",
-          "Present the five scalability dimensions and ask the user to select which apply: (1) load \u2014 handles more requests, users, or throughput; (2) data_volume \u2014 handles more records, storage, or query size; (3) team_org \u2014 more teams or developers working on this scope; (4) feature_extensibility \u2014 more features added without rearchitecting; (5) operational \u2014 more deployments, environments, or operational complexity.",
-          "Ask the user to confirm the scope boundary \u2014 what is explicitly in and explicitly out.",
-          "Classify audit complexity: Simple (1\u20132 dimensions, small scope), Medium (2\u20133 dimensions, moderate scope), Complex (4\u20135 dimensions or large scope).",
-          "Run a context-clarity check: score boundary_clarity, dimension_clarity, and codebase_familiarity 1\u20133. If any score is 1, gather more context before advancing."
+          "Present the five scalability dimensions and ask the user to select which apply: (1) load — handles more requests, users, or throughput; (2) data_volume — handles more records, storage, or query size; (3) team_org — more teams or developers working on this scope; (4) feature_extensibility — more features added without rearchitecting; (5) operational — more deployments, environments, or operational complexity.",
+          "Ask the user to confirm the scope boundary — what is explicitly in and explicitly out.",
+          "Classify audit complexity: Simple (1–2 dimensions, small scope), Medium (2–3 dimensions, moderate scope), Complex (4–5 dimensions or large scope).",
+          "Run a context-clarity check: score boundary_clarity, dimension_clarity, and codebase_familiarity 1–3. If any score is 1, gather more context before advancing."
         ],
         "outputRequired": {
           "notesMarkdown": "Scope boundary (in and out), declared dimensions with rationale, audit complexity classification, and any open boundary questions.",
@@ -105,7 +112,7 @@
         "procedure": [
           "Create a neutral `scalabilityFactPacket` containing: scope boundary (in and out), declared dimensions, key architectural patterns found, main components and their roles, data flow and storage patterns, concurrency and state management approach, dependency boundaries and coupling, deployment and runtime assumptions, and explicit open unknowns.",
           "Include realism signals: code that looks scalable at a glance but may have hidden limits (e.g. in-memory state, synchronous choke points, missing pagination, tight coupling between components).",
-          "For each declared dimension, assign a reviewer family mission: load = examine request handling, concurrency, session/state management, caching, connection pools, and horizontal scaling readiness \u2014 check whether session state is in-memory or distributed, whether connection pools are bounded, whether synchronous bottlenecks exist in hot paths; data_volume = examine query patterns, pagination, indexing, result set bounds, storage growth, and data access layer scalability \u2014 check for unbounded queries (missing LIMIT/pagination), missing indexes on filtered columns, N+1 patterns in repository/service layers, and data structures that grow unboundedly; team_org = examine module coupling, shared state, and parallel development friction \u2014 specifically check import graphs for cross-module dependencies that would cause merge conflicts, identify shared mutable singletons or global state, look for test setup that requires spinning up adjacent modules, and check whether public interfaces change frequently or are stable; feature_extensibility = examine how much code changes when a new variant of a core concept is added \u2014 specifically look for switch/when/if-else chains on type discriminators that would need a new branch per feature, hardcoded business-rule constants, direct concrete dependencies instead of interfaces or abstractions, and files that are edited for every new feature; operational = examine deployment complexity, environment-specific behavior, observability, configuration surface, and operational runbook needs \u2014 specifically check for environment-specific code paths (if/switch on env vars that create different behavior per environment), configuration that must be updated in multiple places per deployment, whether logs and metrics cover the main operational failure modes, and whether a new deployment of this scope would require manual steps beyond a standard deploy.",
+          "For each declared dimension, assign a reviewer family mission: load = examine request handling, concurrency, session/state management, caching, connection pools, and horizontal scaling readiness — check whether session state is in-memory or distributed, whether connection pools are bounded, whether synchronous bottlenecks exist in hot paths; data_volume = examine query patterns, pagination, indexing, result set bounds, storage growth, and data access layer scalability — check for unbounded queries (missing LIMIT/pagination), missing indexes on filtered columns, N+1 patterns in repository/service layers, and data structures that grow unboundedly; team_org = examine module coupling, shared state, and parallel development friction — specifically check import graphs for cross-module dependencies that would cause merge conflicts, identify shared mutable singletons or global state, look for test setup that requires spinning up adjacent modules, and check whether public interfaces change frequently or are stable; feature_extensibility = examine how much code changes when a new variant of a core concept is added — specifically look for switch/when/if-else chains on type discriminators that would need a new branch per feature, hardcoded business-rule constants, direct concrete dependencies instead of interfaces or abstractions, and files that are edited for every new feature; operational = examine deployment complexity, environment-specific behavior, observability, configuration surface, and operational runbook needs — specifically check for environment-specific code paths (if/switch on env vars that create different behavior per environment), configuration that must be updated in multiple places per deployment, whether logs and metrics cover the main operational failure modes, and whether a new deployment of this scope would require manual steps beyond a standard deploy.",
           "Set selectedReviewerFamilies to the list of assigned families (one per declared dimension). Set contradictionCount and blindSpotCount to 0."
         ],
         "outputRequired": {
@@ -124,7 +131,7 @@
             "var": "auditComplexity",
             "equals": "Simple"
           },
-          "text": "For a Simple audit, keep the fact packet compact \u2014 scope summary, key patterns, and declared dimensions only. Skip exhaustive realism signal enumeration."
+          "text": "For a Simple audit, keep the fact packet compact — scope summary, key patterns, and declared dimensions only. Skip exhaustive realism signal enumeration."
         }
       ],
       "requireConfirmation": false
@@ -149,11 +156,11 @@
           ],
           "Each reviewer family uses scalabilityFactPacket as primary truth.",
           "Reviewer-family outputs are raw evidence. The main agent owns synthesis and verdict assignment.",
-          "Each reviewer family audits only its declared dimension \u2014 no cross-dimension scope creep."
+          "Each reviewer family audits only its declared dimension — no cross-dimension scope creep."
         ],
         "procedure": [
           "Before investigating, restate your scalabilityHypothesis and name which dimension is most likely to challenge it.",
-          "Run one investigation per declared dimension. For each dimension, the investigation must return: top findings, evidence for each finding (specific file, class, method, or pattern references \u2014 not just technology names), verdict tier per finding (will_break / risk / fine), growth scenario for each concern (e.g. 10x traffic, 100x records, 3x team size), biggest uncertainty, and likely false-confidence vector for this dimension.",
+          "Run one investigation per declared dimension. For each dimension, the investigation must return: top findings, evidence for each finding (specific file, class, method, or pattern references — not just technology names), verdict tier per finding (will_break / risk / fine), growth scenario for each concern (e.g. 10x traffic, 100x records, 3x team size), biggest uncertainty, and likely false-confidence vector for this dimension.",
           "After completing all dimension investigations, synthesize explicitly: what was confirmed, what was genuinely new, what looks weak or overstated, and what changed your current hypothesis.",
           "Build dimensionFindings keyed by dimension containing: findings list, verdict summary, evidence quality assessment, and open questions.",
           "Identify cross-cutting concerns: architectural patterns or components that appear in findings from multiple dimensions."
@@ -244,10 +251,10 @@
               "This is a structured four-item check, not a free-form review."
             ],
             "procedure": [
-              "Check 1 \u2014 Technology-vs-usage: did any reviewer identify a scalable technology without checking actual usage patterns in the code? (e.g. Postgres was identified as the DB, but were N+1 queries, missing indexes, or unbounded result sets actually checked?) Fix any instances found.",
-              "Check 2 \u2014 Scope drift: did any reviewer audit components outside the declared scope boundary? Remove out-of-scope findings.",
-              "Check 3 \u2014 Undeclared relevant dimensions: does the codebase have patterns suggesting a declared-out dimension actually matters for this scope? If so, surface it as an advisory note without adding it to the audit verdict.",
-              "Check 4 \u2014 Growth scenario vagueness: does every concern name a specific growth scenario? If not, assign one now based on the most realistic growth pattern for this scope.",
+              "Check 1 — Technology-vs-usage: did any reviewer identify a scalable technology without checking actual usage patterns in the code? (e.g. Postgres was identified as the DB, but were N+1 queries, missing indexes, or unbounded result sets actually checked?) Fix any instances found.",
+              "Check 2 — Scope drift: did any reviewer audit components outside the declared scope boundary? Remove out-of-scope findings.",
+              "Check 3 — Undeclared relevant dimensions: does the codebase have patterns suggesting a declared-out dimension actually matters for this scope? If so, surface it as an advisory note without adding it to the audit verdict.",
+              "Check 4 — Growth scenario vagueness: does every concern name a specific growth scenario? If not, assign one now based on the most realistic growth pattern for this scope.",
               "Set blindSpotCount to the number of blind spots found across all four checks."
             ],
             "outputRequired": {
@@ -299,11 +306,11 @@
           "Do not advance to handoff with known hard gate failures."
         ],
         "procedure": [
-          "Verdict aggregation \u2014 derive scalabilityVerdict from dimensionFindings using these explicit rules: (1) at_risk if any declared dimension has a will_break finding; (2) conditional if no will_break findings exist but at least one dimension has a risk finding; (3) ready_to_scale if all declared dimensions have only fine findings; (4) inconclusive if any dimension still has evidenceWeak = true after the synthesis loop, making a reliable verdict impossible. Capture verdictRationale naming the specific dimension and finding that drove the verdict.",
-          "Hard gate 1 \u2014 Evidence grounding: for every will_break and risk finding in dimensionFindings, confirm it cites a specific file, class, method, or code pattern. Technology name alone fails this gate. Fix by locating the code evidence or downgrading to risk with an evidence-needed note.",
-          "Hard gate 2 \u2014 Dimension coverage: confirm every declared dimension has at least one substantive finding. A verdict of fine with supporting evidence counts. A dimension with no findings at all fails this gate.",
-          "Hard gate 3 \u2014 Hypothesis revisited: confirm that scalabilityHypothesis from Phase 1 is either confirmed or explicitly revised in synthesis notes. If it was never addressed, address it now.",
-          "Hard gate 4 \u2014 Growth scenario specificity: confirm every concern in dimensionFindings names a growth scenario. If any do not, assign one now.",
+          "Verdict aggregation — derive scalabilityVerdict from dimensionFindings using these explicit rules: (1) at_risk if any declared dimension has a will_break finding; (2) conditional if no will_break findings exist but at least one dimension has a risk finding; (3) ready_to_scale if all declared dimensions have only fine findings; (4) inconclusive if any dimension still has evidenceWeak = true after the synthesis loop, making a reliable verdict impossible. Capture verdictRationale naming the specific dimension and finding that drove the verdict.",
+          "Hard gate 1 — Evidence grounding: for every will_break and risk finding in dimensionFindings, confirm it cites a specific file, class, method, or code pattern. Technology name alone fails this gate. Fix by locating the code evidence or downgrading to risk with an evidence-needed note.",
+          "Hard gate 2 — Dimension coverage: confirm every declared dimension has at least one substantive finding. A verdict of fine with supporting evidence counts. A dimension with no findings at all fails this gate.",
+          "Hard gate 3 — Hypothesis revisited: confirm that scalabilityHypothesis from Phase 1 is either confirmed or explicitly revised in synthesis notes. If it was never addressed, address it now.",
+          "Hard gate 4 — Growth scenario specificity: confirm every concern in dimensionFindings names a growth scenario. If any do not, assign one now.",
           "Set hardGatesPassed = true only when the verdict aggregation and all four gates pass. Set hardGateFailures to the list of any that needed fixing."
         ],
         "outputRequired": {
@@ -327,13 +334,13 @@
           "Do not drift into implementation planning or remediation design unless the user explicitly asks."
         ],
         "procedure": [
-          "Open with the overall scalability readiness verdict (ready_to_scale / conditional / at_risk / inconclusive) and the verdictRationale \u2014 name the specific dimension and finding that drove it.",
+          "Open with the overall scalability readiness verdict (ready_to_scale / conditional / at_risk / inconclusive) and the verdictRationale — name the specific dimension and finding that drove it.",
           "For each declared dimension, give: dimension name, verdict tier (will_break / risk / fine), top finding with specific code reference, growth scenario, and severity.",
           "List cross-cutting concerns: patterns that create scalability risk across multiple dimensions.",
           "Revisit scalabilityHypothesis from Phase 1: was it confirmed or revised? What evidence changed your view?",
           "Give a prioritized concern list ordered by: (1) will_break findings first, (2) risk findings by severity, (3) cross-cutting concerns, (4) fine findings worth noting as already solid.",
           "Surface any advisory notes for undeclared dimensions that may be worth considering.",
-          "State what is already well-designed for scale \u2014 not everything should be a concern."
+          "State what is already well-designed for scale — not everything should be a concern."
         ],
         "outputRequired": {
           "notesMarkdown": "Decision-ready scalability handoff: overall verdict, per-dimension summary with code references, prioritized concerns, cross-cutting concerns, hypothesis outcome, and what is already solid."
@@ -342,7 +349,7 @@
           "The handoff is verdict-first and evidence-grounded.",
           "Every concern is tied to a specific code reference and growth scenario.",
           "The hypothesis from Phase 1 is explicitly addressed.",
-          "What is already well-designed is stated \u2014 not just the concerns."
+          "What is already well-designed is stated — not just the concerns."
         ]
       },
       "requireConfirmation": false

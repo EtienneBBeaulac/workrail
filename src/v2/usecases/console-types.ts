@@ -202,3 +202,40 @@ export interface ConsoleNodeDetail {
   readonly validations: readonly ConsoleValidationResult[];
   readonly gaps: readonly ConsoleNodeGap[];
 }
+
+// ---------------------------------------------------------------------------
+// Workflow Catalog
+// ---------------------------------------------------------------------------
+
+export interface ConsoleWorkflowSourceInfo {
+  readonly kind: 'bundled' | 'user' | 'project' | 'custom' | 'git' | 'remote' | 'plugin';
+  readonly displayName: string;
+}
+
+export interface ConsoleWorkflowSummary {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  readonly version: string;
+  readonly tags: readonly string[];
+  readonly source: ConsoleWorkflowSourceInfo;
+  readonly about?: string;
+  readonly examples?: readonly string[];
+}
+
+export interface ConsoleWorkflowListResponse {
+  readonly workflows: readonly ConsoleWorkflowSummary[];
+}
+
+export interface ConsoleWorkflowDetail {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  readonly version: string;
+  readonly tags: readonly string[];
+  readonly source: ConsoleWorkflowSourceInfo;
+  readonly stepCount: number;
+  readonly about?: string;
+  readonly examples?: readonly string[];
+  readonly preconditions?: readonly string[];
+}

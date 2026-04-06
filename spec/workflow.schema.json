@@ -182,6 +182,24 @@
       "type": "integer",
       "minimum": 1,
       "description": "The authoring spec version this workflow was last validated against."
+    },
+    "about": {
+      "type": "string",
+      "description": "Human-readable overview for display in the console and other UIs. Markdown is supported. Write for a user deciding whether to use this workflow: what it does, when to use it, what it produces, and how to get good results. User-facing surface -- not an agent instruction (use metaGuidance for that).",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "examples": {
+      "type": "array",
+      "description": "Short illustrative goal strings showing what this workflow is used for. Write for humans browsing the catalog and for agents selecting the right workflow. Each item should be concrete and specific enough to be informative.",
+      "items": {
+        "type": "string",
+        "minLength": 10,
+        "maxLength": 120
+      },
+      "minItems": 1,
+      "maxItems": 6,
+      "uniqueItems": true
     }
   },
   "required": [

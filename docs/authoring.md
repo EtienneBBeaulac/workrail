@@ -346,6 +346,49 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 - `src/application/services/compiler/feature-registry.ts` (runtime) — The registry rejects unknown feature IDs at compile time.
 
 
+## Workflow catalog fields
+### about-is-for-human-readers
+- **Level**: recommended
+- **Status**: active
+- **Scope**: workflow.about, documentation.authoring
+- **Rule**: Use `about` for a human-readable overview of the workflow for display in the console and other catalog UIs. Do not use `metaGuidance` as a substitute for `about`.
+- **Why**: `metaGuidance` is surfaced to agents at runtime. `about` is surfaced to humans browsing the catalog before they start a workflow. Mixing the two audiences produces text that serves neither well.
+- **Enforced by**: advisory; `workflow-for-workflows.v2.json` Phase 7a prompts for this field
+
+**Content guidance**
+Write `about` for a user deciding whether to use the workflow. Cover: what it does, when to use it, what it produces, and how to get good results. Markdown is supported. Aim for 100-400 words; longer is acceptable if the workflow is complex. The `description` field (one sentence, max 512 chars) handles the brief summary -- `about` is the detail.
+
+**Anti-patterns**
+- Writing `about` as a list of behavioral rules (that belongs in `metaGuidance`)
+- Writing `metaGuidance` as a usage guide for humans (that belongs in `about`)
+- Omitting `about` from a workflow that would be hard to evaluate from `description` alone
+
+### examples-are-for-catalog-discoverability
+- **Level**: recommended
+- **Status**: active
+- **Scope**: workflow.examples, documentation.authoring
+- **Rule**: Use `examples` for 2-6 short, concrete goal strings that illustrate what this workflow is used for. Write them as if they are real user goals a developer would actually type.
+- **Why**: `examples` serve two audiences: humans browsing the console catalog and agents selecting a workflow on the user's behalf. They appear in `list_workflows` MCP output so agents can communicate concrete goal phrasing to users. Vague or generic examples serve neither audience.
+- **Enforced by**: advisory; `workflow-for-workflows.v2.json` Phase 7a prompts for these fields
+
+**Content guidance**
+Each example should be specific enough to be informative and short enough to scan (10-120 characters). Prefer examples that would actually appear as a `goal` parameter when starting the workflow.
+
+**Good examples (for `coding-task-workflow-agentic`)**
+- "Implement JWT refresh token rotation in the auth service"
+- "Fix the race condition in the cache invalidation path when concurrent writes occur"
+- "Refactor the payment flow to use a Result type instead of throwing exceptions"
+
+**Bad examples**
+- "Implement a feature" -- applies to any coding workflow, adds no signal
+- "Review code" -- too generic, does not help an agent distinguish this from mr-review-workflow
+- "Use this when you need to implement something" -- written as an instruction, not a goal
+
+**Anti-patterns**
+- Generic examples that apply to many workflows
+- Phrasing as instructions ("use this when...") rather than goals
+- Fewer than 2 examples -- single examples do not show the range of applicable tasks
+
 ## Workflow references
 ### references-are-for-runtime-companion-material
 - **Level**: recommended

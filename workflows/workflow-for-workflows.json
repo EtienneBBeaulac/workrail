@@ -3,6 +3,13 @@
   "name": "Progressive Workflow Creation Guide",
   "version": "0.1.0",
   "description": "Use this to author or modernize a WorkRail workflow. Guides through understanding the task, defining effectiveness targets, designing architecture and quality gates, drafting, validating, and handing off.",
+  "about": "## Workflow Authoring Workflow\n\nThis is the standard WorkRail workflow for creating a new workflow from scratch or modernizing an existing one. It is the trust gate for all other workflows: a workflow is not considered production-ready until it has passed through here.\n\n**What it does:**\nThe workflow walks through the full authoring lifecycle: understanding the task, choosing the right baseline and archetype, designing the phase and quality-gate architecture, drafting the workflow JSON, running structural validators, auditing state fields for bloat, simulating execution against real scenarios, running an adversarial quality review, and producing a final trust handoff. For modernization tasks it builds a value inventory first to ensure enforcement mechanisms, domain knowledge, and behavioral rules are preserved or equivalently replaced.\n\n**When to use it:**\n- You want to author a new WorkRail workflow for a recurring task or problem\n- You have an existing workflow that is outdated, uses legacy patterns (pseudo-DSL, regex validation, satisfaction-score loops), or produces shallow results\n- You want a workflow that will pass the WorkRail quality bar and be trusted to run in production\n\n**What it produces:**\nA validated, tagged workflow JSON file with a `validatedAgainstSpecVersion` stamp. A final trust handoff with readiness verdict, known failure modes, residual weaknesses, and testing guidance.\n\n**How to get good results:**\nDescribe the recurring task the workflow should solve, who will run it, and what a satisfying result looks like. For modernization, point to the existing workflow file. The workflow reads the schema and authoring spec itself  -- you do not need to know the JSON format in advance.",
+  "examples": [
+    "Create a new workflow for conducting weekly engineering retrospectives",
+    "Modernize the old exploration workflow to use v2 authoring patterns and remove pseudo-DSL",
+    "Author a workflow for triaging and prioritizing incoming support tickets",
+    "Upgrade the code review workflow to add adversarial reviewer families and hard gates"
+  ],
   "clarificationPrompts": [
     "What's your experience level with workflow creation? (New to this / Some experience / Very experienced)",
     "What type of workflow are you creating? (e.g., coding, analysis, content creation, process management)",

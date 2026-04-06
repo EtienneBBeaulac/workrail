@@ -3,6 +3,13 @@
   "name": "Bug Investigation (v2 \u2022 Notes-First \u2022 WorkRail Executor)",
   "version": "2.0.0",
   "description": "Use this to diagnose a bug or unexpected behavior in code. Builds a hypothesis, gathers evidence, and proves or disproves the root cause before concluding.",
+  "about": "## Bug Investigation Workflow\n\nThis workflow guides an AI agent through a rigorous, evidence-driven investigation of a bug or unexpected behavior. It is designed to prevent the most common failure mode in AI debugging: jumping to a plausible-sounding conclusion without sufficient proof.\n\n**What it does:**\nThe workflow moves through triage, context gathering, hypothesis generation, evidence planning, iterative evidence collection, diagnosis validation, and a final handoff. It explicitly distinguishes between theories (formed by reading code) and proof (confirmed by running tests or reproducing the failure). The final output is a diagnosis with a confidence rating, the strongest alternative explanations that were ruled out, and a high-level fix direction  -- not a patch.\n\n**When to use it:**\n- You have a specific bug report, failing test, or production incident to investigate\n- The root cause is not immediately obvious and multiple explanations are plausible\n- You want a trustworthy diagnosis before spending time writing a fix\n- The bug carries enough risk that you need to be confident before changing code\n\n**What it produces:**\nA structured investigation handoff covering: root cause type (single cause, multi-factor, working as designed, etc.), proof summary, ruled-out alternatives, residual uncertainty, likely files involved, and verification steps for whoever implements the fix.\n\n**How to get good results:**\nProvide repro steps, observed symptoms, and expected behavior upfront. Include any relevant logs, failing test commands, or environment details you already have. The more concrete the repro, the faster the workflow can gather real evidence rather than theorizing. If the bug is intermittent, say so  -- the workflow adapts its rigor based on reproducibility confidence.",
+  "examples": [
+    "Investigate why the payments API returns 500 after deploying the rate limiter",
+    "Debug why the mobile app crashes on logout when a background sync is in progress",
+    "Find out why search results are missing items added in the last 10 minutes",
+    "Diagnose why CI passes locally but the integration test fails on the build server"
+  ],
   "recommendedPreferences": {
     "recommendedAutonomy": "guided",
     "recommendedRiskPolicy": "conservative"

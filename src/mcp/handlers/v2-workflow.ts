@@ -459,6 +459,9 @@ async function buildV2WorkflowListItem(options: {
   }
 
   const visibility = await buildWorkflowVisibility(workflow, workflowReader, rememberedRootRecords);
+  const examples = workflow.definition.examples?.length
+    ? { examples: [...workflow.definition.examples] }
+    : {};
   const snapshot = compileV1WorkflowToV2PreviewSnapshot(workflow);
   const hashRes = workflowHashForCompiledSnapshot(snapshot as unknown as JsonValue, crypto);
   if (hashRes.isErr()) {
@@ -470,6 +473,7 @@ async function buildV2WorkflowListItem(options: {
       workflowHash: null,
       kind: 'workflow' as const,
       visibility,
+      ...examples,
     };
   }
 
@@ -486,6 +490,7 @@ async function buildV2WorkflowListItem(options: {
         workflowHash: hash,
         kind: 'workflow' as const,
         visibility,
+        ...examples,
       };
     }
   }
@@ -502,6 +507,7 @@ async function buildV2WorkflowListItem(options: {
     kind: 'workflow' as const,
     visibility,
     ...(staleness !== undefined ? { staleness } : {}),
+    ...examples,
   };
 }
 
