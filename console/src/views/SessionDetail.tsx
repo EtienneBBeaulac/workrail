@@ -78,15 +78,6 @@ export function SessionDetail({ sessionId }: Props) {
         )}
       </div>
 
-      {/* Backdrop -- click outside the panel to dismiss */}
-      {selectedNode && (
-        <div
-          className="fixed inset-0"
-          style={{ zIndex: 39 }}
-          onClick={() => setSelectedNode(null)}
-        />
-      )}
-
       {/* Floating detail panel -- slides in from the right over everything */}
       <div
         className="fixed top-0 right-0 bottom-0 w-[560px] max-w-[92vw] flex flex-col bg-[var(--bg-card)] border-l border-[var(--border)] shadow-2xl transition-transform duration-200 ease-out"
