@@ -5,7 +5,7 @@ import { StatusBadge } from '../components/StatusBadge';
 import { HealthBadge } from '../components/HealthBadge';
 import { NodeDetailSection } from '../components/NodeDetailSection';
 import { CutCornerBox } from '../components/CutCornerBox';
-import type { ConsoleDagRun } from '../api/types';
+import type { ConsoleSessionDetail, ConsoleDagRun } from '../api/types';
 
 interface Props {
   sessionId: string;
@@ -15,6 +15,90 @@ interface SelectedNode {
   runId: string;
   nodeId: string;
 }
+
+// ---------------------------------------------------------------------------
+// SessionMetaCard
+// ---------------------------------------------------------------------------
+
+function formatSessionId(sessionId: string): string {
+  return sessionId.length > 16 ? `\u2026${sessionId.slice(-16)}` : sessionId;
+}
+
+function SessionMetaCard({ data }: { data: ConsoleSessionDetail }) {
+  const firstRun = data.runs[0] ?? null;
+  const workflow = firstRun?.workflowName ?? firstRun?.workflowId ?? '--';
+  const hash = firstRun?.workflowHash?.slice(0, 12) ?? '--';
+
+  return (
+    <div className="bg-[var(--bg-card)] border border-[var(--border)] px-5 py-4">
+      {data.sessionTitle && (
+        <h2 className="text-base font-medium text-[var(--text-primary)] mb-3">
+          {data.sessionTitle}
+        </h2>
+      )}
+      <dl className="grid grid-cols-[auto_1fr] gap-x-8 gap-y-2">
+        <dt className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)] self-center">
+          Session
+        </dt>
+        <dd className="font-mono text-xs text-[var(--text-secondary)] self-center">
+          {formatSessionId(data.sessionId)}
+        </dd>
+
+        <dt className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)] self-center">
+          Workflow
+        </dt>
+        <dd className="text-sm text-[var(--text-primary)] self-center">
+          {workflow}
+        </dd>
+
+        <dt className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)] self-center">
+          Hash
+        </dt>
+        <dd className="font-mono text-xs text-[var(--text-secondary)] self-center">
+          {hash}
+        </dd>
+
+        <dt className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)] self-center">
+          Status
+        </dt>
+        <dd className="self-center flex items-center gap-2">
+          <HealthBadge health={data.health} />
+          {data.health === 'healthy' && (
+            <span className="text-sm text-[var(--text-primary)]">Healthy</span>
+          )}
+        </dd>
+
+        <dt className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)] self-center">
+          Runs
+        </dt>
+        <dd className="text-sm text-[var(--text-primary)] self-center">
+          {data.runs.length} run{data.runs.length !== 1 ? 's' : ''}
+        </dd>
+      </dl>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// HintBanner
+// ---------------------------------------------------------------------------
+
+function HintBanner({ runs }: { runs: readonly ConsoleDagRun[] }) {
+  const hasPreferredTip = runs.some((r) => r.preferredTipNodeId !== null);
+  const message = hasPreferredTip
+    ? 'Nodes with a gold border are the current execution tips \u2014 click any node to inspect its execution detail.'
+    : 'Click any node in the DAG to inspect its execution detail.';
+
+  return (
+    <p className="border border-[var(--border)] px-4 py-3 text-xs text-[var(--text-muted)]">
+      {message}
+    </p>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SessionDetail
+// ---------------------------------------------------------------------------
 
 export function SessionDetail({ sessionId }: Props) {
   const { data, isLoading, error } = useSessionDetail(sessionId);
@@ -46,36 +130,29 @@ export function SessionDetail({ sessionId }: Props) {
 
   return (
     <>
-      <div className="space-y-6">
-        {data.sessionTitle && (
-          <h2 className="text-base font-medium text-[var(--text-primary)] mb-2">
-            {data.sessionTitle}
-          </h2>
-        )}
-        <div className="flex items-center gap-3 mb-6">
-          <HealthBadge health={data.health} />
-          <span className="text-sm text-[var(--text-muted)]">
-            {data.runs.length} run{data.runs.length !== 1 ? 's' : ''}
-          </span>
-        </div>
+      <div className="space-y-4">
+        <SessionMetaCard data={data} />
 
         {data.runs.length === 0 ? (
           <div className="text-center py-16 text-[var(--text-secondary)]">
             No runs in this session
           </div>
         ) : (
-          <div className="space-y-6">
-            {data.runs.map((run) => (
-              <RunCard
-                key={run.runId}
-                run={run}
-                selectedNodeId={
-                  selectedNode?.runId === run.runId ? selectedNode.nodeId : null
-                }
-                onNodeClick={handleNodeClick}
-              />
-            ))}
-          </div>
+          <>
+            {selectedNode === null && <HintBanner runs={data.runs} />}
+            <div className="space-y-6">
+              {data.runs.map((run) => (
+                <RunCard
+                  key={run.runId}
+                  run={run}
+                  selectedNodeId={
+                    selectedNode?.runId === run.runId ? selectedNode.nodeId : null
+                  }
+                  onNodeClick={handleNodeClick}
+                />
+              ))}
+            </div>
+          </>
         )}
       </div>
 
@@ -116,6 +193,10 @@ export function SessionDetail({ sessionId }: Props) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// RunCard
+// ---------------------------------------------------------------------------
+
 function RunCard({
   run,
   selectedNodeId,
@@ -141,6 +222,9 @@ function RunCard({
           </span>
           <span className="font-mono text-xs text-[var(--text-muted)]">
             {run.runId}
+          </span>
+          <span className="font-mono text-xs text-[var(--text-muted)]">
+            {run.nodes.length} nodes &middot; {run.tipNodeIds.length} tip{run.tipNodeIds.length !== 1 ? 's' : ''}
           </span>
         </div>
         <div className="flex items-center gap-2">
