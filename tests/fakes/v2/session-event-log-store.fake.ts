@@ -69,7 +69,13 @@ export class InMemorySessionEventLogStore
     }));
   }
 
-  append(lock: WithHealthySessionLock, plan: AppendPlanV2): ResultAsync<void, SessionEventLogStoreError> {
+  append(
+    lock: WithHealthySessionLock,
+    plan: AppendPlanV2,
+    // preloadedTruth is accepted for interface compatibility but ignored: the in-memory store has
+    // no I/O cost to avoid, so the optimization has no effect here.
+    _preloadedTruth?: import('../../../src/v2/ports/session-event-log-store.port.js').LoadedSessionTruthV2,
+  ): ResultAsync<void, SessionEventLogStoreError> {
     // Validate witness is still held
     if (!lock.assertHeld()) {
       return errAsync({

@@ -309,7 +309,10 @@ function writeCheckpoint(
     createdByEventId: nodeCreatedEventId,
   }];
 
-  return sessionStore.append(lock, { events: validated, snapshotPins })
+  // Pass preloaded truth to skip redundant disk reads in appendImpl.
+  // Cast manifest: writeCheckpoint uses `readonly unknown[]` for the manifest type but the
+  // actual value is a valid ManifestRecordV1[] from store.load(). The cast is safe here.
+  return sessionStore.append(lock, { events: validated, snapshotPins }, truth as import('../../v2/ports/session-event-log-store.port.js').LoadedSessionTruthV2)
     .mapErr((cause): CheckpointError => ({ kind: 'store_failed', cause }))
     .andThen(() => {
       // Mint resumeToken pointing at the ORIGINAL node (not the checkpoint node).
