@@ -387,9 +387,11 @@ function validateAppendPlan(sessionId: SessionId, plan: AppendPlanV2, expectedFi
     return err({ code: 'SESSION_STORE_INVARIANT_VIOLATION', message: 'AppendPlan.events must be non-empty' });
   }
 
-  // Events are typed DomainEventV1 and have already been validated at the gate boundary.
-  // Re-running Zod.safeParse here in the locked write path is wasteful. Keep only the
-  // cheap structural checks: correct starting eventIndex, sessionId on each event, and
+  // Events are constructed from typed object literals by the engine -- no external user
+  // data enters the construction path. Validation at the gate boundary
+  // (ExecutionSessionGateV2) is sufficient. Re-running Zod.safeParse here in the locked
+  // write path is wasteful. "Validate at boundaries, trust inside." Keep only the cheap
+  // structural checks: correct starting eventIndex, sessionId on each event, and
   // contiguity within the plan.
   const first = plan.events[0]!;
   if (first.eventIndex !== expectedFirstEventIndex) {

@@ -8,6 +8,8 @@
  * @enforces dedupe-key-idempotent
  * @enforces append-plan-atomic
  */
+import * as os from 'os';
+import * as path from 'path';
 import { describe, it, expect, vi } from 'vitest';
 import type { ResultAsync } from 'neverthrow';
 
@@ -44,7 +46,7 @@ function makeSessionCreatedEvent(sessionId: ReturnType<typeof asSessionId>, even
 }
 
 function makeStore(fs: InMemoryFileSystem): LocalSessionEventLogStoreV2 {
-  const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: '/tmp/test-preloaded-truth' });
+  const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: path.join(os.tmpdir(), 'workrail-preloaded-truth-test') });
   const sha = new NodeSha256V2();
   return new LocalSessionEventLogStoreV2(dataDir, fs, sha);
 }
