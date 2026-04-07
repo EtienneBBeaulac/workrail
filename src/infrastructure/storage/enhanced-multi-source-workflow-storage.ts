@@ -261,12 +261,13 @@ export class EnhancedMultiSourceWorkflowStorage implements ICompositeWorkflowSto
     if (config.includeProject !== false && this.featureFlagProvider) {
       try {
         const projectPath = config.projectPath || this.getProjectWorkflowsPath();
-        const bundledPath = this.getBundledWorkflowsPath();
-        // Skip project source if it resolves to the same directory as bundled --
-        // this happens when running workrail from its own repo. The bundled source
-        // already covers these workflows with the correct kind.
-        const isSameAsBundled = path.resolve(projectPath) === path.resolve(bundledPath);
-        if (existsSync(projectPath) && !isSameAsBundled) {
+        // Skip project source registration when process.cwd() is the workrail
+        // package root itself. This happens during workrail development: both
+        // __dirname (3 levels up) and process.cwd() resolve to the same package
+        // root, so the project path would duplicate the bundled workflows directory.
+        // The check belongs here -- it is the storage layer's responsibility to
+        // avoid registering the same directory under two different source kinds.
+        if (existsSync(projectPath) && !this.isProjectPathInsideOwnPackage(projectPath)) {
           instances.push(new FileWorkflowStorage(
             projectPath,
             createProjectDirectorySource(projectPath),
@@ -423,7 +424,11 @@ export class EnhancedMultiSourceWorkflowStorage implements ICompositeWorkflowSto
   }
 
   private getBundledWorkflowsPath(): string {
-    // Bundled workflows are in the package directory
+    // The compiled output lives at dist/infrastructure/storage/, so going up
+    // three levels reaches the package root where the workflows/ directory is
+    // published. This is equally correct when running under ts-node (which sets
+    // __dirname to src/infrastructure/storage/) -- both paths resolve to the
+    // same package root.
     return path.resolve(__dirname, '../../../workflows');
   }
 
@@ -433,6 +438,26 @@ export class EnhancedMultiSourceWorkflowStorage implements ICompositeWorkflowSto
 
   private getProjectWorkflowsPath(): string {
     return path.join(process.cwd(), 'workflows');
+  }
+
+  /**
+   * Returns true when the given project workflows path resolves inside this
+   * package's own bundled workflows directory.
+   *
+   * This happens during workrail development: __dirname (3 levels up) and
+   * process.cwd() both point to the same package root, so
+   * process.cwd()/workflows would be identical to the bundled workflows path.
+   * Registering the same directory as both 'bundled' (priority 1) and 'project'
+   * (priority 7) would cause every bundled workflow to appear as kind:'project'
+   * in the console, because the higher-priority project source would win.
+   *
+   * Normal users running workrail in their own project are unaffected: their
+   * process.cwd() is their project directory, not the installed workrail package,
+   * so the resolved paths are always distinct.
+   */
+  private isProjectPathInsideOwnPackage(projectPath: string): boolean {
+    const bundledPath = this.getBundledWorkflowsPath();
+    return path.resolve(projectPath) === path.resolve(bundledPath);
   }
 
   private extractRepoName(url: string): string {

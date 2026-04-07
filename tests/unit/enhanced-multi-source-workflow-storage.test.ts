@@ -2,8 +2,10 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { EnhancedMultiSourceWorkflowStorage } from '../../src/infrastructure/storage/enhanced-multi-source-workflow-storage';
 import { IWorkflowStorage } from '../../src/types/storage';
 import { Workflow } from '../../src/types/workflow';
+import { EnvironmentFeatureFlagProvider } from '../../src/config/feature-flags';
 import os from 'os';
 import path from 'path';
+import fs from 'fs';
 
 /**
  * Mock workflow storage for testing
@@ -371,7 +373,7 @@ describe('createEnhancedMultiSourceWorkflowStorage', () => {
     // This is tested more thoroughly in integration tests
     // Here we just verify the function exists and can be called
     const { createEnhancedMultiSourceWorkflowStorage } = await import('../../src/infrastructure/storage/enhanced-multi-source-workflow-storage');
-    
+
     const storage = createEnhancedMultiSourceWorkflowStorage({
       includeBundled: false,
       includeUser: false,
@@ -380,6 +382,60 @@ describe('createEnhancedMultiSourceWorkflowStorage', () => {
 
     expect(storage).toBeDefined();
     expect(storage.loadAllWorkflows).toBeDefined();
+  });
+});
+
+describe('Development-mode path deduplication', () => {
+  // Regression test for the bug where bundled workflows showed as kind:'project'
+  // when running workrail from its own source repo.
+  //
+  // Root cause: getBundledWorkflowsPath() and getProjectWorkflowsPath() both
+  // resolve to the same directory during development (process.cwd() == package
+  // root). The higher-priority project source (priority 7) would overwrite the
+  // bundled source (priority 1), changing kind from 'bundled' to 'project'.
+  //
+  // Fix: isProjectPathInsideOwnPackage() returns true when the resolved project
+  // path equals the resolved bundled path, and the project source is skipped.
+
+  it('skips project source registration when project path equals bundled path', () => {
+    // Provide an explicit projectPath that resolves to the same location as the
+    // bundled workflows dir (simulates running from the workrail source repo).
+    // __dirname here is tests/unit/ so we go up 3 levels to reach package root.
+    const bundledPath = path.resolve(__dirname, '../../../workflows');
+    const storage = new EnhancedMultiSourceWorkflowStorage({
+      includeBundled: true,
+      includeUser: false,
+      includeProject: true,
+      projectPath: bundledPath  // intentionally same as bundled
+    });
+
+    const sourceInfo = storage.getSourceInfo();
+    const projectSources = sourceInfo.filter((s: { source: { kind: string } }) => s.source.kind === 'project');
+    expect(projectSources).toHaveLength(0);
+  });
+
+  it('registers project source normally when project path differs from bundled path', () => {
+    const tmpDir = path.join(os.tmpdir(), 'workrail-test-project-workflows');
+    // Create the directory so existsSync returns true
+    fs.mkdirSync(tmpDir, { recursive: true });
+
+    const featureFlags = EnvironmentFeatureFlagProvider.withEnv({});
+    const storage = new EnhancedMultiSourceWorkflowStorage(
+      {
+        includeBundled: false,
+        includeUser: false,
+        includeProject: true,
+        projectPath: tmpDir
+      },
+      featureFlags
+    );
+
+    const sourceInfo = storage.getSourceInfo();
+    const projectSources = sourceInfo.filter((s: { source: { kind: string } }) => s.source.kind === 'project');
+    expect(projectSources).toHaveLength(1);
+
+    // Cleanup
+    fs.rmdirSync(tmpDir);
   });
 });
 
