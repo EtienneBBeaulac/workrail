@@ -47,10 +47,10 @@ export function asSortedEventLog(
   events: readonly DomainEventV1[]
 ): Result<SortedEventLog, ProjectionError> {
   for (let i = 1; i < events.length; i++) {
-    if (events[i]!.eventIndex < events[i - 1]!.eventIndex) {
+    if (events[i]!.eventIndex <= events[i - 1]!.eventIndex) {
       return err({
         code: 'PROJECTION_INVARIANT_VIOLATION',
-        message: 'Events must be sorted by eventIndex ascending',
+        message: 'Events must be sorted by eventIndex strictly ascending (no duplicates)',
       });
     }
   }

@@ -1,4 +1,5 @@
 import type { V2ContinueWorkflowInput } from '../../v2/tools.js';
+import type { SessionIndex } from '../../../v2/durable-core/session-index.js';
 import type { Workflow } from '../../../types/workflow.js';
 import type { DomainEventV1 } from '../../../v2/durable-core/schemas/session/index.js';
 import {
@@ -47,23 +48,19 @@ export function advanceAndRecord(args: {
   readonly sessionStore: import('../../../v2/ports/session-event-log-store.port.js').SessionEventLogAppendStorePortV2 & import('../../../v2/ports/session-event-log-store.port.js').SessionEventLogReadonlyStorePortV2;
   readonly sha256: Sha256PortV2;
   readonly idFactory: { readonly mintNodeId: () => NodeId; readonly mintEventId: () => string };
+  readonly lockedIndex: SessionIndex;
 }): RA<void, InternalError | SessionEventLogStoreError | SnapshotStoreError> {
   const { truth, sessionId, runId, nodeId, attemptId, workflowHash, dedupeKey, inputContext, inputOutput, lock, pinnedWorkflow, snapshotStore, sessionStore, sha256, idFactory } = args;
 
   // Enforce invariants: do not record advance attempts for unknown nodes.
-  const hasRun = truth.events.some((e) => e.kind === EVENT_KIND.RUN_STARTED && e.scope?.runId === String(runId));
-  const hasNode = truth.events.some(
-    (e) => e.kind === EVENT_KIND.NODE_CREATED && e.scope?.runId === String(runId) && e.scope?.nodeId === String(nodeId)
-  );
+  // Use the pre-built lockedIndex instead of rescanning truth.events.
+  // lockedIndex (not preLockIndex) is correct here: this function runs inside
+  // withHealthySessionLock, so lockedIndex reflects post-lock truth.
+  // Note: hasNode check uses nodeId only (ULID uniqueness; see session-index.ts Invariant #4).
+  const hasRun = args.lockedIndex.runStartedByRunId.has(String(runId));
+  const nodeCreated = args.lockedIndex.nodeCreatedByNodeId.get(String(nodeId));
+  const hasNode = nodeCreated !== undefined;
   if (!hasRun || !hasNode) {
-    return neErrorAsync({ kind: 'missing_node_or_run' as const });
-  }
-
-  // Load current node snapshot to compute next state.
-  const nodeCreated = truth.events.find(
-    (e): e is Extract<DomainEventV1, { kind: 'node_created' }> => e.kind === EVENT_KIND.NODE_CREATED && e.scope?.nodeId === String(nodeId)
-  );
-  if (!nodeCreated) {
     return neErrorAsync({ kind: 'missing_node_or_run' as const });
   }
   if (String(nodeCreated.data.workflowHash) !== String(workflowHash)) {
@@ -92,6 +89,7 @@ export function advanceAndRecord(args: {
         truth, sessionId, runId, attemptId, workflowHash, dedupeKey,
         inputContext, inputOutput, lock, pinnedWorkflow,
         ports: { snapshotStore, sessionStore, sha256, idFactory },
+        lockedIndex: args.lockedIndex,
       });
     }
 
@@ -101,6 +99,7 @@ export function advanceAndRecord(args: {
       truth, sessionId, runId, attemptId, workflowHash, dedupeKey,
       inputContext, inputOutput, lock, pinnedWorkflow,
       ports: { snapshotStore, sessionStore, sha256, idFactory },
+      lockedIndex: args.lockedIndex,
     });
   });
 }

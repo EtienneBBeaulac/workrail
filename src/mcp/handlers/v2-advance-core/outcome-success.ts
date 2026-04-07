@@ -4,6 +4,7 @@
  */
 
 import { ResultAsync as RA, errAsync as neErrorAsync } from 'neverthrow';
+import type { SessionIndex } from '../../../v2/durable-core/session-index.js';
 import type { ExecutionSnapshotFileV1 } from '../../../v2/durable-core/schemas/execution-snapshot/index.js';
 import type { SessionId, RunId, NodeId, WorkflowHash } from '../../../v2/durable-core/ids/index.js';
 import type { AttemptId } from '../../../v2/durable-core/tokens/index.js';
@@ -50,6 +51,7 @@ export function buildSuccessOutcome(args: {
   readonly v: ValidatedAdvanceInputs;
   readonly lock: WithHealthySessionLock;
   readonly ports: AdvanceCorePorts;
+  readonly lockedIndex: SessionIndex;
 }): RA<void, InternalError | SessionEventLogStoreError | SnapshotStoreError> {
   const { mode, v, lock, ports } = args;
   const { truth, sessionId, runId, currentNodeId, attemptId, workflowHash, inputOutput, pinnedWorkflow, engineState, pendingStep } = args.ctx;
@@ -219,7 +221,7 @@ export function buildSuccessOutcome(args: {
 
     return buildAndAppendPlan({
       kind: 'advanced',
-      truth, sessionId, runId, currentNodeId, attemptId, workflowHash,
+      truth, lockedIndex: args.lockedIndex, sessionId, runId, currentNodeId, attemptId, workflowHash,
       extraEventsToAppend, toNodeKind: successNodeKind(mode),
       snapshotRef: newSnapshotRef, outputsToAppend,
       sessionStore, idFactory, lock,

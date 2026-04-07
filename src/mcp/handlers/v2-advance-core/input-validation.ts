@@ -23,6 +23,7 @@ import type { InternalError } from '../v2-error-mapping.js';
 import { EVENT_KIND } from '../../../v2/durable-core/constants.js';
 import { validateAssessmentForStep } from './assessment-validation.js';
 import { evaluateAssessmentConsequences } from './assessment-consequences.js';
+import type { SessionIndex } from '../../../v2/durable-core/session-index.js';
 
 /**
  * Result of validating advance inputs at the boundary.
@@ -63,17 +64,26 @@ export function validateAdvanceInputs(args: {
   readonly inputOutput: V2ContinueWorkflowInput['output'];
   readonly pinnedWorkflow: ReturnType<typeof import('../../../types/workflow.js').createWorkflow>;
   readonly pendingStep: { readonly stepId: string; readonly loopPath: readonly { readonly loopId: string; readonly iteration: number }[] };
+  /** Pre-built SessionIndex -- when provided, skips asSortedEventLog, projectRunContextV2, and parentByNodeId loop. */
+  readonly precomputedIndex?: SessionIndex;
 }): Result<ValidatedAdvanceInputs, InternalError> {
   const { truth, runId, currentNodeId, inputContext, inputOutput, pinnedWorkflow, pendingStep } = args;
 
-  // Context merge
-  const sortedEventsRes = asSortedEventLog(truth.events);
-  if (sortedEventsRes.isErr()) {
-    return err({ kind: 'invariant_violation' as const, message: sortedEventsRes.error.message });
+  // Context merge -- use pre-computed sorted events and run context when available.
+  let sortedEvents: import('../../../v2/durable-core/sorted-event-log.js').SortedEventLog;
+  let storedContext: import('../../../v2/durable-core/canonical/json-types.js').JsonObject | undefined;
+  if (args.precomputedIndex) {
+    sortedEvents = args.precomputedIndex.sortedEvents;
+    storedContext = args.precomputedIndex.runContextByRunId.get(String(runId));
+  } else {
+    const sortedEventsRes = asSortedEventLog(truth.events);
+    if (sortedEventsRes.isErr()) {
+      return err({ kind: 'invariant_violation' as const, message: sortedEventsRes.error.message });
+    }
+    sortedEvents = sortedEventsRes.value;
+    const storedContextRes = projectRunContextV2(sortedEvents);
+    storedContext = storedContextRes.isOk() ? storedContextRes.value.byRunId[String(runId)]?.context : undefined;
   }
-  const sortedEvents = sortedEventsRes.value;
-  const storedContextRes = projectRunContextV2(sortedEvents);
-  const storedContext = storedContextRes.isOk() ? storedContextRes.value.byRunId[String(runId)]?.context : undefined;
 
   const inputContextObj =
     inputContext && typeof inputContext === 'object' && inputContext !== null && !Array.isArray(inputContext)
@@ -114,12 +124,20 @@ export function validateAdvanceInputs(args: {
     outputContract !== undefined ||
     (step !== null && step !== undefined && 'notesOptional' in step && step.notesOptional === true);
 
-  // Preferences
+  // Preferences -- derive parentByNodeId from the index when available (avoids re-scanning events).
   const parentByNodeId: Record<string, string | null> = {};
-  for (const e of truth.events) {
-    if (e.kind !== EVENT_KIND.NODE_CREATED) continue;
-    if (e.scope?.runId !== String(runId)) continue;
-    parentByNodeId[String(e.scope.nodeId)] = e.data.parentNodeId;
+  if (args.precomputedIndex) {
+    for (const [nodeId, evt] of args.precomputedIndex.nodeCreatedByNodeId) {
+      if (evt.scope.runId === String(runId)) {
+        parentByNodeId[nodeId] = evt.data.parentNodeId ?? null;
+      }
+    }
+  } else {
+    for (const e of truth.events) {
+      if (e.kind !== EVENT_KIND.NODE_CREATED) continue;
+      if (e.scope?.runId !== String(runId)) continue;
+      parentByNodeId[String(e.scope.nodeId)] = e.data.parentNodeId;
+    }
   }
   const prefs = projectPreferencesV2(sortedEvents, parentByNodeId);
   const effectivePrefs = prefs.isOk() ? prefs.value.byNodeId[String(currentNodeId)]?.effective : undefined;
