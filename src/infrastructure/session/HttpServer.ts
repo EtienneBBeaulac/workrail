@@ -469,9 +469,6 @@ export class HttpServer {
    * Uses unified dashboard pattern (primary/secondary) unless disabled
    */
   async start(): Promise<string | null> {
-    // STEP 1: Quick cleanup of orphaned processes
-    await this.quickCleanup();
-    
     // Check dashboard mode (DI-provided, not env check)
     const mode = this.config.dashboardMode ?? this.dashboardMode;
     if (mode.kind === 'legacy') {
@@ -1005,126 +1002,8 @@ export class HttpServer {
   // Heartbeat behavior is delegated to DashboardHeartbeat.
   
   /**
-   * Quick cleanup of orphaned workrail processes
-   * Only removes processes that are unresponsive on ports 3456-3499
-   */
-  private async quickCleanup(): Promise<void> {
-    try {
-      const busyPorts = await this.getWorkrailPorts();
-      
-      if (busyPorts.length === 0) {
-        return; // Nothing to clean up
-      }
-      
-      console.error(`[Cleanup] Found ${busyPorts.length} workrail process(es), checking health...`);
-      
-      let cleanedCount = 0;
-      
-      for (const { port, pid } of busyPorts) {
-        // Don't check ourselves
-        if (pid === process.pid) continue;
-        
-        const isHealthy = await this.checkHealth(port);
-        
-        if (!isHealthy) {
-          console.error(`[Cleanup] Removing unresponsive process ${pid} on port ${port}`);
-          try {
-            // Try graceful shutdown first
-            process.kill(pid, 'SIGTERM');
-            await new Promise(r => setTimeout(r, 1000));
-            
-            // Check if still alive
-            try {
-              process.kill(pid, 0);
-              // Still alive, force kill
-              process.kill(pid, 'SIGKILL');
-            } catch {
-              // Already dead, good
-            }
-            
-            cleanedCount++;
-          } catch (error) {
-            // Process might have already exited
-          }
-        }
-      }
-      
-      if (cleanedCount > 0) {
-        console.error(`[Cleanup] Cleaned up ${cleanedCount} orphaned process(es)`);
-        // Wait a bit for ports to be released
-        await new Promise(r => setTimeout(r, 1000));
-      }
-    } catch (error) {
-      // Cleanup failures shouldn't block startup
-      console.error('[Cleanup] Failed, continuing anyway:', error);
-    }
-  }
-  
-  /**
-   * Get list of workrail processes and their ports in range 3456-3499
-   * Platform-specific implementation
-   */
-  private async getWorkrailPorts(): Promise<Array<{port: number, pid: number}>> {
-    try {
-      const platform = os.platform();
-      
-      if (platform === 'darwin' || platform === 'linux') {
-        // Use lsof on Unix-like systems
-        const output = execSync(
-          'lsof -i :3456-3499 -Pn 2>/dev/null | grep node || true',
-          { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
-        ).trim();
-        
-        if (!output) return [];
-        
-        // Parse lsof output format: COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
-        // Example: node    79144 etienneb   14u  IPv6 0xc2ceb87d07ed2009      0t0  TCP *:3456 (LISTEN)
-        return output.split('\n').filter(Boolean).map(line => {
-          const parts = line.trim().split(/\s+/);
-          const pid = parseInt(parts[1]);
-          const nameField = parts[8]; // NAME field contains *:PORT or *:service_name
-          const portMatch = nameField.match(/:(\d+)$/);
-          const port = portMatch ? parseInt(portMatch[1]) : 0;
-          return { port, pid };
-        }).filter(item => item.port >= 3456 && item.port < 3500 && !isNaN(item.pid));
-        
-      } else if (platform === 'win32') {
-        // Use netstat on Windows
-        const output = execSync(
-          'netstat -ano | findstr "3456" || echo',
-          { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
-        ).trim();
-        
-        if (!output) return [];
-        
-        return output.split('\n').filter(Boolean).map(line => {
-          const parts = line.trim().split(/\s+/);
-          // Only consider listening sockets; other states can have pid=0 which is unsafe to kill.
-          const state = parts[3] || '';
-          const address = parts[1] || '';
-          const pid = parseInt(parts[4]);
-          const portMatch = address.match(/:(\d+)$/);
-          const port = portMatch ? parseInt(portMatch[1]) : 0;
-          return { port, pid, state };
-        }).filter(item =>
-          item.state === 'LISTENING' &&
-          item.port >= 3456 &&
-          item.port < 3500 &&
-          !isNaN(item.pid) &&
-          item.pid > 0
-        ).map(({ port, pid }) => ({ port, pid }));
-      }
-      
-      return [];
-    } catch (error) {
-      // Command failed, return empty array
-      return [];
-    }
-  }
-  
-  /**
-   * Manual cleanup utility - can be called externally
-   * More aggressive than quickCleanup - removes ALL workrail processes on our ports
+   * Manual cleanup utility - can be called externally via the CLI cleanup command.
+   * Kills ALL workrail processes found on ports 3456-3499 (except the current one).
    */
   async fullCleanup(): Promise<number> {
     try {
@@ -1183,6 +1062,69 @@ export class HttpServer {
     } catch (error) {
       console.error('[Cleanup] Full cleanup failed:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Get list of workrail processes and their ports in range 3456-3499.
+   * Used only by fullCleanup() (an explicit user-triggered CLI command).
+   * Platform-specific implementation using lsof (Unix) or netstat (Windows).
+   */
+  private async getWorkrailPorts(): Promise<Array<{port: number, pid: number}>> {
+    try {
+      const platform = os.platform();
+
+      if (platform === 'darwin' || platform === 'linux') {
+        // Use lsof on Unix-like systems
+        const output = execSync(
+          'lsof -i :3456-3499 -Pn 2>/dev/null | grep node || true',
+          { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+        ).trim();
+
+        if (!output) return [];
+
+        // Parse lsof output format: COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
+        // Example: node    79144 etienneb   14u  IPv6 0xc2ceb87d07ed2009      0t0  TCP *:3456 (LISTEN)
+        return output.split('\n').filter(Boolean).map(line => {
+          const parts = line.trim().split(/\s+/);
+          const pid = parseInt(parts[1]);
+          const nameField = parts[8]; // NAME field contains *:PORT or *:service_name
+          const portMatch = nameField.match(/:(\d+)$/);
+          const port = portMatch ? parseInt(portMatch[1]) : 0;
+          return { port, pid };
+        }).filter(item => item.port >= 3456 && item.port < 3500 && !isNaN(item.pid));
+
+      } else if (platform === 'win32') {
+        // Use netstat on Windows
+        const output = execSync(
+          'netstat -ano | findstr "3456" || echo',
+          { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+        ).trim();
+
+        if (!output) return [];
+
+        return output.split('\n').filter(Boolean).map(line => {
+          const parts = line.trim().split(/\s+/);
+          // Only consider listening sockets; other states can have pid=0 which is unsafe to kill.
+          const state = parts[3] || '';
+          const address = parts[1] || '';
+          const pid = parseInt(parts[4]);
+          const portMatch = address.match(/:(\d+)$/);
+          const port = portMatch ? parseInt(portMatch[1]) : 0;
+          return { port, pid, state };
+        }).filter(item =>
+          item.state === 'LISTENING' &&
+          item.port >= 3456 &&
+          item.port < 3500 &&
+          !isNaN(item.pid) &&
+          item.pid > 0
+        ).map(({ port, pid }) => ({ port, pid }));
+      }
+
+      return [];
+    } catch {
+      // Command failed, return empty array
+      return [];
     }
   }
 }
