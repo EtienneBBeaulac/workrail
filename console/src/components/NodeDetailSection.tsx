@@ -210,7 +210,7 @@ function LiveBadge({ children }: { children: React.ReactNode }) {
   return (
     <span
       className="inline-flex items-center px-2 py-1 font-medium text-xs"
-      style={{ backgroundColor: 'rgba(0, 240, 255, 0.12)', color: 'var(--accent-strong)' }}
+      style={{ backgroundColor: 'rgba(0, 219, 233, 0.12)', color: 'var(--accent-strong)' }}
     >
       {children}
     </span>
