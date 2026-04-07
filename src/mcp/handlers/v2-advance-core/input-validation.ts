@@ -17,6 +17,7 @@ import type { TriggeredAssessmentConsequenceV1 } from './assessment-consequences
 import { getStepById } from '../../../types/workflow.js';
 import { projectRunContextV2 } from '../../../v2/projections/run-context.js';
 import { projectPreferencesV2 } from '../../../v2/projections/preferences.js';
+import { asSortedEventLog } from '../../../v2/durable-core/sorted-event-log.js';
 import { mergeContext } from '../../../v2/durable-core/domain/context-merge.js';
 import type { InternalError } from '../v2-error-mapping.js';
 import { EVENT_KIND } from '../../../v2/durable-core/constants.js';
@@ -66,7 +67,12 @@ export function validateAdvanceInputs(args: {
   const { truth, runId, currentNodeId, inputContext, inputOutput, pinnedWorkflow, pendingStep } = args;
 
   // Context merge
-  const storedContextRes = projectRunContextV2(truth.events);
+  const sortedEventsRes = asSortedEventLog(truth.events);
+  if (sortedEventsRes.isErr()) {
+    return err({ kind: 'invariant_violation' as const, message: sortedEventsRes.error.message });
+  }
+  const sortedEvents = sortedEventsRes.value;
+  const storedContextRes = projectRunContextV2(sortedEvents);
   const storedContext = storedContextRes.isOk() ? storedContextRes.value.byRunId[String(runId)]?.context : undefined;
 
   const inputContextObj =
@@ -115,7 +121,7 @@ export function validateAdvanceInputs(args: {
     if (e.scope?.runId !== String(runId)) continue;
     parentByNodeId[String(e.scope.nodeId)] = e.data.parentNodeId;
   }
-  const prefs = projectPreferencesV2(truth.events, parentByNodeId);
+  const prefs = projectPreferencesV2(sortedEvents, parentByNodeId);
   const effectivePrefs = prefs.isOk() ? prefs.value.byNodeId[String(currentNodeId)]?.effective : undefined;
   const rawAutonomy = effectivePrefs?.autonomy ?? 'guided';
   const rawRiskPolicy = effectivePrefs?.riskPolicy ?? 'conservative';

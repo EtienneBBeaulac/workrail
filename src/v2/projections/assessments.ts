@@ -1,6 +1,7 @@
 import type { Result } from 'neverthrow';
-import { err, ok } from 'neverthrow';
+import { ok } from 'neverthrow';
 import type { DomainEventV1 } from '../durable-core/schemas/session/index.js';
+import type { SortedEventLog } from '../durable-core/sorted-event-log.js';
 import { EVENT_KIND } from '../durable-core/constants.js';
 import type { ProjectionError } from './projection-error.js';
 
@@ -20,11 +21,12 @@ export interface AssessmentsProjectionV2 {
   readonly byNodeId: Readonly<Record<string, readonly RecordedAssessmentViewV2[]>>;
 }
 
-export function projectAssessmentsV2(events: readonly DomainEventV1[]): Result<AssessmentsProjectionV2, ProjectionError> {
-  for (let i = 1; i < events.length; i++) {
-    if (events[i]!.eventIndex < events[i - 1]!.eventIndex) {
-      return err({ code: 'PROJECTION_INVARIANT_VIOLATION', message: 'Events must be sorted by eventIndex ascending' });
-    }
+export function projectAssessmentsV2(events: SortedEventLog): Result<AssessmentsProjectionV2, ProjectionError> {
+  // Sort order is guaranteed by the SortedEventLog brand (validated once at boundary via asSortedEventLog).
+
+  // Fast-path: skip the full scan when no assessment events exist (the common case).
+  if (!events.some((e) => e.kind === EVENT_KIND.ASSESSMENT_RECORDED)) {
+    return ok({ byNodeId: {} });
   }
 
   const byNodeId: Record<string, RecordedAssessmentViewV2[]> = {};

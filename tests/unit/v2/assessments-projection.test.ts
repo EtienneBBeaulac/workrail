@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { projectAssessmentsV2, getLatestAssessmentForNode } from '../../../src/v2/projections/assessments.js';
+import { asSortedEventLog } from '../../../src/v2/durable-core/sorted-event-log.js';
 import type { DomainEventV1 } from '../../../src/v2/durable-core/schemas/session/index.js';
 
 function createAssessmentRecordedEvent(args: {
@@ -53,7 +54,9 @@ describe('projectAssessmentsV2', () => {
       }),
     ];
 
-    const result = projectAssessmentsV2(events);
+    const sorted = asSortedEventLog(events);
+    expect(sorted.isOk()).toBe(true);
+    const result = projectAssessmentsV2(sorted._unsafeUnwrap());
     expect(result.isOk()).toBe(true);
     if (result.isOk()) {
       expect(result.value.byNodeId['node_1']).toHaveLength(1);
@@ -65,7 +68,7 @@ describe('projectAssessmentsV2', () => {
   });
 
   it('returns latest assessment for a node', () => {
-    const projection = projectAssessmentsV2([
+    const events = [
       createAssessmentRecordedEvent({
         eventIndex: 0,
         nodeId: 'node_1',
@@ -79,7 +82,10 @@ describe('projectAssessmentsV2', () => {
         artifactOutputId: 'out_2',
         assessmentId: 'risk_gate',
       }),
-    ]);
+    ];
+    const sorted = asSortedEventLog(events);
+    expect(sorted.isOk()).toBe(true);
+    const projection = projectAssessmentsV2(sorted._unsafeUnwrap());
 
     expect(projection.isOk()).toBe(true);
     if (projection.isOk()) {
@@ -90,8 +96,43 @@ describe('projectAssessmentsV2', () => {
     }
   });
 
-  it('fails on unsorted events', () => {
-    const result = projectAssessmentsV2([
+  it('fast-path: returns empty projection when no assessment events exist', () => {
+    // Verifies that projectAssessmentsV2 short-circuits without scanning the full event log
+    // when there are no assessment_recorded events (the common case).
+    const events: DomainEventV1[] = [];
+    const sorted = asSortedEventLog(events);
+    expect(sorted.isOk()).toBe(true);
+    const result = projectAssessmentsV2(sorted._unsafeUnwrap());
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.byNodeId).toEqual({});
+    }
+  });
+
+  it('fast-path: returns empty projection when events contain no assessment_recorded', () => {
+    const events = [
+      createAssessmentRecordedEvent({
+        eventIndex: 0,
+        nodeId: 'node_1',
+        attemptId: 'attempt_1',
+        artifactOutputId: 'out_1',
+      }),
+    ];
+    // Mutate the kind to simulate non-assessment events (for fast-path testing)
+    const nonAssessmentEvents = [{ ...events[0]!, kind: 'session_created' as const }] as unknown as DomainEventV1[];
+    const sorted = asSortedEventLog(nonAssessmentEvents);
+    expect(sorted.isOk()).toBe(true);
+    const result = projectAssessmentsV2(sorted._unsafeUnwrap());
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.byNodeId).toEqual({});
+    }
+  });
+
+  it('sort validation: asSortedEventLog rejects unsorted events (boundary test)', () => {
+    // Sort order validation is now enforced at the boundary (asSortedEventLog),
+    // not inside the projection itself.
+    const result = asSortedEventLog([
       createAssessmentRecordedEvent({
         eventIndex: 1,
         nodeId: 'node_1',

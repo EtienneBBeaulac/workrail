@@ -17,6 +17,7 @@ import type { ExecutionState, LoopFrame } from '../../domain/execution/state.js'
 import type { RunId, NodeId } from '../../v2/durable-core/ids/index.js';
 import type { LoadedSessionTruthV2 } from '../../v2/ports/session-event-log-store.port.js';
 import { projectPreferencesV2 } from '../../v2/projections/preferences.js';
+import { asSortedEventLog } from '../../v2/durable-core/sorted-event-log.js';
 import { EVENT_KIND } from '../../v2/durable-core/constants.js';
 
 // ── State Conversion ──────────────────────────────────────────────────
@@ -147,7 +148,9 @@ export function derivePreferencesForNode(args: {
     parentByNodeId[String(e.scope.nodeId)] = e.data.parentNodeId;
   }
 
-  const prefs = projectPreferencesV2(args.truth.events, parentByNodeId);
+  const sortedEventsRes = asSortedEventLog(args.truth.events);
+  if (sortedEventsRes.isErr()) return defaultPreferences;
+  const prefs = projectPreferencesV2(sortedEventsRes.value, parentByNodeId);
   if (prefs.isErr()) return defaultPreferences;
 
   const p = prefs.value.byNodeId[String(args.nodeId)]?.effective;

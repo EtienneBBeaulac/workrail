@@ -31,6 +31,7 @@ import { projectNodeOutputsV2 } from '../projections/node-outputs.js';
 import { projectAdvanceOutcomesV2 } from '../projections/advance-outcomes.js';
 import { projectArtifactsV2 } from '../projections/artifacts.js';
 import { projectRunContextV2 } from '../projections/run-context.js';
+import { asSortedEventLog } from '../durable-core/sorted-event-log.js';
 import { projectRunExecutionTraceV2 } from '../projections/run-execution-trace.js';
 import { OUTPUT_CHANNEL, PAYLOAD_KIND, EVENT_KIND } from '../durable-core/constants.js';
 import type {
@@ -495,7 +496,9 @@ const TITLE_CONTEXT_KEYS = ['goal', 'taskDescription', 'mrTitle', 'prTitle', 'ti
  */
 function deriveSessionTitle(events: readonly DomainEventV1[]): string | null {
   // 1. Check context_set for well-known descriptive keys
-  const contextRes = projectRunContextV2(events);
+  const sortedEventsRes = asSortedEventLog(events);
+  if (sortedEventsRes.isErr()) return null;
+  const contextRes = projectRunContextV2(sortedEventsRes.value);
   if (contextRes.isOk()) {
     for (const runCtx of Object.values(contextRes.value.byRunId)) {
       for (const key of TITLE_CONTEXT_KEYS) {
@@ -643,8 +646,9 @@ function projectSessionSummary(
   }
   if (dag === null) return null;
 
-  const statusRes = projectRunStatusSignalsV2(events);
-  const gapsRes = projectGapsV2(events);
+  const sortedEventsRes = asSortedEventLog(events);
+  const statusRes = sortedEventsRes.isOk() ? projectRunStatusSignalsV2(sortedEventsRes.value) : sortedEventsRes;
+  const gapsRes = sortedEventsRes.isOk() ? projectGapsV2(sortedEventsRes.value) : sortedEventsRes;
 
   const sessionTitle = deriveSessionTitle(events);
   const gitBranch = extractGitBranch(events);
@@ -747,8 +751,9 @@ function projectSessionDetail(
     return { sessionId, sessionTitle, health: sessionHealth, runs: [] };
   }
 
-  const statusRes = projectRunStatusSignalsV2(events);
-  const gapsRes = projectGapsV2(events);
+  const sortedEventsRes = asSortedEventLog(events);
+  const statusRes = sortedEventsRes.isOk() ? projectRunStatusSignalsV2(sortedEventsRes.value) : sortedEventsRes;
+  const gapsRes = sortedEventsRes.isOk() ? projectGapsV2(sortedEventsRes.value) : sortedEventsRes;
   const executionTraceRes = projectRunExecutionTraceV2(events);
 
   // Richness projections -- used to populate summary boolean flags on each node.
@@ -964,7 +969,9 @@ function extractValidations(events: readonly DomainEventV1[], nodeId: string): r
 }
 
 function extractGaps(events: readonly DomainEventV1[], nodeId: string): readonly ConsoleNodeGap[] {
-  const gapsRes = projectGapsV2(events);
+  const sortedEventsRes = asSortedEventLog(events);
+  if (sortedEventsRes.isErr()) return [];
+  const gapsRes = projectGapsV2(sortedEventsRes.value);
   if (gapsRes.isErr()) return [];
 
   const gaps: ConsoleNodeGap[] = [];

@@ -34,6 +34,7 @@ import { EVENT_KIND } from '../../../v2/durable-core/constants.js';
 import { buildNextCall } from './index.js';
 import { projectAssessmentsV2, getLatestAssessmentForNode } from '../../../v2/projections/assessments.js';
 import { assertOutput, assertContinueTokenPresence } from '../../assert-output.js';
+import { asSortedEventLog } from '../../../v2/durable-core/sorted-event-log.js';
 
 
 
@@ -226,7 +227,12 @@ function buildStepContext(
   events: readonly DomainEventV1[],
   completedNodeId: NodeId,
 ): { assessments?: { assessmentId: string; dimensions: { dimensionId: string; level: string; rationale?: string }[]; normalizationNotes: readonly string[] } } | undefined {
-  const projection = projectAssessmentsV2(events);
+  const sortedEventsRes = asSortedEventLog(events);
+  if (sortedEventsRes.isErr()) {
+    console.warn(`[workrail:replay] stepContext events unsorted for node '${String(completedNodeId)}' — stepContext will be absent: ${sortedEventsRes.error.message}`);
+    return undefined;
+  }
+  const projection = projectAssessmentsV2(sortedEventsRes.value);
   if (projection.isErr()) {
     console.warn(`[workrail:replay] stepContext projection failed for node '${String(completedNodeId)}' — stepContext will be absent: ${projection.error.message}`);
     return undefined;

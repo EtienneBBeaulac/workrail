@@ -13,6 +13,7 @@ import { projectSessionHealthV2 } from '../../../projections/session-health.js';
 import { projectRunDagV2 } from '../../../projections/run-dag.js';
 import { projectNodeOutputsV2, type NodeOutputsProjectionV2 } from '../../../projections/node-outputs.js';
 import { projectRunContextV2 } from '../../../projections/run-context.js';
+import { asSortedEventLog } from '../../../durable-core/sorted-event-log.js';
 import { derivePendingStep, deriveIsComplete } from '../../../durable-core/projections/snapshot-state.js';
 import type { DomainEventV1 } from '../../../durable-core/schemas/session/index.js';
 import type { SessionId, SnapshotRef } from '../../../durable-core/ids/index.js';
@@ -364,7 +365,9 @@ function extractWorkflowIdentity(events: readonly DomainEventV1[], runId: string
  * 3. null (caller falls back to workflowId/sessionId)
  */
 function deriveSessionTitle(events: readonly DomainEventV1[], runId: string): string | null {
-  const contextRes = projectRunContextV2(events);
+  const sortedEventsRes = asSortedEventLog(events);
+  if (sortedEventsRes.isErr()) return null;
+  const contextRes = projectRunContextV2(sortedEventsRes.value);
   if (contextRes.isOk()) {
     const runCtx = contextRes.value.byRunId[runId];
     if (runCtx) {
