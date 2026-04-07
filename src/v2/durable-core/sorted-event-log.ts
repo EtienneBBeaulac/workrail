@@ -36,6 +36,12 @@ export type SortedEventLog = Brand<readonly DomainEventV1[], 'v2.SortedEventLog'
  *
  * Call this once after loading events from the store, then pass the result
  * to projections that require SortedEventLog.
+ *
+ * Contributor guidance: when adding new projections, accept SortedEventLog as
+ * the parameter type rather than readonly DomainEventV1[]. Call asSortedEventLog
+ * once per call chain entry point and thread the result through. This keeps the
+ * O(n) sort check to a single validation at the boundary instead of repeating it
+ * in every downstream projection.
  */
 export function asSortedEventLog(
   events: readonly DomainEventV1[]

@@ -31,7 +31,7 @@ import { projectNodeOutputsV2 } from '../projections/node-outputs.js';
 import { projectAdvanceOutcomesV2 } from '../projections/advance-outcomes.js';
 import { projectArtifactsV2 } from '../projections/artifacts.js';
 import { projectRunContextV2 } from '../projections/run-context.js';
-import { asSortedEventLog } from '../durable-core/sorted-event-log.js';
+import { asSortedEventLog, type SortedEventLog } from '../durable-core/sorted-event-log.js';
 import { projectRunExecutionTraceV2 } from '../projections/run-execution-trace.js';
 import { OUTPUT_CHANNEL, PAYLOAD_KIND, EVENT_KIND } from '../durable-core/constants.js';
 import type {
@@ -493,12 +493,13 @@ const TITLE_CONTEXT_KEYS = ['goal', 'taskDescription', 'mrTitle', 'prTitle', 'ti
  * 1. Explicit context fields (goal, taskDescription, mrTitle, ...)
  * 2. First recap's descriptive content (stripped of markdown headings)
  * 3. null (caller falls back to workflowName or sessionId)
+ *
+ * Accepts a pre-validated SortedEventLog so that callers which have already
+ * called asSortedEventLog() do not repeat the O(n) sort check.
  */
-function deriveSessionTitle(events: readonly DomainEventV1[]): string | null {
+function deriveSessionTitle(sortedEvents: SortedEventLog): string | null {
   // 1. Check context_set for well-known descriptive keys
-  const sortedEventsRes = asSortedEventLog(events);
-  if (sortedEventsRes.isErr()) return null;
-  const contextRes = projectRunContextV2(sortedEventsRes.value);
+  const contextRes = projectRunContextV2(sortedEvents);
   if (contextRes.isOk()) {
     for (const runCtx of Object.values(contextRes.value.byRunId)) {
       for (const key of TITLE_CONTEXT_KEYS) {
@@ -513,7 +514,7 @@ function deriveSessionTitle(events: readonly DomainEventV1[]): string | null {
   }
 
   // 2. Extract first descriptive line from the root node's recap
-  const title = extractTitleFromFirstRecap(events);
+  const title = extractTitleFromFirstRecap(sortedEvents);
   if (title) return title;
 
   return null;
@@ -646,11 +647,13 @@ function projectSessionSummary(
   }
   if (dag === null) return null;
 
+  // Validate sort order once; thread SortedEventLog through all projections and
+  // deriveSessionTitle so no downstream call repeats the O(n) check.
   const sortedEventsRes = asSortedEventLog(events);
   const statusRes = sortedEventsRes.isOk() ? projectRunStatusSignalsV2(sortedEventsRes.value) : err(sortedEventsRes.error);
   const gapsRes = sortedEventsRes.isOk() ? projectGapsV2(sortedEventsRes.value) : err(sortedEventsRes.error);
 
-  const sessionTitle = deriveSessionTitle(events);
+  const sessionTitle = sortedEventsRes.isOk() ? deriveSessionTitle(sortedEventsRes.value) : null;
   const gitBranch = extractGitBranch(events);
   const repoRoot = extractRepoRoot(events);
 
@@ -744,14 +747,16 @@ function projectSessionDetail(
   const sessionHealth: ConsoleSessionHealth =
     health.isOk() && health.value.kind === 'healthy' ? 'healthy' : 'corrupt';
 
-  const sessionTitle = deriveSessionTitle(events);
+  // Validate sort order once at the top; thread SortedEventLog through all
+  // projections and deriveSessionTitle so no downstream call repeats the O(n) check.
+  const sortedEventsRes = asSortedEventLog(events);
+  const sessionTitle = sortedEventsRes.isOk() ? deriveSessionTitle(sortedEventsRes.value) : null;
 
   const dagRes = projectRunDagV2(events);
   if (dagRes.isErr()) {
     return { sessionId, sessionTitle, health: sessionHealth, runs: [] };
   }
 
-  const sortedEventsRes = asSortedEventLog(events);
   const statusRes = sortedEventsRes.isOk() ? projectRunStatusSignalsV2(sortedEventsRes.value) : err(sortedEventsRes.error);
   const gapsRes = sortedEventsRes.isOk() ? projectGapsV2(sortedEventsRes.value) : err(sortedEventsRes.error);
   const executionTraceRes = projectRunExecutionTraceV2(events);
