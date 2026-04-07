@@ -397,6 +397,8 @@ export function renderPendingPrompt(args: {
   readonly runId: RunId;
   readonly nodeId: NodeId;
   readonly rehydrateOnly: boolean;
+  /** Pre-built SessionIndex -- when provided, skips hasPriorNotesInRun and asSortedEventLog+projectRunContextV2. */
+  readonly precomputedIndex?: import('../session-index.js').SessionIndex;
 }): Result<StepMetadata, PromptRenderError> {
   // Extract base step metadata.
   // Fail-fast: a missing step is a structural invariant violation, not a "use a fallback" situation.
@@ -433,18 +435,22 @@ export function renderPendingPrompt(args: {
   // Context template resolution: substitute {{varName}} / {{varName.path}} tokens in the
   // authored step prompt and title using live session context merged with loop-derived vars.
   // This runs before banner/requirements injection so only the authored text is substituted.
-  const sessionContext: Record<string, unknown> = asSortedEventLog(args.truth.events).andThen(
-    (sorted) => projectRunContextV2(sorted)
-  ).match(
-    (ok) => (ok.byRunId[String(args.runId)]?.context ?? {}) as Record<string, unknown>,
-    (e) => {
-      console.warn(
-        `[prompt-renderer] Context projection failed for step '${args.stepId}' — ` +
-        `{{varName}} tokens will render as [unset:...]: ${e.message}`,
+  // Use pre-computed context from SessionIndex when available to skip the
+  // asSortedEventLog + projectRunContextV2 scans.
+  const sessionContext: Record<string, unknown> = args.precomputedIndex
+    ? (args.precomputedIndex.runContextByRunId.get(String(args.runId)) ?? {}) as Record<string, unknown>
+    : asSortedEventLog(args.truth.events).andThen(
+        (sorted) => projectRunContextV2(sorted)
+      ).match(
+        (ok) => (ok.byRunId[String(args.runId)]?.context ?? {}) as Record<string, unknown>,
+        (e) => {
+          console.warn(
+            `[prompt-renderer] Context projection failed for step '${args.stepId}' — ` +
+            `{{varName}} tokens will render as [unset:...]: ${e.message}`,
+          );
+          return {};
+        },
       );
-      return {};
-    },
-  );
 
   // .at(-1) is idiomatic and expresses intent directly — last frame of the loop path
   const loopIterationFrame = args.loopPath.at(-1);
@@ -508,7 +514,10 @@ export function renderPendingPrompt(args: {
       return '';  // Notes reminder handled in the response formatter footer
     }
 
-    const hasPriorNotes = hasPriorNotesInRun({ truth: args.truth, runId: args.runId });
+    // Use pre-computed index when available to skip the hasPriorNotesInRun .some() scan.
+    const hasPriorNotes = args.precomputedIndex
+      ? args.precomputedIndex.hasPriorNotesByRunId.has(String(args.runId))
+      : hasPriorNotesInRun({ truth: args.truth, runId: args.runId });
     if (hasPriorNotes && !args.rehydrateOnly) {
       return '\n\n**NOTES REQUIRED (System):** Include `output.notesMarkdown` when advancing.\n\n' +
         'Scope: this step only — WorkRail concatenates notes automatically.\n' +
