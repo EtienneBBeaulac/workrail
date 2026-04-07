@@ -67,6 +67,11 @@ interface Props {
    * "drop-shadow(0 16px 48px rgba(0,0,0,0.8)) drop-shadow(0 2px 8px rgba(0,0,0,0.5))"
    */
   dropShadow?: string;
+  /**
+   * Adds backdrop-filter to the inner content layer (the frosted glass effect).
+   * The ambient background bleeds through the semi-transparent panel background.
+   */
+  backdropFilter?: string;
   className?: string;
   style?: CSSProperties;
   children: ReactNode;
@@ -77,6 +82,7 @@ export function CutCornerBox({
   borderColor = 'var(--border)',
   background = 'var(--bg-card)',
   dropShadow,
+  backdropFilter,
   className,
   style,
   children,
@@ -110,6 +116,8 @@ export function CutCornerBox({
           position: 'absolute',
           inset: INSET_PX,
           background,
+          backdropFilter: backdropFilter ?? undefined,
+          WebkitBackdropFilter: backdropFilter ?? undefined,
           clipPath: path,
           display: 'flex',
           flexDirection: 'column',

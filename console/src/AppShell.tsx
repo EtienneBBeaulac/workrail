@@ -103,7 +103,7 @@ export function AppShell() {
       className="min-h-screen bg-[var(--bg-primary)]"
       style={{ '--app-header-height': '61px' } as CSSProperties}
     >
-      <header className="sticky top-0 z-20 border-b border-[var(--border)] px-6 py-4 bg-[var(--bg-primary)]">
+      <header className="sticky top-0 z-20 border-b border-[var(--border)] px-6 py-4" style={{ background: 'rgba(15, 19, 31, 0.9)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' }}>
         <div className="flex items-center gap-4">
           {isInSessionDetail && (
             <button

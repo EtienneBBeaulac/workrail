@@ -1,11 +1,11 @@
 @import "tailwindcss";
 
 :root {
-  /* Backgrounds -- dark neutral base, no colour bleed */
+  /* Backgrounds -- dark neutral base, semi-transparent for glassmorphism */
   --bg-primary: #0f131f;
-  --bg-secondary: #171b28;
-  --bg-card: #1b1f2c;
-  --bg-tertiary: #262937;
+  --bg-secondary: rgba(23, 27, 40, 0.80);
+  --bg-card: rgba(27, 31, 44, 0.72);
+  --bg-tertiary: rgba(38, 41, 55, 0.85);
   --border: #3a3a2e;
 
   /* Text -- warm off-white, not cool lavender */
@@ -29,9 +29,22 @@
 
 body {
   margin: 0;
-  background: var(--bg-primary);
+  background-color: var(--bg-primary);
+  background-image:
+    /* Ambient amber radial glow from top -- like a light source overhead */
+    radial-gradient(ellipse 80% 40% at 50% -10%, rgba(244, 196, 48, 0.06) 0%, transparent 70%),
+    /* Subtle cyan counter-glow from bottom-right -- depth */
+    radial-gradient(ellipse 60% 40% at 100% 110%, rgba(0, 219, 233, 0.04) 0%, transparent 60%);
+  background-attachment: fixed;
   color: var(--text-primary);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Frosted glass utility -- apply to floating panels and key surfaces */
+.glass-panel {
+  background: rgba(27, 31, 44, 0.65) !important;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 
 /* Scanlines overlay -- 2% opacity, 4px pitch. Subtle texture without impeding reading. */
@@ -60,8 +73,8 @@ body::after {
 
 .console-blueprint-grid {
   background-image:
-    linear-gradient(rgba(132, 148, 149, 0.06) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(132, 148, 149, 0.06) 1px, transparent 1px);
+    linear-gradient(rgba(132, 148, 149, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(132, 148, 149, 0.08) 1px, transparent 1px);
   background-size: 20px 20px;
 }
 
@@ -80,8 +93,9 @@ body::after {
   position: relative;
   isolation: isolate;
   box-shadow:
-    inset 0 0 0 1px rgba(244, 196, 48, 0.28),
-    inset 0 0 22px rgba(244, 196, 48, 0.08);
+    inset 0 0 0 1px rgba(244, 196, 48, 0.35),
+    inset 0 0 28px rgba(244, 196, 48, 0.1),
+    0 0 16px rgba(244, 196, 48, 0.15);
   animation: workrail-current-node-pulse 3.2s ease-in-out infinite;
 }
 
@@ -127,10 +141,10 @@ body::after {
       inset 0 0 0 rgba(244, 196, 48, 0);
   }
   50% {
-    opacity: 0.9;
+    opacity: 1.0;
     box-shadow:
-      0 0 24px rgba(244, 196, 48, 0.22),
-      inset 0 0 18px rgba(244, 196, 48, 0.1);
+      0 0 32px rgba(244, 196, 48, 0.3),
+      inset 0 0 24px rgba(244, 196, 48, 0.12);
   }
 }
 
@@ -144,7 +158,7 @@ body::after {
 
 /* Accent-colored elements get a subtle amber glow */
 .energy-glow {
-  box-shadow: 0 0 12px rgba(244, 196, 48, 0.25), 0 0 4px rgba(244, 196, 48, 0.15);
+  box-shadow: 0 0 20px rgba(244, 196, 48, 0.3), 0 0 8px rgba(244, 196, 48, 0.2);
 }
 
 /* Active/live state: cyan electric pulse */
