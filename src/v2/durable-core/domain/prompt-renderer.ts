@@ -28,11 +28,7 @@ import {
   renderBudgetedRehydrateRecovery,
   type RetrievalPackSegment,
 } from './retrieval-contract.js';
-
-// Cached once at module load — avoids a per-call env lookup on the hot
-// renderPendingPrompt path. Consistent with the same pattern in
-// v2-response-formatter.ts (CLEAN_RESPONSE_FORMAT).
-const CLEAN_RESPONSE_FORMAT = process.env.WORKRAIL_CLEAN_RESPONSE_FORMAT === 'true';
+import { CLEAN_RESPONSE_FORMAT } from '../../../env-flags.js';
 
 export type PromptRenderError = {
   readonly code: 'RENDER_FAILED';

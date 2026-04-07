@@ -23,6 +23,7 @@ import {
   buildResponseSupplements,
   type FormattedSupplement,
 } from './response-supplements.js';
+import { CLEAN_RESPONSE_FORMAT } from '../env-flags.js';
 
 // ---------------------------------------------------------------------------
 // Response shape types (mirrors output schemas without importing them)
@@ -404,10 +405,8 @@ function formatSuccess(data: V2ExecutionResponse): string {
 // Clean format variants ("transparent proxy" — authored prompt as-is)
 // ---------------------------------------------------------------------------
 
-// Evaluated once at module load. MCP servers are long-lived processes; the
-// env var is set at startup and does not change at runtime. Caching here
-// eliminates a per-call process.env lookup on the hot path.
-const CLEAN_RESPONSE_FORMAT = process.env.WORKRAIL_CLEAN_RESPONSE_FORMAT === 'true';
+// CLEAN_RESPONSE_FORMAT is imported from ./env-flags.ts — single source of
+// truth shared with prompt-renderer.ts.
 
 // Footer phrasing variants to avoid looking templated.
 // Selected by step index (derived from stepId hash) for determinism.

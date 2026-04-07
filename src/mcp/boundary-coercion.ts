@@ -7,6 +7,7 @@
  */
 
 import { z } from 'zod';
+import { getCachedShape } from './validation/schema-introspection.js';
 
 // -----------------------------------------------------------------------------
 // Internal helpers
@@ -78,7 +79,7 @@ export function buildCoercionFn(
   shapeSchema: z.ZodObject<z.ZodRawShape>,
   aliasMap?: Readonly<Record<string, string>>,
 ): (args: unknown) => unknown {
-  const shape = shapeSchema._def.shape();
+  const shape = getCachedShape(shapeSchema);
 
   // Pre-compute once at registration time.
   const objectFields = new Set<string>();
