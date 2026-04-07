@@ -13,6 +13,8 @@ import { WorkflowCompiler } from '../../src/application/services/workflow-compil
 import { WorkflowInterpreter } from '../../src/application/services/workflow-interpreter.js';
 import { collectArtifactsForEvaluation } from '../../src/mcp/handlers/v2-context-budget.js';
 import { LOOP_CONTROL_CONTRACT_REF } from '../../src/v2/durable-core/schemas/artifacts/index.js';
+import { createWorkflow } from '../../src/types/workflow.js';
+import { createBundledSource } from '../../src/types/workflow-source.js';
 import type { WorkflowDefinition } from '../../src/types/workflow-definition.js';
 import type { DomainEventV1 } from '../../src/v2/durable-core/schemas/session/index.js';
 
@@ -79,7 +81,7 @@ const compiler = new WorkflowCompiler();
 const interpreter = new WorkflowInterpreter();
 
 function compileWorkflow(def: WorkflowDefinition) {
-  const workflow = { definition: def, source: { kind: 'bundled' as const, ref: '(test)' } };
+  const workflow = createWorkflow(def, createBundledSource());
   const result = compiler.compile(workflow);
   if (result.isErr()) throw new Error(`Compilation failed: ${result.error.message}`);
   return result.value;

@@ -123,11 +123,10 @@ function buildWorkflowIndices(definition: WorkflowDefinition): {
       }
 
       if ('type' in step && step.type === 'loop') {
-        const loopStep = step as LoopStepDefinition;
-        loopById.set(loopStep.id, loopStep);
+        loopById.set(step.id, step);
 
-        if (Array.isArray(loopStep.body)) {
-          indexSteps(loopStep.body, loopStep);
+        if (Array.isArray(step.body)) {
+          indexSteps(step.body, step);
         }
       }
     }
@@ -200,21 +199,10 @@ export function getStepById(
 
 /**
  * Get all step IDs from a workflow (including loop body steps).
+ * Uses the pre-built stepById index for consistency with other accessors.
  */
 export function getAllStepIds(workflow: Workflow): readonly string[] {
-  const ids: string[] = [];
-  
-  for (const step of workflow.definition.steps) {
-    ids.push(step.id);
-    
-    if ('type' in step && step.type === 'loop' && Array.isArray(step.body)) {
-      for (const bodyStep of step.body) {
-        ids.push(bodyStep.id);
-      }
-    }
-  }
-  
-  return Object.freeze(ids);
+  return Object.freeze([...workflow.stepById.keys()]);
 }
 
 // =============================================================================
@@ -226,16 +214,22 @@ export function getAllStepIds(workflow: Workflow): readonly string[] {
  */
 export function isWorkflow(obj: unknown): obj is Workflow {
   if (!obj || typeof obj !== 'object') return false;
-  
+
   const candidate = obj as Record<string, unknown>;
-  
+
   return (
     'definition' in candidate &&
     'source' in candidate &&
+    'stepById' in candidate &&
+    'parentLoopByStepId' in candidate &&
+    'loopById' in candidate &&
     candidate['definition'] !== null &&
     typeof candidate['definition'] === 'object' &&
     candidate['source'] !== null &&
-    typeof candidate['source'] === 'object'
+    typeof candidate['source'] === 'object' &&
+    candidate['stepById'] instanceof Map &&
+    candidate['parentLoopByStepId'] instanceof Map &&
+    candidate['loopById'] instanceof Map
   );
 }
 

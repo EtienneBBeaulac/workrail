@@ -287,3 +287,61 @@ describe('getStepById correctness parity', () => {
     expect(getStepById(wf, 'step-1')).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// body: string (loop step with a string reference body)
+// ---------------------------------------------------------------------------
+
+function makeStringBodyLoopWorkflow(): ReturnType<typeof createWorkflow> {
+  // A loop where body is a string reference to a top-level step, not an
+  // inline array. The string body value must NOT be treated as a step, and
+  // the referenced top-level step must NOT appear in parentLoopByStepId.
+  const def = {
+    id: 'test-string-body-loop',
+    name: 'String Body Loop',
+    description: 'A workflow with a loop whose body is a string reference',
+    version: '1.0.0',
+    steps: [
+      {
+        id: 'string-body-loop',
+        type: 'loop',
+        title: 'String Body Loop',
+        loop: { type: 'count', maxIterations: 3 },
+        body: 'ref-step',
+      },
+      {
+        id: 'ref-step',
+        title: 'Referenced Step',
+        prompt: 'I am referenced by the loop body string',
+        requireConfirmation: false,
+      },
+    ],
+  } as unknown as WorkflowDefinition;
+  return createWorkflow(def, createBundledSource());
+}
+
+describe('workflow indices: loop with body as a string reference', () => {
+  it('indexes the loop step in loopById', () => {
+    const wf = makeStringBodyLoopWorkflow();
+    expect(wf.loopById.get('string-body-loop')).toBeDefined();
+    expect(wf.loopById.get('string-body-loop')?.id).toBe('string-body-loop');
+  });
+
+  it('indexes the loop step in stepById', () => {
+    const wf = makeStringBodyLoopWorkflow();
+    expect(wf.stepById.get('string-body-loop')).toBeDefined();
+  });
+
+  it('does NOT treat the string body value itself as a step ID', () => {
+    const wf = makeStringBodyLoopWorkflow();
+    // 'ref-step' exists as a top-level step, but the string 'ref-step' as
+    // a body value should not cause it to appear in parentLoopByStepId.
+    expect(wf.parentLoopByStepId.get('ref-step')).toBeUndefined();
+  });
+
+  it('does NOT add any entries to parentLoopByStepId for a string body loop', () => {
+    const wf = makeStringBodyLoopWorkflow();
+    // Only the top-level steps exist; none should be a loop child.
+    expect(wf.parentLoopByStepId.size).toBe(0);
+  });
+});
