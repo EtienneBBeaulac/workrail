@@ -5,6 +5,9 @@ import { WorkspaceView } from './views/WorkspaceView';
 import { SessionDetail } from './views/SessionDetail';
 import { WorkflowsView } from './views/WorkflowsView';
 import { WorkflowDetail } from './views/WorkflowDetail';
+import { CutCornerBox } from './components/CutCornerBox';
+import { BracketBadge } from './components/BracketBadge';
+import { useSessionList } from './api/hooks';
 
 /**
  * AppShell is the root route component. It owns all view rendering directly,
@@ -40,6 +43,14 @@ export function AppShell() {
 
   // Tag filter is a search param on the workflow routes.
   const activeTag = new URLSearchParams(location.search).get('tag');
+
+  // ---------------------------------------------------------------------------
+  // Telemetry badges
+  // ---------------------------------------------------------------------------
+
+  const { data: sessionData } = useSessionList();
+  const liveCount = sessionData?.sessions.filter(s => s.status === 'in_progress').length ?? 0;
+  const blockedCount = sessionData?.sessions.filter(s => s.status === 'blocked').length ?? 0;
 
   // ---------------------------------------------------------------------------
   // Navigation handlers
@@ -100,76 +111,122 @@ export function AppShell() {
 
   return (
     <div
-      className="min-h-screen bg-[var(--bg-primary)]"
-      style={{ '--app-header-height': '61px' } as CSSProperties}
+      className="min-h-screen"
+      style={{ '--app-header-height': '56px' } as CSSProperties}
     >
-      <header className="sticky top-0 z-20 border-b border-[var(--border)] px-6 py-4" style={{ background: 'rgba(15, 19, 31, 0.9)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' }}>
-        <div className="flex items-center gap-4">
-          {isInSessionDetail && (
+      <header
+        style={{
+          background: 'rgba(23, 27, 40, 0.92)',
+          backdropFilter: 'blur(24px)',
+          WebkitBackdropFilter: 'blur(24px)',
+          borderBottom: '1px solid rgba(244, 196, 48, 0.25)',
+          boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+        }}
+        className="fixed top-0 w-full z-50 flex items-center h-14 px-4 gap-6"
+      >
+        {/* Left zone -- identity */}
+        <div className="flex items-center gap-3 shrink-0">
+          <CutCornerBox
+            cut={8}
+            borderColor="rgba(244, 196, 48, 0.5)"
+            background="rgba(27, 31, 44, 0.8)"
+            className="relative w-10 h-10"
+          >
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className="font-mono text-[11px] font-bold text-[var(--accent)] tracking-widest">WR</span>
+            </div>
+          </CutCornerBox>
+          <div className="hidden sm:flex flex-col leading-none">
+            <span className="font-mono text-[11px] font-bold text-[var(--text-primary)] tracking-[0.25em] uppercase">
+              WR_CONSOLE
+            </span>
+            <span className="font-mono text-[9px] text-[var(--text-muted)] tracking-[0.15em]">
+              // V{import.meta.env.VITE_APP_VERSION}
+            </span>
+          </div>
+        </div>
+
+        {/* Center zone -- navigation */}
+        {isInSessionDetail && sessionId ? (
+          /* Session detail breadcrumb */
+          <nav className="flex items-center flex-1 justify-center">
             <button
               onClick={handleBackFromSession}
-              className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+              className="font-mono text-[10px] uppercase tracking-[0.20em] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:outline-none"
             >
-              &larr; Back
+              &larr; WORKSPACE // {sessionId.slice(-12)}
             </button>
-          )}
-
-          <h1 className="text-lg font-semibold text-[var(--text-primary)]">
-            WorkRail Console
-          </h1>
-
-          {isInSessionDetail && sessionId && (
-            <span className="text-sm text-[var(--text-muted)] font-mono">
-              {sessionId}
-            </span>
-          )}
-
-          {/* Tab bar -- hidden when in session detail */}
-          {!isInSessionDetail && (
-            <div
-              role="tablist"
-              aria-label="Console sections"
-              ref={tabBarRef}
-              className="flex items-center gap-1 ml-4"
+          </nav>
+        ) : (
+          /* Tab navigation */
+          <div
+            role="tablist"
+            aria-label="Console sections"
+            ref={tabBarRef}
+            className="flex items-center gap-1 flex-1 justify-center"
+          >
+            <button
+              role="tab"
+              id="tab-workspace"
+              aria-selected={!isOnWorkflowsTab}
+              aria-controls="panel-workspace"
+              tabIndex={!isOnWorkflowsTab ? 0 : -1}
+              onClick={() => void navigate({ to: '/' })}
+              className={[
+                'px-4 py-2.5 font-mono text-[10px] uppercase tracking-[0.30em] transition-colors',
+                'focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:outline-none',
+                !isOnWorkflowsTab
+                  ? 'corner-brackets text-[var(--accent)] text-glow-amber'
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
+              ].join(' ')}
+              style={!isOnWorkflowsTab ? { backgroundColor: 'rgba(244, 196, 48, 0.06)' } : undefined}
             >
-              <button
-                role="tab"
-                id="tab-workspace"
-                aria-selected={!isOnWorkflowsTab}
-                aria-controls="panel-workspace"
-                tabIndex={!isOnWorkflowsTab ? 0 : -1}
-                onClick={() => void navigate({ to: '/' })}
-                className={[
-                  'px-3 py-1 rounded text-sm font-medium transition-colors',
-                  !isOnWorkflowsTab
-                    ? 'text-[var(--text-primary)]'
-                    : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]',
-                ].join(' ')}
-              >
-                Workspace
-              </button>
-              <button
-                role="tab"
-                id="tab-workflows"
-                aria-selected={isOnWorkflowsTab}
-                aria-controls="panel-workflows"
-                tabIndex={isOnWorkflowsTab ? 0 : -1}
-                onClick={() => void navigate({ to: '/workflows', search: { tag: undefined } })}
-                className={[
-                  'px-3 py-1 rounded text-sm font-medium transition-colors',
-                  isOnWorkflowsTab
-                    ? 'text-[var(--text-primary)]'
-                    : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]',
-                ].join(' ')}
-              >
-                Workflows
-              </button>
-            </div>
+              Workspace
+            </button>
+            <button
+              role="tab"
+              id="tab-workflows"
+              aria-selected={isOnWorkflowsTab}
+              aria-controls="panel-workflows"
+              tabIndex={isOnWorkflowsTab ? 0 : -1}
+              onClick={() => void navigate({ to: '/workflows', search: { tag: undefined } })}
+              className={[
+                'px-4 py-2.5 font-mono text-[10px] uppercase tracking-[0.30em] transition-colors',
+                'focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:outline-none',
+                isOnWorkflowsTab
+                  ? 'corner-brackets text-[var(--accent)] text-glow-amber'
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
+              ].join(' ')}
+              style={isOnWorkflowsTab ? { backgroundColor: 'rgba(244, 196, 48, 0.06)' } : undefined}
+            >
+              Workflows
+            </button>
+          </div>
+        )}
+
+        {/* Right zone -- telemetry badges */}
+        <div className="flex items-center gap-2 shrink-0">
+          {liveCount > 0 && (
+            <BracketBadge
+              label={`${Math.min(liveCount, 9)}${liveCount > 9 ? '+' : ''} LIVE`}
+              color="var(--accent-strong)"
+              pulse
+              role="status"
+              aria-label={`${liveCount} live session${liveCount === 1 ? '' : 's'}`}
+            />
+          )}
+          {blockedCount > 0 && (
+            <BracketBadge
+              label={`${Math.min(blockedCount, 9)}${blockedCount > 9 ? '+' : ''} BLOCKED`}
+              color="var(--blocked)"
+              role="status"
+              aria-label={`${blockedCount} blocked session${blockedCount === 1 ? '' : 's'}`}
+            />
           )}
         </div>
       </header>
 
-      <main className="p-6">
+      <main className="p-6" style={{ paddingTop: 'calc(56px + 1.5rem)' }}>
         {/* Workspace panel */}
         <div
           id="panel-workspace"
