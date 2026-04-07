@@ -2,9 +2,9 @@ import fs from 'fs';
 import path from 'path';
 import Ajv, { ValidateFunction } from 'ajv';
 import { IWorkflowStorage, ICompositeWorkflowStorage, isCompositeStorage } from '../../types/storage';
-import { 
-  Workflow, 
-  WorkflowSummary, 
+import {
+  Workflow,
+  WorkflowSummary,
   WorkflowDefinition,
   WorkflowSource,
   createWorkflow,
@@ -12,6 +12,25 @@ import {
 } from '../../types/workflow';
 import { InvalidWorkflowError } from '../../core/error-handler';
 import { validateWorkflowIdForLoad, validateWorkflowIdForSave } from '../../domain/workflow-id-policy';
+
+// ---------------------------------------------------------------------------
+// Module-level AJV singleton
+//
+// Compiling the schema is expensive (~10ms). Both validator classes used to
+// run `new Ajv().compile(schema)` inside their constructors, which meant a
+// fresh compile on every `createWorkflowReaderForRequest` call (once per MCP
+// request). Moving the compiled validator here makes compilation happen once
+// at module load time. AJV compiled validators are pure, stateless functions
+// and are safe to share across any number of instances.
+// ---------------------------------------------------------------------------
+function buildModuleValidator(): ValidateFunction {
+  const schemaPath = path.resolve(__dirname, '../../../spec/workflow.schema.json');
+  const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf-8'));
+  const ajv = new Ajv({ allErrors: true, strict: false });
+  return ajv.compile(schema);
+}
+
+const MODULE_WORKFLOW_VALIDATOR: ValidateFunction = buildModuleValidator();
 
 /**
  * Structured prefix for validation errors.
@@ -41,14 +60,10 @@ function reportValidationFailure(workflowId: string, sourceKind: string, error: 
  */
 export class SchemaValidatingWorkflowStorage implements IWorkflowStorage {
   public readonly kind = 'single' as const;
-  private readonly validator: ValidateFunction;
+  // Use the module-level singleton to avoid recompiling the schema per instance.
+  private readonly validator: ValidateFunction = MODULE_WORKFLOW_VALIDATOR;
 
-  constructor(private readonly inner: IWorkflowStorage) {
-    const schemaPath = path.resolve(__dirname, '../../../spec/workflow.schema.json');
-    const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf-8'));
-    const ajv = new Ajv({ allErrors: true, strict: false });
-    this.validator = ajv.compile(schema);
-  }
+  constructor(private readonly inner: IWorkflowStorage) {}
 
   get source(): WorkflowSource {
     return this.inner.source;
@@ -133,14 +148,10 @@ export class SchemaValidatingWorkflowStorage implements IWorkflowStorage {
  */
 export class SchemaValidatingCompositeWorkflowStorage implements ICompositeWorkflowStorage {
   public readonly kind = 'composite' as const;
-  private readonly validator: ValidateFunction;
+  // Use the module-level singleton to avoid recompiling the schema per instance.
+  private readonly validator: ValidateFunction = MODULE_WORKFLOW_VALIDATOR;
 
-  constructor(private readonly inner: ICompositeWorkflowStorage) {
-    const schemaPath = path.resolve(__dirname, '../../../spec/workflow.schema.json');
-    const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf-8'));
-    const ajv = new Ajv({ allErrors: true, strict: false });
-    this.validator = ajv.compile(schema);
-  }
+  constructor(private readonly inner: ICompositeWorkflowStorage) {}
   
   private validateDefinition(definition: WorkflowDefinition, sourceKind: WorkflowSource['kind']): boolean {
     const isValid = this.validator(definition);

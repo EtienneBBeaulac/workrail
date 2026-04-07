@@ -166,6 +166,7 @@ interface WorkflowLookupReader {
     readonly description: string;
     readonly version: string;
   }[]>;
+  readonly loadAllWorkflows: () => Promise<readonly Workflow[]>;
 }
 
 function isToolErrorResult(
@@ -207,15 +208,27 @@ export async function handleV2ListWorkflows(
     ? [`Managed workflow source store was temporarily unavailable (${managedStoreError}). Managed sources were not loaded.`]
     : undefined;
 
+  // Load all workflows in a single pass and build a Map for O(1) access.
+  // Previously this called listWorkflowSummaries() then fanned out to N
+  // individual getWorkflowById() calls -- one per workflow (N+1 pattern).
   return ResultAsync.fromPromise(
-    withTimeout(workflowReader.listWorkflowSummaries(), TIMEOUT_MS, 'list_workflows'),
+    withTimeout(workflowReader.loadAllWorkflows(), TIMEOUT_MS, 'list_workflows'),
     (err) => mapUnknownErrorToToolError(err)
   )
-    .andThen((summaries) =>
-      ResultAsync.combine(
+    .andThen((allWorkflows) => {
+      const workflowMap = new Map<string, Workflow>(allWorkflows.map((w) => [w.definition.id, w]));
+      // Build summary list from loaded workflows to preserve sort-stability and filtering.
+      const summaries = allWorkflows.map((w) => ({
+        id: w.definition.id,
+        name: w.definition.name,
+        description: w.definition.description,
+        version: w.definition.version,
+      }));
+      return ResultAsync.combine(
         summaries.map((s) =>
           ResultAsync.fromPromise(
             buildV2WorkflowListItem({
+              workflow: workflowMap.get(s.id) ?? null,
               summary: s,
               workflowReader,
               rememberedRootRecords,
@@ -225,8 +238,8 @@ export async function handleV2ListWorkflows(
             (err) => mapUnknownErrorToToolError(err)
           )
         )
-      )
-    )
+      );
+    })
     .andThen((compiled) => {
       const sortedIds = compiled.map((w) => w.workflowId).sort((a, b) => a.localeCompare(b));
       const sortedCompiled = [...compiled].sort((a, b) => a.workflowId.localeCompare(b.workflowId));
@@ -432,20 +445,21 @@ async function buildWorkflowVisibility(
   return toWorkflowVisibility(workflow, rememberedRootRecords, { migration });
 }
 
-async function buildV2WorkflowListItem(options: {
+export async function buildV2WorkflowListItem(options: {
+  /** Full workflow object, pre-fetched by the caller to avoid N+1 reads. */
+  readonly workflow: Workflow | null;
   readonly summary: {
     readonly id: string;
-  readonly name: string;
-  readonly description: string;
-  readonly version: string;
+    readonly name: string;
+    readonly description: string;
+    readonly version: string;
   };
   readonly workflowReader: WorkflowLookupReader;
   readonly rememberedRootRecords: readonly RememberedRootRecordV2[];
   readonly crypto: CryptoPortV2;
   readonly pinnedStore: PinnedWorkflowStorePortV2;
 }) {
-  const { summary, workflowReader, rememberedRootRecords, crypto, pinnedStore } = options;
-  const workflow = await workflowReader.getWorkflowById(summary.id);
+  const { workflow, summary, workflowReader, rememberedRootRecords, crypto, pinnedStore } = options;
 
   if (!workflow) {
     return {
