@@ -391,27 +391,47 @@ describe('Development-mode path deduplication', () => {
   //
   // Root cause: getBundledWorkflowsPath() and getProjectWorkflowsPath() both
   // resolve to the same directory during development (process.cwd() == package
-  // root). The higher-priority project source (priority 7) would overwrite the
-  // bundled source (priority 1), changing kind from 'bundled' to 'project'.
+  // root). The higher-priority project source (priority 7) would register the
+  // same workflows under kind:'project', and the previous storage-layer guard
+  // (isProjectPathInsideOwnPackage) would skip the project source entirely.
   //
-  // Fix: isProjectPathInsideOwnPackage() returns true when the resolved project
-  // path equals the resolved bundled path, and the project source is skipped.
+  // New fix (Option C): The storage layer now registers both sources when both
+  // paths exist. The resolution layer (workflow-resolution.ts) handles the
+  // conflict: a bundled source always beats a project source for the same
+  // workflow ID, so every bundled workflow retains kind:'bundled'.
+  //
+  // The storage layer no longer needs the path-collision guard.
 
-  it('skips project source registration when project path equals bundled path', () => {
-    // Provide an explicit projectPath that resolves to the same location as the
-    // bundled workflows dir (simulates running from the workrail source repo).
-    // __dirname here is tests/unit/ so we go up 3 levels to reach package root.
-    const bundledPath = path.resolve(__dirname, '../../../workflows');
-    const storage = new EnhancedMultiSourceWorkflowStorage({
-      includeBundled: true,
-      includeUser: false,
-      includeProject: true,
-      projectPath: bundledPath  // intentionally same as bundled
-    });
+  it('registers project source even when project path equals bundled path (guard moved to resolution layer)', () => {
+    // Simulate the development scenario: project path is explicitly set to the
+    // bundled workflows directory (src/infrastructure/storage/../../../workflows).
+    // The storage layer must NOT suppress the project source -- conflict
+    // resolution now happens in resolveWorkflowCandidates.
+    //
+    // We use the same relative resolution that getBundledWorkflowsPath() uses
+    // internally (3 levels up from src/infrastructure/storage/) so the paths
+    // are guaranteed to match regardless of where the worktree lives.
+    const storageLayerDir = path.resolve(__dirname, '../../src/infrastructure/storage');
+    const bundledPath = path.resolve(storageLayerDir, '../../../workflows');
+    const featureFlags = EnvironmentFeatureFlagProvider.withEnv({});
+    const storage = new EnhancedMultiSourceWorkflowStorage(
+      {
+        includeBundled: true,
+        includeUser: false,
+        includeProject: true,
+        projectPath: bundledPath  // intentionally same as bundled
+      },
+      featureFlags
+    );
 
     const sourceInfo = storage.getSourceInfo();
+    // Both bundled AND project sources are now registered -- the storage layer
+    // no longer suppresses the project source. Conflict resolution happens in
+    // resolveWorkflowCandidates (bundled wins over project).
+    const bundledSources = sourceInfo.filter((s: { source: { kind: string } }) => s.source.kind === 'bundled');
     const projectSources = sourceInfo.filter((s: { source: { kind: string } }) => s.source.kind === 'project');
-    expect(projectSources).toHaveLength(0);
+    expect(bundledSources).toHaveLength(1);
+    expect(projectSources).toHaveLength(1);
   });
 
   it('registers project source normally when project path differs from bundled path', () => {

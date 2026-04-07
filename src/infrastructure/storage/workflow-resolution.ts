@@ -135,15 +135,35 @@ export function resolveWorkflowCandidates(
         },
       });
     } else {
-      // Multiple sources — apply priority rules
-      // Check for bundled protection
-      const bundledSource = sources.find(s => isBundledWorkflow(s.workflow));
+      // Multiple sources — apply priority rules.
+      //
+      // Bundled protection: a workflow from a 'bundled' source wins over any
+      // 'project' source that carries the same ID.
+      //
+      // This covers two cases:
+      //   1. wr.* namespace — canonical WorkRail workflows that must not be
+      //      shadowed by user-authored workflows with the same ID.
+      //   2. Any bundled workflow when the project path accidentally equals the
+      //      bundled workflows directory (e.g. running workrail from its own
+      //      source repo during development). Without this rule the higher-
+      //      priority project source would overwrite the bundled one, making
+      //      every bundled workflow appear as kind:'project' in the console.
+      //
+      // Only project sources are blocked — user, custom, git, and remote
+      // sources still follow normal source_priority ordering.
+      const bundledSource = sources.find(s => s.workflow.source.kind === 'bundled');
+      const projectShadowers = bundledSource
+        ? sources.filter(s => s !== bundledSource && s.workflow.source.kind === 'project')
+        : [];
 
-      if (bundledSource && sources.some(s => s !== bundledSource && !isBundledWorkflow(s.workflow))) {
-        // Bundled source with non-bundled shadowers
+      if (bundledSource && projectShadowers.length > 0) {
+        // Bundled source beats project sources.
+        // Any remaining non-project, non-bundled sources (user, custom, git,
+        // remote) are also treated as shadowers for reporting purposes — they
+        // didn't win, but they are not the reason bundled was protected.
         const { sourceRef: bundledRef, workflow } = bundledSource;
         const attemptedShadowRefs = sources
-          .filter(s => s !== bundledSource && !isBundledWorkflow(s.workflow))
+          .filter(s => s !== bundledSource)
           .map(s => s.sourceRef);
 
         const variantResolution = variantResolutions.get(id)?.get(bundledRef);
@@ -177,20 +197,6 @@ export function resolveWorkflowCandidates(
   }
 
   return resolved;
-}
-
-/**
- * Check if a workflow qualifies for bundled protection.
- *
- * Both conditions must be true:
- * - ID starts with 'wr.' (the namespace convention)
- * - Source kind is 'bundled' (actually from the bundled storage)
- *
- * A wr.* ID from a non-bundled source does NOT get protection —
- * it's a user-created workflow that happens to use the wr. prefix.
- */
-function isBundledWorkflow(workflow: Workflow): boolean {
-  return workflow.definition.id.startsWith('wr.') && workflow.source.kind === 'bundled';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
