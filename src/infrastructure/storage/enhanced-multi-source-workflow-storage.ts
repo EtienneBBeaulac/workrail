@@ -333,6 +333,12 @@ export class EnhancedMultiSourceWorkflowStorage implements ICompositeWorkflowSto
   }
 
   async listWorkflowSummaries(): Promise<readonly WorkflowSummary[]> {
+    // DIVERGENCE RISK: The deduplication logic below (seenIds + findIndex + last-wins) is a
+    // hand-rolled parallel to the shared `resolveWorkflowCandidates` function used by
+    // `loadAllWorkflows()` and the registry validator. The two paths must produce equivalent
+    // precedence results (later source wins, bundled `wr.*` protected), but they are maintained
+    // separately. Future changes to deduplication rules (e.g. priority order, bundled protection,
+    // conflict resolution) MUST be applied to BOTH paths to stay in sync.
     const allSummaries: WorkflowSummary[] = [];
     const seenIds = new Set<string>();
 

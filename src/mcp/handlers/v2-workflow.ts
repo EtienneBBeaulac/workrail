@@ -445,7 +445,7 @@ async function buildWorkflowVisibility(
   return toWorkflowVisibility(workflow, rememberedRootRecords, { migration });
 }
 
-async function buildV2WorkflowListItem(options: {
+export async function buildV2WorkflowListItem(options: {
   /** Full workflow object, pre-fetched by the caller to avoid N+1 reads. */
   readonly workflow: Workflow | null;
   readonly summary: {

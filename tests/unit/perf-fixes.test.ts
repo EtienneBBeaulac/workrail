@@ -258,6 +258,52 @@ describe('Fix 3b: CachingCompositeWorkflowStorage uses Map for getWorkflowById',
 });
 
 // ---------------------------------------------------------------------------
+// Fix 4 (degraded path): buildV2WorkflowListItem with missing workflow
+// ---------------------------------------------------------------------------
+
+describe('buildV2WorkflowListItem: degraded path when workflow is null', () => {
+  // This exercises the `workflowMap.get(s.id) ?? null` fallback in handleV2ListWorkflows.
+  // In normal operation the map is built from the same allWorkflows array as the summaries,
+  // so the null branch should never fire. We test it anyway to guard against race conditions
+  // or stale summaries where a summary ID has no matching workflow object.
+  it('returns a minimal list item without throwing when workflow is null', async () => {
+    const { buildV2WorkflowListItem } = await import('../../src/mcp/handlers/v2-workflow');
+
+    // Minimal stubs -- the null-workflow early-return path never reaches crypto or pinnedStore.
+    const stubCrypto = {} as import('../../src/v2/durable-core/canonical/hashing').CryptoPortV2;
+    const stubPinnedStore = {} as import('../../src/v2/ports/pinned-workflow-store.port').PinnedWorkflowStorePortV2;
+    const stubReader = {
+      getWorkflowById: async () => null,
+      listWorkflowSummaries: async () => [],
+      loadAllWorkflows: async () => [],
+    };
+
+    const summary = {
+      id: 'missing-workflow-id',
+      name: 'Missing Workflow',
+      description: 'A workflow that exists in summaries but not in the map',
+      version: '1.0.0',
+    };
+
+    // Should not throw, even though workflow is null.
+    const result = await buildV2WorkflowListItem({
+      workflow: null,
+      summary,
+      workflowReader: stubReader,
+      rememberedRootRecords: [],
+      crypto: stubCrypto,
+      pinnedStore: stubPinnedStore,
+    });
+
+    // Degrades gracefully: returns a list item shaped from the summary alone.
+    expect(result.workflowId).toBe('missing-workflow-id');
+    expect(result.name).toBe('Missing Workflow');
+    expect(result.workflowHash).toBeNull();
+    expect(result.kind).toBe('workflow');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Fix 5: Schema caching in handleWorkflowGetSchema
 // ---------------------------------------------------------------------------
 
