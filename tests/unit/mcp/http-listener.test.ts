@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createHttpListener } from '../../../src/mcp/transports/http-listener.js';
+import { createHttpListener, bindWithPortFallback } from '../../../src/mcp/transports/http-listener.js';
 import fetch from 'node-fetch';
 
 describe('HttpListener', () => {
@@ -92,16 +92,63 @@ describe('HttpListener', () => {
   it('allows mounting routes on the Express app before starting', async () => {
     const listener = createHttpListener(13303);
     listeners.push(listener);
-    
+
     listener.app.get('/test', (req, res) => {
       res.json({ message: 'test route' });
     });
-    
+
     await listener.start();
-    
+
     const response = await fetch(`http://localhost:13303/test`);
     const data: any = await response.json();
-    
+
     expect(data.message).toBe('test route');
+  });
+});
+
+describe('bindWithPortFallback', () => {
+  let boundListeners: ReturnType<typeof createHttpListener>[] = [];
+
+  afterEach(async () => {
+    for (const l of boundListeners) {
+      await l.stop();
+    }
+    boundListeners = [];
+  });
+
+  it('binds to startPort when it is available', async () => {
+    const listener = await bindWithPortFallback(13400, 13410);
+    boundListeners.push(listener);
+
+    expect(listener.getBoundPort()).toBe(13400);
+  });
+
+  it('falls back to the next available port when startPort is busy', async () => {
+    // Occupy 13400 first
+    const occupier = createHttpListener(13400);
+    await occupier.start();
+    boundListeners.push(occupier);
+
+    const listener = await bindWithPortFallback(13400, 13410);
+    boundListeners.push(listener);
+
+    // Should have bound to 13401 (or higher) since 13400 is taken
+    const boundPort = listener.getBoundPort();
+    expect(boundPort).not.toBeNull();
+    expect(boundPort!).toBeGreaterThan(13400);
+    expect(boundPort!).toBeLessThanOrEqual(13410);
+  });
+
+  it('throws when no port in range is available', async () => {
+    // Occupy all ports in a small range
+    const occupiers = [createHttpListener(13420), createHttpListener(13421)];
+    for (const occ of occupiers) {
+      await occ.start();
+      boundListeners.push(occ);
+    }
+
+    await expect(bindWithPortFallback(13420, 13421)).rejects.toThrow(
+      'No available port in range 13420-13421'
+    );
   });
 });

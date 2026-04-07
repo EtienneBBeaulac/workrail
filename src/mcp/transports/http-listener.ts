@@ -38,10 +38,10 @@ export interface HttpListener {
 
 /**
  * Create a minimal HTTP listener for MCP transport.
- * 
- * No middleware by default — caller mounts MCP handlers.
- * No CORS — bot service is expected to be same-origin or handle CORS externally.
- * 
+ *
+ * No middleware by default -- caller mounts MCP handlers.
+ * No CORS -- bot service is expected to be same-origin or handle CORS externally.
+ *
  * Fail-fast on port conflict: throws immediately, no fallback.
  * Supports ephemeral ports: requestedPort=0 lets OS assign a port;
  * getBoundPort() returns the actual bound port after start().
@@ -84,7 +84,7 @@ export function createHttpListener(requestedPort: number): HttpListener {
         server.listen(requestedPort, () => {
           const addr = server.address();
           const boundPort = addr && typeof addr === 'object' ? addr.port : requestedPort;
-          
+
           state = { kind: 'running', server, boundPort };
           console.error(`[HttpListener] MCP HTTP transport listening on port ${boundPort}`);
           resolve();
@@ -112,4 +112,53 @@ export function createHttpListener(requestedPort: number): HttpListener {
       });
     },
   };
+}
+
+/**
+ * Scan ports [startPort, endPort] and return the first HttpListener that binds
+ * successfully.
+ *
+ * WHY this lives here (not in http-entry.ts): the function only depends on
+ * `createHttpListener`, so it belongs in this module. Keeping it here lets
+ * tests import it without pulling in the full `composeServer` / DI stack.
+ *
+ * The returned listener is already started. Callers must call stop() on it
+ * when they are done, as usual.
+ *
+ * Throws if no port in the range is available.
+ */
+export async function bindWithPortFallback(
+  startPort: number,
+  endPort: number
+): Promise<HttpListener> {
+  let lastError: Error | undefined;
+
+  for (let port = startPort; port <= endPort; port++) {
+    const listener = createHttpListener(port);
+    try {
+      await listener.start();
+      if (port !== startPort) {
+        console.error(
+          `[HttpListener] Port ${startPort} unavailable; bound to fallback port ${port}`
+        );
+      }
+      return listener;
+    } catch (err: unknown) {
+      const nodeErr = err as NodeJS.ErrnoException;
+      if (
+        nodeErr.code === 'EADDRINUSE' ||
+        (err instanceof Error && err.message.includes('already in use'))
+      ) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        continue;
+      }
+      // Non-EADDRINUSE error: propagate immediately (unexpected failure)
+      throw err;
+    }
+  }
+
+  throw new Error(
+    `[HttpListener] No available port in range ${startPort}-${endPort}. ` +
+    `Last error: ${lastError?.message}`
+  );
 }

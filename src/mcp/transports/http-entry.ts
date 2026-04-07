@@ -12,14 +12,23 @@
  */
 
 import { composeServer } from '../server.js';
-import { createHttpListener } from './http-listener.js';
+import { bindWithPortFallback } from './http-listener.js';
 import { wireShutdownHooks } from './shutdown-hooks.js';
 import * as crypto from 'crypto';
 import express from 'express';
 
+/** Inclusive upper bound for the HTTP port scan range. Scan starts at the requested port. */
+const HTTP_PORT_SCAN_END = 3199;
+
 export async function startHttpServer(port: number): Promise<void> {
   const { server, ctx } = await composeServer();
-  const listener = createHttpListener(port);
+
+  // Scan from the requested port up to HTTP_PORT_SCAN_END so a second
+  // concurrent WorkRail instance can bind to a different port rather than
+  // failing hard. createHttpListener() itself stays fail-fast; the scan
+  // policy lives here at the transport entry point where it belongs.
+  const scanEnd = Math.max(port, HTTP_PORT_SCAN_END);
+  const listener = await bindWithPortFallback(port, scanEnd);
 
   const { StreamableHTTPServerTransport } = await import(
     '@modelcontextprotocol/sdk/server/streamableHttp.js'
@@ -35,12 +44,14 @@ export async function startHttpServer(port: number): Promise<void> {
   // -------------------------------------------------------------------------
   // The SDK's handleRequest takes (req, res, parsedBody).
   // Express body-parser makes the parsed body available on req.body.
+  // Routes are registered on the Express app after the port is bound.
+  // Express dispatches by app-level routing, not by listen order, so
+  // registering routes on an already-started server is safe.
   listener.app.use(express.json());
   listener.app.post('/mcp', (req, res) => transport.handleRequest(req, res, req.body));
   listener.app.get('/mcp', (req, res) => transport.handleRequest(req, res));
   listener.app.delete('/mcp', (req, res) => transport.handleRequest(req, res));
 
-  await listener.start();
   await server.connect(transport);
 
   const boundPort = listener.getBoundPort();
