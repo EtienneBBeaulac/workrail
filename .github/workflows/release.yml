@@ -36,17 +36,14 @@ jobs:
             exit 0
           fi
 
+          BODY="$(printf '## CI failure on main is blocking releases\n\nCI failed for commit [%s](https://github.com/%s/commit/%s) on `main`. The release workflow will not run until CI passes.\n\n**Failed CI run:** %s\n\nThis issue was opened automatically by the release workflow.' \
+            "${SHORT_SHA}" "${REPO}" "${CI_SHA}" "${CI_RUN_URL}")"
+
           gh issue create \
             --repo "${REPO}" \
             --title "${TITLE}" \
             --label "bug" \
-            --body "## CI failure on main is blocking releases
-
-CI failed for commit [\`${SHORT_SHA}\`](https://github.com/${REPO}/commit/${CI_SHA}) on \`main\`. The release workflow will not run until CI passes.
-
-**Failed CI run:** ${CI_RUN_URL}
-
-This issue was opened automatically by the release workflow."
+            --body "${BODY}"
 
   release:
     name: Release
@@ -184,19 +181,15 @@ This issue was opened automatically by the release workflow."
             exit 0
           fi
 
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          BODY="$(printf '## Release failure\n\nThe release workflow failed for commit [%s](https://github.com/%s/commit/%s).\n\n**CI run:** %s\n**Release run:** %s\n\nThis issue was opened automatically by the release workflow.' \
+            "${SHORT_SHA}" "${REPO}" "${CI_SHA}" "${CI_RUN_URL}" "${RUN_URL}")"
+
           gh issue create \
             --repo "${REPO}" \
             --title "${TITLE}" \
             --label "bug" \
-            --body "## Release failure
-
-The release workflow failed for commit [\`${SHORT_SHA}\`](https://github.com/${REPO}/commit/${CI_SHA}).
-
-**CI run:** ${CI_RUN_URL}
-
-Check the [release workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details.
-
-This issue was opened automatically by the release workflow."
+            --body "${BODY}"
 
       - name: Release summary
         if: always()
