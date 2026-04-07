@@ -295,7 +295,7 @@ export function mountConsoleRoutes(
             description: definition.description,
             version: definition.version,
             tags: tagEntry?.tags ?? [],
-            source,
+            source: toWorkflowSourceInfo(source),
             stepCount: definition.steps.length,
             ...(definition.about !== undefined ? { about: definition.about } : {}),
             ...(definition.examples?.length ? { examples: [...definition.examples] } : {}),
