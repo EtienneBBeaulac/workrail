@@ -3,7 +3,7 @@ title: Console UI Backlog
 scope: console
 status: active
 branch: feature/etienneb/console-ui-redesign
-last_updated: 2026-04-07
+last_updated: 2026-04-08
 related:
   - docs/design/console-cyberpunk-ui-discovery.md
   - docs/roadmap/now-next-later.md
@@ -122,6 +122,43 @@ the old flat dark style.
 
 *(worth keeping visible, not current delivery commitments)*
 
+### Nicer hover animations
+
+Current hover state: border brightens, top stripe goes full opacity, ambient glow appears.
+Explore richer micro-interactions:
+- Subtle `transform: translateY(-1px)` lift on card hover
+- The ambient glow (`energy-card`) could animate in with a short fade (100ms) rather than being instant
+- Active/pressed state: slight scale down (`scale(0.99)`)
+- The `corner-brackets` CSS could animate in on hover with opacity + scale transition for a "locking on target" feel (currently removed from cards, but could be a hover-only effect on selected state)
+
+**Files:** `console/src/index.css`, `console/src/components/ConsoleCard.tsx`
+
+---
+
+### Background spotlight movement by active tab
+
+The ambient radial glows in the body background should shift position based on which
+tab is currently active -- the "light source" follows the user's focus.
+
+```
+Workspace tab (leftmost)   → amber glow at ~20% from left, cyan at bottom-right
+Workflows tab (middle)     → amber glow centered (50%), cyan balanced
+Performance tab (rightmost)→ amber glow at ~80% from left, cyan at bottom-left
+```
+
+Implementation: CSS custom properties (`--spotlight-x`, `--spotlight-y`) on `body`,
+updated via JavaScript when the active tab changes. The `radial-gradient` in `body`
+background-image references these properties. Transition: `background-position`
+doesn't transition, but the CSS properties can be transitioned via a wrapper element
+or by lerping the values with a short JS animation.
+
+Alternative: three separate keyframe states on `body` driven by a `data-active-tab`
+attribute, with a CSS transition on `background-position`.
+
+**Files:** `console/src/index.css`, `console/src/AppShell.tsx`
+
+---
+
 ### Project-specific workflow loading
 
 When browsing sessions from a specific project, the workflow catalog could show
@@ -165,6 +202,7 @@ conditions evaluated, what context facts were used.
 | Source `displayName` fix | `fd8f6b8` | Backend now enriches source with displayName |
 | `src: WorkRail` fix (resolution layer) | `7a89132` | Bundled workflows correctly tagged via resolution, not storage hack |
 | Remove `repoRoot` | `7880373` | Unreliable field nuked; backward-compat preserved for old event logs |
+| Fix `src:` in workflow detail | `bbc83b7` | Detail endpoint now enriches source with displayName |
 | SessionList SORT_AXES refactor | merged | Typed axis objects, debounce, grouped pagination |
 | Audit findings (MR + prod + arch) | `60cf743`+ | All 3 audit cycles addressed |
 | Unit tests for lineage layout | `609c343` | 22 tests covering F1 regression, cycle safety, compression |
