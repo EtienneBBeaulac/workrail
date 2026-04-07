@@ -16,4 +16,13 @@ export class NodeProcessSignals implements ProcessSignals {
       void handler();
     });
   }
+
+  once(signal: ProcessSignal, handler: () => void | Promise<void>): void {
+    // process.once ensures the handler fires at most once and then deregisters
+    // itself. Use this when the one-shot contract must be enforced at the OS
+    // listener level rather than by an application-level latch.
+    process.once(signal as any, () => {
+      void handler();
+    });
+  }
 }
