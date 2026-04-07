@@ -30,7 +30,7 @@ function SessionMetaCard({ data }: { data: ConsoleSessionDetail }) {
   const hash = firstRun?.workflowHash?.slice(0, 12) ?? '--';
 
   return (
-    <div className="bg-[var(--bg-card)] border border-[var(--border)] px-5 py-4 corner-brackets">
+    <div className="bg-[var(--bg-card)] border border-[var(--border)] px-5 py-4 corner-brackets" style={{ backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
       {data.sessionTitle && (
         <h2 className="text-base font-medium text-[var(--text-primary)] mb-3">
           {data.sessionTitle}
@@ -160,8 +160,9 @@ export function SessionDetail({ sessionId }: Props) {
       <CutCornerBox
         cut={18}
         borderColor="rgba(244, 196, 48, 0.35)"
-        background="color-mix(in srgb, var(--bg-card) 92%, var(--accent) 8%)"
-        dropShadow="drop-shadow(0 16px 48px rgba(0,0,0,0.8)) drop-shadow(0 2px 8px rgba(0,0,0,0.55))"
+        background="rgba(27, 31, 44, 0.78)"
+        dropShadow="drop-shadow(0 16px 48px rgba(0,0,0,0.9)) drop-shadow(0 2px 12px rgba(244,196,48,0.15))"
+        backdropFilter="blur(16px)"
         className="fixed top-3 right-3 bottom-3 w-[560px] max-w-[calc(92vw-12px)] transition-transform duration-200 ease-out"
         style={{
           zIndex: 40,
@@ -212,6 +213,8 @@ function RunCard({
     // DAG: 460px. Inset: 2px. Total: 506px.
     <CutCornerBox
       cut={10}
+      background="rgba(27, 31, 44, 0.72)"
+      backdropFilter="blur(8px)"
       className="relative"
       style={{ height: '506px' }}
     >
