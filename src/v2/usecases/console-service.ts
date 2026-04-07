@@ -114,11 +114,16 @@ export class ConsoleService {
    * projection runs. On mtime change the entry is replaced.
    *
    * The cache is instance-scoped (not module-level) so it never leaks state
-   * between independent ConsoleService instances (e.g. in tests). It holds at
-   * most MAX_SESSIONS_TO_LOAD entries -- no explicit eviction needed.
+   * between independent ConsoleService instances (e.g. in tests). Entries
+   * accumulate over the lifetime of the instance and are only replaced when
+   * the session's mtime changes -- there is no size-based eviction.
    *
-   * Only non-null summaries are cached. Load errors and sessions that project
-   * to null are retried on the next request.
+   * Only summaries with terminal statuses (`complete`, `complete_with_gaps`,
+   * `blocked`, `dormant`) are cached. `in_progress` summaries are intentionally
+   * excluded: a dormant session writes no new events so its mtime never
+   * advances, meaning an `in_progress` entry would never be invalidated and
+   * would never transition to `dormant`. Null results (load errors, corrupt
+   * sessions) are also excluded and retried on the next request.
    */
   private readonly _summaryCache = new Map<string, { readonly mtime: number; readonly summary: ConsoleSessionSummary }>();
 
@@ -263,9 +268,14 @@ export class ConsoleService {
         });
       })
       .map((summary) => {
-        // Only cache non-null results. A null means the session failed to project
-        // (corrupt DAG, load error, etc.) and should be retried on the next request.
-        if (summary !== null) {
+        // Only cache summaries with terminal statuses. `in_progress` is excluded
+        // because a session that should become `dormant` writes no new events,
+        // so its mtime never changes -- a cached `in_progress` would never
+        // transition to `dormant`. Terminal statuses (`complete`,
+        // `complete_with_gaps`, `blocked`, `dormant`) are stable and safe to
+        // cache by mtime. Null results (load errors, corrupt DAG) are also
+        // excluded so they are retried on the next request.
+        if (summary !== null && summary.status !== 'in_progress') {
           this._summaryCache.set(sessionId, { mtime: lastModifiedMs, summary });
         }
         return summary;
@@ -624,10 +634,13 @@ function projectSessionSummary(
 
   // Use a pre-computed DAG when available (threaded from loadSessionSummary) to
   // avoid a redundant projectRunDagV2 call on the same event array.
-  const dag: RunDagProjectionV2 | null = precomputedDag ?? (() => {
+  let dag: RunDagProjectionV2 | null;
+  if (precomputedDag !== undefined) {
+    dag = precomputedDag;
+  } else {
     const res = projectRunDagV2(events);
-    return res.isOk() ? res.value : null;
-  })();
+    dag = res.isOk() ? res.value : null;
+  }
   if (dag === null) return null;
 
   const statusRes = projectRunStatusSignalsV2(events);

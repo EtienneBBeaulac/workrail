@@ -267,6 +267,97 @@ describe('ConsoleService session summary cache', () => {
     expect(cachedSessions[0]?.sessionId).toBe(SESSION_ID);
   });
 
+  it('in_progress summaries are not cached (dormancy transition must remain live)', async () => {
+    // A session with no run completion and recent enough mtime projects to
+    // `in_progress`. The fix requires we do NOT cache it, so a subsequent
+    // call at the same mtime still hits the store (allowing the status to
+    // transition to `dormant` once enough time has elapsed).
+    const events = makeMinimalEvents(SESSION_ID);
+    let loadCallCount = 0;
+
+    const sessionStore: SessionEventLogReadonlyStorePortV2 = {
+      load: () => {
+        loadCallCount++;
+        return okAsync({ events, manifest: [] });
+      },
+      loadValidatedPrefix: () => okAsync({ kind: 'complete', truth: { events, manifest: [] } }),
+    };
+
+    // Use a recent mtime so the session is `in_progress`, not `dormant`.
+    const recentMtime = Date.now() - 60_000; // 1 minute ago -- well within 3 days
+    const directoryListing: DirectoryListingPortV2 = {
+      readdir: () => okAsync([]),
+      readdirWithMtime: () => okAsync([{ name: SESSION_ID, mtimeMs: recentMtime }]),
+    };
+
+    const service = new ConsoleService({
+      directoryListing,
+      dataDir: makeDataDir(),
+      sessionStore,
+      snapshotStore: makeSnapshotStore(),
+      pinnedWorkflowStore: makePinnedWorkflowStore(),
+    });
+
+    // First call -- projects to `in_progress`, must NOT be cached.
+    const first = await service.getSessionList();
+    expect(first.isOk()).toBe(true);
+    const firstSessions = first.isOk() ? first.value.sessions : [];
+    expect(firstSessions).toHaveLength(1);
+    expect(firstSessions[0]?.status).toBe('in_progress');
+    expect(loadCallCount).toBe(1);
+
+    // Second call at the same mtime -- must re-project (not serve from cache),
+    // because the session might have crossed the dormancy threshold.
+    const second = await service.getSessionList();
+    expect(second.isOk()).toBe(true);
+    expect(loadCallCount).toBe(2); // store called again -- not cached
+  });
+
+  it('in_progress session transitions to dormant on second call when mtime is old', async () => {
+    // Simulates the exact bug: a session whose mtime is older than
+    // DORMANCY_THRESHOLD_MS should show `dormant`, not `in_progress`.
+    // Before the fix this test would fail because the `in_progress` result
+    // from the first call (with a recent nowMs) would be cached and served
+    // on the second call (with an old nowMs), never transitioning to `dormant`.
+    const events = makeMinimalEvents(SESSION_ID);
+
+    const sessionStore: SessionEventLogReadonlyStorePortV2 = {
+      load: () => okAsync({ events, manifest: [] }),
+      loadValidatedPrefix: () => okAsync({ kind: 'complete', truth: { events, manifest: [] } }),
+    };
+
+    // The session's mtime is fixed and old (> 3 days ago).
+    const oldMtime = Date.now() - 4 * 24 * 60 * 60 * 1000; // 4 days ago
+    const directoryListing: DirectoryListingPortV2 = {
+      readdir: () => okAsync([]),
+      readdirWithMtime: () => okAsync([{ name: SESSION_ID, mtimeMs: oldMtime }]),
+    };
+
+    const service = new ConsoleService({
+      directoryListing,
+      dataDir: makeDataDir(),
+      sessionStore,
+      snapshotStore: makeSnapshotStore(),
+      pinnedWorkflowStore: makePinnedWorkflowStore(),
+    });
+
+    // The session mtime is 4 days in the past, so `nowMs - lastModifiedMs`
+    // exceeds DORMANCY_THRESHOLD_MS. The status must be `dormant`.
+    const result = await service.getSessionList();
+    expect(result.isOk()).toBe(true);
+    const sessions = result.isOk() ? result.value.sessions : [];
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]?.status).toBe('dormant');
+
+    // Second call at the same (old) mtime -- must still return `dormant`,
+    // not serve a stale `in_progress` from cache.
+    const second = await service.getSessionList();
+    expect(second.isOk()).toBe(true);
+    const secondSessions = second.isOk() ? second.value.sessions : [];
+    expect(secondSessions).toHaveLength(1);
+    expect(secondSessions[0]?.status).toBe('dormant');
+  });
+
   it('null results (load errors) are not cached and do not appear in sessions list', async () => {
     let loadCallCount = 0;
 
