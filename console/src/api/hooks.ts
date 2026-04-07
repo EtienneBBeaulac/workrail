@@ -95,6 +95,35 @@ export function usePerfToolCalls(): PerfToolCallsResult {
   return mapPerfQueryToResult(query, retry);
 }
 
+/**
+ * Returns true when the server is running with WORKRAIL_DEV=1, false otherwise.
+ * Fetches once at app startup (staleTime: Infinity) -- only I have this flag on.
+ * Returns null while the initial check is in flight.
+ */
+export function useIsDevMode(): boolean | null {
+  const query = useQuery({
+    queryKey: ['perf', 'dev-mode-check'],
+    queryFn: async () => {
+      try {
+        const data = await fetchApi<PerfToolCallsResponse>('/api/v2/perf/tool-calls?limit=1');
+        return data.devMode === true;
+      } catch (err) {
+        if (err instanceof HttpError && err.status === 404) {
+          return false;
+        }
+        throw err;
+      }
+    },
+    staleTime: Infinity,
+    refetchInterval: false,
+    retry: false,
+  });
+
+  if (query.isLoading) return null;
+  if (query.isError) return false;
+  return query.data ?? false;
+}
+
 export function useWorkflowDetail(workflowId: string | null) {
   return useQuery({
     queryKey: ['workflow', workflowId],

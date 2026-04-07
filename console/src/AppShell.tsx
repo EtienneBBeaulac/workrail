@@ -6,6 +6,7 @@ import { SessionDetail } from './views/SessionDetail';
 import { WorkflowsView } from './views/WorkflowsView';
 import { WorkflowDetail } from './views/WorkflowDetail';
 import { PerformanceView } from './views/PerformanceView';
+import { useIsDevMode } from './api/hooks';
 
 /**
  * AppShell is the root route component. It owns all view rendering directly,
@@ -31,7 +32,10 @@ export function AppShell() {
   const isInSessionDetail = sessionMatch !== false;
   const isOnWorkflowsTab = workflowsMatch !== false || workflowDetailMatch !== false;
   const isOnWorkflowDetail = workflowDetailMatch !== false;
-  const isOnPerfTab = perfMatch !== false;
+  const isDevMode = useIsDevMode();
+  // Only show the Performance tab when devMode is confirmed active.
+  // If someone navigates directly to /perf without WORKRAIL_DEV=1, treat it as not-perf.
+  const isOnPerfTab = perfMatch !== false && isDevMode === true;
 
   const sessionId = isInSessionDetail
     ? (sessionMatch as Record<string, string>).sessionId
@@ -78,8 +82,10 @@ export function AppShell() {
   // Tab bar keyboard (ARIA tablist: Left/Right arrows switch tabs)
   // ---------------------------------------------------------------------------
 
-  // A3: data-driven tab order -- add new tabs here, not in the handler
-  const TAB_ROUTES = ['/', '/workflows', '/perf'] as const;
+  // A3: data-driven tab order -- perf tab only included when devMode is active
+  const TAB_ROUTES = isDevMode === true
+    ? (['/', '/workflows', '/perf'] as const)
+    : (['/', '/workflows'] as const);
 
   const tabBarRef = useRef<HTMLDivElement>(null);
 
@@ -175,22 +181,24 @@ export function AppShell() {
               >
                 Workflows
               </button>
-              <button
-                role="tab"
-                id="tab-perf"
-                aria-selected={isOnPerfTab}
-                aria-controls="panel-perf"
-                tabIndex={isOnPerfTab ? 0 : -1}
-                onClick={() => void navigate({ to: '/perf' })}
-                className={[
-                  'px-3 py-1 rounded text-sm font-medium transition-colors',
-                  isOnPerfTab
-                    ? 'text-[var(--text-primary)]'
-                    : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]',
-                ].join(' ')}
-              >
-                Performance
-              </button>
+              {isDevMode === true && (
+                <button
+                  role="tab"
+                  id="tab-perf"
+                  aria-selected={isOnPerfTab}
+                  aria-controls="panel-perf"
+                  tabIndex={isOnPerfTab ? 0 : -1}
+                  onClick={() => void navigate({ to: '/perf' })}
+                  className={[
+                    'px-3 py-1 rounded text-sm font-medium transition-colors',
+                    isOnPerfTab
+                      ? 'text-[var(--text-primary)]'
+                      : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]',
+                  ].join(' ')}
+                >
+                  Performance
+                </button>
+              )}
             </div>
           )}
         </div>
