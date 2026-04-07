@@ -159,7 +159,7 @@ export function SessionDetail({ sessionId }: Props) {
       {/* Floating node detail panel */}
       <CutCornerBox
         cut={18}
-        borderColor="rgba(0, 240, 255, 0.28)"
+        borderColor="rgba(244, 196, 48, 0.35)"
         background="color-mix(in srgb, var(--bg-card) 92%, var(--accent) 8%)"
         dropShadow="drop-shadow(0 16px 48px rgba(0,0,0,0.8)) drop-shadow(0 2px 8px rgba(0,0,0,0.55))"
         className="fixed top-3 right-3 bottom-3 w-[560px] max-w-[calc(92vw-12px)] transition-transform duration-200 ease-out"

@@ -1,20 +1,30 @@
 @import "tailwindcss";
 
 :root {
-  --bg-primary: #0a0a0a;
-  --bg-secondary: #141414;
-  --bg-card: #1a1a1a;
-  --border: #2a2a2a;
-  --text-primary: #fafafa;
-  --text-secondary: #a0a0a0;
-  --text-muted: #666666;
-  --accent: #3b82f6;
-  --accent-hover: #2563eb;
-  --accent-strong: #00f0ff;
-  --success: #22c55e;
-  --warning: #eab308;
-  --error: #ef4444;
-  --blocked: #f97316;
+  /* Backgrounds -- dark neutral base, no colour bleed */
+  --bg-primary: #0f131f;
+  --bg-secondary: #171b28;
+  --bg-card: #1b1f2c;
+  --bg-tertiary: #262937;
+  --border: #3a3a2e;
+
+  /* Text -- warm off-white, not cool lavender */
+  --text-primary: #e8dfc8;
+  --text-secondary: #a89f8c;
+  --text-muted: #5e5a4e;
+
+  /* Accent -- amber/gold as primary interactive colour (CP2077) */
+  --accent: #f4c430;
+  --accent-hover: #d4a80e;
+
+  /* Cyan reserved for live/running/active states */
+  --accent-strong: #00dbe9;
+
+  /* Semantic */
+  --success: #00e1a9;
+  --warning: #f97316;
+  --error: #ff6b6b;
+  --blocked: #ff4444;
 }
 
 body {
@@ -50,9 +60,9 @@ body::after {
 
 .console-blueprint-grid {
   background-image:
-    linear-gradient(rgba(65, 87, 118, 0.14) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(65, 87, 118, 0.14) 1px, transparent 1px);
-  background-size: 24px 24px;
+    linear-gradient(rgba(132, 148, 149, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(132, 148, 149, 0.06) 1px, transparent 1px);
+  background-size: 20px 20px;
 }
 
 .lineage-scroll-surface {
@@ -70,8 +80,8 @@ body::after {
   position: relative;
   isolation: isolate;
   box-shadow:
-    inset 0 0 0 1px rgba(0, 240, 255, 0.22),
-    inset 0 0 22px rgba(0, 240, 255, 0.07);
+    inset 0 0 0 1px rgba(244, 196, 48, 0.28),
+    inset 0 0 22px rgba(244, 196, 48, 0.08);
   animation: workrail-current-node-pulse 3.2s ease-in-out infinite;
 }
 
@@ -79,7 +89,7 @@ body::after {
   content: "";
   position: absolute;
   inset: -1px;
-  border: 1px solid rgba(0, 240, 255, 0.28);
+  border: 1px solid rgba(244, 196, 48, 0.35);
   pointer-events: none;
   animation: workrail-current-node-outline 3.2s ease-in-out infinite;
 }
@@ -113,14 +123,14 @@ body::after {
   0%, 100% {
     opacity: 0.34;
     box-shadow:
-      0 0 0 rgba(0, 240, 255, 0),
-      inset 0 0 0 rgba(0, 240, 255, 0);
+      0 0 0 rgba(244, 196, 48, 0),
+      inset 0 0 0 rgba(244, 196, 48, 0);
   }
   50% {
-    opacity: 0.82;
+    opacity: 0.9;
     box-shadow:
-      0 0 20px rgba(0, 240, 255, 0.18),
-      inset 0 0 18px rgba(0, 240, 255, 0.08);
+      0 0 24px rgba(244, 196, 48, 0.22),
+      inset 0 0 18px rgba(244, 196, 48, 0.1);
   }
 }
 
@@ -128,6 +138,49 @@ body::after {
   to {
     stroke-dashoffset: -32;
   }
+}
+
+/* ---------- Energy / electricity effects ---------- */
+
+/* Accent-colored elements get a subtle amber glow */
+.energy-glow {
+  box-shadow: 0 0 12px rgba(244, 196, 48, 0.25), 0 0 4px rgba(244, 196, 48, 0.15);
+}
+
+/* Active/live state: cyan electric pulse */
+.energy-live {
+  box-shadow: 0 0 16px rgba(0, 219, 233, 0.3), 0 0 4px rgba(0, 219, 233, 0.2);
+  animation: energy-live-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes energy-live-pulse {
+  0%, 100% { box-shadow: 0 0 10px rgba(0, 219, 233, 0.2), 0 0 3px rgba(0, 219, 233, 0.15); }
+  50%       { box-shadow: 0 0 22px rgba(0, 219, 233, 0.45), 0 0 8px rgba(0, 219, 233, 0.3); }
+}
+
+/* Border glow on hover for interactive cards */
+.energy-card {
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.energy-card:hover {
+  border-color: rgba(244, 196, 48, 0.5);
+  box-shadow: 0 0 0 1px rgba(244, 196, 48, 0.12), 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+/* Accent text glow for headings / key values */
+.text-glow-amber {
+  text-shadow: 0 0 12px rgba(244, 196, 48, 0.5), 0 0 4px rgba(244, 196, 48, 0.3);
+}
+.text-glow-cyan {
+  text-shadow: 0 0 12px rgba(0, 219, 233, 0.5), 0 0 4px rgba(0, 219, 233, 0.3);
+}
+
+/* Status badge for in_progress sessions -- cyan electric */
+.badge-live {
+  color: var(--accent-strong);
+  border-color: rgba(0, 219, 233, 0.4);
+  box-shadow: 0 0 8px rgba(0, 219, 233, 0.2);
+  animation: energy-live-pulse 2.4s ease-in-out infinite;
 }
 
 /* ---------- Markdown typography ---------- */

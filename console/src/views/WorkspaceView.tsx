@@ -28,7 +28,7 @@ const STATUS_ACCENT: Record<ConsoleSessionStatus, string> = {
   blocked: 'var(--blocked)',
   dormant: 'var(--text-muted)',
   complete_with_gaps: 'var(--warning)',
-  in_progress: 'var(--accent)',
+  in_progress: 'var(--accent-strong)',
   complete: 'var(--success)',
 };
 
@@ -430,7 +430,7 @@ function RepoSection({
             {group.repoName}
           </h3>
           {activeCount > 0 && (
-            <span className="text-xs font-medium text-[var(--accent)]">
+            <span className="text-xs font-medium" style={{ color: 'var(--accent-strong)' }}>
               ● {activeCount} active
             </span>
           )}
