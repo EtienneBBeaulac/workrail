@@ -21,22 +21,28 @@ export function collectAncestryRecap(args: {
   readonly outputs: NodeOutputsProjectionV2;
   readonly includeCurrentNode: boolean;
 }): Result<readonly string[], RecapRecoveryError> {
-  // Build ancestry chain via recursion (pure, no mutation)
-  const buildChain = (cur: string | null, visited: ReadonlySet<string>): readonly string[] => {
-    if (!cur || visited.has(cur)) return [];
-
-    const nodeData = args.dag.nodesById[cur];
-    const parent = nodeData?.parentNodeId ?? null;
-    const newVisited = new Set([...visited, cur]);
-
-    return [cur, ...buildChain(parent, newVisited)];
+  // Build ancestry chain iteratively to avoid O(N²) Set allocations.
+  // Each level of the recursive version did `new Set([...visited, cur])` which
+  // copies the entire visited set -- O(N) work per level for an O(N²) total.
+  // The iterative version mutates a single Set; the chain order is identical:
+  // [startNode, parent, grandparent, ...] tip-to-root.
+  const buildChain = (start: string | null): readonly string[] => {
+    const result: string[] = [];
+    const visited = new Set<string>();
+    let cur: string | null = start;
+    while (cur !== null && !visited.has(cur)) {
+      visited.add(cur);
+      result.push(cur);
+      cur = args.dag.nodesById[cur]?.parentNodeId ?? null;
+    }
+    return result;
   };
 
   const startNode = args.includeCurrentNode
     ? String(args.nodeId)
     : args.dag.nodesById[String(args.nodeId)]?.parentNodeId ?? null;
 
-  const chain = buildChain(startNode, new Set());
+  const chain = buildChain(startNode);
 
   // Extract recaps functionally
   const recaps = chain.flatMap((nodeId: string) => {
@@ -68,18 +74,23 @@ export function collectDownstreamRecap(args: {
   readonly dag: RunDagRunV2;
   readonly outputs: NodeOutputsProjectionV2;
 }): Result<readonly string[], RecapRecoveryError> {
-  // Build path from tip backward to fromNode (recursive, pure)
-  const buildPathBackward = (cur: string | null, visited: ReadonlySet<string>): readonly string[] => {
-    if (!cur || cur === String(args.fromNodeId) || visited.has(cur)) return [];
-
-    const nodeData = args.dag.nodesById[cur];
-    const parent = nodeData?.parentNodeId ?? null;
-    const newVisited = new Set([...visited, cur]);
-
-    return [cur, ...buildPathBackward(parent, newVisited)];
+  // Build path from tip backward to fromNode iteratively.
+  // Same O(N²) Set allocation hazard as buildChain -- fixed with a single
+  // mutable Set. Output order is identical: [toNodeId, ..., child_of_fromNodeId].
+  const buildPathBackward = (start: string): readonly string[] => {
+    const result: string[] = [];
+    const visited = new Set<string>();
+    const fromId = String(args.fromNodeId);
+    let cur: string | null = start;
+    while (cur !== null && cur !== fromId && !visited.has(cur)) {
+      visited.add(cur);
+      result.push(cur);
+      cur = args.dag.nodesById[cur]?.parentNodeId ?? null;
+    }
+    return result;
   };
 
-  const pathBackward = buildPathBackward(String(args.toNodeId), new Set());
+  const pathBackward = buildPathBackward(String(args.toNodeId));
 
   // Extract recaps in chronological order (reverse the backward path)
   const recaps = [...pathBackward].reverse().flatMap((nodeId: string) => {
