@@ -100,6 +100,9 @@ export function usePerfToolCalls(): PerfToolCallsResult {
   }
   if (query.data === null) return { state: 'devModeOff' };
   if (query.data === undefined) return { state: 'loading' };
+  // Defense-in-depth: guard against future server change from 404-signaling to
+  // devMode:false-signaling without a breaking schema change.
+  if (query.data.devMode === false) return { state: 'devModeOff' };
   return { state: 'data', data: query.data };
 }
 
