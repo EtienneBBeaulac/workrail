@@ -64,12 +64,12 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStore
     // with N segments. The idempotency and contiguity checks below use the supplied truth
     // in exactly the same way as the freshly-loaded one would have been used.
     const mkdirResult = this.fs.mkdirp(eventsDir).mapErr(mapFsToStoreError);
-    const truthSource: ResultAsync<{ manifest: ManifestRecordV1[]; events: DomainEventV1[] }, SessionEventLogStoreError> =
+    const truthSource: ResultAsync<{ readonly manifest: readonly ManifestRecordV1[]; readonly events: readonly DomainEventV1[] }, SessionEventLogStoreError> =
       preloadedTruth !== undefined
         ? mkdirResult.andThen(() =>
             okAsync({
-              manifest: preloadedTruth.manifest as ManifestRecordV1[],
-              events: preloadedTruth.events as DomainEventV1[],
+              manifest: preloadedTruth.manifest,
+              events: preloadedTruth.events,
             })
           )
         : mkdirResult.andThen(() => this.loadTruthOrEmpty(sessionId));

@@ -63,9 +63,8 @@ export class InMemorySessionEventLogStore
   loadValidatedPrefix(sessionId: SessionId): ResultAsync<LoadedValidatedPrefixV2, SessionEventLogStoreError> {
     // For fakes: always return full truth as complete validated prefix
     return this.load(sessionId).map((truth) => ({
+      kind: 'complete' as const,
       truth,
-      isComplete: true,
-      tailReason: null,
     }));
   }
 

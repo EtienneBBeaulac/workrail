@@ -129,6 +129,10 @@ export interface SessionEventLogAppendStorePortV2 {
    * a session with N segments). The idempotency check is derived from this truth
    * instead of re-reading from disk. When omitted the store falls back to its
    * normal load path.
+   *
+   * @param preloadedTruth - When provided, must be either lock-held truth (loaded
+   * inside `withHealthySessionLock`) or definitionally-empty truth (for new sessions).
+   * Passing stale truth loaded outside a lock would break idempotency guarantees.
    */
   append(
     lock: WithHealthySessionLock,
