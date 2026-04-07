@@ -222,6 +222,7 @@ export function AppShell() {
             {isOnWorkflowDetail && workflowId ? (
               <WorkflowDetail
                 workflowId={workflowId}
+                activeTag={activeTag}
                 onBack={handleBackFromWorkflow}
               />
             ) : (

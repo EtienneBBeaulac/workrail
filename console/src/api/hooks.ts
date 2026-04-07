@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import type { ApiResponse, ConsoleSessionListResponse, ConsoleSessionDetail, ConsoleNodeDetail, ConsoleWorktreeListResponse, ConsoleWorkflowListResponse, ConsoleWorkflowDetail, PerfToolCallsResponse } from './types';
+import { mapPerfQueryToResult } from './perf-state';
 
 // Typed HTTP error so callers can check status without brittle string parsing.
 export class HttpError extends Error {
@@ -90,20 +91,8 @@ export function usePerfToolCalls(): PerfToolCallsResult {
     refetchIntervalInBackground: false,
   });
 
-  if (query.isLoading) return { state: 'loading' };
-  if (query.isError) {
-    return {
-      state: 'error',
-      message: query.error instanceof Error ? query.error.message : 'Could not load performance data.',
-      retry: () => void query.refetch(),
-    };
-  }
-  if (query.data === null) return { state: 'devModeOff' };
-  if (query.data === undefined) return { state: 'loading' };
-  // Defense-in-depth: guard against future server change from 404-signaling to
-  // devMode:false-signaling without a breaking schema change.
-  if (query.data.devMode === false) return { state: 'devModeOff' };
-  return { state: 'data', data: query.data };
+  const retry = () => void query.refetch();
+  return mapPerfQueryToResult(query, retry);
 }
 
 export function useWorkflowDetail(workflowId: string | null) {
