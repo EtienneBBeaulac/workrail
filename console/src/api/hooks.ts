@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
-import type { ApiResponse, ConsoleSessionListResponse, ConsoleSessionDetail, ConsoleNodeDetail, ConsoleWorktreeListResponse, ConsoleWorkflowListResponse, ConsoleWorkflowDetail } from './types';
+import type { ApiResponse, ConsoleSessionListResponse, ConsoleSessionDetail, ConsoleNodeDetail, ConsoleWorktreeListResponse, ConsoleWorkflowListResponse, ConsoleWorkflowDetail, PerfToolCallsResponse } from './types';
 
 // Typed HTTP error so callers can check status without brittle string parsing.
 export class HttpError extends Error {
@@ -62,6 +62,45 @@ export function useWorkflowList() {
     staleTime: Infinity,
     refetchInterval: false,
   });
+}
+
+/** Discriminated result type for the perf tool calls hook. */
+export type PerfToolCallsResult =
+  | { readonly state: 'loading' }
+  | { readonly state: 'devModeOff' }
+  | { readonly state: 'error'; readonly message: string; readonly retry: () => void }
+  | { readonly state: 'data'; readonly data: PerfToolCallsResponse };
+
+export function usePerfToolCalls(): PerfToolCallsResult {
+  const query = useQuery({
+    queryKey: ['perf', 'tool-calls'],
+    queryFn: async () => {
+      try {
+        return await fetchApi<PerfToolCallsResponse>('/api/v2/perf/tool-calls');
+      } catch (err) {
+        if (err instanceof HttpError && err.status === 404) {
+          // Sentinel value: server is running without WORKRAIL_DEV=1
+          return null;
+        }
+        throw err;
+      }
+    },
+    refetchInterval: 5_000,
+    staleTime: 3_000,
+    refetchIntervalInBackground: false,
+  });
+
+  if (query.isLoading) return { state: 'loading' };
+  if (query.isError) {
+    return {
+      state: 'error',
+      message: query.error instanceof Error ? query.error.message : 'Could not load performance data.',
+      retry: () => void query.refetch(),
+    };
+  }
+  if (query.data === null) return { state: 'devModeOff' };
+  if (query.data === undefined) return { state: 'loading' };
+  return { state: 'data', data: query.data };
 }
 
 export function useWorkflowDetail(workflowId: string | null) {

@@ -5,6 +5,7 @@ import { WorkspaceView } from './views/WorkspaceView';
 import { SessionDetail } from './views/SessionDetail';
 import { WorkflowsView } from './views/WorkflowsView';
 import { WorkflowDetail } from './views/WorkflowDetail';
+import { PerformanceView } from './views/PerformanceView';
 
 /**
  * AppShell is the root route component. It owns all view rendering directly,
@@ -25,10 +26,12 @@ export function AppShell() {
   const sessionMatch = matchRoute({ to: '/session/$sessionId' });
   const workflowsMatch = matchRoute({ to: '/workflows' });
   const workflowDetailMatch = matchRoute({ to: '/workflows/$workflowId' });
+  const perfMatch = matchRoute({ to: '/perf' });
 
   const isInSessionDetail = sessionMatch !== false;
   const isOnWorkflowsTab = workflowsMatch !== false || workflowDetailMatch !== false;
   const isOnWorkflowDetail = workflowDetailMatch !== false;
+  const isOnPerfTab = perfMatch !== false;
 
   const sessionId = isInSessionDetail
     ? (sessionMatch as Record<string, string>).sessionId
@@ -83,16 +86,32 @@ export function AppShell() {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
         e.preventDefault();
-        if (isOnWorkflowsTab) {
-          void navigate({ to: '/' });
+        // Cycle: Workspace -> Workflows -> Performance -> Workspace
+        if (isOnPerfTab) {
+          if (e.key === 'ArrowRight') {
+            void navigate({ to: '/' });
+          } else {
+            void navigate({ to: '/workflows', search: { tag: undefined } });
+          }
+        } else if (isOnWorkflowsTab) {
+          if (e.key === 'ArrowRight') {
+            void navigate({ to: '/perf' });
+          } else {
+            void navigate({ to: '/' });
+          }
         } else {
-          void navigate({ to: '/workflows', search: { tag: undefined } });
+          // On Workspace tab
+          if (e.key === 'ArrowRight') {
+            void navigate({ to: '/workflows', search: { tag: undefined } });
+          } else {
+            void navigate({ to: '/perf' });
+          }
         }
       }
     }
     el.addEventListener('keydown', handleKeyDown);
     return () => el.removeEventListener('keydown', handleKeyDown);
-  }, [isOnWorkflowsTab, navigate]);
+  }, [isOnWorkflowsTab, isOnPerfTab, navigate]);
 
   // ---------------------------------------------------------------------------
   // Render
@@ -135,13 +154,13 @@ export function AppShell() {
               <button
                 role="tab"
                 id="tab-workspace"
-                aria-selected={!isOnWorkflowsTab}
+                aria-selected={!isOnWorkflowsTab && !isOnPerfTab}
                 aria-controls="panel-workspace"
-                tabIndex={!isOnWorkflowsTab ? 0 : -1}
+                tabIndex={!isOnWorkflowsTab && !isOnPerfTab ? 0 : -1}
                 onClick={() => void navigate({ to: '/' })}
                 className={[
                   'px-3 py-1 rounded text-sm font-medium transition-colors',
-                  !isOnWorkflowsTab
+                  !isOnWorkflowsTab && !isOnPerfTab
                     ? 'text-[var(--text-primary)]'
                     : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]',
                 ].join(' ')}
@@ -164,6 +183,22 @@ export function AppShell() {
               >
                 Workflows
               </button>
+              <button
+                role="tab"
+                id="tab-perf"
+                aria-selected={isOnPerfTab}
+                aria-controls="panel-perf"
+                tabIndex={isOnPerfTab ? 0 : -1}
+                onClick={() => void navigate({ to: '/perf' })}
+                className={[
+                  'px-3 py-1 rounded text-sm font-medium transition-colors',
+                  isOnPerfTab
+                    ? 'text-[var(--text-primary)]'
+                    : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]',
+                ].join(' ')}
+              >
+                Performance
+              </button>
             </div>
           )}
         </div>
@@ -175,7 +210,7 @@ export function AppShell() {
           id="panel-workspace"
           role="tabpanel"
           aria-labelledby="tab-workspace"
-          hidden={isOnWorkflowsTab}
+          hidden={isOnWorkflowsTab || isOnPerfTab}
         >
           {/* WorkspaceView is always mounted -- hidden via CSS only so scroll
               position in scrollYRef survives back-navigation from SessionDetail */}
@@ -204,6 +239,17 @@ export function AppShell() {
                 onSelectWorkflow={handleSelectWorkflow}
               />
             )}
+          </div>
+        )}
+
+        {/* Performance panel */}
+        {isOnPerfTab && (
+          <div
+            id="panel-perf"
+            role="tabpanel"
+            aria-labelledby="tab-perf"
+          >
+            <PerformanceView />
           </div>
         )}
       </main>
