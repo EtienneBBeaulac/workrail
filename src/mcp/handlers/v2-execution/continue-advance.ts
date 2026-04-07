@@ -1,6 +1,6 @@
 import type { V2ContinueWorkflowInput } from '../../v2/tools.js';
 import { V2ContinueWorkflowOutputSchema } from '../../output-schemas.js';
-import { createWorkflow } from '../../../types/workflow.js';
+import { getCachedWorkflow } from './workflow-object-cache.js';
 import type { DomainEventV1 } from '../../../v2/durable-core/schemas/session/index.js';
 import {
   asAttemptId,
@@ -18,7 +18,6 @@ import type { Sha256PortV2 } from '../../../v2/ports/sha256.port.js';
 import type { TokenCodecPorts } from '../../../v2/durable-core/tokens/token-codec-ports.js';
 import { ResultAsync as RA, okAsync, errAsync as neErrorAsync } from 'neverthrow';
 import type { JsonValue } from '../../../v2/durable-core/canonical/json-types.js';
-import { createBundledSource } from '../../../types/workflow-source.js';
 import type { WorkflowDefinition } from '../../../types/workflow-definition.js';
 import { hasWorkflowDefinitionShape } from '../../../types/workflow-definition.js';
 import { type ContinueWorkflowError } from '../v2-execution-helpers.js';
@@ -94,20 +93,26 @@ export function handleAdvanceIntent(args: {
       suggestion: 'Use tokens returned by WorkRail for an existing node.',
     });
   }
-  const nodeRefRes = deriveWorkflowHashRef(nodeCreated.data.workflowHash);
-  if (nodeRefRes.isErr()) {
-    return neErrorAsync({
-      kind: 'precondition_failed' as const,
-      message: nodeRefRes.error.message,
-      suggestion: 'Re-pin the workflow via start_workflow.',
-    });
-  }
-  if (String(nodeRefRes.value) !== String(workflowHashRef)) {
-    return neErrorAsync({
-      kind: 'precondition_failed' as const,
-      message: 'workflowHash mismatch for this node.',
-      suggestion: 'Use the continueToken returned by WorkRail for this node.',
-    });
+  // Validate node hash against workflowHashRef.
+  // When the node hash equals the run hash (the common case), reuse the already-computed
+  // refRes to avoid a second deriveWorkflowHashRef call. Only call it again on mismatch,
+  // which is a fast error path rather than the hot path.
+  if (nodeCreated.data.workflowHash !== workflowHash) {
+    const nodeRefRes = deriveWorkflowHashRef(nodeCreated.data.workflowHash);
+    if (nodeRefRes.isErr()) {
+      return neErrorAsync({
+        kind: 'precondition_failed' as const,
+        message: nodeRefRes.error.message,
+        suggestion: 'Re-pin the workflow via start_workflow.',
+      });
+    }
+    if (String(nodeRefRes.value) !== String(workflowHashRef)) {
+      return neErrorAsync({
+        kind: 'precondition_failed' as const,
+        message: 'workflowHash mismatch for this node.',
+        suggestion: 'Use the continueToken returned by WorkRail for this node.',
+      });
+    }
   }
 
   const existing = truth.events.find(
@@ -127,7 +132,7 @@ export function handleAdvanceIntent(args: {
         });
       }
 
-      const pinnedWorkflow = createWorkflow(compiled.definition as WorkflowDefinition, createBundledSource());
+      const pinnedWorkflow = getCachedWorkflow(workflowHash, compiled.definition as WorkflowDefinition);
 
       if (existing) {
         return replayFromRecordedAdvance({

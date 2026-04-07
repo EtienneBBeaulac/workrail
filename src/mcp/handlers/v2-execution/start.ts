@@ -4,7 +4,6 @@ import { toPendingStep } from '../../output-schemas.js';
 import { deriveIsComplete, derivePendingStep } from '../../../v2/durable-core/projections/snapshot-state.js';
 import type { ExecutionSnapshotFileV1 } from '../../../v2/durable-core/schemas/execution-snapshot/index.js';
 import { asExpandedStepIdV1 } from '../../../v2/durable-core/schemas/execution-snapshot/step-instance-key.js';
-import { createWorkflow } from '../../../types/workflow.js';
 import type { DomainEventV1 } from '../../../v2/durable-core/schemas/session/index.js';
 import {
   asWorkflowId,
@@ -24,9 +23,9 @@ import { validateWorkflowPhase1a, type ValidationPipelineDepsPhase1a } from '../
 import { workflowHashForCompiledSnapshot } from '../../../v2/durable-core/canonical/hashing.js';
 import type { JsonValue } from '../../../v2/durable-core/canonical/json-types.js';
 import { anchorsToObservations, type ObservationEventData } from '../../../v2/durable-core/domain/observation-builder.js';
-import { createBundledSource } from '../../../types/workflow-source.js';
 import type { WorkflowDefinition } from '../../../types/workflow-definition.js';
 import { hasWorkflowDefinitionShape } from '../../../types/workflow-definition.js';
+import { getCachedWorkflow } from './workflow-object-cache.js';
 import type { CompiledWorkflowSnapshotV1 } from '../../../v2/durable-core/schemas/compiled-workflow/index.js';
 import {
   type StartWorkflowError,
@@ -68,7 +67,7 @@ export function loadAndPinWorkflow(args: {
 }): RA<{
   readonly workflow: import('../../../types/workflow.js').Workflow;
   readonly workflowHash: WorkflowHash;
-  readonly pinnedWorkflow: ReturnType<typeof createWorkflow>;
+  readonly pinnedWorkflow: import('../../../types/workflow.js').Workflow;
   readonly firstStep: { readonly id: string };
   readonly resolvedReferences: readonly ResolvedReference[];
 }, StartWorkflowError> {
@@ -122,16 +121,21 @@ export function loadAndPinWorkflow(args: {
           }
           const workflowHash = workflowHashRes.value;
 
+          // Fetch the pinned snapshot once. If it already exists, use it directly.
+          // If not, put the enriched snapshot and then fetch it.
+          // This avoids a redundant get() call on the common path where the pin exists.
           return pinnedStore.get(workflowHash)
             .mapErr((cause) => ({ kind: 'pinned_workflow_store_failed' as const, cause }))
             .andThen((existingPinned) => {
-              if (!existingPinned) {
-                return pinnedStore.put(workflowHash, enrichedCompiled)
-                  .mapErr((cause) => ({ kind: 'pinned_workflow_store_failed' as const, cause }));
+              if (existingPinned) {
+                // Pin already exists -- skip put() and the second get().
+                return okAsync(existingPinned);
               }
-              return okAsync(undefined);
+              // No existing pin: store it, then fetch the stored value.
+              return pinnedStore.put(workflowHash, enrichedCompiled)
+                .mapErr((cause) => ({ kind: 'pinned_workflow_store_failed' as const, cause }))
+                .andThen(() => pinnedStore.get(workflowHash).mapErr((cause) => ({ kind: 'pinned_workflow_store_failed' as const, cause })));
             })
-            .andThen(() => pinnedStore.get(workflowHash).mapErr((cause) => ({ kind: 'pinned_workflow_store_failed' as const, cause })))
             .andThen((pinned) => {
               if (!pinned || pinned.sourceKind !== 'v1_pinned' || !hasWorkflowDefinitionShape(pinned.definition)) {
                 return neErrorAsync({
@@ -139,7 +143,7 @@ export function loadAndPinWorkflow(args: {
                   message: 'Failed to pin executable workflow snapshot (missing or invalid pinned workflow).',
                 });
               }
-              const pinnedWorkflow = createWorkflow(pinned.definition as WorkflowDefinition, createBundledSource());
+              const pinnedWorkflow = getCachedWorkflow(workflowHash, pinned.definition as WorkflowDefinition);
 
               const resolution = resolveFirstStep(workflow, pinned);
               if (resolution.isErr()) {

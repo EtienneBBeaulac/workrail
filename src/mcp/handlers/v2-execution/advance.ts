@@ -1,5 +1,5 @@
 import type { V2ContinueWorkflowInput } from '../../v2/tools.js';
-import { createWorkflow } from '../../../types/workflow.js';
+import type { Workflow } from '../../../types/workflow.js';
 import type { DomainEventV1 } from '../../../v2/durable-core/schemas/session/index.js';
 import {
   type AttemptId,
@@ -42,7 +42,7 @@ export function advanceAndRecord(args: {
   readonly inputContext: JsonValue | undefined;
   readonly inputOutput: V2ContinueWorkflowInput['output'];
   readonly lock: WithHealthySessionLock;
-  readonly pinnedWorkflow: ReturnType<typeof createWorkflow>;
+  readonly pinnedWorkflow: Workflow;
   readonly snapshotStore: import('../../../v2/ports/snapshot-store.port.js').SnapshotStorePortV2;
   readonly sessionStore: import('../../../v2/ports/session-event-log-store.port.js').SessionEventLogAppendStorePortV2 & import('../../../v2/ports/session-event-log-store.port.js').SessionEventLogReadonlyStorePortV2;
   readonly sha256: Sha256PortV2;

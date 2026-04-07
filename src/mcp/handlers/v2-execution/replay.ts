@@ -6,7 +6,7 @@ import {
   asAttemptId,
   type AttemptId,
 } from '../../../v2/durable-core/tokens/index.js';
-import { createWorkflow } from '../../../types/workflow.js';
+import type { Workflow } from '../../../types/workflow.js';
 import type { DomainEventV1 } from '../../../v2/durable-core/schemas/session/index.js';
 import {
   asRunId,
@@ -48,7 +48,7 @@ export function buildAdvancedReplayResponse(args: {
   readonly toNodeId: NodeId;
   readonly attemptId: AttemptId;
   readonly toSnapshot: ExecutionSnapshotFileV1;
-  readonly workflow: ReturnType<typeof createWorkflow>;
+  readonly workflow: Workflow;
   readonly truth: LoadedSessionTruthV2;
   readonly workflowHash: WorkflowHash;
   readonly ports: TokenCodecPorts;
@@ -266,7 +266,9 @@ export function replayFromRecordedAdvance(args: {
   readonly nodeId: NodeId;
   readonly workflowHash: WorkflowHash;
   readonly attemptId: AttemptId;
-  readonly pinnedWorkflow: ReturnType<typeof createWorkflow>;
+  // Note: `.source` is not accessed on pinnedWorkflow in this path -- only `.definition`
+  // fields are used. `createBundledSource()` substitution in the cache is safe.
+  readonly pinnedWorkflow: Workflow;
   readonly snapshotStore: import('../../../v2/ports/snapshot-store.port.js').SnapshotStorePortV2;
   readonly sha256: Sha256PortV2;
   readonly tokenCodecPorts: TokenCodecPorts;
