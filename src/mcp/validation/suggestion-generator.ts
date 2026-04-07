@@ -28,6 +28,7 @@ import {
   findMissingRequiredKeys,
   generateTemplate,
   generateExampleValue,
+  getCachedShape,
 } from './schema-introspection.js';
 
 // Re-export ZodIssue type for callers
@@ -94,7 +95,7 @@ function generateMissingRequiredSuggestions(
     return [];
   }
 
-  const shape = schema._def.shape();
+  const shape = getCachedShape(schema);
   const suggestions: MissingRequiredSuggestion[] = [];
 
   for (const key of missingKeys) {
@@ -260,7 +261,7 @@ export function patchTemplateForFailedOptionals(
   if (args === null || typeof args !== 'object' || Array.isArray(args)) return correctTemplate;
 
   const argsObj = args as Record<string, unknown>;
-  const shape = schema._def.shape() as Record<string, z.ZodType>;
+  const shape = getCachedShape(schema) as Record<string, z.ZodType>;
   const patched: Record<string, unknown> = { ...correctTemplate };
   let changed = false;
 

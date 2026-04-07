@@ -7,6 +7,7 @@
  */
 
 import { z } from 'zod';
+import { getCachedShape } from './validation/schema-introspection.js';
 
 // -----------------------------------------------------------------------------
 // Internal helpers
@@ -62,9 +63,74 @@ function tryParseJsonObject(value: string): Record<string, unknown> | null {
 // -----------------------------------------------------------------------------
 
 /**
+ * Build a coercion function that pre-computes the set of fields to coerce
+ * at handler-registration time rather than on every call.
+ *
+ * Use this factory when the schema and aliasMap are known ahead of time
+ * (e.g. at MCP handler registration). The returned function has the same
+ * semantics as coerceJsonStringObjectFields but avoids per-call schema
+ * traversal.
+ *
+ * @param shapeSchema - ZodObject schema describing the expected input shape
+ * @param aliasMap - Optional alias-to-canonical field name map
+ * @returns Coercion function with pre-computed field sets
+ */
+export function buildCoercionFn(
+  shapeSchema: z.ZodObject<z.ZodRawShape>,
+  aliasMap?: Readonly<Record<string, string>>,
+): (args: unknown) => unknown {
+  const shape = getCachedShape(shapeSchema);
+
+  // Pre-compute once at registration time.
+  const objectFields = new Set<string>();
+  for (const [key, fieldSchema] of Object.entries(shape)) {
+    if (expectsObjectValue(fieldSchema as z.ZodType)) {
+      objectFields.add(key);
+    }
+  }
+
+  const aliasesToCoerce = new Set<string>();
+  if (aliasMap) {
+    for (const [alias, canonical] of Object.entries(aliasMap)) {
+      if (objectFields.has(canonical)) {
+        aliasesToCoerce.add(alias);
+      }
+    }
+  }
+
+  const hasCoercibleFields = objectFields.size > 0 || aliasesToCoerce.size > 0;
+
+  return (args: unknown): unknown => {
+    if (!hasCoercibleFields) return args;
+    if (typeof args !== 'object' || args === null) return args;
+
+    const input = args as Record<string, unknown>;
+    let result: Record<string, unknown> | null = null;
+
+    const coerceField = (key: string): void => {
+      const value = input[key];
+      if (typeof value !== 'string') return;
+      const parsed = tryParseJsonObject(value);
+      if (parsed === null) return;
+      if (result === null) result = { ...input };
+      result[key] = parsed;
+    };
+
+    for (const key of objectFields) coerceField(key);
+    for (const alias of aliasesToCoerce) coerceField(alias);
+
+    return result ?? args;
+  };
+}
+
+/**
  * For each field in shapeSchema that expects a ZodObject or ZodRecord value,
  * parse it from JSON if the raw value is a string. Aliased fields are included
  * via aliasMap. Returns the original args reference when nothing needs coercion.
+ *
+ * Prefer buildCoercionFn when schema and aliasMap are known at handler
+ * registration time — it pre-computes the field sets once rather than on
+ * every call.
  */
 export function coerceJsonStringObjectFields(
   args: unknown,

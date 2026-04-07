@@ -28,6 +28,7 @@ import {
   renderBudgetedRehydrateRecovery,
   type RetrievalPackSegment,
 } from './retrieval-contract.js';
+import { CLEAN_RESPONSE_FORMAT } from '../../../env-flags.js';
 
 export type PromptRenderError = {
   readonly code: 'RENDER_FAILED';
@@ -464,8 +465,9 @@ export function renderPendingPrompt(args: {
   const basePrompt = resolveContextTemplates(step.prompt ?? '', renderContext);
   const baseTitle = resolveContextTemplates(step.title, renderContext);
 
-  // Clean response format flag — read once, used for banner, notes, and recovery.
-  const cleanResponseFormat = process.env.WORKRAIL_CLEAN_RESPONSE_FORMAT === 'true';
+  // Use module-level CLEAN_RESPONSE_FORMAT (cached at startup) — same pattern
+  // as v2-response-formatter.ts to avoid per-call env lookups on the hot path.
+  const cleanResponseFormat = CLEAN_RESPONSE_FORMAT;
 
   // Loop context banner — prepended before the authored prompt so the agent
   // understands it is intentionally re-entering a loop body step.

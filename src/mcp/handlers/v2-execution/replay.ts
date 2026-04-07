@@ -137,6 +137,12 @@ export function buildAdvancedReplayResponse(args: {
     const preferences = derivePreferencesOrDefault({ truth, runId, nodeId: toNodeIdBranded });
     const nextIntent = deriveNextIntent({ rehydrateOnly: false, isComplete, pending: blockedMeta });
 
+    // Pass the object literal directly into .parse() rather than first
+    // assigning `const payload: z.infer<typeof V2ContinueWorkflowOutputSchema>
+    // = {...}`. The direct form lets TypeScript narrow the discriminated-union
+    // literal (`kind: 'blocked'`) inside the call-site expression without
+    // requiring an explicit `as` cast. The `const payload: T = {...}` pattern
+    // works for simple object shapes where no discriminant narrowing is needed.
     return nextTokensMint.andThen((nextTokens) =>
       retryContinueMint.andThen((retryContinueToken) => {
         // TypeScript requires `as` cast here for discriminated union literal narrowing;

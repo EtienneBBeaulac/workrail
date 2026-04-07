@@ -23,6 +23,7 @@ import {
   buildResponseSupplements,
   type FormattedSupplement,
 } from './response-supplements.js';
+import { CLEAN_RESPONSE_FORMAT } from '../env-flags.js';
 
 // ---------------------------------------------------------------------------
 // Response shape types (mirrors output schemas without importing them)
@@ -404,10 +405,8 @@ function formatSuccess(data: V2ExecutionResponse): string {
 // Clean format variants ("transparent proxy" — authored prompt as-is)
 // ---------------------------------------------------------------------------
 
-// Read per-call for consistency with prompt-renderer (both react to env changes).
-function isCleanResponseFormat(): boolean {
-  return process.env.WORKRAIL_CLEAN_RESPONSE_FORMAT === 'true';
-}
+// CLEAN_RESPONSE_FORMAT is imported from ./env-flags.ts — single source of
+// truth shared with prompt-renderer.ts.
 
 // Footer phrasing variants to avoid looking templated.
 // Selected by step index (derived from stepId hash) for determinism.
@@ -618,7 +617,7 @@ export interface FormattedResponse {
 export function formatV2ExecutionResponse(data: unknown): FormattedResponse | null {
   const renderInput = deriveRenderInput(data);
   if (!renderInput) return null;
-  const cleanFormat = isCleanResponseFormat();
+  const cleanFormat = CLEAN_RESPONSE_FORMAT;
   const { response, lifecycle, contentEnvelope } = renderInput;
 
   // Render references from content envelope (if present and non-empty)
