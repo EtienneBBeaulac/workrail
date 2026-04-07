@@ -15,7 +15,7 @@
 import { z } from 'zod';
 import type { ToolContext, ToolResult, ToolError } from './types.js';
 import { errNotRetryable } from './types.js';
-import { coerceJsonStringObjectFields } from './boundary-coercion.js';
+import { buildCoercionFn } from './boundary-coercion.js';
 import {
   generateSuggestions,
   formatSuggestionDetails,
@@ -68,7 +68,7 @@ export function toMcpResult<T>(result: ToolResult<T>): McpCallToolResult {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(jsonPayload, null, 2),
+          text: JSON.stringify(jsonPayload),
         }],
       };
     }
@@ -81,7 +81,7 @@ export function toMcpResult<T>(result: ToolResult<T>): McpCallToolResult {
             message: result.message,
             retry: result.retry,
             ...(result.details !== undefined ? { details: result.details } : {}),
-          }, null, 2),
+          }),
         }],
         isError: true,
       };
@@ -113,13 +113,17 @@ export function createHandler<TInput extends z.ZodType, TOutput>(
   shapeSchema?: z.ZodObject<z.ZodRawShape>,
   aliasMap?: Readonly<Record<string, string>>,
 ): WrappedToolHandler {
+  // Pre-compute the coercion function once at registration time.
+  // Avoids per-call schema traversal (building objectFields Set) on the hot path.
+  const coerce = shapeSchema !== undefined
+    ? buildCoercionFn(shapeSchema, aliasMap)
+    : null;
+
   return async (args: unknown, ctx: ToolContext): Promise<McpCallToolResult> => {
     // Normalize JSON-encoded string values to objects before Zod validation.
     // Some MCP clients serialize complex parameters as JSON strings rather than
     // inline objects. The shape schema identifies which fields expect objects.
-    const normalizedArgs = shapeSchema !== undefined
-      ? coerceJsonStringObjectFields(args, shapeSchema, aliasMap)
-      : args;
+    const normalizedArgs = coerce !== null ? coerce(args) : args;
     const parseResult = schema.safeParse(normalizedArgs);
     if (!parseResult.success) {
       // Use shape schema for introspection (interface segregation), validation schema as fallback
@@ -191,11 +195,20 @@ export function createValidatingHandler<TInput extends z.ZodType, TOutput>(
   shapeSchema?: z.ZodObject<z.ZodRawShape>,
   aliasMap?: Readonly<Record<string, string>>,
 ): WrappedToolHandler {
+  // Pre-compute the coercion function once at registration time.
+  const coerce = shapeSchema !== undefined
+    ? buildCoercionFn(shapeSchema, aliasMap)
+    : null;
+
+  // Pre-build the inner handler at registration time.
+  // Pass shapeSchema for introspection but omit aliasMap — coercion happens
+  // above via the pre-computed coerce fn, so the inner handler only needs
+  // shapeSchema for error-path suggestion generation.
+  const innerHandler = createHandler(schema, handler, shapeSchema);
+
   return async (args: unknown, ctx: ToolContext): Promise<McpCallToolResult> => {
     // Normalize JSON-encoded string fields before pre-validation and Zod parsing.
-    const normalizedArgs = shapeSchema !== undefined
-      ? coerceJsonStringObjectFields(args, shapeSchema, aliasMap)
-      : args;
+    const normalizedArgs = coerce !== null ? coerce(args) : args;
     const pre = preValidate(normalizedArgs);
     if (!pre.ok) {
       const error = pre.error;
@@ -223,7 +236,8 @@ export function createValidatingHandler<TInput extends z.ZodType, TOutput>(
     }
 
     // Fall back to the standard Zod + handler pipeline.
-    // Pass normalizedArgs so coercion is not applied twice.
-    return createHandler(schema, handler, shapeSchema, aliasMap)(normalizedArgs, ctx);
+    // Pass normalizedArgs — args are already coerced above, so the inner
+    // handler's coerce fn (built without aliasMap) is a safe no-op.
+    return innerHandler(normalizedArgs, ctx);
   };
 }

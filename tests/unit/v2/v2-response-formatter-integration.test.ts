@@ -92,62 +92,80 @@ describe('toMcpResult — WORKRAIL_JSON_RESPONSES env flag', () => {
 });
 
 describe('toMcpResult — clean response supplements', () => {
-  const originalClean = process.env.WORKRAIL_CLEAN_RESPONSE_FORMAT;
+  // WORKRAIL_CLEAN_RESPONSE_FORMAT is evaluated at module load time (module-level
+  // const). Tests that require clean-format behavior must set the env var before
+  // the module is imported, using vi.resetModules() + dynamic import — the same
+  // pattern used for WORKRAIL_JSON_RESPONSES above.
 
-  beforeEach(() => {
+  it('start responses include authority context and notes guidance as separate content items', async () => {
     process.env.WORKRAIL_CLEAN_RESPONSE_FORMAT = 'true';
-  });
+    vi.resetModules();
+    try {
+      const { toMcpResult: freshToMcpResult } = await import('../../../src/mcp/handler-factory.js');
+      const { createV2ExecutionRenderEnvelope: freshEnvelope } = await import('../../../src/mcp/render-envelope.js');
+      const result = freshToMcpResult({
+        type: 'success',
+        data: freshEnvelope({
+          response: EXECUTION_RESPONSE,
+          lifecycle: 'start',
+        }),
+      });
 
-  afterEach(() => {
-    if (originalClean === undefined) {
+      expect(result.content).toHaveLength(3);
+      expect((result.content[0] as { text: string }).text).toContain('Execute the first task.');
+      expect((result.content[1] as { text: string }).text).toContain('WorkRail is a separate live system');
+      expect((result.content[2] as { text: string }).text).toContain('How to write good notes');
+    } finally {
       delete process.env.WORKRAIL_CLEAN_RESPONSE_FORMAT;
-    } else {
-      process.env.WORKRAIL_CLEAN_RESPONSE_FORMAT = originalClean;
+      vi.resetModules();
     }
   });
 
-  it('start responses include authority context and notes guidance as separate content items', () => {
-    const result = toMcpResult({
-      type: 'success',
-      data: createV2ExecutionRenderEnvelope({
-        response: EXECUTION_RESPONSE,
-        lifecycle: 'start',
-      }),
-    });
+  it('rehydrate responses include authority context but not notes guidance', async () => {
+    process.env.WORKRAIL_CLEAN_RESPONSE_FORMAT = 'true';
+    vi.resetModules();
+    try {
+      const { toMcpResult: freshToMcpResult } = await import('../../../src/mcp/handler-factory.js');
+      const { createV2ExecutionRenderEnvelope: freshEnvelope } = await import('../../../src/mcp/render-envelope.js');
+      const result = freshToMcpResult({
+        type: 'success',
+        data: freshEnvelope({
+          response: {
+            ...EXECUTION_RESPONSE,
+            nextIntent: 'rehydrate_only' as const,
+          },
+          lifecycle: 'rehydrate',
+        }),
+      });
 
-    expect(result.content).toHaveLength(3);
-    expect((result.content[0] as { text: string }).text).toContain('Execute the first task.');
-    expect((result.content[1] as { text: string }).text).toContain('WorkRail is a separate live system');
-    expect((result.content[2] as { text: string }).text).toContain('How to write good notes');
+      expect(result.content).toHaveLength(2);
+      expect((result.content[1] as { text: string }).text).toContain('WorkRail is a separate live system');
+      expect((result.content[1] as { text: string }).text).not.toContain('How to write good notes');
+    } finally {
+      delete process.env.WORKRAIL_CLEAN_RESPONSE_FORMAT;
+      vi.resetModules();
+    }
   });
 
-  it('rehydrate responses include authority context but not notes guidance', () => {
-    const result = toMcpResult({
-      type: 'success',
-      data: createV2ExecutionRenderEnvelope({
-        response: {
-          ...EXECUTION_RESPONSE,
-          nextIntent: 'rehydrate_only' as const,
-        },
-        lifecycle: 'rehydrate',
-      }),
-    });
+  it('advance responses do not include supplemental content items', async () => {
+    process.env.WORKRAIL_CLEAN_RESPONSE_FORMAT = 'true';
+    vi.resetModules();
+    try {
+      const { toMcpResult: freshToMcpResult } = await import('../../../src/mcp/handler-factory.js');
+      const { createV2ExecutionRenderEnvelope: freshEnvelope } = await import('../../../src/mcp/render-envelope.js');
+      const result = freshToMcpResult({
+        type: 'success',
+        data: freshEnvelope({
+          response: EXECUTION_RESPONSE,
+          lifecycle: 'advance',
+        }),
+      });
 
-    expect(result.content).toHaveLength(2);
-    expect((result.content[1] as { text: string }).text).toContain('WorkRail is a separate live system');
-    expect((result.content[1] as { text: string }).text).not.toContain('How to write good notes');
-  });
-
-  it('advance responses do not include supplemental content items', () => {
-    const result = toMcpResult({
-      type: 'success',
-      data: createV2ExecutionRenderEnvelope({
-        response: EXECUTION_RESPONSE,
-        lifecycle: 'advance',
-      }),
-    });
-
-    expect(result.content).toHaveLength(1);
-    expect((result.content[0] as { text: string }).text).not.toContain('# Step 1: Do Something');
+      expect(result.content).toHaveLength(1);
+      expect((result.content[0] as { text: string }).text).not.toContain('# Step 1: Do Something');
+    } finally {
+      delete process.env.WORKRAIL_CLEAN_RESPONSE_FORMAT;
+      vi.resetModules();
+    }
   });
 });
