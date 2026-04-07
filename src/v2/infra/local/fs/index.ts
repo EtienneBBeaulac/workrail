@@ -172,22 +172,33 @@ export class NodeFileSystemV2 implements FileSystemPortV2 {
     return RA.fromPromise(
       (async (): Promise<readonly FsDirEntryWithMtime[]> => {
         const entries = await fs.readdir(dirPath);
+
+        // WHY: Issue all stat calls concurrently instead of sequentially. For a directory
+        // with N session entries this reduces I/O latency from O(N * stat_latency) to
+        // O(stat_latency). Promise.allSettled preserves graceful degradation: individual
+        // stat failures are captured as rejected results and skipped, matching the original
+        // try/catch behavior.
+        const results = await Promise.allSettled(
+          entries.map((name) =>
+            fs.stat(path.join(dirPath, name)).then((s): FsDirEntryWithMtime => ({ name, mtimeMs: s.mtimeMs }))
+          )
+        );
+
         const withMtime: FsDirEntryWithMtime[] = [];
         let skipped = 0;
 
-        for (const name of entries) {
-          try {
-            const stats = await fs.stat(path.join(dirPath, name));
-            withMtime.push({ name, mtimeMs: stats.mtimeMs });
-          } catch (e) {
+        for (let i = 0; i < results.length; i++) {
+          const result = results[i]!;
+          if (result.status === 'fulfilled') {
+            withMtime.push(result.value);
+          } else {
             // Graceful degradation: individual stat failures don't abort enumeration,
             // but we must observe what's being skipped for debugging.
-            const code = nodeErrorCode(e);
+            const code = nodeErrorCode(result.reason);
             skipped++;
             console.error(
-              `[workrail:session-enum] Skipping ${name}: stat failed (${code ?? 'unknown'}: ${e instanceof Error ? e.message : String(e)})`
+              `[workrail:session-enum] Skipping ${entries[i]}: stat failed (${code ?? 'unknown'}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)})`
             );
-            continue;
           }
         }
 

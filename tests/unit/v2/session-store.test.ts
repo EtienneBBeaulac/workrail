@@ -240,47 +240,28 @@ describe('v2 local session store (Slice 2 substrate)', () => {
   });
 
   it('crash after segment_closed but before snapshot_pinned is corruption (pin-after-close lock)', async () => {
+    // WHY: This test simulates a crash that left the on-disk state in a partially committed
+    // condition: the segment file was written, and segment_closed was appended to the manifest,
+    // but the snapshot_pinned record was never written (e.g., process killed between writes).
+    // With the merged-write optimization, we construct this crash state directly on disk
+    // rather than by intercepting internal calls. The invariant under test is unchanged:
+    // a manifest with segment_closed but no snapshot_pinned for an introduced snapshotRef
+    // must be detected as SESSION_STORE_CORRUPTION_DETECTED.
     const root = await mkTempDataDir();
     const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: root });
-    const baseFs = new NodeFileSystemV2();
+    const fsPort = new NodeFileSystemV2();
     const sha = new NodeSha256V2();
+    const store = new LocalSessionEventLogStoreV2(dataDir, fsPort, sha);
 
     const sessionId = asSessionId('sess_test_pin_after_close');
-    const manifestPath = dataDir.sessionManifestPath(sessionId);
-
-    // Fail on the SECOND manifest append (pins), simulating a crash after segment_closed was committed.
-    // Important: do not use object spread for class instances (methods are on prototype and not enumerable).
-    let openAppendCount = 0;
-    const failingFs: FileSystemPortV2 = {
-      mkdirp: (p) => baseFs.mkdirp(p),
-      readFileUtf8: (p) => baseFs.readFileUtf8(p),
-      readFileBytes: (p) => baseFs.readFileBytes(p),
-      writeFileBytes: (p, b) => baseFs.writeFileBytes(p, b),
-      openWriteTruncate: (p) => baseFs.openWriteTruncate(p),
-      openAppend: (filePath: string) => {
-        if (filePath === manifestPath) {
-          openAppendCount++;
-          if (openAppendCount >= 2) {
-            return errAsync({ code: 'FS_IO_ERROR' as const, message: 'simulated crash during pin append' } satisfies FsError);
-          }
-        }
-        return baseFs.openAppend(filePath);
-      },
-      writeAll: (fd, b) => baseFs.writeAll(fd, b),
-      openExclusive: (p, b) => baseFs.openExclusive(p, b),
-      fsyncFile: (fd) => baseFs.fsyncFile(fd),
-      fsyncDir: (p) => baseFs.fsyncDir(p),
-      closeFile: (fd) => baseFs.closeFile(fd),
-      rename: (a, b) => baseFs.rename(a, b),
-      unlink: (p) => baseFs.unlink(p),
-      stat: (p) => baseFs.stat(p),
-    };
-
-    const lock = new LocalSessionLockV2(dataDir, failingFs, new NodeTimeClockV2());
-    const store = new LocalSessionEventLogStoreV2(dataDir, failingFs, sha);
-    const gate = new ExecutionSessionGateV2(lock, store);
-
     const snapshotRef = asSnapshotRef(asSha256Digest('sha256:5947229239ac2966c1099d6d74f4448c064e54ae25959eaebfd89cec073bdc11'));
+
+    // Build the crash state directly: write the segment file and a manifest that has
+    // segment_closed but is missing snapshot_pinned.
+    const { toJsonlLineBytes } = await import('../../../src/v2/durable-core/canonical/jsonl.js');
+    const { NodeSha256V2: Sha256Impl } = await import('../../../src/v2/infra/local/sha256/index.js');
+    const sha256Port = new Sha256Impl();
+
     const nodeCreated: DomainEventV1 = {
       v: 1,
       eventId: 'evt_node_1',
@@ -297,20 +278,36 @@ describe('v2 local session store (Slice 2 substrate)', () => {
       },
     };
 
-    const appended = await gate
-      .withHealthySessionLock(sessionId, (w) =>
-        store.append(w, {
-          events: [nodeCreated],
-          snapshotPins: [{ snapshotRef, eventIndex: 0, createdByEventId: 'evt_node_1' }],
-        })
-      )
-      .match(
-        () => ({ ok: true as const }),
-        (e) => ({ ok: false as const, error: e })
-      );
-    expect(appended.ok).toBe(false);
+    // Write the segment file
+    const eventsDir = dataDir.sessionEventsDir(sessionId);
+    const sessionDir = dataDir.sessionDir(sessionId);
+    await fs.mkdir(eventsDir, { recursive: true });
+    const segRelPath = 'events/00000000-00000000.jsonl';
+    const lineResult = toJsonlLineBytes(nodeCreated as unknown as Record<string, unknown>);
+    if (lineResult.isErr()) throw new Error(`failed to encode event: ${lineResult.error.message}`);
+    const segBytes = lineResult.value;
+    await fs.writeFile(path.join(sessionDir, segRelPath), segBytes);
 
-    // A normal load must now fail fast because the segment was closed but pins were not appended.
+    // Write manifest with only segment_closed (no snapshot_pinned) - simulating the crash state
+    const digest = sha256Port.sha256(segBytes);
+    const manifestPath = dataDir.sessionManifestPath(sessionId);
+    await fs.mkdir(path.dirname(String(manifestPath)), { recursive: true });
+    await fs.writeFile(
+      String(manifestPath),
+      JSON.stringify({
+        v: 1,
+        manifestIndex: 0,
+        sessionId,
+        kind: 'segment_closed',
+        firstEventIndex: 0,
+        lastEventIndex: 0,
+        segmentRelPath: segRelPath,
+        sha256: digest,
+        bytes: segBytes.length,
+      }) + '\n'
+    );
+
+    // A normal load must detect corruption: segment_closed exists but snapshot_pinned is missing.
     const loaded = await store.load(sessionId).match(
       () => ({ ok: true as const }),
       (e) => ({ ok: false as const, error: e })

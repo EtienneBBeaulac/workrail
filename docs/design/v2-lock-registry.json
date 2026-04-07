@@ -690,6 +690,31 @@
       "source": "v2-architectural-hardening-final.md §2.0.1 Pattern P4",
       "summary": "Tests use centralized in-memory fakes for ports, not mocks that mirror implementation",
       "category": "architecture"
+    },
+
+    {
+      "id": "parallel-stat-correctness",
+      "source": "perf-parallel-io",
+      "summary": "readdirWithMtime issues stat calls in parallel and returns correct name+mtimeMs for all entries; entries where stat fails are skipped gracefully",
+      "category": "storage"
+    },
+    {
+      "id": "parallel-segment-order",
+      "source": "perf-parallel-io",
+      "summary": "loadSegmentsParallel reads segment files concurrently but concatenates results in manifest index order to preserve the eventIndex ordering invariant",
+      "category": "storage"
+    },
+    {
+      "id": "single-manifest-fsync",
+      "source": "perf-parallel-io",
+      "summary": "segment_closed and snapshot_pinned records are written in a single appendManifestRecords call, reducing fsyncs from 2 to 1 when snapshot pins are present",
+      "category": "storage"
+    },
+    {
+      "id": "mkdirp-once-per-session",
+      "source": "perf-parallel-io",
+      "summary": "mkdirp for the events directory is called at most once per session per process lifetime; subsequent appends skip the syscall via a module-level cache",
+      "category": "storage"
     }
   ],
 
