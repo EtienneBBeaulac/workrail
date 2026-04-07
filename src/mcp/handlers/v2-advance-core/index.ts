@@ -155,6 +155,7 @@ export function executeAdvanceCore(args: {
   readonly lock: WithHealthySessionLock;
   readonly pinnedWorkflow: ReturnType<typeof createWorkflow>;
   readonly ports: AdvanceCorePorts;
+  readonly lockedIndex: import('../../../v2/durable-core/session-index.js').SessionIndex;
 }): RA<void, InternalError | SessionEventLogStoreError | SnapshotStoreError> {
   const { mode, truth, sessionId, runId, attemptId, workflowHash, inputContext, inputOutput, lock, pinnedWorkflow, ports } = args;
   const { snapshotStore, sessionStore, sha256, idFactory } = ports;
@@ -232,7 +233,7 @@ export function executeAdvanceCore(args: {
       const computed: ComputedAdvanceResults = { reasons: effectiveReasons, outputRequirement, validation: evalValidation };
       const portsLocal: AdvanceCorePorts = { snapshotStore, sessionStore, sha256, idFactory };
 
-      return buildBlockedOutcome({ mode, snap, ctx, computed, v, lock, ports: portsLocal });
+      return buildBlockedOutcome({ mode, snap, ctx, computed, v, lock, ports: portsLocal, lockedIndex: args.lockedIndex });
     }
 
     const validation = phase.validation;
@@ -290,12 +291,12 @@ export function executeAdvanceCore(args: {
     // ── 5. Blocked path ─────────────────────────────────────────────────
 
     if (shouldBlockNow) {
-      return buildBlockedOutcome({ mode, snap, ctx, computed, v, lock, ports });
+      return buildBlockedOutcome({ mode, snap, ctx, computed, v, lock, ports, lockedIndex: args.lockedIndex });
     }
 
     // ── 6. Success path ─────────────────────────────────────────────────
 
-    return buildSuccessOutcome({ mode, ctx, computed, v, lock, ports });
+    return buildSuccessOutcome({ mode, ctx, computed, v, lock, ports, lockedIndex: args.lockedIndex });
   });
 }
 

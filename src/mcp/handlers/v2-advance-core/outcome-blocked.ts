@@ -33,6 +33,7 @@ export function buildBlockedOutcome(args: {
   readonly v: ValidatedAdvanceInputs;
   readonly lock: WithHealthySessionLock;
   readonly ports: AdvanceCorePorts;
+  readonly lockedIndex: import('../../../v2/durable-core/session-index.js').SessionIndex;
 }): RA<void, InternalError | SessionEventLogStoreError | SnapshotStoreError> {
   const { mode, snap, lock, ports } = args;
   const { truth, sessionId, runId, currentNodeId, attemptId, workflowHash } = args.ctx;
@@ -140,7 +141,7 @@ export function buildBlockedOutcome(args: {
   return snapshotStore.putExecutionSnapshotV1(blockedSnapshotRes.value).andThen((blockedSnapshotRef) => {
     return buildAndAppendPlan({
       kind: 'blocked',
-      truth, sessionId, runId, currentNodeId, attemptId, workflowHash,
+      truth, lockedIndex: args.lockedIndex, sessionId, runId, currentNodeId, attemptId, workflowHash,
       extraEventsToAppend, blockers: blockersRes.value, snapshotRef: blockedSnapshotRef,
       outputsToAppend,
       sessionStore, idFactory, lock,
