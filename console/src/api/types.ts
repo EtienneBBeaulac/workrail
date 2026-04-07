@@ -68,8 +68,6 @@ export interface ConsoleSessionSummary {
   readonly hasUnresolvedGaps: boolean;
   readonly recapSnippet: string | null;
   readonly gitBranch: string | null;
-  /** Absolute repo root path, or null for sessions recorded before this field was introduced. */
-  readonly repoRoot: string | null;
   readonly lastModifiedMs: number;
 }
 

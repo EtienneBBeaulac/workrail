@@ -194,56 +194,23 @@ export function mountConsoleRoutes(
   });
 
   // List git worktrees grouped by repo, with enriched status and active session counts.
-  // Repo roots are derived from session observations (repo_root anchor) so the view
-  // covers all repos agents have worked in, not just the current CWD's repo.
+  // Repo roots are derived from the server process CWD only. Active session counts
+  // (for worktree badges) come from a full session scan on each request.
 
-  // CWD root: stable for the lifetime of the process — resolve once, cache forever.
+  // CWD root: stable for the lifetime of the process -- resolve once, cache forever.
   let cwdRepoRootPromise: Promise<string | null> | null = null;
 
-  // Repo roots from sessions: changes only when new sessions appear from new repos.
-  // Cache with a TTL so we re-scan sessions infrequently rather than on every request.
-  // Active session counts (for worktree badges) still come from each full session scan.
-  const REPO_ROOTS_TTL_MS = 60_000;
-
-  // Sessions older than this threshold do not contribute repo roots to worktree discovery.
-  // Without this bound, a single stale session from a large repo (e.g. one with 79 worktrees)
-  // permanently inflates the worktree enrichment cost for the lifetime of the MCP server process.
-  // 30 days is conservative: any session not touched in a month is almost certainly inactive.
-  const REPO_ROOT_SESSION_STALENESS_MS = 30 * 24 * 60 * 60 * 1000;
-
-  let cachedRepoRoots: readonly string[] = [];
-  let repoRootsExpiresAt = 0;
-
-  // Note: this handler triggers a full session event replay via getSessionList()
-  // as a side effect (to derive repo roots and active session counts). It is a
-  // candidate for caching when session count grows.
   app.get('/api/v2/worktrees', async (_req: Request, res: Response) => {
     try {
       const sessionResult = await consoleService.getSessionList();
       const sessions = sessionResult.isOk() ? sessionResult.value.sessions : [];
       const activeSessions = buildActiveSessionCounts(sessions);
 
-      // Refresh the known-repos set at most once per TTL window.
-      if (Date.now() > repoRootsExpiresAt) {
-        cwdRepoRootPromise ??= resolveRepoRoot(process.cwd());
-        const cwdRoot = await cwdRepoRootPromise;
-        // Normalize each session repoRoot through resolveRepoRoot so linked worktrees
-        // collapse to their main repo root rather than appearing as separate repos.
-        // Only include sessions touched within the staleness window -- stale sessions
-        // from inactive repos inflate the worktree count without providing useful signal.
-        const cutoffMs = Date.now() - REPO_ROOT_SESSION_STALENESS_MS;
-        const rawRoots = sessions
-          .filter(s => s.lastModifiedMs >= cutoffMs)
-          .map(s => s.repoRoot)
-          .filter((r): r is string => r !== null);
-        const resolvedRoots = await Promise.all(rawRoots.map(r => resolveRepoRoot(r)));
-        const repoRootSet = new Set<string>(resolvedRoots.filter((r): r is string => r !== null));
-        if (cwdRoot !== null) repoRootSet.add(cwdRoot);
-        cachedRepoRoots = [...repoRootSet];
-        repoRootsExpiresAt = Date.now() + REPO_ROOTS_TTL_MS;
-      }
+      cwdRepoRootPromise ??= resolveRepoRoot(process.cwd());
+      const cwdRoot = await cwdRepoRootPromise;
+      const repoRoots: readonly string[] = cwdRoot !== null ? [cwdRoot] : [];
 
-      const data = await getWorktreeList(cachedRepoRoots, activeSessions);
+      const data = await getWorktreeList(repoRoots, activeSessions);
       res.json({ success: true, data });
     } catch (e) {
       res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });

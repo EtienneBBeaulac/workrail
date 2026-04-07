@@ -105,7 +105,6 @@ function excerptRecap(md: string, maxLen = 220): string {
 
 interface ArchiveState {
   readonly repoName: string | undefined;
-  readonly repoRoot: string | undefined;
 }
 
 /** Branches grouped by repo, sorted for display within their repo section. */
@@ -318,7 +317,6 @@ export function WorkspaceView({ hidden = false }: Props) {
         </div>
         <SessionList
           onSelectSession={wrappedSelectSession}
-          initialRepoRoot={archive.repoRoot ?? null}
         />
       </div>
     );
@@ -376,7 +374,7 @@ export function WorkspaceView({ hidden = false }: Props) {
           {/* Archive links -- uses unfiltered archiveRepos so all repos are always reachable */}
           <ArchiveLinks
             repos={archiveRepos}
-            onOpen={(repoName, repoRoot) => setArchive({ repoName, repoRoot })}
+            onOpen={(repoName) => setArchive({ repoName })}
           />
         </>
       )}
@@ -1123,28 +1121,24 @@ function ArchiveLinks({
   // Pre-computed from the unfiltered join so all repos are always shown
   // regardless of attention filter or scope.
   readonly repos: ReadonlyArray<readonly [string, string]>;
-  readonly onOpen: (repoName: string | undefined, repoRoot: string | undefined) => void;
+  readonly onOpen: (repoName: string | undefined) => void;
 }) {
-
-  // Always show at least the global link so users with only null-repoRoot sessions
-  // (pre-dating the repoRoot observation) can still reach the full archive.
   return (
     <div className="flex flex-col gap-1 pt-2 border-t border-[var(--border)]">
       {repos.map(([repoRoot, repoName]) => (
         <button
           key={repoRoot}
           type="button"
-          onClick={() => onOpen(repoName, repoRoot)}
+          onClick={() => onOpen(repoName)}
           className="text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors text-left"
         >
           All {repoName} sessions &rarr;
         </button>
       ))}
-      {/* Global link: always shown so null-repoRoot sessions are always reachable */}
       {repos.length !== 1 && (
         <button
           type="button"
-          onClick={() => onOpen(undefined, undefined)}
+          onClick={() => onOpen(undefined)}
           className="text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors text-left"
         >
           All sessions &rarr;
@@ -1347,7 +1341,7 @@ function useWorkspaceKeyboard({
         }
         case '/': {
           e.preventDefault();
-          setArchive({ repoName: undefined, repoRoot: undefined });
+          setArchive({ repoName: undefined });
           break;
         }
         case 'r': {

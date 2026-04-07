@@ -64,11 +64,9 @@ export class LocalWorkspaceAnchorV2 implements WorkspaceContextResolverPortV2 {
     const anchors: WorkspaceAnchor[] = [];
 
     // Use --git-common-dir to resolve linked worktrees to the main repo root.
-    // --show-toplevel returns the worktree's own directory, so sessions started
-    // from a linked worktree would store a per-worktree path rather than the
-    // canonical repo root, causing them to appear as separate repos in the console.
-    // --git-common-dir always points to the main .git directory regardless of
-    // which worktree the agent is running in.
+    // This is used solely to compute repo_root_hash for resume ranking
+    // (sameWorkspaceOnly filtering). The human-readable repo_root path is not
+    // recorded -- it was unreliable as a session identity signal.
     const gitCommonDir = await this.gitCommand('git rev-parse --path-format=absolute --git-common-dir', cwd);
     if (!gitCommonDir) return anchors;
     const repoRoot = gitCommonDir.replace(/\/\.git\/?$/, '').trim() || null;
@@ -78,10 +76,6 @@ export class LocalWorkspaceAnchorV2 implements WorkspaceContextResolverPortV2 {
     if (repoRootHash) {
       anchors.push({ key: 'repo_root_hash', value: repoRootHash });
     }
-
-    // Emit the human-readable path alongside the hash so the console can group
-    // sessions and worktrees by repo without needing a reverse-hash lookup.
-    anchors.push({ key: 'repo_root', value: repoRoot });
 
     // git branch: read symbolic ref (graceful: empty on detached HEAD or non-git)
     const branch = await this.gitCommand('git rev-parse --abbrev-ref HEAD', cwd);

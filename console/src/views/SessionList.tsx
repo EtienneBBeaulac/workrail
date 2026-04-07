@@ -10,9 +10,6 @@ interface Props {
   onSelectSession: (sessionId: string) => void;
   /** Pre-seed the search field (e.g. branch name from worktree click-through). */
   initialSearch?: string;
-  /** Restrict results to sessions from this repo root. Sessions without a
-   * repoRoot (recorded before the field was introduced) are always included. */
-  initialRepoRoot?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -113,18 +110,11 @@ function filterSessions(
   sessions: readonly ConsoleSessionSummary[],
   search: string,
   statusFilter: StatusFilter,
-  repoRoot: string | null,
 ): ConsoleSessionSummary[] {
   let filtered = [...sessions];
 
   if (statusFilter !== 'all') {
     filtered = filtered.filter((s) => s.status === statusFilter);
-  }
-
-  // Repo filter: sessions without repoRoot predate the field and are always
-  // included — we don't know which repo they belong to.
-  if (repoRoot !== null) {
-    filtered = filtered.filter((s) => s.repoRoot === repoRoot || s.repoRoot === null);
   }
 
   if (search.trim()) {
@@ -196,11 +186,10 @@ function useDebounce<T>(value: T, delayMs: number): T {
 // Components
 // ---------------------------------------------------------------------------
 
-export function SessionList({ onSelectSession, initialSearch = '', initialRepoRoot = null }: Props) {
+export function SessionList({ onSelectSession, initialSearch = '' }: Props) {
   const { data, isLoading, error } = useSessionList();
 
   const [search, setSearch] = useState(initialSearch);
-  const [repoRoot] = useState(initialRepoRoot);
   const [sort, setSort] = useState<SortField>('recent');
   const [groupBy, setGroupBy] = useState<GroupBy>('none');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -219,11 +208,11 @@ export function SessionList({ onSelectSession, initialSearch = '', initialRepoRo
 
   const processed = useMemo(() => {
     if (!data) return { groups: [], total: 0, filtered: 0 };
-    const filtered = filterSessions(data.sessions, debouncedSearch, statusFilter, repoRoot);
+    const filtered = filterSessions(data.sessions, debouncedSearch, statusFilter);
     const sorted = sortSessions(filtered, sort);
     const groups = groupSessions(sorted, groupBy);
     return { groups, total: data.sessions.length, filtered: filtered.length };
-  }, [data, debouncedSearch, statusFilter, repoRoot, sort, groupBy]);
+  }, [data, debouncedSearch, statusFilter, sort, groupBy]);
 
   // Status counts for filter pills
   const statusCounts = useMemo(() => {

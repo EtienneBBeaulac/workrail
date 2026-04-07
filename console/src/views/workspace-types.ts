@@ -169,62 +169,59 @@ export function sortItemsForRepo(
 /**
  * Client-side join of sessions and worktrees into WorkspaceItems.
  *
- * - Sessions with repoRoot=null are excluded from the result. They are only
+ * - Sessions without a gitBranch are excluded from the result. They are only
  *   accessible via the global archive link.
+ * - Sessions with a gitBranch are matched to worktrees by branch name within
+ *   each repo. Sessions with no matching worktree are not shown in the main
+ *   workspace view -- they remain accessible via the archive link.
  * - Branches that exist only as worktrees (no sessions) are included.
- * - Branches that exist only as sessions (no matching worktree) are included
- *   with worktree=undefined.
  *
  * The join key is `branch + '\0' + repoRoot` to avoid collisions between repos
- * that share branch names.
+ * that share branch names. repoRoot always comes from the worktrees API.
  */
 export function joinSessionsAndWorktrees(
   sessions: readonly ConsoleSessionSummary[],
   worktreeRepos: readonly ConsoleRepoWorktrees[],
 ): WorkspaceItem[] {
-  // Index worktrees by join key for O(1) lookup
-  const worktreeByKey = new Map<string, { wt: ConsoleWorktreeSummary; repoName: string }>();
+  // Index worktrees by join key for O(1) lookup.
+  // repoRoot is always sourced from the worktrees API (not from sessions).
+  const worktreeByKey = new Map<string, { wt: ConsoleWorktreeSummary; repoName: string; repoRoot: string }>();
   for (const repo of worktreeRepos) {
     for (const wt of repo.worktrees) {
       if (wt.branch !== null) {
-        worktreeByKey.set(`${wt.branch}\0${repo.repoRoot}`, { wt, repoName: repo.repoName });
+        worktreeByKey.set(`${wt.branch}\0${repo.repoRoot}`, { wt, repoName: repo.repoName, repoRoot: repo.repoRoot });
       }
     }
   }
 
-  // Build a map from any worktree path -> canonical main repo root.
-  // Sessions store the worktree path they were started from as repoRoot, but the
-  // worktrees API normalizes linked worktrees to the main repo root. Without this
-  // map, sessions from linked worktrees would never join with their worktree entry
-  // and would appear as separate spurious repos (named after the worktree dir).
-  const worktreePathToRepoRoot = new Map<string, string>();
-  for (const repo of worktreeRepos) {
-    for (const wt of repo.worktrees) {
-      worktreePathToRepoRoot.set(wt.path, repo.repoRoot);
-    }
+  // Build a branch -> worktree entry index for sessions that only know their branch name.
+  // When a session's branch matches exactly one worktree entry, use that entry's repoRoot.
+  const worktreeByBranch = new Map<string, Array<{ repoRoot: string; repoName: string; wt: ConsoleWorktreeSummary }>>();
+  for (const [key, entry] of worktreeByKey) {
+    const [branch] = key.split('\0') as [string, string];
+    const existing = worktreeByBranch.get(branch) ?? [];
+    existing.push(entry);
+    worktreeByBranch.set(branch, existing);
   }
 
-  // Group sessions by join key, excluding null-repoRoot sessions.
-  // Normalize session repoRoot via worktreePathToRepoRoot so sessions started
-  // from a linked worktree collapse to the main repo root.
+  // Group sessions by join key, excluding sessions without a gitBranch.
+  // repoRoot is derived from the worktrees API via branch matching.
+  // Sessions whose branch matches no worktree are excluded from the main view.
   const sessionsByKey = new Map<string, ConsoleSessionSummary[]>();
   for (const session of sessions) {
-    if (session.repoRoot === null || session.gitBranch === null) continue;
-    const normalizedRoot = worktreePathToRepoRoot.get(session.repoRoot) ?? session.repoRoot;
-    const key = `${session.gitBranch}\0${normalizedRoot}`;
-    const existing = sessionsByKey.get(key);
-    if (existing) {
-      existing.push(session);
-    } else {
-      sessionsByKey.set(key, [session]);
+    if (session.gitBranch === null) continue;
+    const entries = worktreeByBranch.get(session.gitBranch) ?? [];
+    if (entries.length === 0) continue; // No matching worktree -- accessible via archive only
+    // When multiple repos share the same branch name, add the session to all of them.
+    for (const entry of entries) {
+      const key = `${session.gitBranch}\0${entry.repoRoot}`;
+      const existing = sessionsByKey.get(key);
+      if (existing) {
+        existing.push(session);
+      } else {
+        sessionsByKey.set(key, [session]);
+      }
     }
-  }
-
-  // Build repoName index from sessions for branches without worktrees
-  // Use the last segment of repoRoot as a fallback repoName
-  const repoNameByRoot = new Map<string, string>();
-  for (const repo of worktreeRepos) {
-    repoNameByRoot.set(repo.repoRoot, repo.repoName);
   }
 
   const items: WorkspaceItem[] = [];
@@ -239,11 +236,7 @@ export function joinSessionsAndWorktrees(
       primarySession?.lastModifiedMs ?? 0,
       worktreeEntry?.wt.headTimestampMs ?? 0,
     );
-    const repoName =
-      worktreeEntry?.repoName ??
-      repoNameByRoot.get(repoRoot) ??
-      repoRoot.split('/').at(-1) ??
-      repoRoot;
+    const repoName = worktreeEntry?.repoName ?? repoRoot.split('/').at(-1) ?? repoRoot;
 
     items.push({
       branch,
@@ -258,9 +251,9 @@ export function joinSessionsAndWorktrees(
   }
 
   // Process worktree-only branches (no sessions recorded yet)
-  for (const [key, { wt, repoName }] of worktreeByKey) {
+  for (const [key, { wt, repoName, repoRoot }] of worktreeByKey) {
     if (processedKeys.has(key)) continue;
-    const [branch, repoRoot] = key.split('\0') as [string, string];
+    const [branch] = key.split('\0') as [string, string];
     items.push({
       branch,
       repoRoot,
