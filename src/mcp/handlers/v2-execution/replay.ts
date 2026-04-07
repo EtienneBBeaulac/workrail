@@ -139,6 +139,8 @@ export function buildAdvancedReplayResponse(args: {
 
     return nextTokensMint.andThen((nextTokens) =>
       retryContinueMint.andThen((retryContinueToken) => {
+        // TypeScript requires `as` cast here for discriminated union literal narrowing;
+        // `const payload: T = {...}` works for simple object shapes but not discriminated unions.
         const out = assertOutput(
           {
             kind: 'blocked' as const,

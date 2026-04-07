@@ -25,20 +25,20 @@ import {
 
 describe('assertOutput()', () => {
   afterEach(() => {
-    // Restore NODE_ENV after each test that modifies it
-    delete process.env['NODE_ENV'];
+    // Restore WORKRAIL_DEV after each test that modifies it
+    delete process.env['WORKRAIL_DEV'];
   });
 
-  it('runs the check in non-production environments', () => {
-    process.env['NODE_ENV'] = 'test';
+  it('runs the check when WORKRAIL_DEV=1', () => {
+    process.env['WORKRAIL_DEV'] = '1';
     const data = { value: 42 };
     expect(() =>
       assertOutput(data, () => { throw new Error('invariant violated'); })
     ).toThrow('invariant violated');
   });
 
-  it('is a no-op in production environments', () => {
-    process.env['NODE_ENV'] = 'production';
+  it('is a no-op when WORKRAIL_DEV is unset', () => {
+    delete process.env['WORKRAIL_DEV'];
     const data = { value: 42 };
     // Should not throw even though the check would fail
     expect(() =>
@@ -47,21 +47,21 @@ describe('assertOutput()', () => {
   });
 
   it('returns the data unchanged (pass-through)', () => {
-    process.env['NODE_ENV'] = 'test';
+    process.env['WORKRAIL_DEV'] = '1';
     const data = { foo: 'bar', nested: { x: 1 } };
     const result = assertOutput(data, () => {});
     expect(result).toBe(data); // same reference, no copy
   });
 
   it('does not mutate the data', () => {
-    process.env['NODE_ENV'] = 'test';
+    process.env['WORKRAIL_DEV'] = '1';
     const data = { count: 5 };
     assertOutput(data, (d) => { void d; }); // read-only check
     expect(data.count).toBe(5);
   });
 
   it('passes the data to the check function', () => {
-    process.env['NODE_ENV'] = 'test';
+    process.env['WORKRAIL_DEV'] = '1';
     const data = { x: 99 };
     let received: typeof data | undefined;
     assertOutput(data, (d) => { received = d; });

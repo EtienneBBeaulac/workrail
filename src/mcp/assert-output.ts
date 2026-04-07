@@ -20,8 +20,8 @@
  *   // Instead of: const payload = SomeSchema.parse(data);
  *   // Use:        const payload = assertOutput(data as T, assertSomeInvariants);
  *
- * The assertOutput() call is a no-op in production (NODE_ENV === 'production').
- * It runs the check function and throws on invariant violations in all other environments.
+ * The assertOutput() call is a no-op unless WORKRAIL_DEV=1 is set.
+ * It runs the check function and throws on invariant violations in dev/test environments.
  */
 
 // ---------------------------------------------------------------------------
@@ -32,11 +32,11 @@
  * Run invariant check on server-produced output data in dev/test only.
  * Returns the data unchanged (same reference, no copy).
  *
- * In production: no-op (returns data immediately, check never called).
- * In development/test: runs check(data) and throws if it throws.
+ * When WORKRAIL_DEV=1: runs check(data) and throws if it throws.
+ * Otherwise: no-op (returns data immediately, check never called).
  */
 export function assertOutput<T>(data: T, check: (data: T) => void): T {
-  if (process.env['NODE_ENV'] !== 'production') {
+  if (process.env['WORKRAIL_DEV'] === '1') {
     check(data);
   }
   return data;
@@ -72,6 +72,10 @@ type BlockerReportLike = {
  * detection and deterministic ordering. Runs in dev/test only via assertOutput().
  *
  * Throws if blockers are not sorted ascending by composite key.
+ *
+ * Intentionally not wired into handler hot paths -- the invariant (blocker sort
+ * order, MAX_BLOCKERS, byte budgets) is enforced upstream by buildBlockerReport()
+ * in reason-model.ts before the response shape is constructed.
  */
 export function assertBlockerReportInvariants(report: BlockerReportLike): void {
   const keyFor = (b: BlockerLike): string => {
