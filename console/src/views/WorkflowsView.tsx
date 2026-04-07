@@ -1,6 +1,8 @@
 import { useWorkflowList } from '../api/hooks';
 import type { ConsoleWorkflowSummary } from '../api/types';
 import { CATALOG_TAGS, TAG_DISPLAY } from '../config/tags';
+import { SectionHeader } from '../components/SectionHeader';
+import { ConsoleCard } from '../components/ConsoleCard';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -163,29 +165,6 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow }: Pr
 }
 
 // ---------------------------------------------------------------------------
-// Section header
-// ---------------------------------------------------------------------------
-
-function SectionHeader({
-  label,
-  count,
-  showRule,
-}: {
-  readonly label: string;
-  readonly count: number;
-  readonly showRule: boolean;
-}) {
-  return (
-    <div className="flex items-center gap-3 mb-3 mt-2">
-      <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
-        {label}&nbsp;&nbsp;·&nbsp;&nbsp;{count} workflow{count !== 1 ? 's' : ''}
-      </span>
-      {showRule && <div className="flex-1 h-px bg-[var(--border)]" />}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Tag pill
 // ---------------------------------------------------------------------------
 
@@ -248,15 +227,7 @@ function WorkflowCard({
     .join('. ');
 
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-label={accessibleName}
-      className="energy-card group flex flex-col bg-[var(--bg-card)] border border-[var(--border)] hover:border-[var(--accent)] transition-colors focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:outline-none min-h-[160px]"
-    >
-      {/* Top accent stripe (horizontal) */}
-      <div className="h-[3px] w-full bg-[var(--accent)] opacity-60 group-hover:opacity-100 transition-opacity shrink-0" />
-
+    <ConsoleCard variant="grid" onClick={onSelect} aria-label={accessibleName}>
       <div className="flex flex-col flex-1 p-4 gap-2 min-w-0">
         {/* Name */}
         <p className="text-sm font-medium text-[var(--text-primary)] group-hover:text-[var(--accent)] transition-colors leading-snug line-clamp-2">
@@ -289,7 +260,7 @@ function WorkflowCard({
           </div>
         </div>
       </div>
-    </button>
+    </ConsoleCard>
   );
 }
 
