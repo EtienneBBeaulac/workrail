@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { MonoLabel } from './MonoLabel';
 import {
   ReactFlow,
   type Edge,
@@ -350,28 +351,15 @@ function NodeLabel({
       )}
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-3 py-3">
         <div className="flex items-start justify-between gap-2">
-          <span
-            className="font-mono text-[10px] uppercase tracking-[0.30em]"
-            style={{ color: getBranchLabelColor(branchKind, isActiveLineage) }}
-          >
+          <MonoLabel color={getBranchLabelColor(branchKind, isActiveLineage)}>
             {formatBranchLabel(node.nodeKind, branchKind, branchIndex)}
-          </span>
+          </MonoLabel>
           <div className="flex shrink-0 items-center gap-1">
             {isSelected && (
-              <span
-                className="font-mono text-[10px] uppercase tracking-[0.30em]"
-                style={{ color: 'var(--warning)' }}
-              >
-                Selected
-              </span>
+              <MonoLabel color="var(--warning)">Selected</MonoLabel>
             )}
             {isCurrent && (
-              <span
-                className="font-mono text-[10px] uppercase tracking-[0.30em]"
-                style={{ color: isLiveRun ? 'var(--accent-strong)' : 'var(--text-secondary)' }}
-              >
-                Current
-              </span>
+              <MonoLabel color={isLiveRun ? 'var(--accent-strong)' : 'var(--text-secondary)'}>Current</MonoLabel>
             )}
           </div>
         </div>
@@ -391,22 +379,20 @@ function NodeLabel({
       </div>
 
       <div className="flex items-center justify-between gap-2 border-t border-[rgba(255,255,255,0.06)] bg-[rgba(0,0,0,0.18)] px-3 py-2">
-        <span className="min-w-0 truncate font-mono text-[11px] text-[var(--text-secondary)]">
+        <MonoLabel color="var(--text-secondary)" className="min-w-0 truncate text-[11px]">
           {stepNumber !== null && totalSteps !== null
             ? `${stepNumber} / ${totalSteps}`
             : `evt ${node.createdAtEventIndex}`}
-        </span>
+        </MonoLabel>
         {node.isTip ? (
-          <span
-            className="shrink-0 font-mono text-[10px] uppercase tracking-[0.30em]"
-            style={{ color: node.isPreferredTip ? 'var(--warning)' : 'var(--text-muted)' }}
+          <MonoLabel
+            className="shrink-0"
+            color={node.isPreferredTip ? 'var(--warning)' : 'var(--text-muted)'}
           >
             {node.isPreferredTip ? 'Preferred tip' : 'Tip'}
-          </span>
+          </MonoLabel>
         ) : (
-          <span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.30em] text-transparent">
-            spacer
-          </span>
+          <MonoLabel className="shrink-0" color="transparent">spacer</MonoLabel>
         )}
       </div>
     </div>
@@ -428,9 +414,7 @@ function OverviewRail({
   return (
     <div className="mt-3 border border-[var(--border)] bg-[rgba(10,10,10,0.38)] px-3 py-2 corner-brackets">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-mono text-[10px] uppercase tracking-[0.30em] text-[var(--text-muted)]">
-          Lineage rail
-        </span>
+        <MonoLabel>Lineage rail</MonoLabel>
         {activeNodes.map((node) => (
           <RailDot
             key={node.node.nodeId}
@@ -478,9 +462,7 @@ function SummaryChip({
         background: emphasis ? 'rgba(0, 240, 255, 0.08)' : 'rgba(15, 19, 31, 0.78)',
       }}
     >
-      <div className="font-mono text-[10px] uppercase tracking-[0.30em] text-[var(--text-muted)]">
-        {label}
-      </div>
+      <MonoLabel>{label}</MonoLabel>
       <div className="mt-1 text-sm text-[var(--text-primary)]">{value}</div>
     </div>
   );
