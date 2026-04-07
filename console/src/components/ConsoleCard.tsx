@@ -33,7 +33,7 @@ export function ConsoleCard({
     );
   }
 
-  const baseClasses = 'energy-card group bg-[var(--bg-card)] border border-[var(--border)] hover:border-[var(--accent)] transition-colors focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:outline-none';
+  const baseClasses = 'energy-card group cursor-pointer bg-[var(--bg-card)] border border-[var(--border)] hover:border-[var(--accent)] transition-colors focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:outline-none';
 
   const variantClasses = {
     grid: 'flex flex-col min-h-[160px]',
@@ -47,7 +47,7 @@ export function ConsoleCard({
       type={onClick ? 'button' : undefined}
       onClick={onClick}
       aria-label={ariaLabel}
-      className={`${baseClasses} ${variantClasses} corner-brackets ${className}`}
+      className={`${baseClasses} ${variantClasses} ${className}`}
       style={style}
     >
       {variant === 'grid' && (
