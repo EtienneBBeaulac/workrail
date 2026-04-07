@@ -260,8 +260,11 @@ export interface ComposedServerInternal extends ComposedServer {
  * Those belong in the transport-specific entry points.
  */
 export async function composeServer(): Promise<ComposedServerInternal> {
-  // Bootstrap DI container
-  await bootstrap({ runtimeMode: { kind: 'production' } });
+  // Bootstrap DI container. No runtimeMode override -- detectRuntimeMode() in
+  // container.ts is the single source of truth (reads VITEST / NODE_ENV=test).
+  // Hardcoding 'production' here bypassed test isolation, causing NodeProcessSignals
+  // and NodeProcessTerminator to be used in tests instead of their noop/throwing variants.
+  await bootstrap();
 
   // Create tool context with all dependencies
   const ctx = await createToolContext();

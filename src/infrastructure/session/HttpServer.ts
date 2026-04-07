@@ -619,11 +619,22 @@ export class HttpServer {
         // Without this, the old process is still bound to port 3456 and
         // startAsPrimary() throws EADDRINUSE, causing silent fallback to legacy mode.
         // Mirror the graceful-shutdown pattern used in the !reclaim branch above.
+        //
+        // checkHealth() guard: confirm the process on this port is still a WorkRail
+        // instance before sending SIGTERM. A recycled PID (process.kill(pid,0) succeeds
+        // but the PID now belongs to an unrelated process) must not receive SIGTERM.
+        // If the port is no longer responding as WorkRail, the old process already
+        // exited -- skip SIGTERM and proceed directly to the atomic lock reclaim.
         try {
           process.kill(lockData.pid, 0); // Throws if process is dead
-          console.error(`[Dashboard] Sending SIGTERM to old process (PID ${lockData.pid})`);
-          process.kill(lockData.pid, 'SIGTERM');
-          await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s for graceful exit
+          const isWorkRailOnPort = await this.checkHealth(lockData.port);
+          if (isWorkRailOnPort) {
+            console.error(`[Dashboard] Sending SIGTERM to old process (PID ${lockData.pid})`);
+            process.kill(lockData.pid, 'SIGTERM');
+            await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s for graceful exit
+          } else {
+            console.error(`[Dashboard] PID ${lockData.pid} alive but not WorkRail on port ${lockData.port} -- reclaiming without SIGTERM`);
+          }
         } catch {
           // Process already dead -- proceed to reclaim
         }
@@ -900,8 +911,12 @@ export class HttpServer {
     // 1. FIRST: Stop heartbeat to prevent further lock file writes
     this.heartbeat.stop();
     
-    // 2. Stop all file watchers
+    // 2. Stop all file watchers (session manager + any route-level disposers, e.g. console SSE watcher)
     this.sessionManager.unwatchAll();
+    for (const dispose of this._routeDisposers) {
+      try { dispose(); } catch { /* ignore errors during shutdown */ }
+    }
+    this._routeDisposers.length = 0;
     
     // 3. Close server with timeout protection
     await new Promise<void>((resolve) => {
@@ -935,11 +950,21 @@ export class HttpServer {
    * Used by Console and other extensions that need to add routes
    * without coupling to the HttpServer class.
    *
+   * The installer may return a disposer (() => void) that will be called
+   * during stop() to clean up resources (e.g. FSWatcher instances).
+   * This keeps resource lifecycle tied to the server lifecycle rather than
+   * relying on process exit hooks, which accumulate across multiple mount calls.
+   *
    * Must be called before finalize().
    */
-  mountRoutes(installer: (app: Application) => void): void {
-    installer(this.app);
+  mountRoutes(installer: (app: Application) => (() => void) | void): void {
+    const disposer = installer(this.app);
+    if (disposer != null) {
+      this._routeDisposers.push(disposer);
+    }
   }
+
+  private readonly _routeDisposers: Array<() => void> = [];
 
   /**
    * Install the 404 catch-all handler.
