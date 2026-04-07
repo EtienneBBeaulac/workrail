@@ -8,7 +8,7 @@ import { detectBindingDrift, type BindingDriftWarning } from '../../../v2/durabl
 import { loadProjectBindings } from '../../../application/services/compiler/binding-registry.js';
 import { resolveBindingBaseDir } from '../v2-workspace-resolution.js';
 import { deriveIsComplete, derivePendingStep } from '../../../v2/durable-core/projections/snapshot-state.js';
-import { createWorkflow } from '../../../types/workflow.js';
+import { getCachedWorkflow } from './workflow-object-cache.js';
 import type { DomainEventV1 } from '../../../v2/durable-core/schemas/session/index.js';
 import {
   asSessionId,
@@ -22,7 +22,6 @@ import { deriveWorkflowHashRef } from '../../../v2/durable-core/ids/workflow-has
 import type { LoadedSessionTruthV2 } from '../../../v2/ports/session-event-log-store.port.js';
 import type { TokenCodecPorts } from '../../../v2/durable-core/tokens/token-codec-ports.js';
 import { ResultAsync as RA, okAsync, errAsync as neErrorAsync } from 'neverthrow';
-import { createBundledSource } from '../../../types/workflow-source.js';
 import type { WorkflowDefinition } from '../../../types/workflow-definition.js';
 import { hasWorkflowDefinitionShape } from '../../../types/workflow-definition.js';
 import {
@@ -190,7 +189,7 @@ export function handleRehydrateIntent(args: {
           return mintContinueAndCheckpointTokens({ entry: entryBase, ports: tokenCodecPorts, aliasStore, entropy })
             .mapErr((failure) => ({ kind: 'token_signing_failed' as const, cause: failure as never }))
             .andThen(({ continueToken: continueTokenValue, checkpointToken: checkpointTokenValue }) => {
-              const wf = createWorkflow(pinned.definition as WorkflowDefinition, createBundledSource());
+              const wf = getCachedWorkflow(workflowHash, pinned.definition as WorkflowDefinition);
 
               // S9: Use renderPendingPrompt (includes recap recovery + function expansion)
               const metaRes = renderPendingPrompt({
