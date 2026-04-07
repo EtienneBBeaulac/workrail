@@ -106,6 +106,27 @@ type WorkflowNameMap = Readonly<Record<string, string>>;
 export class ConsoleService {
   constructor(private readonly ports: ConsoleServicePorts) {}
 
+  /**
+   * In-process projection cache keyed by sessionId.
+   *
+   * Each entry stores the mtime at the time the summary was projected and the
+   * projected summary itself. On cache hit the store is not consulted and no
+   * projection runs. On mtime change the entry is replaced.
+   *
+   * The cache is instance-scoped (not module-level) so it never leaks state
+   * between independent ConsoleService instances (e.g. in tests). Entries
+   * accumulate over the lifetime of the instance and are only replaced when
+   * the session's mtime changes -- there is no size-based eviction.
+   *
+   * Only summaries with terminal statuses (`complete`, `complete_with_gaps`,
+   * `blocked`, `dormant`) are cached. `in_progress` summaries are intentionally
+   * excluded: a dormant session writes no new events so its mtime never
+   * advances, meaning an `in_progress` entry would never be invalidated and
+   * would never transition to `dormant`. Null results (load errors, corrupt
+   * sessions) are also excluded and retried on the next request.
+   */
+  private readonly _summaryCache = new Map<string, { readonly mtime: number; readonly summary: ConsoleSessionSummary }>();
+
   /** Returns the absolute path to the sessions directory -- used by the SSE watcher. */
   getSessionsDir(): string {
     return this.ports.dataDir.sessionsDir();
@@ -216,20 +237,48 @@ export class ConsoleService {
     lastModifiedMs: number,
     nowMs: number,
   ): ResultAsync<ConsoleSessionSummary | null, never> {
+    // Cache hit: return the stored summary without any disk I/O or re-projection.
+    // The mtime check is the invalidation signal: if the session's event log was
+    // appended to, its directory mtime advances and we fall through to a fresh load.
+    const cached = this._summaryCache.get(sessionId);
+    if (cached !== undefined && cached.mtime === lastModifiedMs) {
+      return okAsync(cached.summary);
+    }
+
     return this.ports.sessionStore
       .load(sessionId)
       .andThen((truth) => {
+        // Compute the DAG once here and thread it through both resolveRunCompletion
+        // and projectSessionSummary to avoid redundant re-projection.
         const dagRes = projectRunDagV2(truth.events);
         const workflowNamesRA = dagRes.isOk()
           ? resolveWorkflowNames(dagRes.value, this.ports.pinnedWorkflowStore)
           : okAsync({} as WorkflowNameMap);
 
+        const completionRA = dagRes.isOk()
+          ? resolveRunCompletionFromDag(dagRes.value, this.ports.snapshotStore)
+          : okAsync({} as RunCompletionMap);
+
         return RA.combine([
-          resolveRunCompletion(truth.events, this.ports.snapshotStore),
+          completionRA,
           workflowNamesRA,
-        ] as const).map(([completionMap, workflowNames]) =>
-          projectSessionSummary(sessionId, truth, completionMap, workflowNames, lastModifiedMs, nowMs)
-        );
+        ] as const).map(([completionMap, workflowNames]) => {
+          const dag = dagRes.isOk() ? dagRes.value : undefined;
+          return projectSessionSummary(sessionId, truth, completionMap, workflowNames, lastModifiedMs, nowMs, dag);
+        });
+      })
+      .map((summary) => {
+        // Only cache summaries with terminal statuses. `in_progress` is excluded
+        // because a session that should become `dormant` writes no new events,
+        // so its mtime never changes -- a cached `in_progress` would never
+        // transition to `dormant`. Terminal statuses (`complete`,
+        // `complete_with_gaps`, `blocked`, `dormant`) are stable and safe to
+        // cache by mtime. Null results (load errors, corrupt DAG) are also
+        // excluded so they are retried on the next request.
+        if (summary !== null && summary.status !== 'in_progress') {
+          this._summaryCache.set(sessionId, { mtime: lastModifiedMs, summary });
+        }
+        return summary;
       })
       .orElse(() => okAsync(null));
   }
@@ -574,6 +623,7 @@ function projectSessionSummary(
   workflowNames: WorkflowNameMap,
   lastModifiedMs: number,
   nowMs: number,
+  precomputedDag?: RunDagProjectionV2,
 ): ConsoleSessionSummary | null {
   const { events } = truth;
   const health = projectSessionHealthV2(truth);
@@ -582,9 +632,16 @@ function projectSessionSummary(
   const sessionHealth: ConsoleSessionHealth =
     health.value.kind === 'healthy' ? 'healthy' : 'corrupt';
 
-  const dagRes = projectRunDagV2(events);
-  if (dagRes.isErr()) return null;
-  const dag = dagRes.value;
+  // Use a pre-computed DAG when available (threaded from loadSessionSummary) to
+  // avoid a redundant projectRunDagV2 call on the same event array.
+  let dag: RunDagProjectionV2 | null;
+  if (precomputedDag !== undefined) {
+    dag = precomputedDag;
+  } else {
+    const res = projectRunDagV2(events);
+    dag = res.isOk() ? res.value : null;
+  }
+  if (dag === null) return null;
 
   const statusRes = projectRunStatusSignalsV2(events);
   const gapsRes = projectGapsV2(events);
