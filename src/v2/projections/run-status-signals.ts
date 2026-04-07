@@ -1,6 +1,6 @@
 import type { Result } from 'neverthrow';
 import { err, ok } from 'neverthrow';
-import type { DomainEventV1 } from '../durable-core/schemas/session/index.js';
+import type { SortedEventLog } from '../durable-core/sorted-event-log.js';
 import { AUTONOMY_MODE, EVENT_KIND } from '../durable-core/constants.js';
 import type { AutonomyV2, RiskPolicyV2 } from '../durable-core/schemas/session/preferences.js';
 import { projectRunDagV2 } from './run-dag.js';
@@ -31,7 +31,7 @@ export interface RunStatusSignalsProjectionV2 {
  * - Completion is not modeled yet (requires execution snapshots in Slice 3), so we only emit
  *   "blocked vs not blocked" plus gap signals.
  */
-export function projectRunStatusSignalsV2(events: readonly DomainEventV1[]): Result<RunStatusSignalsProjectionV2, ProjectionError> {
+export function projectRunStatusSignalsV2(events: SortedEventLog): Result<RunStatusSignalsProjectionV2, ProjectionError> {
   const dagRes = projectRunDagV2(events);
   if (dagRes.isErr()) return err(dagRes.error);
   const dag = dagRes.value;

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { projectRunDagV2 } from '../../../src/v2/projections/run-dag.js';
 import { projectRunStatusSignalsV2 } from '../../../src/v2/projections/run-status-signals.js';
+import { asSortedEventLog } from '../../../src/v2/durable-core/sorted-event-log.js';
 import type { DomainEventV1 } from '../../../src/v2/durable-core/schemas/session/index.js';
 
 describe('Projections with blocked nodes', () => {
@@ -98,7 +99,9 @@ describe('Projections with blocked nodes', () => {
       } as any,
     ];
 
-    const statusRes = projectRunStatusSignalsV2(events);
+    const sortedRes = asSortedEventLog(events);
+    expect(sortedRes.isOk()).toBe(true);
+    const statusRes = projectRunStatusSignalsV2(sortedRes._unsafeUnwrap());
     expect(statusRes.isOk()).toBe(true);
     if (!statusRes.isOk()) return;
 

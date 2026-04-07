@@ -3,6 +3,7 @@ import {
   projectAssessmentConsequencesV2,
   getLatestAssessmentConsequenceForNode,
 } from '../../../src/v2/projections/assessment-consequences.js';
+import { asSortedEventLog } from '../../../src/v2/durable-core/sorted-event-log.js';
 import type { DomainEventV1 } from '../../../src/v2/durable-core/schemas/session/index.js';
 
 function createAssessmentConsequenceAppliedEvent(args: {
@@ -39,7 +40,7 @@ function createAssessmentConsequenceAppliedEvent(args: {
 
 describe('projectAssessmentConsequencesV2', () => {
   it('projects applied assessment consequences by node', () => {
-    const result = projectAssessmentConsequencesV2([
+    const sortedRes = asSortedEventLog([
       createAssessmentConsequenceAppliedEvent({
         eventIndex: 0,
         nodeId: 'node_1',
@@ -53,6 +54,9 @@ describe('projectAssessmentConsequencesV2', () => {
       }),
     ]);
 
+    expect(sortedRes.isOk()).toBe(true);
+    const result = projectAssessmentConsequencesV2(sortedRes._unsafeUnwrap());
+
     expect(result.isOk()).toBe(true);
     if (result.isOk()) {
       expect(result.value.byNodeId['node_1']).toHaveLength(1);
@@ -61,7 +65,7 @@ describe('projectAssessmentConsequencesV2', () => {
   });
 
   it('returns latest applied consequence for a node', () => {
-    const result = projectAssessmentConsequencesV2([
+    const sortedRes = asSortedEventLog([
       createAssessmentConsequenceAppliedEvent({
         eventIndex: 0,
         nodeId: 'node_1',
@@ -77,6 +81,9 @@ describe('projectAssessmentConsequencesV2', () => {
       }),
     ]);
 
+    expect(sortedRes.isOk()).toBe(true);
+    const result = projectAssessmentConsequencesV2(sortedRes._unsafeUnwrap());
+
     expect(result.isOk()).toBe(true);
     if (result.isOk()) {
       const latest = getLatestAssessmentConsequenceForNode(result.value, 'node_1');
@@ -86,8 +93,8 @@ describe('projectAssessmentConsequencesV2', () => {
     }
   });
 
-  it('fails on unsorted events', () => {
-    const result = projectAssessmentConsequencesV2([
+  it('rejects unsorted events at the boundary (asSortedEventLog)', () => {
+    const sortedRes = asSortedEventLog([
       createAssessmentConsequenceAppliedEvent({
         eventIndex: 2,
         nodeId: 'node_1',
@@ -100,9 +107,9 @@ describe('projectAssessmentConsequencesV2', () => {
       }),
     ]);
 
-    expect(result.isErr()).toBe(true);
-    if (result.isErr()) {
-      expect(result.error.code).toBe('PROJECTION_INVARIANT_VIOLATION');
+    expect(sortedRes.isErr()).toBe(true);
+    if (sortedRes.isErr()) {
+      expect(sortedRes.error.code).toBe('PROJECTION_INVARIANT_VIOLATION');
     }
   });
 });

@@ -1,6 +1,7 @@
 import type { Result } from 'neverthrow';
 import { err, ok } from 'neverthrow';
 import type { DomainEventV1 } from '../durable-core/schemas/session/index.js';
+import type { SortedEventLog } from '../durable-core/sorted-event-log.js';
 import { EVENT_KIND } from '../durable-core/constants.js';
 import type { JsonObject } from '../durable-core/canonical/json-types.js';
 import type { RunId } from '../durable-core/ids/index.js';
@@ -29,14 +30,8 @@ export interface RunContextProjectionV2 {
  * - Run-scoped (not node-scoped)
  * - Context is a snapshot (not incremental deltas)
  */
-export function projectRunContextV2(events: readonly DomainEventV1[]): Result<RunContextProjectionV2, ProjectionError> {
-  // Enforce sorted events
-  for (let i = 1; i < events.length; i++) {
-    if (events[i]!.eventIndex < events[i - 1]!.eventIndex) {
-      return err({ code: 'PROJECTION_INVARIANT_VIOLATION', message: 'Events must be sorted by eventIndex ascending' });
-    }
-  }
-
+export function projectRunContextV2(events: SortedEventLog): Result<RunContextProjectionV2, ProjectionError> {
+  // Sort order is guaranteed by the SortedEventLog brand (validated once at boundary via asSortedEventLog).
   const byRunId: Record<string, RunContextV2> = {};
 
   for (const e of events) {

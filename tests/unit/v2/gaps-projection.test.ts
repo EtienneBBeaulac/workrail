@@ -3,7 +3,15 @@
  */
 import { describe, it, expect } from 'vitest';
 import { projectGapsV2 } from '../../../src/v2/projections/gaps.js';
+import { asSortedEventLog } from '../../../src/v2/durable-core/sorted-event-log.js';
 import type { DomainEventV1 } from '../../../src/v2/durable-core/schemas/session/index.js';
+
+/** Convenience: assert sort then project; throws on sort failure (test setup error). */
+function projectGapsSorted(events: readonly DomainEventV1[]) {
+  const sorted = asSortedEventLog(events);
+  expect(sorted.isOk()).toBe(true);
+  return projectGapsV2(sorted._unsafeUnwrap());
+}
 
 describe('v2 gaps projection', () => {
   it('treats gaps as unresolved unless resolved by a later linkage record', () => {
@@ -42,7 +50,7 @@ describe('v2 gaps projection', () => {
       },
     ];
 
-    const res = projectGapsV2(events);
+    const res = projectGapsSorted(events);
     expect(res.isOk()).toBe(true);
     const projected = res._unsafeUnwrap();
     expect(projected.resolvedGapIds.has('gap_1')).toBe(true);
@@ -50,7 +58,9 @@ describe('v2 gaps projection', () => {
   });
 
   it('handles empty events array', () => {
-    const res = projectGapsV2([]);
+    const sorted = asSortedEventLog([]);
+    expect(sorted.isOk()).toBe(true);
+    const res = projectGapsV2(sorted._unsafeUnwrap());
     expect(res.isOk()).toBe(true);
     const projected = res._unsafeUnwrap();
     expect(Object.keys(projected.byGapId)).toEqual([]);
@@ -126,14 +136,14 @@ describe('v2 gaps projection', () => {
       },
     ];
 
-    const res = projectGapsV2(events);
+    const res = projectGapsSorted(events);
     expect(res.isOk()).toBe(true);
     const projected = res._unsafeUnwrap();
-    
+
     expect(projected.resolvedGapIds.has('gap_1')).toBe(true);
     expect(projected.resolvedGapIds.has('gap_2')).toBe(true);
     expect(projected.resolvedGapIds.size).toBe(2);
-    
+
     expect(Object.keys(projected.byGapId).sort()).toEqual(['gap_1', 'gap_2', 'gap_3', 'gap_4']);
     expect(projected.unresolvedCriticalByRunId['run_1'] ?? []).toEqual([]);
   });
@@ -190,14 +200,14 @@ describe('v2 gaps projection', () => {
       },
     ];
 
-    const res = projectGapsV2(events);
+    const res = projectGapsSorted(events);
     expect(res.isOk()).toBe(true);
     const projected = res._unsafeUnwrap();
-    
+
     const run1Critical = projected.unresolvedCriticalByRunId['run_1'] ?? [];
     expect(run1Critical.length).toBe(1);
     expect(run1Critical[0]!.gapId).toBe('gap_1');
-    
+
     const run2Critical = projected.unresolvedCriticalByRunId['run_2'] ?? [];
     expect(run2Critical.length).toBe(1);
     expect(run2Critical[0]!.gapId).toBe('gap_3');
@@ -255,13 +265,13 @@ describe('v2 gaps projection', () => {
       },
     ];
 
-    const res = projectGapsV2(events);
+    const res = projectGapsSorted(events);
     expect(res.isOk()).toBe(true);
     const projected = res._unsafeUnwrap();
-    
+
     const criticalGaps = projected.unresolvedCriticalByRunId['run_1'] ?? [];
     expect(criticalGaps.length).toBe(3);
-    
+
     expect(criticalGaps[0]!.gapId).toBe('gap_b');
     expect(criticalGaps[1]!.gapId).toBe('gap_a');
     expect(criticalGaps[2]!.gapId).toBe('gap_z');
@@ -287,15 +297,17 @@ describe('v2 gaps projection', () => {
       },
     ];
 
-    const res = projectGapsV2(events);
+    const res = projectGapsSorted(events);
     expect(res.isOk()).toBe(true);
     const projected = res._unsafeUnwrap();
-    
+
     expect(projected.resolvedGapIds.has('gap_does_not_exist')).toBe(true);
     expect(Object.keys(projected.byGapId)).toEqual(['gap_resolution']);
   });
 
-  it('rejects out-of-order events', () => {
+  it('sort validation: asSortedEventLog rejects out-of-order events (boundary test)', () => {
+    // Sort order validation is now enforced at the boundary (asSortedEventLog),
+    // not inside the projection itself.
     const events: DomainEventV1[] = [
       {
         v: 1,
@@ -331,7 +343,7 @@ describe('v2 gaps projection', () => {
       },
     ];
 
-    const res = projectGapsV2(events);
+    const res = asSortedEventLog(events);
     expect(res.isErr()).toBe(true);
     expect(res._unsafeUnwrapErr().code).toBe('PROJECTION_INVARIANT_VIOLATION');
     expect(res._unsafeUnwrapErr().message).toContain('sorted by eventIndex');

@@ -1,6 +1,7 @@
 import type { Result } from 'neverthrow';
-import { err, ok } from 'neverthrow';
+import { ok } from 'neverthrow';
 import type { DomainEventV1 } from '../durable-core/schemas/session/index.js';
+import type { SortedEventLog } from '../durable-core/sorted-event-log.js';
 import { EVENT_KIND } from '../durable-core/constants.js';
 import type { ProjectionError } from './projection-error.js';
 
@@ -30,13 +31,8 @@ export interface GapsProjectionV2 {
  * - gaps are immutable; resolution is linkage (resolvesGapId)
  * - "resolved" is derived by later linkage (projection)
  */
-export function projectGapsV2(events: readonly DomainEventV1[]): Result<GapsProjectionV2, ProjectionError> {
-  for (let i = 1; i < events.length; i++) {
-    if (events[i]!.eventIndex < events[i - 1]!.eventIndex) {
-      return err({ code: 'PROJECTION_INVARIANT_VIOLATION', message: 'Events must be sorted by eventIndex ascending' });
-    }
-  }
-
+export function projectGapsV2(events: SortedEventLog): Result<GapsProjectionV2, ProjectionError> {
+  // Sort order is guaranteed by the SortedEventLog brand (validated once at boundary via asSortedEventLog).
   const byGapId: Record<string, GapV2> = {};
   const resolved = new Set<string>();
 

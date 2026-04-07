@@ -17,6 +17,7 @@ import { EVENT_KIND, OUTPUT_CHANNEL, PAYLOAD_KIND } from '../constants.js';
 import { extractValidationRequirements } from './validation-requirements-extractor.js';
 import { LOOP_CONTROL_CONTRACT_REF } from '../schemas/artifacts/index.js';
 import { projectRunContextV2 } from '../../projections/run-context.js';
+import { asSortedEventLog } from '../sorted-event-log.js';
 import { evaluateCondition } from '../../../utils/condition-evaluator.js';
 import { resolveContextTemplates } from './context-template-resolver.js';
 import type { LoopStepDefinition } from '../../../types/workflow-definition.js';
@@ -432,7 +433,9 @@ export function renderPendingPrompt(args: {
   // Context template resolution: substitute {{varName}} / {{varName.path}} tokens in the
   // authored step prompt and title using live session context merged with loop-derived vars.
   // This runs before banner/requirements injection so only the authored text is substituted.
-  const sessionContext: Record<string, unknown> = projectRunContextV2(args.truth.events).match(
+  const sessionContext: Record<string, unknown> = asSortedEventLog(args.truth.events).andThen(
+    (sorted) => projectRunContextV2(sorted)
+  ).match(
     (ok) => (ok.byRunId[String(args.runId)]?.context ?? {}) as Record<string, unknown>,
     (e) => {
       console.warn(

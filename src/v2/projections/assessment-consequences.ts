@@ -1,7 +1,8 @@
 import type { Result } from 'neverthrow';
-import { err, ok } from 'neverthrow';
+import { ok } from 'neverthrow';
 import type { DomainEventV1 } from '../durable-core/schemas/session/index.js';
 import { EVENT_KIND } from '../durable-core/constants.js';
+import type { SortedEventLog } from '../durable-core/sorted-event-log.js';
 import type { ProjectionError } from './projection-error.js';
 
 type AssessmentConsequenceAppliedEventV1 = Extract<DomainEventV1, { kind: 'assessment_consequence_applied' }>;
@@ -19,13 +20,8 @@ export interface AssessmentConsequencesProjectionV2 {
 }
 
 export function projectAssessmentConsequencesV2(
-  events: readonly DomainEventV1[],
+  events: SortedEventLog,
 ): Result<AssessmentConsequencesProjectionV2, ProjectionError> {
-  for (let i = 1; i < events.length; i++) {
-    if (events[i]!.eventIndex < events[i - 1]!.eventIndex) {
-      return err({ code: 'PROJECTION_INVARIANT_VIOLATION', message: 'Events must be sorted by eventIndex ascending' });
-    }
-  }
 
   const byNodeId: Record<string, AppliedAssessmentConsequenceViewV2[]> = {};
 

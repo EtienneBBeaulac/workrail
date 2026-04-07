@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { projectRunContextV2 } from '../../../src/v2/projections/run-context.js';
+import { asSortedEventLog } from '../../../src/v2/durable-core/sorted-event-log.js';
 import type { DomainEventV1 } from '../../../src/v2/durable-core/schemas/session/index.js';
 
 describe('projectRunContextV2', () => {
@@ -16,7 +17,9 @@ describe('projectRunContextV2', () => {
       } as DomainEventV1,
     ];
 
-    const result = projectRunContextV2(events);
+    const sorted = asSortedEventLog(events);
+    expect(sorted.isOk()).toBe(true);
+    const result = projectRunContextV2(sorted._unsafeUnwrap());
     expect(result.isOk()).toBe(true);
     if (result.isOk()) {
       expect(result.value.byRunId).toEqual({});
@@ -55,7 +58,9 @@ describe('projectRunContextV2', () => {
       } as DomainEventV1,
     ];
 
-    const result = projectRunContextV2(events);
+    const sorted = asSortedEventLog(events);
+    expect(sorted.isOk()).toBe(true);
+    const result = projectRunContextV2(sorted._unsafeUnwrap());
     expect(result.isOk()).toBe(true);
     if (result.isOk()) {
       expect(result.value.byRunId['run_1']).toEqual({
@@ -100,7 +105,9 @@ describe('projectRunContextV2', () => {
       } as DomainEventV1,
     ];
 
-    const result = projectRunContextV2(events);
+    const sorted = asSortedEventLog(events);
+    expect(sorted.isOk()).toBe(true);
+    const result = projectRunContextV2(sorted._unsafeUnwrap());
     expect(result.isOk()).toBe(true);
     if (result.isOk()) {
       expect(result.value.byRunId['run_1']?.context).toEqual({ a: 1 });
@@ -108,7 +115,9 @@ describe('projectRunContextV2', () => {
     }
   });
 
-  it('rejects unsorted events', () => {
+  it('sort validation: asSortedEventLog rejects unsorted events (boundary test)', () => {
+    // Sort order validation is now enforced at the boundary (asSortedEventLog),
+    // not inside the projection itself.
     const events: DomainEventV1[] = [
       {
         v: 1,
@@ -131,7 +140,7 @@ describe('projectRunContextV2', () => {
       } as DomainEventV1,
     ];
 
-    const result = projectRunContextV2(events);
+    const result = asSortedEventLog(events);
     expect(result.isErr()).toBe(true);
     if (result.isErr()) {
       expect(result.error.code).toBe('PROJECTION_INVARIANT_VIOLATION');
@@ -157,7 +166,9 @@ describe('projectRunContextV2', () => {
       } as DomainEventV1,
     ];
 
-    const result = projectRunContextV2(events);
+    const sorted = asSortedEventLog(events);
+    expect(sorted.isOk()).toBe(true);
+    const result = projectRunContextV2(sorted._unsafeUnwrap());
     expect(result.isErr()).toBe(true);
     if (result.isErr()) {
       expect(result.error.code).toBe('PROJECTION_CORRUPTION_DETECTED');
@@ -183,7 +194,9 @@ describe('projectRunContextV2', () => {
       } as DomainEventV1,
     ];
 
-    const result = projectRunContextV2(events);
+    const sorted = asSortedEventLog(events);
+    expect(sorted.isOk()).toBe(true);
+    const result = projectRunContextV2(sorted._unsafeUnwrap());
     expect(result.isErr()).toBe(true);
     if (result.isErr()) {
       expect(result.error.code).toBe('PROJECTION_CORRUPTION_DETECTED');

@@ -3,7 +3,15 @@
  */
 import { describe, it, expect } from 'vitest';
 import { projectRunStatusSignalsV2 } from '../../../src/v2/projections/run-status-signals.js';
+import { asSortedEventLog } from '../../../src/v2/durable-core/sorted-event-log.js';
 import type { DomainEventV1 } from '../../../src/v2/durable-core/schemas/session/index.js';
+
+/** Convenience: assert sort then project; throws on sort failure (test setup error). */
+function projectStatusSorted(events: readonly DomainEventV1[]) {
+  const sorted = asSortedEventLog(events);
+  expect(sorted.isOk()).toBe(true);
+  return projectRunStatusSignalsV2(sorted._unsafeUnwrap());
+}
 
 describe('v2 run status signals projection', () => {
   it('marks blocked in guided mode when there is an unresolved critical gap', () => {
@@ -56,7 +64,7 @@ describe('v2 run status signals projection', () => {
       },
     ];
 
-    const res = projectRunStatusSignalsV2(events);
+    const res = projectStatusSorted(events);
     expect(res.isOk()).toBe(true);
     const projected = res._unsafeUnwrap().byRunId['run_1']!;
     expect(projected.isBlocked).toBe(true);
@@ -128,7 +136,7 @@ describe('v2 run status signals projection', () => {
       },
     ];
 
-    const res = projectRunStatusSignalsV2(events);
+    const res = projectStatusSorted(events);
     expect(res.isOk()).toBe(true);
     const projected = res._unsafeUnwrap().byRunId['run_1']!;
     expect(projected.isBlocked).toBe(false);
@@ -189,7 +197,7 @@ describe('v2 run status signals projection', () => {
           },
         },
       ];
-      const resConservative = projectRunStatusSignalsV2(conservativeEvents);
+      const resConservative = projectStatusSorted(conservativeEvents);
       expect(resConservative.isOk()).toBe(true);
       expect(resConservative._unsafeUnwrap().byRunId['run_1']?.effectivePreferencesAtTip.riskPolicy).toBe('conservative');
 
@@ -212,7 +220,7 @@ describe('v2 run status signals projection', () => {
           },
         },
       ];
-      const resBalanced = projectRunStatusSignalsV2(balancedEvents);
+      const resBalanced = projectStatusSorted(balancedEvents);
       expect(resBalanced.isOk()).toBe(true);
       expect(resBalanced._unsafeUnwrap().byRunId['run_1']?.effectivePreferencesAtTip.riskPolicy).toBe('balanced');
 
@@ -235,7 +243,7 @@ describe('v2 run status signals projection', () => {
           },
         },
       ];
-      const resAggressive = projectRunStatusSignalsV2(aggressiveEvents);
+      const resAggressive = projectStatusSorted(aggressiveEvents);
       expect(resAggressive.isOk()).toBe(true);
       expect(resAggressive._unsafeUnwrap().byRunId['run_1']?.effectivePreferencesAtTip.riskPolicy).toBe('aggressive');
     });
@@ -308,7 +316,7 @@ describe('v2 run status signals projection', () => {
         },
       ];
 
-      const res = projectRunStatusSignalsV2(events);
+      const res = projectStatusSorted(events);
       expect(res.isOk()).toBe(true);
       const projected = res._unsafeUnwrap().byRunId['run_1']!;
 
@@ -387,7 +395,7 @@ describe('v2 run status signals projection', () => {
         },
       ];
 
-      const res = projectRunStatusSignalsV2(events);
+      const res = projectStatusSorted(events);
       expect(res.isOk()).toBe(true);
       const projected = res._unsafeUnwrap().byRunId['run_1']!;
 
