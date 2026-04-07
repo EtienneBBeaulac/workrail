@@ -1,21 +1,22 @@
 import type { ConsoleSessionStatus } from '../api/types';
 
-const STATUS_CONFIG: Record<ConsoleSessionStatus, { label: string; color: string }> = {
-  in_progress: { label: 'In Progress', color: 'var(--accent)' },
-  dormant: { label: 'Dormant', color: 'var(--text-secondary)' },
-  complete: { label: 'Complete', color: 'var(--success)' },
-  complete_with_gaps: { label: 'Gaps', color: 'var(--warning)' },
-  blocked: { label: 'Blocked', color: 'var(--blocked)' },
+// Label text is uppercased; color is derived from status semantics.
+const STATUS_CONFIG: Record<ConsoleSessionStatus, { label: string; colorClass: string; colorStyle?: string }> = {
+  in_progress: { label: 'IN PROGRESS', colorClass: 'badge-live' },
+  dormant:     { label: 'DORMANT',     colorClass: '', colorStyle: 'var(--text-muted)' },
+  complete:    { label: 'COMPLETE',    colorClass: '', colorStyle: 'var(--success)' },
+  complete_with_gaps: { label: 'GAPS', colorClass: '', colorStyle: 'var(--warning)' },
+  blocked:     { label: 'BLOCKED',     colorClass: '', colorStyle: 'var(--blocked)' },
 };
 
 export function StatusBadge({ status }: { status: ConsoleSessionStatus }) {
   const config = STATUS_CONFIG[status];
   return (
     <span
-      className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
-      style={{ backgroundColor: `color-mix(in srgb, ${config.color} 12%, transparent)`, color: config.color }}
+      className={`font-mono text-[10px] font-bold uppercase tracking-[0.20em]${config.colorClass ? ` ${config.colorClass}` : ''}`}
+      style={config.colorStyle ? { color: config.colorStyle } : undefined}
     >
-      {config.label}
+      [ {config.label} ]
     </span>
   );
 }

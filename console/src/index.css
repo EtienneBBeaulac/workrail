@@ -24,6 +24,22 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
+/* Scanlines overlay -- 2% opacity, 4px pitch. Subtle texture without impeding reading. */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.02) 0px,
+    rgba(0, 0, 0, 0.02) 1px,
+    transparent 1px,
+    transparent 4px
+  );
+}
+
 .workrail-minimap-node {
   opacity: 1;
 }
@@ -251,4 +267,31 @@ body {
 .markdown-view img {
   max-width: 100%;
   border-radius: 4px;
+}
+
+/* ---------- Corner bracket frames ---------- */
+/* Renders 4 L-shaped corner accents using background-image gradients.
+   No pseudo-element used, so child content is not constrained. */
+.corner-brackets {
+  position: relative;
+  background-image:
+    linear-gradient(var(--accent), var(--accent)),
+    linear-gradient(var(--accent), var(--accent)),
+    linear-gradient(var(--accent), var(--accent)),
+    linear-gradient(var(--accent), var(--accent)),
+    linear-gradient(var(--accent), var(--accent)),
+    linear-gradient(var(--accent), var(--accent)),
+    linear-gradient(var(--accent), var(--accent)),
+    linear-gradient(var(--accent), var(--accent));
+  background-repeat: no-repeat;
+  background-size:
+    1px 12px, 12px 1px,
+    1px 12px, 12px 1px,
+    1px 12px, 12px 1px,
+    1px 12px, 12px 1px;
+  background-position:
+    top 0 left 0, top 0 left 0,
+    top 0 right 0, top 0 right 0,
+    bottom 0 left 0, bottom 0 left 0,
+    bottom 0 right 0, bottom 0 right 0;
 }

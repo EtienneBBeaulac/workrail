@@ -351,7 +351,7 @@ function NodeLabel({
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-3 py-3">
         <div className="flex items-start justify-between gap-2">
           <span
-            className="font-mono text-[10px] uppercase tracking-[0.18em]"
+            className="font-mono text-[10px] uppercase tracking-[0.30em]"
             style={{ color: getBranchLabelColor(branchKind, isActiveLineage) }}
           >
             {formatBranchLabel(node.nodeKind, branchKind, branchIndex)}
@@ -359,7 +359,7 @@ function NodeLabel({
           <div className="flex shrink-0 items-center gap-1">
             {isSelected && (
               <span
-                className="font-mono text-[10px] uppercase tracking-[0.18em]"
+                className="font-mono text-[10px] uppercase tracking-[0.30em]"
                 style={{ color: 'var(--warning)' }}
               >
                 Selected
@@ -367,7 +367,7 @@ function NodeLabel({
             )}
             {isCurrent && (
               <span
-                className="font-mono text-[10px] uppercase tracking-[0.18em]"
+                className="font-mono text-[10px] uppercase tracking-[0.30em]"
                 style={{ color: isLiveRun ? 'var(--accent-strong)' : 'var(--text-secondary)' }}
               >
                 Current
@@ -398,13 +398,13 @@ function NodeLabel({
         </span>
         {node.isTip ? (
           <span
-            className="shrink-0 font-mono text-[10px] uppercase tracking-[0.18em]"
+            className="shrink-0 font-mono text-[10px] uppercase tracking-[0.30em]"
             style={{ color: node.isPreferredTip ? 'var(--warning)' : 'var(--text-muted)' }}
           >
             {node.isPreferredTip ? 'Preferred tip' : 'Tip'}
           </span>
         ) : (
-          <span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.18em] text-transparent">
+          <span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.30em] text-transparent">
             spacer
           </span>
         )}
@@ -426,9 +426,9 @@ function OverviewRail({
   const sideNodes = model.nodes.filter((node) => !node.isActiveLineage).slice(-8);
 
   return (
-    <div className="mt-3 border border-[var(--border)] bg-[rgba(10,10,10,0.38)] px-3 py-2">
+    <div className="mt-3 border border-[var(--border)] bg-[rgba(10,10,10,0.38)] px-3 py-2 corner-brackets">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+        <span className="font-mono text-[10px] uppercase tracking-[0.30em] text-[var(--text-muted)]">
           Lineage rail
         </span>
         {activeNodes.map((node) => (
@@ -478,7 +478,7 @@ function SummaryChip({
         background: emphasis ? 'rgba(0, 240, 255, 0.08)' : 'rgba(15, 19, 31, 0.78)',
       }}
     >
-      <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+      <div className="font-mono text-[10px] uppercase tracking-[0.30em] text-[var(--text-muted)]">
         {label}
       </div>
       <div className="mt-1 text-sm text-[var(--text-primary)]">{value}</div>
@@ -497,7 +497,7 @@ function JumpButton({
     <button
       type="button"
       onClick={onClick}
-      className="border border-[var(--border)] bg-[var(--bg-primary)] px-3 py-2 font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent-strong)] hover:text-[var(--text-primary)]"
+      className="border border-[var(--border)] bg-[var(--bg-primary)] px-3 py-2 font-mono text-[11px] uppercase tracking-[0.30em] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent-strong)] hover:text-[var(--text-primary)]"
     >
       {children}
     </button>
