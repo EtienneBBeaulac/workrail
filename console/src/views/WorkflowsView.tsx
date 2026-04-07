@@ -122,14 +122,14 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow }: Pr
           )}
         </div>
       ) : selectedTag !== null ? (
-        // Single selected tag: one section header + flat list
+        // Single selected tag: one section header + card grid
         <div className="space-y-2">
           <SectionHeader
             label={TAG_DISPLAY[selectedTag] ?? selectedTag}
             count={visibleWorkflows.length}
             showRule={true}
           />
-          <div className="space-y-2">
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
             {visibleWorkflows.map((workflow) => (
               <WorkflowCard
                 key={workflow.id}
@@ -145,7 +145,7 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow }: Pr
           {groupWorkflowsByTag(visibleWorkflows).map((group) => (
             <div key={group.tagId ?? '__other__'} className="space-y-2">
               <SectionHeader label={group.label} count={group.workflows.length} showRule />
-              <div className="space-y-2">
+              <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
                 {group.workflows.map((workflow) => (
                   <WorkflowCard
                     key={workflow.id}
@@ -252,32 +252,41 @@ function WorkflowCard({
       type="button"
       onClick={onSelect}
       aria-label={accessibleName}
-      className="w-full text-left flex items-stretch gap-0 bg-[var(--bg-card)] border border-[var(--border)] hover:border-[var(--accent)] transition-colors group focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:outline-none"
+      className="energy-card group flex flex-col bg-[var(--bg-card)] border border-[var(--border)] hover:border-[var(--accent)] transition-colors focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:outline-none min-h-[160px]"
     >
-      {/* Left accent stripe */}
-      <div className="w-[3px] shrink-0 self-stretch bg-[var(--accent)] opacity-60 group-hover:opacity-100 transition-opacity" />
+      {/* Top accent stripe (horizontal) */}
+      <div className="h-[3px] w-full bg-[var(--accent)] opacity-60 group-hover:opacity-100 transition-opacity shrink-0" />
 
-      <div className="flex-1 min-w-0 px-4 py-3">
+      <div className="flex flex-col flex-1 p-4 gap-2 min-w-0">
         {/* Name */}
-        <p className="text-sm font-medium text-[var(--text-primary)] group-hover:text-[var(--accent)] transition-colors leading-snug mb-1">
+        <p className="text-sm font-medium text-[var(--text-primary)] group-hover:text-[var(--accent)] transition-colors leading-snug line-clamp-2">
           {workflow.name}
         </p>
 
-        {/* Description -- 2 lines */}
-        <p className="text-xs text-[var(--text-secondary)] line-clamp-2 leading-relaxed mb-2">
+        {/* Description */}
+        <p className="text-xs text-[var(--text-secondary)] line-clamp-3 leading-relaxed flex-1">
           {workflow.description}
         </p>
 
-        {/* Badges row */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {displayTags.map((label) => (
-            <span key={label} className="font-mono text-[10px] px-1.5 py-0.5 bg-[var(--bg-secondary)] text-[var(--text-secondary)]">
-              {label}
+        {/* Footer: step count + source */}
+        <div className="flex items-center justify-between gap-2 mt-auto pt-2 border-t border-[var(--border)]">
+          <div className="flex flex-wrap gap-1.5">
+            {displayTags.slice(0, 1).map((label) => (
+              <span key={label} className="font-mono text-[9px] px-1.5 py-0.5 bg-[var(--bg-secondary)] text-[var(--text-muted)]">
+                {label}
+              </span>
+            ))}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {workflow.stepCount != null && workflow.stepCount > 0 && (
+              <span className="font-mono text-[9px] text-[var(--text-muted)]">
+                {workflow.stepCount}s
+              </span>
+            )}
+            <span className="font-mono text-[9px] text-[var(--text-muted)] max-w-[80px] truncate">
+              src: {workflow.source.displayName}
             </span>
-          ))}
-          <span className="font-mono text-[10px] px-1.5 py-0.5 border border-[var(--border)] text-[var(--text-secondary)] max-w-[160px] truncate">
-            src: {workflow.source.displayName}
-          </span>
+          </div>
         </div>
       </div>
     </button>
@@ -290,29 +299,29 @@ function WorkflowCard({
 
 function WorkflowListSkeleton() {
   return (
-    <div className="space-y-6" aria-busy="true" aria-label="Loading workflows">
-      {[0, 1, 2].map((section) => (
-        <div key={section} className="space-y-2">
-          {/* Section header skeleton */}
-          <div className="flex items-center gap-3 mb-3">
-            <div className="h-3 w-24 rounded bg-[var(--bg-tertiary)] motion-safe:animate-pulse" />
-            <div className="flex-1 h-px bg-[var(--bg-tertiary)] motion-safe:animate-pulse" />
+    <div className="space-y-6 motion-safe:animate-pulse">
+      {[0, 1].map((section) => (
+        <div key={section} className="space-y-3">
+          <div className="flex items-center gap-3">
+            <div className="h-3 w-24 bg-[var(--bg-tertiary)]" />
+            <div className="flex-1 h-px bg-[var(--bg-tertiary)]" />
           </div>
-          {/* Card skeletons */}
-          {[0, 1, 2, 3].map((card) => (
-            <div key={card} className="flex bg-[var(--bg-card)] border border-[var(--border)]">
-              <div className="w-[3px] bg-[var(--bg-tertiary)] motion-safe:animate-pulse" />
-              <div className="flex-1 px-4 py-3 space-y-2">
-                <div className="h-4 w-2/3 rounded bg-[var(--bg-tertiary)] motion-safe:animate-pulse" />
-                <div className="h-3 w-full rounded bg-[var(--bg-tertiary)] motion-safe:animate-pulse" />
-                <div className="h-3 w-4/5 rounded bg-[var(--bg-tertiary)] motion-safe:animate-pulse" />
-                <div className="flex gap-1.5">
-                  <div className="h-4 w-14 rounded bg-[var(--bg-tertiary)] motion-safe:animate-pulse" />
-                  <div className="h-4 w-16 rounded bg-[var(--bg-tertiary)] motion-safe:animate-pulse" />
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+            {[0, 1, 2, 3, 4, 5].map((card) => (
+              <div key={card} className="min-h-[160px] bg-[var(--bg-card)] border border-[var(--border)] flex flex-col">
+                <div className="h-[3px] bg-[var(--bg-tertiary)]" />
+                <div className="p-4 flex flex-col gap-2 flex-1">
+                  <div className="h-4 w-3/4 bg-[var(--bg-tertiary)]" />
+                  <div className="h-3 w-full bg-[var(--bg-tertiary)]" />
+                  <div className="h-3 w-5/6 bg-[var(--bg-tertiary)]" />
+                  <div className="mt-auto pt-2 border-t border-[var(--border)] flex justify-between">
+                    <div className="h-3 w-12 bg-[var(--bg-tertiary)]" />
+                    <div className="h-3 w-16 bg-[var(--bg-tertiary)]" />
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       ))}
     </div>
