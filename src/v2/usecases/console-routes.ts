@@ -11,6 +11,7 @@ import path from 'path';
 import fs from 'fs';
 import type { ConsoleService } from './console-service.js';
 import { getWorktreeList, buildActiveSessionCounts, resolveRepoRoot } from './worktree-service.js';
+import { toWorkflowSourceInfo } from '../../types/workflow.js';
 import type { WorkflowService } from '../../application/services/workflow-service.js';
 import type { ToolCallTimingRingBuffer } from '../../mcp/tool-call-timing.js';
 import { DEV_MODE } from '../../mcp/dev-mode.js';
@@ -295,7 +296,7 @@ export function mountConsoleRoutes(
               description: definition.description,
               version: definition.version,
               tags: tagEntry?.tags ?? [],
-              source,
+              source: toWorkflowSourceInfo(source),
               ...(definition.about !== undefined ? { about: definition.about } : {}),
               ...(definition.examples?.length ? { examples: [...definition.examples] } : {}),
             };
