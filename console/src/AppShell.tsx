@@ -78,6 +78,9 @@ export function AppShell() {
   // Tab bar keyboard (ARIA tablist: Left/Right arrows switch tabs)
   // ---------------------------------------------------------------------------
 
+  // A3: data-driven tab order -- add new tabs here, not in the handler
+  const TAB_ROUTES = ['/', '/workflows', '/perf'] as const;
+
   const tabBarRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -86,32 +89,21 @@ export function AppShell() {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
         e.preventDefault();
-        // Cycle: Workspace -> Workflows -> Performance -> Workspace
-        if (isOnPerfTab) {
-          if (e.key === 'ArrowRight') {
-            void navigate({ to: '/' });
-          } else {
-            void navigate({ to: '/workflows', search: { tag: undefined } });
-          }
-        } else if (isOnWorkflowsTab) {
-          if (e.key === 'ArrowRight') {
-            void navigate({ to: '/perf' });
-          } else {
-            void navigate({ to: '/' });
-          }
+        // Derive current tab index from booleans (matches the TabRoutes order above)
+        const currentIndex = isOnPerfTab ? 2 : isOnWorkflowsTab ? 1 : 0;
+        const delta = e.key === 'ArrowRight' ? 1 : -1;
+        const nextIndex = (currentIndex + delta + TAB_ROUTES.length) % TAB_ROUTES.length;
+        const nextRoute = TAB_ROUTES[nextIndex];
+        if (nextRoute === '/workflows') {
+          void navigate({ to: '/workflows', search: { tag: undefined } });
         } else {
-          // On Workspace tab
-          if (e.key === 'ArrowRight') {
-            void navigate({ to: '/workflows', search: { tag: undefined } });
-          } else {
-            void navigate({ to: '/perf' });
-          }
+          void navigate({ to: nextRoute });
         }
       }
     }
     el.addEventListener('keydown', handleKeyDown);
     return () => el.removeEventListener('keydown', handleKeyDown);
-  }, [isOnWorkflowsTab, isOnPerfTab, navigate]);
+  }, [isOnWorkflowsTab, isOnPerfTab, navigate, TAB_ROUTES]);
 
   // ---------------------------------------------------------------------------
   // Render
