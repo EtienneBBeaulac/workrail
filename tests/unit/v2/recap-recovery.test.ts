@@ -263,6 +263,31 @@ describe('recap-recovery', () => {
     }
   });
 
+  it('collectDownstreamRecap does not infinite loop when a cycle exists in parentNodeId', () => {
+    // Cycle guard for buildPathBackward: node_b.parentNodeId = node_a, node_a.parentNodeId = node_b
+    // collectDownstreamRecap walks backwards from toNodeId via parentNodeId, so this exercises
+    // the !visited.has(cur) guard inside buildPathBackward.
+    const dag = {
+      nodesById: {
+        node_a: { nodeId: 'node_a', parentNodeId: 'node_b', nodeKind: 'step' as const, workflowHash: 'sha256:abc', snapshotRef: 'sha256:1', createdAtEventIndex: 0 },
+        node_b: { nodeId: 'node_b', parentNodeId: 'node_a', nodeKind: 'step' as const, workflowHash: 'sha256:abc', snapshotRef: 'sha256:2', createdAtEventIndex: 1 },
+      },
+      edges: [],
+      preferredTipNodeId: 'node_b',
+      runId: 'run_1',
+      workflowId: null,
+      workflowHash: null,
+      tipNodeIds: ['node_b'],
+    };
+    const outputs = { nodesById: {} };
+    // Must terminate without stack overflow; result length is bounded by visited node count
+    const result = collectDownstreamRecap({ fromNodeId: 'node_a', toNodeId: 'node_b', dag, outputs });
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.length).toBeLessThanOrEqual(2);
+    }
+  });
+
   it('collectDownstreamRecap handles missing recap outputs gracefully', () => {
     const dag = {
       nodesById: {
