@@ -11,6 +11,9 @@
  * - Pinned workflow definitions are immutable -- same hash always means same definition.
  * - The cache is unbounded by design. In practice the number of distinct pinned workflow
  *   hashes per process is small (one per unique workflow version used in an active session).
+ *   This assumption breaks in multi-tenant or long-lived service deployments where many
+ *   distinct workflow versions accumulate over time -- add eviction before using this
+ *   module in such environments.
  * - clearWorkflowObjectCacheForTesting() is provided for test isolation only.
  */
 

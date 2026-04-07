@@ -139,4 +139,87 @@ describe('loadAndPinWorkflow -- pinnedStore.get call count', () => {
     expect(getCallCount).toBe(1);
     void result; // result shape is not under test here
   });
+
+  it('calls pinnedStore.get twice and put once on the cold path (no pre-existing pin)', async () => {
+    // Cold path: the first get() returns null, so the implementation must call put()
+    // to persist the new pin, then call get() a second time to retrieve it.
+
+    const { loadAndPinWorkflow } = await import(
+      '../../../src/mcp/handlers/v2-execution/start.js'
+    );
+    const { createTestValidationPipelineDeps } = await import(
+      '../../helpers/v2-test-helpers.js'
+    );
+    const { workflowHashForCompiledSnapshot } = await import(
+      '../../../src/v2/durable-core/canonical/hashing.js'
+    );
+    const { NodeSha256V2 } = await import(
+      '../../../src/v2/infra/local/sha256/index.js'
+    );
+
+    const sha256Port = new NodeSha256V2();
+    const validationPipelineDeps = createTestValidationPipelineDeps();
+
+    const fakeWorkflow = {
+      definition: {
+        id: 'perf-test-wf-cold',
+        name: 'Perf Test Cold',
+        description: 'Performance optimization cold-path test workflow',
+        version: '1.0.0',
+        steps: [
+          {
+            id: 'step-1',
+            title: 'Step 1',
+            prompt: 'Do the thing',
+          },
+        ],
+      },
+      source: { kind: 'bundled' as const },
+    };
+
+    const fakeWorkflowReader = {
+      getWorkflowById: vi.fn().mockResolvedValue(fakeWorkflow),
+    };
+
+    const pinnedSnapshot = {
+      v: 1 as const,
+      sourceKind: 'v1_pinned' as const,
+      workflowId: 'perf-test-wf-cold',
+      definition: fakeWorkflow.definition,
+      resolvedBindings: {},
+      pinnedOverrides: {},
+      compiledWorkflow: { v: 1, workflowId: 'perf-test-wf-cold', nodes: {}, edges: [], metadata: {} },
+      resolvedReferences: [],
+    };
+
+    let getCallCount = 0;
+    let putCallCount = 0;
+    const fakePinnedStore = {
+      get: vi.fn().mockImplementation((_hash: unknown) => {
+        getCallCount++;
+        // First call returns null (cold path); subsequent calls return the snapshot.
+        return okAsync(getCallCount === 1 ? null : pinnedSnapshot);
+      }),
+      put: vi.fn().mockImplementation(() => {
+        putCallCount++;
+        return okAsync(undefined);
+      }),
+    };
+
+    const result = await loadAndPinWorkflow({
+      workflowId: 'perf-test-wf-cold',
+      workflowReader: fakeWorkflowReader,
+      crypto: sha256Port,
+      pinnedStore: fakePinnedStore as never,
+      validationPipelineDeps,
+      workspacePath: '/tmp',
+      resolvedRootUris: [],
+    });
+
+    // On the cold path: get() called once to check (returns null), put() called once
+    // to persist, then get() called again to retrieve -- total 2 gets and 1 put.
+    expect(getCallCount).toBe(2);
+    expect(putCallCount).toBe(1);
+    void result;
+  });
 });
