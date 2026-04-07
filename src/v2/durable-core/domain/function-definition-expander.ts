@@ -1,7 +1,6 @@
 import type { Result } from 'neverthrow';
 import { err, ok } from 'neverthrow';
-import type { Workflow, FunctionDefinition, LoopStepDefinition, WorkflowStepDefinition } from '../../../types/workflow.js';
-import { isLoopStepDefinition } from '../../../types/workflow.js';
+import type { Workflow, FunctionDefinition, LoopStepDefinition } from '../../../types/workflow.js';
 import type { LoopPathFrameV1 } from '../schemas/execution-snapshot/index.js';
 
 export type FunctionExpansionError = {
@@ -10,25 +9,11 @@ export type FunctionExpansionError = {
 };
 
 /**
- * Find a loop step by loopId (recursive search, pure).
+ * Find a loop step by loopId.
+ * O(1) lookup via the pre-built loopById index (built at createWorkflow() time).
  */
 function findLoopById(workflow: Workflow, loopId: string): LoopStepDefinition | null {
-  function searchSteps(steps: readonly (WorkflowStepDefinition | LoopStepDefinition)[]): LoopStepDefinition | null {
-    for (const step of steps) {
-      if (!isLoopStepDefinition(step)) continue;
-
-      if (step.id === loopId) return step;
-
-      // Recursively search loop body
-      if (Array.isArray(step.body)) {
-        const found = searchSteps(step.body);
-        if (found) return found;
-      }
-    }
-    return null;
-  }
-
-  return searchSteps(workflow.definition.steps);
+  return workflow.loopById.get(loopId) ?? null;
 }
 
 /**

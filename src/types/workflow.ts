@@ -17,21 +17,49 @@ import { WorkflowSource, getSourceDisplayName } from './workflow-source';
 
 /**
  * A workflow as it exists in our runtime system.
- * 
+ *
  * IMPORTANT: This is different from WorkflowDefinition.
  * - WorkflowDefinition: What's in the JSON file (pure, serializable)
  * - Workflow: Runtime representation (includes source, potentially other metadata)
- * 
+ *
  * All code that operates on "workflows" should use this type.
  * Only use WorkflowDefinition when dealing with raw file I/O.
+ *
+ * The index Maps are built eagerly by createWorkflow() to enable O(1) lookups
+ * for hot-path operations (step lookup, parent loop resolution, loop lookup).
+ * Object.freeze is shallow, so the Map references are pointer-immutable; the
+ * ReadonlyMap type enforces content immutability at compile time.
  */
 export interface Workflow {
   /** The workflow definition (from JSON file) */
   readonly definition: WorkflowDefinition;
-  
+
   /** Where this workflow was loaded from */
   readonly source: WorkflowSource;
-  
+
+  // ==========================================================================
+  // PRE-BUILT INDICES (O(1) lookups -- built eagerly at createWorkflow() time)
+  // ==========================================================================
+
+  /**
+   * All steps (top-level and loop-body) indexed by step ID.
+   * Enables O(1) replacement of the linear scan in getStepById.
+   */
+  readonly stepById: ReadonlyMap<string, WorkflowStepDefinition | LoopStepDefinition>;
+
+  /**
+   * Maps each loop-body step ID to its parent LoopStepDefinition.
+   * Top-level steps are absent (not present in the map).
+   * Enables O(1) replacement of the double-nested scan in resolveParentLoopStep.
+   */
+  readonly parentLoopByStepId: ReadonlyMap<string, LoopStepDefinition>;
+
+  /**
+   * Maps loop step IDs to their LoopStepDefinition.
+   * Enables O(1) replacement of the recursive findLoopById scan.
+   */
+  readonly loopById: ReadonlyMap<string, LoopStepDefinition>;
+
   // ==========================================================================
   // FUTURE EXTENSIBILITY - add new runtime metadata fields here:
   // ==========================================================================
@@ -71,15 +99,62 @@ export interface WorkflowSourceInfo {
 // =============================================================================
 
 /**
+ * Build the three pre-built index Maps for a workflow definition.
+ * Called once at createWorkflow() time -- O(n) upfront, O(1) per lookup thereafter.
+ */
+function buildWorkflowIndices(definition: WorkflowDefinition): {
+  readonly stepById: ReadonlyMap<string, WorkflowStepDefinition | LoopStepDefinition>;
+  readonly parentLoopByStepId: ReadonlyMap<string, LoopStepDefinition>;
+  readonly loopById: ReadonlyMap<string, LoopStepDefinition>;
+} {
+  const stepById = new Map<string, WorkflowStepDefinition | LoopStepDefinition>();
+  const parentLoopByStepId = new Map<string, LoopStepDefinition>();
+  const loopById = new Map<string, LoopStepDefinition>();
+
+  function indexSteps(
+    steps: readonly (WorkflowStepDefinition | LoopStepDefinition)[],
+    parentLoop: LoopStepDefinition | null
+  ): void {
+    for (const step of steps) {
+      stepById.set(step.id, step);
+
+      if (parentLoop !== null) {
+        parentLoopByStepId.set(step.id, parentLoop);
+      }
+
+      if ('type' in step && step.type === 'loop') {
+        const loopStep = step as LoopStepDefinition;
+        loopById.set(loopStep.id, loopStep);
+
+        if (Array.isArray(loopStep.body)) {
+          indexSteps(loopStep.body, loopStep);
+        }
+      }
+    }
+  }
+
+  // Guard: definition.steps may be absent when createWorkflow is called with a
+  // partially-constructed definition (e.g. during JSON validation flows).
+  indexSteps(definition.steps ?? [], null);
+
+  return { stepById, parentLoopByStepId, loopById };
+}
+
+/**
  * Create an immutable Workflow from definition and source.
+ * Eagerly builds O(1) lookup indices for hot-path operations.
  */
 export function createWorkflow(
   definition: WorkflowDefinition,
   source: WorkflowSource
 ): Workflow {
+  const { stepById, parentLoopByStepId, loopById } = buildWorkflowIndices(definition);
   return Object.freeze({
     definition,
-    source
+    source,
+    stepById,
+    parentLoopByStepId,
+    loopById,
   });
 }
 
@@ -114,30 +189,13 @@ export function toWorkflowSourceInfo(source: WorkflowSource): WorkflowSourceInfo
 
 /**
  * Get a step from a workflow by ID.
- * Searches through all steps including loop bodies.
+ * O(1) lookup via the pre-built stepById index (built at createWorkflow() time).
  */
 export function getStepById(
   workflow: Workflow,
   stepId: string
 ): WorkflowStepDefinition | LoopStepDefinition | null {
-  const steps = workflow.definition.steps;
-  
-  for (const step of steps) {
-    if (step.id === stepId) {
-      return step;
-    }
-    
-    // Search in loop bodies
-    if ('type' in step && step.type === 'loop' && Array.isArray(step.body)) {
-      for (const bodyStep of step.body) {
-        if (bodyStep.id === stepId) {
-          return bodyStep;
-        }
-      }
-    }
-  }
-  
-  return null;
+  return workflow.stepById.get(stepId) ?? null;
 }
 
 /**
