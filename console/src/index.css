@@ -3,9 +3,9 @@
 :root {
   /* Backgrounds -- dark neutral base, semi-transparent for glassmorphism */
   --bg-primary: #0f131f;
-  --bg-secondary: rgba(23, 27, 40, 0.80);
-  --bg-card: rgba(27, 31, 44, 0.72);
-  --bg-tertiary: rgba(38, 41, 55, 0.85);
+  --bg-secondary: rgba(23, 27, 40, 0.70);
+  --bg-card: rgba(27, 31, 44, 0.60);
+  --bg-tertiary: rgba(38, 41, 55, 0.75);
   --border: #3a3a2e;
 
   /* Text -- warm off-white, not cool lavender */
@@ -32,9 +32,9 @@ body {
   background-color: var(--bg-primary);
   background-image:
     /* Ambient amber radial glow from top -- like a light source overhead */
-    radial-gradient(ellipse 80% 40% at 50% -10%, rgba(244, 196, 48, 0.06) 0%, transparent 70%),
-    /* Subtle cyan counter-glow from bottom-right -- depth */
-    radial-gradient(ellipse 60% 40% at 100% 110%, rgba(0, 219, 233, 0.04) 0%, transparent 60%);
+    radial-gradient(ellipse 80% 50% at 50% -5%, rgba(244, 196, 48, 0.18) 0%, transparent 70%),
+    /* Cyan counter-glow from bottom-right -- depth */
+    radial-gradient(ellipse 60% 50% at 100% 110%, rgba(0, 219, 233, 0.12) 0%, transparent 60%);
   background-attachment: fixed;
   color: var(--text-primary);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -361,4 +361,13 @@ body::after {
     top 0 right 0, top 0 right 0,
     bottom 0 left 0, bottom 0 left 0,
     bottom 0 right 0, bottom 0 right 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .badge-live,
+  .energy-live,
+  .workrail-current-lineage-node,
+  .workrail-current-lineage-edge .react-flow__edge-path {
+    animation: none !important;
+  }
 }
