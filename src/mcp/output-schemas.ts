@@ -52,15 +52,8 @@ export const WorkflowNextOutputSchema = z.object({
 
 export const WorkflowValidateJsonOutputSchema = z.object({
   valid: z.boolean(),
-  errors: z
-    .array(
-      z.object({
-        message: z.string(),
-        path: z.string().optional(),
-      })
-    )
-    .optional(),
-  suggestions: z.array(z.string()).optional(),
+  issues: z.array(z.string()),
+  suggestions: z.array(z.string()),
 });
 
 export const WorkflowGetSchemaOutputSchema = z.object({

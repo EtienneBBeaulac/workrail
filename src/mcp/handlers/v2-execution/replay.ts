@@ -1,4 +1,5 @@
-import { V2ContinueWorkflowOutputSchema, toPendingStep } from '../../output-schemas.js';
+import type { V2ContinueWorkflowOutputSchema } from '../../output-schemas.js';
+import { toPendingStep } from '../../output-schemas.js';
 import { deriveIsComplete, derivePendingStep } from '../../../v2/durable-core/projections/snapshot-state.js';
 import type { ExecutionSnapshotFileV1 } from '../../../v2/durable-core/schemas/execution-snapshot/index.js';
 import {
@@ -32,6 +33,7 @@ import { deriveNextIntent } from '../v2-state-conversion.js';
 import { EVENT_KIND } from '../../../v2/durable-core/constants.js';
 import { buildNextCall } from './index.js';
 import { projectAssessmentsV2, getLatestAssessmentForNode } from '../../../v2/projections/assessments.js';
+import { assertOutput, assertContinueTokenPresence } from '../../assert-output.js';
 
 
 
@@ -136,23 +138,29 @@ export function buildAdvancedReplayResponse(args: {
     const nextIntent = deriveNextIntent({ rehydrateOnly: false, isComplete, pending: blockedMeta });
 
     return nextTokensMint.andThen((nextTokens) =>
-      retryContinueMint.andThen((retryContinueToken) =>
-        okAsync(V2ContinueWorkflowOutputSchema.parse({
-          kind: 'blocked',
-          continueToken: pending ? nextTokens.continueToken : undefined,
-          checkpointToken: pending ? nextTokens.checkpointToken : undefined,
-          isComplete,
-          pending: toPendingStep(blockedMeta),
-          preferences,
-          nextIntent,
-          nextCall: buildNextCall({ continueToken: pending ? nextTokens.continueToken : undefined, isComplete, pending: blockedMeta, retryContinueToken }),
-          blockers,
-          retryable,
-          retryContinueToken,
-          validation,
-          assessmentFollowup,
-        }))
-      )
+      retryContinueMint.andThen((retryContinueToken) => {
+        // TypeScript requires `as` cast here for discriminated union literal narrowing;
+        // `const payload: T = {...}` works for simple object shapes but not discriminated unions.
+        const out = assertOutput(
+          {
+            kind: 'blocked' as const,
+            continueToken: pending ? nextTokens.continueToken : undefined,
+            checkpointToken: pending ? nextTokens.checkpointToken : undefined,
+            isComplete,
+            pending: toPendingStep(blockedMeta),
+            preferences,
+            nextIntent,
+            nextCall: buildNextCall({ continueToken: pending ? nextTokens.continueToken : undefined, isComplete, pending: blockedMeta, retryContinueToken }),
+            blockers,
+            retryable,
+            retryContinueToken,
+            validation,
+            assessmentFollowup,
+          } as z.infer<typeof V2ContinueWorkflowOutputSchema>,
+          assertContinueTokenPresence,
+        );
+        return okAsync(out);
+      })
     );
   }
 
@@ -181,10 +189,10 @@ export function buildAdvancedReplayResponse(args: {
   // Assessment was submitted and accepted on fromNodeId, not toNodeId.
   const stepContext = buildStepContext(truth.events, fromNodeId);
 
-  return nextTokensMint.andThen((nextTokens) =>
-    okAsync(
-      V2ContinueWorkflowOutputSchema.parse({
-        kind: 'ok',
+  return nextTokensMint.andThen((nextTokens) => {
+    const out = assertOutput(
+      {
+        kind: 'ok' as const,
         continueToken: pending ? nextTokens.continueToken : undefined,
         checkpointToken: pending ? nextTokens.checkpointToken : undefined,
         isComplete,
@@ -193,9 +201,11 @@ export function buildAdvancedReplayResponse(args: {
         nextIntent,
         nextCall: buildNextCall({ continueToken: pending ? nextTokens.continueToken : undefined, isComplete, pending: okMeta }),
         stepContext,
-      })
-    )
-  );
+      } as z.infer<typeof V2ContinueWorkflowOutputSchema>,
+      assertContinueTokenPresence,
+    );
+    return okAsync(out);
+  });
 }
 
 /**
