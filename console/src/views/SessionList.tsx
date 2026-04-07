@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useSessionList } from '../api/hooks';
 import { StatusBadge } from '../components/StatusBadge';
 import { HealthBadge } from '../components/HealthBadge';
+import { MetaChip } from '../components/MetaChip';
 import type { ConsoleSessionSummary, ConsoleSessionStatus } from '../api/types';
 import { formatRelativeTime } from '../utils/time';
 
@@ -601,9 +602,9 @@ const CHIP_ICONS = {
 
 function Chip({ children, icon }: { children: React.ReactNode; icon?: keyof typeof CHIP_ICONS }) {
   return (
-    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[var(--bg-secondary)] text-[10px] text-[var(--text-muted)] max-w-[200px] truncate">
+    <MetaChip className="gap-1 rounded text-[var(--text-muted)] max-w-[200px] truncate">
       {icon && CHIP_ICONS[icon]}
       {children}
-    </span>
+    </MetaChip>
   );
 }
