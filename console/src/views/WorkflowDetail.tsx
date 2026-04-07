@@ -10,7 +10,6 @@ import { TAG_DISPLAY } from '../config/tags';
 
 interface Props {
   readonly workflowId: string;
-  readonly activeTag: string | null;
   readonly onBack: () => void;
 }
 
@@ -18,7 +17,7 @@ interface Props {
 // WorkflowDetail
 // ---------------------------------------------------------------------------
 
-export function WorkflowDetail({ workflowId, activeTag, onBack }: Props) {
+export function WorkflowDetail({ workflowId, onBack }: Props) {
   const queryClient = useQueryClient();
 
   // Optimistic partial data: use cached list entry while detail fetch completes.
@@ -29,9 +28,7 @@ export function WorkflowDetail({ workflowId, activeTag, onBack }: Props) {
 
   const { data: detail, isLoading, isError, error, refetch } = useWorkflowDetail(workflowId);
 
-  const backLabel = activeTag && TAG_DISPLAY[activeTag]
-    ? `Back to Workflows: ${TAG_DISPLAY[activeTag]}`
-    : 'Back to Workflows';
+  const backLabel = 'Workflows';
 
   // Use detail data when available, fall back to cached list data for header fields.
   const name = detail?.name ?? cached?.name ?? workflowId;

@@ -12,6 +12,8 @@ import fs from 'fs';
 import type { ConsoleService } from './console-service.js';
 import { getWorktreeList, buildActiveSessionCounts, resolveRepoRoot } from './worktree-service.js';
 import type { WorkflowService } from '../../application/services/workflow-service.js';
+import type { ToolCallTimingRingBuffer } from '../../mcp/tool-call-timing.js';
+import { DEV_MODE } from '../../mcp/dev-mode.js';
 
 // ---------------------------------------------------------------------------
 // Workspace SSE broadcast
@@ -124,7 +126,12 @@ function loadWorkflowTags(): WorkflowTagsFile {
   }
 }
 
-export function mountConsoleRoutes(app: Application, consoleService: ConsoleService, workflowService?: WorkflowService): void {
+export function mountConsoleRoutes(
+  app: Application,
+  consoleService: ConsoleService,
+  workflowService?: WorkflowService,
+  timingRingBuffer?: ToolCallTimingRingBuffer,
+): void {
   // Start watching the sessions directory so SSE clients get notified of changes
   const stopWatcher = watchSessionsDir(consoleService.getSessionsDir());
   // Clean up watcher if the process exits gracefully
@@ -151,6 +158,30 @@ export function mountConsoleRoutes(app: Application, consoleService: ConsoleServ
     req.on('close', () => { sseClients.delete(res); });
     res.on('close', () => { sseClients.delete(res); }); // F4: catch external res.end() immediately
   });
+
+  // ---------------------------------------------------------------------------
+  // Perf: recent tool call timings
+  //
+  // GET /api/v2/perf/tool-calls?limit=N
+  //
+  // Returns the most recent N tool call timing observations from the ring buffer
+  // (newest first, max 100). Only mounted when WORKRAIL_DEV=1 so this endpoint
+  // is never reachable in production servers.
+  //
+  // The ring buffer is optional: if not wired in, the endpoint returns an empty
+  // array rather than 404 so clients can always query it unconditionally.
+  // The devMode field lets consumers distinguish "no calls happened" from
+  // "DEV_MODE is off and the buffer was never wired in".
+  // ---------------------------------------------------------------------------
+  if (DEV_MODE) {
+    app.get('/api/v2/perf/tool-calls', (req: Request, res: Response) => {
+      const rawLimit = req.query['limit'];
+      const limit = typeof rawLimit === 'string' ? parseInt(rawLimit, 10) : undefined;
+      const safeLimit = (limit !== undefined && Number.isFinite(limit) && limit > 0) ? limit : undefined;
+      const observations = timingRingBuffer ? timingRingBuffer.recent(safeLimit) : [];
+      res.json({ success: true, data: { observations, total: timingRingBuffer?.size ?? 0, devMode: DEV_MODE } });
+    });
+  }
 
   // List all v2 sessions
   app.get('/api/v2/sessions', async (_req: Request, res: Response) => {
