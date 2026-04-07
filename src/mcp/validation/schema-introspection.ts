@@ -271,7 +271,7 @@ export function extractEnumValues(schema: z.ZodType, path: string): readonly str
 
   for (const part of parts) {
     if (current instanceof z.ZodObject) {
-      const shape = current._def.shape();
+      const shape = getCachedShape(current);
       const field = shape[part] as z.ZodType | undefined;
       if (!field) return [];
       current = field;
@@ -279,7 +279,7 @@ export function extractEnumValues(schema: z.ZodType, path: string): readonly str
       current = current._def.innerType;
       // Re-check with the unwrapped type
       if (current instanceof z.ZodObject) {
-        const shape = current._def.shape();
+        const shape = getCachedShape(current);
         const field = shape[part] as z.ZodType | undefined;
         if (!field) return [];
         current = field;

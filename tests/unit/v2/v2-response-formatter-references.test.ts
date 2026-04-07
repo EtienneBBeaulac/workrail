@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { formatV2ExecutionResponse } from '../../../src/mcp/v2-response-formatter.js';
 import { createV2ExecutionRenderEnvelope } from '../../../src/mcp/render-envelope.js';
 import { buildStepContentEnvelope, type ResolvedReference } from '../../../src/mcp/step-content-envelope.js';
@@ -71,13 +71,6 @@ function makeEnvelope(lifecycle: 'start' | 'advance' | 'rehydrate', refs: readon
 }
 
 describe('formatV2ExecutionResponse — reference delivery', () => {
-  beforeEach(() => {
-    vi.stubEnv('WORKRAIL_CLEAN_RESPONSE_FORMAT', 'true');
-  });
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
   it('renders references as a separate section on start lifecycle', () => {
     const envelope = makeEnvelope('start', [RESOLVED_REF]);
     const result = formatV2ExecutionResponse(envelope);

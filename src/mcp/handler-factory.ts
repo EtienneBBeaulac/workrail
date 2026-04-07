@@ -44,9 +44,6 @@ const jsonResponsesOverride = process.env.WORKRAIL_JSON_RESPONSES === 'true';
 export function toMcpResult<T>(result: ToolResult<T>): McpCallToolResult {
   switch (result.type) {
     case 'success': {
-      // Resolve envelope once — avoids a second getV2ExecutionRenderEnvelope
-      // call in the JSON fallback path below.
-      const envelope = getV2ExecutionRenderEnvelope(result.data);
       if (!jsonResponsesOverride) {
         const formatted: FormattedResponse | null =
           formatV2ExecutionResponse(result.data) ?? formatV2ResumeResponse(result.data);
@@ -62,6 +59,7 @@ export function toMcpResult<T>(result: ToolResult<T>): McpCallToolResult {
         }
       }
       // JSON mode: include references alongside the response when present
+      const envelope = getV2ExecutionRenderEnvelope(result.data);
       const responseBody = envelope != null ? envelope.response : result.data;
       const refs = envelope?.contentEnvelope?.references;
       const jsonPayload = (refs != null && refs.length > 0)
