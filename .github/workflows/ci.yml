@@ -307,8 +307,8 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     strategy:
       matrix:
-        # Full OS matrix on PRs and main -- catches cross-platform failures before merge
-        os: [ "ubuntu-latest", "macos-latest", "windows-latest" ]
+        # Slim matrix on PRs (fast feedback), full matrix on main (pre-release validation)
+        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "macos-latest", "windows-latest"]') }}
         node-version: ${{ github.event_name == 'pull_request' && fromJSON('["22.14.0"]') || fromJSON('["20", "22.14.0"]') }}
       fail-fast: false
     
