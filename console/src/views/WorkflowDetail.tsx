@@ -11,7 +11,7 @@ import { TAG_DISPLAY } from '../config/tags';
 
 interface Props {
   readonly workflowId: string;
-  readonly activeTag: string | null;
+  readonly activeTag?: string | null;
   readonly onBack: () => void;
 }
 
