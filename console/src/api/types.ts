@@ -224,6 +224,7 @@ export interface ConsoleWorkflowSummary {
   readonly version: string;
   readonly tags: readonly string[];
   readonly source: ConsoleWorkflowSourceInfo;
+  readonly stepCount?: number;
   readonly about?: string;
   readonly examples?: readonly string[];
 }
