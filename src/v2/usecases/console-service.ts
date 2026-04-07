@@ -546,17 +546,6 @@ function extractGitBranch(events: readonly DomainEventV1[]): string | null {
   return null;
 }
 
-/** Extract the repo root path from observation events, or null for sessions
- * recorded before the repo_root anchor was introduced. */
-function extractRepoRoot(events: readonly DomainEventV1[]): string | null {
-  for (const e of events) {
-    if (e.kind !== EVENT_KIND.OBSERVATION_RECORDED) continue;
-    if (e.data.key === 'repo_root') {
-      return e.data.value.value;
-    }
-  }
-  return null;
-}
 
 function truncateTitle(text: string, maxLen = 120): string {
   if (text.length <= maxLen) return text;
@@ -591,7 +580,6 @@ function projectSessionSummary(
 
   const sessionTitle = deriveSessionTitle(events);
   const gitBranch = extractGitBranch(events);
-  const repoRoot = extractRepoRoot(events);
 
   const runs = Object.values(dag.runsById);
   const run = runs[0];
@@ -613,7 +601,6 @@ function projectSessionSummary(
       hasUnresolvedGaps: false,
       recapSnippet: null,
       gitBranch,
-      repoRoot,
       lastModifiedMs,
     };
   }
@@ -666,7 +653,6 @@ function projectSessionSummary(
     hasUnresolvedGaps,
     recapSnippet,
     gitBranch,
-    repoRoot,
     lastModifiedMs,
   };
 }

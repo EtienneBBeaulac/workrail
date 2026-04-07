@@ -14,8 +14,7 @@ import type { ResultAsync } from 'neverthrow';
 export type WorkspaceAnchor =
   | { readonly key: 'git_branch'; readonly value: string }
   | { readonly key: 'git_head_sha'; readonly value: string }
-  | { readonly key: 'repo_root_hash'; readonly value: string }
-  | { readonly key: 'repo_root'; readonly value: string };
+  | { readonly key: 'repo_root_hash'; readonly value: string };
 
 export type WorkspaceAnchorError =
   | { readonly code: 'ANCHOR_RESOLVE_FAILED'; readonly message: string };
