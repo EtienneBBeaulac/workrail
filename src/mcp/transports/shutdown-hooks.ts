@@ -65,7 +65,10 @@ export function wireShutdownHooks(opts: ShutdownHookOptions): void {
 export function wireStdinShutdown(): void {
   const shutdownEvents = container.resolve<ShutdownEvents>(DI.Runtime.ShutdownEvents);
 
-  process.stdin.on('end', () => {
+  // process.stdin.once: stdin 'end' fires at most once per process lifetime.
+  // Using once prevents listener accumulation if wireStdinShutdown() is ever
+  // called more than once in the same process.
+  process.stdin.once('end', () => {
     console.error('[MCP] stdin closed, initiating shutdown');
     shutdownEvents.emit({ kind: 'shutdown_requested', signal: 'SIGHUP' });
   });
