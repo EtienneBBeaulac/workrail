@@ -13,7 +13,7 @@
  * Graceful degradation: if any label can't be resolved, it falls back to null.
  */
 import { type ResultAsync, ResultAsync as RA } from 'neverthrow';
-import { okAsync, errAsync } from 'neverthrow';
+import { okAsync, errAsync, err } from 'neverthrow';
 import type { DirectoryListingPortV2 } from '../ports/directory-listing.port.js';
 import type { DataDirPortV2 } from '../ports/data-dir.port.js';
 import type { SessionEventLogReadonlyStorePortV2 } from '../ports/session-event-log-store.port.js';
@@ -647,8 +647,8 @@ function projectSessionSummary(
   if (dag === null) return null;
 
   const sortedEventsRes = asSortedEventLog(events);
-  const statusRes = sortedEventsRes.isOk() ? projectRunStatusSignalsV2(sortedEventsRes.value) : sortedEventsRes;
-  const gapsRes = sortedEventsRes.isOk() ? projectGapsV2(sortedEventsRes.value) : sortedEventsRes;
+  const statusRes = sortedEventsRes.isOk() ? projectRunStatusSignalsV2(sortedEventsRes.value) : err(sortedEventsRes.error);
+  const gapsRes = sortedEventsRes.isOk() ? projectGapsV2(sortedEventsRes.value) : err(sortedEventsRes.error);
 
   const sessionTitle = deriveSessionTitle(events);
   const gitBranch = extractGitBranch(events);
@@ -752,8 +752,8 @@ function projectSessionDetail(
   }
 
   const sortedEventsRes = asSortedEventLog(events);
-  const statusRes = sortedEventsRes.isOk() ? projectRunStatusSignalsV2(sortedEventsRes.value) : sortedEventsRes;
-  const gapsRes = sortedEventsRes.isOk() ? projectGapsV2(sortedEventsRes.value) : sortedEventsRes;
+  const statusRes = sortedEventsRes.isOk() ? projectRunStatusSignalsV2(sortedEventsRes.value) : err(sortedEventsRes.error);
+  const gapsRes = sortedEventsRes.isOk() ? projectGapsV2(sortedEventsRes.value) : err(sortedEventsRes.error);
   const executionTraceRes = projectRunExecutionTraceV2(events);
 
   // Richness projections -- used to populate summary boolean flags on each node.
