@@ -261,7 +261,12 @@ export class EnhancedMultiSourceWorkflowStorage implements ICompositeWorkflowSto
     if (config.includeProject !== false && this.featureFlagProvider) {
       try {
         const projectPath = config.projectPath || this.getProjectWorkflowsPath();
-        if (existsSync(projectPath)) {
+        const bundledPath = this.getBundledWorkflowsPath();
+        // Skip project source if it resolves to the same directory as bundled --
+        // this happens when running workrail from its own repo. The bundled source
+        // already covers these workflows with the correct kind.
+        const isSameAsBundled = path.resolve(projectPath) === path.resolve(bundledPath);
+        if (existsSync(projectPath) && !isSameAsBundled) {
           instances.push(new FileWorkflowStorage(
             projectPath,
             createProjectDirectorySource(projectPath),
