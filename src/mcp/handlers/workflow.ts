@@ -5,6 +5,8 @@
  * Each handler receives typed input and context, returns ToolResult<T>.
  */
 
+import fs from 'fs';
+import path from 'path';
 import type { ToolContext, ToolResult } from '../types.js';
 import { success, errNotRetryable } from '../types.js';
 import { mapDomainErrorToToolError, mapUnknownErrorToToolError } from '../error-mapper.js';
@@ -66,6 +68,14 @@ export interface WorkflowGetSchemaOutput {
 // -----------------------------------------------------------------------------
 
 const TIMEOUT_MS = 30_000;
+
+// Parse the workflow schema once at module load time.
+// handleWorkflowGetSchema is called on every agent first-contact; reading and
+// parsing the JSON file per-invocation adds unnecessary synchronous I/O.
+const WORKFLOW_SCHEMA: unknown = (() => {
+  const schemaPath = path.resolve(__dirname, '../../../spec/workflow.schema.json');
+  return JSON.parse(fs.readFileSync(schemaPath, 'utf-8'));
+})();
 
 // -----------------------------------------------------------------------------
 // Helpers
@@ -217,13 +227,8 @@ export async function handleWorkflowGetSchema(
   void ctx;
 
   try {
-    const fs = await import('fs');
-    const path = await import('path');
-
-    // Load the workflow schema (relative to dist/mcp/handlers/)
-    const schemaPath = path.resolve(__dirname, '../../../spec/workflow.schema.json');
-    const schemaContent = fs.readFileSync(schemaPath, 'utf-8');
-    const schema = JSON.parse(schemaContent);
+    // Use the module-level constant parsed once at startup.
+    const schema = WORKFLOW_SCHEMA;
 
     const result: WorkflowGetSchemaOutput = {
       schema,

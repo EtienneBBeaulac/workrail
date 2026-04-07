@@ -1,5 +1,5 @@
 import fs from 'fs/promises';
-import { existsSync, statSync } from 'fs';
+import { existsSync } from 'fs';
 import path from 'path';
 import { IWorkflowStorage } from '../../types/storage';
 import { 
@@ -144,7 +144,7 @@ export class FileWorkflowStorage implements IWorkflowStorage {
         const filePathRaw = path.resolve(this.baseDirReal, file);
         assertWithinBase(filePathRaw, this.baseDirReal);
 
-        const stats = statSync(filePathRaw);
+        const stats = await fs.stat(filePathRaw);
         if (stats.size > this.maxFileSize) continue;
 
         const raw = await fs.readFile(filePathRaw, 'utf-8');
@@ -182,8 +182,8 @@ export class FileWorkflowStorage implements IWorkflowStorage {
 
       // Add to index
       const filePath = path.resolve(this.baseDirReal, selected.file);
-      const stats = statSync(filePath);
-      
+      const stats = await fs.stat(filePath);
+
       index.set(id, {
         id: selected.definition.id,
         filename: selected.file,
@@ -220,7 +220,7 @@ export class FileWorkflowStorage implements IWorkflowStorage {
     assertWithinBase(filePath, this.baseDirReal);
 
     try {
-      const stats = statSync(filePath);
+      const stats = await fs.stat(filePath);
       if (stats.size > this.maxFileSize) {
         throw new SecurityError('Workflow file exceeds size limit', 'file-size');
       }
