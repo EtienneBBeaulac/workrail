@@ -67,16 +67,45 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow }: Pr
           No workflows in this category.
         </p>
       ) : (
-        <div className="space-y-px">
-          {visibleWorkflows.map((workflow) => (
-            <WorkflowCard
-              key={workflow.id}
-              workflow={workflow}
-              onSelect={() => onSelectWorkflow(workflow.id)}
+        <div className="space-y-2">
+          {selectedTag !== null && (
+            <SectionHeader
+              label={TAG_DISPLAY[selectedTag] ?? selectedTag}
+              count={visibleWorkflows.length}
             />
-          ))}
+          )}
+          <div className="space-y-px">
+            {visibleWorkflows.map((workflow) => (
+              <WorkflowCard
+                key={workflow.id}
+                workflow={workflow}
+                onSelect={() => onSelectWorkflow(workflow.id)}
+              />
+            ))}
+          </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Section header
+// ---------------------------------------------------------------------------
+
+function SectionHeader({
+  label,
+  count,
+}: {
+  readonly label: string;
+  readonly count: number;
+}) {
+  return (
+    <div className="flex items-center gap-3 mb-3 mt-2">
+      <span className="font-mono text-[11px] uppercase tracking-[0.30em] text-[var(--text-secondary)]">
+        {label.toUpperCase()}&nbsp;&nbsp;//&nbsp;&nbsp;{count} workflow{count !== 1 ? 's' : ''}
+      </span>
+      <div className="flex-1 h-px bg-[var(--border)]" />
     </div>
   );
 }

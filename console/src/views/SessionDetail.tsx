@@ -30,35 +30,35 @@ function SessionMetaCard({ data }: { data: ConsoleSessionDetail }) {
   const hash = firstRun?.workflowHash?.slice(0, 12) ?? '--';
 
   return (
-    <div className="bg-[var(--bg-card)] border border-[var(--border)] px-5 py-4">
+    <div className="bg-[var(--bg-card)] border border-[var(--border)] px-5 py-4 corner-brackets">
       {data.sessionTitle && (
         <h2 className="text-base font-medium text-[var(--text-primary)] mb-3">
           {data.sessionTitle}
         </h2>
       )}
       <dl className="grid grid-cols-[auto_1fr] gap-x-8 gap-y-2">
-        <dt className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)] self-center">
+        <dt className="font-mono text-[10px] uppercase tracking-[0.30em] text-[var(--text-muted)] self-center">
           Session
         </dt>
         <dd className="font-mono text-xs text-[var(--text-secondary)] self-center">
           {formatSessionId(data.sessionId)}
         </dd>
 
-        <dt className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)] self-center">
+        <dt className="font-mono text-[10px] uppercase tracking-[0.30em] text-[var(--text-muted)] self-center">
           Workflow
         </dt>
         <dd className="text-sm text-[var(--text-primary)] self-center">
           {workflow}
         </dd>
 
-        <dt className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)] self-center">
+        <dt className="font-mono text-[10px] uppercase tracking-[0.30em] text-[var(--text-muted)] self-center">
           Hash
         </dt>
         <dd className="font-mono text-xs text-[var(--text-secondary)] self-center">
           {hash}
         </dd>
 
-        <dt className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)] self-center">
+        <dt className="font-mono text-[10px] uppercase tracking-[0.30em] text-[var(--text-muted)] self-center">
           Status
         </dt>
         <dd className="self-center flex items-center gap-2">
@@ -68,7 +68,7 @@ function SessionMetaCard({ data }: { data: ConsoleSessionDetail }) {
           )}
         </dd>
 
-        <dt className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)] self-center">
+        <dt className="font-mono text-[10px] uppercase tracking-[0.30em] text-[var(--text-muted)] self-center">
           Runs
         </dt>
         <dd className="text-sm text-[var(--text-primary)] self-center">
@@ -169,7 +169,7 @@ export function SessionDetail({ sessionId }: Props) {
         }}
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] shrink-0 console-blueprint-grid">
-          <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+          <span className="font-mono text-[10px] uppercase tracking-[0.30em] text-[var(--text-muted)]">
             Node detail
           </span>
           <button
