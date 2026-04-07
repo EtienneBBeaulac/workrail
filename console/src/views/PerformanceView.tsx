@@ -4,12 +4,64 @@ import type { ToolCallTiming } from '../api/types';
 import { formatRelativeTime } from '../utils/time';
 
 // ---------------------------------------------------------------------------
+// Column configuration (A1)
+// Drives thead rendering; TimingRow still renders hardcoded cells but this
+// documents the column contract and makes header generation extend-safe.
+// ---------------------------------------------------------------------------
+
+interface ColumnDef {
+  readonly key: string;
+  readonly label: string;
+  readonly width?: string;
+  readonly minWidth?: string;
+}
+
+const COLUMNS: readonly ColumnDef[] = [
+  { key: 'tool', label: 'Tool', minWidth: '180px' },
+  { key: 'duration', label: 'Duration', width: '220px' },
+  { key: 'started', label: 'Started', width: '100px' },
+  { key: 'outcome', label: 'Outcome' },
+];
+
+// ---------------------------------------------------------------------------
+// Sort configuration (A2)
+// ---------------------------------------------------------------------------
+
+type SortOrder = 'recent' | 'slowest';
+
+interface SortOption {
+  readonly value: SortOrder;
+  readonly label: string;
+  readonly compareFn: (a: ToolCallTiming, b: ToolCallTiming) => number;
+}
+
+const SORT_OPTIONS: readonly SortOption[] = [
+  { value: 'recent', label: 'Recent first', compareFn: (a, b) => b.startedAtMs - a.startedAtMs },
+  { value: 'slowest', label: 'Slowest first', compareFn: (a, b) => b.durationMs - a.durationMs },
+];
+
+// ---------------------------------------------------------------------------
+// Outcome configuration (M6 single source of truth)
+// ---------------------------------------------------------------------------
+
+type Outcome = 'success' | 'error' | 'unknown_tool';
+
+const OUTCOME_CONFIG: Record<
+  Outcome,
+  { readonly color: string; readonly label: string; readonly isError: boolean }
+> = {
+  success: { color: 'var(--success)', label: 'OK', isError: false },
+  error: { color: 'var(--error)', label: 'Error', isError: true },
+  unknown_tool: { color: 'var(--warning)', label: 'Unknown', isError: true },
+};
+
+// ---------------------------------------------------------------------------
 // PerformanceView
 // ---------------------------------------------------------------------------
 
 export function PerformanceView() {
   const result = usePerfToolCalls();
-  const [sortOrder, setSortOrder] = useState<'recent' | 'slowest'>('recent');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('recent');
 
   if (result.state === 'loading') {
     return <PerfSkeleton />;
@@ -41,11 +93,12 @@ export function PerformanceView() {
     );
   }
 
-  const { observations } = result.data;
+  const { observations, total } = result.data;
 
   return (
     <PerfContent
       observations={observations}
+      total={total}
       sortOrder={sortOrder}
       onSortChange={setSortOrder}
     />
@@ -58,45 +111,51 @@ export function PerformanceView() {
 
 function PerfContent({
   observations,
+  total,
   sortOrder,
   onSortChange,
 }: {
   readonly observations: readonly ToolCallTiming[];
-  readonly sortOrder: 'recent' | 'slowest';
-  readonly onSortChange: (order: 'recent' | 'slowest') => void;
+  readonly total: number;
+  readonly sortOrder: SortOrder;
+  readonly onSortChange: (order: SortOrder) => void;
 }) {
   const sorted = useMemo(() => {
-    const copy = [...observations];
-    if (sortOrder === 'recent') {
-      copy.sort((a, b) => b.startedAtMs - a.startedAtMs);
-    } else {
-      copy.sort((a, b) => b.durationMs - a.durationMs);
-    }
-    return copy;
+    // A2: find the matching SortOption and use its compareFn
+    const option = SORT_OPTIONS.find((o) => o.value === sortOrder)!;
+    return [...observations].sort(option.compareFn);
   }, [observations, sortOrder]);
 
+  // M2: use reduce to avoid Math.max(...spread) latent crash on large arrays
   const maxDuration = useMemo(
-    () => (sorted.length > 0 ? Math.max(...sorted.map((o) => o.durationMs)) : 0),
+    () => sorted.reduce((max, o) => Math.max(max, o.durationMs), 0),
     [sorted],
   );
 
-  const errorCount = observations.filter(
-    (o) => o.outcome === 'error' || o.outcome === 'unknown_tool',
-  ).length;
+  const errorCount = observations.filter((o) => OUTCOME_CONFIG[o.outcome].isError).length;
 
   const avgMs =
     observations.length > 0
       ? Math.round(observations.reduce((sum, o) => sum + o.durationMs, 0) / observations.length)
       : null;
 
+  // M2: use reduce to avoid Math.max(...spread) latent crash on large arrays
   const lastCallMs =
-    observations.length > 0 ? Math.max(...observations.map((o) => o.startedAtMs)) : null;
+    observations.length > 0
+      ? observations.reduce((max, o) => Math.max(max, o.startedAtMs), 0)
+      : null;
+
+  // M4: show truncation indicator when ring buffer contains more than the window
+  const countLabel =
+    total > observations.length
+      ? `${observations.length} of ${total} recorded`
+      : `${total} recorded`;
 
   return (
     <div className="space-y-3">
       {/* Summary line */}
       <p className="text-sm text-[var(--text-secondary)]">
-        {observations.length} recorded
+        {countLabel}
         {' | '}
         <span
           style={{ color: errorCount > 0 ? 'var(--error)' : 'var(--text-muted)' }}
@@ -109,41 +168,40 @@ function PerfContent({
         last call {lastCallMs !== null ? formatRelativeTime(lastCallMs) : 'no calls yet'}
       </p>
 
-      {/* Sort controls */}
-      <div role="group" aria-label="Sort order" className="flex items-center gap-1">
-        <SortButton
-          label="Recent first"
-          isActive={sortOrder === 'recent'}
-          onClick={() => onSortChange('recent')}
-        />
-        <SortButton
-          label="Slowest first"
-          isActive={sortOrder === 'slowest'}
-          onClick={() => onSortChange('slowest')}
-        />
+      {/* Sort controls (M5: radiogroup for mutually-exclusive selection) */}
+      <div role="radiogroup" aria-label="Sort order" className="flex items-center gap-1">
+        {SORT_OPTIONS.map((opt) => (
+          <SortButton
+            key={opt.value}
+            label={opt.label}
+            isActive={sortOrder === opt.value}
+            onClick={() => onSortChange(opt.value)}
+          />
+        ))}
       </div>
 
       {/* Table */}
       <table className="w-full text-sm border-collapse">
         <thead>
+          {/* A1: headers driven from COLUMNS; P1: scope="col" on every th */}
           <tr className="text-xs text-[var(--text-muted)] border-b border-[var(--border)]">
-            <th className="text-left py-2 pr-4 font-medium" style={{ minWidth: '180px' }}>
-              Tool
-            </th>
-            <th className="text-left py-2 pr-4 font-medium" style={{ width: '220px' }}>
-              Duration
-            </th>
-            <th className="text-left py-2 pr-4 font-medium" style={{ width: '100px' }}>
-              Started
-            </th>
-            <th className="text-left py-2 font-medium">Outcome</th>
+            {COLUMNS.map((col) => (
+              <th
+                key={col.key}
+                scope="col"
+                className="text-left py-2 pr-4 font-medium"
+                style={{ width: col.width, minWidth: col.minWidth }}
+              >
+                {col.label}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
           {sorted.length === 0 ? (
             <tr>
               <td
-                colSpan={4}
+                colSpan={COLUMNS.length}
                 className="py-8 text-center text-sm text-[var(--text-muted)]"
               >
                 No tool calls recorded yet. Run a workflow to see timing data.
@@ -151,7 +209,8 @@ function PerfContent({
             </tr>
           ) : (
             sorted.map((obs, i) => (
-              <TimingRow key={i} obs={obs} maxDuration={maxDuration} />
+              // M1: stable composite key; i as tiebreaker for same-tool same-ms edge case
+              <TimingRow key={`${obs.startedAtMs}-${obs.toolName}-${i}`} obs={obs} maxDuration={maxDuration} />
             ))
           )}
         </tbody>
@@ -171,7 +230,8 @@ function TimingRow({
   readonly obs: ToolCallTiming;
   readonly maxDuration: number;
 }) {
-  const isErrorRow = obs.outcome === 'error' || obs.outcome === 'unknown_tool';
+  // M6: derive isError from OUTCOME_CONFIG (single source of truth)
+  const isErrorRow = OUTCOME_CONFIG[obs.outcome].isError;
   const barWidth =
     maxDuration > 0 ? Math.round((obs.durationMs / maxDuration) * 120) : 0;
 
@@ -224,17 +284,6 @@ function TimingRow({
 // OutcomePill
 // ---------------------------------------------------------------------------
 
-type Outcome = 'success' | 'error' | 'unknown_tool';
-
-const OUTCOME_CONFIG: Record<
-  Outcome,
-  { readonly color: string; readonly label: string }
-> = {
-  success: { color: 'var(--success)', label: 'OK' },
-  error: { color: 'var(--error)', label: 'Error' },
-  unknown_tool: { color: 'var(--warning)', label: 'Unknown' },
-};
-
 function OutcomePill({ outcome }: { readonly outcome: Outcome }) {
   const config = OUTCOME_CONFIG[outcome];
   return (
@@ -251,7 +300,7 @@ function OutcomePill({ outcome }: { readonly outcome: Outcome }) {
 }
 
 // ---------------------------------------------------------------------------
-// SortButton
+// SortButton (M5: role="radio" + aria-checked for mutually-exclusive group)
 // ---------------------------------------------------------------------------
 
 function SortButton({
@@ -266,8 +315,9 @@ function SortButton({
   return (
     <button
       type="button"
+      role="radio"
       onClick={onClick}
-      aria-pressed={isActive}
+      aria-checked={isActive}
       className={[
         'px-3 py-2 rounded text-xs font-medium min-w-[44px] transition-colors',
         isActive
