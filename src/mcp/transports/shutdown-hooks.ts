@@ -55,20 +55,34 @@ export function wireShutdownHooks(opts: ShutdownHookOptions): void {
   });
 }
 
+export interface StdinShutdownOptions {
+  /**
+   * Readable stream to watch for EOF.
+   *
+   * Defaults to `process.stdin`. Inject a fake stream in tests to avoid
+   * touching the real stdin descriptor.
+   */
+  readonly stdin?: NodeJS.ReadableStream;
+}
+
 /**
  * Wire stdin-EOF shutdown for stdio transport.
  *
  * The MCP SDK's StdioServerTransport does not listen for stdin 'end',
  * so server.onclose never fires on disconnect. Without this, the session
  * HTTP server keeps the process alive after stdin EOF, blocking client restart.
+ *
+ * Accepts an optional `stdin` stream via `opts` so the dependency is
+ * injectable in tests. Production callers pass nothing and get `process.stdin`.
  */
-export function wireStdinShutdown(): void {
+export function wireStdinShutdown(opts?: StdinShutdownOptions): void {
   const shutdownEvents = container.resolve<ShutdownEvents>(DI.Runtime.ShutdownEvents);
+  const stdin = opts?.stdin ?? process.stdin;
 
-  // process.stdin.once: stdin 'end' fires at most once per process lifetime.
+  // stdin.once: the 'end' event fires at most once per stream lifetime.
   // Using once prevents listener accumulation if wireStdinShutdown() is ever
   // called more than once in the same process.
-  process.stdin.once('end', () => {
+  stdin.once('end', () => {
     console.error('[MCP] stdin closed, initiating shutdown');
     shutdownEvents.emit({ kind: 'shutdown_requested', signal: 'SIGHUP' });
   });

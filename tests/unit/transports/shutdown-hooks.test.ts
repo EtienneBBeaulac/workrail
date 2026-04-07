@@ -22,15 +22,25 @@ function createFakeShutdownEvents() {
 
 function createFakeProcessSignals() {
   const handlers = new Map<string, Array<() => void>>();
+  const onceHandlers = new Map<string, Array<() => void>>();
   return {
     on: (signal: string, handler: () => void) => {
       if (!handlers.has(signal)) handlers.set(signal, []);
       handlers.get(signal)!.push(handler);
     },
+    once: (signal: string, handler: () => void) => {
+      if (!onceHandlers.has(signal)) onceHandlers.set(signal, []);
+      onceHandlers.get(signal)!.push(handler);
+    },
     _fire: (signal: string) => {
       for (const handler of handlers.get(signal) ?? []) handler();
+      // once handlers fire then clear
+      const onces = onceHandlers.get(signal) ?? [];
+      onceHandlers.delete(signal);
+      for (const handler of onces) handler();
     },
     _handlers: handlers,
+    _onceHandlers: onceHandlers,
   };
 }
 
@@ -76,7 +86,7 @@ vi.mock('../../../src/di/tokens.js', () => ({
 }));
 
 // Import after mocks are set up
-const { wireShutdownHooks } = await import(
+const { wireShutdownHooks, wireStdinShutdown } = await import(
   '../../../src/mcp/transports/shutdown-hooks.js'
 );
 
@@ -91,6 +101,7 @@ describe('wireShutdownHooks', () => {
     // Reset fakes
     fakeShutdownEvents._listeners.length = 0;
     fakeProcessSignals._handlers.clear();
+    fakeProcessSignals._onceHandlers.clear();
     fakeTerminator._calls.length = 0;
     onBeforeTerminate = vi.fn().mockResolvedValue(undefined);
   });
@@ -159,5 +170,59 @@ describe('wireShutdownHooks', () => {
     // Should have registered a listener AND it should have been called
     // The signal handler emits to shutdownEvents, which triggers the listener
     expect(fakeShutdownEvents._listeners.length).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fake readable stream for wireStdinShutdown tests
+// ---------------------------------------------------------------------------
+
+import { EventEmitter } from 'events';
+
+function createFakeStdin(): NodeJS.ReadableStream & { simulateEnd(): void } {
+  const emitter = new EventEmitter() as NodeJS.ReadableStream & { simulateEnd(): void };
+  emitter.simulateEnd = () => emitter.emit('end');
+  return emitter;
+}
+
+describe('wireStdinShutdown', () => {
+  beforeEach(() => {
+    fakeShutdownEvents._listeners.length = 0;
+    fakeProcessSignals._handlers.clear();
+    fakeProcessSignals._onceHandlers.clear();
+    fakeTerminator._calls.length = 0;
+  });
+
+  it('emits shutdown_requested with SIGHUP when stdin ends', () => {
+    const fakeStdin = createFakeStdin();
+    const emittedEvents: Array<{ kind: string; signal: string }> = [];
+
+    // Register a listener to capture emitted events before wiring
+    fakeShutdownEvents._listeners.push((event) => {
+      emittedEvents.push(event);
+    });
+
+    wireStdinShutdown({ stdin: fakeStdin });
+    fakeStdin.simulateEnd();
+
+    expect(emittedEvents).toHaveLength(1);
+    expect(emittedEvents[0]).toEqual({ kind: 'shutdown_requested', signal: 'SIGHUP' });
+  });
+
+  it('fires at most once even if end is emitted multiple times', () => {
+    const fakeStdin = createFakeStdin();
+    const emittedEvents: Array<{ kind: string; signal: string }> = [];
+
+    fakeShutdownEvents._listeners.push((event) => {
+      emittedEvents.push(event);
+    });
+
+    wireStdinShutdown({ stdin: fakeStdin });
+
+    fakeStdin.simulateEnd();
+    fakeStdin.simulateEnd(); // Second call should be ignored by once() semantics
+
+    expect(emittedEvents).toHaveLength(1);
+    expect(emittedEvents[0]).toEqual({ kind: 'shutdown_requested', signal: 'SIGHUP' });
   });
 });
