@@ -1,22 +1,14 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
-import { execSync } from 'child_process';
-
-// Use the latest git tag as the version (semantic-release manages tags,
-// not package.json version which stays at a dev value on feature branches).
-function getVersion(): string {
-  try {
-    return execSync('git describe --tags --abbrev=0', { encoding: 'utf8' }).trim().replace(/^v/, '');
-  } catch {
-    return 'dev';
-  }
-}
+import pkg from '../package.json' with { type: 'json' };
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   define: {
-    'import.meta.env.VITE_APP_VERSION': JSON.stringify(getVersion()),
+    // package.json version is kept in sync with the latest release tag by
+    // @semantic-release/git which commits the version bump back to main.
+    'import.meta.env.VITE_APP_VERSION': JSON.stringify(pkg.version),
   },
   // Base path must match the Express mount point (/console)
   // so asset URLs resolve correctly in production.
