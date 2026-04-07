@@ -1,5 +1,6 @@
 import type { V2ToolContext } from '../../types.js';
-import { V2StartWorkflowOutputSchema, toPendingStep } from '../../output-schemas.js';
+import type { V2StartWorkflowOutputSchema } from '../../output-schemas.js';
+import { toPendingStep } from '../../output-schemas.js';
 import { deriveIsComplete, derivePendingStep } from '../../../v2/durable-core/projections/snapshot-state.js';
 import type { ExecutionSnapshotFileV1 } from '../../../v2/durable-core/schemas/execution-snapshot/index.js';
 import { asExpandedStepIdV1 } from '../../../v2/durable-core/schemas/execution-snapshot/step-instance-key.js';
@@ -514,7 +515,7 @@ export function executeStartWorkflow(
           references: resolvedReferences,
         });
 
-          const parsed = V2StartWorkflowOutputSchema.parse({
+          const parsed: z.infer<typeof V2StartWorkflowOutputSchema> = {
             continueToken: tokens.continueToken,
             checkpointToken: tokens.checkpointToken,
             isComplete: false,
@@ -523,7 +524,7 @@ export function executeStartWorkflow(
             nextIntent,
             nextCall: buildNextCall({ continueToken: tokens.continueToken, isComplete: false, pending }),
             ...(stalePaths.length > 0 ? { staleRoots: [...stalePaths] } : {}),
-          });
+          };
           return okAsync({ response: parsed, contentEnvelope });
       });
     })
