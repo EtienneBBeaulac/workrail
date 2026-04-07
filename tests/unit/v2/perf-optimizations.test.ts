@@ -220,6 +220,12 @@ describe('loadAndPinWorkflow -- pinnedStore.get call count', () => {
     // to persist, then get() called again to retrieve -- total 2 gets and 1 put.
     expect(getCallCount).toBe(2);
     expect(putCallCount).toBe(1);
-    void result;
+
+    // Verify the returned workflow has the expected shape so we know the cold path
+    // actually yields a usable object, not just the right call counts.
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.workflow.definition.id).toBe('perf-test-wf-cold');
+    }
   });
 });
