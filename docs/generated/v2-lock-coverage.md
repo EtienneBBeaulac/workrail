@@ -41,7 +41,7 @@
 | `ack-replay-idempotent` | `tests/unit/v2/session-store-idempotency-with-fakes.test.ts`, `tests/unit/v2/session-store-idempotency.test.ts` |
 | `ack-token-payload-fields` | `tests/unit/v2/tokens-binary.test.ts` |
 | `advance-append-capable` | `tests/unit/v2/v2-execution-protocol.test.ts` |
-| `append-plan-atomic` | `tests/unit/v2/session-store-idempotency-with-fakes.test.ts`, `tests/unit/v2/session-store-idempotency.test.ts`, `tests/unit/v2/session-store.test.ts` |
+| `append-plan-atomic` | `tests/unit/v2/session-store-idempotency-with-fakes.test.ts`, `tests/unit/v2/session-store-idempotency.test.ts`, `tests/unit/v2/session-store-preloaded-truth.test.ts`, `tests/unit/v2/session-store.test.ts` |
 | `autonomy-closed-set` | `tests/unit/v2/schema-locks.test.ts` |
 | `bech32m-checksum-validation` | `tests/unit/v2/tokens-corruption.test.ts` |
 | `binary-payload-deterministic` | `tests/unit/v2/golden-tokens/golden-tokens.test.ts`, `tests/unit/v2/tokens-property-based.test.ts` |
@@ -64,7 +64,7 @@
 | `crash-state-detection` | `tests/unit/v2/session-store.test.ts` |
 | `data-dir-workrail-owned` | `tests/unit/v2/data-dir.test.ts` |
 | `decision-trace-bounded` | `tests/unit/v2/budget-enforcement.test.ts` |
-| `dedupe-key-idempotent` | `tests/unit/v2/session-store-idempotency-with-fakes.test.ts`, `tests/unit/v2/session-store-idempotency.test.ts`, `tests/unit/v2/session-store.test.ts` |
+| `dedupe-key-idempotent` | `tests/unit/v2/session-store-idempotency-with-fakes.test.ts`, `tests/unit/v2/session-store-idempotency.test.ts`, `tests/unit/v2/session-store-preloaded-truth.test.ts`, `tests/unit/v2/session-store.test.ts` |
 | `dedupe-key-stable` | `tests/unit/v2/session-store-idempotency-with-fakes.test.ts`, `tests/unit/v2/session-store-idempotency.test.ts` |
 | `determinism` | `tests/unit/v2/notes-markdown.test.ts` |
 | `durable-core-no-buffer` | `tests/architecture/v2-import-boundaries.test.ts` |

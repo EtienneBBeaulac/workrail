@@ -93,6 +93,7 @@
       "tests": [
         "tests/unit/v2/session-store-idempotency-with-fakes.test.ts",
         "tests/unit/v2/session-store-idempotency.test.ts",
+        "tests/unit/v2/session-store-preloaded-truth.test.ts",
         "tests/unit/v2/session-store.test.ts"
       ]
     },
@@ -234,6 +235,7 @@
       "tests": [
         "tests/unit/v2/session-store-idempotency-with-fakes.test.ts",
         "tests/unit/v2/session-store-idempotency.test.ts",
+        "tests/unit/v2/session-store-preloaded-truth.test.ts",
         "tests/unit/v2/session-store.test.ts"
       ]
     },

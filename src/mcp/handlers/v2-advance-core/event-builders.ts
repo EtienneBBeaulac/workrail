@@ -92,7 +92,8 @@ export function buildAndAppendPlan(args: BuildAppendPlanArgs): RA<void, Internal
       outputsToAppend: args.outputsToAppend ?? [],
     });
     if (planRes.isErr()) return neErrorAsync({ kind: 'invariant_violation' as const, message: planRes.error.message });
-    return sessionStore.append(lock, planRes.value);
+    // Pass preloaded truth to skip redundant disk reads in appendImpl.
+    return sessionStore.append(lock, planRes.value, truth);
   }
 
   // Advanced path
@@ -132,7 +133,8 @@ export function buildAndAppendPlan(args: BuildAppendPlanArgs): RA<void, Internal
   });
   if (planRes.isErr()) return neErrorAsync({ kind: 'invariant_violation' as const, message: planRes.error.message });
 
-  return sessionStore.append(lock, planRes.value);
+  // Pass preloaded truth to skip redundant disk reads in appendImpl.
+  return sessionStore.append(lock, planRes.value, truth);
 }
 
 // ── Output builders ───────────────────────────────────────────────────
