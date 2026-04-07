@@ -12,7 +12,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { EnhancedMultiSourceWorkflowStorage } from '../../src/infrastructure/storage/enhanced-multi-source-workflow-storage';
 import { SchemaValidatingCompositeWorkflowStorage } from '../../src/infrastructure/storage/schema-validating-workflow-storage';
-import { CachingWorkflowStorage } from '../../src/infrastructure/storage/caching-workflow-storage';
+import { CachingWorkflowStorage, CachingCompositeWorkflowStorage } from '../../src/infrastructure/storage/caching-workflow-storage';
 import { InMemoryWorkflowStorage } from '../../src/infrastructure/storage/in-memory-storage';
 import { handleWorkflowGetSchema } from '../../src/mcp/handlers/workflow';
 import { createBundledSource } from '../../src/types/workflow';
@@ -76,6 +76,48 @@ describe('Fix 1: AJV singleton across SchemaValidatingCompositeWorkflowStorage i
     const storage = new SchemaValidatingCompositeWorkflowStorage(inner);
     const workflows = await storage.loadAllWorkflows();
     expect(workflows.map((w) => w.definition.id)).toContain('test-singleton');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix 2: N+1 reads eliminated - getWorkflowById never called during list
+// ---------------------------------------------------------------------------
+
+describe('Fix 2: N+1 reads - loadAllWorkflows used; getWorkflowById never called during list', () => {
+  it('never calls getWorkflowById on inner storage when listing via CachingWorkflowStorage.loadAllWorkflows', async () => {
+    const defs = [makeDef('wf-a'), makeDef('wf-b'), makeDef('wf-c')];
+    const inner = new InMemoryWorkflowStorage(defs, createBundledSource());
+    const getByIdSpy = vi.spyOn(inner, 'getWorkflowById');
+
+    const caching = new CachingWorkflowStorage(inner, 60_000);
+
+    // Simulate what handleV2ListWorkflows does: one loadAllWorkflows call, no fan-out
+    const allWorkflows = await caching.loadAllWorkflows();
+
+    // getWorkflowById must never have been called on the inner storage
+    expect(getByIdSpy).not.toHaveBeenCalled();
+
+    // The returned list must contain all expected workflows
+    const returnedIds = allWorkflows.map((w) => w.definition.id).sort();
+    expect(returnedIds).toEqual(['wf-a', 'wf-b', 'wf-c']);
+  });
+
+  it('never calls getWorkflowById on inner storage when listing via CachingCompositeWorkflowStorage.loadAllWorkflows', async () => {
+    const defs = [makeDef('wf-x'), makeDef('wf-y')];
+    const inner = new InMemoryWorkflowStorage(defs, createBundledSource());
+    const getByIdSpy = vi.spyOn(inner, 'getWorkflowById');
+
+    const composite = makeEmptyCompositeStorage();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (composite as any).storageInstances = [inner];
+
+    const caching = new CachingCompositeWorkflowStorage(composite, 60_000);
+    const allWorkflows = await caching.loadAllWorkflows();
+
+    expect(getByIdSpy).not.toHaveBeenCalled();
+
+    const returnedIds = allWorkflows.map((w) => w.definition.id).sort();
+    expect(returnedIds).toEqual(['wf-x', 'wf-y']);
   });
 });
 
@@ -144,6 +186,74 @@ describe('Fix 3: CachingWorkflowStorage uses Map for getWorkflowById', () => {
 
     // Should be a miss (cache was cleared)
     expect(statsAfter.misses).toBeGreaterThan(statsBefore.misses);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix 3b: Map cache in CachingCompositeWorkflowStorage
+// ---------------------------------------------------------------------------
+
+describe('Fix 3b: CachingCompositeWorkflowStorage uses Map for getWorkflowById', () => {
+  function makeCompositeCaching(defs: WorkflowDefinition[]): {
+    inner: InMemoryWorkflowStorage;
+    caching: CachingCompositeWorkflowStorage;
+  } {
+    const inner = new InMemoryWorkflowStorage(defs, createBundledSource());
+    const composite = makeEmptyCompositeStorage();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (composite as any).storageInstances = [inner];
+    const caching = new CachingCompositeWorkflowStorage(composite, 60_000);
+    return { inner, caching };
+  }
+
+  it('warm cache hit returns correct workflow by ID via O(1) Map lookup', async () => {
+    const { caching } = makeCompositeCaching([makeDef('comp-alpha'), makeDef('comp-beta')]);
+
+    // Warm the cache
+    await caching.loadAllWorkflows();
+
+    const result = await caching.getWorkflowById('comp-alpha');
+    expect(result).not.toBeNull();
+    expect(result!.definition.id).toBe('comp-alpha');
+  });
+
+  it('returns null for unknown ID when cache is warm (no fall-through to inner storage)', async () => {
+    const { inner, caching } = makeCompositeCaching([makeDef('comp-gamma')]);
+    const getByIdSpy = vi.spyOn(inner, 'getWorkflowById');
+
+    // Warm the cache
+    await caching.loadAllWorkflows();
+
+    const result = await caching.getWorkflowById('does-not-exist');
+    expect(result).toBeNull();
+    // Inner storage must NOT be consulted -- the warm Map index is the authority
+    expect(getByIdSpy).not.toHaveBeenCalled();
+  });
+
+  it('clearCache() invalidates the Map index so subsequent calls rebuild it', async () => {
+    const { caching } = makeCompositeCaching([makeDef('comp-delta')]);
+
+    // Warm cache and confirm Map lookup works
+    await caching.loadAllWorkflows();
+    const before = await caching.getWorkflowById('comp-delta');
+    expect(before).not.toBeNull();
+
+    // Clear cache -- Map index must also be cleared
+    caching.clearCache();
+
+    // After clearing, getWorkflowById falls through to inner (which is a miss in stats)
+    const statsBefore = caching.getCacheStats();
+    await caching.getWorkflowById('comp-delta');
+    const statsAfter = caching.getCacheStats();
+
+    // Expect a cache miss -- the index was cleared, so it fell through to inner storage
+    expect(statsAfter.misses).toBeGreaterThan(statsBefore.misses);
+
+    // Reload to rebuild the index; now the Map lookup should work again
+    await caching.loadAllWorkflows();
+    const after = await caching.getWorkflowById('comp-delta');
+    expect(after).not.toBeNull();
+    expect(after!.definition.id).toBe('comp-delta');
   });
 });
 
