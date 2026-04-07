@@ -256,8 +256,11 @@ describe('request-workflow-reader', () => {
   });
 
   it('marks root as stale when the root path does not exist (ENOENT)', async () => {
-    const { discovered, stale } = await discoverRootedWorkflowDirectories(['/nonexistent-path-xyz-123']);
-    expect(stale).toEqual(['/nonexistent-path-xyz-123']);
+    // Use path.resolve so the expected value matches the platform-normalized path
+    // (on Windows, '/nonexistent-path-xyz-123' resolves to 'D:\nonexistent-path-xyz-123')
+    const nonExistent = path.resolve('/nonexistent-path-xyz-123');
+    const { discovered, stale } = await discoverRootedWorkflowDirectories([nonExistent]);
+    expect(stale).toEqual([nonExistent]);
     expect(discovered).toEqual([]);
   });
 
