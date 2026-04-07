@@ -28,6 +28,8 @@ import { replayFromRecordedAdvance } from './replay.js';
 import { advanceAndRecord } from './advance.js';
 import type { ExecutionSessionGateErrorV2 } from '../../../v2/usecases/execution-session-gate.js';
 import type { SessionEventLogStoreError } from '../../../v2/ports/session-event-log-store.port.js';
+import { asSortedEventLog } from '../../../v2/durable-core/sorted-event-log.js';
+import { buildSessionIndex } from '../../../v2/durable-core/session-index.js';
 
 /**
  * Handle advance intent: execute next step and record the outcome.
@@ -55,9 +57,21 @@ export function handleAdvanceIntent(args: {
 
   const dedupeKey = `advance_recorded:${sessionId}:${nodeId}:${attemptId}`;
 
-  const runStarted = truth.events.find(
-    (e): e is Extract<DomainEventV1, { kind: 'run_started' }> => e.kind === EVENT_KIND.RUN_STARTED && e.scope.runId === String(runId)
-  );
+  // Build a single-pass index over the pre-lock truth to eliminate three redundant
+  // .find() scans below. The index is named preLockIndex to make the TOCTOU boundary
+  // visible: pre-lock facts (runStarted, nodeCreated) are immutable and safe to read
+  // from here. The advance_recorded dedup check (existingLocked) MUST use the
+  // lockedIndex built inside withHealthySessionLock -- never preLockIndex.
+  const preLockSortedResult = asSortedEventLog(truth.events);
+  if (preLockSortedResult.isErr()) {
+    return neErrorAsync({
+      kind: 'invariant_violation' as const,
+      message: `Session events are not sorted: ${preLockSortedResult.error.message}`,
+    });
+  }
+  const preLockIndex = buildSessionIndex(preLockSortedResult.value);
+
+  const runStarted = preLockIndex.runStartedByRunId.get(String(runId));
   if (!runStarted) {
     return neErrorAsync({
       kind: 'token_unknown_node' as const,
@@ -82,10 +96,10 @@ export function handleAdvanceIntent(args: {
     });
   }
 
-  const nodeCreated = truth.events.find(
-    (e): e is Extract<DomainEventV1, { kind: 'node_created' }> =>
-      e.kind === EVENT_KIND.NODE_CREATED && e.scope.nodeId === String(nodeId) && e.scope.runId === String(runId)
-  );
+  // NodeIds are ULIDs -- unique within the session. The original .find() checked
+  // both nodeId AND runId; the index omits the runId predicate since ULID
+  // uniqueness makes it redundant (see Invariant #4 in implementation plan).
+  const nodeCreated = preLockIndex.nodeCreatedByNodeId.get(String(nodeId));
   if (!nodeCreated) {
     return neErrorAsync({
       kind: 'token_unknown_node' as const,
@@ -115,9 +129,11 @@ export function handleAdvanceIntent(args: {
     }
   }
 
-  const existing = truth.events.find(
-    (e): e is Extract<DomainEventV1, { kind: 'advance_recorded' }> => e.kind === EVENT_KIND.ADVANCE_RECORDED && e.dedupeKey === dedupeKey
-  );
+  // Pre-lock early-exit: if we already recorded this advance, skip straight to replay.
+  // Uses preLockIndex -- safe because the replay path (line below) re-reads truth for rendering.
+  // The TOCTOU-sensitive dedup check (existingLocked) happens inside withHealthySessionLock
+  // using lockedIndex built from truthLocked. See TOCTOU note in session-index.ts.
+  const existing = preLockIndex.advanceRecordedByDedupeKey.get(dedupeKey);
 
   return pinnedStore.get(workflowHash)
     .mapErr((cause) => ({ kind: 'pinned_workflow_store_failed' as const, cause }))
@@ -157,10 +173,23 @@ export function handleAdvanceIntent(args: {
       return gate
         .withHealthySessionLock(sessionId, (lock) =>
           sessionStore.load(sessionId).andThen((truthLocked) => {
-            const existingLocked = truthLocked.events.find(
-              (e): e is Extract<DomainEventV1, { kind: 'advance_recorded' }> =>
-                e.kind === EVENT_KIND.ADVANCE_RECORDED && e.dedupeKey === dedupeKey
-            );
+            // IMPORTANT: Build lockedIndex from truthLocked (post-lock), NOT from the
+            // pre-lock truth or from preLockIndex. The advance_recorded dedup check below
+            // MUST use this index. Using preLockIndex here would be a TOCTOU race: a
+            // concurrent writer could record the same advance between the pre-lock read
+            // and lock acquisition, and we would miss the dedup check.
+            // truthLocked comes from a separate sessionStore.load() inside the lock --
+            // must validate independently, cannot reuse preLockSortedResult.
+            const lockedSortedResult = asSortedEventLog(truthLocked.events);
+            if (lockedSortedResult.isErr()) {
+              return neErrorAsync({
+                kind: 'invariant_violation' as const,
+                message: `Locked session events are not sorted: ${lockedSortedResult.error.message}`,
+              });
+            }
+            const lockedIndex = buildSessionIndex(lockedSortedResult.value);
+
+            const existingLocked = lockedIndex.advanceRecordedByDedupeKey.get(dedupeKey);
             if (existingLocked) return okAsync({ kind: 'replay' as const, truth: truthLocked, recordedEvent: existingLocked });
 
             return advanceAndRecord({
@@ -179,6 +208,7 @@ export function handleAdvanceIntent(args: {
               sessionStore,
               sha256,
               idFactory,
+              lockedIndex,
             }).andThen(() =>
               sessionStore
                 .load(sessionId)
