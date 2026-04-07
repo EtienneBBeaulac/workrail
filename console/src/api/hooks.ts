@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
-import type { ApiResponse, ConsoleSessionListResponse, ConsoleSessionDetail, ConsoleNodeDetail, ConsoleWorktreeListResponse, ConsoleWorkflowListResponse, ConsoleWorkflowDetail } from './types';
+import type { ApiResponse, ConsoleSessionListResponse, ConsoleSessionDetail, ConsoleNodeDetail, ConsoleWorktreeListResponse, ConsoleWorkflowListResponse, ConsoleWorkflowDetail, PerfToolCallsResponse } from './types';
+import { mapPerfQueryToResult } from './perf-state';
 
 // Typed HTTP error so callers can check status without brittle string parsing.
 export class HttpError extends Error {
@@ -62,6 +63,65 @@ export function useWorkflowList() {
     staleTime: Infinity,
     refetchInterval: false,
   });
+}
+
+/** Discriminated result type for the perf tool calls hook. */
+export type PerfToolCallsResult =
+  | { readonly state: 'loading' }
+  | { readonly state: 'devModeOff' }
+  | { readonly state: 'error'; readonly message: string; readonly retry: () => void }
+  | { readonly state: 'data'; readonly data: PerfToolCallsResponse };
+
+export function usePerfToolCalls(): PerfToolCallsResult {
+  const query = useQuery({
+    queryKey: ['perf', 'tool-calls'],
+    queryFn: async () => {
+      try {
+        return await fetchApi<PerfToolCallsResponse>('/api/v2/perf/tool-calls');
+      } catch (err) {
+        if (err instanceof HttpError && err.status === 404) {
+          // Sentinel value: server is running without WORKRAIL_DEV=1
+          return null;
+        }
+        throw err;
+      }
+    },
+    refetchInterval: 5_000,
+    staleTime: 3_000,
+    refetchIntervalInBackground: false,
+  });
+
+  const retry = () => void query.refetch();
+  return mapPerfQueryToResult(query, retry);
+}
+
+/**
+ * Returns true when the server is running with WORKRAIL_DEV=1, false otherwise.
+ * Fetches once at app startup (staleTime: Infinity) -- only I have this flag on.
+ * Returns null while the initial check is in flight.
+ */
+export function useIsDevMode(): boolean | null {
+  const query = useQuery({
+    queryKey: ['perf', 'dev-mode-check'],
+    queryFn: async () => {
+      try {
+        const data = await fetchApi<PerfToolCallsResponse>('/api/v2/perf/tool-calls?limit=1');
+        return data.devMode === true;
+      } catch (err) {
+        if (err instanceof HttpError && err.status === 404) {
+          return false;
+        }
+        throw err;
+      }
+    },
+    staleTime: Infinity,
+    refetchInterval: false,
+    retry: false,
+  });
+
+  if (query.isLoading) return null;
+  if (query.isError) return false;
+  return query.data ?? false;
 }
 
 export function useWorkflowDetail(workflowId: string | null) {
