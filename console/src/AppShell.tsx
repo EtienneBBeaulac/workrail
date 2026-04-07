@@ -33,9 +33,10 @@ export function AppShell() {
   const isOnWorkflowsTab = workflowsMatch !== false || workflowDetailMatch !== false;
   const isOnWorkflowDetail = workflowDetailMatch !== false;
   const isDevMode = useIsDevMode();
-  // Only show the Performance tab when devMode is confirmed active.
-  // If someone navigates directly to /perf without WORKRAIL_DEV=1, treat it as not-perf.
-  const isOnPerfTab = perfMatch !== false && isDevMode === true;
+  // isOnPerfRoute: are we at the /perf URL (regardless of dev flag -- supports easter egg direct link)
+  const isOnPerfRoute = perfMatch !== false;
+  // isOnPerfTab: only true when the flag is on -- drives tab button visibility and keyboard nav
+  const isOnPerfTab = isOnPerfRoute && isDevMode === true;
 
   const sessionId = isInSessionDetail
     ? (sessionMatch as Record<string, string>).sessionId
@@ -152,13 +153,13 @@ export function AppShell() {
               <button
                 role="tab"
                 id="tab-workspace"
-                aria-selected={!isOnWorkflowsTab && !isOnPerfTab}
+                aria-selected={!isOnWorkflowsTab && !isOnPerfRoute}
                 aria-controls="panel-workspace"
-                tabIndex={!isOnWorkflowsTab && !isOnPerfTab ? 0 : -1}
+                tabIndex={!isOnWorkflowsTab && !isOnPerfRoute ? 0 : -1}
                 onClick={() => void navigate({ to: '/' })}
                 className={[
                   'px-3 py-1 rounded text-sm font-medium transition-colors',
-                  !isOnWorkflowsTab && !isOnPerfTab
+                  !isOnWorkflowsTab && !isOnPerfRoute
                     ? 'text-[var(--text-primary)]'
                     : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]',
                 ].join(' ')}
@@ -210,7 +211,7 @@ export function AppShell() {
           id="panel-workspace"
           role="tabpanel"
           aria-labelledby="tab-workspace"
-          hidden={isOnWorkflowsTab || isOnPerfTab}
+          hidden={isOnWorkflowsTab || isOnPerfRoute}
         >
           {/* WorkspaceView is always mounted -- hidden via CSS only so scroll
               position in scrollYRef survives back-navigation from SessionDetail */}
@@ -244,7 +245,7 @@ export function AppShell() {
         )}
 
         {/* Performance panel */}
-        {isOnPerfTab && (
+        {isOnPerfRoute && (
           <div
             id="panel-perf"
             role="tabpanel"

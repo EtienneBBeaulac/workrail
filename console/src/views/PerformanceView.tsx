@@ -70,9 +70,8 @@ export function PerformanceView() {
   if (result.state === 'devModeOff') {
     return (
       <div className="flex items-center justify-center py-16">
-        <p className="text-sm text-[var(--text-secondary)] text-center max-w-md">
-          Performance tracing is not active. Start the WorkRail server with{' '}
-          <code className="font-mono">WORKRAIL_DEV=1</code> to enable tool call timing.
+        <p className="text-sm text-[var(--text-muted)] text-center">
+          nothing to see here
         </p>
       </div>
     );
