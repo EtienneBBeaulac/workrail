@@ -441,8 +441,9 @@ export function renderBudgetedRehydrateRecovery(args: {
   const initiallyIncludedTiers = tiersInOrder.filter((tier) => (sectionsByTier.get(tier) ?? []).length > 0);
   let includedTiers = initiallyIncludedTiers;
   let recoveryText = renderFromTiers(includedTiers);
-  // Cache the byte length so the while condition, needsSuffix check, and return
-  // value do not each re-encode the same string. Recompute only after renderFromTiers.
+  // Eliminated 2 redundant `encoder.encode()` calls per loop iteration (was 3
+  // total: condition + needsSuffix check + return value). Now encodes once per
+  // iteration for the condition check. Recompute only after renderFromTiers.
   let recoveryBytes = encoder.encode(recoveryText).length;
 
   while (recoveryBytes > RECOVERY_BUDGET_BYTES) {

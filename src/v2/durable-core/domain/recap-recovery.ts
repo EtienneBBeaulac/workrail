@@ -77,6 +77,10 @@ export function collectDownstreamRecap(args: {
   // Build path from tip backward to fromNode iteratively.
   // Same O(N²) Set allocation hazard as buildChain -- fixed with a single
   // mutable Set. Output order is identical: [toNodeId, ..., child_of_fromNodeId].
+  //
+  // Relies on the DAG structural invariant enforced by `projectRunDagV2`: all
+  // `parentNodeId` references point to valid nodes. Cycle detection via `visited`
+  // set guards against any violation.
   const buildPathBackward = (start: string): readonly string[] => {
     const result: string[] = [];
     const visited = new Set<string>();
