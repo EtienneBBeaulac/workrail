@@ -7,7 +7,7 @@
  * 3. Edge cases: empty workflow, multiple loops, step not found
  */
 import { describe, it, expect } from 'vitest';
-import { createWorkflow, getStepById } from '../../../src/types/workflow.js';
+import { createWorkflow, getStepById, getAllStepIds } from '../../../src/types/workflow.js';
 import { createBundledSource } from '../../../src/types/workflow-source.js';
 import type { WorkflowDefinition } from '../../../src/types/workflow-definition.js';
 
@@ -343,5 +343,37 @@ describe('workflow indices: loop with body as a string reference', () => {
     const wf = makeStringBodyLoopWorkflow();
     // Only the top-level steps exist; none should be a loop child.
     expect(wf.parentLoopByStepId.size).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getAllStepIds ordering
+// ---------------------------------------------------------------------------
+
+describe('getAllStepIds ordering', () => {
+  it('returns top-level step IDs in definition order for a simple workflow', () => {
+    const wf = makeSimpleWorkflow();
+    expect(getAllStepIds(wf)).toEqual(['step-1', 'step-2']);
+  });
+
+  it('returns steps in DFS definition order (loop body steps immediately after their loop step)', () => {
+    // Map insertion order is spec-guaranteed; this test makes the contract
+    // explicit: createWorkflow() uses a DFS traversal, so loop body steps
+    // appear immediately after their parent loop step, not at the end.
+    const wf = makeLoopWorkflow();
+    const ids = getAllStepIds(wf);
+    expect(ids).toEqual([
+      'step-before',
+      'loop-1',
+      'loop-body-1',
+      'loop-body-2',
+      'loop-exit-1',
+      'step-after',
+    ]);
+  });
+
+  it('returns an empty array for an empty workflow', () => {
+    const wf = makeEmptyWorkflow();
+    expect(getAllStepIds(wf)).toEqual([]);
   });
 });

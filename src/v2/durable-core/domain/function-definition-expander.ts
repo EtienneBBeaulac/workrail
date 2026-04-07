@@ -42,12 +42,15 @@ function getLoopScopeDefs(args: {
 
 /**
  * Get step-scoped function definitions.
+ * Uses workflow.stepById for O(1) lookup that correctly covers loop-body steps.
+ * The old definition.steps.find() was a top-level-only O(n) scan that silently
+ * returned empty for any step nested inside a loop body.
  */
 function getStepScopeDefs(args: {
   readonly workflow: Workflow;
   readonly stepId: string;
 }): readonly FunctionDefinition[] {
-  const step = args.workflow.definition.steps.find(s => s.id === args.stepId);
+  const step = args.workflow.stepById.get(args.stepId);
   return step?.functionDefinitions?.filter(
     f => !f.scope || f.scope === 'step'
   ) ?? [];
