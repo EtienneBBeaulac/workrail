@@ -189,12 +189,17 @@ body::after {
   text-shadow: 0 0 12px rgba(0, 219, 233, 0.5), 0 0 4px rgba(0, 219, 233, 0.3);
 }
 
-/* Status badge for in_progress sessions -- cyan electric */
+/* Status badge for in_progress sessions -- cyan electric.
+   Uses text-shadow (not box-shadow) to avoid layer compositing isolation
+   which causes a dark rectangle behind the text inside backdrop-filter parents. */
 .badge-live {
   color: var(--accent-strong);
-  border-color: rgba(0, 219, 233, 0.4);
-  box-shadow: 0 0 8px rgba(0, 219, 233, 0.2);
-  animation: energy-live-pulse 2.4s ease-in-out infinite;
+  animation: badge-live-text-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes badge-live-text-pulse {
+  0%, 100% { text-shadow: 0 0 6px rgba(0, 219, 233, 0.5); }
+  50%       { text-shadow: 0 0 16px rgba(0, 219, 233, 0.9), 0 0 4px rgba(0, 219, 233, 0.6); }
 }
 
 /* ---------- Markdown typography ---------- */
