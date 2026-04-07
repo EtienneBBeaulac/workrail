@@ -16,7 +16,6 @@ import { describe, it, expect } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
-import { errAsync } from 'neverthrow';
 
 import { NodeFileSystemV2 } from '../../../src/v2/infra/local/fs/index.js';
 import { LocalDataDirV2 } from '../../../src/v2/infra/local/data-dir/index.js';
@@ -28,7 +27,7 @@ import { NodeTimeClockV2 } from '../../../src/v2/infra/local/time-clock/index.js
 
 import { asSessionId, asSnapshotRef, asSha256Digest } from '../../../src/v2/durable-core/ids/index.js';
 import type { DomainEventV1 } from '../../../src/v2/durable-core/schemas/session/index.js';
-import type { FileSystemPortV2, FsError } from '../../../src/v2/ports/fs.port.js';
+import type { FileSystemPortV2 } from '../../../src/v2/ports/fs.port.js';
 
 async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-perf-'));
@@ -103,21 +102,6 @@ describe('readdirWithMtime - parallel stat calls', () => {
 
     // Remove one entry after readdir would have listed it to simulate ENOENT on stat
     // We achieve this by using a fake that fails stat for one specific path.
-    const baseFs = new NodeFileSystemV2();
-    const targetPath = path.join(root, 'sess_y');
-    const failingStatFs = wrapFs(baseFs, {
-      stat: (filePath: string) => {
-        if (filePath === targetPath) {
-          return errAsync({ code: 'FS_NOT_FOUND' as const, message: `Not found: ${filePath}` } satisfies FsError);
-        }
-        return baseFs.stat(filePath);
-      },
-      // readdirWithMtime must use this fs's stat, so we override readdirWithMtime too
-      // to use the fake stat. Since NodeFileSystemV2 calls its own stat internally,
-      // we need to test the real implementation differently.
-      // Instead, test with a real ENOENT by unlinking the dir after readdir:
-    });
-
     // For the graceful degradation test, use the real fs but delete a dir mid-scan.
     // We can't intercept internals easily, so we instead verify the real behavior
     // with a directory that disappears:
@@ -135,7 +119,6 @@ describe('readdirWithMtime - parallel stat calls', () => {
     // but no error is thrown. What's certain is sess_y is missing from stat results.
     expect(result.find((e) => e.name === 'sess_y')).toBeUndefined();
     expect(result.length).toBeGreaterThanOrEqual(2);
-    void failingStatFs;
   });
 
   it('returns empty array for empty directory', async () => {

@@ -171,6 +171,12 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStore
             }));
             return this.appendManifestRecords(manifestPath, [segClosed, ...pinRecords]);
           });
+      })
+      .orElse((error) => {
+        // WHY: If the append fails after mkdirp succeeded, the events dir may have been deleted
+        // externally. Evict the cache so the next attempt retries mkdirp rather than skipping it.
+        _createdEventsDirs.delete(eventsDir);
+        return errAsync(error);
       });
   }
 
@@ -187,7 +193,7 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStore
 
         const segments = manifest.filter((m): m is Extract<ManifestRecordV1, { kind: 'segment_closed' }> => m.kind === MANIFEST_KIND.SEGMENT_CLOSED);
 
-        return loadSegmentsRecursive({
+        return loadSegmentsParallel({
           segments,
           sessionDir,
           sha256: this.sha256,
@@ -709,7 +715,7 @@ function processSegmentForSalvage(args: {
 type CrashSafeFileOpsPortV2 = Pick<FileSystemPortV2, 'readFileBytes'>;
 
 // Extracted from loadImpl: parallel segment loading with full validation
-function loadSegmentsRecursive(args: {
+function loadSegmentsParallel(args: {
   segments: readonly Extract<ManifestRecordV1, { kind: 'segment_closed' }>[];
   sessionDir: string;
   sha256: Sha256PortV2;
