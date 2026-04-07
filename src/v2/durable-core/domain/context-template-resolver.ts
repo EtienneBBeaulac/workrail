@@ -40,8 +40,10 @@
  */
 export const CONTEXT_TOKEN_PATTERN = /\{\{(?!wr\.)([a-zA-Z_]\w*(?:\.[a-zA-Z_]\w*)*)\}\}/;
 
-/** @internal Used only by resolveContextTemplates — owns the `g` flag lifecycle. */
-const CONTEXT_TOKEN_RE_G = new RegExp(CONTEXT_TOKEN_PATTERN.source, 'g');
+// Note: CONTEXT_TOKEN_RE_G (shared global `g`-flagged regex) was removed.
+// A shared `g`-flagged regex is a correctness hazard: its `lastIndex` state
+// persists across calls. Use a fresh instance inside resolveContextTemplates
+// instead (see the comment on CONTEXT_TOKEN_PATTERN above).
 
 // ---------------------------------------------------------------------------
 // Dot-path resolution
@@ -85,7 +87,9 @@ export function resolveContextTemplates(
   // Fast path: no tokens present
   if (!template.includes('{{')) return template;
 
-  return template.replace(CONTEXT_TOKEN_RE_G, (_match, dotPath: string) => {
+  // Construct a fresh `g`-flagged regex per call to avoid shared lastIndex state.
+  const re = new RegExp(CONTEXT_TOKEN_PATTERN.source, 'g');
+  return template.replace(re, (_match, dotPath: string) => {
     const value = resolveDotPath(context, dotPath.split('.'));
 
     if (value === undefined || value === null) {

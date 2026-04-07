@@ -136,6 +136,30 @@ describe('resolveContextTemplates — expression tokens pass-through (no regress
   });
 });
 
+describe('resolveContextTemplates — regex lastIndex safety', () => {
+  it('resolves the same template correctly on two consecutive calls (no lastIndex bleed)', () => {
+    // A shared global `g`-flagged regex can retain lastIndex state across calls.
+    // This test calls resolveContextTemplates twice with the same template to ensure
+    // the second call produces the same result as the first.
+    const template = '{{a}} and {{b}} and {{a}}';
+    const context = { a: 'X', b: 'Y' };
+    const first = resolveContextTemplates(template, context);
+    const second = resolveContextTemplates(template, context);
+    expect(first).toBe('X and Y and X');
+    expect(second).toBe('X and Y and X');
+    expect(first).toBe(second);
+  });
+
+  it('resolves tokens correctly after a call that left tokens unresolved', () => {
+    // Unresolved tokens produce [unset: ...] replacements; verify the next call is clean.
+    const template = '{{x}}';
+    const first = resolveContextTemplates(template, {});
+    expect(first).toBe('[unset: x]');
+    const second = resolveContextTemplates(template, { x: 'resolved' });
+    expect(second).toBe('resolved');
+  });
+});
+
 describe('resolveContextTemplates — edge cases', () => {
   it('returns template unchanged when context is empty and no tokens are present', () => {
     expect(resolveContextTemplates('No tokens here.', {})).toBe('No tokens here.');
