@@ -193,6 +193,30 @@ describe('Phase 5: God-Tier Validation Regression Tests', () => {
       expect(report.isValid).toBe(true); // Warning, not error
     });
 
+    it('2a. Non-wr.* bundled workflow vs project source → bundled wins (development-mode regression)', () => {
+      // Regression: when workrail runs from its own source repo, the project
+      // path equals the bundled workflows directory. Both sources register the
+      // same workflow files. The resolution layer must keep kind:'bundled'.
+      const bundledWf = wf(def('coding-task-workflow-agentic'), createBundledSource());
+      const projectWf = wf(def('coding-task-workflow-agentic'), createProjectDirectorySource('/path/to/workrail/workflows'));
+
+      const candidates = [
+        { sourceRef: 0 as SourceRef, workflows: [bundledWf] },
+        { sourceRef: 1 as SourceRef, workflows: [projectWf] },
+      ];
+
+      const resolved = resolveWorkflowCandidates(candidates, new Map());
+
+      // Bundled source wins even though the workflow ID does not start with 'wr.'
+      expect(resolved).toHaveLength(1);
+      expect(resolved[0]!.workflow.source.kind).toBe('bundled');
+      expect(resolved[0]!.resolvedBy.kind).toBe('bundled_protected');
+      if (resolved[0]!.resolvedBy.kind === 'bundled_protected') {
+        expect(resolved[0]!.resolvedBy.bundledSourceRef).toBe(0);
+        expect(resolved[0]!.resolvedBy.attemptedShadowRefs).toEqual([1]);
+      }
+    });
+
     it('2b. wr.* ID in two non-bundled sources → hard error (no protection)', () => {
       const projectWf = wf(def('wr.shadow-attempt'), createProjectDirectorySource('/home/user/project'));
       const userWf = wf(def('wr.shadow-attempt'), createUserDirectorySource('/home/user/.workrail/workflows'));
@@ -224,6 +248,28 @@ describe('Phase 5: God-Tier Validation Regression Tests', () => {
 
       expect(report.duplicateIds[0]!.isBundledProtection).toBe(false);
       expect(report.isValid).toBe(false); // Hard error
+    });
+
+    it('2c. Bundled workflow vs user/custom/git source → user/custom/git wins (normal priority)', () => {
+      // Bundled protection only applies to project sources, not user/custom/git.
+      // User, custom, and git sources should still override bundled via normal
+      // source_priority ordering (they appear later in the source list).
+      const bundledWf = wf(def('my-workflow'), createBundledSource());
+      const userWf = wf(def('my-workflow'), createUserDirectorySource('/home/user/.workrail/workflows'));
+
+      const candidates = [
+        { sourceRef: 0 as SourceRef, workflows: [bundledWf] },
+        { sourceRef: 1 as SourceRef, workflows: [userWf] },
+      ];
+
+      const resolved = resolveWorkflowCandidates(candidates, new Map());
+
+      // User source wins via normal source_priority (bundled protection does not activate)
+      expect(resolved).toHaveLength(1);
+      expect(resolved[0]!.resolvedBy.kind).toBe('source_priority');
+      if (resolved[0]!.resolvedBy.kind === 'source_priority') {
+        expect(resolved[0]!.resolvedBy.winnerRef).toBe(1);
+      }
     });
 
     it('3. Three workflows with same ID → reports all three sources', () => {
@@ -854,11 +900,13 @@ describe('Phase 5: God-Tier Validation Regression Tests', () => {
         expect(unique[0]!.resolvedBy.sourceRef).toBe(0);
       }
 
-      // Test source_priority
+      // Test source_priority (bundled vs user — user wins via normal priority)
+      // Note: bundled vs project now triggers bundled_protected (see test 2a/2c).
+      // Use user source here to demonstrate normal source_priority ordering.
       const priority = resolveWorkflowCandidates(
         [
           { sourceRef: 0, workflows: [wf(def('wf'), createBundledSource())] },
-          { sourceRef: 1, workflows: [wf(def('wf'), createProjectDirectorySource('/project'))] },
+          { sourceRef: 1, workflows: [wf(def('wf'), createUserDirectorySource('/home/user/.workrail/workflows'))] },
         ],
         new Map()
       );
