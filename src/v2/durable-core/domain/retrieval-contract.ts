@@ -161,20 +161,39 @@ export const RESUME_PREVIEW_CONTRACT: ResumePreviewContract = {
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8');
 
+// Pre-computed Record lookups replace Array.find over constant 2-3 element arrays.
+// Each call to getTierPriority etc. happens inside sort comparators that run on
+// every segment pair -- O(1) Record access is meaningfully cheaper than O(N) find.
+const TIER_PRIORITY: Record<RetrievalPackTier, number> = Object.fromEntries(
+  REHYDRATE_RETRIEVAL_CONTRACT.tiers.map((t) => [t.tier, t.priority]),
+) as Record<RetrievalPackTier, number>;
+
+const TIER_RETENTION: Record<RetrievalPackTier, 'core' | 'tail'> = Object.fromEntries(
+  REHYDRATE_RETRIEVAL_CONTRACT.tiers.map((t) => [t.tier, t.retention]),
+) as Record<RetrievalPackTier, 'core' | 'tail'>;
+
+const RESUME_PREVIEW_TIER_PRIORITY: Record<ResumePreviewTier, number> = Object.fromEntries(
+  RESUME_PREVIEW_CONTRACT.tiers.map((t) => [t.tier, t.priority]),
+) as Record<ResumePreviewTier, number>;
+
+const RESUME_PREVIEW_TIER_MAX_BYTES: Record<ResumePreviewTier, number> = Object.fromEntries(
+  RESUME_PREVIEW_CONTRACT.tiers.map((t) => [t.tier, t.maxBytes]),
+) as Record<ResumePreviewTier, number>;
+
 function getTierPriority(tier: RetrievalPackTier): number {
-  return REHYDRATE_RETRIEVAL_CONTRACT.tiers.find((candidate) => candidate.tier === tier)?.priority ?? Number.MAX_SAFE_INTEGER;
+  return TIER_PRIORITY[tier] ?? Number.MAX_SAFE_INTEGER;
 }
 
 function getTierRetention(tier: RetrievalPackTier): 'core' | 'tail' {
-  return REHYDRATE_RETRIEVAL_CONTRACT.tiers.find((candidate) => candidate.tier === tier)?.retention ?? 'tail';
+  return TIER_RETENTION[tier] ?? 'tail';
 }
 
 function getResumePreviewTierPriority(tier: ResumePreviewTier): number {
-  return RESUME_PREVIEW_CONTRACT.tiers.find((candidate) => candidate.tier === tier)?.priority ?? Number.MAX_SAFE_INTEGER;
+  return RESUME_PREVIEW_TIER_PRIORITY[tier] ?? Number.MAX_SAFE_INTEGER;
 }
 
 function getResumePreviewTierMaxBytes(tier: ResumePreviewTier): number {
-  return RESUME_PREVIEW_CONTRACT.tiers.find((candidate) => candidate.tier === tier)?.maxBytes ?? RESUME_PREVIEW_CONTRACT.budgetBytes;
+  return RESUME_PREVIEW_TIER_MAX_BYTES[tier] ?? RESUME_PREVIEW_CONTRACT.budgetBytes;
 }
 
 function compareAscii(a: string, b: string): number {
@@ -422,8 +441,11 @@ export function renderBudgetedRehydrateRecovery(args: {
   const initiallyIncludedTiers = tiersInOrder.filter((tier) => (sectionsByTier.get(tier) ?? []).length > 0);
   let includedTiers = initiallyIncludedTiers;
   let recoveryText = renderFromTiers(includedTiers);
+  // Cache the byte length so the while condition, needsSuffix check, and return
+  // value do not each re-encode the same string. Recompute only after renderFromTiers.
+  let recoveryBytes = encoder.encode(recoveryText).length;
 
-  while (encoder.encode(recoveryText).length > RECOVERY_BUDGET_BYTES) {
+  while (recoveryBytes > RECOVERY_BUDGET_BYTES) {
     const droppableTierIndex = [...includedTiers]
       .reverse()
       .findIndex((tier) => getTierRetention(tier) === 'tail');
@@ -435,10 +457,11 @@ export function renderBudgetedRehydrateRecovery(args: {
     const actualIndex = includedTiers.length - 1 - droppableTierIndex;
     includedTiers = includedTiers.filter((_, index) => index !== actualIndex);
     recoveryText = renderFromTiers(includedTiers);
+    recoveryBytes = encoder.encode(recoveryText).length;
   }
 
   const omittedTierCount = initiallyIncludedTiers.length - includedTiers.length;
-  const needsSuffix = omittedTierCount > 0 || encoder.encode(recoveryText).length > RECOVERY_BUDGET_BYTES || includedTiers.length === 0;
+  const needsSuffix = omittedTierCount > 0 || recoveryBytes > RECOVERY_BUDGET_BYTES || includedTiers.length === 0;
   const finalText = recoveryText.length === 0
     ? trimFinalRecoveryText(args.header, initiallyIncludedTiers.length)
     : !needsSuffix
@@ -449,6 +472,6 @@ export function renderBudgetedRehydrateRecovery(args: {
     text: finalText,
     includedTiers,
     omittedTierCount,
-    truncatedWithinTier: encoder.encode(recoveryText).length > RECOVERY_BUDGET_BYTES || includedTiers.length === 0,
+    truncatedWithinTier: recoveryBytes > RECOVERY_BUDGET_BYTES || includedTiers.length === 0,
   };
 }
