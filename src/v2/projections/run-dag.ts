@@ -338,8 +338,17 @@ export function projectRunDagV2(events: readonly DomainEventV1[]): Result<RunDag
         };
 
         if (existing) {
-          // duplicate node_created is allowed only if identical (replay).
-          if (JSON.stringify(existing) !== JSON.stringify(node)) {
+          // Duplicate node_created is allowed only if identical (replay).
+          // Field-by-field comparison avoids JSON.stringify overhead on every
+          // replay event. All 6 fields of RunDagNodeV2 are primitive-valued.
+          const differs =
+            existing.nodeId !== node.nodeId ||
+            existing.nodeKind !== node.nodeKind ||
+            existing.parentNodeId !== node.parentNodeId ||
+            existing.workflowHash !== node.workflowHash ||
+            existing.snapshotRef !== node.snapshotRef ||
+            existing.createdAtEventIndex !== node.createdAtEventIndex;
+          if (differs) {
             return err({
               code: 'PROJECTION_CORRUPTION_DETECTED',
               message: `node_created conflict for runId=${runId} nodeId=${nodeId}`,
