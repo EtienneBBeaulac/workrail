@@ -191,7 +191,7 @@ export function handleAdvanceIntent(args: {
             const lockedIndex = buildSessionIndex(lockedSortedResult.value);
 
             const existingLocked = lockedIndex.advanceRecordedByDedupeKey.get(dedupeKey);
-            if (existingLocked) return okAsync({ kind: 'replay' as const, truth: truthLocked, recordedEvent: existingLocked });
+            if (existingLocked) return okAsync({ kind: 'replay' as const, truth: truthLocked, recordedEvent: existingLocked, precomputedIndex: lockedIndex });
 
             return advanceAndRecord({
               truth: truthLocked,
@@ -213,7 +213,20 @@ export function handleAdvanceIntent(args: {
             }).andThen(() =>
               sessionStore
                 .load(sessionId)
-                .map((truthAfter) => ({ kind: 'replay' as const, truth: truthAfter, recordedEvent: null }))
+                .andThen((truthAfter) => {
+                  // Build an index over truth2 so the recordedEvent lookup and the
+                  // subsequent renderPendingPrompt scans can use the index.
+                  const afterSortedResult = asSortedEventLog(truthAfter.events);
+                  if (afterSortedResult.isErr()) {
+                    return neErrorAsync({
+                      kind: 'invariant_violation' as const,
+                      message: `Post-advance session events are not sorted: ${afterSortedResult.error.message}`,
+                    });
+                  }
+                  const index2 = buildSessionIndex(afterSortedResult.value);
+                  const recordedEvent = index2.advanceRecordedByDedupeKey.get(dedupeKey) ?? null;
+                  return okAsync({ kind: 'replay' as const, truth: truthAfter, recordedEvent, precomputedIndex: index2 });
+                })
             );
           })
         )
@@ -247,12 +260,9 @@ export function handleAdvanceIntent(args: {
         })
         .andThen((res) => {
           const truth2 = res.truth;
-          const recordedEvent =
-            res.recordedEvent ??
-            truth2.events.find(
-              (e): e is Extract<DomainEventV1, { kind: 'advance_recorded' }> =>
-                e.kind === EVENT_KIND.ADVANCE_RECORDED && e.dedupeKey === dedupeKey
-            );
+          // recordedEvent is pre-populated from index2 on the fresh-advance path.
+          // On the replay path (res.recordedEvent from existingLocked), it's also set.
+          const recordedEvent = res.recordedEvent;
 
           if (!recordedEvent) {
             return neErrorAsync({
@@ -264,6 +274,7 @@ export function handleAdvanceIntent(args: {
           return replayFromRecordedAdvance({
             recordedEvent,
             truth: truth2,
+            precomputedIndex: res.precomputedIndex,
             sessionId,
             runId,
             nodeId,

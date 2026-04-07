@@ -175,6 +175,7 @@ export function executeAdvanceCore(args: {
 
   const validatedRes = validateAdvanceInputs({
     truth, runId, currentNodeId, inputContext, inputOutput, pinnedWorkflow, pendingStep,
+    precomputedIndex: args.lockedIndex,
   });
   if (validatedRes.isErr()) return errAsync(validatedRes.error);
   const v = validatedRes.value;

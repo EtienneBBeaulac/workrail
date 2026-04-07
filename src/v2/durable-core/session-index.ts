@@ -1,12 +1,14 @@
 import type { Brand } from '../../runtime/brand.js';
 import type { SortedEventLog } from './sorted-event-log.js';
 import type { DomainEventV1 } from './schemas/session/index.js';
+import type { JsonObject } from './canonical/json-types.js';
+import { OUTPUT_CHANNEL, PAYLOAD_KIND } from './constants.js';
 
 /**
  * Branded type: SessionIndex
  *
  * A single-pass index over a SortedEventLog that pre-extracts the facts
- * currently scattered across ~9 redundant .find()/.some() scans per
+ * currently scattered across redundant .find()/.some() scans per
  * continue_workflow call.
  *
  * Invariants:
@@ -28,11 +30,18 @@ import type { DomainEventV1 } from './schemas/session/index.js';
  * across module boundaries, phantom types should be added at that point.
  *
  * Performance intent:
- * - Eliminates ~9 handler-level O(n) event scans per continue_workflow call
- * - Projection-internal scans (validateAdvanceInputs, renderPendingPrompt)
- *   are deferred to a follow-on PR
+ * - Eliminates handler-level O(n) event scans per continue_workflow call
+ * - Also eliminates projection-internal scans when callers pass the index
+ *   to validateAdvanceInputs and renderPendingPrompt
  */
 export interface SessionIndexData {
+  /**
+   * The validated, sorted event log this index was built from.
+   * Callers can pass this to projections that accept SortedEventLog
+   * instead of calling asSortedEventLog() again.
+   */
+  readonly sortedEvents: SortedEventLog;
+
   /**
    * run_started events keyed by scope.runId.
    * Used to retrieve workflowHash for the active run without re-scanning.
@@ -69,14 +78,21 @@ export interface SessionIndexData {
   /**
    * The eventIndex to use for the next appended event.
    * Computed as last event's eventIndex + 1, or 0 for an empty log.
-   * Non-contiguous indices are handled correctly (e.g. [0, 5] → nextEventIndex = 6).
    */
   readonly nextEventIndex: number;
 
-  // hasPriorNotesByRunId intentionally omitted from this PR.
-  // No consumer in scope -- prompt-renderer.ts is projection-internal and
-  // deferred to the follow-on projection-level scan reduction PR.
-  // Add here when prompt-renderer.ts is migrated to accept SessionIndex.
+  /**
+   * Set of runIds that have at least one node_output_appended recap/notes event.
+   * Used by renderPendingPrompt to skip the hasPriorNotesInRun .some() scan.
+   */
+  readonly hasPriorNotesByRunId: ReadonlySet<string>;
+
+  /**
+   * Latest context per runId, derived from context_set events (latest wins).
+   * Used by validateAdvanceInputs to skip the projectRunContextV2 scan.
+   * Only populated for context_set events with valid plain-object context.
+   */
+  readonly runContextByRunId: ReadonlyMap<string, JsonObject>;
 }
 
 export type SessionIndex = Brand<SessionIndexData, 'v2.SessionIndex'>;
@@ -97,6 +113,8 @@ export function buildSessionIndex(events: SortedEventLog): SessionIndex {
   const nodeCreatedByNodeId = new Map<string, Extract<DomainEventV1, { kind: 'node_created' }>>();
   const hasChildEdgeByFromNodeId = new Set<string>();
   const advanceRecordedByDedupeKey = new Map<string, Extract<DomainEventV1, { kind: 'advance_recorded' }>>();
+  const hasPriorNotesByRunId = new Set<string>();
+  const runContextByRunId = new Map<string, JsonObject>();
 
   for (const event of events) {
     switch (event.kind) {
@@ -112,6 +130,25 @@ export function buildSessionIndex(events: SortedEventLog): SessionIndex {
       case 'advance_recorded':
         advanceRecordedByDedupeKey.set(event.dedupeKey, event as Extract<DomainEventV1, { kind: 'advance_recorded' }>);
         break;
+      case 'node_output_appended': {
+        // Track runs that have prior recap/notes so renderPendingPrompt
+        // can skip its hasPriorNotesInRun .some() scan.
+        const outputEvt = event as Extract<DomainEventV1, { kind: 'node_output_appended' }>;
+        if (outputEvt.data.outputChannel === OUTPUT_CHANNEL.RECAP &&
+            outputEvt.data.payload.payloadKind === PAYLOAD_KIND.NOTES) {
+          hasPriorNotesByRunId.add(event.scope.runId);
+        }
+        break;
+      }
+      case 'context_set': {
+        // Latest context_set wins per runId (same semantics as projectRunContextV2).
+        // Skip events with invalid context (non-plain-object).
+        const ctx = (event as Extract<DomainEventV1, { kind: 'context_set' }>).data.context;
+        if (ctx && typeof ctx === 'object' && !Array.isArray(ctx)) {
+          runContextByRunId.set(event.scope.runId, ctx as JsonObject);
+        }
+        break;
+      }
       default:
         // Silently skip unknown event kinds for forward compatibility.
         // Unknown kinds indicate a schema version this code doesn't recognize,
@@ -125,11 +162,14 @@ export function buildSessionIndex(events: SortedEventLog): SessionIndex {
   const nextEventIndex = lastEvent !== undefined ? lastEvent.eventIndex + 1 : 0;
 
   const data: SessionIndexData = {
+    sortedEvents: events,
     runStartedByRunId,
     nodeCreatedByNodeId,
     hasChildEdgeByFromNodeId,
     advanceRecordedByDedupeKey,
     nextEventIndex,
+    hasPriorNotesByRunId,
+    runContextByRunId,
   };
 
   return data as SessionIndex;

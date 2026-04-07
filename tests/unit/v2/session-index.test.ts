@@ -162,6 +162,59 @@ describe('buildSessionIndex', () => {
     expect(index.runStartedByRunId.get('run_2')).toBeDefined();
   });
 
+  it('exposes sortedEvents field matching the input', () => {
+    const events = [makeRunStarted(0, 'run_1'), makeNodeCreated(1, 'run_1', 'node_a')];
+    const sorted = sortedLog(events);
+    const index = buildSessionIndex(sorted);
+    expect(index.sortedEvents).toBe(sorted); // same reference
+  });
+
+  it('populates hasPriorNotesByRunId for recap/notes output events', () => {
+    const noteEvent: DomainEventV1 = {
+      v: 1, eventId: 'evt_2', eventIndex: 2, sessionId: 'sess_1',
+      kind: 'node_output_appended',
+      dedupeKey: 'noa:sess_1:2',
+      scope: { runId: 'run_1', nodeId: 'node_a' },
+      data: { outputChannel: 'recap', payload: { payloadKind: 'notes', notesMarkdown: 'hi' } },
+    } as unknown as DomainEventV1;
+    const events = [makeRunStarted(0, 'run_1'), makeNodeCreated(1, 'run_1', 'node_a'), noteEvent];
+    const index = buildSessionIndex(sortedLog(events));
+    expect(index.hasPriorNotesByRunId.has('run_1')).toBe(true);
+    expect(index.hasPriorNotesByRunId.has('run_2')).toBe(false);
+  });
+
+  it('does not populate hasPriorNotesByRunId for non-recap output events', () => {
+    const artifactEvent: DomainEventV1 = {
+      v: 1, eventId: 'evt_2', eventIndex: 2, sessionId: 'sess_1',
+      kind: 'node_output_appended',
+      dedupeKey: 'noa:sess_1:2',
+      scope: { runId: 'run_1', nodeId: 'node_a' },
+      data: { outputChannel: 'artifact', payload: { payloadKind: 'artifact', artifactId: 'x' } },
+    } as unknown as DomainEventV1;
+    const events = [makeRunStarted(0, 'run_1'), makeNodeCreated(1, 'run_1', 'node_a'), artifactEvent];
+    const index = buildSessionIndex(sortedLog(events));
+    expect(index.hasPriorNotesByRunId.has('run_1')).toBe(false);
+  });
+
+  it('populates runContextByRunId from context_set events (latest wins)', () => {
+    const ctxEvent1: DomainEventV1 = {
+      v: 1, eventId: 'evt_2', eventIndex: 2, sessionId: 'sess_1',
+      kind: 'context_set', dedupeKey: 'ctx:sess_1:1',
+      scope: { runId: 'run_1' },
+      data: { context: { foo: 'first' }, source: 'agent_delta' },
+    } as unknown as DomainEventV1;
+    const ctxEvent2: DomainEventV1 = {
+      v: 1, eventId: 'evt_3', eventIndex: 3, sessionId: 'sess_1',
+      kind: 'context_set', dedupeKey: 'ctx:sess_1:2',
+      scope: { runId: 'run_1' },
+      data: { context: { foo: 'second' }, source: 'agent_delta' },
+    } as unknown as DomainEventV1;
+    const events = [makeRunStarted(0, 'run_1'), makeNodeCreated(1, 'run_1', 'node_a'), ctxEvent1, ctxEvent2];
+    const index = buildSessionIndex(sortedLog(events));
+    expect(index.runContextByRunId.get('run_1')).toEqual({ foo: 'second' }); // latest wins
+    expect(index.runContextByRunId.get('run_2')).toBeUndefined();
+  });
+
   it('TOCTOU: index built after advance_recorded write reflects the new record', () => {
     // Pre-lock: no advance recorded
     const preLockEvents = [

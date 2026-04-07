@@ -38,6 +38,17 @@ describe('asSortedEventLog', () => {
     }
   });
 
+  it('rejects an array with duplicate eventIndex values', () => {
+    // The tightened check (<=) rejects equal consecutive indices, not just descending.
+    const events = [makeEvent(0), makeEvent(1), makeEvent(1), makeEvent(2)];
+    const result = asSortedEventLog(events);
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      expect(result.error.code).toBe('PROJECTION_INVARIANT_VIOLATION');
+      expect(result.error.message).toContain('strictly ascending');
+    }
+  });
+
   it('rejects an out-of-order array', () => {
     const events = [makeEvent(1), makeEvent(0)];
     const result = asSortedEventLog(events);

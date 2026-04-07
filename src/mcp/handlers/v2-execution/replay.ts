@@ -55,6 +55,7 @@ export function buildAdvancedReplayResponse(args: {
   readonly sha256: Sha256PortV2;
   readonly aliasStore: import('../../../v2/ports/token-alias-store.port.js').TokenAliasStorePortV2;
   readonly entropy: import('../../../v2/ports/random-entropy.port.js').RandomEntropyPortV2;
+  readonly precomputedIndex?: import('../../../v2/durable-core/session-index.js').SessionIndex;
 }): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, ContinueWorkflowError> {
   const { sessionId, runId, fromNodeId, toNodeId, attemptId, toSnapshot, workflow, truth, workflowHash, ports, sha256, aliasStore, entropy } = args;
   
@@ -128,6 +129,7 @@ export function buildAdvancedReplayResponse(args: {
         runId: asRunId(String(runId)),
         nodeId: asNodeId(String(toNodeIdBranded)),
         rehydrateOnly: false,
+        precomputedIndex: args.precomputedIndex,
       });
       if (result.isErr()) {
         return neErrorAsync({ kind: 'prompt_render_failed' as const, message: result.error.message });
@@ -135,7 +137,7 @@ export function buildAdvancedReplayResponse(args: {
       blockedMeta = result.value;
     }
 
-    const preferences = derivePreferencesOrDefault({ truth, runId, nodeId: toNodeIdBranded });
+    const preferences = derivePreferencesOrDefault({ truth, runId, nodeId: toNodeIdBranded, precomputedIndex: args.precomputedIndex });
     const nextIntent = deriveNextIntent({ rehydrateOnly: false, isComplete, pending: blockedMeta });
 
     // Pass the object literal directly into .parse() rather than first
@@ -182,6 +184,7 @@ export function buildAdvancedReplayResponse(args: {
       runId: asRunId(String(runId)),
       nodeId: asNodeId(String(toNodeIdBranded)),
       rehydrateOnly: false,
+      precomputedIndex: args.precomputedIndex,
     });
     if (result.isErr()) {
       return neErrorAsync({ kind: 'prompt_render_failed' as const, message: result.error.message });
@@ -189,7 +192,7 @@ export function buildAdvancedReplayResponse(args: {
     okMeta = result.value;
   }
 
-  const preferences = derivePreferencesOrDefault({ truth, runId, nodeId: toNodeIdBranded });
+  const preferences = derivePreferencesOrDefault({ truth, runId, nodeId: toNodeIdBranded, precomputedIndex: args.precomputedIndex });
   const nextIntent = deriveNextIntent({ rehydrateOnly: false, isComplete, pending: okMeta });
 
   // Collect step-scoped execution facts for the step that just completed (fromNodeId).
@@ -274,6 +277,8 @@ export function replayFromRecordedAdvance(args: {
   readonly tokenCodecPorts: TokenCodecPorts;
   readonly aliasStore: import('../../../v2/ports/token-alias-store.port.js').TokenAliasStorePortV2;
   readonly entropy: import('../../../v2/ports/random-entropy.port.js').RandomEntropyPortV2;
+  /** Pre-built SessionIndex for this truth -- eliminates projection-internal scans in renderPendingPrompt. */
+  readonly precomputedIndex?: import('../../../v2/durable-core/session-index.js').SessionIndex;
 }): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, ContinueWorkflowError> {
   const {
     recordedEvent,
@@ -337,6 +342,7 @@ export function replayFromRecordedAdvance(args: {
         sha256,
         aliasStore,
         entropy,
+        precomputedIndex: args.precomputedIndex,
       });
     });
 }
