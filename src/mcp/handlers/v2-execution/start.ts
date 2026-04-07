@@ -449,11 +449,14 @@ export function executeStartWorkflow(
               goal: input.goal,
             });
 
+            // New session: truth is known to be empty at this point (session just created).
+            // Pass the empty truth to skip the redundant loadTruthOrEmpty disk reads in appendImpl.
+            const emptyTruth = { manifest: [], events: [] } as const;
             return gate.withHealthySessionLock(sessionId, (lock) =>
               sessionStore.append(lock, {
                 events,
                 snapshotPins: [{ snapshotRef, eventIndex: 2, createdByEventId: events[2]!.eventId }],
-              })
+              }, emptyTruth)
             )
               .mapErr((cause) => ({ kind: 'session_append_failed' as const, cause }))
               .map(() => ({ workflow, firstStep, workflowHash, pinnedWorkflow, resolvedReferences, sessionId, runId, nodeId }));

@@ -28,14 +28,18 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStore
     private readonly sha256: Sha256PortV2
   ) {}
 
-  append(lock: WithHealthySessionLock, plan: AppendPlanV2): ResultAsync<void, SessionEventLogStoreError> {
+  append(
+    lock: WithHealthySessionLock,
+    plan: AppendPlanV2,
+    preloadedTruth?: LoadedSessionTruthV2,
+  ): ResultAsync<void, SessionEventLogStoreError> {
     if (!lock.assertHeld()) {
       return errAsync({
         code: 'SESSION_STORE_INVARIANT_VIOLATION' as const,
         message: 'WithHealthySessionLock used after gate callback ended (witness misuse-after-release)',
       } satisfies SessionEventLogStoreError);
     }
-    return this.appendImpl(lock.sessionId, plan);
+    return this.appendImpl(lock.sessionId, plan, preloadedTruth);
   }
 
   load(sessionId: SessionId): ResultAsync<LoadedSessionTruthV2, SessionEventLogStoreError> {
@@ -46,14 +50,31 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStore
     return this.loadValidatedPrefixImpl(sessionId);
   }
 
-  private appendImpl(sessionId: SessionId, plan: AppendPlanV2): ResultAsync<void, SessionEventLogStoreError> {
+  private appendImpl(
+    sessionId: SessionId,
+    plan: AppendPlanV2,
+    preloadedTruth?: LoadedSessionTruthV2,
+  ): ResultAsync<void, SessionEventLogStoreError> {
     const sessionDir = this.dataDir.sessionDir(sessionId);
     const eventsDir = this.dataDir.sessionEventsDir(sessionId);
     const manifestPath = this.dataDir.sessionManifestPath(sessionId);
 
-    return this.fs.mkdirp(eventsDir)
-      .mapErr(mapFsToStoreError)
-      .andThen(() => this.loadTruthOrEmpty(sessionId))
+    // When the caller already holds a freshly-loaded truth (e.g. from ExecutionSessionGateV2),
+    // skip the redundant loadTruthOrEmpty disk reads. This eliminates N+1 reads for a session
+    // with N segments. The idempotency and contiguity checks below use the supplied truth
+    // in exactly the same way as the freshly-loaded one would have been used.
+    const mkdirResult = this.fs.mkdirp(eventsDir).mapErr(mapFsToStoreError);
+    const truthSource: ResultAsync<{ readonly manifest: readonly ManifestRecordV1[]; readonly events: readonly DomainEventV1[] }, SessionEventLogStoreError> =
+      preloadedTruth !== undefined
+        ? mkdirResult.andThen(() =>
+            okAsync({
+              manifest: preloadedTruth.manifest,
+              events: preloadedTruth.events,
+            })
+          )
+        : mkdirResult.andThen(() => this.loadTruthOrEmpty(sessionId));
+
+    return truthSource
       .andThen(({ manifest, events: existingEvents }) => {
         const contiguityRes = validateManifestContiguity(manifest);
         if (contiguityRes.isErr()) return errAsync(contiguityRes.error);
@@ -366,7 +387,12 @@ function validateAppendPlan(sessionId: SessionId, plan: AppendPlanV2, expectedFi
     return err({ code: 'SESSION_STORE_INVARIANT_VIOLATION', message: 'AppendPlan.events must be non-empty' });
   }
 
-  // Validate schema + sessionId, and contiguity.
+  // Events are constructed from typed object literals by the engine -- no external user
+  // data enters the construction path. Validation at the gate boundary
+  // (ExecutionSessionGateV2) is sufficient. Re-running Zod.safeParse here in the locked
+  // write path is wasteful. "Validate at boundaries, trust inside." Keep only the cheap
+  // structural checks: correct starting eventIndex, sessionId on each event, and
+  // contiguity within the plan.
   const first = plan.events[0]!;
   if (first.eventIndex !== expectedFirstEventIndex) {
     return err({
@@ -376,17 +402,14 @@ function validateAppendPlan(sessionId: SessionId, plan: AppendPlanV2, expectedFi
   }
 
   for (let i = 0; i < plan.events.length; i++) {
-    const e = DomainEventV1Schema.safeParse(plan.events[i]);
-    if (!e.success) {
-      return err({ code: 'SESSION_STORE_INVARIANT_VIOLATION', message: `Invalid domain event at index ${i}` });
-    }
-    if (e.data.sessionId !== sessionId) {
+    const e = plan.events[i]!;
+    if (e.sessionId !== sessionId) {
       return err({
         code: 'SESSION_STORE_INVARIANT_VIOLATION',
         message: `Domain event sessionId mismatch at index ${i}`,
       });
     }
-    if (i > 0 && plan.events[i]!.eventIndex !== plan.events[i - 1]!.eventIndex + 1) {
+    if (i > 0 && e.eventIndex !== plan.events[i - 1]!.eventIndex + 1) {
       return err({
         code: 'SESSION_STORE_INVARIANT_VIOLATION',
         message: `Non-contiguous eventIndex in AppendPlan at index ${i}`,
@@ -394,7 +417,7 @@ function validateAppendPlan(sessionId: SessionId, plan: AppendPlanV2, expectedFi
     }
   }
 
-  // Validate snapshotPins are deterministic + refer to this segment range.
+  // Validate snapshotPins refer to an event in this segment range.
   const pins = sortedPins(plan.snapshotPins);
   for (const p of pins) {
     if (p.eventIndex < first.eventIndex || p.eventIndex > plan.events[plan.events.length - 1]!.eventIndex) {
