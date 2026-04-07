@@ -43,8 +43,8 @@ export interface WorkflowNextOutput {
 
 export interface WorkflowValidateJsonOutput {
   valid: boolean;
-  errors?: Array<{ message: string; path?: string }>;
-  suggestions?: string[];
+  issues: string[];
+  suggestions: string[];
 }
 
 export interface WorkflowGetSchemaOutput {

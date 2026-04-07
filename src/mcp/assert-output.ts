@@ -1,5 +1,5 @@
 /**
- * Dev/test-only output invariant helper.
+ * Opt-in dev/test output invariant helper.
  *
  * WHY THIS EXISTS:
  * MCP handlers previously called Schema.parse() on server-produced data.
@@ -11,10 +11,14 @@
  * development (blocker sort order, continueToken presence). Those checks are
  * extracted here and run only outside production.
  *
+ * THIS IS AN OPT-IN UTILITY -- callers must explicitly call assertOutput().
+ * It is not wired into every handler automatically. Currently used in:
+ *   - src/mcp/handlers/v2-execution/replay.ts
+ *   - src/mcp/handlers/v2-execution/continue-rehydrate.ts
+ *
  * USAGE:
  *   // Instead of: const payload = SomeSchema.parse(data);
- *   // Use:        const payload = data as z.infer<typeof SomeSchema>;
- *   // And in dev: assertOutput(payload, assertSomeInvariants);
+ *   // Use:        const payload = assertOutput(data as T, assertSomeInvariants);
  *
  * The assertOutput() call is a no-op in production (NODE_ENV === 'production').
  * It runs the check function and throws on invariant violations in all other environments.
