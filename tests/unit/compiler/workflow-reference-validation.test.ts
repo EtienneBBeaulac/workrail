@@ -4,6 +4,8 @@
 import { describe, it, expect } from 'vitest';
 import { ValidationEngine } from '../../../src/application/services/validation-engine.js';
 import { EnhancedLoopValidator } from '../../../src/application/services/enhanced-loop-validator.js';
+import { createWorkflow } from '../../../src/types/workflow.js';
+import { createBundledSource } from '../../../src/types/workflow-source.js';
 import type { Workflow } from '../../../src/types/workflow.js';
 import type { WorkflowDefinition, WorkflowReference } from '../../../src/types/workflow-definition.js';
 
@@ -26,7 +28,7 @@ function makeWorkflow(refs?: WorkflowReference[]): Workflow {
     ],
     ...(refs !== undefined ? { references: refs } : {}),
   };
-  return { definition, source: { kind: 'bundled' } } as unknown as Workflow;
+  return createWorkflow(definition, createBundledSource());
 }
 
 function makeEngine(): ValidationEngine {

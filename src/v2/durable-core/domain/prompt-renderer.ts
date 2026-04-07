@@ -1,7 +1,7 @@
 import type { Result } from 'neverthrow';
 import { err, ok } from 'neverthrow';
 import type { Workflow } from '../../../types/workflow.js';
-import { getStepById, isLoopStepDefinition } from '../../../types/workflow.js';
+import { getStepById } from '../../../types/workflow.js';
 import type { AssessmentDefinition, PromptFragment } from '../../../types/workflow-definition.js';
 import type { LoadedSessionTruthV2 } from '../../ports/session-event-log-store.port.js';
 import type { LoopPathFrameV1 } from '../schemas/execution-snapshot/index.js';
@@ -159,20 +159,13 @@ function buildRecoverySegments(args: {
 /**
  * Find the parent loop step for a given body step ID.
  * Returns undefined if the step is not inside a loop.
- * Single traversal — callers derive maxIterations from the returned step directly.
+ * O(1) lookup via the pre-built parentLoopByStepId index (built at createWorkflow() time).
  */
 function resolveParentLoopStep(
   workflow: Workflow,
   stepId: string,
 ): LoopStepDefinition | undefined {
-  for (const step of workflow.definition.steps) {
-    if (isLoopStepDefinition(step) && Array.isArray(step.body)) {
-      for (const bodyStep of step.body) {
-        if (bodyStep.id === stepId) return step as LoopStepDefinition;
-      }
-    }
-  }
-  return undefined;
+  return workflow.parentLoopByStepId.get(stepId);
 }
 
 /**

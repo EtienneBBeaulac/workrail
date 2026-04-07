@@ -5,6 +5,8 @@ import { describe, it, expect } from 'vitest';
 import { container } from 'tsyringe';
 import { ValidationEngine } from '../../../src/application/services/validation-engine.js';
 import { EnhancedLoopValidator } from '../../../src/application/services/enhanced-loop-validator.js';
+import { createWorkflow } from '../../../src/types/workflow.js';
+import { createBundledSource } from '../../../src/types/workflow-source.js';
 import type { Workflow } from '../../../src/types/workflow.js';
 import type { WorkflowDefinition } from '../../../src/types/workflow-definition.js';
 
@@ -27,7 +29,7 @@ function makeWorkflow(stepOverrides: Partial<WorkflowDefinition['steps'][number]
       } as WorkflowDefinition['steps'][number],
     ],
   };
-  return { definition, source: { kind: 'bundled' } } as unknown as Workflow;
+  return createWorkflow(definition, createBundledSource());
 }
 
 function makeEngine(): ValidationEngine {
