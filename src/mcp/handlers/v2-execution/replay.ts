@@ -306,10 +306,11 @@ export function replayFromRecordedAdvance(args: {
 
   // Advanced outcome
   const toNodeId = asNodeId(String(recordedEvent.data.outcome.toNodeId));
-  const toNode = truth.events.find(
-    (e): e is Extract<DomainEventV1, { kind: 'node_created' }> =>
-      e.kind === EVENT_KIND.NODE_CREATED && e.scope?.nodeId === String(toNodeId)
-  );
+  const toNode = args.precomputedIndex?.nodeCreatedByNodeId.get(String(toNodeId))
+    ?? truth.events.find(
+      (e): e is Extract<DomainEventV1, { kind: 'node_created' }> =>
+        e.kind === EVENT_KIND.NODE_CREATED && e.scope?.nodeId === String(toNodeId)
+    );
   if (!toNode) {
     return neErrorAsync({
       kind: 'invariant_violation' as const,
