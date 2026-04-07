@@ -1,4 +1,5 @@
 import type { V2ContinueWorkflowInput } from '../../v2/tools.js';
+import type { SessionIndex } from '../../../v2/durable-core/session-index.js';
 import type { Workflow } from '../../../types/workflow.js';
 import type { DomainEventV1 } from '../../../v2/durable-core/schemas/session/index.js';
 import {
@@ -47,7 +48,7 @@ export function advanceAndRecord(args: {
   readonly sessionStore: import('../../../v2/ports/session-event-log-store.port.js').SessionEventLogAppendStorePortV2 & import('../../../v2/ports/session-event-log-store.port.js').SessionEventLogReadonlyStorePortV2;
   readonly sha256: Sha256PortV2;
   readonly idFactory: { readonly mintNodeId: () => NodeId; readonly mintEventId: () => string };
-  readonly lockedIndex: import('../../../v2/durable-core/session-index.js').SessionIndex;
+  readonly lockedIndex: SessionIndex;
 }): RA<void, InternalError | SessionEventLogStoreError | SnapshotStoreError> {
   const { truth, sessionId, runId, nodeId, attemptId, workflowHash, dedupeKey, inputContext, inputOutput, lock, pinnedWorkflow, snapshotStore, sessionStore, sha256, idFactory } = args;
 

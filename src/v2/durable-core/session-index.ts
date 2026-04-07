@@ -41,10 +41,11 @@ export interface SessionIndexData {
 
   /**
    * node_created events keyed by scope.nodeId.
-   * NodeIds are ULIDs -- unique within the session. The original .find() checks
-   * both nodeId AND runId; the index drops the runId predicate since ULID
-   * uniqueness makes it redundant. If this assumption is relaxed, change the
-   * key to `runId:nodeId` (tracked in follow-up ticket).
+   * NodeIds are 128-bit cryptographically random IDs (see IdFactoryV2.mintNodeId())
+   * -- unique within the session by negligible collision probability. The original
+   * .find() checked both nodeId AND runId; the index drops the runId predicate
+   * since random-ID uniqueness makes it redundant. If this assumption is relaxed,
+   * change the key to `runId:nodeId` (tracked in follow-up ticket).
    */
   readonly nodeCreatedByNodeId: ReadonlyMap<string, Extract<DomainEventV1, { kind: 'node_created' }>>;
 

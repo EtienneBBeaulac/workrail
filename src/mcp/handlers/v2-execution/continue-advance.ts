@@ -96,9 +96,10 @@ export function handleAdvanceIntent(args: {
     });
   }
 
-  // NodeIds are ULIDs -- unique within the session. The original .find() checked
-  // both nodeId AND runId; the index omits the runId predicate since ULID
-  // uniqueness makes it redundant (see Invariant #4 in implementation plan).
+  // NodeIds are 128-bit cryptographically random IDs -- unique within the session
+  // by negligible collision probability. The original .find() checked both nodeId
+  // AND runId; the index omits the runId predicate since random-ID uniqueness makes
+  // it redundant (see Invariant #4 in implementation plan).
   const nodeCreated = preLockIndex.nodeCreatedByNodeId.get(String(nodeId));
   if (!nodeCreated) {
     return neErrorAsync({

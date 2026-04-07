@@ -56,8 +56,7 @@ type BuildAppendPlanArgs = {
 export function buildAndAppendPlan(args: BuildAppendPlanArgs): RA<void, InternalError | SessionEventLogStoreError> {
   const { truth, lockedIndex, sessionId, runId, currentNodeId, attemptId, workflowHash, extraEventsToAppend, sessionStore, idFactory, lock } = args;
 
-  // Use pre-computed nextEventIndex from the SessionIndex rather than re-scanning
-  // truth.events. Handles non-contiguous event indices correctly.
+  // Use pre-computed nextEventIndex from the SessionIndex rather than re-computing inline.
   const nextEventIndex = lockedIndex.nextEventIndex;
   const evtAdvanceRecorded = idFactory.mintEventId();
 

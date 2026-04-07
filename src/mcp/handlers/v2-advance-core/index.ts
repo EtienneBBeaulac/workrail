@@ -16,6 +16,7 @@
  */
 
 import { ResultAsync as RA, okAsync, errAsync as neErrorAsync } from 'neverthrow';
+import type { SessionIndex } from '../../../v2/durable-core/session-index.js';
 import type { DomainEventV1 } from '../../../v2/durable-core/schemas/session/index.js';
 import type { ExecutionSnapshotFileV1, EngineStateV1 } from '../../../v2/durable-core/schemas/execution-snapshot/index.js';
 import type { SessionId, RunId, NodeId, WorkflowHash } from '../../../v2/durable-core/ids/index.js';
@@ -155,7 +156,7 @@ export function executeAdvanceCore(args: {
   readonly lock: WithHealthySessionLock;
   readonly pinnedWorkflow: ReturnType<typeof createWorkflow>;
   readonly ports: AdvanceCorePorts;
-  readonly lockedIndex: import('../../../v2/durable-core/session-index.js').SessionIndex;
+  readonly lockedIndex: SessionIndex;
 }): RA<void, InternalError | SessionEventLogStoreError | SnapshotStoreError> {
   const { mode, truth, sessionId, runId, attemptId, workflowHash, inputContext, inputOutput, lock, pinnedWorkflow, ports } = args;
   const { snapshotStore, sessionStore, sha256, idFactory } = ports;
