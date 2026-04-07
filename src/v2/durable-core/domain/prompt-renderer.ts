@@ -562,8 +562,16 @@ export function renderPendingPrompt(args: {
     ? assembleFragmentedPrompt(promptFragments, renderContext)
     : '';
 
-  const enhancedPrompt = loopBanner + basePrompt + requirementsSection + contractSection + assessmentSection + notesSection
-    + (fragmentSuffix ? '\n\n' + fragmentSuffix : '');
+  // Array join avoids 5 intermediate string allocations from the + chain.
+  const enhancedPrompt = [
+    loopBanner,
+    basePrompt,
+    requirementsSection,
+    contractSection,
+    assessmentSection,
+    notesSection,
+    fragmentSuffix ? '\n\n' + fragmentSuffix : '',
+  ].join('');
 
   // If not rehydrate-only, return enhanced prompt (no recovery needed for advance/start)
   if (!args.rehydrateOnly) {
