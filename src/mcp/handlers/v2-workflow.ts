@@ -1,13 +1,13 @@
 import path from 'path';
 import fs from 'fs';
 import { ResultAsync, okAsync, errAsync } from 'neverthrow';
+import type { z } from 'zod';
 import type { ToolContext, ToolResult } from '../types.js';
 import { success, errNotRetryable, requireV2Context } from '../types.js';
 import { mapUnknownErrorToToolError } from '../error-mapper.js';
 import { internalSuggestion } from './v2-execution-helpers.js';
 import type { V2InspectWorkflowInput, V2ListWorkflowsInput } from '../v2/tools.js';
-import { V2WorkflowInspectOutputSchema, V2WorkflowListOutputSchema } from '../output-schemas.js';
-import type { StalenessSummary } from '../output-schemas.js';
+import type { V2WorkflowInspectOutputSchema, V2WorkflowListOutputSchema, StalenessSummary } from '../output-schemas.js';
 import type { RememberedRootRecordV2 } from '../../v2/ports/remembered-roots-store.port.js';
 import type { ManagedSourceRecordV2 } from '../../v2/ports/managed-source-store.port.js';
 import type { CryptoPortV2 } from '../../v2/durable-core/canonical/hashing.js';
@@ -266,13 +266,13 @@ export async function handleV2ListWorkflows(
         // the agent is just discovering tags, not looking for specific workflows, so stale
         // source paths are noise it cannot act on. Emit staleRoots on filtered calls only.
         const includeStaleRoots = !tagSummaryEntry && stalePaths.length > 0;
-        const payload = V2WorkflowListOutputSchema.parse({
+        const payload: z.infer<typeof V2WorkflowListOutputSchema> = {
           workflows: tagFilteredCompiled,
           ...(tagSummaryEntry ? { tagSummary: tagSummaryEntry } : {}),
           ...(nextStepHint ? { _nextStep: nextStepHint } : {}),
           ...(includeStaleRoots ? { staleRoots: [...stalePaths] } : {}),
           ...(warnings ? { warnings } : {}),
-        });
+        };
         return okAsync(success(payload) as ToolResult<unknown>);
       }
       // Reuse workflowReader directly -- it already uses the same factory as the
@@ -282,28 +282,28 @@ export async function handleV2ListWorkflows(
       // produces a composite reader. If this assumption ever breaks, stale managed entries
       // would appear in staleRoots but NOT in sources -- an inconsistency worth knowing about.
       if (!isCompositeWorkflowReader(workflowReader)) {
-        const payload = V2WorkflowListOutputSchema.parse({
+        const payload: z.infer<typeof V2WorkflowListOutputSchema> = {
           workflows: tagFilteredCompiled,
           ...(tagSummaryEntry ? { tagSummary: tagSummaryEntry } : {}),
           ...(nextStepHint ? { _nextStep: nextStepHint } : {}),
           ...(stalePaths.length > 0 ? { staleRoots: [...stalePaths] } : {}),
           ...(warnings ? { warnings } : {}),
           sources: [],
-        });
+        };
         return okAsync(success(payload) as ToolResult<unknown>);
       }
       return ResultAsync.fromPromise(
         withTimeout(buildSourceCatalog(workflowReader, rememberedRootRecords, managedSourceRecords, staleManagedRecords), TIMEOUT_MS, 'list_workflow_sources'),
         (err) => mapUnknownErrorToToolError(err),
       ).map((sources) => {
-        const payload = V2WorkflowListOutputSchema.parse({
+        const payload: z.infer<typeof V2WorkflowListOutputSchema> = {
           workflows: tagFilteredCompiled,
           ...(tagSummaryEntry ? { tagSummary: tagSummaryEntry } : {}),
           ...(nextStepHint ? { _nextStep: nextStepHint } : {}),
           ...(stalePaths.length > 0 ? { staleRoots: [...stalePaths] } : {}),
           ...(warnings ? { warnings } : {}),
-          sources,
-        });
+          sources: [...sources] as z.infer<typeof V2WorkflowListOutputSchema>['sources'],
+        };
         return success(payload) as ToolResult<unknown>;
       });
     })
@@ -392,22 +392,22 @@ export async function handleV2InspectWorkflow(
 
             // Surface references for discoverability (available before start_workflow)
             const references = workflow.definition.references;
-            const payload = V2WorkflowInspectOutputSchema.parse({
+            const payload = {
               workflowId: input.workflowId,
               workflowHash,
               mode: input.mode,
-              compiled: body,
+              compiled: body as import('../../v2/durable-core/canonical/json-types.js').JsonValue,
               ...(visibility ? { visibility } : {}),
               ...(stalePaths.length > 0 ? { staleRoots: [...stalePaths] } : {}),
               ...(inspectWarnings ? { warnings: inspectWarnings } : {}),
-              ...(references != null && references.length > 0 ? { references } : {}),
+              ...(references != null && references.length > 0 ? { references: [...references] } : {}),
               ...(() => {
                 const staleness = shouldShowStaleness(visibility?.category)
                   ? computeWorkflowStaleness(workflow.definition.validatedAgainstSpecVersion, CURRENT_SPEC_VERSION)
                   : undefined;
                 return staleness !== undefined ? { staleness } : {};
               })(),
-            });
+            } as z.infer<typeof V2WorkflowInspectOutputSchema>;
             return okAsync(success(payload) as ToolResult<unknown>);
           })
       );

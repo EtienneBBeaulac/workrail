@@ -7,13 +7,6 @@
 
 import type { ToolContext, ToolResult } from '../types.js';
 import { success, errNotRetryable } from '../types.js';
-import {
-  WorkflowGetOutputSchema,
-  WorkflowGetSchemaOutputSchema,
-  WorkflowListOutputSchema,
-  WorkflowNextOutputSchema,
-  WorkflowValidateJsonOutputSchema,
-} from '../output-schemas.js';
 import { mapDomainErrorToToolError, mapUnknownErrorToToolError } from '../error-mapper.js';
 import type {
   WorkflowListInput,
@@ -95,7 +88,7 @@ export async function handleWorkflowList(
       'workflow_list'
     );
 
-    const payload = WorkflowListOutputSchema.parse({ workflows });
+    const payload: WorkflowListOutput = { workflows };
     return success(payload);
   } catch (err) {
     const mapped = mapUnknownErrorToToolError(err);
@@ -123,7 +116,7 @@ export async function handleWorkflowGet(
       return mapped;
     }
 
-    const payload = WorkflowGetOutputSchema.parse({ workflow: result.value });
+    const payload: WorkflowGetOutput = { workflow: result.value };
     return success(payload);
   } catch (err) {
     // Check for timeout errors via structured error type (not string matching)
@@ -171,7 +164,7 @@ export async function handleWorkflowNext(
       return mapped;
     }
 
-    const payload = WorkflowNextOutputSchema.parse(result.value);
+    const payload = result.value as WorkflowNextOutput;
     return success(payload);
   } catch (err) {
     const elapsed = Date.now() - startTime;
@@ -208,7 +201,7 @@ export async function handleWorkflowValidateJson(
 
     const result = await validateWorkflowJsonUseCase(input.workflowJson);
 
-    const payload = WorkflowValidateJsonOutputSchema.parse(result);
+    const payload = result as WorkflowValidateJsonOutput;
     return success(payload);
   } catch (err) {
     const mapped = mapUnknownErrorToToolError(err);
@@ -259,8 +252,7 @@ export async function handleWorkflowGetSchema(
       },
     };
 
-    const payload = WorkflowGetSchemaOutputSchema.parse(result);
-    return success(payload);
+    return success(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return errNotRetryable(

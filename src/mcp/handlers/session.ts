@@ -7,13 +7,6 @@
 
 import type { ToolContext, ToolResult } from '../types.js';
 import { success, errNotRetryable } from '../types.js';
-import {
-  CreateSessionOutputSchema,
-  OpenDashboardOutputSchema,
-  ReadSessionOutputSchema,
-  ReadSessionSchemaOutputSchema,
-  UpdateSessionOutputSchema,
-} from '../output-schemas.js';
 import type {
   CreateSessionInput,
   UpdateSessionInput,
@@ -144,13 +137,13 @@ export async function handleCreateSession(
   const baseUrl = httpServer.getBaseUrl();
   const dashboardUrl = baseUrl ? `${baseUrl}?session=${input.sessionId}` : null;
 
-  const payload = CreateSessionOutputSchema.parse({
+  const payload: CreateSessionOutput = {
     sessionId: session.id,
     workflowId: session.workflowId,
     path: sessionManager.getSessionPath(input.workflowId, input.sessionId),
     dashboardUrl,
     createdAt: session.createdAt,
-  });
+  };
   return success(payload);
 }
 
@@ -178,7 +171,7 @@ export async function handleUpdateSession(
     return errNotRetryable('INTERNAL_ERROR', res.error.message);
   }
 
-  const payload = UpdateSessionOutputSchema.parse({ updatedAt: new Date().toISOString() });
+  const payload: UpdateSessionOutput = { updatedAt: new Date().toISOString() };
   return success(payload);
 }
 
@@ -193,10 +186,10 @@ export async function handleReadSession(
 
   // Special case: $schema returns structure overview
   if (input.path === '$schema') {
-    const payload = ReadSessionSchemaOutputSchema.parse({
+    const payload: ReadSessionSchemaOutput = {
       query: '$schema' as const,
       schema: SESSION_SCHEMA_OVERVIEW,
-    });
+    };
     return success(payload);
   }
 
@@ -215,10 +208,10 @@ export async function handleReadSession(
     return errNotRetryable('INTERNAL_ERROR', res.error.message);
   }
 
-  const payload = ReadSessionOutputSchema.parse({
+  const payload: ReadSessionOutput = {
     query: input.path ?? '(full session)',
     data: res.value,
-  });
+  };
   return success(payload);
 }
 
@@ -233,7 +226,7 @@ export async function handleOpenDashboard(
 
   try {
     const url = await httpServer.openDashboard(input.sessionId);
-    const payload = OpenDashboardOutputSchema.parse({ url });
+    const payload: OpenDashboardOutput = { url };
     return success(payload);
   } catch (err) {
     return errNotRetryable(

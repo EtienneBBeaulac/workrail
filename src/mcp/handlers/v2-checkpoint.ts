@@ -14,7 +14,7 @@ import { okAsync, errAsync } from 'neverthrow';
 import type { ToolContext, ToolResult, V2ToolContext } from '../types.js';
 import { success, errNotRetryable, requireV2Context } from '../types.js';
 import type { V2CheckpointWorkflowInput } from '../v2/tools.js';
-import { V2CheckpointWorkflowOutputSchema } from '../output-schemas.js';
+import type { V2CheckpointWorkflowOutputSchema } from '../output-schemas.js';
 import { parseCheckpointTokenOrFail, mintSingleShortToken, mintContinueAndCheckpointTokens } from './v2-token-ops.js';
 import { type ToolFailure, mapExecutionSessionGateErrorToToolError } from './v2-execution-helpers.js';
 import type { SessionId, NodeId, RunId, AttemptId } from '../../v2/durable-core/ids/index.js';
@@ -224,11 +224,11 @@ function replayCheckpoint(
         entry: { sessionId: String(sessionId), runId: String(runId), nodeId: String(nodeId), attemptId: String(attemptId), workflowHashRef },
         ports: tokenCodecPorts, aliasStore, entropy,
       }).andThen(({ continueToken }) =>
-        okAsync(V2CheckpointWorkflowOutputSchema.parse({
+        okAsync({
           checkpointNodeId,
           resumeToken: resumeTokenValue,
-          nextCall: { tool: 'continue_workflow', params: { continueToken } },
-        }))
+          nextCall: { tool: 'continue_workflow' as const, params: { continueToken } },
+        } as z.infer<typeof V2CheckpointWorkflowOutputSchema>)
       )
     )
     .mapErr((e): CheckpointError => ({ kind: 'store_failed', cause: e as any }));
@@ -324,11 +324,11 @@ function writeCheckpoint(
             entry: { sessionId: String(sessionId), runId: String(runId), nodeId: String(nodeId), attemptId: String(attemptId), workflowHashRef },
             ports: tokenCodecPorts, aliasStore, entropy,
           }).andThen(({ continueToken }) =>
-            okAsync(V2CheckpointWorkflowOutputSchema.parse({
+            okAsync({
               checkpointNodeId: String(checkpointNodeId),
               resumeToken: resumeTokenValue,
-              nextCall: { tool: 'continue_workflow', params: { continueToken } },
-            }))
+              nextCall: { tool: 'continue_workflow' as const, params: { continueToken } },
+            } as z.infer<typeof V2CheckpointWorkflowOutputSchema>)
           )
         )
         .mapErr((e): CheckpointError => ({ kind: 'store_failed', cause: e as any }));

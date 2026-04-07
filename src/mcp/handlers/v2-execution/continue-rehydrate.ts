@@ -1,5 +1,6 @@
 import type { V2ContinueWorkflowInput } from '../../v2/tools.js';
-import { V2ContinueWorkflowOutputSchema, toPendingStep } from '../../output-schemas.js';
+import type { V2ContinueWorkflowOutputSchema } from '../../output-schemas.js';
+import { toPendingStep } from '../../output-schemas.js';
 import { detectBindingDrift, type BindingDriftWarning } from '../../../v2/durable-core/domain/binding-drift.js';
 // Use the uncached loader for drift detection — we want the current on-disk state,
 // not a value that may have been frozen at process startup. The cached
@@ -160,15 +161,15 @@ export function handleRehydrateIntent(args: {
             const preferences = derivePreferencesOrDefault({ truth, runId, nodeId });
             const nextIntent = deriveNextIntent({ rehydrateOnly: true, isComplete, pending: null });
 
-            const parsed = V2ContinueWorkflowOutputSchema.parse({
+            const parsed: z.infer<typeof V2ContinueWorkflowOutputSchema> = {
               kind: 'ok',
               isComplete,
               pending: null,
               preferences,
               nextIntent,
               nextCall: null,
-              ...(driftWarnings.length > 0 ? { warnings: driftWarnings } : {}),
-            });
+              ...(driftWarnings.length > 0 ? { warnings: [...driftWarnings] } : {}),
+            };
             return okAsync({ response: parsed });
           }
 
@@ -214,7 +215,7 @@ export function handleRehydrateIntent(args: {
                 references: pinned.resolvedReferences ?? buildPinnedReferencesFallback((pinned.definition as WorkflowDefinition).references ?? []),
               });
 
-              const parsed = V2ContinueWorkflowOutputSchema.parse({
+              const parsed: z.infer<typeof V2ContinueWorkflowOutputSchema> = {
                 kind: 'ok',
                 continueToken: continueTokenValue,
                 checkpointToken: checkpointTokenValue,
@@ -223,8 +224,8 @@ export function handleRehydrateIntent(args: {
                 preferences,
                 nextIntent,
                 nextCall: buildNextCall({ continueToken: continueTokenValue, isComplete, pending: meta }),
-                ...(driftWarnings.length > 0 ? { warnings: driftWarnings } : {}),
-              });
+                ...(driftWarnings.length > 0 ? { warnings: [...driftWarnings] } : {}),
+              };
               return okAsync({ response: parsed, contentEnvelope });
             });
         });

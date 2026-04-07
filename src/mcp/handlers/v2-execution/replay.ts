@@ -1,4 +1,5 @@
-import { V2ContinueWorkflowOutputSchema, toPendingStep } from '../../output-schemas.js';
+import type { V2ContinueWorkflowOutputSchema } from '../../output-schemas.js';
+import { toPendingStep } from '../../output-schemas.js';
 import { deriveIsComplete, derivePendingStep } from '../../../v2/durable-core/projections/snapshot-state.js';
 import type { ExecutionSnapshotFileV1 } from '../../../v2/durable-core/schemas/execution-snapshot/index.js';
 import {
@@ -137,8 +138,8 @@ export function buildAdvancedReplayResponse(args: {
 
     return nextTokensMint.andThen((nextTokens) =>
       retryContinueMint.andThen((retryContinueToken) =>
-        okAsync(V2ContinueWorkflowOutputSchema.parse({
-          kind: 'blocked',
+        okAsync({
+          kind: 'blocked' as const,
           continueToken: pending ? nextTokens.continueToken : undefined,
           checkpointToken: pending ? nextTokens.checkpointToken : undefined,
           isComplete,
@@ -151,7 +152,7 @@ export function buildAdvancedReplayResponse(args: {
           retryContinueToken,
           validation,
           assessmentFollowup,
-        }))
+        } as z.infer<typeof V2ContinueWorkflowOutputSchema>)
       )
     );
   }
@@ -182,19 +183,17 @@ export function buildAdvancedReplayResponse(args: {
   const stepContext = buildStepContext(truth.events, fromNodeId);
 
   return nextTokensMint.andThen((nextTokens) =>
-    okAsync(
-      V2ContinueWorkflowOutputSchema.parse({
-        kind: 'ok',
-        continueToken: pending ? nextTokens.continueToken : undefined,
-        checkpointToken: pending ? nextTokens.checkpointToken : undefined,
-        isComplete,
-        pending: toPendingStep(okMeta),
-        preferences,
-        nextIntent,
-        nextCall: buildNextCall({ continueToken: pending ? nextTokens.continueToken : undefined, isComplete, pending: okMeta }),
-        stepContext,
-      })
-    )
+    okAsync({
+      kind: 'ok' as const,
+      continueToken: pending ? nextTokens.continueToken : undefined,
+      checkpointToken: pending ? nextTokens.checkpointToken : undefined,
+      isComplete,
+      pending: toPendingStep(okMeta),
+      preferences,
+      nextIntent,
+      nextCall: buildNextCall({ continueToken: pending ? nextTokens.continueToken : undefined, isComplete, pending: okMeta }),
+      stepContext,
+    } as z.infer<typeof V2ContinueWorkflowOutputSchema>)
   );
 }
 
