@@ -1,6 +1,7 @@
 import { useWorkflowList } from '../api/hooks';
 import type { ConsoleWorkflowSummary } from '../api/types';
 import { CATALOG_TAGS, TAG_DISPLAY } from '../config/tags';
+import { SectionHeader } from '../components/SectionHeader';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -158,29 +159,6 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow }: Pr
           ))}
         </div>
       )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Section header
-// ---------------------------------------------------------------------------
-
-function SectionHeader({
-  label,
-  count,
-  showRule,
-}: {
-  readonly label: string;
-  readonly count: number;
-  readonly showRule: boolean;
-}) {
-  return (
-    <div className="flex items-center gap-3 mb-3 mt-2">
-      <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
-        {label}&nbsp;&nbsp;·&nbsp;&nbsp;{count} workflow{count !== 1 ? 's' : ''}
-      </span>
-      {showRule && <div className="flex-1 h-px bg-[var(--border)]" />}
     </div>
   );
 }
