@@ -483,8 +483,15 @@ export class HttpServer {
         return this.baseUrl;
       } catch (error: any) {
         if (error.code === 'EADDRINUSE') {
-          // Port busy even though we have lock - cleanup and fall back
-          console.error(`[Dashboard] Port ${this.port} busy despite lock, falling back to legacy mode`);
+          // Port busy despite winning the lock -- the previous primary is still
+          // bound to the port (e.g. version upgrade: old instance holds 3456,
+          // new instance reclaimed the lock but can't bind yet). Fall back to
+          // legacy mode so both instances can run concurrently. The old instance
+          // will release the port when its IDE tab closes (stdin EOF).
+          console.error(
+            `[Dashboard] Port ${this.port} still held by previous instance -- ` +
+            `running on next available port. Restart the old instance to move to ${this.port}.`
+          );
           await fs.unlink(this.lockFile).catch(() => {});
           return await this.startLegacyMode();
         }
@@ -539,8 +546,17 @@ export class HttpServer {
   }
   
   /**
-   * Determine if a lock should be reclaimed based on its data
-   * Pure function - no side effects
+   * Determine if a lock should be reclaimed based on its data.
+   *
+   * Pure function - no side effects, no I/O.
+   *
+   * Note: this function intentionally does NOT probe the HTTP health endpoint.
+   * HTTP responsiveness is not a reliable liveness signal -- Node.js is
+   * single-threaded, so a busy event loop (e.g. processing a tool call) will
+   * fail a health check while the process is perfectly healthy. The three
+   * checks below (structure, version, TTL, PID) are reliable and sufficient.
+   * Adding an HTTP check here caused false-positive kills; see the fix in
+   * reclaimStaleLock() for full rationale.
    */
   private shouldReclaimLock(lockData: DashboardLock): { reclaim: boolean; reason: string } {
     // Invalid structure
@@ -548,8 +564,10 @@ export class HttpServer {
       return { reclaim: true, reason: 'invalid lock structure' };
     }
 
-    // Version mismatch: a newer (or different) version should take over so the
-    // browser always gets up-to-date console assets from the running process.
+    // Version mismatch: a different version holds the lock. We reclaim atomically
+    // so the new version's lock metadata is current. If the old process still holds
+    // the port, startAsPrimary() will EADDRINUSE and fall back to legacy mode --
+    // the old instance keeps its port and sessions until it exits naturally.
     // undefined means the lock was written by a pre-version-field build -- treat
     // it the same as "wrong version" so the fix takes effect on first deployment.
     if (lockData.version !== CURRENT_VERSION) {
