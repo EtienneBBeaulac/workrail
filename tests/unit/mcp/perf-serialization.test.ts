@@ -117,10 +117,9 @@ describe('CLEAN_RESPONSE_FORMAT behavioral equivalence', () => {
   };
 
   it('classic format: primary contains USER/SYSTEM section headers', async () => {
-    // Without WORKRAIL_CLEAN_RESPONSE_FORMAT, formatter uses classic format
-    vi.unstubAllEnvs();
+    // Without clean format, formatter uses classic format
     const { formatV2ExecutionResponse } = await import('../../../src/mcp/v2-response-formatter.js');
-    const result = formatV2ExecutionResponse(BASE_RESPONSE);
+    const result = formatV2ExecutionResponse(BASE_RESPONSE, false);
     expect(result).not.toBeNull();
     // Classic format includes the persona delimiters
     expect(result!.primary).toContain('USER');
@@ -129,9 +128,9 @@ describe('CLEAN_RESPONSE_FORMAT behavioral equivalence', () => {
 
   it('returns null for non-v2-execution responses regardless of format mode', async () => {
     const { formatV2ExecutionResponse } = await import('../../../src/mcp/v2-response-formatter.js');
-    expect(formatV2ExecutionResponse({ foo: 'bar' })).toBeNull();
-    expect(formatV2ExecutionResponse(null)).toBeNull();
-    expect(formatV2ExecutionResponse('string')).toBeNull();
+    expect(formatV2ExecutionResponse({ foo: 'bar' }, false)).toBeNull();
+    expect(formatV2ExecutionResponse(null, false)).toBeNull();
+    expect(formatV2ExecutionResponse('string', false)).toBeNull();
   });
 
   it('complete response: returns formatted result with isComplete/no pending', async () => {
@@ -143,7 +142,7 @@ describe('CLEAN_RESPONSE_FORMAT behavioral equivalence', () => {
       nextIntent: 'complete',
       nextCall: null,
     };
-    const result = formatV2ExecutionResponse(completeResponse);
+    const result = formatV2ExecutionResponse(completeResponse, false);
     expect(result).not.toBeNull();
     expect(result!.primary).toContain('Workflow Complete');
   });

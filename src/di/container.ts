@@ -14,6 +14,7 @@ import { NodeProcessTerminator } from '../runtime/adapters/node-process-terminat
 import { ThrowingProcessTerminator } from '../runtime/adapters/throwing-process-terminator.js';
 import type { ValidatedConfig } from '../config/app-config.js';
 import { loadConfig } from '../config/app-config.js';
+import { loadWorkrailConfigFile } from '../config/config-file.js';
 import { formatAppError } from '../errors/formatter.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -26,15 +27,28 @@ let asyncInitialized = false;
 let initializationPromise: Promise<void> | null = null;
 let isInitializing = false; // Synchronous flag for race protection
 
+/**
+ * Merged environment: config file defaults + process.env overrides.
+ * Computed once during registerConfig() and reused by all sub-registrations
+ * so that every component sees the same effective environment.
+ */
+let mergedEnv: Record<string, string | undefined> = process.env;
+
 // ═══════════════════════════════════════════════════════════════════════════
 // CONFIGURATION REGISTRATION
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function registerConfig(): Promise<void> {
+  // Build merged env once: config file provides defaults; process.env always wins.
+  // This must happen before any other registration so all components share the same env.
+  const configFileResult = loadWorkrailConfigFile();
+  const configFileValues = configFileResult.kind === 'ok' ? configFileResult.value : {};
+  mergedEnv = { ...configFileValues, ...process.env };
+
   // Allow tests to inject config explicitly before container initialization.
   // This prevents the composition root from overwriting test-provided values.
   if (!container.isRegistered(DI.Config.App)) {
-    const configResult = loadConfig({ env: process.env, projectPath: process.cwd() });
+    const configResult = loadConfig({ env: mergedEnv, projectPath: process.cwd() });
 
     if (configResult.kind === 'err') {
       console.error(formatAppError(configResult.error));
@@ -55,9 +69,10 @@ async function registerConfig(): Promise<void> {
   // Register FeatureFlags early - needed by storage layer
   // (Tests may have already registered this, so check first)
   if (!container.isRegistered(DI.Infra.FeatureFlags)) {
-    const { EnvironmentFeatureFlagProvider } = await import('../config/feature-flags.js');
+    const { CustomEnvFeatureFlagProvider } = await import('../config/feature-flags.js');
+    const captured = mergedEnv;
     container.register(DI.Infra.FeatureFlags, {
-      useFactory: instanceCachingFactory((c) => c.resolve(EnvironmentFeatureFlagProvider))
+      useFactory: instanceCachingFactory(() => new CustomEnvFeatureFlagProvider(captured))
     });
   }
 }
@@ -248,7 +263,7 @@ async function registerV2Services(): Promise<void> {
   const { IdFactoryV2 } = await import('../v2/infra/local/id-factory/index.js');
 
   container.register(DI.V2.DataDir, {
-    useFactory: instanceCachingFactory(() => new LocalDataDirV2(process.env)),
+    useFactory: instanceCachingFactory(() => new LocalDataDirV2(mergedEnv)),
   });
   container.register(DI.V2.FileSystem, {
     useFactory: instanceCachingFactory(() => new NodeFileSystemV2()),
@@ -476,6 +491,7 @@ export function resetContainer(): void {
   asyncInitialized = false;
   initializationPromise = null;
   isInitializing = false;
+  mergedEnv = process.env;
 }
 
 /**

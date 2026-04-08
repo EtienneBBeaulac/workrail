@@ -56,6 +56,7 @@ export function buildAdvancedReplayResponse(args: {
   readonly aliasStore: import('../../../v2/ports/token-alias-store.port.js').TokenAliasStorePortV2;
   readonly entropy: import('../../../v2/ports/random-entropy.port.js').RandomEntropyPortV2;
   readonly precomputedIndex?: import('../../../v2/durable-core/session-index.js').SessionIndex;
+  readonly cleanResponseFormat?: boolean;
 }): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, ContinueWorkflowError> {
   const { sessionId, runId, fromNodeId, toNodeId, attemptId, toSnapshot, workflow, truth, workflowHash, ports, sha256, aliasStore, entropy } = args;
   
@@ -130,6 +131,7 @@ export function buildAdvancedReplayResponse(args: {
         nodeId: asNodeId(String(toNodeIdBranded)),
         rehydrateOnly: false,
         precomputedIndex: args.precomputedIndex,
+        cleanResponseFormat: args.cleanResponseFormat,
       });
       if (result.isErr()) {
         return neErrorAsync({ kind: 'prompt_render_failed' as const, message: result.error.message });
@@ -185,6 +187,7 @@ export function buildAdvancedReplayResponse(args: {
       nodeId: asNodeId(String(toNodeIdBranded)),
       rehydrateOnly: false,
       precomputedIndex: args.precomputedIndex,
+      cleanResponseFormat: args.cleanResponseFormat,
     });
     if (result.isErr()) {
       return neErrorAsync({ kind: 'prompt_render_failed' as const, message: result.error.message });
@@ -279,6 +282,7 @@ export function replayFromRecordedAdvance(args: {
   readonly entropy: import('../../../v2/ports/random-entropy.port.js').RandomEntropyPortV2;
   /** Pre-built SessionIndex for this truth -- eliminates projection-internal scans in renderPendingPrompt. */
   readonly precomputedIndex?: import('../../../v2/durable-core/session-index.js').SessionIndex;
+  readonly cleanResponseFormat?: boolean;
 }): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, ContinueWorkflowError> {
   const {
     recordedEvent,
@@ -344,6 +348,7 @@ export function replayFromRecordedAdvance(args: {
         aliasStore,
         entropy,
         precomputedIndex: args.precomputedIndex,
+        cleanResponseFormat: args.cleanResponseFormat,
       });
     });
 }

@@ -33,6 +33,7 @@ import { interpretCliResult, interpretCliResultWithoutDI } from './cli/interpret
 import { printResult } from './cli/output-formatter.js';
 import {
   executeInitCommand,
+  executeInitConfigCommand,
   executeSourcesCommand,
   executeListCommand,
   executeValidateCommand,
@@ -59,7 +60,20 @@ program
 program
   .command('init')
   .description('Initialize user workflow directory with sample workflows')
-  .action(async () => {
+  .option('--config', 'Write a ~/.workrail/config.json template instead of initializing workflows')
+  .action(async (options: { config?: boolean }) => {
+    if (options.config) {
+      const result = await executeInitConfigCommand({
+        mkdir: (p, opts) => fs.promises.mkdir(p, opts),
+        readFile: (p) => fs.promises.readFile(p, 'utf-8'),
+        writeFile: (p, content) => fs.promises.writeFile(p, content, 'utf-8'),
+        homedir: os.homedir,
+        joinPath: path.join,
+      });
+      interpretCliResultWithoutDI(result);
+      return;
+    }
+
     const result = await executeInitCommand({
       mkdir: (p, opts) => fs.promises.mkdir(p, opts),
       readdir: (p) => fs.promises.readdir(p),
