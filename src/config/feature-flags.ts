@@ -106,7 +106,7 @@ export const FEATURE_FLAG_DEFINITIONS: ReadonlyArray<FeatureFlagDefinition> = [
     key: 'devMode',
     envVar: 'WORKRAIL_DEV',
     defaultValue: false,
-    description: 'Enable development features: staleness signal for all workflow categories, structured tool-call timing on stderr, and /api/v2/perf/tool-calls endpoint',
+    description: 'Enable development features: structured tool-call timing on stderr and /api/v2/perf/tool-calls endpoint. Note: staleness visibility for all workflow categories is controlled separately by WORKRAIL_DEV_STALENESS.',
     since: '0.11.0',
     stable: false,
   },
