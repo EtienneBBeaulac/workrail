@@ -483,8 +483,15 @@ export class HttpServer {
         return this.baseUrl;
       } catch (error: any) {
         if (error.code === 'EADDRINUSE') {
-          // Port busy even though we have lock - cleanup and fall back
-          console.error(`[Dashboard] Port ${this.port} busy despite lock, falling back to legacy mode`);
+          // Port busy despite winning the lock -- the previous primary is still
+          // bound to the port (e.g. version upgrade: old instance holds 3456,
+          // new instance reclaimed the lock but can't bind yet). Fall back to
+          // legacy mode so both instances can run concurrently. The old instance
+          // will release the port when its IDE tab closes (stdin EOF).
+          console.error(
+            `[Dashboard] Port ${this.port} still held by previous instance -- ` +
+            `running on next available port. Restart the old instance to move to ${this.port}.`
+          );
           await fs.unlink(this.lockFile).catch(() => {});
           return await this.startLegacyMode();
         }
@@ -539,8 +546,17 @@ export class HttpServer {
   }
   
   /**
-   * Determine if a lock should be reclaimed based on its data
-   * Pure function - no side effects
+   * Determine if a lock should be reclaimed based on its data.
+   *
+   * Pure function - no side effects, no I/O.
+   *
+   * Note: this function intentionally does NOT probe the HTTP health endpoint.
+   * HTTP responsiveness is not a reliable liveness signal -- Node.js is
+   * single-threaded, so a busy event loop (e.g. processing a tool call) will
+   * fail a health check while the process is perfectly healthy. The three
+   * checks below (structure, version, TTL, PID) are reliable and sufficient.
+   * Adding an HTTP check here caused false-positive kills; see the fix in
+   * reclaimStaleLock() for full rationale.
    */
   private shouldReclaimLock(lockData: DashboardLock): { reclaim: boolean; reason: string } {
     // Invalid structure
@@ -548,8 +564,10 @@ export class HttpServer {
       return { reclaim: true, reason: 'invalid lock structure' };
     }
 
-    // Version mismatch: a newer (or different) version should take over so the
-    // browser always gets up-to-date console assets from the running process.
+    // Version mismatch: a different version holds the lock. We reclaim atomically
+    // so the new version's lock metadata is current. If the old process still holds
+    // the port, startAsPrimary() will EADDRINUSE and fall back to legacy mode --
+    // the old instance keeps its port and sessions until it exits naturally.
     // undefined means the lock was written by a pre-version-field build -- treat
     // it the same as "wrong version" so the fix takes effect on first deployment.
     if (lockData.version !== CURRENT_VERSION) {
@@ -591,50 +609,23 @@ export class HttpServer {
       const { reclaim, reason } = this.shouldReclaimLock(lockData);
       
       if (!reclaim) {
-        // Check if primary is healthy even though lock seems valid
-        const isHealthy = await this.checkHealth(lockData.port);
-        if (isHealthy) {
-          return false; // Valid primary exists
-        }
-        
-        // Process exists but not responding - try to kill it first
-        console.error(`[Dashboard] Primary (PID ${lockData.pid}) not responding, attempting graceful shutdown`);
-        try {
-          process.kill(lockData.pid, 'SIGTERM');
-          await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s
-        } catch {}
-        
-        // Re-check if it's now healthy or dead
-        const stillHealthy = await this.checkHealth(lockData.port);
-        if (stillHealthy) {
-          return false; // It recovered
-        }
+        // shouldReclaimLock() already confirmed: version matches, heartbeat is fresh,
+        // and the PID is alive. These three signals are reliable liveness proof.
+        // HTTP responsiveness is NOT a reliable signal -- a busy event loop (e.g.
+        // processing a tool call) will fail a 2s health check while the process is
+        // perfectly healthy. Yield unconditionally to the existing primary.
+        console.error(`[Dashboard] Secondary mode: primary lock valid (PID ${lockData.pid}), yielding`);
+        return false;
       } else {
-        console.error(`[Dashboard] Lock reclaim needed: ${reason}`);
-
-        // SIGTERM the old process before reclaiming the port.
-        // Without this, the old process is still bound to port 3456 and
-        // startAsPrimary() throws EADDRINUSE, causing silent fallback to legacy mode.
-        // Mirror the graceful-shutdown pattern used in the !reclaim branch above.
+        // shouldReclaimLock() determined the lock should be reclaimed (version mismatch,
+        // stale TTL, or dead PID). Proceed directly to atomic reclaim -- do not SIGTERM.
         //
-        // checkHealth() guard: confirm the process on this port is still a WorkRail
-        // instance before sending SIGTERM. A recycled PID (process.kill(pid,0) succeeds
-        // but the PID now belongs to an unrelated process) must not receive SIGTERM.
-        // If the port is no longer responding as WorkRail, the old process already
-        // exited -- skip SIGTERM and proceed directly to the atomic lock reclaim.
-        try {
-          process.kill(lockData.pid, 0); // Throws if process is dead
-          const isWorkRailOnPort = await this.checkHealth(lockData.port);
-          if (isWorkRailOnPort) {
-            console.error(`[Dashboard] Sending SIGTERM to old process (PID ${lockData.pid})`);
-            process.kill(lockData.pid, 'SIGTERM');
-            await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s for graceful exit
-          } else {
-            console.error(`[Dashboard] PID ${lockData.pid} alive but not WorkRail on port ${lockData.port} -- reclaiming without SIGTERM`);
-          }
-        } catch {
-          // Process already dead -- proceed to reclaim
-        }
+        // Rationale: the old primary is either already dead (dead-PID case) or still
+        // serving active MCP sessions that must not be interrupted. If it holds port
+        // 3456, startAsPrimary() will throw EADDRINUSE and fall back to legacy mode on
+        // port 3457+. That is the correct outcome -- the old instance keeps its port
+        // and its sessions; the new instance starts on an available port.
+        console.error(`[Dashboard] Lock reclaim needed: ${reason}`);
       }
 
       // ATOMIC RECLAIM: Write new lock to temp file, then rename
@@ -702,30 +693,6 @@ export class HttpServer {
       console.error('[Dashboard] Lock file corrupted, attempting fresh claim');
       await fs.unlink(this.lockFile).catch(() => {});
       return await this.tryBecomePrimary();
-    }
-  }
-  
-  /**
-   * Check if a server is healthy on given port
-   */
-  private async checkHealth(port: number): Promise<boolean> {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 2000); // 2s timeout
-      
-      const response = await fetch(`http://localhost:${port}/api/health`, {
-        signal: controller.signal
-      });
-      
-      clearTimeout(timeout);
-      
-      if (!response.ok) return false;
-      
-      const data = await response.json();
-      return data.status === 'healthy' && data.isPrimary !== undefined;
-      
-    } catch {
-      return false;
     }
   }
   
