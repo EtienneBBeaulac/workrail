@@ -29,7 +29,6 @@ import {
   renderBudgetedRehydrateRecovery,
   type RetrievalPackSegment,
 } from './retrieval-contract.js';
-import { CLEAN_RESPONSE_FORMAT } from '../../../env-flags.js';
 
 export type PromptRenderError = {
   readonly code: 'RENDER_FAILED';
@@ -399,6 +398,12 @@ export function renderPendingPrompt(args: {
   readonly rehydrateOnly: boolean;
   /** Pre-built SessionIndex -- when provided, skips hasPriorNotesInRun and asSortedEventLog+projectRunContextV2. */
   readonly precomputedIndex?: import('../session-index.js').SessionIndex;
+  /**
+   * Whether to use the clean response format (transparent proxy mode).
+   * Passed from the caller so the feature flag is resolved via DI rather
+   * than read directly from process.env inside this pure rendering function.
+   */
+  readonly cleanResponseFormat?: boolean;
 }): Result<StepMetadata, PromptRenderError> {
   // Extract base step metadata.
   // Fail-fast: a missing step is a structural invariant violation, not a "use a fallback" situation.
@@ -467,9 +472,8 @@ export function renderPendingPrompt(args: {
   const basePrompt = resolveContextTemplates(step.prompt ?? '', renderContext);
   const baseTitle = resolveContextTemplates(step.title, renderContext);
 
-  // Use module-level CLEAN_RESPONSE_FORMAT (cached at startup) — same pattern
-  // as v2-response-formatter.ts to avoid per-call env lookups on the hot path.
-  const cleanResponseFormat = CLEAN_RESPONSE_FORMAT;
+  // Use the cleanResponseFormat flag passed from the caller (resolved via DI feature flags).
+  const cleanResponseFormat = args.cleanResponseFormat ?? false;
 
   // Loop context banner — prepended before the authored prompt so the agent
   // understands it is intentionally re-entering a loop body step.

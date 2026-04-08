@@ -1,6 +1,58 @@
 # Configuration
 
-WorkRail can be configured through environment variables and file paths.
+WorkRail can be configured through environment variables, a config file, and file paths.
+
+## Config File
+
+`~/.workrail/config.json` is a persistent, per-user configuration file. All IDEs pick it up automatically -- no MCP `env` block changes needed.
+
+### Location
+
+```
+~/.workrail/config.json
+```
+
+### Format
+
+A flat JSON object whose keys are env var names and whose values are strings:
+
+```json
+{
+  "WORKRAIL_LOG_LEVEL": "INFO",
+  "WORKRAIL_CLEAN_RESPONSE_FORMAT": "true",
+  "CACHE_TTL": "600000"
+}
+```
+
+### Precedence
+
+```
+process.env  (highest -- always wins)
+    +
+~/.workrail/config.json  (defaults)
+    +
+compiled defaults  (lowest)
+```
+
+Environment variables set in the MCP `env` block, shell, or system always override the config file.
+
+### Excluded keys
+
+The following keys are intentionally ignored in the config file and must be set via `process.env` only:
+
+- `*_TOKEN` -- authentication tokens (security)
+- `WORKRAIL_DEV`, `WORKRAIL_DEV_STALENESS` -- internal dev-only flags
+- `NODE_ENV`, `VITEST` -- injected by the Node.js / test runtime
+
+### Generate a template
+
+```bash
+workrail init --config
+```
+
+Creates `~/.workrail/config.json` with all supported keys commented out and their default values shown. If the file already exists, prints its current contents without overwriting.
+
+---
 
 ## Quick Start
 

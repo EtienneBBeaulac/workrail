@@ -52,8 +52,9 @@ export function handleAdvanceIntent(args: {
   readonly sha256: Sha256PortV2;
   readonly aliasStore: import('../../../v2/ports/token-alias-store.port.js').TokenAliasStorePortV2;
   readonly entropy: import('../../../v2/ports/random-entropy.port.js').RandomEntropyPortV2;
+  readonly cleanResponseFormat?: boolean;
 }): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, ContinueWorkflowError> {
-  const { input, sessionId, runId, nodeId, attemptId, workflowHashRef, truth, gate, sessionStore, snapshotStore, pinnedStore, tokenCodecPorts, idFactory, sha256, aliasStore, entropy } = args;
+  const { input, sessionId, runId, nodeId, attemptId, workflowHashRef, truth, gate, sessionStore, snapshotStore, pinnedStore, tokenCodecPorts, idFactory, sha256, aliasStore, entropy, cleanResponseFormat } = args;
 
   const dedupeKey = `advance_recorded:${sessionId}:${nodeId}:${attemptId}`;
 
@@ -166,6 +167,7 @@ export function handleAdvanceIntent(args: {
           tokenCodecPorts,
           aliasStore,
           entropy,
+          cleanResponseFormat,
         });
       }
 
@@ -286,6 +288,7 @@ export function handleAdvanceIntent(args: {
             tokenCodecPorts,
             aliasStore,
             entropy,
+            cleanResponseFormat,
           });
         });
     });
