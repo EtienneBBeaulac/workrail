@@ -122,6 +122,17 @@ the old flat dark style.
 
 *(worth keeping visible, not current delivery commitments)*
 
+### Custom cyberpunk overscroll effect
+
+When scrolling past the limits of a scrollable container (modal, session list,
+DAG), add a themed visual effect instead of the default OS rubber-band bounce.
+Options: amber glow flash at the boundary, a brief scan-line flicker, or a
+subtle "resistance" indicator. Requires custom scroll event handling + CSS.
+
+**Files:** `console/src/index.css`, scroll container components
+
+---
+
 ### Nicer hover animations
 
 Current hover state: border brightens, top stripe goes full opacity, ambient glow appears.
