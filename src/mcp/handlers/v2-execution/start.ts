@@ -500,6 +500,7 @@ export function executeStartWorkflow(
           runId: asRunId(String(runId)),
           nodeId: asNodeId(String(nodeId)),
           rehydrateOnly: false,
+          cleanResponseFormat: ctx.featureFlags?.isEnabled('cleanResponseFormat') ?? false,
         });
 
         if (metaResult.isErr()) {

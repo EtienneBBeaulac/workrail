@@ -34,19 +34,29 @@ import { getV2ExecutionRenderEnvelope } from './render-envelope.js';
 // -----------------------------------------------------------------------------
 
 /**
+ * Module-level JSON override: read once at load time (same as before).
+ * WORKRAIL_JSON_RESPONSES is not a feature flag; it is a raw env var.
+ */
+const jsonResponsesOverride = process.env.WORKRAIL_JSON_RESPONSES === 'true';
+
+/**
  * Convert our ToolResult<T> to MCP's CallToolResult format.
  *
  * For error results, serializes the unified envelope:
  * { code, message, retry, details? }
+ *
+ * @param result - The tool result to convert
+ * @param ctx - Tool context providing feature flags. When absent (e.g., error path
+ *   before handler runs), clean response format defaults to false.
  */
-const jsonResponsesOverride = process.env.WORKRAIL_JSON_RESPONSES === 'true';
-
-export function toMcpResult<T>(result: ToolResult<T>): McpCallToolResult {
+export function toMcpResult<T>(result: ToolResult<T>, ctx?: ToolContext): McpCallToolResult {
   switch (result.type) {
     case 'success': {
+      const cleanResponseFormat = ctx?.featureFlags.isEnabled('cleanResponseFormat') ?? false;
+
       if (!jsonResponsesOverride) {
         const formatted: FormattedResponse | null =
-          formatV2ExecutionResponse(result.data) ?? formatV2ResumeResponse(result.data);
+          formatV2ExecutionResponse(result.data, cleanResponseFormat) ?? formatV2ResumeResponse(result.data);
         if (formatted !== null) {
           const content: { type: 'text'; text: string }[] = [{ type: 'text', text: formatted.primary }];
           if (formatted.references != null) {
@@ -154,14 +164,15 @@ export function createHandler<TInput extends z.ZodType, TOutput>(
             message: e.message,
           })),
           ...patchedDetails,
-        })
+        }),
+        ctx
       );
     }
     // Boundary safety net: if a handler throws instead of returning ToolResult,
     // catch the exception and convert it to a structured error envelope.
     // This prevents raw Error objects from leaking to the MCP SDK.
     try {
-      return toMcpResult(await handler(parseResult.data, ctx));
+      return toMcpResult(await handler(parseResult.data, ctx), ctx);
     } catch (err) {
       // Log the raw error for server-side debugging (stderr, not agent-facing)
       console.error('[WorkRail] Unhandled exception in tool handler:', err);
@@ -169,7 +180,8 @@ export function createHandler<TInput extends z.ZodType, TOutput>(
         errNotRetryable('INTERNAL_ERROR',
           'WorkRail encountered an unexpected error. This is not caused by your input.',
           { suggestion: internalSuggestion('Retry the call.', 'WorkRail has an internal error.') },
-        )
+        ),
+        ctx
       );
     }
   };
@@ -229,10 +241,10 @@ export function createValidatingHandler<TInput extends z.ZodType, TOutput>(
           ...error,
           details: boundedDetails as ToolError['details'],
         };
-        return toMcpResult(boundedError);
+        return toMcpResult(boundedError, ctx);
       }
 
-      return toMcpResult(error);
+      return toMcpResult(error, ctx);
     }
 
     // Fall back to the standard Zod + handler pipeline.

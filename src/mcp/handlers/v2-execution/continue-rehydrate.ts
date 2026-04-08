@@ -62,8 +62,9 @@ export function handleRehydrateIntent(args: {
   readonly entropy: import('../../../v2/ports/random-entropy.port.js').RandomEntropyPortV2;
   /** MCP roots resolved by the server — used as fallback for binding base dir. */
   readonly resolvedRootUris?: readonly string[];
+  readonly cleanResponseFormat?: boolean;
 }): RA<RehydrateResult, ContinueWorkflowError> {
-  const { input, sessionId, runId, nodeId, workflowHashRef, truth, tokenCodecPorts, pinnedStore, snapshotStore, idFactory, aliasStore, entropy, resolvedRootUris } = args;
+  const { input, sessionId, runId, nodeId, workflowHashRef, truth, tokenCodecPorts, pinnedStore, snapshotStore, idFactory, aliasStore, entropy, resolvedRootUris, cleanResponseFormat } = args;
 
   const runStarted = truth.events.find(
     (e): e is Extract<DomainEventV1, { kind: 'run_started' }> => e.kind === EVENT_KIND.RUN_STARTED && e.scope.runId === String(runId)
@@ -200,6 +201,7 @@ export function handleRehydrateIntent(args: {
                 runId: asRunId(String(runId)),
                 nodeId: asNodeId(String(nodeId)),
                 rehydrateOnly: true,
+                cleanResponseFormat,
               });
 
               if (metaRes.isErr()) {
