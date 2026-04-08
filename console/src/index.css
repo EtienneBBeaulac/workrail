@@ -384,30 +384,34 @@ body::after {
   animation: tab-activate-flicker 280ms ease-out forwards;
 }
 
-/* Tab corner brackets -- 4 absolute spans, scale in/out on active state */
-.tab-btn {
-  position: relative;
-  overflow: visible;
-}
+/* Tab corner brackets -- 4 absolute spans, scale in/out on active state.
+   Declared in @layer components so Tailwind v4 preserves them even when
+   the class names aren't referenced as Tailwind utilities in JSX. */
+@layer components {
+  .tab-btn {
+    position: relative;
+    overflow: visible;
+  }
 
-.tab-corner {
-  position: absolute;
-  width: 8px;
-  height: 8px;
-  opacity: 0;
-  transform: scale(0.5);
-  transition: opacity 150ms ease, transform 150ms ease;
-  pointer-events: none;
-}
+  .tab-corner {
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    opacity: 0;
+    transform: scale(0.5);
+    transition: opacity 150ms ease, transform 150ms ease;
+    pointer-events: none;
+  }
 
-.tab-corner--tl { top: 2px; left: 2px; border-top: 1px solid var(--accent); border-left: 1px solid var(--accent); }
-.tab-corner--tr { top: 2px; right: 2px; border-top: 1px solid var(--accent); border-right: 1px solid var(--accent); }
-.tab-corner--bl { bottom: 2px; left: 2px; border-bottom: 1px solid var(--accent); border-left: 1px solid var(--accent); }
-.tab-corner--br { bottom: 2px; right: 2px; border-bottom: 1px solid var(--accent); border-right: 1px solid var(--accent); }
+  .tab-corner--tl { top: 2px; left: 2px; border-top: 1px solid var(--accent); border-left: 1px solid var(--accent); }
+  .tab-corner--tr { top: 2px; right: 2px; border-top: 1px solid var(--accent); border-right: 1px solid var(--accent); }
+  .tab-corner--bl { bottom: 2px; left: 2px; border-bottom: 1px solid var(--accent); border-left: 1px solid var(--accent); }
+  .tab-corner--br { bottom: 2px; right: 2px; border-bottom: 1px solid var(--accent); border-right: 1px solid var(--accent); }
 
-.tab-btn--active .tab-corner {
-  opacity: 1;
-  transform: scale(1);
+  .tab-btn--active .tab-corner {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
