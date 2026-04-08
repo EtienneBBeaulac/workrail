@@ -62,7 +62,7 @@ async function buildCtx(dataRoot: string, workflowRoot?: string): Promise<{
   const keyringRes = await keyringPort.loadOrCreate();
   if (keyringRes.isErr()) throw new Error(`keyring load failed: ${keyringRes.error.code}`);
 
-  const rememberedRootsStore = new LocalRememberedRootsStoreV2(dataDir, fsPort);
+  const rememberedRootsStore = new LocalRememberedRootsStoreV2(dataDir, fsPort, clock);
   const sessionSummaryProvider: SessionSummaryProviderPortV2 = {
     loadHealthySummaries: () => okAsync([]),
   };
@@ -230,7 +230,7 @@ describe('v2 remembered roots integration', () => {
 
     const reloadedStore = new LocalRememberedRootsStoreV2(
       new LocalDataDirV2({ WORKRAIL_DATA_DIR: dataRoot }),
-      new NodeFileSystemV2(),
+      new NodeFileSystemV2(), new NodeTimeClockV2(),
     );
     const roots = await reloadedStore.listRoots();
     expect(roots.isOk()).toBe(true);
@@ -251,7 +251,7 @@ describe('v2 remembered roots integration', () => {
 
     const reloadedStore = new LocalRememberedRootsStoreV2(
       new LocalDataDirV2({ WORKRAIL_DATA_DIR: dataRoot }),
-      new NodeFileSystemV2(),
+      new NodeFileSystemV2(), new NodeTimeClockV2(),
     );
     const roots = await reloadedStore.listRoots();
     expect(roots.isOk()).toBe(true);
@@ -272,7 +272,7 @@ describe('v2 remembered roots integration', () => {
 
     const reloadedStore = new LocalRememberedRootsStoreV2(
       new LocalDataDirV2({ WORKRAIL_DATA_DIR: dataRoot }),
-      new NodeFileSystemV2(),
+      new NodeFileSystemV2(), new NodeTimeClockV2(),
     );
     const roots = await reloadedStore.listRoots();
     expect(roots.isOk()).toBe(true);
@@ -295,7 +295,7 @@ describe('v2 remembered roots integration', () => {
 
     const reloadedStore = new LocalRememberedRootsStoreV2(
       new LocalDataDirV2({ WORKRAIL_DATA_DIR: dataRoot }),
-      new NodeFileSystemV2(),
+      new NodeFileSystemV2(), new NodeTimeClockV2(),
     );
     const roots = await reloadedStore.listRoots();
     expect(roots.isOk()).toBe(true);

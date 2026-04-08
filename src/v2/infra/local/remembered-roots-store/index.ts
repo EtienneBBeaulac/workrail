@@ -4,6 +4,7 @@ import { okAsync, errAsync } from 'neverthrow';
 import type { ResultAsync } from 'neverthrow';
 import type { DataDirPortV2 } from '../../../ports/data-dir.port.js';
 import type { FileSystemPortV2, FsError } from '../../../ports/fs.port.js';
+import type { TimeClockPortV2 } from '../../../ports/time-clock.port.js';
 import type {
   RememberedRootRecordV2,
   RememberedRootsStoreError,
@@ -13,6 +14,11 @@ import { toCanonicalBytes } from '../../../durable-core/canonical/jcs.js';
 import type { JsonValue } from '../../../durable-core/canonical/json-types.js';
 
 const REMEMBERED_ROOTS_LOCK_RETRY_MS = 250;
+
+// Roots not seen for this long are evicted on the next rememberRoot write.
+// Eviction is lazy (write-triggered), not proactive -- roots accumulate until
+// a new root is remembered.
+const TTL_30_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
 const RememberedRootRecordSchema = z.object({
   path: z.string(),
@@ -63,6 +69,7 @@ export class LocalRememberedRootsStoreV2 implements RememberedRootsStorePortV2 {
   constructor(
     private readonly dataDir: DataDirPortV2,
     private readonly fs: FileSystemPortV2,
+    private readonly clock: TimeClockPortV2,
   ) {}
 
   listRoots(): ResultAsync<readonly string[], RememberedRootsStoreError> {
@@ -104,7 +111,7 @@ export class LocalRememberedRootsStoreV2 implements RememberedRootsStorePortV2 {
 
   rememberRoot(rootPath: string): ResultAsync<void, RememberedRootsStoreError> {
     const normalizedRoot = path.resolve(rootPath);
-    const nowMs = Date.now();
+    const nowMs = this.clock.nowMs();
 
     return this.withLock(() =>
       this.listRootRecords().andThen((roots) => {
@@ -125,7 +132,12 @@ export class LocalRememberedRootsStoreV2 implements RememberedRootsStorePortV2 {
               },
             ];
 
-        return this.persist(nextRoots);
+        // Lazy TTL eviction: filter out roots not seen in the last 30 days.
+        // Runs on every write so stale roots are cleaned up gradually without
+        // requiring a separate background process.
+        const withEviction = nextRoots.filter((r) => r.lastSeenAtMs >= nowMs - TTL_30_DAYS_MS);
+
+        return this.persist(withEviction);
       })
     );
   }
