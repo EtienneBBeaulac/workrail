@@ -217,3 +217,16 @@ conditions evaluated, what context facts were used.
 | SessionList SORT_AXES refactor | merged | Typed axis objects, debounce, grouped pagination |
 | Audit findings (MR + prod + arch) | `60cf743`+ | All 3 audit cycles addressed |
 | Unit tests for lineage layout | `609c343` | 22 tests covering F1 regression, cycle safety, compression |
+
+---
+
+### Theme the back navigation element
+
+The `← Workflows` / `← Workflows / CODING` back link in WorkflowDetail
+is plain text. Should match the cyberpunk aesthetic:
+- Use `←` replaced with `//` or `<` in monospace, e.g. `< WORKFLOWS // CODING`
+- Amber color on hover, muted at rest
+- Could use `BracketBadge` or a dedicated nav arrow component
+- Consistent with the `//` separator language established elsewhere
+
+**Files:** `console/src/views/WorkflowDetail.tsx`
