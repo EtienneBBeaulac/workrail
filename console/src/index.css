@@ -368,11 +368,26 @@ body::after {
     bottom 0 right 0, bottom 0 right 0;
 }
 
+/* Cyberpunk tab activation flicker -- brief amber over-brightness on click */
+@keyframes tab-activate-flicker {
+  0%   { opacity: 1; }
+  15%  { opacity: 0.4; filter: brightness(2.5); }
+  30%  { opacity: 1; filter: brightness(1.8); }
+  50%  { opacity: 0.7; filter: brightness(2.2); }
+  70%  { opacity: 1; filter: brightness(1.4); }
+  100% { opacity: 1; filter: brightness(1); }
+}
+
+.tab-activating {
+  animation: tab-activate-flicker 180ms ease-out forwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .badge-live,
   .energy-live,
   .workrail-current-lineage-node,
-  .workrail-current-lineage-edge .react-flow__edge-path {
+  .workrail-current-lineage-edge .react-flow__edge-path,
+  .tab-activating {
     animation: none !important;
   }
 }

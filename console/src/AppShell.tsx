@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useMatchRoute, useRouterState } from '@tanstack/react-router';
 import { WorkspaceView } from './views/WorkspaceView';
 import { SessionDetail } from './views/SessionDetail';
@@ -81,6 +81,22 @@ export function AppShell() {
   const handleBackFromWorkflow = useCallback(() => {
     void navigate({ to: '/workflows', search: { tag: activeTag ?? undefined } });
   }, [navigate, activeTag]);
+
+  // ---------------------------------------------------------------------------
+  // Tab activation flicker
+  // ---------------------------------------------------------------------------
+
+  const [activatingTab, setActivatingTab] = useState<string | null>(null);
+
+  const handleTabClick = useCallback(
+    (tabId: string, navigationFn: () => void) => {
+      navigationFn();
+      setActivatingTab(tabId);
+      // Clear after animation completes (180ms animation + small buffer)
+      setTimeout(() => setActivatingTab(null), 200);
+    },
+    [],
+  );
 
   // ---------------------------------------------------------------------------
   // Tab bar keyboard (ARIA tablist: Left/Right arrows switch tabs)
@@ -171,13 +187,14 @@ export function AppShell() {
               aria-selected={!isOnWorkflowsTab}
               aria-controls="panel-workspace"
               tabIndex={!isOnWorkflowsTab ? 0 : -1}
-              onClick={() => void navigate({ to: '/' })}
+              onClick={() => handleTabClick('workspace', () => void navigate({ to: '/' }))}
               className={[
-                'px-4 py-2.5 font-mono text-[10px] uppercase tracking-[0.30em] transition-colors',
+                'px-4 py-2.5 font-mono text-[10px] uppercase tracking-[0.30em] transition-colors duration-150',
                 'focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:outline-none',
                 !isOnWorkflowsTab
                   ? 'corner-brackets text-[var(--accent)] text-glow-amber'
                   : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
+                activatingTab === 'workspace' ? 'tab-activating' : '',
               ].join(' ')}
               style={!isOnWorkflowsTab ? { backgroundColor: 'rgba(244, 196, 48, 0.06)' } : undefined}
             >
@@ -189,13 +206,14 @@ export function AppShell() {
               aria-selected={isOnWorkflowsTab}
               aria-controls="panel-workflows"
               tabIndex={isOnWorkflowsTab ? 0 : -1}
-              onClick={() => void navigate({ to: '/workflows', search: { tag: undefined } })}
+              onClick={() => handleTabClick('workflows', () => void navigate({ to: '/workflows', search: { tag: undefined } }))}
               className={[
-                'px-4 py-2.5 font-mono text-[10px] uppercase tracking-[0.30em] transition-colors',
+                'px-4 py-2.5 font-mono text-[10px] uppercase tracking-[0.30em] transition-colors duration-150',
                 'focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:outline-none',
                 isOnWorkflowsTab
                   ? 'corner-brackets text-[var(--accent)] text-glow-amber'
                   : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
+                activatingTab === 'workflows' ? 'tab-activating' : '',
               ].join(' ')}
               style={isOnWorkflowsTab ? { backgroundColor: 'rgba(244, 196, 48, 0.06)' } : undefined}
             >
