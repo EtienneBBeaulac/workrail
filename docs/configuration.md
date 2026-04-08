@@ -41,7 +41,6 @@ Environment variables set in the MCP `env` block, shell, or system always overri
 The following keys are intentionally ignored in the config file and must be set via `process.env` only:
 
 - `*_TOKEN` -- authentication tokens (security)
-- `WORKRAIL_DEV`, `WORKRAIL_DEV_STALENESS` -- internal dev-only flags
 - `NODE_ENV`, `VITEST` -- injected by the Node.js / test runtime
 
 ### Generate a template

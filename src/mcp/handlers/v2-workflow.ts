@@ -43,16 +43,11 @@ function readCurrentSpecVersion(): number | null {
 const CURRENT_SPEC_VERSION: number | null = readCurrentSpecVersion();
 
 /**
- * When set to '1', surfaces staleness for all workflow categories (including built-in
- * and legacy_project). Intended for maintainer use only — not documented publicly.
- */
-const DEV_STALENESS: boolean = process.env['WORKRAIL_DEV_STALENESS'] === '1';
-
-/**
  * Whether to surface the staleness field for a given workflow visibility category.
- * By default only user-owned/imported workflows get the signal; DEV_STALENESS bypasses this.
+ * By default only user-owned/imported workflows get the signal.
+ * When dev mode is active (WORKRAIL_DEV=1), all categories get the signal.
  */
-export function shouldShowStaleness(category: string | undefined, devMode: boolean = DEV_STALENESS): boolean {
+export function shouldShowStaleness(category: string | undefined, devMode: boolean = isDevMode()): boolean {
   if (devMode) return true;
   return category === 'personal' || category === 'rooted_sharing' || category === 'external';
 }
@@ -148,6 +143,7 @@ export function computeWorkflowStaleness(
   };
 }
 
+import { isDevMode } from '../dev-mode.js';
 import { withTimeout } from './shared/with-timeout.js';
 import { createWorkflowReaderForRequest, hasRequestWorkspaceSignal } from './shared/request-workflow-reader.js';
 import { listRememberedRootRecords, rememberExplicitWorkspaceRoot } from './shared/remembered-roots.js';

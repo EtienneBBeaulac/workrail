@@ -492,7 +492,7 @@ git add workflows/my-workflow.json && git commit -m "chore: stamp workflow"
 
 The stamp must be committed to take effect. The `workflow-for-workflows` Phase 7 step includes a reminder to do this.
 
-**Visibility:** By default, the staleness signal is only shown for user-owned/imported workflows (`personal`, `rooted_sharing`, `external`). Built-in and legacy_project workflows are excluded. Set `WORKRAIL_DEV_STALENESS=1` to see staleness for all categories (useful for catalog maintenance).
+**Visibility:** By default, the staleness signal is only shown for user-owned/imported workflows (`personal`, `rooted_sharing`, `external`). Built-in and legacy_project workflows are excluded. Set `WORKRAIL_DEV=1` to see staleness for all categories (useful for catalog maintenance).
 
 **In `validate:registry`:** The validator prints a non-blocking advisory listing unstamped and outdated workflows after each run. This is always visible regardless of the dev flag.
 
