@@ -1,11 +1,11 @@
-import type { ReactNode, CSSProperties } from 'react';
+import type { ReactNode, CSSProperties, MouseEvent } from 'react';
 import { CutCornerBox } from './CutCornerBox';
 
 type Variant = 'grid' | 'list' | 'hero';
 
 interface Props {
   variant?: Variant;
-  onClick?: () => void;
+  onClick?: (e: MouseEvent<HTMLButtonElement>) => void;
   className?: string;
   style?: CSSProperties;
   children: ReactNode;
@@ -40,20 +40,34 @@ export function ConsoleCard({
     list: 'w-full text-left',
   }[variant];
 
-  const Tag = onClick ? 'button' : 'div';
+  const sharedClasses = `${baseClasses} ${variantClasses} ${className}`;
+  const accentBar = variant === 'grid' && (
+    <div className="h-[3px] w-full bg-[var(--accent)] opacity-60 group-hover:opacity-100 transition-opacity shrink-0" />
+  );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={ariaLabel}
+        className={sharedClasses}
+        style={style}
+      >
+        {accentBar}
+        {children}
+      </button>
+    );
+  }
 
   return (
-    <Tag
-      type={onClick ? 'button' : undefined}
-      onClick={onClick}
+    <div
       aria-label={ariaLabel}
-      className={`${baseClasses} ${variantClasses} ${className}`}
+      className={sharedClasses}
       style={style}
     >
-      {variant === 'grid' && (
-        <div className="h-[3px] w-full bg-[var(--accent)] opacity-60 group-hover:opacity-100 transition-opacity shrink-0" />
-      )}
+      {accentBar}
       {children}
-    </Tag>
+    </div>
   );
 }

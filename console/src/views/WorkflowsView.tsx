@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useWorkflowList } from '../api/hooks';
 import type { ConsoleWorkflowSummary } from '../api/types';
 import { CATALOG_TAGS, TAG_DISPLAY } from '../config/tags';
@@ -65,7 +65,52 @@ function groupWorkflowsByTag(workflows: readonly ConsoleWorkflowSummary[]): Work
 
 export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onSelectWorkflow }: Props) {
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const { data, isLoading, isError, error, refetch } = useWorkflowList();
+
+  // Issue #6: Restore focus to the card that opened the modal when it closes.
+  useEffect(() => {
+    if (!selectedWorkflowId && triggerRef.current) {
+      triggerRef.current.focus();
+      triggerRef.current = null;
+    }
+  }, [selectedWorkflowId]);
+
+  // Issue #4: Lock body scroll when modal is open, preserving scroll position.
+  // Setting overflow:hidden alone resets scroll to top -- position:fixed preserves it.
+  useEffect(() => {
+    if (!selectedWorkflowId) return;
+
+    const scrollY = window.scrollY;
+    document.body.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.width = '100%';
+
+    return () => {
+      document.body.style.overflow = '';
+      document.body.style.position = '';
+      document.body.style.top = '';
+      document.body.style.width = '';
+      window.scrollTo(0, scrollY);
+    };
+  }, [selectedWorkflowId]);
+
+  // Issue #5: Close modal on Escape key.
+  useEffect(() => {
+    if (!selectedWorkflowId) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSelectedWorkflowId(null);
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [selectedWorkflowId]);
+
+  // Issue #6: Store the trigger element before opening the modal.
+  const handleCardSelect = (id: string, triggerEl: HTMLButtonElement) => {
+    triggerRef.current = triggerEl;
+    setSelectedWorkflowId(id);
+  };
 
   // Filter: exclude routines tag; apply selected tag filter
   const allWorkflows = data?.workflows.filter((w) => !w.tags.includes('routines')) ?? [];
@@ -140,7 +185,7 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
               <WorkflowCard
                 key={workflow.id}
                 workflow={workflow}
-                onSelect={() => setSelectedWorkflowId(workflow.id)}
+                onSelect={(triggerEl) => handleCardSelect(workflow.id, triggerEl)}
               />
             ))}
           </div>
@@ -156,7 +201,7 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
                   <WorkflowCard
                     key={workflow.id}
                     workflow={workflow}
-                    onSelect={() => setSelectedWorkflowId(workflow.id)}
+                    onSelect={(triggerEl) => handleCardSelect(workflow.id, triggerEl)}
                   />
                 ))}
               </div>
@@ -194,7 +239,8 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
           <CutCornerBox
             cut={20}
             borderColor="rgba(244, 196, 48, 0.4)"
-            background="color-mix(in srgb, var(--bg-card) 88%, #f4c430 12%)"
+            background="rgba(15, 19, 31, 0.85)"
+            backdropFilter="blur(20px)"
             dropShadow="drop-shadow(0 24px 64px rgba(0,0,0,0.9)) drop-shadow(0 4px 16px rgba(244,196,48,0.15))"
             className="h-full flex flex-col"
           >
@@ -214,7 +260,7 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
             </div>
 
             {/* Scrollable content */}
-            <div className="flex-1 overflow-auto">
+            <div className="flex-1 overflow-auto overscroll-contain pb-6">
               {selectedWorkflowId && (
                 <WorkflowDetail
                   workflowId={selectedWorkflowId}
@@ -277,7 +323,7 @@ function WorkflowCard({
   onSelect,
 }: {
   readonly workflow: ConsoleWorkflowSummary;
-  readonly onSelect: () => void;
+  readonly onSelect: (triggerEl: HTMLButtonElement) => void;
 }) {
   const displayTags = workflow.tags
     .filter((t) => t !== 'routines')
@@ -293,7 +339,7 @@ function WorkflowCard({
     .join('. ');
 
   return (
-    <ConsoleCard variant="grid" onClick={onSelect} aria-label={accessibleName}>
+    <ConsoleCard variant="grid" onClick={(e) => onSelect(e.currentTarget as HTMLButtonElement)} aria-label={accessibleName}>
       <div className="flex flex-col flex-1 p-4 gap-2 min-w-0">
         {/* Name */}
         <p className="text-sm font-medium text-[var(--text-primary)] group-hover:text-[var(--accent)] transition-colors leading-snug line-clamp-2">
