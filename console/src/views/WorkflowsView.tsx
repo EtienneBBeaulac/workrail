@@ -1,8 +1,11 @@
+import { useState } from 'react';
 import { useWorkflowList } from '../api/hooks';
 import type { ConsoleWorkflowSummary } from '../api/types';
 import { CATALOG_TAGS, TAG_DISPLAY } from '../config/tags';
 import { SectionHeader } from '../components/SectionHeader';
 import { ConsoleCard } from '../components/ConsoleCard';
+import { CutCornerBox } from '../components/CutCornerBox';
+import { WorkflowDetail } from './WorkflowDetail';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -60,7 +63,8 @@ function groupWorkflowsByTag(workflows: readonly ConsoleWorkflowSummary[]): Work
 // WorkflowsView
 // ---------------------------------------------------------------------------
 
-export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow }: Props) {
+export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onSelectWorkflow }: Props) {
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
   const { data, isLoading, isError, error, refetch } = useWorkflowList();
 
   // Filter: exclude routines tag; apply selected tag filter
@@ -136,7 +140,7 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow }: Pr
               <WorkflowCard
                 key={workflow.id}
                 workflow={workflow}
-                onSelect={() => onSelectWorkflow(workflow.id)}
+                onSelect={() => setSelectedWorkflowId(workflow.id)}
               />
             ))}
           </div>
@@ -152,7 +156,7 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow }: Pr
                   <WorkflowCard
                     key={workflow.id}
                     workflow={workflow}
-                    onSelect={() => onSelectWorkflow(workflow.id)}
+                    onSelect={() => setSelectedWorkflowId(workflow.id)}
                   />
                 ))}
               </div>
@@ -160,6 +164,68 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow }: Pr
           ))}
         </div>
       )}
+      {/* Workflow detail modal */}
+      <div
+        className="fixed inset-0 z-50 flex items-end justify-center p-4 pointer-events-none"
+        aria-hidden={!selectedWorkflowId}
+      >
+        {/* Backdrop */}
+        {selectedWorkflowId && (
+          <div
+            className="absolute inset-0 pointer-events-auto"
+            style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}
+            onClick={() => setSelectedWorkflowId(null)}
+          />
+        )}
+
+        {/* Modal panel */}
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Workflow detail"
+          className="relative pointer-events-auto w-full max-w-3xl"
+          style={{
+            height: '85vh',
+            transform: selectedWorkflowId ? 'translateY(0) scale(1)' : 'translateY(24px) scale(0.97)',
+            opacity: selectedWorkflowId ? 1 : 0,
+            transition: 'transform 250ms ease-out, opacity 250ms ease-out',
+          }}
+        >
+          <CutCornerBox
+            cut={20}
+            borderColor="rgba(244, 196, 48, 0.4)"
+            background="color-mix(in srgb, var(--bg-card) 88%, #f4c430 12%)"
+            dropShadow="drop-shadow(0 24px 64px rgba(0,0,0,0.9)) drop-shadow(0 4px 16px rgba(244,196,48,0.15))"
+            className="h-full flex flex-col"
+          >
+            {/* Modal header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)] shrink-0 console-blueprint-grid">
+              <span className="font-mono text-[10px] uppercase tracking-[0.30em] text-[var(--text-muted)]">
+                Workflow
+              </span>
+              <button
+                type="button"
+                onClick={() => setSelectedWorkflowId(null)}
+                className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-xl leading-none"
+                aria-label="Close"
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Scrollable content */}
+            <div className="flex-1 overflow-auto">
+              {selectedWorkflowId && (
+                <WorkflowDetail
+                  workflowId={selectedWorkflowId}
+                  activeTag={selectedTag}
+                  onBack={() => setSelectedWorkflowId(null)}
+                />
+              )}
+            </div>
+          </CutCornerBox>
+        </div>
+      </div>
     </div>
   );
 }
