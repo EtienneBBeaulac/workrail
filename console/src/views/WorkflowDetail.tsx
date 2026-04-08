@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { PathBreadcrumb } from '../components/PathBreadcrumb';
 import { useQueryClient } from '@tanstack/react-query';
 import { useWorkflowDetail, HttpError } from '../api/hooks';
 import { MarkdownView } from '../components/MarkdownView';
@@ -43,14 +44,13 @@ export function WorkflowDetail({ workflowId, activeTag, onBack }: Props) {
   return (
     <div className="space-y-5 max-w-3xl">
       {/* Back link */}
-      <button
-        type="button"
-        onClick={onBack}
-        className="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors group"
-      >
-        <span className="group-hover:text-[var(--accent)] transition-colors">{'<'}</span>
-        {' '}{backLabel.toUpperCase()}
-      </button>
+      <PathBreadcrumb
+        segments={
+          activeTag
+            ? [{ label: 'Workflows', onClick: onBack }, { label: backLabel.replace('Workflows / ', '') }]
+            : [{ label: 'Workflows', onClick: onBack }]
+        }
+      />
 
       {/* Header */}
       <div className="border border-[var(--border)] px-5 py-4 console-blueprint-grid">
@@ -114,13 +114,9 @@ export function WorkflowDetail({ workflowId, activeTag, onBack }: Props) {
       )}
 
       {/* Second back link at bottom */}
-      <button
-        type="button"
-        onClick={onBack}
-        className="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
-      >
-        {'<'} {backLabel.toUpperCase()}
-      </button>
+      <PathBreadcrumb
+        segments={[{ label: 'Workflows', onClick: onBack }]}
+      />
     </div>
   );
 }

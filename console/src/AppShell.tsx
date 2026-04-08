@@ -7,6 +7,7 @@ import { WorkflowsView } from './views/WorkflowsView';
 import { WorkflowDetail } from './views/WorkflowDetail';
 import { CutCornerBox } from './components/CutCornerBox';
 import { BracketBadge } from './components/BracketBadge';
+import { PathBreadcrumb } from './components/PathBreadcrumb';
 import { useSessionList } from './api/hooks';
 
 /**
@@ -167,12 +168,12 @@ export function AppShell() {
         {isInSessionDetail && sessionId ? (
           /* Session detail breadcrumb */
           <nav className="flex items-center flex-1 justify-center">
-            <button
-              onClick={handleBackFromSession}
-              className="font-mono text-[10px] uppercase tracking-[0.20em] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:outline-none"
-            >
-              &larr; WORKSPACE // {sessionId.slice(-12)}
-            </button>
+            <PathBreadcrumb
+              segments={[
+                { label: 'Workspace', onClick: handleBackFromSession },
+                { label: sessionId?.slice(-12) ?? '' },
+              ]}
+            />
           </nav>
         ) : (
           /* Tab navigation */
