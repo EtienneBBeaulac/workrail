@@ -13,7 +13,7 @@ import type { ConsoleService } from './console-service.js';
 import { getWorktreeList, buildActiveSessionCounts, resolveRepoRoot } from './worktree-service.js';
 import type { WorkflowService } from '../../application/services/workflow-service.js';
 import type { ToolCallTimingRingBuffer } from '../../mcp/tool-call-timing.js';
-import { DEV_MODE } from '../../mcp/dev-mode.js';
+import { isDevMode } from '../../mcp/dev-mode.js';
 
 // ---------------------------------------------------------------------------
 // Workspace SSE broadcast
@@ -182,13 +182,14 @@ export function mountConsoleRoutes(
   // The devMode field lets consumers distinguish "no calls happened" from
   // "DEV_MODE is off and the buffer was never wired in".
   // ---------------------------------------------------------------------------
-  if (DEV_MODE) {
+  const devMode = isDevMode();
+  if (devMode) {
     app.get('/api/v2/perf/tool-calls', (req: Request, res: Response) => {
       const rawLimit = req.query['limit'];
       const limit = typeof rawLimit === 'string' ? parseInt(rawLimit, 10) : undefined;
       const safeLimit = (limit !== undefined && Number.isFinite(limit) && limit > 0) ? limit : undefined;
       const observations = timingRingBuffer ? timingRingBuffer.recent(safeLimit) : [];
-      res.json({ success: true, data: { observations, total: timingRingBuffer?.size ?? 0, devMode: DEV_MODE } });
+      res.json({ success: true, data: { observations, total: timingRingBuffer?.size ?? 0, devMode } });
     });
   }
 
