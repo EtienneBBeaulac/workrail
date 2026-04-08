@@ -189,15 +189,19 @@ export function AppShell() {
               tabIndex={!isOnWorkflowsTab ? 0 : -1}
               onClick={() => handleTabClick('workspace', () => void navigate({ to: '/' }))}
               className={[
-                'px-4 py-2.5 font-mono text-[10px] uppercase tracking-[0.30em] transition-colors duration-150',
+                'tab-btn px-4 py-2.5 font-mono text-[10px] uppercase tracking-[0.30em] transition-colors duration-150',
                 'focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:outline-none',
                 !isOnWorkflowsTab
-                  ? 'corner-brackets text-[var(--accent)] text-glow-amber'
+                  ? 'tab-btn--active text-[var(--accent)] text-glow-amber'
                   : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
                 activatingTab === 'workspace' ? 'tab-activating' : '',
               ].join(' ')}
               style={!isOnWorkflowsTab ? { backgroundColor: 'rgba(244, 196, 48, 0.06)' } : undefined}
             >
+              <span className="tab-corner tab-corner--tl" aria-hidden="true" />
+              <span className="tab-corner tab-corner--tr" aria-hidden="true" />
+              <span className="tab-corner tab-corner--bl" aria-hidden="true" />
+              <span className="tab-corner tab-corner--br" aria-hidden="true" />
               Workspace
             </button>
             <button
@@ -208,15 +212,19 @@ export function AppShell() {
               tabIndex={isOnWorkflowsTab ? 0 : -1}
               onClick={() => handleTabClick('workflows', () => void navigate({ to: '/workflows', search: { tag: undefined } }))}
               className={[
-                'px-4 py-2.5 font-mono text-[10px] uppercase tracking-[0.30em] transition-colors duration-150',
+                'tab-btn px-4 py-2.5 font-mono text-[10px] uppercase tracking-[0.30em] transition-colors duration-150',
                 'focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:outline-none',
                 isOnWorkflowsTab
-                  ? 'corner-brackets text-[var(--accent)] text-glow-amber'
+                  ? 'tab-btn--active text-[var(--accent)] text-glow-amber'
                   : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
                 activatingTab === 'workflows' ? 'tab-activating' : '',
               ].join(' ')}
               style={isOnWorkflowsTab ? { backgroundColor: 'rgba(244, 196, 48, 0.06)' } : undefined}
             >
+              <span className="tab-corner tab-corner--tl" aria-hidden="true" />
+              <span className="tab-corner tab-corner--tr" aria-hidden="true" />
+              <span className="tab-corner tab-corner--bl" aria-hidden="true" />
+              <span className="tab-corner tab-corner--br" aria-hidden="true" />
               Workflows
             </button>
           </div>

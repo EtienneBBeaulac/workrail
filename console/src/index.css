@@ -368,18 +368,46 @@ body::after {
     bottom 0 right 0, bottom 0 right 0;
 }
 
-/* Cyberpunk tab activation flicker -- brief amber over-brightness on click */
+/* Cyberpunk tab activation flicker -- dramatic amber flash with brief cyan burst */
 @keyframes tab-activate-flicker {
-  0%   { opacity: 1; }
-  15%  { opacity: 0.4; filter: brightness(2.5); }
-  30%  { opacity: 1; filter: brightness(1.8); }
-  50%  { opacity: 0.7; filter: brightness(2.2); }
-  70%  { opacity: 1; filter: brightness(1.4); }
-  100% { opacity: 1; filter: brightness(1); }
+  0%   { opacity: 1;   filter: brightness(1); }
+  10%  { opacity: 0.2; filter: brightness(0.5); }
+  20%  { opacity: 1;   filter: brightness(3) hue-rotate(180deg); }  /* cyan flash */
+  35%  { opacity: 0.5; filter: brightness(1.5); }
+  50%  { opacity: 1;   filter: brightness(2.5); }
+  70%  { opacity: 0.8; filter: brightness(1.8); }
+  85%  { opacity: 1;   filter: brightness(1.3); }
+  100% { opacity: 1;   filter: brightness(1); }
 }
 
 .tab-activating {
-  animation: tab-activate-flicker 180ms ease-out forwards;
+  animation: tab-activate-flicker 280ms ease-out forwards;
+}
+
+/* Tab corner brackets -- 4 absolute spans, scale in/out on active state */
+.tab-btn {
+  position: relative;
+  overflow: visible;
+}
+
+.tab-corner {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  opacity: 0;
+  transform: scale(0.5);
+  transition: opacity 150ms ease, transform 150ms ease;
+  pointer-events: none;
+}
+
+.tab-corner--tl { top: 2px; left: 2px; border-top: 1px solid var(--accent); border-left: 1px solid var(--accent); }
+.tab-corner--tr { top: 2px; right: 2px; border-top: 1px solid var(--accent); border-right: 1px solid var(--accent); }
+.tab-corner--bl { bottom: 2px; left: 2px; border-bottom: 1px solid var(--accent); border-left: 1px solid var(--accent); }
+.tab-corner--br { bottom: 2px; right: 2px; border-bottom: 1px solid var(--accent); border-right: 1px solid var(--accent); }
+
+.tab-btn--active .tab-corner {
+  opacity: 1;
+  transform: scale(1);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -390,4 +418,5 @@ body::after {
   .tab-activating {
     animation: none !important;
   }
+  .tab-corner { transition: none; }
 }
