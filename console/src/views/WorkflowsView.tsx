@@ -66,6 +66,7 @@ function groupWorkflowsByTag(workflows: readonly ConsoleWorkflowSummary[]): Work
 
 export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onSelectWorkflow }: Props) {
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
+  const [selectedSource, setSelectedSource] = useState<string | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const modalPanelRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -115,11 +116,26 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [selectedWorkflowId]);
 
-  // Filter: exclude routines tag; apply selected tag filter
-  const allWorkflows = data?.workflows.filter((w) => !w.tags.includes('routines')) ?? [];
-  const visibleWorkflows = selectedTag
-    ? allWorkflows.filter((w) => w.tags.includes(selectedTag))
-    : allWorkflows;
+  // Filter: exclude routines tag; apply selected tag + source filters
+  const allWorkflows = useMemo(
+    () => data?.workflows.filter((w) => !w.tags.includes('routines')) ?? [],
+    [data],
+  );
+
+  const availableSources = useMemo(() => {
+    const sources = new Set(allWorkflows.map((w) => w.source.displayName));
+    return [...sources].sort();
+  }, [allWorkflows]);
+
+  const visibleWorkflows = useMemo(() => {
+    let filtered = selectedTag
+      ? allWorkflows.filter((w) => w.tags.includes(selectedTag))
+      : allWorkflows;
+    if (selectedSource) {
+      filtered = filtered.filter((w) => w.source.displayName === selectedSource);
+    }
+    return filtered;
+  }, [allWorkflows, selectedTag, selectedSource]);
 
   // Flatten into a single ordered array matching the visual card order.
   // When selectedTag is set the list is already flat. When showing all tags,
@@ -253,6 +269,33 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
           />
         ))}
       </div>
+
+      {/* Source filter pills */}
+      {availableSources.length > 1 && (
+        <div
+          role="group"
+          aria-label="Filter workflows by source"
+          className="flex flex-wrap gap-1.5"
+        >
+          <TagPill
+            label="All Sources"
+            count={allWorkflows.length}
+            isActive={selectedSource === null}
+            disabled={isLoading}
+            onClick={() => setSelectedSource(null)}
+          />
+          {availableSources.map((source) => (
+            <TagPill
+              key={source}
+              label={source}
+              count={allWorkflows.filter((w) => w.source.displayName === source).length}
+              isActive={selectedSource === source}
+              disabled={isLoading}
+              onClick={() => setSelectedSource(selectedSource === source ? null : source)}
+            />
+          ))}
+        </div>
+      )}
 
       {/* Content area */}
       {isLoading ? (

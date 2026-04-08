@@ -3,6 +3,7 @@ import { useSessionList } from '../api/hooks';
 import { StatusBadge } from '../components/StatusBadge';
 import { HealthBadge } from '../components/HealthBadge';
 import { MetaChip } from '../components/MetaChip';
+import { ConsoleCard } from '../components/ConsoleCard';
 import type { ConsoleSessionSummary, ConsoleSessionStatus } from '../api/types';
 import { formatRelativeTime } from '../utils/time';
 import { useGridKeyNav, type UseGridKeyNavResult } from '../hooks/useGridKeyNav';
@@ -545,13 +546,14 @@ function SessionCard({
   const timeAgo = formatRelativeTime(session.lastModifiedMs);
 
   return (
-    <button
+    <ConsoleCard
+      variant="list"
       onClick={onClick}
       tabIndex={navProps?.tabIndex}
       onKeyDown={navProps?.onKeyDown}
       onFocus={navProps?.onFocus}
       ref={navProps?.ref as React.Ref<HTMLButtonElement> | undefined}
-      className="w-full text-left bg-[var(--bg-card)] border border-[var(--border)] rounded-lg px-4 py-3 hover:border-[var(--accent)] transition-colors cursor-pointer group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1"
+      className="rounded-lg px-4 py-3"
     >
       {/* Row 1: Title + status + time */}
       <div className="flex items-start justify-between gap-3">
@@ -581,7 +583,7 @@ function SessionCard({
         )}
         {session.hasUnresolvedGaps && (
           <span className="inline-flex items-center gap-1 text-[10px] text-[var(--warning)]">
-            ⚠ gaps
+            gaps
           </span>
         )}
       </div>
@@ -590,7 +592,7 @@ function SessionCard({
       <div className="mt-1.5 font-mono text-[10px] text-[var(--text-muted)] opacity-60 group-hover:opacity-100 transition-opacity truncate">
         {session.sessionId}
       </div>
-    </button>
+    </ConsoleCard>
   );
 }
 
