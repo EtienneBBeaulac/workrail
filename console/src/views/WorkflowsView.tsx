@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useWorkflowList } from '../api/hooks';
 import type { ConsoleWorkflowSummary } from '../api/types';
 import { CATALOG_TAGS, TAG_DISPLAY } from '../config/tags';
@@ -6,6 +6,7 @@ import { SectionHeader } from '../components/SectionHeader';
 import { ConsoleCard } from '../components/ConsoleCard';
 import { CutCornerBox } from '../components/CutCornerBox';
 import { WorkflowDetail } from './WorkflowDetail';
+import { useGridKeyNav, type UseGridKeyNavResult } from '../hooks/useGridKeyNav';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -107,16 +108,35 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
   }, [selectedWorkflowId]);
 
   // Issue #6: Store the trigger element before opening the modal.
-  const handleCardSelect = (id: string, triggerEl: HTMLButtonElement) => {
+  const handleCardSelect = useCallback((id: string, triggerEl: HTMLButtonElement) => {
     triggerRef.current = triggerEl;
     setSelectedWorkflowId(id);
-  };
+  }, []);
 
   // Filter: exclude routines tag; apply selected tag filter
   const allWorkflows = data?.workflows.filter((w) => !w.tags.includes('routines')) ?? [];
   const visibleWorkflows = selectedTag
     ? allWorkflows.filter((w) => w.tags.includes(selectedTag))
     : allWorkflows;
+
+  // Flatten into a single ordered array matching the visual card order.
+  // When selectedTag is set the list is already flat. When showing all tags,
+  // the order must match the grouped rendering below.
+  const flatWorkflows: readonly ConsoleWorkflowSummary[] = selectedTag !== null
+    ? visibleWorkflows
+    : groupWorkflowsByTag(visibleWorkflows).flatMap((g) => g.workflows);
+
+  // Issue #7: Keyboard navigation -- roving tabindex + arrow keys + WASD + Enter/Space.
+  const { getItemProps, containerProps } = useGridKeyNav({
+    count: flatWorkflows.length,
+    cols: 'auto',
+    onActivate: useCallback((i: number) => {
+      // When Enter/Space fires, document.activeElement is the focused button.
+      // We use it as the trigger element for focus-restoration on modal close.
+      const triggerEl = document.activeElement as HTMLButtonElement;
+      handleCardSelect(flatWorkflows[i].id, triggerEl);
+    }, [flatWorkflows, handleCardSelect]),
+  });
 
   // Derive which tag pills have at least one workflow and count per tag.
   const tagsWithWorkflows = new Set(allWorkflows.flatMap((w) => w.tags));
@@ -180,33 +200,42 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
             count={visibleWorkflows.length}
             showRule={true}
           />
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-            {visibleWorkflows.map((workflow) => (
+          <div {...containerProps} className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+            {visibleWorkflows.map((workflow, i) => (
               <WorkflowCard
                 key={workflow.id}
                 workflow={workflow}
                 onSelect={(triggerEl) => handleCardSelect(workflow.id, triggerEl)}
+                navProps={getItemProps(i)}
               />
             ))}
           </div>
         </div>
       ) : (
-        // All: grouped by tag with section headers
+        // All: grouped by tag with section headers.
+        // Cards are indexed sequentially across all groups to match flatWorkflows.
         <div className="space-y-6">
-          {groupWorkflowsByTag(visibleWorkflows).map((group) => (
-            <div key={group.tagId ?? '__other__'} className="space-y-2">
-              <SectionHeader label={group.label} count={group.workflows.length} showRule />
-              <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-                {group.workflows.map((workflow) => (
-                  <WorkflowCard
-                    key={workflow.id}
-                    workflow={workflow}
-                    onSelect={(triggerEl) => handleCardSelect(workflow.id, triggerEl)}
-                  />
-                ))}
+          {(() => {
+            let flatIndex = 0;
+            return groupWorkflowsByTag(visibleWorkflows).map((group) => (
+              <div key={group.tagId ?? '__other__'} className="space-y-2">
+                <SectionHeader label={group.label} count={group.workflows.length} showRule />
+                <div {...containerProps} className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+                  {group.workflows.map((workflow) => {
+                    const i = flatIndex++;
+                    return (
+                      <WorkflowCard
+                        key={workflow.id}
+                        workflow={workflow}
+                        onSelect={(triggerEl) => handleCardSelect(workflow.id, triggerEl)}
+                        navProps={getItemProps(i)}
+                      />
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          ))}
+            ));
+          })()}
         </div>
       )}
       {/* Workflow detail modal */}
@@ -323,9 +352,11 @@ function TagPill({
 function WorkflowCard({
   workflow,
   onSelect,
+  navProps,
 }: {
   readonly workflow: ConsoleWorkflowSummary;
   readonly onSelect: (triggerEl: HTMLButtonElement) => void;
+  readonly navProps?: ReturnType<UseGridKeyNavResult['getItemProps']>;
 }) {
   const displayTags = workflow.tags
     .filter((t) => t !== 'routines')
@@ -341,7 +372,12 @@ function WorkflowCard({
     .join('. ');
 
   return (
-    <ConsoleCard variant="grid" onClick={(e) => onSelect(e.currentTarget as HTMLButtonElement)} aria-label={accessibleName}>
+    <ConsoleCard
+      variant="grid"
+      onClick={(e) => onSelect(e.currentTarget as HTMLButtonElement)}
+      aria-label={accessibleName}
+      {...navProps}
+    >
       <div className="flex flex-col flex-1 p-4 gap-2 min-w-0">
         {/* Name */}
         <p className="text-sm font-medium text-[var(--text-primary)] group-hover:text-[var(--accent)] transition-colors leading-snug line-clamp-2">

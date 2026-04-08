@@ -1,4 +1,5 @@
-import type { ReactNode, CSSProperties, MouseEvent } from 'react';
+import { forwardRef } from 'react';
+import type { ReactNode, CSSProperties, MouseEvent, KeyboardEvent } from 'react';
 import { CutCornerBox } from './CutCornerBox';
 
 type Variant = 'grid' | 'list' | 'hero';
@@ -6,6 +7,10 @@ type Variant = 'grid' | 'list' | 'hero';
 interface Props {
   variant?: Variant;
   onClick?: (e: MouseEvent<HTMLButtonElement>) => void;
+  onKeyDown?: (e: KeyboardEvent<HTMLButtonElement>) => void;
+  onFocus?: () => void;
+  /** Controls tab order. Used by useGridKeyNav for roving tabindex behaviour. */
+  tabIndex?: number;
   className?: string;
   style?: CSSProperties;
   children: ReactNode;
@@ -15,16 +20,22 @@ interface Props {
   borderColor?: string;
 }
 
-export function ConsoleCard({
-  variant = 'list',
-  onClick,
-  className = '',
-  style,
-  children,
-  'aria-label': ariaLabel,
-  cut = 10,
-  borderColor,
-}: Props) {
+export const ConsoleCard = forwardRef<HTMLButtonElement, Props>(function ConsoleCard(
+  {
+    variant = 'list',
+    onClick,
+    onKeyDown,
+    onFocus,
+    tabIndex,
+    className = '',
+    style,
+    children,
+    'aria-label': ariaLabel,
+    cut = 10,
+    borderColor,
+  },
+  ref,
+) {
   if (variant === 'hero') {
     return (
       <CutCornerBox cut={cut} borderColor={borderColor} className={`relative ${className}`} style={style}>
@@ -48,8 +59,12 @@ export function ConsoleCard({
   if (onClick) {
     return (
       <button
+        ref={ref}
         type="button"
         onClick={onClick}
+        onKeyDown={onKeyDown}
+        onFocus={onFocus}
+        tabIndex={tabIndex}
         aria-label={ariaLabel}
         className={sharedClasses}
         style={style}
@@ -70,4 +85,4 @@ export function ConsoleCard({
       {children}
     </div>
   );
-}
+});

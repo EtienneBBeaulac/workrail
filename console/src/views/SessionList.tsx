@@ -1,10 +1,11 @@
-import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useSessionList } from '../api/hooks';
 import { StatusBadge } from '../components/StatusBadge';
 import { HealthBadge } from '../components/HealthBadge';
 import { MetaChip } from '../components/MetaChip';
 import type { ConsoleSessionSummary, ConsoleSessionStatus } from '../api/types';
 import { formatRelativeTime } from '../utils/time';
+import { useGridKeyNav, type UseGridKeyNavResult } from '../hooks/useGridKeyNav';
 
 interface Props {
   onSelectSession: (sessionId: string) => void;
@@ -257,6 +258,19 @@ export function SessionList({ onSelectSession, initialSearch = '' }: Props) {
   const pageEnd = pageStart + PAGE_SIZE;
   const totalPages = Math.ceil(processed.filtered / PAGE_SIZE);
 
+  // Flat visible sessions for the current page (non-grouped path only).
+  const flatPageSessions = isGrouped ? [] : (processed.groups[0]?.sessions.slice(pageStart, pageEnd) ?? []);
+
+  // Issue #7: Keyboard navigation for the flat session list (cols=1, single column).
+  const { getItemProps: getSessionNavProps, containerProps: sessionContainerProps } = useGridKeyNav({
+    count: flatPageSessions.length,
+    cols: 1,
+    onActivate: useCallback((i: number) => {
+      onSelectSession(flatPageSessions[i].sessionId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [flatPageSessions, onSelectSession]),
+  });
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -352,12 +366,13 @@ export function SessionList({ onSelectSession, initialSearch = '' }: Props) {
         </div>
       ) : (
         <>
-          <div className="space-y-2">
-            {processed.groups[0]?.sessions.slice(pageStart, pageEnd).map((session) => (
+          <div {...sessionContainerProps} className="space-y-2">
+            {flatPageSessions.map((session, i) => (
               <SessionCard
                 key={session.sessionId}
                 session={session}
                 onClick={() => onSelectSession(session.sessionId)}
+                navProps={getSessionNavProps(i)}
               />
             ))}
           </div>
@@ -516,7 +531,15 @@ function Pagination({
 // Session card (redesigned)
 // ---------------------------------------------------------------------------
 
-function SessionCard({ session, onClick }: { session: ConsoleSessionSummary; onClick: () => void }) {
+function SessionCard({
+  session,
+  onClick,
+  navProps,
+}: {
+  session: ConsoleSessionSummary;
+  onClick: () => void;
+  navProps?: ReturnType<UseGridKeyNavResult['getItemProps']>;
+}) {
   const title = session.sessionTitle;
   const workflowLabel = session.workflowName ?? session.workflowId;
   const timeAgo = formatRelativeTime(session.lastModifiedMs);
@@ -524,7 +547,11 @@ function SessionCard({ session, onClick }: { session: ConsoleSessionSummary; onC
   return (
     <button
       onClick={onClick}
-      className="w-full text-left bg-[var(--bg-card)] border border-[var(--border)] rounded-lg px-4 py-3 hover:border-[var(--accent)] transition-colors cursor-pointer group"
+      tabIndex={navProps?.tabIndex}
+      onKeyDown={navProps?.onKeyDown}
+      onFocus={navProps?.onFocus}
+      ref={navProps?.ref as React.Ref<HTMLButtonElement> | undefined}
+      className="w-full text-left bg-[var(--bg-card)] border border-[var(--border)] rounded-lg px-4 py-3 hover:border-[var(--accent)] transition-colors cursor-pointer group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1"
     >
       {/* Row 1: Title + status + time */}
       <div className="flex items-start justify-between gap-3">
