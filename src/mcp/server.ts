@@ -32,7 +32,7 @@ import { LocalDirectoryListingV2 } from '../v2/infra/local/directory-listing/ind
 import { LocalSessionSummaryProviderV2 } from '../v2/infra/local/session-summary-provider/index.js';
 
 import { createToolFactory, type ToolAnnotations, type ToolDefinition } from './tool-factory.js';
-import { DEV_MODE } from './dev-mode.js';
+import { isDevMode } from './dev-mode.js';
 import {
   DEFAULT_RING_BUFFER_CAPACITY,
   ToolCallTimingRingBuffer,
@@ -382,11 +382,12 @@ export async function composeServer(): Promise<ComposedServerInternal> {
   // Observations flow into the ring buffer created above (shared with console route).
   // When WORKRAIL_DEV=1, stderr output is composed in as a second sink.
   // ---------------------------------------------------------------------------
-  const timingSink: ToolCallTimingSink = DEV_MODE
+  const devMode = isDevMode();
+  const timingSink: ToolCallTimingSink = devMode
     ? composeSinks(createRingBufferSink(timingRingBuffer), createDevPerfSink())
     : createRingBufferSink(timingRingBuffer);
 
-  if (DEV_MODE) {
+  if (devMode) {
     console.error('[PerfTrace] WORKRAIL_DEV=1 -- tool call timing active');
   }
 

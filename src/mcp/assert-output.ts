@@ -24,6 +24,8 @@
  * It runs the check function and throws on invariant violations in dev/test environments.
  */
 
+import { isDevMode } from './dev-mode.js';
+
 // ---------------------------------------------------------------------------
 // Core guard
 // ---------------------------------------------------------------------------
@@ -36,7 +38,7 @@
  * Otherwise: no-op (returns data immediately, check never called).
  */
 export function assertOutput<T>(data: T, check: (data: T) => void): T {
-  if (process.env['WORKRAIL_DEV'] === '1') {
+  if (isDevMode()) {
     check(data);
   }
   return data;

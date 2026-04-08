@@ -29,8 +29,11 @@ import { ok } from '../runtime/result.js';
  *
  * Exclusions (never read from file, must come from process.env only):
  * - *_TOKEN  (GitHub/GitLab/etc tokens - sensitive)
- * - WORKRAIL_DEV, WORKRAIL_DEV_STALENESS (internal dev-only)
+ * - WORKRAIL_DEV_STALENESS (internal dev-only, not a feature flag)
  * - NODE_ENV, VITEST (injected by the Node.js / test runtime)
+ *
+ * Note: WORKRAIL_DEV is intentionally included so developers can persist dev mode
+ * in ~/.workrail/config.json instead of setting the env var on every shell session.
  */
 const ALLOWED_CONFIG_FILE_KEYS = new Set([
   // app-config.ts keys
@@ -41,6 +44,7 @@ const ALLOWED_CONFIG_FILE_KEYS = new Set([
   'WORKRAIL_DASHBOARD_PORT',
 
   // feature-flags.ts keys
+  'WORKRAIL_DEV',
   'WORKRAIL_ENABLE_SESSION_TOOLS',
   'WORKRAIL_ENABLE_EXPERIMENTAL_WORKFLOWS',
   'WORKRAIL_VERBOSE_LOGGING',
@@ -121,6 +125,7 @@ const CONFIG_FILE_TEMPLATE = `{
  * Silent no-op if the file is already present. Never throws.
  */
 export function ensureWorkrailConfigFile(): void {
+  if (process.env['VITEST']) return;
   const configPath = path.join(os.homedir(), '.workrail', 'config.json');
   try {
     fs.accessSync(configPath);

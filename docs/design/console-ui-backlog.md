@@ -122,6 +122,17 @@ the old flat dark style.
 
 *(worth keeping visible, not current delivery commitments)*
 
+### Custom cyberpunk overscroll effect
+
+When scrolling past the limits of a scrollable container (modal, session list,
+DAG), add a themed visual effect instead of the default OS rubber-band bounce.
+Options: amber glow flash at the boundary, a brief scan-line flicker, or a
+subtle "resistance" indicator. Requires custom scroll event handling + CSS.
+
+**Files:** `console/src/index.css`, scroll container components
+
+---
+
 ### Nicer hover animations
 
 Current hover state: border brightens, top stripe goes full opacity, ambient glow appears.
@@ -206,3 +217,55 @@ conditions evaluated, what context facts were used.
 | SessionList SORT_AXES refactor | merged | Typed axis objects, debounce, grouped pagination |
 | Audit findings (MR + prod + arch) | `60cf743`+ | All 3 audit cycles addressed |
 | Unit tests for lineage layout | `609c343` | 22 tests covering F1 regression, cycle safety, compression |
+
+---
+
+### Theme the back navigation element
+
+The `← Workflows` / `← Workflows / CODING` back link in WorkflowDetail
+is plain text. Should match the cyberpunk aesthetic:
+- Use `←` replaced with `//` or `<` in monospace, e.g. `< WORKFLOWS // CODING`
+- Amber color on hover, muted at rest
+- Could use `BracketBadge` or a dedicated nav arrow component
+- Consistent with the `//` separator language established elsewhere
+
+**Files:** `console/src/views/WorkflowDetail.tsx`
+
+---
+
+### Workflow catalog as inventory screen
+
+Aesthetic direction: the workflow catalog should feel like a cyberpunk game's inventory
+or loadout screen (CP2077 cyberware, Deus Ex augmentations, Starfield ship modules).
+Each workflow is an "item" you can inspect and equip. Visual ideas:
+
+- Card hover shows a full stat readout (step count, tags, source, compatibility)
+- "Equipped" workflows visually distinguished from unequipped (active border glow vs dim)
+- Possible grid rearrangement / drag to reorder priority
+- Category grouping by "slot type" (coding, review, investigation) mirrors equipment slots
+
+**Depends on:** equip/unequip feature below.
+
+---
+
+### Equip / unequip workflows from the console
+
+Allow users to toggle workflows active/inactive from the console UI. An "equipped"
+workflow is enabled in the MCP tool list (`list_workflows` returns it); unequipped
+workflows are hidden from agents but still browsable in the console.
+
+This maps to the existing pinned-workflows / managed-sources infrastructure
+(`src/infrastructure/storage/` + `PinnedWorkflowStorePortV2`).
+
+Implementation direction:
+- Add an equip/unequip button to each workflow card and the detail modal
+- Equipped state shown as an amber `[ EQUIPPED ]` badge on the card
+- Backend: toggle in the pinned workflow store via a new `/api/v2/workflows/:id/equip` endpoint
+- The MCP `list_workflows` handler already filters by source -- extend to respect equipped state
+- Equipped workflows get the full amber border treatment; unequipped are dimmed (50% opacity)
+
+**Design note:** This is the most natural extension of the inventory metaphor. A player
+"equips" the tools they want their agent to use for a session. Session-scoped or
+persistent equip state TBD.
+
+**Dependencies:** requires backend API + pinned workflow store changes.

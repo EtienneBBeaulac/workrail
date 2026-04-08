@@ -28,6 +28,9 @@ describe('MCP HTTP transport integration', () => {
     process.env.WORKRAIL_DATA_DIR = tempDataDir;
     process.env.WORKRAIL_ENABLE_V2_TOOLS = 'true';
     process.env.WORKRAIL_ENABLE_SESSION_TOOLS = 'false'; // HTTP-only, no dashboard
+    // Explicitly neutralize flags that may come from ~/.workrail/config.json on the
+    // developer's machine so test assertions are not affected by personal settings.
+    process.env.WORKRAIL_CLEAN_RESPONSE_FORMAT = 'false';
 
     // Start HTTP server
     await startHttpServer(HTTP_PORT);
