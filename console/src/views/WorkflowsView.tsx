@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useWorkflowList } from '../api/hooks';
 import type { ConsoleWorkflowSummary } from '../api/types';
 import { CATALOG_TAGS, TAG_DISPLAY } from '../config/tags';
@@ -67,6 +67,14 @@ function groupWorkflowsByTag(workflows: readonly ConsoleWorkflowSummary[]): Work
 export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onSelectWorkflow }: Props) {
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const modalPanelRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const isAnimatingRef = useRef(false);
+  const pendingNavRef = useRef<number | null>(null);
+  const [scanlineKey, setScanlineKey] = useState(0);
+  const [contentAnimClass, setContentAnimClass] = useState('');
+  const [borderFlashing, setBorderFlashing] = useState(false);
+  const [hintVisible, setHintVisible] = useState(false);
   const { data, isLoading, isError, error, refetch } = useWorkflowList();
 
   // Issue #6: Restore focus to the card that opened the modal when it closes.
@@ -107,12 +115,6 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [selectedWorkflowId]);
 
-  // Issue #6: Store the trigger element before opening the modal.
-  const handleCardSelect = useCallback((id: string, triggerEl: HTMLButtonElement) => {
-    triggerRef.current = triggerEl;
-    setSelectedWorkflowId(id);
-  }, []);
-
   // Filter: exclude routines tag; apply selected tag filter
   const allWorkflows = data?.workflows.filter((w) => !w.tags.includes('routines')) ?? [];
   const visibleWorkflows = selectedTag
@@ -122,9 +124,92 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
   // Flatten into a single ordered array matching the visual card order.
   // When selectedTag is set the list is already flat. When showing all tags,
   // the order must match the grouped rendering below.
-  const flatWorkflows: readonly ConsoleWorkflowSummary[] = selectedTag !== null
-    ? visibleWorkflows
-    : groupWorkflowsByTag(visibleWorkflows).flatMap((g) => g.workflows);
+  const flatWorkflows = useMemo((): readonly ConsoleWorkflowSummary[] => {
+    if (selectedTag) return visibleWorkflows;
+    return groupWorkflowsByTag(visibleWorkflows).flatMap((g) => g.workflows);
+  }, [visibleWorkflows, selectedTag]);
+
+  const currentIndex = flatWorkflows.findIndex((w) => w.id === selectedWorkflowId);
+
+  // Issue #6: Store the trigger element before opening the modal.
+  const handleCardSelect = useCallback((id: string, triggerEl: HTMLButtonElement) => {
+    triggerRef.current = triggerEl;
+    setSelectedWorkflowId(id);
+  }, []);
+
+  const navigateModal = useCallback((direction: 'prev' | 'next') => {
+    if (flatWorkflows.length <= 1) return;
+    const current = flatWorkflows.findIndex((w) => w.id === selectedWorkflowId);
+    if (current === -1) return;
+
+    const nextIndex = direction === 'next'
+      ? (current + 1) % flatWorkflows.length
+      : (current - 1 + flatWorkflows.length) % flatWorkflows.length;
+
+    if (isAnimatingRef.current) {
+      pendingNavRef.current = nextIndex;
+      return;
+    }
+
+    startModalTransition(nextIndex, direction);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flatWorkflows, selectedWorkflowId]);
+
+  function startModalTransition(nextIndex: number, direction: 'prev' | 'next') {
+    isAnimatingRef.current = true;
+    setBorderFlashing(true);
+    setScanlineKey((k) => k + 1);
+    setContentAnimClass(direction === 'next' ? 'modal-content--exit-right' : 'modal-content--exit-left');
+
+    // Reset scroll position immediately
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+
+    // At midpoint (80ms), swap the workflow ID and start enter animation
+    setTimeout(() => {
+      setSelectedWorkflowId(flatWorkflows[nextIndex]!.id);
+      setContentAnimClass(direction === 'next' ? 'modal-content--enter-right' : 'modal-content--enter-left');
+      setBorderFlashing(false);
+    }, 80);
+
+    // After full animation, clear
+    setTimeout(() => {
+      setContentAnimClass('');
+      isAnimatingRef.current = false;
+      if (pendingNavRef.current !== null) {
+        const pending = pendingNavRef.current;
+        pendingNavRef.current = null;
+        // determine direction for pending
+        const cur = flatWorkflows.findIndex((w) => w.id === selectedWorkflowId);
+        const dir = pending > cur ? 'next' : 'prev';
+        startModalTransition(pending, dir);
+      }
+    }, 240);
+  }
+
+  // Keyboard navigation between workflows while modal is open.
+  useEffect(() => {
+    if (!selectedWorkflowId) return;
+
+    // Show keyboard hint briefly
+    setHintVisible(true);
+    const hintTimer = setTimeout(() => setHintVisible(false), 3000);
+
+    const navKeys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'a', 'A', 'd', 'D', 'w', 'W', 's', 'S'];
+
+    const handler = (e: KeyboardEvent) => {
+      if (!navKeys.includes(e.key)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const isPrev = ['ArrowLeft', 'ArrowUp', 'a', 'A', 'w', 'W'].includes(e.key);
+      navigateModal(isPrev ? 'prev' : 'next');
+    };
+
+    document.addEventListener('keydown', handler, { capture: true });
+    return () => {
+      document.removeEventListener('keydown', handler, { capture: true });
+      clearTimeout(hintTimer);
+    };
+  }, [selectedWorkflowId, navigateModal]);
 
   // Issue #7: Keyboard navigation -- roving tabindex + arrow keys + WASD + Enter/Space.
   const { getItemProps, containerProps } = useGridKeyNav({
@@ -254,10 +339,12 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
 
         {/* Modal panel */}
         <div
+          ref={modalPanelRef}
+          tabIndex={-1}
           role="dialog"
           aria-modal="true"
-          aria-label="Workflow detail"
-          className={`relative w-full max-w-3xl ${selectedWorkflowId ? "pointer-events-auto" : "pointer-events-none"}`}
+          aria-label={`Workflow detail${selectedWorkflowId ? `: ${flatWorkflows.find((w) => w.id === selectedWorkflowId)?.name ?? ''}` : ''}`}
+          className={`relative w-full max-w-3xl ${selectedWorkflowId ? "pointer-events-auto" : "pointer-events-none"}${borderFlashing ? ' modal-border-flashing' : ''}`}
           style={{
             height: '85vh',
             transform: selectedWorkflowId ? 'translateY(0) scale(1)' : 'translateY(24px) scale(0.97)',
@@ -277,9 +364,23 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
           >
             {/* Modal header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)] shrink-0 console-blueprint-grid">
-              <span className="font-mono text-[10px] uppercase tracking-[0.30em] text-[var(--text-muted)]">
-                Workflow
-              </span>
+              <div className="flex items-center gap-4">
+                <span className="font-mono text-[10px] uppercase tracking-[0.30em] text-[var(--text-muted)]">
+                  Workflow
+                </span>
+                {currentIndex >= 0 && (
+                  <span className="font-mono text-[10px] tracking-[0.20em] text-[var(--text-muted)]">
+                    [ {currentIndex + 1} / {flatWorkflows.length} ]
+                  </span>
+                )}
+                <span
+                  className="font-mono text-[9px] tracking-[0.15em] text-[var(--text-muted)] transition-opacity duration-600"
+                  style={{ opacity: hintVisible ? 0.5 : 0 }}
+                  aria-hidden="true"
+                >
+                  [ &#8592; &#8594; ] NAV
+                </span>
+              </div>
               <button
                 type="button"
                 onClick={() => setSelectedWorkflowId(null)}
@@ -291,7 +392,18 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
             </div>
 
             {/* Scrollable content */}
-            <div className="flex-1 overflow-auto overscroll-contain px-6 py-5">
+            <div
+              ref={scrollRef}
+              className={`flex-1 overflow-auto overscroll-contain px-6 py-5 ${contentAnimClass}`}
+            >
+              {/* Scanline sweep overlay -- re-mounts on each navigation via key prop */}
+              <div key={scanlineKey} className={scanlineKey === 0 ? 'modal-scanline modal-scanline--hidden' : 'modal-scanline'} aria-hidden="true" />
+
+              {/* Screen reader announcement */}
+              <div aria-live="polite" aria-atomic="true" className="sr-only">
+                {flatWorkflows.find((w) => w.id === selectedWorkflowId)?.name ?? ''}
+              </div>
+
               {selectedWorkflowId && (
                 <WorkflowDetail
                   workflowId={selectedWorkflowId}

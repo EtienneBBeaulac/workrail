@@ -481,3 +481,68 @@ body::after {
   }
   .tab-corner { transition: none; }
 }
+
+/* ---------- Modal workflow navigation ---------- */
+
+@keyframes modal-exit-right {
+  from { transform: translateX(0);     opacity: 1; }
+  to   { transform: translateX(-40px); opacity: 0; }
+}
+@keyframes modal-exit-left {
+  from { transform: translateX(0);    opacity: 1; }
+  to   { transform: translateX(40px); opacity: 0; }
+}
+@keyframes modal-enter-right {
+  from { transform: translateX(40px); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+@keyframes modal-enter-left {
+  from { transform: translateX(-40px); opacity: 0; }
+  to   { transform: translateX(0);     opacity: 1; }
+}
+
+@keyframes modal-scanline-sweep {
+  from { top: -2px; opacity: 0.9; }
+  to   { top: 100%; opacity: 0; }
+}
+
+@keyframes modal-border-flash {
+  0%   { filter: brightness(1); }
+  10%  { filter: brightness(2.5); }
+  30%  { filter: brightness(4) hue-rotate(180deg); }
+  60%  { filter: brightness(1.8); }
+  100% { filter: brightness(1); }
+}
+
+.modal-content--exit-right  { animation: modal-exit-right  160ms ease-in  forwards; }
+.modal-content--exit-left   { animation: modal-exit-left   160ms ease-in  forwards; }
+.modal-content--enter-right { animation: modal-enter-right 160ms ease-out forwards; }
+.modal-content--enter-left  { animation: modal-enter-left  160ms ease-out forwards; }
+.modal-border-flashing      { animation: modal-border-flash 200ms ease-out forwards; }
+
+.modal-scanline {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 10;
+}
+.modal-scanline::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; top: -2px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent 0%, rgba(244,196,48,0.6) 20%, rgba(244,196,48,1) 50%, rgba(244,196,48,0.6) 80%, transparent 100%);
+  box-shadow: 0 0 8px rgba(244,196,48,0.8), 0 0 2px rgba(244,196,48,1);
+  animation: modal-scanline-sweep 160ms linear forwards;
+}
+.modal-scanline--hidden::after { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-content--exit-right,
+  .modal-content--exit-left,
+  .modal-content--enter-right,
+  .modal-content--enter-left  { animation: none !important; transform: none !important; opacity: 1 !important; }
+  .modal-scanline              { display: none; }
+  .modal-border-flashing       { animation: none !important; filter: none !important; }
+}
