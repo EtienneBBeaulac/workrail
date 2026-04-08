@@ -38,18 +38,26 @@ let mergedEnv: Record<string, string | undefined> = process.env;
 // CONFIGURATION REGISTRATION
 // ═══════════════════════════════════════════════════════════════════════════
 
-async function registerConfig(): Promise<void> {
+async function registerConfig(env?: Record<string, string | undefined>): Promise<void> {
   // Write ~/.workrail/config.json on first startup if it doesn't exist yet.
   ensureWorkrailConfigFile();
 
-  // Build merged env once: config file provides defaults; process.env always wins.
-  // This must happen before any other registration so all components share the same env.
+  // Build merged env once so that every component sees the same effective environment.
   //
-  // In test environments (VITEST is set), skip the config file entirely so that
-  // a developer's personal ~/.workrail/config.json does not leak into test runs.
-  // The guard belongs here (composition root) rather than in loadWorkrailConfigFile(),
-  // which should remain a pure, independently testable function.
-  if (process.env['VITEST']) {
+  // Priority order (highest first):
+  //   1. options.env  -- caller-provided explicit env (tests declaring their flag state)
+  //   2. process.env  -- shell / CI environment (always wins over config file)
+  //   3. config file  -- ~/.workrail/config.json user defaults
+  //
+  // When options.env is provided it is used as-is; config file and process.env are both
+  // bypassed. This lets tests be fully declarative about their required env state.
+  //
+  // When VITEST is set (but no options.env), skip the config file so that a developer's
+  // personal ~/.workrail/config.json does not leak into test runs. The guard lives here
+  // (composition root) rather than in loadWorkrailConfigFile(), which stays pure.
+  if (env !== undefined) {
+    mergedEnv = env;
+  } else if (process.env['VITEST']) {
     mergedEnv = { ...process.env };
   } else {
     const configFileResult = loadWorkrailConfigFile();
@@ -118,6 +126,19 @@ function toProcessLifecyclePolicy(mode: RuntimeMode): ProcessLifecyclePolicy {
 
 export interface ContainerInitOptions {
   readonly runtimeMode?: RuntimeMode;
+  /**
+   * Explicit environment to use for config and feature flag resolution.
+   * When provided, process.env and ~/.workrail/config.json are both bypassed.
+   * Intended for tests that need to declare required flag state explicitly:
+   *
+   *   await initializeContainer({ env: { WORKRAIL_ENABLE_V2_TOOLS: 'true' } });
+   *
+   * The env object is used as-is (no merging with process.env or config file),
+   * so callers should spread process.env if they need those values too:
+   *
+   *   await initializeContainer({ env: { ...process.env, MY_FLAG: 'true' } });
+   */
+  readonly env?: Record<string, string | undefined>;
 }
 
 function registerRuntime(options: ContainerInitOptions = {}): void {
@@ -443,7 +464,7 @@ export async function initializeContainer(options: ContainerInitOptions = {}): P
 
   try {
     registerRuntime(options);
-    await registerConfig();
+    await registerConfig(options.env);
     await registerStorageChain();
     await registerV2Services();
     await registerServices();
