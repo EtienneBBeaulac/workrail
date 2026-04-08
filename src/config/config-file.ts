@@ -95,13 +95,13 @@ const CONFIG_FILE_TEMPLATE = `{
   "_comment": "WorkRail configuration. Values here are defaults; process.env always wins.",
   "_docs": "https://github.com/exaudeus/workrail/blob/main/docs/configuration.md",
 
-  "CACHE_TTL": "300000",
+  "CACHE_TTL": "0",
   "WORKRAIL_ENABLE_SESSION_TOOLS": "true",
   "WORKRAIL_ENABLE_AGENTIC_ROUTINES": "true",
   "WORKRAIL_ENABLE_V2_TOOLS": "true",
-  "WORKRAIL_ENABLE_LEAN_WORKFLOWS": "false",
-  "WORKRAIL_AUTHORITATIVE_DESCRIPTIONS": "false",
-  "WORKRAIL_CLEAN_RESPONSE_FORMAT": "false",
+  "WORKRAIL_ENABLE_LEAN_WORKFLOWS": "true",
+  "WORKRAIL_AUTHORITATIVE_DESCRIPTIONS": "true",
+  "WORKRAIL_CLEAN_RESPONSE_FORMAT": "true",
   "WORKRAIL_VERBOSE_LOGGING": "false",
 
   "WORKFLOW_STORAGE_PATH": "",
