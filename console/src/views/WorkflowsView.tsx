@@ -262,7 +262,7 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
             </div>
 
             {/* Scrollable content */}
-            <div className="flex-1 overflow-auto overscroll-contain pb-6">
+            <div className="flex-1 overflow-auto overscroll-contain px-6 py-5">
               {selectedWorkflowId && (
                 <WorkflowDetail
                   workflowId={selectedWorkflowId}
