@@ -46,9 +46,10 @@ export function WorkflowDetail({ workflowId, activeTag, onBack }: Props) {
       <button
         type="button"
         onClick={onBack}
-        className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors text-sm"
+        className="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors group"
       >
-        &larr; {backLabel}
+        <span className="group-hover:text-[var(--accent)] transition-colors">{'<'}</span>
+        {' '}{backLabel.toUpperCase()}
       </button>
 
       {/* Header */}
@@ -116,9 +117,9 @@ export function WorkflowDetail({ workflowId, activeTag, onBack }: Props) {
       <button
         type="button"
         onClick={onBack}
-        className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors text-sm"
+        className="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
       >
-        &larr; {backLabel}
+        {'<'} {backLabel.toUpperCase()}
       </button>
     </div>
   );
@@ -303,9 +304,9 @@ function DetailError({
           type="button"
           onClick={onBack}
           aria-label="Back to workflows list"
-          className="text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+          className="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
         >
-          &larr; Back to Workflows
+          {'<'} WORKFLOWS
         </button>
       </div>
     </div>
