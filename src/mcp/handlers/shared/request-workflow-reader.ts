@@ -7,6 +7,63 @@ import { createEnhancedMultiSourceWorkflowStorage } from '../../../infrastructur
 import { SchemaValidatingCompositeWorkflowStorage } from '../../../infrastructure/storage/schema-validating-workflow-storage.js';
 import type { RememberedRootsStorePortV2 } from '../../../v2/ports/remembered-roots-store.port.js';
 import type { ManagedSourceRecordV2, ManagedSourceStorePortV2 } from '../../../v2/ports/managed-source-store.port.js';
+import { withTimeout } from './with-timeout.js';
+
+// ---------------------------------------------------------------------------
+// Walk skip list
+// ---------------------------------------------------------------------------
+
+const SKIP_DIRS = new Set([
+  '.git', 'node_modules',
+  'build', 'dist', 'out', 'target',
+  '.gradle', '.gradle-cache', '.cache',
+  'DerivedData', 'Pods',
+  'vendor',
+  '__pycache__', '.venv', 'venv',
+  '.next', '.nuxt', '.turbo', '.parcel-cache',
+  'coverage', '.nyc_output',
+]);
+
+// ---------------------------------------------------------------------------
+// Walk depth limit
+// ---------------------------------------------------------------------------
+
+// .workrail/workflows will never be nested more than 5 levels deep in a
+// typical project layout (workspace/project/module/src/pkg/.workrail).
+// Capping here prevents unbounded traversal into deep build artifact trees
+// that are not in the skip list.
+const MAX_WALK_DEPTH = 5;
+
+// ---------------------------------------------------------------------------
+// Walk result cache
+// ---------------------------------------------------------------------------
+
+// Keyed on sorted, path.resolve'd root paths joined by NUL.
+// Invalidated automatically when the root set changes (different key).
+// TTL guards against stale results within a single session when a user
+// creates a new .workrail/workflows dir inside an already-remembered root.
+// NOTE: adding a new root changes the key -> cache miss (correct behavior).
+const WALK_CACHE_TTL_MS = 30_000;
+interface WalkCacheEntry {
+  readonly result: WorkflowRootDiscoveryResult;
+  readonly expiresAt: number;
+}
+const walkCache = new Map<string, WalkCacheEntry>();
+
+/** Exported for test isolation only -- do not use in production code. */
+export function clearWalkCacheForTesting(): void {
+  walkCache.clear();
+}
+
+// ---------------------------------------------------------------------------
+// Discovery timeout
+// ---------------------------------------------------------------------------
+
+// Caps the total time spent walking remembered root directories.
+// NOTE: withTimeout races but does not cancel the underlying walk.
+// The walk continues in background after timeout; subsequent calls within
+// the TTL window will hit the cache so repeated background walks are avoided.
+const DISCOVERY_TIMEOUT_MS = 10_000;
 
 export interface RequestWorkflowReaderOptions {
   readonly featureFlags: IFeatureFlagProvider;
@@ -58,6 +115,14 @@ export interface WorkflowRootDiscoveryResult {
 export async function discoverRootedWorkflowDirectories(
   roots: readonly string[],
 ): Promise<WorkflowRootDiscoveryResult> {
+  // Cache key uses resolved paths so trailing slashes / relative paths hit the same entry.
+  const cacheKey = roots.map((r) => path.resolve(r)).sort().join('\0');
+  const now = Date.now();
+  const cached = walkCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return cached.result;
+  }
+
   const discoveredByPath = new Set<string>();
   const discoveredPaths: string[] = [];
   const stalePaths: string[] = [];
@@ -77,7 +142,9 @@ export async function discoverRootedWorkflowDirectories(
     }
   }
 
-  return { discovered: discoveredPaths, stale: stalePaths };
+  const result: WorkflowRootDiscoveryResult = { discovered: discoveredPaths, stale: stalePaths };
+  walkCache.set(cacheKey, { result, expiresAt: now + WALK_CACHE_TTL_MS });
+  return result;
 }
 
 export interface WorkflowReaderForRequestResult {
@@ -100,7 +167,23 @@ export async function createWorkflowReaderForRequest(
   const workspaceDirectory = resolveRequestWorkspaceDirectory(options);
   const projectWorkflowDirectory = toProjectWorkflowDirectory(workspaceDirectory);
   const rememberedRoots = await listRememberedRoots(options.rememberedRootsStore);
-  const { discovered: rootedWorkflowDirectories, stale: stalePaths } = await discoverRootedWorkflowDirectories(rememberedRoots);
+
+  let discoveryResult: WorkflowRootDiscoveryResult;
+  try {
+    discoveryResult = await withTimeout(
+      discoverRootedWorkflowDirectories(rememberedRoots),
+      DISCOVERY_TIMEOUT_MS,
+      'workflow_root_discovery',
+    );
+  } catch {
+    // Discovery timed out or failed -- degrade gracefully to empty rooted sources.
+    // The background walk continues running and will write to the cache when it
+    // completes. A caller retrying immediately may still see empty results until
+    // the background walk finishes and populates the cache.
+    discoveryResult = { discovered: [], stale: [] };
+  }
+  const { discovered: rootedWorkflowDirectories, stale: stalePaths } = discoveryResult;
+
   const rootedCustomPaths = rootedWorkflowDirectories.filter((directory) => directory !== projectWorkflowDirectory);
 
   // Include managed source paths, deduplicating against already-discovered custom paths.
@@ -200,8 +283,12 @@ async function listRememberedRoots(
 
   const result = await rememberedRootsStore.listRoots();
   if (result.isErr()) {
-    const error = result.error;
-    throw new Error(`Failed to load remembered workflow roots: ${error.code}: ${error.message}`);
+    // Degrade gracefully: log and return empty list rather than throwing.
+    // A throw here would propagate out of the bare `await createWorkflowReaderForRequest`
+    // in handlers, bypassing ResultAsync error handling. Empty roots = no rooted sources
+    // this call, which is safe.
+    console.error(`[workrail] Failed to load remembered workflow roots: ${result.error.code}: ${result.error.message}`);
+    return [];
   }
 
   return result.value.map((root) => path.resolve(root));
@@ -228,6 +315,7 @@ async function discoverWorkflowDirectoriesUnderRoot(rootPath: string): Promise<R
 async function walkForRootedWorkflowDirectories(
   currentDirectory: string,
   discoveredPaths: string[],
+  depth = 0,
 ): Promise<void> {
   const entries = await fs.readdir(currentDirectory, { withFileTypes: true });
   const sortedEntries = [...entries].sort((a, b) => a.name.localeCompare(b.name));
@@ -246,16 +334,26 @@ async function walkForRootedWorkflowDirectories(
       continue;
     }
 
+    // Depth limit: stop recursing beyond MAX_WALK_DEPTH levels.
+    // .workrail entries are checked before this guard so a directory at depth=MAX_WALK_DEPTH
+    // is still inspected for .workrail -- only its non-.workrail children are skipped.
+    if (depth >= MAX_WALK_DEPTH) {
+      if (process.env['WORKRAIL_DEV'] === '1') {
+        console.error(`[workrail] walk depth limit (${MAX_WALK_DEPTH}) reached at: ${entryPath}`);
+      }
+      continue;
+    }
+
     // Guard recursive descent: a subdirectory may vanish between readdir and recurse.
     // ENOENT here means the subdir disappeared mid-walk -- skip it, not the whole root.
-    await walkForRootedWorkflowDirectories(entryPath, discoveredPaths).catch((err) => {
+    await walkForRootedWorkflowDirectories(entryPath, discoveredPaths, depth + 1).catch((err) => {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
     });
   }
 }
 
 function shouldSkipDirectory(name: string): boolean {
-  return name === '.git' || name === 'node_modules';
+  return SKIP_DIRS.has(name);
 }
 
 async function isDirectory(targetPath: string): Promise<boolean> {

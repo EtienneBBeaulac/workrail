@@ -362,7 +362,8 @@ async function registerV2Services(): Promise<void> {
     useFactory: instanceCachingFactory((c: DependencyContainer) => {
       const dataDir = c.resolve<any>(DI.V2.DataDir);
       const fs = c.resolve<any>(DI.V2.FileSystem);
-      return new LocalRememberedRootsStoreV2(dataDir, fs);
+      const clock = c.resolve<any>(DI.V2.TimeClock);
+      return new LocalRememberedRootsStoreV2(dataDir, fs, clock);
     }),
   });
   container.register(DI.V2.ManagedSourceStore, {
