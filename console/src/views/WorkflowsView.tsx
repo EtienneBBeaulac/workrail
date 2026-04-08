@@ -228,19 +228,21 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
           role="dialog"
           aria-modal="true"
           aria-label="Workflow detail"
-          className="relative pointer-events-auto w-full max-w-3xl"
+          className={`relative w-full max-w-3xl ${selectedWorkflowId ? "pointer-events-auto" : "pointer-events-none"}`}
           style={{
             height: '85vh',
             transform: selectedWorkflowId ? 'translateY(0) scale(1)' : 'translateY(24px) scale(0.97)',
             opacity: selectedWorkflowId ? 1 : 0,
             transition: 'transform 250ms ease-out, opacity 250ms ease-out',
+            /* backdrop-filter here, not inside CutCornerBox -- clip-path breaks backdrop-filter */
+            backdropFilter: 'blur(20px)',
+            WebkitBackdropFilter: 'blur(20px)',
           }}
         >
           <CutCornerBox
             cut={20}
             borderColor="rgba(244, 196, 48, 0.4)"
             background="rgba(15, 19, 31, 0.85)"
-            backdropFilter="blur(20px)"
             dropShadow="drop-shadow(0 24px 64px rgba(0,0,0,0.9)) drop-shadow(0 4px 16px rgba(244,196,48,0.15))"
             className="h-full flex flex-col"
           >
