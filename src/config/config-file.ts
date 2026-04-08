@@ -6,9 +6,9 @@
  * not an error. Malformed JSON or unknown keys are logged and ignored so that a
  * bad config file never prevents the server from starting.
  *
- * Keys that carry sensitive data (*_TOKEN), internal dev keys (WORKRAIL_DEV,
- * WORKRAIL_DEV_STALENESS), and runtime-injected keys (NODE_ENV, VITEST) are
- * excluded from the allowed set even if present in the file.
+ * Keys that carry sensitive data (*_TOKEN), the internal dev key (WORKRAIL_DEV),
+ * and runtime-injected keys (NODE_ENV, VITEST) are excluded from the allowed set
+ * even if present in the file.
  *
  * @module config/config-file
  */
@@ -29,7 +29,6 @@ import { ok } from '../runtime/result.js';
  *
  * Exclusions (never read from file, must come from process.env only):
  * - *_TOKEN  (GitHub/GitLab/etc tokens - sensitive)
- * - WORKRAIL_DEV_STALENESS (internal dev-only, not a feature flag)
  * - NODE_ENV, VITEST (injected by the Node.js / test runtime)
  *
  * Note: WORKRAIL_DEV is intentionally included so developers can persist dev mode
