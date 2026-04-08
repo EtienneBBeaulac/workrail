@@ -14,7 +14,7 @@ import { NodeProcessTerminator } from '../runtime/adapters/node-process-terminat
 import { ThrowingProcessTerminator } from '../runtime/adapters/throwing-process-terminator.js';
 import type { ValidatedConfig } from '../config/app-config.js';
 import { loadConfig } from '../config/app-config.js';
-import { loadWorkrailConfigFile } from '../config/config-file.js';
+import { ensureWorkrailConfigFile, loadWorkrailConfigFile } from '../config/config-file.js';
 import { formatAppError } from '../errors/formatter.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -39,6 +39,9 @@ let mergedEnv: Record<string, string | undefined> = process.env;
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function registerConfig(): Promise<void> {
+  // Write ~/.workrail/config.json on first startup if it doesn't exist yet.
+  ensureWorkrailConfigFile();
+
   // Build merged env once: config file provides defaults; process.env always wins.
   // This must happen before any other registration so all components share the same env.
   const configFileResult = loadWorkrailConfigFile();

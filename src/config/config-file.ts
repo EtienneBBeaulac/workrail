@@ -88,8 +88,52 @@ export type ConfigFileError = {
 const ConfigFileSchema = z.record(z.string(), z.string());
 
 // =============================================================================
+// Default config template
+// =============================================================================
+
+const CONFIG_FILE_TEMPLATE = `{
+  "_comment": "WorkRail configuration. Values here are defaults; process.env always wins.",
+  "_docs": "https://github.com/exaudeus/workrail/blob/main/docs/configuration.md",
+
+  "CACHE_TTL": "300000",
+  "WORKRAIL_ENABLE_SESSION_TOOLS": "true",
+  "WORKRAIL_ENABLE_AGENTIC_ROUTINES": "true",
+  "WORKRAIL_ENABLE_V2_TOOLS": "true",
+  "WORKRAIL_ENABLE_LEAN_WORKFLOWS": "false",
+  "WORKRAIL_AUTHORITATIVE_DESCRIPTIONS": "false",
+  "WORKRAIL_CLEAN_RESPONSE_FORMAT": "false",
+  "WORKRAIL_VERBOSE_LOGGING": "false",
+
+  "WORKFLOW_STORAGE_PATH": "",
+  "WORKFLOW_GIT_REPOS": "",
+
+  "WORKRAIL_LOG_LEVEL": "SILENT",
+  "WORKRAIL_LOG_FORMAT": "human"
+}
+`;
+
+// =============================================================================
 // Public API
 // =============================================================================
+
+/**
+ * Write ~/.workrail/config.json with default values if it does not yet exist.
+ * Silent no-op if the file is already present. Never throws.
+ */
+export function ensureWorkrailConfigFile(): void {
+  const configPath = path.join(os.homedir(), '.workrail', 'config.json');
+  try {
+    fs.accessSync(configPath);
+    // File exists -- nothing to do.
+  } catch {
+    try {
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(configPath, CONFIG_FILE_TEMPLATE, 'utf-8');
+    } catch {
+      // Best-effort -- if we can't write, carry on silently.
+    }
+  }
+}
 
 /**
  * Load and validate ~/.workrail/config.json.
