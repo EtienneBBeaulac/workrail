@@ -341,6 +341,63 @@ body::after {
   border-radius: 4px;
 }
 
+/* Cyberpunk markdown overrides for workflow detail modal */
+.markdown-view h1,
+.markdown-view h2,
+.markdown-view h3,
+.markdown-view h4 {
+  color: var(--accent);
+  letter-spacing: 0.08em;
+}
+
+.markdown-view strong {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.markdown-view code {
+  background: rgba(0, 219, 233, 0.08);
+  color: var(--accent-strong);
+  border: 1px solid rgba(0, 219, 233, 0.2);
+  border-radius: 0;
+}
+
+.markdown-view pre {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(0, 219, 233, 0.2);
+  border-left: 2px solid var(--accent-strong);
+  border-radius: 0;
+}
+
+.markdown-view pre code {
+  background: none;
+  border: none;
+  color: var(--accent-strong);
+}
+
+.markdown-view blockquote {
+  border-left: 2px solid var(--accent);
+  color: var(--text-secondary);
+  background: rgba(244, 196, 48, 0.04);
+  padding: 0.5em 0.75em;
+}
+
+.markdown-view ul li::before {
+  content: '// ';
+  color: var(--accent);
+  font-family: monospace;
+  font-weight: bold;
+}
+
+.markdown-view ul {
+  list-style: none;
+  padding-left: 1.2em;
+}
+
+.markdown-view a {
+  color: var(--accent-strong);
+}
+
 /* ---------- Corner bracket frames ---------- */
 /* Renders 4 L-shaped corner accents using background-image gradients.
    No pseudo-element used, so child content is not constrained. */
