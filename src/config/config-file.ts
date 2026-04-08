@@ -149,10 +149,6 @@ export function ensureWorkrailConfigFile(): void {
  * - Returns ok(validatedRecord) on success
  */
 export function loadWorkrailConfigFile(): Result<Record<string, string>, ConfigFileError> {
-  // Never load the personal config file during test runs -- tests must not be
-  // affected by the developer's local settings.
-  if (process.env['VITEST']) return ok({});
-
   const configPath = path.join(os.homedir(), '.workrail', 'config.json');
 
   let rawContent: string;
