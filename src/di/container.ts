@@ -44,9 +44,18 @@ async function registerConfig(): Promise<void> {
 
   // Build merged env once: config file provides defaults; process.env always wins.
   // This must happen before any other registration so all components share the same env.
-  const configFileResult = loadWorkrailConfigFile();
-  const configFileValues = configFileResult.kind === 'ok' ? configFileResult.value : {};
-  mergedEnv = { ...configFileValues, ...process.env };
+  //
+  // In test environments (VITEST is set), skip the config file entirely so that
+  // a developer's personal ~/.workrail/config.json does not leak into test runs.
+  // The guard belongs here (composition root) rather than in loadWorkrailConfigFile(),
+  // which should remain a pure, independently testable function.
+  if (process.env['VITEST']) {
+    mergedEnv = { ...process.env };
+  } else {
+    const configFileResult = loadWorkrailConfigFile();
+    const configFileValues = configFileResult.kind === 'ok' ? configFileResult.value : {};
+    mergedEnv = { ...configFileValues, ...process.env };
+  }
 
   // Allow tests to inject config explicitly before container initialization.
   // This prevents the composition root from overwriting test-provided values.
