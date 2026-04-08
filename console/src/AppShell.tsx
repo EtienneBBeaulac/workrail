@@ -16,6 +16,31 @@ import { useSessionList } from './api/hooks';
  * Navigation state is derived from the URL so browser back/forward work
  * correctly without any React state synchronization.
  */
+// Inline-styled corner brackets for tab buttons.
+// Not CSS classes because Tailwind v4 strips custom classes that aren't
+// referenced as Tailwind utilities, causing them to disappear from the bundle.
+function TabCorners({ active }: { active: boolean }) {
+  const base: React.CSSProperties = {
+    position: 'absolute',
+    width: 8,
+    height: 8,
+    opacity: active ? 1 : 0,
+    transform: active ? 'scale(1)' : 'scale(0.5)',
+    transition: 'opacity 150ms ease, transform 150ms ease',
+    pointerEvents: 'none',
+    borderColor: 'var(--accent)',
+    borderStyle: 'solid',
+  };
+  return (
+    <>
+      <span aria-hidden="true" style={{ ...base, top: 2, left: 2, borderWidth: '1px 0 0 1px' }} />
+      <span aria-hidden="true" style={{ ...base, top: 2, right: 2, borderWidth: '1px 1px 0 0' }} />
+      <span aria-hidden="true" style={{ ...base, bottom: 2, left: 2, borderWidth: '0 0 1px 1px' }} />
+      <span aria-hidden="true" style={{ ...base, bottom: 2, right: 2, borderWidth: '0 1px 1px 0' }} />
+    </>
+  );
+}
+
 export function AppShell() {
   const navigate = useNavigate();
   const matchRoute = useMatchRoute();
@@ -198,10 +223,7 @@ export function AppShell() {
               ].join(' ')}
               style={!isOnWorkflowsTab ? { backgroundColor: 'rgba(244, 196, 48, 0.06)' } : undefined}
             >
-              <span className="tab-corner tab-corner--tl" aria-hidden="true" />
-              <span className="tab-corner tab-corner--tr" aria-hidden="true" />
-              <span className="tab-corner tab-corner--bl" aria-hidden="true" />
-              <span className="tab-corner tab-corner--br" aria-hidden="true" />
+              <TabCorners active={!isOnWorkflowsTab} />
               Workspace
             </button>
             <button
@@ -221,10 +243,7 @@ export function AppShell() {
               ].join(' ')}
               style={isOnWorkflowsTab ? { backgroundColor: 'rgba(244, 196, 48, 0.06)' } : undefined}
             >
-              <span className="tab-corner tab-corner--tl" aria-hidden="true" />
-              <span className="tab-corner tab-corner--tr" aria-hidden="true" />
-              <span className="tab-corner tab-corner--bl" aria-hidden="true" />
-              <span className="tab-corner tab-corner--br" aria-hidden="true" />
+              <TabCorners active={isOnWorkflowsTab} />
               Workflows
             </button>
           </div>
