@@ -184,8 +184,8 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
     setCrtOffset(Math.floor(Math.random() * 4));
     setGlitchY(5 + Math.floor(Math.random() * 80));
     setGlitchY2(5 + Math.floor(Math.random() * 80));
-    setGlitchW(1 + Math.floor(Math.random() * 28));  // 1–28px
-    setGlitchW2(1 + Math.floor(Math.random() * 16)); // 1–16px
+    setGlitchW(2 + Math.floor(Math.random() * 40));  // 2–42px
+    setGlitchW2(2 + Math.floor(Math.random() * 25)); // 2–27px
     const exitClass = axis === 'horizontal'
       ? (direction === 'next' ? 'modal-content--exit-h-next' : 'modal-content--exit-h-prev')
       : (direction === 'next' ? 'modal-content--exit-v-next' : 'modal-content--exit-v-prev');
