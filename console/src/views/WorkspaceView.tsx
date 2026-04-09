@@ -20,7 +20,6 @@ import {
 import { formatRelativeTime } from '../utils/time';
 import { CutCornerBox } from '../components/CutCornerBox';
 import { BracketBadge } from '../components/BracketBadge';
-import { SectionHeader } from '../components/SectionHeader';
 import { TreeLine } from '../components/TreeLine';
 import { ConsoleCard } from '../components/ConsoleCard';
 import { StatusBadge } from '../components/StatusBadge';
