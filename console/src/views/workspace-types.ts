@@ -215,15 +215,19 @@ export function joinSessionsAndWorktrees(
     // Fallback: no matching worktree (API slow/unavailable) -- use session's own repoRoot
     // so sessions stay visible without git badge data rather than disappearing entirely.
     if (entries.length === 0) {
-      if (!session.repoRoot) continue;
-      const key = `${session.gitBranch}\0${session.repoRoot}`;
+      // Fallback: no worktree match. Group by branch under a synthetic repo so
+      // sessions remain visible without git badge data (e.g. when worktrees API
+      // is slow or unavailable).
+      const syntheticRoot = session.repoRoot ?? '__sessions__';
+      const key = `${session.gitBranch}\0${syntheticRoot}`;
       const existing = sessionsByKey.get(key);
       if (existing) existing.push(session);
       else sessionsByKey.set(key, [session]);
-      // Store a synthetic worktree entry so the item has repoRoot/repoName
       if (!worktreeByKey.has(key)) {
-        const repoName = session.repoRoot.split('/').at(-1) ?? session.repoRoot;
-        worktreeByKey.set(key, { wt: undefined as never, repoName, repoRoot: session.repoRoot });
+        const repoName = session.repoRoot
+          ? (session.repoRoot.split('/').at(-1) ?? session.repoRoot)
+          : 'Sessions';
+        worktreeByKey.set(key, { wt: undefined as never, repoName, repoRoot: syntheticRoot });
       }
       continue;
     }
