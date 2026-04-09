@@ -21,6 +21,7 @@ import { formatRelativeTime } from '../utils/time';
 import { CutCornerBox } from '../components/CutCornerBox';
 import { BracketBadge } from '../components/BracketBadge';
 import { SectionHeader } from '../components/SectionHeader';
+import { TreeLine } from '../components/TreeLine';
 import { ConsoleCard } from '../components/ConsoleCard';
 import { StatusBadge } from '../components/StatusBadge';
 
@@ -401,12 +402,12 @@ function RepoSection({
           // Single-session: branch header + session row connected by left border
           const session = item.allSessions[0]!;
           return (
-            <div key={`${item.branch}\0${item.repoRoot}`} className="branch-tree-line" style={isFocused ? { outline: '2px solid var(--accent)', outlineOffset: '2px' } : undefined}>
+            <TreeLine key={`${item.branch}\0${item.repoRoot}`} style={isFocused ? { outline: '2px solid var(--accent)', outlineOffset: '2px' } : undefined}>
               <BranchLabel item={item} worktreesFetching={worktreesFetching} filesExpanded={false} onToggleFiles={() => {}} unpushedExpanded={false} onToggleUnpushed={() => {}} />
               <div className="pl-3 mt-px">
                 <SessionRow session={session} item={item} showBranch={false} onSelect={() => onSelectSession(session.sessionId)} />
               </div>
-            </div>
+            </TreeLine>
           );
         })}
 
@@ -456,7 +457,6 @@ function BranchGroup({
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [filesExpanded, setFilesExpanded] = useState(() => getExpand().filesExpanded);
   const [unpushedExpanded, setUnpushedExpanded] = useState(() => getExpand().unpushedExpanded);
-  const [animateRef] = useAutoAnimate<HTMLDivElement>();
   const sorted = [...item.allSessions].sort(SESSION_SORT);
 
   const handleToggleFiles = useCallback(() => {
@@ -481,7 +481,7 @@ function BranchGroup({
   const historySessions = sorted.filter(s => s.status !== 'in_progress' && s.status !== 'blocked' && s.status !== 'dormant');
 
   return (
-    <div ref={animateRef} className="branch-tree-line" style={isFocused ? { outline: '2px solid var(--accent)', outlineOffset: '2px' } : undefined}>
+    <TreeLine style={isFocused ? { outline: '2px solid var(--accent)', outlineOffset: '2px' } : undefined}>
       <BranchLabel
         item={item}
         worktreesFetching={worktreesFetching}
@@ -515,7 +515,7 @@ function BranchGroup({
           </>
         )}
       </div>
-    </div>
+    </TreeLine>
   );
 }
 
