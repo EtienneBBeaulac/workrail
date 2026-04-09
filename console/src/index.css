@@ -522,15 +522,15 @@ body::after {
 
 @keyframes modal-border-flash {
   0%   { filter: brightness(1); }
-  15%  { filter: brightness(1.4); }
-  40%  { filter: brightness(1.2); }
+  15%  { filter: brightness(1.8); }
+  50%  { filter: brightness(1.3); }
   100% { filter: brightness(1); }
 }
 
 @keyframes modal-crt-fade {
   0%   { opacity: 0; }
-  25%  { opacity: 0.45; }
-  65%  { opacity: 0.45; }
+  20%  { opacity: 0.65; }
+  70%  { opacity: 0.65; }
   100% { opacity: 0; }
 }
 
@@ -580,21 +580,20 @@ body::after {
     repeating-linear-gradient(
       to bottom,
       transparent 0px, transparent 2px,
-      rgba(255, 255, 255, 0.18) 2px, rgba(255, 255, 255, 0.18) 3px
+      rgba(0, 0, 0, 0.55) 2px, rgba(0, 0, 0, 0.55) 3px
     ),
     /* Secondary: 7px pitch — moiré beat with primary every 21px */
     repeating-linear-gradient(
       to bottom,
       transparent 0px, transparent 5px,
-      rgba(255, 255, 255, 0.08) 5px, rgba(255, 255, 255, 0.10) 7px
+      rgba(0, 0, 0, 0.22) 5px, rgba(0, 0, 0, 0.26) 7px
     ),
     /* Tertiary: 5px pitch — triple moiré, LCM(3,5,7)=105px before repeating */
     repeating-linear-gradient(
       to bottom,
       transparent 0px, transparent 3px,
-      rgba(255, 255, 255, 0.05) 3px, rgba(255, 255, 255, 0.05) 5px
+      rgba(0, 0, 0, 0.12) 3px, rgba(0, 0, 0, 0.12) 5px
     );
-  mix-blend-mode: difference;
   background-position-y:
     0,
     0,
