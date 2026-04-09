@@ -219,10 +219,17 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
     setHintVisible(true);
     const hintTimer = setTimeout(() => setHintVisible(false), 3000);
 
-    const navKeys = ['ArrowLeft', 'ArrowRight', 'a', 'A', 'd', 'D'];
+    const activeKeys = ['ArrowLeft', 'ArrowRight', 'a', 'A', 'd', 'D'];
+    const suppressedKeys = ['ArrowUp', 'ArrowDown', 'w', 'W', 's', 'S'];
 
     const handler = (e: KeyboardEvent) => {
-      if (!navKeys.includes(e.key)) return;
+      if (suppressedKeys.includes(e.key)) {
+        // Block grid keyboard nav from firing while modal is open
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      if (!activeKeys.includes(e.key)) return;
       e.preventDefault();
       e.stopPropagation();
       const isPrev = ['ArrowLeft', 'a', 'A'].includes(e.key);
