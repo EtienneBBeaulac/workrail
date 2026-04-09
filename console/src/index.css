@@ -561,24 +561,46 @@ body::after {
   pointer-events: none;
   z-index: 10;
   background:
+    /* Glitch band 1: cool blue-white, random position + width */
     linear-gradient(
       to bottom,
       transparent calc(var(--glitch-y, 38%) - 1px),
-      rgba(180, 210, 255, 0.10) calc(var(--glitch-y, 38%) - 1px),
-      rgba(180, 210, 255, 0.10) calc(var(--glitch-y, 38%) + 3px),
-      transparent calc(var(--glitch-y, 38%) + 3px)
+      rgba(180, 210, 255, 0.11) calc(var(--glitch-y, 38%) - 1px),
+      rgba(180, 210, 255, 0.11) calc(var(--glitch-y, 38%) + var(--glitch-w, 3px)),
+      transparent calc(var(--glitch-y, 38%) + var(--glitch-w, 3px))
     ),
+    /* Glitch band 2: faint amber, independent position + width */
+    linear-gradient(
+      to bottom,
+      transparent calc(var(--glitch-y2, 62%) - 1px),
+      rgba(244, 196, 48, 0.07) calc(var(--glitch-y2, 62%) - 1px),
+      rgba(244, 196, 48, 0.07) calc(var(--glitch-y2, 62%) + var(--glitch-w2, 2px)),
+      transparent calc(var(--glitch-y2, 62%) + var(--glitch-w2, 2px))
+    ),
+    /* Primary scanlines: 3px pitch */
     repeating-linear-gradient(
       to bottom,
       transparent 0px, transparent 2px,
       rgba(0, 0, 0, 0.50) 2px, rgba(0, 0, 0, 0.50) 3px
     ),
+    /* Secondary: 7px pitch — moiré beat with primary every 21px */
     repeating-linear-gradient(
       to bottom,
       transparent 0px, transparent 5px,
       rgba(0, 0, 0, 0.20) 5px, rgba(0, 0, 0, 0.24) 7px
+    ),
+    /* Tertiary: 5px pitch — triple moiré, LCM(3,5,7)=105px before repeating */
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0px, transparent 3px,
+      rgba(0, 0, 0, 0.12) 3px, rgba(0, 0, 0, 0.12) 5px
     );
-  background-position-y: 0, var(--crt-offset, 0px), calc(var(--crt-offset, 0px) + 2px);
+  background-position-y:
+    0,
+    0,
+    var(--crt-offset, 0px),
+    calc(var(--crt-offset, 0px) + 2px),
+    calc(var(--crt-offset, 0px) + 4px);
   animation: modal-crt-fade 220ms linear forwards;
   opacity: 0;
 }.modal-scanline--hidden { display: none; }

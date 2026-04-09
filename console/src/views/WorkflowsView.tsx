@@ -75,6 +75,9 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
   const [scanlineKey, setScanlineKey] = useState(0);
   const [crtOffset, setCrtOffset] = useState(0);
   const [glitchY, setGlitchY] = useState(38);
+  const [glitchY2, setGlitchY2] = useState(62);
+  const [glitchW, setGlitchW] = useState(3);
+  const [glitchW2, setGlitchW2] = useState(2);
   const [contentAnimClass, setContentAnimClass] = useState('');
   const [borderFlashing, setBorderFlashing] = useState(false);
   const [hintVisible, setHintVisible] = useState(false);
@@ -179,7 +182,10 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
     setBorderFlashing(true);
     setScanlineKey((k) => k + 1);
     setCrtOffset(Math.floor(Math.random() * 4));
-    setGlitchY(15 + Math.floor(Math.random() * 55)); // 15–70% down the panel
+    setGlitchY(10 + Math.floor(Math.random() * 60));
+    setGlitchY2(15 + Math.floor(Math.random() * 65));
+    setGlitchW(2 + Math.floor(Math.random() * 6));  // 2–7px
+    setGlitchW2(1 + Math.floor(Math.random() * 4)); // 1–4px
     const exitClass = axis === 'horizontal'
       ? (direction === 'next' ? 'modal-content--exit-h-next' : 'modal-content--exit-h-prev')
       : (direction === 'next' ? 'modal-content--exit-v-next' : 'modal-content--exit-v-prev');
@@ -431,7 +437,7 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
                 key={scanlineKey}
                 className="modal-scanline"
                 aria-hidden="true"
-                style={{ '--crt-offset': `${crtOffset}px`, '--glitch-y': `${glitchY}%`, clipPath: cutCornerPath(20) } as React.CSSProperties}
+                style={{ '--crt-offset': `${crtOffset}px`, '--glitch-y': `${glitchY}%`, '--glitch-y2': `${glitchY2}%`, '--glitch-w': `${glitchW}px`, '--glitch-w2': `${glitchW2}px`, clipPath: cutCornerPath(20) } as React.CSSProperties}
               />
             )}
 
