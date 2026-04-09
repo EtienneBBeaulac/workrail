@@ -406,15 +406,15 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
             opacity: selectedWorkflowId ? 1 : 0,
             transition: 'transform 250ms ease-out, opacity 250ms ease-out',
             /* backdrop-filter here, not inside CutCornerBox -- clip-path breaks backdrop-filter */
-            backdropFilter: 'blur(16px)',
-            WebkitBackdropFilter: 'blur(16px)',
+            backdropFilter: 'blur(2px)',
+            WebkitBackdropFilter: 'blur(2px)',
           }}
         >
           <CutCornerBox
             cut={20}
-            borderColor="rgba(244, 196, 48, 0.5)"
-            background="rgba(15, 19, 31, 0.30)"
-            dropShadow="drop-shadow(0 24px 64px rgba(0,0,0,0.5)) drop-shadow(0 4px 16px rgba(244,196,48,0.25))"
+            borderColor="rgba(244, 196, 48, 0.7)"
+            background="rgba(15, 19, 31, 0.15)"
+            dropShadow="drop-shadow(0 4px 24px rgba(244,196,48,0.2))"
             className="h-full flex flex-col"
           >
             {/* Modal header */}
