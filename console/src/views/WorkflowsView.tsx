@@ -73,6 +73,7 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
   const isAnimatingRef = useRef(false);
   const pendingNavRef = useRef<number | null>(null);
   const [scanlineKey, setScanlineKey] = useState(0);
+  const [crtOffset, setCrtOffset] = useState(0);
   const [contentAnimClass, setContentAnimClass] = useState('');
   const [borderFlashing, setBorderFlashing] = useState(false);
   const [hintVisible, setHintVisible] = useState(false);
@@ -175,7 +176,9 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
     isAnimatingRef.current = true;
     setBorderFlashing(true);
     setScanlineKey((k) => k + 1);
-    setContentAnimClass(direction === 'next' ? 'modal-content--exit-right' : 'modal-content--exit-left');
+    // Random offset within the 4px repeating pitch so lines land at different pixels each time
+    setCrtOffset(Math.floor(Math.random() * 4));
+    setContentAnimClass(direction === 'next' ? 'modal-content--exit-next' : 'modal-content--exit-prev');
 
     // Reset scroll position immediately
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
@@ -183,7 +186,7 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
     // At midpoint (80ms), swap the workflow ID and start enter animation
     setTimeout(() => {
       setSelectedWorkflowId(flatWorkflows[nextIndex]!.id);
-      setContentAnimClass(direction === 'next' ? 'modal-content--enter-right' : 'modal-content--enter-left');
+      setContentAnimClass(direction === 'next' ? 'modal-content--enter-next' : 'modal-content--enter-prev');
       setBorderFlashing(false);
     }, 80);
 
@@ -335,6 +338,7 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
                 workflow={workflow}
                 onSelect={(triggerEl) => handleCardSelect(workflow.id, triggerEl)}
                 navProps={getItemProps(i)}
+                isActive={workflow.id === selectedWorkflowId}
               />
             ))}
           </div>
@@ -357,6 +361,7 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
                         workflow={workflow}
                         onSelect={(triggerEl) => handleCardSelect(workflow.id, triggerEl)}
                         navProps={getItemProps(i)}
+                        isActive={workflow.id === selectedWorkflowId}
                       />
                     );
                   })}
@@ -439,8 +444,15 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
               ref={scrollRef}
               className={`flex-1 overflow-auto overscroll-contain px-6 py-5 ${contentAnimClass}`}
             >
-              {/* Scanline sweep overlay -- re-mounts on each navigation via key prop */}
-              <div key={scanlineKey} className={scanlineKey === 0 ? 'modal-scanline modal-scanline--hidden' : 'modal-scanline'} aria-hidden="true" />
+              {/* CRT scanline overlay -- re-mounts on each navigation via key prop; --crt-offset randomises line position */}
+              {scanlineKey > 0 && (
+                <div
+                  key={scanlineKey}
+                  className="modal-scanline"
+                  aria-hidden="true"
+                  style={{ '--crt-offset': `${crtOffset}px` } as React.CSSProperties}
+                />
+              )}
 
               {/* Screen reader announcement */}
               <div aria-live="polite" aria-atomic="true" className="sr-only">
@@ -508,10 +520,12 @@ function WorkflowCard({
   workflow,
   onSelect,
   navProps,
+  isActive,
 }: {
   readonly workflow: ConsoleWorkflowSummary;
   readonly onSelect: (triggerEl: HTMLButtonElement) => void;
   readonly navProps?: ReturnType<UseGridKeyNavResult['getItemProps']>;
+  readonly isActive?: boolean;
 }) {
   const displayTags = workflow.tags
     .filter((t) => t !== 'routines')
@@ -531,6 +545,7 @@ function WorkflowCard({
       variant="grid"
       onClick={(e) => onSelect(e.currentTarget as HTMLButtonElement)}
       aria-label={accessibleName}
+      style={isActive ? { borderColor: 'var(--accent)', backgroundColor: 'rgba(244, 196, 48, 0.06)' } : undefined}
       {...navProps}
     >
       <div className="flex flex-col flex-1 p-4 gap-2 min-w-0">
