@@ -219,15 +219,14 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
     setHintVisible(true);
     const hintTimer = setTimeout(() => setHintVisible(false), 3000);
 
-    const navKeys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'a', 'A', 'd', 'D', 'w', 'W', 's', 'S'];
+    const navKeys = ['ArrowLeft', 'ArrowRight', 'a', 'A', 'd', 'D'];
 
     const handler = (e: KeyboardEvent) => {
       if (!navKeys.includes(e.key)) return;
       e.preventDefault();
       e.stopPropagation();
-      const isPrev = ['ArrowLeft', 'ArrowUp', 'a', 'A', 'w', 'W'].includes(e.key);
-      const axis = ['ArrowLeft', 'ArrowRight', 'a', 'A', 'd', 'D'].includes(e.key) ? 'horizontal' : 'vertical';
-      navigateModal(isPrev ? 'prev' : 'next', axis);
+      const isPrev = ['ArrowLeft', 'a', 'A'].includes(e.key);
+      navigateModal(isPrev ? 'prev' : 'next', 'horizontal');
     };
 
     document.addEventListener('keydown', handler, { capture: true });
@@ -436,7 +435,7 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
                   style={{ opacity: hintVisible ? 0.5 : 0 }}
                   aria-hidden="true"
                 >
-                  [ &#8592; &#8594; ] NAV
+                  [ A / D ] NAV
                 </span>
               </div>
               <button
