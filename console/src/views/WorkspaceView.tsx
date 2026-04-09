@@ -401,7 +401,7 @@ function RepoSection({
           // Single-session: branch header + session row connected by left border
           const session = item.allSessions[0]!;
           return (
-            <div key={`${item.branch}\0${item.repoRoot}`} className="ml-2 border-l border-[var(--border)] pl-3" style={isFocused ? { outline: '2px solid var(--accent)', outlineOffset: '2px' } : undefined}>
+            <div key={`${item.branch}\0${item.repoRoot}`} className="branch-tree-line" style={isFocused ? { outline: '2px solid var(--accent)', outlineOffset: '2px' } : undefined}>
               <BranchLabel item={item} worktreesFetching={worktreesFetching} filesExpanded={false} onToggleFiles={() => {}} unpushedExpanded={false} onToggleUnpushed={() => {}} />
               <div className="pl-3 mt-px">
                 <SessionRow session={session} item={item} showBranch={false} onSelect={() => onSelectSession(session.sessionId)} />
@@ -481,7 +481,7 @@ function BranchGroup({
   const historySessions = sorted.filter(s => s.status !== 'in_progress' && s.status !== 'blocked' && s.status !== 'dormant');
 
   return (
-    <div ref={animateRef} className="ml-2 border-l border-[var(--border)] pl-3" style={isFocused ? { outline: '2px solid var(--accent)', outlineOffset: '2px' } : undefined}>
+    <div ref={animateRef} className="branch-tree-line" style={isFocused ? { outline: '2px solid var(--accent)', outlineOffset: '2px' } : undefined}>
       <BranchLabel
         item={item}
         worktreesFetching={worktreesFetching}

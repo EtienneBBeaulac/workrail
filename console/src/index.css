@@ -444,6 +444,34 @@ body::after {
 /* Tab corner brackets -- 4 absolute spans, scale in/out on active state.
    Declared in @layer components so Tailwind v4 preserves them even when
    the class names aren't referenced as Tailwind utilities in JSX. */
+/* Branch tree connector -- two parallel amber lines, diagonally clipped at the bottom.
+   The outer line (1px) and inner line (3px) are offset by 4px, both cut on the same
+   diagonal so they end at slightly different heights, giving a schematic/circuit feel. */
+@layer components {
+  .branch-tree-line {
+    position: relative;
+    padding-left: 14px;
+    margin-left: 4px;
+  }
+
+  .branch-tree-line::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 10px;
+    pointer-events: none;
+    background:
+      /* outer thin line */
+      linear-gradient(rgba(244, 196, 48, 0.18), rgba(244, 196, 48, 0.18)) no-repeat 0 0 / 1px 100%,
+      /* inner thick line */
+      linear-gradient(rgba(244, 196, 48, 0.45), rgba(244, 196, 48, 0.45)) no-repeat 5px 0 / 3px 100%;
+    /* diagonal cut: left edge full height, right edge 14px shorter → lines taper off together */
+    clip-path: polygon(0 0, 100% 0, 100% calc(100% - 14px), 0 100%);
+  }
+}
+
 @layer components {
   .tab-btn {
     position: relative;
