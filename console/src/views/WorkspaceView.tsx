@@ -368,7 +368,7 @@ function RepoSection({
         </div>
       )}
 
-      <div className="space-y-px">
+      <div className="space-y-3">
         {visibleItems.map((item, idx) => {
           const absoluteIndex = groupOffset + idx;
           const isFocused = focusedIndex === absoluteIndex;
@@ -398,14 +398,14 @@ function RepoSection({
             );
           }
 
+          // Single-session: branch header + session row connected by left border
           const session = item.allSessions[0]!;
           return (
-            <div key={`${item.branch}\0${item.repoRoot}`} className="ml-1 border-l-2 border-[var(--border)] pl-2" style={isFocused ? { outline: '2px solid var(--accent)', outlineOffset: '2px' } : undefined}>
-              <SessionRow
-                session={session}
-                item={item}
-                onSelect={() => onSelectSession(session.sessionId)}
-              />
+            <div key={`${item.branch}\0${item.repoRoot}`} className="ml-2 border-l border-[var(--border)] pl-3" style={isFocused ? { outline: '2px solid var(--accent)', outlineOffset: '2px' } : undefined}>
+              <BranchLabel item={item} worktreesFetching={worktreesFetching} filesExpanded={false} onToggleFiles={() => {}} unpushedExpanded={false} onToggleUnpushed={() => {}} />
+              <div className="pl-3 mt-px">
+                <SessionRow session={session} item={item} showBranch={false} onSelect={() => onSelectSession(session.sessionId)} />
+              </div>
             </div>
           );
         })}
@@ -481,7 +481,7 @@ function BranchGroup({
   const historySessions = sorted.filter(s => s.status !== 'in_progress' && s.status !== 'blocked' && s.status !== 'dormant');
 
   return (
-    <div ref={animateRef} style={isFocused ? { outline: '2px solid var(--accent)', outlineOffset: '2px' } : undefined}>
+    <div ref={animateRef} className="ml-2 border-l border-[var(--border)] pl-3" style={isFocused ? { outline: '2px solid var(--accent)', outlineOffset: '2px' } : undefined}>
       <BranchLabel
         item={item}
         worktreesFetching={worktreesFetching}
@@ -496,7 +496,7 @@ function BranchGroup({
       {unpushedExpanded && item.worktree && (
         <UnpushedCommitsPanel commits={item.worktree.unpushedCommits} count={item.worktree.aheadCount} />
       )}
-      <div className="ml-3 border-l-2 border-[var(--border)] pl-2 space-y-px">
+      <div className="pl-3 mt-px space-y-px">
         {activeSessions.map(session => (
           <SessionRow key={session.sessionId} session={session} showBranch={false} onSelect={() => onSelectSession(session.sessionId)} />
         ))}
@@ -540,8 +540,7 @@ function BranchLabel({
 }) {
   const timeAgo = formatRelativeTime(item.activityMs);
   return (
-    <div className="flex items-center gap-2 pl-4 pr-3 pt-2.5 pb-1 border-l-2 border-[var(--border)] ml-1">
-      <span className="font-mono text-[10px] text-[var(--text-muted)] shrink-0">·</span>
+    <div className="flex items-center gap-2 py-1 pr-3">
       <span className="font-mono text-[11px] font-medium text-[var(--text-secondary)] truncate flex-1">
         {item.branch}
       </span>
