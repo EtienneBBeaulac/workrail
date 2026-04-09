@@ -424,6 +424,16 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
             dropShadow="drop-shadow(0 4px 24px rgba(244,196,48,0.15))"
             className="h-full flex flex-col"
           >
+            {/* CRT scanline overlay -- sibling to header+scroll, clipped by CutCornerBox clip-path */}
+            {scanlineKey > 0 && (
+              <div
+                key={scanlineKey}
+                className="modal-scanline"
+                aria-hidden="true"
+                style={{ '--crt-offset': `${crtOffset}px` } as React.CSSProperties}
+              />
+            )}
+
             {/* Modal header */}
             <div
               className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)] shrink-0 console-blueprint-grid"
@@ -462,16 +472,6 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
               className={`flex-1 overflow-auto overscroll-contain px-6 py-5 ${contentAnimClass}`}
               style={{ '--text-muted': 'var(--text-secondary)' } as React.CSSProperties}
             >
-              {/* CRT scanline overlay -- re-mounts on each navigation via key prop; --crt-offset randomises line position */}
-              {scanlineKey > 0 && (
-                <div
-                  key={scanlineKey}
-                  className="modal-scanline"
-                  aria-hidden="true"
-                  style={{ '--crt-offset': `${crtOffset}px` } as React.CSSProperties}
-                />
-              )}
-
               {/* Screen reader announcement */}
               <div aria-live="polite" aria-atomic="true" className="sr-only">
                 {flatWorkflows.find((w) => w.id === selectedWorkflowId)?.name ?? ''}
