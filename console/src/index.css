@@ -581,20 +581,21 @@ body::after {
     repeating-linear-gradient(
       to bottom,
       transparent 0px, transparent 2px,
-      rgba(0, 0, 0, 0.50) 2px, rgba(0, 0, 0, 0.50) 3px
+      rgba(255, 255, 255, 0.18) 2px, rgba(255, 255, 255, 0.18) 3px
     ),
     /* Secondary: 7px pitch — moiré beat with primary every 21px */
     repeating-linear-gradient(
       to bottom,
       transparent 0px, transparent 5px,
-      rgba(0, 0, 0, 0.20) 5px, rgba(0, 0, 0, 0.24) 7px
+      rgba(255, 255, 255, 0.08) 5px, rgba(255, 255, 255, 0.10) 7px
     ),
     /* Tertiary: 5px pitch — triple moiré, LCM(3,5,7)=105px before repeating */
     repeating-linear-gradient(
       to bottom,
       transparent 0px, transparent 3px,
-      rgba(0, 0, 0, 0.12) 3px, rgba(0, 0, 0, 0.12) 5px
+      rgba(255, 255, 255, 0.05) 3px, rgba(255, 255, 255, 0.05) 5px
     );
+  mix-blend-mode: difference;
   background-position-y:
     0,
     0,

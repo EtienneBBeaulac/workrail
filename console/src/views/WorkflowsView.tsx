@@ -133,8 +133,11 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
   }, [allWorkflows]);
 
   const visibleWorkflows = useMemo(() => {
+    const knownIds = new Set(CATALOG_TAGS.map((t) => t.id));
     let filtered = selectedTag
-      ? allWorkflows.filter((w) => w.tags.includes(selectedTag))
+      ? selectedTag === '__other__'
+        ? allWorkflows.filter((w) => !w.tags.some((t) => t !== 'routines' && knownIds.has(t)))
+        : allWorkflows.filter((w) => w.tags.includes(selectedTag))
       : allWorkflows;
     if (selectedSource) {
       filtered = filtered.filter((w) => w.source.displayName === selectedSource);
@@ -264,8 +267,10 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
   });
 
   // Derive which tag pills have at least one workflow and count per tag.
+  const knownTagIds = new Set(CATALOG_TAGS.map((t) => t.id));
   const tagsWithWorkflows = new Set(allWorkflows.flatMap((w) => w.tags));
   const countByTag = new Map(CATALOG_TAGS.map((t) => [t.id, allWorkflows.filter((w) => w.tags.includes(t.id)).length]));
+  const otherCount = allWorkflows.filter((w) => !w.tags.some((t) => t !== 'routines' && knownTagIds.has(t))).length;
 
   return (
     <div className="space-y-4" aria-busy={isLoading}>
@@ -292,6 +297,15 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
             onClick={() => onSelectTag(selectedTag === tag.id ? null : tag.id)}
           />
         ))}
+        {otherCount > 0 && (
+          <TagPill
+            label="Other"
+            count={otherCount}
+            isActive={selectedTag === '__other__'}
+            disabled={isLoading}
+            onClick={() => onSelectTag(selectedTag === '__other__' ? null : '__other__')}
+          />
+        )}
       </div>
 
       {/* Source filter pills */}
@@ -348,7 +362,7 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
         // Single selected tag: one section header + card grid
         <div className="space-y-2">
           <SectionHeader
-            label={TAG_DISPLAY[selectedTag] ?? selectedTag}
+            label={selectedTag === '__other__' ? 'Other' : (TAG_DISPLAY[selectedTag] ?? selectedTag)}
             count={visibleWorkflows.length}
             showRule={true}
           />
