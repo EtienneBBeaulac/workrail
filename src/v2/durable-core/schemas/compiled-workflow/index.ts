@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { JsonValueSchema } from '../../canonical/json-zod.js';
+import { RESOLVE_FROM_VALUES } from '../../../../types/workflow-definition.js';
 
 /**
  * Compiled workflow snapshot (schemaVersion 1).
@@ -83,7 +84,7 @@ const CompiledWorkflowSnapshotV1PinnedSchema = z.object({
       source: z.string().min(1),
       purpose: z.string().min(1),
       authoritative: z.boolean(),
-      resolveFrom: z.enum(['workspace', 'package']),
+      resolveFrom: z.enum(RESOLVE_FROM_VALUES),
       status: z.literal('resolved'),
       resolvedPath: z.string().min(1),
     }),
@@ -93,7 +94,7 @@ const CompiledWorkflowSnapshotV1PinnedSchema = z.object({
       source: z.string().min(1),
       purpose: z.string().min(1),
       authoritative: z.boolean(),
-      resolveFrom: z.enum(['workspace', 'package']),
+      resolveFrom: z.enum(RESOLVE_FROM_VALUES),
       status: z.literal('unresolved'),
     }),
     z.object({
@@ -102,7 +103,7 @@ const CompiledWorkflowSnapshotV1PinnedSchema = z.object({
       source: z.string().min(1),
       purpose: z.string().min(1),
       authoritative: z.boolean(),
-      resolveFrom: z.enum(['workspace', 'package']),
+      resolveFrom: z.enum(RESOLVE_FROM_VALUES),
       status: z.literal('pinned'),
     }),
   ])).optional(),

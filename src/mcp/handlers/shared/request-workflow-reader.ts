@@ -50,7 +50,14 @@ interface WalkCacheEntry {
 }
 const walkCache = new Map<string, WalkCacheEntry>();
 
-/** Exported for test isolation only -- do not use in production code. */
+/**
+ * Exported for test isolation only -- do not use in production code.
+ *
+ * Tests MUST call this in `beforeEach` (or `afterEach`) when running in a
+ * shared Jest/Vitest process pool. The walk cache is a module-level singleton;
+ * without explicit clearing, cache state from one test suite bleeds into
+ * subsequent suites running in the same worker process.
+ */
 export function clearWalkCacheForTesting(): void {
   walkCache.clear();
 }
@@ -127,14 +134,30 @@ export async function discoverRootedWorkflowDirectories(
   const discoveredPaths: string[] = [];
   const stalePaths: string[] = [];
 
-  for (const root of roots) {
-    const rootPath = path.resolve(root);
-    const result = await discoverWorkflowDirectoriesUnderRoot(rootPath);
-    if (result.stale) {
+  // Walk all roots in parallel -- each root's filesystem traversal is independent.
+  // Cold walk time becomes max(slowest root) instead of sum(all roots).
+  // Promise.allSettled preserves partial results if a root throws unexpectedly
+  // (discoverWorkflowDirectoriesUnderRoot already handles ENOENT internally).
+  const resolvedRoots = roots.map((r) => path.resolve(r));
+  const rootResults = await Promise.allSettled(
+    resolvedRoots.map((rootPath) => discoverWorkflowDirectoriesUnderRoot(rootPath)),
+  );
+
+  for (let i = 0; i < resolvedRoots.length; i++) {
+    const rootPath = resolvedRoots[i]!;
+    const rootResult = rootResults[i]!;
+    if (rootResult.status === 'rejected') {
+      // Re-throw non-ENOENT errors (e.g. ENOTDIR on a file path) -- these indicate a
+      // caller error, not a missing root. discoverWorkflowDirectoriesUnderRoot converts
+      // ENOENT into a stale result internally, so a rejected entry here is always
+      // something unexpected that should propagate.
+      throw rootResult.reason;
+    }
+    if (rootResult.value.stale) {
       stalePaths.push(rootPath);
       continue;
     }
-    for (const nextPath of result.discovered) {
+    for (const nextPath of rootResult.value.discovered) {
       const normalizedPath = path.resolve(nextPath);
       if (discoveredByPath.has(normalizedPath)) continue;
       discoveredByPath.add(normalizedPath);
@@ -202,18 +225,48 @@ export async function createWorkflowReaderForRequest(
   const additionalManagedPaths: string[] = [];
   const activeManagedRecords: ManagedSourceRecordV2[] = [];
   const staleManagedRecords: ManagedSourceRecordV2[] = [];
+
+  // Separate already-covered records (no stat needed) from records that require a
+  // filesystem check. Covered records are always active.
+  const alreadyCovered: ManagedSourceRecordV2[] = [];
+  const needsStatCheck: ManagedSourceRecordV2[] = [];
   for (const record of allManagedRecords) {
     if (normalizedCustom.has(path.resolve(record.path))) {
       // Already covered by rooted discovery -- the path exists and is in customPaths.
       // Still add to activeManagedRecords so the catalog annotates it as managed.
-      activeManagedRecords.push(record);
-      continue;
-    }
-    if (await isDirectory(record.path)) {
-      additionalManagedPaths.push(record.path);
-      activeManagedRecords.push(record);
+      alreadyCovered.push(record);
     } else {
-      staleManagedRecords.push(record);
+      needsStatCheck.push(record);
+    }
+  }
+  activeManagedRecords.push(...alreadyCovered);
+
+  // Fan out stat checks in parallel and cap aggregate time with the existing discovery
+  // timeout budget. Sequential fs.stat calls at 20+ managed sources would add 20+ round
+  // trips even on a warm cache. Promise.allSettled (not Promise.all) isolates per-entry
+  // failures: one bad NFS path must not abort the rest.
+  //
+  // On timeout the underlying promises continue in the background (same tradeoff as the
+  // walk timeout at discoverRootedWorkflowDirectories). The next call within the TTL
+  // window may still see partial results; subsequent calls after TTL expiry re-stat.
+  if (needsStatCheck.length > 0) {
+    const statResults = await withTimeout(
+      Promise.allSettled(needsStatCheck.map((record) => isDirectory(record.path))),
+      DISCOVERY_TIMEOUT_MS,
+      'managed_source_stat',
+    ).catch(() => null);
+
+    for (let i = 0; i < needsStatCheck.length; i++) {
+      const record = needsStatCheck[i]!;
+      // On overall timeout (null) or per-entry rejection, treat as stale.
+      const result = statResults?.[i];
+      const isDir = result?.status === 'fulfilled' && result.value === true;
+      if (isDir) {
+        additionalManagedPaths.push(record.path);
+        activeManagedRecords.push(record);
+      } else {
+        staleManagedRecords.push(record);
+      }
     }
   }
   const customPaths = [...rootedCustomPaths, ...additionalManagedPaths];

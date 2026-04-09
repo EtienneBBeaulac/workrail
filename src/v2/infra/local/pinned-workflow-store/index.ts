@@ -1,3 +1,4 @@
+import * as nodePath from 'node:path';
 import type { ResultAsync } from 'neverthrow';
 import { ResultAsync as RA, okAsync, errAsync } from 'neverthrow';
 import type { PinnedWorkflowStorePortV2, PinnedWorkflowStoreError } from '../../../ports/pinned-workflow-store.port.js';
@@ -50,6 +51,30 @@ export class LocalPinnedWorkflowStoreV2 implements PinnedWorkflowStorePortV2 {
 
         return okAsync(validated.data);
       });
+  }
+
+  list(): ResultAsync<readonly WorkflowHash[], PinnedWorkflowStoreError> {
+    const dir = this.dataDir.pinnedWorkflowsDir();
+
+    return this.fs.readdir(dir)
+      .orElse((e) => {
+        // Directory not found means no snapshots have been stored yet -- return empty list.
+        if (e.code === 'FS_NOT_FOUND') return okAsync([] as string[]);
+        return errAsync(mapFsToStoreError(e));
+      })
+      .map((entries) =>
+        entries
+          .filter((name) => name.endsWith('.json') && !name.endsWith('.tmp'))
+          .map((name) => nodePath.basename(name, '.json') as WorkflowHash),
+      );
+  }
+
+  /**
+   * No-op stub. The port contract is satisfied; real GC policy with session-reference
+   * safety checking is a follow-up task.
+   */
+  prune(_olderThanMs: number): ResultAsync<number, PinnedWorkflowStoreError> {
+    return okAsync(0);
   }
 
   put(workflowHash: WorkflowHash, compiled: CompiledWorkflowSnapshot): ResultAsync<void, PinnedWorkflowStoreError> {

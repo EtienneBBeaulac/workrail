@@ -576,6 +576,10 @@ export const V2StartWorkflowOutputSchema = z.object({
     'Workflows from these paths were not included in this response. ' +
     'These paths will be rechecked on the next call.'
   ),
+  warnings: z.array(z.string()).optional().describe(
+    'Non-fatal warnings about workflow source availability. ' +
+    'The workflow was started successfully but some sources may have been unavailable (e.g., managed source store temporarily inaccessible).'
+  ),
 }).refine(
   (data) => (data.pending ? data.continueToken != null : true),
   { message: 'continueToken is required when a pending step exists' }

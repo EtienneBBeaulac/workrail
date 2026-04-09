@@ -6,6 +6,7 @@ import type { ToolContext, ToolResult } from '../types.js';
 import { success, errNotRetryable, requireV2Context } from '../types.js';
 import { mapUnknownErrorToToolError } from '../error-mapper.js';
 import { internalSuggestion } from './v2-execution-helpers.js';
+import { assertNever } from '../../runtime/assert-never.js';
 import type { V2InspectWorkflowInput, V2ListWorkflowsInput } from '../v2/tools.js';
 import type { V2WorkflowInspectOutputSchema, V2WorkflowListOutputSchema, StalenessSummary } from '../output-schemas.js';
 import type { RememberedRootRecordV2 } from '../../v2/ports/remembered-roots-store.port.js';
@@ -649,6 +650,10 @@ function deriveSourceCatalogEntry(options: {
     case 'plugin':
       return { sourceKey, category: 'external', source: { kind: source.kind, displayName }, sourceMode: 'live_directory', effectiveWorkflowCount: effective, totalWorkflowCount: total, shadowedWorkflowCount: shadowed };
   }
+
+  // Exhaustiveness guard: adding a new WorkflowSource.kind without updating this switch
+  // will cause a compile-time error here. Do not replace with a default case.
+  assertNever(source);
 }
 
 function deriveSourceKey(source: WorkflowSource): string {

@@ -83,14 +83,16 @@ export class LocalWorkspaceAnchorV2 implements WorkspaceContextResolverPortV2 {
     // sessions and worktrees by repo without needing a reverse-hash lookup.
     anchors.push({ key: 'repo_root', value: repoRoot });
 
-    // git branch: read symbolic ref (graceful: empty on detached HEAD or non-git)
-    const branch = await this.gitCommand('git rev-parse --abbrev-ref HEAD', cwd);
+    // git branch and git HEAD sha are independent of each other -- run in parallel.
+    const [branch, sha] = await Promise.all([
+      this.gitCommand('git rev-parse --abbrev-ref HEAD', cwd),
+      this.gitCommand('git rev-parse HEAD', cwd),
+    ]);
+
     if (branch && branch !== 'HEAD') {
       anchors.push({ key: 'git_branch', value: branch });
     }
 
-    // git head sha: read full commit hash
-    const sha = await this.gitCommand('git rev-parse HEAD', cwd);
     if (sha && /^[0-9a-f]{40}$/.test(sha)) {
       anchors.push({ key: 'git_head_sha', value: sha });
     }
