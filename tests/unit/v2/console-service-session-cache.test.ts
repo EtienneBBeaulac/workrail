@@ -107,6 +107,8 @@ function makePinnedWorkflowStore(): PinnedWorkflowStorePortV2 {
   return {
     get: () => okAsync(null),
     put: () => okAsync(undefined),
+    list: () => okAsync([]),
+    prune: () => okAsync(0),
   };
 }
 

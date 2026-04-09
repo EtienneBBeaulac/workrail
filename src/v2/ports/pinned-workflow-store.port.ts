@@ -48,4 +48,24 @@ export interface PinnedWorkflowStorePortV2 {
    * Idempotent for the same hash.
    */
   put(workflowHash: WorkflowHash, compiled: CompiledWorkflowSnapshot): ResultAsync<void, PinnedWorkflowStoreError>;
+
+  /**
+   * List all known workflow hashes in the store.
+   *
+   * Used to enumerate snapshots for GC or export. Order is unspecified.
+   */
+  list(): ResultAsync<readonly WorkflowHash[], PinnedWorkflowStoreError>;
+
+  /**
+   * Remove snapshots that were last written more than `olderThanMs` milliseconds ago.
+   *
+   * Returns the count of snapshots removed.
+   *
+   * Safety: implementations SHOULD check that no active session references a snapshot
+   * before deleting it. The no-op reference implementation returns 0 and is safe to use
+   * until a real GC policy is needed.
+   *
+   * @param olderThanMs - Age threshold in milliseconds. Snapshots older than this are pruned.
+   */
+  prune(olderThanMs: number): ResultAsync<number, PinnedWorkflowStoreError>;
 }

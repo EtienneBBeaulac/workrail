@@ -22,7 +22,7 @@ import { deriveWorkflowHashRef } from '../../../v2/durable-core/ids/workflow-has
 import type { LoadedSessionTruthV2 } from '../../../v2/ports/session-event-log-store.port.js';
 import type { TokenCodecPorts } from '../../../v2/durable-core/tokens/token-codec-ports.js';
 import { ResultAsync as RA, okAsync, errAsync as neErrorAsync } from 'neverthrow';
-import type { WorkflowDefinition } from '../../../types/workflow-definition.js';
+import type { WorkflowDefinition, ResolveFrom } from '../../../types/workflow-definition.js';
 import { hasWorkflowDefinitionShape } from '../../../types/workflow-definition.js';
 import {
   derivePreferencesOrDefault,
@@ -259,7 +259,7 @@ function buildPinnedReferencesFallback(
     source: ref.source,
     purpose: ref.purpose,
     authoritative: ref.authoritative,
-    resolveFrom: (ref.resolveFrom ?? 'workspace') as 'workspace' | 'package',
+    resolveFrom: (ref.resolveFrom ?? 'workspace') as ResolveFrom,
     status: 'pinned' as const,
   }));
 }

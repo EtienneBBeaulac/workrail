@@ -140,9 +140,10 @@ describe('loadAndPinWorkflow -- pinnedStore.get call count', () => {
     void result; // result shape is not under test here
   });
 
-  it('calls pinnedStore.get twice and put once on the cold path (no pre-existing pin)', async () => {
+  it('calls pinnedStore.get once and put once on the cold path (no pre-existing pin)', async () => {
     // Cold path: the first get() returns null, so the implementation must call put()
-    // to persist the new pin, then call get() a second time to retrieve it.
+    // to persist the new pin. The value is returned directly from memory -- no second
+    // get() is needed, avoiding a redundant disk read and Zod re-parse.
 
     const { loadAndPinWorkflow } = await import(
       '../../../src/mcp/handlers/v2-execution/start.js'
@@ -181,24 +182,13 @@ describe('loadAndPinWorkflow -- pinnedStore.get call count', () => {
       getWorkflowById: vi.fn().mockResolvedValue(fakeWorkflow),
     };
 
-    const pinnedSnapshot = {
-      v: 1 as const,
-      sourceKind: 'v1_pinned' as const,
-      workflowId: 'perf-test-wf-cold',
-      definition: fakeWorkflow.definition,
-      resolvedBindings: {},
-      pinnedOverrides: {},
-      compiledWorkflow: { v: 1, workflowId: 'perf-test-wf-cold', nodes: {}, edges: [], metadata: {} },
-      resolvedReferences: [],
-    };
-
     let getCallCount = 0;
     let putCallCount = 0;
     const fakePinnedStore = {
       get: vi.fn().mockImplementation((_hash: unknown) => {
         getCallCount++;
-        // First call returns null (cold path); subsequent calls return the snapshot.
-        return okAsync(getCallCount === 1 ? null : pinnedSnapshot);
+        // First (and only) call returns null -- cold path.
+        return okAsync(null);
       }),
       put: vi.fn().mockImplementation(() => {
         putCallCount++;
@@ -217,8 +207,8 @@ describe('loadAndPinWorkflow -- pinnedStore.get call count', () => {
     });
 
     // On the cold path: get() called once to check (returns null), put() called once
-    // to persist, then get() called again to retrieve -- total 2 gets and 1 put.
-    expect(getCallCount).toBe(2);
+    // to persist. The in-memory snapshot is returned directly -- no second get().
+    expect(getCallCount).toBe(1);
     expect(putCallCount).toBe(1);
 
     // Verify the returned workflow has the expected shape so we know the cold path

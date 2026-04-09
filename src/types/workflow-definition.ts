@@ -328,9 +328,21 @@ export interface WorkflowRecommendedPreferences {
 }
 
 /**
+ * The set of valid reference resolution bases.
+ *
+ * This is the canonical single source of truth for the resolveFrom enum.
+ * Zod schemas and TypeScript types MUST derive from this constant so that
+ * adding a third resolution base requires only one change here.
+ */
+export const RESOLVE_FROM_VALUES = ['workspace', 'package'] as const;
+
+/** Where to resolve a reference source path from. */
+export type ResolveFrom = typeof RESOLVE_FROM_VALUES[number];
+
+/**
  * A workflow-declared reference to an external document.
  *
- * References are pointers — content is never inlined. The agent reads the
+ * References are pointers -- content is never inlined. The agent reads the
  * file itself if needed. Declarations are included in the workflow hash;
  * referenced file content is not (hash stability).
  *
@@ -365,7 +377,7 @@ export interface WorkflowReference {
    * - `'workspace'` (default): user's project root. For project-specific artifacts.
    * - `'package'`: workrail package root. For files bundled with the workflow.
    */
-  readonly resolveFrom?: 'workspace' | 'package';
+  readonly resolveFrom?: ResolveFrom;
 }
 
 export interface WorkflowDefinition {

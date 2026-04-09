@@ -69,6 +69,14 @@ class FakePinnedWorkflowStore {
     return okAsync(this.store.get(workflowHash) ?? null);
   }
 
+  list(): ResultAsync<readonly WorkflowHash[], PinnedWorkflowStoreError> {
+    return okAsync([...this.store.keys()] as WorkflowHash[]);
+  }
+
+  prune(_olderThanMs: number): ResultAsync<number, PinnedWorkflowStoreError> {
+    return okAsync(0);
+  }
+
   get size() { return this.store.size; }
   has(hash: string) { return this.store.has(hash); }
 }

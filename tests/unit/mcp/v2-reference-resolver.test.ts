@@ -156,3 +156,46 @@ describe('resolveWorkflowReferences', () => {
     expect(result.warnings[0]!.message).toContain('filesystem unavailable');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Timeout-based graceful degradation (F2)
+// ---------------------------------------------------------------------------
+// These tests verify the contract used by enrichPinnedSnapshotWithResolvedReferences:
+// a .catch(() => null) sentinel on the timeout path must produce all-unresolved refs,
+// NOT a hard error. The pattern is tested here at a lower level of abstraction.
+
+describe('resolveWorkflowReferences -- timeout degradation pattern', () => {
+  it('withTimeout + catch pattern converts timeout to null (graceful degradation)', async () => {
+    // Simulates the shape used by enrichPinnedSnapshotWithResolvedReferences:
+    //   const result = await withTimeout(resolveWorkflowReferences(...), ms).catch(() => null);
+    // On timeout the resolved value is null, and callers must branch on null.
+    const FAST_TIMEOUT_MS = 1;
+    const neverResolvesExists: FileExistsPort = () => new Promise(() => {
+      // never resolves
+    });
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('timed out')), FAST_TIMEOUT_MS);
+    });
+
+    const resolutionResult = await Promise.race([
+      resolveWorkflowReferences([SAMPLE_REF], '/workspace', neverResolvesExists),
+      timeoutPromise,
+    ]).catch(() => null);
+
+    // Timeout produces null -- this is the degradation sentinel
+    expect(resolutionResult).toBeNull();
+  });
+
+  it('non-timeout call returns a valid result (not null)', async () => {
+    const resolutionResult = await Promise.race([
+      resolveWorkflowReferences([SAMPLE_REF], '/workspace', alwaysExists),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timed out')), 5_000)),
+    ]).catch(() => null);
+
+    // No timeout -- result is the actual resolution
+    expect(resolutionResult).not.toBeNull();
+    expect(resolutionResult!.resolved).toHaveLength(1);
+    expect(resolutionResult!.resolved[0]!.status).toBe('resolved');
+  });
+});
