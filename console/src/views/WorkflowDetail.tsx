@@ -53,20 +53,30 @@ export function WorkflowDetail({ workflowId, activeTag, onBack }: Props) {
       />
 
       {/* Header */}
-      <div className="border border-[var(--border)] px-5 py-4 console-blueprint-grid">
-        <h2 className="text-lg font-semibold text-[var(--text-primary)] leading-snug mb-2">
+      <div className="border border-[var(--border)] px-5 py-5 console-blueprint-grid">
+        {/* Designation label */}
+        <p className="font-mono text-[10px] uppercase tracking-[0.35em] text-[var(--text-muted)] mb-2">
+          // Workflow
+        </p>
+
+        {/* Title */}
+        <h2
+          className="font-mono text-xl font-bold uppercase tracking-[0.08em] leading-tight mb-3"
+          style={{
+            color: 'var(--accent)',
+            textShadow: '0 0 24px rgba(244,196,48,0.45), 0 0 48px rgba(244,196,48,0.15)',
+          }}
+        >
           {name}
         </h2>
 
-        {/* stepCount as standalone metric */}
-        {detail && detail.stepCount != null && detail.stepCount > 0 && (
-          <p className="font-mono text-[11px] text-[var(--text-secondary)] mb-2">
-            {detail.stepCount} step{detail.stepCount !== 1 ? 's' : ''}
-          </p>
-        )}
-
-        {/* Badges row */}
-        <div className="flex flex-wrap items-center gap-2 mb-2">
+        {/* Badges row -- step count inline with tags */}
+        <div className="flex flex-wrap items-center gap-2">
+          {detail && detail.stepCount != null && detail.stepCount > 0 && (
+            <span className="font-mono text-[10px] px-1.5 py-0.5 border border-[var(--border)] text-[var(--text-secondary)]">
+              {detail.stepCount} step{detail.stepCount !== 1 ? 's' : ''}
+            </span>
+          )}
           {tags.filter((t) => t !== 'routines').map((tag) => (
             <span
               key={tag}
@@ -86,9 +96,9 @@ export function WorkflowDetail({ workflowId, activeTag, onBack }: Props) {
           )}
         </div>
 
-        {/* Short description (full text, not truncated) */}
+        {/* Short description */}
         {description && (
-          <p className="text-sm text-[var(--text-secondary)] leading-relaxed">
+          <p className="text-sm text-[var(--text-secondary)] leading-relaxed mt-3">
             {description}
           </p>
         )}
