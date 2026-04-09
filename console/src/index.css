@@ -549,23 +549,37 @@ body::after {
 
 .modal-border-flashing        { animation: modal-border-flash 200ms ease-out forwards; }
 
-/* CRT scanline overlay: thin amber lines on transparent background.
-   Positioned as a direct child of CutCornerBox so clip-path applies correctly.
-   --crt-offset shifts the pattern so lines land at different pixels each time. */
+/* CRT scanline overlay.
+   Three layers:
+   1. Random phosphor glitch band: thin bright stripe at --glitch-y position
+   2. Primary fine scanlines (3px pitch)
+   3. Secondary coarser pattern (7px pitch) -- beats against primary for uneven moiré effect
+   --crt-offset and --glitch-y are randomised per-navigation in JS. */
 .modal-scanline {
   position: absolute;
   inset: 0;
   pointer-events: none;
   z-index: 10;
-  background: repeating-linear-gradient(
-    to bottom,
-    transparent 0px,
-    transparent 2px,
-    rgba(0, 0, 0, 0.5) 2px,
-    rgba(0, 0, 0, 0.5) 3px
-  );
-  background-position-y: var(--crt-offset, 0px);
-  animation: modal-crt-fade 200ms linear forwards;
+  background:
+    linear-gradient(
+      to bottom,
+      transparent calc(var(--glitch-y, 38%) - 1px),
+      rgba(180, 210, 255, 0.10) calc(var(--glitch-y, 38%) - 1px),
+      rgba(180, 210, 255, 0.10) calc(var(--glitch-y, 38%) + 3px),
+      transparent calc(var(--glitch-y, 38%) + 3px)
+    ),
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0px, transparent 2px,
+      rgba(0, 0, 0, 0.50) 2px, rgba(0, 0, 0, 0.50) 3px
+    ),
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0px, transparent 5px,
+      rgba(0, 0, 0, 0.20) 5px, rgba(0, 0, 0, 0.24) 7px
+    );
+  background-position-y: 0, var(--crt-offset, 0px), calc(var(--crt-offset, 0px) + 2px);
+  animation: modal-crt-fade 220ms linear forwards;
   opacity: 0;
 }
 .modal-scanline--hidden { display: none; }
