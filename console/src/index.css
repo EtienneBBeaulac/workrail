@@ -581,8 +581,7 @@ body::after {
   background-position-y: 0, var(--crt-offset, 0px), calc(var(--crt-offset, 0px) + 2px);
   animation: modal-crt-fade 220ms linear forwards;
   opacity: 0;
-}
-.modal-scanline--hidden { display: none; }
+}.modal-scanline--hidden { display: none; }
 
 @media (prefers-reduced-motion: reduce) {
   .modal-content--exit-v-next, .modal-content--exit-v-prev,
