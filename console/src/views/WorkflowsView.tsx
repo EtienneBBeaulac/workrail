@@ -412,9 +412,9 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
         >
           <CutCornerBox
             cut={20}
-            borderColor="rgba(244, 196, 48, 0.7)"
-            background="rgba(15, 19, 31, 0.15)"
-            dropShadow="drop-shadow(0 4px 24px rgba(244,196,48,0.2))"
+            borderColor="rgba(244, 196, 48, 0.45)"
+            background="rgba(15, 19, 31, 0.50)"
+            dropShadow="drop-shadow(0 4px 24px rgba(244,196,48,0.15))"
             className="h-full flex flex-col"
           >
             {/* Modal header */}
