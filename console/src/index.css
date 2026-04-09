@@ -522,16 +522,15 @@ body::after {
 
 @keyframes modal-border-flash {
   0%   { filter: brightness(1); }
-  10%  { filter: brightness(2.5); }
-  30%  { filter: brightness(4) hue-rotate(180deg); }
-  60%  { filter: brightness(1.8); }
+  15%  { filter: brightness(1.4); }
+  40%  { filter: brightness(1.2); }
   100% { filter: brightness(1); }
 }
 
 @keyframes modal-crt-fade {
   0%   { opacity: 0; }
-  25%  { opacity: 0.8; }
-  65%  { opacity: 0.8; }
+  25%  { opacity: 0.45; }
+  65%  { opacity: 0.45; }
   100% { opacity: 0; }
 }
 
