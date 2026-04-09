@@ -274,6 +274,19 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
 
   return (
     <div className="space-y-4" aria-busy={isLoading}>
+      {/* Page title */}
+      <div>
+        <h1
+          className="font-mono text-2xl font-bold uppercase tracking-[0.12em] leading-none"
+          style={{ color: 'var(--accent)', textShadow: '0 0 28px rgba(244,196,48,0.35)' }}
+        >
+          Workflows
+        </h1>
+        <p className="font-mono text-[10px] tracking-[0.25em] text-[var(--text-muted)] mt-1.5">
+          // {allWorkflows.length} available
+        </p>
+      </div>
+
       {/* Tag filter pills */}
       <div
         role="group"
