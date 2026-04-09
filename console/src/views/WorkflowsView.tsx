@@ -418,18 +418,21 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
             className="h-full flex flex-col"
           >
             {/* Modal header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)] shrink-0 console-blueprint-grid">
+            <div
+              className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)] shrink-0 console-blueprint-grid"
+              style={{ background: 'rgba(15, 19, 31, 0.55)' }}
+            >
               <div className="flex items-center gap-4">
-                <span className="font-mono text-[10px] uppercase tracking-[0.30em] text-[var(--text-muted)]">
+                <span className="font-mono text-[10px] uppercase tracking-[0.30em] text-[var(--text-secondary)]">
                   Workflow
                 </span>
                 {currentIndex >= 0 && (
-                  <span className="font-mono text-[10px] tracking-[0.20em] text-[var(--text-muted)]">
+                  <span className="font-mono text-[10px] tracking-[0.20em] text-[var(--text-secondary)]">
                     [ {currentIndex + 1} / {flatWorkflows.length} ]
                   </span>
                 )}
                 <span
-                  className="font-mono text-[9px] tracking-[0.15em] text-[var(--text-muted)] transition-opacity duration-600"
+                  className="font-mono text-[9px] tracking-[0.15em] text-[var(--text-secondary)] transition-opacity duration-600"
                   style={{ opacity: hintVisible ? 0.5 : 0 }}
                   aria-hidden="true"
                 >
@@ -439,7 +442,7 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
               <button
                 type="button"
                 onClick={() => setSelectedWorkflowId(null)}
-                className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-xl leading-none"
+                className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors text-xl leading-none"
                 aria-label="Close"
               >
                 &times;
