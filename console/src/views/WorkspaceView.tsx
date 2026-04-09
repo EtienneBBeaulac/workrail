@@ -145,12 +145,13 @@ export function WorkspaceView({ hidden = false }: Props) {
     }
   }, [hidden]);
 
-  const { liveItems, attentionItems, recentItems, orderedItems, archiveRepos } = useMemo(() => {
+  const { liveItems, attentionItems, recentItems, worktreeItems, orderedItems, archiveRepos } = useMemo(() => {
     const nowMs = Date.now();
     const empty = {
       liveItems: [] as WorkspaceItem[],
       attentionItems: [] as WorkspaceItem[],
       recentItems: [] as WorkspaceItem[],
+      worktreeItems: [] as WorkspaceItem[],
       orderedItems: [] as WorkspaceItem[],
       archiveRepos: [] as Array<[string, string]>,
     };
@@ -165,18 +166,20 @@ export function WorkspaceView({ hidden = false }: Props) {
     }
 
     const allSorted = sortItemsForRepo(joined, scope, nowMs);
-    const live = allSorted.filter(i => i.primarySession?.status === 'in_progress');
-    const attention = allSorted.filter(i => i.primarySession?.status === 'blocked');
-    const recent = allSorted.filter(i => {
+    const liveItems = allSorted.filter(i => i.primarySession?.status === 'in_progress');
+    const attentionItems = allSorted.filter(i => i.primarySession?.status === 'blocked');
+    const worktreeItems = allSorted.filter(i => i.allSessions.length === 0);
+    const recentItems = allSorted.filter(i => {
       const s = i.primarySession?.status;
-      return s !== 'in_progress' && s !== 'blocked';
+      return s !== 'in_progress' && s !== 'blocked' && i.allSessions.length > 0;
     });
 
     return {
-      liveItems: live,
-      attentionItems: attention,
-      recentItems: recent,
-      orderedItems: [...live, ...attention, ...recent],
+      liveItems,
+      attentionItems,
+      recentItems,
+      worktreeItems,
+      orderedItems: [...liveItems, ...attentionItems, ...recentItems, ...worktreeItems],
       archiveRepos: [...reposSeen.entries()] as Array<[string, string]>,
     };
   }, [sessionData, worktreeData, scope]);
@@ -328,6 +331,24 @@ export function WorkspaceView({ hidden = false }: Props) {
                   </div>
                 </section>
               )}
+
+              {/* WORKTREES band -- branches with no sessions */}
+              {worktreeItems.length > 0 && (
+                <section aria-label="Worktrees">
+                  <SectionHeader label="// Worktrees" count={worktreeItems.length} countLabel="branch" />
+                  <div className="space-y-1">
+                    {worktreeItems.map((item, idx) => (
+                      <WorktreeOnlyRow
+                        key={`${item.branch}\0${item.repoRoot}`}
+                        item={item}
+                        isFocused={focusedIndex === liveItems.length + attentionItems.length + recentItems.length + idx}
+                        worktreesFetching={worktreesFetching}
+                        expandStateRef={expandStateRef}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
             </>
           )}
 
@@ -361,7 +382,7 @@ function HeroSessionCard({
     <button
       type="button"
       onClick={() => onSelect(session.sessionId)}
-      className="relative block w-full text-left h-[120px] group"
+      className="relative block w-full text-left h-[120px] group hero-card-breathing"
       style={isFocused ? { outline: '2px solid var(--accent)', outlineOffset: '2px' } : undefined}
       aria-label={goalTitle}
     >
@@ -519,10 +540,14 @@ function BandSessionRow({
   const timeAgo = formatRelativeTime(session.lastModifiedMs);
   const multiSessionCount = item.allSessions.length;
 
-  const borderAccent =
-    band === 'attention' ? 'var(--blocked)' :
-    band === 'live' ? 'var(--accent-strong)' :
-    'rgba(244, 196, 48, 0.2)';
+  const isDormant = band === 'recent' && session.status === 'dormant';
+  const borderAccent = band === 'attention'
+    ? 'var(--blocked)'
+    : band === 'live'
+    ? 'var(--accent-strong)'
+    : isDormant
+    ? 'rgba(244, 196, 48, 0.55)'
+    : 'rgba(244, 196, 48, 0.2)';
 
   return (
     <div style={isFocused ? { outline: '2px solid var(--accent)', outlineOffset: '2px' } : undefined}>
@@ -534,7 +559,14 @@ function BandSessionRow({
         aria-label={goalTitle}
       >
         {/* Row 1: goal title | gaps | +N badge | StatusBadge | time ago */}
-        <div className="flex items-center gap-2 min-w-0 mb-1">
+        <div className="flex items-start gap-2 min-w-0 mb-1">
+          {isDormant && (
+            <span
+              className="w-1.5 h-1.5 rounded-full shrink-0 mt-[3px] bg-[var(--accent)]"
+              title="Dormant -- session has been idle"
+              aria-hidden="true"
+            />
+          )}
           <span className="text-sm text-[var(--text-primary)] group-hover:text-[var(--accent)] transition-colors flex-1 truncate">
             {goalTitle}
           </span>

@@ -614,3 +614,16 @@ body::after {
   .modal-scanline        { display: none; }
   .modal-border-flashing { animation: none !important; filter: none !important; }
 }
+
+@keyframes hero-card-glow-breathe {
+  0%, 100% { filter: drop-shadow(0 0 12px rgba(0, 175, 192, 0.20)); }
+  50%       { filter: drop-shadow(0 0 28px rgba(0, 175, 192, 0.55)); }
+}
+
+.hero-card-breathing {
+  animation: hero-card-glow-breathe 3s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-card-breathing { animation: none; }
+}

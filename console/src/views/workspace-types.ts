@@ -274,8 +274,7 @@ export function joinSessionsAndWorktrees(
  */
 export function countNeedsAttention(items: readonly WorkspaceItem[]): number {
   return items.reduce((count, item) => {
-    const status = item.primarySession?.status;
-    return status === 'blocked' || status === 'dormant' ? count + 1 : count;
+    return item.primarySession?.status === 'blocked' ? count + 1 : count;
   }, 0);
 }
 
