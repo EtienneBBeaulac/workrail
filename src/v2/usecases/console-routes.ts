@@ -196,11 +196,24 @@ export function mountConsoleRoutes(
   // List git worktrees grouped by repo, with enriched status and active session counts.
   // Repo roots are derived from the server process CWD only. Active session counts
   // (for worktree badges) come from a full session scan on each request.
+  //
+  // Per-request timeout: if git scanning takes longer than 8 s, respond with the
+  // cached result (or an empty list) so the UI never spins indefinitely.
 
   // CWD root: stable for the lifetime of the process -- resolve once, cache forever.
   let cwdRepoRootPromise: Promise<string | null> | null = null;
 
+  /** 8 s ceiling for the entire worktrees response, well above the p99 git scan time. */
+  const WORKTREES_REQUEST_TIMEOUT_MS = 8_000;
+
   app.get('/api/v2/worktrees', async (_req: Request, res: Response) => {
+    // Timeout race: if the scan takes too long, return an empty repo list so the
+    // client doesn't spin. The next poll will retry, and the in-flight scan result
+    // will be cached by then.
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('worktrees scan timeout')), WORKTREES_REQUEST_TIMEOUT_MS)
+    );
+
     try {
       const sessionResult = await consoleService.getSessionList();
       const sessions = sessionResult.isOk() ? sessionResult.value.sessions : [];
@@ -210,10 +223,19 @@ export function mountConsoleRoutes(
       const cwdRoot = await cwdRepoRootPromise;
       const repoRoots: readonly string[] = cwdRoot !== null ? [cwdRoot] : [];
 
-      const data = await getWorktreeList(repoRoots, activeSessions);
+      const data = await Promise.race([
+        getWorktreeList(repoRoots, activeSessions),
+        timeoutPromise,
+      ]);
       res.json({ success: true, data });
     } catch (e) {
-      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+      if (e instanceof Error && e.message === 'worktrees scan timeout') {
+        // Respond with empty data instead of leaving the client hanging.
+        // The background scan is still running and will populate the cache.
+        res.json({ success: true, data: { repos: [] } });
+      } else {
+        res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+      }
     }
   });
 
