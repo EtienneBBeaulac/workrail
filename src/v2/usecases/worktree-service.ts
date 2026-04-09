@@ -111,6 +111,13 @@ function parseWorktreePorcelain(raw: string): RawWorktree[] {
 // With MAX_CONCURRENT_ENRICHMENTS=8: at most 48 concurrent git processes
 // (8 worktrees x 6 commands). Total latency for 101 worktrees becomes
 // ~ceil(101/8) x single-worktree-time rather than max single-worktree-time.
+//
+// Invariant: activeEnrichments counts RUNNING enrichments only.
+// When a slot is released and there is a waiter, the slot is TRANSFERRED
+// (count stays the same) by calling the waiter's resolve directly.
+// The waiter callback must NOT increment activeEnrichments -- that would
+// cause the counter to drift upward after each request, eventually leaving
+// it permanently at MAX_CONCURRENT_ENRICHMENTS and hanging all future requests.
 // ---------------------------------------------------------------------------
 
 const MAX_CONCURRENT_ENRICHMENTS = 8;
@@ -123,7 +130,10 @@ function acquireEnrichmentSlot(): Promise<void> {
       activeEnrichments++;
       resolve();
     } else {
-      enrichmentQueue.push(() => { activeEnrichments++; resolve(); });
+      // Store only the resolve callback. The slot count is already accounted for
+      // by the releasing side: releaseEnrichmentSlot transfers the slot without
+      // changing activeEnrichments, so the waiter must NOT increment it again.
+      enrichmentQueue.push(resolve);
     }
   });
 }
@@ -131,6 +141,7 @@ function acquireEnrichmentSlot(): Promise<void> {
 function releaseEnrichmentSlot(): void {
   const next = enrichmentQueue.shift();
   if (next) {
+    // Transfer the slot to the next waiter: count stays the same.
     next();
   } else {
     activeEnrichments--;
@@ -362,33 +373,52 @@ export function buildActiveSessionCounts(
   return { counts };
 }
 
-/**
- * Return worktrees for each of the given repo roots, grouped per repo.
- *
- * Repos are enriched in parallel. Repos with 0 worktrees (inaccessible root,
- * or all enrichments failed) are omitted from the result — an empty section
- * header would be confusing when the repo's path no longer exists.
- *
- * Sort order: repos with active sessions first, then alphabetical by repo name.
- */
-export async function getWorktreeList(
+// ---------------------------------------------------------------------------
+// Worktree scan result cache
+//
+// The console UI polls /api/v2/worktrees every few seconds. Without caching,
+// each poll triggers a full git scan of all worktrees. With caching, the first
+// request in each TTL window does the scan; concurrent and near-concurrent
+// requests get the stale result immediately.
+//
+// Active-session counts change frequently (every continue_workflow), so the
+// TTL is kept short. The repos/branches list changes infrequently, so even a
+// 15s stale read is acceptable for the git data portion.
+//
+// In-flight deduplication: if a scan is already running when a second request
+// arrives, the second request awaits the same promise rather than launching
+// a duplicate scan. This prevents the semaphore from being acquired twice
+// simultaneously for the same repo set.
+// ---------------------------------------------------------------------------
+
+const WORKTREE_CACHE_TTL_MS = 15_000;
+
+interface WorktreeCache {
+  readonly repos: readonly ConsoleRepoWorktrees[];
+  readonly cachedAtMs: number;
+  /** Canonical key used to detect repo root changes (comma-joined sorted paths). */
+  readonly repoRootsKey: string;
+}
+
+let worktreeCache: WorktreeCache | null = null;
+let inflight: Promise<readonly ConsoleRepoWorktrees[]> | null = null;
+
+async function scanRepos(
   repoRoots: readonly string[],
-  activeSessions: ActiveSessionsByBranch,
-): Promise<ConsoleWorktreeListResponse> {
+): Promise<readonly ConsoleRepoWorktrees[]> {
   const repoResults = await Promise.allSettled(
     repoRoots.map(async (repoRoot) => {
-      const worktrees = await enrichRepo(repoRoot, activeSessions);
+      const worktrees = await enrichRepo(repoRoot, { counts: new Map() });
       return { repoRoot, worktrees };
     }),
   );
 
-  const repos: ConsoleRepoWorktrees[] = repoResults.flatMap((result) => {
+  return repoResults.flatMap((result) => {
     if (result.status === 'rejected') {
       console.warn(`[WorktreeService] Failed to enrich repo:`, result.reason);
       return [];
     }
     const { repoRoot, worktrees } = result.value;
-    // Omit repos with null (inaccessible) or 0 worktrees
     if (!worktrees || worktrees.length === 0) return [];
     return [{
       repoName: basename(repoRoot),
@@ -396,10 +426,58 @@ export async function getWorktreeList(
       worktrees,
     }];
   });
+}
+
+/**
+ * Return worktrees for each of the given repo roots, grouped per repo.
+ *
+ * Repos are enriched in parallel. Repos with 0 worktrees (inaccessible root,
+ * or all enrichments failed) are omitted from the result — an empty section
+ * header would be confusing when the repo's path no longer exists.
+ *
+ * Active session counts are applied on top of cached git data so they always
+ * reflect the current session state even when serving a cached scan.
+ *
+ * Sort order: repos with active sessions first, then alphabetical by repo name.
+ */
+export async function getWorktreeList(
+  repoRoots: readonly string[],
+  activeSessions: ActiveSessionsByBranch,
+): Promise<ConsoleWorktreeListResponse> {
+  const repoRootsKey = [...repoRoots].sort().join(',');
+  const nowMs = Date.now();
+
+  let repos: readonly ConsoleRepoWorktrees[];
+
+  const isCacheValid =
+    worktreeCache !== null &&
+    worktreeCache.repoRootsKey === repoRootsKey &&
+    nowMs - worktreeCache.cachedAtMs < WORKTREE_CACHE_TTL_MS;
+
+  if (isCacheValid) {
+    repos = worktreeCache!.repos;
+  } else {
+    // Deduplicate concurrent scans: if a scan is already running, await it.
+    if (inflight === null) {
+      inflight = scanRepos(repoRoots).finally(() => { inflight = null; });
+    }
+    repos = await inflight;
+    worktreeCache = { repos, cachedAtMs: Date.now(), repoRootsKey };
+  }
+
+  // Apply current active-session counts on top of (possibly cached) git data.
+  // This keeps session badges up-to-date without re-scanning git on every poll.
+  const reposWithActiveSessions: ConsoleRepoWorktrees[] = repos.map((repo) => ({
+    ...repo,
+    worktrees: repo.worktrees.map((wt) => ({
+      ...wt,
+      activeSessionCount: wt.branch ? (activeSessions.counts.get(wt.branch) ?? 0) : 0,
+    })),
+  }));
 
   // Sort: repos with active sessions first, then alphabetical by name.
   // Spread before sorting — same immutability rationale as enrichRepo.
-  const sortedRepos = [...repos].sort((a, b) => {
+  const sortedRepos = [...reposWithActiveSessions].sort((a, b) => {
     const aActive = a.worktrees.some(w => w.activeSessionCount > 0) ? 0 : 1;
     const bActive = b.worktrees.some(w => w.activeSessionCount > 0) ? 0 : 1;
     if (aActive !== bActive) return aActive - bActive;
