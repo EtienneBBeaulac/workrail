@@ -68,6 +68,8 @@ export interface ConsoleSessionSummary {
   readonly hasUnresolvedGaps: boolean;
   readonly recapSnippet: string | null;
   readonly gitBranch: string | null;
+  /** Repo root path from the session record. Used as fallback when worktree data is unavailable. */
+  readonly repoRoot: string | null;
   readonly lastModifiedMs: number;
 }
 
