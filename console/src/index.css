@@ -530,8 +530,8 @@ body::after {
 
 @keyframes modal-crt-fade {
   0%   { opacity: 0; }
-  15%  { opacity: 1; }
-  75%  { opacity: 1; }
+  25%  { opacity: 0.8; }
+  65%  { opacity: 0.8; }
   100% { opacity: 0; }
 }
 
@@ -560,9 +560,9 @@ body::after {
   background: repeating-linear-gradient(
     to bottom,
     transparent 0px,
-    transparent 3px,
-    rgba(244, 196, 48, 0.22) 3px,
-    rgba(244, 196, 48, 0.22) 4px
+    transparent 2px,
+    rgba(0, 0, 0, 0.5) 2px,
+    rgba(0, 0, 0, 0.5) 3px
   );
   background-position-y: var(--crt-offset, 0px);
   animation: modal-crt-fade 200ms linear forwards;
