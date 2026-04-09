@@ -21,6 +21,7 @@ const SKIP_DIRS = new Set([
   'vendor',
   '__pycache__', '.venv', 'venv',
   '.next', '.nuxt', '.turbo', '.parcel-cache',
+  '.claude', '.claude-worktrees', '.firebender',
   'coverage', '.nyc_output',
 ]);
 
@@ -43,12 +44,17 @@ const MAX_WALK_DEPTH = 5;
 // TTL guards against stale results within a single session when a user
 // creates a new .workrail/workflows dir inside an already-remembered root.
 // NOTE: adding a new root changes the key -> cache miss (correct behavior).
-const WALK_CACHE_TTL_MS = 30_000;
+const WALK_CACHE_TTL_MS = 300_000; // 5 min -- covers list_workflows -> think -> start_workflow agent workflow gap
 interface WalkCacheEntry {
   readonly result: WorkflowRootDiscoveryResult;
   readonly expiresAt: number;
 }
 const walkCache = new Map<string, WalkCacheEntry>();
+
+// In-flight dedup: if multiple callers request the same root set concurrently
+// (e.g. parallel list_workflows + start_workflow at server startup), they share
+// one in-flight walk instead of each spawning independent filesystem traversals.
+const walkInFlight = new Map<string, Promise<WorkflowRootDiscoveryResult>>();
 
 /**
  * Exported for test isolation only -- do not use in production code.
@@ -60,6 +66,7 @@ const walkCache = new Map<string, WalkCacheEntry>();
  */
 export function clearWalkCacheForTesting(): void {
   walkCache.clear();
+  walkInFlight.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -119,7 +126,7 @@ export interface WorkflowRootDiscoveryResult {
   readonly stale: readonly string[];
 }
 
-export async function discoverRootedWorkflowDirectories(
+export function discoverRootedWorkflowDirectories(
   roots: readonly string[],
 ): Promise<WorkflowRootDiscoveryResult> {
   // Cache key uses resolved paths so trailing slashes / relative paths hit the same entry.
@@ -127,8 +134,32 @@ export async function discoverRootedWorkflowDirectories(
   const now = Date.now();
   const cached = walkCache.get(cacheKey);
   if (cached && cached.expiresAt > now) {
-    return cached.result;
+    return Promise.resolve(cached.result);
   }
+
+  // In-flight dedup: return the existing promise if a walk for this root set is
+  // already running. Concurrent callers (e.g. list_workflows + start_workflow at
+  // startup) share one walk instead of each spawning independent directory traversals.
+  const inFlight = walkInFlight.get(cacheKey);
+  if (inFlight) return inFlight;
+
+  const promise = _doWalk(cacheKey, roots, now);
+  walkInFlight.set(cacheKey, promise);
+  // Use then+both-paths (not .finally) to clean up the in-flight entry.
+  // .finally() would create a second rejected promise that triggers an
+  // unhandled rejection warning when the walk throws.
+  promise.then(
+    () => walkInFlight.delete(cacheKey),
+    () => walkInFlight.delete(cacheKey),
+  );
+  return promise;
+}
+
+async function _doWalk(
+  cacheKey: string,
+  roots: readonly string[],
+  now: number,
+): Promise<WorkflowRootDiscoveryResult> {
 
   const discoveredByPath = new Set<string>();
   const discoveredPaths: string[] = [];
