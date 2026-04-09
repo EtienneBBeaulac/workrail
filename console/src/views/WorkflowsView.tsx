@@ -413,8 +413,8 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
           <CutCornerBox
             cut={20}
             borderColor="rgba(244, 196, 48, 0.5)"
-            background="rgba(15, 19, 31, 0.55)"
-            dropShadow="drop-shadow(0 24px 64px rgba(0,0,0,0.7)) drop-shadow(0 4px 16px rgba(244,196,48,0.2))"
+            background="rgba(15, 19, 31, 0.30)"
+            dropShadow="drop-shadow(0 24px 64px rgba(0,0,0,0.5)) drop-shadow(0 4px 16px rgba(244,196,48,0.25))"
             className="h-full flex flex-col"
           >
             {/* Modal header */}
@@ -552,7 +552,7 @@ function WorkflowCard({
       variant="grid"
       onClick={(e) => onSelect(e.currentTarget as HTMLButtonElement)}
       aria-label={accessibleName}
-      style={isActive ? { borderColor: 'var(--accent)', backgroundColor: 'rgba(244, 196, 48, 0.12)', boxShadow: '0 0 0 1px rgba(244,196,48,0.3)' } : undefined}
+      style={isActive ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px rgba(244,196,48,0.4), 0 0 16px rgba(244,196,48,0.12)' } : undefined}
       {...navProps}
     >
       <div className="flex flex-col flex-1 p-4 gap-2 min-w-0">
