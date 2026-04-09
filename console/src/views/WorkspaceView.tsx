@@ -348,10 +348,13 @@ function RepoSection({
       {showHeader && (
         <div
           style={{ position: 'sticky', top: 'var(--app-header-height)', zIndex: 10 }}
-          className="mb-2 bg-[var(--bg-primary)]"
+          className="mb-3 bg-[var(--bg-primary)] pb-1"
         >
-          <div className="flex items-center gap-3">
-            <span className="font-mono text-[11px] uppercase tracking-[0.30em] text-[var(--text-secondary)]">
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-[11px] tracking-[0.20em] text-[var(--accent)]">
+              //
+            </span>
+            <span className="font-mono text-[12px] font-semibold uppercase tracking-[0.25em] text-[var(--text-primary)]">
               {group.repoName}
             </span>
             {activeCount > 0 && (
@@ -360,7 +363,7 @@ function RepoSection({
                 color="var(--accent-strong)"
               />
             )}
-            <div className="flex-1 h-px bg-[var(--border)]" />
+            <div className="flex-1 h-px" style={{ background: 'rgba(244,196,48,0.25)' }} />
           </div>
         </div>
       )}
@@ -397,7 +400,7 @@ function RepoSection({
 
           const session = item.allSessions[0]!;
           return (
-            <div key={`${item.branch}\0${item.repoRoot}`} style={isFocused ? { outline: '2px solid var(--accent)', outlineOffset: '2px' } : undefined}>
+            <div key={`${item.branch}\0${item.repoRoot}`} className="ml-1 border-l-2 border-[var(--border)] pl-2" style={isFocused ? { outline: '2px solid var(--accent)', outlineOffset: '2px' } : undefined}>
               <SessionRow
                 session={session}
                 item={item}
@@ -493,23 +496,25 @@ function BranchGroup({
       {unpushedExpanded && item.worktree && (
         <UnpushedCommitsPanel commits={item.worktree.unpushedCommits} count={item.worktree.aheadCount} />
       )}
-      {activeSessions.map(session => (
-        <SessionRow key={session.sessionId} session={session} showBranch={false} onSelect={() => onSelectSession(session.sessionId)} />
-      ))}
-      {historySessions.length > 0 && (
-        <>
-          {historyExpanded && historySessions.map(session => (
-            <SessionRow key={session.sessionId} session={session} showBranch={false} onSelect={() => onSelectSession(session.sessionId)} />
-          ))}
-          <button
-            type="button"
-            onClick={() => setHistoryExpanded(e => !e)}
-            className="w-full text-left px-3 py-1.5 font-mono text-[10px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
-          >
-            {historyExpanded ? '// hide history' : `+ ${historySessions.length} completed workflow${historySessions.length !== 1 ? 's' : ''}`}
-          </button>
-        </>
-      )}
+      <div className="ml-3 border-l-2 border-[var(--border)] pl-2 space-y-px">
+        {activeSessions.map(session => (
+          <SessionRow key={session.sessionId} session={session} showBranch={false} onSelect={() => onSelectSession(session.sessionId)} />
+        ))}
+        {historySessions.length > 0 && (
+          <>
+            {historyExpanded && historySessions.map(session => (
+              <SessionRow key={session.sessionId} session={session} showBranch={false} onSelect={() => onSelectSession(session.sessionId)} />
+            ))}
+            <button
+              type="button"
+              onClick={() => setHistoryExpanded(e => !e)}
+              className="w-full text-left px-3 py-1.5 font-mono text-[10px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
+            >
+              {historyExpanded ? '// hide history' : `+ ${historySessions.length} completed workflow${historySessions.length !== 1 ? 's' : ''}`}
+            </button>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -535,8 +540,9 @@ function BranchLabel({
 }) {
   const timeAgo = formatRelativeTime(item.activityMs);
   return (
-    <div className="flex items-center gap-2 px-3 pt-2 pb-1">
-      <span className="font-mono text-xs font-medium text-[var(--text-secondary)] truncate flex-1">
+    <div className="flex items-center gap-2 pl-4 pr-3 pt-2.5 pb-1 border-l-2 border-[var(--border)] ml-1">
+      <span className="font-mono text-[10px] text-[var(--text-muted)] shrink-0">·</span>
+      <span className="font-mono text-[11px] font-medium text-[var(--text-secondary)] truncate flex-1">
         {item.branch}
       </span>
       {item.worktree?.isMerged && item.worktree.branch !== null && item.worktree.branch !== 'main' && (
