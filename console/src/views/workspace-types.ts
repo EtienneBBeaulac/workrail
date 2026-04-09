@@ -215,7 +215,7 @@ export function joinSessionsAndWorktrees(
     // Fallback: no matching worktree (API slow/unavailable) -- use session's own repoRoot
     // so sessions stay visible without git badge data rather than disappearing entirely.
     if (entries.length === 0) {
-      if (session.repoRoot === null) continue;
+      if (!session.repoRoot) continue;
       const key = `${session.gitBranch}\0${session.repoRoot}`;
       const existing = sessionsByKey.get(key);
       if (existing) existing.push(session);
