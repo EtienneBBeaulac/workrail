@@ -4,7 +4,7 @@ import type { ConsoleWorkflowSummary } from '../api/types';
 import { CATALOG_TAGS, TAG_DISPLAY } from '../config/tags';
 import { SectionHeader } from '../components/SectionHeader';
 import { ConsoleCard } from '../components/ConsoleCard';
-import { CutCornerBox } from '../components/CutCornerBox';
+import { CutCornerBox, cutCornerPath } from '../components/CutCornerBox';
 import { WorkflowDetail } from './WorkflowDetail';
 import { useGridKeyNav, type UseGridKeyNavResult } from '../hooks/useGridKeyNav';
 
@@ -424,13 +424,13 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
             dropShadow="drop-shadow(0 4px 24px rgba(244,196,48,0.15))"
             className="h-full flex flex-col"
           >
-            {/* CRT scanline overlay -- sibling to header+scroll, clipped by CutCornerBox clip-path */}
+            {/* CRT scanline overlay -- clip-path applied directly to guarantee cut corner is respected */}
             {scanlineKey > 0 && (
               <div
                 key={scanlineKey}
                 className="modal-scanline"
                 aria-hidden="true"
-                style={{ '--crt-offset': `${crtOffset}px` } as React.CSSProperties}
+                style={{ '--crt-offset': `${crtOffset}px`, clipPath: cutCornerPath(20) } as React.CSSProperties}
               />
             )}
 
