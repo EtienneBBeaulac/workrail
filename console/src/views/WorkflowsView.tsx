@@ -74,6 +74,7 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
   const pendingNavRef = useRef<number | null>(null);
   const [scanlineKey, setScanlineKey] = useState(0);
   const [crtOffset, setCrtOffset] = useState(0);
+  const [glitchY, setGlitchY] = useState(38);
   const [contentAnimClass, setContentAnimClass] = useState('');
   const [borderFlashing, setBorderFlashing] = useState(false);
   const [hintVisible, setHintVisible] = useState(false);
@@ -177,8 +178,8 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
     isAnimatingRef.current = true;
     setBorderFlashing(true);
     setScanlineKey((k) => k + 1);
-    // Random offset within the 4px repeating pitch so lines land at different pixels each time
     setCrtOffset(Math.floor(Math.random() * 4));
+    setGlitchY(15 + Math.floor(Math.random() * 55)); // 15–70% down the panel
     const exitClass = axis === 'horizontal'
       ? (direction === 'next' ? 'modal-content--exit-h-next' : 'modal-content--exit-h-prev')
       : (direction === 'next' ? 'modal-content--exit-v-next' : 'modal-content--exit-v-prev');
@@ -430,7 +431,7 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
                 key={scanlineKey}
                 className="modal-scanline"
                 aria-hidden="true"
-                style={{ '--crt-offset': `${crtOffset}px`, clipPath: cutCornerPath(20) } as React.CSSProperties}
+                style={{ '--crt-offset': `${crtOffset}px`, '--glitch-y': `${glitchY}%`, clipPath: cutCornerPath(20) } as React.CSSProperties}
               />
             )}
 
