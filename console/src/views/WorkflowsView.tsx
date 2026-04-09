@@ -152,6 +152,7 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
   const handleCardSelect = useCallback((id: string, triggerEl: HTMLButtonElement) => {
     triggerRef.current = triggerEl;
     setSelectedWorkflowId(id);
+    triggerEl.blur();
   }, []);
 
   const navigateModal = useCallback((direction: 'prev' | 'next', axis: 'horizontal' | 'vertical') => {
