@@ -182,10 +182,10 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
     setBorderFlashing(true);
     setScanlineKey((k) => k + 1);
     setCrtOffset(Math.floor(Math.random() * 4));
-    setGlitchY(10 + Math.floor(Math.random() * 60));
-    setGlitchY2(15 + Math.floor(Math.random() * 65));
-    setGlitchW(2 + Math.floor(Math.random() * 6));  // 2–7px
-    setGlitchW2(1 + Math.floor(Math.random() * 4)); // 1–4px
+    setGlitchY(5 + Math.floor(Math.random() * 80));
+    setGlitchY2(5 + Math.floor(Math.random() * 80));
+    setGlitchW(1 + Math.floor(Math.random() * 28));  // 1–28px
+    setGlitchW2(1 + Math.floor(Math.random() * 16)); // 1–16px
     const exitClass = axis === 'horizontal'
       ? (direction === 'next' ? 'modal-content--exit-h-next' : 'modal-content--exit-h-prev')
       : (direction === 'next' ? 'modal-content--exit-v-next' : 'modal-content--exit-v-prev');

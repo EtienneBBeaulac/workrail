@@ -565,16 +565,16 @@ body::after {
     linear-gradient(
       to bottom,
       transparent calc(var(--glitch-y, 38%) - 1px),
-      rgba(180, 210, 255, 0.11) calc(var(--glitch-y, 38%) - 1px),
-      rgba(180, 210, 255, 0.11) calc(var(--glitch-y, 38%) + var(--glitch-w, 3px)),
+      rgba(180, 210, 255, 0.22) calc(var(--glitch-y, 38%) - 1px),
+      rgba(180, 210, 255, 0.22) calc(var(--glitch-y, 38%) + var(--glitch-w, 3px)),
       transparent calc(var(--glitch-y, 38%) + var(--glitch-w, 3px))
     ),
     /* Glitch band 2: faint amber, independent position + width */
     linear-gradient(
       to bottom,
       transparent calc(var(--glitch-y2, 62%) - 1px),
-      rgba(244, 196, 48, 0.07) calc(var(--glitch-y2, 62%) - 1px),
-      rgba(244, 196, 48, 0.07) calc(var(--glitch-y2, 62%) + var(--glitch-w2, 2px)),
+      rgba(244, 196, 48, 0.18) calc(var(--glitch-y2, 62%) - 1px),
+      rgba(244, 196, 48, 0.18) calc(var(--glitch-y2, 62%) + var(--glitch-w2, 2px)),
       transparent calc(var(--glitch-y2, 62%) + var(--glitch-w2, 2px))
     ),
     /* Primary scanlines: 3px pitch */
