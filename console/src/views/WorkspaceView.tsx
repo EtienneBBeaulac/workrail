@@ -302,7 +302,7 @@ export function WorkspaceView({ hidden = false }: Props) {
                   <RepoSection
                     key={group.repoRoot}
                     group={group}
-                    showHeader={repoGroups.length > 1}
+                    showHeader={true}
                     focusedIndex={focusedIndex}
                     groupOffset={groupOffset}
                     worktreesFetching={worktreesFetching}
