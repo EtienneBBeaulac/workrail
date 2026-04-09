@@ -371,6 +371,7 @@ export function executeStartWorkflow(
           workspacePath: input.workspacePath,
           resolvedRootUris: ctx.v2.resolvedRootUris,
           rememberedRootsStore: ctx.v2.rememberedRootsStore,
+          managedSourceStore: ctx.v2.managedSourceStore,
         }),
         (err): StartWorkflowError => ({
           kind: 'precondition_failed',
