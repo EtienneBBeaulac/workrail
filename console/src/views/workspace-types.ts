@@ -211,7 +211,23 @@ export function joinSessionsAndWorktrees(
   for (const session of sessions) {
     if (session.gitBranch === null) continue;
     const entries = worktreeByBranch.get(session.gitBranch) ?? [];
-    if (entries.length === 0) continue; // No matching worktree -- accessible via archive only
+
+    // Fallback: no matching worktree (API slow/unavailable) -- use session's own repoRoot
+    // so sessions stay visible without git badge data rather than disappearing entirely.
+    if (entries.length === 0) {
+      if (session.repoRoot === null) continue;
+      const key = `${session.gitBranch}\0${session.repoRoot}`;
+      const existing = sessionsByKey.get(key);
+      if (existing) existing.push(session);
+      else sessionsByKey.set(key, [session]);
+      // Store a synthetic worktree entry so the item has repoRoot/repoName
+      if (!worktreeByKey.has(key)) {
+        const repoName = session.repoRoot.split('/').at(-1) ?? session.repoRoot;
+        worktreeByKey.set(key, { wt: undefined as never, repoName, repoRoot: session.repoRoot });
+      }
+      continue;
+    }
+
     // When multiple repos share the same branch name, add the session to all of them.
     for (const entry of entries) {
       const key = `${session.gitBranch}\0${entry.repoRoot}`;
@@ -234,7 +250,7 @@ export function joinSessionsAndWorktrees(
     const primarySession = selectPrimarySession(branchSessions);
     const activityMs = Math.max(
       primarySession?.lastModifiedMs ?? 0,
-      worktreeEntry?.wt.headTimestampMs ?? 0,
+      worktreeEntry?.wt?.headTimestampMs ?? 0,
     );
     const repoName = worktreeEntry?.repoName ?? repoRoot.split('/').at(-1) ?? repoRoot;
 
