@@ -453,6 +453,7 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
             <div
               ref={scrollRef}
               className={`flex-1 overflow-auto overscroll-contain px-6 py-5 ${contentAnimClass}`}
+              style={{ '--text-muted': 'var(--text-secondary)' } as React.CSSProperties}
             >
               {/* CRT scanline overlay -- re-mounts on each navigation via key prop; --crt-offset randomises line position */}
               {scanlineKey > 0 && (
