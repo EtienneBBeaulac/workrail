@@ -276,8 +276,18 @@ export function WorkspaceView({ hidden = false }: Props) {
         </>
       ) : (
         <>
-          <div className="flex items-center justify-between">
-            <SectionHeader label="Workspace" count={orderedItems.length} countLabel="session" showRule={false} />
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h1
+                className="font-mono text-2xl font-bold uppercase tracking-[0.12em] leading-none"
+                style={{ color: 'var(--accent)', textShadow: '0 0 28px rgba(244,196,48,0.35)' }}
+              >
+                Workspace
+              </h1>
+              <p className="font-mono text-[10px] tracking-[0.25em] text-[var(--text-muted)] mt-1.5">
+                // {orderedItems.length} session{orderedItems.length !== 1 ? 's' : ''}
+              </p>
+            </div>
             <ScopeToggle scope={scope} onChange={setScope} />
           </div>
 
@@ -349,13 +359,17 @@ function RepoSection({
       {showHeader && (
         <div
           style={{ position: 'sticky', top: 'var(--app-header-height)', zIndex: 10 }}
-          className="mb-3 bg-[var(--bg-primary)] pb-1"
+          className="mb-3"
         >
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-[11px] tracking-[0.20em] text-[var(--accent)]">
-              //
-            </span>
-            <span className="font-mono text-[12px] font-semibold uppercase tracking-[0.25em] text-[var(--text-primary)]">
+          <div
+            className="flex items-center gap-3 px-3 py-2"
+            style={{
+              background: 'var(--bg-secondary)',
+              borderLeft: '3px solid var(--accent)',
+              borderBottom: '1px solid rgba(244,196,48,0.15)',
+            }}
+          >
+            <span className="font-mono text-[12px] font-bold uppercase tracking-[0.25em] text-[var(--text-primary)]">
               {group.repoName}
             </span>
             {activeCount > 0 && (
@@ -364,7 +378,7 @@ function RepoSection({
                 color="var(--accent-strong)"
               />
             )}
-            <div className="flex-1 h-px" style={{ background: 'rgba(244,196,48,0.25)' }} />
+            <div className="flex-1 h-px" style={{ background: 'rgba(244,196,48,0.12)' }} />
           </div>
         </div>
       )}
