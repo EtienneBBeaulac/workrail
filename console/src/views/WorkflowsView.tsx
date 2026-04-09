@@ -154,7 +154,7 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
     setSelectedWorkflowId(id);
   }, []);
 
-  const navigateModal = useCallback((direction: 'prev' | 'next') => {
+  const navigateModal = useCallback((direction: 'prev' | 'next', axis: 'horizontal' | 'vertical') => {
     if (flatWorkflows.length <= 1) return;
     const current = flatWorkflows.findIndex((w) => w.id === selectedWorkflowId);
     if (current === -1) return;
@@ -168,17 +168,20 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
       return;
     }
 
-    startModalTransition(nextIndex, direction);
+    startModalTransition(nextIndex, direction, axis);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flatWorkflows, selectedWorkflowId]);
 
-  function startModalTransition(nextIndex: number, direction: 'prev' | 'next') {
+  function startModalTransition(nextIndex: number, direction: 'prev' | 'next', axis: 'horizontal' | 'vertical') {
     isAnimatingRef.current = true;
     setBorderFlashing(true);
     setScanlineKey((k) => k + 1);
     // Random offset within the 4px repeating pitch so lines land at different pixels each time
     setCrtOffset(Math.floor(Math.random() * 4));
-    setContentAnimClass(direction === 'next' ? 'modal-content--exit-next' : 'modal-content--exit-prev');
+    const exitClass = axis === 'horizontal'
+      ? (direction === 'next' ? 'modal-content--exit-h-next' : 'modal-content--exit-h-prev')
+      : (direction === 'next' ? 'modal-content--exit-v-next' : 'modal-content--exit-v-prev');
+    setContentAnimClass(exitClass);
 
     // Reset scroll position immediately
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
@@ -186,7 +189,10 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
     // At midpoint (80ms), swap the workflow ID and start enter animation
     setTimeout(() => {
       setSelectedWorkflowId(flatWorkflows[nextIndex]!.id);
-      setContentAnimClass(direction === 'next' ? 'modal-content--enter-next' : 'modal-content--enter-prev');
+      const enterClass = axis === 'horizontal'
+        ? (direction === 'next' ? 'modal-content--enter-h-next' : 'modal-content--enter-h-prev')
+        : (direction === 'next' ? 'modal-content--enter-v-next' : 'modal-content--enter-v-prev');
+      setContentAnimClass(enterClass);
       setBorderFlashing(false);
     }, 80);
 
@@ -200,7 +206,7 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
         // determine direction for pending
         const cur = flatWorkflows.findIndex((w) => w.id === selectedWorkflowId);
         const dir = pending > cur ? 'next' : 'prev';
-        startModalTransition(pending, dir);
+        startModalTransition(pending, dir, 'vertical');
       }
     }, 240);
   }
@@ -220,7 +226,8 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
       e.preventDefault();
       e.stopPropagation();
       const isPrev = ['ArrowLeft', 'ArrowUp', 'a', 'A', 'w', 'W'].includes(e.key);
-      navigateModal(isPrev ? 'prev' : 'next');
+      const axis = ['ArrowLeft', 'ArrowRight', 'a', 'A', 'd', 'D'].includes(e.key) ? 'horizontal' : 'vertical';
+      navigateModal(isPrev ? 'prev' : 'next', axis);
     };
 
     document.addEventListener('keydown', handler, { capture: true });
@@ -380,7 +387,7 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
         {selectedWorkflowId && (
           <div
             className="absolute inset-0 pointer-events-auto"
-            style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}
+            style={{ background: 'rgba(0,0,0,0.22)', backdropFilter: 'blur(2px)' }}
             onClick={() => setSelectedWorkflowId(null)}
           />
         )}
@@ -399,15 +406,15 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
             opacity: selectedWorkflowId ? 1 : 0,
             transition: 'transform 250ms ease-out, opacity 250ms ease-out',
             /* backdrop-filter here, not inside CutCornerBox -- clip-path breaks backdrop-filter */
-            backdropFilter: 'blur(20px)',
-            WebkitBackdropFilter: 'blur(20px)',
+            backdropFilter: 'blur(16px)',
+            WebkitBackdropFilter: 'blur(16px)',
           }}
         >
           <CutCornerBox
             cut={20}
-            borderColor="rgba(244, 196, 48, 0.4)"
-            background="rgba(15, 19, 31, 0.85)"
-            dropShadow="drop-shadow(0 24px 64px rgba(0,0,0,0.9)) drop-shadow(0 4px 16px rgba(244,196,48,0.15))"
+            borderColor="rgba(244, 196, 48, 0.5)"
+            background="rgba(15, 19, 31, 0.55)"
+            dropShadow="drop-shadow(0 24px 64px rgba(0,0,0,0.7)) drop-shadow(0 4px 16px rgba(244,196,48,0.2))"
             className="h-full flex flex-col"
           >
             {/* Modal header */}
@@ -545,7 +552,7 @@ function WorkflowCard({
       variant="grid"
       onClick={(e) => onSelect(e.currentTarget as HTMLButtonElement)}
       aria-label={accessibleName}
-      style={isActive ? { borderColor: 'var(--accent)', backgroundColor: 'rgba(244, 196, 48, 0.06)' } : undefined}
+      style={isActive ? { borderColor: 'var(--accent)', backgroundColor: 'rgba(244, 196, 48, 0.12)', boxShadow: '0 0 0 1px rgba(244,196,48,0.3)' } : undefined}
       {...navProps}
     >
       <div className="flex flex-col flex-1 p-4 gap-2 min-w-0">

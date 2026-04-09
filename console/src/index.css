@@ -484,7 +484,7 @@ body::after {
 
 /* ---------- Modal workflow navigation ---------- */
 
-/* Directional vertical slide: next = exit up / enter from below, prev = exit down / enter from above */
+/* Vertical: ↑↓ / WS -- exit up/down, enter from below/above */
 @keyframes modal-exit-to-top {
   from { transform: translateY(0);     opacity: 1; }
   to   { transform: translateY(-14px); opacity: 0; }
@@ -502,6 +502,24 @@ body::after {
   to   { transform: translateY(0);     opacity: 1; }
 }
 
+/* Horizontal: ←→ / AD -- exit left/right, enter from right/left */
+@keyframes modal-exit-to-left {
+  from { transform: translateX(0);     opacity: 1; }
+  to   { transform: translateX(-20px); opacity: 0; }
+}
+@keyframes modal-exit-to-right {
+  from { transform: translateX(0);    opacity: 1; }
+  to   { transform: translateX(20px); opacity: 0; }
+}
+@keyframes modal-enter-from-right {
+  from { transform: translateX(20px); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+@keyframes modal-enter-from-left {
+  from { transform: translateX(-20px); opacity: 0; }
+  to   { transform: translateX(0);     opacity: 1; }
+}
+
 @keyframes modal-border-flash {
   0%   { filter: brightness(1); }
   10%  { filter: brightness(2.5); }
@@ -517,11 +535,19 @@ body::after {
   100% { opacity: 0; }
 }
 
-.modal-content--exit-next   { animation: modal-exit-to-top      80ms  ease-in  forwards; }
-.modal-content--exit-prev   { animation: modal-exit-to-bottom   80ms  ease-in  forwards; }
-.modal-content--enter-next  { animation: modal-enter-from-below 160ms ease-out forwards; }
-.modal-content--enter-prev  { animation: modal-enter-from-above 160ms ease-out forwards; }
-.modal-border-flashing      { animation: modal-border-flash 200ms ease-out forwards; }
+/* Vertical classes (↑↓/WS) */
+.modal-content--exit-v-next   { animation: modal-exit-to-top      80ms  ease-in  forwards; }
+.modal-content--exit-v-prev   { animation: modal-exit-to-bottom   80ms  ease-in  forwards; }
+.modal-content--enter-v-next  { animation: modal-enter-from-below 160ms ease-out forwards; }
+.modal-content--enter-v-prev  { animation: modal-enter-from-above 160ms ease-out forwards; }
+
+/* Horizontal classes (←→/AD) */
+.modal-content--exit-h-next   { animation: modal-exit-to-left     80ms  ease-in  forwards; }
+.modal-content--exit-h-prev   { animation: modal-exit-to-right    80ms  ease-in  forwards; }
+.modal-content--enter-h-next  { animation: modal-enter-from-right 160ms ease-out forwards; }
+.modal-content--enter-h-prev  { animation: modal-enter-from-left  160ms ease-out forwards; }
+
+.modal-border-flashing        { animation: modal-border-flash 200ms ease-out forwards; }
 
 /* CRT scanline overlay: repeating dark lines that fade in/out.
    --crt-offset shifts the pattern so lines land at different pixels each time. */
@@ -544,10 +570,10 @@ body::after {
 .modal-scanline--hidden { display: none; }
 
 @media (prefers-reduced-motion: reduce) {
-  .modal-content--exit-next,
-  .modal-content--exit-prev,
-  .modal-content--enter-next,
-  .modal-content--enter-prev { animation: none !important; transform: none !important; opacity: 1 !important; }
-  .modal-scanline             { display: none; }
-  .modal-border-flashing      { animation: none !important; filter: none !important; }
+  .modal-content--exit-v-next, .modal-content--exit-v-prev,
+  .modal-content--enter-v-next, .modal-content--enter-v-prev,
+  .modal-content--exit-h-next, .modal-content--exit-h-prev,
+  .modal-content--enter-h-next, .modal-content--enter-h-prev { animation: none !important; transform: none !important; opacity: 1 !important; }
+  .modal-scanline        { display: none; }
+  .modal-border-flashing { animation: none !important; filter: none !important; }
 }
