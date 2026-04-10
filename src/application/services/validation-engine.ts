@@ -902,9 +902,9 @@ export class ValidationEngine {
         return;
       }
 
-      if (!step.assessmentRefs || step.assessmentRefs.length !== 1) {
-        issues.push(`${stepLabel}: assessmentConsequences require exactly one assessmentRef on the same step`);
-        suggestions.push(`Add exactly one assessmentRef to ${stepLabel} before declaring assessmentConsequences`);
+      if (!step.assessmentRefs || step.assessmentRefs.length === 0) {
+        issues.push(`${stepLabel}: assessmentConsequences require at least one assessmentRef on the same step`);
+        suggestions.push(`Add at least one assessmentRef to ${stepLabel} before declaring assessmentConsequences`);
         return;
       }
 
@@ -913,17 +913,17 @@ export class ValidationEngine {
         suggestions.push(`Reduce assessmentConsequences on ${stepLabel} to a single declaration`);
       }
 
-      const assessmentDefinition = assessments.find(assessment => assessment.id === step.assessmentRefs?.[0]);
-      if (!assessmentDefinition) return;
+      const referencedDefinitions = assessments.filter(assessment => step.assessmentRefs!.includes(assessment.id));
+      if (referencedDefinitions.length === 0) return;
 
       for (const consequence of step.assessmentConsequences) {
         const trigger = consequence.when;
         const effect = consequence.effect;
 
-        const allLevels = assessmentDefinition.dimensions.flatMap(d => d.levels);
+        const allLevels = referencedDefinitions.flatMap(def => def.dimensions.flatMap(d => d.levels));
         if (!allLevels.includes(trigger.anyEqualsLevel)) {
           issues.push(
-            `${stepLabel}: assessment consequence anyEqualsLevel '${trigger.anyEqualsLevel}' is not declared in any dimension of assessment '${assessmentDefinition.id}'`
+            `${stepLabel}: assessment consequence anyEqualsLevel '${trigger.anyEqualsLevel}' is not declared in any dimension of any referenced assessment`
           );
           suggestions.push(
             `Use a level declared in one of the dimensions: ${[...new Set(allLevels)].join(', ')}`
@@ -1013,10 +1013,6 @@ export class ValidationEngine {
 
         // Validate assessmentRefs (cross-check against workflow-level declarations)
         validateAssessmentRefsForStep(typedStep, `Step '${step.id}'`);
-        if (typedStep.assessmentRefs !== undefined && typedStep.assessmentRefs.length > 1) {
-          issues.push(`Step '${step.id}': v1 assessment support allows exactly one assessmentRef per step`);
-          suggestions.push(`Reduce assessmentRefs on step '${step.id}' to a single assessment id`);
-        }
         validateAssessmentConsequencesForStep(typedStep, `Step '${step.id}'`);
 
         // Validate function calls for standard steps using workflow + step scopes

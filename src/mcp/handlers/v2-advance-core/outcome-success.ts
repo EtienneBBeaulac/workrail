@@ -194,8 +194,15 @@ export function buildSuccessOutcome(args: {
       return errAsync(artifactOutputsRes.error);
     }
 
-    if (v.recordedAssessment && v.assessmentArtifact && v.assessmentValidation?.acceptedArtifactIndex !== undefined) {
-      const assessmentOutput = artifactOutputsRes.value[v.assessmentValidation.acceptedArtifactIndex];
+    // Emit one assessment_recorded event per accepted assessment (one per assessmentRef).
+    // recordedAssessments[i] and acceptedArtifacts[i] are positionally aligned — built in the same loop.
+    const acceptedArtifacts = v.assessmentValidation?.acceptedArtifacts ?? [];
+    for (let i = 0; i < acceptedArtifacts.length; i++) {
+      const { artifactIndex } = acceptedArtifacts[i]!;
+      const recordedAssessment = v.assessmentValidation?.recordedAssessments[i];
+      if (!recordedAssessment) continue;
+
+      const assessmentOutput = artifactOutputsRes.value[artifactIndex];
       if (!assessmentOutput || assessmentOutput.outputChannel !== 'artifact') {
         return errAsync({
           kind: 'invariant_violation',
@@ -208,7 +215,7 @@ export function buildSuccessOutcome(args: {
         attemptId: String(attemptId),
         artifactOutputId: String(assessmentOutput.outputId),
         scope: { runId: String(runId), nodeId: String(currentNodeId) },
-        assessment: v.recordedAssessment,
+        assessment: recordedAssessment,
         minted: { eventId: idFactory.mintEventId() },
       });
       if (assessmentEventRes.isErr()) {

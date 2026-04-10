@@ -46,9 +46,9 @@ describe('validateAssessmentForStep', () => {
 
     expect(result?.contractRef).toBe(ASSESSMENT_CONTRACT_REF);
     expect(result?.validation.valid).toBe(true);
-    expect(result?.acceptedArtifact).toBeDefined();
-    expect(result?.acceptedArtifactIndex).toBe(0);
-    expect(result?.recordedAssessment).toEqual({
+    expect(result?.acceptedArtifacts[0]?.artifact).toBeDefined();
+    expect(result?.acceptedArtifacts[0]?.artifactIndex).toBe(0);
+    expect(result?.recordedAssessments[0]).toEqual({
       assessmentId: 'readiness_gate',
       summary: undefined,
       normalizationNotes: [],
@@ -92,7 +92,7 @@ describe('validateAssessmentForStep', () => {
         expect.stringContaining('Normalized level "COMPLETE"'),
       ]),
     );
-    expect(result?.recordedAssessment?.dimensions).toEqual([
+    expect(result?.recordedAssessments[0]?.dimensions).toEqual([
       {
         dimensionId: 'confidence',
         level: 'high',

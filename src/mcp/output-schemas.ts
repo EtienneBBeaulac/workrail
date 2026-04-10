@@ -399,29 +399,29 @@ export const V2BindingDriftWarningSchema = z.object({
  * Backward-looking: describes what happened during the step that just advanced.
  * Distinct from top-level fields, which are forward-looking (next pending step, tokens, intent).
  *
- * assessments: the assessment submitted and accepted for this step, if the step declared an
- * assessmentRef. Absent when no assessment was involved. Dimensions carry the normalized level
- * and optional rationale the agent recorded.
+ * assessments: one entry per assessmentRef declared on the step, in assessmentRefs order.
+ * Absent when no assessment was involved. Dimensions carry the normalized level and optional
+ * rationale the agent recorded.
  */
-export const V2StepContextSchema = z.object({
-  assessments: z
-    .object({
-      assessmentId: z.string().min(1),
-      dimensions: z.array(
-        z.object({
-          dimensionId: z.string().min(1),
-          level: z.string().min(1),
-          rationale: z.string().optional(),
-        })
-      ),
-      /**
-       * Non-empty when WorkRail normalized the agent's submitted levels (e.g. "HIGH" -> "high").
-       * Each entry explains one normalization applied. Empty array means all levels matched exactly.
-       * Agents can use this to correct their submissions in future steps.
-       */
-      normalizationNotes: z.array(z.string()).readonly(),
+const V2StepContextAssessmentSchema = z.object({
+  assessmentId: z.string().min(1),
+  dimensions: z.array(
+    z.object({
+      dimensionId: z.string().min(1),
+      level: z.string().min(1),
+      rationale: z.string().optional(),
     })
-    .optional(),
+  ),
+  /**
+   * Non-empty when WorkRail normalized the agent's submitted levels (e.g. "HIGH" -> "high").
+   * Each entry explains one normalization applied. Empty array means all levels matched exactly.
+   * Agents can use this to correct their submissions in future steps.
+   */
+  normalizationNotes: z.array(z.string()).readonly(),
+});
+
+export const V2StepContextSchema = z.object({
+  assessments: z.array(V2StepContextAssessmentSchema).optional(),
 });
 
 const V2ContinueWorkflowOkSchema = z.object({

@@ -998,11 +998,11 @@
             "step.assessmentRefs",
             "step.assessmentConsequences"
           ],
-          "rule": "V1 supports exactly one assessmentRef per step and at most one assessmentConsequences entry per step. Use anyEqualsLevel as the trigger -- the engine checks all submitted dimensions and fires if any equals that level.",
-          "why": "anyEqualsLevel is the only trigger form. It works for both single-dimension and multi-dimension assessments without requiring the author to choose between two forms.",
+          "rule": "A step may declare one or more assessmentRefs and at most one assessmentConsequences entry. When assessmentConsequences is present, at least one ref is required. Use anyEqualsLevel as the trigger -- the engine checks all submitted dimensions across all referenced assessments and fires if any equals that level.",
+          "why": "Multiple refs allow composing separate orthogonal assessment definitions (e.g. quality-gate + coverage-gate) behind a single blocking consequence, without forcing unrelated dimensions into one monolithic definition.",
           "enforcement": ["schema"],
           "checks": [
-            "No more than one assessmentRefs entry per step.",
+            "At least one assessmentRefs entry when assessmentConsequences is present.",
             "No more than one assessmentConsequences entry per step.",
             "The consequence uses anyEqualsLevel to declare which level blocks -- not a named dimension."
           ],

@@ -104,7 +104,7 @@ describe('assessment declarations — validation engine', () => {
     );
   });
 
-  it('rejects multiple assessmentRefs on a single step in v1', () => {
+  it('accepts multiple assessmentRefs on a single step', () => {
     const workflow = mkWorkflow({
       assessments: [
         {
@@ -129,10 +129,8 @@ describe('assessment declarations — validation engine', () => {
     });
 
     const result = new ValidationEngine(new EnhancedLoopValidator()).validateWorkflow(workflow);
-    expect(result.valid).toBe(false);
-    expect(result.issues).toEqual(
-      expect.arrayContaining([expect.stringContaining('exactly one assessmentRef per step')])
-    );
+    expect(result.valid).toBe(true);
+    expect(result.issues).toHaveLength(0);
   });
 
   it('accepts a valid step-level follow-up consequence', () => {
