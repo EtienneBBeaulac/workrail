@@ -1,7 +1,7 @@
 {
   "id": "mr-review-workflow-agentic",
   "name": "MR Review Workflow (Lean v2 \u2022 Notes-First \u2022 Evidence-Driven Reviewer Families)",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "description": "Lean v2 MR review workflow. Merges intake, missing-input gating, context gathering, and re-triage into one structured front phase, then drives review through a shared fact packet, parallel reviewer families, contradiction-driven synthesis, and evidence-first final validation.",
   "about": "## MR Review Workflow\n\nThis workflow conducts a structured, evidence-driven code review of a merge request or pull request. It is designed for cases where you want a thorough, audit-quality review rather than a quick glance -- particularly when the change touches critical surfaces, spans many files, or carries real production risk.\n\n**What it does:**\nThe workflow locates and bounds the review target, enriches it with PR context and ticket intent, classifies the change by risk and shape, then runs parallel \"reviewer family\" agents (covering correctness, architecture, runtime risk, tests/docs, and more) from a shared neutral fact packet. It reconciles contradictions between reviewer families, stress-tests the recommendation with adversarial validators, and produces a final handoff with severity-classified findings and ready-to-post MR comments.\n\n**When to use it:**\n- Before merging a PR that touches auth, data models, APIs, or critical paths\n- When you want independent perspectives on a change without the noise of an unstructured review\n- When the change is large or the reviewer is unfamiliar with the surrounding code\n- When you need a reproducible audit trail for compliance or team review processes\n\n**What it produces:**\nA final review recommendation (approve / request changes / needs discussion) with a confidence band, severity-graded findings (Critical / Major / Minor / Nit), ready-to-post MR comments, a coverage ledger showing which review domains were checked, and an honest disclosure of any context that could not be recovered.\n\n**How to get good results:**\nProvide the PR URL, branch name, or diff. The workflow can recover most context on its own -- ticket links, repo patterns, policy docs -- but if the change has non-obvious intent, a one-sentence description of the goal helps calibrate review sensitivity. The workflow will not post comments or approve/reject without explicit instruction.",
   "examples": [
@@ -19,22 +19,34 @@
   ],
   "assessments": [
     {
-      "id": "review_readiness_gate",
-      "purpose": "Assess whether the review is ready to hand off across three orthogonal dimensions. Each must be high independently -- strength in one cannot compensate for weakness in another.",
+      "id": "evidence-quality-gate",
+      "purpose": "Key findings are backed by specific code references, line numbers, or concrete observations -- not intuition or pattern-matching alone.",
       "dimensions": [
         {
           "id": "evidence_quality",
-          "purpose": "Key findings are backed by specific code references, line numbers, or concrete observations -- not intuition or pattern-matching alone.",
+          "purpose": "Each finding cites a specific file, function, or line. No finding relies on intuition or pattern-matching without concrete grounding.",
           "levels": ["low", "high"]
-        },
+        }
+      ]
+    },
+    {
+      "id": "coverage-completeness-gate",
+      "purpose": "All relevant review domains have been adequately checked for this change. No material blind spots remain unacknowledged.",
+      "dimensions": [
         {
           "id": "coverage_completeness",
-          "purpose": "All relevant review domains have been adequately checked for this change. No material blind spots remain unacknowledged.",
+          "purpose": "All material review domains are checked or explicitly acknowledged as gaps in the coverage ledger.",
           "levels": ["low", "high"]
-        },
+        }
+      ]
+    },
+    {
+      "id": "contradiction-resolution-gate",
+      "purpose": "Material contradictions and competing interpretations are resolved or explicitly acknowledged with a clear rationale for the chosen position.",
+      "dimensions": [
         {
           "id": "contradiction_resolution",
-          "purpose": "Material contradictions and competing interpretations are resolved or explicitly acknowledged with a clear rationale for the chosen position.",
+          "purpose": "Every material contradiction is resolved by evidence or explicitly acknowledged with a stated position and rationale.",
           "levels": ["low", "high"]
         }
       ]
@@ -260,7 +272,9 @@
         ]
       },
       "assessmentRefs": [
-        "review_readiness_gate"
+        "evidence-quality-gate",
+        "coverage-completeness-gate",
+        "contradiction-resolution-gate"
       ],
       "assessmentConsequences": [
         {
@@ -269,7 +283,7 @@
           },
           "effect": {
             "kind": "require_followup",
-            "guidance": "Address whichever dimensions scored low: evidence_quality low -- anchor each finding to a specific file, function, or line; remove findings without concrete grounding. coverage_completeness low -- investigate uncovered domains or explicitly acknowledge gaps in the ledger. contradiction_resolution low -- resolve each contradiction or explicitly state your position with rationale."
+            "guidance": "Address whichever gate scored low: evidence_quality low -- anchor each finding to a specific file, function, or line; remove findings without concrete grounding. coverage_completeness low -- investigate uncovered domains or explicitly acknowledge gaps in the coverage ledger. contradiction_resolution low -- resolve each contradiction or explicitly state your position with rationale."
           }
         }
       ],
