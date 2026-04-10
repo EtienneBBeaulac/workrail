@@ -17,9 +17,10 @@ import type {
 export interface AssessmentValidationOutcome {
   readonly contractRef: typeof ASSESSMENT_CONTRACT_REF;
   readonly validation: ValidationResult;
-  readonly acceptedArtifact: AssessmentArtifactV1 | undefined;
-  readonly acceptedArtifactIndex: number | undefined;
-  readonly recordedAssessment: RecordedAssessmentV1 | undefined;
+  /** All recorded assessments, one per assessmentRef, in assessmentRefs order. */
+  readonly recordedAssessments: readonly RecordedAssessmentV1[];
+  /** All accepted artifacts with their original artifact-array indices, one per assessmentRef. */
+  readonly acceptedArtifacts: ReadonlyArray<{ readonly artifact: AssessmentArtifactV1; readonly artifactIndex: number }>;
 }
 
 function normalizeLevel(level: string, allowedLevels: readonly string[]): { readonly kind: 'exact'; readonly value: string } | { readonly kind: 'normalized'; readonly value: string; readonly note: string } | { readonly kind: 'ambiguous'; readonly message: string } | { readonly kind: 'invalid'; readonly message: string } {
@@ -59,47 +60,6 @@ function extractSubmittedRationale(value: AssessmentArtifactV1['dimensions'][str
   if (typeof value === 'string') return undefined;
   const trimmed = value.rationale?.trim();
   return trimmed && trimmed.length > 0 ? trimmed : undefined;
-}
-
-function buildDefinitionLookup(
-  assessments: readonly AssessmentDefinition[] | undefined,
-  step: WorkflowStepDefinition,
-): { readonly definition: AssessmentDefinition | undefined; readonly issues: readonly string[]; readonly suggestions: readonly string[] } {
-  const refs = step.assessmentRefs ?? [];
-  if (refs.length === 0) {
-    return {
-      definition: undefined,
-      issues: [],
-      suggestions: [],
-    };
-  }
-
-  if (!assessments || assessments.length === 0) {
-    return {
-      definition: undefined,
-      issues: [`Step "${step.id}" expects assessment input, but the workflow declares no assessments.`],
-      suggestions: ['Update the workflow definition to declare the assessments referenced by this step.'],
-    };
-  }
-
-  if (refs.length > 1) {
-    return {
-      definition: undefined,
-      issues: [`Step "${step.id}" declares multiple assessmentRefs. Assessment boundary validation currently supports exactly one assessment per step.`],
-      suggestions: ['Reduce assessmentRefs to a single assessment for this step in v1.'],
-    };
-  }
-
-  const definition = assessments.find((assessment) => assessment.id === refs[0]);
-  if (!definition) {
-    return {
-      definition: undefined,
-      issues: [`Step "${step.id}" references undeclared assessment "${refs[0]}".`],
-      suggestions: [`Declare assessment "${refs[0]}" on the workflow or remove the step reference.`],
-    };
-  }
-
-  return { definition, issues: [], suggestions: [] };
 }
 
 function validateDimension(
@@ -151,77 +111,84 @@ function validateDimension(
   }
 }
 
-export function validateAssessmentForStep(args: {
-  readonly step: WorkflowStepDefinition;
-  readonly assessments: readonly AssessmentDefinition[] | undefined;
+/**
+ * Validate a single assessment artifact against its definition.
+ * Returns null when no matching artifact is found.
+ */
+function validateSingleAssessment(args: {
+  readonly definition: AssessmentDefinition;
   readonly artifacts: readonly unknown[];
-}): AssessmentValidationOutcome | undefined {
-  if (!args.step.assessmentRefs || args.step.assessmentRefs.length === 0) return undefined;
-
-  const lookup = buildDefinitionLookup(args.assessments, args.step);
-  if (!lookup.definition) {
-    return {
-      contractRef: ASSESSMENT_CONTRACT_REF,
-      acceptedArtifact: undefined,
-      acceptedArtifactIndex: undefined,
-      recordedAssessment: undefined,
-      validation: {
-        valid: false,
-        issues: [...lookup.issues],
-        suggestions: [...lookup.suggestions],
-      },
-    };
-  }
-
+  readonly isSingleRef: boolean;
+}): {
+  readonly issues: readonly string[];
+  readonly suggestions: readonly string[];
+  readonly warnings: readonly string[];
+  readonly acceptedArtifact: AssessmentArtifactV1 | undefined;
+  readonly acceptedArtifactIndex: number | undefined;
+  readonly recordedAssessment: RecordedAssessmentV1 | undefined;
+} {
   const assessmentArtifacts = args.artifacts
     .map((artifact, index) => ({ artifact, index }))
     .filter(({ artifact }) => typeof artifact === 'object' && artifact !== null && (artifact as Record<string, unknown>).kind === 'wr.assessment');
+
   if (assessmentArtifacts.length === 0) {
     return {
-      contractRef: ASSESSMENT_CONTRACT_REF,
+      issues: [`This step requires an assessment submission for "${args.definition.id}".`],
+      suggestions: [
+        `Provide an artifact with kind "wr.assessment" for assessment "${args.definition.id}".`,
+        `Include dimension values for: ${args.definition.dimensions.map((dimension) => `${dimension.id} (${dimension.levels.join(' | ')})`).join(', ')}.`,
+      ],
+      warnings: [],
       acceptedArtifact: undefined,
       acceptedArtifactIndex: undefined,
       recordedAssessment: undefined,
-      validation: {
-        valid: false,
-        issues: [`This step requires an assessment submission for "${lookup.definition.id}".`],
-        suggestions: [
-          `Provide an artifact with kind "wr.assessment" for assessment "${lookup.definition.id}".`,
-          `Include dimension values for: ${lookup.definition.dimensions.map((dimension) => `${dimension.id} (${dimension.levels.join(' | ')})`).join(', ')}.`,
-        ],
-      },
     };
   }
 
-  const acceptedCandidate = assessmentArtifacts[0]!;
-  const parsed = parseAssessmentArtifact(acceptedCandidate.artifact);
+  // For single-ref steps: accept the first artifact (backward compat — assessmentId is optional).
+  // For multi-ref steps: match by assessmentId only; unidentified artifacts are ambiguous.
+  const candidateEntry = args.isSingleRef
+    ? assessmentArtifacts[0]!
+    : assessmentArtifacts.find(({ artifact }) => {
+        const parsed = parseAssessmentArtifact(artifact);
+        return parsed?.assessmentId === args.definition.id;
+      });
+
+  if (!candidateEntry) {
+    return {
+      issues: [`Missing assessment artifact for "${args.definition.id}". Provide an artifact with kind "wr.assessment" and assessmentId "${args.definition.id}".`],
+      suggestions: [
+        `Include dimension values for: ${args.definition.dimensions.map((d) => `${d.id} (${d.levels.join(' | ')})`).join(', ')}.`,
+      ],
+      warnings: [],
+      acceptedArtifact: undefined,
+      acceptedArtifactIndex: undefined,
+      recordedAssessment: undefined,
+    };
+  }
+
+  const parsed = parseAssessmentArtifact(candidateEntry.artifact);
   if (!parsed) {
     return {
-      contractRef: ASSESSMENT_CONTRACT_REF,
+      issues: ['Assessment artifact is malformed or does not match the expected shape.'],
+      suggestions: [
+        `Use an artifact with kind "wr.assessment", a dimensions object, and canonical dimension values for assessment "${args.definition.id}".`,
+      ],
+      warnings: [],
       acceptedArtifact: undefined,
       acceptedArtifactIndex: undefined,
       recordedAssessment: undefined,
-      validation: {
-        valid: false,
-        issues: ['Assessment artifact is malformed or does not match the expected shape.'],
-        suggestions: [
-          `Use an artifact with kind "wr.assessment", a dimensions object, and canonical dimension values for assessment "${lookup.definition.id}".`,
-        ],
-      },
     };
   }
 
-  if (parsed.assessmentId && parsed.assessmentId !== lookup.definition.id) {
+  if (parsed.assessmentId && parsed.assessmentId !== args.definition.id) {
     return {
-      contractRef: ASSESSMENT_CONTRACT_REF,
+      issues: [`Assessment artifact targets "${parsed.assessmentId}", but this step expects "${args.definition.id}".`],
+      suggestions: [`Set assessmentId to "${args.definition.id}" or omit it and provide the correct dimensions.`],
+      warnings: [],
       acceptedArtifact: undefined,
       acceptedArtifactIndex: undefined,
       recordedAssessment: undefined,
-      validation: {
-        valid: false,
-        issues: [`Assessment artifact targets "${parsed.assessmentId}", but this step expects "${lookup.definition.id}".`],
-        suggestions: [`Set assessmentId to "${lookup.definition.id}" or omit it and provide the correct dimensions.`],
-      },
     };
   }
 
@@ -230,35 +197,112 @@ export function validateAssessmentForStep(args: {
   const warnings: string[] = [];
   const recordedDimensions: RecordedAssessmentDimensionV1[] = [];
 
-  for (const dimension of lookup.definition.dimensions) {
+  for (const dimension of args.definition.dimensions) {
     validateDimension(dimension, parsed, issues, suggestions, warnings, recordedDimensions);
   }
 
-  const allowedDimensionIds = new Set(lookup.definition.dimensions.map((dimension) => dimension.id));
+  const allowedDimensionIds = new Set(args.definition.dimensions.map((d) => d.id));
   for (const submittedDimensionId of Object.keys(parsed.dimensions)) {
     if (!allowedDimensionIds.has(submittedDimensionId)) {
-      issues.push(`Unknown assessment dimension "${submittedDimensionId}" for assessment "${lookup.definition.id}".`);
-      suggestions.push(`Remove "${submittedDimensionId}" and use only: ${lookup.definition.dimensions.map((dimension) => dimension.id).join(', ')}.`);
+      issues.push(`Unknown assessment dimension "${submittedDimensionId}" for assessment "${args.definition.id}".`);
+      suggestions.push(`Remove "${submittedDimensionId}" and use only: ${args.definition.dimensions.map((d) => d.id).join(', ')}.`);
     }
   }
 
+  const valid = issues.length === 0;
   return {
-    contractRef: ASSESSMENT_CONTRACT_REF,
-    acceptedArtifact: issues.length === 0 ? parsed : undefined,
-    acceptedArtifactIndex: issues.length === 0 ? acceptedCandidate.index : undefined,
-    recordedAssessment: issues.length === 0
+    issues,
+    suggestions,
+    warnings,
+    acceptedArtifact: valid ? parsed : undefined,
+    acceptedArtifactIndex: valid ? candidateEntry.index : undefined,
+    recordedAssessment: valid
       ? {
-          assessmentId: lookup.definition.id,
+          assessmentId: args.definition.id,
           summary: parsed.summary,
           dimensions: recordedDimensions,
           normalizationNotes: warnings,
         }
       : undefined,
+  };
+}
+
+export function validateAssessmentForStep(args: {
+  readonly step: WorkflowStepDefinition;
+  readonly assessments: readonly AssessmentDefinition[] | undefined;
+  readonly artifacts: readonly unknown[];
+}): AssessmentValidationOutcome | undefined {
+  if (!args.step.assessmentRefs || args.step.assessmentRefs.length === 0) return undefined;
+
+  const refs = args.step.assessmentRefs;
+
+  if (!args.assessments || args.assessments.length === 0) {
+    return {
+      contractRef: ASSESSMENT_CONTRACT_REF,
+      recordedAssessments: [],
+      acceptedArtifacts: [],
+      validation: {
+        valid: false,
+        issues: refs.map((ref) => `Step expects assessment input for "${ref}", but the workflow declares no assessments.`),
+        suggestions: ['Update the workflow definition to declare the assessments referenced by this step.'],
+      },
+    };
+  }
+
+  // Check all refs resolve to declared assessments.
+  const allIssues: string[] = [];
+  const allSuggestions: string[] = [];
+  const definitions: AssessmentDefinition[] = [];
+  for (const ref of refs) {
+    const definition = args.assessments.find((a) => a.id === ref);
+    if (!definition) {
+      allIssues.push(`Step references undeclared assessment "${ref}".`);
+      allSuggestions.push(`Declare assessment "${ref}" on the workflow or remove the step reference.`);
+    } else {
+      definitions.push(definition);
+    }
+  }
+
+  if (allIssues.length > 0) {
+    return {
+      contractRef: ASSESSMENT_CONTRACT_REF,
+      recordedAssessments: [],
+      acceptedArtifacts: [],
+      validation: { valid: false, issues: allIssues, suggestions: allSuggestions },
+    };
+  }
+
+  const isSingleRef = refs.length === 1;
+  const perRefResults = definitions.map((definition) =>
+    validateSingleAssessment({ definition, artifacts: args.artifacts, isSingleRef })
+  );
+
+  const combinedIssues = perRefResults.flatMap((r) => r.issues);
+  const combinedSuggestions = perRefResults.flatMap((r) => r.suggestions);
+  const combinedWarnings = perRefResults.flatMap((r) => r.warnings);
+  const allValid = combinedIssues.length === 0;
+
+  const recordedAssessments: RecordedAssessmentV1[] = [];
+  const acceptedArtifacts: Array<{ artifact: AssessmentArtifactV1; artifactIndex: number }> = [];
+
+  if (allValid) {
+    for (const result of perRefResults) {
+      if (result.recordedAssessment) recordedAssessments.push(result.recordedAssessment);
+      if (result.acceptedArtifact !== undefined && result.acceptedArtifactIndex !== undefined) {
+        acceptedArtifacts.push({ artifact: result.acceptedArtifact, artifactIndex: result.acceptedArtifactIndex });
+      }
+    }
+  }
+
+  return {
+    contractRef: ASSESSMENT_CONTRACT_REF,
+    recordedAssessments,
+    acceptedArtifacts,
     validation: {
-      valid: issues.length === 0,
-      issues,
-      suggestions,
-      warnings: warnings.length > 0 ? warnings : undefined,
+      valid: allValid,
+      issues: combinedIssues,
+      suggestions: combinedSuggestions,
+      ...(combinedWarnings.length > 0 ? { warnings: combinedWarnings } : {}),
     },
   };
 }

@@ -11,24 +11,29 @@ export interface TriggeredAssessmentConsequenceV1 {
 
 export function evaluateAssessmentConsequences(args: {
   readonly step: WorkflowStepDefinition | undefined;
-  readonly recordedAssessment: RecordedAssessmentV1 | undefined;
+  readonly recordedAssessments: readonly RecordedAssessmentV1[];
 }): TriggeredAssessmentConsequenceV1 | undefined {
   if (!args.step?.assessmentConsequences || args.step.assessmentConsequences.length === 0) return undefined;
-  if (!args.recordedAssessment) return undefined;
+  if (args.recordedAssessments.length === 0) return undefined;
 
   const consequence = args.step.assessmentConsequences[0];
   if (!consequence) return undefined;
 
-  const matched = args.recordedAssessment.dimensions.find(d => d.level === consequence.when.anyEqualsLevel);
-  if (!matched) return undefined;
+  // Check all recorded assessments — fire on the first matching dimension found (in assessmentRefs order).
+  for (const recorded of args.recordedAssessments) {
+    const matched = recorded.dimensions.find(d => d.level === consequence.when.anyEqualsLevel);
+    if (matched) {
+      return {
+        kind: 'require_followup',
+        assessmentId: recorded.assessmentId,
+        firstMatchedDimensionId: matched.dimensionId,
+        triggerLevel: consequence.when.anyEqualsLevel,
+        guidance: consequence.effect.guidance,
+      };
+    }
+  }
 
-  return {
-    kind: 'require_followup',
-    assessmentId: args.recordedAssessment.assessmentId,
-    firstMatchedDimensionId: matched.dimensionId,
-    triggerLevel: consequence.when.anyEqualsLevel,
-    guidance: consequence.effect.guidance,
-  };
+  return undefined;
 }
 
 export function getDeclaredAssessmentConsequence(

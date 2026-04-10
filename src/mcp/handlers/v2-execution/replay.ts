@@ -32,7 +32,7 @@ import { attemptIdForNextNode, mintContinueAndCheckpointTokens } from '../v2-tok
 import { deriveNextIntent } from '../v2-state-conversion.js';
 import { EVENT_KIND } from '../../../v2/durable-core/constants.js';
 import { buildNextCall } from './index.js';
-import { projectAssessmentsV2, getLatestAssessmentForNode } from '../../../v2/projections/assessments.js';
+import { projectAssessmentsV2 } from '../../../v2/projections/assessments.js';
 import { assertOutput, assertContinueTokenPresence } from '../../assert-output.js';
 import { asSortedEventLog } from '../../../v2/durable-core/sorted-event-log.js';
 
@@ -232,7 +232,7 @@ export function buildAdvancedReplayResponse(args: {
 function buildStepContext(
   events: readonly DomainEventV1[],
   completedNodeId: NodeId,
-): { assessments?: { assessmentId: string; dimensions: { dimensionId: string; level: string; rationale?: string }[]; normalizationNotes: readonly string[] } } | undefined {
+): { assessments?: Array<{ assessmentId: string; dimensions: { dimensionId: string; level: string; rationale?: string }[]; normalizationNotes: readonly string[] }> } | undefined {
   const sortedEventsRes = asSortedEventLog(events);
   if (sortedEventsRes.isErr()) {
     console.warn(`[workrail:replay] stepContext events unsorted for node '${String(completedNodeId)}' — stepContext will be absent: ${sortedEventsRes.error.message}`);
@@ -244,11 +244,11 @@ function buildStepContext(
     return undefined;
   }
 
-  const recorded = getLatestAssessmentForNode(projection.value, String(completedNodeId));
-  if (!recorded) return undefined;
+  const allRecorded = projection.value.byNodeId[String(completedNodeId)];
+  if (!allRecorded || allRecorded.length === 0) return undefined;
 
   return {
-    assessments: {
+    assessments: allRecorded.map((recorded) => ({
       assessmentId: recorded.assessmentId,
       dimensions: recorded.dimensions.map((d) => ({
         dimensionId: d.dimensionId,
@@ -256,7 +256,7 @@ function buildStepContext(
         ...(d.rationale !== undefined ? { rationale: d.rationale } : {}),
       })),
       normalizationNotes: recorded.normalizationNotes,
-    },
+    })),
   };
 }
 

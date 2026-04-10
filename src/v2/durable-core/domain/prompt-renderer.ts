@@ -313,9 +313,13 @@ function formatAssessmentRequirements(
 ): readonly string[] {
   if (assessments.length === 0) return [];
 
+  const multiRef = assessments.length > 1;
   const requirements: string[] = [];
   for (const assessment of assessments) {
     requirements.push('Provide an artifact with kind: "wr.assessment"');
+    if (multiRef) {
+      requirements.push(`Set assessmentId: "${assessment.id}" on the artifact so the engine can match it to the correct assessment.`);
+    }
     requirements.push(`Assessment target: "${assessment.id}"`);
     requirements.push(
       `Dimensions: ${assessment.dimensions.map((dimension) => `${dimension.id} (${dimension.levels.join(' | ')})`).join(', ')}`

@@ -104,7 +104,7 @@ describe('assessment declarations — validation engine', () => {
     );
   });
 
-  it('rejects multiple assessmentRefs on a single step in v1', () => {
+  it('accepts multiple assessmentRefs on a single step', () => {
     const workflow = mkWorkflow({
       assessments: [
         {
@@ -129,10 +129,8 @@ describe('assessment declarations — validation engine', () => {
     });
 
     const result = new ValidationEngine(new EnhancedLoopValidator()).validateWorkflow(workflow);
-    expect(result.valid).toBe(false);
-    expect(result.issues).toEqual(
-      expect.arrayContaining([expect.stringContaining('exactly one assessmentRef per step')])
-    );
+    expect(result.valid).toBe(true);
+    expect(result.issues).toHaveLength(0);
   });
 
   it('accepts a valid step-level follow-up consequence', () => {
@@ -162,6 +160,78 @@ describe('assessment declarations — validation engine', () => {
 
     const result = new ValidationEngine(new EnhancedLoopValidator()).validateWorkflow(workflow);
     expect(result.valid).toBe(true);
+  });
+
+  it('accepts multiple assessmentRefs with a consequence whose trigger level exists only in the second assessment', () => {
+    const workflow = mkWorkflow({
+      assessments: [
+        {
+          id: 'quality_gate',
+          purpose: 'Quality gate.',
+          dimensions: [{ id: 'depth', purpose: 'Depth', levels: ['shallow', 'deep'] }],
+        },
+        {
+          id: 'coverage_gate',
+          purpose: 'Coverage gate.',
+          dimensions: [{ id: 'completeness', purpose: 'Completeness', levels: ['low', 'high'] }],
+        },
+      ],
+      steps: [
+        {
+          id: 'step-1',
+          title: 'Step 1',
+          prompt: 'Assess.',
+          assessmentRefs: ['quality_gate', 'coverage_gate'],
+          assessmentConsequences: [
+            {
+              when: { anyEqualsLevel: 'low' },
+              effect: { kind: 'require_followup', guidance: 'Fix low dimensions before proceeding.' },
+            },
+          ],
+        },
+      ],
+    });
+
+    const result = new ValidationEngine(new EnhancedLoopValidator()).validateWorkflow(workflow);
+    expect(result.valid).toBe(true);
+    expect(result.issues).toHaveLength(0);
+  });
+
+  it('rejects a multi-ref consequence whose trigger level exists in neither referenced assessment', () => {
+    const workflow = mkWorkflow({
+      assessments: [
+        {
+          id: 'quality_gate',
+          purpose: 'Quality gate.',
+          dimensions: [{ id: 'depth', purpose: 'Depth', levels: ['shallow', 'deep'] }],
+        },
+        {
+          id: 'coverage_gate',
+          purpose: 'Coverage gate.',
+          dimensions: [{ id: 'completeness', purpose: 'Completeness', levels: ['partial', 'complete'] }],
+        },
+      ],
+      steps: [
+        {
+          id: 'step-1',
+          title: 'Step 1',
+          prompt: 'Assess.',
+          assessmentRefs: ['quality_gate', 'coverage_gate'],
+          assessmentConsequences: [
+            {
+              when: { anyEqualsLevel: 'low' },
+              effect: { kind: 'require_followup', guidance: 'Fix before proceeding.' },
+            },
+          ],
+        },
+      ],
+    });
+
+    const result = new ValidationEngine(new EnhancedLoopValidator()).validateWorkflow(workflow);
+    expect(result.valid).toBe(false);
+    expect(result.issues).toEqual(
+      expect.arrayContaining([expect.stringContaining("anyEqualsLevel 'low'")])
+    );
   });
 
   it('rejects a consequence that references an undeclared level', () => {

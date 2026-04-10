@@ -163,11 +163,12 @@ describe('stepContext on continue_workflow ok response', () => {
       if (advanceRes.data.kind !== 'ok') return;
 
       expect(advanceRes.data.stepContext).toBeDefined();
-      expect(advanceRes.data.stepContext?.assessments?.assessmentId).toBe('readiness_gate');
-      expect(advanceRes.data.stepContext?.assessments?.dimensions).toHaveLength(1);
-      expect(advanceRes.data.stepContext?.assessments?.dimensions[0]?.dimensionId).toBe('confidence');
-      expect(advanceRes.data.stepContext?.assessments?.dimensions[0]?.level).toBe('high');
-      expect(advanceRes.data.stepContext?.assessments?.dimensions[0]?.rationale).toBe('Evidence is clear.');
+      expect(advanceRes.data.stepContext?.assessments).toHaveLength(1);
+      expect(advanceRes.data.stepContext?.assessments?.[0]?.assessmentId).toBe('readiness_gate');
+      expect(advanceRes.data.stepContext?.assessments?.[0]?.dimensions).toHaveLength(1);
+      expect(advanceRes.data.stepContext?.assessments?.[0]?.dimensions[0]?.dimensionId).toBe('confidence');
+      expect(advanceRes.data.stepContext?.assessments?.[0]?.dimensions[0]?.level).toBe('high');
+      expect(advanceRes.data.stepContext?.assessments?.[0]?.dimensions[0]?.rationale).toBe('Evidence is clear.');
     } finally {
       delete process.env.WORKRAIL_DATA_DIR;
     }
@@ -207,8 +208,8 @@ describe('stepContext on continue_workflow ok response', () => {
       expect(advanceRes.data.kind).toBe('ok');
       if (advanceRes.data.kind !== 'ok') return;
 
-      expect(advanceRes.data.stepContext?.assessments?.dimensions[0]?.level).toBe('high');
-      expect(advanceRes.data.stepContext?.assessments?.normalizationNotes.length).toBeGreaterThan(0);
+      expect(advanceRes.data.stepContext?.assessments?.[0]?.dimensions[0]?.level).toBe('high');
+      expect(advanceRes.data.stepContext?.assessments?.[0]?.normalizationNotes.length).toBeGreaterThan(0);
     } finally {
       delete process.env.WORKRAIL_DATA_DIR;
     }
@@ -247,7 +248,7 @@ describe('stepContext on continue_workflow ok response', () => {
       expect(advanceRes.data.kind).toBe('ok');
       if (advanceRes.data.kind !== 'ok') return;
 
-      expect(advanceRes.data.stepContext?.assessments?.normalizationNotes).toHaveLength(0);
+      expect(advanceRes.data.stepContext?.assessments?.[0]?.normalizationNotes).toHaveLength(0);
     } finally {
       delete process.env.WORKRAIL_DATA_DIR;
     }

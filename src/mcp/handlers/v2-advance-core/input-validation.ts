@@ -10,8 +10,7 @@ import type { JsonValue, JsonObject } from '../../../v2/durable-core/canonical/j
 import type { V2ContinueWorkflowInput } from '../../v2/tools.js';
 import type { AssessmentDefinition, OutputContract, WorkflowStepDefinition } from '../../../types/workflow-definition.js';
 import type { ValidationCriteria } from '../../../types/validation.js';
-import type { AssessmentArtifactV1 } from '../../../v2/durable-core/schemas/artifacts/index.js';
-import type { RecordedAssessmentV1 } from '../../../v2/durable-core/domain/assessment-record.js';
+
 import type { TriggeredAssessmentConsequenceV1 } from './assessment-consequences.js';
 
 import { getStepById } from '../../../types/workflow.js';
@@ -38,8 +37,6 @@ export interface ValidatedAdvanceInputs {
   readonly outputContract: OutputContract | undefined;
   readonly notesMarkdown: string | undefined;
   readonly artifacts: readonly unknown[];
-  readonly assessmentArtifact: AssessmentArtifactV1 | undefined;
-  readonly recordedAssessment: RecordedAssessmentV1 | undefined;
   readonly triggeredAssessmentConsequence: TriggeredAssessmentConsequenceV1 | undefined;
   readonly stepAssessments: readonly AssessmentDefinition[];
   readonly autonomy: 'guided' | 'full_auto_stop_on_user_deps' | 'full_auto_never_stop';
@@ -113,7 +110,7 @@ export function validateAdvanceInputs(args: {
     : undefined;
   const triggeredAssessmentConsequence = evaluateAssessmentConsequences({
     step: typedStep,
-    recordedAssessment: assessmentValidation?.recordedAssessment,
+    recordedAssessments: assessmentValidation?.recordedAssessments ?? [],
   });
 
   // Auto-derive notesOptional.
@@ -167,8 +164,6 @@ export function validateAdvanceInputs(args: {
     outputContract,
     notesMarkdown: inputOutput?.notesMarkdown,
     artifacts: inputOutput?.artifacts ?? [],
-    assessmentArtifact: assessmentValidation?.acceptedArtifact,
-    recordedAssessment: assessmentValidation?.recordedAssessment,
     triggeredAssessmentConsequence,
     stepAssessments,
     autonomy,
