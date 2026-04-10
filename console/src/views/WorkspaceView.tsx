@@ -16,6 +16,7 @@ import {
   type Scope,
   joinSessionsAndWorktrees,
   sortItemsForRepo,
+  effectiveStatus,
 } from './workspace-types';
 import { formatRelativeTime } from '../utils/time';
 import { CutCornerBox } from '../components/CutCornerBox';
@@ -592,12 +593,13 @@ function SessionRow({
   const timeAgo = formatRelativeTime(session.lastModifiedMs);
   const goalTitle = session.sessionTitle?.trim() || session.workflowName || session.workflowId || session.sessionId.slice(0, 8);
   const workflowLabel = session.workflowName ?? session.workflowId ?? null;
-  const isDormant = session.status === 'dormant';
+  const status = effectiveStatus(session, Date.now());
+  const isDormant = status === 'dormant';
 
   const borderAccent =
-    session.status === 'in_progress' ? 'var(--accent-strong)' :
-    session.status === 'blocked'     ? 'var(--blocked)' :
-    isDormant                        ? 'rgba(244, 196, 48, 0.55)' :
+    status === 'in_progress' ? 'var(--accent-strong)' :
+    status === 'blocked'     ? 'var(--blocked)' :
+    isDormant                ? 'rgba(244, 196, 48, 0.55)' :
     'rgba(244, 196, 48, 0.15)';
 
   return (
