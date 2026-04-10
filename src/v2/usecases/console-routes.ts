@@ -207,53 +207,33 @@ export function mountConsoleRoutes(
   const REPO_ROOTS_TTL_MS = 60_000;
 
   /**
-   * Discovers standalone git repos by scanning up to 2 levels under ~/git.
-   * Filters out linked worktrees (their --git-common-dir points outside the dir).
-   * This replicates the original session-repoRoot-based discovery without needing
-   * repoRoot on sessions, which was removed as an unreliable field.
+   * Derives repo roots from the remembered-roots.json file, which records every
+   * workspacePath passed to start_workflow. Each path is resolved to its canonical
+   * git repo root via resolveRepoRoot(), so linked worktrees (e.g. .claude-worktrees/)
+   * all collapse to their shared main repo. Result is deduplicated.
+   *
+   * This is the correct source of truth: only repos that have had actual sessions
+   * appear, with no filesystem scanning needed.
    */
   async function discoverMainRepoRoots(): Promise<readonly string[]> {
-    const { execFile } = await import('child_process');
-    const { promisify } = await import('util');
-    const execFileAsync = promisify(execFile);
+    const dataDir = process.env['WORKRAIL_DATA_DIR']
+      ?? path.join(process.env.HOME ?? '/tmp', '.workrail', 'data');
+    const rootsFile = path.join(dataDir, 'workflow-sources', 'remembered-roots.json');
 
-    const candidates: string[] = [];
-    const base = path.join(process.env.HOME ?? '/tmp', 'git');
+    let workspacePaths: string[] = [];
     try {
-      const level1 = await fs.promises.readdir(base, { withFileTypes: true });
-      for (const l1 of level1) {
-        if (!l1.isDirectory()) continue;
-        const l1path = path.join(base, l1.name);
-        try { await fs.promises.access(path.join(l1path, '.git')); candidates.push(l1path); continue; } catch {}
-        try {
-          const level2 = await fs.promises.readdir(l1path, { withFileTypes: true });
-          for (const l2 of level2) {
-            if (!l2.isDirectory()) continue;
-            const l2path = path.join(l1path, l2.name);
-            try { await fs.promises.access(path.join(l2path, '.git')); candidates.push(l2path); } catch {}
-          }
-        } catch {}
-      }
-    } catch {}
+      const raw = await fs.promises.readFile(rootsFile, 'utf8');
+      const parsed = JSON.parse(raw) as { roots?: { path: string }[] };
+      workspacePaths = (parsed.roots ?? []).map((r) => r.path).filter(Boolean);
+    } catch {
+      return [];
+    }
 
-    // Filter: keep only repos whose git-common-dir lives inside the repo dir itself.
-    // Linked worktrees (git worktree add) have their common-dir pointing to the main
-    // repo's .git, so they're excluded. This eliminates .claude-worktrees/ entries
-    // and any other linked worktrees without git commands on every single candidate.
-    const roots: string[] = [];
-    await Promise.all(candidates.map(async (dir) => {
-      try {
-        const { stdout } = await execFileAsync('git', ['rev-parse', '--git-common-dir'], {
-          cwd: dir, timeout: 3_000,
-        });
-        const commonDir = path.resolve(dir, stdout.trim());
-        // A main repo's common-dir is inside (or equal to) its own dir.
-        if (commonDir.startsWith(dir + path.sep) || commonDir === dir) {
-          roots.push(dir);
-        }
-      } catch {}
-    }));
-    return roots;
+    // Resolve each workspace path to its canonical git repo root in parallel.
+    // Linked worktrees resolve to the main repo, deduplicating automatically.
+    const resolved = await Promise.all(workspacePaths.map((p) => resolveRepoRoot(p)));
+    const roots = new Set(resolved.filter((r): r is string => r !== null));
+    return [...roots];
   }
 
   /** 8 s ceiling for the entire worktrees response, well above the p99 git scan time. */
