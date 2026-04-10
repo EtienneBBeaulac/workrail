@@ -200,8 +200,61 @@ export function mountConsoleRoutes(
   // Per-request timeout: if git scanning takes longer than 8 s, respond with the
   // cached result (or an empty list) so the UI never spins indefinitely.
 
-  // CWD root: stable for the lifetime of the process -- resolve once, cache forever.
+  // CWD root + discovered repo roots, refreshed on a TTL like the original design.
   let cwdRepoRootPromise: Promise<string | null> | null = null;
+  let cachedRepoRoots: readonly string[] = [];
+  let repoRootsExpiresAt = 0;
+  const REPO_ROOTS_TTL_MS = 60_000;
+
+  /**
+   * Discovers standalone git repos by scanning up to 2 levels under ~/git.
+   * Filters out linked worktrees (their --git-common-dir points outside the dir).
+   * This replicates the original session-repoRoot-based discovery without needing
+   * repoRoot on sessions, which was removed as an unreliable field.
+   */
+  async function discoverMainRepoRoots(): Promise<readonly string[]> {
+    const { execFile } = await import('child_process');
+    const { promisify } = await import('util');
+    const execFileAsync = promisify(execFile);
+
+    const candidates: string[] = [];
+    const base = path.join(process.env.HOME ?? '/tmp', 'git');
+    try {
+      const level1 = await fs.promises.readdir(base, { withFileTypes: true });
+      for (const l1 of level1) {
+        if (!l1.isDirectory()) continue;
+        const l1path = path.join(base, l1.name);
+        try { await fs.promises.access(path.join(l1path, '.git')); candidates.push(l1path); continue; } catch {}
+        try {
+          const level2 = await fs.promises.readdir(l1path, { withFileTypes: true });
+          for (const l2 of level2) {
+            if (!l2.isDirectory()) continue;
+            const l2path = path.join(l1path, l2.name);
+            try { await fs.promises.access(path.join(l2path, '.git')); candidates.push(l2path); } catch {}
+          }
+        } catch {}
+      }
+    } catch {}
+
+    // Filter: keep only repos whose git-common-dir lives inside the repo dir itself.
+    // Linked worktrees (git worktree add) have their common-dir pointing to the main
+    // repo's .git, so they're excluded. This eliminates .claude-worktrees/ entries
+    // and any other linked worktrees without git commands on every single candidate.
+    const roots: string[] = [];
+    await Promise.all(candidates.map(async (dir) => {
+      try {
+        const { stdout } = await execFileAsync('git', ['rev-parse', '--git-common-dir'], {
+          cwd: dir, timeout: 3_000,
+        });
+        const commonDir = path.resolve(dir, stdout.trim());
+        // A main repo's common-dir is inside (or equal to) its own dir.
+        if (commonDir.startsWith(dir + path.sep) || commonDir === dir) {
+          roots.push(dir);
+        }
+      } catch {}
+    }));
+    return roots;
+  }
 
   /** 8 s ceiling for the entire worktrees response, well above the p99 git scan time. */
   const WORKTREES_REQUEST_TIMEOUT_MS = 8_000;
@@ -220,8 +273,17 @@ export function mountConsoleRoutes(
       const activeSessions = buildActiveSessionCounts(sessions);
 
       cwdRepoRootPromise ??= resolveRepoRoot(process.cwd());
-      const cwdRoot = await cwdRepoRootPromise;
-      const repoRoots: readonly string[] = cwdRoot !== null ? [cwdRoot] : [];
+      if (Date.now() > repoRootsExpiresAt) {
+        const [cwdRoot, discovered] = await Promise.all([
+          cwdRepoRootPromise,
+          discoverMainRepoRoots(),
+        ]);
+        const repoRootsSet = new Set<string>(discovered);
+        if (cwdRoot !== null) repoRootsSet.add(cwdRoot);
+        cachedRepoRoots = [...repoRootsSet];
+        repoRootsExpiresAt = Date.now() + REPO_ROOTS_TTL_MS;
+      }
+      const repoRoots = cachedRepoRoots;
 
       const data = await Promise.race([
         getWorktreeList(repoRoots, activeSessions),
