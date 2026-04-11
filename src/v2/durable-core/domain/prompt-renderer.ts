@@ -321,9 +321,11 @@ function formatAssessmentRequirements(
       requirements.push(`Set assessmentId: "${assessment.id}" on the artifact so the engine can match it to the correct assessment.`);
     }
     requirements.push(`Assessment target: "${assessment.id}"`);
-    requirements.push(
-      `Dimensions: ${assessment.dimensions.map((dimension) => `${dimension.id} (${dimension.levels.join(' | ')})`).join(', ')}`
-    );
+    requirements.push(`Purpose: ${assessment.purpose}`);
+    requirements.push('Dimensions:');
+    for (const dimension of assessment.dimensions) {
+      requirements.push(`  ${dimension.id} (${dimension.levels.join(' | ')}): ${dimension.purpose}`);
+    }
     requirements.push('Use only canonical dimension levels. If the engine rejects the artifact, correct the submitted levels instead of inventing new ones.');
   }
   return requirements;
