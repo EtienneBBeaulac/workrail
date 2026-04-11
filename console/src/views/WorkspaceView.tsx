@@ -229,7 +229,7 @@ export function WorkspaceView({ hidden = false }: Props) {
   if (sessionsLoading) {
     return (
       <div className={`flex items-center justify-center py-32 ${hidden ? 'hidden' : ''}`}>
-        <span className="font-mono text-[11px] text-[var(--text-muted)] uppercase tracking-[0.25em] animate-pulse">
+        <span className="font-mono text-[11px] text-[var(--text-muted)] uppercase tracking-[0.25em] motion-safe:animate-pulse">
           // LOADING WORKSPACE...
         </span>
       </div>
@@ -959,7 +959,7 @@ function MergedBadge() {
 
 function SkeletonBadge() {
   return (
-    <span className="inline-block h-5 w-20 rounded bg-[var(--bg-tertiary)] animate-pulse" />
+    <span className="inline-block h-5 w-20 rounded bg-[var(--bg-tertiary)] motion-safe:animate-pulse" />
   );
 }
 
