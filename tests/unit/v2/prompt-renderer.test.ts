@@ -264,8 +264,10 @@ describe('renderPendingPrompt', () => {
         expect(result.value.prompt).toContain('**ASSESSMENT REQUIREMENTS (System):**');
         expect(result.value.prompt).toContain('Provide an artifact with kind: "wr.assessment"');
         expect(result.value.prompt).toContain('Assessment target: "readiness_gate"');
-        expect(result.value.prompt).toContain('confidence (low | medium | high)');
-        expect(result.value.prompt).toContain('scope (partial | complete)');
+        expect(result.value.prompt).toContain('Purpose: Assess readiness.');
+        expect(result.value.prompt).toContain('Dimensions:');
+        expect(result.value.prompt).toContain('  confidence (low | medium | high): Confidence');
+        expect(result.value.prompt).toContain('  scope (partial | complete): Scope');
       }
     });
 
