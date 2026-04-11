@@ -73,7 +73,7 @@ const STATUS_PRIORITY: Record<ConsoleSessionStatus, number> = {
  *
  * Priority: in_progress/dormant (most recently updated) > blocked >
  * complete_with_gaps > most recently modified (any status).
- * Uses effectiveStatus so stale in_progress sessions sort as dormant.
+ * dormant is a first-class status returned by the backend (sessions idle > 1h).
  */
 export function selectPrimarySession(
   sessions: readonly ConsoleSessionSummary[],

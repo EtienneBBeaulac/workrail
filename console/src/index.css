@@ -503,6 +503,7 @@ body::after {
   .badge-live,
   .energy-live,
   .workrail-current-lineage-node,
+  .workrail-current-lineage-node::after,
   .workrail-current-lineage-edge .react-flow__edge-path,
   .tab-activating {
     animation: none !important;

@@ -31,9 +31,7 @@ export function WorkflowDetail({ workflowId, activeTag, onBack }: Props) {
 
   const { data: detail, isLoading, isError, error, refetch } = useWorkflowDetail(workflowId);
 
-  const backLabel = activeTag && TAG_DISPLAY[activeTag]
-    ? `Workflows / ${TAG_DISPLAY[activeTag]}`
-    : 'Workflows';
+  const activeTagLabel = activeTag ? (TAG_DISPLAY[activeTag] ?? activeTag) : null;
 
   // Use detail data when available, fall back to cached list data for header fields.
   const name = detail?.name ?? cached?.name ?? workflowId;
@@ -46,8 +44,8 @@ export function WorkflowDetail({ workflowId, activeTag, onBack }: Props) {
       {/* Back link */}
       <PathBreadcrumb
         segments={
-          activeTag
-            ? [{ label: 'Workflows', onClick: onBack }, { label: backLabel.replace('Workflows / ', '') }]
+          activeTagLabel
+            ? [{ label: 'Workflows', onClick: onBack }, { label: activeTagLabel }]
             : [{ label: 'Workflows', onClick: onBack }]
         }
       />
@@ -255,7 +253,7 @@ function CopyPromptCta({ name }: { readonly name: string }) {
 
 function SectionSkeleton() {
   return (
-    <div className="space-y-3 animate-pulse">
+    <div className="space-y-3 motion-safe:animate-pulse">
       <div className="h-3 w-16 rounded bg-[var(--bg-tertiary)]" />
       <div className="h-4 w-full rounded bg-[var(--bg-tertiary)]" />
       <div className="h-4 w-5/6 rounded bg-[var(--bg-tertiary)]" />
@@ -266,7 +264,7 @@ function SectionSkeleton() {
 
 function DetailSkeleton() {
   return (
-    <div className="space-y-6 animate-pulse">
+    <div className="space-y-6 motion-safe:animate-pulse">
       <div className="space-y-2">
         <div className="h-6 w-1/2 rounded bg-[var(--bg-tertiary)]" />
         <div className="flex gap-2">
@@ -292,7 +290,7 @@ function DetailError({
   readonly onBack: () => void;
 }) {
   return (
-    <div className="space-y-4 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-4">
+    <div className="space-y-4 bg-[var(--bg-card)] border border-[var(--border)] p-4">
       <p className="text-sm text-[var(--error)]">
         {is404 ? 'Workflow not found.' : message}
       </p>
