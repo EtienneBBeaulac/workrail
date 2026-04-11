@@ -48,7 +48,7 @@ const ACTION_PROMPTS: readonly ActionPrompt[] = [
 // 3 stale tips removed (Worktrees tab reference, Group by Status reference, Sessions tab search reference)
 const DISCOVERY_TIPS: readonly string[] = [
   'The DAG view shows every node the agent created, including blocked attempts and alternative paths.',
-  'Dormant sessions have been idle for 3 days -- return to the original conversation to resume.',
+  'Dormant sessions have been idle for over an hour -- return to the original conversation to resume.',
   'Gaps are open questions the agent flagged but could not resolve. Check them in the node detail panel.',
   'The preferred tip node (highlighted in yellow in the DAG) is the most recent forward position.',
   'Complete with gaps means the workflow finished but left critical follow-ups unresolved.',

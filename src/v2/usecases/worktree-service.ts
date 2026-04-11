@@ -325,7 +325,6 @@ export async function resolveRepoRoot(path: string): Promise<string | null> {
  */
 async function buildFastWorktrees(
   repoRoot: string,
-  activeSessions: ActiveSessionsByBranch,
 ): Promise<readonly ConsoleWorktreeSummary[] | null> {
   const porcelain = await git(repoRoot, ['worktree', 'list', '--porcelain']);
   if (porcelain === null) return null;
@@ -626,7 +625,7 @@ export async function getWorktreeList(
     // Fast path: list all worktrees in parallel (~100ms for any repo size)
     const fastRepoResults = await Promise.allSettled(
       repoRoots.map(async (repoRoot) => {
-        const worktrees = await buildFastWorktrees(repoRoot, { counts: new Map() });
+        const worktrees = await buildFastWorktrees(repoRoot);
         return { repoRoot, worktrees };
       }),
     );
@@ -655,6 +654,8 @@ export async function getWorktreeList(
   }
 
   // Use enriched data if available, fall back to unenriched.
-  const repos = worktreeCache!.enrichedRepos ?? worktreeCache!.unenrichedRepos;
+  // worktreeCache is non-null here: set in the cache-miss block above, or confirmed valid at isCacheValid.
+  const cache = worktreeCache!;
+  const repos = cache.enrichedRepos ?? cache.unenrichedRepos;
   return applyActiveSessionsAndSort(repos, activeSessions);
 }
