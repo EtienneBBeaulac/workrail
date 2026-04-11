@@ -72,6 +72,9 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const isAnimatingRef = useRef(false);
   const pendingNavRef = useRef<number | null>(null);
+  // Tracks the post-transition selectedWorkflowId so the 240ms pending-nav
+  // callback reads the correct value even after setSelectedWorkflowId fires.
+  const selectedWorkflowIdRef = useRef<string | null>(null);
   const [scanlineKey, setScanlineKey] = useState(0);
   const [crtOffset, setCrtOffset] = useState(0);
   const [glitchY, setGlitchY] = useState(38);
@@ -159,6 +162,7 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
   const handleCardSelect = useCallback((id: string, triggerEl: HTMLButtonElement) => {
     triggerRef.current = triggerEl;
     setSelectedWorkflowId(id);
+    selectedWorkflowIdRef.current = id;
     triggerEl.blur();
   }, []);
 
@@ -198,8 +202,10 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
 
     // At midpoint (80ms), swap the workflow ID and start enter animation
+    const nextId = flatWorkflows[nextIndex]!.id;
     setTimeout(() => {
-      setSelectedWorkflowId(flatWorkflows[nextIndex]!.id);
+      setSelectedWorkflowId(nextId);
+      selectedWorkflowIdRef.current = nextId;
       const enterClass = axis === 'horizontal'
         ? (direction === 'next' ? 'modal-content--enter-h-next' : 'modal-content--enter-h-prev')
         : (direction === 'next' ? 'modal-content--enter-v-next' : 'modal-content--enter-v-prev');
@@ -207,17 +213,17 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
       setBorderFlashing(false);
     }, 80);
 
-    // After full animation, clear
+    // After full animation, clear. Use selectedWorkflowIdRef (not the closed-over
+    // selectedWorkflowId state) to get the post-transition value for pending-nav direction.
     setTimeout(() => {
       setContentAnimClass('');
       isAnimatingRef.current = false;
       if (pendingNavRef.current !== null) {
         const pending = pendingNavRef.current;
         pendingNavRef.current = null;
-        // determine direction for pending
-        const cur = flatWorkflows.findIndex((w) => w.id === selectedWorkflowId);
+        const cur = flatWorkflows.findIndex((w) => w.id === selectedWorkflowIdRef.current);
         const dir = pending > cur ? 'next' : 'prev';
-        startModalTransition(pending, dir, 'vertical');
+        startModalTransition(pending, dir, 'horizontal');
       }
     }, 240);
   }
