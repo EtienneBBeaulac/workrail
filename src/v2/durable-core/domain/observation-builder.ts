@@ -63,6 +63,15 @@ export function anchorsToObservations(anchors: readonly WorkspaceAnchor[]): read
         });
         break;
 
+      case 'repo_root':
+        // Human-readable path -- recorded as a short_string observation for console grouping.
+        observations.push({
+          key: 'repo_root',
+          value: { type: 'short_string', value: anchor.value },
+          confidence: 'high',
+        });
+        break;
+
       default: {
         const _exhaustive: never = anchor;
         return _exhaustive;
