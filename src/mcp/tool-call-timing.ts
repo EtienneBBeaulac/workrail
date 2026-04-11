@@ -8,10 +8,14 @@
  * - Sink interface (not global mutable) -- DI for I/O boundaries
  * - Best-effort: sink errors never affect handler results (immutability of correctness)
  * - Ring buffer for console API: bounded, deterministic, zero dynamic growth
+ * - Disk persistence via JSONL append (fire-and-forget, lazy eviction on read)
  * - `WORKRAIL_DEV=1` unified dev flag (see dev-mode.ts)
  *
  * @module mcp/tool-call-timing
  */
+
+import * as fs from 'fs';
+import * as path from 'path';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -22,6 +26,18 @@
  * Discriminated union ensures exhaustive handling at all consumers.
  */
 export type ToolCallOutcome = 'success' | 'error' | 'unknown_tool';
+
+/**
+ * Persisted timing record: `ToolCallTiming` enriched with server version metadata.
+ *
+ * WHY a separate type rather than adding `serverVersion` to `ToolCallTiming`:
+ * - `ToolCallTiming` is the in-flight observation type (no version context at emit time)
+ * - `ToolCallTimingEntry` is the stored/API type (always includes server version)
+ * - Keeps the in-flight type minimal; illegal state (missing version on disk) is unrepresentable
+ */
+export type ToolCallTimingEntry = ToolCallTiming & {
+  readonly serverVersion: string;
+};
 
 /**
  * Structured timing observation for one MCP tool call.
@@ -128,6 +144,32 @@ export function createRingBufferSink(
 ): ToolCallTimingSink {
   return (timing) => {
     buffer.push(timing);
+  };
+}
+
+/**
+ * Create a sink that persists each timing observation as a JSONL line to disk.
+ *
+ * Each line is a complete `ToolCallTimingEntry` JSON record terminated by `\n`.
+ * Uses async append (fire-and-forget) so disk I/O never blocks the event loop.
+ * Errors are silently swallowed -- observability must not affect correctness.
+ *
+ * The target directory is created synchronously at construction time (once).
+ * This avoids ENOENT on first write without adding async complexity.
+ *
+ * @param perfFilePath  Absolute path to the JSONL file (e.g. `~/.workrail/data/perf/tool-calls.jsonl`)
+ * @param serverVersion Server version string from package.json (e.g. `"3.16.0"`)
+ */
+export function createDiskPersistSink(perfFilePath: string, serverVersion: string): ToolCallTimingSink {
+  // Create directory once at construction time -- sync is acceptable here (startup path, not hot path).
+  try { fs.mkdirSync(path.dirname(perfFilePath), { recursive: true }); } catch { /* ignore */ }
+
+  return (timing: ToolCallTiming): void => {
+    const entry: ToolCallTimingEntry = { ...timing, serverVersion };
+    // Fire-and-forget: errors must not affect the calling tool handler.
+    fs.promises.appendFile(perfFilePath, JSON.stringify(entry) + '\n').catch(() => {
+      // Disk write failure is a silent observability gap, not a correctness failure.
+    });
   };
 }
 

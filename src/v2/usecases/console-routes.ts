@@ -13,7 +13,7 @@ import type { ConsoleService } from './console-service.js';
 import { getWorktreeList, buildActiveSessionCounts, resolveRepoRoot, setEnrichmentCompleteCallback } from './worktree-service.js';
 import { toWorkflowSourceInfo } from '../../types/workflow.js';
 import type { WorkflowService } from '../../application/services/workflow-service.js';
-import type { ToolCallTimingRingBuffer } from '../../mcp/tool-call-timing.js';
+import type { ToolCallTimingEntry, ToolCallTimingRingBuffer } from '../../mcp/tool-call-timing.js';
 import { isDevMode } from '../../mcp/dev-mode.js';
 
 // ---------------------------------------------------------------------------
@@ -116,6 +116,8 @@ export function mountConsoleRoutes(
   consoleService: ConsoleService,
   workflowService?: WorkflowService,
   timingRingBuffer?: ToolCallTimingRingBuffer,
+  toolCallsPerfFile?: string,
+  serverVersion?: string,
 ): () => void {
   // SSE state: per-instance, not module-level (see comment block above).
   const sseClients = new Set<Response>();
@@ -203,14 +205,70 @@ export function mountConsoleRoutes(
   // The devMode field lets consumers distinguish "no calls happened" from
   // "DEV_MODE is off and the buffer was never wired in".
   // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // Perf JSONL reader helper
+  //
+  // Reads all timing entries from the JSONL file, skipping malformed lines.
+  // Entries older than 30 days are filtered out (lazy eviction -- no file rewrite).
+  // ---------------------------------------------------------------------------
+  const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+  function readDiskEntries(perfFile: string): readonly ToolCallTimingEntry[] {
+    try {
+      const raw = fs.readFileSync(perfFile, 'utf8');
+      const cutoff = Date.now() - THIRTY_DAYS_MS;
+      return raw
+        .split('\n')
+        .filter(Boolean)
+        .flatMap((line) => {
+          try {
+            const entry = JSON.parse(line) as ToolCallTimingEntry;
+            // Guard: skip entries missing required fields or older than 30 days
+            if (typeof entry.toolName !== 'string' || typeof entry.startedAtMs !== 'number') return [];
+            if (entry.startedAtMs < cutoff) return [];
+            return [entry];
+          } catch {
+            return []; // Skip malformed lines
+          }
+        });
+    } catch {
+      return []; // File doesn't exist yet or unreadable -- return empty
+    }
+  }
+
   const devMode = isDevMode();
   if (devMode) {
     app.get('/api/v2/perf/tool-calls', (req: Request, res: Response) => {
       const rawLimit = req.query['limit'];
       const limit = typeof rawLimit === 'string' ? parseInt(rawLimit, 10) : undefined;
       const safeLimit = (limit !== undefined && Number.isFinite(limit) && limit > 0) ? limit : undefined;
-      const observations = timingRingBuffer ? timingRingBuffer.recent(safeLimit) : [];
-      res.json({ success: true, data: { observations, total: timingRingBuffer?.size ?? 0, devMode } });
+
+      // Read from disk (persistent store, filtered to 30d window)
+      const diskEntries = toolCallsPerfFile ? readDiskEntries(toolCallsPerfFile) : [];
+
+      // Read from in-memory ring buffer (recent entries, may overlap with disk)
+      const ringEntries = timingRingBuffer ? timingRingBuffer.recent(safeLimit) : [];
+
+      // Enrich in-memory entries with serverVersion (ring buffer stores ToolCallTiming, not ToolCallTimingEntry)
+      const version = serverVersion ?? 'unknown';
+      const ringEntriesWithVersion: readonly ToolCallTimingEntry[] = ringEntries.map((t) => ({
+        ...t,
+        serverVersion: version,
+      }));
+
+      // Merge: prefer in-memory entries (they are newest); dedupe disk entries that overlap
+      // with in-memory by key = toolName + startedAtMs (same observation written to both).
+      // In-memory is always a strict subset of what was written to disk (same writes go to both sinks).
+      const inMemoryKeys = new Set(ringEntriesWithVersion.map((e) => `${e.toolName}:${e.startedAtMs}`));
+      const diskOnlyEntries = diskEntries.filter((e) => !inMemoryKeys.has(`${e.toolName}:${e.startedAtMs}`));
+
+      // Combine: in-memory (newest-first) + disk-only entries (oldest-first from file)
+      // Sort by startedAtMs descending so response is always newest-first.
+      const allEntries: readonly ToolCallTimingEntry[] = [...ringEntriesWithVersion, ...diskOnlyEntries]
+        .sort((a, b) => b.startedAtMs - a.startedAtMs)
+        .slice(0, safeLimit ?? undefined);
+
+      res.json({ success: true, data: { observations: allEntries, total: allEntries.length, devMode } });
     });
   }
 

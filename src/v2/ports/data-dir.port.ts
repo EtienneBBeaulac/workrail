@@ -75,4 +75,8 @@ export interface DataDirPortV2 {
   managedSourcesPath(): string;
   /** Absolute path to managed workflow source records lock file. */
   managedSourcesLockPath(): string;
+
+  // Observability: performance data
+  /** Root directory for performance observability data. */
+  perfDir(): string;
 }
