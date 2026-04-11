@@ -1016,10 +1016,10 @@ function ArchiveLinks({
           onClick={() => onOpen(repoName)}
           className="font-mono text-[10px] uppercase tracking-[0.20em] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors text-left"
         >
-          // ALL {repoName.toUpperCase()} &rarr;
+          // SESSION ARCHIVE &rarr;
         </button>
       ))}
-      {repos.length !== 1 && (
+      {repos.length > 1 && (
         <button
           type="button"
           onClick={() => onOpen(undefined)}
