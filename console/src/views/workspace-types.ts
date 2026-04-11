@@ -203,7 +203,7 @@ export function joinSessionsAndWorktrees(
 
   // Build a branch -> worktree entry index for sessions that only know their branch name.
   // When a session's branch matches exactly one worktree entry, use that entry's repoRoot.
-  const worktreeByBranch = new Map<string, Array<{ repoRoot: string; repoName: string; wt: ConsoleWorktreeSummary }>>();
+  const worktreeByBranch = new Map<string, Array<{ repoRoot: string; repoName: string; wt: ConsoleWorktreeSummary | undefined }>>();
   for (const [key, entry] of worktreeByKey) {
     const [branch] = key.split('\0') as [string, string];
     const existing = worktreeByBranch.get(branch) ?? [];
@@ -289,7 +289,7 @@ export function joinSessionsAndWorktrees(
       worktree: wt,
       primarySession: undefined,
       allSessions: [],
-      activityMs: wt.headTimestampMs,
+      activityMs: wt?.headTimestampMs ?? 0,
     });
   }
 
