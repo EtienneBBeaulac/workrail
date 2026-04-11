@@ -5,6 +5,7 @@ import { WorkspaceView } from './views/WorkspaceView';
 import { SessionDetail } from './views/SessionDetail';
 import { WorkflowsView } from './views/WorkflowsView';
 import { WorkflowDetail } from './views/WorkflowDetail';
+import { PerformanceView } from './views/PerformanceView';
 import { CutCornerBox } from './components/CutCornerBox';
 import { BracketBadge } from './components/BracketBadge';
 import { PathBreadcrumb } from './components/PathBreadcrumb';
@@ -30,10 +31,12 @@ export function AppShell() {
   const sessionMatch = matchRoute({ to: '/session/$sessionId' });
   const workflowsMatch = matchRoute({ to: '/workflows' });
   const workflowDetailMatch = matchRoute({ to: '/workflows/$workflowId' });
+  const perfMatch = matchRoute({ to: '/perf' });
 
   const isInSessionDetail = sessionMatch !== false;
   const isOnWorkflowsTab = workflowsMatch !== false || workflowDetailMatch !== false;
   const isOnWorkflowDetail = workflowDetailMatch !== false;
+  const isOnPerfTab = perfMatch !== false;
 
   const sessionId = isInSessionDetail
     ? (sessionMatch as Record<string, string>).sessionId
@@ -109,19 +112,21 @@ export function AppShell() {
   useEffect(() => {
     const el = tabBarRef.current;
     if (!el) return;
+    const tabs = ['/', '/workflows', '/perf'] as const;
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
         e.preventDefault();
-        if (isOnWorkflowsTab) {
-          void navigate({ to: '/' });
-        } else {
-          void navigate({ to: '/workflows', search: { tag: undefined } });
-        }
+        const current = isOnWorkflowsTab ? 1 : isOnPerfTab ? 2 : 0;
+        const next = e.key === 'ArrowRight'
+          ? (current + 1) % tabs.length
+          : (current - 1 + tabs.length) % tabs.length;
+        const dest = tabs[next]!;
+        void navigate({ to: dest, ...(dest === '/workflows' ? { search: { tag: undefined } } : {}) });
       }
     }
     el.addEventListener('keydown', handleKeyDown);
     return () => el.removeEventListener('keydown', handleKeyDown);
-  }, [isOnWorkflowsTab, navigate]);
+  }, [isOnWorkflowsTab, isOnPerfTab, navigate]);
 
   // ---------------------------------------------------------------------------
   // Render
@@ -229,6 +234,29 @@ export function AppShell() {
               <span className="tab-corner tab-corner--br" aria-hidden="true" />
               Workflows
             </button>
+            <button
+              role="tab"
+              id="tab-perf"
+              aria-selected={isOnPerfTab}
+              aria-controls="panel-perf"
+              tabIndex={isOnPerfTab ? 0 : -1}
+              onClick={() => handleTabClick('perf', () => void navigate({ to: '/perf' }))}
+              className={[
+                'tab-btn px-4 py-2.5 font-mono text-[10px] uppercase tracking-[0.30em] transition-colors duration-150',
+                'focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:outline-none',
+                isOnPerfTab
+                  ? 'tab-btn--active text-[var(--accent)] text-glow-amber'
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
+                activatingTab === 'perf' ? 'tab-activating' : '',
+              ].join(' ')}
+              style={isOnPerfTab ? { backgroundColor: 'rgba(244, 196, 48, 0.06)' } : undefined}
+            >
+              <span className="tab-corner tab-corner--tl" aria-hidden="true" />
+              <span className="tab-corner tab-corner--tr" aria-hidden="true" />
+              <span className="tab-corner tab-corner--bl" aria-hidden="true" />
+              <span className="tab-corner tab-corner--br" aria-hidden="true" />
+              Performance
+            </button>
           </div>
         )}
 
@@ -260,7 +288,7 @@ export function AppShell() {
           id="panel-workspace"
           role="tabpanel"
           aria-labelledby="tab-workspace"
-          hidden={isOnWorkflowsTab}
+          hidden={isOnWorkflowsTab || isOnPerfTab}
         >
           {/* WorkspaceView is always mounted -- hidden via CSS only so scroll
               position in scrollYRef survives back-navigation from SessionDetail */}
@@ -289,6 +317,17 @@ export function AppShell() {
                 onSelectWorkflow={handleSelectWorkflow}
               />
             )}
+          </div>
+        )}
+
+        {/* Performance panel */}
+        {isOnPerfTab && (
+          <div
+            id="panel-perf"
+            role="tabpanel"
+            aria-labelledby="tab-perf"
+          >
+            <PerformanceView />
           </div>
         )}
       </main>
