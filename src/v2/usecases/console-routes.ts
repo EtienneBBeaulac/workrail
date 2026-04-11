@@ -236,8 +236,9 @@ export function mountConsoleRoutes(
     return [...roots];
   }
 
-  /** 8 s ceiling for the entire worktrees response, well above the p99 git scan time. */
-  const WORKTREES_REQUEST_TIMEOUT_MS = 8_000;
+  /** Response timeout: discovery + scan must complete within this window.
+   *  Set above PER_REPO_TIMEOUT_MS so fast repos return even if slow ones timeout. */
+  const WORKTREES_REQUEST_TIMEOUT_MS = 12_000;
 
   app.get('/api/v2/worktrees', async (_req: Request, res: Response) => {
     // Timeout race: if the scan takes too long, return an empty repo list so the
