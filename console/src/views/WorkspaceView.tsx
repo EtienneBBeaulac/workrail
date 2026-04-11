@@ -776,8 +776,10 @@ function GitBadges({
   readonly unpushedExpanded?: boolean;
   readonly onToggleUnpushed?: () => void;
 }) {
-  if (fetching && item.worktree === undefined) {
-    // Show skeleton shimmer while worktree data loads
+  if (fetching && (item.worktree === undefined || item.worktree.enrichment === null)) {
+    // Show skeleton shimmer while worktree data loads or while background enrichment
+    // is still in progress (enrichment: null means fast path returned but git badge
+    // data is not yet available -- expect a worktrees-updated SSE event soon).
     return (
       <span className="flex gap-1">
         <SkeletonBadge />

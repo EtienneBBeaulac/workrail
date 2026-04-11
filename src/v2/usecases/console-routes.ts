@@ -10,7 +10,7 @@ import type { Application, Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
 import type { ConsoleService } from './console-service.js';
-import { getWorktreeList, buildActiveSessionCounts, resolveRepoRoot } from './worktree-service.js';
+import { getWorktreeList, buildActiveSessionCounts, resolveRepoRoot, setEnrichmentCompleteCallback } from './worktree-service.js';
 import { toWorkflowSourceInfo } from '../../types/workflow.js';
 import type { WorkflowService } from '../../application/services/workflow-service.js';
 import type { ToolCallTimingRingBuffer } from '../../mcp/tool-call-timing.js';
@@ -137,6 +137,26 @@ export function mountConsoleRoutes(
   const stopWatcher = watchSessionsDir(consoleService.getSessionsDir());
   // Clean up watcher if the process exits gracefully
   process.once('exit', stopWatcher);
+
+  // Wire up background enrichment completion callback.
+  // When background worktree enrichment finishes, broadcast a `worktrees-updated`
+  // SSE event so connected clients know to refetch the enriched git badge data.
+  // Debounced at 2s to collapse rapid completions (e.g. multiple repos finishing
+  // within the same second) into a single broadcast.
+  let enrichmentBroadcastTimer: ReturnType<typeof setTimeout> | null = null;
+  setEnrichmentCompleteCallback(() => {
+    if (enrichmentBroadcastTimer !== null) clearTimeout(enrichmentBroadcastTimer);
+    enrichmentBroadcastTimer = setTimeout(() => {
+      enrichmentBroadcastTimer = null;
+      for (const client of sseClients) {
+        try {
+          client.write('data: {"type":"worktrees-updated"}\n\n');
+        } catch {
+          sseClients.delete(client);
+        }
+      }
+    }, 2_000);
+  });
 
   // --- API routes ---
 

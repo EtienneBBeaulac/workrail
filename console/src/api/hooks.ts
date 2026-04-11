@@ -104,6 +104,9 @@ export function useWorkspaceEvents(): void {
           if (msg.type === 'change') {
             // Only invalidate sessions -- worktrees are governed by refetchInterval.
             void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+          } else if (msg.type === 'worktrees-updated') {
+            // Background enrichment completed -- refetch worktrees to get git badge data.
+            void queryClient.invalidateQueries({ queryKey: ['worktrees'] });
           }
         } catch { /* ignore malformed messages */ }
       };
