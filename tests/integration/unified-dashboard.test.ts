@@ -87,12 +87,10 @@ describe('Unified Dashboard - Primary/Secondary Pattern', () => {
   });
   
   it('should reclaim lock when version field differs from current version', async () => {
-    // Write a lock file with a different version but a dead PID so that the
-    // SIGTERM branch is a no-op and the test completes without the 2-second wait.
     const versionMismatchLock = {
-      pid: 999999, // Non-existent PID so kill() throws and we skip the 2s wait
+      pid: 999999, // Non-existent PID -- dead-PID path in shouldReclaimLock triggers reclaim
       port: 3456,
-      startedAt: new Date().toISOString(), // Fresh timestamp -- TTL would NOT trigger reclaim
+      startedAt: new Date().toISOString(),
       lastHeartbeat: new Date().toISOString(),
       projectId: 'test',
       projectPath: path.join(os.tmpdir(), 'workrail-test'),
@@ -111,6 +109,37 @@ describe('Unified Dashboard - Primary/Secondary Pattern', () => {
     const lockData = JSON.parse(await fs.readFile(lockFile, 'utf-8'));
     expect(lockData.pid).toBe(process.pid);
     expect(lockData.version).not.toBe('0.0.0-old');
+  });
+
+  it('should yield to existing primary without SIGTERM when lock is valid', async () => {
+    // Write a lock with a valid (alive) PID, fresh heartbeat, and matching version.
+    // This is the false-positive kill scenario: a busy primary fails a health check
+    // but holds a valid lock. The secondary must yield, not kill.
+    const pkg = JSON.parse(await fs.readFile(
+      new URL('../../package.json', import.meta.url),
+      'utf-8'
+    ));
+    const validLock = {
+      pid: process.pid, // Use own PID -- guaranteed alive
+      port: 3456,
+      startedAt: new Date().toISOString(),
+      lastHeartbeat: new Date().toISOString(),
+      projectId: 'test',
+      projectPath: path.join(os.tmpdir(), 'workrail-test'),
+      version: pkg.version, // Same version -- no mismatch
+    };
+
+    await fs.mkdir(path.dirname(lockFile), { recursive: true });
+    await fs.writeFile(lockFile, JSON.stringify(validLock));
+
+    // start() should return null (secondary mode) without killing anything
+    const url = await httpServer.start();
+    expect(url).toBeNull();
+
+    // Lock must not have been overwritten -- original PID and version still present
+    const lockData = JSON.parse(await fs.readFile(lockFile, 'utf-8'));
+    expect(lockData.pid).toBe(process.pid);
+    expect(lockData.version).toBe(pkg.version);
   });
 
   it('should fall back to legacy mode when unified dashboard disabled', async () => {

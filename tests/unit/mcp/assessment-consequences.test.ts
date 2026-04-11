@@ -18,7 +18,7 @@ describe('evaluateAssessmentConsequences -- single dimension (equivalent to exac
   };
 
   it('fires when the single dimension equals the level', () => {
-    const recordedAssessment: RecordedAssessmentV1 = {
+    const recorded: RecordedAssessmentV1 = {
       assessmentId: 'readiness_gate',
       normalizationNotes: [],
       dimensions: [
@@ -27,7 +27,7 @@ describe('evaluateAssessmentConsequences -- single dimension (equivalent to exac
     };
 
     expect(
-      evaluateAssessmentConsequences({ step, recordedAssessment })
+      evaluateAssessmentConsequences({ step, recordedAssessments: [recorded] })
     ).toEqual({
       kind: 'require_followup',
       assessmentId: 'readiness_gate',
@@ -38,7 +38,7 @@ describe('evaluateAssessmentConsequences -- single dimension (equivalent to exac
   });
 
   it('returns undefined when the dimension does not match', () => {
-    const recordedAssessment: RecordedAssessmentV1 = {
+    const recorded: RecordedAssessmentV1 = {
       assessmentId: 'readiness_gate',
       normalizationNotes: [],
       dimensions: [
@@ -46,7 +46,7 @@ describe('evaluateAssessmentConsequences -- single dimension (equivalent to exac
       ],
     };
 
-    expect(evaluateAssessmentConsequences({ step, recordedAssessment })).toBeUndefined();
+    expect(evaluateAssessmentConsequences({ step, recordedAssessments: [recorded] })).toBeUndefined();
   });
 });
 
@@ -65,7 +65,7 @@ describe('evaluateAssessmentConsequences -- anyEqualsLevel trigger', () => {
   };
 
   it('fires when the first dimension is low', () => {
-    const recordedAssessment: RecordedAssessmentV1 = {
+    const recorded: RecordedAssessmentV1 = {
       assessmentId: 'readiness_gate',
       normalizationNotes: [],
       dimensions: [
@@ -75,7 +75,7 @@ describe('evaluateAssessmentConsequences -- anyEqualsLevel trigger', () => {
       ],
     };
 
-    expect(evaluateAssessmentConsequences({ step: stepWithAnyTrigger, recordedAssessment })).toEqual({
+    expect(evaluateAssessmentConsequences({ step: stepWithAnyTrigger, recordedAssessments: [recorded] })).toEqual({
       kind: 'require_followup',
       assessmentId: 'readiness_gate',
       firstMatchedDimensionId: 'evidence_quality',
@@ -85,7 +85,7 @@ describe('evaluateAssessmentConsequences -- anyEqualsLevel trigger', () => {
   });
 
   it('fires when a non-first dimension is low', () => {
-    const recordedAssessment: RecordedAssessmentV1 = {
+    const recorded: RecordedAssessmentV1 = {
       assessmentId: 'readiness_gate',
       normalizationNotes: [],
       dimensions: [
@@ -95,7 +95,7 @@ describe('evaluateAssessmentConsequences -- anyEqualsLevel trigger', () => {
       ],
     };
 
-    expect(evaluateAssessmentConsequences({ step: stepWithAnyTrigger, recordedAssessment })).toEqual({
+    expect(evaluateAssessmentConsequences({ step: stepWithAnyTrigger, recordedAssessments: [recorded] })).toEqual({
       kind: 'require_followup',
       assessmentId: 'readiness_gate',
       firstMatchedDimensionId: 'contradiction_resolution',
@@ -105,7 +105,7 @@ describe('evaluateAssessmentConsequences -- anyEqualsLevel trigger', () => {
   });
 
   it('returns the first matched dimension when multiple are low', () => {
-    const recordedAssessment: RecordedAssessmentV1 = {
+    const recorded: RecordedAssessmentV1 = {
       assessmentId: 'readiness_gate',
       normalizationNotes: [],
       dimensions: [
@@ -115,13 +115,13 @@ describe('evaluateAssessmentConsequences -- anyEqualsLevel trigger', () => {
       ],
     };
 
-    const result = evaluateAssessmentConsequences({ step: stepWithAnyTrigger, recordedAssessment });
+    const result = evaluateAssessmentConsequences({ step: stepWithAnyTrigger, recordedAssessments: [recorded] });
     expect(result?.firstMatchedDimensionId).toBe('evidence_quality');
     expect(result?.triggerLevel).toBe('low');
   });
 
   it('does not fire when all dimensions are high', () => {
-    const recordedAssessment: RecordedAssessmentV1 = {
+    const recorded: RecordedAssessmentV1 = {
       assessmentId: 'readiness_gate',
       normalizationNotes: [],
       dimensions: [
@@ -131,16 +131,71 @@ describe('evaluateAssessmentConsequences -- anyEqualsLevel trigger', () => {
       ],
     };
 
-    expect(evaluateAssessmentConsequences({ step: stepWithAnyTrigger, recordedAssessment })).toBeUndefined();
+    expect(evaluateAssessmentConsequences({ step: stepWithAnyTrigger, recordedAssessments: [recorded] })).toBeUndefined();
   });
 
   it('does not fire when no dimensions are present', () => {
-    const recordedAssessment: RecordedAssessmentV1 = {
+    const recorded: RecordedAssessmentV1 = {
       assessmentId: 'readiness_gate',
       normalizationNotes: [],
       dimensions: [],
     };
 
-    expect(evaluateAssessmentConsequences({ step: stepWithAnyTrigger, recordedAssessment })).toBeUndefined();
+    expect(evaluateAssessmentConsequences({ step: stepWithAnyTrigger, recordedAssessments: [recorded] })).toBeUndefined();
+  });
+
+  it('fires on the first matching assessment when multiple refs are present', () => {
+    const qualityGate: RecordedAssessmentV1 = {
+      assessmentId: 'quality_gate',
+      normalizationNotes: [],
+      dimensions: [{ dimensionId: 'depth', level: 'high', normalization: 'exact' }],
+    };
+    const coverageGate: RecordedAssessmentV1 = {
+      assessmentId: 'coverage_gate',
+      normalizationNotes: [],
+      dimensions: [{ dimensionId: 'completeness', level: 'low', normalization: 'exact' }],
+    };
+    const stepMultiRef: WorkflowStepDefinition = {
+      id: 'multi-step',
+      title: 'Multi-ref Gate',
+      prompt: 'Assess.',
+      assessmentRefs: ['quality_gate', 'coverage_gate'],
+      assessmentConsequences: [
+        { when: { anyEqualsLevel: 'low' }, effect: { kind: 'require_followup', guidance: 'Fix before proceeding.' } },
+      ],
+    };
+
+    const result = evaluateAssessmentConsequences({ step: stepMultiRef, recordedAssessments: [qualityGate, coverageGate] });
+    expect(result).toEqual({
+      kind: 'require_followup',
+      assessmentId: 'coverage_gate',
+      firstMatchedDimensionId: 'completeness',
+      triggerLevel: 'low',
+      guidance: 'Fix before proceeding.',
+    });
+  });
+
+  it('does not fire when all dimensions across multiple refs are high', () => {
+    const qualityGate: RecordedAssessmentV1 = {
+      assessmentId: 'quality_gate',
+      normalizationNotes: [],
+      dimensions: [{ dimensionId: 'depth', level: 'high', normalization: 'exact' }],
+    };
+    const coverageGate: RecordedAssessmentV1 = {
+      assessmentId: 'coverage_gate',
+      normalizationNotes: [],
+      dimensions: [{ dimensionId: 'completeness', level: 'high', normalization: 'exact' }],
+    };
+    const stepMultiRef: WorkflowStepDefinition = {
+      id: 'multi-step',
+      title: 'Multi-ref Gate',
+      prompt: 'Assess.',
+      assessmentRefs: ['quality_gate', 'coverage_gate'],
+      assessmentConsequences: [
+        { when: { anyEqualsLevel: 'low' }, effect: { kind: 'require_followup', guidance: 'Fix before proceeding.' } },
+      ],
+    };
+
+    expect(evaluateAssessmentConsequences({ step: stepMultiRef, recordedAssessments: [qualityGate, coverageGate] })).toBeUndefined();
   });
 });

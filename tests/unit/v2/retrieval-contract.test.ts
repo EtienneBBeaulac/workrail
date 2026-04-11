@@ -130,6 +130,43 @@ describe('retrieval-contract', () => {
     expect(result.text).toContain('### Function Definitions');
   });
 
+  it('compareRetrievalPackSegments returns correct ordering for all tier pairs (Record lookup)', () => {
+    // Verifies the Record<tier, priority> lookup returns the same values as the
+    // previous Array.find implementation for all possible tier pairs.
+    const structural = createBranchSummarySegment('x')!;
+    const durable = createAncestryRecapSegment('x')!;
+    const reference = createFunctionDefinitionsSegment('x')!;
+
+    // structural (0) < durable (1): negative diff
+    expect(compareRetrievalPackSegments(structural, durable)).toBeLessThan(0);
+    // durable (1) < reference (2): negative diff
+    expect(compareRetrievalPackSegments(durable, reference)).toBeLessThan(0);
+    // structural (0) < reference (2): negative diff
+    expect(compareRetrievalPackSegments(structural, reference)).toBeLessThan(0);
+    // same tier, same body: 0 (after title sort)
+    expect(compareRetrievalPackSegments(structural, createBranchSummarySegment('x')!)).toBe(0);
+  });
+
+  it('renderBudgetedRehydrateRecovery correctly drops tail tiers under repeated budget checks (encoder caching)', () => {
+    // This exercises the encoder.encode caching path: the while loop in
+    // renderBudgetedRehydrateRecovery must re-check bytes after each tier drop.
+    // If caching is incorrect (stale bytes), the wrong tiers may be included.
+    // We verify correctness, not timing.
+    const largeBody = 'X'.repeat(15000);
+    const result = renderBudgetedRehydrateRecovery({
+      header: '## Recovery',
+      segments: [
+        createBranchSummarySegment('Orientation')!,
+        createAncestryRecapSegment(largeBody)!,
+        createFunctionDefinitionsSegment(largeBody)!,
+      ],
+    });
+    // reference_material (tail) should be dropped first to fit budget
+    expect(result.omittedTierCount).toBeGreaterThanOrEqual(1);
+    expect(result.includedTiers).not.toContain('reference_material');
+    expect(result.includedTiers).toContain('structural_context');
+  });
+
   it('keeps both identity context and recap in larger resume previews', () => {
     const result = renderBudgetedResumePreview({
       segments: [

@@ -34,6 +34,7 @@ import { NodeTimeClockV2 } from '../../src/v2/infra/local/time-clock/index.js';
 import { IdFactoryV2 } from '../../src/v2/infra/local/id-factory/index.js';
 import { Bech32mAdapterV2 } from '../../src/v2/infra/local/bech32m/index.js';
 import { Base32AdapterV2 } from '../../src/v2/infra/local/base32/index.js';
+import { LocalManagedSourceStoreV2 } from '../../src/v2/infra/local/managed-source-store/index.js';
 
 async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-start-'));
@@ -442,6 +443,59 @@ describe('v2 start_workflow (Slice 3.5)', () => {
     if (!parsed.success) {
       expect(JSON.stringify(parsed.error.issues)).toContain('workspacePath');
       expect(JSON.stringify(parsed.error.issues)).toContain('Required');
+    }
+  });
+
+  it('finds and starts a workflow registered via manage_workflow_source', async () => {
+    const root = await mkTempDataDir();
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'workrail-managed-start-'));
+    const prev = process.env.WORKRAIL_DATA_DIR;
+    process.env.WORKRAIL_DATA_DIR = root;
+
+    try {
+      // Write a valid workflow JSON directly into the managed directory (no .workrail subdir)
+      const workflowId = 'managed-source-workflow';
+      const workflowFile = {
+        id: workflowId,
+        name: 'Managed Source Workflow',
+        description: 'Workflow loaded from a managed source directory.',
+        version: '1.0.0',
+        steps: [{ id: 'step-one', title: 'Step One', prompt: 'Do step one' }],
+      };
+      await fs.writeFile(
+        path.join(workspaceDir, `${workflowId}.json`),
+        JSON.stringify(workflowFile, null, 2),
+      );
+
+      // Register the directory as a managed source
+      const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: root });
+      const fsPort = new NodeFileSystemV2();
+      const managedSourceStore = new LocalManagedSourceStoreV2(dataDir, fsPort);
+      const attachResult = await managedSourceStore.attach(workspaceDir);
+      expect(attachResult.isOk()).toBe(true);
+
+      // Build a request context with managedSourceStore wired in
+      const ctx = await mkRequestCtx();
+      (ctx.v2 as any).managedSourceStore = managedSourceStore;
+
+      // start_workflow must find the workflow via the managed source
+      const res = await handleV2StartWorkflow(
+        { workflowId, workspacePath: workspaceDir, goal: 'test managed source resolution' } as any,
+        ctx,
+      );
+
+      expect(res.type).toBe('success');
+      if (res.type !== 'success') {
+        const err = res as any;
+        throw new Error(`Expected success but got error: ${err.code} - ${err.message}`);
+      }
+
+      const response = unwrapResponse(res.data);
+      expect(response.isComplete).toBe(false);
+      expect(response.pending?.stepId).toBe('step-one');
+    } finally {
+      process.env.WORKRAIL_DATA_DIR = prev;
+      await fs.rm(workspaceDir, { recursive: true, force: true });
     }
   });
 });

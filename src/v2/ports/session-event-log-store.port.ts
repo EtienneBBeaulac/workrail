@@ -117,11 +117,26 @@ export interface SessionEventLogAppendStorePortV2 {
    *
    * Atomic: all events in plan or none.
    * Idempotent: replaying same dedupeKeys is no-op.
-   * 
+   *
    * Partial idempotency (some exist, some don't) fails fast with INVARIANT_VIOLATION.
-   * 
+   *
    * Slice 2.5 lock: requires non-forgeable witness from ExecutionSessionGateV2.
    * Witness misuse-after-release fails fast before any I/O.
+   *
+   * Performance: when the caller already holds a freshly-loaded session truth
+   * (e.g. loaded by ExecutionSessionGateV2 for health gating), pass it here so
+   * the store can skip the redundant loadTruthOrEmpty disk reads (N+1 reads for
+   * a session with N segments). The idempotency check is derived from this truth
+   * instead of re-reading from disk. When omitted the store falls back to its
+   * normal load path.
+   *
+   * @param preloadedTruth - When provided, must be either lock-held truth (loaded
+   * inside `withHealthySessionLock`) or definitionally-empty truth (for new sessions).
+   * Passing stale truth loaded outside a lock would break idempotency guarantees.
    */
-  append(lock: WithHealthySessionLock, plan: AppendPlanV2): ResultAsync<void, SessionEventLogStoreError>;
+  append(
+    lock: WithHealthySessionLock,
+    plan: AppendPlanV2,
+    preloadedTruth?: LoadedSessionTruthV2,
+  ): ResultAsync<void, SessionEventLogStoreError>;
 }

@@ -11,6 +11,10 @@ import type { CryptoPortV2 } from '../../../durable-core/canonical/hashing.js';
 import { toCanonicalBytes } from '../../../durable-core/canonical/jcs.js';
 import type { JsonValue } from '../../../durable-core/canonical/json-types.js';
 
+// WHY: TextDecoder is stateless between decode() calls (WHATWG spec guarantee).
+// A module-level singleton avoids repeated allocation on every snapshot read.
+const _utf8Decoder = new TextDecoder();
+
 export class LocalSnapshotStoreV2 implements SnapshotStorePortV2 {
   constructor(
     private readonly dataDir: DataDirPortV2,
@@ -54,7 +58,7 @@ export class LocalSnapshotStoreV2 implements SnapshotStorePortV2 {
       .andThen((bytes) => {
         let parsed: unknown;
         try {
-          parsed = JSON.parse(new TextDecoder().decode(bytes));
+          parsed = JSON.parse(_utf8Decoder.decode(bytes));
         } catch {
           return errAsync({
             code: 'SNAPSHOT_STORE_CORRUPTION_DETECTED',

@@ -190,6 +190,104 @@ describe('recap-recovery', () => {
     }
   });
 
+  it('collectAncestryRecap traverses a long linear chain without O(N^2) Set allocations', () => {
+    // 10-node linear chain: node_10 -> node_9 -> ... -> node_1 (root)
+    // This test validates correctness for deep chains where recursive Set-spread is costly.
+    const nodeIds = ['node_1', 'node_2', 'node_3', 'node_4', 'node_5', 'node_6', 'node_7', 'node_8', 'node_9', 'node_10'];
+    const nodesById: Record<string, { nodeId: string; parentNodeId: string | null; nodeKind: 'step'; workflowHash: string; snapshotRef: string; createdAtEventIndex: number }> = {};
+    nodeIds.forEach((id, idx) => {
+      nodesById[id] = {
+        nodeId: id,
+        parentNodeId: idx === 0 ? null : `node_${idx}`,
+        nodeKind: 'step' as const,
+        workflowHash: 'sha256:abc',
+        snapshotRef: `sha256:${idx}`,
+        createdAtEventIndex: idx,
+      };
+    });
+    const dag = { nodesById, edges: [], preferredTipNodeId: 'node_10', runId: 'run_1', workflowId: null, workflowHash: null, tipNodeIds: ['node_10'] };
+
+    // Build outputs for nodes 2-10 (each has a recap note)
+    const outputs: Record<string, unknown> = {};
+    for (let i = 2; i <= 10; i++) {
+      outputs[`node_${i}`] = {
+        historyByChannel: { recap: [], artifact: [] },
+        currentByChannel: {
+          recap: [{ outputId: `out_${i}`, outputChannel: 'recap', payload: { payloadKind: 'notes', notesMarkdown: `Note from node_${i}` }, createdAtEventIndex: i }],
+          artifact: [],
+        },
+      };
+    }
+
+    const result = collectAncestryRecap({ nodeId: 'node_10', dag, outputs: { nodesById: outputs }, includeCurrentNode: true });
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      // collectAncestryRecap builds the chain tip-to-root then reverses it,
+      // so the final output is root-to-tip order: node_2, node_3, ..., node_10.
+      // node_1 has no recap output so it is absent.
+      expect(result.value).toEqual([
+        'Note from node_2',
+        'Note from node_3',
+        'Note from node_4',
+        'Note from node_5',
+        'Note from node_6',
+        'Note from node_7',
+        'Note from node_8',
+        'Note from node_9',
+        'Note from node_10',
+      ]);
+    }
+  });
+
+  it('collectAncestryRecap does not infinite loop when a cycle exists in parentNodeId', () => {
+    // Cycle guard: node_1 -> node_2 -> node_1 (cycle)
+    const dag = {
+      nodesById: {
+        node_1: { nodeId: 'node_1', parentNodeId: 'node_2', nodeKind: 'step' as const, workflowHash: 'sha256:abc', snapshotRef: 'sha256:1', createdAtEventIndex: 0 },
+        node_2: { nodeId: 'node_2', parentNodeId: 'node_1', nodeKind: 'step' as const, workflowHash: 'sha256:abc', snapshotRef: 'sha256:2', createdAtEventIndex: 1 },
+      },
+      edges: [],
+      preferredTipNodeId: 'node_2',
+      runId: 'run_1',
+      workflowId: null,
+      workflowHash: null,
+      tipNodeIds: ['node_2'],
+    };
+    const outputs = { nodesById: {} };
+    // Must terminate without stack overflow
+    const result = collectAncestryRecap({ nodeId: 'node_2', dag, outputs, includeCurrentNode: true });
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      // Should collect at most the nodes it can visit before cycle detection stops it
+      expect(result.value.length).toBeLessThanOrEqual(2);
+    }
+  });
+
+  it('collectDownstreamRecap does not infinite loop when a cycle exists in parentNodeId', () => {
+    // Cycle guard for buildPathBackward: node_b.parentNodeId = node_a, node_a.parentNodeId = node_b
+    // collectDownstreamRecap walks backwards from toNodeId via parentNodeId, so this exercises
+    // the !visited.has(cur) guard inside buildPathBackward.
+    const dag = {
+      nodesById: {
+        node_a: { nodeId: 'node_a', parentNodeId: 'node_b', nodeKind: 'step' as const, workflowHash: 'sha256:abc', snapshotRef: 'sha256:1', createdAtEventIndex: 0 },
+        node_b: { nodeId: 'node_b', parentNodeId: 'node_a', nodeKind: 'step' as const, workflowHash: 'sha256:abc', snapshotRef: 'sha256:2', createdAtEventIndex: 1 },
+      },
+      edges: [],
+      preferredTipNodeId: 'node_b',
+      runId: 'run_1',
+      workflowId: null,
+      workflowHash: null,
+      tipNodeIds: ['node_b'],
+    };
+    const outputs = { nodesById: {} };
+    // Must terminate without stack overflow; result length is bounded by visited node count
+    const result = collectDownstreamRecap({ fromNodeId: 'node_a', toNodeId: 'node_b', dag, outputs });
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.length).toBeLessThanOrEqual(2);
+    }
+  });
+
   it('collectDownstreamRecap handles missing recap outputs gracefully', () => {
     const dag = {
       nodesById: {

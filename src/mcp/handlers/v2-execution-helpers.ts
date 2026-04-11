@@ -607,6 +607,7 @@ import type { LoadedSessionTruthV2 } from '../../v2/ports/session-event-log-stor
 
 import { EVENT_KIND } from '../../v2/durable-core/constants.js';
 import { projectPreferencesV2 } from '../../v2/projections/preferences.js';
+import { asSortedEventLog } from '../../v2/durable-core/sorted-event-log.js';
 
 /**
  * Preferences output shape for WorkRail v2 tools.
@@ -635,17 +636,33 @@ export function derivePreferencesOrDefault(args: {
   readonly truth: LoadedSessionTruthV2;
   readonly runId: RunId;
   readonly nodeId: NodeId;
+  /** Pre-built SessionIndex -- when provided, skips asSortedEventLog and the parentByNodeId loop. */
+  readonly precomputedIndex?: import('../../v2/durable-core/session-index.js').SessionIndex;
 }): PreferencesV2 {
-  // Build parent map from node_created events
+  // Derive sortedEvents and parentByNodeId -- use pre-computed index when available.
+  let sortedEventsForPrefs: import('../../v2/durable-core/sorted-event-log.js').SortedEventLog | undefined;
   const parentByNodeId: Record<string, string | null> = {};
-  for (const e of args.truth.events) {
-    if (e.kind !== EVENT_KIND.NODE_CREATED) continue;
-    if (e.scope?.runId !== String(args.runId)) continue;
-    parentByNodeId[String(e.scope.nodeId)] = e.data.parentNodeId;
+
+  if (args.precomputedIndex) {
+    sortedEventsForPrefs = args.precomputedIndex.sortedEvents;
+    for (const [nodeId, evt] of args.precomputedIndex.nodeCreatedByNodeId) {
+      if (evt.scope.runId === String(args.runId)) {
+        parentByNodeId[nodeId] = evt.data.parentNodeId ?? null;
+      }
+    }
+  } else {
+    for (const e of args.truth.events) {
+      if (e.kind !== EVENT_KIND.NODE_CREATED) continue;
+      if (e.scope?.runId !== String(args.runId)) continue;
+      parentByNodeId[String(e.scope.nodeId)] = e.data.parentNodeId;
+    }
+    const sortedEventsRes = asSortedEventLog(args.truth.events);
+    if (sortedEventsRes.isErr()) return defaultPreferences;
+    sortedEventsForPrefs = sortedEventsRes.value;
   }
 
   // Project preferences and extract for target node
-  const prefs = projectPreferencesV2(args.truth.events, parentByNodeId);
+  const prefs = projectPreferencesV2(sortedEventsForPrefs, parentByNodeId);
   if (prefs.isErr()) return defaultPreferences;
   
   const p = prefs.value.byNodeId[String(args.nodeId)]?.effective;

@@ -1,6 +1,7 @@
 import type { Result } from 'neverthrow';
 import { err, ok } from 'neverthrow';
 import type { DomainEventV1 } from '../durable-core/schemas/session/index.js';
+import type { SortedEventLog } from '../durable-core/sorted-event-log.js';
 import { EVENT_KIND } from '../durable-core/constants.js';
 import type { AutonomyV2, RiskPolicyV2 } from '../durable-core/schemas/session/preferences.js';
 import type { ProjectionError } from './projection-error.js';
@@ -33,15 +34,10 @@ const defaultPrefs: EffectivePreferencesV2 = { autonomy: 'guided', riskPolicy: '
  * - preferences propagate down the ancestry chain
  */
 export function projectPreferencesV2(
-  events: readonly DomainEventV1[],
+  events: SortedEventLog,
   parentByNodeId: Readonly<Record<string, string | null>>
 ): Result<PreferencesProjectionV2, ProjectionError> {
-  for (let i = 1; i < events.length; i++) {
-    if (events[i]!.eventIndex < events[i - 1]!.eventIndex) {
-      return err({ code: 'PROJECTION_INVARIANT_VIOLATION', message: 'Events must be sorted by eventIndex ascending' });
-    }
-  }
-
+  // Sort order is guaranteed by the SortedEventLog brand (validated once at boundary via asSortedEventLog).
   const changesByNodeId: Record<string, PreferencesChangedEventV1[]> = {};
   for (const e of events) {
     if (e.kind !== EVENT_KIND.PREFERENCES_CHANGED) continue;

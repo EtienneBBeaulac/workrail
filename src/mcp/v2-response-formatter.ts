@@ -404,11 +404,6 @@ function formatSuccess(data: V2ExecutionResponse): string {
 // Clean format variants ("transparent proxy" — authored prompt as-is)
 // ---------------------------------------------------------------------------
 
-// Read per-call for consistency with prompt-renderer (both react to env changes).
-function isCleanResponseFormat(): boolean {
-  return process.env.WORKRAIL_CLEAN_RESPONSE_FORMAT === 'true';
-}
-
 // Footer phrasing variants to avoid looking templated.
 // Selected by step index (derived from stepId hash) for determinism.
 const CLEAN_ADVANCE_FOOTERS: readonly string[] = [
@@ -611,14 +606,17 @@ export interface FormattedResponse {
  * response shape (start_workflow or continue_workflow output). Returns null
  * if the data does not match, signaling the caller to fall back to JSON.
  *
- * When WORKRAIL_CLEAN_RESPONSE_FORMAT is enabled, uses the "transparent proxy"
- * format: authored prompt delivered as-is with a minimal WorkRail footer.
+ * When cleanResponseFormat is true, uses the "transparent proxy" format:
+ * authored prompt delivered as-is with a minimal WorkRail footer.
  * This improves agent authority perception by removing system scaffolding.
+ *
+ * @param data - The tool result data to format
+ * @param cleanResponseFormat - Whether to use the clean response format (from feature flags)
  */
-export function formatV2ExecutionResponse(data: unknown): FormattedResponse | null {
+export function formatV2ExecutionResponse(data: unknown, cleanResponseFormat: boolean): FormattedResponse | null {
   const renderInput = deriveRenderInput(data);
   if (!renderInput) return null;
-  const cleanFormat = isCleanResponseFormat();
+  const cleanFormat = cleanResponseFormat;
   const { response, lifecycle, contentEnvelope } = renderInput;
 
   // Render references from content envelope (if present and non-empty)

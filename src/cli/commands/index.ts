@@ -2,7 +2,7 @@
  * CLI Commands - Public API
  */
 
-export { executeInitCommand, type InitCommandDeps } from './init.js';
+export { executeInitCommand, executeInitConfigCommand, type InitCommandDeps, type InitConfigCommandDeps } from './init.js';
 export { executeSourcesCommand, getWorkflowSources, type SourcesCommandDeps, type WorkflowSource } from './sources.js';
 export { executeListCommand, type ListCommandDeps, type ListCommandOptions } from './list.js';
 export { executeValidateCommand, type ValidateCommandDeps } from './validate.js';

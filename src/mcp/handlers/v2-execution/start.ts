@@ -1,9 +1,9 @@
 import type { V2ToolContext } from '../../types.js';
-import { V2StartWorkflowOutputSchema, toPendingStep } from '../../output-schemas.js';
+import type { V2StartWorkflowOutputSchema } from '../../output-schemas.js';
+import { toPendingStep } from '../../output-schemas.js';
 import { deriveIsComplete, derivePendingStep } from '../../../v2/durable-core/projections/snapshot-state.js';
 import type { ExecutionSnapshotFileV1 } from '../../../v2/durable-core/schemas/execution-snapshot/index.js';
 import { asExpandedStepIdV1 } from '../../../v2/durable-core/schemas/execution-snapshot/step-instance-key.js';
-import { createWorkflow } from '../../../types/workflow.js';
 import type { DomainEventV1 } from '../../../v2/durable-core/schemas/session/index.js';
 import {
   asWorkflowId,
@@ -23,9 +23,9 @@ import { validateWorkflowPhase1a, type ValidationPipelineDepsPhase1a } from '../
 import { workflowHashForCompiledSnapshot } from '../../../v2/durable-core/canonical/hashing.js';
 import type { JsonValue } from '../../../v2/durable-core/canonical/json-types.js';
 import { anchorsToObservations, type ObservationEventData } from '../../../v2/durable-core/domain/observation-builder.js';
-import { createBundledSource } from '../../../types/workflow-source.js';
 import type { WorkflowDefinition } from '../../../types/workflow-definition.js';
 import { hasWorkflowDefinitionShape } from '../../../types/workflow-definition.js';
+import { getCachedWorkflow } from './workflow-object-cache.js';
 import type { CompiledWorkflowSnapshotV1 } from '../../../v2/durable-core/schemas/compiled-workflow/index.js';
 import {
   type StartWorkflowError,
@@ -43,6 +43,12 @@ import { createWorkflowReaderForRequest, hasRequestWorkspaceSignal } from '../sh
 import { buildStepContentEnvelope, type StepContentEnvelope, type ResolvedReference } from '../../step-content-envelope.js';
 import { resolveBindingBaseDir } from '../v2-workspace-resolution.js';
 import { resolveWorkflowReferences } from '../v2-reference-resolver.js';
+import { withTimeout } from '../shared/with-timeout.js';
+import type { ResolveFrom } from '../../../types/workflow-definition.js';
+
+// Cap reference I/O time so a slow or hung filesystem cannot block start_workflow indefinitely.
+// On timeout, all references are marked unresolved and the workflow still starts (graceful degradation).
+const REFERENCE_RESOLUTION_TIMEOUT_MS = 5_000;
 
 /**
  * Result of executeStartWorkflow — includes both the public response and
@@ -67,7 +73,7 @@ export function loadAndPinWorkflow(args: {
 }): RA<{
   readonly workflow: import('../../../types/workflow.js').Workflow;
   readonly workflowHash: WorkflowHash;
-  readonly pinnedWorkflow: ReturnType<typeof createWorkflow>;
+  readonly pinnedWorkflow: import('../../../types/workflow.js').Workflow;
   readonly firstStep: { readonly id: string };
   readonly resolvedReferences: readonly ResolvedReference[];
 }, StartWorkflowError> {
@@ -121,16 +127,25 @@ export function loadAndPinWorkflow(args: {
           }
           const workflowHash = workflowHashRes.value;
 
+          // Fetch the pinned snapshot once. If it already exists, use it directly.
+          // If not, put the enriched snapshot and then fetch it.
+          // This avoids a redundant get() call on the common path where the pin exists.
           return pinnedStore.get(workflowHash)
             .mapErr((cause) => ({ kind: 'pinned_workflow_store_failed' as const, cause }))
             .andThen((existingPinned) => {
-              if (!existingPinned) {
-                return pinnedStore.put(workflowHash, enrichedCompiled)
-                  .mapErr((cause) => ({ kind: 'pinned_workflow_store_failed' as const, cause }));
+              if (existingPinned) {
+                // Pin already exists -- skip put() and the second get().
+                return okAsync(existingPinned);
               }
-              return okAsync(undefined);
+              // No existing pin: store it and return the in-memory snapshot directly.
+              // Skipping a second get() avoids a redundant disk read and Zod re-parse --
+              // enrichedCompiled has already passed the full Phase 1a validation pipeline.
+              // NOTE: this assumes pinnedStore.put is a pure write-through with no normalization.
+              // If the store is ever changed to normalize on write, this must be reverted.
+              return pinnedStore.put(workflowHash, enrichedCompiled)
+                .mapErr((cause) => ({ kind: 'pinned_workflow_store_failed' as const, cause }))
+                .map(() => enrichedCompiled);
             })
-            .andThen(() => pinnedStore.get(workflowHash).mapErr((cause) => ({ kind: 'pinned_workflow_store_failed' as const, cause })))
             .andThen((pinned) => {
               if (!pinned || pinned.sourceKind !== 'v1_pinned' || !hasWorkflowDefinitionShape(pinned.definition)) {
                 return neErrorAsync({
@@ -138,7 +153,7 @@ export function loadAndPinWorkflow(args: {
                   message: 'Failed to pin executable workflow snapshot (missing or invalid pinned workflow).',
                 });
               }
-              const pinnedWorkflow = createWorkflow(pinned.definition as WorkflowDefinition, createBundledSource());
+              const pinnedWorkflow = getCachedWorkflow(workflowHash, pinned.definition as WorkflowDefinition);
 
               const resolution = resolveFirstStep(workflow, pinned);
               if (resolution.isErr()) {
@@ -366,12 +381,13 @@ export function executeStartWorkflow(
           workspacePath: input.workspacePath,
           resolvedRootUris: ctx.v2.resolvedRootUris,
           rememberedRootsStore: ctx.v2.rememberedRootsStore,
+          managedSourceStore: ctx.v2.managedSourceStore,
         }),
         (err): StartWorkflowError => ({
           kind: 'precondition_failed',
           message: `Failed to initialize workflow reader: ${String(err)}`,
         })
-      ).map(({ reader, stalePaths }) => ({
+      ).map(({ reader, stalePaths, managedStoreError }) => ({
         workflowReader: {
           getWorkflowById: async (workflowId: string) => {
             const requestResult = await reader.getWorkflowById(workflowId);
@@ -380,27 +396,34 @@ export function executeStartWorkflow(
           },
         },
         stalePaths,
+        managedStoreError,
       }))
-    : okAsync({ workflowReader: ctx.workflowService, stalePaths: [] as readonly string[] });
+    : okAsync({ workflowReader: ctx.workflowService, stalePaths: [] as readonly string[], managedStoreError: undefined as string | undefined });
 
-  // 1. Load, validate (Phase 1a pipeline), and pin workflow
-  return readerRA.andThen(({ workflowReader, stalePaths }) => loadAndPinWorkflow({
-    workflowId: input.workflowId,
-    workflowReader,
-    crypto,
-    pinnedStore,
-    validationPipelineDeps,
-    workspacePath: input.workspacePath,
-    resolvedRootUris: ctx.v2.resolvedRootUris,
-  })
-    .andThen(({ workflow, firstStep, workflowHash, pinnedWorkflow, resolvedReferences }) => {
-      // 2. Resolve workspace anchors for observation events (graceful: empty on failure).
-      // Priority: explicit workspacePath input > MCP roots URI > server process CWD.
-      const anchorsRA: RA<readonly ObservationEventData[], never> =
-        resolveWorkspaceAnchors(ctx.v2, input.workspacePath)
-          .map((anchors) => anchorsToObservations(anchors));
+  // Start workspace anchor resolution eagerly so it runs in parallel with workflow loading.
+  // resolveWorkspaceAnchors has no data dependency on loadAndPinWorkflow and is always-ok
+  // (error type is `never`). The .mapErr cast is a zero-cost type unification.
+  // Priority: explicit workspacePath input > MCP roots URI > server process CWD.
+  const anchorsRA: RA<readonly ObservationEventData[], StartWorkflowError> =
+    resolveWorkspaceAnchors(ctx.v2, input.workspacePath)
+      .map((anchors) => anchorsToObservations(anchors))
+      .mapErr((x: never): StartWorkflowError => x);
 
-      return anchorsRA.andThen((observations) => {
+  // 1. Load, validate (Phase 1a pipeline), and pin workflow -- runs concurrently with anchorsRA above.
+  return readerRA.andThen(({ workflowReader, stalePaths, managedStoreError }) => {
+    const pinnedRA = loadAndPinWorkflow({
+      workflowId: input.workflowId,
+      workflowReader,
+      crypto,
+      pinnedStore,
+      validationPipelineDeps,
+      workspacePath: input.workspacePath,
+      resolvedRootUris: ctx.v2.resolvedRootUris,
+    });
+
+    // 2. Combine workflow loading and anchor resolution -- both started before this point.
+    return RA.combine([pinnedRA, anchorsRA] as const)
+      .andThen(([{ workflow, firstStep, workflowHash, pinnedWorkflow, resolvedReferences }, observations]) => {
         // 3. Mint IDs and create initial snapshot
         const sessionId = idFactory.mintSessionId();
         const runId = idFactory.mintRunId();
@@ -449,18 +472,21 @@ export function executeStartWorkflow(
               goal: input.goal,
             });
 
+            // New session: truth is known to be empty at this point (session just created).
+            // Pass the empty truth to skip the redundant loadTruthOrEmpty disk reads in appendImpl.
+            const emptyTruth = { manifest: [], events: [] } as const;
             return gate.withHealthySessionLock(sessionId, (lock) =>
               sessionStore.append(lock, {
                 events,
                 snapshotPins: [{ snapshotRef, eventIndex: 2, createdByEventId: events[2]!.eventId }],
-              })
+              }, emptyTruth)
             )
               .mapErr((cause) => ({ kind: 'session_append_failed' as const, cause }))
-              .map(() => ({ workflow, firstStep, workflowHash, pinnedWorkflow, resolvedReferences, sessionId, runId, nodeId }));
+              .map(() => ({ workflow, firstStep, workflowHash, pinnedWorkflow, resolvedReferences, sessionId, runId, nodeId, stalePaths, managedStoreError }));
           });
       });
     })
-    .andThen(({ pinnedWorkflow, firstStep, workflowHash, sessionId, runId, nodeId, resolvedReferences }) => {
+    .andThen(({ pinnedWorkflow, firstStep, workflowHash, sessionId, runId, nodeId, resolvedReferences, stalePaths, managedStoreError }) => {
       // 5. Derive workflow hash ref
       const wfRefRes = deriveWorkflowHashRef(workflowHash);
       if (wfRefRes.isErr()) {
@@ -492,6 +518,7 @@ export function executeStartWorkflow(
           runId: asRunId(String(runId)),
           nodeId: asNodeId(String(nodeId)),
           rehydrateOnly: false,
+          cleanResponseFormat: ctx.featureFlags?.isEnabled('cleanResponseFormat') ?? false,
         });
 
         if (metaResult.isErr()) {
@@ -511,7 +538,11 @@ export function executeStartWorkflow(
           references: resolvedReferences,
         });
 
-          const parsed = V2StartWorkflowOutputSchema.parse({
+          const startWarnings = managedStoreError !== undefined
+            ? [`Managed workflow source store was temporarily unavailable (${managedStoreError}). Managed sources were not loaded.`]
+            : undefined;
+
+          const parsed: z.infer<typeof V2StartWorkflowOutputSchema> = {
             continueToken: tokens.continueToken,
             checkpointToken: tokens.checkpointToken,
             isComplete: false,
@@ -520,11 +551,11 @@ export function executeStartWorkflow(
             nextIntent,
             nextCall: buildNextCall({ continueToken: tokens.continueToken, isComplete: false, pending }),
             ...(stalePaths.length > 0 ? { staleRoots: [...stalePaths] } : {}),
-          });
+            ...(startWarnings !== undefined ? { warnings: startWarnings } : {}),
+          };
           return okAsync({ response: parsed, contentEnvelope });
       });
-    })
-  );
+    });
 }
 
 function enrichPinnedSnapshotWithResolvedReferences(
@@ -539,10 +570,43 @@ function enrichPinnedSnapshotWithResolvedReferences(
     return okAsync({ snapshot, resolvedReferences: [] });
   }
 
-  return RA.fromPromise(
+  // Build a fallback result for the timeout path: mark every reference as unresolved.
+  // This matches the module contract ("always succeeds") and ensures start_workflow
+  // completes even when the filesystem is slow or hung.
+  const allUnresolved: readonly ResolvedReference[] = references.map((ref) => ({
+    id: ref.id,
+    title: ref.title,
+    source: ref.source,
+    purpose: ref.purpose,
+    authoritative: ref.authoritative,
+    resolveFrom: (ref.resolveFrom ?? 'workspace') as ResolveFrom,
+    status: 'unresolved' as const,
+  }));
+
+  // withTimeout races the I/O against a deadline; .catch(() => null) converts a
+  // timeout rejection into a null sentinel (graceful degradation).
+  // The RA.fromPromise error mapper below is unreachable in practice: resolveWorkflowReferences
+  // has per-entry try/catch that prevents Promise.all from rejecting. It exists only as a
+  // safety net for unexpected runtime conditions.
+  const resolutionPromise = withTimeout(
     resolveWorkflowReferences(references, workspacePath),
+    REFERENCE_RESOLUTION_TIMEOUT_MS,
+    'reference_resolution',
+  ).catch((): null => null);
+
+  return RA.fromPromise(
+    resolutionPromise,
     () => ({ kind: 'reference_resolution_failed' as const }),
   ).map((result) => {
+    if (result === null) {
+      // Timeout: degrade gracefully to all-unresolved references.
+      console.warn('[workrail:reference-resolution] timed out; all references marked unresolved');
+      return {
+        snapshot: { ...snapshot, resolvedReferences: [...allUnresolved] },
+        resolvedReferences: allUnresolved,
+      };
+    }
+
     for (const warning of result.warnings) {
       console.warn(`[workrail:reference-resolution] ${warning.message}`);
     }

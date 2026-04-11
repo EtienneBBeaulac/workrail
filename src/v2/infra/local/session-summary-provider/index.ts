@@ -13,6 +13,7 @@ import { projectSessionHealthV2 } from '../../../projections/session-health.js';
 import { projectRunDagV2 } from '../../../projections/run-dag.js';
 import { projectNodeOutputsV2, type NodeOutputsProjectionV2 } from '../../../projections/node-outputs.js';
 import { projectRunContextV2 } from '../../../projections/run-context.js';
+import { asSortedEventLog, type SortedEventLog } from '../../../durable-core/sorted-event-log.js';
 import { derivePendingStep, deriveIsComplete } from '../../../durable-core/projections/snapshot-state.js';
 import type { DomainEventV1 } from '../../../durable-core/schemas/session/index.js';
 import type { SessionId, SnapshotRef } from '../../../durable-core/ids/index.js';
@@ -244,6 +245,13 @@ function projectSessionSummary(
   const workflow = extractWorkflowIdentity(truth.events, bestRun.run.runId);
   if (!workflow) return null;
 
+  // Validate sort order once here; pass SortedEventLog down to avoid re-checking
+  // inside deriveSessionTitle (which calls projectRunContextV2, a sorted-log consumer).
+  const sortedEventsRes = asSortedEventLog(truth.events);
+  const sessionTitle = sortedEventsRes.isOk()
+    ? deriveSessionTitle(sortedEventsRes.value, bestRun.run.runId)
+    : null;
+
   // Recap projection is best-effort: a failed output projection yields no snippet
   // rather than failing the whole summary.
   const outputsRes = projectNodeOutputsV2(truth.events);
@@ -262,7 +270,7 @@ function projectSessionSummary(
       recapSnippet,
       observations: extractObservations(truth.events),
       workflow,
-      sessionTitle: deriveSessionTitle(truth.events, bestRun.run.runId),
+      sessionTitle,
       lastModifiedMs: mtimeMs,
       // Defaults; enriched by snapshot store if available
       pendingStepId: null,
@@ -362,9 +370,12 @@ function extractWorkflowIdentity(events: readonly DomainEventV1[], runId: string
  * 1. Explicit context fields (goal, taskDescription, mrTitle, ...)
  * 2. First descriptive line from the earliest recap
  * 3. null (caller falls back to workflowId/sessionId)
+ *
+ * Accepts a pre-validated SortedEventLog so the sort check is not duplicated
+ * across every call path that already holds a sorted log.
  */
-function deriveSessionTitle(events: readonly DomainEventV1[], runId: string): string | null {
-  const contextRes = projectRunContextV2(events);
+function deriveSessionTitle(sortedEvents: SortedEventLog, runId: string): string | null {
+  const contextRes = projectRunContextV2(sortedEvents);
   if (contextRes.isOk()) {
     const runCtx = contextRes.value.byRunId[runId];
     if (runCtx) {
@@ -377,11 +388,11 @@ function deriveSessionTitle(events: readonly DomainEventV1[], runId: string): st
     }
   }
 
-  return extractTitleFromFirstRecap(events);
+  return extractTitleFromFirstRecap(sortedEvents);
 }
 
 /** Extract a short descriptive title from the earliest recap note in the session. */
-function extractTitleFromFirstRecap(events: readonly DomainEventV1[]): string | null {
+function extractTitleFromFirstRecap(events: SortedEventLog): string | null {
   const outputsRes = projectNodeOutputsV2(events);
   if (outputsRes.isErr()) return null;
 

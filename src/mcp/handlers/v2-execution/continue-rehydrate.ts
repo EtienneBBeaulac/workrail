@@ -1,5 +1,6 @@
 import type { V2ContinueWorkflowInput } from '../../v2/tools.js';
-import { V2ContinueWorkflowOutputSchema, toPendingStep } from '../../output-schemas.js';
+import type { V2ContinueWorkflowOutputSchema } from '../../output-schemas.js';
+import { toPendingStep } from '../../output-schemas.js';
 import { detectBindingDrift, type BindingDriftWarning } from '../../../v2/durable-core/domain/binding-drift.js';
 // Use the uncached loader for drift detection — we want the current on-disk state,
 // not a value that may have been frozen at process startup. The cached
@@ -7,7 +8,7 @@ import { detectBindingDrift, type BindingDriftWarning } from '../../../v2/durabl
 import { loadProjectBindings } from '../../../application/services/compiler/binding-registry.js';
 import { resolveBindingBaseDir } from '../v2-workspace-resolution.js';
 import { deriveIsComplete, derivePendingStep } from '../../../v2/durable-core/projections/snapshot-state.js';
-import { createWorkflow } from '../../../types/workflow.js';
+import { getCachedWorkflow } from './workflow-object-cache.js';
 import type { DomainEventV1 } from '../../../v2/durable-core/schemas/session/index.js';
 import {
   asSessionId,
@@ -21,8 +22,7 @@ import { deriveWorkflowHashRef } from '../../../v2/durable-core/ids/workflow-has
 import type { LoadedSessionTruthV2 } from '../../../v2/ports/session-event-log-store.port.js';
 import type { TokenCodecPorts } from '../../../v2/durable-core/tokens/token-codec-ports.js';
 import { ResultAsync as RA, okAsync, errAsync as neErrorAsync } from 'neverthrow';
-import { createBundledSource } from '../../../types/workflow-source.js';
-import type { WorkflowDefinition } from '../../../types/workflow-definition.js';
+import type { WorkflowDefinition, ResolveFrom } from '../../../types/workflow-definition.js';
 import { hasWorkflowDefinitionShape } from '../../../types/workflow-definition.js';
 import {
   derivePreferencesOrDefault,
@@ -35,6 +35,7 @@ import { deriveNextIntent } from '../v2-state-conversion.js';
 import { EVENT_KIND } from '../../../v2/durable-core/constants.js';
 import { buildNextCall } from './index.js';
 import { buildStepContentEnvelope, type StepContentEnvelope, type ResolvedReference } from '../../step-content-envelope.js';
+import { assertOutput, assertContinueTokenPresence } from '../../assert-output.js';
 
 /** Result wrapper for rehydrate — envelope is present only when a pending step exists. */
 export interface RehydrateResult {
@@ -61,8 +62,9 @@ export function handleRehydrateIntent(args: {
   readonly entropy: import('../../../v2/ports/random-entropy.port.js').RandomEntropyPortV2;
   /** MCP roots resolved by the server — used as fallback for binding base dir. */
   readonly resolvedRootUris?: readonly string[];
+  readonly cleanResponseFormat?: boolean;
 }): RA<RehydrateResult, ContinueWorkflowError> {
-  const { input, sessionId, runId, nodeId, workflowHashRef, truth, tokenCodecPorts, pinnedStore, snapshotStore, idFactory, aliasStore, entropy, resolvedRootUris } = args;
+  const { input, sessionId, runId, nodeId, workflowHashRef, truth, tokenCodecPorts, pinnedStore, snapshotStore, idFactory, aliasStore, entropy, resolvedRootUris, cleanResponseFormat } = args;
 
   const runStarted = truth.events.find(
     (e): e is Extract<DomainEventV1, { kind: 'run_started' }> => e.kind === EVENT_KIND.RUN_STARTED && e.scope.runId === String(runId)
@@ -160,15 +162,18 @@ export function handleRehydrateIntent(args: {
             const preferences = derivePreferencesOrDefault({ truth, runId, nodeId });
             const nextIntent = deriveNextIntent({ rehydrateOnly: true, isComplete, pending: null });
 
-            const parsed = V2ContinueWorkflowOutputSchema.parse({
-              kind: 'ok',
-              isComplete,
-              pending: null,
-              preferences,
-              nextIntent,
-              nextCall: null,
-              ...(driftWarnings.length > 0 ? { warnings: driftWarnings } : {}),
-            });
+            const parsed = assertOutput(
+              {
+                kind: 'ok',
+                isComplete,
+                pending: null,
+                preferences,
+                nextIntent,
+                nextCall: null,
+                ...(driftWarnings.length > 0 ? { warnings: [...driftWarnings] } : {}),
+              } as z.infer<typeof V2ContinueWorkflowOutputSchema>,
+              assertContinueTokenPresence,
+            );
             return okAsync({ response: parsed });
           }
 
@@ -185,7 +190,7 @@ export function handleRehydrateIntent(args: {
           return mintContinueAndCheckpointTokens({ entry: entryBase, ports: tokenCodecPorts, aliasStore, entropy })
             .mapErr((failure) => ({ kind: 'token_signing_failed' as const, cause: failure as never }))
             .andThen(({ continueToken: continueTokenValue, checkpointToken: checkpointTokenValue }) => {
-              const wf = createWorkflow(pinned.definition as WorkflowDefinition, createBundledSource());
+              const wf = getCachedWorkflow(workflowHash, pinned.definition as WorkflowDefinition);
 
               // S9: Use renderPendingPrompt (includes recap recovery + function expansion)
               const metaRes = renderPendingPrompt({
@@ -196,6 +201,7 @@ export function handleRehydrateIntent(args: {
                 runId: asRunId(String(runId)),
                 nodeId: asNodeId(String(nodeId)),
                 rehydrateOnly: true,
+                cleanResponseFormat,
               });
 
               if (metaRes.isErr()) {
@@ -214,17 +220,20 @@ export function handleRehydrateIntent(args: {
                 references: pinned.resolvedReferences ?? buildPinnedReferencesFallback((pinned.definition as WorkflowDefinition).references ?? []),
               });
 
-              const parsed = V2ContinueWorkflowOutputSchema.parse({
-                kind: 'ok',
-                continueToken: continueTokenValue,
-                checkpointToken: checkpointTokenValue,
-                isComplete,
-                pending: toPendingStep(meta),
-                preferences,
-                nextIntent,
-                nextCall: buildNextCall({ continueToken: continueTokenValue, isComplete, pending: meta }),
-                ...(driftWarnings.length > 0 ? { warnings: driftWarnings } : {}),
-              });
+              const parsed = assertOutput(
+                {
+                  kind: 'ok',
+                  continueToken: continueTokenValue,
+                  checkpointToken: checkpointTokenValue,
+                  isComplete,
+                  pending: toPendingStep(meta),
+                  preferences,
+                  nextIntent,
+                  nextCall: buildNextCall({ continueToken: continueTokenValue, isComplete, pending: meta }),
+                  ...(driftWarnings.length > 0 ? { warnings: [...driftWarnings] } : {}),
+                } as z.infer<typeof V2ContinueWorkflowOutputSchema>,
+                assertContinueTokenPresence,
+              );
               return okAsync({ response: parsed, contentEnvelope });
             });
         });
@@ -250,7 +259,7 @@ function buildPinnedReferencesFallback(
     source: ref.source,
     purpose: ref.purpose,
     authoritative: ref.authoritative,
-    resolveFrom: (ref.resolveFrom ?? 'workspace') as 'workspace' | 'package',
+    resolveFrom: (ref.resolveFrom ?? 'workspace') as ResolveFrom,
     status: 'pinned' as const,
   }));
 }

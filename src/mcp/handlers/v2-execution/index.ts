@@ -159,6 +159,7 @@ function loadAndRehydrate(
       aliasStore: tokenAliasStore,
       entropy,
       resolvedRootUris: args.ctx.v2.resolvedRootUris,
+      cleanResponseFormat: args.ctx.featureFlags?.isEnabled('cleanResponseFormat') ?? false,
     }));
 }
 
@@ -243,6 +244,7 @@ export function executeContinueWorkflow(
               sha256,
               aliasStore: tokenAliasStore,
               entropy,
+              cleanResponseFormat: ctx.featureFlags?.isEnabled('cleanResponseFormat') ?? false,
             }))
             .map((response) => ({ response }));
         });

@@ -1,11 +1,12 @@
-import { V2ContinueWorkflowOutputSchema, toPendingStep } from '../../output-schemas.js';
+import type { V2ContinueWorkflowOutputSchema } from '../../output-schemas.js';
+import { toPendingStep } from '../../output-schemas.js';
 import { deriveIsComplete, derivePendingStep } from '../../../v2/durable-core/projections/snapshot-state.js';
 import type { ExecutionSnapshotFileV1 } from '../../../v2/durable-core/schemas/execution-snapshot/index.js';
 import {
   asAttemptId,
   type AttemptId,
 } from '../../../v2/durable-core/tokens/index.js';
-import { createWorkflow } from '../../../types/workflow.js';
+import type { Workflow } from '../../../types/workflow.js';
 import type { DomainEventV1 } from '../../../v2/durable-core/schemas/session/index.js';
 import {
   asRunId,
@@ -31,7 +32,9 @@ import { attemptIdForNextNode, mintContinueAndCheckpointTokens } from '../v2-tok
 import { deriveNextIntent } from '../v2-state-conversion.js';
 import { EVENT_KIND } from '../../../v2/durable-core/constants.js';
 import { buildNextCall } from './index.js';
-import { projectAssessmentsV2, getLatestAssessmentForNode } from '../../../v2/projections/assessments.js';
+import { projectAssessmentsV2 } from '../../../v2/projections/assessments.js';
+import { assertOutput, assertContinueTokenPresence } from '../../assert-output.js';
+import { asSortedEventLog } from '../../../v2/durable-core/sorted-event-log.js';
 
 
 
@@ -45,13 +48,15 @@ export function buildAdvancedReplayResponse(args: {
   readonly toNodeId: NodeId;
   readonly attemptId: AttemptId;
   readonly toSnapshot: ExecutionSnapshotFileV1;
-  readonly workflow: ReturnType<typeof createWorkflow>;
+  readonly workflow: Workflow;
   readonly truth: LoadedSessionTruthV2;
   readonly workflowHash: WorkflowHash;
   readonly ports: TokenCodecPorts;
   readonly sha256: Sha256PortV2;
   readonly aliasStore: import('../../../v2/ports/token-alias-store.port.js').TokenAliasStorePortV2;
   readonly entropy: import('../../../v2/ports/random-entropy.port.js').RandomEntropyPortV2;
+  readonly precomputedIndex?: import('../../../v2/durable-core/session-index.js').SessionIndex;
+  readonly cleanResponseFormat?: boolean;
 }): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, ContinueWorkflowError> {
   const { sessionId, runId, fromNodeId, toNodeId, attemptId, toSnapshot, workflow, truth, workflowHash, ports, sha256, aliasStore, entropy } = args;
   
@@ -125,6 +130,8 @@ export function buildAdvancedReplayResponse(args: {
         runId: asRunId(String(runId)),
         nodeId: asNodeId(String(toNodeIdBranded)),
         rehydrateOnly: false,
+        precomputedIndex: args.precomputedIndex,
+        cleanResponseFormat: args.cleanResponseFormat,
       });
       if (result.isErr()) {
         return neErrorAsync({ kind: 'prompt_render_failed' as const, message: result.error.message });
@@ -132,27 +139,39 @@ export function buildAdvancedReplayResponse(args: {
       blockedMeta = result.value;
     }
 
-    const preferences = derivePreferencesOrDefault({ truth, runId, nodeId: toNodeIdBranded });
+    const preferences = derivePreferencesOrDefault({ truth, runId, nodeId: toNodeIdBranded, precomputedIndex: args.precomputedIndex });
     const nextIntent = deriveNextIntent({ rehydrateOnly: false, isComplete, pending: blockedMeta });
 
+    // Pass the object literal directly into .parse() rather than first
+    // assigning `const payload: z.infer<typeof V2ContinueWorkflowOutputSchema>
+    // = {...}`. The direct form lets TypeScript narrow the discriminated-union
+    // literal (`kind: 'blocked'`) inside the call-site expression without
+    // requiring an explicit `as` cast. The `const payload: T = {...}` pattern
+    // works for simple object shapes where no discriminant narrowing is needed.
     return nextTokensMint.andThen((nextTokens) =>
-      retryContinueMint.andThen((retryContinueToken) =>
-        okAsync(V2ContinueWorkflowOutputSchema.parse({
-          kind: 'blocked',
-          continueToken: pending ? nextTokens.continueToken : undefined,
-          checkpointToken: pending ? nextTokens.checkpointToken : undefined,
-          isComplete,
-          pending: toPendingStep(blockedMeta),
-          preferences,
-          nextIntent,
-          nextCall: buildNextCall({ continueToken: pending ? nextTokens.continueToken : undefined, isComplete, pending: blockedMeta, retryContinueToken }),
-          blockers,
-          retryable,
-          retryContinueToken,
-          validation,
-          assessmentFollowup,
-        }))
-      )
+      retryContinueMint.andThen((retryContinueToken) => {
+        // TypeScript requires `as` cast here for discriminated union literal narrowing;
+        // `const payload: T = {...}` works for simple object shapes but not discriminated unions.
+        const out = assertOutput(
+          {
+            kind: 'blocked' as const,
+            continueToken: pending ? nextTokens.continueToken : undefined,
+            checkpointToken: pending ? nextTokens.checkpointToken : undefined,
+            isComplete,
+            pending: toPendingStep(blockedMeta),
+            preferences,
+            nextIntent,
+            nextCall: buildNextCall({ continueToken: pending ? nextTokens.continueToken : undefined, isComplete, pending: blockedMeta, retryContinueToken }),
+            blockers,
+            retryable,
+            retryContinueToken,
+            validation,
+            assessmentFollowup,
+          } as z.infer<typeof V2ContinueWorkflowOutputSchema>,
+          assertContinueTokenPresence,
+        );
+        return okAsync(out);
+      })
     );
   }
 
@@ -167,6 +186,8 @@ export function buildAdvancedReplayResponse(args: {
       runId: asRunId(String(runId)),
       nodeId: asNodeId(String(toNodeIdBranded)),
       rehydrateOnly: false,
+      precomputedIndex: args.precomputedIndex,
+      cleanResponseFormat: args.cleanResponseFormat,
     });
     if (result.isErr()) {
       return neErrorAsync({ kind: 'prompt_render_failed' as const, message: result.error.message });
@@ -174,17 +195,17 @@ export function buildAdvancedReplayResponse(args: {
     okMeta = result.value;
   }
 
-  const preferences = derivePreferencesOrDefault({ truth, runId, nodeId: toNodeIdBranded });
+  const preferences = derivePreferencesOrDefault({ truth, runId, nodeId: toNodeIdBranded, precomputedIndex: args.precomputedIndex });
   const nextIntent = deriveNextIntent({ rehydrateOnly: false, isComplete, pending: okMeta });
 
   // Collect step-scoped execution facts for the step that just completed (fromNodeId).
   // Assessment was submitted and accepted on fromNodeId, not toNodeId.
   const stepContext = buildStepContext(truth.events, fromNodeId);
 
-  return nextTokensMint.andThen((nextTokens) =>
-    okAsync(
-      V2ContinueWorkflowOutputSchema.parse({
-        kind: 'ok',
+  return nextTokensMint.andThen((nextTokens) => {
+    const out = assertOutput(
+      {
+        kind: 'ok' as const,
         continueToken: pending ? nextTokens.continueToken : undefined,
         checkpointToken: pending ? nextTokens.checkpointToken : undefined,
         isComplete,
@@ -193,9 +214,11 @@ export function buildAdvancedReplayResponse(args: {
         nextIntent,
         nextCall: buildNextCall({ continueToken: pending ? nextTokens.continueToken : undefined, isComplete, pending: okMeta }),
         stepContext,
-      })
-    )
-  );
+      } as z.infer<typeof V2ContinueWorkflowOutputSchema>,
+      assertContinueTokenPresence,
+    );
+    return okAsync(out);
+  });
 }
 
 /**
@@ -209,18 +232,23 @@ export function buildAdvancedReplayResponse(args: {
 function buildStepContext(
   events: readonly DomainEventV1[],
   completedNodeId: NodeId,
-): { assessments?: { assessmentId: string; dimensions: { dimensionId: string; level: string; rationale?: string }[]; normalizationNotes: readonly string[] } } | undefined {
-  const projection = projectAssessmentsV2(events);
+): { assessments?: Array<{ assessmentId: string; dimensions: { dimensionId: string; level: string; rationale?: string }[]; normalizationNotes: readonly string[] }> } | undefined {
+  const sortedEventsRes = asSortedEventLog(events);
+  if (sortedEventsRes.isErr()) {
+    console.warn(`[workrail:replay] stepContext events unsorted for node '${String(completedNodeId)}' — stepContext will be absent: ${sortedEventsRes.error.message}`);
+    return undefined;
+  }
+  const projection = projectAssessmentsV2(sortedEventsRes.value);
   if (projection.isErr()) {
     console.warn(`[workrail:replay] stepContext projection failed for node '${String(completedNodeId)}' — stepContext will be absent: ${projection.error.message}`);
     return undefined;
   }
 
-  const recorded = getLatestAssessmentForNode(projection.value, String(completedNodeId));
-  if (!recorded) return undefined;
+  const allRecorded = projection.value.byNodeId[String(completedNodeId)];
+  if (!allRecorded || allRecorded.length === 0) return undefined;
 
   return {
-    assessments: {
+    assessments: allRecorded.map((recorded) => ({
       assessmentId: recorded.assessmentId,
       dimensions: recorded.dimensions.map((d) => ({
         dimensionId: d.dimensionId,
@@ -228,7 +256,7 @@ function buildStepContext(
         ...(d.rationale !== undefined ? { rationale: d.rationale } : {}),
       })),
       normalizationNotes: recorded.normalizationNotes,
-    },
+    })),
   };
 }
 
@@ -244,12 +272,17 @@ export function replayFromRecordedAdvance(args: {
   readonly nodeId: NodeId;
   readonly workflowHash: WorkflowHash;
   readonly attemptId: AttemptId;
-  readonly pinnedWorkflow: ReturnType<typeof createWorkflow>;
+  // Note: `.source` is not accessed on pinnedWorkflow in this path -- only `.definition`
+  // fields are used. `createBundledSource()` substitution in the cache is safe.
+  readonly pinnedWorkflow: Workflow;
   readonly snapshotStore: import('../../../v2/ports/snapshot-store.port.js').SnapshotStorePortV2;
   readonly sha256: Sha256PortV2;
   readonly tokenCodecPorts: TokenCodecPorts;
   readonly aliasStore: import('../../../v2/ports/token-alias-store.port.js').TokenAliasStorePortV2;
   readonly entropy: import('../../../v2/ports/random-entropy.port.js').RandomEntropyPortV2;
+  /** Pre-built SessionIndex for this truth -- eliminates projection-internal scans in renderPendingPrompt. */
+  readonly precomputedIndex?: import('../../../v2/durable-core/session-index.js').SessionIndex;
+  readonly cleanResponseFormat?: boolean;
 }): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, ContinueWorkflowError> {
   const {
     recordedEvent,
@@ -277,10 +310,11 @@ export function replayFromRecordedAdvance(args: {
 
   // Advanced outcome
   const toNodeId = asNodeId(String(recordedEvent.data.outcome.toNodeId));
-  const toNode = truth.events.find(
-    (e): e is Extract<DomainEventV1, { kind: 'node_created' }> =>
-      e.kind === EVENT_KIND.NODE_CREATED && e.scope?.nodeId === String(toNodeId)
-  );
+  const toNode = args.precomputedIndex?.nodeCreatedByNodeId.get(String(toNodeId))
+    ?? truth.events.find(
+      (e): e is Extract<DomainEventV1, { kind: 'node_created' }> =>
+        e.kind === EVENT_KIND.NODE_CREATED && e.scope?.nodeId === String(toNodeId)
+    );
   if (!toNode) {
     return neErrorAsync({
       kind: 'invariant_violation' as const,
@@ -313,6 +347,8 @@ export function replayFromRecordedAdvance(args: {
         sha256,
         aliasStore,
         entropy,
+        precomputedIndex: args.precomputedIndex,
+        cleanResponseFormat: args.cleanResponseFormat,
       });
     });
 }

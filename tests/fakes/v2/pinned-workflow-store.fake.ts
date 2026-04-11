@@ -39,4 +39,13 @@ export class InMemoryPinnedWorkflowStore implements PinnedWorkflowStorePortV2 {
     this.store.set(String(workflowHash), compiled);
     return okAsync(void 0);
   }
+
+  list(): ResultAsync<readonly WorkflowHash[], PinnedWorkflowStoreError> {
+    return okAsync([...this.store.keys()] as WorkflowHash[]);
+  }
+
+  prune(_olderThanMs: number): ResultAsync<number, PinnedWorkflowStoreError> {
+    // No-op in tests -- GC policy not exercised here.
+    return okAsync(0);
+  }
 }

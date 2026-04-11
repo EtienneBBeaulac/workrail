@@ -102,6 +102,14 @@ export const FEATURE_FLAG_DEFINITIONS: ReadonlyArray<FeatureFlagDefinition> = [
     since: '0.11.0',
     stable: false,
   },
+  {
+    key: 'devMode',
+    envVar: 'WORKRAIL_DEV',
+    defaultValue: false,
+    description: 'Enable development features: staleness visibility for all workflow categories, structured tool-call timing on stderr, and /api/v2/perf/tool-calls endpoint',
+    since: '0.11.0',
+    stable: false,
+  },
 ] as const;
 
 /**

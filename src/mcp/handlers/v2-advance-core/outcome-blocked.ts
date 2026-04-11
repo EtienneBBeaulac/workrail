@@ -4,6 +4,7 @@
  */
 
 import { ResultAsync as RA, errAsync as neErrorAsync } from 'neverthrow';
+import type { SessionIndex } from '../../../v2/durable-core/session-index.js';
 import type { ExecutionSnapshotFileV1 } from '../../../v2/durable-core/schemas/execution-snapshot/index.js';
 import type { SessionId, RunId, NodeId, WorkflowHash } from '../../../v2/durable-core/ids/index.js';
 import type { AttemptId } from '../../../v2/durable-core/tokens/index.js';
@@ -33,6 +34,7 @@ export function buildBlockedOutcome(args: {
   readonly v: ValidatedAdvanceInputs;
   readonly lock: WithHealthySessionLock;
   readonly ports: AdvanceCorePorts;
+  readonly lockedIndex: SessionIndex;
 }): RA<void, InternalError | SessionEventLogStoreError | SnapshotStoreError> {
   const { mode, snap, lock, ports } = args;
   const { truth, sessionId, runId, currentNodeId, attemptId, workflowHash } = args.ctx;
@@ -100,8 +102,15 @@ export function buildBlockedOutcome(args: {
       : [];
 
   const validated = args.v;
-  if (validated?.recordedAssessment && validated.assessmentValidation?.acceptedArtifactIndex !== undefined) {
-    const assessmentOutput = outputsToAppend[validated.assessmentValidation.acceptedArtifactIndex];
+  // Emit one assessment_recorded event per accepted assessment (one per assessmentRef).
+  // recordedAssessments[i] and acceptedArtifacts[i] are positionally aligned — built in the same loop.
+  const acceptedArtifacts = validated?.assessmentValidation?.acceptedArtifacts ?? [];
+  for (let i = 0; i < acceptedArtifacts.length; i++) {
+    const { artifactIndex } = acceptedArtifacts[i]!;
+    const recordedAssessment = validated?.assessmentValidation?.recordedAssessments[i];
+    if (!recordedAssessment) continue;
+
+    const assessmentOutput = outputsToAppend[artifactIndex];
     if (!assessmentOutput || assessmentOutput.outputChannel !== 'artifact') {
       return errAsync({ kind: 'invariant_violation' as const, message: 'Accepted assessment artifact did not produce a matching artifact output on blocked path.' } as const);
     }
@@ -111,7 +120,7 @@ export function buildBlockedOutcome(args: {
       attemptId: String(attemptId),
       artifactOutputId: String(assessmentOutput.outputId),
       scope: { runId: String(runId), nodeId: String(currentNodeId) },
-      assessment: validated.recordedAssessment,
+      assessment: recordedAssessment,
       minted: { eventId: idFactory.mintEventId() },
     });
     if (assessmentEventRes.isErr()) {
@@ -140,7 +149,7 @@ export function buildBlockedOutcome(args: {
   return snapshotStore.putExecutionSnapshotV1(blockedSnapshotRes.value).andThen((blockedSnapshotRef) => {
     return buildAndAppendPlan({
       kind: 'blocked',
-      truth, sessionId, runId, currentNodeId, attemptId, workflowHash,
+      truth, lockedIndex: args.lockedIndex, sessionId, runId, currentNodeId, attemptId, workflowHash,
       extraEventsToAppend, blockers: blockersRes.value, snapshotRef: blockedSnapshotRef,
       outputsToAppend,
       sessionStore, idFactory, lock,

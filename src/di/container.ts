@@ -14,6 +14,7 @@ import { NodeProcessTerminator } from '../runtime/adapters/node-process-terminat
 import { ThrowingProcessTerminator } from '../runtime/adapters/throwing-process-terminator.js';
 import type { ValidatedConfig } from '../config/app-config.js';
 import { loadConfig } from '../config/app-config.js';
+import { ensureWorkrailConfigFile, loadWorkrailConfigFile } from '../config/config-file.js';
 import { formatAppError } from '../errors/formatter.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -26,15 +27,48 @@ let asyncInitialized = false;
 let initializationPromise: Promise<void> | null = null;
 let isInitializing = false; // Synchronous flag for race protection
 
+/**
+ * Merged environment: config file defaults + process.env overrides.
+ * Computed once during registerConfig() and reused by all sub-registrations
+ * so that every component sees the same effective environment.
+ */
+let mergedEnv: Record<string, string | undefined> = process.env;
+
 // ═══════════════════════════════════════════════════════════════════════════
 // CONFIGURATION REGISTRATION
 // ═══════════════════════════════════════════════════════════════════════════
 
-async function registerConfig(): Promise<void> {
+async function registerConfig(env?: Record<string, string | undefined>): Promise<void> {
+  // Write ~/.workrail/config.json on first startup if it doesn't exist yet.
+  ensureWorkrailConfigFile();
+
+  // Build merged env once so that every component sees the same effective environment.
+  //
+  // Priority order (highest first):
+  //   1. options.env  -- caller-provided explicit env (tests declaring their flag state)
+  //   2. process.env  -- shell / CI environment (always wins over config file)
+  //   3. config file  -- ~/.workrail/config.json user defaults
+  //
+  // When options.env is provided it is used as-is; config file and process.env are both
+  // bypassed. This lets tests be fully declarative about their required env state.
+  //
+  // When VITEST is set (but no options.env), skip the config file so that a developer's
+  // personal ~/.workrail/config.json does not leak into test runs. The guard lives here
+  // (composition root) rather than in loadWorkrailConfigFile(), which stays pure.
+  if (env !== undefined) {
+    mergedEnv = env;
+  } else if (process.env['VITEST']) {
+    mergedEnv = { ...process.env };
+  } else {
+    const configFileResult = loadWorkrailConfigFile();
+    const configFileValues = configFileResult.kind === 'ok' ? configFileResult.value : {};
+    mergedEnv = { ...configFileValues, ...process.env };
+  }
+
   // Allow tests to inject config explicitly before container initialization.
   // This prevents the composition root from overwriting test-provided values.
   if (!container.isRegistered(DI.Config.App)) {
-    const configResult = loadConfig({ env: process.env, projectPath: process.cwd() });
+    const configResult = loadConfig({ env: mergedEnv, projectPath: process.cwd() });
 
     if (configResult.kind === 'err') {
       console.error(formatAppError(configResult.error));
@@ -55,9 +89,10 @@ async function registerConfig(): Promise<void> {
   // Register FeatureFlags early - needed by storage layer
   // (Tests may have already registered this, so check first)
   if (!container.isRegistered(DI.Infra.FeatureFlags)) {
-    const { EnvironmentFeatureFlagProvider } = await import('../config/feature-flags.js');
+    const { CustomEnvFeatureFlagProvider } = await import('../config/feature-flags.js');
+    const captured = mergedEnv;
     container.register(DI.Infra.FeatureFlags, {
-      useFactory: instanceCachingFactory((c) => c.resolve(EnvironmentFeatureFlagProvider))
+      useFactory: instanceCachingFactory(() => new CustomEnvFeatureFlagProvider(captured))
     });
   }
 }
@@ -91,6 +126,19 @@ function toProcessLifecyclePolicy(mode: RuntimeMode): ProcessLifecyclePolicy {
 
 export interface ContainerInitOptions {
   readonly runtimeMode?: RuntimeMode;
+  /**
+   * Explicit environment to use for config and feature flag resolution.
+   * When provided, process.env and ~/.workrail/config.json are both bypassed.
+   * Intended for tests that need to declare required flag state explicitly:
+   *
+   *   await initializeContainer({ env: { WORKRAIL_ENABLE_V2_TOOLS: 'true' } });
+   *
+   * The env object is used as-is (no merging with process.env or config file),
+   * so callers should spread process.env if they need those values too:
+   *
+   *   await initializeContainer({ env: { ...process.env, MY_FLAG: 'true' } });
+   */
+  readonly env?: Record<string, string | undefined>;
 }
 
 function registerRuntime(options: ContainerInitOptions = {}): void {
@@ -248,7 +296,7 @@ async function registerV2Services(): Promise<void> {
   const { IdFactoryV2 } = await import('../v2/infra/local/id-factory/index.js');
 
   container.register(DI.V2.DataDir, {
-    useFactory: instanceCachingFactory(() => new LocalDataDirV2(process.env)),
+    useFactory: instanceCachingFactory(() => new LocalDataDirV2(mergedEnv)),
   });
   container.register(DI.V2.FileSystem, {
     useFactory: instanceCachingFactory(() => new NodeFileSystemV2()),
@@ -314,7 +362,8 @@ async function registerV2Services(): Promise<void> {
     useFactory: instanceCachingFactory((c: DependencyContainer) => {
       const dataDir = c.resolve<any>(DI.V2.DataDir);
       const fs = c.resolve<any>(DI.V2.FileSystem);
-      return new LocalRememberedRootsStoreV2(dataDir, fs);
+      const clock = c.resolve<any>(DI.V2.TimeClock);
+      return new LocalRememberedRootsStoreV2(dataDir, fs, clock);
     }),
   });
   container.register(DI.V2.ManagedSourceStore, {
@@ -416,7 +465,7 @@ export async function initializeContainer(options: ContainerInitOptions = {}): P
 
   try {
     registerRuntime(options);
-    await registerConfig();
+    await registerConfig(options.env);
     await registerStorageChain();
     await registerV2Services();
     await registerServices();
@@ -476,6 +525,7 @@ export function resetContainer(): void {
   asyncInitialized = false;
   initializationPromise = null;
   isInitializing = false;
+  mergedEnv = process.env;
 }
 
 /**

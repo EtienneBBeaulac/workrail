@@ -22,11 +22,13 @@ import { buildAckAdvanceAppendPlanV1 } from '../../../v2/durable-core/domain/ack
 import type { InternalError } from '../v2-error-mapping.js';
 import { EVENT_KIND, OUTPUT_CHANNEL, PAYLOAD_KIND, EDGE_CAUSE } from '../../../v2/durable-core/constants.js';
 import type { AdvanceCorePorts } from './index.js';
+import type { SessionIndex } from '../../../v2/durable-core/session-index.js';
 
 // ── buildAndAppendPlan ────────────────────────────────────────────────
 
 type BuildAppendPlanArgs = {
   readonly truth: LoadedSessionTruthV2;
+  readonly lockedIndex: SessionIndex;
   readonly sessionId: SessionId;
   readonly runId: RunId;
   readonly currentNodeId: NodeId;
@@ -52,9 +54,10 @@ type BuildAppendPlanArgs = {
 );
 
 export function buildAndAppendPlan(args: BuildAppendPlanArgs): RA<void, InternalError | SessionEventLogStoreError> {
-  const { truth, sessionId, runId, currentNodeId, attemptId, workflowHash, extraEventsToAppend, sessionStore, idFactory, lock } = args;
+  const { truth, lockedIndex, sessionId, runId, currentNodeId, attemptId, workflowHash, extraEventsToAppend, sessionStore, idFactory, lock } = args;
 
-  const nextEventIndex = truth.events.length === 0 ? 0 : truth.events[truth.events.length - 1]!.eventIndex + 1;
+  // Use pre-computed nextEventIndex from the SessionIndex rather than re-computing inline.
+  const nextEventIndex = lockedIndex.nextEventIndex;
   const evtAdvanceRecorded = idFactory.mintEventId();
 
   if (args.kind === 'blocked') {
@@ -64,10 +67,7 @@ export function buildAndAppendPlan(args: BuildAppendPlanArgs): RA<void, Internal
     const evtEdgeCreated = idFactory.mintEventId();
     const outputEventIds = (args.outputsToAppend ?? []).map(() => idFactory.mintEventId());
 
-    const hasChildren = truth.events.some(
-      (e): e is Extract<DomainEventV1, { kind: 'edge_created' }> =>
-        e.kind === EVENT_KIND.EDGE_CREATED && e.data.fromNodeId === String(currentNodeId)
-    );
+    const hasChildren = lockedIndex.hasChildEdgeByFromNodeId.has(String(currentNodeId));
     const causeKind: 'non_tip_advance' | 'intentional_fork' = hasChildren ? EDGE_CAUSE.NON_TIP_ADVANCE : EDGE_CAUSE.INTENTIONAL_FORK;
 
     const planRes = buildAckAdvanceAppendPlanV1({
@@ -92,7 +92,8 @@ export function buildAndAppendPlan(args: BuildAppendPlanArgs): RA<void, Internal
       outputsToAppend: args.outputsToAppend ?? [],
     });
     if (planRes.isErr()) return neErrorAsync({ kind: 'invariant_violation' as const, message: planRes.error.message });
-    return sessionStore.append(lock, planRes.value);
+    // Pass preloaded truth to skip redundant disk reads in appendImpl.
+    return sessionStore.append(lock, planRes.value, truth);
   }
 
   // Advanced path
@@ -100,10 +101,7 @@ export function buildAndAppendPlan(args: BuildAppendPlanArgs): RA<void, Internal
   const evtNodeCreated = idFactory.mintEventId();
   const evtEdgeCreated = idFactory.mintEventId();
 
-  const hasChildren = truth.events.some(
-    (e): e is Extract<DomainEventV1, { kind: 'edge_created' }> =>
-      e.kind === EVENT_KIND.EDGE_CREATED && e.data.fromNodeId === String(currentNodeId)
-  );
+  const hasChildren = lockedIndex.hasChildEdgeByFromNodeId.has(String(currentNodeId));
   const causeKind: 'non_tip_advance' | 'intentional_fork' = hasChildren ? EDGE_CAUSE.NON_TIP_ADVANCE : EDGE_CAUSE.INTENTIONAL_FORK;
 
   const normalizedOutputs = normalizeOutputsForAppend(args.outputsToAppend);
@@ -132,7 +130,8 @@ export function buildAndAppendPlan(args: BuildAppendPlanArgs): RA<void, Internal
   });
   if (planRes.isErr()) return neErrorAsync({ kind: 'invariant_violation' as const, message: planRes.error.message });
 
-  return sessionStore.append(lock, planRes.value);
+  // Pass preloaded truth to skip redundant disk reads in appendImpl.
+  return sessionStore.append(lock, planRes.value, truth);
 }
 
 // ── Output builders ───────────────────────────────────────────────────

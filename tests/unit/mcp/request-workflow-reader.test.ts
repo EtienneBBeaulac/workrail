@@ -2,16 +2,19 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { pathToFileURL } from 'url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, afterEach, beforeEach } from 'vitest';
 import { StaticFeatureFlagProvider } from '../../../src/config/feature-flags.js';
+
 import {
   createWorkflowReaderForRequest,
   discoverRootedWorkflowDirectories,
+  clearWalkCacheForTesting,
   resolveRequestWorkspaceDirectory,
   toProjectWorkflowDirectory,
 } from '../../../src/mcp/handlers/shared/request-workflow-reader.js';
 import type { RememberedRootsStorePortV2 } from '../../../src/v2/ports/remembered-roots-store.port.js';
-import { okAsync } from 'neverthrow';
+import type { ManagedSourceStorePortV2, ManagedSourceRecordV2 } from '../../../src/v2/ports/managed-source-store.port.js';
+import { okAsync, errAsync } from 'neverthrow';
 
 function writeWorkflow(workspaceDir: string, name: string): void {
   const workflowsDir = path.join(workspaceDir, 'workflows');
@@ -256,8 +259,11 @@ describe('request-workflow-reader', () => {
   });
 
   it('marks root as stale when the root path does not exist (ENOENT)', async () => {
-    const { discovered, stale } = await discoverRootedWorkflowDirectories(['/nonexistent-path-xyz-123']);
-    expect(stale).toEqual(['/nonexistent-path-xyz-123']);
+    // Use path.resolve so the expected value matches the platform-normalized path
+    // (on Windows, '/nonexistent-path-xyz-123' resolves to 'D:\nonexistent-path-xyz-123')
+    const nonExistent = path.resolve('/nonexistent-path-xyz-123');
+    const { discovered, stale } = await discoverRootedWorkflowDirectories([nonExistent]);
+    expect(stale).toEqual([nonExistent]);
     expect(discovered).toEqual([]);
   });
 
@@ -296,5 +302,195 @@ describe('request-workflow-reader', () => {
     // Workflow from present subdir is discovered
     expect(discovered).toContain(path.resolve(workflowsDir));
     // vanishedSubdir path is not in discovered (it didn't exist, was skipped silently)
+  });
+});
+
+// ---------------------------------------------------------------------------
+// New behavioral tests for perf fixes
+// ---------------------------------------------------------------------------
+
+
+
+describe('discoverRootedWorkflowDirectories -- depth limit', () => {
+  afterEach(() => clearWalkCacheForTesting());
+
+  it('discovers .workrail/workflows at exactly MAX_WALK_DEPTH (depth 5)', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-depth5-'));
+    // root/a/b/c/d/e/.workrail/workflows -- .workrail is at depth 5
+    const workflowsDir = path.join(root, 'a', 'b', 'c', 'd', 'e', '.workrail', 'workflows');
+    fs.mkdirSync(workflowsDir, { recursive: true });
+
+    const { discovered } = await discoverRootedWorkflowDirectories([root]);
+
+    expect(discovered).toContain(path.resolve(workflowsDir));
+
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('does NOT discover .workrail/workflows at depth 6', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-depth6-'));
+    // root/a/b/c/d/e/f/.workrail/workflows -- .workrail is at depth 6, beyond MAX_WALK_DEPTH
+    const workflowsDir = path.join(root, 'a', 'b', 'c', 'd', 'e', 'f', '.workrail', 'workflows');
+    fs.mkdirSync(workflowsDir, { recursive: true });
+
+    const { discovered } = await discoverRootedWorkflowDirectories([root]);
+
+    expect(discovered).not.toContain(path.resolve(workflowsDir));
+
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe('discoverRootedWorkflowDirectories -- walk cache', () => {
+  afterEach(() => clearWalkCacheForTesting());
+
+  it('returns the same object reference on second call (cache hit)', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-cache-'));
+
+    const result1 = await discoverRootedWorkflowDirectories([root]);
+    const result2 = await discoverRootedWorkflowDirectories([root]);
+
+    // Strict reference equality proves the second call hit the module-level cache.
+    expect(result1).toBe(result2);
+
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('does NOT return cached result after clearWalkCacheForTesting()', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-cache-clear-'));
+
+    const result1 = await discoverRootedWorkflowDirectories([root]);
+    clearWalkCacheForTesting();
+    const result2 = await discoverRootedWorkflowDirectories([root]);
+
+    // Different references after cache clear -- a fresh walk was performed.
+    expect(result1).not.toBe(result2);
+
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe('discoverRootedWorkflowDirectories -- skip list', () => {
+  afterEach(() => clearWalkCacheForTesting());
+
+  it('does not descend into skip-listed directories', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-skip-'));
+    // .workrail at root level -- should be found
+    const rootWorkflows = path.join(root, '.workrail', 'workflows');
+    fs.mkdirSync(rootWorkflows, { recursive: true });
+    // .workrail inside build/ -- should NOT be found (build is in skip list)
+    const buildWorkflows = path.join(root, 'build', '.workrail', 'workflows');
+    fs.mkdirSync(buildWorkflows, { recursive: true });
+    // .workrail inside node_modules/ -- should NOT be found
+    const nmWorkflows = path.join(root, 'node_modules', 'pkg', '.workrail', 'workflows');
+    fs.mkdirSync(nmWorkflows, { recursive: true });
+
+    const { discovered } = await discoverRootedWorkflowDirectories([root]);
+
+    expect(discovered).toContain(path.resolve(rootWorkflows));
+    expect(discovered).not.toContain(path.resolve(buildWorkflows));
+    expect(discovered).not.toContain(path.resolve(nmWorkflows));
+
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Managed source stat -- parallelism and timeout (F1/F4)
+// ---------------------------------------------------------------------------
+
+function managedSourceStore(records: readonly ManagedSourceRecordV2[]): ManagedSourceStorePortV2 {
+  return {
+    list: () => okAsync(records),
+    attach: () => okAsync(undefined),
+    detach: () => okAsync(undefined),
+  };
+}
+
+const testFeatureFlags = new StaticFeatureFlagProvider({
+  v2Tools: true,
+  leanWorkflows: false,
+  agenticRoutines: false,
+  experimentalWorkflows: false,
+});
+
+describe('createWorkflowReaderForRequest -- managed source stat parallelism', () => {
+  beforeEach(() => clearWalkCacheForTesting());
+  afterEach(() => clearWalkCacheForTesting());
+
+  it('discovers multiple managed source directories in parallel', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-managed-parallel-'));
+    const dirA = path.join(tempRoot, 'source-a');
+    const dirB = path.join(tempRoot, 'source-b');
+    const dirC = path.join(tempRoot, 'source-c');
+    fs.mkdirSync(dirA);
+    fs.mkdirSync(dirB);
+    fs.mkdirSync(dirC);
+
+    const records: readonly ManagedSourceRecordV2[] = [
+      { path: dirA, addedAtMs: 1 },
+      { path: dirB, addedAtMs: 2 },
+      { path: dirC, addedAtMs: 3 },
+    ];
+
+    const result = await createWorkflowReaderForRequest({
+      featureFlags: testFeatureFlags,
+      workspacePath: tempRoot,
+      managedSourceStore: managedSourceStore(records),
+    });
+
+    // All three existing directories should be active, none stale
+    expect(result.staleManagedRecords).toHaveLength(0);
+    expect(result.managedSourceRecords).toHaveLength(3);
+
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  });
+
+  it('marks non-existent managed source directories as stale', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-managed-stale-'));
+    const existingDir = path.join(tempRoot, 'exists');
+    const missingDir = path.join(tempRoot, 'missing'); // never created
+    fs.mkdirSync(existingDir);
+
+    const records: readonly ManagedSourceRecordV2[] = [
+      { path: existingDir, addedAtMs: 1 },
+      { path: missingDir, addedAtMs: 2 },
+    ];
+
+    const result = await createWorkflowReaderForRequest({
+      featureFlags: testFeatureFlags,
+      workspacePath: tempRoot,
+      managedSourceStore: managedSourceStore(records),
+    });
+
+    expect(result.managedSourceRecords.map((r) => r.path)).toContain(existingDir);
+    expect(result.staleManagedRecords.map((r) => r.path)).toContain(missingDir);
+
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  });
+
+  it('degrades gracefully when managed source store returns an error', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-managed-error-'));
+    fs.mkdirSync(tempRoot, { recursive: true });
+
+    const failingStore: ManagedSourceStorePortV2 = {
+      list: () => errAsync({ code: 'MANAGED_SOURCE_IO_ERROR' as const, message: 'disk read failed' }),
+      attach: () => okAsync(undefined),
+      detach: () => okAsync(undefined),
+    };
+
+    const result = await createWorkflowReaderForRequest({
+      featureFlags: testFeatureFlags,
+      workspacePath: tempRoot,
+      managedSourceStore: failingStore,
+    });
+
+    // Should succeed (no throw) and surface the error as managedStoreError
+    expect(result.managedSourceRecords).toHaveLength(0);
+    expect(result.staleManagedRecords).toHaveLength(0);
+    expect(result.managedStoreError).toBeDefined();
+    expect(result.managedStoreError).toContain('disk read failed');
+
+    fs.rmSync(tempRoot, { recursive: true, force: true });
   });
 });

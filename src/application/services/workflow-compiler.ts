@@ -305,16 +305,9 @@ export class WorkflowCompiler {
       const assessmentConsequences = typedStep.assessmentConsequences;
       if (!assessmentConsequences) continue;
 
-      if (!typedStep.assessmentRefs || typedStep.assessmentRefs.length !== 1) {
+      if (!typedStep.assessmentRefs || typedStep.assessmentRefs.length === 0) {
         return err(Err.invalidState(
-          `Step '${step.id}' declares assessmentConsequences but does not declare exactly one assessmentRef`
-        ));
-      }
-
-      const assessment = (workflow.definition.assessments ?? []).find(candidate => candidate.id === typedStep.assessmentRefs?.[0]);
-      if (!assessment) {
-        return err(Err.invalidState(
-          `Step '${step.id}' declares assessmentConsequences for unknown assessmentRef '${typedStep.assessmentRefs[0]}'`
+          `Step '${step.id}' declares assessmentConsequences but declares no assessmentRefs`
         ));
       }
 
@@ -324,12 +317,15 @@ export class WorkflowCompiler {
         ));
       }
 
+      const allLevelsAcrossRefs = (workflow.definition.assessments ?? [])
+        .filter(candidate => typedStep.assessmentRefs!.includes(candidate.id))
+        .flatMap(assessment => assessment.dimensions.flatMap(d => d.levels));
+
       for (const consequence of assessmentConsequences) {
         const trigger = consequence.when;
-        const allLevels = assessment.dimensions.flatMap(d => d.levels);
-        if (!allLevels.includes(trigger.anyEqualsLevel)) {
+        if (!allLevelsAcrossRefs.includes(trigger.anyEqualsLevel)) {
           return err(Err.invalidState(
-            `Step '${step.id}' declares consequence with anyEqualsLevel '${trigger.anyEqualsLevel}' that is not declared in any dimension of assessment '${assessment.id}'`
+            `Step '${step.id}' declares consequence with anyEqualsLevel '${trigger.anyEqualsLevel}' that is not declared in any dimension of any referenced assessment`
           ));
         }
         if (consequence.effect.kind !== 'require_followup') {
@@ -374,9 +370,9 @@ export class WorkflowCompiler {
         }
 
         if (bodyStep.assessmentConsequences) {
-          if (!bodyStep.assessmentRefs || bodyStep.assessmentRefs.length !== 1) {
+          if (!bodyStep.assessmentRefs || bodyStep.assessmentRefs.length === 0) {
             return err(Err.invalidState(
-              `Loop body step '${bodyStep.id}' in loop '${loop.id}' declares assessmentConsequences but does not declare exactly one assessmentRef`
+              `Loop body step '${bodyStep.id}' in loop '${loop.id}' declares assessmentConsequences but declares no assessmentRefs`
             ));
           }
         }

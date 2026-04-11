@@ -637,4 +637,67 @@ describe('v2 run DAG projection', () => {
     expect(res._unsafeUnwrapErr().code).toBe('PROJECTION_INVARIANT_VIOLATION');
     expect(res._unsafeUnwrapErr().message).toContain('missing parentNodeId');
   });
+
+  it('rejects a duplicate node_created with a differing nodeKind field (field-by-field equality)', () => {
+    // Verifies the duplicate-node detection works correctly after replacing JSON.stringify
+    // with field-by-field comparison. A node that differs in any one field must be rejected.
+    const wfHash = 'sha256:5947229239ac2966c1099d6d74f4448c064e54ae25959eaebfd89cec073bdc11';
+    const snapRef = 'sha256:5947229239ac2966c1099d6d74f4448c064e54ae25959eaebfd89cec073bdc11';
+    const events: DomainEventV1[] = [
+      {
+        v: 1, eventId: 'evt_run', eventIndex: 0, sessionId: 'sess_1', kind: 'run_started',
+        dedupeKey: 'run_started:sess_1:run_1',
+        scope: { runId: 'run_1' },
+        data: { workflowId: 'test', workflowHash: wfHash, workflowSourceKind: 'project', workflowSourceRef: 't' },
+      },
+      {
+        v: 1, eventId: 'evt_node_1', eventIndex: 1, sessionId: 'sess_1', kind: 'node_created',
+        dedupeKey: 'node_created:sess_1:run_1:node_a',
+        scope: { runId: 'run_1', nodeId: 'node_a' },
+        data: { nodeKind: 'step', parentNodeId: null, workflowHash: wfHash, snapshotRef: snapRef },
+      },
+      {
+        // Same nodeId, but nodeKind changed from 'step' to 'checkpoint' -- conflict
+        v: 1, eventId: 'evt_node_2', eventIndex: 2, sessionId: 'sess_1', kind: 'node_created',
+        dedupeKey: 'node_created:sess_1:run_1:node_a:v2',
+        scope: { runId: 'run_1', nodeId: 'node_a' },
+        data: { nodeKind: 'checkpoint', parentNodeId: null, workflowHash: wfHash, snapshotRef: snapRef },
+      },
+    ];
+
+    const res = projectRunDagV2(events);
+    expect(res.isErr()).toBe(true);
+    expect(res._unsafeUnwrapErr().code).toBe('PROJECTION_CORRUPTION_DETECTED');
+  });
+
+  it('rejects a duplicate node_created with only snapshotRef differing (field-by-field equality)', () => {
+    // The field-by-field comparison must catch differences in any field, not just nodeKind.
+    // This test differs only in snapshotRef, verifying all fields are checked.
+    const wfHash = 'sha256:5947229239ac2966c1099d6d74f4448c064e54ae25959eaebfd89cec073bdc11';
+    const events: DomainEventV1[] = [
+      {
+        v: 1, eventId: 'evt_run', eventIndex: 0, sessionId: 'sess_1', kind: 'run_started',
+        dedupeKey: 'run_started:sess_1:run_1',
+        scope: { runId: 'run_1' },
+        data: { workflowId: 'test', workflowHash: wfHash, workflowSourceKind: 'project', workflowSourceRef: 't' },
+      },
+      {
+        v: 1, eventId: 'evt_node_1', eventIndex: 1, sessionId: 'sess_1', kind: 'node_created',
+        dedupeKey: 'node_created:sess_1:run_1:node_a',
+        scope: { runId: 'run_1', nodeId: 'node_a' },
+        data: { nodeKind: 'step', parentNodeId: null, workflowHash: wfHash, snapshotRef: 'sha256:aaa' },
+      },
+      {
+        // Same nodeId and eventIndex, but snapshotRef differs -- conflict
+        v: 1, eventId: 'evt_node_1', eventIndex: 1, sessionId: 'sess_1', kind: 'node_created',
+        dedupeKey: 'node_created:sess_1:run_1:node_a',
+        scope: { runId: 'run_1', nodeId: 'node_a' },
+        data: { nodeKind: 'step', parentNodeId: null, workflowHash: wfHash, snapshotRef: 'sha256:bbb' },
+      },
+    ];
+
+    const res = projectRunDagV2(events);
+    expect(res.isErr()).toBe(true);
+    expect(res._unsafeUnwrapErr().code).toBe('PROJECTION_CORRUPTION_DETECTED');
+  });
 });

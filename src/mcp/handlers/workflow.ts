@@ -5,15 +5,10 @@
  * Each handler receives typed input and context, returns ToolResult<T>.
  */
 
+import fs from 'fs';
+import path from 'path';
 import type { ToolContext, ToolResult } from '../types.js';
 import { success, errNotRetryable } from '../types.js';
-import {
-  WorkflowGetOutputSchema,
-  WorkflowGetSchemaOutputSchema,
-  WorkflowListOutputSchema,
-  WorkflowNextOutputSchema,
-  WorkflowValidateJsonOutputSchema,
-} from '../output-schemas.js';
 import { mapDomainErrorToToolError, mapUnknownErrorToToolError } from '../error-mapper.js';
 import type {
   WorkflowListInput,
@@ -50,8 +45,8 @@ export interface WorkflowNextOutput {
 
 export interface WorkflowValidateJsonOutput {
   valid: boolean;
-  errors?: Array<{ message: string; path?: string }>;
-  suggestions?: string[];
+  issues: string[];
+  suggestions: string[];
 }
 
 export interface WorkflowGetSchemaOutput {
@@ -74,6 +69,14 @@ export interface WorkflowGetSchemaOutput {
 
 const TIMEOUT_MS = 30_000;
 
+// Parse the workflow schema once at module load time.
+// handleWorkflowGetSchema is called on every agent first-contact; reading and
+// parsing the JSON file per-invocation adds unnecessary synchronous I/O.
+const WORKFLOW_SCHEMA: unknown = (() => {
+  const schemaPath = path.resolve(__dirname, '../../../spec/workflow.schema.json');
+  return JSON.parse(fs.readFileSync(schemaPath, 'utf-8'));
+})();
+
 // -----------------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------------
@@ -95,7 +98,7 @@ export async function handleWorkflowList(
       'workflow_list'
     );
 
-    const payload = WorkflowListOutputSchema.parse({ workflows });
+    const payload: WorkflowListOutput = { workflows };
     return success(payload);
   } catch (err) {
     const mapped = mapUnknownErrorToToolError(err);
@@ -123,7 +126,7 @@ export async function handleWorkflowGet(
       return mapped;
     }
 
-    const payload = WorkflowGetOutputSchema.parse({ workflow: result.value });
+    const payload: WorkflowGetOutput = { workflow: result.value };
     return success(payload);
   } catch (err) {
     // Check for timeout errors via structured error type (not string matching)
@@ -171,7 +174,7 @@ export async function handleWorkflowNext(
       return mapped;
     }
 
-    const payload = WorkflowNextOutputSchema.parse(result.value);
+    const payload = result.value as WorkflowNextOutput;
     return success(payload);
   } catch (err) {
     const elapsed = Date.now() - startTime;
@@ -208,7 +211,7 @@ export async function handleWorkflowValidateJson(
 
     const result = await validateWorkflowJsonUseCase(input.workflowJson);
 
-    const payload = WorkflowValidateJsonOutputSchema.parse(result);
+    const payload = result as WorkflowValidateJsonOutput;
     return success(payload);
   } catch (err) {
     const mapped = mapUnknownErrorToToolError(err);
@@ -224,13 +227,8 @@ export async function handleWorkflowGetSchema(
   void ctx;
 
   try {
-    const fs = await import('fs');
-    const path = await import('path');
-
-    // Load the workflow schema (relative to dist/mcp/handlers/)
-    const schemaPath = path.resolve(__dirname, '../../../spec/workflow.schema.json');
-    const schemaContent = fs.readFileSync(schemaPath, 'utf-8');
-    const schema = JSON.parse(schemaContent);
+    // Use the module-level constant parsed once at startup.
+    const schema = WORKFLOW_SCHEMA;
 
     const result: WorkflowGetSchemaOutput = {
       schema,
@@ -259,8 +257,7 @@ export async function handleWorkflowGetSchema(
       },
     };
 
-    const payload = WorkflowGetSchemaOutputSchema.parse(result);
-    return success(payload);
+    return success(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return errNotRetryable(

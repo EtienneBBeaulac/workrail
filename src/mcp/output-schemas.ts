@@ -52,15 +52,8 @@ export const WorkflowNextOutputSchema = z.object({
 
 export const WorkflowValidateJsonOutputSchema = z.object({
   valid: z.boolean(),
-  errors: z
-    .array(
-      z.object({
-        message: z.string(),
-        path: z.string().optional(),
-      })
-    )
-    .optional(),
-  suggestions: z.array(z.string()).optional(),
+  issues: z.array(z.string()),
+  suggestions: z.array(z.string()),
 });
 
 export const WorkflowGetSchemaOutputSchema = z.object({
@@ -406,29 +399,29 @@ export const V2BindingDriftWarningSchema = z.object({
  * Backward-looking: describes what happened during the step that just advanced.
  * Distinct from top-level fields, which are forward-looking (next pending step, tokens, intent).
  *
- * assessments: the assessment submitted and accepted for this step, if the step declared an
- * assessmentRef. Absent when no assessment was involved. Dimensions carry the normalized level
- * and optional rationale the agent recorded.
+ * assessments: one entry per assessmentRef declared on the step, in assessmentRefs order.
+ * Absent when no assessment was involved. Dimensions carry the normalized level and optional
+ * rationale the agent recorded.
  */
-export const V2StepContextSchema = z.object({
-  assessments: z
-    .object({
-      assessmentId: z.string().min(1),
-      dimensions: z.array(
-        z.object({
-          dimensionId: z.string().min(1),
-          level: z.string().min(1),
-          rationale: z.string().optional(),
-        })
-      ),
-      /**
-       * Non-empty when WorkRail normalized the agent's submitted levels (e.g. "HIGH" -> "high").
-       * Each entry explains one normalization applied. Empty array means all levels matched exactly.
-       * Agents can use this to correct their submissions in future steps.
-       */
-      normalizationNotes: z.array(z.string()).readonly(),
+const V2StepContextAssessmentSchema = z.object({
+  assessmentId: z.string().min(1),
+  dimensions: z.array(
+    z.object({
+      dimensionId: z.string().min(1),
+      level: z.string().min(1),
+      rationale: z.string().optional(),
     })
-    .optional(),
+  ),
+  /**
+   * Non-empty when WorkRail normalized the agent's submitted levels (e.g. "HIGH" -> "high").
+   * Each entry explains one normalization applied. Empty array means all levels matched exactly.
+   * Agents can use this to correct their submissions in future steps.
+   */
+  normalizationNotes: z.array(z.string()).readonly(),
+});
+
+export const V2StepContextSchema = z.object({
+  assessments: z.array(V2StepContextAssessmentSchema).optional(),
 });
 
 const V2ContinueWorkflowOkSchema = z.object({
@@ -582,6 +575,10 @@ export const V2StartWorkflowOutputSchema = z.object({
     'Workflow source paths that were inaccessible during discovery (missing remembered roots or missing managed source directories). ' +
     'Workflows from these paths were not included in this response. ' +
     'These paths will be rechecked on the next call.'
+  ),
+  warnings: z.array(z.string()).optional().describe(
+    'Non-fatal warnings about workflow source availability. ' +
+    'The workflow was started successfully but some sources may have been unavailable (e.g., managed source store temporarily inaccessible).'
   ),
 }).refine(
   (data) => (data.pending ? data.continueToken != null : true),

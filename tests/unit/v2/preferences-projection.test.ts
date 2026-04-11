@@ -3,6 +3,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { projectPreferencesV2 } from '../../../src/v2/projections/preferences.js';
+import { asSortedEventLog } from '../../../src/v2/durable-core/sorted-event-log.js';
 import type { DomainEventV1 } from '../../../src/v2/durable-core/schemas/session/index.js';
 
 describe('v2 preferences projection', () => {
@@ -40,8 +41,10 @@ describe('v2 preferences projection', () => {
       },
     ];
 
+    const sorted = asSortedEventLog(events);
+    expect(sorted.isOk()).toBe(true);
     const parentMap = { root: null, child: 'root', grandchild: 'child' };
-    const res = projectPreferencesV2(events, parentMap);
+    const res = projectPreferencesV2(sorted._unsafeUnwrap(), parentMap);
     expect(res.isOk()).toBe(true);
     const projected = res._unsafeUnwrap();
 
@@ -60,7 +63,9 @@ describe('v2 preferences projection', () => {
 
     const events: DomainEventV1[] = [];  // No events needed, cycle detection is structural
 
-    const result = projectPreferencesV2(events, parentMap);
+    const sorted = asSortedEventLog(events);
+    expect(sorted.isOk()).toBe(true);
+    const result = projectPreferencesV2(sorted._unsafeUnwrap(), parentMap);
 
     expect(result.isErr()).toBe(true);
     if (result.isErr()) {
@@ -77,7 +82,9 @@ describe('v2 preferences projection', () => {
 
     const events: DomainEventV1[] = [];
 
-    const result = projectPreferencesV2(events, parentMap);
+    const sorted = asSortedEventLog(events);
+    expect(sorted.isOk()).toBe(true);
+    const result = projectPreferencesV2(sorted._unsafeUnwrap(), parentMap);
 
     expect(result.isErr()).toBe(true);
     if (result.isErr()) {
