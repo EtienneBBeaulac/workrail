@@ -56,19 +56,6 @@ export interface WorkspaceItem {
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** Sessions in_progress with no update in this window are treated as dormant. */
-const DORMANT_THRESHOLD_MS = 30 * 60 * 1000;
-
-/**
- * Returns the effective display status for a session.
- * An in_progress session that hasn't been updated in 30 minutes is treated as
- * dormant -- it's stalled rather than actively running.
- */
-export function effectiveStatus(session: ConsoleSessionSummary, nowMs: number): ConsoleSessionStatus {
-  if (session.status === 'in_progress' && nowMs - session.lastModifiedMs > DORMANT_THRESHOLD_MS) {
-    return 'dormant';
-  }
-  return session.status;
-}
 
 /** Priority order for selecting the primary session from a branch's sessions. */
 const STATUS_PRIORITY: Record<ConsoleSessionStatus, number> = {
@@ -92,11 +79,10 @@ const STATUS_PRIORITY: Record<ConsoleSessionStatus, number> = {
  */
 export function selectPrimarySession(
   sessions: readonly ConsoleSessionSummary[],
-  nowMs: number = Date.now(),
 ): ConsoleSessionSummary | undefined {
   if (sessions.length === 0) return undefined;
   return [...sessions].sort((a, b) => {
-    const priorityDiff = STATUS_PRIORITY[effectiveStatus(a, nowMs)] - STATUS_PRIORITY[effectiveStatus(b, nowMs)];
+    const priorityDiff = STATUS_PRIORITY[a.status] - STATUS_PRIORITY[b.status];
     if (priorityDiff !== 0) return priorityDiff;
     return b.lastModifiedMs - a.lastModifiedMs;
   })[0];
@@ -114,7 +100,7 @@ export function itemVisibility(
   scope: Scope,
   nowMs: number,
 ): ItemVisibility {
-  const status = item.primarySession ? effectiveStatus(item.primarySession, nowMs) : undefined;
+  const status = item.primarySession?.status;
 
   // Active sessions are always visible regardless of age or cleanliness
   if (status === 'in_progress' || status === 'dormant' || status === 'blocked') {
@@ -147,8 +133,8 @@ export function itemVisibility(
  * The gaps badge is surfaced inline on the row -- the sort position does not
  * need to distinguish them.
  */
-function sortPriority(item: WorkspaceItem, nowMs: number): 0 | 1 | 2 | 3 | 4 {
-  const status = item.primarySession ? effectiveStatus(item.primarySession, nowMs) : undefined;
+function sortPriority(item: WorkspaceItem): 0 | 1 | 2 | 3 | 4 {
+  const status = item.primarySession?.status;
   switch (status) {
     case 'in_progress': return 0;
     case 'blocked': return 1;
@@ -177,7 +163,7 @@ export function sortItemsForRepo(
   return [...items]
     .filter((item) => itemVisibility(item, scope, nowMs) === 'visible')
     .sort((a, b) => {
-      const priorityDiff = sortPriority(a, nowMs) - sortPriority(b, nowMs);
+      const priorityDiff = sortPriority(a) - sortPriority(b);
       if (priorityDiff !== 0) return priorityDiff;
       return b.activityMs - a.activityMs;
     });

@@ -78,9 +78,8 @@ const MAX_SESSIONS_TO_LOAD = 500;
 // Dormancy
 // ---------------------------------------------------------------------------
 
-/** Sessions in_progress with no activity for this long are considered dormant.
- * 3 days covers the "started on Friday, not coming back Monday" scenario. */
-const DORMANCY_THRESHOLD_MS = 3 * 24 * 60 * 60 * 1000;
+/** Sessions in_progress with no activity for this long are considered dormant. */
+const DORMANCY_THRESHOLD_MS = 30 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // Run completion map — keyed by runId, true when preferred tip snapshot
