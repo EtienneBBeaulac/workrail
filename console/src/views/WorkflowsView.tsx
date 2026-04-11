@@ -86,9 +86,13 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
   const [hintVisible, setHintVisible] = useState(false);
   const { data, isLoading, isError, error, refetch } = useWorkflowList();
 
-  // Issue #6: Restore focus to the card that opened the modal when it closes.
+  // Focus management: move focus into the modal on open, restore to trigger on close.
   useEffect(() => {
-    if (!selectedWorkflowId && triggerRef.current) {
+    if (selectedWorkflowId) {
+      // rAF defers until after the opacity transition starts so the panel is visible
+      const id = requestAnimationFrame(() => modalPanelRef.current?.focus());
+      return () => cancelAnimationFrame(id);
+    } else if (triggerRef.current) {
       triggerRef.current.focus();
       triggerRef.current = null;
     }
