@@ -12,6 +12,8 @@
  */
 
 import { z } from 'zod';
+import * as fs from 'fs';
+import * as path from 'path';
 import { zodToJsonSchema } from './zod-to-json-schema.js';
 import { bootstrap, container } from '../di/container.js';
 import { DI } from '../di/tokens.js';
@@ -38,6 +40,7 @@ import {
   ToolCallTimingRingBuffer,
   composeSinks,
   createDevPerfSink,
+  createDiskPersistSink,
   createRingBufferSink,
   withToolCallTiming,
   type ToolCallTimingSink,
@@ -275,6 +278,23 @@ export async function composeServer(): Promise<ComposedServerInternal> {
   // ---------------------------------------------------------------------------
   const timingRingBuffer = new ToolCallTimingRingBuffer(DEFAULT_RING_BUFFER_CAPACITY);
 
+  // Server version read once at startup for stamping persisted timing records.
+  // Uses fs.readFileSync to avoid import assertion syntax incompatible with commonjs module target.
+  let serverVersion = 'unknown';
+  try {
+    const pkgPath = path.resolve(__dirname, '../../package.json');
+    const pkgJson = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as { version?: string };
+    if (pkgJson.version) serverVersion = pkgJson.version;
+  } catch {
+    // Non-fatal: version defaults to 'unknown' if package.json is unreadable
+  }
+
+  // Derive the tool-calls JSONL path from the data dir port (respects WORKRAIL_DATA_DIR).
+  // null when v2 data dir is not available (e.g. v2 tools disabled).
+  const toolCallsPerfFile: string | null = ctx.v2?.dataDir
+    ? path.join(ctx.v2.dataDir.perfDir(), 'tool-calls.jsonl')
+    : null;
+
   // Mount v2 Console API routes (read-only, if v2 + httpServer available)
   if (ctx.v2 && ctx.httpServer && ctx.v2.dataDir && ctx.v2.directoryListing) {
     const { ConsoleService } = await import('../v2/usecases/console-service.js');
@@ -286,7 +306,14 @@ export async function composeServer(): Promise<ComposedServerInternal> {
       snapshotStore: ctx.v2.snapshotStore,
       pinnedWorkflowStore: ctx.v2.pinnedStore,
     });
-    ctx.httpServer.mountRoutes((app) => mountConsoleRoutes(app, consoleService, ctx.workflowService, timingRingBuffer));
+    ctx.httpServer.mountRoutes((app) => mountConsoleRoutes(
+      app,
+      consoleService,
+      ctx.workflowService,
+      timingRingBuffer,
+      toolCallsPerfFile ?? undefined,
+      serverVersion,
+    ));
     console.error('[Console] v2 Console API routes mounted at /api/v2/');
   }
 
@@ -379,13 +406,22 @@ export async function composeServer(): Promise<ComposedServerInternal> {
   // ---------------------------------------------------------------------------
   // Tool call timing sink
   //
-  // Observations flow into the ring buffer created above (shared with console route).
-  // When WORKRAIL_DEV=1, stderr output is composed in as a second sink.
+  // Observations flow into:
+  // 1. The in-memory ring buffer (shared with console route for fast reads)
+  // 2. The JSONL file on disk (persistent, 30-day retention via lazy eviction)
+  // When WORKRAIL_DEV=1, stderr output is composed in as a third sink.
   // ---------------------------------------------------------------------------
   const devMode = isDevMode();
-  const timingSink: ToolCallTimingSink = devMode
-    ? composeSinks(createRingBufferSink(timingRingBuffer), createDevPerfSink())
-    : createRingBufferSink(timingRingBuffer);
+  const diskSink: ToolCallTimingSink | null = toolCallsPerfFile
+    ? createDiskPersistSink(toolCallsPerfFile, serverVersion)
+    : null;
+  const timingSink: ToolCallTimingSink = diskSink
+    ? devMode
+      ? composeSinks(createRingBufferSink(timingRingBuffer), diskSink, createDevPerfSink())
+      : composeSinks(createRingBufferSink(timingRingBuffer), diskSink)
+    : devMode
+      ? composeSinks(createRingBufferSink(timingRingBuffer), createDevPerfSink())
+      : createRingBufferSink(timingRingBuffer);
 
   if (devMode) {
     console.error('[PerfTrace] WORKRAIL_DEV=1 -- tool call timing active');
