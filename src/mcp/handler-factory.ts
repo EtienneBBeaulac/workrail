@@ -15,7 +15,7 @@
 import { z } from 'zod';
 import type { ToolContext, ToolResult, ToolError } from './types.js';
 import { errNotRetryable } from './types.js';
-import { coerceJsonStringObjectFields } from './boundary-coercion.js';
+import { buildCoercionFn } from './boundary-coercion.js';
 import {
   generateSuggestions,
   formatSuggestionDetails,
@@ -34,19 +34,29 @@ import { getV2ExecutionRenderEnvelope } from './render-envelope.js';
 // -----------------------------------------------------------------------------
 
 /**
+ * Module-level JSON override: read once at load time (same as before).
+ * WORKRAIL_JSON_RESPONSES is not a feature flag; it is a raw env var.
+ */
+const jsonResponsesOverride = process.env.WORKRAIL_JSON_RESPONSES === 'true';
+
+/**
  * Convert our ToolResult<T> to MCP's CallToolResult format.
  *
  * For error results, serializes the unified envelope:
  * { code, message, retry, details? }
+ *
+ * @param result - The tool result to convert
+ * @param ctx - Tool context providing feature flags. When absent (e.g., error path
+ *   before handler runs), clean response format defaults to false.
  */
-const jsonResponsesOverride = process.env.WORKRAIL_JSON_RESPONSES === 'true';
-
-export function toMcpResult<T>(result: ToolResult<T>): McpCallToolResult {
+export function toMcpResult<T>(result: ToolResult<T>, ctx?: ToolContext): McpCallToolResult {
   switch (result.type) {
     case 'success': {
+      const cleanResponseFormat = ctx?.featureFlags.isEnabled('cleanResponseFormat') ?? false;
+
       if (!jsonResponsesOverride) {
         const formatted: FormattedResponse | null =
-          formatV2ExecutionResponse(result.data) ?? formatV2ResumeResponse(result.data);
+          formatV2ExecutionResponse(result.data, cleanResponseFormat) ?? formatV2ResumeResponse(result.data);
         if (formatted !== null) {
           const content: { type: 'text'; text: string }[] = [{ type: 'text', text: formatted.primary }];
           if (formatted.references != null) {
@@ -68,7 +78,7 @@ export function toMcpResult<T>(result: ToolResult<T>): McpCallToolResult {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(jsonPayload, null, 2),
+          text: JSON.stringify(jsonPayload),
         }],
       };
     }
@@ -81,7 +91,7 @@ export function toMcpResult<T>(result: ToolResult<T>): McpCallToolResult {
             message: result.message,
             retry: result.retry,
             ...(result.details !== undefined ? { details: result.details } : {}),
-          }, null, 2),
+          }),
         }],
         isError: true,
       };
@@ -113,13 +123,17 @@ export function createHandler<TInput extends z.ZodType, TOutput>(
   shapeSchema?: z.ZodObject<z.ZodRawShape>,
   aliasMap?: Readonly<Record<string, string>>,
 ): WrappedToolHandler {
+  // Pre-compute the coercion function once at registration time.
+  // Avoids per-call schema traversal (building objectFields Set) on the hot path.
+  const coerce = shapeSchema !== undefined
+    ? buildCoercionFn(shapeSchema, aliasMap)
+    : null;
+
   return async (args: unknown, ctx: ToolContext): Promise<McpCallToolResult> => {
     // Normalize JSON-encoded string values to objects before Zod validation.
     // Some MCP clients serialize complex parameters as JSON strings rather than
     // inline objects. The shape schema identifies which fields expect objects.
-    const normalizedArgs = shapeSchema !== undefined
-      ? coerceJsonStringObjectFields(args, shapeSchema, aliasMap)
-      : args;
+    const normalizedArgs = coerce !== null ? coerce(args) : args;
     const parseResult = schema.safeParse(normalizedArgs);
     if (!parseResult.success) {
       // Use shape schema for introspection (interface segregation), validation schema as fallback
@@ -150,14 +164,15 @@ export function createHandler<TInput extends z.ZodType, TOutput>(
             message: e.message,
           })),
           ...patchedDetails,
-        })
+        }),
+        ctx
       );
     }
     // Boundary safety net: if a handler throws instead of returning ToolResult,
     // catch the exception and convert it to a structured error envelope.
     // This prevents raw Error objects from leaking to the MCP SDK.
     try {
-      return toMcpResult(await handler(parseResult.data, ctx));
+      return toMcpResult(await handler(parseResult.data, ctx), ctx);
     } catch (err) {
       // Log the raw error for server-side debugging (stderr, not agent-facing)
       console.error('[WorkRail] Unhandled exception in tool handler:', err);
@@ -165,7 +180,8 @@ export function createHandler<TInput extends z.ZodType, TOutput>(
         errNotRetryable('INTERNAL_ERROR',
           'WorkRail encountered an unexpected error. This is not caused by your input.',
           { suggestion: internalSuggestion('Retry the call.', 'WorkRail has an internal error.') },
-        )
+        ),
+        ctx
       );
     }
   };
@@ -191,11 +207,20 @@ export function createValidatingHandler<TInput extends z.ZodType, TOutput>(
   shapeSchema?: z.ZodObject<z.ZodRawShape>,
   aliasMap?: Readonly<Record<string, string>>,
 ): WrappedToolHandler {
+  // Pre-compute the coercion function once at registration time.
+  const coerce = shapeSchema !== undefined
+    ? buildCoercionFn(shapeSchema, aliasMap)
+    : null;
+
+  // Pre-build the inner handler at registration time.
+  // Pass shapeSchema for introspection but omit aliasMap — coercion happens
+  // above via the pre-computed coerce fn, so the inner handler only needs
+  // shapeSchema for error-path suggestion generation.
+  const innerHandler = createHandler(schema, handler, shapeSchema);
+
   return async (args: unknown, ctx: ToolContext): Promise<McpCallToolResult> => {
     // Normalize JSON-encoded string fields before pre-validation and Zod parsing.
-    const normalizedArgs = shapeSchema !== undefined
-      ? coerceJsonStringObjectFields(args, shapeSchema, aliasMap)
-      : args;
+    const normalizedArgs = coerce !== null ? coerce(args) : args;
     const pre = preValidate(normalizedArgs);
     if (!pre.ok) {
       const error = pre.error;
@@ -216,14 +241,15 @@ export function createValidatingHandler<TInput extends z.ZodType, TOutput>(
           ...error,
           details: boundedDetails as ToolError['details'],
         };
-        return toMcpResult(boundedError);
+        return toMcpResult(boundedError, ctx);
       }
 
-      return toMcpResult(error);
+      return toMcpResult(error, ctx);
     }
 
     // Fall back to the standard Zod + handler pipeline.
-    // Pass normalizedArgs so coercion is not applied twice.
-    return createHandler(schema, handler, shapeSchema, aliasMap)(normalizedArgs, ctx);
+    // Pass normalizedArgs — args are already coerced above, so the inner
+    // handler's coerce fn (built without aliasMap) is a safe no-op.
+    return innerHandler(normalizedArgs, ctx);
   };
 }

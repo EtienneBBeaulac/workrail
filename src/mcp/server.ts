@@ -32,7 +32,7 @@ import { LocalDirectoryListingV2 } from '../v2/infra/local/directory-listing/ind
 import { LocalSessionSummaryProviderV2 } from '../v2/infra/local/session-summary-provider/index.js';
 
 import { createToolFactory, type ToolAnnotations, type ToolDefinition } from './tool-factory.js';
-import { DEV_MODE } from './dev-mode.js';
+import { isDevMode } from './dev-mode.js';
 import {
   DEFAULT_RING_BUFFER_CAPACITY,
   ToolCallTimingRingBuffer,
@@ -260,8 +260,11 @@ export interface ComposedServerInternal extends ComposedServer {
  * Those belong in the transport-specific entry points.
  */
 export async function composeServer(): Promise<ComposedServerInternal> {
-  // Bootstrap DI container
-  await bootstrap({ runtimeMode: { kind: 'production' } });
+  // Bootstrap DI container. No runtimeMode override -- detectRuntimeMode() in
+  // container.ts is the single source of truth (reads VITEST / NODE_ENV=test).
+  // Hardcoding 'production' here bypassed test isolation, causing NodeProcessSignals
+  // and NodeProcessTerminator to be used in tests instead of their noop/throwing variants.
+  await bootstrap();
 
   // Create tool context with all dependencies
   const ctx = await createToolContext();
@@ -379,11 +382,12 @@ export async function composeServer(): Promise<ComposedServerInternal> {
   // Observations flow into the ring buffer created above (shared with console route).
   // When WORKRAIL_DEV=1, stderr output is composed in as a second sink.
   // ---------------------------------------------------------------------------
-  const timingSink: ToolCallTimingSink = DEV_MODE
+  const devMode = isDevMode();
+  const timingSink: ToolCallTimingSink = devMode
     ? composeSinks(createRingBufferSink(timingRingBuffer), createDevPerfSink())
     : createRingBufferSink(timingRingBuffer);
 
-  if (DEV_MODE) {
+  if (devMode) {
     console.error('[PerfTrace] WORKRAIL_DEV=1 -- tool call timing active');
   }
 

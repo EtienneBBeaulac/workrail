@@ -23,7 +23,7 @@
 
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
-import type { WorkflowReference } from '../../types/workflow-definition.js';
+import type { WorkflowReference, ResolveFrom } from '../../types/workflow-definition.js';
 import type { ResolvedReference } from '../step-content-envelope.js';
 
 export interface ReferenceResolutionWarning {
@@ -128,7 +128,7 @@ export async function resolveWorkflowReferences(
       source: ref.source,
       purpose: ref.purpose,
       authoritative: ref.authoritative,
-      resolveFrom: (ref.resolveFrom ?? 'workspace') as 'workspace' | 'package',
+      resolveFrom: (ref.resolveFrom ?? 'workspace') as ResolveFrom,
     } as const;
 
     resolved.push(

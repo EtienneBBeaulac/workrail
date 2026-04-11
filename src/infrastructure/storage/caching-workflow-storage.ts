@@ -23,9 +23,12 @@ interface Cached<T> {
  */
 export class CachingWorkflowStorage implements IWorkflowStorage {
   public readonly kind = 'single' as const;
-  
+
   private workflowCache: Cached<readonly Workflow[]> | null = null;
   private summaryCache: Cached<readonly WorkflowSummary[]> | null = null;
+  // Map index over workflowCache for O(1) getWorkflowById lookups.
+  // Rebuilt whenever workflowCache is populated; cleared with it.
+  private workflowCacheIndex: Map<string, Workflow> | null = null;
   private stats = { hits: 0, misses: 0 };
 
   constructor(
@@ -47,6 +50,7 @@ export class CachingWorkflowStorage implements IWorkflowStorage {
   public clearCache(): void {
     this.workflowCache = null;
     this.summaryCache = null;
+    this.workflowCacheIndex = null;
   }
 
   private isFresh<T>(cache: Cached<T> | null): cache is Cached<T> {
@@ -58,25 +62,29 @@ export class CachingWorkflowStorage implements IWorkflowStorage {
       this.stats.hits += 1;
       return deepClone(this.workflowCache.value);
     }
-    
+
     this.stats.misses += 1;
     const workflows = await this.inner.loadAllWorkflows();
     this.workflowCache = { value: workflows, timestamp: Date.now() };
-    
+    // Rebuild the Map index so getWorkflowById lookups are O(1).
+    this.workflowCacheIndex = new Map(workflows.map((w) => [w.definition.id, w]));
+
     // Also invalidate summary cache since workflows changed
     this.summaryCache = null;
-    
+
     return deepClone(workflows);
   }
 
   async getWorkflowById(id: string): Promise<Workflow | null> {
-    // Try to find in cached workflows first
-    if (this.isFresh(this.workflowCache)) {
-      const wf = this.workflowCache.value.find((w) => w.definition.id === id);
-      if (wf) {
+    // Use Map index for O(1) lookup when cache is warm.
+    if (this.isFresh(this.workflowCache) && this.workflowCacheIndex !== null) {
+      const wf = this.workflowCacheIndex.get(id);
+      if (wf !== undefined) {
         this.stats.hits += 1;
         return deepClone(wf);
       }
+      // id is not in the index -- no point hitting inner storage
+      return null;
     }
     
     // Fall through to inner storage
@@ -116,16 +124,18 @@ export class CachingWorkflowStorage implements IWorkflowStorage {
  */
 export class CachingCompositeWorkflowStorage implements ICompositeWorkflowStorage {
   public readonly kind = 'composite' as const;
-  
+
   private workflowCache: Cached<readonly Workflow[]> | null = null;
   private summaryCache: Cached<readonly WorkflowSummary[]> | null = null;
+  // Map index over workflowCache for O(1) getWorkflowById lookups.
+  private workflowCacheIndex: Map<string, Workflow> | null = null;
   private stats = { hits: 0, misses: 0 };
-  
+
   constructor(
     private readonly inner: ICompositeWorkflowStorage,
     private readonly ttlMs: number
   ) {}
-  
+
   private isFresh<T>(cache: Cached<T> | null): cache is Cached<T> {
     return cache !== null && Date.now() - cache.timestamp < this.ttlMs;
   }
@@ -143,24 +153,29 @@ export class CachingCompositeWorkflowStorage implements ICompositeWorkflowStorag
       this.stats.hits += 1;
       return deepClone(this.workflowCache.value);
     }
-    
+
     this.stats.misses += 1;
     const workflows = await this.inner.loadAllWorkflows();
     this.workflowCache = { value: workflows, timestamp: Date.now() };
+    // Rebuild the Map index so getWorkflowById lookups are O(1).
+    this.workflowCacheIndex = new Map(workflows.map((w) => [w.definition.id, w]));
     this.summaryCache = null;
-    
+
     return deepClone(workflows);
   }
 
   async getWorkflowById(id: string): Promise<Workflow | null> {
-    if (this.isFresh(this.workflowCache)) {
-      const wf = this.workflowCache.value.find((w) => w.definition.id === id);
-      if (wf) {
+    // Use Map index for O(1) lookup when cache is warm.
+    if (this.isFresh(this.workflowCache) && this.workflowCacheIndex !== null) {
+      const wf = this.workflowCacheIndex.get(id);
+      if (wf !== undefined) {
         this.stats.hits += 1;
         return deepClone(wf);
       }
+      // id is not in the index -- no point hitting inner storage
+      return null;
     }
-    
+
     this.stats.misses += 1;
     const workflow = await this.inner.getWorkflowById(id);
     return workflow ? deepClone(workflow) : null;
@@ -171,11 +186,11 @@ export class CachingCompositeWorkflowStorage implements ICompositeWorkflowStorag
       this.stats.hits += 1;
       return deepClone(this.summaryCache.value);
     }
-    
+
     this.stats.misses += 1;
     const summaries = await this.inner.listWorkflowSummaries();
     this.summaryCache = { value: summaries, timestamp: Date.now() };
-    
+
     return deepClone(summaries);
   }
 
@@ -184,6 +199,7 @@ export class CachingCompositeWorkflowStorage implements ICompositeWorkflowStorag
       await this.inner.save(definition);
       this.workflowCache = null;
       this.summaryCache = null;
+      this.workflowCacheIndex = null;
     }
   }
 
@@ -194,5 +210,6 @@ export class CachingCompositeWorkflowStorage implements ICompositeWorkflowStorag
   clearCache(): void {
     this.workflowCache = null;
     this.summaryCache = null;
+    this.workflowCacheIndex = null;
   }
 }

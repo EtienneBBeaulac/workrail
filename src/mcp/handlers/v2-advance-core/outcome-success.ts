@@ -4,6 +4,7 @@
  */
 
 import { ResultAsync as RA, errAsync as neErrorAsync } from 'neverthrow';
+import type { SessionIndex } from '../../../v2/durable-core/session-index.js';
 import type { ExecutionSnapshotFileV1 } from '../../../v2/durable-core/schemas/execution-snapshot/index.js';
 import type { SessionId, RunId, NodeId, WorkflowHash } from '../../../v2/durable-core/ids/index.js';
 import type { AttemptId } from '../../../v2/durable-core/tokens/index.js';
@@ -50,6 +51,7 @@ export function buildSuccessOutcome(args: {
   readonly v: ValidatedAdvanceInputs;
   readonly lock: WithHealthySessionLock;
   readonly ports: AdvanceCorePorts;
+  readonly lockedIndex: SessionIndex;
 }): RA<void, InternalError | SessionEventLogStoreError | SnapshotStoreError> {
   const { mode, v, lock, ports } = args;
   const { truth, sessionId, runId, currentNodeId, attemptId, workflowHash, inputOutput, pinnedWorkflow, engineState, pendingStep } = args.ctx;
@@ -192,8 +194,15 @@ export function buildSuccessOutcome(args: {
       return errAsync(artifactOutputsRes.error);
     }
 
-    if (v.recordedAssessment && v.assessmentArtifact && v.assessmentValidation?.acceptedArtifactIndex !== undefined) {
-      const assessmentOutput = artifactOutputsRes.value[v.assessmentValidation.acceptedArtifactIndex];
+    // Emit one assessment_recorded event per accepted assessment (one per assessmentRef).
+    // recordedAssessments[i] and acceptedArtifacts[i] are positionally aligned — built in the same loop.
+    const acceptedArtifacts = v.assessmentValidation?.acceptedArtifacts ?? [];
+    for (let i = 0; i < acceptedArtifacts.length; i++) {
+      const { artifactIndex } = acceptedArtifacts[i]!;
+      const recordedAssessment = v.assessmentValidation?.recordedAssessments[i];
+      if (!recordedAssessment) continue;
+
+      const assessmentOutput = artifactOutputsRes.value[artifactIndex];
       if (!assessmentOutput || assessmentOutput.outputChannel !== 'artifact') {
         return errAsync({
           kind: 'invariant_violation',
@@ -206,7 +215,7 @@ export function buildSuccessOutcome(args: {
         attemptId: String(attemptId),
         artifactOutputId: String(assessmentOutput.outputId),
         scope: { runId: String(runId), nodeId: String(currentNodeId) },
-        assessment: v.recordedAssessment,
+        assessment: recordedAssessment,
         minted: { eventId: idFactory.mintEventId() },
       });
       if (assessmentEventRes.isErr()) {
@@ -219,7 +228,7 @@ export function buildSuccessOutcome(args: {
 
     return buildAndAppendPlan({
       kind: 'advanced',
-      truth, sessionId, runId, currentNodeId, attemptId, workflowHash,
+      truth, lockedIndex: args.lockedIndex, sessionId, runId, currentNodeId, attemptId, workflowHash,
       extraEventsToAppend, toNodeKind: successNodeKind(mode),
       snapshotRef: newSnapshotRef, outputsToAppend,
       sessionStore, idFactory, lock,

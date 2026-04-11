@@ -1,0 +1,351 @@
+/**
+ * Tests for performance fixes (issue #258).
+ *
+ * Each test is written BEFORE the corresponding fix is implemented (TDD).
+ * Tests verify:
+ * 1. AJV singleton: same compiled validator instance across storage constructions
+ * 2. N+1 reads: getWorkflowById not called during list_workflows
+ * 3. Map cache: CachingWorkflowStorage.getWorkflowById returns correct result via Map
+ * 4. Schema caching: handleWorkflowGetSchema returns consistent schema content
+ */
+
+import { describe, it, expect, vi } from 'vitest';
+import { EnhancedMultiSourceWorkflowStorage } from '../../src/infrastructure/storage/enhanced-multi-source-workflow-storage';
+import { SchemaValidatingCompositeWorkflowStorage } from '../../src/infrastructure/storage/schema-validating-workflow-storage';
+import { CachingWorkflowStorage, CachingCompositeWorkflowStorage } from '../../src/infrastructure/storage/caching-workflow-storage';
+import { InMemoryWorkflowStorage } from '../../src/infrastructure/storage/in-memory-storage';
+import { handleWorkflowGetSchema } from '../../src/mcp/handlers/workflow';
+import { createBundledSource } from '../../src/types/workflow';
+import type { WorkflowDefinition } from '../../src/types/workflow';
+import type { ToolContext } from '../../src/mcp/types';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function makeDef(id: string): WorkflowDefinition {
+  return {
+    id,
+    name: `Workflow ${id}`,
+    description: 'A test workflow',
+    version: '1.0.0',
+    steps: [
+      {
+        id: 'step-1',
+        title: 'Step One',
+        prompt: 'Do the thing',
+      },
+    ],
+  };
+}
+
+function makeEmptyCompositeStorage(): EnhancedMultiSourceWorkflowStorage {
+  return new EnhancedMultiSourceWorkflowStorage({
+    includeBundled: false,
+    includeUser: false,
+    includeProject: false,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Fix 1: AJV singleton
+// ---------------------------------------------------------------------------
+
+describe('Fix 1: AJV singleton across SchemaValidatingCompositeWorkflowStorage instances', () => {
+  it('uses the same compiled validator instance for every construction', () => {
+    const storage1 = new SchemaValidatingCompositeWorkflowStorage(makeEmptyCompositeStorage());
+    const storage2 = new SchemaValidatingCompositeWorkflowStorage(makeEmptyCompositeStorage());
+
+    // Access the internal validator via type-bypass.
+    // After fix: both instances share one module-level compiled validator.
+    const v1 = (storage1 as unknown as { validator: unknown }).validator;
+    const v2 = (storage2 as unknown as { validator: unknown }).validator;
+
+    expect(v1).toBeDefined();
+    expect(v2).toBeDefined();
+    // Strict reference equality: same function object
+    expect(v1).toBe(v2);
+  });
+
+  it('validator still correctly validates a valid workflow definition', async () => {
+    const inner = makeEmptyCompositeStorage();
+    const memStorage = new InMemoryWorkflowStorage([makeDef('test-singleton')], createBundledSource());
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (inner as any).storageInstances = [memStorage];
+
+    const storage = new SchemaValidatingCompositeWorkflowStorage(inner);
+    const workflows = await storage.loadAllWorkflows();
+    expect(workflows.map((w) => w.definition.id)).toContain('test-singleton');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix 2: N+1 reads eliminated - getWorkflowById never called during list
+// ---------------------------------------------------------------------------
+
+describe('Fix 2: N+1 reads - loadAllWorkflows used; getWorkflowById never called during list', () => {
+  it('never calls getWorkflowById on inner storage when listing via CachingWorkflowStorage.loadAllWorkflows', async () => {
+    const defs = [makeDef('wf-a'), makeDef('wf-b'), makeDef('wf-c')];
+    const inner = new InMemoryWorkflowStorage(defs, createBundledSource());
+    const getByIdSpy = vi.spyOn(inner, 'getWorkflowById');
+
+    const caching = new CachingWorkflowStorage(inner, 60_000);
+
+    // Simulate what handleV2ListWorkflows does: one loadAllWorkflows call, no fan-out
+    const allWorkflows = await caching.loadAllWorkflows();
+
+    // getWorkflowById must never have been called on the inner storage
+    expect(getByIdSpy).not.toHaveBeenCalled();
+
+    // The returned list must contain all expected workflows
+    const returnedIds = allWorkflows.map((w) => w.definition.id).sort();
+    expect(returnedIds).toEqual(['wf-a', 'wf-b', 'wf-c']);
+  });
+
+  it('never calls getWorkflowById on inner storage when listing via CachingCompositeWorkflowStorage.loadAllWorkflows', async () => {
+    const defs = [makeDef('wf-x'), makeDef('wf-y')];
+    const inner = new InMemoryWorkflowStorage(defs, createBundledSource());
+    const getByIdSpy = vi.spyOn(inner, 'getWorkflowById');
+
+    const composite = makeEmptyCompositeStorage();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (composite as any).storageInstances = [inner];
+
+    const caching = new CachingCompositeWorkflowStorage(composite, 60_000);
+    const allWorkflows = await caching.loadAllWorkflows();
+
+    expect(getByIdSpy).not.toHaveBeenCalled();
+
+    const returnedIds = allWorkflows.map((w) => w.definition.id).sort();
+    expect(returnedIds).toEqual(['wf-x', 'wf-y']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix 3: Map cache in CachingWorkflowStorage
+// ---------------------------------------------------------------------------
+
+describe('Fix 3: CachingWorkflowStorage uses Map for getWorkflowById', () => {
+  it('returns the correct workflow by id when cache is warm', async () => {
+    const defs = [makeDef('alpha'), makeDef('beta'), makeDef('gamma')];
+    const inner = new InMemoryWorkflowStorage(defs, createBundledSource());
+    const caching = new CachingWorkflowStorage(inner, 60_000);
+
+    // Warm the cache
+    await caching.loadAllWorkflows();
+
+    // Should resolve from cache (not inner storage)
+    const result = await caching.getWorkflowById('beta');
+    expect(result).not.toBeNull();
+    expect(result!.definition.id).toBe('beta');
+  });
+
+  it('returns null for an id not in the cache', async () => {
+    const defs = [makeDef('alpha'), makeDef('beta')];
+    const inner = new InMemoryWorkflowStorage(defs, createBundledSource());
+    const caching = new CachingWorkflowStorage(inner, 60_000);
+
+    await caching.loadAllWorkflows();
+
+    const result = await caching.getWorkflowById('nonexistent');
+    expect(result).toBeNull();
+  });
+
+  it('increments hit count when resolving via cache', async () => {
+    const defs = [makeDef('delta')];
+    const inner = new InMemoryWorkflowStorage(defs, createBundledSource());
+    const caching = new CachingWorkflowStorage(inner, 60_000);
+
+    await caching.loadAllWorkflows();
+    const statsBefore = caching.getCacheStats();
+
+    await caching.getWorkflowById('delta');
+    const statsAfter = caching.getCacheStats();
+
+    expect(statsAfter.hits).toBeGreaterThan(statsBefore.hits);
+  });
+
+  it('invalidates Map index when clearCache is called', async () => {
+    const defs = [makeDef('epsilon')];
+    const inner = new InMemoryWorkflowStorage(defs, createBundledSource());
+    const caching = new CachingWorkflowStorage(inner, 60_000);
+
+    // Warm cache and verify Map lookup works
+    await caching.loadAllWorkflows();
+    const before = await caching.getWorkflowById('epsilon');
+    expect(before).not.toBeNull();
+
+    // Clear cache -- Map index must also be invalidated
+    caching.clearCache();
+
+    // After clearing, a getWorkflowById for a non-existent id should fall through to inner
+    // (inner still has it, but the cache is cold -- this tests that Map index was cleared)
+    const statsBefore = caching.getCacheStats();
+    await caching.getWorkflowById('epsilon');
+    const statsAfter = caching.getCacheStats();
+
+    // Should be a miss (cache was cleared)
+    expect(statsAfter.misses).toBeGreaterThan(statsBefore.misses);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix 3b: Map cache in CachingCompositeWorkflowStorage
+// ---------------------------------------------------------------------------
+
+describe('Fix 3b: CachingCompositeWorkflowStorage uses Map for getWorkflowById', () => {
+  function makeCompositeCaching(defs: WorkflowDefinition[]): {
+    inner: InMemoryWorkflowStorage;
+    caching: CachingCompositeWorkflowStorage;
+  } {
+    const inner = new InMemoryWorkflowStorage(defs, createBundledSource());
+    const composite = makeEmptyCompositeStorage();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (composite as any).storageInstances = [inner];
+    const caching = new CachingCompositeWorkflowStorage(composite, 60_000);
+    return { inner, caching };
+  }
+
+  it('warm cache hit returns correct workflow by ID via O(1) Map lookup', async () => {
+    const { caching } = makeCompositeCaching([makeDef('comp-alpha'), makeDef('comp-beta')]);
+
+    // Warm the cache
+    await caching.loadAllWorkflows();
+
+    const result = await caching.getWorkflowById('comp-alpha');
+    expect(result).not.toBeNull();
+    expect(result!.definition.id).toBe('comp-alpha');
+  });
+
+  it('returns null for unknown ID when cache is warm (no fall-through to inner storage)', async () => {
+    const { inner, caching } = makeCompositeCaching([makeDef('comp-gamma')]);
+    const getByIdSpy = vi.spyOn(inner, 'getWorkflowById');
+
+    // Warm the cache
+    await caching.loadAllWorkflows();
+
+    const result = await caching.getWorkflowById('does-not-exist');
+    expect(result).toBeNull();
+    // Inner storage must NOT be consulted -- the warm Map index is the authority
+    expect(getByIdSpy).not.toHaveBeenCalled();
+  });
+
+  it('clearCache() invalidates the Map index so subsequent calls rebuild it', async () => {
+    const { caching } = makeCompositeCaching([makeDef('comp-delta')]);
+
+    // Warm cache and confirm Map lookup works
+    await caching.loadAllWorkflows();
+    const before = await caching.getWorkflowById('comp-delta');
+    expect(before).not.toBeNull();
+
+    // Clear cache -- Map index must also be cleared
+    caching.clearCache();
+
+    // After clearing, getWorkflowById falls through to inner (which is a miss in stats)
+    const statsBefore = caching.getCacheStats();
+    await caching.getWorkflowById('comp-delta');
+    const statsAfter = caching.getCacheStats();
+
+    // Expect a cache miss -- the index was cleared, so it fell through to inner storage
+    expect(statsAfter.misses).toBeGreaterThan(statsBefore.misses);
+
+    // Reload to rebuild the index; now the Map lookup should work again
+    await caching.loadAllWorkflows();
+    const after = await caching.getWorkflowById('comp-delta');
+    expect(after).not.toBeNull();
+    expect(after!.definition.id).toBe('comp-delta');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix 4 (degraded path): buildV2WorkflowListItem with missing workflow
+// ---------------------------------------------------------------------------
+
+describe('buildV2WorkflowListItem: degraded path when workflow is null', () => {
+  // This exercises the `workflowMap.get(s.id) ?? null` fallback in handleV2ListWorkflows.
+  // In normal operation the map is built from the same allWorkflows array as the summaries,
+  // so the null branch should never fire. We test it anyway to guard against race conditions
+  // or stale summaries where a summary ID has no matching workflow object.
+  it('returns a minimal list item without throwing when workflow is null', async () => {
+    const { buildV2WorkflowListItem } = await import('../../src/mcp/handlers/v2-workflow');
+
+    // Minimal stubs -- the null-workflow early-return path never reaches crypto or pinnedStore.
+    const stubCrypto = {} as import('../../src/v2/durable-core/canonical/hashing').CryptoPortV2;
+    const stubPinnedStore = {} as import('../../src/v2/ports/pinned-workflow-store.port').PinnedWorkflowStorePortV2;
+    const stubReader = {
+      getWorkflowById: async () => null,
+      listWorkflowSummaries: async () => [],
+      loadAllWorkflows: async () => [],
+    };
+
+    const summary = {
+      id: 'missing-workflow-id',
+      name: 'Missing Workflow',
+      description: 'A workflow that exists in summaries but not in the map',
+      version: '1.0.0',
+    };
+
+    // Should not throw, even though workflow is null.
+    const result = await buildV2WorkflowListItem({
+      workflow: null,
+      summary,
+      workflowReader: stubReader,
+      rememberedRootRecords: [],
+      crypto: stubCrypto,
+      pinnedStore: stubPinnedStore,
+    });
+
+    // Degrades gracefully: returns a list item shaped from the summary alone.
+    expect(result.workflowId).toBe('missing-workflow-id');
+    expect(result.name).toBe('Missing Workflow');
+    expect(result.workflowHash).toBeNull();
+    expect(result.kind).toBe('workflow');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix 5: Schema caching in handleWorkflowGetSchema
+// ---------------------------------------------------------------------------
+
+describe('Fix 5: handleWorkflowGetSchema returns consistent schema content across calls', () => {
+  // Minimal ToolContext stub -- handleWorkflowGetSchema does not use ctx
+  const ctx = {} as ToolContext;
+
+  it('returns a valid schema on first call', async () => {
+    const result = await handleWorkflowGetSchema({}, ctx);
+    expect(result.type).toBe('success');
+    if (result.type !== 'success') return;
+
+    const payload = result.data as { schema: Record<string, unknown> };
+    expect(payload.schema).toBeDefined();
+    expect(payload.schema.type).toBe('object');
+    expect(payload.schema.properties).toBeDefined();
+  });
+
+  it('returns identical schema content on repeated calls', async () => {
+    const result1 = await handleWorkflowGetSchema({}, ctx);
+    const result2 = await handleWorkflowGetSchema({}, ctx);
+
+    expect(result1.type).toBe('success');
+    expect(result2.type).toBe('success');
+
+    if (result1.type !== 'success' || result2.type !== 'success') return;
+
+    const payload1 = result1.data as { schema: Record<string, unknown> };
+    const payload2 = result2.data as { schema: Record<string, unknown> };
+
+    // Schema content must be identical
+    expect(JSON.stringify(payload1.schema)).toBe(JSON.stringify(payload2.schema));
+  });
+
+  it('includes required workflow fields in schema', async () => {
+    const result = await handleWorkflowGetSchema({}, ctx);
+    expect(result.type).toBe('success');
+    if (result.type !== 'success') return;
+
+    const payload = result.data as { schema: { required: string[]; properties: Record<string, unknown> } };
+    expect(payload.schema.required).toContain('id');
+    expect(payload.schema.required).toContain('name');
+    expect(payload.schema.required).toContain('steps');
+  });
+});

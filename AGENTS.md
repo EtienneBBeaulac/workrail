@@ -138,7 +138,7 @@ To stamp a workflow after running `workflow-for-workflows` on it:
 npm run stamp-workflow -- workflows/my-workflow.json
 ```
 
-**Dev flag:** `WORKRAIL_DEV_STALENESS=1` surfaces staleness for all workflow categories (including built-in and legacy_project) through the MCP tools. This is set by default in the local MCP server config for development use. End users only see staleness for their own imported/personal workflows.
+**Dev flag:** `WORKRAIL_DEV=1` surfaces staleness for all workflow categories (including built-in and legacy_project) through the MCP tools, in addition to enabling perf timing and the `/api/v2/perf/tool-calls` endpoint. End users only see staleness for their own imported/personal workflows.
 
 ## Testing
 

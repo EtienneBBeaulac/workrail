@@ -126,6 +126,8 @@ describe('ConsoleService executionTraceSummary integration', () => {
     const pinnedWorkflowStore: PinnedWorkflowStorePortV2 = {
       get: () => okAsync(null),
       put: () => okAsync(undefined),
+      list: () => okAsync([]),
+      prune: () => okAsync(0),
     };
 
     const service = new ConsoleService({
@@ -285,6 +287,8 @@ describe('ConsoleService executionTraceSummary integration', () => {
     const pinnedWorkflowStore: PinnedWorkflowStorePortV2 = {
       get: () => okAsync(null),
       put: () => okAsync(undefined),
+      list: () => okAsync([]),
+      prune: () => okAsync(0),
     };
 
     const service = new ConsoleService({

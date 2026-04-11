@@ -156,7 +156,7 @@ WorkRail v2 introduces several primitives for expressive workflows:
 - **AgentRole**: workflow and/or step-level stance/persona (not system prompt control).
 - **Extension points**: named slots declared with `extensionPoints` and referenced via `{{wr.bindings.slotId}}` tokens; resolved at compile time from project `.workrail/bindings.json` overrides or workflow defaults. Enables project-overridable delegation seams without forking workflow JSON.
 - **References**: workflow-declared pointers to external documents (schemas, specs, guides). Resolved at start time, delivered as a separate MCP content item. The agent reads the files itself if needed. See "Workflow references" section below.
-- **Assessments**: workflow-declared assessment shapes (`assessments`) that steps can reference with `assessmentRefs` and, in v1, use for one exact-match `require_followup` consequence via `assessmentConsequences`.
+- **Assessments**: workflow-declared assessment shapes (`assessments`) that steps can reference with one or more `assessmentRefs` and, in v1, use for one exact-match `require_followup` consequence via `assessmentConsequences` (fires if any dimension across any referenced assessment equals the trigger level).
 
 For detailed JSON syntax and examples, see: `docs/design/workflow-authoring-v2.md`.
 
@@ -229,14 +229,14 @@ Use them when:
 
 The v1 shape is:
 
-- declare a workflow-level assessment in `assessments`
-- reference it from a step with exactly one `assessmentRefs` entry
+- declare one or more workflow-level assessments in `assessments`
+- reference them from a step with one or more `assessmentRefs` entries
 - optionally declare one step-level `assessmentConsequences` rule
-- if the accepted canonical assessment exactly matches that rule, the engine returns a retryable same-step follow-up block
+- if any dimension across any referenced assessment matches that rule, the engine returns a retryable same-step follow-up block
 
 Important limits in v1:
 
-- one `assessmentRefs` entry per step
+- at least one `assessmentRefs` entry when `assessmentConsequences` is present; multiple refs are supported
 - at most one `assessmentConsequences` entry per step
 - one supported effect only: `require_followup`
 - exact-match trigger only: one declared dimension equals one declared canonical level
@@ -492,7 +492,7 @@ git add workflows/my-workflow.json && git commit -m "chore: stamp workflow"
 
 The stamp must be committed to take effect. The `workflow-for-workflows` Phase 7 step includes a reminder to do this.
 
-**Visibility:** By default, the staleness signal is only shown for user-owned/imported workflows (`personal`, `rooted_sharing`, `external`). Built-in and legacy_project workflows are excluded. Set `WORKRAIL_DEV_STALENESS=1` to see staleness for all categories (useful for catalog maintenance).
+**Visibility:** By default, the staleness signal is only shown for user-owned/imported workflows (`personal`, `rooted_sharing`, `external`). Built-in and legacy_project workflows are excluded. Set `WORKRAIL_DEV=1` to see staleness for all categories (useful for catalog maintenance).
 
 **In `validate:registry`:** The validator prints a non-blocking advisory listing unstamped and outdated workflows after each run. This is always visible regardless of the dev flag.
 

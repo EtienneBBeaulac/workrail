@@ -270,6 +270,23 @@ export interface ConsoleWorkflowDetail {
 }
 
 // ---------------------------------------------------------------------------
+// Performance Tracing
+// ---------------------------------------------------------------------------
+
+export interface ToolCallTiming {
+  readonly toolName: string;
+  readonly startedAtMs: number;
+  readonly durationMs: number;
+  readonly outcome: 'success' | 'error' | 'unknown_tool';
+}
+
+export interface PerfToolCallsResponse {
+  readonly observations: readonly ToolCallTiming[];
+  readonly total: number;
+  readonly devMode: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // API Envelope
 // ---------------------------------------------------------------------------
 

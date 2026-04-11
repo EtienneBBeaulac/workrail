@@ -36,6 +36,7 @@ import { Base32AdapterV2 } from '../../../src/v2/infra/local/base32/index.js';
 import { asSessionId } from '../../../src/v2/durable-core/ids/index.js';
 import { projectRunDagV2 } from '../../../src/v2/projections/run-dag.js';
 import { projectRunStatusSignalsV2 } from '../../../src/v2/projections/run-status-signals.js';
+import { asSortedEventLog } from '../../../src/v2/durable-core/sorted-event-log.js';
 
 async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-projection-'));
@@ -161,7 +162,10 @@ describe('Blocked node projection consistency (status transitions)', () => {
       if (!dagRes.isOk()) return;
       const dag = dagRes.value;
 
-      const statusRes = projectRunStatusSignalsV2(truth.events);
+      const sortedEventsRes = asSortedEventLog(truth.events);
+      expect(sortedEventsRes.isOk()).toBe(true);
+      if (!sortedEventsRes.isOk()) return;
+      const statusRes = projectRunStatusSignalsV2(sortedEventsRes.value);
       expect(statusRes.isOk()).toBe(true);
       if (!statusRes.isOk()) return;
       const status = statusRes.value;

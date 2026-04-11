@@ -15,7 +15,7 @@ import type { z } from 'zod';
 import type { V2ResumeSessionInput } from '../v2/tools.js';
 import type { ToolContext, ToolResult } from '../types.js';
 import { errNotRetryable } from '../types.js';
-import { V2ResumeSessionOutputSchema } from '../output-schemas.js';
+import type { V2ResumeSessionOutputSchema } from '../output-schemas.js';
 import { signTokenOrErr } from './v2-token-ops.js';
 import type { ResumeQuery, RankedResumeCandidate } from '../../v2/projections/resume-ranking.js';
 import type { WorkspaceAnchor } from '../../v2/ports/workspace-anchor.port.js';
@@ -101,10 +101,10 @@ export async function handleV2ResumeSession(
     console.error(`[workrail:resume] ${skipped}/${candidates.length} candidate(s) skipped: token minting failed (workflowHashRef derivation or signing error)`);
   }
 
-  const output = V2ResumeSessionOutputSchema.parse({
-    candidates: outputCandidates,
+  const output = {
+    candidates: [...outputCandidates],
     totalEligible: totalFound,
-  });
+  } as z.infer<typeof V2ResumeSessionOutputSchema>;
 
   return {
     type: 'success' as const,

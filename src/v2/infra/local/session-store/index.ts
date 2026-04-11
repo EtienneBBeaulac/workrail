@@ -21,6 +21,16 @@ import type { CorruptionReasonV2 } from '../../../durable-core/schemas/session/s
 import { EVENT_KIND, MANIFEST_KIND } from '../../../durable-core/constants.js';
 import * as path from 'path';
 
+// WHY: TextDecoder is stateless and allocation is cheap, but creating one per segment
+// read adds unnecessary GC pressure under load. A module-level singleton is safe because
+// the WHATWG spec guarantees TextDecoder has no mutable state between decode() calls.
+const _utf8Decoder = new TextDecoder();
+
+// WHY: mkdirp(eventsDir) is called on every append. Since the directory is created once
+// and never removed during a session's lifetime, we cache known-created paths to avoid
+// redundant syscalls (stat + mkdir) on every subsequent append.
+const _createdEventsDirs = new Set<string>();
+
 export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStorePortV2, SessionEventLogAppendStorePortV2 {
   constructor(
     private readonly dataDir: DataDirPortV2,
@@ -28,14 +38,18 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStore
     private readonly sha256: Sha256PortV2
   ) {}
 
-  append(lock: WithHealthySessionLock, plan: AppendPlanV2): ResultAsync<void, SessionEventLogStoreError> {
+  append(
+    lock: WithHealthySessionLock,
+    plan: AppendPlanV2,
+    preloadedTruth?: LoadedSessionTruthV2,
+  ): ResultAsync<void, SessionEventLogStoreError> {
     if (!lock.assertHeld()) {
       return errAsync({
         code: 'SESSION_STORE_INVARIANT_VIOLATION' as const,
         message: 'WithHealthySessionLock used after gate callback ended (witness misuse-after-release)',
       } satisfies SessionEventLogStoreError);
     }
-    return this.appendImpl(lock.sessionId, plan);
+    return this.appendImpl(lock.sessionId, plan, preloadedTruth);
   }
 
   load(sessionId: SessionId): ResultAsync<LoadedSessionTruthV2, SessionEventLogStoreError> {
@@ -46,14 +60,36 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStore
     return this.loadValidatedPrefixImpl(sessionId);
   }
 
-  private appendImpl(sessionId: SessionId, plan: AppendPlanV2): ResultAsync<void, SessionEventLogStoreError> {
+  private appendImpl(
+    sessionId: SessionId,
+    plan: AppendPlanV2,
+    preloadedTruth?: LoadedSessionTruthV2,
+  ): ResultAsync<void, SessionEventLogStoreError> {
     const sessionDir = this.dataDir.sessionDir(sessionId);
     const eventsDir = this.dataDir.sessionEventsDir(sessionId);
     const manifestPath = this.dataDir.sessionManifestPath(sessionId);
 
-    return this.fs.mkdirp(eventsDir)
-      .mapErr(mapFsToStoreError)
-      .andThen(() => this.loadTruthOrEmpty(sessionId))
+    // WHY: Skip mkdirp if we already know this events dir was created in this process lifetime.
+    // The Set is populated on first successful mkdirp, so subsequent appends skip the syscall.
+    const mkdirpResult = _createdEventsDirs.has(eventsDir)
+      ? okAsync(undefined)
+      : this.fs.mkdirp(eventsDir).mapErr(mapFsToStoreError).map(() => { _createdEventsDirs.add(eventsDir); });
+
+    // WHY: When the caller already holds a freshly-loaded truth (e.g. from ExecutionSessionGateV2),
+    // skip the redundant loadTruthOrEmpty disk reads. This eliminates N+1 reads for a session
+    // with N segments. The idempotency and contiguity checks below use the supplied truth
+    // in exactly the same way as the freshly-loaded one would have been used.
+    const truthSource: ResultAsync<{ readonly manifest: readonly ManifestRecordV1[]; readonly events: readonly DomainEventV1[] }, SessionEventLogStoreError> =
+      preloadedTruth !== undefined
+        ? mkdirpResult.andThen(() =>
+            okAsync({
+              manifest: preloadedTruth.manifest,
+              events: preloadedTruth.events,
+            })
+          )
+        : mkdirpResult.andThen(() => this.loadTruthOrEmpty(sessionId));
+
+    return truthSource
       .andThen(({ manifest, events: existingEvents }) => {
         const contiguityRes = validateManifestContiguity(manifest);
         if (contiguityRes.isErr()) return errAsync(contiguityRes.error);
@@ -117,25 +153,30 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStore
               bytes: segmentBytes.length,
             };
             
-            return this.appendManifestRecords(manifestPath, [segClosed])
-              .andThen(() => {
-                // (3) Pin snapshots: append snapshot_pinned records → fsync(manifest)
-                const pins = sortedPins(plan.snapshotPins);
-                if (pins.length === 0) return okAsync(undefined);
-
-                const startIndex = segClosed.manifestIndex + 1;
-                const records: ManifestRecordV1[] = pins.map((p, i) => ({
-                  v: 1,
-                  manifestIndex: startIndex + i,
-                  sessionId,
-                  kind: MANIFEST_KIND.SNAPSHOT_PINNED,
-                  eventIndex: p.eventIndex,
-                  snapshotRef: p.snapshotRef,
-                  createdByEventId: p.createdByEventId,
-                }));
-                return this.appendManifestRecords(manifestPath, records);
-              });
+            // (2+3) Attest segment and pin snapshots in a single manifest write.
+            // WHY: Merging segment_closed + snapshot_pinned into one appendManifestRecords
+            // call reduces fsyncs from 2 to 1 when snapshot pins are present. The ordering
+            // invariant (segment_closed before snapshot_pinned) is preserved because we
+            // build the combined records array with segClosed first.
+            const pins = sortedPins(plan.snapshotPins);
+            const startIndex = segClosed.manifestIndex + 1;
+            const pinRecords: ManifestRecordV1[] = pins.map((p, i) => ({
+              v: 1,
+              manifestIndex: startIndex + i,
+              sessionId,
+              kind: MANIFEST_KIND.SNAPSHOT_PINNED,
+              eventIndex: p.eventIndex,
+              snapshotRef: p.snapshotRef,
+              createdByEventId: p.createdByEventId,
+            }));
+            return this.appendManifestRecords(manifestPath, [segClosed, ...pinRecords]);
           });
+      })
+      .orElse((error) => {
+        // WHY: If the append fails after mkdirp succeeded, the events dir may have been deleted
+        // externally. Evict the cache so the next attempt retries mkdirp rather than skipping it.
+        _createdEventsDirs.delete(eventsDir);
+        return errAsync(error);
       });
   }
 
@@ -152,7 +193,7 @@ export class LocalSessionEventLogStoreV2 implements SessionEventLogReadonlyStore
 
         const segments = manifest.filter((m): m is Extract<ManifestRecordV1, { kind: 'segment_closed' }> => m.kind === MANIFEST_KIND.SEGMENT_CLOSED);
 
-        return loadSegmentsRecursive({
+        return loadSegmentsParallel({
           segments,
           sessionDir,
           sha256: this.sha256,
@@ -366,7 +407,12 @@ function validateAppendPlan(sessionId: SessionId, plan: AppendPlanV2, expectedFi
     return err({ code: 'SESSION_STORE_INVARIANT_VIOLATION', message: 'AppendPlan.events must be non-empty' });
   }
 
-  // Validate schema + sessionId, and contiguity.
+  // Events are constructed from typed object literals by the engine -- no external user
+  // data enters the construction path. Validation at the gate boundary
+  // (ExecutionSessionGateV2) is sufficient. Re-running Zod.safeParse here in the locked
+  // write path is wasteful. "Validate at boundaries, trust inside." Keep only the cheap
+  // structural checks: correct starting eventIndex, sessionId on each event, and
+  // contiguity within the plan.
   const first = plan.events[0]!;
   if (first.eventIndex !== expectedFirstEventIndex) {
     return err({
@@ -376,17 +422,14 @@ function validateAppendPlan(sessionId: SessionId, plan: AppendPlanV2, expectedFi
   }
 
   for (let i = 0; i < plan.events.length; i++) {
-    const e = DomainEventV1Schema.safeParse(plan.events[i]);
-    if (!e.success) {
-      return err({ code: 'SESSION_STORE_INVARIANT_VIOLATION', message: `Invalid domain event at index ${i}` });
-    }
-    if (e.data.sessionId !== sessionId) {
+    const e = plan.events[i]!;
+    if (e.sessionId !== sessionId) {
       return err({
         code: 'SESSION_STORE_INVARIANT_VIOLATION',
         message: `Domain event sessionId mismatch at index ${i}`,
       });
     }
-    if (i > 0 && plan.events[i]!.eventIndex !== plan.events[i - 1]!.eventIndex + 1) {
+    if (i > 0 && e.eventIndex !== plan.events[i - 1]!.eventIndex + 1) {
       return err({
         code: 'SESSION_STORE_INVARIANT_VIOLATION',
         message: `Non-contiguous eventIndex in AppendPlan at index ${i}`,
@@ -394,7 +437,7 @@ function validateAppendPlan(sessionId: SessionId, plan: AppendPlanV2, expectedFi
     }
   }
 
-  // Validate snapshotPins are deterministic + refer to this segment range.
+  // Validate snapshotPins refer to an event in this segment range.
   const pins = sortedPins(plan.snapshotPins);
   for (const p of pins) {
     if (p.eventIndex < first.eventIndex || p.eventIndex > plan.events[plan.events.length - 1]!.eventIndex) {
@@ -488,7 +531,9 @@ function parseJsonlText<T>(text: string, schema: { safeParse: (v: unknown) => { 
 }
 
 function parseJsonlLines<T>(bytes: Uint8Array, schema: { safeParse: (v: unknown) => { success: true; data: T } | { success: false } }): Result<T[], SessionEventLogStoreError> {
-  const text = new TextDecoder().decode(bytes);
+  // WHY: Use module-level singleton decoder instead of allocating a new TextDecoder per call.
+  // TextDecoder is stateless between decode() calls (WHATWG spec guarantee).
+  const text = _utf8Decoder.decode(bytes);
   return parseJsonlText(text, schema);
 }
 
@@ -669,47 +714,70 @@ function processSegmentForSalvage(args: {
 // Type alias for CrashSafeFileOpsPortV2 to match the required interface
 type CrashSafeFileOpsPortV2 = Pick<FileSystemPortV2, 'readFileBytes'>;
 
-// Extracted from loadImpl: recursive segment loading with full validation
-function loadSegmentsRecursive(args: {
+// Extracted from loadImpl: parallel segment loading with full validation
+function loadSegmentsParallel(args: {
   segments: readonly Extract<ManifestRecordV1, { kind: 'segment_closed' }>[];
   sessionDir: string;
   sha256: Sha256PortV2;
   fs: CrashSafeFileOpsPortV2;
 }): ResultAsync<readonly DomainEventV1[], SessionEventLogStoreError> {
   if (args.segments.length === 0) return okAsync([]);
-  const [head, ...tail] = args.segments;
-  const segmentPath = path.join(args.sessionDir, head.segmentRelPath);
-  
-  return args.fs.readFileBytes(segmentPath)
-    .mapErr((e) => {
-      if (e.code === 'FS_NOT_FOUND') {
-        return {
-          code: 'SESSION_STORE_CORRUPTION_DETECTED' as const,
-          location: 'tail' as const,
-          reason: { code: 'missing_attested_segment' as const, message: `Missing attested segment: ${head.segmentRelPath}` },
-          message: `Missing attested segment: ${head.segmentRelPath}`,
-        };
-      }
-      return mapFsToStoreError(e);
-    })
-    .andThen((bytes) => {
+
+  // WHY: Segments are immutable once written (attested by digest in manifest). It is safe to
+  // read all segment files concurrently. We issue all reads in parallel with Promise.all, then
+  // validate and concatenate results in manifest order to preserve the eventIndex ordering
+  // invariant. This reduces load latency from O(N * read_latency) to O(read_latency).
+  return RA.fromPromise(
+    Promise.all(
+      args.segments.map((seg) =>
+        args.fs.readFileBytes(path.join(args.sessionDir, seg.segmentRelPath))
+          .match(
+            (bytes) => ({ ok: true as const, bytes, seg }),
+            (e): { ok: false; error: SessionEventLogStoreError } => {
+              if (e.code === 'FS_NOT_FOUND') {
+                return {
+                  ok: false,
+                  error: {
+                    code: 'SESSION_STORE_CORRUPTION_DETECTED' as const,
+                    location: 'tail' as const,
+                    reason: { code: 'missing_attested_segment' as const, message: `Missing attested segment: ${seg.segmentRelPath}` },
+                    message: `Missing attested segment: ${seg.segmentRelPath}`,
+                  },
+                };
+              }
+              return { ok: false, error: mapFsToStoreError(e) };
+            }
+          )
+      )
+    ),
+    // Promise.all only rejects on programmer error (e.g. match() throwing) — the per-segment
+    // errors are already captured as { ok: false } values above. Map the unexpected case.
+    (e): SessionEventLogStoreError => ({ code: 'SESSION_STORE_IO_ERROR', message: String(e) })
+  ).andThen((readResults): Result<readonly DomainEventV1[], SessionEventLogStoreError> => {
+    // Validate and concatenate in manifest index order.
+    const allEvents: DomainEventV1[] = [];
+    for (const result of readResults) {
+      if (!result.ok) return err(result.error);
+
+      const { bytes, seg } = result;
       const actual = args.sha256.sha256(bytes);
-      if (actual !== head.sha256) {
-        return errAsync({
+      if (actual !== seg.sha256) {
+        return err({
           code: 'SESSION_STORE_CORRUPTION_DETECTED' as const,
           location: 'tail' as const,
-          reason: { code: 'digest_mismatch' as const, message: `Segment digest mismatch: ${head.segmentRelPath}` },
-          message: `Segment digest mismatch: ${head.segmentRelPath}`,
+          reason: { code: 'digest_mismatch' as const, message: `Segment digest mismatch: ${seg.segmentRelPath}` },
+          message: `Segment digest mismatch: ${seg.segmentRelPath}`,
         });
       }
+
       const parsedRes = parseJsonlLines(bytes, DomainEventV1Schema);
-      if (parsedRes.isErr()) return errAsync(parsedRes.error);
-      const parsed = parsedRes.value;
+      if (parsedRes.isErr()) return err(parsedRes.error);
 
-      const boundsResult = validateSegmentBounds(parsed, head);
-      if (boundsResult.isErr()) return errAsync(boundsResult.error);
+      const boundsResult = validateSegmentBounds(parsedRes.value, seg);
+      if (boundsResult.isErr()) return err(boundsResult.error);
 
-      return okAsync(parsed);
-    })
-    .andThen((events) => loadSegmentsRecursive({ ...args, segments: tail }).map((rest) => [...events, ...rest]));
+      allEvents.push(...parsedRes.value);
+    }
+    return ok(allEvents);
+  });
 }

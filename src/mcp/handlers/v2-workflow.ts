@@ -1,13 +1,14 @@
 import path from 'path';
 import fs from 'fs';
 import { ResultAsync, okAsync, errAsync } from 'neverthrow';
+import type { z } from 'zod';
 import type { ToolContext, ToolResult } from '../types.js';
 import { success, errNotRetryable, requireV2Context } from '../types.js';
 import { mapUnknownErrorToToolError } from '../error-mapper.js';
 import { internalSuggestion } from './v2-execution-helpers.js';
+import { assertNever } from '../../runtime/assert-never.js';
 import type { V2InspectWorkflowInput, V2ListWorkflowsInput } from '../v2/tools.js';
-import { V2WorkflowInspectOutputSchema, V2WorkflowListOutputSchema } from '../output-schemas.js';
-import type { StalenessSummary } from '../output-schemas.js';
+import type { V2WorkflowInspectOutputSchema, V2WorkflowListOutputSchema, StalenessSummary } from '../output-schemas.js';
 import type { RememberedRootRecordV2 } from '../../v2/ports/remembered-roots-store.port.js';
 import type { ManagedSourceRecordV2 } from '../../v2/ports/managed-source-store.port.js';
 import type { CryptoPortV2 } from '../../v2/durable-core/canonical/hashing.js';
@@ -43,16 +44,11 @@ function readCurrentSpecVersion(): number | null {
 const CURRENT_SPEC_VERSION: number | null = readCurrentSpecVersion();
 
 /**
- * When set to '1', surfaces staleness for all workflow categories (including built-in
- * and legacy_project). Intended for maintainer use only — not documented publicly.
- */
-const DEV_STALENESS: boolean = process.env['WORKRAIL_DEV_STALENESS'] === '1';
-
-/**
  * Whether to surface the staleness field for a given workflow visibility category.
- * By default only user-owned/imported workflows get the signal; DEV_STALENESS bypasses this.
+ * By default only user-owned/imported workflows get the signal.
+ * When dev mode is active (WORKRAIL_DEV=1), all categories get the signal.
  */
-export function shouldShowStaleness(category: string | undefined, devMode: boolean = DEV_STALENESS): boolean {
+export function shouldShowStaleness(category: string | undefined, devMode: boolean = isDevMode()): boolean {
   if (devMode) return true;
   return category === 'personal' || category === 'rooted_sharing' || category === 'external';
 }
@@ -148,6 +144,7 @@ export function computeWorkflowStaleness(
   };
 }
 
+import { isDevMode } from '../dev-mode.js';
 import { withTimeout } from './shared/with-timeout.js';
 import { createWorkflowReaderForRequest, hasRequestWorkspaceSignal } from './shared/request-workflow-reader.js';
 import { listRememberedRootRecords, rememberExplicitWorkspaceRoot } from './shared/remembered-roots.js';
@@ -166,6 +163,7 @@ interface WorkflowLookupReader {
     readonly description: string;
     readonly version: string;
   }[]>;
+  readonly loadAllWorkflows: () => Promise<readonly Workflow[]>;
 }
 
 function isToolErrorResult(
@@ -207,15 +205,27 @@ export async function handleV2ListWorkflows(
     ? [`Managed workflow source store was temporarily unavailable (${managedStoreError}). Managed sources were not loaded.`]
     : undefined;
 
+  // Load all workflows in a single pass and build a Map for O(1) access.
+  // Previously this called listWorkflowSummaries() then fanned out to N
+  // individual getWorkflowById() calls -- one per workflow (N+1 pattern).
   return ResultAsync.fromPromise(
-    withTimeout(workflowReader.listWorkflowSummaries(), TIMEOUT_MS, 'list_workflows'),
+    withTimeout(workflowReader.loadAllWorkflows(), TIMEOUT_MS, 'list_workflows'),
     (err) => mapUnknownErrorToToolError(err)
   )
-    .andThen((summaries) =>
-      ResultAsync.combine(
+    .andThen((allWorkflows) => {
+      const workflowMap = new Map<string, Workflow>(allWorkflows.map((w) => [w.definition.id, w]));
+      // Build summary list from loaded workflows to preserve sort-stability and filtering.
+      const summaries = allWorkflows.map((w) => ({
+        id: w.definition.id,
+        name: w.definition.name,
+        description: w.definition.description,
+        version: w.definition.version,
+      }));
+      return ResultAsync.combine(
         summaries.map((s) =>
           ResultAsync.fromPromise(
             buildV2WorkflowListItem({
+              workflow: workflowMap.get(s.id) ?? null,
               summary: s,
               workflowReader,
               rememberedRootRecords,
@@ -225,8 +235,8 @@ export async function handleV2ListWorkflows(
             (err) => mapUnknownErrorToToolError(err)
           )
         )
-      )
-    )
+      );
+    })
     .andThen((compiled) => {
       const sortedIds = compiled.map((w) => w.workflowId).sort((a, b) => a.localeCompare(b));
       const sortedCompiled = [...compiled].sort((a, b) => a.workflowId.localeCompare(b.workflowId));
@@ -266,13 +276,13 @@ export async function handleV2ListWorkflows(
         // the agent is just discovering tags, not looking for specific workflows, so stale
         // source paths are noise it cannot act on. Emit staleRoots on filtered calls only.
         const includeStaleRoots = !tagSummaryEntry && stalePaths.length > 0;
-        const payload = V2WorkflowListOutputSchema.parse({
+        const payload: z.infer<typeof V2WorkflowListOutputSchema> = {
           workflows: tagFilteredCompiled,
           ...(tagSummaryEntry ? { tagSummary: tagSummaryEntry } : {}),
           ...(nextStepHint ? { _nextStep: nextStepHint } : {}),
           ...(includeStaleRoots ? { staleRoots: [...stalePaths] } : {}),
           ...(warnings ? { warnings } : {}),
-        });
+        };
         return okAsync(success(payload) as ToolResult<unknown>);
       }
       // Reuse workflowReader directly -- it already uses the same factory as the
@@ -282,28 +292,28 @@ export async function handleV2ListWorkflows(
       // produces a composite reader. If this assumption ever breaks, stale managed entries
       // would appear in staleRoots but NOT in sources -- an inconsistency worth knowing about.
       if (!isCompositeWorkflowReader(workflowReader)) {
-        const payload = V2WorkflowListOutputSchema.parse({
+        const payload: z.infer<typeof V2WorkflowListOutputSchema> = {
           workflows: tagFilteredCompiled,
           ...(tagSummaryEntry ? { tagSummary: tagSummaryEntry } : {}),
           ...(nextStepHint ? { _nextStep: nextStepHint } : {}),
           ...(stalePaths.length > 0 ? { staleRoots: [...stalePaths] } : {}),
           ...(warnings ? { warnings } : {}),
           sources: [],
-        });
+        };
         return okAsync(success(payload) as ToolResult<unknown>);
       }
       return ResultAsync.fromPromise(
         withTimeout(buildSourceCatalog(workflowReader, rememberedRootRecords, managedSourceRecords, staleManagedRecords), TIMEOUT_MS, 'list_workflow_sources'),
         (err) => mapUnknownErrorToToolError(err),
       ).map((sources) => {
-        const payload = V2WorkflowListOutputSchema.parse({
+        const payload: z.infer<typeof V2WorkflowListOutputSchema> = {
           workflows: tagFilteredCompiled,
           ...(tagSummaryEntry ? { tagSummary: tagSummaryEntry } : {}),
           ...(nextStepHint ? { _nextStep: nextStepHint } : {}),
           ...(stalePaths.length > 0 ? { staleRoots: [...stalePaths] } : {}),
           ...(warnings ? { warnings } : {}),
-          sources,
-        });
+          sources: [...sources] as z.infer<typeof V2WorkflowListOutputSchema>['sources'],
+        };
         return success(payload) as ToolResult<unknown>;
       });
     })
@@ -392,22 +402,22 @@ export async function handleV2InspectWorkflow(
 
             // Surface references for discoverability (available before start_workflow)
             const references = workflow.definition.references;
-            const payload = V2WorkflowInspectOutputSchema.parse({
+            const payload = {
               workflowId: input.workflowId,
               workflowHash,
               mode: input.mode,
-              compiled: body,
+              compiled: body as import('../../v2/durable-core/canonical/json-types.js').JsonValue,
               ...(visibility ? { visibility } : {}),
               ...(stalePaths.length > 0 ? { staleRoots: [...stalePaths] } : {}),
               ...(inspectWarnings ? { warnings: inspectWarnings } : {}),
-              ...(references != null && references.length > 0 ? { references } : {}),
+              ...(references != null && references.length > 0 ? { references: [...references] } : {}),
               ...(() => {
                 const staleness = shouldShowStaleness(visibility?.category)
                   ? computeWorkflowStaleness(workflow.definition.validatedAgainstSpecVersion, CURRENT_SPEC_VERSION)
                   : undefined;
                 return staleness !== undefined ? { staleness } : {};
               })(),
-            });
+            } as z.infer<typeof V2WorkflowInspectOutputSchema>;
             return okAsync(success(payload) as ToolResult<unknown>);
           })
       );
@@ -432,20 +442,21 @@ async function buildWorkflowVisibility(
   return toWorkflowVisibility(workflow, rememberedRootRecords, { migration });
 }
 
-async function buildV2WorkflowListItem(options: {
+export async function buildV2WorkflowListItem(options: {
+  /** Full workflow object, pre-fetched by the caller to avoid N+1 reads. */
+  readonly workflow: Workflow | null;
   readonly summary: {
     readonly id: string;
-  readonly name: string;
-  readonly description: string;
-  readonly version: string;
+    readonly name: string;
+    readonly description: string;
+    readonly version: string;
   };
   readonly workflowReader: WorkflowLookupReader;
   readonly rememberedRootRecords: readonly RememberedRootRecordV2[];
   readonly crypto: CryptoPortV2;
   readonly pinnedStore: PinnedWorkflowStorePortV2;
 }) {
-  const { summary, workflowReader, rememberedRootRecords, crypto, pinnedStore } = options;
-  const workflow = await workflowReader.getWorkflowById(summary.id);
+  const { workflow, summary, workflowReader, rememberedRootRecords, crypto, pinnedStore } = options;
 
   if (!workflow) {
     return {
@@ -639,6 +650,10 @@ function deriveSourceCatalogEntry(options: {
     case 'plugin':
       return { sourceKey, category: 'external', source: { kind: source.kind, displayName }, sourceMode: 'live_directory', effectiveWorkflowCount: effective, totalWorkflowCount: total, shadowedWorkflowCount: shadowed };
   }
+
+  // Exhaustiveness guard: adding a new WorkflowSource.kind without updating this switch
+  // will cause a compile-time error here. Do not replace with a default case.
+  assertNever(source);
 }
 
 function deriveSourceKey(source: WorkflowSource): string {

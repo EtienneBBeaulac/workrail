@@ -14,13 +14,13 @@ import { okAsync, errAsync } from 'neverthrow';
 import type { ToolContext, ToolResult, V2ToolContext } from '../types.js';
 import { success, errNotRetryable, requireV2Context } from '../types.js';
 import type { V2CheckpointWorkflowInput } from '../v2/tools.js';
-import { V2CheckpointWorkflowOutputSchema } from '../output-schemas.js';
+import type { V2CheckpointWorkflowOutputSchema } from '../output-schemas.js';
 import { parseCheckpointTokenOrFail, mintSingleShortToken, mintContinueAndCheckpointTokens } from './v2-token-ops.js';
 import { type ToolFailure, mapExecutionSessionGateErrorToToolError } from './v2-execution-helpers.js';
 import type { SessionId, NodeId, RunId, AttemptId } from '../../v2/durable-core/ids/index.js';
 import { asSessionId, asRunId, asNodeId, asAttemptId } from '../../v2/durable-core/ids/index.js';
 import type { ExecutionSessionGateErrorV2 } from '../../v2/usecases/execution-session-gate.js';
-import type { SessionEventLogStoreError } from '../../v2/ports/session-event-log-store.port.js';
+import type { SessionEventLogStoreError, LoadedSessionTruthV2 } from '../../v2/ports/session-event-log-store.port.js';
 import { deriveWorkflowHashRef } from '../../v2/durable-core/ids/workflow-hash-ref.js';
 import { DomainEventV1Schema, type DomainEventV1 } from '../../v2/durable-core/schemas/session/index.js';
 import { EVENT_KIND } from '../../v2/durable-core/constants.js';
@@ -224,11 +224,11 @@ function replayCheckpoint(
         entry: { sessionId: String(sessionId), runId: String(runId), nodeId: String(nodeId), attemptId: String(attemptId), workflowHashRef },
         ports: tokenCodecPorts, aliasStore, entropy,
       }).andThen(({ continueToken }) =>
-        okAsync(V2CheckpointWorkflowOutputSchema.parse({
+        okAsync({
           checkpointNodeId,
           resumeToken: resumeTokenValue,
-          nextCall: { tool: 'continue_workflow', params: { continueToken } },
-        }))
+          nextCall: { tool: 'continue_workflow' as const, params: { continueToken } },
+        } as z.infer<typeof V2CheckpointWorkflowOutputSchema>)
       )
     )
     .mapErr((e): CheckpointError => ({ kind: 'store_failed', cause: e as any }));
@@ -239,7 +239,7 @@ function replayCheckpoint(
 // ---------------------------------------------------------------------------
 
 function writeCheckpoint(
-  truth: { readonly events: readonly DomainEventV1[]; readonly manifest: readonly unknown[] },
+  truth: LoadedSessionTruthV2,
   dedupeKey: string,
   originalNode: Extract<DomainEventV1, { kind: 'node_created' }>,
   sessionId: SessionId,
@@ -309,7 +309,8 @@ function writeCheckpoint(
     createdByEventId: nodeCreatedEventId,
   }];
 
-  return sessionStore.append(lock, { events: validated, snapshotPins })
+  // Pass preloaded truth to skip redundant disk reads in appendImpl.
+  return sessionStore.append(lock, { events: validated, snapshotPins }, truth)
     .mapErr((cause): CheckpointError => ({ kind: 'store_failed', cause }))
     .andThen(() => {
       // Mint resumeToken pointing at the ORIGINAL node (not the checkpoint node).
@@ -323,11 +324,11 @@ function writeCheckpoint(
             entry: { sessionId: String(sessionId), runId: String(runId), nodeId: String(nodeId), attemptId: String(attemptId), workflowHashRef },
             ports: tokenCodecPorts, aliasStore, entropy,
           }).andThen(({ continueToken }) =>
-            okAsync(V2CheckpointWorkflowOutputSchema.parse({
+            okAsync({
               checkpointNodeId: String(checkpointNodeId),
               resumeToken: resumeTokenValue,
-              nextCall: { tool: 'continue_workflow', params: { continueToken } },
-            }))
+              nextCall: { tool: 'continue_workflow' as const, params: { continueToken } },
+            } as z.infer<typeof V2CheckpointWorkflowOutputSchema>)
           )
         )
         .mapErr((e): CheckpointError => ({ kind: 'store_failed', cause: e as any }));

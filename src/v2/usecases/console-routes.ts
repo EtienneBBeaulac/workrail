@@ -14,7 +14,7 @@ import { getWorktreeList, buildActiveSessionCounts, resolveRepoRoot, setEnrichme
 import { toWorkflowSourceInfo } from '../../types/workflow.js';
 import type { WorkflowService } from '../../application/services/workflow-service.js';
 import type { ToolCallTimingRingBuffer } from '../../mcp/tool-call-timing.js';
-import { DEV_MODE } from '../../mcp/dev-mode.js';
+import { isDevMode } from '../../mcp/dev-mode.js';
 
 // ---------------------------------------------------------------------------
 // Workspace SSE broadcast
@@ -23,29 +23,13 @@ import { DEV_MODE } from '../../mcp/dev-mode.js';
 // clients. When the sessions directory changes (new session, status update,
 // recap written) all connected EventSource clients receive a 'change' event so
 // they can immediately re-fetch instead of waiting for the next poll interval.
+//
+// NOTE: sseClients and sseDebounceTimer are intentionally declared inside
+// mountConsoleRoutes() (not at module scope). Module-level state is shared
+// across all calls to mountConsoleRoutes(), causing SSE broadcasts from one
+// WorkRail instance's watcher to fire on a different instance's browser clients.
+// Closure scope makes shared state structurally impossible.
 // ---------------------------------------------------------------------------
-
-const sseClients = new Set<Response>();
-
-/**
- * Debounce a change notification so rapid successive writes (e.g. a sequence
- * of event appends in one continue_workflow call) collapse into one broadcast.
- */
-let sseDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-function broadcastChange(): void {
-  if (sseDebounceTimer !== null) return; // already scheduled
-  sseDebounceTimer = setTimeout(() => {
-    sseDebounceTimer = null;
-    for (const client of sseClients) {
-      try {
-        client.write('data: {"type":"change"}\n\n');
-      } catch {
-        // Client already disconnected -- remove it
-        sseClients.delete(client);
-      }
-    }
-  }, 200);
-}
 
 /**
  * Watch the sessions directory and broadcast a change event whenever any file
@@ -55,7 +39,7 @@ function broadcastChange(): void {
  * On unsupported platforms the watcher silently degrades -- clients fall back
  * to their polling interval.
  */
-function watchSessionsDir(sessionsDir: string): (() => void) {
+function watchSessionsDir(sessionsDir: string, onChanged: () => void): (() => void) {
   // Create the directory if it doesn't exist yet (first run before any session)
   try { fs.mkdirSync(sessionsDir, { recursive: true }); } catch { /* ignore */ }
 
@@ -69,7 +53,7 @@ function watchSessionsDir(sessionsDir: string): (() => void) {
       // otherwise trigger unnecessary session refetches.
       // filename can be null on some platforms -- guard required.
       if (filename !== null && filename.endsWith('.jsonl')) {
-        broadcastChange();
+        onChanged();
       }
     });
     watcher.on('error', () => { /* ignore watch errors -- polling fallback covers gaps */ });
@@ -132,11 +116,36 @@ export function mountConsoleRoutes(
   consoleService: ConsoleService,
   workflowService?: WorkflowService,
   timingRingBuffer?: ToolCallTimingRingBuffer,
-): void {
-  // Start watching the sessions directory so SSE clients get notified of changes
-  const stopWatcher = watchSessionsDir(consoleService.getSessionsDir());
-  // Clean up watcher if the process exits gracefully
-  process.once('exit', stopWatcher);
+): () => void {
+  // SSE state: per-instance, not module-level (see comment block above).
+  const sseClients = new Set<Response>();
+  let sseDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * Debounce a change notification so rapid successive writes (e.g. a sequence
+   * of event appends in one continue_workflow call) collapse into one broadcast.
+   */
+  function broadcastChange(): void {
+    if (sseDebounceTimer !== null) return; // already scheduled
+    sseDebounceTimer = setTimeout(() => {
+      sseDebounceTimer = null;
+      for (const client of sseClients) {
+        try {
+          client.write('data: {"type":"change"}\n\n');
+        } catch {
+          // Client already disconnected -- remove it
+          sseClients.delete(client);
+        }
+      }
+    }, 200);
+  }
+
+  // Start watching the sessions directory so SSE clients get notified of changes.
+  // stopWatcher is returned as a disposer -- the caller (HttpServer.mountRoutes)
+  // stores it and invokes it during stop(). process.once('exit') is intentionally
+  // NOT used here: it accumulates one listener per mountConsoleRoutes() call,
+  // causing MaxListenersExceededWarning on stderr which corrupts the MCP stdio channel.
+  const stopWatcher = watchSessionsDir(consoleService.getSessionsDir(), broadcastChange);
 
   // Wire up background enrichment completion callback.
   // When background worktree enrichment finishes, broadcast a `worktrees-updated`
@@ -194,13 +203,14 @@ export function mountConsoleRoutes(
   // The devMode field lets consumers distinguish "no calls happened" from
   // "DEV_MODE is off and the buffer was never wired in".
   // ---------------------------------------------------------------------------
-  if (DEV_MODE) {
+  const devMode = isDevMode();
+  if (devMode) {
     app.get('/api/v2/perf/tool-calls', (req: Request, res: Response) => {
       const rawLimit = req.query['limit'];
       const limit = typeof rawLimit === 'string' ? parseInt(rawLimit, 10) : undefined;
       const safeLimit = (limit !== undefined && Number.isFinite(limit) && limit > 0) ? limit : undefined;
       const observations = timingRingBuffer ? timingRingBuffer.recent(safeLimit) : [];
-      res.json({ success: true, data: { observations, total: timingRingBuffer?.size ?? 0, devMode: DEV_MODE } });
+      res.json({ success: true, data: { observations, total: timingRingBuffer?.size ?? 0, devMode } });
     });
   }
 
@@ -430,4 +440,6 @@ export function mountConsoleRoutes(
     });
     console.error('[Console] UI not found (run: cd console && npm run build)');
   }
+
+  return stopWatcher;
 }

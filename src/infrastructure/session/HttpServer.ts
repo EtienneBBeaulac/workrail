@@ -469,9 +469,6 @@ export class HttpServer {
    * Uses unified dashboard pattern (primary/secondary) unless disabled
    */
   async start(): Promise<string | null> {
-    // STEP 1: Quick cleanup of orphaned processes
-    await this.quickCleanup();
-    
     // Check dashboard mode (DI-provided, not env check)
     const mode = this.config.dashboardMode ?? this.dashboardMode;
     if (mode.kind === 'legacy') {
@@ -486,8 +483,15 @@ export class HttpServer {
         return this.baseUrl;
       } catch (error: any) {
         if (error.code === 'EADDRINUSE') {
-          // Port busy even though we have lock - cleanup and fall back
-          console.error(`[Dashboard] Port ${this.port} busy despite lock, falling back to legacy mode`);
+          // Port busy despite winning the lock -- the previous primary is still
+          // bound to the port (e.g. version upgrade: old instance holds 3456,
+          // new instance reclaimed the lock but can't bind yet). Fall back to
+          // legacy mode so both instances can run concurrently. The old instance
+          // will release the port when its IDE tab closes (stdin EOF).
+          console.error(
+            `[Dashboard] Port ${this.port} still held by previous instance -- ` +
+            `running on next available port. Restart the old instance to move to ${this.port}.`
+          );
           await fs.unlink(this.lockFile).catch(() => {});
           return await this.startLegacyMode();
         }
@@ -542,8 +546,17 @@ export class HttpServer {
   }
   
   /**
-   * Determine if a lock should be reclaimed based on its data
-   * Pure function - no side effects
+   * Determine if a lock should be reclaimed based on its data.
+   *
+   * Pure function - no side effects, no I/O.
+   *
+   * Note: this function intentionally does NOT probe the HTTP health endpoint.
+   * HTTP responsiveness is not a reliable liveness signal -- Node.js is
+   * single-threaded, so a busy event loop (e.g. processing a tool call) will
+   * fail a health check while the process is perfectly healthy. The three
+   * checks below (structure, version, TTL, PID) are reliable and sufficient.
+   * Adding an HTTP check here caused false-positive kills; see the fix in
+   * reclaimStaleLock() for full rationale.
    */
   private shouldReclaimLock(lockData: DashboardLock): { reclaim: boolean; reason: string } {
     // Invalid structure
@@ -551,8 +564,10 @@ export class HttpServer {
       return { reclaim: true, reason: 'invalid lock structure' };
     }
 
-    // Version mismatch: a newer (or different) version should take over so the
-    // browser always gets up-to-date console assets from the running process.
+    // Version mismatch: a different version holds the lock. We reclaim atomically
+    // so the new version's lock metadata is current. If the old process still holds
+    // the port, startAsPrimary() will EADDRINUSE and fall back to legacy mode --
+    // the old instance keeps its port and sessions until it exits naturally.
     // undefined means the lock was written by a pre-version-field build -- treat
     // it the same as "wrong version" so the fix takes effect on first deployment.
     if (lockData.version !== CURRENT_VERSION) {
@@ -594,39 +609,23 @@ export class HttpServer {
       const { reclaim, reason } = this.shouldReclaimLock(lockData);
       
       if (!reclaim) {
-        // Check if primary is healthy even though lock seems valid
-        const isHealthy = await this.checkHealth(lockData.port);
-        if (isHealthy) {
-          return false; // Valid primary exists
-        }
-        
-        // Process exists but not responding - try to kill it first
-        console.error(`[Dashboard] Primary (PID ${lockData.pid}) not responding, attempting graceful shutdown`);
-        try {
-          process.kill(lockData.pid, 'SIGTERM');
-          await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s
-        } catch {}
-        
-        // Re-check if it's now healthy or dead
-        const stillHealthy = await this.checkHealth(lockData.port);
-        if (stillHealthy) {
-          return false; // It recovered
-        }
+        // shouldReclaimLock() already confirmed: version matches, heartbeat is fresh,
+        // and the PID is alive. These three signals are reliable liveness proof.
+        // HTTP responsiveness is NOT a reliable signal -- a busy event loop (e.g.
+        // processing a tool call) will fail a 2s health check while the process is
+        // perfectly healthy. Yield unconditionally to the existing primary.
+        console.error(`[Dashboard] Secondary mode: primary lock valid (PID ${lockData.pid}), yielding`);
+        return false;
       } else {
+        // shouldReclaimLock() determined the lock should be reclaimed (version mismatch,
+        // stale TTL, or dead PID). Proceed directly to atomic reclaim -- do not SIGTERM.
+        //
+        // Rationale: the old primary is either already dead (dead-PID case) or still
+        // serving active MCP sessions that must not be interrupted. If it holds port
+        // 3456, startAsPrimary() will throw EADDRINUSE and fall back to legacy mode on
+        // port 3457+. That is the correct outcome -- the old instance keeps its port
+        // and its sessions; the new instance starts on an available port.
         console.error(`[Dashboard] Lock reclaim needed: ${reason}`);
-
-        // SIGTERM the old process before reclaiming the port.
-        // Without this, the old process is still bound to port 3456 and
-        // startAsPrimary() throws EADDRINUSE, causing silent fallback to legacy mode.
-        // Mirror the graceful-shutdown pattern used in the !reclaim branch above.
-        try {
-          process.kill(lockData.pid, 0); // Throws if process is dead
-          console.error(`[Dashboard] Sending SIGTERM to old process (PID ${lockData.pid})`);
-          process.kill(lockData.pid, 'SIGTERM');
-          await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s for graceful exit
-        } catch {
-          // Process already dead -- proceed to reclaim
-        }
       }
 
       // ATOMIC RECLAIM: Write new lock to temp file, then rename
@@ -694,30 +693,6 @@ export class HttpServer {
       console.error('[Dashboard] Lock file corrupted, attempting fresh claim');
       await fs.unlink(this.lockFile).catch(() => {});
       return await this.tryBecomePrimary();
-    }
-  }
-  
-  /**
-   * Check if a server is healthy on given port
-   */
-  private async checkHealth(port: number): Promise<boolean> {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 2000); // 2s timeout
-      
-      const response = await fetch(`http://localhost:${port}/api/health`, {
-        signal: controller.signal
-      });
-      
-      clearTimeout(timeout);
-      
-      if (!response.ok) return false;
-      
-      const data = await response.json();
-      return data.status === 'healthy' && data.isPrimary !== undefined;
-      
-    } catch {
-      return false;
     }
   }
   
@@ -900,8 +875,12 @@ export class HttpServer {
     // 1. FIRST: Stop heartbeat to prevent further lock file writes
     this.heartbeat.stop();
     
-    // 2. Stop all file watchers
+    // 2. Stop all file watchers (session manager + any route-level disposers, e.g. console SSE watcher)
     this.sessionManager.unwatchAll();
+    for (const dispose of this._routeDisposers) {
+      try { dispose(); } catch { /* ignore errors during shutdown */ }
+    }
+    this._routeDisposers.length = 0;
     
     // 3. Close server with timeout protection
     await new Promise<void>((resolve) => {
@@ -935,11 +914,21 @@ export class HttpServer {
    * Used by Console and other extensions that need to add routes
    * without coupling to the HttpServer class.
    *
+   * The installer may return a disposer (() => void) that will be called
+   * during stop() to clean up resources (e.g. FSWatcher instances).
+   * This keeps resource lifecycle tied to the server lifecycle rather than
+   * relying on process exit hooks, which accumulate across multiple mount calls.
+   *
    * Must be called before finalize().
    */
-  mountRoutes(installer: (app: Application) => void): void {
-    installer(this.app);
+  mountRoutes(installer: (app: Application) => (() => void) | void): void {
+    const disposer = installer(this.app);
+    if (disposer != null) {
+      this._routeDisposers.push(disposer);
+    }
   }
+
+  private readonly _routeDisposers: Array<() => void> = [];
 
   /**
    * Install the 404 catch-all handler.
@@ -980,126 +969,8 @@ export class HttpServer {
   // Heartbeat behavior is delegated to DashboardHeartbeat.
   
   /**
-   * Quick cleanup of orphaned workrail processes
-   * Only removes processes that are unresponsive on ports 3456-3499
-   */
-  private async quickCleanup(): Promise<void> {
-    try {
-      const busyPorts = await this.getWorkrailPorts();
-      
-      if (busyPorts.length === 0) {
-        return; // Nothing to clean up
-      }
-      
-      console.error(`[Cleanup] Found ${busyPorts.length} workrail process(es), checking health...`);
-      
-      let cleanedCount = 0;
-      
-      for (const { port, pid } of busyPorts) {
-        // Don't check ourselves
-        if (pid === process.pid) continue;
-        
-        const isHealthy = await this.checkHealth(port);
-        
-        if (!isHealthy) {
-          console.error(`[Cleanup] Removing unresponsive process ${pid} on port ${port}`);
-          try {
-            // Try graceful shutdown first
-            process.kill(pid, 'SIGTERM');
-            await new Promise(r => setTimeout(r, 1000));
-            
-            // Check if still alive
-            try {
-              process.kill(pid, 0);
-              // Still alive, force kill
-              process.kill(pid, 'SIGKILL');
-            } catch {
-              // Already dead, good
-            }
-            
-            cleanedCount++;
-          } catch (error) {
-            // Process might have already exited
-          }
-        }
-      }
-      
-      if (cleanedCount > 0) {
-        console.error(`[Cleanup] Cleaned up ${cleanedCount} orphaned process(es)`);
-        // Wait a bit for ports to be released
-        await new Promise(r => setTimeout(r, 1000));
-      }
-    } catch (error) {
-      // Cleanup failures shouldn't block startup
-      console.error('[Cleanup] Failed, continuing anyway:', error);
-    }
-  }
-  
-  /**
-   * Get list of workrail processes and their ports in range 3456-3499
-   * Platform-specific implementation
-   */
-  private async getWorkrailPorts(): Promise<Array<{port: number, pid: number}>> {
-    try {
-      const platform = os.platform();
-      
-      if (platform === 'darwin' || platform === 'linux') {
-        // Use lsof on Unix-like systems
-        const output = execSync(
-          'lsof -i :3456-3499 -Pn 2>/dev/null | grep node || true',
-          { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
-        ).trim();
-        
-        if (!output) return [];
-        
-        // Parse lsof output format: COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
-        // Example: node    79144 etienneb   14u  IPv6 0xc2ceb87d07ed2009      0t0  TCP *:3456 (LISTEN)
-        return output.split('\n').filter(Boolean).map(line => {
-          const parts = line.trim().split(/\s+/);
-          const pid = parseInt(parts[1]);
-          const nameField = parts[8]; // NAME field contains *:PORT or *:service_name
-          const portMatch = nameField.match(/:(\d+)$/);
-          const port = portMatch ? parseInt(portMatch[1]) : 0;
-          return { port, pid };
-        }).filter(item => item.port >= 3456 && item.port < 3500 && !isNaN(item.pid));
-        
-      } else if (platform === 'win32') {
-        // Use netstat on Windows
-        const output = execSync(
-          'netstat -ano | findstr "3456" || echo',
-          { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
-        ).trim();
-        
-        if (!output) return [];
-        
-        return output.split('\n').filter(Boolean).map(line => {
-          const parts = line.trim().split(/\s+/);
-          // Only consider listening sockets; other states can have pid=0 which is unsafe to kill.
-          const state = parts[3] || '';
-          const address = parts[1] || '';
-          const pid = parseInt(parts[4]);
-          const portMatch = address.match(/:(\d+)$/);
-          const port = portMatch ? parseInt(portMatch[1]) : 0;
-          return { port, pid, state };
-        }).filter(item =>
-          item.state === 'LISTENING' &&
-          item.port >= 3456 &&
-          item.port < 3500 &&
-          !isNaN(item.pid) &&
-          item.pid > 0
-        ).map(({ port, pid }) => ({ port, pid }));
-      }
-      
-      return [];
-    } catch (error) {
-      // Command failed, return empty array
-      return [];
-    }
-  }
-  
-  /**
-   * Manual cleanup utility - can be called externally
-   * More aggressive than quickCleanup - removes ALL workrail processes on our ports
+   * Manual cleanup utility - can be called externally via the CLI cleanup command.
+   * Kills ALL workrail processes found on ports 3456-3499 (except the current one).
    */
   async fullCleanup(): Promise<number> {
     try {
@@ -1158,6 +1029,69 @@ export class HttpServer {
     } catch (error) {
       console.error('[Cleanup] Full cleanup failed:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Get list of workrail processes and their ports in range 3456-3499.
+   * Used only by fullCleanup() (an explicit user-triggered CLI command).
+   * Platform-specific implementation using lsof (Unix) or netstat (Windows).
+   */
+  private async getWorkrailPorts(): Promise<Array<{port: number, pid: number}>> {
+    try {
+      const platform = os.platform();
+
+      if (platform === 'darwin' || platform === 'linux') {
+        // Use lsof on Unix-like systems
+        const output = execSync(
+          'lsof -i :3456-3499 -Pn 2>/dev/null | grep node || true',
+          { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+        ).trim();
+
+        if (!output) return [];
+
+        // Parse lsof output format: COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
+        // Example: node    79144 etienneb   14u  IPv6 0xc2ceb87d07ed2009      0t0  TCP *:3456 (LISTEN)
+        return output.split('\n').filter(Boolean).map(line => {
+          const parts = line.trim().split(/\s+/);
+          const pid = parseInt(parts[1]);
+          const nameField = parts[8]; // NAME field contains *:PORT or *:service_name
+          const portMatch = nameField.match(/:(\d+)$/);
+          const port = portMatch ? parseInt(portMatch[1]) : 0;
+          return { port, pid };
+        }).filter(item => item.port >= 3456 && item.port < 3500 && !isNaN(item.pid));
+
+      } else if (platform === 'win32') {
+        // Use netstat on Windows
+        const output = execSync(
+          'netstat -ano | findstr "3456" || echo',
+          { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+        ).trim();
+
+        if (!output) return [];
+
+        return output.split('\n').filter(Boolean).map(line => {
+          const parts = line.trim().split(/\s+/);
+          // Only consider listening sockets; other states can have pid=0 which is unsafe to kill.
+          const state = parts[3] || '';
+          const address = parts[1] || '';
+          const pid = parseInt(parts[4]);
+          const portMatch = address.match(/:(\d+)$/);
+          const port = portMatch ? parseInt(portMatch[1]) : 0;
+          return { port, pid, state };
+        }).filter(item =>
+          item.state === 'LISTENING' &&
+          item.port >= 3456 &&
+          item.port < 3500 &&
+          !isNaN(item.pid) &&
+          item.pid > 0
+        ).map(({ port, pid }) => ({ port, pid }));
+      }
+
+      return [];
+    } catch {
+      // Command failed, return empty array
+      return [];
     }
   }
 }

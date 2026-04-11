@@ -7,4 +7,8 @@ export class NoopProcessSignals implements ProcessSignals {
   on(_signal: ProcessSignal, _handler: () => void | Promise<void>): void {
     // no-op
   }
+
+  once(_signal: ProcessSignal, _handler: () => void | Promise<void>): void {
+    // no-op
+  }
 }

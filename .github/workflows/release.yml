@@ -12,6 +12,39 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  notify-ci-failure:
+    name: Notify CI failure on main
+    runs-on: ubuntu-latest
+    # Fires when CI fails on a push to main -- release will be skipped, open an issue.
+    if: github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main'
+    permissions:
+      issues: write
+    steps:
+      - name: Open issue for CI failure blocking release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_RUN_URL: ${{ github.event.workflow_run.html_url }}
+          CI_SHA: ${{ github.event.workflow_run.head_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          SHORT_SHA="${CI_SHA:0:7}"
+          TITLE="CI failure on main blocking release (${SHORT_SHA})"
+
+          EXISTING="$(gh issue list --repo "${REPO}" --state open --search "${TITLE}" --json number --jq '.[0].number // empty')"
+          if [ -n "${EXISTING}" ]; then
+            echo "Issue #${EXISTING} already open -- skipping"
+            exit 0
+          fi
+
+          BODY="$(printf '## CI failure on main is blocking releases\n\nCI failed for commit [%s](https://github.com/%s/commit/%s) on `main`. The release workflow will not run until CI passes.\n\n**Failed CI run:** %s\n\nThis issue was opened automatically by the release workflow.' \
+            "${SHORT_SHA}" "${REPO}" "${CI_SHA}" "${CI_RUN_URL}")"
+
+          gh issue create \
+            --repo "${REPO}" \
+            --title "${TITLE}" \
+            --label "bug" \
+            --body "${BODY}"
+
   release:
     name: Release
     runs-on: ubuntu-latest
@@ -21,6 +54,7 @@ jobs:
       contents: write
       actions: read
       id-token: write
+      issues: write
     
     steps:
       - name: Checkout
@@ -128,6 +162,34 @@ jobs:
 
           echo "RELEASE_TAG_CLEANUP_STATUS=deleted" >> "$GITHUB_ENV"
           echo "RELEASE_TAG_CLEANUP_TAG=${POST_TAG}" >> "$GITHUB_ENV"
+
+      - name: Open issue on release failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_RUN_URL: ${{ github.event.workflow_run.html_url }}
+          CI_SHA: ${{ github.event.workflow_run.head_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          SHORT_SHA="${CI_SHA:0:7}"
+          TITLE="Release failed for ${SHORT_SHA}"
+
+          # Avoid duplicate issues: search for an open issue with the same title.
+          EXISTING="$(gh issue list --repo "${REPO}" --state open --search "${TITLE}" --json number --jq '.[0].number // empty')"
+          if [ -n "${EXISTING}" ]; then
+            echo "Issue #${EXISTING} already open for this failure -- skipping"
+            exit 0
+          fi
+
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          BODY="$(printf '## Release failure\n\nThe release workflow failed for commit [%s](https://github.com/%s/commit/%s).\n\n**CI run:** %s\n**Release run:** %s\n\nThis issue was opened automatically by the release workflow.' \
+            "${SHORT_SHA}" "${REPO}" "${CI_SHA}" "${CI_RUN_URL}" "${RUN_URL}")"
+
+          gh issue create \
+            --repo "${REPO}" \
+            --title "${TITLE}" \
+            --label "bug" \
+            --body "${BODY}"
 
       - name: Release summary
         if: always()

@@ -1,46 +1,51 @@
 import fs from 'fs/promises';
-import { existsSync, statSync } from 'fs';
 import path from 'path';
 import type { WorkflowDefinition } from '../../types/workflow-definition.js';
 
-// ─────────────────────────────────────────────────────────────────────────────
+// _____________________________________________________________________________
 // Shared File Discovery
-// ─────────────────────────────────────────────────────────────────────────────
+// _____________________________________________________________________________
 
 /**
  * Find all JSON files in a directory recursively.
  *
  * Shared pure function used by both FileWorkflowStorage and the raw file scanner.
- * Philosophy: "Single source of truth" — not reimplemented.
+ * Philosophy: "Single source of truth" -- not reimplemented.
  */
 export async function findWorkflowJsonFiles(baseDirReal: string): Promise<string[]> {
   const files: string[] = [];
 
   async function scan(currentDir: string) {
     const entries = await fs.readdir(currentDir, { withFileTypes: true });
+    const jsonFiles = entries.filter((e) => e.isFile() && e.name.endsWith('.json'));
+    const subDirs = entries.filter((e) => e.isDirectory() && e.name !== 'examples');
 
-    for (const entry of entries) {
-      const fullPath = path.join(currentDir, entry.name);
-
-      if (entry.isDirectory()) {
-        // Skip examples directory
-        if (entry.name === 'examples') {
-          continue;
-        }
-        await scan(fullPath);
-      } else if (entry.isFile() && entry.name.endsWith('.json')) {
-        files.push(fullPath);
-      }
+    for (const f of jsonFiles) {
+      files.push(path.join(currentDir, f.name));
     }
+
+    // Fan out subdirectory scans in parallel. Per-entry catch isolates ENOENT
+    // (directory removed between readdir and scan) so one disappearing dir
+    // does not abort the entire scan.
+    await Promise.all(
+      subDirs.map((d) =>
+        scan(path.join(currentDir, d.name)).catch((err: unknown) => {
+          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+        }),
+      ),
+    );
   }
 
   await scan(baseDirReal);
+  // Sort after parallel scan to ensure deterministic ordering regardless of
+  // I/O completion order.
+  files.sort();
   return files;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// _____________________________________________________________________________
 // Raw Workflow File Types
-// ─────────────────────────────────────────────────────────────────────────────
+// _____________________________________________________________________________
 
 export type VariantKind = 'lean' | 'v2' | 'agentic' | 'standard';
 
@@ -67,21 +72,21 @@ export interface UnparseableRawWorkflowFile {
 
 export type RawWorkflowFile = ParsedRawWorkflowFile | UnparseableRawWorkflowFile;
 
-// ─────────────────────────────────────────────────────────────────────────────
+// _____________________________________________________________________________
 // Raw File Scanner
-// ─────────────────────────────────────────────────────────────────────────────
+// _____________________________________________________________________________
 
 /**
  * Scan raw workflow files from a directory.
  *
  * Returns all discovered .json files, both parsed and unparseable.
- * Unparseable files are never silently dropped — they are reported so the
+ * Unparseable files are never silently dropped -- they are reported so the
  * validator can enforce that invalid variant files fail CI.
  *
  * Detects variant from filename:
- * - `.v2.json` → 'v2' variant
- * - `.agentic.json` → 'agentic' variant
- * - `.json` (no variant marker) → 'standard' variant
+ * - `.v2.json` -> 'v2' variant
+ * - `.agentic.json` -> 'agentic' variant
+ * - `.json` (no variant marker) -> 'standard' variant
  */
 export async function scanRawWorkflowFiles(baseDirReal: string): Promise<RawWorkflowFile[]> {
   const allJsonFiles = await findWorkflowJsonFiles(baseDirReal);
@@ -92,7 +97,7 @@ export async function scanRawWorkflowFiles(baseDirReal: string): Promise<RawWork
 
     try {
       // Enforce file size limit
-      const stats = statSync(filePath);
+      const stats = await fs.stat(filePath);
       if (stats.size > 1_000_000) {
         results.push({
           kind: 'unparseable',
@@ -145,10 +150,10 @@ export async function scanRawWorkflowFiles(baseDirReal: string): Promise<RawWork
  * Detect variant kind from filename.
  *
  * Rules:
- * - Contains `.lean.` → 'lean'
- * - Contains `.v2.` → 'v2'
- * - Contains `.agentic.` → 'agentic'
- * - Otherwise → 'standard'
+ * - Contains `.lean.` -> 'lean'
+ * - Contains `.v2.` -> 'v2'
+ * - Contains `.agentic.` -> 'agentic'
+ * - Otherwise -> 'standard'
  */
 function detectVariantKind(relativeFilePath: string): VariantKind {
   const normalized = relativeFilePath.replace(/\\/g, '/'); // normalize path separators

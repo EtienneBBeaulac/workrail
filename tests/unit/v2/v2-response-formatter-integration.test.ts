@@ -32,9 +32,20 @@ const NON_EXECUTION_RESPONSE = {
   workflows: [{ workflowId: 'test', name: 'Test', description: 'Test workflow', version: '1.0.0', kind: 'workflow', workflowHash: null }],
 };
 
+/** Minimal mock ToolContext for tests that need feature flag access. */
+function makeCtx(flags: Record<string, boolean> = {}) {
+  return {
+    featureFlags: {
+      isEnabled: (key: string) => flags[key] ?? false,
+      getAll: () => ({}),
+      getSummary: () => '',
+    },
+  } as unknown as Parameters<typeof toMcpResult>[1];
+}
+
 describe('toMcpResult — NL formatting integration', () => {
   it('formats v2 execution success as natural language', () => {
-    const result = toMcpResult({ type: 'success', data: EXECUTION_RESPONSE });
+    const result = toMcpResult({ type: 'success', data: EXECUTION_RESPONSE }, makeCtx());
     const text = result.content[0]!;
     expect(text.type).toBe('text');
     expect((text as { text: string }).text).toContain('# Step 1: Do Something');
@@ -43,7 +54,7 @@ describe('toMcpResult — NL formatting integration', () => {
   });
 
   it('still returns JSON for non-execution tool outputs', () => {
-    const result = toMcpResult({ type: 'success', data: NON_EXECUTION_RESPONSE });
+    const result = toMcpResult({ type: 'success', data: NON_EXECUTION_RESPONSE }, makeCtx());
     const text = (result.content[0] as { text: string }).text;
     expect(() => JSON.parse(text)).not.toThrow();
     expect(JSON.parse(text)).toHaveProperty('workflows');
@@ -82,6 +93,7 @@ describe('toMcpResult — WORKRAIL_JSON_RESPONSES env flag', () => {
     vi.resetModules();
     const { toMcpResult: freshToMcpResult } = await import('../../../src/mcp/handler-factory.js');
 
+    // No ctx needed for JSON responses mode — it bypasses formatting entirely
     const result = freshToMcpResult({ type: 'success', data: EXECUTION_RESPONSE });
     const text = (result.content[0] as { text: string }).text;
     expect(() => JSON.parse(text)).not.toThrow();
@@ -92,28 +104,18 @@ describe('toMcpResult — WORKRAIL_JSON_RESPONSES env flag', () => {
 });
 
 describe('toMcpResult — clean response supplements', () => {
-  const originalClean = process.env.WORKRAIL_CLEAN_RESPONSE_FORMAT;
-
-  beforeEach(() => {
-    process.env.WORKRAIL_CLEAN_RESPONSE_FORMAT = 'true';
-  });
-
-  afterEach(() => {
-    if (originalClean === undefined) {
-      delete process.env.WORKRAIL_CLEAN_RESPONSE_FORMAT;
-    } else {
-      process.env.WORKRAIL_CLEAN_RESPONSE_FORMAT = originalClean;
-    }
-  });
+  // cleanResponseFormat is now a parameter passed via ctx.featureFlags.
+  // No module reload needed — just pass a ctx with cleanResponseFormat enabled.
 
   it('start responses include authority context and notes guidance as separate content items', () => {
+    const ctx = makeCtx({ cleanResponseFormat: true });
     const result = toMcpResult({
       type: 'success',
       data: createV2ExecutionRenderEnvelope({
         response: EXECUTION_RESPONSE,
         lifecycle: 'start',
       }),
-    });
+    }, ctx);
 
     expect(result.content).toHaveLength(3);
     expect((result.content[0] as { text: string }).text).toContain('Execute the first task.');
@@ -122,6 +124,7 @@ describe('toMcpResult — clean response supplements', () => {
   });
 
   it('rehydrate responses include authority context but not notes guidance', () => {
+    const ctx = makeCtx({ cleanResponseFormat: true });
     const result = toMcpResult({
       type: 'success',
       data: createV2ExecutionRenderEnvelope({
@@ -131,7 +134,7 @@ describe('toMcpResult — clean response supplements', () => {
         },
         lifecycle: 'rehydrate',
       }),
-    });
+    }, ctx);
 
     expect(result.content).toHaveLength(2);
     expect((result.content[1] as { text: string }).text).toContain('WorkRail is a separate live system');
@@ -139,13 +142,14 @@ describe('toMcpResult — clean response supplements', () => {
   });
 
   it('advance responses do not include supplemental content items', () => {
+    const ctx = makeCtx({ cleanResponseFormat: true });
     const result = toMcpResult({
       type: 'success',
       data: createV2ExecutionRenderEnvelope({
         response: EXECUTION_RESPONSE,
         lifecycle: 'advance',
       }),
-    });
+    }, ctx);
 
     expect(result.content).toHaveLength(1);
     expect((result.content[0] as { text: string }).text).not.toContain('# Step 1: Do Something');

@@ -15,6 +15,22 @@
 
 import { z } from 'zod';
 
+// Memoize _def.shape() calls per ZodObject instance.
+//
+// _def.shape() is a getter that may allocate a new plain object on each call
+// (depending on the Zod version and schema construction path). Since schemas
+// are reference-stable across the lifetime of a server process, a WeakMap
+// cache gives per-schema amortization without preventing GC.
+const shapeCache = new WeakMap<z.ZodObject<z.ZodRawShape>, z.ZodRawShape>();
+
+export function getCachedShape(schema: z.ZodObject<z.ZodRawShape>): z.ZodRawShape {
+  const cached = shapeCache.get(schema);
+  if (cached !== undefined) return cached;
+  const shape = schema._def.shape();
+  shapeCache.set(schema, shape);
+  return shape;
+}
+
 /**
  * Extract all expected keys from a Zod object schema.
  *
@@ -26,7 +42,7 @@ import { z } from 'zod';
  */
 export function extractExpectedKeys(schema: z.ZodType): readonly string[] {
   if (schema instanceof z.ZodObject) {
-    return Object.keys(schema._def.shape());
+    return Object.keys(getCachedShape(schema));
   }
   return [];
 }
@@ -45,7 +61,7 @@ export function extractRequiredKeys(schema: z.ZodType): readonly string[] {
     return [];
   }
 
-  const shape = schema._def.shape();
+  const shape = getCachedShape(schema);
   const required: string[] = [];
 
   for (const [key, value] of Object.entries(shape)) {
@@ -131,7 +147,7 @@ export function generateExampleValue(
 
   // Handle ZodObject
   if (schema instanceof z.ZodObject) {
-    const shape = schema._def.shape();
+    const shape = getCachedShape(schema);
     const result: Record<string, unknown> = {};
 
     for (const [key, value] of Object.entries(shape)) {
@@ -255,7 +271,7 @@ export function extractEnumValues(schema: z.ZodType, path: string): readonly str
 
   for (const part of parts) {
     if (current instanceof z.ZodObject) {
-      const shape = current._def.shape();
+      const shape = getCachedShape(current);
       const field = shape[part] as z.ZodType | undefined;
       if (!field) return [];
       current = field;
@@ -263,7 +279,7 @@ export function extractEnumValues(schema: z.ZodType, path: string): readonly str
       current = current._def.innerType;
       // Re-check with the unwrapped type
       if (current instanceof z.ZodObject) {
-        const shape = current._def.shape();
+        const shape = getCachedShape(current);
         const field = shape[part] as z.ZodType | undefined;
         if (!field) return [];
         current = field;

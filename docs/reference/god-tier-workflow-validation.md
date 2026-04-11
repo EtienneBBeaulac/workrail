@@ -117,8 +117,10 @@ Validation must check the authored workflow for:
 - function definition/call integrity
 - condition shape
 - confirmation rule shape
-- validation criteria shape
+- validation criteria shape (including context-aware condition integrity on individual rules)
 - output contract shape
+- assessment ref integrity: every `assessmentRef` on every step must resolve to a declared workflow-level assessment
+- assessment consequence shape: if `assessmentConsequences` is present, at least one `assessmentRef` must be declared; the `anyEqualsLevel` trigger value must exist in at least one dimension of at least one referenced assessment; at most one consequence per step
 - structural workflow invariants
 This layer catches bad authored input early, before normalization.
 ## Phase 4 — Executable Normalization Validation
@@ -148,6 +150,7 @@ Validation must prove the executable workflow compiles into runtime structures s
 - loop-body resolution
 - condition-source derivation
 - output contracts
+- assessment consequence compilation: all referenced assessments resolve, trigger levels are reachable across the combined dimension set, consequence effect kinds are supported
 - any other runtime compilation artifacts
 ### Required rule
 If compilation fails, validation fails.
@@ -186,6 +189,7 @@ Each execution-tested workflow should define or be paired with:
 - synthetic user answers
 - synthetic step outputs
 - branch-driving context values
+- synthetic assessment artifacts for steps with `assessmentRefs` (one `wr.assessment` artifact per ref, with canonical dimension levels)
 - expected terminal condition
 ## Required Execution Coverage
 At minimum, each runnable workflow should have:

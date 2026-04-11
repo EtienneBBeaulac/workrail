@@ -9,8 +9,8 @@ This file is a deterministic “what to do next” plan for driving **uncovered 
 
 ## Summary
 
-- Total locks: **114**
-- Covered: **114**
+- Total locks: **118**
+- Covered: **118**
 - Uncovered: **0**
 
 ## Uncovered locks by priority

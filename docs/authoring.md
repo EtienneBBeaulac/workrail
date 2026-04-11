@@ -21,6 +21,7 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 - Then update this authoring spec so guidance matches the shipped behavior.
 - Then regenerate or update human-facing docs and examples derived from this spec.
 - Do not leave authoring guidance behind the runtime.
+- Increment `version` when any required-level rule is added, removed, or materially changed. Add a `changelog` entry for the new version.
 
 ## Quickstart
 ### start-from-real-sources
@@ -99,52 +100,6 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 
 **Source refs**
 - `spec/workflow.schema.json` (schema) — Legal workflow structure lives here.
-
-### assessment-definitions-hold-vocabulary-not-policy
-- **Level**: recommended
-- **Status**: active
-- **Scope**: workflow.assessments, step.assessment-refs, step.assessment-consequences
-- **Rule**: Put reusable judgment vocabulary in `assessments`, and put execution behavior in step-level `assessmentConsequences`.
-- **Why**: Shared assessment definitions should describe what can be judged, while step-local declarations decide what the workflow does with that judgment.
-- **Enforced by**: validator, compiler, advisory
-
-**Checks**
-- Use `assessments` for dimensions, levels, and purpose only.
-- Use `assessmentRefs` to opt a step into one declared assessment.
-- Use `assessmentConsequences` only on the step that should react to the assessment result.
-
-**Anti-patterns**
-- Encoding step-specific follow-up policy into a shared assessment definition
-- Reusing one assessment definition and expecting all referencing steps to inherit the same behavior implicitly
-
-**Source refs**
-- `spec/workflow.schema.json` (schema) — Assessment declarations and step usage fields.
-- `src/application/services/validation-engine.ts` (validator) — Enforces valid assessment refs and consequence shapes.
-- `src/application/services/workflow-compiler.ts` (runtime) — Fails fast on invalid assessment consequence declarations.
-
-### assessment-consequences-stay-narrow-in-v1
-- **Level**: required
-- **Status**: active
-- **Scope**: step.assessment-consequences, workflow.authoring, documentation.authoring
-- **Rule**: Author assessment consequences using only the shipped v1 shape: one exact-match trigger and one `require_followup` effect.
-- **Why**: The engine supports a deliberately narrow assessment consequence model today. Authoring ahead of that model would create drift and false expectations.
-- **Enforced by**: validator, compiler, advisory
-
-**Checks**
-- Declare at most one `assessmentRefs` entry per step.
-- Declare at most one `assessmentConsequences` entry per step.
-- Use one declared dimension and one declared canonical level for the trigger.
-- Use `require_followup` guidance that keeps the same step pending and retryable.
-
-**Anti-patterns**
-- Multiple consequence rules on one step
-- Scoring ladders or severity tables encoded as pseudo-policy
-- Follow-up wording that implies rewind or a new subflow when the engine still expects same-step retry
-
-**Source refs**
-- `spec/workflow.schema.json` (schema) — V1 legal assessment consequence structure.
-- `src/mcp/handlers/v2-advance-core/assessment-consequences.ts` (runtime) — Exact-match evaluation semantics.
-- `src/v2/durable-core/domain/reason-model.ts` (runtime) — Same-step follow-up blocker framing.
 
 ### runtime-behavior-beats-prose
 - **Level**: required
@@ -346,49 +301,6 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 - `src/application/services/compiler/feature-registry.ts` (runtime) — The registry rejects unknown feature IDs at compile time.
 
 
-## Workflow catalog fields
-### about-is-for-human-readers
-- **Level**: recommended
-- **Status**: active
-- **Scope**: workflow.about, documentation.authoring
-- **Rule**: Use `about` for a human-readable overview of the workflow for display in the console and other catalog UIs. Do not use `metaGuidance` as a substitute for `about`.
-- **Why**: `metaGuidance` is surfaced to agents at runtime. `about` is surfaced to humans browsing the catalog before they start a workflow. Mixing the two audiences produces text that serves neither well.
-- **Enforced by**: advisory; `workflow-for-workflows.v2.json` Phase 7a prompts for this field
-
-**Content guidance**
-Write `about` for a user deciding whether to use the workflow. Cover: what it does, when to use it, what it produces, and how to get good results. Markdown is supported. Aim for 100-400 words; longer is acceptable if the workflow is complex. The `description` field (one sentence, max 512 chars) handles the brief summary -- `about` is the detail.
-
-**Anti-patterns**
-- Writing `about` as a list of behavioral rules (that belongs in `metaGuidance`)
-- Writing `metaGuidance` as a usage guide for humans (that belongs in `about`)
-- Omitting `about` from a workflow that would be hard to evaluate from `description` alone
-
-### examples-are-for-catalog-discoverability
-- **Level**: recommended
-- **Status**: active
-- **Scope**: workflow.examples, documentation.authoring
-- **Rule**: Use `examples` for 2-6 short, concrete goal strings that illustrate what this workflow is used for. Write them as if they are real user goals a developer would actually type.
-- **Why**: `examples` serve two audiences: humans browsing the console catalog and agents selecting a workflow on the user's behalf. They appear in `list_workflows` MCP output so agents can communicate concrete goal phrasing to users. Vague or generic examples serve neither audience.
-- **Enforced by**: advisory; `workflow-for-workflows.v2.json` Phase 7a prompts for these fields
-
-**Content guidance**
-Each example should be specific enough to be informative and short enough to scan (10-120 characters). Prefer examples that would actually appear as a `goal` parameter when starting the workflow.
-
-**Good examples (for `coding-task-workflow-agentic`)**
-- "Implement JWT refresh token rotation in the auth service"
-- "Fix the race condition in the cache invalidation path when concurrent writes occur"
-- "Refactor the payment flow to use a Result type instead of throwing exceptions"
-
-**Bad examples**
-- "Implement a feature" -- applies to any coding workflow, adds no signal
-- "Review code" -- too generic, does not help an agent distinguish this from mr-review-workflow
-- "Use this when you need to implement something" -- written as an instruction, not a goal
-
-**Anti-patterns**
-- Generic examples that apply to many workflows
-- Phrasing as instructions ("use this when...") rather than goals
-- Fewer than 2 examples -- single examples do not show the range of applicable tasks
-
 ## Workflow references
 ### references-are-for-runtime-companion-material
 - **Level**: recommended
@@ -534,6 +446,63 @@ Each example should be specific enough to be informative and short enough to sca
 
 **Source refs**
 - `workflows/coding-task-workflow-agentic.lean.v2.json` (example) — Uses confirmation for real review barriers like MultiPR checkpoints.
+
+
+## Assessment gates
+### assessment-use-for-bounded-judgment
+- **Level**: recommended
+- **Status**: active
+- **Scope**: workflow.assessments, step.assessmentRefs, step.assessmentConsequences
+- **Rule**: Use assessment gates when a step needs the agent to submit a bounded, durable judgment before the workflow can safely advance -- not for generic scoring or ceremony.
+- **Why**: Assessment gates force explicit structured reasoning at a decision point and durably record the result. Generic scoring that never affects routing adds noise without value.
+- **Enforced by**: advisory
+
+**Checks**
+- The assessment is at a step where a wrong answer would produce a bad handoff.
+- At least one dimension has a consequence that keeps the step pending and requires follow-up.
+- The assessment result is durably recorded and useful to a future resume agent.
+
+**Anti-patterns**
+- Using assessments as a generic five-level scoring rubric with no routing consequence
+- Declaring an assessment but never referencing it from any step
+
+**Source refs**
+- `workflows/mr-review-workflow.agentic.v2.json` (example) — Uses a three-dimension readiness gate on the final validation step.
+- `workflows/bug-investigation.agentic.v2.json` (example) — Uses a single-dimension diagnosis readiness gate before handoff.
+
+### assessment-dimension-orthogonality
+- **Level**: required
+- **Status**: active
+- **Scope**: workflow.assessments
+- **Rule**: Each dimension in an assessment must capture a distinct failure mode that the other dimensions cannot catch. A dimension that restates existing workflow state (such as a generic 'confidence' dimension that mirrors the workflow's confidence band) adds ceremony without structure.
+- **Why**: The value of multiple dimensions is that each one independently blocks advancement for a different reason. Correlated or vague dimensions collapse to a single gate with extra steps.
+- **Enforced by**: advisory
+
+**Checks**
+- Each dimension is independently checkable without needing to know the result of the others.
+- No dimension restates a context variable the workflow already computes (e.g. recommendationConfidenceBand).
+- A 'low' rating on any one dimension alone justifies a follow-up, regardless of the others.
+
+**Anti-patterns**
+- A single 'confidence' dimension that mirrors the workflow's existing confidence band
+- Multiple dimensions that all reduce to 'did I do a good job overall'
+- Dimensions so correlated that one being low always means the others are low too
+
+### assessment-v1-constraints
+- **Level**: required
+- **Status**: active
+- **Scope**: step.assessmentRefs, step.assessmentConsequences
+- **Rule**: A step may declare one or more assessmentRefs and at most one assessmentConsequences entry. When assessmentConsequences is present, at least one ref is required. Use anyEqualsLevel as the trigger -- the engine checks all submitted dimensions across all referenced assessments and fires if any equals that level.
+- **Why**: Multiple refs allow composing separate orthogonal assessment definitions (e.g. quality-gate + coverage-gate) behind a single blocking consequence, without forcing unrelated dimensions into one monolithic definition.
+- **Enforced by**: schema
+
+**Checks**
+- At least one assessmentRefs entry when assessmentConsequences is present.
+- No more than one assessmentConsequences entry per step.
+- The consequence uses anyEqualsLevel to declare which level blocks -- not a named dimension.
+
+**Anti-patterns**
+- Trying to encode multiple consequences via workarounds
 
 
 ## Delegation and subagents
@@ -876,3 +845,4 @@ Each example should be specific enough to be informative and short enough to sca
 - `delegation.context-packet`: Structured context passed to subagents
 - `delegation.result-envelope`: Structured result shape returned by subagents
 - `legacy.patterns`: Older authoring patterns that should now be discouraged or avoided
+

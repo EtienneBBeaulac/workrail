@@ -9,8 +9,8 @@
 
 | Metric | Value |
 |--------|-------|
-| Total locks | 114 |
-| Covered | 114 |
+| Total locks | 118 |
+| Covered | 118 |
 | Uncovered | 0 |
 | Coverage | **100%** |
 
@@ -26,14 +26,14 @@
 | projection | 3 | 3 | 100% |
 | protocol | 14 | 14 | 100% |
 | schema | 32 | 32 | 100% |
-| storage | 16 | 16 | 100% |
+| storage | 20 | 20 | 100% |
 | tokens | 21 | 21 | 100% |
 | types | 2 | 2 | 100% |
 
 ## Covered Locks
 
 <details>
-<summary>Click to expand (114 locks)</summary>
+<summary>Click to expand (118 locks)</summary>
 
 | Lock ID | Test Files |
 |---------|------------|
@@ -41,7 +41,7 @@
 | `ack-replay-idempotent` | `tests/unit/v2/session-store-idempotency-with-fakes.test.ts`, `tests/unit/v2/session-store-idempotency.test.ts` |
 | `ack-token-payload-fields` | `tests/unit/v2/tokens-binary.test.ts` |
 | `advance-append-capable` | `tests/unit/v2/v2-execution-protocol.test.ts` |
-| `append-plan-atomic` | `tests/unit/v2/session-store-idempotency-with-fakes.test.ts`, `tests/unit/v2/session-store-idempotency.test.ts`, `tests/unit/v2/session-store.test.ts` |
+| `append-plan-atomic` | `tests/unit/v2/session-store-idempotency-with-fakes.test.ts`, `tests/unit/v2/session-store-idempotency.test.ts`, `tests/unit/v2/session-store-preloaded-truth.test.ts`, `tests/unit/v2/session-store.test.ts` |
 | `autonomy-closed-set` | `tests/unit/v2/schema-locks.test.ts` |
 | `bech32m-checksum-validation` | `tests/unit/v2/tokens-corruption.test.ts` |
 | `binary-payload-deterministic` | `tests/unit/v2/golden-tokens/golden-tokens.test.ts`, `tests/unit/v2/tokens-property-based.test.ts` |
@@ -64,7 +64,7 @@
 | `crash-state-detection` | `tests/unit/v2/session-store.test.ts` |
 | `data-dir-workrail-owned` | `tests/unit/v2/data-dir.test.ts` |
 | `decision-trace-bounded` | `tests/unit/v2/budget-enforcement.test.ts` |
-| `dedupe-key-idempotent` | `tests/unit/v2/session-store-idempotency-with-fakes.test.ts`, `tests/unit/v2/session-store-idempotency.test.ts`, `tests/unit/v2/session-store.test.ts` |
+| `dedupe-key-idempotent` | `tests/unit/v2/session-store-idempotency-with-fakes.test.ts`, `tests/unit/v2/session-store-idempotency.test.ts`, `tests/unit/v2/session-store-preloaded-truth.test.ts`, `tests/unit/v2/session-store.test.ts` |
 | `dedupe-key-stable` | `tests/unit/v2/session-store-idempotency-with-fakes.test.ts`, `tests/unit/v2/session-store-idempotency.test.ts` |
 | `determinism` | `tests/unit/v2/notes-markdown.test.ts` |
 | `durable-core-no-buffer` | `tests/architecture/v2-import-boundaries.test.ts` |
@@ -90,6 +90,7 @@
 | `keyring-two-keys` | `tests/unit/v2/tokens.test.ts` |
 | `keyring-verification-order` | `tests/unit/v2/tokens.test.ts` |
 | `manifest-index-monotonic-contiguous` | `tests/unit/v2/session-store.test.ts` |
+| `mkdirp-once-per-session` | `tests/unit/v2/perf-parallel-io.test.ts` |
 | `no-throws-across-boundaries` | `tests/unit/v2/keyring-adapter.test.ts`, `tests/unit/v2/pinned-workflow-store-adapter.test.ts` |
 | `non-assumable-choice-closed-set` | `tests/unit/v2/schema-locks.test.ts` |
 | `non-tip-advance-creates-fork` | `tests/unit/v2/v2-execution-protocol.test.ts` |
@@ -97,6 +98,8 @@
 | `orphan-segment-ignored` | `tests/unit/v2/session-store.test.ts` |
 | `output-channel-closed-set` | `tests/unit/v2/output-ordering.test.ts` |
 | `output-ordering-deterministic` | `tests/unit/v2/output-ordering.test.ts` |
+| `parallel-segment-order` | `tests/unit/v2/perf-parallel-io.test.ts` |
+| `parallel-stat-correctness` | `tests/unit/v2/perf-parallel-io.test.ts` |
 | `paths-relative-only` | `tests/unit/v2/session-manifest-schema.test.ts` |
 | `pin-after-close` | `tests/unit/v2/session-store.test.ts` |
 | `ports-interfaces-only` | `tests/architecture/v2-import-boundaries.test.ts` |
@@ -121,6 +124,7 @@
 | `schema-versioned` | `tests/unit/v2/schema-locks.test.ts` |
 | `segment-digest-verification` | `tests/unit/v2/session-store.test.ts` |
 | `session-health-closed-set` | `tests/unit/v2/execution-session-gate.test.ts` |
+| `single-manifest-fsync` | `tests/unit/v2/perf-parallel-io.test.ts` |
 | `single-writer-per-session` | `tests/unit/v2/execution-session-gate.test.ts`, `tests/unit/v2/session-store.test.ts` |
 | `snapshot-completed-sorted` | `tests/unit/v2/execution-snapshot.test.ts` |
 | `snapshot-content-addressed` | `tests/unit/v2/golden-hashes/golden-hashes.test.ts` |

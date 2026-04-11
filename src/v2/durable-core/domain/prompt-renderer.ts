@@ -1,7 +1,7 @@
 import type { Result } from 'neverthrow';
 import { err, ok } from 'neverthrow';
 import type { Workflow } from '../../../types/workflow.js';
-import { getStepById, isLoopStepDefinition } from '../../../types/workflow.js';
+import { getStepById } from '../../../types/workflow.js';
 import type { AssessmentDefinition, PromptFragment } from '../../../types/workflow-definition.js';
 import type { LoadedSessionTruthV2 } from '../../ports/session-event-log-store.port.js';
 import type { LoopPathFrameV1 } from '../schemas/execution-snapshot/index.js';
@@ -17,6 +17,7 @@ import { EVENT_KIND, OUTPUT_CHANNEL, PAYLOAD_KIND } from '../constants.js';
 import { extractValidationRequirements } from './validation-requirements-extractor.js';
 import { LOOP_CONTROL_CONTRACT_REF } from '../schemas/artifacts/index.js';
 import { projectRunContextV2 } from '../../projections/run-context.js';
+import { asSortedEventLog } from '../sorted-event-log.js';
 import { evaluateCondition } from '../../../utils/condition-evaluator.js';
 import { resolveContextTemplates } from './context-template-resolver.js';
 import type { LoopStepDefinition } from '../../../types/workflow-definition.js';
@@ -158,20 +159,13 @@ function buildRecoverySegments(args: {
 /**
  * Find the parent loop step for a given body step ID.
  * Returns undefined if the step is not inside a loop.
- * Single traversal — callers derive maxIterations from the returned step directly.
+ * O(1) lookup via the pre-built parentLoopByStepId index (built at createWorkflow() time).
  */
 function resolveParentLoopStep(
   workflow: Workflow,
   stepId: string,
 ): LoopStepDefinition | undefined {
-  for (const step of workflow.definition.steps) {
-    if (isLoopStepDefinition(step) && Array.isArray(step.body)) {
-      for (const bodyStep of step.body) {
-        if (bodyStep.id === stepId) return step as LoopStepDefinition;
-      }
-    }
-  }
-  return undefined;
+  return workflow.parentLoopByStepId.get(stepId);
 }
 
 /**
@@ -319,13 +313,19 @@ function formatAssessmentRequirements(
 ): readonly string[] {
   if (assessments.length === 0) return [];
 
+  const multiRef = assessments.length > 1;
   const requirements: string[] = [];
   for (const assessment of assessments) {
     requirements.push('Provide an artifact with kind: "wr.assessment"');
+    if (multiRef) {
+      requirements.push(`Set assessmentId: "${assessment.id}" on the artifact so the engine can match it to the correct assessment.`);
+    }
     requirements.push(`Assessment target: "${assessment.id}"`);
-    requirements.push(
-      `Dimensions: ${assessment.dimensions.map((dimension) => `${dimension.id} (${dimension.levels.join(' | ')})`).join(', ')}`
-    );
+    requirements.push(`Purpose: ${assessment.purpose}`);
+    requirements.push('Dimensions:');
+    for (const dimension of assessment.dimensions) {
+      requirements.push(`  ${dimension.id} (${dimension.levels.join(' | ')}): ${dimension.purpose}`);
+    }
     requirements.push('Use only canonical dimension levels. If the engine rejects the artifact, correct the submitted levels instead of inventing new ones.');
   }
   return requirements;
@@ -402,6 +402,14 @@ export function renderPendingPrompt(args: {
   readonly runId: RunId;
   readonly nodeId: NodeId;
   readonly rehydrateOnly: boolean;
+  /** Pre-built SessionIndex -- when provided, skips hasPriorNotesInRun and asSortedEventLog+projectRunContextV2. */
+  readonly precomputedIndex?: import('../session-index.js').SessionIndex;
+  /**
+   * Whether to use the clean response format (transparent proxy mode).
+   * Passed from the caller so the feature flag is resolved via DI rather
+   * than read directly from process.env inside this pure rendering function.
+   */
+  readonly cleanResponseFormat?: boolean;
 }): Result<StepMetadata, PromptRenderError> {
   // Extract base step metadata.
   // Fail-fast: a missing step is a structural invariant violation, not a "use a fallback" situation.
@@ -438,16 +446,22 @@ export function renderPendingPrompt(args: {
   // Context template resolution: substitute {{varName}} / {{varName.path}} tokens in the
   // authored step prompt and title using live session context merged with loop-derived vars.
   // This runs before banner/requirements injection so only the authored text is substituted.
-  const sessionContext: Record<string, unknown> = projectRunContextV2(args.truth.events).match(
-    (ok) => (ok.byRunId[String(args.runId)]?.context ?? {}) as Record<string, unknown>,
-    (e) => {
-      console.warn(
-        `[prompt-renderer] Context projection failed for step '${args.stepId}' — ` +
-        `{{varName}} tokens will render as [unset:...]: ${e.message}`,
+  // Use pre-computed context from SessionIndex when available to skip the
+  // asSortedEventLog + projectRunContextV2 scans.
+  const sessionContext: Record<string, unknown> = args.precomputedIndex
+    ? (args.precomputedIndex.runContextByRunId.get(String(args.runId)) ?? {}) as Record<string, unknown>
+    : asSortedEventLog(args.truth.events).andThen(
+        (sorted) => projectRunContextV2(sorted)
+      ).match(
+        (ok) => (ok.byRunId[String(args.runId)]?.context ?? {}) as Record<string, unknown>,
+        (e) => {
+          console.warn(
+            `[prompt-renderer] Context projection failed for step '${args.stepId}' — ` +
+            `{{varName}} tokens will render as [unset:...]: ${e.message}`,
+          );
+          return {};
+        },
       );
-      return {};
-    },
-  );
 
   // .at(-1) is idiomatic and expresses intent directly — last frame of the loop path
   const loopIterationFrame = args.loopPath.at(-1);
@@ -464,8 +478,8 @@ export function renderPendingPrompt(args: {
   const basePrompt = resolveContextTemplates(step.prompt ?? '', renderContext);
   const baseTitle = resolveContextTemplates(step.title, renderContext);
 
-  // Clean response format flag — read once, used for banner, notes, and recovery.
-  const cleanResponseFormat = process.env.WORKRAIL_CLEAN_RESPONSE_FORMAT === 'true';
+  // Use the cleanResponseFormat flag passed from the caller (resolved via DI feature flags).
+  const cleanResponseFormat = args.cleanResponseFormat ?? false;
 
   // Loop context banner — prepended before the authored prompt so the agent
   // understands it is intentionally re-entering a loop body step.
@@ -510,7 +524,10 @@ export function renderPendingPrompt(args: {
       return '';  // Notes reminder handled in the response formatter footer
     }
 
-    const hasPriorNotes = hasPriorNotesInRun({ truth: args.truth, runId: args.runId });
+    // Use pre-computed index when available to skip the hasPriorNotesInRun .some() scan.
+    const hasPriorNotes = args.precomputedIndex
+      ? args.precomputedIndex.hasPriorNotesByRunId.has(String(args.runId))
+      : hasPriorNotesInRun({ truth: args.truth, runId: args.runId });
     if (hasPriorNotes && !args.rehydrateOnly) {
       return '\n\n**NOTES REQUIRED (System):** Include `output.notesMarkdown` when advancing.\n\n' +
         'Scope: this step only — WorkRail concatenates notes automatically.\n' +
@@ -562,8 +579,16 @@ export function renderPendingPrompt(args: {
     ? assembleFragmentedPrompt(promptFragments, renderContext)
     : '';
 
-  const enhancedPrompt = loopBanner + basePrompt + requirementsSection + contractSection + assessmentSection + notesSection
-    + (fragmentSuffix ? '\n\n' + fragmentSuffix : '');
+  // Array join avoids 5 intermediate string allocations from the + chain.
+  const enhancedPrompt = [
+    loopBanner,
+    basePrompt,
+    requirementsSection,
+    contractSection,
+    assessmentSection,
+    notesSection,
+    fragmentSuffix ? '\n\n' + fragmentSuffix : '',
+  ].join('');
 
   // If not rehydrate-only, return enhanced prompt (no recovery needed for advance/start)
   if (!args.rehydrateOnly) {

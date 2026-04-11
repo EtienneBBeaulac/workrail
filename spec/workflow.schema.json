@@ -456,14 +456,13 @@
         },
         "assessmentRefs": {
           "type": "array",
-          "description": "References to workflow-level assessment definitions expected for this step. V1 supports exactly one assessmentRef per step.",
+          "description": "References to workflow-level assessment definitions expected for this step. When assessmentConsequences is present, at least one ref is required; multiple refs are supported and the consequence fires if any dimension across any referenced assessment equals the trigger level.",
           "items": {
             "type": "string",
             "minLength": 1,
             "maxLength": 64
           },
           "minItems": 1,
-          "maxItems": 1,
           "uniqueItems": true
         },
         "assessmentConsequences": {
