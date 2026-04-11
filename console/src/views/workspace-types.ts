@@ -102,15 +102,21 @@ export function itemVisibility(
 ): ItemVisibility {
   const status = item.primarySession?.status;
 
-  // Active sessions are always visible regardless of age or cleanliness
-  if (status === 'in_progress' || status === 'dormant' || status === 'blocked') {
+  // Actively running or blocked: always visible
+  if (status === 'in_progress' || status === 'blocked') {
     return 'visible';
   }
 
-  // Branches with uncommitted or unpushed work are always visible
+  // Branches with uncommitted or unpushed work are always visible -- the branch
+  // has active changes regardless of session status
   const hasUncommitted = (item.worktree?.changedCount ?? 0) > 0;
   const hasUnpushed = (item.worktree?.aheadCount ?? 0) > 0;
   if (hasUncommitted || hasUnpushed) return 'visible';
+
+  // Dormant sessions: visible in All scope only
+  if (status === 'dormant') {
+    return scope === 'all' ? 'visible' : 'hidden';
+  }
 
   // Within-30-day activity is always visible
   if (nowMs - item.activityMs < THIRTY_DAYS_MS) return 'visible';
