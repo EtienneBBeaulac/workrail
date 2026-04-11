@@ -264,9 +264,10 @@ export function mountConsoleRoutes(
     // Timeout race: if the scan takes too long, return an empty repo list so the
     // client doesn't spin. The next poll will retry, and the in-flight scan result
     // will be cached by then.
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('worktrees scan timeout')), WORKTREES_REQUEST_TIMEOUT_MS)
-    );
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error('worktrees scan timeout')), WORKTREES_REQUEST_TIMEOUT_MS);
+    });
 
     try {
       const sessionResult = await consoleService.getSessionList();
@@ -290,11 +291,11 @@ export function mountConsoleRoutes(
         getWorktreeList(repoRoots, activeSessions),
         timeoutPromise,
       ]);
+      if (timeoutId !== null) clearTimeout(timeoutId);
       res.json({ success: true, data });
     } catch (e) {
+      if (timeoutId !== null) clearTimeout(timeoutId);
       if (e instanceof Error && e.message === 'worktrees scan timeout') {
-        // Respond with empty data instead of leaving the client hanging.
-        // The background scan is still running and will populate the cache.
         res.json({ success: true, data: { repos: [] } });
       } else {
         res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });

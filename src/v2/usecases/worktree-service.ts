@@ -45,13 +45,18 @@ const GIT_TIMEOUT_MS = 5_000;
 /**
  * Discriminate child_process execution errors from programmer errors.
  *
- * Execution errors (non-zero exit, ENOENT, ETIMEDOUT) are set by Node's
- * child_process module and always carry a `killed` property. TypeError,
- * ReferenceError, etc. do not — those are bugs in our code and must
- * propagate rather than being silently swallowed.
+ * Two classes of execution error need to be caught:
+ * - ExecFileException (non-zero exit, timeout): carries a `killed` property
+ * - Spawn errors (ENOENT cwd or binary, EACCES): system errors with `syscall`
+ *   starting with 'spawn'. These do NOT carry `killed`.
+ *
+ * TypeError, ReferenceError, etc. don't match either pattern and propagate.
  */
 function isExecError(e: unknown): boolean {
-  return e instanceof Error && 'killed' in e;
+  if (!(e instanceof Error)) return false;
+  if ('killed' in e) return true; // ExecFileException (non-zero exit, timeout)
+  const sys = (e as NodeJS.ErrnoException).syscall ?? '';
+  return sys.startsWith('spawn'); // ENOENT/EACCES from spawn (bad cwd or missing binary)
 }
 
 /**
