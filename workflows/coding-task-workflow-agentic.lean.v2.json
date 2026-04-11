@@ -1,7 +1,7 @@
 {
   "id": "coding-task-workflow-agentic",
   "name": "Agentic Task Dev Workflow (Lean • Notes-First • WorkRail Executor)",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Use this to implement a software feature or task. Follows a plan-then-execute approach with architecture decisions, invariant tracking, and final verification.",
   "about": "## Agentic Coding Task Workflow\n\nThis workflow structures the full lifecycle of a software implementation task: from understanding and classifying the work, through architecture decisions and incremental implementation, to final verification and handoff.\n\n### What it does\n\nThe workflow guides an AI agent through a disciplined plan-then-execute process. It begins by analyzing the task to determine complexity, risk, and the right level of rigor (QUICK, STANDARD, or THOROUGH). For non-trivial tasks, it then gathers codebase context, surfaces invariants and non-goals, generates competing design candidates, and selects an approach before writing a single line of code. Implementation proceeds slice by slice, with built-in verification gates after each slice. A final integration verification pass confirms acceptance criteria are met before handoff.\n\n### When to use it\n\nUse this workflow whenever you are implementing a feature, fixing a non-trivial bug, or making an architectural change in a real codebase. It is especially valuable when:\n- The task touches multiple files or systems\n- There is meaningful risk of regressions or invariant violations\n- You want the agent to surface trade-offs and commit to a reasoned design decision rather than guessing\n- You need a resumable, auditable record of what was decided and why\n\nFor quick one-liner fixes or very small changes, the workflow includes a fast path that skips heavyweight planning.\n\n### What it produces\n\n- An `implementation_plan.md` artifact covering the selected approach, vertical slices, test design, and philosophy alignment\n- A `spec.md` for large or high-risk tasks, capturing observable behavior and acceptance criteria\n- Step-level notes in WorkRail that serve as a durable execution log\n- A PR-ready handoff summary with acceptance criteria status, invariant proofs, and follow-up tickets\n\n### How to get good results\n\n- Provide a clear task description and at least partial acceptance criteria before starting\n- If you have coding philosophy or project conventions configured in session rules or Memory MCP, the workflow will apply them automatically as a design lens\n- Let the workflow classify complexity and rigor itself; override only if the classification is clearly wrong\n- For large or high-risk tasks, review the architecture decision step before implementation begins",
   "examples": [
@@ -14,6 +14,96 @@
     "recommendedAutonomy": "guided",
     "recommendedRiskPolicy": "conservative"
   },
+  "assessments": [
+    {
+      "id": "design-soundness-gate",
+      "purpose": "The selected design approach is committed with rationale. No unresolved ambiguity remains about what to build.",
+      "dimensions": [
+        {
+          "id": "design_soundness",
+          "purpose": "Design decision is made, tradeoffs are recorded, and there is no remaining ambiguity about the chosen approach.",
+          "levels": ["low", "high"]
+        }
+      ]
+    },
+    {
+      "id": "design-gaps-gate",
+      "purpose": "A deliberate scan for unconsidered alternatives, unhandled edge cases, or untracked risks has been completed.",
+      "dimensions": [
+        {
+          "id": "design_gaps",
+          "purpose": "Active scan completed: either no material gaps were found, or any found were addressed or explicitly filed.",
+          "levels": ["low", "high"]
+        }
+      ]
+    },
+    {
+      "id": "plan-completeness-gate",
+      "purpose": "Every slice has a defined scope and verifiable acceptance criterion. No slice is vague or open-ended.",
+      "dimensions": [
+        {
+          "id": "plan_completeness",
+          "purpose": "Slices have clear boundaries and acceptance criteria. The agent knows what done looks like for each.",
+          "levels": ["low", "high"]
+        }
+      ]
+    },
+    {
+      "id": "invariant-clarity-gate",
+      "purpose": "Invariants and non-goals are explicit enough to verify against during and after implementation.",
+      "dimensions": [
+        {
+          "id": "invariant_clarity",
+          "purpose": "Named invariants are checkable in the implementation. Non-goals are stated and will prevent scope creep.",
+          "levels": ["low", "high"]
+        }
+      ]
+    },
+    {
+      "id": "plan-gaps-gate",
+      "purpose": "A deliberate scan for missing slices, untracked risks, or acceptance criteria mismatches has been completed.",
+      "dimensions": [
+        {
+          "id": "plan_gaps",
+          "purpose": "Active scan completed: either no material gaps were found, or any found were addressed or explicitly filed.",
+          "levels": ["low", "high"]
+        }
+      ]
+    },
+    {
+      "id": "build-correctness-gate",
+      "purpose": "The implementation compiles and passes all relevant tests.",
+      "dimensions": [
+        {
+          "id": "build_correctness",
+          "purpose": "Build succeeds and tests pass. No compilation errors or failing assertions.",
+          "levels": ["low", "high"]
+        }
+      ]
+    },
+    {
+      "id": "invariant-preservation-gate",
+      "purpose": "Invariants identified during planning still hold in the implemented code.",
+      "dimensions": [
+        {
+          "id": "invariant_preservation",
+          "purpose": "Each named invariant from the plan has been verified in the implementation.",
+          "levels": ["low", "high"]
+        }
+      ]
+    },
+    {
+      "id": "implementation-gaps-gate",
+      "purpose": "A deliberate scan for gaps, issues, or improvements surfaced during implementation has been completed.",
+      "dimensions": [
+        {
+          "id": "implementation_gaps",
+          "purpose": "Active scan completed: gaps found are either fixed inline, filed as follow-up tickets, or explicitly deferred with rationale.",
+          "levels": ["low", "high"]
+        }
+      ]
+    }
+  ],
   "preconditions": [
     "User provides a task description or equivalent objective.",
     "Agent has codebase read access and can run the tools needed for analysis and validation.",
@@ -164,6 +254,19 @@
           "text": "Also run `routine-execution-simulation` on the three most likely failure paths before you decide."
         }
       ],
+      "assessmentRefs": [
+        "design-soundness-gate",
+        "design-gaps-gate"
+      ],
+      "assessmentConsequences": [
+        {
+          "when": { "anyEqualsLevel": "low" },
+          "effect": {
+            "kind": "require_followup",
+            "guidance": "Address whichever gate scored low: design_soundness low -- the design decision is still ambiguous; commit to an approach and record the rationale before proceeding. design_gaps low -- the gap scan was not completed or found unaddressed gaps; either resolve them or explicitly file them before proceeding."
+          }
+        }
+      ],
       "requireConfirmation": {
         "or": [
           {
@@ -251,6 +354,20 @@
         "not_equals": "Small"
       },
       "prompt": "Turn the decision into a plan someone else could execute without guessing.\n\nUpdate `implementation_plan.md`.\n\nIt should cover:\n1. Problem statement\n2. Acceptance criteria (mirror `spec.md` if it exists; `spec.md` owns observable behavior)\n3. Non-goals\n4. Philosophy-driven constraints\n5. Invariants\n6. Selected approach + rationale + runner-up\n7. Vertical slices\n8. Work packages only if they actually help\n9. Test design\n10. Risk register\n11. PR packaging strategy\n12. Philosophy alignment per slice:\n   - [principle] -> [satisfied / tension / violated + 1-line why]\n\nCapture:\n- `implementationPlan`\n- `slices`\n- `testDesign`\n- `estimatedPRCount`\n- `followUpTickets` (initialize if needed)\n- `unresolvedUnknownCount` — count of open issues that would materially affect implementation quality\n- `planConfidenceBand` — Low / Medium / High\n\nThe plan is the deliverable for this step. Do not implement anything -- not a \"quick win\", not a file read that bleeds into edits, nothing. Execution begins in Phase 6, one slice at a time. If you find yourself writing code or editing source files right now, stop immediately.",
+      "assessmentRefs": [
+        "plan-completeness-gate",
+        "invariant-clarity-gate",
+        "plan-gaps-gate"
+      ],
+      "assessmentConsequences": [
+        {
+          "when": { "anyEqualsLevel": "low" },
+          "effect": {
+            "kind": "require_followup",
+            "guidance": "Address whichever gate scored low: plan_completeness low -- one or more slices lack clear boundaries or verifiable acceptance criteria; sharpen them before implementation begins. invariant_clarity low -- invariants or non-goals are too vague to verify against; make them concrete. plan_gaps low -- the gap scan was not completed or found unaddressed gaps; resolve or file them before proceeding."
+          }
+        }
+      ],
       "requireConfirmation": false
     },
     {
@@ -470,6 +587,20 @@
           "id": "phase-7b-fix-and-summarize",
           "title": "Synthesize Findings, Fix, and Re-Verify",
           "prompt": "Read `final-verification-findings.md` and decide what actually needs fixing.\n\nDon't rubber-stamp it. The verifier is evidence, not the decision.\n\nIf `spec.md` exists, use it as the verification anchor and make sure every acceptance criterion is actually met.\n\nThis loop is verify, fix, then re-verify. If you fix anything here, the next pass exists to prove the fixes worked.\n\nSynthesize the verification output explicitly:\n- what the verifier found\n- what you agree with\n- what you reject and why\n- what changed because of the fixes\n\nFor any finding that changes final acceptance, classify it as:\n- `Confirmed`: you checked it against primary evidence (code, spec, tests/build, or direct workflow context)\n- `Plausible`: interesting, but not verified enough to accept or block final signoff yet\n- `Rejected`: contradicted by fuller context or direct evidence\n\nSubagent agreement alone is not enough for `Confirmed`.\n\nFix what has to be fixed now, rerun the affected verification, and update:\n- `implementation_plan.md` if the execution shape changed\n- `spec.md` if acceptance criteria, observable behavior, or external contracts changed\n\nCapture:\n- `integrationFindings`\n- `integrationPassed`\n- `regressionDetected`",
+          "assessmentRefs": [
+            "build-correctness-gate",
+            "invariant-preservation-gate",
+            "implementation-gaps-gate"
+          ],
+          "assessmentConsequences": [
+            {
+              "when": { "anyEqualsLevel": "low" },
+              "effect": {
+                "kind": "require_followup",
+                "guidance": "Address whichever gate scored low: build_correctness low -- the build or tests are still failing; fix them before this step can complete. invariant_preservation low -- one or more invariants from the plan are violated; fix the implementation. implementation_gaps low -- the gap scan was not completed or found unaddressed gaps; fix them inline, file as follow-up tickets, or explicitly defer with rationale."
+              }
+            }
+          ],
           "requireConfirmation": false
         },
         {
