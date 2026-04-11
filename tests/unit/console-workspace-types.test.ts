@@ -46,6 +46,7 @@ function makeSession(overrides: Partial<ConsoleSessionSummary> = {}): ConsoleSes
     hasUnresolvedGaps: false,
     recapSnippet: null,
     gitBranch: 'feature/foo',
+    repoRoot: null,
     lastModifiedMs: NOW_MS - DAY_MS,
     ...overrides,
   };
@@ -65,6 +66,7 @@ function makeWorktree(overrides: Partial<ConsoleWorktreeSummary> = {}): ConsoleW
     unpushedCommits: [],
     isMerged: false,
     activeSessionCount: 0,
+    enrichment: null,
     ...overrides,
   };
 }
@@ -125,13 +127,22 @@ describe('joinSessionsAndWorktrees', () => {
     expect(items[0]!.worktree).toBeDefined();
   });
 
-  it('excludes sessions with no matching worktree (accessible via archive only)', () => {
-    // Session has a branch but no worktree exists for it -- not shown in main view
-    const session = makeSession({ gitBranch: 'feature/no-worktree' });
-
+  it('excludes sessions with no matching worktree and no repoRoot (archive only)', () => {
+    // Session has a branch but no worktree and no repoRoot -- cannot be grouped, excluded
+    const session = makeSession({ gitBranch: 'feature/no-worktree', repoRoot: null });
     const items = joinSessionsAndWorktrees([session], []);
-
     expect(items).toHaveLength(0);
+  });
+
+  it('includes sessions with no matching worktree but a known repoRoot (degraded mode)', () => {
+    // Session has a repoRoot but no matching worktree (e.g. worktrees API slow/unavailable)
+    // -- grouped under a synthetic repo so it remains visible without git badge data
+    const session = makeSession({ gitBranch: 'feature/no-worktree', repoRoot: '/repo/main' });
+    const items = joinSessionsAndWorktrees([session], []);
+    expect(items).toHaveLength(1);
+    expect(items[0]!.branch).toBe('feature/no-worktree');
+    expect(items[0]!.repoRoot).toBe('/repo/main');
+    expect(items[0]!.worktree).toBeUndefined();
   });
 
   it('excludes sessions with null gitBranch', () => {
@@ -209,8 +220,20 @@ describe('itemVisibility', () => {
     expect(itemVisibility(item, 'active', NOW_MS)).toBe('visible');
   });
 
-  it('always visible when session is dormant', () => {
+  it('hidden in active scope when session is dormant and no git changes', () => {
+    // Dormant sessions without uncommitted/unpushed work are hidden in Active scope
     const item = makeItem({ primarySession: makeSession({ status: 'dormant' }) });
+    expect(itemVisibility(item, 'active', NOW_MS)).toBe('hidden');
+  });
+
+  it('visible in all scope when session is dormant', () => {
+    const item = makeItem({ primarySession: makeSession({ status: 'dormant' }) });
+    expect(itemVisibility(item, 'all', NOW_MS)).toBe('visible');
+  });
+
+  it('visible in active scope when session is dormant but branch has uncommitted changes', () => {
+    const worktree = makeWorktree({ changedCount: 2 });
+    const item = makeItem({ primarySession: makeSession({ status: 'dormant' }), worktree });
     expect(itemVisibility(item, 'active', NOW_MS)).toBe('visible');
   });
 
@@ -342,14 +365,14 @@ describe('countNeedsAttention', () => {
     expect(countNeedsAttention(items)).toBe(1);
   });
 
-  it('counts dormant sessions', () => {
+  it('does not count dormant sessions (dormant is hidden in Active scope, not an attention signal)', () => {
     const items = [makeItem('dormant'), makeItem('complete')];
-    expect(countNeedsAttention(items)).toBe(1);
+    expect(countNeedsAttention(items)).toBe(0);
   });
 
-  it('counts both blocked and dormant', () => {
+  it('counts blocked but not dormant', () => {
     const items = [makeItem('blocked'), makeItem('dormant'), makeItem('in_progress')];
-    expect(countNeedsAttention(items)).toBe(2);
+    expect(countNeedsAttention(items)).toBe(1);
   });
 
   it('returns 0 when no items need attention', () => {

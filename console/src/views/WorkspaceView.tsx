@@ -107,7 +107,7 @@ interface Props {
 export function WorkspaceView({ hidden = false }: Props) {
   const navigate = useNavigate();
   const { data: sessionData, isLoading: sessionsLoading, error: sessionsError, refetch } = useSessionList();
-  const { data: worktreeData, isFetching: worktreesFetching } = useWorktreeList();
+  const { data: worktreeData, isLoading: worktreesFetching } = useWorktreeList();
   // Subscribe to server-sent events -- triggers immediate refetch when sessions change
   useWorkspaceEvents();
 

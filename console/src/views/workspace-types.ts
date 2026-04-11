@@ -55,8 +55,6 @@ export interface WorkspaceItem {
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
-/** Sessions in_progress with no update in this window are treated as dormant. */
-
 /** Priority order for selecting the primary session from a branch's sessions. */
 const STATUS_PRIORITY: Record<ConsoleSessionStatus, number> = {
   in_progress: 0,
@@ -194,7 +192,7 @@ export function joinSessionsAndWorktrees(
 ): WorkspaceItem[] {
   // Index worktrees by join key for O(1) lookup.
   // repoRoot is always sourced from the worktrees API (not from sessions).
-  const worktreeByKey = new Map<string, { wt: ConsoleWorktreeSummary; repoName: string; repoRoot: string }>();
+  const worktreeByKey = new Map<string, { wt: ConsoleWorktreeSummary | undefined; repoName: string; repoRoot: string }>();
   for (const repo of worktreeRepos) {
     for (const wt of repo.worktrees) {
       if (wt.branch !== null) {
@@ -215,7 +213,8 @@ export function joinSessionsAndWorktrees(
 
   // Group sessions by join key, excluding sessions without a gitBranch.
   // repoRoot is derived from the worktrees API via branch matching.
-  // Sessions whose branch matches no worktree are excluded from the main view.
+  // Sessions whose branch matches no worktree fall back to a synthetic repo
+  // using the session's own repoRoot (if available), or are excluded entirely.
   const sessionsByKey = new Map<string, ConsoleSessionSummary[]>();
   for (const session of sessions) {
     if (session.gitBranch === null) continue;
@@ -224,19 +223,19 @@ export function joinSessionsAndWorktrees(
     // Fallback: no matching worktree (API slow/unavailable) -- use session's own repoRoot
     // so sessions stay visible without git badge data rather than disappearing entirely.
     if (entries.length === 0) {
-      // Fallback: no worktree match. Group by branch under a synthetic repo so
-      // sessions remain visible without git badge data (e.g. when worktrees API
-      // is slow or unavailable).
-      const syntheticRoot = session.repoRoot ?? '__sessions__';
-      const key = `${session.gitBranch}\0${syntheticRoot}`;
+      // Fallback: no worktree match. Sessions with a known repoRoot are grouped
+      // under a synthetic repo so they remain visible without git badge data
+      // (e.g. when the worktrees API is slow or unavailable).
+      // Sessions with no repoRoot have no grouping information and are excluded
+      // -- they remain accessible via the archive link.
+      if (!session.repoRoot) continue;
+      const key = `${session.gitBranch}\0${session.repoRoot}`;
       const existing = sessionsByKey.get(key);
       if (existing) existing.push(session);
       else sessionsByKey.set(key, [session]);
       if (!worktreeByKey.has(key)) {
-        const repoName = session.repoRoot
-          ? (session.repoRoot.split('/').at(-1) ?? session.repoRoot)
-          : 'Sessions';
-        worktreeByKey.set(key, { wt: undefined as never, repoName, repoRoot: syntheticRoot });
+        const repoName = session.repoRoot.split('/').at(-1) ?? session.repoRoot;
+        worktreeByKey.set(key, { wt: undefined, repoName, repoRoot: session.repoRoot });
       }
       continue;
     }
