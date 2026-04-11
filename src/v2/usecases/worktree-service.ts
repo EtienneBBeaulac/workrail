@@ -403,12 +403,22 @@ interface WorktreeCache {
 let worktreeCache: WorktreeCache | null = null;
 let inflight: Promise<readonly ConsoleRepoWorktrees[]> | null = null;
 
+/** Per-repo enrichment timeout. Repos that exceed this are skipped for the
+ *  current scan cycle and retried on the next TTL expiry. Prevents a single
+ *  large repo (e.g. 79 worktrees) from blocking results for all others. */
+const PER_REPO_TIMEOUT_MS = 8_000;
+
 async function scanRepos(
   repoRoots: readonly string[],
 ): Promise<readonly ConsoleRepoWorktrees[]> {
   const repoResults = await Promise.allSettled(
     repoRoots.map(async (repoRoot) => {
-      const worktrees = await enrichRepo(repoRoot, { counts: new Map() });
+      const worktrees = await Promise.race([
+        enrichRepo(repoRoot, { counts: new Map() }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`repo scan timeout: ${repoRoot}`)), PER_REPO_TIMEOUT_MS)
+        ),
+      ]);
       return { repoRoot, worktrees };
     }),
   );
