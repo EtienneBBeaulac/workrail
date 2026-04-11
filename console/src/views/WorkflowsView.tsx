@@ -226,8 +226,8 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
   useEffect(() => {
     if (!selectedWorkflowId) return;
 
-    // Show keyboard hint briefly
-    setHintVisible(true);
+    // Show keyboard hint briefly -- only when navigation is actually possible
+    if (flatWorkflows.length > 1) setHintVisible(true);
     const hintTimer = setTimeout(() => setHintVisible(false), 3000);
 
     const activeKeys = ['ArrowLeft', 'ArrowRight', 'a', 'A', 'd', 'D'];
@@ -445,7 +445,9 @@ export function WorkflowsView({ selectedTag, onSelectTag, onSelectWorkflow: _onS
             height: '85vh',
             transform: selectedWorkflowId ? 'translateY(0) scale(1)' : 'translateY(24px) scale(0.97)',
             opacity: selectedWorkflowId ? 1 : 0,
-            transition: 'transform 250ms ease-out, opacity 250ms ease-out',
+            transition: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+              ? 'opacity 150ms ease-out'
+              : 'transform 250ms ease-out, opacity 250ms ease-out',
             /* backdrop-filter here, not inside CutCornerBox -- clip-path breaks backdrop-filter */
             backdropFilter: 'blur(2px)',
             WebkitBackdropFilter: 'blur(2px)',

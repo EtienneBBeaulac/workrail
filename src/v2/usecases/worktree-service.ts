@@ -549,7 +549,10 @@ async function runBackgroundEnrichment(
       ),
     ]);
     // Only write to cache if the repo roots haven't changed since the scan started.
-    // If the user opened a new workspace during enrichment, stale data is discarded.
+    // If the user opened a new workspace during enrichment, the stale result is
+    // discarded -- but we must NOT leave the current cache with enrichedRepos: null
+    // indefinitely. The finally block resets backgroundEnrichmentInFlight so the
+    // next request to getWorktreeList (next poll) will trigger a fresh background scan.
     if (worktreeCache?.repoRootsKey === repoRootsKey) {
       worktreeCache = { ...worktreeCache, enrichedRepos: enriched };
       onEnrichmentComplete?.();
