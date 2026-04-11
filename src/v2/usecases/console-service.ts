@@ -78,8 +78,10 @@ const MAX_SESSIONS_TO_LOAD = 500;
 // Dormancy
 // ---------------------------------------------------------------------------
 
-/** Sessions in_progress with no activity for this long are considered dormant. */
-const DORMANCY_THRESHOLD_MS = 30 * 60 * 1000;
+/** Sessions in_progress with no activity for this long are considered dormant.
+ * Override via WORKRAIL_DORMANCY_THRESHOLD_MS env var (milliseconds). */
+const DORMANCY_THRESHOLD_MS =
+  parseInt(process.env['WORKRAIL_DORMANCY_THRESHOLD_MS'] ?? '', 10) || 60 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // Run completion map — keyed by runId, true when preferred tip snapshot
