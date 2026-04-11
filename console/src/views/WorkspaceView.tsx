@@ -149,9 +149,9 @@ export function WorkspaceView({ hidden = false }: Props) {
     }
   }, [hidden]);
 
-  const { repoGroups, orderedItems, archiveRepos } = useMemo(() => {
+  const { repoGroups, orderedItems, archiveRepos, dormantHiddenCount } = useMemo(() => {
     const nowMs = Date.now();
-    const empty = { repoGroups: [] as RepoGroup[], orderedItems: [] as WorkspaceItem[], archiveRepos: [] as Array<[string, string]> };
+    const empty = { repoGroups: [] as RepoGroup[], orderedItems: [] as WorkspaceItem[], archiveRepos: [] as Array<[string, string]>, dormantHiddenCount: 0 };
     if (!sessionData) return empty;
 
     const worktreeRepos = worktreeData?.repos ?? [];
@@ -187,10 +187,20 @@ export function WorkspaceView({ hidden = false }: Props) {
 
     const flat = groups.flatMap(g => g.sortedItems);
 
+    // Count items hidden from Active scope because they're dormant (no git changes)
+    const dormantHiddenCount = scope === 'active'
+      ? joined.filter(item =>
+          item.primarySession?.status === 'dormant' &&
+          (item.worktree?.changedCount ?? 0) === 0 &&
+          (item.worktree?.aheadCount ?? 0) === 0
+        ).length
+      : 0;
+
     return {
       repoGroups: groups,
       orderedItems: flat,
       archiveRepos: [...reposSeen.entries()] as Array<[string, string]>,
+      dormantHiddenCount,
     };
   }, [sessionData, worktreeData, scope]);
 
@@ -314,7 +324,17 @@ export function WorkspaceView({ hidden = false }: Props) {
             </div>
           )}
 
-          <ArchiveLinks repos={archiveRepos} onOpen={(repoName) => setArchive({ repoName })} />
+          {dormantHiddenCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setScope('all')}
+            className="font-mono text-[10px] uppercase tracking-[0.20em] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors text-left"
+          >
+            // {dormantHiddenCount} dormant session{dormantHiddenCount !== 1 ? 's' : ''} hidden — show all
+          </button>
+        )}
+
+        <ArchiveLinks repos={archiveRepos} onOpen={(repoName) => setArchive({ repoName })} />
         </>
       )}
       <TipCard />
