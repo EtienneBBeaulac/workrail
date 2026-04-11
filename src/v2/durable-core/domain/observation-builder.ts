@@ -7,7 +7,7 @@ import { MAX_OBSERVATION_SHORT_STRING_LENGTH } from '../constants.js';
  * Lock: §1 observation_recorded — closed-set keys + tagged scalar values.
  */
 export interface ObservationEventData {
-  readonly key: 'git_branch' | 'git_head_sha' | 'repo_root_hash';
+  readonly key: 'git_branch' | 'git_head_sha' | 'repo_root_hash' | 'repo_root';
   readonly value:
     | { readonly type: 'short_string'; readonly value: string }
     | { readonly type: 'git_sha1'; readonly value: string }
