@@ -46,7 +46,6 @@ export interface SessionObservations {
   readonly gitHeadSha: string | null;
   readonly gitBranch: string | null;
   readonly repoRootHash: string | null;
-  readonly repoRoot: string | null;
 }
 
 /**

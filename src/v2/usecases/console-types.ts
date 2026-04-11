@@ -36,10 +36,6 @@ export interface ConsoleSessionSummary {
   readonly hasUnresolvedGaps: boolean;
   readonly recapSnippet: string | null;
   readonly gitBranch: string | null;
-  /** Absolute filesystem path to the git repo root, or null for sessions
-   * recorded before this field was introduced. Used by the worktrees view
-   * to group sessions and discover worktrees by repo. */
-  readonly repoRoot: string | null;
   /** Filesystem mtime of the session directory (epoch ms). */
   readonly lastModifiedMs: number;
 }
@@ -187,6 +183,24 @@ export interface ChangedFile {
   readonly path: string;
 }
 
+/**
+ * Git enrichment data for a single worktree. Available only after the background
+ * enrichment scan completes. When null on ConsoleWorktreeSummary, the flat
+ * convenience fields below default to safe values (0, [], false, '').
+ */
+export interface WorktreeEnrichment {
+  readonly headHash: string;
+  readonly headMessage: string;
+  readonly headTimestampMs: number;
+  readonly changedCount: number;
+  readonly changedFiles: readonly ChangedFile[];
+  readonly aheadCount: number;
+  readonly unpushedCommits: readonly { readonly hash: string; readonly message: string }[];
+  readonly isMerged: boolean;
+  /** Content of `git config branch.<name>.description`, or empty string if unset. */
+  readonly description: string;
+}
+
 export interface ConsoleWorktreeSummary {
   /** Absolute path to the worktree directory. */
   readonly path: string;
@@ -214,6 +228,17 @@ export interface ConsoleWorktreeSummary {
   readonly activeSessionCount: number;
   /** Content of `git config branch.<name>.description`. Absent when unset. */
   readonly description?: string;
+  /**
+   * Full git enrichment data. null when the background enrichment scan has not yet
+   * completed for this worktree. When null, all flat fields above default to safe
+   * values (headHash: '', changedCount: 0, changedFiles: [], aheadCount: 0,
+   * unpushedCommits: [], isMerged: false).
+   *
+   * Consumers that need to distinguish "enrichment not yet available" from
+   * "enrichment complete with zero changes" should check this field.
+   * UI components that show git badges should show a skeleton shimmer when null.
+   */
+  readonly enrichment: WorktreeEnrichment | null;
 }
 
 export interface ConsoleRepoWorktrees {

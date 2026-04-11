@@ -1,9 +1,15 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
+import pkg from '../package.json' with { type: 'json' };
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  define: {
+    // package.json version is kept in sync with the latest release tag by
+    // @semantic-release/git which commits the version bump back to main.
+    'import.meta.env.VITE_APP_VERSION': JSON.stringify(pkg.version),
+  },
   // Base path must match the Express mount point (/console)
   // so asset URLs resolve correctly in production.
   base: '/console/',

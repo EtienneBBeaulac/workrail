@@ -424,7 +424,11 @@ export class EnhancedMultiSourceWorkflowStorage implements ICompositeWorkflowSto
   }
 
   private getBundledWorkflowsPath(): string {
-    // Bundled workflows are in the package directory
+    // The compiled output lives at dist/infrastructure/storage/, so going up
+    // three levels reaches the package root where the workflows/ directory is
+    // published. This is equally correct when running under ts-node (which sets
+    // __dirname to src/infrastructure/storage/) -- both paths resolve to the
+    // same package root.
     return path.resolve(__dirname, '../../../workflows');
   }
 

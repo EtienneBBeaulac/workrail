@@ -1,27 +1,66 @@
 @import "tailwindcss";
 
 :root {
-  --bg-primary: #0a0a0a;
-  --bg-secondary: #141414;
-  --bg-card: #1a1a1a;
-  --border: #2a2a2a;
-  --text-primary: #fafafa;
-  --text-secondary: #a0a0a0;
-  --text-muted: #666666;
-  --accent: #3b82f6;
-  --accent-hover: #2563eb;
-  --accent-strong: #00f0ff;
-  --success: #22c55e;
-  --warning: #eab308;
-  --error: #ef4444;
-  --blocked: #f97316;
+  /* Backgrounds -- dark neutral base, semi-transparent for glassmorphism */
+  --bg-primary: #0f131f;
+  --bg-secondary: rgba(23, 27, 40, 0.70);
+  --bg-card: rgba(27, 31, 44, 0.60);
+  --bg-tertiary: rgba(38, 41, 55, 0.75);
+  --border: #3a3a2e;
+
+  /* Text -- warm off-white, not cool lavender */
+  --text-primary: #e8dfc8;
+  --text-secondary: #a89f8c;
+  --text-muted: #5e5a4e;
+
+  /* Accent -- amber/gold as primary interactive colour (CP2077) */
+  --accent: #f4c430;
+  --accent-hover: #d4a80e;
+
+  /* Cyan reserved for live/running/active states */
+  --accent-strong: #00afc0;
+
+  /* Semantic */
+  --success: #00e1a9;
+  --warning: #f97316;
+  --error: #ff6b6b;
+  --blocked: #ff4444;
 }
 
 body {
   margin: 0;
-  background: var(--bg-primary);
+  background-color: var(--bg-primary);
+  background-image:
+    /* Ambient amber radial glow from top -- like a light source overhead */
+    radial-gradient(ellipse 80% 50% at 50% -5%, rgba(244, 196, 48, 0.18) 0%, transparent 70%),
+    /* Cyan counter-glow from bottom-right -- depth */
+    radial-gradient(ellipse 60% 50% at 100% 110%, rgba(0, 219, 233, 0.12) 0%, transparent 60%);
+  background-attachment: fixed;
   color: var(--text-primary);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Frosted glass utility -- apply to floating panels and key surfaces */
+.glass-panel {
+  background: rgba(27, 31, 44, 0.65) !important;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+/* Scanlines overlay -- 2% opacity, 4px pitch. Subtle texture without impeding reading. */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.02) 0px,
+    rgba(0, 0, 0, 0.02) 1px,
+    transparent 1px,
+    transparent 4px
+  );
 }
 
 .workrail-minimap-node {
@@ -34,9 +73,9 @@ body {
 
 .console-blueprint-grid {
   background-image:
-    linear-gradient(rgba(65, 87, 118, 0.14) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(65, 87, 118, 0.14) 1px, transparent 1px);
-  background-size: 24px 24px;
+    linear-gradient(rgba(132, 148, 149, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(132, 148, 149, 0.08) 1px, transparent 1px);
+  background-size: 20px 20px;
 }
 
 .lineage-scroll-surface {
@@ -54,8 +93,9 @@ body {
   position: relative;
   isolation: isolate;
   box-shadow:
-    inset 0 0 0 1px rgba(0, 240, 255, 0.22),
-    inset 0 0 22px rgba(0, 240, 255, 0.07);
+    inset 0 0 0 1px rgba(244, 196, 48, 0.35),
+    inset 0 0 28px rgba(244, 196, 48, 0.1),
+    0 0 16px rgba(244, 196, 48, 0.15);
   animation: workrail-current-node-pulse 3.2s ease-in-out infinite;
 }
 
@@ -63,7 +103,7 @@ body {
   content: "";
   position: absolute;
   inset: -1px;
-  border: 1px solid rgba(0, 240, 255, 0.28);
+  border: 1px solid rgba(244, 196, 48, 0.35);
   pointer-events: none;
   animation: workrail-current-node-outline 3.2s ease-in-out infinite;
 }
@@ -97,14 +137,14 @@ body {
   0%, 100% {
     opacity: 0.34;
     box-shadow:
-      0 0 0 rgba(0, 240, 255, 0),
-      inset 0 0 0 rgba(0, 240, 255, 0);
+      0 0 0 rgba(244, 196, 48, 0),
+      inset 0 0 0 rgba(244, 196, 48, 0);
   }
   50% {
-    opacity: 0.82;
+    opacity: 1.0;
     box-shadow:
-      0 0 20px rgba(0, 240, 255, 0.18),
-      inset 0 0 18px rgba(0, 240, 255, 0.08);
+      0 0 32px rgba(244, 196, 48, 0.3),
+      inset 0 0 24px rgba(244, 196, 48, 0.12);
   }
 }
 
@@ -112,6 +152,54 @@ body {
   to {
     stroke-dashoffset: -32;
   }
+}
+
+/* ---------- Energy / electricity effects ---------- */
+
+/* Accent-colored elements get a subtle amber glow */
+.energy-glow {
+  box-shadow: 0 0 20px rgba(244, 196, 48, 0.3), 0 0 8px rgba(244, 196, 48, 0.2);
+}
+
+/* Active/live state: cyan electric pulse */
+.energy-live {
+  box-shadow: 0 0 16px rgba(0, 219, 233, 0.3), 0 0 4px rgba(0, 219, 233, 0.2);
+  animation: energy-live-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes energy-live-pulse {
+  0%, 100% { box-shadow: 0 0 10px rgba(0, 219, 233, 0.2), 0 0 3px rgba(0, 219, 233, 0.15); }
+  50%       { box-shadow: 0 0 22px rgba(0, 219, 233, 0.45), 0 0 8px rgba(0, 219, 233, 0.3); }
+}
+
+/* Border glow on hover for interactive cards */
+.energy-card {
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.energy-card:hover {
+  border-color: rgba(244, 196, 48, 0.5);
+  box-shadow: 0 0 0 1px rgba(244, 196, 48, 0.12), 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+/* Accent text glow for headings / key values */
+.text-glow-amber {
+  text-shadow: 0 0 12px rgba(244, 196, 48, 0.5), 0 0 4px rgba(244, 196, 48, 0.3);
+}
+.text-glow-cyan {
+  text-shadow: 0 0 12px rgba(0, 219, 233, 0.5), 0 0 4px rgba(0, 219, 233, 0.3);
+}
+
+/* Status badge for in_progress sessions -- cyan electric.
+   Uses text-shadow (not box-shadow) to avoid layer compositing isolation
+   which causes a dark rectangle behind the text inside backdrop-filter parents. */
+.badge-live {
+  color: var(--accent-strong);
+  animation: badge-live-text-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes badge-live-text-pulse {
+  0%, 100% { text-shadow: 0 0 6px rgba(0, 219, 233, 0.5); }
+  50%       { text-shadow: 0 0 16px rgba(0, 219, 233, 0.9), 0 0 4px rgba(0, 219, 233, 0.6); }
 }
 
 /* ---------- Markdown typography ---------- */
@@ -251,4 +339,318 @@ body {
 .markdown-view img {
   max-width: 100%;
   border-radius: 4px;
+}
+
+/* Cyberpunk markdown overrides for workflow detail modal */
+.markdown-view h1,
+.markdown-view h2,
+.markdown-view h3,
+.markdown-view h4 {
+  color: var(--accent);
+  letter-spacing: 0.08em;
+}
+
+.markdown-view strong {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.markdown-view code {
+  background: rgba(0, 219, 233, 0.08);
+  color: var(--accent-strong);
+  border: 1px solid rgba(0, 219, 233, 0.2);
+  border-radius: 0;
+}
+
+.markdown-view pre {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(0, 219, 233, 0.2);
+  border-left: 2px solid var(--accent-strong);
+  border-radius: 0;
+}
+
+.markdown-view pre code {
+  background: none;
+  border: none;
+  color: var(--accent-strong);
+}
+
+.markdown-view blockquote {
+  border-left: 2px solid var(--accent);
+  color: var(--text-secondary);
+  background: rgba(244, 196, 48, 0.04);
+  padding: 0.5em 0.75em;
+}
+
+.markdown-view ul li::before {
+  content: '// ';
+  color: var(--accent);
+  font-family: monospace;
+  font-weight: bold;
+}
+
+.markdown-view ul {
+  list-style: none;
+  padding-left: 1.2em;
+}
+
+.markdown-view a {
+  color: var(--accent-strong);
+}
+
+/* ---------- Corner bracket frames ---------- */
+/* Renders 4 L-shaped corner accents using background-image gradients.
+   No pseudo-element used, so child content is not constrained. */
+.corner-brackets {
+  position: relative;
+  background-image:
+    linear-gradient(var(--accent), var(--accent)),
+    linear-gradient(var(--accent), var(--accent)),
+    linear-gradient(var(--accent), var(--accent)),
+    linear-gradient(var(--accent), var(--accent)),
+    linear-gradient(var(--accent), var(--accent)),
+    linear-gradient(var(--accent), var(--accent)),
+    linear-gradient(var(--accent), var(--accent)),
+    linear-gradient(var(--accent), var(--accent));
+  background-repeat: no-repeat;
+  background-size:
+    1px 12px, 12px 1px,
+    1px 12px, 12px 1px,
+    1px 12px, 12px 1px,
+    1px 12px, 12px 1px;
+  background-position:
+    top 0 left 0, top 0 left 0,
+    top 0 right 0, top 0 right 0,
+    bottom 0 left 0, bottom 0 left 0,
+    bottom 0 right 0, bottom 0 right 0;
+}
+
+/* Cyberpunk tab activation flicker -- dramatic amber flash with brief cyan burst */
+@keyframes tab-activate-flicker {
+  0%   { opacity: 1;   filter: brightness(1); }
+  10%  { opacity: 0.2; filter: brightness(0.5); }
+  20%  { opacity: 1;   filter: brightness(3) hue-rotate(180deg); }  /* cyan flash */
+  35%  { opacity: 0.5; filter: brightness(1.5); }
+  50%  { opacity: 1;   filter: brightness(2.5); }
+  70%  { opacity: 0.8; filter: brightness(1.8); }
+  85%  { opacity: 1;   filter: brightness(1.3); }
+  100% { opacity: 1;   filter: brightness(1); }
+}
+
+.tab-activating {
+  animation: tab-activate-flicker 280ms ease-out forwards;
+}
+
+/* Tab corner brackets -- 4 absolute spans, scale in/out on active state.
+   Declared in @layer components so Tailwind v4 preserves them even when
+   the class names aren't referenced as Tailwind utilities in JSX. */
+/* Branch tree connector -- two parallel amber lines, diagonally clipped at the bottom.
+   The outer line (1px) and inner line (3px) are offset by 4px, both cut on the same
+   diagonal so they end at slightly different heights, giving a schematic/circuit feel. */
+@layer components {
+  .branch-tree-line {
+    position: relative;
+    padding-left: 14px;
+    margin-left: 4px;
+  }
+
+  .branch-tree-line::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 10px;
+    pointer-events: none;
+    background:
+      /* outer thin line */
+      linear-gradient(rgba(244, 196, 48, 0.18), rgba(244, 196, 48, 0.18)) no-repeat 0 0 / 1px 100%,
+      /* inner thick line */
+      linear-gradient(rgba(244, 196, 48, 0.45), rgba(244, 196, 48, 0.45)) no-repeat 5px 0 / 3px 100%;
+    /* diagonal cut: left edge full height, right edge 14px shorter → lines taper off together */
+    clip-path: polygon(0 0, 100% 0, 100% calc(100% - 14px), 0 100%);
+  }
+}
+
+@layer components {
+  .tab-btn {
+    position: relative;
+    overflow: visible;
+  }
+
+  .tab-corner {
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    opacity: 0;
+    transform: scale(0.5);
+    transition: opacity 150ms ease, transform 150ms ease;
+    pointer-events: none;
+  }
+
+  .tab-corner--tl { top: 2px; left: 2px; border-top: 1px solid var(--accent); border-left: 1px solid var(--accent); }
+  .tab-corner--tr { top: 2px; right: 2px; border-top: 1px solid var(--accent); border-right: 1px solid var(--accent); }
+  .tab-corner--bl { bottom: 2px; left: 2px; border-bottom: 1px solid var(--accent); border-left: 1px solid var(--accent); }
+  .tab-corner--br { bottom: 2px; right: 2px; border-bottom: 1px solid var(--accent); border-right: 1px solid var(--accent); }
+
+  .tab-btn--active .tab-corner {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .badge-live,
+  .energy-live,
+  .workrail-current-lineage-node,
+  .workrail-current-lineage-node::after,
+  .workrail-current-lineage-edge .react-flow__edge-path,
+  .tab-activating {
+    animation: none !important;
+  }
+  .tab-corner { transition: none; }
+}
+
+/* ---------- Modal workflow navigation ---------- */
+
+/* Vertical: ↑↓ / WS -- exit up/down, enter from below/above */
+@keyframes modal-exit-to-top {
+  from { transform: translateY(0);     opacity: 1; }
+  to   { transform: translateY(-14px); opacity: 0; }
+}
+@keyframes modal-exit-to-bottom {
+  from { transform: translateY(0);    opacity: 1; }
+  to   { transform: translateY(14px); opacity: 0; }
+}
+@keyframes modal-enter-from-below {
+  from { transform: translateY(14px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+@keyframes modal-enter-from-above {
+  from { transform: translateY(-14px); opacity: 0; }
+  to   { transform: translateY(0);     opacity: 1; }
+}
+
+/* Horizontal: ←→ / AD -- exit left/right, enter from right/left */
+@keyframes modal-exit-to-left {
+  from { transform: translateX(0);     opacity: 1; }
+  to   { transform: translateX(-20px); opacity: 0; }
+}
+@keyframes modal-exit-to-right {
+  from { transform: translateX(0);    opacity: 1; }
+  to   { transform: translateX(20px); opacity: 0; }
+}
+@keyframes modal-enter-from-right {
+  from { transform: translateX(20px); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+@keyframes modal-enter-from-left {
+  from { transform: translateX(-20px); opacity: 0; }
+  to   { transform: translateX(0);     opacity: 1; }
+}
+
+@keyframes modal-border-flash {
+  0%   { filter: brightness(1); }
+  15%  { filter: brightness(1.8); }
+  50%  { filter: brightness(1.3); }
+  100% { filter: brightness(1); }
+}
+
+@keyframes modal-crt-fade {
+  0%   { opacity: 0; }
+  20%  { opacity: 0.65; }
+  70%  { opacity: 0.65; }
+  100% { opacity: 0; }
+}
+
+/* Vertical classes (↑↓/WS) */
+.modal-content--exit-v-next   { animation: modal-exit-to-top      80ms  ease-in  forwards; }
+.modal-content--exit-v-prev   { animation: modal-exit-to-bottom   80ms  ease-in  forwards; }
+.modal-content--enter-v-next  { animation: modal-enter-from-below 160ms ease-out forwards; }
+.modal-content--enter-v-prev  { animation: modal-enter-from-above 160ms ease-out forwards; }
+
+/* Horizontal classes (←→/AD) */
+.modal-content--exit-h-next   { animation: modal-exit-to-left     80ms  ease-in  forwards; }
+.modal-content--exit-h-prev   { animation: modal-exit-to-right    80ms  ease-in  forwards; }
+.modal-content--enter-h-next  { animation: modal-enter-from-right 160ms ease-out forwards; }
+.modal-content--enter-h-prev  { animation: modal-enter-from-left  160ms ease-out forwards; }
+
+.modal-border-flashing        { animation: modal-border-flash 200ms ease-out forwards; }
+
+/* CRT scanline overlay.
+   Three layers:
+   1. Random phosphor glitch band: thin bright stripe at --glitch-y position
+   2. Primary fine scanlines (3px pitch)
+   3. Secondary coarser pattern (7px pitch) -- beats against primary for uneven moiré effect
+   --crt-offset and --glitch-y are randomised per-navigation in JS. */
+.modal-scanline {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+  background:
+    /* Glitch band 1: cool blue-white, random position + width */
+    linear-gradient(
+      to bottom,
+      transparent calc(var(--glitch-y, 38%) - 1px),
+      rgba(180, 210, 255, 0.35) calc(var(--glitch-y, 38%) - 1px),
+      rgba(180, 210, 255, 0.35) calc(var(--glitch-y, 38%) + var(--glitch-w, 3px)),
+      transparent calc(var(--glitch-y, 38%) + var(--glitch-w, 3px))
+    ),
+    /* Glitch band 2: faint amber, independent position + width */
+    linear-gradient(
+      to bottom,
+      transparent calc(var(--glitch-y2, 62%) - 1px),
+      rgba(244, 196, 48, 0.30) calc(var(--glitch-y2, 62%) - 1px),
+      rgba(244, 196, 48, 0.30) calc(var(--glitch-y2, 62%) + var(--glitch-w2, 2px)),
+      transparent calc(var(--glitch-y2, 62%) + var(--glitch-w2, 2px))
+    ),
+    /* Primary scanlines: 3px pitch */
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0px, transparent 2px,
+      rgba(0, 0, 0, 0.55) 2px, rgba(0, 0, 0, 0.55) 3px
+    ),
+    /* Secondary: 7px pitch — moiré beat with primary every 21px */
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0px, transparent 5px,
+      rgba(0, 0, 0, 0.22) 5px, rgba(0, 0, 0, 0.26) 7px
+    ),
+    /* Tertiary: 5px pitch — triple moiré, LCM(3,5,7)=105px before repeating */
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0px, transparent 3px,
+      rgba(0, 0, 0, 0.12) 3px, rgba(0, 0, 0, 0.12) 5px
+    );
+  background-position-y:
+    0,
+    0,
+    var(--crt-offset, 0px),
+    calc(var(--crt-offset, 0px) + 2px),
+    calc(var(--crt-offset, 0px) + 4px);
+  animation: modal-crt-fade 220ms linear forwards;
+  opacity: 0;
+}.modal-scanline--hidden { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-content--exit-v-next, .modal-content--exit-v-prev,
+  .modal-content--enter-v-next, .modal-content--enter-v-prev,
+  .modal-content--exit-h-next, .modal-content--exit-h-prev,
+  .modal-content--enter-h-next, .modal-content--enter-h-prev { animation: none !important; transform: none !important; opacity: 1 !important; }
+  .modal-scanline        { display: none; }
+  .modal-border-flashing { animation: none !important; filter: none !important; }
+}
+
+@keyframes hero-card-glow-breathe {
+  0%, 100% { filter: drop-shadow(0 0 12px rgba(0, 175, 192, 0.20)); }
+  50%       { filter: drop-shadow(0 0 28px rgba(0, 175, 192, 0.55)); }
+}
+
+.hero-card-breathing {
+  animation: hero-card-glow-breathe 3s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-card-breathing { animation: none; }
 }

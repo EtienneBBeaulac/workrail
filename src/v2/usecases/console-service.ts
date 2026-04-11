@@ -80,8 +80,11 @@ const MAX_SESSIONS_TO_LOAD = 500;
 // ---------------------------------------------------------------------------
 
 /** Sessions in_progress with no activity for this long are considered dormant.
- * 3 days covers the "started on Friday, not coming back Monday" scenario. */
-const DORMANCY_THRESHOLD_MS = 3 * 24 * 60 * 60 * 1000;
+ * Override via WORKRAIL_DORMANCY_THRESHOLD_MS env var (milliseconds, must be > 0). */
+const DORMANCY_THRESHOLD_MS = (() => {
+  const override = parseInt(process.env['WORKRAIL_DORMANCY_THRESHOLD_MS'] ?? '', 10);
+  return Number.isFinite(override) && override > 0 ? override : 60 * 60 * 1000;
+})();
 
 // ---------------------------------------------------------------------------
 // Run completion map — keyed by runId, true when preferred tip snapshot
@@ -599,17 +602,6 @@ function extractGitBranch(events: readonly DomainEventV1[]): string | null {
   return null;
 }
 
-/** Extract the repo root path from observation events, or null for sessions
- * recorded before the repo_root anchor was introduced. */
-function extractRepoRoot(events: readonly DomainEventV1[]): string | null {
-  for (const e of events) {
-    if (e.kind !== EVENT_KIND.OBSERVATION_RECORDED) continue;
-    if (e.data.key === 'repo_root') {
-      return e.data.value.value;
-    }
-  }
-  return null;
-}
 
 function truncateTitle(text: string, maxLen = 120): string {
   if (text.length <= maxLen) return text;
@@ -655,7 +647,6 @@ function projectSessionSummary(
 
   const sessionTitle = sortedEventsRes.isOk() ? deriveSessionTitle(sortedEventsRes.value) : null;
   const gitBranch = extractGitBranch(events);
-  const repoRoot = extractRepoRoot(events);
 
   const runs = Object.values(dag.runsById);
   const run = runs[0];
@@ -677,7 +668,6 @@ function projectSessionSummary(
       hasUnresolvedGaps: false,
       recapSnippet: null,
       gitBranch,
-      repoRoot,
       lastModifiedMs,
     };
   }
@@ -730,7 +720,6 @@ function projectSessionSummary(
     hasUnresolvedGaps,
     recapSnippet,
     gitBranch,
-    repoRoot,
     lastModifiedMs,
   };
 }

@@ -22,6 +22,24 @@ export interface ChangedFile {
   readonly path: string;
 }
 
+/**
+ * Git enrichment data for a single worktree. Available only after the background
+ * enrichment scan completes. When null on ConsoleWorktreeSummary, the flat
+ * convenience fields default to safe values (0, [], false, '').
+ */
+export interface WorktreeEnrichment {
+  readonly headHash: string;
+  readonly headMessage: string;
+  readonly headTimestampMs: number;
+  readonly changedCount: number;
+  readonly changedFiles: readonly ChangedFile[];
+  readonly aheadCount: number;
+  readonly unpushedCommits: readonly { readonly hash: string; readonly message: string }[];
+  readonly isMerged: boolean;
+  /** Content of `git config branch.<name>.description`, or empty string if unset. */
+  readonly description: string;
+}
+
 export interface ConsoleWorktreeSummary {
   readonly path: string;
   readonly name: string;
@@ -40,6 +58,11 @@ export interface ConsoleWorktreeSummary {
   readonly activeSessionCount: number;
   /** Content of `git config branch.<name>.description`. Absent when unset. */
   readonly description?: string;
+  /**
+   * Full git enrichment data. null when background enrichment has not yet completed.
+   * UI components that show git badges should display a skeleton shimmer when null.
+   */
+  readonly enrichment: WorktreeEnrichment | null;
 }
 
 export interface ConsoleRepoWorktrees {
@@ -68,7 +91,7 @@ export interface ConsoleSessionSummary {
   readonly hasUnresolvedGaps: boolean;
   readonly recapSnippet: string | null;
   readonly gitBranch: string | null;
-  /** Absolute repo root path, or null for sessions recorded before this field was introduced. */
+  /** Repo root path from the session record. Used as fallback when worktree data is unavailable. */
   readonly repoRoot: string | null;
   readonly lastModifiedMs: number;
 }
@@ -224,6 +247,7 @@ export interface ConsoleWorkflowSummary {
   readonly version: string;
   readonly tags: readonly string[];
   readonly source: ConsoleWorkflowSourceInfo;
+  readonly stepCount?: number;
   readonly about?: string;
   readonly examples?: readonly string[];
 }

@@ -1,5 +1,6 @@
 import { useNodeDetail } from '../api/hooks';
 import { MarkdownView } from './MarkdownView';
+import { MonoLabel } from './MonoLabel';
 import type {
   ConsoleNodeDetail,
   ConsoleRunStatus,
@@ -182,9 +183,7 @@ function InProgressRecapSection({ detail }: { detail: ConsoleNodeDetail }) {
 
         <div className="bg-[var(--bg-primary)] border border-[var(--border)] overflow-hidden">
           <div className="px-4 py-3 border-b border-[var(--border)]">
-            <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
-              What lands here next
-            </div>
+            <MonoLabel>What lands here next</MonoLabel>
           </div>
           <div className="p-4 grid gap-3 md:grid-cols-3">
             <PendingOutputCard
@@ -210,7 +209,7 @@ function LiveBadge({ children }: { children: React.ReactNode }) {
   return (
     <span
       className="inline-flex items-center px-2 py-1 font-medium text-xs"
-      style={{ backgroundColor: 'rgba(0, 240, 255, 0.12)', color: 'var(--accent-strong)' }}
+      style={{ backgroundColor: 'rgba(0, 219, 233, 0.12)', color: 'var(--accent-strong)' }}
     >
       {children}
     </span>
@@ -230,9 +229,7 @@ function LiveInfoCard({
 }) {
   return (
     <div className="bg-[var(--bg-primary)] border border-[var(--border)] px-4 py-3 space-y-2">
-      <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
-        {label}
-      </div>
+      <MonoLabel>{label}</MonoLabel>
       <div className={mono ? 'font-mono text-sm text-[var(--text-primary)]' : 'text-[var(--text-primary)]'}>
         {value}
       </div>
@@ -252,9 +249,7 @@ function PendingOutputCard({
 }) {
   return (
     <div className="border border-[var(--border)] bg-[rgba(255,255,255,0.02)] px-3 py-3 space-y-2">
-      <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
-        {title}
-      </div>
+      <MonoLabel color="var(--text-secondary)">{title}</MonoLabel>
       <div className="text-xs text-[var(--text-muted)] leading-relaxed">
         {description}
       </div>
@@ -459,7 +454,7 @@ function ArtifactsSection({ artifacts }: { artifacts: readonly ConsoleArtifact[]
           <div key={artifact.sha256} className="bg-[var(--bg-primary)] border border-[var(--border)] px-4 py-3 text-xs space-y-2">
             <div className="flex flex-wrap items-center gap-2 text-[var(--text-muted)]">
               <span>{artifact.contentType}</span>
-              <span>·</span>
+              <span>//</span>
               <span>{formatBytes(artifact.byteLength)}</span>
             </div>
             {renderArtifactContent(artifact)}
@@ -474,9 +469,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   return (
     <div>
       <div className="mb-2">
-        <h3 className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
-          {title}
-        </h3>
+        <MonoLabel>{title}</MonoLabel>
       </div>
       {children}
     </div>
@@ -494,9 +487,7 @@ function MetaCard({
 }) {
   return (
     <div className="bg-[var(--bg-primary)] border border-[var(--border)] px-4 py-3">
-      <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
-        {label}
-      </div>
+      <MonoLabel>{label}</MonoLabel>
       <div className={mono ? 'mt-2 font-mono text-sm text-[var(--text-secondary)] truncate' : 'mt-2 text-sm text-[var(--text-primary)]'}>
         {value}
       </div>

@@ -17,7 +17,7 @@ interface Props {
 }
 
 const NODE_KIND_STYLES: Record<ConsoleDagNode['nodeKind'], { bg: string; border: string }> = {
-  step: { bg: '#1e3a5f', border: '#3b82f6' },
+  step: { bg: '#1f1c10', border: '#f4c430' },
   checkpoint: { bg: '#1a3d2e', border: '#22c55e' },
   blocked_attempt: { bg: '#3d1a1a', border: '#ef4444' },
 };
@@ -67,7 +67,7 @@ export function RunDag({ run, onNodeClick }: Props) {
       source: edge.fromNodeId,
       target: edge.toNodeId,
       style: {
-        stroke: edge.edgeKind === 'checkpoint' ? '#22c55e' : '#3b82f6',
+        stroke: edge.edgeKind === 'checkpoint' ? '#22c55e' : '#f4c430',
         strokeWidth: 2,
       },
       animated: edge.edgeKind === 'acked_step',

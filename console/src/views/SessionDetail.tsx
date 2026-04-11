@@ -30,35 +30,35 @@ function SessionMetaCard({ data }: { data: ConsoleSessionDetail }) {
   const hash = firstRun?.workflowHash?.slice(0, 12) ?? '--';
 
   return (
-    <div className="bg-[var(--bg-card)] border border-[var(--border)] px-5 py-4">
+    <div className="bg-[var(--bg-card)] border border-[var(--border)] px-5 py-4 corner-brackets" style={{ backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
       {data.sessionTitle && (
         <h2 className="text-base font-medium text-[var(--text-primary)] mb-3">
           {data.sessionTitle}
         </h2>
       )}
       <dl className="grid grid-cols-[auto_1fr] gap-x-8 gap-y-2">
-        <dt className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)] self-center">
+        <dt className="font-mono text-[10px] uppercase tracking-[0.30em] text-[var(--text-muted)] self-center">
           Session
         </dt>
         <dd className="font-mono text-xs text-[var(--text-secondary)] self-center">
           {formatSessionId(data.sessionId)}
         </dd>
 
-        <dt className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)] self-center">
+        <dt className="font-mono text-[10px] uppercase tracking-[0.30em] text-[var(--text-muted)] self-center">
           Workflow
         </dt>
         <dd className="text-sm text-[var(--text-primary)] self-center">
           {workflow}
         </dd>
 
-        <dt className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)] self-center">
+        <dt className="font-mono text-[10px] uppercase tracking-[0.30em] text-[var(--text-muted)] self-center">
           Hash
         </dt>
         <dd className="font-mono text-xs text-[var(--text-secondary)] self-center">
           {hash}
         </dd>
 
-        <dt className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)] self-center">
+        <dt className="font-mono text-[10px] uppercase tracking-[0.30em] text-[var(--text-muted)] self-center">
           Status
         </dt>
         <dd className="self-center flex items-center gap-2">
@@ -68,7 +68,7 @@ function SessionMetaCard({ data }: { data: ConsoleSessionDetail }) {
           )}
         </dd>
 
-        <dt className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)] self-center">
+        <dt className="font-mono text-[10px] uppercase tracking-[0.30em] text-[var(--text-muted)] self-center">
           Runs
         </dt>
         <dd className="text-sm text-[var(--text-primary)] self-center">
@@ -159,9 +159,10 @@ export function SessionDetail({ sessionId }: Props) {
       {/* Floating node detail panel */}
       <CutCornerBox
         cut={18}
-        borderColor="rgba(0, 240, 255, 0.28)"
-        background="color-mix(in srgb, var(--bg-card) 92%, var(--accent) 8%)"
-        dropShadow="drop-shadow(0 16px 48px rgba(0,0,0,0.8)) drop-shadow(0 2px 8px rgba(0,0,0,0.55))"
+        borderColor="rgba(244, 196, 48, 0.35)"
+        background="rgba(27, 31, 44, 0.78)"
+        dropShadow="drop-shadow(0 16px 48px rgba(0,0,0,0.9)) drop-shadow(0 2px 12px rgba(244,196,48,0.15))"
+        backdropFilter="blur(16px)"
         className="fixed top-3 right-3 bottom-3 w-[560px] max-w-[calc(92vw-12px)] transition-transform duration-200 ease-out"
         style={{
           zIndex: 40,
@@ -169,7 +170,7 @@ export function SessionDetail({ sessionId }: Props) {
         }}
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] shrink-0 console-blueprint-grid">
-          <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+          <span className="font-mono text-[10px] uppercase tracking-[0.30em] text-[var(--text-muted)]">
             Node detail
           </span>
           <button
@@ -212,6 +213,8 @@ function RunCard({
     // DAG: 460px. Inset: 2px. Total: 506px.
     <CutCornerBox
       cut={10}
+      background="rgba(27, 31, 44, 0.72)"
+      backdropFilter="blur(8px)"
       className="relative"
       style={{ height: '506px' }}
     >

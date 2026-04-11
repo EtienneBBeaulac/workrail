@@ -10,35 +10,19 @@ import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { useNavigate } from '@tanstack/react-router';
 import { useSessionList, useWorktreeList, useWorkspaceEvents } from '../api/hooks';
 import { SessionList } from './SessionList';
-import type { ConsoleSessionSummary, ConsoleSessionStatus, FileChangeStatus, ChangedFile } from '../api/types';
+import type { FileChangeStatus, ChangedFile, ConsoleSessionSummary } from '../api/types';
 import {
   type WorkspaceItem,
   type Scope,
   joinSessionsAndWorktrees,
   sortItemsForRepo,
-  countNeedsAttention,
 } from './workspace-types';
 import { formatRelativeTime } from '../utils/time';
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const STATUS_ACCENT: Record<ConsoleSessionStatus, string> = {
-  blocked: 'var(--blocked)',
-  dormant: 'var(--text-muted)',
-  complete_with_gaps: 'var(--warning)',
-  in_progress: 'var(--accent)',
-  complete: 'var(--success)',
-};
-
-const STATUS_DOT_LABEL: Record<ConsoleSessionStatus, string> = {
-  in_progress: 'In progress',
-  dormant: 'Dormant',
-  blocked: 'Blocked',
-  complete_with_gaps: 'Complete with gaps',
-  complete: 'Complete',
-};
+import { CutCornerBox } from '../components/CutCornerBox';
+import { BracketBadge } from '../components/BracketBadge';
+import { TreeLine } from '../components/TreeLine';
+import { ConsoleCard } from '../components/ConsoleCard';
+import { StatusBadge } from '../components/StatusBadge';
 
 // ---------------------------------------------------------------------------
 // Rotating content
@@ -64,7 +48,7 @@ const ACTION_PROMPTS: readonly ActionPrompt[] = [
 // 3 stale tips removed (Worktrees tab reference, Group by Status reference, Sessions tab search reference)
 const DISCOVERY_TIPS: readonly string[] = [
   'The DAG view shows every node the agent created, including blocked attempts and alternative paths.',
-  'Dormant sessions have been idle for 3 days -- return to the original conversation to resume.',
+  'Dormant sessions have been idle for over an hour -- return to the original conversation to resume.',
   'Gaps are open questions the agent flagged but could not resolve. Check them in the node detail panel.',
   'The preferred tip node (highlighted in yellow in the DAG) is the most recent forward position.',
   'Complete with gaps means the workflow finished but left critical follow-ups unresolved.',
@@ -77,42 +61,11 @@ function pickRandom<T>(pool: readonly T[]): T {
 }
 
 // ---------------------------------------------------------------------------
-// Text utilities (same as Homepage.tsx)
-// ---------------------------------------------------------------------------
-
-function stripMarkdown(md: string): string {
-  return md
-    .replace(/^#{1,6}\s+/gm, '')
-    .replace(/\*{1,3}([^*\n]+)\*{1,3}/g, '$1')
-    .replace(/^[-*+]\s+/gm, '')
-    .replace(/`([^`]+)`/g, '$1')
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    .replace(/\n+/g, ' ')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
-}
-
-function excerptRecap(md: string, maxLen = 220): string {
-  const plain = stripMarkdown(md);
-  if (plain.length <= maxLen) return plain;
-  const cut = plain.lastIndexOf(' ', maxLen);
-  return plain.slice(0, cut > 0 ? cut : maxLen) + '\u2026';
-}
-
-// ---------------------------------------------------------------------------
 // Archive state
 // ---------------------------------------------------------------------------
 
 interface ArchiveState {
   readonly repoName: string | undefined;
-  readonly repoRoot: string | undefined;
-}
-
-/** Branches grouped by repo, sorted for display within their repo section. */
-interface RepoGroup {
-  readonly repoRoot: string;
-  readonly repoName: string;
-  readonly sortedItems: readonly WorkspaceItem[];
 }
 
 /**
@@ -126,6 +79,16 @@ interface BranchExpandState {
 }
 
 type ExpandStateMap = Map<string, BranchExpandState>;
+
+// ---------------------------------------------------------------------------
+// RepoGroup
+// ---------------------------------------------------------------------------
+
+interface RepoGroup {
+  readonly repoRoot: string;
+  readonly repoName: string;
+  readonly sortedItems: readonly WorkspaceItem[];
+}
 
 // ---------------------------------------------------------------------------
 // Props
@@ -144,13 +107,12 @@ interface Props {
 export function WorkspaceView({ hidden = false }: Props) {
   const navigate = useNavigate();
   const { data: sessionData, isLoading: sessionsLoading, error: sessionsError, refetch } = useSessionList();
-  const { data: worktreeData, isFetching: worktreesFetching } = useWorktreeList();
+  const { data: worktreeData, isLoading: worktreesFetching } = useWorktreeList();
   // Subscribe to server-sent events -- triggers immediate refetch when sessions change
   useWorkspaceEvents();
 
   const [scope, setScope] = useState<Scope>('active');
   const [focusedIndex, setFocusedIndex] = useState<number>(-1);
-  const [attentionFilter, setAttentionFilter] = useState(false);
   const [archive, setArchive] = useState<ArchiveState | null>(null);
 
   // Scroll restoration: capture scroll position before navigating to SessionDetail,
@@ -187,87 +149,66 @@ export function WorkspaceView({ hidden = false }: Props) {
     }
   }, [hidden]);
 
-  const { repoGroups, orderedItems, needsAttentionCount, archiveRepos } = useMemo(() => {
+  const { repoGroups, orderedItems, archiveRepos, dormantHiddenCount } = useMemo(() => {
     const nowMs = Date.now();
-    const empty = { repoGroups: [] as RepoGroup[], orderedItems: [] as WorkspaceItem[], needsAttentionCount: 0, archiveRepos: [] as Array<[string, string]> };
+    const empty = { repoGroups: [] as RepoGroup[], orderedItems: [] as WorkspaceItem[], archiveRepos: [] as Array<[string, string]>, dormantHiddenCount: 0 };
     if (!sessionData) return empty;
 
     const worktreeRepos = worktreeData?.repos ?? [];
     const joined = joinSessionsAndWorktrees(sessionData.sessions, worktreeRepos);
 
-    // Derive archive repos from the full joined list so ArchiveLinks always shows
-    // all repos even when attentionFilter hides some.
-    const reposSeen = new Map<string, string>(); // repoRoot -> repoName
+    const reposSeen = new Map<string, string>();
     for (const item of joined) {
-      if (!reposSeen.has(item.repoRoot)) {
-        reposSeen.set(item.repoRoot, item.repoName);
-      }
+      if (!reposSeen.has(item.repoRoot)) reposSeen.set(item.repoRoot, item.repoName);
     }
 
-    // Pre-filter for attention (blocked/dormant only) before grouping
-    const attentionFiltered = attentionFilter
-      ? joined.filter((item) => {
-          const s = item.primarySession?.status;
-          return s === 'blocked' || s === 'dormant';
-        })
-      : joined;
-
-    // Group by repo, sort within each group using sortItemsForRepo
+    // Group by repo
     const byRepo = new Map<string, WorkspaceItem[]>();
-    for (const item of attentionFiltered) {
-      const existing = byRepo.get(item.repoRoot);
-      if (existing) {
-        existing.push(item);
-      } else {
-        byRepo.set(item.repoRoot, [item]);
-      }
+    for (const item of joined) {
+      const existing = byRepo.get(item.repoRoot) ?? [];
+      existing.push(item);
+      byRepo.set(item.repoRoot, existing);
     }
 
     // Sort repos: repos with active sessions first, then alphabetical
     const groups: RepoGroup[] = [...byRepo.entries()]
-      .map(([repoRoot, repoItems]) => ({
+      .map(([repoRoot, items]) => ({
         repoRoot,
-        repoName: repoItems[0]!.repoName,
-        sortedItems: sortItemsForRepo(repoItems, scope, nowMs),
+        repoName: items[0]!.repoName,
+        sortedItems: sortItemsForRepo(items, scope, nowMs),
       }))
-      .filter((g) => g.sortedItems.length > 0)
+      .filter(g => g.sortedItems.length > 0)
       .sort((a, b) => {
-        const aActive = a.sortedItems.some(
-          (i) => i.primarySession?.status === 'in_progress' || i.primarySession?.status === 'blocked',
-        ) ? 0 : 1;
-        const bActive = b.sortedItems.some(
-          (i) => i.primarySession?.status === 'in_progress' || i.primarySession?.status === 'blocked',
-        ) ? 0 : 1;
+        const aActive = a.sortedItems.some(i => i.primarySession?.status === 'in_progress' || i.primarySession?.status === 'blocked') ? 0 : 1;
+        const bActive = b.sortedItems.some(i => i.primarySession?.status === 'in_progress' || i.primarySession?.status === 'blocked') ? 0 : 1;
         if (aActive !== bActive) return aActive - bActive;
         return a.repoName.localeCompare(b.repoName);
       });
 
-    // Flat ordered list for keyboard navigation -- must match visual order
-    const flat = groups.flatMap((g) => g.sortedItems);
+    const flat = groups.flatMap(g => g.sortedItems);
+
+    // Count items hidden from Active scope because they're dormant (no git changes)
+    const dormantHiddenCount = scope === 'active'
+      ? joined.filter(item =>
+          item.primarySession?.status === 'dormant' &&
+          (item.worktree?.changedCount ?? 0) === 0 &&
+          (item.worktree?.aheadCount ?? 0) === 0
+        ).length
+      : 0;
 
     return {
       repoGroups: groups,
       orderedItems: flat,
-      needsAttentionCount: countNeedsAttention(joined),
       archiveRepos: [...reposSeen.entries()] as Array<[string, string]>,
+      dormantHiddenCount,
     };
-  }, [sessionData, worktreeData, scope, attentionFilter]);
+  }, [sessionData, worktreeData, scope]);
 
   // Reset keyboard focus when the item list changes length (e.g. after scope toggle).
   // Prevents focusedIndex pointing to a different item than the user expects.
   useEffect(() => {
     setFocusedIndex(-1);
   }, [orderedItems.length]);
-
-  const handleAlertClick = useCallback(() => {
-    setAttentionFilter((prev) => {
-      const next = !prev;
-      // Activating the filter forces All scope so hidden branches become visible.
-      // Deactivating resets scope back to Active -- the ScopeToggle pill must match reality.
-      setScope(next ? 'all' : 'active');
-      return next;
-    });
-  }, []);
 
   // Keyboard navigation -- disabled while hidden (e.g. SessionDetail overlaid on top)
   useWorkspaceKeyboard({
@@ -288,15 +229,25 @@ export function WorkspaceView({ hidden = false }: Props) {
   if (sessionsLoading) {
     return (
       <div className={`flex items-center justify-center py-32 ${hidden ? 'hidden' : ''}`}>
-        <div className="text-[var(--text-muted)] text-sm">Loading workspace...</div>
+        <span className="font-mono text-[11px] text-[var(--text-muted)] uppercase tracking-[0.25em] motion-safe:animate-pulse">
+          // LOADING WORKSPACE...
+        </span>
       </div>
     );
   }
 
   if (sessionsError) {
     return (
-      <div className={`text-[var(--error)] bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-4 text-sm ${hidden ? 'hidden' : ''}`}>
-        Failed to load workspace: {sessionsError.message}
+      <div
+        className={`p-4 ${hidden ? 'hidden' : ''}`}
+        style={{ borderLeft: '3px solid var(--error)' }}
+      >
+        <span className="font-mono text-[10px] uppercase tracking-[0.20em] text-[var(--error)] block mb-1">
+          // ERROR
+        </span>
+        <span className="text-sm text-[var(--text-secondary)]">
+          Failed to load workspace: {sessionsError.message}
+        </span>
       </div>
     );
   }
@@ -308,24 +259,25 @@ export function WorkspaceView({ hidden = false }: Props) {
         <div className="flex items-center gap-3">
           <button
             onClick={() => setArchive(null)}
-            className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors text-sm"
+            className="font-mono text-[10px] uppercase tracking-[0.20em] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
           >
-            &larr; Back to Workspace
+            // WORKSPACE &larr;
           </button>
           {archive.repoName && (
-            <span className="text-sm text-[var(--text-muted)] font-mono">{archive.repoName}</span>
+            <span className="font-mono text-[10px] uppercase tracking-[0.20em] text-[var(--text-muted)]">
+              {archive.repoName}
+            </span>
           )}
         </div>
         <SessionList
           onSelectSession={wrappedSelectSession}
-          initialRepoRoot={archive.repoRoot ?? null}
         />
       </div>
     );
   }
 
   return (
-    <div className={`space-y-5 ${hidden ? 'hidden' : ''}`}>
+    <div className={`space-y-6 ${hidden ? 'hidden' : ''}`}>
       {!hasAnySessions ? (
         <>
           <FullEmptyState prompt={pickRandom(ACTION_PROMPTS)} />
@@ -333,35 +285,34 @@ export function WorkspaceView({ hidden = false }: Props) {
         </>
       ) : (
         <>
-          {/* Alert strip */}
-          {needsAttentionCount > 0 && (
-            <AlertStrip
-              count={needsAttentionCount}
-              active={attentionFilter}
-              onFocusAttention={handleAlertClick}
-            />
-          )}
-
-          {/* Scope toggle */}
-          <ScopeToggle scope={scope} onChange={setScope} />
-
-          {/* Repo sections -- one per repo, header shown only when 2+ repos */}
-          {repoGroups.length === 0 ? (
-            <div className="text-sm text-[var(--text-muted)] py-8 text-center">
-              No branches match the current filter.
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h1
+                className="font-mono text-2xl font-bold uppercase tracking-[0.12em] leading-none"
+                style={{ color: 'var(--accent)', textShadow: '0 0 28px rgba(244,196,48,0.35)' }}
+              >
+                Workspace
+              </h1>
+              <p className="font-mono text-[10px] tracking-[0.25em] text-[var(--text-muted)] mt-1.5">
+                // {orderedItems.length} session{orderedItems.length !== 1 ? 's' : ''}
+              </p>
             </div>
+            <ScopeToggle scope={scope} onChange={setScope} />
+          </div>
+
+          {orderedItems.length === 0 ? (
+            <p className="font-mono text-[11px] text-[var(--text-muted)] text-center py-8">
+              // no sessions match current filter
+            </p>
           ) : (
             <div className="space-y-6">
               {repoGroups.map((group, groupIndex) => {
-                // Compute the flat offset of this group's first item in orderedItems
-                const groupOffset = repoGroups
-                  .slice(0, groupIndex)
-                  .reduce((sum, g) => sum + g.sortedItems.length, 0);
+                const groupOffset = repoGroups.slice(0, groupIndex).reduce((sum, g) => sum + g.sortedItems.length, 0);
                 return (
                   <RepoSection
                     key={group.repoRoot}
                     group={group}
-                    showHeader={repoGroups.length > 1}
+                    showHeader={true}
                     focusedIndex={focusedIndex}
                     groupOffset={groupOffset}
                     worktreesFetching={worktreesFetching}
@@ -373,21 +324,26 @@ export function WorkspaceView({ hidden = false }: Props) {
             </div>
           )}
 
-          {/* Archive links -- uses unfiltered archiveRepos so all repos are always reachable */}
-          <ArchiveLinks
-            repos={archiveRepos}
-            onOpen={(repoName, repoRoot) => setArchive({ repoName, repoRoot })}
-          />
+          {dormantHiddenCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setScope('all')}
+            className="font-mono text-[10px] uppercase tracking-[0.20em] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors text-left"
+          >
+            // {dormantHiddenCount} dormant session{dormantHiddenCount !== 1 ? 's' : ''} hidden — show all
+          </button>
+        )}
+
+        <ArchiveLinks repos={archiveRepos} onOpen={(repoName) => setArchive({ repoName })} />
         </>
       )}
-
       <TipCard />
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Repo section
+// RepoSection
 // ---------------------------------------------------------------------------
 
 const SECTION_COLLAPSE_THRESHOLD = 12;
@@ -406,47 +362,51 @@ function RepoSection({
   readonly focusedIndex: number;
   readonly groupOffset: number;
   readonly worktreesFetching: boolean;
-  readonly onSelectSession: (sessionId: string) => void;
+  readonly onSelectSession: (id: string) => void;
   readonly expandStateRef: RefObject<ExpandStateMap>;
 }) {
   const [showAll, setShowAll] = useState(false);
-  const visibleItems = showAll
-    ? group.sortedItems
-    : group.sortedItems.slice(0, SECTION_COLLAPSE_THRESHOLD);
+  const visibleItems = showAll ? group.sortedItems : group.sortedItems.slice(0, SECTION_COLLAPSE_THRESHOLD);
   const hiddenCount = group.sortedItems.length - SECTION_COLLAPSE_THRESHOLD;
 
   const activeCount = group.sortedItems.filter(
-    (i) => i.primarySession?.status === 'in_progress' || i.primarySession?.status === 'blocked',
-  ).length;
-  const uncommittedCount = group.sortedItems.filter(
-    (i) => (i.worktree?.changedCount ?? 0) > 0,
+    i => i.primarySession?.status === 'in_progress' || i.primarySession?.status === 'blocked'
   ).length;
 
   return (
     <section>
       {showHeader && (
-        <div style={{ position: 'sticky', top: 'var(--app-header-height)', zIndex: 10 }} className="flex items-center gap-2 border-b border-[var(--border)] pb-2 mb-2 bg-[var(--bg-primary)]">
-          <h3 className="text-sm font-semibold text-[var(--text-primary)] font-mono">
-            {group.repoName}
-          </h3>
-          {activeCount > 0 && (
-            <span className="text-xs font-medium text-[var(--accent)]">
-              ● {activeCount} active
+        <div
+          style={{ position: 'sticky', top: 'var(--app-header-height)', zIndex: 10 }}
+          className="mb-3"
+        >
+          <div
+            className="flex items-center gap-3 px-3 py-2"
+            style={{
+              background: 'var(--bg-secondary)',
+              borderLeft: '3px solid var(--accent)',
+              borderBottom: '1px solid rgba(244,196,48,0.15)',
+            }}
+          >
+            <span className="font-mono text-[12px] font-bold uppercase tracking-[0.25em] text-[var(--text-primary)]">
+              {group.repoName}
             </span>
-          )}
-          {uncommittedCount > 0 && (
-            <span className="text-xs font-medium text-orange-400">
-              · {uncommittedCount} uncommitted
-            </span>
-          )}
+            {activeCount > 0 && (
+              <BracketBadge
+                label={`${activeCount} ACTIVE`}
+                color="var(--accent-strong)"
+              />
+            )}
+            <div className="flex-1 h-px" style={{ background: 'rgba(244,196,48,0.12)' }} />
+          </div>
         </div>
       )}
-      <div className="space-y-px">
+
+      <div className="space-y-3">
         {visibleItems.map((item, idx) => {
           const absoluteIndex = groupOffset + idx;
           const isFocused = focusedIndex === absoluteIndex;
 
-          // Worktree-only branch (no sessions): compact git-state row
           if (item.allSessions.length === 0) {
             return (
               <WorktreeOnlyRow
@@ -459,7 +419,6 @@ function RepoSection({
             );
           }
 
-          // Multi-session branch: collapsible group with branch label as toggle
           if (item.allSessions.length > 1) {
             return (
               <BranchGroup
@@ -473,26 +432,25 @@ function RepoSection({
             );
           }
 
-          // Single-session branch: one flat row (goal headline + branch subscript)
+          // Single-session: branch header + session row connected by left border
           const session = item.allSessions[0]!;
           return (
-            <div key={`${item.branch}\0${item.repoRoot}`} className={isFocused ? 'ring-2 ring-[var(--accent)] ring-offset-1 rounded' : ''}>
-              <SessionRow
-                session={session}
-                item={item}
-                showBranch={true}
-                onSelect={() => onSelectSession(session.sessionId)}
-              />
-            </div>
+            <TreeLine key={`${item.branch}\0${item.repoRoot}`} style={isFocused ? { outline: '2px solid var(--accent)', outlineOffset: '2px' } : undefined}>
+              <BranchLabel item={item} worktreesFetching={worktreesFetching} filesExpanded={false} onToggleFiles={() => {}} unpushedExpanded={false} onToggleUnpushed={() => {}} />
+              <div className="pl-3 mt-px">
+                <SessionRow session={session} item={item} showBranch={false} onSelect={() => onSelectSession(session.sessionId)} />
+              </div>
+            </TreeLine>
           );
         })}
+
         {!showAll && hiddenCount > 0 && (
           <button
             type="button"
             onClick={() => setShowAll(true)}
-            className="w-full text-left px-3 py-2 text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
+            className="w-full text-left px-3 py-2 font-mono text-[10px] uppercase tracking-[0.20em] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
           >
-            show {hiddenCount} more {hiddenCount === 1 ? 'branch' : 'branches'} &rarr;
+            + {hiddenCount} more {hiddenCount === 1 ? 'branch' : 'branches'}
           </button>
         )}
       </div>
@@ -501,16 +459,13 @@ function RepoSection({
 }
 
 // ---------------------------------------------------------------------------
-// Branch group -- collapsible container for multi-session branches
+// BranchGroup -- collapsible multi-session branches
 // ---------------------------------------------------------------------------
 
-// Session sort: matches sortPriority() order in workspace-types.ts
-// in_progress=dormant(0) > blocked(1) > everything else(2), then by recency -- dormant matches STATUS_PRIORITY (F2 fix)
 const SESSION_SORT = (a: ConsoleSessionSummary, b: ConsoleSessionSummary) => {
   const priority = (s: ConsoleSessionSummary) =>
     s.status === 'in_progress' || s.status === 'dormant' ? 0 :
-    s.status === 'blocked' ? 1 :
-    2;
+    s.status === 'blocked' ? 1 : 2;
   const diff = priority(a) - priority(b);
   if (diff !== 0) return diff;
   return b.lastModifiedMs - a.lastModifiedMs;
@@ -526,24 +481,19 @@ function BranchGroup({
   readonly item: WorkspaceItem;
   readonly isFocused: boolean;
   readonly worktreesFetching: boolean;
-  readonly onSelectSession: (sessionId: string) => void;
+  readonly onSelectSession: (id: string) => void;
   readonly expandStateRef: RefObject<ExpandStateMap>;
 }) {
   const expandKey = `${item.branch}\0${item.repoRoot}`;
-
-  // Read initial expand state from the hoisted ref map so panels survive
-  // SSE-driven re-renders that cause React to unmount/remount this component.
-  const getExpand = (): BranchExpandState =>
-    expandStateRef.current?.get(expandKey) ?? { filesExpanded: false, unpushedExpanded: false };
+  const getExpand = () => expandStateRef.current?.get(expandKey) ?? { filesExpanded: false, unpushedExpanded: false };
 
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [filesExpanded, setFilesExpanded] = useState(() => getExpand().filesExpanded);
   const [unpushedExpanded, setUnpushedExpanded] = useState(() => getExpand().unpushedExpanded);
-  const [animateRef] = useAutoAnimate<HTMLDivElement>();
   const sorted = [...item.allSessions].sort(SESSION_SORT);
 
   const handleToggleFiles = useCallback(() => {
-    setFilesExpanded((e) => {
+    setFilesExpanded(e => {
       const next = !e;
       const current = expandStateRef.current?.get(expandKey) ?? { filesExpanded: false, unpushedExpanded: false };
       expandStateRef.current?.set(expandKey, { ...current, filesExpanded: next });
@@ -552,7 +502,7 @@ function BranchGroup({
   }, [expandKey, expandStateRef]);
 
   const handleToggleUnpushed = useCallback(() => {
-    setUnpushedExpanded((e) => {
+    setUnpushedExpanded(e => {
       const next = !e;
       const current = expandStateRef.current?.get(expandKey) ?? { filesExpanded: false, unpushedExpanded: false };
       expandStateRef.current?.set(expandKey, { ...current, unpushedExpanded: next });
@@ -560,18 +510,11 @@ function BranchGroup({
     });
   }, [expandKey, expandStateRef]);
 
-  // Active sessions (in_progress/blocked/dormant) are always visible.
-  // Dormant = stalled but not done, so it stays visible alongside active work.
-  // Completed sessions are collapsed behind a toggle -- they're history, not current work.
-  const activeSessions = sorted.filter(
-    (s) => s.status === 'in_progress' || s.status === 'blocked' || s.status === 'dormant',
-  );
-  const historySessions = sorted.filter(
-    (s) => s.status !== 'in_progress' && s.status !== 'blocked' && s.status !== 'dormant',
-  );
+  const activeSessions = sorted.filter(s => s.status === 'in_progress' || s.status === 'blocked' || s.status === 'dormant');
+  const historySessions = sorted.filter(s => s.status !== 'in_progress' && s.status !== 'blocked' && s.status !== 'dormant');
 
   return (
-    <div ref={animateRef} className={isFocused ? 'ring-2 ring-[var(--accent)] ring-offset-1 rounded' : ''}>
+    <TreeLine style={isFocused ? { outline: '2px solid var(--accent)', outlineOffset: '2px' } : undefined}>
       <BranchLabel
         item={item}
         worktreesFetching={worktreesFetching}
@@ -584,132 +527,33 @@ function BranchGroup({
         <ChangedFilesPanel files={item.worktree.changedFiles} />
       )}
       {unpushedExpanded && item.worktree && (
-        <UnpushedCommitsPanel
-          commits={item.worktree.unpushedCommits}
-          count={item.worktree.aheadCount}
-        />
+        <UnpushedCommitsPanel commits={item.worktree.unpushedCommits} count={item.worktree.aheadCount} />
       )}
-      {activeSessions.map((session) => (
-        <SessionRow
-          key={session.sessionId}
-          session={session}
-          showBranch={false}
-          onSelect={() => onSelectSession(session.sessionId)}
-        />
-      ))}
-      {historySessions.length > 0 && (
-        <>
-          {historyExpanded && historySessions.map((session) => (
-            <SessionRow
-              key={session.sessionId}
-              session={session}
-              showBranch={false}
-              onSelect={() => onSelectSession(session.sessionId)}
-            />
-          ))}
-          <button
-            type="button"
-            onClick={() => setHistoryExpanded((e) => !e)}
-            className="w-full text-left px-3 py-1.5 text-[10px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
-          >
-            {historyExpanded
-              ? 'hide history ▴'
-              : `${historySessions.length} completed workflow${historySessions.length !== 1 ? 's' : ''} ▾`}
-          </button>
-        </>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Session row -- one per session, always visible, click opens SessionDetail
-// ---------------------------------------------------------------------------
-
-function SessionRow({
-  session,
-  item,
-  showBranch,
-  onSelect,
-}: {
-  readonly session: ConsoleSessionSummary;
-  /** The parent WorkspaceItem -- needed for branch subscript and git badges on single-session rows */
-  readonly item?: WorkspaceItem;
-  /** Show branch name as subscript (true for single-session rows; false for multi-session children) */
-  readonly showBranch: boolean;
-  readonly onSelect: () => void;
-}) {
-  const accent = STATUS_ACCENT[session.status];
-  const isDormant = session.status === 'dormant';
-  const workflowLabel = session.workflowName ?? session.workflowId ?? null;
-  const timeAgo = formatRelativeTime(session.lastModifiedMs);
-
-  // Goal title: session title (from goal field) or fallback
-  const goalTitle = session.sessionTitle?.trim() || workflowLabel || session.sessionId.slice(0, 8);
-  const recapSubtitle = session.recapSnippet && !session.sessionTitle
-    ? excerptRecap(session.recapSnippet, 100)
-    : null;
-
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className="w-full text-left flex items-start gap-3 px-3 py-2.5 rounded hover:bg-[var(--bg-card)] transition-colors group"
-    >
-      {/* Status dot -- hollow ring for dormant */}
-      {isDormant ? (
-        <div
-          className="w-1.5 h-1.5 rounded-full shrink-0 mt-[3px] border-2 bg-transparent"
-          style={{ borderColor: accent }}
-          title={STATUS_DOT_LABEL['dormant']}
-        />
-      ) : (
-        <div
-          className="w-1.5 h-1.5 rounded-full shrink-0 mt-[3px]"
-          style={{ backgroundColor: accent }}
-          title={STATUS_DOT_LABEL[session.status]}
-        />
-      )}
-
-      <div className="flex-1 min-w-0">
-        {/* Goal headline -- full width, wraps naturally */}
-        <p className="text-sm text-[var(--text-primary)] group-hover:text-[var(--accent)] transition-colors leading-snug mb-0.5 max-w-prose line-clamp-2">
-          {goalTitle}
-        </p>
-
-        {/* Meta row: branch (if single-session) + workflow + time + gaps */}
-        <div className="flex items-center gap-2 min-w-0">
-          {showBranch && item && (
-            <span className="font-mono text-xs text-[var(--text-muted)] truncate flex-1">
-              {item.branch}
-            </span>
-          )}
-          {showBranch && item?.worktree?.isMerged && item.worktree.branch !== null && item.worktree.branch !== 'main' && (
-            <MergedBadge />
-          )}
-          {!showBranch && workflowLabel && (
-            <span className="text-[10px] text-[var(--text-muted)] shrink-0">
-              {workflowLabel}
-            </span>
-          )}
-          {session.hasUnresolvedGaps && (
-            <span title="Unresolved gaps" className="text-[10px] text-[var(--warning)] shrink-0">&#x26A0;</span>
-          )}
-          <span className="text-[10px] text-[var(--text-muted)] tabular-nums shrink-0 ml-auto">{timeAgo}</span>
-        </div>
-
-        {/* Recap subtitle (when no goal title but recap exists) */}
-        {recapSubtitle && (
-          <p className="text-xs text-[var(--text-muted)] truncate leading-snug">{recapSubtitle}</p>
+      <div className="pl-3 mt-px space-y-px">
+        {activeSessions.map(session => (
+          <SessionRow key={session.sessionId} session={session} showBranch={false} onSelect={() => onSelectSession(session.sessionId)} />
+        ))}
+        {historySessions.length > 0 && (
+          <>
+            {historyExpanded && historySessions.map(session => (
+              <SessionRow key={session.sessionId} session={session} showBranch={false} onSelect={() => onSelectSession(session.sessionId)} />
+            ))}
+            <button
+              type="button"
+              onClick={() => setHistoryExpanded(e => !e)}
+              className="w-full text-left px-3 py-1.5 font-mono text-[10px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
+            >
+              {historyExpanded ? '// hide history' : `+ ${historySessions.length} completed workflow${historySessions.length !== 1 ? 's' : ''}`}
+            </button>
+          </>
         )}
       </div>
-    </button>
+    </TreeLine>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Branch label -- visual separator for multi-session branches
-// Shows branch name + git state. Not clickable -- sessions are the action target.
+// BranchLabel
 // ---------------------------------------------------------------------------
 
 function BranchLabel({
@@ -722,15 +566,15 @@ function BranchLabel({
 }: {
   readonly item: WorkspaceItem;
   readonly worktreesFetching: boolean;
-  readonly filesExpanded?: boolean;
-  readonly onToggleFiles?: () => void;
-  readonly unpushedExpanded?: boolean;
-  readonly onToggleUnpushed?: () => void;
+  readonly filesExpanded: boolean;
+  readonly onToggleFiles: () => void;
+  readonly unpushedExpanded: boolean;
+  readonly onToggleUnpushed: () => void;
 }) {
   const timeAgo = formatRelativeTime(item.activityMs);
   return (
-    <div className="flex items-center gap-2 px-3 pt-2 pb-1">
-      <span className="font-mono text-xs font-medium text-[var(--text-secondary)] truncate flex-1">
+    <div className="flex items-center gap-2 py-1 pr-3">
+      <span className="font-mono text-[11px] font-medium text-[var(--text-secondary)] truncate flex-1">
         {item.branch}
       </span>
       {item.worktree?.isMerged && item.worktree.branch !== null && item.worktree.branch !== 'main' && (
@@ -745,8 +589,81 @@ function BranchLabel({
         unpushedExpanded={unpushedExpanded}
         onToggleUnpushed={onToggleUnpushed}
       />
-      <span className="text-[10px] text-[var(--text-muted)] tabular-nums shrink-0">{timeAgo}</span>
+      <span className="font-mono text-[10px] text-[var(--text-muted)] tabular-nums shrink-0">{timeAgo}</span>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SessionRow -- status-based left border
+// ---------------------------------------------------------------------------
+
+function SessionRow({
+  session,
+  item,
+  showBranch = true,
+  onSelect,
+}: {
+  readonly session: ConsoleSessionSummary;
+  readonly item?: WorkspaceItem;
+  readonly showBranch?: boolean;
+  readonly onSelect: () => void;
+}) {
+  const timeAgo = formatRelativeTime(session.lastModifiedMs);
+  const goalTitle = session.sessionTitle?.trim() || session.workflowName || session.workflowId || session.sessionId.slice(0, 8);
+  const workflowLabel = session.workflowName ?? session.workflowId ?? null;
+  const isDormant = session.status === 'dormant';
+
+  const borderAccent =
+    session.status === 'in_progress' ? 'var(--accent-strong)' :
+    session.status === 'blocked'     ? 'var(--blocked)' :
+    isDormant                        ? 'rgba(244, 196, 48, 0.55)' :
+    'rgba(244, 196, 48, 0.15)';
+
+  return (
+    <ConsoleCard
+      variant="list"
+      onClick={onSelect}
+      className="px-4 py-3"
+      style={{ borderLeft: `3px solid ${borderAccent}` }}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1 flex items-start gap-2">
+          {isDormant && (
+            <span
+              className="w-1.5 h-1.5 rounded-full shrink-0 mt-[3px] bg-[var(--accent)]"
+              aria-hidden="true"
+              title="Dormant"
+            />
+          )}
+          <div className="min-w-0 flex-1">
+            <p className="text-sm text-[var(--text-primary)] group-hover:text-[var(--accent)] transition-colors leading-snug line-clamp-1 mb-0.5">
+              {goalTitle}
+            </p>
+            <div className="flex items-center gap-2 flex-wrap min-w-0">
+              {showBranch && item && (
+                <span className="font-mono text-[10px] text-[var(--text-muted)] truncate max-w-[200px]">
+                  {item.branch}
+                </span>
+              )}
+              {workflowLabel && session.sessionTitle && (
+                <span className="font-mono text-[10px] text-[var(--text-muted)] shrink-0">{workflowLabel}</span>
+              )}
+              {showBranch && item?.worktree && (
+                <GitBadges item={item} fetching={false} compact />
+              )}
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {session.hasUnresolvedGaps && (
+            <span className="text-[10px] text-[var(--warning)]" title="Unresolved gaps">&#x26A0;</span>
+          )}
+          <StatusBadge status={session.status} />
+          <span className="font-mono text-[10px] text-[var(--text-muted)] tabular-nums">{timeAgo}</span>
+        </div>
+      </div>
+    </ConsoleCard>
   );
 }
 
@@ -859,8 +776,10 @@ function GitBadges({
   readonly unpushedExpanded?: boolean;
   readonly onToggleUnpushed?: () => void;
 }) {
-  if (fetching && item.worktree === undefined) {
-    // Show skeleton shimmer while worktree data loads
+  if (fetching && (item.worktree === undefined || item.worktree.enrichment === null)) {
+    // Show skeleton shimmer while worktree data loads or while background enrichment
+    // is still in progress (enrichment: null means fast path returned but git badge
+    // data is not yet available -- expect a worktrees-updated SSE event soon).
     return (
       <span className="flex gap-1">
         <SkeletonBadge />
@@ -1040,13 +959,9 @@ function MergedBadge() {
 
 function SkeletonBadge() {
   return (
-    <span className="inline-block h-5 w-20 rounded bg-[var(--bg-tertiary)] animate-pulse" />
+    <span className="inline-block h-5 w-20 rounded bg-[var(--bg-tertiary)] motion-safe:animate-pulse" />
   );
 }
-
-// ---------------------------------------------------------------------------
-// Session row list (accordion content)
-// (SessionRowList removed -- sessions are now rendered directly as SessionRow components)
 
 // ---------------------------------------------------------------------------
 // Scope toggle
@@ -1066,49 +981,16 @@ function ScopeToggle({
           key={s}
           type="button"
           onClick={() => onChange(s)}
-          className={`px-3 py-1 rounded-full text-xs font-medium transition-colors capitalize ${
+          className={`font-mono text-[10px] uppercase tracking-[0.20em] px-2.5 py-1 transition-colors capitalize ${
             scope === s
-              ? 'bg-[var(--bg-tertiary)] text-[var(--text-primary)]'
-              : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
+              ? 'border border-[var(--accent)] text-[var(--accent)] bg-transparent'
+              : 'border border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
           }`}
         >
           {s === 'active' ? 'Active' : 'All'}
         </button>
       ))}
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Alert strip (clickable)
-// ---------------------------------------------------------------------------
-
-function AlertStrip({
-  count,
-  active,
-  onFocusAttention,
-}: {
-  readonly count: number;
-  readonly active: boolean;
-  readonly onFocusAttention: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onFocusAttention}
-      className={`w-full flex items-center gap-3 bg-[var(--bg-card)] border rounded-lg px-4 py-2.5 overflow-hidden text-left transition-colors hover:border-[var(--blocked)] ${
-        active ? 'border-[var(--blocked)]' : 'border-[var(--border)]'
-      }`}
-      style={{ borderLeftColor: 'var(--blocked)', borderLeftWidth: '3px' }}
-      title={active ? 'Click to show all branches' : 'Click to focus on sessions needing attention'}
-    >
-      <span className="text-sm font-medium" style={{ color: 'var(--blocked)' }}>
-        {count} session{count !== 1 ? 's' : ''} {count !== 1 ? 'need' : 'needs'} attention
-      </span>
-      <span className="text-xs text-[var(--text-muted)]">
-        {active ? '-- click to clear filter' : '-- click to focus'}
-      </span>
-    </button>
   );
 }
 
@@ -1121,33 +1003,29 @@ function ArchiveLinks({
   onOpen,
 }: {
   // Pre-computed from the unfiltered join so all repos are always shown
-  // regardless of attention filter or scope.
+  // regardless of scope.
   readonly repos: ReadonlyArray<readonly [string, string]>;
-  readonly onOpen: (repoName: string | undefined, repoRoot: string | undefined) => void;
+  readonly onOpen: (repoName: string | undefined) => void;
 }) {
-
-  // Always show at least the global link so users with only null-repoRoot sessions
-  // (pre-dating the repoRoot observation) can still reach the full archive.
   return (
     <div className="flex flex-col gap-1 pt-2 border-t border-[var(--border)]">
       {repos.map(([repoRoot, repoName]) => (
         <button
           key={repoRoot}
           type="button"
-          onClick={() => onOpen(repoName, repoRoot)}
-          className="text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors text-left"
+          onClick={() => onOpen(repoName)}
+          className="font-mono text-[10px] uppercase tracking-[0.20em] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors text-left"
         >
-          All {repoName} sessions &rarr;
+          // SESSION ARCHIVE &rarr;
         </button>
       ))}
-      {/* Global link: always shown so null-repoRoot sessions are always reachable */}
-      {repos.length !== 1 && (
+      {repos.length > 1 && (
         <button
           type="button"
-          onClick={() => onOpen(undefined, undefined)}
-          className="text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors text-left"
+          onClick={() => onOpen(undefined)}
+          className="font-mono text-[10px] uppercase tracking-[0.20em] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors text-left"
         >
-          All sessions &rarr;
+          // ALL SESSIONS &rarr;
         </button>
       )}
     </div>
@@ -1162,6 +1040,9 @@ function FullEmptyState({ prompt }: { readonly prompt: ActionPrompt }) {
   return (
     <div className="flex flex-col items-center gap-8 py-20 text-center">
       <div>
+        <p className="font-mono text-[11px] uppercase tracking-[0.30em] text-[var(--text-muted)] mb-3">
+          // WORKSPACE READY
+        </p>
         <h2 className="text-xl font-semibold text-[var(--text-primary)] mb-3">
           Ready when you are
         </h2>
@@ -1170,19 +1051,28 @@ function FullEmptyState({ prompt }: { readonly prompt: ActionPrompt }) {
         </p>
       </div>
 
-      <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl px-6 py-5 max-w-lg w-full text-left">
-        <p className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider mb-2">
-          Try this prompt
-        </p>
-        <p className="text-[var(--text-primary)] text-sm leading-relaxed">
-          "Use the{' '}
-          <span className="text-[var(--accent)] font-medium">{prompt.workflow}</span>
-          {' '}to {prompt.task}"
-        </p>
+      <div className="relative h-[100px] max-w-lg w-full">
+        <CutCornerBox
+          cut={12}
+          borderColor="var(--border)"
+          background="var(--bg-card)"
+          className="absolute inset-0"
+        >
+          <div className="px-6 py-5 text-left">
+            <p className="font-mono text-[10px] uppercase tracking-[0.20em] text-[var(--text-muted)] mb-2">
+              Try this prompt
+            </p>
+            <p className="text-[var(--text-primary)] text-sm leading-relaxed">
+              "Use the{' '}
+              <span className="text-[var(--accent)] font-medium">{prompt.workflow}</span>
+              {' '}to {prompt.task}"
+            </p>
+          </div>
+        </CutCornerBox>
       </div>
 
-      <p className="text-xs text-[var(--text-muted)]">
-        Prompts rotate each visit -- there are {ACTION_PROMPTS.length} to discover.
+      <p className="font-mono text-[10px] uppercase tracking-[0.20em] text-[var(--text-muted)]">
+        // {ACTION_PROMPTS.length} PROMPTS AVAILABLE
       </p>
     </div>
   );
@@ -1220,14 +1110,13 @@ function TipCard() {
   }, []);
 
   return (
-    <div className="flex items-start gap-3 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg px-4 py-3">
-      <div
-        className="w-0.5 shrink-0 self-stretch rounded-full"
-        style={{ backgroundColor: 'var(--accent)' }}
-      />
+    <div
+      className="flex items-start gap-3 border border-[var(--border)] px-4 py-3"
+      style={{ borderLeft: '3px solid rgba(244, 196, 48, 0.4)' }}
+    >
       <div style={{ opacity: fading ? 0 : 1, transition: 'opacity 300ms' }}>
-        <span className="text-[10px] font-semibold text-[var(--accent)] uppercase tracking-widest">
-          Tip
+        <span className="font-mono text-[10px] uppercase tracking-[0.20em] text-[var(--accent)]">
+          // TIP
         </span>
         <p className="text-sm text-[var(--text-secondary)] mt-1 leading-relaxed">
           {DISCOVERY_TIPS[tipIndex]}
@@ -1347,7 +1236,7 @@ function useWorkspaceKeyboard({
         }
         case '/': {
           e.preventDefault();
-          setArchive({ repoName: undefined, repoRoot: undefined });
+          setArchive({ repoName: undefined });
           break;
         }
         case 'r': {

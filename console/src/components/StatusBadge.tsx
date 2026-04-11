@@ -1,21 +1,16 @@
 import type { ConsoleSessionStatus } from '../api/types';
+import { BracketBadge } from './BracketBadge';
 
-const STATUS_CONFIG: Record<ConsoleSessionStatus, { label: string; color: string }> = {
-  in_progress: { label: 'In Progress', color: 'var(--accent)' },
-  dormant: { label: 'Dormant', color: 'var(--text-secondary)' },
-  complete: { label: 'Complete', color: 'var(--success)' },
-  complete_with_gaps: { label: 'Gaps', color: 'var(--warning)' },
-  blocked: { label: 'Blocked', color: 'var(--blocked)' },
+// Label text is uppercased; color is derived from status semantics.
+const STATUS_CONFIG: Record<ConsoleSessionStatus, { label: string; pulse: boolean; color?: string }> = {
+  in_progress:        { label: 'IN PROGRESS', pulse: true },
+  dormant:            { label: 'DORMANT',      pulse: false, color: 'var(--text-muted)' },
+  complete:           { label: 'COMPLETE',     pulse: false, color: 'var(--success)' },
+  complete_with_gaps: { label: 'GAPS',         pulse: false, color: 'var(--warning)' },
+  blocked:            { label: 'BLOCKED',      pulse: false, color: 'var(--blocked)' },
 };
 
 export function StatusBadge({ status }: { status: ConsoleSessionStatus }) {
-  const config = STATUS_CONFIG[status];
-  return (
-    <span
-      className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
-      style={{ backgroundColor: `color-mix(in srgb, ${config.color} 12%, transparent)`, color: config.color }}
-    >
-      {config.label}
-    </span>
-  );
+  const { label, pulse, color } = STATUS_CONFIG[status];
+  return <BracketBadge label={label} pulse={pulse} color={color} />;
 }

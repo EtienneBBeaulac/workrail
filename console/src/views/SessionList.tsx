@@ -1,17 +1,17 @@
-import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useSessionList } from '../api/hooks';
 import { StatusBadge } from '../components/StatusBadge';
 import { HealthBadge } from '../components/HealthBadge';
+import { MetaChip } from '../components/MetaChip';
+import { ConsoleCard } from '../components/ConsoleCard';
 import type { ConsoleSessionSummary, ConsoleSessionStatus } from '../api/types';
 import { formatRelativeTime } from '../utils/time';
+import { useGridKeyNav, type UseGridKeyNavResult } from '../hooks/useGridKeyNav';
 
 interface Props {
   onSelectSession: (sessionId: string) => void;
   /** Pre-seed the search field (e.g. branch name from worktree click-through). */
   initialSearch?: string;
-  /** Restrict results to sessions from this repo root. Sessions without a
-   * repoRoot (recorded before the field was introduced) are always included. */
-  initialRepoRoot?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -112,18 +112,11 @@ function filterSessions(
   sessions: readonly ConsoleSessionSummary[],
   search: string,
   statusFilter: StatusFilter,
-  repoRoot: string | null,
 ): ConsoleSessionSummary[] {
   let filtered = [...sessions];
 
   if (statusFilter !== 'all') {
     filtered = filtered.filter((s) => s.status === statusFilter);
-  }
-
-  // Repo filter: sessions without repoRoot predate the field and are always
-  // included — we don't know which repo they belong to.
-  if (repoRoot !== null) {
-    filtered = filtered.filter((s) => s.repoRoot === repoRoot || s.repoRoot === null);
   }
 
   if (search.trim()) {
@@ -195,11 +188,10 @@ function useDebounce<T>(value: T, delayMs: number): T {
 // Components
 // ---------------------------------------------------------------------------
 
-export function SessionList({ onSelectSession, initialSearch = '', initialRepoRoot = null }: Props) {
+export function SessionList({ onSelectSession, initialSearch = '' }: Props) {
   const { data, isLoading, error } = useSessionList();
 
   const [search, setSearch] = useState(initialSearch);
-  const [repoRoot] = useState(initialRepoRoot);
   const [sort, setSort] = useState<SortField>('recent');
   const [groupBy, setGroupBy] = useState<GroupBy>('none');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -218,11 +210,11 @@ export function SessionList({ onSelectSession, initialSearch = '', initialRepoRo
 
   const processed = useMemo(() => {
     if (!data) return { groups: [], total: 0, filtered: 0 };
-    const filtered = filterSessions(data.sessions, debouncedSearch, statusFilter, repoRoot);
+    const filtered = filterSessions(data.sessions, debouncedSearch, statusFilter);
     const sorted = sortSessions(filtered, sort);
     const groups = groupSessions(sorted, groupBy);
     return { groups, total: data.sessions.length, filtered: filtered.length };
-  }, [data, debouncedSearch, statusFilter, repoRoot, sort, groupBy]);
+  }, [data, debouncedSearch, statusFilter, sort, groupBy]);
 
   // Status counts for filter pills
   const statusCounts = useMemo(() => {
@@ -266,6 +258,19 @@ export function SessionList({ onSelectSession, initialSearch = '', initialRepoRo
   const pageStart = page * PAGE_SIZE;
   const pageEnd = pageStart + PAGE_SIZE;
   const totalPages = Math.ceil(processed.filtered / PAGE_SIZE);
+
+  // Flat visible sessions for the current page (non-grouped path only).
+  const flatPageSessions = isGrouped ? [] : (processed.groups[0]?.sessions.slice(pageStart, pageEnd) ?? []);
+
+  // Issue #7: Keyboard navigation for the flat session list (cols=1, single column).
+  const { getItemProps: getSessionNavProps, containerProps: sessionContainerProps } = useGridKeyNav({
+    count: flatPageSessions.length,
+    cols: 1,
+    onActivate: useCallback((i: number) => {
+      onSelectSession(flatPageSessions[i].sessionId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [flatPageSessions, onSelectSession]),
+  });
 
   return (
     <div className="space-y-4">
@@ -362,12 +367,13 @@ export function SessionList({ onSelectSession, initialSearch = '', initialRepoRo
         </div>
       ) : (
         <>
-          <div className="space-y-2">
-            {processed.groups[0]?.sessions.slice(pageStart, pageEnd).map((session) => (
+          <div {...sessionContainerProps} className="space-y-2">
+            {flatPageSessions.map((session, i) => (
               <SessionCard
                 key={session.sessionId}
                 session={session}
                 onClick={() => onSelectSession(session.sessionId)}
+                navProps={getSessionNavProps(i)}
               />
             ))}
           </div>
@@ -526,15 +532,28 @@ function Pagination({
 // Session card (redesigned)
 // ---------------------------------------------------------------------------
 
-function SessionCard({ session, onClick }: { session: ConsoleSessionSummary; onClick: () => void }) {
+function SessionCard({
+  session,
+  onClick,
+  navProps,
+}: {
+  session: ConsoleSessionSummary;
+  onClick: () => void;
+  navProps?: ReturnType<UseGridKeyNavResult['getItemProps']>;
+}) {
   const title = session.sessionTitle;
   const workflowLabel = session.workflowName ?? session.workflowId;
   const timeAgo = formatRelativeTime(session.lastModifiedMs);
 
   return (
-    <button
+    <ConsoleCard
+      variant="list"
       onClick={onClick}
-      className="w-full text-left bg-[var(--bg-card)] border border-[var(--border)] rounded-lg px-4 py-3 hover:border-[var(--accent)] transition-colors cursor-pointer group"
+      tabIndex={navProps?.tabIndex}
+      onKeyDown={navProps?.onKeyDown}
+      onFocus={navProps?.onFocus}
+      ref={navProps?.ref as React.Ref<HTMLButtonElement> | undefined}
+      className="rounded-lg px-4 py-3"
     >
       {/* Row 1: Title + status + time */}
       <div className="flex items-start justify-between gap-3">
@@ -564,7 +583,7 @@ function SessionCard({ session, onClick }: { session: ConsoleSessionSummary; onC
         )}
         {session.hasUnresolvedGaps && (
           <span className="inline-flex items-center gap-1 text-[10px] text-[var(--warning)]">
-            ⚠ gaps
+            gaps
           </span>
         )}
       </div>
@@ -573,7 +592,7 @@ function SessionCard({ session, onClick }: { session: ConsoleSessionSummary; onC
       <div className="mt-1.5 font-mono text-[10px] text-[var(--text-muted)] opacity-60 group-hover:opacity-100 transition-opacity truncate">
         {session.sessionId}
       </div>
-    </button>
+    </ConsoleCard>
   );
 }
 
@@ -601,9 +620,9 @@ const CHIP_ICONS = {
 
 function Chip({ children, icon }: { children: React.ReactNode; icon?: keyof typeof CHIP_ICONS }) {
   return (
-    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[var(--bg-secondary)] text-[10px] text-[var(--text-muted)] max-w-[200px] truncate">
+    <MetaChip className="gap-1 rounded text-[var(--text-muted)] max-w-[200px] truncate">
       {icon && CHIP_ICONS[icon]}
       {children}
-    </span>
+    </MetaChip>
   );
 }

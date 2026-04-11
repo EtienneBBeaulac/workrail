@@ -1,3 +1,5 @@
+import { useState } from 'react';
+import { PathBreadcrumb } from '../components/PathBreadcrumb';
 import { useQueryClient } from '@tanstack/react-query';
 import { useWorkflowDetail, HttpError } from '../api/hooks';
 import { MarkdownView } from '../components/MarkdownView';
@@ -10,6 +12,7 @@ import { TAG_DISPLAY } from '../config/tags';
 
 interface Props {
   readonly workflowId: string;
+  readonly activeTag?: string | null;
   readonly onBack: () => void;
 }
 
@@ -17,7 +20,7 @@ interface Props {
 // WorkflowDetail
 // ---------------------------------------------------------------------------
 
-export function WorkflowDetail({ workflowId, onBack }: Props) {
+export function WorkflowDetail({ workflowId, activeTag, onBack }: Props) {
   const queryClient = useQueryClient();
 
   // Optimistic partial data: use cached list entry while detail fetch completes.
@@ -28,7 +31,7 @@ export function WorkflowDetail({ workflowId, onBack }: Props) {
 
   const { data: detail, isLoading, isError, error, refetch } = useWorkflowDetail(workflowId);
 
-  const backLabel = 'Workflows';
+  const activeTagLabel = activeTag ? (TAG_DISPLAY[activeTag] ?? activeTag) : null;
 
   // Use detail data when available, fall back to cached list data for header fields.
   const name = detail?.name ?? cached?.name ?? workflowId;
@@ -39,28 +42,44 @@ export function WorkflowDetail({ workflowId, onBack }: Props) {
   return (
     <div className="space-y-5 max-w-3xl">
       {/* Back link */}
-      <button
-        type="button"
-        onClick={onBack}
-        aria-label={backLabel}
-        className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors text-sm"
-      >
-        &larr; {backLabel}
-      </button>
+      <PathBreadcrumb
+        segments={
+          activeTagLabel
+            ? [{ label: 'Workflows', onClick: onBack }, { label: activeTagLabel }]
+            : [{ label: 'Workflows', onClick: onBack }]
+        }
+      />
 
       {/* Header */}
-      <div className="space-y-2">
-        <h2 className="text-xl font-semibold text-[var(--text-primary)] leading-snug">
+      <div className="border border-[var(--border)] px-5 py-5 console-blueprint-grid">
+        {/* Designation label */}
+        <p className="font-mono text-[10px] uppercase tracking-[0.35em] text-[var(--text-muted)] mb-2">
+          // Workflow
+        </p>
+
+        {/* Title */}
+        <h2
+          className="font-mono text-xl font-bold uppercase tracking-[0.08em] leading-tight mb-3"
+          style={{
+            color: 'var(--accent)',
+            textShadow: '0 0 24px rgba(244,196,48,0.45), 0 0 48px rgba(244,196,48,0.15)',
+          }}
+        >
           {name}
         </h2>
 
-        {/* Badges row */}
+        {/* Badges row -- step count inline with tags */}
         <div className="flex flex-wrap items-center gap-2">
+          {detail && detail.stepCount != null && detail.stepCount > 0 && (
+            <span className="font-mono text-[10px] px-1.5 py-0.5 border border-[var(--border)] text-[var(--text-secondary)]">
+              {detail.stepCount} step{detail.stepCount !== 1 ? 's' : ''}
+            </span>
+          )}
           {tags.filter((t) => t !== 'routines').map((tag) => (
             <span
               key={tag}
               aria-hidden="true"
-              className="text-[10px] px-2 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--text-secondary)]"
+              className="font-mono text-[10px] px-1.5 py-0.5 bg-[var(--bg-secondary)] text-[var(--text-muted)]"
             >
               {TAG_DISPLAY[tag] ?? tag}
             </span>
@@ -68,21 +87,16 @@ export function WorkflowDetail({ workflowId, onBack }: Props) {
           {source && (
             <span
               aria-hidden="true"
-              className="text-[10px] px-2 py-0.5 rounded bg-[var(--bg-secondary)] text-[var(--text-muted)] border border-[var(--border)]"
+              className="font-mono text-[10px] px-1.5 py-0.5 border border-[var(--border)] text-[var(--text-muted)]"
             >
-              {source.displayName}
-            </span>
-          )}
-          {detail && (
-            <span className="text-[10px] text-[var(--text-muted)]">
-              {detail.stepCount} {detail.stepCount === 1 ? 'step' : 'steps'}
+              src: {source.displayName}
             </span>
           )}
         </div>
 
-        {/* Short description (full text, not truncated) */}
+        {/* Short description */}
         {description && (
-          <p className="text-sm text-[var(--text-secondary)] leading-relaxed">
+          <p className="text-sm text-[var(--text-secondary)] leading-relaxed mt-3">
             {description}
           </p>
         )}
@@ -99,13 +113,18 @@ export function WorkflowDetail({ workflowId, onBack }: Props) {
           onBack={onBack}
         />
       ) : detail ? (
-        <DetailContent detail={detail} />
+        <DetailContent detail={detail} name={name} />
       ) : (
         // Optimistic state: cached partial data shown, detail still loading
         <div className="space-y-4">
           <SectionSkeleton />
         </div>
       )}
+
+      {/* Second back link at bottom */}
+      <PathBreadcrumb
+        segments={[{ label: 'Workflows', onClick: onBack }]}
+      />
     </div>
   );
 }
@@ -116,8 +135,10 @@ export function WorkflowDetail({ workflowId, onBack }: Props) {
 
 function DetailContent({
   detail,
+  name,
 }: {
   readonly detail: WorkflowDetailData;
+  readonly name: string;
 }) {
   const hasAbout = detail.about !== undefined && detail.about.length > 0;
   const hasExamples = detail.examples !== undefined && detail.examples.length > 0;
@@ -127,7 +148,7 @@ function DetailContent({
   if (!hasAnyContent) {
     return (
       <p className="text-sm text-[var(--text-muted)] italic">
-        No extended description available for this workflow.
+        No additional documentation available.
       </p>
     );
   }
@@ -152,9 +173,10 @@ function DetailContent({
             {detail.examples!.map((example) => (
               <li
                 key={example}
-                className="flex items-start gap-3 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg px-4 py-3"
+                className="flex items-start gap-3 bg-[var(--bg-card)] border border-[var(--border)] rounded-none px-4 py-3"
               >
                 <div
+                  aria-hidden="true"
                   className="w-0.5 shrink-0 self-stretch rounded-full"
                   style={{ backgroundColor: 'var(--accent)' }}
                 />
@@ -182,7 +204,46 @@ function DetailContent({
           </ul>
         </section>
       )}
+
+      {/* Copy prompt CTA */}
+      <CopyPromptCta name={name} />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Copy prompt CTA
+// ---------------------------------------------------------------------------
+
+function CopyPromptCta({ name }: { readonly name: string }) {
+  const [copied, setCopied] = useState(false);
+  const prompt = `Use the ${name} to [your goal]`;
+
+  const handleCopy = () => {
+    void navigator.clipboard.writeText(prompt).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  return (
+    <section>
+      <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-3">
+        Start with this prompt
+      </h3>
+      <div className="flex items-center gap-3 border border-[var(--border)] px-4 py-3">
+        <span className="flex-1 text-sm text-[var(--text-secondary)] font-mono truncate">
+          &quot;{prompt}&quot;
+        </span>
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="shrink-0 text-xs font-mono text-[var(--accent)] hover:text-[var(--text-primary)] transition-colors"
+        >
+          {copied ? 'Copied!' : 'Copy'}
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -192,7 +253,7 @@ function DetailContent({
 
 function SectionSkeleton() {
   return (
-    <div className="space-y-3 animate-pulse">
+    <div className="space-y-3 motion-safe:animate-pulse">
       <div className="h-3 w-16 rounded bg-[var(--bg-tertiary)]" />
       <div className="h-4 w-full rounded bg-[var(--bg-tertiary)]" />
       <div className="h-4 w-5/6 rounded bg-[var(--bg-tertiary)]" />
@@ -203,7 +264,7 @@ function SectionSkeleton() {
 
 function DetailSkeleton() {
   return (
-    <div className="space-y-6 animate-pulse">
+    <div className="space-y-6 motion-safe:animate-pulse">
       <div className="space-y-2">
         <div className="h-6 w-1/2 rounded bg-[var(--bg-tertiary)]" />
         <div className="flex gap-2">
@@ -229,7 +290,7 @@ function DetailError({
   readonly onBack: () => void;
 }) {
   return (
-    <div className="space-y-4 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-4">
+    <div className="space-y-4 bg-[var(--bg-card)] border border-[var(--border)] p-4">
       <p className="text-sm text-[var(--error)]">
         {is404 ? 'Workflow not found.' : message}
       </p>
@@ -247,9 +308,9 @@ function DetailError({
           type="button"
           onClick={onBack}
           aria-label="Back to workflows list"
-          className="text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+          className="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
         >
-          &larr; Back to Workflows
+          {'<'} WORKFLOWS
         </button>
       </div>
     </div>

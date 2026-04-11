@@ -160,7 +160,7 @@ export function assertNever(x: never): never {
 export function getSourceDisplayName(source: WorkflowSource): string {
   switch (source.kind) {
     case 'bundled':
-      return 'Built-in';
+      return 'WorkRail';
     case 'user':
       return 'User Library';
     case 'project':

@@ -10,7 +10,8 @@ import type { Application, Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
 import type { ConsoleService } from './console-service.js';
-import { getWorktreeList, buildActiveSessionCounts, resolveRepoRoot } from './worktree-service.js';
+import { getWorktreeList, buildActiveSessionCounts, resolveRepoRoot, setEnrichmentCompleteCallback } from './worktree-service.js';
+import { toWorkflowSourceInfo } from '../../types/workflow.js';
 import type { WorkflowService } from '../../application/services/workflow-service.js';
 import type { ToolCallTimingRingBuffer } from '../../mcp/tool-call-timing.js';
 import { isDevMode } from '../../mcp/dev-mode.js';
@@ -146,6 +147,26 @@ export function mountConsoleRoutes(
   // causing MaxListenersExceededWarning on stderr which corrupts the MCP stdio channel.
   const stopWatcher = watchSessionsDir(consoleService.getSessionsDir(), broadcastChange);
 
+  // Wire up background enrichment completion callback.
+  // When background worktree enrichment finishes, broadcast a `worktrees-updated`
+  // SSE event so connected clients know to refetch the enriched git badge data.
+  // Debounced at 2s to collapse rapid completions (e.g. multiple repos finishing
+  // within the same second) into a single broadcast.
+  let enrichmentBroadcastTimer: ReturnType<typeof setTimeout> | null = null;
+  setEnrichmentCompleteCallback(() => {
+    if (enrichmentBroadcastTimer !== null) clearTimeout(enrichmentBroadcastTimer);
+    enrichmentBroadcastTimer = setTimeout(() => {
+      enrichmentBroadcastTimer = null;
+      for (const client of sseClients) {
+        try {
+          client.write('data: {"type":"worktrees-updated"}\n\n');
+        } catch {
+          sseClients.delete(client);
+        }
+      }
+    }, 2_000);
+  });
+
   // --- API routes ---
 
   // SSE: push a 'change' event to all connected console clients whenever the
@@ -203,59 +224,92 @@ export function mountConsoleRoutes(
   });
 
   // List git worktrees grouped by repo, with enriched status and active session counts.
-  // Repo roots are derived from session observations (repo_root anchor) so the view
-  // covers all repos agents have worked in, not just the current CWD's repo.
+  // Repo roots are derived from the server process CWD only. Active session counts
+  // (for worktree badges) come from a full session scan on each request.
+  //
+  // Per-request timeout: if git scanning takes longer than 8 s, respond with the
+  // cached result (or an empty list) so the UI never spins indefinitely.
 
-  // CWD root: stable for the lifetime of the process — resolve once, cache forever.
+  // CWD root + discovered repo roots, refreshed on a TTL like the original design.
   let cwdRepoRootPromise: Promise<string | null> | null = null;
-
-  // Repo roots from sessions: changes only when new sessions appear from new repos.
-  // Cache with a TTL so we re-scan sessions infrequently rather than on every request.
-  // Active session counts (for worktree badges) still come from each full session scan.
-  const REPO_ROOTS_TTL_MS = 60_000;
-
-  // Sessions older than this threshold do not contribute repo roots to worktree discovery.
-  // Without this bound, a single stale session from a large repo (e.g. one with 79 worktrees)
-  // permanently inflates the worktree enrichment cost for the lifetime of the MCP server process.
-  // 30 days is conservative: any session not touched in a month is almost certainly inactive.
-  const REPO_ROOT_SESSION_STALENESS_MS = 30 * 24 * 60 * 60 * 1000;
-
   let cachedRepoRoots: readonly string[] = [];
   let repoRootsExpiresAt = 0;
+  const REPO_ROOTS_TTL_MS = 60_000;
 
-  // Note: this handler triggers a full session event replay via getSessionList()
-  // as a side effect (to derive repo roots and active session counts). It is a
-  // candidate for caching when session count grows.
+  /**
+   * Derives repo roots from the remembered-roots.json file, which records every
+   * workspacePath passed to start_workflow. Each path is resolved to its canonical
+   * git repo root via resolveRepoRoot(), so linked worktrees (e.g. .claude-worktrees/)
+   * all collapse to their shared main repo. Result is deduplicated.
+   *
+   * This is the correct source of truth: only repos that have had actual sessions
+   * appear, with no filesystem scanning needed.
+   */
+  async function discoverMainRepoRoots(): Promise<readonly string[]> {
+    const dataDir = process.env['WORKRAIL_DATA_DIR']
+      ?? path.join(process.env.HOME ?? '/tmp', '.workrail', 'data');
+    const rootsFile = path.join(dataDir, 'workflow-sources', 'remembered-roots.json');
+
+    let workspacePaths: string[] = [];
+    try {
+      const raw = await fs.promises.readFile(rootsFile, 'utf8');
+      const parsed = JSON.parse(raw) as { roots?: { path: string }[] };
+      workspacePaths = (parsed.roots ?? []).map((r) => r.path).filter(Boolean);
+    } catch {
+      return [];
+    }
+
+    // Resolve each workspace path to its canonical git repo root in parallel.
+    // Linked worktrees resolve to the main repo, deduplicating automatically.
+    const resolved = await Promise.all(workspacePaths.map((p) => resolveRepoRoot(p)));
+    const roots = new Set(resolved.filter((r): r is string => r !== null));
+    return [...roots];
+  }
+
+  /** Response timeout: discovery + scan must complete within this window.
+   *  Set above PER_REPO_TIMEOUT_MS so fast repos return even if slow ones timeout. */
+  const WORKTREES_REQUEST_TIMEOUT_MS = 12_000;
+
   app.get('/api/v2/worktrees', async (_req: Request, res: Response) => {
+    // Timeout race: if the scan takes too long, return an empty repo list so the
+    // client doesn't spin. The next poll will retry, and the in-flight scan result
+    // will be cached by then.
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error('worktrees scan timeout')), WORKTREES_REQUEST_TIMEOUT_MS);
+    });
+
     try {
       const sessionResult = await consoleService.getSessionList();
       const sessions = sessionResult.isOk() ? sessionResult.value.sessions : [];
       const activeSessions = buildActiveSessionCounts(sessions);
 
-      // Refresh the known-repos set at most once per TTL window.
+      cwdRepoRootPromise ??= resolveRepoRoot(process.cwd());
       if (Date.now() > repoRootsExpiresAt) {
-        cwdRepoRootPromise ??= resolveRepoRoot(process.cwd());
-        const cwdRoot = await cwdRepoRootPromise;
-        // Normalize each session repoRoot through resolveRepoRoot so linked worktrees
-        // collapse to their main repo root rather than appearing as separate repos.
-        // Only include sessions touched within the staleness window -- stale sessions
-        // from inactive repos inflate the worktree count without providing useful signal.
-        const cutoffMs = Date.now() - REPO_ROOT_SESSION_STALENESS_MS;
-        const rawRoots = sessions
-          .filter(s => s.lastModifiedMs >= cutoffMs)
-          .map(s => s.repoRoot)
-          .filter((r): r is string => r !== null);
-        const resolvedRoots = await Promise.all(rawRoots.map(r => resolveRepoRoot(r)));
-        const repoRootSet = new Set<string>(resolvedRoots.filter((r): r is string => r !== null));
-        if (cwdRoot !== null) repoRootSet.add(cwdRoot);
-        cachedRepoRoots = [...repoRootSet];
+        const [cwdRoot, discovered] = await Promise.all([
+          cwdRepoRootPromise,
+          discoverMainRepoRoots(),
+        ]);
+        const repoRootsSet = new Set<string>(discovered);
+        if (cwdRoot !== null) repoRootsSet.add(cwdRoot);
+        cachedRepoRoots = [...repoRootsSet];
         repoRootsExpiresAt = Date.now() + REPO_ROOTS_TTL_MS;
       }
+      const repoRoots = cachedRepoRoots;
 
-      const data = await getWorktreeList(cachedRepoRoots, activeSessions);
+      const data = await Promise.race([
+        getWorktreeList(repoRoots, activeSessions),
+        timeoutPromise,
+      ]);
+      if (timeoutId !== null) clearTimeout(timeoutId);
       res.json({ success: true, data });
     } catch (e) {
-      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+      if (timeoutId !== null) clearTimeout(timeoutId);
+      if (e instanceof Error && e.message === 'worktrees scan timeout') {
+        res.json({ success: true, data: { repos: [] } });
+      } else {
+        res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+      }
     }
   });
 
@@ -305,7 +359,7 @@ export function mountConsoleRoutes(
               description: definition.description,
               version: definition.version,
               tags: tagEntry?.tags ?? [],
-              source,
+              source: toWorkflowSourceInfo(source),
               ...(definition.about !== undefined ? { about: definition.about } : {}),
               ...(definition.examples?.length ? { examples: [...definition.examples] } : {}),
             };
@@ -337,7 +391,7 @@ export function mountConsoleRoutes(
             description: definition.description,
             version: definition.version,
             tags: tagEntry?.tags ?? [],
-            source,
+            source: toWorkflowSourceInfo(source),
             stepCount: definition.steps.length,
             ...(definition.about !== undefined ? { about: definition.about } : {}),
             ...(definition.examples?.length ? { examples: [...definition.examples] } : {}),
