@@ -7,6 +7,16 @@
  *
  * Why not a port: git is not an application boundary we need to mock in tests.
  * The console is a dev-time tool; a real git repo is always present.
+ *
+ * Two-phase scan design:
+ * - Fast path: `git worktree list --porcelain` per repo (~100ms total, any repo size)
+ *   returns branch names and paths only. Response is immediate.
+ * - Background enrichment: per-worktree git commands (6 per worktree) run after the
+ *   response is sent. When complete, onEnrichmentComplete callback fires so the route
+ *   can push a `worktrees-updated` SSE event. The client then re-fetches and gets
+ *   fully enriched data.
+ *
+ * This eliminates the timeout problem for repos with 79+ worktrees.
  */
 
 import { execFile } from 'child_process';
@@ -19,6 +29,7 @@ import type {
   ConsoleSessionStatus,
   ChangedFile,
   FileChangeStatus,
+  WorktreeEnrichment,
 } from './console-types.js';
 
 const execFileAsync = promisify(execFile);
@@ -101,7 +112,7 @@ function parseWorktreePorcelain(raw: string): RawWorktree[] {
 }
 
 // ---------------------------------------------------------------------------
-// Semaphore: limit concurrent git subprocess batches
+// Foreground semaphore: limit concurrent git subprocess batches
 //
 // enrichWorktree runs 6 git commands in parallel per worktree via Promise.all.
 // Without a cap, a repo with 101 worktrees spawns 606 concurrent subprocesses
@@ -149,6 +160,41 @@ function releaseEnrichmentSlot(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Background semaphore: separate capacity for off-request-path enrichment
+//
+// Background enrichment runs after the HTTP response is sent, so it must not
+// compete with foreground request-path operations for the same semaphore slots.
+// Using a separate semaphore with a higher cap (MAX=16) allows background work
+// to proceed faster without impacting foreground request latency.
+//
+// Same slot-transfer invariant as the foreground semaphore.
+// ---------------------------------------------------------------------------
+
+const MAX_BACKGROUND_ENRICHMENTS = 16;
+let activeBackgroundEnrichments = 0;
+const backgroundEnrichmentQueue: Array<() => void> = [];
+
+function acquireBackgroundSlot(): Promise<void> {
+  return new Promise((resolve) => {
+    if (activeBackgroundEnrichments < MAX_BACKGROUND_ENRICHMENTS) {
+      activeBackgroundEnrichments++;
+      resolve();
+    } else {
+      backgroundEnrichmentQueue.push(resolve);
+    }
+  });
+}
+
+function releaseBackgroundSlot(): void {
+  const next = backgroundEnrichmentQueue.shift();
+  if (next) {
+    next();
+  } else {
+    activeBackgroundEnrichments--;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Per-worktree enrichment
 // ---------------------------------------------------------------------------
 
@@ -185,19 +231,6 @@ function parseChangedFiles(statusRaw: string): readonly ChangedFile[] {
       status: parseFileStatus(line.slice(0, 2)),
       path: line.slice(3),
     }));
-}
-
-interface WorktreeEnrichment {
-  headHash: string;
-  headMessage: string;
-  headTimestampMs: number;
-  changedCount: number;
-  changedFiles: readonly ChangedFile[];
-  aheadCount: number;
-  unpushedCommits: readonly { readonly hash: string; readonly message: string }[];
-  isMerged: boolean;
-  /** Content of `git config branch.<name>.description`, or empty string if unset. */
-  branchDescription: string;
 }
 
 // Hardcoded to origin/main -- repos using master/trunk will silently degrade (badges disappear, no crash)
@@ -256,13 +289,13 @@ async function enrichWorktree(wt: RawWorktree): Promise<WorktreeEnrichment> {
     mergedBranchesRaw !== null &&
     mergedBranchesRaw.split('\n').some(line => line.trim() === wt.branch);
 
-  const branchDescription = descriptionRaw?.trim() ?? '';
+  const description = descriptionRaw?.trim() ?? '';
 
-  return { headHash, headMessage, headTimestampMs, changedCount, changedFiles, aheadCount, unpushedCommits, isMerged, branchDescription };
+  return { headHash, headMessage, headTimestampMs, changedCount, changedFiles, aheadCount, unpushedCommits, isMerged, description };
 }
 
 // ---------------------------------------------------------------------------
-// Per-repo enrichment
+// Per-repo operations
 // ---------------------------------------------------------------------------
 
 /**
@@ -280,12 +313,12 @@ export async function resolveRepoRoot(path: string): Promise<string | null> {
 }
 
 /**
- * Enrich all worktrees for a single repo root.
- * Returns null if the repo root is inaccessible (not a git repo, deleted, etc.).
- * Returns an empty array if the repo is valid but has no worktrees to enrich
- * (all enrichments failed) — callers filter out empty repos.
+ * Build a fast (unenriched) ConsoleWorktreeSummary for each worktree in a repo.
+ * Uses `git worktree list --porcelain` which is a single fast local operation.
+ * All enrichment fields default to safe values (0, [], false, '').
+ * `enrichment: null` signals that background enrichment has not yet completed.
  */
-async function enrichRepo(
+async function buildFastWorktrees(
   repoRoot: string,
   activeSessions: ActiveSessionsByBranch,
 ): Promise<readonly ConsoleWorktreeSummary[] | null> {
@@ -293,22 +326,47 @@ async function enrichRepo(
   if (porcelain === null) return null;
 
   const rawWorktrees = parseWorktreePorcelain(porcelain);
+  return rawWorktrees.map((wt): ConsoleWorktreeSummary => ({
+    path: wt.path,
+    name: basename(wt.path),
+    branch: wt.branch,
+    // Safe defaults for all enrichment-derived flat fields
+    headHash: wt.head.slice(0, 7),
+    headMessage: '',
+    headTimestampMs: 0,
+    changedCount: 0,
+    changedFiles: [],
+    aheadCount: 0,
+    unpushedCommits: [],
+    isMerged: false,
+    activeSessionCount: wt.branch ? (activeSessions.counts.get(wt.branch) ?? 0) : 0,
+    // enrichment: null signals "background scan not yet complete"
+    enrichment: null,
+  }));
+}
 
-  // Enrich all worktrees in parallel, gated by the process-level semaphore.
-  // Each enrichWorktree call runs 6 git commands concurrently; the semaphore
-  // limits how many worktrees are enriched at once so we don't fan out to
-  // hundreds of simultaneous git subprocesses across multiple repo roots.
-  //
-  // Promise.allSettled so a single broken worktree (unexpected JS error, not a
-  // git failure -- those are already handled in git()) does not silently fail the
-  // entire repo. Rejected entries are logged and excluded: surface info, don't hide it.
+/**
+ * Enrich all worktrees for a single repo root using the background semaphore.
+ * Returns null if the repo root is inaccessible.
+ * Returns an empty array if all enrichments failed.
+ */
+async function enrichRepo(
+  repoRoot: string,
+): Promise<readonly ConsoleWorktreeSummary[] | null> {
+  const porcelain = await git(repoRoot, ['worktree', 'list', '--porcelain']);
+  if (porcelain === null) return null;
+
+  const rawWorktrees = parseWorktreePorcelain(porcelain);
+
+  // Enrich all worktrees in parallel, gated by the BACKGROUND semaphore.
+  // Promise.allSettled so a single broken worktree does not fail the entire repo.
   const results = await Promise.allSettled(
     rawWorktrees.map(async (wt) => {
-      await acquireEnrichmentSlot();
+      await acquireBackgroundSlot();
       try {
         return await enrichWorktree(wt);
       } finally {
-        releaseEnrichmentSlot();
+        releaseBackgroundSlot();
       }
     }),
   );
@@ -320,10 +378,7 @@ async function enrichRepo(
       return [];
     }
     const e = result.value;
-    return [{
-      path: wt.path,
-      name: basename(wt.path),
-      branch: wt.branch,
+    const enrichment: WorktreeEnrichment = {
       headHash: e.headHash,
       headMessage: e.headMessage,
       headTimestampMs: e.headTimestampMs,
@@ -332,17 +387,30 @@ async function enrichRepo(
       aheadCount: e.aheadCount,
       unpushedCommits: e.unpushedCommits,
       isMerged: e.isMerged,
-      activeSessionCount: wt.branch ? (activeSessions.counts.get(wt.branch) ?? 0) : 0,
-      // Empty string means unset -- omit from the type so consumers can use simple truthiness checks
-      ...(e.branchDescription ? { description: e.branchDescription } : {}),
+      description: e.description,
+    };
+    return [{
+      path: wt.path,
+      name: basename(wt.path),
+      branch: wt.branch,
+      // Flat fields mirrored from enrichment for backward compat with consumers
+      headHash: e.headHash,
+      headMessage: e.headMessage,
+      headTimestampMs: e.headTimestampMs,
+      changedCount: e.changedCount,
+      changedFiles: e.changedFiles,
+      aheadCount: e.aheadCount,
+      unpushedCommits: e.unpushedCommits,
+      isMerged: e.isMerged,
+      activeSessionCount: 0, // applied later in applyActiveSessionsAndSort
+      // Empty string means unset -- omit from the flat field so consumers can use simple truthiness checks
+      ...(e.description ? { description: e.description } : {}),
+      enrichment,
     }];
   });
 
-  // Sort: active sessions first, then dirty, then by recency.
-  // Spread before sorting — keeps the mutation local rather than mutating
-  // a fresh flatMap result in place before handing it out as readonly.
+  // Sort: dirty first, then by recency. Active sessions applied afterward.
   return [...worktrees].sort((a, b) => {
-    if (b.activeSessionCount !== a.activeSessionCount) return b.activeSessionCount - a.activeSessionCount;
     if (b.changedCount !== a.changedCount) return b.changedCount - a.changedCount;
     return b.headTimestampMs - a.headTimestampMs;
   });
@@ -376,49 +444,69 @@ export function buildActiveSessionCounts(
 // ---------------------------------------------------------------------------
 // Worktree scan result cache
 //
-// The console UI polls /api/v2/worktrees every few seconds. Without caching,
-// each poll triggers a full git scan of all worktrees. With caching, the first
-// request in each TTL window does the scan; concurrent and near-concurrent
-// requests get the stale result immediately.
+// Two-phase design:
+// - unenrichedRepos: available immediately after `git worktree list --porcelain`
+//   (fast path, <1s for any repo size). All worktrees have enrichment: null.
+// - enrichedRepos: null until background enrichment completes. Once set, all
+//   worktrees have full enrichment data. getWorktreeList serves enrichedRepos
+//   when available, falls back to unenrichedRepos otherwise.
 //
-// Active-session counts change frequently (every continue_workflow), so the
-// TTL is kept short. The repos/branches list changes infrequently, so even a
-// 15s stale read is acceptable for the git data portion.
-//
-// In-flight deduplication: if a scan is already running when a second request
-// arrives, the second request awaits the same promise rather than launching
-// a duplicate scan. This prevents the semaphore from being acquired twice
-// simultaneously for the same repo set.
+// Cache TTL of 45s: longer than the 30s frontend poll interval so steady-state
+// polls always hit the cache. The enriched data changes infrequently (branch
+// switches, commits); active session counts are applied fresh on every request.
 // ---------------------------------------------------------------------------
 
-const WORKTREE_CACHE_TTL_MS = 15_000;
+const WORKTREE_CACHE_TTL_MS = 45_000;
 
 interface WorktreeCache {
-  readonly repos: readonly ConsoleRepoWorktrees[];
+  /** Fast-path data: branch + path only, enrichment: null on all worktrees. */
+  readonly unenrichedRepos: readonly ConsoleRepoWorktrees[];
+  /** Background-enriched data: null until enrichment completes. */
+  readonly enrichedRepos: readonly ConsoleRepoWorktrees[] | null;
   readonly cachedAtMs: number;
   /** Canonical key used to detect repo root changes (comma-joined sorted paths). */
   readonly repoRootsKey: string;
 }
 
 let worktreeCache: WorktreeCache | null = null;
-let inflight: Promise<readonly ConsoleRepoWorktrees[]> | null = null;
 
-/** Per-repo enrichment timeout. Repos that exceed this are skipped for the
- *  current scan cycle and retried on the next TTL expiry. Prevents a single
- *  large repo (e.g. 79 worktrees) from blocking results for all others. */
-const PER_REPO_TIMEOUT_MS = 8_000;
+// ---------------------------------------------------------------------------
+// Background enrichment
+//
+// Deduplication guard: prevents N concurrent cold-cache requests from each
+// launching a separate background scan. Only one background scan runs at a time
+// per cache window. This is the same class of problem that the foreground
+// `inflight` pattern solved -- background enrichment needs the same protection.
+//
+// The guard is reset in the finally block of runBackgroundEnrichment so it is
+// always released even on timeout or error.
+// ---------------------------------------------------------------------------
+
+let backgroundEnrichmentInFlight = false;
+
+/** 120s ceiling for background enrichment -- much longer than request timeout.
+ * Individual git commands are still bounded by GIT_TIMEOUT_MS=5s so the
+ * realistic worst case for 79 worktrees is ceil(79/16) * 5s = ~25s. */
+const BACKGROUND_ENRICHMENT_TIMEOUT_MS = 120_000;
+
+/** Callback invoked when background enrichment completes -- used to broadcast SSE. */
+let onEnrichmentComplete: (() => void) | null = null;
+
+/**
+ * Register a callback to be invoked when background enrichment finishes.
+ * Called once at server startup by mountConsoleRoutes.
+ * The callback broadcasts a `worktrees-updated` SSE event to all connected clients.
+ */
+export function setEnrichmentCompleteCallback(cb: () => void): void {
+  onEnrichmentComplete = cb;
+}
 
 async function scanRepos(
   repoRoots: readonly string[],
 ): Promise<readonly ConsoleRepoWorktrees[]> {
   const repoResults = await Promise.allSettled(
     repoRoots.map(async (repoRoot) => {
-      const worktrees = await Promise.race([
-        enrichRepo(repoRoot, { counts: new Map() }),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error(`repo scan timeout: ${repoRoot}`)), PER_REPO_TIMEOUT_MS)
-        ),
-      ]);
+      const worktrees = await enrichRepo(repoRoot);
       return { repoRoot, worktrees };
     }),
   );
@@ -439,44 +527,48 @@ async function scanRepos(
 }
 
 /**
- * Return worktrees for each of the given repo roots, grouped per repo.
- *
- * Repos are enriched in parallel. Repos with 0 worktrees (inaccessible root,
- * or all enrichments failed) are omitted from the result — an empty section
- * header would be confusing when the repo's path no longer exists.
- *
- * Active session counts are applied on top of cached git data so they always
- * reflect the current session state even when serving a cached scan.
- *
- * Sort order: repos with active sessions first, then alphabetical by repo name.
+ * Run background enrichment for the given repo roots.
+ * Updates the cache with enriched data when complete.
+ * Invokes onEnrichmentComplete to trigger SSE broadcast.
+ * Always releases the backgroundEnrichmentInFlight guard.
  */
-export async function getWorktreeList(
+async function runBackgroundEnrichment(
   repoRoots: readonly string[],
-  activeSessions: ActiveSessionsByBranch,
-): Promise<ConsoleWorktreeListResponse> {
-  const repoRootsKey = [...repoRoots].sort().join(',');
-  const nowMs = Date.now();
-
-  let repos: readonly ConsoleRepoWorktrees[];
-
-  const isCacheValid =
-    worktreeCache !== null &&
-    worktreeCache.repoRootsKey === repoRootsKey &&
-    nowMs - worktreeCache.cachedAtMs < WORKTREE_CACHE_TTL_MS;
-
-  if (isCacheValid) {
-    repos = worktreeCache!.repos;
-  } else {
-    // Deduplicate concurrent scans: if a scan is already running, await it.
-    if (inflight === null) {
-      inflight = scanRepos(repoRoots).finally(() => { inflight = null; });
+  repoRootsKey: string,
+): Promise<void> {
+  try {
+    const enriched = await Promise.race([
+      scanRepos(repoRoots),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('background enrichment timeout')), BACKGROUND_ENRICHMENT_TIMEOUT_MS)
+      ),
+    ]);
+    // Only write to cache if the repo roots haven't changed since the scan started.
+    // If the user opened a new workspace during enrichment, stale data is discarded.
+    if (worktreeCache?.repoRootsKey === repoRootsKey) {
+      worktreeCache = { ...worktreeCache, enrichedRepos: enriched };
+      onEnrichmentComplete?.();
     }
-    repos = await inflight;
-    worktreeCache = { repos, cachedAtMs: Date.now(), repoRootsKey };
+  } catch {
+    // Background enrichment failed or timed out -- unenriched data remains in cache.
+    // The next TTL expiry will trigger a fresh fast path + new background scan.
+  } finally {
+    backgroundEnrichmentInFlight = false;
   }
+}
 
-  // Apply current active-session counts on top of (possibly cached) git data.
-  // This keeps session badges up-to-date without re-scanning git on every poll.
+/**
+ * Apply current active-session counts on top of cached repos and sort.
+ *
+ * Active-session counts change frequently (every continue_workflow step), so
+ * they are always applied fresh rather than cached with git data.
+ *
+ * Sort order: repos with active sessions first, then alphabetical by name.
+ */
+function applyActiveSessionsAndSort(
+  repos: readonly ConsoleRepoWorktrees[],
+  activeSessions: ActiveSessionsByBranch,
+): ConsoleWorktreeListResponse {
   const reposWithActiveSessions: ConsoleRepoWorktrees[] = repos.map((repo) => ({
     ...repo,
     worktrees: repo.worktrees.map((wt) => ({
@@ -486,7 +578,6 @@ export async function getWorktreeList(
   }));
 
   // Sort: repos with active sessions first, then alphabetical by name.
-  // Spread before sorting — same immutability rationale as enrichRepo.
   const sortedRepos = [...reposWithActiveSessions].sort((a, b) => {
     const aActive = a.worktrees.some(w => w.activeSessionCount > 0) ? 0 : 1;
     const bActive = b.worktrees.some(w => w.activeSessionCount > 0) ? 0 : 1;
@@ -495,4 +586,67 @@ export async function getWorktreeList(
   });
 
   return { repos: sortedRepos };
+}
+
+/**
+ * Return worktrees for each of the given repo roots, grouped per repo.
+ *
+ * Fast path: if cache is stale or empty, runs `git worktree list --porcelain`
+ * per repo (<1s total) and returns immediately with unenriched data. Background
+ * enrichment is triggered concurrently and will push a `worktrees-updated` SSE
+ * event when complete.
+ *
+ * Enriched path: once background enrichment completes and the client refetches
+ * (triggered by the SSE event), the enriched data is served from cache.
+ *
+ * Active session counts are applied on top of cached git data so they always
+ * reflect the current session state even when serving a cached scan.
+ */
+export async function getWorktreeList(
+  repoRoots: readonly string[],
+  activeSessions: ActiveSessionsByBranch,
+): Promise<ConsoleWorktreeListResponse> {
+  const repoRootsKey = [...repoRoots].sort().join(',');
+  const nowMs = Date.now();
+
+  const isCacheValid =
+    worktreeCache !== null &&
+    worktreeCache.repoRootsKey === repoRootsKey &&
+    nowMs - worktreeCache.cachedAtMs < WORKTREE_CACHE_TTL_MS;
+
+  if (!isCacheValid) {
+    // Fast path: list all worktrees in parallel (~100ms for any repo size)
+    const fastRepoResults = await Promise.allSettled(
+      repoRoots.map(async (repoRoot) => {
+        const worktrees = await buildFastWorktrees(repoRoot, { counts: new Map() });
+        return { repoRoot, worktrees };
+      }),
+    );
+
+    const fastRepos: ConsoleRepoWorktrees[] = fastRepoResults.flatMap((result) => {
+      if (result.status === 'rejected') return [];
+      const { repoRoot, worktrees } = result.value;
+      if (!worktrees || worktrees.length === 0) return [];
+      return [{ repoName: basename(repoRoot), repoRoot, worktrees }];
+    });
+
+    worktreeCache = {
+      unenrichedRepos: fastRepos,
+      enrichedRepos: null,
+      cachedAtMs: nowMs,
+      repoRootsKey,
+    };
+
+    // Trigger background enrichment only if one isn't already running.
+    // This prevents N concurrent cold-cache requests from each launching
+    // a separate background scan (same problem inflight solved for foreground).
+    if (!backgroundEnrichmentInFlight) {
+      backgroundEnrichmentInFlight = true;
+      void runBackgroundEnrichment(repoRoots, repoRootsKey);
+    }
+  }
+
+  // Use enriched data if available, fall back to unenriched.
+  const repos = worktreeCache!.enrichedRepos ?? worktreeCache!.unenrichedRepos;
+  return applyActiveSessionsAndSort(repos, activeSessions);
 }
