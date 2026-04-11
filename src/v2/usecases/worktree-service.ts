@@ -343,7 +343,7 @@ async function buildFastWorktrees(
     aheadCount: 0,
     unpushedCommits: [],
     isMerged: false,
-    activeSessionCount: wt.branch ? (activeSessions.counts.get(wt.branch) ?? 0) : 0,
+    activeSessionCount: 0, // populated later by applyActiveSessionsAndSort
     // enrichment: null signals "background scan not yet complete"
     enrichment: null,
   }));
