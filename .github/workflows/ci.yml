@@ -289,6 +289,9 @@ jobs:
       - name: Verify dist manifest
         run: node scripts/dist-manifest.js --dist dist --verify dist/manifest.json
 
+      - name: Restore bin execute bit (upload-artifact strips file permissions)
+        run: node -e "require('fs').chmodSync('dist/mcp-server.js',0o755)"
+
       - name: Validate all workflows
         run: npm run validate:registry
 
@@ -344,6 +347,9 @@ jobs:
       - name: Verify dist manifest
         run: node scripts/dist-manifest.js --dist dist --verify dist/manifest.json
 
+      - name: Restore bin execute bit (upload-artifact strips file permissions)
+        run: node -e "require('fs').chmodSync('dist/mcp-server.js',0o755)"
+
       - name: Cross-platform test guardrails
         run: npm run -s codemod:test-platform-guard
 
@@ -390,6 +396,9 @@ jobs:
       - name: Verify dist manifest
         run: node scripts/dist-manifest.js --dist dist --verify dist/manifest.json
 
+      - name: Restore bin execute bit (upload-artifact strips file permissions)
+        run: node -e "require('fs').chmodSync('dist/mcp-server.js',0o755)"
+
       - name: Cross-platform test guardrails
         run: npm run -s codemod:test-platform-guard
 
@@ -435,6 +444,9 @@ jobs:
 
       - name: Verify dist manifest
         run: node scripts/dist-manifest.js --dist dist --verify dist/manifest.json
+
+      - name: Restore bin execute bit (upload-artifact strips file permissions)
+        run: node -e "require('fs').chmodSync('dist/mcp-server.js',0o755)"
 
       - name: Install Playwright browsers with dependencies
         run: npx playwright install --with-deps chromium
