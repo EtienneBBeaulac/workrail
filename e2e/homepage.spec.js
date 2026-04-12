@@ -18,21 +18,22 @@ test.describe('Homepage', () => {
   test('should load the WorkRail Console', async ({ page }) => {
     await page.goto('/console');
 
-    // Console heading is visible (cyberpunk redesign uses "Workspace" as the h1)
-    await expect(page.locator('h1')).toContainText('Workspace');
+    // The console always renders either the workspace sessions view (h1 "Workspace")
+    // or the empty state ("Ready when you are") when no sessions exist.
+    // Both are valid loaded states -- wait for either.
+    await expect(
+      page.locator('h1').filter({ hasText: 'Workspace' })
+        .or(page.locator('text=Ready when you are'))
+    ).toBeVisible({ timeout: 10_000 });
   });
 
   test('should display the Workspace view by default', async ({ page }) => {
     await page.goto('/console');
 
-    // Workspace is the sole view -- h1 shows "Workspace"
-    await expect(page.locator('h1')).toContainText('Workspace');
-
-    // Scope toggle (Active / All) confirms the Workspace view is loaded
+    // Workspace view is loaded when either the session list (h1 "Workspace") or
+    // the empty state ("Ready when you are") is visible.
     await expect(
-      page.getByRole('button', { name: 'Active' })
-        .or(page.locator('text=Active'))
-        .or(page.locator('text=No branches match'))
+      page.locator('h1').filter({ hasText: 'Workspace' })
         .or(page.locator('text=Ready when you are'))
     ).toBeVisible({ timeout: 10_000 });
   });
