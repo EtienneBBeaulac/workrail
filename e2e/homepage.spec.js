@@ -18,15 +18,15 @@ test.describe('Homepage', () => {
   test('should load the WorkRail Console', async ({ page }) => {
     await page.goto('/console');
 
-    // Console heading is visible
-    await expect(page.locator('h1')).toContainText('WorkRail Console');
+    // Console heading is visible (cyberpunk redesign uses "Workspace" as the h1)
+    await expect(page.locator('h1')).toContainText('Workspace');
   });
 
   test('should display the Workspace view by default', async ({ page }) => {
     await page.goto('/console');
 
-    // Workspace is the sole view -- no tab buttons, just the heading
-    await expect(page.locator('h1')).toContainText('WorkRail Console');
+    // Workspace is the sole view -- h1 shows "Workspace"
+    await expect(page.locator('h1')).toContainText('Workspace');
 
     // Scope toggle (Active / All) confirms the Workspace view is loaded
     await expect(
