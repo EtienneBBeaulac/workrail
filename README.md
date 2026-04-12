@@ -150,6 +150,19 @@ Then prompt your agent:
 
 The agent will find the workflow, start at step 1, and proceed systematically.
 
+### Troubleshooting: "Permission denied" on startup
+
+Versions before 3.19.0 were published without the execute bit set on the binary.
+If you see `Permission denied` when WorkRail starts, reinstall or fix it in place:
+
+```sh
+# Option A: reinstall (recommended)
+npm install -g @exaudeus/workrail
+
+# Option B: fix in place without reinstalling
+chmod +x $(npm root -g)/@exaudeus/workrail/dist/mcp-server.js
+```
+
 ---
 
 ## CI & Releases
