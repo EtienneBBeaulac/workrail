@@ -2,6 +2,7 @@ import path from 'path';
 import type { Workflow, WorkflowSourceInfo } from '../../../types/workflow.js';
 import type { ICompositeWorkflowStorage, IWorkflowReader } from '../../../types/storage.js';
 import type { RememberedRootRecordV2 } from '../../../v2/ports/remembered-roots-store.port.js';
+import { isWorkspaceAncestor } from './workspace-path-utils.js';
 
 export interface PublicWorkflowSource {
   readonly kind: WorkflowSourceInfo['kind'];
@@ -120,12 +121,7 @@ function deriveRootedSharingContext(
   const sourcePath = path.resolve(workflow.source.directoryPath);
   for (const record of rememberedRoots) {
     const rootPath = path.resolve(record.path);
-    const relative = path.relative(rootPath, sourcePath);
-    const isUnderRoot =
-      relative.length === 0 ||
-      (!relative.startsWith('..') && !path.isAbsolute(relative));
-
-    if (!isUnderRoot) continue;
+    if (!isWorkspaceAncestor(rootPath, sourcePath)) continue;
 
     return {
       kind: 'remembered_root',

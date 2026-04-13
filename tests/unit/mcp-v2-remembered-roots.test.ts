@@ -137,10 +137,15 @@ async function writeWorkspaceWorkflow(workspaceRoot: string): Promise<void> {
 describe('stale remembered roots in tool responses', () => {
   it('list_workflows suppresses staleRoots in tagSummary (compact) mode, surfaces them in filtered mode', async () => {
     const dataRoot = await mkTempDir('workrail-stale-list-data-');
-    const workspaceRoot = await mkTempDir('workrail-stale-list-ws-');
+    // stalePath must be an ancestor of workspaceRoot to pass the scoping filter.
+    // Create workspaceRoot inside stalePath, then delete stalePath to make it stale.
+    const baseDir = await mkTempDir('workrail-stale-list-base-');
+    const stalePath = path.join(baseDir, 'remembered-root');
+    const workspaceRoot = path.join(stalePath, 'workspace');
+    await fs.mkdir(workspaceRoot, { recursive: true });
+    await fs.rm(stalePath, { recursive: true, force: true }); // make stalePath stale
     const { ctx, rememberedRootsStore } = await buildCtx(dataRoot);
 
-    const stalePath = path.join(os.tmpdir(), `wr-stale-${Date.now()}`); // never created
     const rememberRes = await rememberedRootsStore.rememberRoot(stalePath);
     expect(rememberRes.isOk()).toBe(true);
 
@@ -177,44 +182,60 @@ describe('stale remembered roots in tool responses', () => {
 
   it('inspect_workflow succeeds and includes staleRoots when a remembered root no longer exists', async () => {
     const dataRoot = await mkTempDir('workrail-stale-inspect-data-');
+    // Scenario: the user's workspace (workspaceRoot) was itself the remembered root.
+    // The workspace gets deleted (e.g., a git worktree is cleaned up). Now the remembered
+    // root is stale. The handler should still succeed using a bundled workflow.
+    // workspaceRoot IS an ancestor of itself (path.relative(root, root) = ''), so it passes
+    // the scoping filter even after deletion.
     const workspaceRoot = await mkTempDir('workrail-stale-inspect-ws-');
     const { ctx, rememberedRootsStore } = await buildCtx(dataRoot, workspaceRoot);
-    await writeWorkspaceWorkflow(workspaceRoot);
 
-    const stalePath = path.join(os.tmpdir(), `wr-stale-${Date.now()}`); // never created
-    const rememberRes = await rememberedRootsStore.rememberRoot(stalePath);
+    const staleRoot = workspaceRoot;
+    const rememberRes = await rememberedRootsStore.rememberRoot(staleRoot);
     expect(rememberRes.isOk()).toBe(true);
 
+    // Delete the workspace to make the remembered root stale
+    await fs.rm(workspaceRoot, { recursive: true, force: true });
+
     const result = await handleV2InspectWorkflow(
-      { workflowId: 'test-workflow', mode: 'metadata', workspacePath: workspaceRoot },
+      // Use a bundled workflow that is always available regardless of project files
+      { workflowId: 'coding-task-workflow-agentic', mode: 'metadata', workspacePath: workspaceRoot },
       ctx,
     );
 
     expect(result.type).toBe('success');
     const data = result.data as Record<string, unknown>;
     expect(Array.isArray(data.staleRoots)).toBe(true);
-    expect(data.staleRoots as string[]).toContain(path.resolve(stalePath));
+    expect(data.staleRoots as string[]).toContain(path.resolve(staleRoot));
   });
 
   it('start_workflow succeeds and includes staleRoots when a remembered root no longer exists', async () => {
     const dataRoot = await mkTempDir('workrail-stale-start-data-');
+    // Scenario: the user's workspace (workspaceRoot) was itself the remembered root.
+    // The workspace gets deleted (e.g., a git worktree is cleaned up). Now the remembered
+    // root is stale. The handler should still succeed using a bundled workflow.
+    // workspaceRoot IS an ancestor of itself (path.relative(root, root) = ''), so it passes
+    // the scoping filter even after deletion.
     const workspaceRoot = await mkTempDir('workrail-stale-start-ws-');
     const { ctx, rememberedRootsStore } = await buildCtx(dataRoot, workspaceRoot);
-    await writeWorkspaceWorkflow(workspaceRoot);
 
-    const stalePath = path.join(os.tmpdir(), `wr-stale-${Date.now()}`); // never created
-    const rememberRes = await rememberedRootsStore.rememberRoot(stalePath);
+    const staleRoot = workspaceRoot;
+    const rememberRes = await rememberedRootsStore.rememberRoot(staleRoot);
     expect(rememberRes.isOk()).toBe(true);
 
+    // Delete the workspace to make the remembered root stale
+    await fs.rm(workspaceRoot, { recursive: true, force: true });
+
     const result = await handleV2StartWorkflow(
-      { workflowId: 'test-workflow', workspacePath: workspaceRoot, goal: 'test workflow execution' },
+      // Use a bundled workflow that is always available regardless of project files
+      { workflowId: 'coding-task-workflow-agentic', workspacePath: workspaceRoot, goal: 'test workflow execution' },
       ctx,
     );
 
     expect(result.type).toBe('success');
     const data = result.data as Record<string, unknown>;
     expect(Array.isArray(data.staleRoots)).toBe(true);
-    expect(data.staleRoots as string[]).toContain(path.resolve(stalePath));
+    expect(data.staleRoots as string[]).toContain(path.resolve(staleRoot));
   });
 });
 

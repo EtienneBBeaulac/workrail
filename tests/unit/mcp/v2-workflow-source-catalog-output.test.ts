@@ -100,9 +100,10 @@ function buildCtxWithManagedStore(
 describe('v2 workflow source catalog output', () => {
   it('lists effective and shadowed sources for rooted-sharing overlap', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-v2-source-catalog-'));
-    const workspace = path.join(tempRoot, 'workspace');
-    const projectDir = path.join(workspace, 'workflows');
+    // workspace must be inside rememberedRoot for the ancestor-scoping filter to include rememberedRoot
     const rememberedRoot = path.join(tempRoot, 'repo');
+    const workspace = path.join(rememberedRoot, 'workspace');
+    const projectDir = path.join(workspace, 'workflows');
     const rootedDir = path.join(rememberedRoot, 'packages', 'tools', '.workrail', 'workflows');
 
     writeWorkflow(projectDir, 'shared-workflow', 'Legacy Project Workflow');

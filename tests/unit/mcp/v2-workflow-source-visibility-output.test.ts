@@ -99,8 +99,9 @@ function buildCtx(rememberedRoots: RememberedRootsStorePortV2): ToolContext {
 describe('v2 workflow source visibility outputs', () => {
   it('surfaces rooted-sharing visibility on list_workflows results', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-v2-visibility-list-'));
-    const workspace = path.join(tempRoot, 'workspace');
+    // workspace must be inside rememberedRoot for the ancestor-scoping filter to include rememberedRoot
     const rememberedRoot = path.join(tempRoot, 'repo');
+    const workspace = path.join(rememberedRoot, 'workspace');
     fs.mkdirSync(workspace, { recursive: true });
     writeRootedWorkflow(rememberedRoot, ['packages', 'tools'], 'rooted-workflow', 'Rooted Workflow');
 
@@ -131,8 +132,9 @@ describe('v2 workflow source visibility outputs', () => {
 
   it('surfaces migration guidance when a legacy project workflow overrides rooted sharing', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-v2-visibility-inspect-'));
-    const workspace = path.join(tempRoot, 'workspace');
+    // workspace must be inside rememberedRoot for the ancestor-scoping filter to include rememberedRoot
     const rememberedRoot = path.join(tempRoot, 'repo');
+    const workspace = path.join(rememberedRoot, 'workspace');
     fs.mkdirSync(workspace, { recursive: true });
     writeProjectWorkflow(workspace, 'shared-workflow', 'Legacy Project Workflow');
     writeRootedWorkflow(rememberedRoot, ['packages', 'tools'], 'shared-workflow', 'Rooted Workflow');

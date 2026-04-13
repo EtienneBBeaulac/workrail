@@ -8,6 +8,7 @@ import { SchemaValidatingCompositeWorkflowStorage } from '../../../infrastructur
 import type { RememberedRootsStorePortV2 } from '../../../v2/ports/remembered-roots-store.port.js';
 import type { ManagedSourceRecordV2, ManagedSourceStorePortV2 } from '../../../v2/ports/managed-source-store.port.js';
 import { withTimeout } from './with-timeout.js';
+import { isWorkspaceAncestor } from './workspace-path-utils.js';
 
 // ---------------------------------------------------------------------------
 // Walk skip list
@@ -209,6 +210,12 @@ export interface WorkflowReaderForRequestResult {
   /** Managed source records whose paths are missing on disk; surfaced in staleRoots + catalog. */
   readonly staleManagedRecords: readonly ManagedSourceRecordV2[];
   /**
+   * Remembered roots that were filtered out because they are not ancestors of (or equal to)
+   * the current workspace. Mirrors the stalePaths pattern so callers can surface or log this
+   * information without relying on the WORKRAIL_DEV debug log.
+   */
+  readonly excludedByScope: readonly string[];
+  /**
    * Set when the managed source store could not be read (busy, IO error, or corrupted).
    * Callers should surface this as a warning so the agent knows managed sources were skipped.
    */
@@ -220,7 +227,14 @@ export async function createWorkflowReaderForRequest(
 ): Promise<WorkflowReaderForRequestResult> {
   const workspaceDirectory = resolveRequestWorkspaceDirectory(options);
   const projectWorkflowDirectory = toProjectWorkflowDirectory(workspaceDirectory);
-  const rememberedRoots = await listRememberedRoots(options.rememberedRootsStore);
+  const allRememberedRoots = await listRememberedRoots(options.rememberedRootsStore);
+  // Filter to only roots that are ancestors of (or equal to) the current workspace.
+  // This prevents .workrail/workflows/ directories from unrelated repositories
+  // from leaking into the workflow list when a user has visited those repos recently.
+  // Engineers who relied on cross-repo bleed should use `manage_workflow_source` instead.
+  const resolvedWorkspace = path.resolve(workspaceDirectory);
+  const rememberedRoots = allRememberedRoots.filter((root) => isWorkspaceAncestor(root, resolvedWorkspace));
+  const excludedByScope = allRememberedRoots.filter((root) => !isWorkspaceAncestor(root, resolvedWorkspace));
 
   let discoveryResult: WorkflowRootDiscoveryResult;
   try {
@@ -324,6 +338,7 @@ export async function createWorkflowReaderForRequest(
     stalePaths: allStalePaths,
     managedSourceRecords: activeManagedRecords,
     staleManagedRecords,
+    excludedByScope,
     ...(managedStoreError !== undefined ? { managedStoreError } : {}),
   };
 }
