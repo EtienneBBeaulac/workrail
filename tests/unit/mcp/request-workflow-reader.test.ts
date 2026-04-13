@@ -162,8 +162,9 @@ describe('request-workflow-reader', () => {
 
   it('loads workflows from rooted .workrail/workflows under remembered roots', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-rooted-reader-'));
-    const workspace = path.join(tempRoot, 'workspace');
+    // workspace must be inside rememberedRoot so the root is an ancestor and passes the filter
     const rememberedRoot = path.join(tempRoot, 'repo');
+    const workspace = path.join(rememberedRoot, 'workspace');
     fs.mkdirSync(workspace, { recursive: true });
     writeRootedWorkflow(rememberedRoot, ['packages', 'tools'], 'rooted-workflow', 'Rooted Workflow');
 
@@ -210,10 +211,12 @@ describe('request-workflow-reader', () => {
 
   it('returns stale paths without throwing when a remembered root no longer exists', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-stale-roots-'));
-    const workspace = path.join(tempRoot, 'workspace');
-    const existingRoot = path.join(tempRoot, 'existing-repo');
-    const deletedRoot = path.join(tempRoot, 'deleted-worktree'); // never created
-    fs.mkdirSync(workspace, { recursive: true });
+    // Both roots must be ancestors of workspace to pass the scoping filter.
+    // deletedRoot (tempRoot/monorepo) is never created on disk -- it will be reported stale.
+    // existingRoot (tempRoot) always exists -- it is walked and reports workflows.
+    const existingRoot = tempRoot;
+    const deletedRoot = path.join(tempRoot, 'monorepo'); // never created
+    const workspace = path.join(tempRoot, 'monorepo', 'packages', 'app');
     writeRootedWorkflow(existingRoot, [], 'existing-workflow', 'Existing Workflow');
 
     const { reader, stalePaths } = await createWorkflowReaderForRequest({
@@ -237,10 +240,11 @@ describe('request-workflow-reader', () => {
 
   it('returns all stale when every remembered root is gone', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-all-stale-'));
-    const workspace = path.join(tempRoot, 'workspace');
-    fs.mkdirSync(workspace, { recursive: true });
-    const gone1 = path.join(tempRoot, 'gone-1');
-    const gone2 = path.join(tempRoot, 'gone-2');
+    // Both gone roots must be ancestors of workspace to pass the scoping filter.
+    // Neither is created on disk -- both should be reported stale after the walk.
+    const gone1 = path.join(tempRoot, 'projects'); // never created
+    const gone2 = path.join(tempRoot, 'projects', 'monorepo'); // never created (child of gone1)
+    const workspace = path.join(tempRoot, 'projects', 'monorepo', 'packages', 'app');
 
     const { stalePaths } = await createWorkflowReaderForRequest({
       featureFlags: new StaticFeatureFlagProvider({
@@ -302,6 +306,32 @@ describe('request-workflow-reader', () => {
     // Workflow from present subdir is discovered
     expect(discovered).toContain(path.resolve(workflowsDir));
     // vanishedSubdir path is not in discovered (it didn't exist, was skipped silently)
+  });
+
+  it('does not discover .workrail/workflows from a remembered root unrelated to the workspace', async () => {
+    // Regression test for cross-repo bleed: visiting repo-b should not make its .workrail/workflows/
+    // appear when the current workspace is repo-a.
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-cross-repo-'));
+    const workspace = path.join(tempRoot, 'repo-a', 'packages', 'app');
+    const unrelatedRoot = path.join(tempRoot, 'repo-b');
+    fs.mkdirSync(workspace, { recursive: true });
+    writeRootedWorkflow(unrelatedRoot, [], 'cross-repo-workflow', 'Cross Repo Workflow');
+
+    const { reader } = await createWorkflowReaderForRequest({
+      featureFlags: new StaticFeatureFlagProvider({
+        v2Tools: true,
+        leanWorkflows: false,
+        agenticRoutines: false,
+        experimentalWorkflows: false,
+      }),
+      workspacePath: workspace,
+      rememberedRootsStore: rememberedRootsStore(unrelatedRoot),
+    });
+
+    const workflow = await reader.getWorkflowById('cross-repo-workflow');
+    expect(workflow).toBeNull();
+
+    fs.rmSync(tempRoot, { recursive: true, force: true });
   });
 });
 
