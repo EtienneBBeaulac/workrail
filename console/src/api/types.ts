@@ -282,7 +282,6 @@ export interface ToolCallTiming {
 
 export interface PerfToolCallsResponse {
   readonly observations: readonly ToolCallTiming[];
-  readonly total: number;
   readonly devMode: boolean;
 }
 

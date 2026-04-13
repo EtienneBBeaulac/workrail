@@ -92,12 +92,11 @@ export function PerformanceView() {
     );
   }
 
-  const { observations, total } = result.data;
+  const { observations } = result.data;
 
   return (
     <PerfContent
       observations={observations}
-      total={total}
       sortOrder={sortOrder}
       onSortChange={setSortOrder}
     />
@@ -110,12 +109,10 @@ export function PerformanceView() {
 
 function PerfContent({
   observations,
-  total,
   sortOrder,
   onSortChange,
 }: {
   readonly observations: readonly ToolCallTiming[];
-  readonly total: number;
   readonly sortOrder: SortOrder;
   readonly onSortChange: (order: SortOrder) => void;
 }) {
@@ -145,10 +142,7 @@ function PerfContent({
       : null;
 
   // M4: show truncation indicator when ring buffer contains more than the window
-  const countLabel =
-    total > observations.length
-      ? `${observations.length} of ${total} recorded`
-      : `${total} recorded`;
+  const countLabel = `${observations.length} recorded`;
 
   return (
     <div className="space-y-3">
