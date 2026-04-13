@@ -203,10 +203,27 @@ export function mountConsoleRoutes(
   // Entries older than 30 days are filtered out (lazy eviction -- no file rewrite).
   // ---------------------------------------------------------------------------
   const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+  /** Cap how much of the JSONL file we read per request.
+   *  At ~150 bytes/entry this is ~35,000 entries -- far more than 30 days of typical usage.
+   *  Reading from the end of the file gives the most recent data when the cap is hit. */
+  const PERF_FILE_READ_LIMIT_BYTES = 5 * 1024 * 1024; // 5 MB
 
   async function readDiskEntries(perfFile: string): Promise<readonly ToolCallTimingEntry[]> {
     try {
-      const raw = await fs.promises.readFile(perfFile, 'utf8');
+      const stat = await fs.promises.stat(perfFile);
+      let raw: string;
+      if (stat.size > PERF_FILE_READ_LIMIT_BYTES) {
+        // File is large -- read only the tail so memory use stays bounded.
+        // The first line in the slice may be truncated; filter(Boolean) + JSON.parse catch handles it.
+        const fd = await fs.promises.open(perfFile, 'r');
+        const offset = stat.size - PERF_FILE_READ_LIMIT_BYTES;
+        const buf = Buffer.alloc(PERF_FILE_READ_LIMIT_BYTES);
+        await fd.read(buf, 0, PERF_FILE_READ_LIMIT_BYTES, offset);
+        await fd.close();
+        raw = buf.toString('utf8');
+      } else {
+        raw = await fs.promises.readFile(perfFile, 'utf8');
+      }
       const cutoff = Date.now() - THIRTY_DAYS_MS;
       return raw
         .split('\n')
@@ -214,7 +231,6 @@ export function mountConsoleRoutes(
         .flatMap((line) => {
           try {
             const entry = JSON.parse(line) as ToolCallTimingEntry;
-            // Guard: skip entries missing required fields or older than 30 days
             if (
               typeof entry.toolName !== 'string' ||
               typeof entry.startedAtMs !== 'number' ||
@@ -224,11 +240,11 @@ export function mountConsoleRoutes(
             if (entry.startedAtMs < cutoff) return [];
             return [entry];
           } catch {
-            return []; // Skip malformed lines
+            return [];
           }
         });
     } catch {
-      return []; // File doesn't exist yet or unreadable -- return empty
+      return [];
     }
   }
 

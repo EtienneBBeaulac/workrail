@@ -164,11 +164,16 @@ export function createDiskPersistSink(perfFilePath: string, serverVersion: strin
   // Create directory once at construction time -- sync is acceptable here (startup path, not hot path).
   try { fs.mkdirSync(path.dirname(perfFilePath), { recursive: true }); } catch { /* ignore */ }
 
+  let warnedOnce = false;
   return (timing: ToolCallTiming): void => {
     const entry: ToolCallTimingEntry = { ...timing, serverVersion };
     // Fire-and-forget: errors must not affect the calling tool handler.
-    fs.promises.appendFile(perfFilePath, JSON.stringify(entry) + '\n').catch(() => {
-      // Disk write failure is a silent observability gap, not a correctness failure.
+    // Log once to stderr so unwritable data dirs are diagnosable without being noisy.
+    fs.promises.appendFile(perfFilePath, JSON.stringify(entry) + '\n').catch((err: unknown) => {
+      if (!warnedOnce) {
+        warnedOnce = true;
+        process.stderr.write(`[PerfTrace] Failed to write timing to disk: ${String(err)}\n`);
+      }
     });
   };
 }

@@ -19,6 +19,13 @@ import { useSessionList } from './api/hooks';
  * correctly without any React state synchronization.
  */
 
+/** Single source of truth for tab order. Add new tabs here only. */
+const TAB_ORDER = [
+  { id: 'workspace' as const, path: '/' },
+  { id: 'workflows' as const, path: '/workflows' },
+  { id: 'perf' as const, path: '/perf' },
+];
+
 export function AppShell() {
   const navigate = useNavigate();
   const matchRoute = useMatchRoute();
@@ -117,16 +124,15 @@ export function AppShell() {
   useEffect(() => {
     const el = tabBarRef.current;
     if (!el) return;
-    const tabs = ['/', '/workflows', '/perf'] as const;
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
         e.preventDefault();
-        const current = activeTab === 'workflows' ? 1 : activeTab === 'perf' ? 2 : 0;
+        const current = TAB_ORDER.findIndex((t) => t.id === activeTab);
         const next = e.key === 'ArrowRight'
-          ? (current + 1) % tabs.length
-          : (current - 1 + tabs.length) % tabs.length;
-        const dest = tabs[next]!;
-        void navigate({ to: dest, ...(dest === '/workflows' ? { search: { tag: undefined } } : {}) });
+          ? (current + 1) % TAB_ORDER.length
+          : (current - 1 + TAB_ORDER.length) % TAB_ORDER.length;
+        const dest = TAB_ORDER[next]!;
+        void navigate({ to: dest.path, ...(dest.path === '/workflows' ? { search: { tag: undefined } } : {}) });
       }
     }
     el.addEventListener('keydown', handleKeyDown);
