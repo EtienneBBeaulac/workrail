@@ -28,7 +28,8 @@
     "web"
   ],
   "scripts": {
-    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true});\" && tsc -p tsconfig.build.json && npm run console:build",
+    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true});\" && tsc -p tsconfig.build.json && npm run console:build && node -e \"require('fs').chmodSync('dist/mcp-server.js',0o755)\"",
+    "prepack": "node -e \"require('fs').chmodSync('dist/mcp-server.js',0o755)\"",
     "console:build": "cd console && npm install && npm run build",
     "console:dev": "cd console && npm run dev",
     "build:all": "npm run build",

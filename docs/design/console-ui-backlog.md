@@ -38,23 +38,17 @@ None currently -- the branch is ahead of main awaiting PR.
 
 *(groomed, ready to implement, ordered by priority)*
 
-### 1. Title bar redesign
+### 1. Workflows tab inventory screen redesign
 
-**Spec:** Complete (produced by `ui-ux-design-workflow`, stored in conversation context).
+The workflow catalog should feel like a cyberpunk game inventory/loadout screen (CP2077, Deus Ex). Split-pane layout: scrollable item list on the left, persistent detail panel on the right. Arrow keys navigate the list, detail updates live. This replaces the current modal overlay approach.
 
-Layout:
-```
-[ WR ]  WORKRAIL CONSOLE  |  WORKSPACE   WORKFLOWS   PERFORMANCE  |  [ IN PROGRESS: 2 ]
-```
+**Agreed direction:** Run UX/UI design workflow first before touching code.
 
-- Left: `[WR]` logo mark using `CutCornerBox` (cut=8, amber border) + `WORKRAIL CONSOLE` in monospace
-- Center: tab navigation, monospace uppercase, active tab = 2px amber bottom border, inactive tabs use `--text-secondary` (not `--text-muted` -- WCAG contrast failure)
-- Right: live session ticker showing `[ IN PROGRESS: N ]` count -- hidden when 0
-- Session detail state: center becomes `← WORKSPACE // session-id` breadcrumb
-- `corner-brackets` CSS class applied to the header element
-- `energy-live-pulse` gets `prefers-reduced-motion` guard
+**Files:** `console/src/views/WorkflowsView.tsx`, `console/src/views/WorkflowDetail.tsx`
 
-**Files:** `console/src/AppShell.tsx`, `console/src/index.css`
+---
+
+### 2. Equip / unequip workflows from the console
 
 ---
 
@@ -217,6 +211,17 @@ conditions evaluated, what context facts were used.
 | SessionList SORT_AXES refactor | merged | Typed axis objects, debounce, grouped pagination |
 | Audit findings (MR + prod + arch) | `60cf743`+ | All 3 audit cycles addressed |
 | Unit tests for lineage layout | `609c343` | 22 tests covering F1 regression, cycle safety, compression |
+| WorkspaceView ops-center redesign | this PR | Repo-first layout, TreeLine component, amber page title, status bands, dormant threshold |
+| Workflow detail themed title | this PR | Amber glow, monospace uppercase, `// Workflow` label |
+| Workflow catalog enhancements | this PR | Source filter pills, Other tag pill, active card sync, directional modal slide |
+| CRT scanline effect | this PR | Moiré interference, dual glitch bands, random position |
+| Modal projection transparency | this PR | 50% panel opacity, minimal blur, see-through feel |
+| PathBreadcrumb component | this PR | `// SEGMENT` style, reusable across views |
+| TreeLine component | this PR | Dual amber lines with diagonal clip-path end, repo/branch hierarchy |
+| SessionCard → ConsoleCard | this PR | SessionList uses ConsoleCard variant="list" |
+| Dormant sessions logic | this PR | 1h threshold backend, hidden in Active scope, hint shortcut |
+| Two-phase worktree scan | this PR | Fast branch list + background enrichment via SSE; fixes 79-worktree hang |
+| Multi-repo discovery | this PR | Derives repo roots from remembered-roots.json |
 
 ---
 
