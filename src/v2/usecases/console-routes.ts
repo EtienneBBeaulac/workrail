@@ -237,8 +237,12 @@ export function mountConsoleRoutes(
               typeof entry.durationMs !== 'number' ||
               (entry.outcome !== 'success' && entry.outcome !== 'error' && entry.outcome !== 'unknown_tool')
             ) return [];
-            if (entry.startedAtMs < cutoff) return [];
-            return [entry];
+            // Entries written before serverVersion was added get a fallback to avoid undefined at runtime
+            const safeEntry: ToolCallTimingEntry = typeof entry.serverVersion === 'string'
+              ? entry
+              : { ...entry, serverVersion: 'unknown' };
+            if (safeEntry.startedAtMs < cutoff) return [];
+            return [safeEntry];
           } catch {
             return [];
           }

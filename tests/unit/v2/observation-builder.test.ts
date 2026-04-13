@@ -123,4 +123,23 @@ describe('anchorsToObservations', () => {
     expect(result[0]!.key).toBe('git_branch');
     expect(result[1]!.key).toBe('repo_root_hash');
   });
+
+  it('maps repo_root within 80 chars to short_string', () => {
+    const anchors: readonly WorkspaceAnchor[] = [
+      { key: 'repo_root', value: '/Users/user/git/my-project' },
+    ];
+    const result = anchorsToObservations(anchors);
+    expect(result).toHaveLength(1);
+    expect(result[0]!.key).toBe('repo_root');
+    expect(result[0]!.value).toEqual({ type: 'short_string', value: '/Users/user/git/my-project' });
+    expect(result[0]!.confidence).toBe('high');
+  });
+
+  it('skips repo_root exceeding 80 chars (no observation emitted)', () => {
+    const anchors: readonly WorkspaceAnchor[] = [
+      { key: 'repo_root', value: '/Users/user/' + 'a'.repeat(80) },
+    ];
+    const result = anchorsToObservations(anchors);
+    expect(result).toHaveLength(0);
+  });
 });
