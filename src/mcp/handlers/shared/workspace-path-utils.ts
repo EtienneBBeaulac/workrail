@@ -26,13 +26,15 @@ export function isWorkspaceAncestor(root: string, workspace: string): boolean {
  * against `dirPath` and then apply `fs.realpath` to normalize symlinks (e.g.
  * on macOS /var is a symlink to /private/var, causing string comparison to fail
  * even when both paths point to the same directory).
+ *
+ * @requires git >= 2.5 (`git worktree` and `--git-common-dir` were added in git 2.5)
  */
 export async function getGitCommonDir(dirPath: string): Promise<string | null> {
   try {
     const { stdout } = await execFileAsync(
       'git',
       ['-C', dirPath, 'rev-parse', '--git-common-dir'],
-      { encoding: 'utf-8', timeout: 5_000 },
+      { encoding: 'utf-8', timeout: 500 },
     );
     const raw = stdout.trim();
     if (!raw) return null;
