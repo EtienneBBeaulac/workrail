@@ -98,12 +98,16 @@ jobs:
           PRE_TAG="$(git describe --tags --abbrev=0 --match "v*" 2>/dev/null || true)"
           echo "PRE_RELEASE_TAG=$PRE_TAG" >> "$GITHUB_ENV"
 
+      - name: Restore bin execute bit (upload-artifact strips file permissions)
+        run: node -e "require('fs').chmodSync('dist/mcp-server.js',0o755)"
+
       - name: Verify build artifacts
         run: |
           echo "Checking build artifacts..."
           ls -la dist/
           test -f dist/mcp-server.js || (echo "Missing dist/mcp-server.js" && exit 1)
           test -f dist/cli.js || (echo "Missing dist/cli.js" && exit 1)
+          test -x dist/mcp-server.js || (echo "dist/mcp-server.js is not executable after chmod -- publish aborted" && exit 1)
           echo "Build artifacts verified."
 
       - name: Release
