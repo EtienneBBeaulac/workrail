@@ -220,7 +220,20 @@ export async function createWorkflowReaderForRequest(
 ): Promise<WorkflowReaderForRequestResult> {
   const workspaceDirectory = resolveRequestWorkspaceDirectory(options);
   const projectWorkflowDirectory = toProjectWorkflowDirectory(workspaceDirectory);
-  const rememberedRoots = await listRememberedRoots(options.rememberedRootsStore);
+  const allRememberedRoots = await listRememberedRoots(options.rememberedRootsStore);
+  // Filter to only roots that are ancestors of (or equal to) the current workspace.
+  // This prevents .workrail/workflows/ directories from unrelated repositories
+  // from leaking into the workflow list when a user has visited those repos recently.
+  // Engineers who relied on cross-repo bleed should use `manage_workflow_source` instead.
+  const resolvedWorkspace = path.resolve(workspaceDirectory);
+  const rememberedRoots = allRememberedRoots.filter((root) => {
+    const rel = path.relative(path.resolve(root), resolvedWorkspace);
+    return rel.length === 0 || (!rel.startsWith('..') && !path.isAbsolute(rel));
+  });
+  if (process.env['WORKRAIL_DEV'] === '1' && allRememberedRoots.length !== rememberedRoots.length) {
+    const excluded = allRememberedRoots.filter((r) => !rememberedRoots.includes(r));
+    console.error(`[workrail] remembered-roots filter excluded ${excluded.length} root(s) not under workspace ${resolvedWorkspace}: ${excluded.join(', ')}`);
+  }
 
   let discoveryResult: WorkflowRootDiscoveryResult;
   try {
