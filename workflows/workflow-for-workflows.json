@@ -170,11 +170,12 @@
           "State what result the authored workflow should reliably produce for its user.",
           "List the criteria that would make the workflow feel genuinely satisfying in practice.",
           "Name the biggest likely failure mode and the most dangerous false-confidence mode.",
-          "State what would make the workflow technically correct but still disappointing."
+          "State what would make the workflow technically correct but still disappointing.",
+          "Build a success-criteria-to-mechanism map: for each item in userSatisfactionCriteria, name the specific step(s) that enforce it and the enforcement mechanism (gate, self-audit, second pass, example contrast, rubric). Any criterion with no named mechanism is a gap -- either add a mechanism to the planned architecture or flag it as a known weakness to address in Phase 3."
         ],
         "outputRequired": {
-          "notesMarkdown": "Effectiveness target, satisfaction criteria, failure modes, and false-confidence risks.",
-          "context": "Capture effectivenessTarget, userSatisfactionCriteria, primaryFailureMode, dangerousFalseConfidenceModes, likelyWeakOutcomeModes, and trustRisk."
+          "notesMarkdown": "Effectiveness target, satisfaction criteria, failure modes, false-confidence risks, and the success-criteria-to-mechanism map with any gaps identified.",
+          "context": "Capture effectivenessTarget, userSatisfactionCriteria, primaryFailureMode, dangerousFalseConfidenceModes, likelyWeakOutcomeModes, trustRisk, and successCriteriaToMechanismMap."
         },
         "verify": [
           "The authored workflow now has a clear outcome bar, not just an authoring bar."
@@ -492,11 +493,12 @@
               "Reviewer-family or validator output is evidence, not authority."
             ],
             "procedure": [
-              "Score these dimensions 0-2 with one sentence of evidence each: `voiceClarity`, `ceremonyLevel`, `loopSoundness`, `delegationBoundedness`, `artifactClarity`, `taskEffectiveness`, `falseConfidenceResistance`, `stateMinimality`, `coverageSharpness`, `domainFit`, `handoffUtility`, `rigorAdaptability` (0 = adapts to complexity/rigor levels, 2 = single-weight), `enforcementStrength` (0 = behavioral rules have structural teeth; 2 = important rules are prose-only with no enforcement mechanism), and `modernizationDiscipline` (0 = every valueInventory item preserved, equivalently replaced with justification, or dropped with justification; 2 = items missing or replaced with weaker versions without justification  -- score 0 for create mode).",
+              "Score these dimensions 0-2 with one sentence of evidence each: `voiceClarity`, `ceremonyLevel`, `loopSoundness`, `delegationBoundedness`, `artifactClarity`, `taskEffectiveness`, `falseConfidenceResistance`, `stateMinimality`, `coverageSharpness`, `domainFit`, `handoffUtility`, `rigorAdaptability` (0 = adapts to complexity/rigor levels, 2 = single-weight), `enforcementStrength` (0 = behavioral rules have structural teeth; 2 = important rules are prose-only with no enforcement mechanism), `outputQualityMechanisms` (0 = each key generative step has a concrete enforcement mechanism for output quality such as a self-audit, second pass, example contrast, or rubric; 1 = some generative steps rely only on metaGuidance or prose rules; 2 = generative steps have no quality enforcement beyond prompt wording), and `modernizationDiscipline` (0 = every valueInventory item preserved, equivalently replaced with justification, or dropped with justification; 2 = items missing or replaced with weaker versions without justification  -- score 0 for create mode).",
+              "For each generative step (any step whose output is judged on content quality rather than structural correctness), run an adversarial trace: what does a lazy or average agent do here, and does the prompt prevent it? A step where the lazy path produces a plausible-looking but shallow result scores poorly on `outputQualityMechanisms`. Check each such step against the successCriteriaToMechanismMap from Phase 1 -- any criterion whose mechanism lives in this step must actually be enforced here.",
               "If delegation is available and rigor is THOROUGH, run an adversarial review bundle with these lenses: `engine_native_reviewer`, `task_effectiveness_reviewer`, `state_economy_reviewer`, `false_confidence_reviewer`, `domain_fit_reviewer`, and `maintainer_reviewer`.",
               "Synthesize what the review confirmed, what it challenged, and what changed your mind.",
               "When scoring `falseConfidenceResistance`, explicitly check: do the workflow's quality gates protect edge cases and degraded paths, or only the happy path? A workflow that passes its own checks on ideal input but fails silently on minimal or unexpected input scores 2.",
-              "Set hard-gate failures whenever any of these are materially weak: `taskEffectiveness`, `falseConfidenceResistance`, `stateMinimality`, `coverageSharpness`, `domainFit`, or `handoffUtility`.",
+              "Set hard-gate failures whenever any of these are materially weak: `taskEffectiveness`, `falseConfidenceResistance`, `stateMinimality`, `coverageSharpness`, `domainFit`, `handoffUtility`, or `outputQualityMechanisms`.",
               "Set `authoringIntegrityPassed = true` only if structural and authoring-quality dimensions are all acceptable. Set `outcomeEffectivenessPassed = true` only if the workflow is likely to achieve satisfying results for the user."
             ],
             "outputRequired": {
@@ -548,6 +550,7 @@
             { "type": "contains", "value": "handoffUtility", "message": "Review must score handoffUtility" },
             { "type": "contains", "value": "rigorAdaptability", "message": "Review must score rigorAdaptability" },
             { "type": "contains", "value": "enforcementStrength", "message": "Review must score enforcementStrength" },
+            { "type": "contains", "value": "outputQualityMechanisms", "message": "Review must score outputQualityMechanisms" },
             {
               "type": "contains",
               "value": "modernizationDiscipline",
@@ -664,6 +667,31 @@
         ]
       },
       "notesOptional": true,
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-8-process-retrospective",
+      "title": "Phase 8: Process Retrospective",
+      "promptBlocks": {
+        "goal": "While this run is still fresh, identify gaps in the workflow-for-workflows process itself -- not in the authored workflow.",
+        "constraints": [
+          "This step is about the authoring process, not the authored workflow. Do not summarize the workflow again.",
+          "Be honest. If the process caught everything, say so. If it missed something, say specifically where and why."
+        ],
+        "procedure": [
+          "Look back at the full run. Were any weaknesses in the authored workflow only identified post-hoc -- after the quality gate loop, by the user, or by a later reviewer?",
+          "For each weakness identified late: name the Phase where it should have been caught, explain why the current step failed to surface it, and propose a specific change to that step's procedure or scoring rubric that would catch it on the next run.",
+          "Check the successCriteriaToMechanismMap from Phase 1 against the final workflow: did every criterion end up with a concrete enforcement mechanism? Any criterion that is still prose-only in the final file is a gap in the Phase 1 or Phase 3 process.",
+          "If nothing was missed and the process caught all meaningful issues in-band, say so explicitly and explain what worked."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Process gaps found (or confirmed absent), where they should have been caught, and concrete proposed changes to workflow-for-workflows. This output is raw material for improving this workflow.",
+          "context": "Capture processGaps and suggestedProcessImprovements."
+        },
+        "verify": [
+          "The retrospective identifies specific step-level changes, not vague general improvements."
+        ]
+      },
       "requireConfirmation": false
     }
   ],
