@@ -49,7 +49,7 @@ function buildPerfApp(timingRingBuffer?: ToolCallTimingRingBuffer): express.Appl
     const limit = typeof rawLimit === 'string' ? parseInt(rawLimit, 10) : undefined;
     const safeLimit = (limit !== undefined && Number.isFinite(limit) && limit > 0) ? limit : undefined;
     const observations = timingRingBuffer ? timingRingBuffer.recent(safeLimit) : [];
-    res.json({ success: true, data: { observations, total: timingRingBuffer?.size ?? 0, devMode: true } });
+    res.json({ success: true, data: { observations, devMode: true } });
   });
   return app;
 }
@@ -88,10 +88,9 @@ describe('GET /api/v2/perf/tool-calls', () => {
 
     const { status, body } = await get(`${baseUrl}/api/v2/perf/tool-calls`);
     expect(status).toBe(200);
-    const b = body as { success: boolean; data: { observations: unknown[]; total: number } };
+    const b = body as { success: boolean; data: { observations: unknown[] } };
     expect(b.success).toBe(true);
     expect(b.data.observations).toEqual([]);
-    expect(b.data.total).toBe(0);
   });
 
   it('returns empty observations when ring buffer is empty', async () => {
@@ -101,10 +100,9 @@ describe('GET /api/v2/perf/tool-calls', () => {
 
     const { status, body } = await get(`${baseUrl}/api/v2/perf/tool-calls`);
     expect(status).toBe(200);
-    const b = body as { success: boolean; data: { observations: unknown[]; total: number } };
+    const b = body as { success: boolean; data: { observations: unknown[] } };
     expect(b.success).toBe(true);
     expect(b.data.observations).toEqual([]);
-    expect(b.data.total).toBe(0);
   });
 
   it('returns observations with correct shape', async () => {
@@ -122,9 +120,8 @@ describe('GET /api/v2/perf/tool-calls', () => {
 
     const { status, body } = await get(`${baseUrl}/api/v2/perf/tool-calls`);
     expect(status).toBe(200);
-    const b = body as { success: boolean; data: { observations: ToolCallTiming[]; total: number } };
+    const b = body as { success: boolean; data: { observations: ToolCallTiming[] } };
     expect(b.success).toBe(true);
-    expect(b.data.total).toBe(1);
     expect(b.data.observations).toHaveLength(1);
     expect(b.data.observations[0].toolName).toBe('start_workflow');
     expect(b.data.observations[0].durationMs).toBe(42.5);
@@ -150,10 +147,8 @@ describe('GET /api/v2/perf/tool-calls', () => {
     ({ server, baseUrl } = await startServer(app));
 
     const { body } = await get(`${baseUrl}/api/v2/perf/tool-calls?limit=2`);
-    const b = body as { data: { observations: ToolCallTiming[]; total: number } };
+    const b = body as { data: { observations: ToolCallTiming[] } };
     expect(b.data.observations).toHaveLength(2);
-    // total reflects buffer size, not the limited result
-    expect(b.data.total).toBe(5);
   });
 
   it('ignores NaN limit and returns all observations', async () => {

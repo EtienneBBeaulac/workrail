@@ -196,19 +196,10 @@ export function mountConsoleRoutes(
   //
   // GET /api/v2/perf/tool-calls?limit=N
   //
-  // Returns the most recent N tool call timing observations from the ring buffer
-  // (newest first, max 100). Only mounted when WORKRAIL_DEV=1 so this endpoint
-  // is never reachable in production servers.
+  // Merges in-memory ring buffer (recent entries) with JSONL disk store (30-day
+  // window). Dedupes entries written to both sinks. Only mounted when WORKRAIL_DEV=1.
   //
-  // The ring buffer is optional: if not wired in, the endpoint returns an empty
-  // array rather than 404 so clients can always query it unconditionally.
-  // The devMode field lets consumers distinguish "no calls happened" from
-  // "DEV_MODE is off and the buffer was never wired in".
-  // ---------------------------------------------------------------------------
-  // ---------------------------------------------------------------------------
-  // Perf JSONL reader helper
-  //
-  // Reads all timing entries from the JSONL file, skipping malformed lines.
+  // JSONL reader: reads all timing entries from disk, skipping malformed lines.
   // Entries older than 30 days are filtered out (lazy eviction -- no file rewrite).
   // ---------------------------------------------------------------------------
   const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
@@ -273,7 +264,7 @@ export function mountConsoleRoutes(
         .sort((a, b) => b.startedAtMs - a.startedAtMs)
         .slice(0, safeLimit ?? undefined);
 
-      res.json({ success: true, data: { observations: allEntries, total: allEntries.length, devMode } });
+      res.json({ success: true, data: { observations: allEntries, devMode } });
     });
   }
 
