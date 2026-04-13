@@ -88,4 +88,8 @@ export class LocalDataDirV2 implements DataDirPortV2 {
   managedSourcesLockPath(): string {
     return path.join(this.root(), 'managed-sources', 'managed-sources.lock');
   }
+
+  perfDir(): string {
+    return path.join(this.root(), 'perf');
+  }
 }

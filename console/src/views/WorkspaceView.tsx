@@ -776,10 +776,11 @@ function GitBadges({
   readonly unpushedExpanded?: boolean;
   readonly onToggleUnpushed?: () => void;
 }) {
-  if (fetching && (item.worktree === undefined || item.worktree.enrichment === null)) {
-    // Show skeleton shimmer while worktree data loads or while background enrichment
-    // is still in progress (enrichment: null means fast path returned but git badge
-    // data is not yet available -- expect a worktrees-updated SSE event soon).
+  if (fetching && item.worktree === undefined || item.worktree?.enrichment === null) {
+    // Show skeleton shimmer in two cases:
+    // 1. Worktree data hasn't arrived yet (fetching + no worktree)
+    // 2. Fast path returned but background enrichment is still pending (enrichment: null)
+    //    -- this fires even when fetching=false since enrichment is independent of the fetch flag.
     return (
       <span className="flex gap-1">
         <SkeletonBadge />

@@ -5,6 +5,7 @@ import { WorkspaceView } from './views/WorkspaceView';
 import { SessionDetail } from './views/SessionDetail';
 import { WorkflowsView } from './views/WorkflowsView';
 import { WorkflowDetail } from './views/WorkflowDetail';
+import { PerformanceView } from './views/PerformanceView';
 import { CutCornerBox } from './components/CutCornerBox';
 import { BracketBadge } from './components/BracketBadge';
 import { PathBreadcrumb } from './components/PathBreadcrumb';
@@ -18,6 +19,13 @@ import { useSessionList } from './api/hooks';
  * correctly without any React state synchronization.
  */
 
+/** Single source of truth for tab order. Add new tabs here only. */
+const TAB_ORDER = [
+  { id: 'workspace' as const, path: '/' },
+  { id: 'workflows' as const, path: '/workflows' },
+  { id: 'perf' as const, path: '/perf' },
+];
+
 export function AppShell() {
   const navigate = useNavigate();
   const matchRoute = useMatchRoute();
@@ -30,9 +38,16 @@ export function AppShell() {
   const sessionMatch = matchRoute({ to: '/session/$sessionId' });
   const workflowsMatch = matchRoute({ to: '/workflows' });
   const workflowDetailMatch = matchRoute({ to: '/workflows/$workflowId' });
+  const perfMatch = matchRoute({ to: '/perf' });
+
+  // Single source of truth for active tab -- structurally impossible for two tabs to be active.
+  const activeTab = workflowsMatch !== false || workflowDetailMatch !== false
+    ? 'workflows' as const
+    : perfMatch !== false
+    ? 'perf' as const
+    : 'workspace' as const;
 
   const isInSessionDetail = sessionMatch !== false;
-  const isOnWorkflowsTab = workflowsMatch !== false || workflowDetailMatch !== false;
   const isOnWorkflowDetail = workflowDetailMatch !== false;
 
   const sessionId = isInSessionDetail
@@ -112,16 +127,17 @@ export function AppShell() {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
         e.preventDefault();
-        if (isOnWorkflowsTab) {
-          void navigate({ to: '/' });
-        } else {
-          void navigate({ to: '/workflows', search: { tag: undefined } });
-        }
+        const current = TAB_ORDER.findIndex((t) => t.id === activeTab);
+        const next = e.key === 'ArrowRight'
+          ? (current + 1) % TAB_ORDER.length
+          : (current - 1 + TAB_ORDER.length) % TAB_ORDER.length;
+        const dest = TAB_ORDER[next]!;
+        void navigate({ to: dest.path, ...(dest.path === '/workflows' ? { search: { tag: undefined } } : {}) });
       }
     }
     el.addEventListener('keydown', handleKeyDown);
     return () => el.removeEventListener('keydown', handleKeyDown);
-  }, [isOnWorkflowsTab, navigate]);
+  }, [activeTab, navigate]);
 
   // ---------------------------------------------------------------------------
   // Render
@@ -186,19 +202,19 @@ export function AppShell() {
             <button
               role="tab"
               id="tab-workspace"
-              aria-selected={!isOnWorkflowsTab}
+              aria-selected={activeTab === 'workspace'}
               aria-controls="panel-workspace"
-              tabIndex={!isOnWorkflowsTab ? 0 : -1}
+              tabIndex={activeTab === 'workspace' ? 0 : -1}
               onClick={() => handleTabClick('workspace', () => void navigate({ to: '/' }))}
               className={[
                 'tab-btn px-4 py-2.5 font-mono text-[10px] uppercase tracking-[0.30em] transition-colors duration-150',
                 'focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:outline-none',
-                !isOnWorkflowsTab
+                activeTab === 'workspace'
                   ? 'tab-btn--active text-[var(--accent)] text-glow-amber'
                   : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
                 activatingTab === 'workspace' ? 'tab-activating' : '',
               ].join(' ')}
-              style={!isOnWorkflowsTab ? { backgroundColor: 'rgba(244, 196, 48, 0.06)' } : undefined}
+              style={activeTab === 'workspace' ? { backgroundColor: 'rgba(244, 196, 48, 0.06)' } : undefined}
             >
               <span className="tab-corner tab-corner--tl" aria-hidden="true" />
               <span className="tab-corner tab-corner--tr" aria-hidden="true" />
@@ -209,25 +225,48 @@ export function AppShell() {
             <button
               role="tab"
               id="tab-workflows"
-              aria-selected={isOnWorkflowsTab}
+              aria-selected={activeTab === 'workflows'}
               aria-controls="panel-workflows"
-              tabIndex={isOnWorkflowsTab ? 0 : -1}
+              tabIndex={activeTab === 'workflows' ? 0 : -1}
               onClick={() => handleTabClick('workflows', () => void navigate({ to: '/workflows', search: { tag: undefined } }))}
               className={[
                 'tab-btn px-4 py-2.5 font-mono text-[10px] uppercase tracking-[0.30em] transition-colors duration-150',
                 'focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:outline-none',
-                isOnWorkflowsTab
+                activeTab === 'workflows'
                   ? 'tab-btn--active text-[var(--accent)] text-glow-amber'
                   : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
                 activatingTab === 'workflows' ? 'tab-activating' : '',
               ].join(' ')}
-              style={isOnWorkflowsTab ? { backgroundColor: 'rgba(244, 196, 48, 0.06)' } : undefined}
+              style={activeTab === 'workflows' ? { backgroundColor: 'rgba(244, 196, 48, 0.06)' } : undefined}
             >
               <span className="tab-corner tab-corner--tl" aria-hidden="true" />
               <span className="tab-corner tab-corner--tr" aria-hidden="true" />
               <span className="tab-corner tab-corner--bl" aria-hidden="true" />
               <span className="tab-corner tab-corner--br" aria-hidden="true" />
               Workflows
+            </button>
+            <button
+              role="tab"
+              id="tab-perf"
+              aria-selected={activeTab === 'perf'}
+              aria-controls="panel-perf"
+              tabIndex={activeTab === 'perf' ? 0 : -1}
+              onClick={() => handleTabClick('perf', () => void navigate({ to: '/perf' }))}
+              className={[
+                'tab-btn px-4 py-2.5 font-mono text-[10px] uppercase tracking-[0.30em] transition-colors duration-150',
+                'focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:outline-none',
+                activeTab === 'perf'
+                  ? 'tab-btn--active text-[var(--accent)] text-glow-amber'
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
+                activatingTab === 'perf' ? 'tab-activating' : '',
+              ].join(' ')}
+              style={activeTab === 'perf' ? { backgroundColor: 'rgba(244, 196, 48, 0.06)' } : undefined}
+            >
+              <span className="tab-corner tab-corner--tl" aria-hidden="true" />
+              <span className="tab-corner tab-corner--tr" aria-hidden="true" />
+              <span className="tab-corner tab-corner--bl" aria-hidden="true" />
+              <span className="tab-corner tab-corner--br" aria-hidden="true" />
+              Performance
             </button>
           </div>
         )}
@@ -260,7 +299,7 @@ export function AppShell() {
           id="panel-workspace"
           role="tabpanel"
           aria-labelledby="tab-workspace"
-          hidden={isOnWorkflowsTab}
+          hidden={activeTab === 'workflows' || activeTab === 'perf'}
         >
           {/* WorkspaceView is always mounted -- hidden via CSS only so scroll
               position in scrollYRef survives back-navigation from SessionDetail */}
@@ -271,7 +310,7 @@ export function AppShell() {
         </div>
 
         {/* Workflows panel */}
-        {isOnWorkflowsTab && (
+        {activeTab === 'workflows' && (
           <div
             id="panel-workflows"
             role="tabpanel"
@@ -289,6 +328,17 @@ export function AppShell() {
                 onSelectWorkflow={handleSelectWorkflow}
               />
             )}
+          </div>
+        )}
+
+        {/* Performance panel */}
+        {activeTab === 'perf' && (
+          <div
+            id="panel-perf"
+            role="tabpanel"
+            aria-labelledby="tab-perf"
+          >
+            <PerformanceView />
           </div>
         )}
       </main>

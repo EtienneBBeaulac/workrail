@@ -10,13 +10,11 @@ const DATA_RESPONSE: PerfToolCallsResponse = {
   observations: [
     { toolName: 'list_files', startedAtMs: 1000, durationMs: 42, outcome: 'success' },
   ],
-  total: 1,
   devMode: true,
 };
 
 const EMPTY_RESPONSE: PerfToolCallsResponse = {
   observations: [],
-  total: 0,
   devMode: true,
 };
 
@@ -116,6 +114,5 @@ describe('mapPerfQueryToResult', () => {
     expect(result.state).toBe('data');
     if (result.state !== 'data') return;
     expect(result.data.observations).toHaveLength(0);
-    expect(result.data.total).toBe(0);
   });
 });
