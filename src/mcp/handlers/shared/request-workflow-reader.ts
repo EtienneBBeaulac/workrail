@@ -8,7 +8,7 @@ import { SchemaValidatingCompositeWorkflowStorage } from '../../../infrastructur
 import type { RememberedRootsStorePortV2 } from '../../../v2/ports/remembered-roots-store.port.js';
 import type { ManagedSourceRecordV2, ManagedSourceStorePortV2 } from '../../../v2/ports/managed-source-store.port.js';
 import { withTimeout } from './with-timeout.js';
-import { isWorkspaceAncestor } from './workspace-path-utils.js';
+import { isWorkspaceAncestor, getGitCommonDir } from './workspace-path-utils.js';
 
 // ---------------------------------------------------------------------------
 // Walk skip list
@@ -233,8 +233,29 @@ export async function createWorkflowReaderForRequest(
   // from leaking into the workflow list when a user has visited those repos recently.
   // Engineers who relied on cross-repo bleed should use `manage_workflow_source` instead.
   const resolvedWorkspace = path.resolve(workspaceDirectory);
-  const rememberedRoots = allRememberedRoots.filter((root) => isWorkspaceAncestor(root, resolvedWorkspace));
-  const excludedByScope = allRememberedRoots.filter((root) => !isWorkspaceAncestor(root, resolvedWorkspace));
+
+  // Scope remembered roots to those that are either:
+  // 1. An ancestor of (or equal to) the current workspace (existing ancestor check), OR
+  // 2. A sibling worktree -- shares the same git common dir as the workspace.
+  //
+  // Sibling worktrees are the default `git worktree add ../branch-name` pattern. They are
+  // not ancestors of each other lexically, but they share the same git repo. Excluding them
+  // would silently drop .workrail/workflows/ from engineers using linked worktrees.
+  //
+  // The ancestor check runs first (no subprocess). The git common-dir check only runs for
+  // roots that fail the ancestor check, so the common case (workspace inside remembered root)
+  // incurs zero git subprocess calls.
+  const workspaceCommonDir = await getGitCommonDir(resolvedWorkspace);
+  const rememberedRoots: string[] = [];
+  for (const root of allRememberedRoots) {
+    if (isWorkspaceAncestor(root, resolvedWorkspace)) {
+      rememberedRoots.push(root);
+    } else if (workspaceCommonDir !== null) {
+      const rootCommonDir = await getGitCommonDir(root);
+      if (rootCommonDir === workspaceCommonDir) rememberedRoots.push(root);
+    }
+  }
+  const excludedByScope = allRememberedRoots.filter((root) => !rememberedRoots.includes(root));
 
   let discoveryResult: WorkflowRootDiscoveryResult;
   try {
