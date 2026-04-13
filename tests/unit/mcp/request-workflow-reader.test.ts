@@ -1,8 +1,8 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { execSync as nodeExecSync } from 'child_process';
 import { pathToFileURL } from 'url';
+import { gitExecSync, initGitRepoSync } from '../../helpers/git-test-utils.js';
 import { describe, expect, it, afterEach, beforeEach } from 'vitest';
 import { StaticFeatureFlagProvider } from '../../../src/config/feature-flags.js';
 
@@ -550,9 +550,6 @@ describe('getGitCommonDir', () => {
 // Sibling worktree scoping tests
 // ---------------------------------------------------------------------------
 
-function execSync(cmd: string, cwd: string): void {
-  nodeExecSync(cmd, { cwd, stdio: 'pipe' });
-}
 
 describe('createWorkflowReaderForRequest -- sibling worktree scoping', () => {
   beforeEach(() => clearWalkCacheForTesting());
@@ -569,12 +566,10 @@ describe('createWorkflowReaderForRequest -- sibling worktree scoping', () => {
     fs.mkdirSync(mainRepo);
 
     try {
-      execSync('git init', mainRepo);
-      execSync('git config user.email "test@test.com"', mainRepo);
-      execSync('git config user.name "Test"', mainRepo);
+      initGitRepoSync(mainRepo, { silent: true });
       // git worktree add requires at least one commit
-      execSync('git commit --allow-empty -m "init"', mainRepo);
-      execSync(`git worktree add ${siblingWorktree}`, mainRepo);
+      gitExecSync(mainRepo, ['commit', '--allow-empty', '-m', 'init'], { silent: true });
+      gitExecSync(mainRepo, ['worktree', 'add', siblingWorktree], { silent: true });
 
       // Write a rooted workflow in the main repo
       writeRootedWorkflow(mainRepo, [], 'sibling-worktree-workflow', 'Sibling Worktree Workflow');
@@ -595,7 +590,7 @@ describe('createWorkflowReaderForRequest -- sibling worktree scoping', () => {
       expect(workflow?.definition.name).toBe('Sibling Worktree Workflow');
     } finally {
       // Clean up worktree before removing the directory
-      try { execSync(`git worktree remove --force ${siblingWorktree}`, mainRepo); } catch { /* ignore */ }
+      try { gitExecSync(mainRepo, ['worktree', 'remove', '--force', siblingWorktree], { silent: true }); } catch { /* ignore */ }
       fs.rmSync(tempRoot, { recursive: true, force: true });
     }
   });
