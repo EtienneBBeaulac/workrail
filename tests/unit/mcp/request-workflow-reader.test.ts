@@ -12,6 +12,7 @@ import {
   clearWalkCacheForTesting,
   resolveRequestWorkspaceDirectory,
   toProjectWorkflowDirectory,
+  filterRememberedRootsForWorkspace,
 } from '../../../src/mcp/handlers/shared/request-workflow-reader.js';
 import { getGitCommonDir } from '../../../src/mcp/handlers/shared/workspace-path-utils.js';
 import type { RememberedRootsStorePortV2 } from '../../../src/v2/ports/remembered-roots-store.port.js';
@@ -617,6 +618,98 @@ describe('createWorkflowReaderForRequest -- sibling worktree scoping', () => {
 
     const workflow = await reader.getWorkflowById('cross-repo-workflow');
     expect(workflow).toBeNull();
+
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// filterRememberedRootsForWorkspace unit tests
+// ---------------------------------------------------------------------------
+
+describe('filterRememberedRootsForWorkspace', () => {
+  it('returns empty array when no roots are provided', async () => {
+    const workspace = path.join(os.tmpdir(), 'workspace');
+    const result = await filterRememberedRootsForWorkspace([], workspace);
+    expect(result).toEqual([]);
+  });
+
+  it('returns all roots when all are ancestors of the workspace (no git call needed)', async () => {
+    // Use plain temp directories -- ancestor check is purely lexical, no subprocess.
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-filter-ancestor-'));
+    const workspace = path.join(tempRoot, 'repo', 'packages', 'app');
+    const root1 = path.resolve(tempRoot);
+    const root2 = path.resolve(path.join(tempRoot, 'repo'));
+
+    const result = await filterRememberedRootsForWorkspace([root1, root2], workspace);
+
+    expect(result).toContain(root1);
+    expect(result).toContain(root2);
+    expect(result).toHaveLength(2);
+
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  });
+
+  it('excludes a non-ancestor root that belongs to an unrelated repo', async () => {
+    // workspace is in repo-a; unrelatedRoot is repo-b (different directory, no git repo).
+    // Neither is an ancestor of the other, and they have no git common dir.
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-filter-unrelated-'));
+    const workspace = path.resolve(path.join(tempRoot, 'repo-a', 'packages', 'app'));
+    const unrelatedRoot = path.resolve(path.join(tempRoot, 'repo-b'));
+    // Create workspace dir so getGitCommonDir can stat it (it still returns null for non-git)
+    fs.mkdirSync(workspace, { recursive: true });
+    fs.mkdirSync(unrelatedRoot, { recursive: true });
+
+    const result = await filterRememberedRootsForWorkspace([unrelatedRoot], workspace);
+
+    expect(result).toEqual([]);
+
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  });
+
+  it('includes a non-ancestor root that is a sibling worktree of the workspace', async () => {
+    // Create a real git repo with a linked worktree to exercise the git common-dir path.
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-filter-sibling-'));
+    const mainRepo = path.join(tempRoot, 'main-repo');
+    const siblingWorktree = path.join(tempRoot, 'sibling-worktree');
+    fs.mkdirSync(mainRepo);
+
+    try {
+      initGitRepoSync(mainRepo, { silent: true });
+      gitExecSync(mainRepo, ['commit', '--allow-empty', '-m', 'init'], { silent: true });
+      gitExecSync(mainRepo, ['worktree', 'add', siblingWorktree], { silent: true });
+
+      // mainRepo is remembered; siblingWorktree is the workspace.
+      // mainRepo is NOT an ancestor of siblingWorktree, but they share the same git common dir.
+      const result = await filterRememberedRootsForWorkspace(
+        [path.resolve(mainRepo)],
+        path.resolve(siblingWorktree),
+      );
+
+      expect(result).toContain(path.resolve(mainRepo));
+      expect(result).toHaveLength(1);
+    } finally {
+      try { gitExecSync(mainRepo, ['worktree', 'remove', '--force', siblingWorktree], { silent: true }); } catch { /* ignore */ }
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('returns only ancestor roots when workspace is not in a git repo (workspaceCommonDir is null)', async () => {
+    // Use plain temp directories (not git repos). Ancestor root is included; non-ancestor is excluded.
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-filter-nogit-'));
+    const workspace = path.join(tempRoot, 'repo', 'packages', 'app');
+    const ancestorRoot = path.resolve(tempRoot); // ancestor of workspace
+    const nonAncestorRoot = path.resolve(path.join(tempRoot, 'other-repo')); // not ancestor
+    fs.mkdirSync(workspace, { recursive: true });
+    fs.mkdirSync(nonAncestorRoot);
+
+    const result = await filterRememberedRootsForWorkspace(
+      [ancestorRoot, nonAncestorRoot],
+      workspace,
+    );
+
+    expect(result).toContain(ancestorRoot);
+    expect(result).not.toContain(nonAncestorRoot);
 
     fs.rmSync(tempRoot, { recursive: true, force: true });
   });

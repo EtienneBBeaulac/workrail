@@ -222,6 +222,43 @@ export interface WorkflowReaderForRequestResult {
   readonly managedStoreError?: string;
 }
 
+/**
+ * Filters `allRoots` to only those that are in scope for the given `workspace`.
+ *
+ * A root is in scope if it is either:
+ * 1. An ancestor of (or equal to) `workspace` -- determined by lexical path comparison,
+ *    no subprocess needed.
+ * 2. A sibling worktree -- shares the same git common directory as `workspace`. This
+ *    covers the `git worktree add ../branch-name` pattern where neither directory is
+ *    an ancestor of the other but both belong to the same repository.
+ *
+ * The ancestor check runs first and incurs no subprocess cost. The git common-dir
+ * check is lazy: it is skipped entirely when all roots pass the ancestor check.
+ * Non-ancestor roots are checked in parallel to keep worst-case latency at
+ * max(one subprocess) rather than N * max(one subprocess).
+ *
+ * @throws never -- all errors from git subprocesses are caught inside `getGitCommonDir`
+ *   and surfaced as null. This function always resolves.
+ */
+export async function filterRememberedRootsForWorkspace(
+  allRoots: readonly string[],
+  workspace: string,
+): Promise<readonly string[]> {
+  const ancestorRoots = allRoots.filter((r) => isWorkspaceAncestor(r, workspace));
+  const nonAncestorRoots = allRoots.filter((r) => !isWorkspaceAncestor(r, workspace));
+
+  let siblingRoots: readonly string[] = [];
+  if (nonAncestorRoots.length > 0) {
+    const workspaceCommonDir = await getGitCommonDir(workspace);
+    if (workspaceCommonDir !== null) {
+      const commonDirResults = await Promise.all(nonAncestorRoots.map((r) => getGitCommonDir(r)));
+      siblingRoots = nonAncestorRoots.filter((_, i) => commonDirResults[i] === workspaceCommonDir);
+    }
+  }
+
+  return [...ancestorRoots, ...siblingRoots];
+}
+
 export async function createWorkflowReaderForRequest(
   options: RequestWorkflowReaderOptions,
 ): Promise<WorkflowReaderForRequestResult> {
@@ -234,27 +271,7 @@ export async function createWorkflowReaderForRequest(
   // Engineers who relied on cross-repo bleed should use `manage_workflow_source` instead.
   const resolvedWorkspace = path.resolve(workspaceDirectory);
 
-  // Scope remembered roots to those that are either:
-  // 1. An ancestor of (or equal to) the current workspace (existing ancestor check), OR
-  // 2. A sibling worktree -- shares the same git common dir as the workspace.
-  //
-  // Sibling worktrees are the default `git worktree add ../branch-name` pattern. They are
-  // not ancestors of each other lexically, but they share the same git repo. Excluding them
-  // would silently drop .workrail/workflows/ from engineers using linked worktrees.
-  //
-  // The ancestor check runs first (no subprocess). The git common-dir check only runs for
-  // roots that fail the ancestor check, so the common case (workspace inside remembered root)
-  // incurs zero git subprocess calls.
-  const workspaceCommonDir = await getGitCommonDir(resolvedWorkspace);
-  const rememberedRoots: string[] = [];
-  for (const root of allRememberedRoots) {
-    if (isWorkspaceAncestor(root, resolvedWorkspace)) {
-      rememberedRoots.push(root);
-    } else if (workspaceCommonDir !== null) {
-      const rootCommonDir = await getGitCommonDir(root);
-      if (rootCommonDir === workspaceCommonDir) rememberedRoots.push(root);
-    }
-  }
+  const rememberedRoots = await filterRememberedRootsForWorkspace(allRememberedRoots, resolvedWorkspace);
   const excludedByScope = allRememberedRoots.filter((root) => !rememberedRoots.includes(root));
 
   let discoveryResult: WorkflowRootDiscoveryResult;
