@@ -1,6 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { execSync as nodeExecSync } from 'child_process';
 import { pathToFileURL } from 'url';
 import { describe, expect, it, afterEach, beforeEach } from 'vitest';
 import { StaticFeatureFlagProvider } from '../../../src/config/feature-flags.js';
@@ -12,6 +13,7 @@ import {
   resolveRequestWorkspaceDirectory,
   toProjectWorkflowDirectory,
 } from '../../../src/mcp/handlers/shared/request-workflow-reader.js';
+import { getGitCommonDir } from '../../../src/mcp/handlers/shared/workspace-path-utils.js';
 import type { RememberedRootsStorePortV2 } from '../../../src/v2/ports/remembered-roots-store.port.js';
 import type { ManagedSourceStorePortV2, ManagedSourceRecordV2 } from '../../../src/v2/ports/managed-source-store.port.js';
 import { okAsync, errAsync } from 'neverthrow';
@@ -520,6 +522,106 @@ describe('createWorkflowReaderForRequest -- managed source stat parallelism', ()
     expect(result.staleManagedRecords).toHaveLength(0);
     expect(result.managedStoreError).toBeDefined();
     expect(result.managedStoreError).toContain('disk read failed');
+
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getGitCommonDir unit tests
+// ---------------------------------------------------------------------------
+
+describe('getGitCommonDir', () => {
+  it('returns a non-null absolute path for a directory inside a git repo', async () => {
+    // The workrail project itself is a git repo -- always available in tests.
+    const result = await getGitCommonDir(process.cwd());
+    expect(result).not.toBeNull();
+    expect(path.isAbsolute(result!)).toBe(true);
+  });
+
+  it('returns null for a directory that is not inside a git repo', async () => {
+    // os.tmpdir() is reliably outside any git repo.
+    const result = await getGitCommonDir(os.tmpdir());
+    expect(result).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Sibling worktree scoping tests
+// ---------------------------------------------------------------------------
+
+function execSync(cmd: string, cwd: string): void {
+  nodeExecSync(cmd, { cwd, stdio: 'pipe' });
+}
+
+describe('createWorkflowReaderForRequest -- sibling worktree scoping', () => {
+  beforeEach(() => clearWalkCacheForTesting());
+  afterEach(() => clearWalkCacheForTesting());
+
+  it('includes a remembered root that is a sibling worktree of the current workspace', async () => {
+    // Arrange: create a real git repo with a linked worktree (sibling).
+    // mainRepo/  (git init)
+    // sibling-worktree/  (git worktree add ../sibling-worktree)
+    // Both share the same git common dir -> mainRepo should be included when workspace is sibling-worktree.
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-sibling-'));
+    const mainRepo = path.join(tempRoot, 'main-repo');
+    const siblingWorktree = path.join(tempRoot, 'sibling-worktree');
+    fs.mkdirSync(mainRepo);
+
+    try {
+      execSync('git init', mainRepo);
+      execSync('git config user.email "test@test.com"', mainRepo);
+      execSync('git config user.name "Test"', mainRepo);
+      // git worktree add requires at least one commit
+      execSync('git commit --allow-empty -m "init"', mainRepo);
+      execSync(`git worktree add ${siblingWorktree}`, mainRepo);
+
+      // Write a rooted workflow in the main repo
+      writeRootedWorkflow(mainRepo, [], 'sibling-worktree-workflow', 'Sibling Worktree Workflow');
+
+      const result = await createWorkflowReaderForRequest({
+        featureFlags: new StaticFeatureFlagProvider({
+          v2Tools: true,
+          leanWorkflows: false,
+          agenticRoutines: false,
+          experimentalWorkflows: false,
+        }),
+        workspacePath: siblingWorktree,
+        rememberedRootsStore: rememberedRootsStore(mainRepo),
+      });
+      const { reader } = result;
+
+      const workflow = await reader.getWorkflowById('sibling-worktree-workflow');
+      expect(workflow?.definition.name).toBe('Sibling Worktree Workflow');
+    } finally {
+      // Clean up worktree before removing the directory
+      try { execSync(`git worktree remove --force ${siblingWorktree}`, mainRepo); } catch { /* ignore */ }
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('still excludes a remembered root from an unrelated repo (cross-repo non-bleed regression)', async () => {
+    // This is the original regression test replicated in this suite to confirm the
+    // sibling worktree fix does not break the cross-repo isolation invariant.
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-sibling-cross-'));
+    const workspace = path.join(tempRoot, 'repo-a', 'packages', 'app');
+    const unrelatedRoot = path.join(tempRoot, 'repo-b');
+    fs.mkdirSync(workspace, { recursive: true });
+    writeRootedWorkflow(unrelatedRoot, [], 'cross-repo-workflow', 'Cross Repo Workflow');
+
+    const { reader } = await createWorkflowReaderForRequest({
+      featureFlags: new StaticFeatureFlagProvider({
+        v2Tools: true,
+        leanWorkflows: false,
+        agenticRoutines: false,
+        experimentalWorkflows: false,
+      }),
+      workspacePath: workspace,
+      rememberedRootsStore: rememberedRootsStore(unrelatedRoot),
+    });
+
+    const workflow = await reader.getWorkflowById('cross-repo-workflow');
+    expect(workflow).toBeNull();
 
     fs.rmSync(tempRoot, { recursive: true, force: true });
   });
