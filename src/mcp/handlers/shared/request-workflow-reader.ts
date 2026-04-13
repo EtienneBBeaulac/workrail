@@ -8,6 +8,7 @@ import { SchemaValidatingCompositeWorkflowStorage } from '../../../infrastructur
 import type { RememberedRootsStorePortV2 } from '../../../v2/ports/remembered-roots-store.port.js';
 import type { ManagedSourceRecordV2, ManagedSourceStorePortV2 } from '../../../v2/ports/managed-source-store.port.js';
 import { withTimeout } from './with-timeout.js';
+import { isWorkspaceAncestor } from './workspace-path-utils.js';
 
 // ---------------------------------------------------------------------------
 // Walk skip list
@@ -226,10 +227,7 @@ export async function createWorkflowReaderForRequest(
   // from leaking into the workflow list when a user has visited those repos recently.
   // Engineers who relied on cross-repo bleed should use `manage_workflow_source` instead.
   const resolvedWorkspace = path.resolve(workspaceDirectory);
-  const rememberedRoots = allRememberedRoots.filter((root) => {
-    const rel = path.relative(path.resolve(root), resolvedWorkspace);
-    return rel.length === 0 || (!rel.startsWith('..') && !path.isAbsolute(rel));
-  });
+  const rememberedRoots = allRememberedRoots.filter((root) => isWorkspaceAncestor(root, resolvedWorkspace));
   if (process.env['WORKRAIL_DEV'] === '1' && allRememberedRoots.length !== rememberedRoots.length) {
     const excluded = allRememberedRoots.filter((r) => !rememberedRoots.includes(r));
     console.error(`[workrail] remembered-roots filter excluded ${excluded.length} root(s) not under workspace ${resolvedWorkspace}: ${excluded.join(', ')}`);
