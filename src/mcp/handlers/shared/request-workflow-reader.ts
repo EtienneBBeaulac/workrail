@@ -210,6 +210,12 @@ export interface WorkflowReaderForRequestResult {
   /** Managed source records whose paths are missing on disk; surfaced in staleRoots + catalog. */
   readonly staleManagedRecords: readonly ManagedSourceRecordV2[];
   /**
+   * Remembered roots that were filtered out because they are not ancestors of (or equal to)
+   * the current workspace. Mirrors the stalePaths pattern so callers can surface or log this
+   * information without relying on the WORKRAIL_DEV debug log.
+   */
+  readonly excludedByScope: readonly string[];
+  /**
    * Set when the managed source store could not be read (busy, IO error, or corrupted).
    * Callers should surface this as a warning so the agent knows managed sources were skipped.
    */
@@ -228,10 +234,7 @@ export async function createWorkflowReaderForRequest(
   // Engineers who relied on cross-repo bleed should use `manage_workflow_source` instead.
   const resolvedWorkspace = path.resolve(workspaceDirectory);
   const rememberedRoots = allRememberedRoots.filter((root) => isWorkspaceAncestor(root, resolvedWorkspace));
-  if (process.env['WORKRAIL_DEV'] === '1' && allRememberedRoots.length !== rememberedRoots.length) {
-    const excluded = allRememberedRoots.filter((r) => !rememberedRoots.includes(r));
-    console.error(`[workrail] remembered-roots filter excluded ${excluded.length} root(s) not under workspace ${resolvedWorkspace}: ${excluded.join(', ')}`);
-  }
+  const excludedByScope = allRememberedRoots.filter((root) => !isWorkspaceAncestor(root, resolvedWorkspace));
 
   let discoveryResult: WorkflowRootDiscoveryResult;
   try {
@@ -335,6 +338,7 @@ export async function createWorkflowReaderForRequest(
     stalePaths: allStalePaths,
     managedSourceRecords: activeManagedRecords,
     staleManagedRecords,
+    excludedByScope,
     ...(managedStoreError !== undefined ? { managedStoreError } : {}),
   };
 }
