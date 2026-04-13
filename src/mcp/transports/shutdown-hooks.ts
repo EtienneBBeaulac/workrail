@@ -55,6 +55,49 @@ export function wireShutdownHooks(opts: ShutdownHookOptions): void {
   });
 }
 
+export interface StdoutShutdownOptions {
+  /**
+   * Writable stream to watch for errors.
+   *
+   * Defaults to `process.stdout`. Inject a fake stream in tests to avoid
+   * touching the real stdout descriptor.
+   */
+  readonly stdout?: NodeJS.WritableStream;
+}
+
+/**
+ * Wire stdout-error shutdown for stdio transport.
+ *
+ * The MCP SDK's StdioServerTransport registers error listeners on stdin but
+ * NOT on stdout. When the MCP client (Claude Code) closes the connection
+ * mid-write, Node.js emits an 'error' event with code EPIPE on stdout. With
+ * no listener, Node.js converts this to an uncaught exception and the process
+ * crashes silently with exit code 1.
+ *
+ * This function registers an error listener that routes the failure through
+ * the same clean shutdown path as SIGINT/SIGTERM instead of crashing.
+ *
+ * Must be called BEFORE server.connect(transport) so the handler is in place
+ * before any writes can occur.
+ */
+export function wireStdoutShutdown(opts?: StdoutShutdownOptions): void {
+  const shutdownEvents = container.resolve<ShutdownEvents>(DI.Runtime.ShutdownEvents);
+  const stdout = opts?.stdout ?? process.stdout;
+
+  stdout.on('error', (err) => {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'EPIPE' || code === 'ERR_STREAM_DESTROYED') {
+      // Pipe broken: MCP client disconnected. Initiate clean shutdown rather
+      // than crashing -- this ensures the HTTP server and lock files are
+      // cleaned up gracefully.
+      console.error('[MCP] stdout pipe broken (client disconnected), initiating shutdown');
+    } else {
+      console.error('[MCP] stdout error:', err);
+    }
+    shutdownEvents.emit({ kind: 'shutdown_requested', signal: 'SIGHUP' });
+  });
+}
+
 export interface StdinShutdownOptions {
   /**
    * Readable stream to watch for EOF.

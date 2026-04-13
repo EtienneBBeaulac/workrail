@@ -1,10 +1,15 @@
-import { useState, useMemo } from 'react';
-import { usePerfToolCalls } from '../api/hooks';
 import type { ToolCallTiming } from '../api/types';
 import { formatRelativeTime } from '../utils/time';
+import {
+  SORT_OPTIONS,
+  OUTCOME_CONFIG,
+  computeBarWidth,
+  type Outcome,
+} from './performance-use-cases';
+import type { UsePerformanceViewModelResult } from '../hooks/usePerformanceViewModel';
 
 // ---------------------------------------------------------------------------
-// Column configuration (A1)
+// Column configuration
 // Drives thead rendering; TimingRow still renders hardcoded cells but this
 // documents the column contract and makes header generation extend-safe.
 // ---------------------------------------------------------------------------
@@ -24,50 +29,29 @@ const COLUMNS: readonly ColumnDef[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// Sort configuration (A2)
+// Props
 // ---------------------------------------------------------------------------
 
-type SortOrder = 'recent' | 'slowest';
-
-interface SortOption {
-  readonly value: SortOrder;
-  readonly label: string;
-  readonly compareFn: (a: ToolCallTiming, b: ToolCallTiming) => number;
+interface Props {
+  /**
+   * ViewModel result from usePerformanceViewModel().
+   * PerformanceView is a pure presentational component -- it does not fetch data.
+   */
+  readonly viewModel: UsePerformanceViewModelResult;
 }
 
-const SORT_OPTIONS: readonly SortOption[] = [
-  { value: 'recent', label: 'Recent first', compareFn: (a, b) => b.startedAtMs - a.startedAtMs },
-  { value: 'slowest', label: 'Slowest first', compareFn: (a, b) => b.durationMs - a.durationMs },
-];
-
 // ---------------------------------------------------------------------------
-// Outcome configuration (M6 single source of truth)
+// PerformanceView -- pure presenter
 // ---------------------------------------------------------------------------
 
-type Outcome = 'success' | 'error' | 'unknown_tool';
+export function PerformanceView({ viewModel }: Props) {
+  const { state } = viewModel;
 
-const OUTCOME_CONFIG: Record<
-  Outcome,
-  { readonly color: string; readonly label: string; readonly isError: boolean }
-> = {
-  success: { color: 'var(--success)', label: 'OK', isError: false },
-  error: { color: 'var(--error)', label: 'Error', isError: true },
-  unknown_tool: { color: 'var(--warning)', label: 'Unknown', isError: true },
-};
-
-// ---------------------------------------------------------------------------
-// PerformanceView
-// ---------------------------------------------------------------------------
-
-export function PerformanceView() {
-  const result = usePerfToolCalls();
-  const [sortOrder, setSortOrder] = useState<SortOrder>('recent');
-
-  if (result.state === 'loading') {
+  if (state.kind === 'loading') {
     return <PerfSkeleton />;
   }
 
-  if (result.state === 'devModeOff') {
+  if (state.kind === 'devModeOff') {
     return (
       <div className="flex items-center justify-center py-16">
         <p className="text-sm text-[var(--text-muted)] text-center">
@@ -77,13 +61,13 @@ export function PerformanceView() {
     );
   }
 
-  if (result.state === 'error') {
+  if (state.kind === 'error') {
     return (
       <div className="space-y-3 py-8 text-center">
-        <p className="text-sm text-[var(--error)]">{result.message}</p>
+        <p className="text-sm text-[var(--error)]">{state.message}</p>
         <button
           type="button"
-          onClick={result.retry}
+          onClick={state.retry}
           className="text-sm text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors"
         >
           Try again
@@ -92,57 +76,17 @@ export function PerformanceView() {
     );
   }
 
-  const { observations } = result.data;
-
-  return (
-    <PerfContent
-      observations={observations}
-      sortOrder={sortOrder}
-      onSortChange={setSortOrder}
-    />
-  );
-}
-
-// ---------------------------------------------------------------------------
-// PerfContent -- populated + empty state
-// ---------------------------------------------------------------------------
-
-function PerfContent({
-  observations,
-  sortOrder,
-  onSortChange,
-}: {
-  readonly observations: readonly ToolCallTiming[];
-  readonly sortOrder: SortOrder;
-  readonly onSortChange: (order: SortOrder) => void;
-}) {
-  const sorted = useMemo(() => {
-    // A2: find the matching SortOption and use its compareFn
-    const option = SORT_OPTIONS.find((o) => o.value === sortOrder)!;
-    return [...observations].sort(option.compareFn);
-  }, [observations, sortOrder]);
-
-  // M2: use reduce to avoid Math.max(...spread) latent crash on large arrays
-  const maxDuration = useMemo(
-    () => sorted.reduce((max, o) => Math.max(max, o.durationMs), 0),
-    [sorted],
-  );
-
-  const errorCount = observations.filter((o) => OUTCOME_CONFIG[o.outcome].isError).length;
-
-  const avgMs =
-    observations.length > 0
-      ? Math.round(observations.reduce((sum, o) => sum + o.durationMs, 0) / observations.length)
-      : null;
-
-  // M2: use reduce to avoid Math.max(...spread) latent crash on large arrays
-  const lastCallMs =
-    observations.length > 0
-      ? observations.reduce((max, o) => Math.max(max, o.startedAtMs), 0)
-      : null;
-
-  // M4: show truncation indicator when ring buffer contains more than the window
-  const countLabel = `${observations.length} recorded`;
+  // state.kind === 'ready'
+  const {
+    sorted,
+    maxDuration,
+    errorCount,
+    avgMs,
+    lastCallMs,
+    countLabel,
+    sortOrder,
+    onSortChange,
+  } = state;
 
   return (
     <div className="space-y-3">
@@ -225,8 +169,7 @@ function TimingRow({
 }) {
   // M6: derive isError from OUTCOME_CONFIG (single source of truth)
   const isErrorRow = OUTCOME_CONFIG[obs.outcome].isError;
-  const barWidth =
-    maxDuration > 0 ? Math.round((obs.durationMs / maxDuration) * 120) : 0;
+  const barWidth = computeBarWidth(obs.durationMs, maxDuration);
 
   return (
     <tr
