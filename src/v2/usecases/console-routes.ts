@@ -213,9 +213,9 @@ export function mountConsoleRoutes(
   // ---------------------------------------------------------------------------
   const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
-  function readDiskEntries(perfFile: string): readonly ToolCallTimingEntry[] {
+  async function readDiskEntries(perfFile: string): Promise<readonly ToolCallTimingEntry[]> {
     try {
-      const raw = fs.readFileSync(perfFile, 'utf8');
+      const raw = await fs.promises.readFile(perfFile, 'utf8');
       const cutoff = Date.now() - THIRTY_DAYS_MS;
       return raw
         .split('\n')
@@ -224,7 +224,12 @@ export function mountConsoleRoutes(
           try {
             const entry = JSON.parse(line) as ToolCallTimingEntry;
             // Guard: skip entries missing required fields or older than 30 days
-            if (typeof entry.toolName !== 'string' || typeof entry.startedAtMs !== 'number') return [];
+            if (
+              typeof entry.toolName !== 'string' ||
+              typeof entry.startedAtMs !== 'number' ||
+              typeof entry.durationMs !== 'number' ||
+              (entry.outcome !== 'success' && entry.outcome !== 'error' && entry.outcome !== 'unknown_tool')
+            ) return [];
             if (entry.startedAtMs < cutoff) return [];
             return [entry];
           } catch {
@@ -238,13 +243,13 @@ export function mountConsoleRoutes(
 
   const devMode = isDevMode();
   if (devMode) {
-    app.get('/api/v2/perf/tool-calls', (req: Request, res: Response) => {
+    app.get('/api/v2/perf/tool-calls', async (req: Request, res: Response) => {
       const rawLimit = req.query['limit'];
       const limit = typeof rawLimit === 'string' ? parseInt(rawLimit, 10) : undefined;
       const safeLimit = (limit !== undefined && Number.isFinite(limit) && limit > 0) ? limit : undefined;
 
-      // Read from disk (persistent store, filtered to 30d window)
-      const diskEntries = toolCallsPerfFile ? readDiskEntries(toolCallsPerfFile) : [];
+      // Read from disk async (persistent store, filtered to 30d window)
+      const diskEntries = toolCallsPerfFile ? await readDiskEntries(toolCallsPerfFile) : [];
 
       // Read from in-memory ring buffer (recent entries, may overlap with disk)
       const ringEntries = timingRingBuffer ? timingRingBuffer.recent(safeLimit) : [];
@@ -256,11 +261,11 @@ export function mountConsoleRoutes(
         serverVersion: version,
       }));
 
-      // Merge: prefer in-memory entries (they are newest); dedupe disk entries that overlap
-      // with in-memory by key = toolName + startedAtMs (same observation written to both).
-      // In-memory is always a strict subset of what was written to disk (same writes go to both sinks).
-      const inMemoryKeys = new Set(ringEntriesWithVersion.map((e) => `${e.toolName}:${e.startedAtMs}`));
-      const diskOnlyEntries = diskEntries.filter((e) => !inMemoryKeys.has(`${e.toolName}:${e.startedAtMs}`));
+      // Merge: prefer in-memory entries; dedupe disk entries that overlap.
+      // Key includes durationMs to avoid false-positive dedup on same-ms parallel calls.
+      const dedupeKey = (e: ToolCallTimingEntry) => `${e.toolName}:${e.startedAtMs}:${e.durationMs}`;
+      const inMemoryKeys = new Set(ringEntriesWithVersion.map(dedupeKey));
+      const diskOnlyEntries = diskEntries.filter((e) => !inMemoryKeys.has(dedupeKey(e)));
 
       // Combine: in-memory (newest-first) + disk-only entries (oldest-first from file)
       // Sort by startedAtMs descending so response is always newest-first.
