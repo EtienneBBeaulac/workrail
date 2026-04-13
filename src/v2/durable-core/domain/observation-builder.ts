@@ -64,7 +64,7 @@ export function anchorsToObservations(anchors: readonly WorkspaceAnchor[]): read
         break;
 
       case 'repo_root':
-        // Lock: short_string max -- truncate long paths to stay within the limit
+        // Lock: short_string max -- paths exceeding the limit are silently skipped (no observation emitted)
         if (anchor.value.length > MAX_OBSERVATION_SHORT_STRING_LENGTH) break;
         observations.push({
           key: 'repo_root',
