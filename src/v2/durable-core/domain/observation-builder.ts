@@ -64,7 +64,8 @@ export function anchorsToObservations(anchors: readonly WorkspaceAnchor[]): read
         break;
 
       case 'repo_root':
-        // Human-readable path -- recorded as a short_string observation for console grouping.
+        // Lock: short_string max -- paths exceeding the limit are silently skipped (no observation emitted)
+        if (anchor.value.length > MAX_OBSERVATION_SHORT_STRING_LENGTH) break;
         observations.push({
           key: 'repo_root',
           value: { type: 'short_string', value: anchor.value },
