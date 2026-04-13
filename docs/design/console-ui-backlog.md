@@ -116,6 +116,23 @@ the old flat dark style.
 
 *(worth keeping visible, not current delivery commitments)*
 
+### Proper MVI architecture for the console
+
+The console currently has all data-fetching, state management, and rendering co-located in large view files (WorkspaceView is 1,200+ lines). Refactor to a proper separation of concerns:
+
+- **ViewModels** -- derived state transformations (e.g. `useWorkspaceViewModel`) separated from fetch hooks
+- **Use cases / interactors** -- business logic (e.g. dormancy derivation, scope filtering) extracted from components
+- **Repository layer** -- wraps React Query hooks so views depend on abstractions, not fetch details
+- **Pure view components** -- receive props only, no hooks
+
+Architecture pattern: MVI (Model-View-Intent) or similar unidirectional data flow. Aligns with the existing `workspace-types.ts` pure-function approach -- extend that pattern to the full view layer.
+
+Benefits: testable logic without React, smaller components, easier to add new views, clear separation between "what data" and "how it looks".
+
+**Files most in need:** `WorkspaceView.tsx` (15+ co-located sub-components), `WorkflowsView.tsx` (complex animation state), `AppShell.tsx` (routing + rendering mixed).
+
+---
+
 ### Custom cyberpunk overscroll effect
 
 When scrolling past the limits of a scrollable container (modal, session list,
