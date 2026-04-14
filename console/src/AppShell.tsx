@@ -9,7 +9,12 @@ import { PerformanceView } from './views/PerformanceView';
 import { CutCornerBox } from './components/CutCornerBox';
 import { BracketBadge } from './components/BracketBadge';
 import { PathBreadcrumb } from './components/PathBreadcrumb';
-import { useSessionList } from './api/hooks';
+import { useWorkspaceViewModel } from './hooks/useWorkspaceViewModel';
+import { useSessionListViewModel } from './hooks/useSessionListViewModel';
+import { useWorkflowsViewModel } from './hooks/useWorkflowsViewModel';
+import { useWorkflowDetailViewModel } from './hooks/useWorkflowDetailViewModel';
+import { usePerformanceViewModel } from './hooks/usePerformanceViewModel';
+import { useSessionDetailViewModel } from './hooks/useSessionDetailViewModel';
 
 /**
  * AppShell is the root route component. It owns all view rendering directly,
@@ -62,12 +67,26 @@ export function AppShell() {
   const activeTag = new URLSearchParams(location.search).get('tag');
 
   // ---------------------------------------------------------------------------
-  // Telemetry badges
+  // Workspace ViewModel
   // ---------------------------------------------------------------------------
 
-  const { data: sessionData } = useSessionList();
-  const liveCount = sessionData?.sessions.filter(s => s.status === 'in_progress').length ?? 0;
-  const blockedCount = sessionData?.sessions.filter(s => s.status === 'blocked').length ?? 0;
+  // useWorkspaceViewModel is called here (not inside WorkspaceView) so the
+  // keyboard handler is disabled when hidden=true (SessionDetail overlaid).
+  const workspaceViewModel = useWorkspaceViewModel(isInSessionDetail);
+
+  // useSessionListViewModel is called here (not inside WorkspaceView) so that
+  // WorkspaceView remains a pure presenter. The archive panel is an inline
+  // sub-panel of WorkspaceView -- AppShell owns all ViewModels.
+  const sessionListViewModel = useSessionListViewModel({
+    onSelectSession: workspaceViewModel.onSelectSession,
+  });
+
+  // ---------------------------------------------------------------------------
+  // Telemetry badges -- derived from workspace ViewModel to avoid a second useSessionList call.
+  // ---------------------------------------------------------------------------
+
+  const liveCount = workspaceViewModel.state.kind === 'ready' ? workspaceViewModel.state.liveCount : 0;
+  const blockedCount = workspaceViewModel.state.kind === 'ready' ? workspaceViewModel.state.blockedCount : 0;
 
   // ---------------------------------------------------------------------------
   // Navigation handlers
@@ -84,20 +103,55 @@ export function AppShell() {
     [navigate],
   );
 
-  const handleSelectWorkflow = useCallback(
+  const handleBackFromWorkflow = useCallback(() => {
+    void navigate({ to: '/workflows', search: { tag: activeTag ?? undefined } });
+  }, [navigate, activeTag]);
+
+  const handleNavigateToWorkflow = useCallback(
     (id: string) => {
-      void navigate({
-        to: '/workflows/$workflowId',
-        params: { workflowId: id },
-        search: { tag: activeTag ?? undefined },
-      });
+      void navigate({ to: '/workflows/$workflowId', params: { workflowId: id }, search: { tag: activeTag ?? undefined } });
     },
     [navigate, activeTag],
   );
 
-  const handleBackFromWorkflow = useCallback(() => {
-    void navigate({ to: '/workflows', search: { tag: activeTag ?? undefined } });
-  }, [navigate, activeTag]);
+  // ---------------------------------------------------------------------------
+  // Workflows ViewModel
+  // ---------------------------------------------------------------------------
+
+  // useWorkflowsViewModel is called here so AppShell owns the URL <-> state sync.
+  // initialTag comes from the URL search param; onSelectTag navigates to update the URL.
+  const workflowsViewModel = useWorkflowsViewModel({
+    initialTag: activeTag,
+    onSelectTag: handleSelectTag,
+  });
+
+  // ---------------------------------------------------------------------------
+  // WorkflowDetail ViewModel
+  // ---------------------------------------------------------------------------
+
+  // Called unconditionally (hooks rules). workflowId is null when not on the
+  // workflow detail route, which disables the underlying query and keeps state
+  // at 'loading' so the keyboard handler is never installed.
+  const workflowDetailViewModel = useWorkflowDetailViewModel({
+    workflowId,
+    activeTag,
+    onBack: handleBackFromWorkflow,
+    onNavigateToWorkflow: handleNavigateToWorkflow,
+  });
+
+  // ---------------------------------------------------------------------------
+  // SessionDetail ViewModel
+  // ---------------------------------------------------------------------------
+
+  // Called unconditionally (hooks rules). The underlying useSessionDetail query
+  // has enabled: !!sessionId, so an empty string triggers no network request.
+  const sessionDetailViewModel = useSessionDetailViewModel(sessionId ?? '');
+
+  // ---------------------------------------------------------------------------
+  // Performance ViewModel
+  // ---------------------------------------------------------------------------
+
+  const performanceViewModel = usePerformanceViewModel();
 
   // ---------------------------------------------------------------------------
   // Tab activation flicker
@@ -302,10 +356,11 @@ export function AppShell() {
           hidden={activeTab === 'workflows' || activeTab === 'perf'}
         >
           {/* WorkspaceView is always mounted -- hidden via CSS only so scroll
-              position in scrollYRef survives back-navigation from SessionDetail */}
-          <WorkspaceView hidden={isInSessionDetail} />
+              position in scrollYRef and expandStateRef survive back-navigation
+              from SessionDetail and SSE-driven remounts of child components. */}
+          <WorkspaceView viewModel={workspaceViewModel} sessionListViewModel={sessionListViewModel} hidden={isInSessionDetail} />
           {isInSessionDetail && sessionId && (
-            <SessionDetail sessionId={sessionId} />
+            <SessionDetail viewModel={sessionDetailViewModel} />
           )}
         </div>
 
@@ -317,16 +372,9 @@ export function AppShell() {
             aria-labelledby="tab-workflows"
           >
             {isOnWorkflowDetail && workflowId ? (
-              <WorkflowDetail
-                workflowId={workflowId}
-                onBack={handleBackFromWorkflow}
-              />
+              <WorkflowDetail viewModel={workflowDetailViewModel} />
             ) : (
-              <WorkflowsView
-                selectedTag={activeTag}
-                onSelectTag={handleSelectTag}
-                onSelectWorkflow={handleSelectWorkflow}
-              />
+              <WorkflowsView viewModel={workflowsViewModel} />
             )}
           </div>
         )}
@@ -338,7 +386,7 @@ export function AppShell() {
             role="tabpanel"
             aria-labelledby="tab-perf"
           >
-            <PerformanceView />
+            <PerformanceView viewModel={performanceViewModel} />
           </div>
         )}
       </main>

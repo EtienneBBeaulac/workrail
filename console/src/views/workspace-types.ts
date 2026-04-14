@@ -307,11 +307,119 @@ export function countNeedsAttention(items: readonly WorkspaceItem[]): number {
 }
 
 /**
- * Returns the count of sessions that have unresolved gaps across all items.
+ * Returns the count of items that have at least one session with unresolved gaps.
+ *
+ * Not currently consumed by the console UI -- reserved for a future
+ * gaps-attention badge or filter. Kept here alongside countNeedsAttention
+ * as the canonical aggregation layer for workspace-level attention signals.
  */
 export function countHasGaps(items: readonly WorkspaceItem[]): number {
   return items.reduce((count, item) => {
     const hasGap = item.allSessions.some((s) => s.hasUnresolvedGaps);
     return hasGap ? count + 1 : count;
   }, 0);
+}
+
+// ---------------------------------------------------------------------------
+// RepoGroup -- the display unit for a group of branches under one repo
+// ---------------------------------------------------------------------------
+
+export interface RepoGroup {
+  readonly repoRoot: string;
+  readonly repoName: string;
+  readonly sortedItems: readonly WorkspaceItem[];
+}
+
+// ---------------------------------------------------------------------------
+// buildRepoGroups -- pure use case: join + group + sort for workspace display
+// ---------------------------------------------------------------------------
+
+export interface RepoGroupsResult {
+  readonly repoGroups: readonly RepoGroup[];
+  readonly orderedItems: readonly WorkspaceItem[];
+  /**
+   * All repos seen in the unfiltered join, used for archive links.
+   * Always shows all repos regardless of scope so archive links are stable.
+   */
+  readonly archiveRepos: ReadonlyArray<readonly [string, string]>;
+  /** Count of dormant items hidden from the active scope (no git changes). */
+  readonly dormantHiddenCount: number;
+}
+
+/**
+ * Joins sessions and worktrees, groups by repo, sorts within each group,
+ * and returns all derived display data for the workspace view.
+ *
+ * This is the primary use case that drives WorkspaceView rendering.
+ * It calls joinSessionsAndWorktrees and sortItemsForRepo internally.
+ *
+ * Pure function: same inputs always produce the same outputs.
+ */
+export function buildRepoGroups(
+  sessions: readonly ConsoleSessionSummary[],
+  worktreeRepos: readonly ConsoleRepoWorktrees[],
+  scope: Scope,
+  nowMs: number,
+): RepoGroupsResult {
+  const joined = joinSessionsAndWorktrees(sessions, worktreeRepos);
+
+  const reposSeen = new Map<string, string>();
+  for (const item of joined) {
+    if (!reposSeen.has(item.repoRoot)) reposSeen.set(item.repoRoot, item.repoName);
+  }
+
+  // Group by repo
+  const byRepo = new Map<string, WorkspaceItem[]>();
+  for (const item of joined) {
+    const existing = byRepo.get(item.repoRoot) ?? [];
+    existing.push(item);
+    byRepo.set(item.repoRoot, existing);
+  }
+
+  // Sort repos: repos with active sessions first, then alphabetical
+  const groups: RepoGroup[] = [...byRepo.entries()]
+    .map(([repoRoot, items]) => ({
+      repoRoot,
+      repoName: items[0]!.repoName,
+      sortedItems: sortItemsForRepo(items, scope, nowMs),
+    }))
+    .filter((g) => g.sortedItems.length > 0)
+    .sort((a, b) => {
+      const aActive = a.sortedItems.some(
+        (i) =>
+          i.primarySession?.status === 'in_progress' ||
+          i.primarySession?.status === 'blocked',
+      )
+        ? 0
+        : 1;
+      const bActive = b.sortedItems.some(
+        (i) =>
+          i.primarySession?.status === 'in_progress' ||
+          i.primarySession?.status === 'blocked',
+      )
+        ? 0
+        : 1;
+      if (aActive !== bActive) return aActive - bActive;
+      return a.repoName.localeCompare(b.repoName);
+    });
+
+  const orderedItems = groups.flatMap((g) => g.sortedItems);
+
+  // Count items hidden from Active scope because they're dormant (no git changes)
+  const dormantHiddenCount =
+    scope === 'active'
+      ? joined.filter(
+          (item) =>
+            item.primarySession?.status === 'dormant' &&
+            (item.worktree?.changedCount ?? 0) === 0 &&
+            (item.worktree?.aheadCount ?? 0) === 0,
+        ).length
+      : 0;
+
+  return {
+    repoGroups: groups,
+    orderedItems,
+    archiveRepos: [...reposSeen.entries()].map(([root, name]) => [root, name] as const),
+    dormantHiddenCount,
+  };
 }

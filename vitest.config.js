@@ -58,6 +58,9 @@ export default defineConfig({
           ...shared,
         },
       },
+      // Console ViewModel hook tests live in console/src/hooks/__tests__/ and
+      // run via the console's own vitest config (console/vitest.config.ts).
+      // Use: cd console && npx vitest run   OR   npm test --prefix console
     ],
     
     // Coverage configuration

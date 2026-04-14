@@ -1,22 +1,16 @@
 import {
   useState,
-  useMemo,
   useEffect,
   useRef,
   useCallback,
   type RefObject,
 } from 'react';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
-import { useNavigate } from '@tanstack/react-router';
-import { useSessionList, useWorktreeList, useWorkspaceEvents } from '../api/hooks';
 import { SessionList } from './SessionList';
 import type { FileChangeStatus, ChangedFile, ConsoleSessionSummary } from '../api/types';
-import {
-  type WorkspaceItem,
-  type Scope,
-  joinSessionsAndWorktrees,
-  sortItemsForRepo,
-} from './workspace-types';
+import { type WorkspaceItem, type Scope, type RepoGroup } from './workspace-types';
+import type { UseWorkspaceViewModelResult } from '../hooks/useWorkspaceViewModel';
+import type { UseSessionListViewModelResult } from '../hooks/useSessionListViewModel';
 import { formatRelativeTime } from '../utils/time';
 import { CutCornerBox } from '../components/CutCornerBox';
 import { BracketBadge } from '../components/BracketBadge';
@@ -60,14 +54,6 @@ function pickRandom<T>(pool: readonly T[]): T {
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
-// ---------------------------------------------------------------------------
-// Archive state
-// ---------------------------------------------------------------------------
-
-interface ArchiveState {
-  readonly repoName: string | undefined;
-}
-
 /**
  * Expand state for a single branch's collapsible panels.
  * Stored in a ref map keyed by `branch + '\0' + repoRoot` so panels survive
@@ -81,22 +67,21 @@ interface BranchExpandState {
 type ExpandStateMap = Map<string, BranchExpandState>;
 
 // ---------------------------------------------------------------------------
-// RepoGroup
-// ---------------------------------------------------------------------------
-
-interface RepoGroup {
-  readonly repoRoot: string;
-  readonly repoName: string;
-  readonly sortedItems: readonly WorkspaceItem[];
-}
-
-// ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
 interface Props {
-  /** When true, the view is hidden (parent navigated to SessionDetail). Kept
-   * mounted so state is preserved for scroll restoration on back-nav. */
+  /**
+   * ViewModel result from useWorkspaceViewModel().
+   * WorkspaceView is a pure presentational component -- it does not fetch data.
+   */
+  readonly viewModel: UseWorkspaceViewModelResult;
+  /** ViewModel for the inline archive (SessionList) sub-panel. */
+  readonly sessionListViewModel: UseSessionListViewModelResult;
+  /**
+   * When true, the view is hidden (parent navigated to SessionDetail). Kept
+   * mounted so expandStateRef survives SSE-driven remounts of child components.
+   */
   hidden?: boolean;
 }
 
@@ -104,38 +89,21 @@ interface Props {
 // WorkspaceView
 // ---------------------------------------------------------------------------
 
-export function WorkspaceView({ hidden = false }: Props) {
-  const navigate = useNavigate();
-  const { data: sessionData, isLoading: sessionsLoading, error: sessionsError, refetch } = useSessionList();
-  const { data: worktreeData, isLoading: worktreesFetching } = useWorktreeList();
-  // Subscribe to server-sent events -- triggers immediate refetch when sessions change
-  useWorkspaceEvents();
-
-  const [scope, setScope] = useState<Scope>('active');
-  const [focusedIndex, setFocusedIndex] = useState<number>(-1);
-  const [archive, setArchive] = useState<ArchiveState | null>(null);
-
-  // Scroll restoration: capture scroll position before navigating to SessionDetail,
-  // restore on return. Sessions are always visible so no accordion key to restore.
-  const scrollYRef = useRef<number>(0);
-  const isFirstRender = useRef(true);
+export function WorkspaceView({ viewModel, sessionListViewModel, hidden = false }: Props) {
+  const { state, dispatch, scrollYRef, onSelectSession } = viewModel;
 
   // Expand state for branch panels (changed files, unpushed commits).
-  // Hoisted here so SSE-driven re-renders that unmount/remount BranchGroup and
-  // WorktreeOnlyRow do not reset the user's open panels. Keyed by
-  // `branch + '\0' + repoRoot` -- same composite key used by the join.
+  // Kept as a local ref (not in reducer state) so SSE-driven re-renders that
+  // unmount/remount BranchGroup and WorktreeOnlyRow do not reset the user's
+  // open panels. Keyed by `branch + '\0' + repoRoot`.
+  //
+  // Invariant: WorkspaceView stays permanently mounted (AppShell renders it
+  // with CSS hidden only). If this invariant breaks, expand state is lost.
   const expandStateRef = useRef<ExpandStateMap>(new Map());
 
-  const wrappedSelectSession = useCallback(
-    (sessionId: string) => {
-      scrollYRef.current = window.scrollY;
-      navigate({ to: '/session/$sessionId', params: { sessionId } });
-    },
-    [navigate],
-  );
-
-  // Restore scroll position when returning from SessionDetail.
-  // Skip on first mount -- page is already at 0 and there is nothing to restore.
+  // Scroll restoration: restore captured position when returning from SessionDetail.
+  // Skip on first render -- page is already at 0 and there is nothing to restore.
+  const isFirstRender = useRef(true);
   useEffect(() => {
     if (isFirstRender.current) {
       isFirstRender.current = false;
@@ -147,86 +115,10 @@ export function WorkspaceView({ hidden = false }: Props) {
       });
       return () => cancelAnimationFrame(id);
     }
-  }, [hidden]);
+  }, [hidden, scrollYRef]);
 
-  const { repoGroups, orderedItems, archiveRepos, dormantHiddenCount } = useMemo(() => {
-    const nowMs = Date.now();
-    const empty = { repoGroups: [] as RepoGroup[], orderedItems: [] as WorkspaceItem[], archiveRepos: [] as Array<[string, string]>, dormantHiddenCount: 0 };
-    if (!sessionData) return empty;
-
-    const worktreeRepos = worktreeData?.repos ?? [];
-    const joined = joinSessionsAndWorktrees(sessionData.sessions, worktreeRepos);
-
-    const reposSeen = new Map<string, string>();
-    for (const item of joined) {
-      if (!reposSeen.has(item.repoRoot)) reposSeen.set(item.repoRoot, item.repoName);
-    }
-
-    // Group by repo
-    const byRepo = new Map<string, WorkspaceItem[]>();
-    for (const item of joined) {
-      const existing = byRepo.get(item.repoRoot) ?? [];
-      existing.push(item);
-      byRepo.set(item.repoRoot, existing);
-    }
-
-    // Sort repos: repos with active sessions first, then alphabetical
-    const groups: RepoGroup[] = [...byRepo.entries()]
-      .map(([repoRoot, items]) => ({
-        repoRoot,
-        repoName: items[0]!.repoName,
-        sortedItems: sortItemsForRepo(items, scope, nowMs),
-      }))
-      .filter(g => g.sortedItems.length > 0)
-      .sort((a, b) => {
-        const aActive = a.sortedItems.some(i => i.primarySession?.status === 'in_progress' || i.primarySession?.status === 'blocked') ? 0 : 1;
-        const bActive = b.sortedItems.some(i => i.primarySession?.status === 'in_progress' || i.primarySession?.status === 'blocked') ? 0 : 1;
-        if (aActive !== bActive) return aActive - bActive;
-        return a.repoName.localeCompare(b.repoName);
-      });
-
-    const flat = groups.flatMap(g => g.sortedItems);
-
-    // Count items hidden from Active scope because they're dormant (no git changes)
-    const dormantHiddenCount = scope === 'active'
-      ? joined.filter(item =>
-          item.primarySession?.status === 'dormant' &&
-          (item.worktree?.changedCount ?? 0) === 0 &&
-          (item.worktree?.aheadCount ?? 0) === 0
-        ).length
-      : 0;
-
-    return {
-      repoGroups: groups,
-      orderedItems: flat,
-      archiveRepos: [...reposSeen.entries()] as Array<[string, string]>,
-      dormantHiddenCount,
-    };
-  }, [sessionData, worktreeData, scope]);
-
-  // Reset keyboard focus when the item list changes length (e.g. after scope toggle).
-  // Prevents focusedIndex pointing to a different item than the user expects.
-  useEffect(() => {
-    setFocusedIndex(-1);
-  }, [orderedItems.length]);
-
-  // Keyboard navigation -- disabled while hidden (e.g. SessionDetail overlaid on top)
-  useWorkspaceKeyboard({
-    items: orderedItems,
-    focusedIndex,
-    setFocusedIndex,
-    onSelectSession: wrappedSelectSession,
-    scope,
-    setScope,
-    refetch,
-    archive,
-    setArchive,
-    disabled: hidden,
-  });
-
-  const hasAnySessions = (sessionData?.totalCount ?? 0) > 0;
-
-  if (sessionsLoading) {
+  // Render based on view state discriminant
+  if (state.kind === 'loading') {
     return (
       <div className={`flex items-center justify-center py-32 ${hidden ? 'hidden' : ''}`}>
         <span className="font-mono text-[11px] text-[var(--text-muted)] uppercase tracking-[0.25em] motion-safe:animate-pulse">
@@ -236,7 +128,7 @@ export function WorkspaceView({ hidden = false }: Props) {
     );
   }
 
-  if (sessionsError) {
+  if (state.kind === 'error') {
     return (
       <div
         className={`p-4 ${hidden ? 'hidden' : ''}`}
@@ -246,11 +138,24 @@ export function WorkspaceView({ hidden = false }: Props) {
           // ERROR
         </span>
         <span className="text-sm text-[var(--text-secondary)]">
-          Failed to load workspace: {sessionsError.message}
+          Failed to load workspace: {state.message}
         </span>
       </div>
     );
   }
+
+  // state.kind === 'ready'
+  const {
+    scope,
+    focusedIndex,
+    archive,
+    repoGroups,
+    orderedItems,
+    archiveRepos,
+    dormantHiddenCount,
+    worktreesFetching,
+    hasAnySessions,
+  } = state;
 
   // Archive view (inline SessionList)
   if (archive !== null) {
@@ -258,7 +163,7 @@ export function WorkspaceView({ hidden = false }: Props) {
       <div className={`space-y-4 ${hidden ? 'hidden' : ''}`}>
         <div className="flex items-center gap-3">
           <button
-            onClick={() => setArchive(null)}
+            onClick={() => dispatch({ type: 'archive_closed' })}
             className="font-mono text-[10px] uppercase tracking-[0.20em] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
           >
             // WORKSPACE &larr;
@@ -270,7 +175,7 @@ export function WorkspaceView({ hidden = false }: Props) {
           )}
         </div>
         <SessionList
-          onSelectSession={wrappedSelectSession}
+          viewModel={sessionListViewModel}
         />
       </div>
     );
@@ -297,7 +202,7 @@ export function WorkspaceView({ hidden = false }: Props) {
                 // {orderedItems.length} session{orderedItems.length !== 1 ? 's' : ''}
               </p>
             </div>
-            <ScopeToggle scope={scope} onChange={setScope} />
+            <ScopeToggle scope={scope} onChange={(s) => dispatch({ type: 'scope_changed', scope: s })} />
           </div>
 
           {orderedItems.length === 0 ? (
@@ -313,10 +218,11 @@ export function WorkspaceView({ hidden = false }: Props) {
                     key={group.repoRoot}
                     group={group}
                     showHeader={true}
+                    scope={scope}
                     focusedIndex={focusedIndex}
                     groupOffset={groupOffset}
                     worktreesFetching={worktreesFetching}
-                    onSelectSession={wrappedSelectSession}
+                    onSelectSession={onSelectSession}
                     expandStateRef={expandStateRef}
                   />
                 );
@@ -327,14 +233,17 @@ export function WorkspaceView({ hidden = false }: Props) {
           {dormantHiddenCount > 0 && (
           <button
             type="button"
-            onClick={() => setScope('all')}
+            onClick={() => dispatch({ type: 'scope_changed', scope: 'all' })}
             className="font-mono text-[10px] uppercase tracking-[0.20em] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors text-left"
           >
             // {dormantHiddenCount} dormant session{dormantHiddenCount !== 1 ? 's' : ''} hidden — show all
           </button>
         )}
 
-        <ArchiveLinks repos={archiveRepos} onOpen={(repoName) => setArchive({ repoName })} />
+        <ArchiveLinks
+          repos={archiveRepos}
+          onOpen={(repoName) => dispatch({ type: 'archive_opened', repoName })}
+        />
         </>
       )}
       <TipCard />
@@ -351,6 +260,7 @@ const SECTION_COLLAPSE_THRESHOLD = 12;
 function RepoSection({
   group,
   showHeader,
+  scope,
   focusedIndex,
   groupOffset,
   worktreesFetching,
@@ -359,6 +269,7 @@ function RepoSection({
 }: {
   readonly group: RepoGroup;
   readonly showHeader: boolean;
+  readonly scope: Scope;
   readonly focusedIndex: number;
   readonly groupOffset: number;
   readonly worktreesFetching: boolean;
@@ -425,6 +336,7 @@ function RepoSection({
                 key={`${item.branch}\0${item.repoRoot}`}
                 item={item}
                 isFocused={isFocused}
+                scope={scope}
                 worktreesFetching={worktreesFetching}
                 onSelectSession={onSelectSession}
                 expandStateRef={expandStateRef}
@@ -474,12 +386,14 @@ const SESSION_SORT = (a: ConsoleSessionSummary, b: ConsoleSessionSummary) => {
 function BranchGroup({
   item,
   isFocused,
+  scope,
   worktreesFetching,
   onSelectSession,
   expandStateRef,
 }: {
   readonly item: WorkspaceItem;
   readonly isFocused: boolean;
+  readonly scope: Scope;
   readonly worktreesFetching: boolean;
   readonly onSelectSession: (id: string) => void;
   readonly expandStateRef: RefObject<ExpandStateMap>;
@@ -510,8 +424,18 @@ function BranchGroup({
     });
   }, [expandKey, expandStateRef]);
 
-  const activeSessions = sorted.filter(s => s.status === 'in_progress' || s.status === 'blocked' || s.status === 'dormant');
-  const historySessions = sorted.filter(s => s.status !== 'in_progress' && s.status !== 'blocked' && s.status !== 'dormant');
+  // In Active scope, dormant sessions are demoted to history -- they appear
+  // behind the "expand history" toggle rather than cluttering the active list.
+  // In All scope, dormant sessions stay visible in the active section so the
+  // user can see all running/stalled work at once.
+  const isDormantVisible = (s: ConsoleSessionSummary) =>
+    s.status === 'dormant' && scope === 'all';
+  const activeSessions = sorted.filter(s =>
+    s.status === 'in_progress' || s.status === 'blocked' || isDormantVisible(s)
+  );
+  const historySessions = sorted.filter(s =>
+    s.status !== 'in_progress' && s.status !== 'blocked' && !isDormantVisible(s)
+  );
 
   return (
     <TreeLine style={isFocused ? { outline: '2px solid var(--accent)', outlineOffset: '2px' } : undefined}>
@@ -1127,134 +1051,4 @@ function TipCard() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Keyboard navigation hook
-// ---------------------------------------------------------------------------
-
-interface KeyboardOptions {
-  readonly items: readonly WorkspaceItem[];
-  readonly focusedIndex: number;
-  readonly setFocusedIndex: (i: number) => void;
-  /** Called when Enter/Space is pressed on a focused item -- navigates to session detail */
-  readonly onSelectSession: (sessionId: string) => void;
-  readonly scope: Scope;
-  readonly setScope: (scope: Scope) => void;
-  readonly refetch: () => void;
-  readonly archive: ArchiveState | null;
-  readonly setArchive: (state: ArchiveState | null) => void;
-  readonly disabled: boolean;
-}
-
-function useWorkspaceKeyboard({
-  items,
-  focusedIndex,
-  setFocusedIndex,
-  onSelectSession,
-  scope,
-  setScope,
-  refetch,
-  archive,
-  setArchive,
-  disabled,
-}: KeyboardOptions) {
-  const itemsRef = useRef(items);
-  itemsRef.current = items;
-
-  const onSelectSessionRef = useRef(onSelectSession);
-  onSelectSessionRef.current = onSelectSession;
-
-  const scopeRef = useRef(scope);
-  scopeRef.current = scope;
-
-  const focusedIndexRef = useRef(focusedIndex);
-  focusedIndexRef.current = focusedIndex;
-
-  const archiveRef = useRef(archive);
-  archiveRef.current = archive;
-
-  const disabledRef = useRef(disabled);
-  disabledRef.current = disabled;
-
-  // (no expandedKeyRef -- sessions are always visible, no accordion state)
-
-  useEffect(() => {
-    function handler(e: KeyboardEvent) {
-      // Skip when the workspace view is hidden behind SessionDetail
-      if (disabledRef.current) return;
-
-      // Skip when modifier keys are held -- let browser shortcuts like Cmd+R pass through
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-
-      // Skip if focus is inside an input or textarea (avoid interfering with typing)
-      const active = document.activeElement;
-      if (
-        active instanceof HTMLInputElement ||
-        active instanceof HTMLTextAreaElement ||
-        active instanceof HTMLSelectElement
-      ) {
-        return;
-      }
-
-      // Close archive on Escape
-      if (e.key === 'Escape' && archiveRef.current !== null) {
-        setArchive(null);
-        return;
-      }
-
-      const items = itemsRef.current;
-      const focusedIndex = focusedIndexRef.current;
-
-      switch (e.key) {
-        case 'j':
-        case 'ArrowDown': {
-          e.preventDefault();
-          const next = Math.min(focusedIndex + 1, items.length - 1);
-          setFocusedIndex(next);
-          break;
-        }
-        case 'k':
-        case 'ArrowUp': {
-          e.preventDefault();
-          const prev = Math.max(focusedIndex - 1, 0);
-          setFocusedIndex(prev);
-          break;
-        }
-        case 'Enter':
-        case ' ': {
-          e.preventDefault();
-          if (focusedIndex >= 0 && focusedIndex < items.length) {
-            const item = items[focusedIndex];
-            const sessionId = item.primarySession?.sessionId;
-            if (sessionId) {
-              onSelectSessionRef.current(sessionId);
-            }
-          }
-          break;
-        }
-        case 'Escape': {
-          // Escape with archive open closes it; otherwise no-op (no accordion to collapse)
-          break;
-        }
-        case '/': {
-          e.preventDefault();
-          setArchive({ repoName: undefined });
-          break;
-        }
-        case 'r': {
-          e.preventDefault();
-          refetch();
-          break;
-        }
-        case 'a': {
-          e.preventDefault();
-          setScope(scopeRef.current === 'active' ? 'all' : 'active');
-          break;
-        }
-      }
-    }
-
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [setFocusedIndex, setScope, refetch, setArchive]);
-}
 // build-1775224304

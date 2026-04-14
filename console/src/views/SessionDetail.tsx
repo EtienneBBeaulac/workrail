@@ -1,19 +1,17 @@
-import { useState, useCallback } from 'react';
-import { useSessionDetail } from '../api/hooks';
 import { RunLineageDag } from '../components/RunLineageDag';
 import { StatusBadge } from '../components/StatusBadge';
 import { HealthBadge } from '../components/HealthBadge';
 import { NodeDetailSection } from '../components/NodeDetailSection';
 import { CutCornerBox } from '../components/CutCornerBox';
 import type { ConsoleSessionDetail, ConsoleDagRun } from '../api/types';
+import type { UseSessionDetailViewModelResult } from '../hooks/useSessionDetailViewModel';
+
+// ---------------------------------------------------------------------------
+// Props
+// ---------------------------------------------------------------------------
 
 interface Props {
-  sessionId: string;
-}
-
-interface SelectedNode {
-  runId: string;
-  nodeId: string;
+  readonly viewModel: UseSessionDetailViewModelResult;
 }
 
 // ---------------------------------------------------------------------------
@@ -97,36 +95,26 @@ function HintBanner({ runs }: { runs: readonly ConsoleDagRun[] }) {
 }
 
 // ---------------------------------------------------------------------------
-// SessionDetail
+// SessionDetail -- pure presenter
 // ---------------------------------------------------------------------------
 
-export function SessionDetail({ sessionId }: Props) {
-  const { data, isLoading, error } = useSessionDetail(sessionId);
-  const [selectedNode, setSelectedNode] = useState<SelectedNode | null>(null);
+export function SessionDetail({ viewModel }: Props) {
+  const { state, onSelectNode, onCloseNode } = viewModel;
 
-  const handleNodeClick = useCallback((runId: string, nodeId: string) => {
-    setSelectedNode((prev) =>
-      prev?.runId === runId && prev?.nodeId === nodeId ? null : { runId, nodeId },
-    );
-  }, []);
-
-  if (isLoading) {
+  if (state.kind === 'loading') {
     return <div className="text-[var(--text-secondary)]">Loading session...</div>;
   }
 
-  if (error) {
+  if (state.kind === 'error') {
     return (
       <div className="text-[var(--error)] bg-[var(--bg-card)] rounded-lg p-4">
-        Failed to load session: {error.message}
+        Failed to load session: {state.message}
       </div>
     );
   }
 
-  if (!data) return null;
-
-  const selectedRun = selectedNode
-    ? (data.runs.find((r) => r.runId === selectedNode.runId) ?? null)
-    : null;
+  // state.kind === 'ready'
+  const { sessionId, data, selectedNode, selectedRun } = state;
 
   return (
     <>
@@ -148,7 +136,7 @@ export function SessionDetail({ sessionId }: Props) {
                   selectedNodeId={
                     selectedNode?.runId === run.runId ? selectedNode.nodeId : null
                   }
-                  onNodeClick={handleNodeClick}
+                  onNodeClick={onSelectNode}
                 />
               ))}
             </div>
@@ -174,7 +162,7 @@ export function SessionDetail({ sessionId }: Props) {
             Node detail
           </span>
           <button
-            onClick={() => setSelectedNode(null)}
+            onClick={onCloseNode}
             className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors text-xl leading-none px-1"
             aria-label="Close"
           >

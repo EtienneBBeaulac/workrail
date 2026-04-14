@@ -1,232 +1,29 @@
-import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { useSessionList } from '../api/hooks';
+import { useState, useEffect } from 'react';
 import { StatusBadge } from '../components/StatusBadge';
 import { HealthBadge } from '../components/HealthBadge';
 import { MetaChip } from '../components/MetaChip';
 import { ConsoleCard } from '../components/ConsoleCard';
-import type { ConsoleSessionSummary, ConsoleSessionStatus } from '../api/types';
+import type { ConsoleSessionSummary } from '../api/types';
 import { formatRelativeTime } from '../utils/time';
-import { useGridKeyNav, type UseGridKeyNavResult } from '../hooks/useGridKeyNav';
+import type { UseGridKeyNavResult } from '../hooks/useGridKeyNav';
+import type { UseSessionListViewModelResult } from '../hooks/useSessionListViewModel';
+
+// ---------------------------------------------------------------------------
+// Props
+// ---------------------------------------------------------------------------
 
 interface Props {
-  onSelectSession: (sessionId: string) => void;
-  /** Pre-seed the search field (e.g. branch name from worktree click-through). */
-  initialSearch?: string;
+  viewModel: UseSessionListViewModelResult;
 }
 
 // ---------------------------------------------------------------------------
-// Sort / group axis definitions
-//
-// Adding a new sort or group axis requires a single entry in SORT_AXES or
-// GROUP_AXES -- no edits to switch statements or separate type unions.
+// SessionList -- pure presenter
 // ---------------------------------------------------------------------------
 
-type StatusFilter = 'all' | ConsoleSessionStatus;
+export function SessionList({ viewModel }: Props) {
+  const { state, dispatch, onSelectSession } = viewModel;
 
-const STATUS_SORT_ORDER: Record<ConsoleSessionStatus, number> = {
-  in_progress: 0,
-  blocked: 1,
-  dormant: 2,
-  complete_with_gaps: 3,
-  complete: 4,
-};
-
-// Parameterised so that `value` is inferred as a literal type rather than
-// widened to `string`. This lets TypeScript catch typos in SortField/GroupBy
-// assignments at compile time.
-interface SortAxisDef<V extends string> {
-  readonly value: V;
-  readonly label: string;
-  readonly compareFn: (a: ConsoleSessionSummary, b: ConsoleSessionSummary) => number;
-}
-
-interface GroupAxisDef<V extends string> {
-  readonly value: V;
-  readonly label: string;
-  // Returns the group key for a session, or null for the "ungrouped" sentinel.
-  readonly keyFn: ((s: ConsoleSessionSummary) => string) | null;
-  // Optional comparator for group labels. Defaults to localeCompare.
-  readonly groupCompareFn?: (a: string, b: string) => number;
-}
-
-const SORT_AXES = [
-  {
-    value: 'recent' as const,
-    label: 'Recent',
-    compareFn: (a: ConsoleSessionSummary, b: ConsoleSessionSummary) => b.lastModifiedMs - a.lastModifiedMs,
-  },
-  {
-    value: 'status' as const,
-    label: 'Status',
-    compareFn: (a: ConsoleSessionSummary, b: ConsoleSessionSummary) =>
-      STATUS_SORT_ORDER[a.status] - STATUS_SORT_ORDER[b.status] || b.lastModifiedMs - a.lastModifiedMs,
-  },
-  {
-    value: 'workflow' as const,
-    label: 'Workflow',
-    compareFn: (a: ConsoleSessionSummary, b: ConsoleSessionSummary) =>
-      (a.workflowName ?? a.workflowId ?? '').localeCompare(b.workflowName ?? b.workflowId ?? '') ||
-      b.lastModifiedMs - a.lastModifiedMs,
-  },
-  {
-    value: 'nodes' as const,
-    label: 'Node count',
-    compareFn: (a: ConsoleSessionSummary, b: ConsoleSessionSummary) =>
-      b.nodeCount - a.nodeCount || b.lastModifiedMs - a.lastModifiedMs,
-  },
-] as const satisfies readonly SortAxisDef<string>[];
-
-const GROUP_AXES = [
-  { value: 'none' as const, label: 'No grouping', keyFn: null },
-  { value: 'workflow' as const, label: 'Workflow', keyFn: (s: ConsoleSessionSummary) => s.workflowName ?? s.workflowId ?? 'Unknown workflow' },
-  {
-    value: 'status' as const,
-    label: 'Status',
-    keyFn: (s: ConsoleSessionSummary) => s.status,
-    // Sort status groups by severity order rather than alphabetically.
-    groupCompareFn: (a: string, b: string) =>
-      (STATUS_SORT_ORDER[a as ConsoleSessionStatus] ?? 99) - (STATUS_SORT_ORDER[b as ConsoleSessionStatus] ?? 99),
-  },
-  { value: 'branch' as const, label: 'Branch', keyFn: (s: ConsoleSessionSummary) => s.gitBranch ?? 'No branch' },
-] as const satisfies readonly GroupAxisDef<string>[];
-
-type SortField = (typeof SORT_AXES)[number]['value'];
-type GroupBy = (typeof GROUP_AXES)[number]['value'];
-
-const STATUS_FILTER_OPTIONS: { value: StatusFilter; label: string }[] = [
-  { value: 'all', label: 'All' },
-  { value: 'in_progress', label: 'In Progress' },
-  { value: 'dormant', label: 'Dormant' },
-  { value: 'complete', label: 'Complete' },
-  { value: 'complete_with_gaps', label: 'Gaps' },
-  { value: 'blocked', label: 'Blocked' },
-];
-
-const PAGE_SIZE = 25;
-
-// ---------------------------------------------------------------------------
-// Pure helpers
-// ---------------------------------------------------------------------------
-
-function filterSessions(
-  sessions: readonly ConsoleSessionSummary[],
-  search: string,
-  statusFilter: StatusFilter,
-): ConsoleSessionSummary[] {
-  let filtered = [...sessions];
-
-  if (statusFilter !== 'all') {
-    filtered = filtered.filter((s) => s.status === statusFilter);
-  }
-
-  if (search.trim()) {
-    const q = search.toLowerCase();
-    filtered = filtered.filter((s) =>
-      (s.sessionTitle ?? '').toLowerCase().includes(q) ||
-      (s.workflowName ?? '').toLowerCase().includes(q) ||
-      (s.workflowId ?? '').toLowerCase().includes(q) ||
-      s.sessionId.toLowerCase().includes(q) ||
-      (s.gitBranch ?? '').toLowerCase().includes(q)
-    );
-  }
-
-  return filtered;
-}
-
-function sortSessions(sessions: ConsoleSessionSummary[], sort: SortField): ConsoleSessionSummary[] {
-  const axis = SORT_AXES.find((a) => a.value === sort) ?? SORT_AXES[0];
-  return [...sessions].sort(axis.compareFn);
-}
-
-function groupSessions(
-  sessions: ConsoleSessionSummary[],
-  groupBy: GroupBy,
-): { label: string; sessions: ConsoleSessionSummary[] }[] {
-  const axis = GROUP_AXES.find((a) => a.value === groupBy) ?? GROUP_AXES[0];
-  if (!axis.keyFn) return [{ label: '', sessions }];
-
-  const groups = new Map<string, ConsoleSessionSummary[]>();
-
-  for (const s of sessions) {
-    const key = axis.keyFn(s);
-    const list = groups.get(key) ?? [];
-    list.push(s);
-    groups.set(key, list);
-  }
-
-  // Cast to the base interface to access the optional groupCompareFn field.
-  // `as const satisfies` narrows each element to its exact literal shape, so
-  // the optional field is only present in the union members that define it.
-  const compareFn = (axis as GroupAxisDef<string>).groupCompareFn ?? ((a: string, b: string) => a.localeCompare(b));
-  return Array.from(groups.entries())
-    .sort(([a], [b]) => compareFn(a, b))
-    .map(([label, groupedSessions]) => ({ label, sessions: groupedSessions }));
-}
-
-// ---------------------------------------------------------------------------
-// Debounce hook
-// Separates UI-responsive input state from the computationally expensive
-// filter/sort/group pipeline. Delays are applied only to the search field.
-// ---------------------------------------------------------------------------
-
-function useDebounce<T>(value: T, delayMs: number): T {
-  const [debouncedValue, setDebouncedValue] = useState(value);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    if (timerRef.current !== null) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => setDebouncedValue(value), delayMs);
-    return () => {
-      if (timerRef.current !== null) clearTimeout(timerRef.current);
-    };
-  }, [value, delayMs]);
-
-  return debouncedValue;
-}
-
-// ---------------------------------------------------------------------------
-// Components
-// ---------------------------------------------------------------------------
-
-export function SessionList({ onSelectSession, initialSearch = '' }: Props) {
-  const { data, isLoading, error } = useSessionList();
-
-  const [search, setSearch] = useState(initialSearch);
-  const [sort, setSort] = useState<SortField>('recent');
-  const [groupBy, setGroupBy] = useState<GroupBy>('none');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
-  const [page, setPage] = useState(0);
-
-  // Debounce the search input so that filter/sort/group computation does not
-  // fire on every keystroke. The raw `search` value drives the input display;
-  // `debouncedSearch` drives the data pipeline.
-  const debouncedSearch = useDebounce(search, 200);
-
-  // Reset page when filters change
-  const handleSearchChange = useCallback((v: string) => { setSearch(v); setPage(0); }, []);
-  const handleSortChange = useCallback((v: SortField) => { setSort(v); setPage(0); }, []);
-  const handleGroupChange = useCallback((v: GroupBy) => { setGroupBy(v); setPage(0); }, []);
-  const handleStatusChange = useCallback((v: StatusFilter) => { setStatusFilter(v); setPage(0); }, []);
-
-  const processed = useMemo(() => {
-    if (!data) return { groups: [], total: 0, filtered: 0 };
-    const filtered = filterSessions(data.sessions, debouncedSearch, statusFilter);
-    const sorted = sortSessions(filtered, sort);
-    const groups = groupSessions(sorted, groupBy);
-    return { groups, total: data.sessions.length, filtered: filtered.length };
-  }, [data, debouncedSearch, statusFilter, sort, groupBy]);
-
-  // Status counts for filter pills
-  const statusCounts = useMemo(() => {
-    if (!data) return {} as Record<StatusFilter, number>;
-    const counts: Record<string, number> = { all: data.sessions.length };
-    for (const s of data.sessions) {
-      counts[s.status] = (counts[s.status] ?? 0) + 1;
-    }
-    return counts as Record<StatusFilter, number>;
-  }, [data]);
-
-  if (isLoading) {
+  if (state.kind === 'loading') {
     return (
       <div className="flex items-center justify-center py-20">
         <div className="text-[var(--text-secondary)] text-sm">Loading sessions...</div>
@@ -234,15 +31,34 @@ export function SessionList({ onSelectSession, initialSearch = '' }: Props) {
     );
   }
 
-  if (error) {
+  if (state.kind === 'error') {
     return (
       <div className="text-[var(--error)] bg-[var(--bg-card)] rounded-lg p-4">
-        Failed to load sessions: {error.message}
+        Failed to load sessions: {state.message}
       </div>
     );
   }
 
-  if (!data || data.sessions.length === 0) {
+  // state.kind === 'ready'
+  const {
+    rawSearch,
+    sort,
+    groupBy,
+    statusFilter,
+    page,
+    totalPages,
+    isGrouped,
+    processed,
+    statusCounts,
+    flatPageSessions,
+    getSessionNavProps,
+    sessionContainerProps,
+    sortAxes,
+    groupAxes,
+    statusFilterOptions,
+  } = state;
+
+  if (processed.total === 0) {
     return (
       <div className="text-center py-16">
         <p className="text-[var(--text-secondary)] text-lg">No v2 sessions found</p>
@@ -252,25 +68,6 @@ export function SessionList({ onSelectSession, initialSearch = '' }: Props) {
       </div>
     );
   }
-
-  // Flatten groups for pagination when not grouped
-  const isGrouped = groupBy !== 'none';
-  const pageStart = page * PAGE_SIZE;
-  const pageEnd = pageStart + PAGE_SIZE;
-  const totalPages = Math.ceil(processed.filtered / PAGE_SIZE);
-
-  // Flat visible sessions for the current page (non-grouped path only).
-  const flatPageSessions = isGrouped ? [] : (processed.groups[0]?.sessions.slice(pageStart, pageEnd) ?? []);
-
-  // Issue #7: Keyboard navigation for the flat session list (cols=1, single column).
-  const { getItemProps: getSessionNavProps, containerProps: sessionContainerProps } = useGridKeyNav({
-    count: flatPageSessions.length,
-    cols: 1,
-    onActivate: useCallback((i: number) => {
-      onSelectSession(flatPageSessions[i].sessionId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [flatPageSessions, onSelectSession]),
-  });
 
   return (
     <div className="space-y-4">
@@ -292,14 +89,14 @@ export function SessionList({ onSelectSession, initialSearch = '' }: Props) {
         <div className="relative flex-1 min-w-[200px] max-w-[360px]">
           <input
             type="text"
-            value={search}
-            onChange={(e) => handleSearchChange(e.target.value)}
+            value={rawSearch}
+            onChange={(e) => dispatch({ type: 'search_changed', value: e.target.value })}
             placeholder="Search sessions..."
             className="w-full bg-[var(--bg-secondary)] border border-[var(--border)] rounded-md px-3 py-1.5 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)] transition-colors"
           />
-          {search && (
+          {rawSearch && (
             <button
-              onClick={() => handleSearchChange('')}
+              onClick={() => dispatch({ type: 'search_changed', value: '' })}
               className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)] text-xs"
             >
               clear
@@ -311,29 +108,29 @@ export function SessionList({ onSelectSession, initialSearch = '' }: Props) {
         <ToolbarSelect
           label="Sort"
           value={sort}
-          options={SORT_AXES}
-          onChange={handleSortChange}
+          options={sortAxes}
+          onChange={(v) => dispatch({ type: 'sort_changed', sort: v })}
         />
 
         {/* Group */}
         <ToolbarSelect
           label="Group"
           value={groupBy}
-          options={GROUP_AXES}
-          onChange={handleGroupChange}
+          options={groupAxes}
+          onChange={(v) => dispatch({ type: 'group_changed', groupBy: v })}
         />
       </div>
 
       {/* Status filter pills */}
       <div className="flex flex-wrap gap-1.5">
-        {STATUS_FILTER_OPTIONS.map((opt) => {
+        {statusFilterOptions.map((opt) => {
           const count = statusCounts[opt.value] ?? 0;
           if (opt.value !== 'all' && count === 0) return null;
           const active = statusFilter === opt.value;
           return (
             <button
               key={opt.value}
-              onClick={() => handleStatusChange(opt.value)}
+              onClick={() => dispatch({ type: 'status_changed', statusFilter: opt.value })}
               className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors cursor-pointer ${
                 active
                   ? 'bg-[var(--accent)] text-white'
@@ -380,7 +177,7 @@ export function SessionList({ onSelectSession, initialSearch = '' }: Props) {
 
           {/* Pagination */}
           {totalPages > 1 && (
-            <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+            <Pagination page={page} totalPages={totalPages} onPageChange={(p) => dispatch({ type: 'page_changed', page: p })} />
           )}
         </>
       )}
@@ -431,9 +228,9 @@ function SessionGroup({
   onSelectSession,
 }: {
   label: string;
-  sessions: ConsoleSessionSummary[];
-  sort: SortField;
-  statusFilter: StatusFilter;
+  sessions: readonly ConsoleSessionSummary[];
+  sort: string;
+  statusFilter: string;
   onSelectSession: (id: string) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -449,9 +246,10 @@ function SessionGroup({
   void sort;
   void statusFilter;
 
-  const totalPages = Math.ceil(sessions.length / PAGE_SIZE);
-  const pageStart = page * PAGE_SIZE;
-  const pageEnd = pageStart + PAGE_SIZE;
+  const PAGE_SIZE_LOCAL = 25;
+  const totalPages = Math.ceil(sessions.length / PAGE_SIZE_LOCAL);
+  const pageStart = page * PAGE_SIZE_LOCAL;
+  const pageEnd = pageStart + PAGE_SIZE_LOCAL;
   const visibleSessions = sessions.slice(pageStart, pageEnd);
 
   return (
