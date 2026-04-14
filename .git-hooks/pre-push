@@ -1,0 +1,16 @@
+#!/bin/bash
+# Block direct pushes to main/master.
+# This hook runs even when using refspec forms like HEAD:main or mybranch:main
+# because git always resolves remote_ref to refs/heads/main before calling this hook.
+while read local_ref local_sha remote_ref remote_sha; do
+  if [[ "$remote_ref" == "refs/heads/main" || "$remote_ref" == "refs/heads/master" ]]; then
+    echo ""
+    echo "╔══════════════════════════════════════════════════════════╗"
+    echo "║  BLOCKED: Direct push to main/master is not allowed.    ║"
+    echo "║  Create a feature branch and open a PR instead.         ║"
+    echo "╚══════════════════════════════════════════════════════════╝"
+    echo ""
+    exit 1
+  fi
+done
+exit 0
