@@ -16,15 +16,11 @@ Lightweight cross-cutting roadmap. **This is the single entry point** -- check h
 
 *(groomed, roughly ordered by value -- ready to execute)*
 
-1. **Console execution-trace explainability** -- The DAG shows only `node_created`/`edge_created`. Engine decisions (fast paths, skipped phases, condition evaluation, loop entry/exit) are invisible, making legitimate runs look broken. This needs a **design phase first** before any implementation -- see `docs/tickets/next-up.md` Ticket 5 and `docs/ideas/backlog.md`.
+1. **Execution trace Layer 3** -- edge cause diamonds on DAG edges, loop bracket in gutter, `[ CAUSE ]` expandable footer on `blocked_attempt` nodes. No backend changes needed. One data dependency for ghost nodes (skipped steps) -- needs backend confirmation before that sub-feature. See `docs/design/console-execution-trace-discovery.md`.
 
-3. **Legacy workflow modernization** -- `exploration-workflow.json` is the highest-priority candidate. `mr-review-workflow.json` and `bug-investigation.json` are next. See `docs/roadmap/open-work-inventory.md` for the full prioritized list and what "modernization" means. -- `workflow-for-workflows.v2.json` and `production-readiness-audit.json` have been tuned through authoring reasoning, not evidence from varied real runs. Run both on multiple tasks spanning different archetypes. Tune `STANDARD` vs `THOROUGH` depth from what is observed. See `docs/tickets/next-up.md` Ticket 6.
+2. **`fix-multi-instance-gaps` PR** -- branch `fix/etienneb/multi-instance-gaps` has 1 committed, pushed, unpushed-to-PR change: `fix(mcp): resolve three multi-instance safety gaps` (HttpServer.ts, http-entry.ts, tests). Needs a PR opened and merged.
 
-3. **Progress notifications** -- Long workflows block with no agent visibility. Design is mostly done; three open issues remain before implementation: (a) `progressToken` threading through `ToolContext`, (b) `NotificationSender` port to give `advance.ts` access to `sendNotification`, (c) step-node counting (filter `step` nodes only, exclude `blocked_attempt`/`checkpoint`). See `docs/plans/v2-followup-enhancements.md` P2.
-
-4. **Console execution-trace explainability** -- The DAG shows only `node_created`/`edge_created`. Engine decisions (fast paths, skipped phases, condition evaluation, loop entry/exit) are invisible, making legitimate runs look broken. This needs a **design phase first** before any implementation -- see `docs/tickets/next-up.md` Ticket 5 and `docs/ideas/backlog.md`.
-
-5. **Legacy workflow modernization** -- `exploration-workflow.json` is the highest-priority candidate. `mr-review-workflow.json` and `bug-investigation.json` are next. See `docs/roadmap/open-work-inventory.md` for the full prioritized list and what "modernization" means.
+3. **Legacy workflow modernization** -- `exploration-workflow.json` is the highest-priority candidate. `mr-review-workflow.json` and `bug-investigation.json` are next. See `docs/roadmap/open-work-inventory.md` for the full prioritized list and what "modernization" means.
 
 ---
 
@@ -32,11 +28,10 @@ Lightweight cross-cutting roadmap. **This is the single entry point** -- check h
 
 *(not yet groomed; rough priority order)*
 
-- **Console engine-trace UX** -- after the design from #4 above is complete and agreed
-- **Dashboard artifacts** -- replace file-based docs with session-scoped structured outputs rendered in the console; design exists in `workflow-execution-contract.md`, blocked on a richer console UI substrate
-- **Evict stale repo roots** -- `remembered-roots-store` accumulates forever; stale repos inflate worktree counts and slow scanning. Add TTL eviction. See #241.
-- **Typed SSE events + server-side `.git/` watchers** -- true live worktree updates without polling; replaces the interval-based worktrees refetch. See #242.
-- **Progress notifications** -- not worth the ceremony for current workflow lengths
+- **Console engine-trace UX -- Layer 3b (ghost nodes)** -- skipped steps shown at 0.25 opacity with `[ SKIPPED ]` badge; requires backend to emit skipped step IDs in trace refs
+- **Dashboard artifacts** -- replace file-based docs with session-scoped structured outputs rendered in the console; design exists in `workflow-execution-contract.md`
+- **Evict stale repo roots** -- `remembered-roots-store` accumulates forever; stale repos inflate worktree counts. Add TTL eviction. See #241.
+- **Typed SSE events + server-side `.git/` watchers** -- true live worktree updates without polling. See #242.
 - **Authorable response supplements** -- workflow schema surface, validation rules, authoring guidance; design needed first
 - **Declarative composition engine** -- spec-driven workflow assembly from pre-validated routines
 - **Parallel `forEach` execution** -- concurrent loop iterations with result collection
@@ -50,7 +45,8 @@ Lightweight cross-cutting roadmap. **This is the single entry point** -- check h
 - **Multi-tenancy and running-workflow upgrades**
 - **Console cyberpunk polish** -- scanlines, bracket notation for status badges, letter-spacing 0.30em, `//` separators (see `docs/design/console-cyberpunk-ui-discovery.md` for ranked list)
 - **Workflows inventory screen redesign** -- split-pane layout, keyboard-nav item list + persistent detail panel; design-first (see `docs/design/console-ui-backlog.md`)
-- **Equip / unequip workflows from the console** -- `[ EQUIPPED ]` badge, equipped/unequipped visual state, backend toggle endpoint
+- **Equip / unequip workflows from the console** -- `[ EQUIPPED ]` badge, backend toggle endpoint
+- **Forever backward compatibility** -- `workrailVersion` field in workflows, engine version adapters; see `docs/ideas/backlog.md` (high importance, not yet properly designed)
 
 ---
 
@@ -58,15 +54,19 @@ Lightweight cross-cutting roadmap. **This is the single entry point** -- check h
 
 *(moved here to keep Now/Next clean)*
 
-- ~~**Trial the quality gate and readiness audit**~~ -- `workflow-for-workflows.v2.json` and `production-readiness-audit.json` exercised extensively on the MVI refactor and MCP stability work across this session; STANDARD/THOROUGH depth validated
+- ~~**GitHub branch protection + pre-push hook**~~ -- server-side rule blocks direct pushes; `.git-hooks/pre-push` added (was missing despite `core.hooksPath` local override); Claude hook updated to catch `:main` refspec syntax (#344)
+- ~~**Console execution trace explainability -- Layers 1 + 2**~~ -- `[ TRACE ]` tab on each RunCard renders chronological decision log; NodeDetailSection routing sections show `[ WHY SELECTED ]`, `[ CONDITIONS EVALUATED ]` with `[ PASS ]`/`[ SKIP ]` badges; contextFacts chip strip in DAG header (#340)
+- ~~**Top-level runCondition tracing**~~ -- `nextTopLevel()` now emits `evaluated_condition` trace entries for each step, explaining why sparse DAGs jump from phase 0 to phase 6; `formatConditionTrace()` produces `SKIP: taskComplexity (equals)` / `PASS: taskComplexity=Medium (not_equals: Small)`
+- ~~**Filter chips cross-contamination fix**~~ -- selecting a source no longer hides/changes tag pill counts; `sourceFilteredWorkflows` / `tagFilteredWorkflows` added to ViewModel state
+- ~~**Windows CI fix**~~ -- duplicate `createFakeStdout` declaration in shutdown-hooks.test.ts resolved; unblocked release pipeline
+- ~~**Trial the quality gate and readiness audit**~~ -- `workflow-for-workflows.v2.json` and `production-readiness-audit.json` exercised extensively on the MVI refactor and MCP stability work; STANDARD/THOROUGH depth validated
 - ~~**Assessment-gate adoption in mr-review-workflow**~~ -- `mr-review-workflow.agentic.v2.json` already has assessmentRefs/assessmentConsequences alongside `bug-investigation`, `coding-task-workflow-agentic.lean.v2`, and `workflow-for-workflows.v2`
-- ~~**Console CPU spiral**~~ -- all three fixes shipped: `change` SSE events no longer invalidate worktrees (governed by refetchInterval only), enrichWorktree semaphore at MAX=8, fs.watch filtered to `.jsonl` writes
+- ~~**Console CPU spiral**~~ -- all three fixes shipped: `change` SSE events no longer invalidate worktrees, enrichWorktree semaphore MAX=8, fs.watch filtered to `.jsonl` writes
 - ~~**Console MVI architecture**~~ -- all 6 views refactored to Repository → UseCases → Reducer → ViewModel → pure presenter; 290+ new tests; `console/CLAUDE.md` documents the pattern (#332)
-- ~~**MCP server stability**~~ -- `wireStdoutShutdown` (EPIPE crash), `clearIfStaleLock` (stale lock after crash), `HttpServer.stop()` idempotency (double SIGTERM), port exhaustion graceful degradation, `openDashboard` degraded-mode guard (#332, #335)
+- ~~**MCP server stability**~~ -- `wireStdoutShutdown` (EPIPE crash), `clearIfStaleLock` (stale lock after crash), `HttpServer.stop()` idempotency, port exhaustion graceful degradation (#332, #335)
 - ~~**HTTP MCP dev environment**~~ -- nodemon + HTTP transport for local dev; `npm run dev:mcp:watch` (#334)
 - ~~**Worktree scan parallelization**~~ -- parallel filter, lazy workspace dir, reduced subprocess timeout (#325)
 - ~~**Workflow-source setup phase 1**~~ -- rooted team sharing, remembered roots, grouped source visibility (#160–#164)
 - ~~**MCP Roots Protocol**~~ -- per-request workspace anchor resolution, `RootsReader`/`RootsWriter` capability split (#75/#78/#147)
-- ~~**Content coherence and linked references**~~ -- `StepContentEnvelope`, `WorkflowReference`, parallel resolution, discriminated union types
 - ~~**v2 production readiness**~~ -- v2 default-on, feature flag gate removed
 - ~~**Retrieval budget and recovery surface**~~ -- 24 KB recovery budget, 2 KB resume preview, deterministic tiering

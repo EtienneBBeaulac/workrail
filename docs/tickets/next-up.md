@@ -4,94 +4,80 @@ Groomed near-term tickets. Check `docs/roadmap/now-next-later.md` first for the 
 
 ---
 
-## Ticket 1: Assessment-gate adoption in mr-review-workflow
+## Ticket 1: Open PR for fix-multi-instance-gaps
 
-### Problem
-
-The assessment-gate engine feature exists and is piloted in `bug-investigation.agentic.v2.json`, but adoption is intentionally narrow. The next highest-value workflow to adopt it is `mr-review-workflow.agentic.v2.json`.
-
-### Goal
-
-Add workflow-level assessment declarations and step-level assessment refs + consequence declarations to `mr-review-workflow.agentic.v2.json`. Calibrate follow-up wording and consequence visibility from observed behavior.
-
-### Acceptance criteria
-
-- `workflows/mr-review-workflow.agentic.v2.json` uses assessment refs on at least its core review steps
-- Follow-up consequence behavior matches the pattern piloted in `bug-investigation.agentic.v2.json`
-- `npm run validate:registry` passes
-- Planning docs updated to reflect the expanded rollout
-
-### Files
-
-- `workflows/mr-review-workflow.agentic.v2.json`
-- `docs/plans/mr-review-workflow-redesign.md`
-- `docs/roadmap/open-work-inventory.md`
+Branch `fix/etienneb/multi-instance-gaps` has a committed + pushed fix: `fix(mcp): resolve three multi-instance safety gaps` (HttpServer.ts, http-entry.ts, tests). Needs a PR opened and merged.
 
 ---
 
-## Ticket 3: Trial quality gate and readiness audit on real tasks
+## Ticket 2: Execution trace Layer 3a (no backend)
 
-### Problem
+### What to build
 
-`workflow-for-workflows.v2.json` and `production-readiness-audit.json` have been tuned through authoring reasoning, not evidence from varied real use. The remaining risk is ceremony vs usefulness at `STANDARD` vs `THOROUGH` depth.
+Three independent DAG annotations, all using existing trace data:
 
-### Goal
-
-Run both workflows on multiple distinct tasks spanning at least two archetypes each. Tune from what is observed. Record findings in planning docs.
-
-### Acceptance criteria
-
-- `workflow-for-workflows.v2.json` exercised on 2+ distinct authoring tasks spanning different archetypes
-- `production-readiness-audit.json` exercised on 2+ realistic audit targets with different scope/risk shapes
-- Observed weaknesses classified into authoring-integrity, outcome-effectiveness, or ceremony/depth tuning buckets
-- Any resulting workflow edits revalidated with `npm run validate:registry`
-- Planning docs capture the tuned follow-up state
+- **Edge cause diamonds** -- 10×10px rotated square at each edge midpoint, character code (C/F/D/>) + color indicating trace item kind. Hover shows the trace item summary.
+- **Loop bracket in gutter** -- amber vertical line spanning looped nodes, `[ LOOP ]` top cap + `[ // Nx ]` bottom cap. Suppressed for single-iteration loops.
+- **`[ CAUSE ]` footer on blocked_attempt nodes** -- expandable footer showing the blocker summary from the trace.
 
 ### Files
 
-- `workflows/workflow-for-workflows.v2.json`
-- `workflows/production-readiness-audit.json`
+- `console/src/components/RunLineageDag.tsx`
+- `console/src/components/NodeDetailSection.tsx` (CAUSE footer section)
+
+### Notes
+
+- `run.executionTraceSummary` is already available in `RunLineageDag` (used for contextFacts chips). No new props needed.
+- Layer 3b (ghost nodes for skipped steps) requires backend confirmation that skipped step IDs are emitted in trace refs -- keep separate.
+- See `docs/design/console-execution-trace-discovery.md` for the full design.
 
 ---
 
-## Ticket 4: Design console execution-trace explainability
-
-### Problem
-
-The console DAG shows only `node_created`/`edge_created`. Engine decisions -- fast paths, skipped phases, condition evaluation, loop entry/exit, `taskComplexity` -- are invisible. Legitimate runs look broken when the DAG is sparse.
+## Ticket 3: Legacy workflow modernization -- exploration-workflow.json
 
 ### Goal
 
-Produce a concrete design (DTO shape + UX direction) so the console can explain *why* the engine took a path, not just *which* nodes were created. This is a design ticket -- no implementation.
+Modernize `workflows/exploration-workflow.json` to current v2/lean authoring patterns. This is the highest-priority candidate among the unmodernized workflows.
 
-### Acceptance criteria
+### What modernization means
 
-- Concrete console design exists for showing engine decisions alongside the DAG
-- Design distinguishes authoring phases from actual execution nodes
-- Proposed DTO shape identifies which engine events and run-context fields must be projected
-- Design includes at least one clear UX treatment for fast paths / skipped phases that currently look like broken graphs
+- Current v2/lean structure where appropriate
+- `metaGuidance` and `recommendedPreferences`
+- `references` for authoritative companion material
+- `templateCall` / routine injection instead of repeating large prompt blocks
+- Tighter loop-control wording and evidence-oriented review structure
 
-### Non-goals
+### Related
 
-- Implementing the full console redesign
-- Exposing every raw engine event directly in the UI
+- `docs/roadmap/open-work-inventory.md` (full prioritized modernization list)
+- `docs/authoring.md` (modern baseline)
 
-### Files / related
+---
 
-- `docs/reference/workflow-execution-contract.md`
-- `src/v2/usecases/console-service.ts`
-- `console/src/api/types.ts`
-- `docs/ideas/backlog.md` (Console engine-trace visibility)
+## Ticket 4: Design console execution-trace explainability (Layer 3b -- ghost nodes)
+
+### Status
+
+Blocked on backend confirmation. `ConsoleDagNode` has no `stepId` field. The backend needs to either emit a step_id-to-position mapping or emit synthetic `skipped_step` DAG nodes before this can be built.
+
+### What needs backend work
+
+- Confirm whether `selected_next_step` trace refs include skipped step IDs
+- Add `stepId` field to `ConsoleDagNode` DTO or a new `skipped_step` event kind
 
 ---
 
 ## Recently completed
 
-- ~~**Ticket: v2 sign-off and cleanup**~~ (done -- v2 is default-on, stale docs cleaned up)
-- ~~**Ticket: Retrieval budget strengthening**~~ (done -- 24 KB recovery budget, deterministic tiering, #144161e)
-- ~~**Ticket: Expand lifecycle validation coverage**~~ (done -- auto-walk smoke test covers all bundled workflows)
-- ~~**Ticket: Workflow-source setup phase 1**~~ (done -- rooted team sharing, remembered roots, grouped source visibility, #160–#164)
-- ~~**Ticket: Finish prompt/supplement boundary alignment**~~ (done -- documented in authoring.md, workflow-execution-contract.md)
-- ~~**Ticket: Console CPU spiral**~~ (done -- change events no longer invalidate worktrees, enrichWorktree semaphore MAX=8, fs.watch filtered to .jsonl)
-- ~~**Ticket: Console MVI architecture**~~ (done -- all 6 views refactored, 290+ tests, console/CLAUDE.md, #332)
-- ~~**Ticket: MCP server stability**~~ (done -- EPIPE crash, stale lock, double SIGTERM, port exhaustion, #332 #335)
+- ~~**Ticket: Console execution trace Layer 1 + 2**~~ (done -- `[ TRACE ]` tab, NodeDetailSection routing sections, condition tracing, #340)
+- ~~**Ticket: Top-level runCondition tracing**~~ (done -- `formatConditionTrace`, `traceStepRunConditionSkipped/Passed`, `nextTopLevel` emits evaluated_condition entries)
+- ~~**Ticket: Filter chips cross-contamination**~~ (done -- `sourceFilteredWorkflows`/`tagFilteredWorkflows` in ViewModel)
+- ~~**Ticket: Windows CI fix**~~ (done -- duplicate createFakeStdout resolved)
+- ~~**Ticket: GitHub branch protection + pre-push hook**~~ (done -- server-side rule + .git-hooks/pre-push, #344)
+- ~~**Ticket: Assessment-gate mr-review adoption**~~ (done -- already had assessmentRefs)
+- ~~**Ticket: Console CPU spiral**~~ (done -- all three fixes shipped)
+- ~~**Ticket: Console MVI architecture**~~ (done -- all 6 views, #332)
+- ~~**Ticket: MCP server stability**~~ (done -- EPIPE, stale lock, double SIGTERM, #332 #335)
+- ~~**Ticket: v2 sign-off and cleanup**~~ (done)
+- ~~**Ticket: Retrieval budget strengthening**~~ (done)
+- ~~**Ticket: Workflow-source setup phase 1**~~ (done, #160–#164)
