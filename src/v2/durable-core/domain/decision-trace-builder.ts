@@ -74,10 +74,11 @@ export function traceExitedLoop(loopId: string, reason: string): DecisionTraceEn
   };
 }
 
-export function traceSelectedNextStep(stepId: string): DecisionTraceEntry {
+export function traceSelectedNextStep(stepId: string, stepTitle?: string): DecisionTraceEntry {
+  const label = stepTitle ? `${stepTitle} (${stepId})` : stepId;
   return {
     kind: 'selected_next_step',
-    summary: `Selected next step '${stepId}'.`,
+    summary: `Next step: ${label}`,
     refs: [{ kind: 'step_id', stepId }],
   };
 }

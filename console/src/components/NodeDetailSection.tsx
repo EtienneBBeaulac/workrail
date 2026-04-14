@@ -164,7 +164,6 @@ function RoutingSection({
             </div>
             {whySelected.length > 0 ? (
               <div className="space-y-1 pl-2 border-l border-[var(--border)]">
-                <p className="text-[10px] font-mono text-[var(--text-muted)] mb-1">Engine selected this step because:</p>
                 {whySelected.map((item, idx) => (
                   <RoutingItemRow key={idx} item={item} />
                 ))}
