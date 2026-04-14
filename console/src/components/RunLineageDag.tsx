@@ -245,6 +245,25 @@ export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props
           </div>
         </div>
         <OverviewRail model={model} selectedNodeId={selectedNodeId} onNavigateToNode={focusNodeInViewport} />
+        {run.executionTraceSummary !== null && run.executionTraceSummary.contextFacts.length > 0 && (
+          <div className="flex flex-wrap gap-2 mt-3">
+            {run.executionTraceSummary.contextFacts.map((fact) => (
+              <div
+                key={fact.key}
+                className="inline-flex items-center gap-2 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.16em]"
+                style={{
+                  color: 'var(--text-muted)',
+                  backgroundColor: 'rgba(123, 141, 167, 0.08)',
+                  border: '1px solid rgba(123, 141, 167, 0.20)',
+                }}
+              >
+                <span style={{ color: 'var(--text-secondary)' }}>{dagCamelToSpacedUpper(fact.key)}</span>
+                <span style={{ color: 'var(--text-muted)' }}>//</span>
+                <span style={{ color: 'var(--text-primary)' }}>{fact.value}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div
@@ -636,4 +655,12 @@ function getDisplayLabel(
 
 function truncateLabel(label: string): string {
   return label.length > 18 ? `${label.slice(0, 18)}…` : label;
+}
+
+/** Converts a camelCase key to spaced uppercase (e.g. taskComplexity -> TASK COMPLEXITY). */
+function dagCamelToSpacedUpper(key: string): string {
+  return key
+    .replace(/([A-Z])/g, ' $1')
+    .toUpperCase()
+    .trim();
 }

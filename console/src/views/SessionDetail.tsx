@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import { RunLineageDag } from '../components/RunLineageDag';
+import { RunNarrativeView } from '../components/RunNarrativeView';
 import { StatusBadge } from '../components/StatusBadge';
 import { HealthBadge } from '../components/HealthBadge';
 import { NodeDetailSection } from '../components/NodeDetailSection';
@@ -83,14 +85,23 @@ function SessionMetaCard({ data }: { data: ConsoleSessionDetail }) {
 
 function HintBanner({ runs }: { runs: readonly ConsoleDagRun[] }) {
   const hasPreferredTip = runs.some((r) => r.preferredTipNodeId !== null);
-  const message = hasPreferredTip
+  const hasTrace = runs.some((r) => r.executionTraceSummary !== null);
+
+  const dagMessage = hasPreferredTip
     ? 'Nodes with a gold border are the current execution tips \u2014 click any node to inspect its execution detail.'
     : 'Click any node in the DAG to inspect its execution detail.';
 
   return (
-    <p className="border border-[var(--border)] px-4 py-3 text-xs text-[var(--text-muted)]">
-      {message}
-    </p>
+    <div className="border border-[var(--border)] px-4 py-3 text-xs text-[var(--text-muted)] space-y-1">
+      <p>{dagMessage}</p>
+      {hasTrace && (
+        <p>
+          This run has execution trace data. Click{' '}
+          <span className="font-mono uppercase tracking-[0.16em]">[ TRACE ]</span>{' '}
+          to see why certain steps ran, were skipped, or repeated.
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -175,6 +186,7 @@ export function SessionDetail({ viewModel }: Props) {
             nodeId={selectedNode?.nodeId ?? null}
             runStatus={selectedRun?.status ?? 'complete'}
             currentNodeId={selectedRun?.preferredTipNodeId ?? null}
+            executionTraceSummary={selectedRun?.executionTraceSummary ?? null}
           />
         </div>
       </CutCornerBox>
@@ -186,6 +198,8 @@ export function SessionDetail({ viewModel }: Props) {
 // RunCard
 // ---------------------------------------------------------------------------
 
+type RunCardTab = 'dag' | 'trace';
+
 function RunCard({
   run,
   selectedNodeId,
@@ -195,16 +209,20 @@ function RunCard({
   selectedNodeId: string | null;
   onNodeClick: (runId: string, nodeId: string) => void;
 }) {
+  // Tab strip is only shown when the run has execution trace data.
+  const hasTrace = run.executionTraceSummary !== null;
+  const [activeTab, setActiveTab] = useState<RunCardTab>('dag');
+
   return (
     // CutCornerBox requires explicit height (absolute inner layers).
-    // Header: py-3 (24px) + text-sm line-height (20px) = 44px.
-    // DAG: 460px. Inset: 2px. Total: 506px.
+    // Without tab strip: header py-3 (24px) + text-sm line-height (20px) = 44px + DAG 460px + inset 2px = 506px.
+    // With tab strip: add 36px for the tab strip row -> 542px.
     <CutCornerBox
       cut={10}
       background="rgba(27, 31, 44, 0.72)"
       backdropFilter="blur(8px)"
       className="relative"
-      style={{ height: '506px' }}
+      style={{ height: hasTrace ? '542px' : '506px' }}
     >
       <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] shrink-0">
         <div className="flex items-center gap-3">
@@ -225,12 +243,64 @@ function RunCard({
           <StatusBadge status={run.status} />
         </div>
       </div>
+
+      {/* Tab strip -- only shown when execution trace data is available */}
+      {hasTrace && (
+        <div className="flex items-center border-b border-[var(--border)] shrink-0 h-9 px-2 gap-0.5">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'dag'}
+            onClick={() => setActiveTab('dag')}
+            className={[
+              'tab-btn px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.25em] transition-colors duration-150',
+              activeTab === 'dag'
+                ? 'tab-btn--active text-[var(--accent)]'
+                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
+            ].join(' ')}
+            style={activeTab === 'dag' ? { backgroundColor: 'rgba(244, 196, 48, 0.06)' } : undefined}
+          >
+            <span className="tab-corner tab-corner--tl" aria-hidden="true" />
+            <span className="tab-corner tab-corner--tr" aria-hidden="true" />
+            <span className="tab-corner tab-corner--bl" aria-hidden="true" />
+            <span className="tab-corner tab-corner--br" aria-hidden="true" />
+            DAG
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'trace'}
+            onClick={() => setActiveTab('trace')}
+            className={[
+              'tab-btn px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.25em] transition-colors duration-150',
+              activeTab === 'trace'
+                ? 'tab-btn--active text-[var(--accent)]'
+                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
+            ].join(' ')}
+            style={activeTab === 'trace' ? { backgroundColor: 'rgba(244, 196, 48, 0.06)' } : undefined}
+          >
+            <span className="tab-corner tab-corner--tl" aria-hidden="true" />
+            <span className="tab-corner tab-corner--tr" aria-hidden="true" />
+            <span className="tab-corner tab-corner--bl" aria-hidden="true" />
+            <span className="tab-corner tab-corner--br" aria-hidden="true" />
+            TRACE
+          </button>
+        </div>
+      )}
+
       <div className="flex-1">
-        <RunLineageDag
-          run={run}
-          selectedNodeId={selectedNodeId}
-          onNodeClick={(nodeId) => onNodeClick(run.runId, nodeId)}
-        />
+        {activeTab === 'trace' && run.executionTraceSummary !== null ? (
+          <RunNarrativeView
+            summary={run.executionTraceSummary}
+            runStatus={run.status}
+          />
+        ) : (
+          <RunLineageDag
+            run={run}
+            selectedNodeId={selectedNodeId}
+            onNodeClick={(nodeId) => onNodeClick(run.runId, nodeId)}
+          />
+        )}
       </div>
     </CutCornerBox>
   );

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useNodeDetail } from '../api/hooks';
 import { MarkdownView } from './MarkdownView';
 import { MonoLabel } from './MonoLabel';
@@ -8,13 +9,16 @@ import type {
   ConsoleAdvanceOutcome,
   ConsoleNodeGap,
   ConsoleArtifact,
+  ConsoleExecutionTraceSummary,
+  ConsoleExecutionTraceItem,
 } from '../api/types';
 
 interface Props {
-  sessionId: string;
-  nodeId: string | null;
-  runStatus?: ConsoleRunStatus;
-  currentNodeId?: string | null;
+  readonly sessionId: string;
+  readonly nodeId: string | null;
+  readonly runStatus?: ConsoleRunStatus;
+  readonly currentNodeId?: string | null;
+  readonly executionTraceSummary?: ConsoleExecutionTraceSummary | null;
 }
 
 export function NodeDetailSection({
@@ -22,6 +26,7 @@ export function NodeDetailSection({
   nodeId,
   runStatus = 'complete',
   currentNodeId = null,
+  executionTraceSummary = null,
 }: Props) {
   const { data, isLoading, error } = useNodeDetail(sessionId, nodeId);
 
@@ -50,6 +55,7 @@ export function NodeDetailSection({
             detail={data}
             runStatus={runStatus}
             currentNodeId={currentNodeId}
+            executionTraceSummary={executionTraceSummary}
           />
         )}
       </div>
@@ -79,9 +85,10 @@ function SectionHeader({ stepLabel, nodeId }: { stepLabel: string | null; nodeId
 // ---------------------------------------------------------------------------
 
 interface NodeDetailContentProps {
-  detail: ConsoleNodeDetail;
-  runStatus: ConsoleRunStatus;
-  currentNodeId: string | null;
+  readonly detail: ConsoleNodeDetail;
+  readonly runStatus: ConsoleRunStatus;
+  readonly currentNodeId: string | null;
+  readonly executionTraceSummary: ConsoleExecutionTraceSummary | null;
 }
 
 interface SectionDef {
@@ -90,8 +97,237 @@ interface SectionDef {
   readonly render: (props: NodeDetailContentProps) => React.ReactNode;
 }
 
+// ---------------------------------------------------------------------------
+// Routing section components (used in SECTION_REGISTRY entries below)
+// ---------------------------------------------------------------------------
+
+function RoutingTraceBadge({
+  label,
+  color,
+}: {
+  label: string;
+  color: string;
+}) {
+  return (
+    <span
+      className="shrink-0 inline-flex items-center px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.20em]"
+      style={{ color, backgroundColor: `${color}18`, border: `1px solid ${color}40` }}
+    >
+      {label}
+    </span>
+  );
+}
+
+function RoutingItemRow({ item }: { item: ConsoleExecutionTraceItem }) {
+  return (
+    <div className="flex items-start gap-2 text-xs py-1">
+      <span className="flex-1 text-[var(--text-secondary)] leading-relaxed">{item.summary}</span>
+      <span className="font-mono text-[10px] text-[var(--text-muted)] shrink-0">#{item.recordedAtEventIndex}</span>
+    </div>
+  );
+}
+
+function RoutingSection({
+  nodeId,
+  nodeKind,
+  executionTraceSummary,
+}: {
+  nodeId: string;
+  nodeKind: ConsoleNodeDetail['nodeKind'];
+  executionTraceSummary: ConsoleExecutionTraceSummary;
+}) {
+  const nodeItems = executionTraceSummary.items.filter(
+    (item) => item.refs.some((r) => r.kind === 'node_id' && r.value === nodeId),
+  );
+
+  const whySelected = nodeItems.filter((i) => i.kind === 'selected_next_step');
+  const conditions = nodeItems.filter((i) => i.kind === 'evaluated_condition');
+  const loops = nodeItems.filter((i) => i.kind === 'entered_loop' || i.kind === 'exited_loop');
+  const divergences = nodeItems.filter((i) => i.kind === 'divergence');
+
+  const hasAnyItems = nodeItems.length > 0;
+
+  // When no items match but trace is non-null: show "no routing trace" message
+  if (!hasAnyItems) {
+    return (
+      <Section title="Routing context">
+        {nodeKind === 'blocked_attempt' && whySelected.length === 0 ? (
+          <div className="flex items-start gap-2 py-1">
+            <RoutingTraceBadge label="WHY SELECTED" color="var(--text-muted)" />
+            <span className="text-xs text-[var(--text-muted)] leading-relaxed">
+              This step was attempted but not selected as the preferred path.
+            </span>
+          </div>
+        ) : (
+          <span className="font-mono text-xs text-[var(--text-muted)]">
+            // no routing trace for this node
+          </span>
+        )}
+      </Section>
+    );
+  }
+
+  return (
+    <Section title="Routing context">
+      <div className="space-y-3">
+        {/* WHY SELECTED */}
+        {(whySelected.length > 0 || nodeKind === 'blocked_attempt') && (
+          <div>
+            <div className="mb-1.5 flex items-center gap-2">
+              <RoutingTraceBadge label="WHY SELECTED" color="var(--accent)" />
+            </div>
+            {whySelected.length > 0 ? (
+              <div className="space-y-1 pl-2 border-l border-[var(--border)]">
+                <p className="text-[10px] font-mono text-[var(--text-muted)] mb-1">Engine selected this step because:</p>
+                {whySelected.map((item, idx) => (
+                  <RoutingItemRow key={idx} item={item} />
+                ))}
+              </div>
+            ) : nodeKind === 'blocked_attempt' ? (
+              <div className="pl-2 border-l border-[var(--border)]">
+                <span className="text-xs text-[var(--text-muted)]">
+                  This step was attempted but not selected as the preferred path.
+                </span>
+              </div>
+            ) : null}
+          </div>
+        )}
+
+        {/* CONDITIONS EVALUATED -- SKIP conditions first */}
+        {conditions.length > 0 && (
+          <div>
+            <div className="mb-1.5">
+              <RoutingTraceBadge label="CONDITIONS EVALUATED" color="var(--text-secondary)" />
+            </div>
+            <div className="space-y-1 pl-2 border-l border-[var(--border)]">
+              {[
+                ...conditions.filter((c) => !/\btrue\b|\bpass/i.test(c.summary)),
+                ...conditions.filter((c) => /\btrue\b|\bpass/i.test(c.summary)),
+              ].map((item, idx) => {
+                const passed = /\btrue\b|\bpass/i.test(item.summary);
+                return (
+                  <div key={idx} className="flex items-start gap-2 text-xs py-0.5">
+                    <RoutingTraceBadge
+                      label={passed ? 'PASS' : 'SKIP'}
+                      color={passed ? 'var(--success)' : 'var(--warning)'}
+                    />
+                    <span className="flex-1 text-[var(--text-secondary)] leading-relaxed">{item.summary}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* LOOP */}
+        {loops.length > 0 && (
+          <div>
+            <div className="mb-1.5">
+              <RoutingTraceBadge label="LOOP" color="var(--accent-strong)" />
+            </div>
+            <div className="space-y-1 pl-2 border-l border-[var(--border)]">
+              {loops.map((item, idx) => (
+                <RoutingItemRow key={idx} item={item} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* DIVERGENCE */}
+        {divergences.length > 0 && (
+          <div>
+            <div className="mb-1.5">
+              <RoutingTraceBadge label="DIVERGENCE" color="var(--error)" />
+            </div>
+            <div className="space-y-1 pl-2 border-l border-[var(--border)]">
+              {divergences.map((item, idx) => (
+                <RoutingItemRow key={idx} item={item} />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </Section>
+  );
+}
+
+function RunRoutingSection({ items }: { items: readonly ConsoleExecutionTraceItem[] }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <Section title="Run routing">
+      <div>
+        <button
+          type="button"
+          onClick={() => setExpanded((e) => !e)}
+          className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.20em] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
+        >
+          <RoutingTraceBadge label="RUN ROUTING" color="var(--text-muted)" />
+          <span className="text-[var(--text-muted)]">// {items.length} ambient items</span>
+          <span>{expanded ? '[-]' : '[+]'}</span>
+        </button>
+        {expanded && (
+          <div className="mt-2 space-y-1 pl-2 border-l border-[var(--border)]">
+            {items.map((item, idx) => {
+              const kindLabel = item.kind.replace(/_/g, ' ').toUpperCase();
+              return (
+                <div key={idx} className="flex items-start gap-2 text-xs py-0.5">
+                  <span
+                    className="shrink-0 inline-flex items-center px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.16em]"
+                    style={{ color: 'var(--text-muted)', backgroundColor: 'rgba(123,141,167,0.08)', border: '1px solid rgba(123,141,167,0.20)' }}
+                  >
+                    {kindLabel}
+                  </span>
+                  <span className="flex-1 text-[var(--text-secondary)] leading-relaxed">{item.summary}</span>
+                  <span className="font-mono text-[10px] text-[var(--text-muted)] shrink-0">#{item.recordedAtEventIndex}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </Section>
+  );
+}
+
+// INVARIANT: routing must remain first -- users need routing context before execution output
 // Sections render top-to-bottom in this order. Return null to hide a section.
 const SECTION_REGISTRY: readonly SectionDef[] = [
+  {
+    id: 'routing',
+    column: 'primary',
+    render: ({ detail, executionTraceSummary }) => {
+      // Hidden entirely when executionTraceSummary is null (legacy sessions)
+      if (executionTraceSummary === null) return null;
+      return (
+        <RoutingSection
+          key="routing"
+          nodeId={detail.nodeId}
+          nodeKind={detail.nodeKind}
+          executionTraceSummary={executionTraceSummary}
+        />
+      );
+    },
+  },
+  {
+    id: 'run_routing',
+    column: 'primary',
+    render: ({ executionTraceSummary }) => {
+      // Hidden entirely when executionTraceSummary is null (legacy sessions)
+      if (executionTraceSummary === null) return null;
+      // Ambient items: items that have no node_id ref
+      const ambientItems = executionTraceSummary.items.filter(
+        (item) => !item.refs.some((r) => r.kind === 'node_id'),
+      );
+      if (ambientItems.length === 0) return null;
+      return (
+        <RunRoutingSection
+          key="run_routing"
+          items={ambientItems}
+        />
+      );
+    },
+  },
   {
     id: 'recap',
     column: 'primary',
