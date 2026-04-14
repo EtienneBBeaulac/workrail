@@ -67,16 +67,10 @@ For explicit status on the major older planning docs themselves, see `docs/roadm
   - `docs/plans/workflow-validation-roadmap.md`
   - `docs/plans/workflow-validation-design.md`
 
-### 5. Planning system adoption
+### ~~5. Planning system adoption~~ (done)
 
-- **Status**: partial
-- **Why it is here**: the planning taxonomy now exists, but old initiative docs still dominate the repo and the new system has not been fully adopted yet
-- **Still open**:
-  - move live work into `ideas`, `roadmap`, and `tickets`
-  - stop using stale plan docs as active truth
-  - keep the next priorities easy to find
-- **Source docs**:
-  - `docs/planning/README.md`
+- **Status**: complete (2026-04-14)
+- **What was delivered**: `now-next-later.md` is the single entry point with accurate Now/Next/Later/Recently-shipped sections. `tickets/next-up.md` has 4 clean groomed tickets. `open-work-inventory.md` reflects actual shipped state. Stale plan docs are no longer the active source of truth.
 
 ## Planned but unimplemented
 
