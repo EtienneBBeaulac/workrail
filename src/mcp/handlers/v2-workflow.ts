@@ -79,21 +79,23 @@ function readWorkflowTags(): WorkflowTagsFile | null {
 
 const WORKFLOW_TAGS: WorkflowTagsFile | null = readWorkflowTags();
 
+/** Well-known acronyms that should not be title-cased like ordinary words. */
+const NAMESPACE_ACRONYMS: Readonly<Record<string, string>> = {
+  ios: 'iOS',
+  api: 'API',
+  ui: 'UI',
+  ux: 'UX',
+  mcp: 'MCP',
+};
+
 /**
  * Convert a kebab-case namespace like "mercury-android" to a display name like "Mercury Android".
  * Recognises common acronyms so "mercury-ios" becomes "Mercury iOS".
  */
 function namespaceToDisplayName(namespace: string): string {
-  const ACRONYMS: Readonly<Record<string, string>> = {
-    ios: 'iOS',
-    api: 'API',
-    ui: 'UI',
-    ux: 'UX',
-    mcp: 'MCP',
-  };
   return namespace
     .split('-')
-    .map((word) => ACRONYMS[word] ?? word.charAt(0).toUpperCase() + word.slice(1))
+    .map((word) => NAMESPACE_ACRONYMS[word] ?? word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ');
 }
 
@@ -155,6 +157,11 @@ export function buildTagSummary(
       examples: [...tag.examples],
     };
   });
+  // Invariant: bundled tag IDs are functional slugs (e.g. "coding", "review_audit") while
+  // virtual source tag IDs are namespace prefixes (e.g. "mercury-android"). These
+  // namespaces are categorically distinct, so collision is not expected. If workflow-tags.json
+  // ever gains a bundled tag whose id matches a team namespace, two entries with the same id
+  // would appear in the summary — update the bundled tag id to avoid the overlap.
   return [...bundledTags, ...buildVirtualSourceTags(tagsFile, compiledWorkflowIds)];
 }
 
@@ -164,7 +171,7 @@ export function buildTagSummary(
  * tags derived from namespace prefixes (e.g. tag "mercury-android" matches all IDs of
  * the form "mercury-android.*" that are not in the bundled registry).
  */
-function filterByTags(
+export function filterByTags(
   tagsFile: WorkflowTagsFile,
   compiledWorkflowIds: readonly string[],
   requestedTags: readonly string[],

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildTagSummary, buildVirtualSourceTags } from '../../../src/mcp/handlers/v2-workflow.js';
+import { buildTagSummary, buildVirtualSourceTags, filterByTags } from '../../../src/mcp/handlers/v2-workflow.js';
 
 const SAMPLE_TAGS_FILE = {
   tags: [
@@ -106,5 +106,39 @@ describe('buildVirtualSourceTags', () => {
   it('applies acronym-aware title casing', () => {
     const tags = buildVirtualSourceTags(SAMPLE_TAGS_FILE, ['mercury-ios.some-workflow']);
     expect(tags[0]!.displayName).toBe('Mercury iOS');
+  });
+});
+
+describe('filterByTags', () => {
+  it('returns registered workflows matching a bundled functional tag', () => {
+    const ids = ['coding-task', 'mr-review', 'mercury-android.workflow-a'];
+    const result = filterByTags(SAMPLE_TAGS_FILE, ids, ['coding']);
+    expect(result).toEqual(['coding-task']);
+  });
+
+  it('returns unregistered namespaced workflows when their namespace is requested', () => {
+    const ids = ['coding-task', 'mercury-android.workflow-a', 'mercury-android.workflow-b', 'mercury-ios.workflow-c'];
+    const result = filterByTags(SAMPLE_TAGS_FILE, ids, ['mercury-android']);
+    expect(result).toContain('mercury-android.workflow-a');
+    expect(result).toContain('mercury-android.workflow-b');
+    expect(result).not.toContain('mercury-ios.workflow-c');
+    expect(result).not.toContain('coding-task');
+  });
+
+  it('handles a mix of bundled and virtual tag filters', () => {
+    const ids = ['coding-task', 'mercury-android.workflow-a'];
+    const result = filterByTags(SAMPLE_TAGS_FILE, ids, ['coding', 'mercury-android']);
+    expect(result).toContain('coding-task');
+    expect(result).toContain('mercury-android.workflow-a');
+  });
+
+  it('does not include registered namespaced IDs as virtual tag matches', () => {
+    const tagsFileWithNs = {
+      ...SAMPLE_TAGS_FILE,
+      workflows: { ...SAMPLE_TAGS_FILE.workflows, 'acme.registered': { tags: ['coding'] as const } },
+    };
+    // 'acme.registered' is registered under 'coding', not as a virtual tag
+    const result = filterByTags(tagsFileWithNs, ['acme.registered'], ['acme']);
+    expect(result).toHaveLength(0); // registered IDs are skipped in virtual matching
   });
 });
