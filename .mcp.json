@@ -4,9 +4,5 @@
       "type": "http",
       "url": "https://api.githubcopilot.com/mcp/"
     },
-    "workrail": {
-      "type": "http",
-      "url": "http://localhost:3100/mcp"
-    }
   }
 }
