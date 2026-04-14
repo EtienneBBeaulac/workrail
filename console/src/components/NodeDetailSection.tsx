@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useNodeDetail } from '../api/hooks';
 import { MarkdownView } from './MarkdownView';
 import { MonoLabel } from './MonoLabel';
+import { TraceBadge } from './TraceBadge';
+import { getNodeRoutingItems, isConditionPassed } from '../views/session-detail-use-cases';
 import type {
   ConsoleNodeDetail,
   ConsoleRunStatus,
@@ -101,23 +103,6 @@ interface SectionDef {
 // Routing section components (used in SECTION_REGISTRY entries below)
 // ---------------------------------------------------------------------------
 
-function RoutingTraceBadge({
-  label,
-  color,
-}: {
-  label: string;
-  color: string;
-}) {
-  return (
-    <span
-      className="shrink-0 inline-flex items-center px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.20em]"
-      style={{ color, backgroundColor: `${color}18`, border: `1px solid ${color}40` }}
-    >
-      {label}
-    </span>
-  );
-}
-
 function RoutingItemRow({ item }: { item: ConsoleExecutionTraceItem }) {
   return (
     <div className="flex items-start gap-2 text-xs py-1">
@@ -136,19 +121,17 @@ function RoutingSection({
   nodeKind: ConsoleNodeDetail['nodeKind'];
   executionTraceSummary: ConsoleExecutionTraceSummary;
 }) {
-  const nodeItems = executionTraceSummary.items.filter(
-    (item) => item.refs.some((r) => r.kind === 'node_id' && r.value === nodeId),
+  const { whySelected, conditions, loops, divergences, forks } = getNodeRoutingItems(
+    executionTraceSummary,
+    nodeId,
   );
 
-  const whySelected = nodeItems.filter((i) => i.kind === 'selected_next_step');
-  const conditions = nodeItems.filter((i) => i.kind === 'evaluated_condition');
-  const loops = nodeItems.filter((i) => i.kind === 'entered_loop' || i.kind === 'exited_loop');
-  const divergences = nodeItems.filter((i) => i.kind === 'divergence');
-  // detected_non_tip_advance always has a node_id ref (run-execution-trace.ts prepends one)
-  // -- must render explicitly or these items make hasAnyItems=true but show nothing.
-  const forks = nodeItems.filter((i) => i.kind === 'detected_non_tip_advance');
-
-  const hasAnyItems = nodeItems.length > 0;
+  // Only count items that are actually rendered -- context_fact items are shown
+  // as chips in the DAG header, not in this section. If only context_fact items
+  // ref this node, show the "no routing trace" fallback rather than an empty body.
+  const hasAnyItems = executionTraceSummary.items.some(
+    (item) => item.kind !== 'context_fact' && item.refs.some((r) => r.kind === 'node_id' && r.value === nodeId),
+  );
 
   // When no items match but trace is non-null: show "no routing trace" message
   if (!hasAnyItems) {
@@ -156,7 +139,7 @@ function RoutingSection({
       <Section title="Routing context">
         {nodeKind === 'blocked_attempt' && whySelected.length === 0 ? (
           <div className="flex items-start gap-2 py-1">
-            <RoutingTraceBadge label="WHY SELECTED" color="var(--text-muted)" />
+            <TraceBadge label="WHY SELECTED" color="var(--text-muted)" bgColor="rgba(123,141,167,0.08)" />
             <span className="text-xs text-[var(--text-muted)] leading-relaxed">
               This step was attempted but not selected as the preferred path.
             </span>
@@ -177,7 +160,7 @@ function RoutingSection({
         {(whySelected.length > 0 || nodeKind === 'blocked_attempt') && (
           <div>
             <div className="mb-1.5 flex items-center gap-2">
-              <RoutingTraceBadge label="WHY SELECTED" color="var(--accent)" />
+              <TraceBadge label="WHY SELECTED" color="var(--accent)" bgColor="rgba(244,196,48,0.10)" />
             </div>
             {whySelected.length > 0 ? (
               <div className="space-y-1 pl-2 border-l border-[var(--border)]">
@@ -200,20 +183,21 @@ function RoutingSection({
         {conditions.length > 0 && (
           <div>
             <div className="mb-1.5">
-              <RoutingTraceBadge label="CONDITIONS EVALUATED" color="var(--text-secondary)" />
+              <TraceBadge label="CONDITIONS EVALUATED" color="var(--text-secondary)" bgColor="rgba(168,159,140,0.10)" />
             </div>
             <div className="space-y-1 pl-2 border-l border-[var(--border)]">
               {/* SKIP conditions first -- surfaces why this path was not taken before confirming what passed */}
               {[
-                ...conditions.filter((c) => !/\btrue\b|\bpass/i.test(c.summary)),
-                ...conditions.filter((c) => /\btrue\b|\bpass/i.test(c.summary)),
+                ...conditions.filter((c) => !isConditionPassed(c)),
+                ...conditions.filter((c) => isConditionPassed(c)),
               ].map((item, idx) => {
-                const passed = /\btrue\b|\bpass/i.test(item.summary);
+                const passed = isConditionPassed(item);
                 return (
                   <div key={idx} className="flex items-start gap-2 text-xs py-0.5">
-                    <RoutingTraceBadge
+                    <TraceBadge
                       label={passed ? 'PASS' : 'SKIP'}
                       color={passed ? 'var(--success)' : 'var(--warning)'}
+                      bgColor={passed ? 'rgba(34,197,94,0.10)' : 'rgba(251,191,36,0.10)'}
                     />
                     <span className="flex-1 text-[var(--text-secondary)] leading-relaxed">{item.summary}</span>
                   </div>
@@ -227,7 +211,7 @@ function RoutingSection({
         {loops.length > 0 && (
           <div>
             <div className="mb-1.5">
-              <RoutingTraceBadge label="LOOP" color="var(--accent-strong)" />
+              <TraceBadge label="LOOP" color="var(--accent-strong)" bgColor="rgba(0,240,255,0.10)" />
             </div>
             <div className="space-y-1 pl-2 border-l border-[var(--border)]">
               {loops.map((item, idx) => (
@@ -241,7 +225,7 @@ function RoutingSection({
         {divergences.length > 0 && (
           <div>
             <div className="mb-1.5">
-              <RoutingTraceBadge label="DIVERGENCE" color="var(--error)" />
+              <TraceBadge label="DIVERGENCE" color="var(--error)" bgColor="rgba(255,107,107,0.10)" />
             </div>
             <div className="space-y-1 pl-2 border-l border-[var(--border)]">
               {divergences.map((item, idx) => (
@@ -255,7 +239,7 @@ function RoutingSection({
         {forks.length > 0 && (
           <div>
             <div className="mb-1.5">
-              <RoutingTraceBadge label="FORK" color="var(--warning)" />
+              <TraceBadge label="FORK" color="var(--warning)" bgColor="rgba(251,191,36,0.10)" />
             </div>
             <div className="space-y-1 pl-2 border-l border-[var(--border)]">
               {forks.map((item, idx) => (
@@ -277,10 +261,11 @@ function RunRoutingSection({ items }: { items: readonly ConsoleExecutionTraceIte
       <div>
         <button
           type="button"
+          aria-expanded={expanded}
           onClick={() => setExpanded((e) => !e)}
           className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.20em] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
         >
-          <RoutingTraceBadge label="RUN ROUTING" color="var(--text-muted)" />
+          <TraceBadge label="RUN ROUTING" color="var(--text-muted)" bgColor="rgba(123,141,167,0.08)" />
           <span className="text-[var(--text-muted)]">// {items.length} ambient items</span>
           <span>{expanded ? '[-]' : '[+]'}</span>
         </button>

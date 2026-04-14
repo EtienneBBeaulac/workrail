@@ -246,10 +246,21 @@ function RunCard({
 
       {/* Tab strip -- only shown when execution trace data is available */}
       {hasTrace && (
-        <div role="tablist" aria-label="Run view mode" className="flex items-center border-b border-[var(--border)] shrink-0 h-9 px-2 gap-0.5">
+        <div
+          role="tablist"
+          aria-label="Run view mode"
+          className="flex items-center border-b border-[var(--border)] shrink-0 h-9 px-2 gap-0.5"
+          onKeyDown={(e) => {
+            // ARIA tabs pattern: arrow keys move between tabs
+            if (e.key === 'ArrowRight') { e.preventDefault(); setActiveTab('trace'); }
+            if (e.key === 'ArrowLeft')  { e.preventDefault(); setActiveTab('dag'); }
+          }}
+        >
           <button
             type="button"
+            id="tab-dag"
             role="tab"
+            tabIndex={activeTab === 'dag' ? 0 : -1}
             aria-selected={activeTab === 'dag'}
             onClick={() => setActiveTab('dag')}
             className={[
@@ -268,7 +279,9 @@ function RunCard({
           </button>
           <button
             type="button"
+            id="tab-trace"
             role="tab"
+            tabIndex={activeTab === 'trace' ? 0 : -1}
             aria-selected={activeTab === 'trace'}
             onClick={() => setActiveTab('trace')}
             className={[
@@ -288,7 +301,11 @@ function RunCard({
         </div>
       )}
 
-      <div className="flex-1">
+      <div
+        role="tabpanel"
+        aria-labelledby={activeTab === 'dag' ? 'tab-dag' : 'tab-trace'}
+        className="flex-1"
+      >
         {activeTab === 'trace' && run.executionTraceSummary !== null ? (
           <RunNarrativeView
             summary={run.executionTraceSummary}
