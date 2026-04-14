@@ -6,6 +6,21 @@
 import type { ConsoleExecutionTraceItem, ConsoleExecutionTraceSummary } from '../api/types';
 
 // ---------------------------------------------------------------------------
+// Condition evaluation helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Heuristic: determines whether an evaluated_condition trace item represents
+ * a condition that passed (true) or was skipped/false.
+ *
+ * The engine summary strings currently use natural language -- this will be
+ * replaced by a structured `passed: boolean` field when the backend adds it.
+ */
+export function isConditionPassed(item: ConsoleExecutionTraceItem): boolean {
+  return /\btrue\b|\bpass/i.test(item.summary);
+}
+
+// ---------------------------------------------------------------------------
 // Execution trace grouping types
 // ---------------------------------------------------------------------------
 

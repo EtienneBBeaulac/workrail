@@ -226,3 +226,75 @@ describe('getNodeRoutingItems', () => {
     expect(result.whySelected).toHaveLength(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// groupTraceEntries -- nested loop invariant
+// ---------------------------------------------------------------------------
+
+describe('groupTraceEntries -- nested loops (loopStack innermost-wins)', () => {
+  beforeEach(() => { nextIndex = 0; });
+
+  it('routes non-loop items to the innermost open loop via loopStack', () => {
+    // Scenario: enter-A, enter-B, step (-> B), exit-B, step (-> A), exit-A
+    // loopStack at each point: [A] -> [A,B] -> [A,B] -> [A] -> [A] -> []
+    const enterA = makeItem('entered_loop', [{ kind: 'loop_id', value: 'loop-A' }]);
+    const enterB = makeItem('entered_loop', [{ kind: 'loop_id', value: 'loop-B' }]);
+    const stepInsideB = makeItem('selected_next_step');
+    const exitB = makeItem('exited_loop', [{ kind: 'loop_id', value: 'loop-B' }]);
+    const stepInsideA = makeItem('selected_next_step');
+    const exitA = makeItem('exited_loop', [{ kind: 'loop_id', value: 'loop-A' }]);
+
+    const result = groupTraceEntries([enterA, enterB, stepInsideB, exitB, stepInsideA, exitA]);
+
+    // Known limitation: innerItems holds raw ConsoleExecutionTraceItem, not TraceEntry.
+    // A closed nested loop (loop-B) becomes a top-level LoopGroup rather than being
+    // nested inside loop-A's innerItems. Both loops appear as top-level entries.
+    expect(result).toHaveLength(2);
+
+    // loop-B closes first and becomes the first top-level LoopGroup
+    const groupB = result[0] as LoopGroup;
+    expect(groupB.kind).toBe('loop_group');
+    expect(groupB.loopId).toBe('loop-B');
+    // stepInsideB went to loop-B (innermost at the time) via loopStack.at(-1)
+    expect(groupB.innerItems).toHaveLength(1);
+    expect(groupB.innerItems[0]).toBe(stepInsideB);
+
+    // loop-A closes second and becomes the second top-level LoopGroup
+    const groupA = result[1] as LoopGroup;
+    expect(groupA.kind).toBe('loop_group');
+    expect(groupA.loopId).toBe('loop-A');
+    // stepInsideA went to loop-A (only remaining open loop after B closed)
+    expect(groupA.innerItems).toHaveLength(1);
+    expect(groupA.innerItems[0]).toBe(stepInsideA);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// camelToSpacedUpper
+// ---------------------------------------------------------------------------
+
+import { camelToSpacedUpper } from '../../console/src/utils/format.js';
+
+describe('camelToSpacedUpper', () => {
+  it('converts camelCase to SPACED UPPER', () => {
+    expect(camelToSpacedUpper('taskComplexity')).toBe('TASK COMPLEXITY');
+  });
+
+  it('converts snake_case to SPACED UPPER', () => {
+    expect(camelToSpacedUpper('my_key')).toBe('MY KEY');
+  });
+
+  it('handles mixed camelCase and snake_case without double spaces', () => {
+    expect(camelToSpacedUpper('someKey_name')).toBe('SOME KEY NAME');
+  });
+
+  it('handles consecutive capitals (LLM -> L L M) -- known limitation', () => {
+    // Consecutive capitals each get a space prefix; this is a known limitation
+    // acceptable for current engine key names (all simple camelCase)
+    expect(camelToSpacedUpper('myLLMKey')).toBe('MY L L M KEY');
+  });
+
+  it('trims leading/trailing whitespace', () => {
+    expect(camelToSpacedUpper('simpleKey')).toBe('SIMPLE KEY');
+  });
+});

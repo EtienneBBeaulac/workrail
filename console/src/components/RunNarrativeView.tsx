@@ -21,6 +21,7 @@ import type {
 } from '../api/types';
 import {
   groupTraceEntries,
+  isConditionPassed,
   type LoopGroup,
 } from '../views/session-detail-use-cases';
 import { TraceBadge } from './TraceBadge';
@@ -50,8 +51,7 @@ function getBadgeConfig(item: ConsoleExecutionTraceItem): BadgeConfig {
     case 'selected_next_step':
       return { label: 'STEP', color: 'var(--accent)', bgColor: 'rgba(244, 196, 48, 0.12)' };
     case 'evaluated_condition': {
-      // Heuristic: if the summary contains "true" or "passed" it's a positive evaluation
-      const isTrue = /\btrue\b|\bpass/i.test(item.summary);
+      const isTrue = isConditionPassed(item);
       return isTrue
         ? { label: 'CONDITION', color: 'var(--success)', bgColor: 'rgba(34, 197, 94, 0.12)' }
         : { label: 'CONDITION', color: 'var(--text-muted)', bgColor: 'rgba(123, 141, 167, 0.10)' };

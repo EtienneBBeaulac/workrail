@@ -12,8 +12,9 @@
  */
 export function camelToSpacedUpper(key: string): string {
   return key
-    .replace(/_/g, ' ')        // snake_case -> spaces
-    .replace(/([A-Z])/g, ' $1') // camelCase -> spaces
+    .replace(/_/g, ' ')          // snake_case -> spaces
+    .replace(/([A-Z])/g, ' $1')  // camelCase -> spaces
+    .replace(/\s+/g, ' ')        // collapse consecutive spaces (mixed camelCase+snake_case)
     .toUpperCase()
     .trim();
 }
