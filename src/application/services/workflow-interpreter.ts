@@ -108,7 +108,7 @@ export class WorkflowInterpreter {
         const result = inLoop.value;
         running = result.state;
         if (result.next) {
-          trace.push(traceSelectedNextStep(result.next.stepInstanceId.stepId));
+          trace.push(traceSelectedNextStep(result.next.stepInstanceId.stepId, result.next.step.title));
           return ok({ state: running, next: result.next, isComplete: false, trace });
         }
         // No next means either:
@@ -125,7 +125,7 @@ export class WorkflowInterpreter {
       const out = top.value;
       running = out.state;
       if (out.next) {
-        trace.push(traceSelectedNextStep(out.next.stepInstanceId.stepId));
+        trace.push(traceSelectedNextStep(out.next.stepInstanceId.stepId, out.next.step.title));
         return ok({ state: running, next: out.next, isComplete: false, trace });
       }
 
