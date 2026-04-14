@@ -6,6 +6,11 @@
  *
  * Transport-specific cleanup (e.g. stopping an HTTP listener, watching stdin)
  * is injected via `onBeforeTerminate`.
+ *
+ * Also handles stream I/O error recovery (stdout drain unblocking) as part of
+ * clean shutdown prerequisites. wireShutdownHooks owns this because it is the
+ * canonical point for "things that must happen before the process can exit
+ * cleanly" -- both signal-based shutdown and stream-error recovery belong here.
  */
 
 import { container } from '../../di/container.js';
@@ -52,6 +57,12 @@ export function wireShutdownHooks(opts: ShutdownHookOptions): void {
   // BEFORE the shutdown event ensures all pending send() callers resolve before
   // the shutdown sequence begins. EventEmitter.emit() is synchronous, so the
   // ordering is deterministic.
+  //
+  // Known limitation: if SIGTERM fires while write() is under backpressure but
+  // before any EPIPE error, this drain emission does not trigger. Those
+  // send() Promises still hang until process.exit() is called at the end of
+  // the shutdown sequence. Fixing this requires the SDK to add a rejection
+  // path to send(), which is out of scope here.
   const stdout = opts.stdout ?? process.stdout;
   stdout.on('error', () => {
     stdout.emit('drain');

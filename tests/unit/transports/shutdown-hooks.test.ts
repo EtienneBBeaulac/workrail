@@ -224,7 +224,7 @@ describe('wireShutdownHooks stdout drain behavior', () => {
     expect(drainFired).toHaveLength(1);
   });
 
-  it('emits drain BEFORE shutdown event so pending Promises resolve first', () => {
+  it('emits drain synchronously within the error handler (drain fires before any shutdown event)', () => {
     const fakeStdout = createFakeStdout();
     const events: string[] = [];
 

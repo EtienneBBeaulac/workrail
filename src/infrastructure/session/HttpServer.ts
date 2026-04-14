@@ -487,6 +487,11 @@ export class HttpServer {
    * Uses unified dashboard pattern (primary/secondary) unless disabled
    */
   async start(): Promise<string | null> {
+    // Reset the stop Promise so a future stop() call runs real teardown.
+    // Restart-in-place is not a supported lifecycle, but this guard prevents
+    // a silent no-op if stop() were ever called after a re-start.
+    this._stopPromise = null;
+
     // Check dashboard mode (DI-provided, not env check)
     const mode = this.config.dashboardMode ?? this.dashboardMode;
     if (mode.kind === 'legacy') {
@@ -840,6 +845,9 @@ export class HttpServer {
       }
     }
     
+    // Clear the last failed server so it doesn't linger with a dangling
+    // error listener. The server never started listening so no close() needed.
+    this.server = null;
     throw new Error('No available ports in range 3457-3499');
   }
   
@@ -862,12 +870,19 @@ export class HttpServer {
    * Open dashboard in browser
    */
   async openDashboard(sessionId?: string): Promise<string> {
+    if (!this.baseUrl) {
+      throw new Error(
+        'Dashboard is unavailable -- the HTTP server did not start successfully ' +
+        '(likely due to port exhaustion). MCP tools still work normally.',
+      );
+    }
+
     let url = this.baseUrl;
-    
+
     if (sessionId) {
       url += `?session=${sessionId}`;
     }
-    
+
     const behavior = this.config.browserBehavior ?? this.browserBehavior;
     if (behavior.kind === 'auto_open') {
       try {
