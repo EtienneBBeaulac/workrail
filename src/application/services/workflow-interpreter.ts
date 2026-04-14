@@ -18,6 +18,8 @@ import {
   traceExitedLoop,
   traceSelectedNextStep,
   traceArtifactMatchResult,
+  traceStepRunConditionSkipped,
+  traceStepRunConditionPassed,
 } from '../../v2/durable-core/domain/decision-trace-builder';
 
 export interface NextStep {
@@ -120,12 +122,16 @@ export class WorkflowInterpreter {
       }
 
       // Top-level selection
-      const top = this.nextTopLevel(compiled, running, context);
+      const top = this.nextTopLevel(compiled, running, context, trace);
       if (top.isErr()) return err(top.error);
       const out = top.value;
       running = out.state;
       if (out.next) {
-        trace.push(traceSelectedNextStep(out.next.stepInstanceId.stepId, out.next.step.title));
+        const selectedStep = out.next.step;
+        const label = selectedStep.runCondition
+          ? selectedStep.title ?? out.next.stepInstanceId.stepId
+          : `Selected (no condition): ${selectedStep.title ?? out.next.stepInstanceId.stepId}`;
+        trace.push(traceSelectedNextStep(out.next.stepInstanceId.stepId, label));
         return ok({ state: running, next: out.next, isComplete: false, trace });
       }
 
@@ -154,7 +160,8 @@ export class WorkflowInterpreter {
   private nextTopLevel(
     compiled: CompiledWorkflow,
     state: Extract<ExecutionState, { kind: 'running' }>,
-    context: Record<string, unknown>
+    context: Record<string, unknown>,
+    trace: DecisionTraceEntry[] = [],
   ): Result<{ state: Extract<ExecutionState, { kind: 'running' }>; next: NextStep | null }, DomainError> {
     for (const step of compiled.steps) {
       // Skip body steps at top-level
@@ -164,8 +171,16 @@ export class WorkflowInterpreter {
       if (state.completed.includes(step.id)) continue;
 
       // runCondition on top-level step (uses external context)
-      if (step.runCondition && !evaluateCondition(step.runCondition as any, context as any)) {
-        continue;
+      if (step.runCondition) {
+        const conditionPassed = evaluateCondition(step.runCondition as any, context as any);
+        if (!conditionPassed) {
+          // Emit SKIP trace entry so the selected step's CONDITIONS EVALUATED panel
+          // explains why this eligible step was not chosen.
+          trace.push(traceStepRunConditionSkipped(step.id, step.title, step.runCondition as any, context));
+          continue;
+        }
+        // Condition passed: emit PASS entry before the selection entry
+        trace.push(traceStepRunConditionPassed(step.id, step.title, step.runCondition as any, context));
       }
 
       if (isLoopStepDefinition(step)) {
