@@ -160,12 +160,28 @@ npm install
 npm run build
 ```
 
-The MCP server is started automatically by agentic IDEs (Firebender, Cursor, Claude Code). After making changes:
-1. Kill all running WorkRail processes
-2. Run `npm run build`
-3. Toggle the MCP server off and on in the IDE so it reloads with the new build
+### Local dev loop (HTTP transport)
 
-Do not attempt to restart the MCP server programmatically -- the user will toggle it manually.
+When developing workrail itself, use the HTTP transport dev loop so Claude Code sessions survive server restarts. The project `.mcp.json` points Claude Code at `http://localhost:3100/mcp` when started from this repo -- no global config changes needed.
+
+```bash
+# Terminal 1: auto-recompile on save
+npm run watch
+
+# Terminal 2: auto-restart MCP server after each compile
+npm run dev:mcp:watch
+```
+
+Changes are live in Claude ~5-10 seconds after saving a TypeScript file.
+
+For a one-shot manual restart (e.g. after `npm run build`):
+```bash
+npm run dev:mcp
+```
+
+**Why HTTP and not stdio:** The MCP SDK does not handle stdout EPIPE errors -- a broken pipe kills the server process and terminates the Claude session. HTTP transport decouples the server lifetime from Claude Code, so restarts are transparent.
+
+**Config note:** The project `.mcp.json` `workrail` entry should shadow the global `~/.claude/settings.json` entry when Claude Code is started from this repo. Verify via `/mcp` on first use -- if two `workrail` entries appear, rename the `.mcp.json` entry to `workrail-dev`.
 
 ## Release policy
 
