@@ -4,36 +4,7 @@ Groomed near-term tickets. Check `docs/roadmap/now-next-later.md` first for the 
 
 ---
 
-## Ticket 1: Fix console CPU spiral (worktrees invalidation on SSE events)
-
-### Problem
-
-When a session write fires `fs.watch`, the SSE handler calls `invalidateQueries(['worktrees'])`, which bypasses `staleTime` and spawns up to 606 concurrent git subprocesses (measured at 12.5s). That git fan-out writes another session event on return, closing the loop.
-
-### Goal
-
-Break the feedback loop and cap git concurrency.
-
-### Acceptance criteria
-
-- `useWorkspaceEvents()` in `console/src/api/hooks.ts` no longer calls `invalidateQueries(['worktrees'])` -- worktrees governed solely by `refetchInterval`
-- `enrichWorktree` in `src/v2/usecases/worktree-service.ts` is bounded by a concurrency semaphore (max 8)
-- `fs.watch` callback in console routes fires only on `.jsonl` writes, not all file changes
-
-### Files
-
-- `console/src/api/hooks.ts` (remove invalidateQueries from useWorkspaceEvents)
-- `src/v2/usecases/worktree-service.ts` (semaphore -- may already be partially done)
-- Console routes fs.watch handler
-
-### Related
-
-- `docs/design/console-performance-discovery.md`
-- `docs/roadmap/open-work-inventory.md` #0
-
----
-
-## Ticket 2: Assessment-gate adoption in mr-review-workflow
+## Ticket 1: Assessment-gate adoption in mr-review-workflow
 
 ### Problem
 
@@ -156,5 +127,6 @@ Produce a concrete design (DTO shape + UX direction) so the console can explain 
 - ~~**Ticket: Expand lifecycle validation coverage**~~ (done -- auto-walk smoke test covers all bundled workflows)
 - ~~**Ticket: Workflow-source setup phase 1**~~ (done -- rooted team sharing, remembered roots, grouped source visibility, #160–#164)
 - ~~**Ticket: Finish prompt/supplement boundary alignment**~~ (done -- documented in authoring.md, workflow-execution-contract.md)
+- ~~**Ticket: Console CPU spiral**~~ (done -- change events no longer invalidate worktrees, enrichWorktree semaphore MAX=8, fs.watch filtered to .jsonl)
 - ~~**Ticket: Console MVI architecture**~~ (done -- all 6 views refactored, 290+ tests, console/CLAUDE.md, #332)
 - ~~**Ticket: MCP server stability**~~ (done -- EPIPE crash, stale lock, double SIGTERM, port exhaustion, #332 #335)
