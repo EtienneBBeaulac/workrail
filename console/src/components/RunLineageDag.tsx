@@ -140,8 +140,9 @@ export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props
   }, [run.executionTraceSummary, run.nodes]);
 
   // Height extension for blocked_attempt nodes with cause items (sub-feature C).
-  // 40px = 32px footer collapsed + 8px border gap.
-  const CAUSE_FOOTER_HEIGHT_EXTENSION = 40;
+  // Must budget for the expanded state (72px) not just collapsed (32px),
+  // because ReactFlow clips to the node height. Use 72 + 8px gap.
+  const CAUSE_FOOTER_HEIGHT_EXTENSION = 80;
 
   const { nodes, edges } = useMemo(() => {
     const currentIncomingEdgeId = model.currentNodeId
@@ -261,10 +262,11 @@ export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props
         const cause = findEdgeCauseItem(edge, items);
         if (!cause) return null;
 
-        const sourceWidth = sourceNode.isActiveLineage ? ACTIVE_NODE_WIDTH : SIDE_NODE_WIDTH;
-        const sourceHeight = sourceNode.isActiveLineage ? ACTIVE_NODE_HEIGHT : SIDE_NODE_HEIGHT;
-        const targetWidth = targetNode.isActiveLineage ? ACTIVE_NODE_WIDTH : SIDE_NODE_WIDTH;
-        const targetHeight = targetNode.isActiveLineage ? ACTIVE_NODE_HEIGHT : SIDE_NODE_HEIGHT;
+        // Both nodes are guaranteed active-lineage by the guard above.
+        const sourceWidth = ACTIVE_NODE_WIDTH;
+        const sourceHeight = ACTIVE_NODE_HEIGHT;
+        const targetWidth = ACTIVE_NODE_WIDTH;
+        const targetHeight = ACTIVE_NODE_HEIGHT;
 
         // Geometric midpoint between the two node centers (approximate -- smoothstep curves
         // don't pass through this exact point, but it's close enough for a 10px annotation).
@@ -309,7 +311,9 @@ export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props
 
         const ys = positionedNodes.map((n) => n.y);
         const topY = Math.min(...ys);
-        const bottomY = Math.max(...ys) + (positionedNodes[0]!.isActiveLineage ? ACTIVE_NODE_HEIGHT : SIDE_NODE_HEIGHT);
+        // Use the highest-Y node's type for the correct height constant.
+        const bottomNode = positionedNodes.reduce((a, b) => a.y > b.y ? a : b);
+        const bottomY = Math.max(...ys) + (bottomNode!.isActiveLineage ? ACTIVE_NODE_HEIGHT : SIDE_NODE_HEIGHT);
 
         // X position: left gutter, just inside the scroll overhang area
         // LINEAGE_SCROLL_OVERHANG (600) + LINEAGE_PADDING (56) is where the first node starts.
@@ -640,7 +644,8 @@ function NodeLabel({
           <div className="flex items-center px-3" style={{ height: 32 }}>
             <button
               type="button"
-              onClick={() => setCauseExpanded((e) => !e)}
+              aria-expanded={causeExpanded}
+              onClick={(e) => { e.stopPropagation(); setCauseExpanded((v) => !v); }}
               className="font-mono text-[9px] uppercase tracking-[0.22em] px-2 py-0.5 transition-colors"
               style={{
                 color: causeExpanded ? 'var(--text-muted)' : 'var(--accent)',
