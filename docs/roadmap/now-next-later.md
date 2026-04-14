@@ -16,9 +16,8 @@ Lightweight cross-cutting roadmap. **This is the single entry point** -- check h
 
 *(groomed, roughly ordered by value -- ready to execute)*
 
-1. **Assessment-gate adoption in mr-review-workflow** -- The assessment-gate engine feature is real and piloted in `bug-investigation.agentic.v2.json`. The next highest-value target is `mr-review-workflow.agentic.v2.json`. This is about rollout and workflow fit, not engine work. See `docs/plans/mr-review-workflow-redesign.md` and `open-work-inventory.md`.
-
-2. **Trial the quality gate and readiness audit on real diverse tasks** -- `workflow-for-workflows.v2.json` and `production-readiness-audit.json` have been tuned through authoring reasoning, not evidence from varied real runs. Run both on multiple tasks spanning different archetypes. Tune `STANDARD` vs `THOROUGH` depth from what is observed. See `docs/tickets/next-up.md` Ticket 6.
+1. **Trial the quality gate and readiness audit on real diverse tasks**
+ -- `workflow-for-workflows.v2.json` and `production-readiness-audit.json` have been tuned through authoring reasoning, not evidence from varied real runs. Run both on multiple tasks spanning different archetypes. Tune `STANDARD` vs `THOROUGH` depth from what is observed. See `docs/tickets/next-up.md` Ticket 6.
 
 3. **Progress notifications** -- Long workflows block with no agent visibility. Design is mostly done; three open issues remain before implementation: (a) `progressToken` threading through `ToolContext`, (b) `NotificationSender` port to give `advance.ts` access to `sendNotification`, (c) step-node counting (filter `step` nodes only, exclude `blocked_attempt`/`checkpoint`). See `docs/plans/v2-followup-enhancements.md` P2.
 
@@ -57,6 +56,7 @@ Lightweight cross-cutting roadmap. **This is the single entry point** -- check h
 
 *(moved here to keep Now/Next clean)*
 
+- ~~**Assessment-gate adoption in mr-review-workflow**~~ -- `mr-review-workflow.agentic.v2.json` already has assessmentRefs/assessmentConsequences alongside `bug-investigation`, `coding-task-workflow-agentic.lean.v2`, and `workflow-for-workflows.v2`
 - ~~**Console CPU spiral**~~ -- all three fixes shipped: `change` SSE events no longer invalidate worktrees (governed by refetchInterval only), enrichWorktree semaphore at MAX=8, fs.watch filtered to `.jsonl` writes
 - ~~**Console MVI architecture**~~ -- all 6 views refactored to Repository → UseCases → Reducer → ViewModel → pure presenter; 290+ new tests; `console/CLAUDE.md` documents the pattern (#332)
 - ~~**MCP server stability**~~ -- `wireStdoutShutdown` (EPIPE crash), `clearIfStaleLock` (stale lock after crash), `HttpServer.stop()` idempotency (double SIGTERM), port exhaustion graceful degradation, `openDashboard` degraded-mode guard (#332, #335)
