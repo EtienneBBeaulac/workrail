@@ -54,42 +54,7 @@ Run both workflows on multiple distinct tasks spanning at least two archetypes e
 
 ---
 
-## Ticket 4: Progress notifications design resolution + implementation
-
-### Problem
-
-Long workflows block the agent with no visibility into progress. The design is mostly done but three issues block implementation.
-
-### Goal
-
-Resolve the three open design issues, then implement `notifications/progress` in `advance.ts`.
-
-### Open design issues (must resolve before coding)
-
-1. **`progressToken` plumbing** -- `request._meta?.progressToken` is available at the `CallToolRequestSchema` handler but not in `advance.ts`. Thread it through `ToolContext` or a dedicated `RequestMeta` field.
-2. **`NotificationSender` port** -- `advance.ts` has no access to the MCP `Server` instance. Pass it via a `NotificationSender` port (interface segregation -- expose only `sendNotification`, not the full server).
-3. **Step-node counting** -- Count only `nodeKind === 'step'` nodes for progress total; exclude `blocked_attempt` and `checkpoint` nodes (post-ADR 008 these are in the same DAG).
-
-### Acceptance criteria
-
-- `continue_workflow` sends `notifications/progress` when `progressToken` is provided
-- `progress` count uses `step` nodes only
-- opt-in only -- no behavior change for clients that do not provide `progressToken`
-- Tests cover the notification send path and the node counting filter
-
-### Files
-
-- `src/mcp/handlers/v2-execution/advance.ts`
-- `src/mcp/types.ts` (V2Dependencies)
-- `src/mcp/handler-factory.ts` (ToolContext)
-
-### Related
-
-- `docs/plans/v2-followup-enhancements.md` P2
-
----
-
-## Ticket 5: Design console execution-trace explainability
+## Ticket 4: Design console execution-trace explainability
 
 ### Problem
 

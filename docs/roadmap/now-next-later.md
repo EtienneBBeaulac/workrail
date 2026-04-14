@@ -16,9 +16,7 @@ Lightweight cross-cutting roadmap. **This is the single entry point** -- check h
 
 *(groomed, roughly ordered by value -- ready to execute)*
 
-1. **Progress notifications** -- Long workflows block with no agent visibility. Design is mostly done; three open issues remain before implementation: (a) `progressToken` threading through `ToolContext`, (b) `NotificationSender` port to give `advance.ts` access to `sendNotification`, (c) step-node counting (filter `step` nodes only, exclude `blocked_attempt`/`checkpoint`). See `docs/plans/v2-followup-enhancements.md` P2.
-
-2. **Console execution-trace explainability** -- The DAG shows only `node_created`/`edge_created`. Engine decisions (fast paths, skipped phases, condition evaluation, loop entry/exit) are invisible, making legitimate runs look broken. This needs a **design phase first** before any implementation -- see `docs/tickets/next-up.md` Ticket 5 and `docs/ideas/backlog.md`.
+1. **Console execution-trace explainability** -- The DAG shows only `node_created`/`edge_created`. Engine decisions (fast paths, skipped phases, condition evaluation, loop entry/exit) are invisible, making legitimate runs look broken. This needs a **design phase first** before any implementation -- see `docs/tickets/next-up.md` Ticket 5 and `docs/ideas/backlog.md`.
 
 3. **Legacy workflow modernization** -- `exploration-workflow.json` is the highest-priority candidate. `mr-review-workflow.json` and `bug-investigation.json` are next. See `docs/roadmap/open-work-inventory.md` for the full prioritized list and what "modernization" means. -- `workflow-for-workflows.v2.json` and `production-readiness-audit.json` have been tuned through authoring reasoning, not evidence from varied real runs. Run both on multiple tasks spanning different archetypes. Tune `STANDARD` vs `THOROUGH` depth from what is observed. See `docs/tickets/next-up.md` Ticket 6.
 
@@ -38,6 +36,7 @@ Lightweight cross-cutting roadmap. **This is the single entry point** -- check h
 - **Dashboard artifacts** -- replace file-based docs with session-scoped structured outputs rendered in the console; design exists in `workflow-execution-contract.md`, blocked on a richer console UI substrate
 - **Evict stale repo roots** -- `remembered-roots-store` accumulates forever; stale repos inflate worktree counts and slow scanning. Add TTL eviction. See #241.
 - **Typed SSE events + server-side `.git/` watchers** -- true live worktree updates without polling; replaces the interval-based worktrees refetch. See #242.
+- **Progress notifications** -- not worth the ceremony for current workflow lengths
 - **Authorable response supplements** -- workflow schema surface, validation rules, authoring guidance; design needed first
 - **Declarative composition engine** -- spec-driven workflow assembly from pre-validated routines
 - **Parallel `forEach` execution** -- concurrent loop iterations with result collection
