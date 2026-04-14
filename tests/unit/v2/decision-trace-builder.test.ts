@@ -15,6 +15,9 @@ import {
   traceExitedLoop,
   traceSelectedNextStep,
   traceArtifactMatchResult,
+  traceStepRunConditionSkipped,
+  traceStepRunConditionPassed,
+  formatConditionTrace,
   applyTraceBudget,
   buildDecisionTraceEventData,
   type DecisionTraceEntry,
@@ -103,6 +106,184 @@ describe('trace entry constructors', () => {
     });
     expect(entry.summary).toContain('invalid');
     expect(entry.summary).toContain('malformed schema');
+  });
+
+  it('traceStepRunConditionSkipped produces evaluated_condition with step_id ref', () => {
+    const entry = traceStepRunConditionSkipped(
+      'phase-6a',
+      'Implement Slices',
+      { var: 'taskComplexity', not_equals: 'Small' },
+      { taskComplexity: 'Small' },
+    );
+    expect(entry.kind).toBe('evaluated_condition');
+    expect(entry.summary).toMatch(/^SKIP:/);
+    expect(entry.refs).toEqual([{ kind: 'step_id', stepId: 'phase-6a' }]);
+  });
+
+  it('traceStepRunConditionSkipped summary does NOT match isConditionPassed regex', () => {
+    // Critical invariant: SKIP summaries must not match /\btrue\b|\bpass/i
+    // Test edge cases: condition contains 'pass' or 'true' as expected value
+    const entryPass = traceStepRunConditionSkipped(
+      'step-1',
+      undefined,
+      { var: 'status', equals: 'pass' },
+      { status: 'fail' },
+    );
+    expect(entryPass.summary).toMatch(/^SKIP:/);
+    expect(entryPass.summary).not.toMatch(/\btrue\b|\bpass/i);
+
+    const entryTrue = traceStepRunConditionSkipped(
+      'step-2',
+      undefined,
+      { var: 'active', equals: 'true' },
+      { active: 'false' },
+    );
+    expect(entryTrue.summary).toMatch(/^SKIP:/);
+    expect(entryTrue.summary).not.toMatch(/\btrue\b|\bpass/i);
+  });
+
+  it('traceStepRunConditionPassed produces evaluated_condition with step_id ref', () => {
+    const entry = traceStepRunConditionPassed(
+      'phase-6a',
+      'Implement Slices',
+      { var: 'taskComplexity', not_equals: 'Small' },
+      { taskComplexity: 'Medium' },
+    );
+    expect(entry.kind).toBe('evaluated_condition');
+    expect(entry.summary).toMatch(/^PASS:/);
+    expect(entry.refs).toEqual([{ kind: 'step_id', stepId: 'phase-6a' }]);
+  });
+
+  it('traceStepRunConditionPassed summary matches isConditionPassed regex', () => {
+    const entry = traceStepRunConditionPassed(
+      'phase-5',
+      'Small Fast Path',
+      { var: 'taskComplexity', equals: 'Small' },
+      { taskComplexity: 'Small' },
+    );
+    expect(entry.summary).toMatch(/\btrue\b|\bpass/i);
+  });
+
+  it('traceStepRunConditionPassed includes actual context value in summary', () => {
+    const entry = traceStepRunConditionPassed(
+      'phase-6a',
+      undefined,
+      { var: 'taskComplexity', not_equals: 'Small' },
+      { taskComplexity: 'Medium' },
+    );
+    expect(entry.summary).toContain('Medium');
+    expect(entry.summary).toContain('not_equals');
+    expect(entry.summary).toContain('Small');
+  });
+});
+
+describe('formatConditionTrace', () => {
+  it('PASS with not_equals -- includes context value and expected value', () => {
+    const result = formatConditionTrace(
+      { var: 'taskComplexity', not_equals: 'Small' },
+      { taskComplexity: 'Medium' },
+      true,
+    );
+    expect(result).toMatch(/^PASS:/);
+    expect(result).toContain('taskComplexity=Medium');
+    expect(result).toContain('not_equals');
+    expect(result).toContain('Small');
+  });
+
+  it('SKIP with equals -- no values in summary', () => {
+    const result = formatConditionTrace(
+      { var: 'taskComplexity', equals: 'Small' },
+      { taskComplexity: 'Medium' },
+      false,
+    );
+    expect(result).toMatch(/^SKIP:/);
+    expect(result).toContain('taskComplexity');
+    expect(result).toContain('equals');
+    // SKIP must not include runtime values
+    expect(result).not.toContain('Medium');
+    expect(result).not.toMatch(/\btrue\b|\bpass/i);
+  });
+
+  it('PASS with equals -- shows actual match', () => {
+    const result = formatConditionTrace(
+      { var: 'taskComplexity', equals: 'Medium' },
+      { taskComplexity: 'Medium' },
+      true,
+    );
+    expect(result).toMatch(/^PASS:/);
+    expect(result).toContain('taskComplexity=Medium');
+    expect(result).toContain('equals');
+  });
+
+  it('PASS with compound AND', () => {
+    const result = formatConditionTrace(
+      { and: [{ var: 'taskComplexity', not_equals: 'Small' }, { var: 'rigorMode', not_equals: 'QUICK' }] },
+      { taskComplexity: 'Medium', rigorMode: 'STANDARD' },
+      true,
+    );
+    expect(result).toBe('PASS: and-condition met');
+    expect(result).toMatch(/\btrue\b|\bpass/i); // must match isConditionPassed
+  });
+
+  it('SKIP with compound AND', () => {
+    const result = formatConditionTrace(
+      { and: [{ var: 'taskComplexity', not_equals: 'Small' }, { var: 'rigorMode', not_equals: 'QUICK' }] },
+      { taskComplexity: 'Small', rigorMode: 'QUICK' },
+      false,
+    );
+    expect(result).toBe('SKIP: and-condition not met');
+    expect(result).not.toMatch(/\btrue\b|\bpass/i); // must NOT match isConditionPassed
+  });
+
+  it('PASS with compound OR', () => {
+    const result = formatConditionTrace(
+      { or: [{ var: 'taskComplexity', equals: 'Large' }, { var: 'riskLevel', equals: 'High' }] },
+      { taskComplexity: 'Medium', riskLevel: 'High' },
+      true,
+    );
+    expect(result).toBe('PASS: or-condition met');
+  });
+
+  it('SKIP with compound OR', () => {
+    const result = formatConditionTrace(
+      { or: [{ var: 'taskComplexity', equals: 'Large' }, { var: 'riskLevel', equals: 'High' }] },
+      { taskComplexity: 'Medium', riskLevel: 'Low' },
+      false,
+    );
+    expect(result).toBe('SKIP: or-condition not met');
+    expect(result).not.toMatch(/\btrue\b|\bpass/i);
+  });
+
+  it('SKIP with boolean context value "true" -- no false positive', () => {
+    // Edge case: context value is 'true' but condition is failing
+    const result = formatConditionTrace(
+      { var: 'retriageNeeded', equals: true },
+      { retriageNeeded: false },
+      false,
+    );
+    expect(result).toMatch(/^SKIP:/);
+    expect(result).not.toMatch(/\btrue\b|\bpass/i);
+  });
+
+  it('SKIP with expected value "pass" -- no false positive', () => {
+    // Edge case: expected value is the string 'pass' but condition is failing
+    const result = formatConditionTrace(
+      { var: 'status', equals: 'pass' },
+      { status: 'fail' },
+      false,
+    );
+    expect(result).toMatch(/^SKIP:/);
+    expect(result).not.toMatch(/\btrue\b|\bpass/i);
+  });
+
+  it('PASS with unset context variable', () => {
+    const result = formatConditionTrace(
+      { var: 'someVar', equals: undefined },
+      {},
+      true,
+    );
+    expect(result).toMatch(/^PASS:/);
+    expect(result).toContain('someVar=(unset)');
   });
 });
 

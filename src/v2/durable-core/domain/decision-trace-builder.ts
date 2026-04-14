@@ -8,6 +8,7 @@ import {
 } from '../constants.js';
 import { utf8ByteLength } from '../schemas/lib/utf8-byte-length.js';
 import type { LoopControlEvaluationResult } from './loop-control-evaluator.js';
+import type { Condition } from '../../../utils/condition-evaluator.js';
 
 /**
  * Decision trace entry kinds (closed set matching lock §1 decision_trace_appended).
@@ -79,6 +80,136 @@ export function traceSelectedNextStep(stepId: string, stepTitle?: string): Decis
   return {
     kind: 'selected_next_step',
     summary: `Next step: ${label}`,
+    refs: [{ kind: 'step_id', stepId }],
+  };
+}
+
+/**
+ * Format a condition as a human-readable trace string for top-level step runConditions.
+ *
+ * Design invariants:
+ * - PASS strings start with "PASS:" and MUST match /\btrue\b|\bpass/i (for isConditionPassed).
+ * - SKIP strings start with "SKIP:" and MUST NOT match /\btrue\b|\bpass/i.
+ * - SKIP strings deliberately omit runtime values to prevent false positives when
+ *   a condition's expected value contains 'pass' or 'true'.
+ * - Pure and deterministic: same inputs always produce the same output.
+ */
+export function formatConditionTrace(
+  condition: Condition,
+  context: Record<string, unknown>,
+  passed: boolean,
+): string {
+  const prefix = passed ? 'PASS' : 'SKIP';
+
+  // Handle logical operators first (compound conditions)
+  if (condition.and !== undefined) {
+    return passed ? 'PASS: and-condition met' : 'SKIP: and-condition not met';
+  }
+  if (condition.or !== undefined) {
+    return passed ? 'PASS: or-condition met' : 'SKIP: or-condition not met';
+  }
+  if (condition.not !== undefined) {
+    return passed ? 'PASS: not-condition met' : 'SKIP: not-condition not met';
+  }
+
+  // Single-variable conditions: determine which operator is present
+  const varName = condition.var;
+  if (!varName) {
+    return `${prefix}: condition ${passed ? 'met' : 'not met'}`;
+  }
+
+  const op = getOperatorLabel(condition);
+
+  if (passed) {
+    // PASS: include actual context value for maximum user insight
+    const contextValue = context[varName];
+    const contextStr = contextValue === undefined ? '(unset)' : String(contextValue);
+    const expectedStr = getExpectedValueLabel(condition);
+    return expectedStr !== null
+      ? `PASS: ${varName}=${contextStr} (${op}: ${expectedStr})`
+      : `PASS: ${varName}=${contextStr} (${op})`;
+  } else {
+    // SKIP: omit all values to prevent isConditionPassed false positives
+    return `SKIP: ${varName} (${op})`;
+  }
+}
+
+/**
+ * Returns a compact label for the operator used in a condition.
+ * Falls back to 'condition' for unknown/empty structures.
+ */
+function getOperatorLabel(condition: Condition): string {
+  if (condition.var === undefined) return 'condition';
+  if ('equals' in condition) return 'equals';
+  if ('not_equals' in condition) return 'not_equals';
+  if (condition.gt !== undefined) return 'gt';
+  if (condition.gte !== undefined) return 'gte';
+  if (condition.lt !== undefined) return 'lt';
+  if (condition.lte !== undefined) return 'lte';
+  if (condition.contains !== undefined) return 'contains';
+  if (condition.startsWith !== undefined) return 'startsWith';
+  if (condition.endsWith !== undefined) return 'endsWith';
+  if (condition.matches !== undefined) return 'matches';
+  if (condition.in !== undefined) return 'in';
+  return 'condition';
+}
+
+/**
+ * Returns the expected value from the condition as a string for PASS summaries,
+ * or null if there is no expected value (e.g., truthiness check).
+ *
+ * Used ONLY in PASS strings -- SKIP strings never include expected values.
+ */
+function getExpectedValueLabel(condition: Condition): string | null {
+  if ('equals' in condition) return String(condition.equals);
+  if ('not_equals' in condition) return String(condition.not_equals);
+  if (condition.gt !== undefined) return String(condition.gt);
+  if (condition.gte !== undefined) return String(condition.gte);
+  if (condition.lt !== undefined) return String(condition.lt);
+  if (condition.lte !== undefined) return String(condition.lte);
+  if (condition.contains !== undefined) return condition.contains;
+  if (condition.startsWith !== undefined) return condition.startsWith;
+  if (condition.endsWith !== undefined) return condition.endsWith;
+  if (condition.matches !== undefined) return condition.matches;
+  if (condition.in !== undefined) return JSON.stringify(condition.in);
+  return null;
+}
+
+/**
+ * Trace a top-level step whose runCondition evaluated to false (step was skipped).
+ *
+ * The emitted entry is kind `evaluated_condition` with a step_id ref.
+ * Summary uses `SKIP:` prefix and intentionally omits runtime values to prevent
+ * isConditionPassed false positives from condition expected values like 'pass'/'true'.
+ */
+export function traceStepRunConditionSkipped(
+  stepId: string,
+  stepTitle: string | undefined,
+  condition: Condition,
+  context: Record<string, unknown>,
+): DecisionTraceEntry {
+  return {
+    kind: 'evaluated_condition',
+    summary: formatConditionTrace(condition, context, false),
+    refs: [{ kind: 'step_id', stepId }],
+  };
+}
+
+/**
+ * Trace a top-level step whose runCondition evaluated to true (step was selected via condition).
+ *
+ * The emitted entry is kind `evaluated_condition` with a step_id ref.
+ * Summary uses `PASS:` prefix and includes the actual context value for user insight.
+ */
+export function traceStepRunConditionPassed(
+  stepId: string,
+  stepTitle: string | undefined,
+  condition: Condition,
+  context: Record<string, unknown>,
+): DecisionTraceEntry {
+  return {
+    kind: 'evaluated_condition',
+    summary: formatConditionTrace(condition, context, true),
     refs: [{ kind: 'step_id', stepId }],
   };
 }
