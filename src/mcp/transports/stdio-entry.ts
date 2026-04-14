@@ -6,7 +6,7 @@
  */
 
 import { composeServer } from '../server.js';
-import { wireShutdownHooks, wireStdinShutdown } from './shutdown-hooks.js';
+import { wireShutdownHooks, wireStdinShutdown, wireStdoutShutdown } from './shutdown-hooks.js';
 
 const INITIAL_ROOTS_TIMEOUT_MS = 1000;
 
@@ -22,6 +22,23 @@ async function fetchInitialRootsWithTimeout(server: {
 }
 
 export async function startStdioServer(): Promise<void> {
+  // Last-resort logging: surface unhandled errors to stderr before Node.js
+  // terminates. Without these, crashes are silent (exit code 1, no message).
+  // Note: wireStdoutShutdown() handles the primary EPIPE crash path;
+  // these handlers catch anything else that slips through.
+  process.on('uncaughtException', (err) => {
+    console.error('[MCP] Uncaught exception -- process will exit:', err);
+    // Do not call process.exit() here: let the default Node.js behavior
+    // handle termination so the exit code is correct.
+  });
+  process.on('unhandledRejection', (reason) => {
+    console.error('[MCP] Unhandled promise rejection:', reason);
+    // Node.js v15+: registering this handler suppresses the runtime's default
+    // exit-on-unhandled-rejection behavior. Explicitly exit so the process
+    // does not silently continue in an undefined state.
+    process.exit(1);
+  });
+
   const { server, ctx, rootsManager } = await composeServer();
 
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
@@ -41,6 +58,17 @@ export async function startStdioServer(): Promise<void> {
       console.error('[Roots] Failed to fetch updated roots after change notification');
     }
   });
+
+  // -------------------------------------------------------------------------
+  // stdio-specific: Guard stdout against EPIPE before connecting transport.
+  //
+  // The MCP SDK's StdioServerTransport only registers error listeners on
+  // stdin. If the client disconnects while a write is in-flight, stdout emits
+  // EPIPE with no listener -- Node.js converts this to an uncaught exception
+  // and the process crashes. wireStdoutShutdown() registers the listener
+  // *before* server.connect() so no write can occur without the guard in place.
+  // -------------------------------------------------------------------------
+  wireStdoutShutdown();
 
   // -------------------------------------------------------------------------
   // stdio-specific: Connect transport

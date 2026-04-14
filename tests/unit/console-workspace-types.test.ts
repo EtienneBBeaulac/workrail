@@ -14,7 +14,10 @@ import {
   sortItemsForRepo,
   itemVisibility,
   countNeedsAttention,
+  countHasGaps,
   selectPrimarySession,
+  buildRepoGroups,
+  type RepoGroupsResult,
 } from '../../console/src/views/workspace-types.js';
 import type { WorkspaceItem } from '../../console/src/views/workspace-types.js';
 import type {
@@ -399,6 +402,55 @@ describe('countNeedsAttention', () => {
 });
 
 // ---------------------------------------------------------------------------
+// countHasGaps
+// ---------------------------------------------------------------------------
+
+describe('countHasGaps', () => {
+  function makeItem(hasGaps: boolean): WorkspaceItem {
+    return {
+      branch: 'feature/x',
+      repoRoot: '/repo',
+      repoName: 'repo',
+      worktree: undefined,
+      primarySession: undefined,
+      allSessions: hasGaps
+        ? [makeSession({ hasUnresolvedGaps: true }), makeSession({ hasUnresolvedGaps: false })]
+        : [makeSession({ hasUnresolvedGaps: false })],
+      activityMs: NOW_MS,
+    };
+  }
+
+  it('counts items with at least one gap session', () => {
+    expect(countHasGaps([makeItem(true), makeItem(false)])).toBe(1);
+  });
+
+  it('returns 0 when no sessions have gaps', () => {
+    expect(countHasGaps([makeItem(false), makeItem(false)])).toBe(0);
+  });
+
+  it('counts each item at most once regardless of gap session count', () => {
+    // item with two gap sessions should still count as 1
+    const item: WorkspaceItem = {
+      branch: 'feature/y',
+      repoRoot: '/repo',
+      repoName: 'repo',
+      worktree: undefined,
+      primarySession: undefined,
+      allSessions: [
+        makeSession({ hasUnresolvedGaps: true }),
+        makeSession({ hasUnresolvedGaps: true }),
+      ],
+      activityMs: NOW_MS,
+    };
+    expect(countHasGaps([item])).toBe(1);
+  });
+
+  it('returns 0 for empty list', () => {
+    expect(countHasGaps([])).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // selectPrimarySession
 // ---------------------------------------------------------------------------
 
@@ -423,5 +475,105 @@ describe('selectPrimarySession', () => {
     const older = makeSession({ sessionId: 'sess_0000000000000000000000001', status: 'complete', lastModifiedMs: NOW_MS - 2 * DAY_MS });
     const newer = makeSession({ sessionId: 'sess_0000000000000000000000002', status: 'complete', lastModifiedMs: NOW_MS - DAY_MS });
     expect(selectPrimarySession([older, newer])!.sessionId).toBe('sess_0000000000000000000000002');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildRepoGroups
+// ---------------------------------------------------------------------------
+
+function makeSimpleRepo(repoRoot = '/repos/myrepo', branch = 'main'): ConsoleRepoWorktrees {
+  return makeRepo(repoRoot, [makeWorktree({ path: repoRoot, branch, headTimestampMs: NOW_MS - DAY_MS })]);
+}
+
+describe('buildRepoGroups', () => {
+  it('returns empty results when sessions and repos are empty', () => {
+    const result: RepoGroupsResult = buildRepoGroups([], [], 'active', NOW_MS);
+    expect(result.repoGroups).toHaveLength(0);
+    expect(result.orderedItems).toHaveLength(0);
+    expect(result.archiveRepos).toHaveLength(0);
+    expect(result.dormantHiddenCount).toBe(0);
+  });
+
+  it('returns a single repo group for sessions in one repo', () => {
+    const sessions = [makeSession({ sessionId: 'sess_test_000000000000000000000002', gitBranch: 'main', repoRoot: '/repos/myrepo' })];
+    const repos = [makeSimpleRepo()];
+    const result = buildRepoGroups(sessions, repos, 'active', NOW_MS);
+    expect(result.repoGroups).toHaveLength(1);
+    expect(result.repoGroups[0]!.repoName).toBe('myrepo');
+    expect(result.orderedItems).toHaveLength(1);
+    expect(result.archiveRepos).toHaveLength(1);
+  });
+
+  it('groups sessions from two repos into two groups', () => {
+    const sessions = [
+      makeSession({ sessionId: 'sess_test_000000000000000000000003', gitBranch: 'main', repoRoot: '/repos/repo-a' }),
+      makeSession({ sessionId: 'sess_test_000000000000000000000004', gitBranch: 'feature', repoRoot: '/repos/repo-b' }),
+    ];
+    const repos: ConsoleRepoWorktrees[] = [
+      {
+        repoName: 'repo-a', repoRoot: '/repos/repo-a',
+        worktrees: [makeWorktree({ path: '/repos/repo-a', branch: 'main', headTimestampMs: NOW_MS - DAY_MS })],
+      },
+      {
+        repoName: 'repo-b', repoRoot: '/repos/repo-b',
+        worktrees: [makeWorktree({ path: '/repos/repo-b', branch: 'feature', headTimestampMs: NOW_MS - DAY_MS })],
+      },
+    ];
+    const result = buildRepoGroups(sessions, repos, 'active', NOW_MS);
+    expect(result.repoGroups).toHaveLength(2);
+    expect(result.orderedItems).toHaveLength(2);
+  });
+
+  it('sorts repos with active sessions before inactive repos', () => {
+    const sessions = [
+      makeSession({ sessionId: 'sess_test_000000000000000000000005', gitBranch: 'main', repoRoot: '/repos/a-repo', status: 'complete', lastModifiedMs: NOW_MS - DAY_MS }),
+      makeSession({ sessionId: 'sess_test_000000000000000000000006', gitBranch: 'feature', repoRoot: '/repos/b-repo', status: 'in_progress', lastModifiedMs: NOW_MS }),
+    ];
+    const repos: ConsoleRepoWorktrees[] = [
+      {
+        repoName: 'a-repo', repoRoot: '/repos/a-repo',
+        worktrees: [makeWorktree({ path: '/repos/a-repo', branch: 'main', headTimestampMs: NOW_MS - DAY_MS })],
+      },
+      {
+        repoName: 'b-repo', repoRoot: '/repos/b-repo',
+        worktrees: [makeWorktree({ path: '/repos/b-repo', branch: 'feature', headTimestampMs: NOW_MS, activeSessionCount: 1 })],
+      },
+    ];
+    const result = buildRepoGroups(sessions, repos, 'active', NOW_MS);
+    // b-repo (active) should come first even though a-repo is alphabetically first
+    expect(result.repoGroups[0]!.repoName).toBe('b-repo');
+    expect(result.repoGroups[1]!.repoName).toBe('a-repo');
+  });
+
+  it('counts dormant hidden items when scope is active', () => {
+    const sessions = [
+      makeSession({ sessionId: 'sess_test_000000000000000000000007', gitBranch: 'stale-branch', repoRoot: '/repos/myrepo', status: 'dormant', lastModifiedMs: NOW_MS - DAY_MS }),
+    ];
+    const repos: ConsoleRepoWorktrees[] = [
+      {
+        repoName: 'myrepo', repoRoot: '/repos/myrepo',
+        worktrees: [makeWorktree({ path: '/repos/myrepo', branch: 'stale-branch', headTimestampMs: NOW_MS - DAY_MS, changedCount: 0, aheadCount: 0 })],
+      },
+    ];
+    const result = buildRepoGroups(sessions, repos, 'active', NOW_MS);
+    expect(result.dormantHiddenCount).toBe(1);
+    // Dormant item is hidden so the repo group is filtered out
+    expect(result.repoGroups).toHaveLength(0);
+  });
+
+  it('dormantHiddenCount is 0 when scope is all', () => {
+    const sessions = [
+      makeSession({ sessionId: 'sess_test_000000000000000000000008', gitBranch: 'stale-branch', repoRoot: '/repos/myrepo', status: 'dormant', lastModifiedMs: NOW_MS - DAY_MS }),
+    ];
+    const repos: ConsoleRepoWorktrees[] = [
+      {
+        repoName: 'myrepo', repoRoot: '/repos/myrepo',
+        worktrees: [makeWorktree({ path: '/repos/myrepo', branch: 'stale-branch', headTimestampMs: NOW_MS - DAY_MS, changedCount: 0, aheadCount: 0 })],
+      },
+    ];
+    const result = buildRepoGroups(sessions, repos, 'all', NOW_MS);
+    expect(result.dormantHiddenCount).toBe(0);
+    expect(result.repoGroups).toHaveLength(1);
   });
 });

@@ -86,7 +86,7 @@ vi.mock('../../../src/di/tokens.js', () => ({
 }));
 
 // Import after mocks are set up
-const { wireShutdownHooks, wireStdinShutdown } = await import(
+const { wireShutdownHooks, wireStdinShutdown, wireStdoutShutdown } = await import(
   '../../../src/mcp/transports/shutdown-hooks.js'
 );
 
@@ -224,5 +224,84 @@ describe('wireStdinShutdown', () => {
 
     expect(emittedEvents).toHaveLength(1);
     expect(emittedEvents[0]).toEqual({ kind: 'shutdown_requested', signal: 'SIGHUP' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fake writable stream for wireStdoutShutdown tests
+// ---------------------------------------------------------------------------
+
+function createFakeStdout(): NodeJS.WritableStream & {
+  simulateError(code: string): void;
+} {
+  const emitter = new EventEmitter() as NodeJS.WritableStream & {
+    simulateError(code: string): void;
+  };
+  emitter.simulateError = (code: string) => {
+    const err = Object.assign(new Error(`write ${code}`), { code });
+    emitter.emit('error', err);
+  };
+  return emitter;
+}
+
+describe('wireStdoutShutdown', () => {
+  beforeEach(() => {
+    fakeShutdownEvents._listeners.length = 0;
+    fakeProcessSignals._handlers.clear();
+    fakeProcessSignals._onceHandlers.clear();
+    fakeTerminator._calls.length = 0;
+  });
+
+  it('emits shutdown_requested with SIGHUP on EPIPE', () => {
+    const fakeStdout = createFakeStdout();
+    const emittedEvents: Array<{ kind: string; signal: string }> = [];
+
+    fakeShutdownEvents._listeners.push((event) => emittedEvents.push(event));
+
+    wireStdoutShutdown({ stdout: fakeStdout });
+    fakeStdout.simulateError('EPIPE');
+
+    expect(emittedEvents).toHaveLength(1);
+    expect(emittedEvents[0]).toEqual({ kind: 'shutdown_requested', signal: 'SIGHUP' });
+  });
+
+  it('emits shutdown_requested with SIGHUP on ERR_STREAM_DESTROYED', () => {
+    const fakeStdout = createFakeStdout();
+    const emittedEvents: Array<{ kind: string; signal: string }> = [];
+
+    fakeShutdownEvents._listeners.push((event) => emittedEvents.push(event));
+
+    wireStdoutShutdown({ stdout: fakeStdout });
+    fakeStdout.simulateError('ERR_STREAM_DESTROYED');
+
+    expect(emittedEvents).toHaveLength(1);
+    expect(emittedEvents[0]).toEqual({ kind: 'shutdown_requested', signal: 'SIGHUP' });
+  });
+
+  it('emits shutdown_requested for other stdout errors too', () => {
+    const fakeStdout = createFakeStdout();
+    const emittedEvents: Array<{ kind: string; signal: string }> = [];
+
+    fakeShutdownEvents._listeners.push((event) => emittedEvents.push(event));
+
+    wireStdoutShutdown({ stdout: fakeStdout });
+    fakeStdout.simulateError('EIO');
+
+    expect(emittedEvents).toHaveLength(1);
+    expect(emittedEvents[0]).toEqual({ kind: 'shutdown_requested', signal: 'SIGHUP' });
+  });
+
+  it('handles multiple errors (does not throw after first)', () => {
+    const fakeStdout = createFakeStdout();
+    const emittedEvents: Array<{ kind: string; signal: string }> = [];
+
+    fakeShutdownEvents._listeners.push((event) => emittedEvents.push(event));
+
+    wireStdoutShutdown({ stdout: fakeStdout });
+    fakeStdout.simulateError('EPIPE');
+    fakeStdout.simulateError('EPIPE');
+
+    // Both fire since we register with .on() not .once()
+    expect(emittedEvents).toHaveLength(2);
   });
 });
