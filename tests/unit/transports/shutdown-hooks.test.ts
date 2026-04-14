@@ -299,9 +299,10 @@ describe('wireStdinShutdown', () => {
 
 // ---------------------------------------------------------------------------
 // Fake writable stream for wireStdoutShutdown tests
+// (named differently from createFakeStdout above to avoid duplicate declaration)
 // ---------------------------------------------------------------------------
 
-function createFakeStdout(): NodeJS.WritableStream & {
+function createFakeStdoutWithCode(): NodeJS.WritableStream & {
   simulateError(code: string): void;
 } {
   const emitter = new EventEmitter() as NodeJS.WritableStream & {
@@ -323,7 +324,7 @@ describe('wireStdoutShutdown', () => {
   });
 
   it('emits shutdown_requested with SIGHUP on EPIPE', () => {
-    const fakeStdout = createFakeStdout();
+    const fakeStdout = createFakeStdoutWithCode();
     const emittedEvents: Array<{ kind: string; signal: string }> = [];
 
     fakeShutdownEvents._listeners.push((event) => emittedEvents.push(event));
@@ -336,7 +337,7 @@ describe('wireStdoutShutdown', () => {
   });
 
   it('emits shutdown_requested with SIGHUP on ERR_STREAM_DESTROYED', () => {
-    const fakeStdout = createFakeStdout();
+    const fakeStdout = createFakeStdoutWithCode();
     const emittedEvents: Array<{ kind: string; signal: string }> = [];
 
     fakeShutdownEvents._listeners.push((event) => emittedEvents.push(event));
@@ -349,7 +350,7 @@ describe('wireStdoutShutdown', () => {
   });
 
   it('emits shutdown_requested for other stdout errors too', () => {
-    const fakeStdout = createFakeStdout();
+    const fakeStdout = createFakeStdoutWithCode();
     const emittedEvents: Array<{ kind: string; signal: string }> = [];
 
     fakeShutdownEvents._listeners.push((event) => emittedEvents.push(event));
@@ -362,7 +363,7 @@ describe('wireStdoutShutdown', () => {
   });
 
   it('handles multiple errors (does not throw after first)', () => {
-    const fakeStdout = createFakeStdout();
+    const fakeStdout = createFakeStdoutWithCode();
     const emittedEvents: Array<{ kind: string; signal: string }> = [];
 
     fakeShutdownEvents._listeners.push((event) => emittedEvents.push(event));
