@@ -8,9 +8,7 @@ Lightweight cross-cutting roadmap. **This is the single entry point** -- check h
 
 ## Now
 
-*(actively in progress or explicitly up next)*
-
-- **Console CPU spiral** -- SSE `change` event still calls `invalidateQueries(['worktrees'])`, spawning unbounded git subprocesses per session write. Fix: remove the worktrees invalidation from `useWorkspaceEvents()` in `console/src/api/hooks.ts`, cap `enrichWorktree` concurrency to 8, filter `fs.watch` to `.jsonl` writes only. See `docs/design/console-performance-discovery.md` and `open-work-inventory.md #0`.
+*(nothing actively in progress -- work is in a clean state)*
 
 ---
 
@@ -59,6 +57,7 @@ Lightweight cross-cutting roadmap. **This is the single entry point** -- check h
 
 *(moved here to keep Now/Next clean)*
 
+- ~~**Console CPU spiral**~~ -- all three fixes shipped: `change` SSE events no longer invalidate worktrees (governed by refetchInterval only), enrichWorktree semaphore at MAX=8, fs.watch filtered to `.jsonl` writes
 - ~~**Console MVI architecture**~~ -- all 6 views refactored to Repository → UseCases → Reducer → ViewModel → pure presenter; 290+ new tests; `console/CLAUDE.md` documents the pattern (#332)
 - ~~**MCP server stability**~~ -- `wireStdoutShutdown` (EPIPE crash), `clearIfStaleLock` (stale lock after crash), `HttpServer.stop()` idempotency (double SIGTERM), port exhaustion graceful degradation, `openDashboard` degraded-mode guard (#332, #335)
 - ~~**HTTP MCP dev environment**~~ -- nodemon + HTTP transport for local dev; `npm run dev:mcp:watch` (#334)

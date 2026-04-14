@@ -14,17 +14,14 @@ For explicit status on the major older planning docs themselves, see `docs/roadm
 
 ## Active partials
 
-### 0. Console performance: CPU spiral from session writes triggering worktree git fan-out
+### ~~0. Console performance: CPU spiral from session writes triggering worktree git fan-out~~ (done)
 
-- **Status**: ready to implement (EtienneBBeaulac/workrail#240, #241)
-- **Root cause**: three-part feedback loop -- session write fires `fs.watch`, SSE `change` event triggers `invalidateQueries(['worktrees'])` which bypasses `staleTime`, spawning 606 concurrent git subprocesses (12.5s) per request, which writes another session event on return
-- **Compound fix (three independent changes)**:
-  1. Remove `invalidateQueries(['worktrees'])` from `useWorkspaceEvents()` in `console/src/api/hooks.ts` - breaks the loop; worktrees governed solely by `refetchInterval`
-  2. Add concurrency semaphore (max 8) around `enrichWorktree` in `src/v2/usecases/worktree-service.ts` - bounds git subprocess fan-out
-  3. Filter `fs.watch` callback in `src/v2/console-routes.ts` to only fire on `.jsonl` writes
-- **Companion fix**: add TTL eviction to `remembered-roots-store` so stale repos (e.g., 79 worktrees from inactive zillow-android-2 session) age out (#241)
-- **Follow-on**: typed SSE events + server-side `.git/` watchers per repo for true live worktree updates without polling (#242, tracked in Later)
-- **Design doc**: `docs/design/console-performance-discovery.md`
+- **Status**: complete (all three parts shipped)
+- **What was delivered**:
+  1. `useWorkspaceEvents()` `change` events no longer call `invalidateQueries(['worktrees'])` -- worktrees governed solely by `refetchInterval`. `worktrees-updated` SSE events (background enrichment complete) still invalidate worktrees, which is correct.
+  2. Concurrency semaphore (MAX=8) added to `enrichWorktree` in `src/v2/usecases/worktree-service.ts`
+  3. `fs.watch` callback in console routes now filters to `.jsonl` writes only
+- **Still open** (tracked in Later): TTL eviction for `remembered-roots-store` (#241), typed SSE events + server-side `.git/` watchers (#242)
 
 ### ~~1. Retrieval budget and recovery-surface strengthening~~ (done)
 
