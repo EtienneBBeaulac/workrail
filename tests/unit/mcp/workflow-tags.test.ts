@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildTagSummary } from '../../../src/mcp/handlers/v2-workflow.js';
+import { buildTagSummary, buildVirtualSourceTags, filterByTags } from '../../../src/mcp/handlers/v2-workflow.js';
 
 const SAMPLE_TAGS_FILE = {
   tags: [
@@ -45,5 +45,100 @@ describe('buildTagSummary', () => {
     const coding = summary.find((t) => t.id === 'coding')!;
     expect(coding.when).toEqual(['implementing a feature']);
     expect(coding.examples).toEqual(['coding-task']);
+  });
+
+  it('appends virtual source tags for unregistered namespaced workflow IDs', () => {
+    const ids = ['coding-task', 'mercury-android.clickstream-impl', 'mercury-android.telemetry-impl', 'mercury-ios.clickstream-impl'];
+    const summary = buildTagSummary(SAMPLE_TAGS_FILE, ids);
+    const androidTag = summary.find((t) => t.id === 'mercury-android');
+    const iosTag = summary.find((t) => t.id === 'mercury-ios');
+    expect(androidTag).toBeDefined();
+    expect(androidTag!.count).toBe(2);
+    expect(androidTag!.displayName).toBe('Mercury Android');
+    expect(androidTag!.examples).toEqual(['mercury-android.clickstream-impl', 'mercury-android.telemetry-impl']);
+    expect(iosTag).toBeDefined();
+    expect(iosTag!.count).toBe(1);
+    expect(iosTag!.displayName).toBe('Mercury iOS');
+  });
+
+  it('does not create virtual tags for already-registered namespaced IDs', () => {
+    // wr.discovery is registered in SAMPLE_TAGS_FILE if we add it, but here we verify
+    // that an ID present in tagsFile.workflows is not double-counted as a virtual tag.
+    const tagsFileWithNs = {
+      ...SAMPLE_TAGS_FILE,
+      workflows: { ...SAMPLE_TAGS_FILE.workflows, 'acme.my-workflow': { tags: ['coding'] as const } },
+    };
+    const summary = buildTagSummary(tagsFileWithNs, ['acme.my-workflow']);
+    expect(summary.find((t) => t.id === 'acme')).toBeUndefined();
+  });
+
+  it('virtual source tags come after bundled functional tags', () => {
+    const ids = ['coding-task', 'acme.workflow-one'];
+    const summary = buildTagSummary(SAMPLE_TAGS_FILE, ids);
+    const bundledIdx = summary.findIndex((t) => t.id === 'coding');
+    const virtualIdx = summary.findIndex((t) => t.id === 'acme');
+    expect(bundledIdx).toBeGreaterThanOrEqual(0);
+    expect(virtualIdx).toBeGreaterThan(bundledIdx);
+  });
+});
+
+describe('buildVirtualSourceTags', () => {
+  it('groups unregistered namespaced IDs by namespace prefix', () => {
+    const ids = ['mercury-android.workflow-a', 'mercury-android.workflow-b', 'mercury-ios.workflow-c', 'non-namespaced'];
+    const tags = buildVirtualSourceTags(SAMPLE_TAGS_FILE, ids);
+    expect(tags).toHaveLength(2);
+    const android = tags.find((t) => t.id === 'mercury-android')!;
+    expect(android.count).toBe(2);
+    expect(android.examples).toEqual(['mercury-android.workflow-a', 'mercury-android.workflow-b']);
+  });
+
+  it('caps examples at 3', () => {
+    const ids = ['acme.a', 'acme.b', 'acme.c', 'acme.d'];
+    const tags = buildVirtualSourceTags(SAMPLE_TAGS_FILE, ids);
+    expect(tags[0]!.examples).toHaveLength(3);
+  });
+
+  it('skips IDs without a dot', () => {
+    const tags = buildVirtualSourceTags(SAMPLE_TAGS_FILE, ['no-dot-here']);
+    expect(tags).toHaveLength(0);
+  });
+
+  it('applies acronym-aware title casing', () => {
+    const tags = buildVirtualSourceTags(SAMPLE_TAGS_FILE, ['mercury-ios.some-workflow']);
+    expect(tags[0]!.displayName).toBe('Mercury iOS');
+  });
+});
+
+describe('filterByTags', () => {
+  it('returns registered workflows matching a bundled functional tag', () => {
+    const ids = ['coding-task', 'mr-review', 'mercury-android.workflow-a'];
+    const result = filterByTags(SAMPLE_TAGS_FILE, ids, ['coding']);
+    expect(result).toEqual(['coding-task']);
+  });
+
+  it('returns unregistered namespaced workflows when their namespace is requested', () => {
+    const ids = ['coding-task', 'mercury-android.workflow-a', 'mercury-android.workflow-b', 'mercury-ios.workflow-c'];
+    const result = filterByTags(SAMPLE_TAGS_FILE, ids, ['mercury-android']);
+    expect(result).toContain('mercury-android.workflow-a');
+    expect(result).toContain('mercury-android.workflow-b');
+    expect(result).not.toContain('mercury-ios.workflow-c');
+    expect(result).not.toContain('coding-task');
+  });
+
+  it('handles a mix of bundled and virtual tag filters', () => {
+    const ids = ['coding-task', 'mercury-android.workflow-a'];
+    const result = filterByTags(SAMPLE_TAGS_FILE, ids, ['coding', 'mercury-android']);
+    expect(result).toContain('coding-task');
+    expect(result).toContain('mercury-android.workflow-a');
+  });
+
+  it('does not include registered namespaced IDs as virtual tag matches', () => {
+    const tagsFileWithNs = {
+      ...SAMPLE_TAGS_FILE,
+      workflows: { ...SAMPLE_TAGS_FILE.workflows, 'acme.registered': { tags: ['coding'] as const } },
+    };
+    // 'acme.registered' is registered under 'coding', not as a virtual tag
+    const result = filterByTags(tagsFileWithNs, ['acme.registered'], ['acme']);
+    expect(result).toHaveLength(0); // registered IDs are skipped in virtual matching
   });
 });
