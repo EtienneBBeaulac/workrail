@@ -383,6 +383,9 @@ For explicit status on the major older planning docs themselves, see `docs/roadm
 
 ### Recently completed
 
+- ~~**Console MVI architecture**~~ (done 2026-04-14 -- all 6 views refactored to Repository → UseCases → Reducer → ViewModel → pure presenter; 290+ tests; console/CLAUDE.md documents the pattern; #332)
+- ~~**MCP server stability**~~ (done 2026-04-14 -- EPIPE crash, stale lock after crash, HttpServer.stop() idempotency, port exhaustion graceful degradation, openDashboard degraded-mode guard; #332 #335)
+- ~~**HTTP MCP dev environment**~~ (done 2026-04-14 -- nodemon + HTTP transport; npm run dev:mcp:watch; #334)
 - ~~**Complete v2 sign-off and cleanup**~~ (done)
 - ~~**Expand lifecycle validation coverage**~~ (done -- auto-walk smoke test)
 - ~~**Finish prompt/supplement boundary alignment**~~ (done)

@@ -2,8 +2,8 @@
 title: Console UI Backlog
 scope: console
 status: active
-branch: feature/etienneb/console-ui-redesign
-last_updated: 2026-04-08
+branch: main
+last_updated: 2026-04-14
 related:
   - docs/design/console-cyberpunk-ui-discovery.md
   - docs/roadmap/now-next-later.md
@@ -116,22 +116,6 @@ the old flat dark style.
 
 *(worth keeping visible, not current delivery commitments)*
 
-### Proper MVI architecture for the console
-
-The console currently has all data-fetching, state management, and rendering co-located in large view files (WorkspaceView is 1,200+ lines). Refactor to a proper separation of concerns:
-
-- **ViewModels** -- derived state transformations (e.g. `useWorkspaceViewModel`) separated from fetch hooks
-- **Use cases / interactors** -- business logic (e.g. dormancy derivation, scope filtering) extracted from components
-- **Repository layer** -- wraps React Query hooks so views depend on abstractions, not fetch details
-- **Pure view components** -- receive props only, no hooks
-
-Architecture pattern: MVI (Model-View-Intent) or similar unidirectional data flow. Aligns with the existing `workspace-types.ts` pure-function approach -- extend that pattern to the full view layer.
-
-Benefits: testable logic without React, smaller components, easier to add new views, clear separation between "what data" and "how it looks".
-
-**Files most in need:** `WorkspaceView.tsx` (15+ co-located sub-components), `WorkflowsView.tsx` (complex animation state), `AppShell.tsx` (routing + rendering mixed).
-
----
 
 ### Custom cyberpunk overscroll effect
 
@@ -239,6 +223,9 @@ conditions evaluated, what context facts were used.
 | Dormant sessions logic | this PR | 1h threshold backend, hidden in Active scope, hint shortcut |
 | Two-phase worktree scan | this PR | Fast branch list + background enrichment via SSE; fixes 79-worktree hang |
 | Multi-repo discovery | this PR | Derives repo roots from remembered-roots.json |
+| MVI architecture refactor | #332 | All 6 views: Repository → UseCases → Reducer → ViewModel → pure presenter; 290+ tests; console/CLAUDE.md |
+| MCP server stability | #332 #335 | wireStdoutShutdown (EPIPE crash), clearIfStaleLock, HttpServer idempotent stop, port exhaustion graceful degradation |
+| Dormant BranchGroup fix | #332 | Dormant sessions in multi-session branches demoted to history section in Active scope |
 
 ---
 
