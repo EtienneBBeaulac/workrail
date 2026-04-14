@@ -16,8 +16,11 @@ Lightweight cross-cutting roadmap. **This is the single entry point** -- check h
 
 *(groomed, roughly ordered by value -- ready to execute)*
 
-1. **Trial the quality gate and readiness audit on real diverse tasks**
- -- `workflow-for-workflows.v2.json` and `production-readiness-audit.json` have been tuned through authoring reasoning, not evidence from varied real runs. Run both on multiple tasks spanning different archetypes. Tune `STANDARD` vs `THOROUGH` depth from what is observed. See `docs/tickets/next-up.md` Ticket 6.
+1. **Progress notifications** -- Long workflows block with no agent visibility. Design is mostly done; three open issues remain before implementation: (a) `progressToken` threading through `ToolContext`, (b) `NotificationSender` port to give `advance.ts` access to `sendNotification`, (c) step-node counting (filter `step` nodes only, exclude `blocked_attempt`/`checkpoint`). See `docs/plans/v2-followup-enhancements.md` P2.
+
+2. **Console execution-trace explainability** -- The DAG shows only `node_created`/`edge_created`. Engine decisions (fast paths, skipped phases, condition evaluation, loop entry/exit) are invisible, making legitimate runs look broken. This needs a **design phase first** before any implementation -- see `docs/tickets/next-up.md` Ticket 5 and `docs/ideas/backlog.md`.
+
+3. **Legacy workflow modernization** -- `exploration-workflow.json` is the highest-priority candidate. `mr-review-workflow.json` and `bug-investigation.json` are next. See `docs/roadmap/open-work-inventory.md` for the full prioritized list and what "modernization" means. -- `workflow-for-workflows.v2.json` and `production-readiness-audit.json` have been tuned through authoring reasoning, not evidence from varied real runs. Run both on multiple tasks spanning different archetypes. Tune `STANDARD` vs `THOROUGH` depth from what is observed. See `docs/tickets/next-up.md` Ticket 6.
 
 3. **Progress notifications** -- Long workflows block with no agent visibility. Design is mostly done; three open issues remain before implementation: (a) `progressToken` threading through `ToolContext`, (b) `NotificationSender` port to give `advance.ts` access to `sendNotification`, (c) step-node counting (filter `step` nodes only, exclude `blocked_attempt`/`checkpoint`). See `docs/plans/v2-followup-enhancements.md` P2.
 
@@ -56,6 +59,7 @@ Lightweight cross-cutting roadmap. **This is the single entry point** -- check h
 
 *(moved here to keep Now/Next clean)*
 
+- ~~**Trial the quality gate and readiness audit**~~ -- `workflow-for-workflows.v2.json` and `production-readiness-audit.json` exercised extensively on the MVI refactor and MCP stability work across this session; STANDARD/THOROUGH depth validated
 - ~~**Assessment-gate adoption in mr-review-workflow**~~ -- `mr-review-workflow.agentic.v2.json` already has assessmentRefs/assessmentConsequences alongside `bug-investigation`, `coding-task-workflow-agentic.lean.v2`, and `workflow-for-workflows.v2`
 - ~~**Console CPU spiral**~~ -- all three fixes shipped: `change` SSE events no longer invalidate worktrees (governed by refetchInterval only), enrichWorktree semaphore at MAX=8, fs.watch filtered to `.jsonl` writes
 - ~~**Console MVI architecture**~~ -- all 6 views refactored to Repository → UseCases → Reducer → ViewModel → pure presenter; 290+ new tests; `console/CLAUDE.md` documents the pattern (#332)
