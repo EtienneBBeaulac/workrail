@@ -3,7 +3,7 @@
  *
  * No React, no side effects. All functions are deterministic.
  */
-import type { ConsoleExecutionTraceItem, ConsoleExecutionTraceSummary } from '../api/types';
+import type { ConsoleDagEdge, ConsoleExecutionTraceItem, ConsoleExecutionTraceSummary } from '../api/types';
 
 // ---------------------------------------------------------------------------
 // Condition evaluation helpers
@@ -130,6 +130,135 @@ export function groupTraceEntries(items: readonly ConsoleExecutionTraceItem[]): 
   }
 
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Edge cause correlation
+// ---------------------------------------------------------------------------
+
+/**
+ * The kind of execution event that preceded (caused) an edge transition.
+ *
+ * Maps to trace item kinds, normalized to a smaller vocabulary for rendering:
+ * - 'condition'  <- evaluated_condition
+ * - 'fork'       <- detected_non_tip_advance
+ * - 'divergence' <- divergence
+ * - 'advance'    <- selected_next_step (normal step advance)
+ */
+export type EdgeCauseKind = 'condition' | 'fork' | 'divergence' | 'advance';
+
+export interface EdgeCause {
+  readonly kind: EdgeCauseKind;
+  readonly summary: string;
+}
+
+/** Returns the EdgeCauseKind for a trace item kind, or null if the item kind
+ *  is not one that causes an edge (e.g., context_fact, entered_loop). */
+function edgeCauseKindFromItem(item: ConsoleExecutionTraceItem): EdgeCauseKind | null {
+  switch (item.kind) {
+    case 'evaluated_condition': return 'condition';
+    case 'detected_non_tip_advance': return 'fork';
+    case 'divergence': return 'divergence';
+    case 'selected_next_step': return 'advance';
+    default: return null;
+  }
+}
+
+/**
+ * Finds the trace item that most likely caused (preceded) this edge.
+ *
+ * Algorithm: linear scan over all items, find the one whose recordedAtEventIndex
+ * is the largest value still <= the edge's createdAtEventIndex and whose kind
+ * maps to an EdgeCauseKind.
+ *
+ * Returns null when no qualifying item exists (e.g., no trace for this edge yet,
+ * or the edge was created before any relevant trace items).
+ *
+ * NOTE: Edge midpoints for cause diamonds are geometric approximations (midpoint
+ * of the two node centers). Smoothstep curves don't pass through this exact point,
+ * but the visual approximation is sufficient for a 10px annotation.
+ */
+export function findEdgeCauseItem(
+  edge: ConsoleDagEdge,
+  items: readonly ConsoleExecutionTraceItem[],
+): EdgeCause | null {
+  let best: EdgeCause | null = null;
+  let bestIndex = -1;
+
+  for (const item of items) {
+    const kind = edgeCauseKindFromItem(item);
+    if (kind === null) continue;
+    if (item.recordedAtEventIndex > edge.createdAtEventIndex) continue;
+    if (item.recordedAtEventIndex > bestIndex) {
+      bestIndex = item.recordedAtEventIndex;
+      best = { kind, summary: item.summary };
+    }
+  }
+
+  return best;
+}
+
+// ---------------------------------------------------------------------------
+// Loop bracket extraction
+// ---------------------------------------------------------------------------
+
+/**
+ * Represents a single loop bracket to render in the DAG gutter.
+ *
+ * nodeIds: all DAG node IDs referenced by the entered_loop or exited_loop
+ * items in this group (via node_id refs). Used to determine the Y range
+ * for the bracket line.
+ */
+export interface LoopBracket {
+  readonly loopId: string;
+  readonly iterationCount: number;
+  readonly nodeIds: readonly string[];
+}
+
+/**
+ * Extracts LoopBracket descriptors from a list of grouped trace entries.
+ *
+ * Only `loop_group` entries (paired entered_loop/exited_loop) produce brackets.
+ * Standalone entries are ignored.
+ *
+ * NOTE: Suppression for iterationCount === 1 is intentionally left to the
+ * render layer (RunLineageDag.tsx) so this function remains generic and testable
+ * without render-layer assumptions.
+ */
+export function getLoopBracketsFromGroups(
+  entries: readonly TraceEntry[],
+): readonly LoopBracket[] {
+  const brackets: LoopBracket[] = [];
+
+  for (const entry of entries) {
+    if (entry.kind !== 'loop_group') continue;
+
+    // Collect all node_id refs from the entered_loop item
+    const enteredNodeIds = entry.enteredItem.refs
+      .filter((r) => r.kind === 'node_id')
+      .map((r) => r.value);
+
+    // Collect all node_id refs from the exited_loop item
+    const exitedNodeIds = entry.exitedItem.refs
+      .filter((r) => r.kind === 'node_id')
+      .map((r) => r.value);
+
+    // Collect node_id refs from all inner items too, to span the full loop range
+    const innerNodeIds = entry.innerItems.flatMap((item) =>
+      item.refs.filter((r) => r.kind === 'node_id').map((r) => r.value),
+    );
+
+    // Deduplicate -- a node may be referenced by multiple inner items
+    const allNodeIds = [...new Set([...enteredNodeIds, ...exitedNodeIds, ...innerNodeIds])];
+
+    brackets.push({
+      loopId: entry.loopId,
+      iterationCount: entry.iterationCount,
+      nodeIds: allNodeIds,
+    });
+  }
+
+  return brackets;
 }
 
 // ---------------------------------------------------------------------------

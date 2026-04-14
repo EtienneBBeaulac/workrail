@@ -13,10 +13,19 @@ import {
   ACTIVE_NODE_HEIGHT,
   ACTIVE_NODE_WIDTH,
   buildLineageDagModel,
+  LINEAGE_SCROLL_OVERHANG,
   shortNodeId,
   SIDE_NODE_HEIGHT,
   SIDE_NODE_WIDTH,
 } from '../lib/lineage-dag-layout';
+import {
+  findEdgeCauseItem,
+  getLoopBracketsFromGroups,
+  getNodeRoutingItems,
+  groupTraceEntries,
+  type EdgeCauseKind,
+} from '../views/session-detail-use-cases';
+import type { ConsoleExecutionTraceItem } from '../api/types';
 
 interface Props {
   run: ConsoleDagRun;
@@ -95,6 +104,43 @@ export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ---------------------------------------------------------------------------
+  // Overlay data: blocked_attempt cause items (sub-feature C)
+  //
+  // Maps nodeId -> cause items for blocked_attempt nodes that have trace data.
+  // null means trace not available (executionTraceSummary is null).
+  // An empty array means trace is available but this node has no cause items.
+  //
+  // NOTE: causeItems are passed to NodeLabel which uses them to decide whether
+  // to render the CAUSE footer band. The node height in flowNodes is also
+  // adjusted based on whether cause items exist.
+  // ---------------------------------------------------------------------------
+
+  const blockedCauseMap = useMemo(() => {
+    if (!run.executionTraceSummary) return null;
+    const summary = run.executionTraceSummary;
+    const result = new Map<string, readonly ConsoleExecutionTraceItem[]>();
+
+    for (const node of run.nodes) {
+      if (node.nodeKind !== 'blocked_attempt') continue;
+      const routing = getNodeRoutingItems(summary, node.nodeId);
+      // Combine all relevant cause item categories
+      const causeItems = [
+        ...routing.divergences,
+        ...routing.forks,
+        ...routing.conditions,
+        ...routing.whySelected,
+      ];
+      result.set(node.nodeId, causeItems);
+    }
+
+    return result;
+  }, [run.executionTraceSummary, run.nodes]);
+
+  // Height extension for blocked_attempt nodes with cause items (sub-feature C).
+  // 40px = 32px footer collapsed + 8px border gap.
+  const CAUSE_FOOTER_HEIGHT_EXTENSION = 40;
+
   const { nodes, edges } = useMemo(() => {
     const currentIncomingEdgeId = model.currentNodeId
       ? model.edges.find((edge) => edge.toNodeId === model.currentNodeId)?.fromNodeId ?? null
@@ -104,10 +150,15 @@ export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props
       const { node, isActiveLineage, isCurrent } = positionedNode;
       const isSelected = node.nodeId === selectedNodeId;
       const width = isActiveLineage ? ACTIVE_NODE_WIDTH : SIDE_NODE_WIDTH;
-      const height = isActiveLineage ? ACTIVE_NODE_HEIGHT : SIDE_NODE_HEIGHT;
       const borderColor = getNodeBorderColor(node, isActiveLineage, isCurrent, isSelected);
       const background = getNodeBackgroundColor(node, isActiveLineage);
       const displayLabel = getDisplayLabel(node, positionedNode.branchKind, positionedNode.branchIndex);
+
+      // Cause items for this node (undefined = trace not available)
+      const causeItems = blockedCauseMap?.get(node.nodeId);
+      const hasCauseFooter = node.nodeKind === 'blocked_attempt' && causeItems !== undefined && causeItems.length > 0;
+      const baseHeight = isActiveLineage ? ACTIVE_NODE_HEIGHT : SIDE_NODE_HEIGHT;
+      const height = hasCauseFooter ? baseHeight + CAUSE_FOOTER_HEIGHT_EXTENSION : baseHeight;
 
       return {
         id: node.nodeId,
@@ -125,6 +176,7 @@ export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props
               displayLabel={displayLabel}
               stepNumber={isActiveLineage ? positionedNode.depth + 1 : null}
               totalSteps={isActiveLineage ? model.summary.lineageNodeCount : null}
+              causeItems={causeItems}
             />
           ),
         },
@@ -184,7 +236,94 @@ export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props
     });
 
     return { nodes: flowNodes, edges: flowEdges };
-  }, [isLiveRun, model.currentNodeId, model.edges, model.nodes, nodeById, selectedNodeId]);
+  }, [blockedCauseMap, isLiveRun, model.currentNodeId, model.edges, model.nodes, nodeById, selectedNodeId]);
+
+  // ---------------------------------------------------------------------------
+  // Overlay data: edge cause diamonds (sub-feature A)
+  //
+  // Computed in a separate useMemo from flowNodes/flowEdges so that changes to
+  // executionTraceSummary don't trigger a full ReactFlow node rebuild.
+  // ---------------------------------------------------------------------------
+
+  const edgeCauses = useMemo(() => {
+    if (!run.executionTraceSummary) return null;
+    const items = run.executionTraceSummary.items;
+
+    return model.edges
+      .map((edge) => {
+        const sourceNode = nodeById.get(edge.fromNodeId);
+        const targetNode = nodeById.get(edge.toNodeId);
+        if (!sourceNode || !targetNode) return null;
+        if (!sourceNode.isActiveLineage || !targetNode.isActiveLineage) return null;
+
+        const cause = findEdgeCauseItem(edge, items);
+        if (!cause) return null;
+
+        const sourceWidth = sourceNode.isActiveLineage ? ACTIVE_NODE_WIDTH : SIDE_NODE_WIDTH;
+        const sourceHeight = sourceNode.isActiveLineage ? ACTIVE_NODE_HEIGHT : SIDE_NODE_HEIGHT;
+        const targetWidth = targetNode.isActiveLineage ? ACTIVE_NODE_WIDTH : SIDE_NODE_WIDTH;
+        const targetHeight = targetNode.isActiveLineage ? ACTIVE_NODE_HEIGHT : SIDE_NODE_HEIGHT;
+
+        // Geometric midpoint between the two node centers (approximate -- smoothstep curves
+        // don't pass through this exact point, but it's close enough for a 10px annotation).
+        const x = (sourceNode.x + sourceWidth / 2 + targetNode.x + targetWidth / 2) / 2;
+        const y = (sourceNode.y + sourceHeight / 2 + targetNode.y + targetHeight / 2) / 2;
+
+        return {
+          edgeKey: `${edge.fromNodeId}->${edge.toNodeId}`,
+          x,
+          y,
+          cause,
+        };
+      })
+      .filter((d): d is NonNullable<typeof d> => d !== null);
+  }, [model.edges, nodeById, run.executionTraceSummary]);
+
+  // ---------------------------------------------------------------------------
+  // Overlay data: loop brackets (sub-feature B)
+  //
+  // Derives positioned loop brackets from the execution trace.
+  // Each bracket has a top Y and bottom Y derived from the Y positions of all
+  // DAG nodes referenced by the loop's trace items.
+  // Brackets with iterationCount === 1 are suppressed (single-iteration loops
+  // don't need a bracket).
+  // ---------------------------------------------------------------------------
+
+  const loopBrackets = useMemo(() => {
+    if (!run.executionTraceSummary) return null;
+    const entries = groupTraceEntries(run.executionTraceSummary.items);
+    const rawBrackets = getLoopBracketsFromGroups(entries);
+
+    return rawBrackets
+      .filter((bracket) => bracket.iterationCount > 1)
+      .map((bracket) => {
+        // Find Y positions of all referenced nodes. Skip brackets where any
+        // node is not in the positioned set (graceful degradation).
+        const positionedNodes = bracket.nodeIds
+          .map((id) => nodeById.get(id))
+          .filter((n): n is NonNullable<typeof n> => n !== undefined);
+
+        if (positionedNodes.length === 0) return null;
+
+        const ys = positionedNodes.map((n) => n.y);
+        const topY = Math.min(...ys);
+        const bottomY = Math.max(...ys) + (positionedNodes[0]!.isActiveLineage ? ACTIVE_NODE_HEIGHT : SIDE_NODE_HEIGHT);
+
+        // X position: left gutter, just inside the scroll overhang area
+        // LINEAGE_SCROLL_OVERHANG (600) + LINEAGE_PADDING (56) is where the first node starts.
+        // We place the bracket at x=LINEAGE_SCROLL_OVERHANG - 36 so it's visible in the gutter.
+        const gutterX = LINEAGE_SCROLL_OVERHANG - 36;
+
+        return {
+          key: bracket.loopId,
+          iterationCount: bracket.iterationCount,
+          topY,
+          bottomY,
+          gutterX,
+        };
+      })
+      .filter((b): b is NonNullable<typeof b> => b !== null);
+  }, [model.nodes, nodeById, run.executionTraceSummary]);
 
   const handleNodeClick: NodeMouseHandler = useCallback(
     (_event, node) => {
@@ -215,6 +354,35 @@ export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props
   }, [nodeById]);
 
   const handleNodeMouseLeave: NodeMouseHandler = useCallback(() => {
+    if (tooltipTimerRef.current !== null) {
+      clearTimeout(tooltipTimerRef.current);
+      tooltipTimerRef.current = null;
+    }
+    setHoveredLabel(null);
+    setTooltipPos(null);
+  }, []);
+
+  // Diamond hover: reuse the same hoveredLabel/tooltipPos state as node label tooltips.
+  // The transparent hover-target div calls these handlers (not the diamond visual itself).
+  const handleDiamondMouseEnter = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>, summary: string) => {
+      const containerRect = scrollContainerRef.current?.getBoundingClientRect();
+      if (!containerRect) return;
+
+      const x = event.clientX - containerRect.left + 12;
+      const y = event.clientY - containerRect.top + 16;
+      const clampedX = Math.min(x, (scrollContainerRef.current?.clientWidth ?? 9999) - 272);
+
+      if (tooltipTimerRef.current !== null) clearTimeout(tooltipTimerRef.current);
+      tooltipTimerRef.current = setTimeout(() => {
+        setHoveredLabel(summary);
+        setTooltipPos({ x: clampedX, y });
+      }, 300);
+    },
+    [],
+  );
+
+  const handleDiamondMouseLeave = useCallback(() => {
     if (tooltipTimerRef.current !== null) {
       clearTimeout(tooltipTimerRef.current);
       tooltipTimerRef.current = null;
@@ -297,6 +465,29 @@ export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props
             onNodeMouseLeave={handleNodeMouseLeave}
             style={{ background: 'transparent' }}
           />
+
+          {/* Sub-feature A: Edge cause diamonds */}
+          {edgeCauses && edgeCauses.map((diamond) => (
+            <EdgeCauseDiamond
+              key={diamond.edgeKey}
+              x={diamond.x}
+              y={diamond.y}
+              cause={diamond.cause}
+              onMouseEnter={handleDiamondMouseEnter}
+              onMouseLeave={handleDiamondMouseLeave}
+            />
+          ))}
+
+          {/* Sub-feature B: Loop bracket SVG overlays */}
+          {loopBrackets && loopBrackets.map((bracket) => (
+            <LoopBracketOverlay
+              key={bracket.key}
+              topY={bracket.topY}
+              bottomY={bracket.bottomY}
+              gutterX={bracket.gutterX}
+              iterationCount={bracket.iterationCount}
+            />
+          ))}
         </div>
         {hoveredLabel && tooltipPos && (
           <div
@@ -336,6 +527,7 @@ function NodeLabel({
   displayLabel,
   stepNumber,
   totalSteps,
+  causeItems,
 }: {
   node: ConsoleDagNode;
   isActiveLineage: boolean;
@@ -347,8 +539,19 @@ function NodeLabel({
   displayLabel: string;
   stepNumber: number | null;
   totalSteps: number | null;
+  /**
+   * Cause items for this node from the execution trace.
+   * undefined = executionTraceSummary not available (legacy session).
+   * empty array = trace available but no cause items for this node.
+   * Non-empty = render CAUSE footer band.
+   */
+  causeItems?: readonly ConsoleExecutionTraceItem[];
 }) {
   const stripeColor = getRichnessStripeColor(node);
+  // Footer is only shown for blocked_attempt nodes with actual cause items
+  const showCauseFooter = node.nodeKind === 'blocked_attempt' && causeItems !== undefined && causeItems.length > 0;
+  // Transient UI state: whether the CAUSE footer is expanded (local only, not feature state)
+  const [causeExpanded, setCauseExpanded] = useState(false);
 
   return (
     <div
@@ -415,6 +618,43 @@ function NodeLabel({
           <MonoLabel className="shrink-0" color="transparent">spacer</MonoLabel>
         )}
       </div>
+
+      {/* Sub-feature C: CAUSE footer band for blocked_attempt nodes */}
+      {showCauseFooter && (
+        <div
+          style={{
+            borderTop: '1px solid rgba(239, 68, 68, 0.25)',
+            background: 'rgba(80, 24, 31, 0.80)',
+            overflow: 'hidden',
+            transition: 'height 120ms ease',
+            height: causeExpanded ? 72 : 32,
+            flexShrink: 0,
+          }}
+        >
+          <div className="flex items-center px-3" style={{ height: 32 }}>
+            <button
+              type="button"
+              onClick={() => setCauseExpanded((e) => !e)}
+              className="font-mono text-[9px] uppercase tracking-[0.22em] px-2 py-0.5 transition-colors"
+              style={{
+                color: causeExpanded ? 'var(--text-muted)' : 'var(--accent)',
+                border: `1px solid ${causeExpanded ? 'rgba(123,141,167,0.25)' : 'rgba(244,196,48,0.40)'}`,
+                background: causeExpanded ? 'rgba(123,141,167,0.06)' : 'rgba(244,196,48,0.08)',
+              }}
+            >
+              {causeExpanded ? '[ CLOSE ]' : '[ CAUSE ]'}
+            </button>
+          </div>
+          {causeExpanded && causeItems && causeItems[0] && (
+            <div
+              className="px-3 pb-2 font-mono text-[9px] leading-relaxed"
+              style={{ color: 'var(--text-secondary)' }}
+            >
+              {causeItems[0].summary}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -656,5 +896,171 @@ function getDisplayLabel(
 
 function truncateLabel(label: string): string {
   return label.length > 18 ? `${label.slice(0, 18)}…` : label;
+}
+
+// ---------------------------------------------------------------------------
+// LoopBracketOverlay
+//
+// Renders a vertical amber line with [ LOOP ] and [ // Nx ] MonoLabels
+// in the left gutter of the DAG canvas. Positioned absolutely within the
+// canvas-sized div so it scrolls with the content.
+// ---------------------------------------------------------------------------
+
+function LoopBracketOverlay({
+  topY,
+  bottomY,
+  gutterX,
+  iterationCount,
+}: {
+  topY: number;
+  bottomY: number;
+  gutterX: number;
+  iterationCount: number;
+}) {
+  const height = bottomY - topY;
+  if (height <= 0) return null;
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: gutterX,
+        top: topY,
+        width: 32,
+        height,
+        pointerEvents: 'none',
+        zIndex: 1,
+      }}
+    >
+      {/* Vertical amber line -- 3px wide, full height */}
+      <div
+        style={{
+          position: 'absolute',
+          left: 14,
+          top: 0,
+          bottom: 0,
+          width: 3,
+          background: 'var(--accent)',
+          opacity: 0.70,
+        }}
+      />
+
+      {/* [ LOOP ] label at top */}
+      <div
+        style={{
+          position: 'absolute',
+          left: 0,
+          top: -2,
+          whiteSpace: 'nowrap',
+        }}
+      >
+        <MonoLabel color="var(--accent)" style={{ fontSize: 9 }}>[ LOOP ]</MonoLabel>
+      </div>
+
+      {/* [ // Nx ] label at bottom */}
+      <div
+        style={{
+          position: 'absolute',
+          left: 0,
+          bottom: -2,
+          whiteSpace: 'nowrap',
+        }}
+      >
+        <MonoLabel color="var(--accent)" style={{ fontSize: 9 }}>{`[ // ${iterationCount}x ]`}</MonoLabel>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Edge cause diamond config
+//
+// Maps EdgeCauseKind to the display character and color used on the diamond.
+// ---------------------------------------------------------------------------
+
+const EDGE_CAUSE_CONFIG: Record<EdgeCauseKind, { readonly char: string; readonly color: string }> = {
+  condition: { char: 'C', color: '#f4c430' },
+  fork:      { char: 'F', color: 'var(--warning)' },
+  divergence:{ char: 'D', color: 'var(--error)' },
+  advance:   { char: '>', color: 'rgba(0,175,192,0.60)' },
+};
+
+// ---------------------------------------------------------------------------
+// EdgeCauseDiamond component
+//
+// Renders a 10x10 rotated square at (x, y) within the canvas-sized div.
+// The diamond visual has pointerEvents:none to avoid blocking node clicks.
+// A separate 20x20 transparent hover-target div sits on top with pointerEvents:auto.
+// Both are at z-index 1-2, below ReactFlow's node layer (z-index 3+).
+// ---------------------------------------------------------------------------
+
+function EdgeCauseDiamond({
+  x,
+  y,
+  cause,
+  onMouseEnter,
+  onMouseLeave,
+}: {
+  x: number;
+  y: number;
+  cause: { kind: EdgeCauseKind; summary: string };
+  onMouseEnter: (event: React.MouseEvent<HTMLDivElement>, summary: string) => void;
+  onMouseLeave: () => void;
+}) {
+  const cfg = EDGE_CAUSE_CONFIG[cause.kind];
+
+  return (
+    <>
+      {/* Diamond visual -- pointerEvents:none so node clicks pass through */}
+      <div
+        style={{
+          position: 'absolute',
+          left: x - 5,
+          top: y - 5,
+          width: 10,
+          height: 10,
+          transform: 'rotate(45deg)',
+          background: cfg.color,
+          zIndex: 1,
+          pointerEvents: 'none',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        {/* Character label (de-rotated to appear upright) */}
+        <span
+          style={{
+            display: 'block',
+            transform: 'rotate(-45deg)',
+            fontSize: 7,
+            lineHeight: 1,
+            fontFamily: 'monospace',
+            fontWeight: 700,
+            color: 'rgba(0,0,0,0.75)',
+            userSelect: 'none',
+          }}
+        >
+          {cfg.char}
+        </span>
+      </div>
+
+      {/* Transparent hover target -- pointerEvents:auto, larger hit area */}
+      <div
+        style={{
+          position: 'absolute',
+          left: x - 10,
+          top: y - 10,
+          width: 20,
+          height: 20,
+          zIndex: 2,
+          pointerEvents: 'auto',
+          cursor: 'default',
+        }}
+        onMouseEnter={(e) => onMouseEnter(e, cause.summary)}
+        onMouseLeave={onMouseLeave}
+      />
+    </>
+  );
 }
 
