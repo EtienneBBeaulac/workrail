@@ -77,6 +77,24 @@ export class HttpServer {
   private isPrimary: boolean = false;
   private lockFile: string;
   private heartbeat: DashboardHeartbeat;
+
+  /**
+   * Cached in-flight stop Promise for idempotency.
+   *
+   * HttpServer has a one-shot lifecycle: start once, stop once. If stop() is
+   * called a second time (e.g. from the double SIGTERM race where both
+   * wireShutdownHooks and setupPrimaryCleanup fire), both callers must join
+   * the same in-flight teardown rather than starting a second one.
+   *
+   * This field is set the first time stop() runs actual teardown (server
+   * non-null). Pre-start no-op calls (server === null) return a fresh
+   * Promise.resolve() without caching -- otherwise a post-start stop would
+   * return the pre-resolved Promise and skip teardown.
+   *
+   * NOTE: If restart-in-place is ever added (start -> stop -> start -> stop),
+   * start() must reset this field to null so the second stop() runs teardown.
+   */
+  private _stopPromise: Promise<void> | null = null;
   
   constructor(
     @inject(SessionManager) private sessionManager: SessionManager,
@@ -469,6 +487,11 @@ export class HttpServer {
    * Uses unified dashboard pattern (primary/secondary) unless disabled
    */
   async start(): Promise<string | null> {
+    // Reset the stop Promise so a future stop() call runs real teardown.
+    // Restart-in-place is not a supported lifecycle, but this guard prevents
+    // a silent no-op if stop() were ever called after a re-start.
+    this._stopPromise = null;
+
     // Check dashboard mode (DI-provided, not env check)
     const mode = this.config.dashboardMode ?? this.dashboardMode;
     if (mode.kind === 'legacy') {
@@ -822,6 +845,9 @@ export class HttpServer {
       }
     }
     
+    // Clear the last failed server so it doesn't linger with a dangling
+    // error listener. The server never started listening so no close() needed.
+    this.server = null;
     throw new Error('No available ports in range 3457-3499');
   }
   
@@ -844,12 +870,19 @@ export class HttpServer {
    * Open dashboard in browser
    */
   async openDashboard(sessionId?: string): Promise<string> {
+    if (!this.baseUrl) {
+      throw new Error(
+        'Dashboard is unavailable -- the HTTP server did not start successfully ' +
+        '(likely due to port exhaustion). MCP tools still work normally.',
+      );
+    }
+
     let url = this.baseUrl;
-    
+
     if (sessionId) {
       url += `?session=${sessionId}`;
     }
-    
+
     const behavior = this.config.browserBehavior ?? this.browserBehavior;
     if (behavior.kind === 'auto_open') {
       try {
@@ -864,14 +897,26 @@ export class HttpServer {
   }
   
   /**
-   * Stop the HTTP server
-   * 
-   * BUG FIX #3: Fixed cleanup order - heartbeat MUST be stopped first
-   * - Heartbeat interval was keeping process alive
-   * - Now clears heartbeat before other cleanup
-   * - Added timeout protection for server close
+   * Stop the HTTP server.
+   *
+   * Idempotent: calling stop() more than once (e.g. from concurrent SIGTERM
+   * handlers) joins the same in-flight teardown rather than starting a second
+   * one. See _stopPromise for the lifecycle invariant.
    */
   async stop(): Promise<void> {
+    // Return cached Promise if teardown is already in flight or complete.
+    if (this._stopPromise !== null) return this._stopPromise;
+
+    // Pre-start no-op: server was never started. Return resolved Promise
+    // without caching so a later start() + stop() runs real teardown.
+    if (this.server === null) return Promise.resolve();
+
+    // Real teardown path -- cache the Promise so concurrent callers join it.
+    this._stopPromise = this._runStop();
+    return this._stopPromise;
+  }
+
+  private async _runStop(): Promise<void> {
     // 1. FIRST: Stop heartbeat to prevent further lock file writes
     this.heartbeat.stop();
     

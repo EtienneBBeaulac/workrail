@@ -6,6 +6,11 @@
  *
  * Transport-specific cleanup (e.g. stopping an HTTP listener, watching stdin)
  * is injected via `onBeforeTerminate`.
+ *
+ * Also handles stream I/O error recovery (stdout drain unblocking) as part of
+ * clean shutdown prerequisites. wireShutdownHooks owns this because it is the
+ * canonical point for "things that must happen before the process can exit
+ * cleanly" -- both signal-based shutdown and stream-error recovery belong here.
  */
 
 import { container } from '../../di/container.js';
@@ -17,6 +22,19 @@ import type { ProcessTerminator } from '../../runtime/ports/process-terminator.j
 export interface ShutdownHookOptions {
   /** Transport-specific teardown (stop listeners, close connections, etc.). */
   readonly onBeforeTerminate: () => Promise<void>;
+
+  /**
+   * The writable stream to watch for I/O errors.
+   *
+   * When stdout encounters an error (e.g. EPIPE from a disconnected client),
+   * any pending StdioServerTransport.send() Promises will hang forever:
+   * the SDK registers once('drain', resolve) but has no rejection path.
+   * Emitting 'drain' on error unblocks those Promises so shutdown is clean.
+   *
+   * Defaults to process.stdout. Inject a fake stream in tests to avoid
+   * touching the real stdout descriptor.
+   */
+  readonly stdout?: NodeJS.WritableStream;
 }
 
 /**
@@ -30,6 +48,25 @@ export function wireShutdownHooks(opts: ShutdownHookOptions): void {
   const shutdownEvents = container.resolve<ShutdownEvents>(DI.Runtime.ShutdownEvents);
   const processSignals = container.resolve<ProcessSignals>(DI.Runtime.ProcessSignals);
   const terminator = container.resolve<ProcessTerminator>(DI.Runtime.ProcessTerminator);
+
+  // Unblock pending StdioServerTransport.send() Promises on stdout error.
+  //
+  // The MCP SDK's send() registers once('drain', resolve) when write() returns
+  // false (backpressure). If EPIPE fires before drain, those Promises hang
+  // forever -- there is no rejection path. Emitting 'drain' synchronously
+  // BEFORE the shutdown event ensures all pending send() callers resolve before
+  // the shutdown sequence begins. EventEmitter.emit() is synchronous, so the
+  // ordering is deterministic.
+  //
+  // Known limitation: if SIGTERM fires while write() is under backpressure but
+  // before any EPIPE error, this drain emission does not trigger. Those
+  // send() Promises still hang until process.exit() is called at the end of
+  // the shutdown sequence. Fixing this requires the SDK to add a rejection
+  // path to send(), which is out of scope here.
+  const stdout = opts.stdout ?? process.stdout;
+  stdout.on('error', () => {
+    stdout.emit('drain');
+  });
 
   // Signal handlers: standard for long-running processes
   processSignals.on('SIGINT', () => shutdownEvents.emit({ kind: 'shutdown_requested', signal: 'SIGINT' }));

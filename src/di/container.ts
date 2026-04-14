@@ -496,8 +496,16 @@ export async function startAsyncServices(): Promise<void> {
 
     if (flags.isEnabled('sessionTools')) {
       const server = container.resolve<any>(DI.Infra.HttpServer);
-      await server.start();
-      console.error('[DI] HTTP server started');
+      try {
+        await server.start();
+        console.error('[DI] HTTP server started');
+      } catch (httpError) {
+        // The HTTP server (dashboard) is non-critical infrastructure.
+        // Port exhaustion or other startup failures must not crash the MCP server --
+        // all MCP tools remain available; only the dashboard console is unavailable.
+        const message = httpError instanceof Error ? httpError.message : String(httpError);
+        console.error(`[DI] Dashboard HTTP server unavailable: ${message}. MCP tools will still work.`);
+      }
     }
 
     asyncInitialized = true;

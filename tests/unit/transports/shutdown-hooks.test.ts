@@ -185,6 +185,76 @@ function createFakeStdin(): NodeJS.ReadableStream & { simulateEnd(): void } {
   return emitter;
 }
 
+// ---------------------------------------------------------------------------
+// Fake writable stream for wireShutdownHooks stdout tests
+// ---------------------------------------------------------------------------
+
+function createFakeStdout(): NodeJS.WritableStream & { simulateError(err?: Error): void } {
+  const emitter = new EventEmitter() as NodeJS.WritableStream & { simulateError(err?: Error): void };
+  emitter.simulateError = (err = new Error('EPIPE')) => emitter.emit('error', err);
+  // WritableStream interface stubs (not used in this test)
+  (emitter as any).write = () => true;
+  (emitter as any).end = () => {};
+  (emitter as any).writable = true;
+  (emitter as any).writableEnded = false;
+  return emitter;
+}
+
+describe('wireShutdownHooks stdout drain behavior', () => {
+  beforeEach(() => {
+    fakeShutdownEvents._listeners.length = 0;
+    fakeProcessSignals._handlers.clear();
+    fakeProcessSignals._onceHandlers.clear();
+    fakeTerminator._calls.length = 0;
+  });
+
+  it('emits drain on stdout error to unblock pending send() Promises', () => {
+    const fakeStdout = createFakeStdout();
+    const drainFired: boolean[] = [];
+
+    fakeStdout.on('drain', () => {
+      drainFired.push(true);
+    });
+
+    const onBeforeTerminate = vi.fn().mockResolvedValue(undefined);
+    wireShutdownHooks({ onBeforeTerminate, stdout: fakeStdout });
+
+    fakeStdout.simulateError(new Error('write EPIPE'));
+
+    expect(drainFired).toHaveLength(1);
+  });
+
+  it('emits drain synchronously within the error handler (drain fires before any shutdown event)', () => {
+    const fakeStdout = createFakeStdout();
+    const events: string[] = [];
+
+    fakeStdout.on('drain', () => events.push('drain'));
+    fakeShutdownEvents._listeners.push(() => events.push('shutdown'));
+
+    const onBeforeTerminate = vi.fn().mockResolvedValue(undefined);
+    wireShutdownHooks({ onBeforeTerminate, stdout: fakeStdout });
+
+    // The stdout error handler emits drain -- no shutdown event is triggered by
+    // the error handler itself. Verify drain fires when error occurs.
+    fakeStdout.simulateError(new Error('write EPIPE'));
+
+    expect(events[0]).toBe('drain');
+  });
+
+  it('does not emit drain when no error occurs (happy path unchanged)', () => {
+    const fakeStdout = createFakeStdout();
+    const drainFired: boolean[] = [];
+
+    fakeStdout.on('drain', () => drainFired.push(true));
+
+    const onBeforeTerminate = vi.fn().mockResolvedValue(undefined);
+    wireShutdownHooks({ onBeforeTerminate, stdout: fakeStdout });
+
+    // No error fired -- drain should not have been emitted
+    expect(drainFired).toHaveLength(0);
+  });
+});
+
 describe('wireStdinShutdown', () => {
   beforeEach(() => {
     fakeShutdownEvents._listeners.length = 0;
