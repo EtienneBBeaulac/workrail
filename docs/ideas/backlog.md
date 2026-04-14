@@ -26,25 +26,30 @@ Workflow and feature ideas that are worth capturing but not yet planned or desig
 
 ## Feature ideas
 
-### Guaranteed backward compatibility for external workflows
+### Forever backward compatibility via engine version declaration
 
 - **Status**: idea
-- **Summary**: As WorkRail evolves (new schema fields, new event kinds, new DTO shapes), external workflow authors and third-party repositories must not break silently. Need a formal compatibility contract and enforcement mechanism so that changes to the engine, MCP output schemas, or workflow schema are either backward-compatible or surfaced as a versioned breaking change with a migration path.
-- **Why this matters**: WorkRail now supports external workflow repositories and team-shared sources. Any author who publishes a workflow to a shared directory or git repo is implicitly depending on the current schema. Engine changes that silently invalidate their workflows -- or worse, change behavior without warning -- erode trust in WorkRail as a platform.
-- **What "guaranteed" means here**:
-  - Breaking changes to `workflow.schema.json` (renamed fields, removed fields, changed types) require a schema version bump and a migration guide
-  - Breaking changes to MCP tool input/output schemas are announced via a changelog entry and a deprecation window
-  - The validation pipeline (`npm run validate:registry`) should catch workflows that use deprecated or removed schema fields, not just structural errors
-  - Ideally: a compatibility test suite that runs bundled + external sample workflows against the current engine to catch regressions before release
-- **Design questions**:
-  - Should WorkRail adopt semver with a formal major/minor/patch policy for schema compatibility?
-  - Should `workflow.schema.json` carry an explicit `schemaVersion` field that the engine validates at load time?
-  - Should old schema versions be supported in a compatibility layer, or should authors be expected to migrate?
-  - How do we distinguish "author error" (workflow was always invalid) from "engine regression" (workflow was valid, engine changed)?
+- **Summary**: Every workflow declares the WorkRail engine version it was written against (`workrailVersion: "1.4.0"`). The engine maintains compatibility adapters for all previous declared versions -- old workflows run forever without author intervention. The engine adapts; authors never migrate.
+- **Design direction**:
+  - Add `workrailVersion` as a top-level required field in `workflow.schema.json`. Validated at load time; workflows without it default to `"1.0.0"` (the oldest supported version).
+  - The engine has a `WorkflowVersionAdapter` layer that normalizes old workflow shapes into the current internal representation before execution. Branching paths in the compiler/executor handle version-specific semantics.
+  - New fields are always additive and optional with sensible defaults -- never remove a field, only deprecate with a redirect.
+  - When a workflow is loaded, the engine resolves its declared version and selects the appropriate normalization path. `workrailVersion` is recorded in `run_started` events for diagnostic traceability.
+  - The validation pipeline (`npm run validate:registry`) runs all bundled workflows through all adapters in CI to catch regressions before release.
+- **The web model**: this is how browsers handle HTML from 1995. A `<marquee>` tag still renders because the browser adapts, not because the author rewrote their page. WorkRail should make the same guarantee to workflow authors.
+- **Engineering implication**: this is a permanent commitment. Once a version adapter is shipped, it cannot be removed. The tradeoff is real but the alternative (expecting external authors to track WorkRail releases and migrate) breaks the platform trust model.
+- **What this does NOT mean**:
+  - Authors still benefit from upgrading -- newer versions get access to new primitives (assessment gates, loop control, references, etc.)
+  - The engine only adapts the schema and execution semantics, not the runtime environment (MCP tools, context variables, file system)
+  - "Forever" means "as long as WorkRail is maintained" -- version adapters would only be removed with a major breaking release and explicit migration announcement
+- **Implementation sketch**:
+  - Phase 1: Add `workrailVersion` field to schema. Default to `"1.0.0"` for existing workflows. Record in run events.
+  - Phase 2: Introduce the first adapter when the first schema-breaking change is needed. The adapter normalizes the old shape to the current internal representation.
+  - Phase 3: Build a compatibility test harness that runs representative old-version workflows against the current engine in CI.
 - **Related**:
-  - `docs/design/v2-core-design-locks.md` -- existing invariants
+  - `docs/design/v2-core-design-locks.md` -- existing invariants (must not conflict)
   - `docs/reference/workflow-execution-contract.md` -- execution contract
-  - `docs/plans/workflow-v2-roadmap.md` -- v2 schema evolution
+  - `src/v2/read-only/v1-to-v2-shim.ts` -- existing precedent for version adaptation
 
 ---
 
