@@ -26,6 +26,28 @@ Workflow and feature ideas that are worth capturing but not yet planned or desig
 
 ## Feature ideas
 
+### Guaranteed backward compatibility for external workflows
+
+- **Status**: idea
+- **Summary**: As WorkRail evolves (new schema fields, new event kinds, new DTO shapes), external workflow authors and third-party repositories must not break silently. Need a formal compatibility contract and enforcement mechanism so that changes to the engine, MCP output schemas, or workflow schema are either backward-compatible or surfaced as a versioned breaking change with a migration path.
+- **Why this matters**: WorkRail now supports external workflow repositories and team-shared sources. Any author who publishes a workflow to a shared directory or git repo is implicitly depending on the current schema. Engine changes that silently invalidate their workflows -- or worse, change behavior without warning -- erode trust in WorkRail as a platform.
+- **What "guaranteed" means here**:
+  - Breaking changes to `workflow.schema.json` (renamed fields, removed fields, changed types) require a schema version bump and a migration guide
+  - Breaking changes to MCP tool input/output schemas are announced via a changelog entry and a deprecation window
+  - The validation pipeline (`npm run validate:registry`) should catch workflows that use deprecated or removed schema fields, not just structural errors
+  - Ideally: a compatibility test suite that runs bundled + external sample workflows against the current engine to catch regressions before release
+- **Design questions**:
+  - Should WorkRail adopt semver with a formal major/minor/patch policy for schema compatibility?
+  - Should `workflow.schema.json` carry an explicit `schemaVersion` field that the engine validates at load time?
+  - Should old schema versions be supported in a compatibility layer, or should authors be expected to migrate?
+  - How do we distinguish "author error" (workflow was always invalid) from "engine regression" (workflow was valid, engine changed)?
+- **Related**:
+  - `docs/design/v2-core-design-locks.md` -- existing invariants
+  - `docs/reference/workflow-execution-contract.md` -- execution contract
+  - `docs/plans/workflow-v2-roadmap.md` -- v2 schema evolution
+
+---
+
 ### Remote references (URLs, GDocs, Confluence, etc.)
 
 - **Status**: idea
