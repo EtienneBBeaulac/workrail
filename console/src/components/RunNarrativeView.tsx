@@ -74,15 +74,18 @@ function groupTraceEntries(items: readonly ConsoleExecutionTraceItem[]): readonl
   const sorted = [...filtered].sort((a, b) => a.recordedAtEventIndex - b.recordedAtEventIndex);
 
   const result: TraceEntry[] = [];
-  // Map of loopId -> { enteredItem, innerItems } for open (unclosed) loops
+  // Map of loopId -> { enteredItem, innerItems } for open (unclosed) loops.
+  // loopStack tracks the insertion order so inner items always go to the
+  // most-recently-opened (innermost) loop rather than the oldest open loop.
   const pendingLoops = new Map<string, { enteredItem: ConsoleExecutionTraceItem; innerItems: ConsoleExecutionTraceItem[] }>();
+  const loopStack: string[] = []; // loopIds in open order, most recent at end
 
   for (const item of sorted) {
     if (item.kind === 'entered_loop') {
       const loopId = getLoopId(item);
       if (loopId) {
-        // Start a new pending loop group
         pendingLoops.set(loopId, { enteredItem: item, innerItems: [] });
+        loopStack.push(loopId);
       } else {
         // No loop_id ref -- treat as standalone
         result.push({ kind: 'standalone', item });
@@ -92,6 +95,8 @@ function groupTraceEntries(items: readonly ConsoleExecutionTraceItem[]): readonl
       const pending = loopId ? pendingLoops.get(loopId) : undefined;
       if (pending && loopId) {
         pendingLoops.delete(loopId);
+        const stackIdx = loopStack.lastIndexOf(loopId);
+        if (stackIdx !== -1) loopStack.splice(stackIdx, 1);
         // Count iterations: number of selected_next_step items inside the loop
         const iterationCount = Math.max(
           1,
@@ -110,15 +115,12 @@ function groupTraceEntries(items: readonly ConsoleExecutionTraceItem[]): readonl
         result.push({ kind: 'standalone', item });
       }
     } else {
-      // Non-loop item: add to the innerItems of any open loop, or as standalone
-      let addedToLoop = false;
-      for (const [, pending] of pendingLoops) {
-        pending.innerItems.push(item);
-        addedToLoop = true;
-        // Only add to the most-recently-opened loop (last in map iteration order)
-        break;
-      }
-      if (!addedToLoop) {
+      // Non-loop item: add to the innermost open loop (last in stack), or standalone
+      const innermostLoopId = loopStack.at(-1);
+      const activePending = innermostLoopId ? pendingLoops.get(innermostLoopId) : undefined;
+      if (activePending) {
+        activePending.innerItems.push(item);
+      } else {
         result.push({ kind: 'standalone', item });
       }
     }
@@ -223,10 +225,10 @@ function LoopGroupEntry({ group }: { group: LoopGroup }) {
           </button>
           {expanded && (
             <ol className="mt-1 space-y-1">
-              {group.innerItems.map((inner, idx) => {
+              {group.innerItems.map((inner) => {
                 const cfg = getBadgeConfig(inner);
                 return (
-                  <li key={idx} className="flex items-start gap-2 text-xs text-[var(--text-muted)]">
+                  <li key={inner.recordedAtEventIndex} className="flex items-start gap-2 text-xs text-[var(--text-muted)]">
                     <TraceBadge label={cfg.label} color={cfg.color} bgColor={cfg.bgColor} />
                     <span className="flex-1 leading-relaxed">{inner.summary}</span>
                     <span className="font-mono text-[10px] shrink-0">#{inner.recordedAtEventIndex}</span>
@@ -274,7 +276,8 @@ function EndMarker({ runStatus }: { runStatus: ConsoleRunStatus }) {
 
 function camelToSpacedUpper(key: string): string {
   return key
-    .replace(/([A-Z])/g, ' $1')
+    .replace(/_/g, ' ')       // snake_case -> spaces
+    .replace(/([A-Z])/g, ' $1') // camelCase -> spaces
     .toUpperCase()
     .trim();
 }
@@ -374,15 +377,15 @@ export function RunNarrativeView({ summary, runStatus }: Props) {
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-2">
         <ol className="space-y-0">
-          {entries.map((entry, idx) => {
+          {entries.map((entry) => {
             if (entry.kind === 'loop_group') {
-              return <LoopGroupEntry key={idx} group={entry} />;
+              return <LoopGroupEntry key={entry.enteredItem.recordedAtEventIndex} group={entry} />;
             }
             const { item } = entry;
             const cfg = getBadgeConfig(item);
             return (
               <li
-                key={idx}
+                key={item.recordedAtEventIndex}
                 className="flex items-start gap-3 py-1.5 border-b border-[var(--border)] last:border-0"
               >
                 <TraceBadge label={cfg.label} color={cfg.color} bgColor={cfg.bgColor} />

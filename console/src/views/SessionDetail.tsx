@@ -246,7 +246,7 @@ function RunCard({
 
       {/* Tab strip -- only shown when execution trace data is available */}
       {hasTrace && (
-        <div className="flex items-center border-b border-[var(--border)] shrink-0 h-9 px-2 gap-0.5">
+        <div role="tablist" aria-label="Run view mode" className="flex items-center border-b border-[var(--border)] shrink-0 h-9 px-2 gap-0.5">
           <button
             type="button"
             role="tab"

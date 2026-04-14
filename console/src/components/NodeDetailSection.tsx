@@ -144,6 +144,9 @@ function RoutingSection({
   const conditions = nodeItems.filter((i) => i.kind === 'evaluated_condition');
   const loops = nodeItems.filter((i) => i.kind === 'entered_loop' || i.kind === 'exited_loop');
   const divergences = nodeItems.filter((i) => i.kind === 'divergence');
+  // detected_non_tip_advance always has a node_id ref (run-execution-trace.ts prepends one)
+  // -- must render explicitly or these items make hasAnyItems=true but show nothing.
+  const forks = nodeItems.filter((i) => i.kind === 'detected_non_tip_advance');
 
   const hasAnyItems = nodeItems.length > 0;
 
@@ -200,6 +203,7 @@ function RoutingSection({
               <RoutingTraceBadge label="CONDITIONS EVALUATED" color="var(--text-secondary)" />
             </div>
             <div className="space-y-1 pl-2 border-l border-[var(--border)]">
+              {/* SKIP conditions first -- surfaces why this path was not taken before confirming what passed */}
               {[
                 ...conditions.filter((c) => !/\btrue\b|\bpass/i.test(c.summary)),
                 ...conditions.filter((c) => /\btrue\b|\bpass/i.test(c.summary)),
@@ -241,6 +245,20 @@ function RoutingSection({
             </div>
             <div className="space-y-1 pl-2 border-l border-[var(--border)]">
               {divergences.map((item, idx) => (
+                <RoutingItemRow key={idx} item={item} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* FORK -- detected_non_tip_advance always carries a node_id ref */}
+        {forks.length > 0 && (
+          <div>
+            <div className="mb-1.5">
+              <RoutingTraceBadge label="FORK" color="var(--warning)" />
+            </div>
+            <div className="space-y-1 pl-2 border-l border-[var(--border)]">
+              {forks.map((item, idx) => (
                 <RoutingItemRow key={idx} item={item} />
               ))}
             </div>
