@@ -111,12 +111,16 @@ export function WorkflowsView({ viewModel }: Props) {
     filteredWorkflows,
     flatWorkflows,
     availableSources,
+    sourceFilteredWorkflows,
+    tagFilteredWorkflows,
   } = state;
 
   const knownTagIds = new Set(CATALOG_TAGS.map((t) => t.id));
-  const tagsWithWorkflows = new Set(filteredWorkflows.flatMap((w) => w.tags));
-  const countByTag = new Map(CATALOG_TAGS.map((t) => [t.id, filteredWorkflows.filter((w) => w.tags.includes(t.id)).length]));
-  const otherCount = filteredWorkflows.filter((w) => !w.tags.some((t) => t !== 'routines' && knownTagIds.has(t))).length;
+  // Tag chip counts are based on source-filtered workflows only (ignoring current tag)
+  // so selecting a tag does not change which tag chips are visible or their counts.
+  const tagsWithWorkflows = new Set(sourceFilteredWorkflows.flatMap((w) => w.tags));
+  const countByTag = new Map(CATALOG_TAGS.map((t) => [t.id, sourceFilteredWorkflows.filter((w) => w.tags.includes(t.id)).length]));
+  const otherCount = sourceFilteredWorkflows.filter((w) => !w.tags.some((t) => t !== 'routines' && knownTagIds.has(t))).length;
 
   const currentIndex = flatWorkflows.findIndex((w) => w.id === selectedWorkflowId);
 
@@ -274,7 +278,7 @@ function WorkflowsReadyView({
       >
         <TagPill
           label="All"
-          count={filteredWorkflows.length}
+          count={sourceFilteredWorkflows.length}
           isActive={selectedTag === null}
           disabled={false}
           onClick={() => dispatch({ type: 'tag_changed', tag: null })}
@@ -309,7 +313,7 @@ function WorkflowsReadyView({
         >
           <TagPill
             label="All Sources"
-            count={filteredWorkflows.length}
+            count={tagFilteredWorkflows.length}
             isActive={selectedSource === null}
             disabled={false}
             onClick={() => dispatch({ type: 'source_changed', source: null })}
@@ -318,7 +322,7 @@ function WorkflowsReadyView({
             <TagPill
               key={source.id}
               label={source.displayName}
-              count={filteredWorkflows.filter((w) => w.source.displayName === source.displayName).length}
+              count={tagFilteredWorkflows.filter((w) => w.source.displayName === source.displayName).length}
               isActive={selectedSource === source.displayName}
               disabled={false}
               onClick={() => dispatch({ type: 'source_changed', source: selectedSource === source.displayName ? null : source.displayName })}

@@ -65,6 +65,17 @@ export type WorkflowsViewState =
       readonly availableSources: readonly WorkflowSourceOption[];
       readonly filteredWorkflows: readonly ConsoleWorkflowSummary[];
       readonly flatWorkflows: readonly ConsoleWorkflowSummary[];
+      /**
+       * Workflows filtered by source only (ignoring the current tag filter).
+       * Used by tag chips to compute independent counts -- tag chip counts should
+       * not change when a source is selected, and vice versa.
+       */
+      readonly sourceFilteredWorkflows: readonly ConsoleWorkflowSummary[];
+      /**
+       * Workflows filtered by tag only (ignoring the current source filter).
+       * Used by source chips to compute independent counts.
+       */
+      readonly tagFilteredWorkflows: readonly ConsoleWorkflowSummary[];
     };
 
 // ---------------------------------------------------------------------------
@@ -200,6 +211,11 @@ export function useWorkflowsViewModel({
     );
     const flat = flattenWorkflows(filteredWorkflows, interactionState.selectedTag);
 
+    // Independent filter slices so tag chip counts don't change when a source
+    // is selected, and source chip counts don't change when a tag is selected.
+    const sourceFilteredWorkflows = filterWorkflows(workflows, null, interactionState.selectedSource);
+    const tagFilteredWorkflows = filterWorkflows(workflows, interactionState.selectedTag, null);
+
     return {
       kind: 'ready',
       selectedWorkflowId: interactionState.selectedWorkflowId,
@@ -210,6 +226,8 @@ export function useWorkflowsViewModel({
       availableSources,
       filteredWorkflows,
       flatWorkflows: flat,
+      sourceFilteredWorkflows,
+      tagFilteredWorkflows,
     };
   }, [
     isLoading,
