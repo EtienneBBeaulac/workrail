@@ -80,7 +80,62 @@ function readWorkflowTags(): WorkflowTagsFile | null {
 const WORKFLOW_TAGS: WorkflowTagsFile | null = readWorkflowTags();
 
 /**
+ * Convert a kebab-case namespace like "mercury-android" to a display name like "Mercury Android".
+ * Recognises common acronyms so "mercury-ios" becomes "Mercury iOS".
+ */
+function namespaceToDisplayName(namespace: string): string {
+  const ACRONYMS: Readonly<Record<string, string>> = {
+    ios: 'iOS',
+    api: 'API',
+    ui: 'UI',
+    ux: 'UX',
+    mcp: 'MCP',
+  };
+  return namespace
+    .split('-')
+    .map((word) => ACRONYMS[word] ?? word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+/**
+ * Build virtual source tags for namespaced workflow IDs that are not registered in the
+ * bundled tags file (e.g. "mercury-android.clickstream-implementation" → tag "mercury-android").
+ * Exported for unit testing.
+ */
+export function buildVirtualSourceTags(
+  tagsFile: WorkflowTagsFile,
+  compiledWorkflowIds: readonly string[],
+): Array<{ id: string; displayName: string; count: number; when: string[]; examples: string[] }> {
+  const registeredIds = new Set(Object.keys(tagsFile.workflows));
+  const namespaceMap = new Map<string, string[]>();
+  for (const id of compiledWorkflowIds) {
+    if (registeredIds.has(id)) continue;
+    const dotIndex = id.indexOf('.');
+    if (dotIndex === -1) continue;
+    const namespace = id.slice(0, dotIndex);
+    const bucket = namespaceMap.get(namespace);
+    if (bucket) {
+      bucket.push(id);
+    } else {
+      namespaceMap.set(namespace, [id]);
+    }
+  }
+  return Array.from(namespaceMap.entries()).map(([namespace, ids]) => {
+    const displayName = namespaceToDisplayName(namespace);
+    return {
+      id: namespace,
+      displayName,
+      count: ids.length,
+      when: [`running ${displayName} workflows`],
+      examples: ids.slice(0, 3),
+    };
+  });
+}
+
+/**
  * Build a tag summary from the tag definitions and the compiled workflow list.
+ * Bundled functional tags come first; virtual source tags for unregistered namespaced
+ * workflows are appended after.
  * Exported for unit testing.
  */
 export function buildTagSummary(
@@ -88,7 +143,7 @@ export function buildTagSummary(
   compiledWorkflowIds: readonly string[],
 ): Array<{ id: string; displayName: string; count: number; when: string[]; examples: string[] }> {
   const idSet = new Set(compiledWorkflowIds);
-  return tagsFile.tags.map((tag) => {
+  const bundledTags = tagsFile.tags.map((tag) => {
     const count = Object.entries(tagsFile.workflows)
       .filter(([wid, meta]) => !meta.hidden && idSet.has(wid) && meta.tags.includes(tag.id))
       .length;
@@ -100,10 +155,14 @@ export function buildTagSummary(
       examples: [...tag.examples],
     };
   });
+  return [...bundledTags, ...buildVirtualSourceTags(tagsFile, compiledWorkflowIds)];
 }
 
 /**
  * Filter compiled workflow IDs to those matching any of the requested tags.
+ * Handles both bundled functional tags (from tagsFile.workflows) and virtual source
+ * tags derived from namespace prefixes (e.g. tag "mercury-android" matches all IDs of
+ * the form "mercury-android.*" that are not in the bundled registry).
  */
 function filterByTags(
   tagsFile: WorkflowTagsFile,
@@ -111,11 +170,22 @@ function filterByTags(
   requestedTags: readonly string[],
 ): readonly string[] {
   const tagSet = new Set(requestedTags);
+  // Registered workflow matching (bundled functional tags).
   const matching = new Set(
     Object.entries(tagsFile.workflows)
       .filter(([, meta]) => !meta.hidden && meta.tags.some((t) => tagSet.has(t)))
-      .map(([wid]) => wid)
+      .map(([wid]) => wid),
   );
+  // Virtual namespace tag matching: tag "mercury-android" matches all unregistered IDs
+  // whose namespace prefix equals the requested tag.
+  const registeredIds = new Set(Object.keys(tagsFile.workflows));
+  for (const id of compiledWorkflowIds) {
+    if (registeredIds.has(id)) continue;
+    const dotIndex = id.indexOf('.');
+    if (dotIndex === -1) continue;
+    const namespace = id.slice(0, dotIndex);
+    if (tagSet.has(namespace)) matching.add(id);
+  }
   return compiledWorkflowIds.filter((id) => matching.has(id));
 }
 
