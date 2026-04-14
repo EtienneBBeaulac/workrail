@@ -121,6 +121,11 @@ export function WorkflowsView({ viewModel }: Props) {
   const tagsWithWorkflows = new Set(sourceFilteredWorkflows.flatMap((w) => w.tags));
   const countByTag = new Map(CATALOG_TAGS.map((t) => [t.id, sourceFilteredWorkflows.filter((w) => w.tags.includes(t.id)).length]));
   const otherCount = sourceFilteredWorkflows.filter((w) => !w.tags.some((t) => t !== 'routines' && knownTagIds.has(t))).length;
+  // "All" tag pill = total in source-filtered list; "All Sources" pill = total in tag-filtered list
+  const allTagCount = sourceFilteredWorkflows.length;
+  const allSourceCount = tagFilteredWorkflows.length;
+  // Per-source counts use tag-filtered list so selecting a tag doesn't change source pill counts
+  const countBySource = new Map(availableSources.map((s) => [s.displayName, tagFilteredWorkflows.filter((w) => w.source.displayName === s.displayName).length]));
 
   const currentIndex = flatWorkflows.findIndex((w) => w.id === selectedWorkflowId);
 
@@ -136,6 +141,9 @@ export function WorkflowsView({ viewModel }: Props) {
       tagsWithWorkflows={tagsWithWorkflows}
       countByTag={countByTag}
       otherCount={otherCount}
+      allTagCount={allTagCount}
+      allSourceCount={allSourceCount}
+      countBySource={countBySource}
       currentIndex={currentIndex}
       dispatch={dispatch}
       onCardSelect={onCardSelect}
@@ -162,6 +170,9 @@ interface ReadyViewProps {
   readonly tagsWithWorkflows: Set<string>;
   readonly countByTag: Map<string, number>;
   readonly otherCount: number;
+  readonly allTagCount: number;
+  readonly allSourceCount: number;
+  readonly countBySource: Map<string, number>;
   readonly currentIndex: number;
   readonly dispatch: UseWorkflowsViewModelResult['dispatch'];
   readonly onCardSelect: UseWorkflowsViewModelResult['onCardSelect'];
@@ -182,6 +193,9 @@ function WorkflowsReadyView({
   tagsWithWorkflows,
   countByTag,
   otherCount,
+  allTagCount,
+  allSourceCount,
+  countBySource,
   currentIndex,
   dispatch,
   onCardSelect,
@@ -278,7 +292,7 @@ function WorkflowsReadyView({
       >
         <TagPill
           label="All"
-          count={sourceFilteredWorkflows.length}
+          count={allTagCount}
           isActive={selectedTag === null}
           disabled={false}
           onClick={() => dispatch({ type: 'tag_changed', tag: null })}
@@ -313,7 +327,7 @@ function WorkflowsReadyView({
         >
           <TagPill
             label="All Sources"
-            count={tagFilteredWorkflows.length}
+            count={allSourceCount}
             isActive={selectedSource === null}
             disabled={false}
             onClick={() => dispatch({ type: 'source_changed', source: null })}
@@ -322,7 +336,7 @@ function WorkflowsReadyView({
             <TagPill
               key={source.id}
               label={source.displayName}
-              count={tagFilteredWorkflows.filter((w) => w.source.displayName === source.displayName).length}
+              count={countBySource.get(source.displayName) ?? 0}
               isActive={selectedSource === source.displayName}
               disabled={false}
               onClick={() => dispatch({ type: 'source_changed', source: selectedSource === source.displayName ? null : source.displayName })}
