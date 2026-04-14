@@ -60,6 +60,8 @@ export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
   // Delay timer stored in a ref to avoid causing extra renders on set/clear.
   const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Clear any pending tooltip timer on unmount to prevent setState-after-unmount warnings.
+  useEffect(() => () => { if (tooltipTimerRef.current !== null) clearTimeout(tooltipTimerRef.current); }, []);
 
   const model = useMemo(() => buildLineageDagModel(run), [run]);
   const nodeById = useMemo(
@@ -442,7 +444,11 @@ export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props
         <div
           style={{
             width: Math.max(model.graphWidth, 960),
-            height: Math.max(model.graphHeight, 360),
+            // Add CAUSE footer extension if any blocked_attempt nodes have cause items,
+            // otherwise the footer is clipped on bottommost nodes.
+            // Add CAUSE footer extension if any blocked_attempt nodes have cause items,
+            // otherwise the footer is clipped on bottommost nodes.
+            height: Math.max(model.graphHeight + (blockedCauseMap && blockedCauseMap.size > 0 ? 40 : 0), 360),
           }}
         >
           <ReactFlow
@@ -989,9 +995,11 @@ const EDGE_CAUSE_CONFIG: Record<EdgeCauseKind, { readonly char: string; readonly
 // EdgeCauseDiamond component
 //
 // Renders a 10x10 rotated square at (x, y) within the canvas-sized div.
-// The diamond visual has pointerEvents:none to avoid blocking node clicks.
-// A separate 20x20 transparent hover-target div sits on top with pointerEvents:auto.
-// Both are at z-index 1-2, below ReactFlow's node layer (z-index 3+).
+// IMPORTANT: diamonds are siblings of the ReactFlow canvas in the same parent div.
+// A separate hover-target at z-index > 0 would sit above the entire ReactFlow
+// layer and silently swallow node clicks. Instead, mouse handlers are applied
+// directly to the diamond visual with pointerEvents:auto. Hit area is small
+// (10x10) but only covers edge midpoints, not node centers.
 // ---------------------------------------------------------------------------
 
 function EdgeCauseDiamond({
@@ -1010,57 +1018,42 @@ function EdgeCauseDiamond({
   const cfg = EDGE_CAUSE_CONFIG[cause.kind];
 
   return (
-    <>
-      {/* Diamond visual -- pointerEvents:none so node clicks pass through */}
-      <div
+    <div
+      style={{
+        position: 'absolute',
+        left: x - 5,
+        top: y - 5,
+        width: 10,
+        height: 10,
+        transform: 'rotate(45deg)',
+        background: cfg.color,
+        zIndex: 1,
+        pointerEvents: 'auto',
+        cursor: 'default',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+      onMouseEnter={(e) => onMouseEnter(e, cause.summary)}
+      onMouseLeave={onMouseLeave}
+    >
+      {/* Character label (de-rotated to appear upright) */}
+      <span
         style={{
-          position: 'absolute',
-          left: x - 5,
-          top: y - 5,
-          width: 10,
-          height: 10,
-          transform: 'rotate(45deg)',
-          background: cfg.color,
-          zIndex: 1,
+          display: 'block',
+          transform: 'rotate(-45deg)',
+          fontSize: 7,
+          lineHeight: 1,
+          fontFamily: 'monospace',
+          fontWeight: 700,
+          color: 'rgba(0,0,0,0.75)',
+          userSelect: 'none',
           pointerEvents: 'none',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
         }}
       >
-        {/* Character label (de-rotated to appear upright) */}
-        <span
-          style={{
-            display: 'block',
-            transform: 'rotate(-45deg)',
-            fontSize: 7,
-            lineHeight: 1,
-            fontFamily: 'monospace',
-            fontWeight: 700,
-            color: 'rgba(0,0,0,0.75)',
-            userSelect: 'none',
-          }}
-        >
-          {cfg.char}
-        </span>
-      </div>
-
-      {/* Transparent hover target -- pointerEvents:auto, larger hit area */}
-      <div
-        style={{
-          position: 'absolute',
-          left: x - 10,
-          top: y - 10,
-          width: 20,
-          height: 20,
-          zIndex: 2,
-          pointerEvents: 'auto',
-          cursor: 'default',
-        }}
-        onMouseEnter={(e) => onMouseEnter(e, cause.summary)}
-        onMouseLeave={onMouseLeave}
-      />
-    </>
+        {cfg.char}
+      </span>
+    </div>
   );
 }
 
