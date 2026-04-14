@@ -116,6 +116,16 @@ the old flat dark style.
 
 *(worth keeping visible, not current delivery commitments)*
 
+### Tables broken in session detail markdown
+
+Markdown tables rendered in `SessionDetail` (and `NodeDetailSection`) are not styled -- they render as raw pipe characters or unstyled `<table>` elements. The cyberpunk markdown styles cover `# headers`, `**bold**`, `` `code` ``, and `> blockquote`, but table rows/cells have no theme treatment.
+
+Fix: add table styles to the markdown renderer (likely `react-markdown` with `remark-gfm`, or a custom CSS block in `NodeDetailSection.tsx`/`index.css`). Target: amber header row border, subtle row separator, `font-mono` cell text.
+
+**Files:** `console/src/components/NodeDetailSection.tsx`, `console/src/index.css`
+
+---
+
 ### Custom cyberpunk overscroll effect
 
 When scrolling past the limits of a scrollable container (modal, session list,
