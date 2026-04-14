@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { MonoLabel } from './MonoLabel';
+import { camelToSpacedUpper } from '../utils/format';
 import {
   ReactFlow,
   type Edge,
@@ -257,7 +258,7 @@ export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props
                   border: '1px solid rgba(123, 141, 167, 0.20)',
                 }}
               >
-                <span style={{ color: 'var(--text-secondary)' }}>{dagCamelToSpacedUpper(fact.key)}</span>
+                <span style={{ color: 'var(--text-secondary)' }}>{camelToSpacedUpper(fact.key)}</span>
                 <span style={{ color: 'var(--text-muted)' }}>//</span>
                 <span style={{ color: 'var(--text-primary)' }}>{fact.value}</span>
               </div>
@@ -657,10 +658,3 @@ function truncateLabel(label: string): string {
   return label.length > 18 ? `${label.slice(0, 18)}…` : label;
 }
 
-/** Converts a camelCase key to spaced uppercase (e.g. taskComplexity -> TASK COMPLEXITY). */
-function dagCamelToSpacedUpper(key: string): string {
-  return key
-    .replace(/([A-Z])/g, ' $1')
-    .toUpperCase()
-    .trim();
-}
