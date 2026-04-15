@@ -9,9 +9,10 @@
  *
  * PRIMARY DEATH + AUTOMATIC RESPAWN
  * On primary close, the bridge reconnects with exponential backoff. When all
- * reconnect attempts are exhausted, it exits cleanly (exit 0). The IDE client
- * auto-restarts the MCP command; the restarted process either bridges to a new
- * primary or wins the lock election and starts the full server + dashboard.
+ * reconnect attempts are exhausted, it shuts down cleanly (exit 0). The IDE
+ * client auto-restarts the MCP command; the restarted process either bridges
+ * to a new primary or wins the lock election and starts the full server +
+ * dashboard.
  *
  * TOOL CALLS DURING RECONNECT
  * Rather than silently dropping messages (causing agent hangs), the bridge
@@ -20,9 +21,10 @@
  * DESIGN NOTES
  * - ConnectionState is a sealed discriminated union — no boolean flags.
  * - Shutdown is an AbortSignal, not a mutable boolean.
+ * - reconnectWithBackoff returns a ReconnectOutcome (errors are data, not
+ *   callbacks). The caller switches exhaustively on the result.
  * - detectHealthyPrimary takes a fetch dependency for testability.
- * - The reconnect loop is a named pure-ish function with explicit params.
- * - All state transitions are explicit; no shared mutable state between closures.
+ * - All shutdown paths go through a single performShutdown() function.
  */
 
 import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
@@ -47,7 +49,7 @@ export const DEFAULT_BRIDGE_CONFIG: BridgeConfig = {
 };
 
 // ---------------------------------------------------------------------------
-// Connection state — sealed discriminated union, no boolean flags
+// Domain types
 // ---------------------------------------------------------------------------
 
 type HttpBridgeTransport = {
@@ -57,15 +59,24 @@ type HttpBridgeTransport = {
 
 /**
  * The connection state between this bridge and the primary WorkRail server.
- * All state is immutable; transitions produce a new ConnectionState value.
+ * Exported for use in tests and diagnostics.
  *
- * Invariant: `reconnecting.attempt < reconnecting.maxAttempts` is always true
- * — once attempt reaches maxAttempts, the state transitions to `closed`.
+ * Invariant: `reconnecting.attempt < reconnecting.maxAttempts` always holds —
+ * once `attempt` reaches `maxAttempts`, the state transitions to `closed`.
  */
-type ConnectionState =
+export type ConnectionState =
   | { readonly kind: 'connected'; readonly transport: HttpBridgeTransport }
   | { readonly kind: 'reconnecting'; readonly attempt: number; readonly maxAttempts: number }
   | { readonly kind: 'closed' };
+
+/**
+ * Outcome of a reconnect attempt sequence. Errors are data — the caller
+ * switches exhaustively rather than receiving side-effectful callbacks.
+ */
+export type ReconnectOutcome =
+  | { readonly kind: 'reconnected'; readonly transport: HttpBridgeTransport }
+  | { readonly kind: 'exhausted' }
+  | { readonly kind: 'aborted' };
 
 // ---------------------------------------------------------------------------
 // Detection
@@ -96,9 +107,7 @@ export async function detectHealthyPrimary(
       });
       if (response.ok) {
         const body = (await response.json().catch(() => null)) as { service?: string } | null;
-        if (body?.service === 'workrail') {
-          return port;
-        }
+        if (body?.service === 'workrail') return port;
       }
     } catch {
       // Connection refused or timeout — not available yet.
@@ -111,41 +120,40 @@ export async function detectHealthyPrimary(
 }
 
 // ---------------------------------------------------------------------------
-// Reconnect loop — named pure-ish function with explicit dependencies
+// Reconnect loop
 // ---------------------------------------------------------------------------
 
 type ReconnectDeps = {
   readonly detect: (attempt: number) => Promise<HttpBridgeTransport | null>;
-  readonly onReconnected: (transport: HttpBridgeTransport) => void;
-  readonly onExhausted: () => void;
   readonly config: Pick<BridgeConfig, 'reconnectBaseDelayMs' | 'reconnectMaxAttempts'>;
   readonly signal: AbortSignal;
 };
 
 /**
- * Reconnect to the primary with exponential backoff.
+ * Attempt to reconnect to the primary with exponential backoff.
  *
- * Drives state transitions: reconnecting(n) → connected | reconnecting(n+1) | closed.
- * Calls onReconnected or onExhausted exactly once. Stops early on abort.
+ * Tries immediately on the first attempt, then backs off between subsequent
+ * attempts. Returns a ReconnectOutcome — the caller switches exhaustively.
  */
-async function reconnectWithBackoff(deps: ReconnectDeps): Promise<void> {
-  const { detect, onReconnected, onExhausted, config, signal } = deps;
+export async function reconnectWithBackoff(deps: ReconnectDeps): Promise<ReconnectOutcome> {
+  const { detect, config, signal } = deps;
   const { reconnectBaseDelayMs, reconnectMaxAttempts } = config;
 
   for (let attempt = 0; attempt < reconnectMaxAttempts; attempt++) {
-    const delay = reconnectBaseDelayMs * Math.pow(2, attempt);
-    await sleep(delay);
-
-    if (signal.aborted) return;
+    if (signal.aborted) return { kind: 'aborted' };
 
     const transport = await detect(attempt);
-    if (transport != null) {
-      onReconnected(transport);
-      return;
+    if (transport != null) return { kind: 'reconnected', transport };
+
+    // Only sleep before the next attempt, not after the last.
+    if (attempt < reconnectMaxAttempts - 1) {
+      const delay = reconnectBaseDelayMs * Math.pow(2, attempt); // 250 500 1000...
+      await sleep(delay);
+      if (signal.aborted) return { kind: 'aborted' };
     }
   }
 
-  onExhausted();
+  return { kind: 'exhausted' };
 }
 
 // ---------------------------------------------------------------------------
@@ -163,14 +171,13 @@ export async function startBridgeServer(
     '@modelcontextprotocol/sdk/client/streamableHttp.js'
   );
 
-  // AbortController for shutdown — platform-native, not a mutable boolean flag.
+  // AbortController for shutdown — platform-native, not a mutable boolean.
   const shutdownController = new AbortController();
   const { signal: shutdownSignal } = shutdownController;
 
   const stdioTransport = new StdioServerTransport();
 
-  // Mutable connection state — the single explicitly managed mutable variable.
-  // All writes go through setConnectionState() to keep transitions traceable.
+  // Single explicitly managed mutable variable — all writes via setConnectionState.
   let connectionState: ConnectionState = {
     kind: 'reconnecting',
     attempt: 0,
@@ -181,10 +188,28 @@ export async function startBridgeServer(
     connectionState = next;
   };
 
-  // Build a connected HttpBridgeTransport. Returns null on failure.
+  // ---------------------------------------------------------------------------
+  // Single shutdown path — all shutdown triggers funnel here.
+  // ---------------------------------------------------------------------------
+
+  const performShutdown = (reason: string): void => {
+    if (shutdownSignal.aborted) return; // guard against double-invocation
+    shutdownController.abort();
+    console.error(`[Bridge] Shutting down: ${reason}`);
+    const state = connectionState;
+    void (state.kind === 'connected' ? state.transport.close() : Promise.resolve()).finally(
+      () => process.exit(0),
+    );
+  };
+
+  // ---------------------------------------------------------------------------
+  // Transport factory + reconnect loop
+  // ---------------------------------------------------------------------------
+
   const buildConnectedTransport = async (): Promise<HttpBridgeTransport | null> => {
-    const url = new URL(`http://localhost:${primaryPort}/mcp`);
-    const t = new StreamableHTTPClientTransport(url);
+    const t = new StreamableHTTPClientTransport(
+      new URL(`http://localhost:${primaryPort}/mcp`),
+    );
 
     t.onerror = (err) => console.error('[Bridge] HTTP transport error:', err);
 
@@ -199,11 +224,7 @@ export async function startBridgeServer(
     t.onclose = () => {
       if (shutdownSignal.aborted) return;
       console.error('[Bridge] Primary connection lost — reconnecting');
-      setConnectionState({
-        kind: 'reconnecting',
-        attempt: 0,
-        maxAttempts: config.reconnectMaxAttempts,
-      });
+      setConnectionState({ kind: 'reconnecting', attempt: 0, maxAttempts: config.reconnectMaxAttempts });
       startReconnectLoop();
     };
 
@@ -215,48 +236,45 @@ export async function startBridgeServer(
     }
   };
 
-  // Reconnect loop — called whenever primary connection drops.
   const startReconnectLoop = (): void => {
     void reconnectWithBackoff({
       signal: shutdownSignal,
       config,
       detect: async (attempt) => {
-        if (shutdownSignal.aborted) return null;
         console.error(`[Bridge] Reconnect attempt ${attempt + 1}/${config.reconnectMaxAttempts}`);
         const detected = await detectHealthyPrimary(primaryPort, { retries: 1 });
         if (detected == null) return null;
         return buildConnectedTransport();
       },
-      onReconnected: (transport) => {
-        setConnectionState({ kind: 'connected', transport });
-        console.error('[Bridge] Reconnected to primary');
-      },
-      onExhausted: () => {
-        setConnectionState({ kind: 'closed' });
-        console.error(
-          '[Bridge] Primary unresponsive after all retries — exiting for IDE respawn',
-        );
-        process.exit(0);
-      },
+    }).then((outcome) => {
+      switch (outcome.kind) {
+        case 'reconnected':
+          setConnectionState({ kind: 'connected', transport: outcome.transport });
+          console.error('[Bridge] Reconnected to primary');
+          return;
+        case 'exhausted':
+          setConnectionState({ kind: 'closed' });
+          performShutdown('primary unresponsive after all retries — IDE will respawn');
+          return;
+        case 'aborted':
+          // Shutdown already in progress via performShutdown — no action needed.
+          return;
+      }
     });
   };
 
   // ---------------------------------------------------------------------------
   // Message routing: IDE → primary
-  // Control flow is driven by the connection state discriminated union.
+  // Control flow driven by ConnectionState — exhaustive switch, no flag checks.
   // ---------------------------------------------------------------------------
 
   stdioTransport.onmessage = (msg: JSONRPCMessage) => {
-    const state = connectionState; // snapshot — avoid TOCTOU on mutable ref
+    const state = connectionState; // snapshot to avoid TOCTOU on the mutable ref
 
     switch (state.kind) {
       case 'connected': {
         const timer = setTimeout(() => {
-          console.error(
-            '[Bridge] Warning: no response from primary after',
-            config.forwardTimeoutMs,
-            'ms',
-          );
+          console.error('[Bridge] Warning: no response from primary after', config.forwardTimeoutMs, 'ms');
         }, config.forwardTimeoutMs);
         void state.transport
           .send(msg)
@@ -267,12 +285,12 @@ export async function startBridgeServer(
 
       case 'reconnecting': {
         // Return an immediate error so the agent doesn't hang on MCP timeout.
-        const req = msg as { id?: string | number };
-        if (req.id != null) {
+        // Notifications have no id — only requests need a response.
+        if ('id' in msg && msg.id != null) {
           void stdioTransport
             .send({
               jsonrpc: '2.0',
-              id: req.id,
+              id: msg.id,
               error: {
                 code: -32603,
                 message:
@@ -289,8 +307,7 @@ export async function startBridgeServer(
       }
 
       case 'closed':
-        // Bridge is shutting down — no-op.
-        return;
+        return; // Bridge is shutting down — no-op.
     }
   };
 
@@ -310,47 +327,24 @@ export async function startBridgeServer(
   // Guard stdout before wiring stdio (same rationale as stdio-entry.ts).
   process.stdout.on('error', (err) => {
     const code = (err as NodeJS.ErrnoException).code;
-    console.error(
+    const reason =
       code === 'EPIPE' || code === 'ERR_STREAM_DESTROYED'
-        ? '[Bridge] stdout pipe broken, shutting down'
-        : `[Bridge] stdout error: ${String(err)}`,
-    );
-    shutdownController.abort();
-    const state = connectionState;
-    void (state.kind === 'connected' ? state.transport.close() : Promise.resolve()).finally(
-      () => process.exit(0),
-    );
+        ? 'stdout pipe broken (client disconnected)'
+        : `stdout error: ${String(err)}`;
+    performShutdown(reason);
   });
 
   await stdioTransport.start();
   console.error('[Bridge] WorkRail MCP bridge running on stdio');
 
   // ---------------------------------------------------------------------------
-  // Shutdown hooks — AbortController, not mutable flags
+  // Shutdown hooks — all funnel to performShutdown
   // ---------------------------------------------------------------------------
 
-  process.stdin.once('end', () => {
-    console.error('[Bridge] stdin closed, shutting down');
-    shutdownController.abort();
-    const state = connectionState;
-    void (state.kind === 'connected' ? state.transport.close() : Promise.resolve()).finally(
-      () => process.exit(0),
-    );
-  });
-
-  const shutdown = (signal: string) => {
-    if (shutdownSignal.aborted) return;
-    shutdownController.abort();
-    console.error(`[Bridge] Received ${signal}, shutting down`);
-    const state = connectionState;
-    void (state.kind === 'connected' ? state.transport.close() : Promise.resolve()).finally(
-      () => process.exit(0),
-    );
-  };
-
-  process.once('SIGINT', () => shutdown('SIGINT'));
-  process.once('SIGTERM', () => shutdown('SIGTERM'));
-  process.once('SIGHUP', () => shutdown('SIGHUP'));
+  process.stdin.once('end', () => performShutdown('stdin closed'));
+  process.once('SIGINT', () => performShutdown('SIGINT'));
+  process.once('SIGTERM', () => performShutdown('SIGTERM'));
+  process.once('SIGHUP', () => performShutdown('SIGHUP'));
 }
 
 // ---------------------------------------------------------------------------
