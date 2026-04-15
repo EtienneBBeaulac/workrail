@@ -18,22 +18,19 @@ Merging them would make WorkRail opinionated about team structure, IDE configs, 
 
 **The right relationship:** Common-Ground distributes WorkRail as part of the team toolchain (already true via `[[workflow_repos]]` in `team.toml`). WorkRail stays generic. Common-Ground stays org-specific. They're friends, not merged.
 
-**WorkRail bootstraps Common-Ground (new idea):**
+**WorkRail bootstraps Common-Ground (tentative idea, low priority):**
 
-WorkRail can be the *setup layer* for Common-Ground. Instead of "clone this repo and edit TOML files," the onboarding becomes:
+> ⚠️ Tentative -- not committed. Needs more thought before pursuing.
 
-1. `workrail init` or a first-run workflow asks: team name, repo patterns, IDE preferences, LLM provider, workflow repos
-2. WorkRail generates a Common-Ground configuration tailored to the answers
-3. WorkRail runs `make sync` to distribute it
-4. WorkRail registers the resulting workflow directories as managed sources automatically
+WorkRail could be the *setup layer* for Common-Ground -- a guided `workrail init` workflow that generates a Common-Ground config, runs `make sync`, and registers workflow directories as managed sources. Would make Common-Ground configurations shareable as WorkRail workflows.
 
-This makes Common-Ground configurations shareable as WorkRail workflows -- "use this workflow to set up the Mercury Mobile toolchain" -- instead of "read the docs and configure manually." The setup process becomes enforced, guided, and resumable.
-
-**The inverse integration:** Common-Ground's `make sync` triggers a WorkRail daemon session to validate the distributed configuration, run smoke tests, and report back. Common-Ground distributes; WorkRail verifies.
+Also tentative: Common-Ground's `make sync` triggering a WorkRail daemon session to validate the distributed configuration. Interesting but not a near-term priority.
 
 ---
 
-**Cross-repo execution model -- WorkRail must handle any environment:**
+**Cross-repo execution model -- HIGH IMPORTANCE, post-MVP:** ⭐
+
+WorkRail must handle any environment. Not MVP, but a must-have before WorkRail can be called a general-purpose platform.
 
 WorkRail currently assumes a single repo. The autonomous daemon breaks this assumption -- a coding task may touch Android, iOS, and a GraphQL backend simultaneously. An investigation may span 5 services.
 
