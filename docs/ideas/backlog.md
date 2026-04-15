@@ -6,6 +6,67 @@ Workflow and feature ideas that are worth capturing but not yet planned or desig
 
 ## Research Notes: Autonomous Platform Vision (Apr 14, 2026)
 
+### Common-Ground relationship + cross-repo execution model
+
+**Common-Ground stays separate -- WorkRail wraps it.**
+
+Common-Ground and WorkRail solve different problems at different layers:
+- Common-Ground: "what does this agent know about this codebase and team?" (context distribution)
+- WorkRail: "what should this agent do next, and did it actually do it?" (workflow enforcement)
+
+Merging them would make WorkRail opinionated about team structure, IDE configs, AGENTS.md formats, and org-specific conventions -- breaking WorkRail's portability. `npx -y @exaudeus/workrail` works for any engineer anywhere with zero config. That's a feature to protect.
+
+**The right relationship:** Common-Ground distributes WorkRail as part of the team toolchain (already true via `[[workflow_repos]]` in `team.toml`). WorkRail stays generic. Common-Ground stays org-specific. They're friends, not merged.
+
+**WorkRail bootstraps Common-Ground (new idea):**
+
+WorkRail can be the *setup layer* for Common-Ground. Instead of "clone this repo and edit TOML files," the onboarding becomes:
+
+1. `workrail init` or a first-run workflow asks: team name, repo patterns, IDE preferences, LLM provider, workflow repos
+2. WorkRail generates a Common-Ground configuration tailored to the answers
+3. WorkRail runs `make sync` to distribute it
+4. WorkRail registers the resulting workflow directories as managed sources automatically
+
+This makes Common-Ground configurations shareable as WorkRail workflows -- "use this workflow to set up the Mercury Mobile toolchain" -- instead of "read the docs and configure manually." The setup process becomes enforced, guided, and resumable.
+
+**The inverse integration:** Common-Ground's `make sync` triggers a WorkRail daemon session to validate the distributed configuration, run smoke tests, and report back. Common-Ground distributes; WorkRail verifies.
+
+---
+
+**Cross-repo execution model -- WorkRail must handle any environment:**
+
+WorkRail currently assumes a single repo. The autonomous daemon breaks this assumption -- a coding task may touch Android, iOS, and a GraphQL backend simultaneously. An investigation may span 5 services.
+
+**Workspace manifest** -- sessions declare which repos they need:
+```json
+{
+  "context": {
+    "repos": [
+      { "name": "android", "path": "~/git/zillow/zillow-android-2" },
+      { "name": "ios", "path": "~/git/zillow/ZillowMap" },
+      { "name": "backend", "path": "~/git/zillow/mercury-graphql" }
+    ]
+  }
+}
+```
+
+**Scoped tools** -- `BashInRepo`, `ReadRepo`, `WriteRepo` that route to the correct working directory:
+```
+BashInRepo(repo: "android", command: "gradle test")
+ReadRepo(repo: "ios", path: "Sources/Messaging/ZIMGallery.swift")
+```
+
+**Dynamic repo provisioning** -- the daemon resolves repos at session start:
+- If the repo is already cloned locally, use it
+- If declared as a remote URL, clone to `~/.workrail/repos/<name>/` (same pattern as Common-Ground's `[[workflow_repos]]`)
+- Workflow authors declare repo requirements; WorkRail ensures they're available
+
+**Why this matters:** This is what Common-Ground's `make scan` does manually today -- finds repos, injects context. WorkRail's daemon does it dynamically, driven by workflow declarations. Any environment, any combination of repos, any org -- zero manual setup.
+
+**Cross-repo is the feature that makes WorkRail truly freestanding.** A developer anywhere can point WorkRail at their repos, declare a workspace manifest in their workflow, and get the same autonomous multi-repo execution that Mercury Mobile gets -- without Common-Ground, without Zillow infrastructure, without anything except WorkRail.
+
+---
+
 ### Core architectural principle: WorkRail drives itself
 
 **The daemon doesn't bypass WorkRail -- it IS WorkRail.**
