@@ -26,6 +26,51 @@ Workflow and feature ideas that are worth capturing but not yet planned or desig
 
 ## Feature ideas
 
+### Autonomous background agent platform ⭐ HIGH PRIORITY
+
+- **Status**: idea -- high priority, not yet designed
+- **Summary**: Transform WorkRail from an MCP server that responds to agent calls into a persistent background daemon that initiates workflows autonomously, integrates with external systems (Jira, GitLab, Slack), and uses the console as a control plane rather than a passive visualization tool.
+- **The shift**: today WorkRail waits for an agent to call it. In this model, WorkRail *initiates* -- it listens for triggers, calls the Claude API directly, manages conversations, advances its own sessions, and surfaces results through the console. Humans interact via the console or via external system integrations, not necessarily via an AI coding session.
+- **Core capabilities**:
+  - **Triggers** -- Jira webhook when a ticket moves to "In Progress," GitLab webhook when an MR is opened, cron schedule, Slack message, manual console dispatch. WorkRail selects the right workflow and starts a session automatically.
+  - **Autonomous execution** -- WorkRail spawns a Claude API session (not Claude Code -- direct Anthropic API), passes the workflow step by step, collects tool call results, advances without a human in the loop unless a step requires approval.
+  - **Integration layer** -- first-class tools for Jira (read ticket, post comment, transition status), GitLab (read MR, post review comment, approve/request changes), Slack (send message, read channel), PagerDuty (acknowledge alert). These are just tools workflows can call.
+  - **Console as mission control** -- live running sessions visible in the console, not just history. Pause a session, inject context, approve a step, redirect. Think Temporal's UI but for AI workflows.
+  - **Evidence collection** -- hooks into Claude Code's `PreToolUse`/`PostToolUse` events to observe what the agent actually did, not just what it reported. Required evidence declared in workflow steps; token gated on observed evidence, not agent claims.
+- **Why WorkRail's existing architecture already points here**:
+  - Durable session store is append-only -- exactly right for long-running background jobs
+  - Token protocol handles resumption -- a background job that gets interrupted can resume via checkpoint token
+  - DAG console already visualizes session state -- one step from making it live
+  - Workflow composition (templateCall, routines, loops) already supports complex orchestration
+- **Concrete first use cases** (Zillow/Mercury Mobile):
+  - Auto-review every incoming MR using `mr-review-workflow` -- post findings as GitLab comment
+  - Auto-triage new Jira tickets assigned to Mercury Mobile -- classify, estimate, link to related work
+  - Daily async standup summary -- aggregate team activity, post to Slack channel
+  - Auto-run `goals-update-workflow` before every 1:1 based on calendar trigger
+- **What's genuinely hard**:
+  - MCP transport assumption breaks -- WorkRail needs to *initiate* Claude API calls, not wait for them
+  - Credential management -- background process needs Claude API key, Jira token, GitLab token; secrets model needs design
+  - Concurrency and resource limits -- multiple simultaneous autonomous sessions need guardrails
+  - Human-in-the-loop design -- some steps should pause and wait for human approval before proceeding
+- **Why this surpasses nexus-core**:
+  - nexus-core is fundamentally human-initiated -- you run `/flow`, it works because you're there. It cannot run autonomously while you sleep. It's a plugin, not a daemon.
+  - WorkRail's durable session model is already designed for this. nexus-core would need a full architectural rewrite.
+- **Why this is differentiated in the broader market**:
+  - Devin, GitHub Copilot Workspace, etc. are autonomous coding agents but are black boxes -- no enforcement, no auditability, no human control plane
+  - WorkRail's autonomous mode retains cryptographic step enforcement and full session observability -- you can see exactly what it did and why, pause it, resume it, roll back to a checkpoint
+- **Design questions**:
+  - Should the daemon run as a separate process from the MCP server, or share the same process with different entry points?
+  - How does the console authenticate to the daemon for live session control?
+  - What is the minimal trigger/integration surface for v1 -- just GitLab MR webhooks + Jira ticket webhooks?
+  - How do we handle workflows that require human approval mid-step in an otherwise autonomous session?
+  - Should WorkRail ship integration adapters, or define an integration contract that external adapters implement?
+- **Related**:
+  - `docs/design/console-ui-backlog.md` -- console evolution
+  - `docs/roadmap/open-work-inventory.md` -- platform vision
+  - Discovery notes: `~/git/zillow/etienne-2026-goals/goals/2026/discovery-notes-apr-2026.md`
+
+---
+
 ### Forever backward compatibility via engine version declaration
 
 - **Status**: high importance, not yet properly thought through -- the solution sketched here is tentative and needs real design work before implementation
