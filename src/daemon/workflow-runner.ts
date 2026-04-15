@@ -489,7 +489,7 @@ export async function runWorkflow(
     const { getModel } = await loadPiAi();
     const usesBedrock = !!process.env['AWS_PROFILE'] || !!process.env['AWS_ACCESS_KEY_ID'];
     if (usesBedrock) {
-      model = getModel('bedrock-converse-stream', 'us.anthropic.claude-sonnet-4-6');
+      model = getModel('amazon-bedrock', 'us.anthropic.claude-sonnet-4-6');
     } else {
       model = getModel('anthropic', 'claude-sonnet-4-5');
     }
