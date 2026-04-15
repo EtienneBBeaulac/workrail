@@ -812,3 +812,26 @@ type WorkflowContinueResult =
 **Priority:** Long-term. Design the local daemon with multi-tenancy seams in mind from the start (don't hardcode single-user assumptions), but don't build the hosted layer until the local daemon is proven.
 
 **Reference:** OpenClaw's channel/extension architecture is the best existing model for multi-integration connectivity. AutoGPT's block/trigger system is the best model for declarative integration configuration.
+
+---
+
+### Business model (tentative)
+
+Three tiers:
+
+| Tier | Who | Price | Notes |
+|------|-----|-------|-------|
+| **Personal / OSS** | Individual devs, open-source projects, non-commercial | Free forever | Builds community, reputation, workflow library. Never charge for this. |
+| **Corporate self-hosted** | Companies running WorkRail on their own infrastructure | Paid license | Data never leaves their VPC. Enterprise buyers pay well for data sovereignty + compliance. Priced per seat or per org. |
+| **WorkRail Auto (cloud)** | Anyone who wants managed, zero-ops | Paid subscription | Higher price, lower friction. Pre-configured integrations. |
+
+**License model options:**
+- **Dual-license:** AGPL for open-source use (anyone can use but must open-source modifications), commercial license for everyone else who doesn't want AGPL obligations. Clean legal distinction.
+- **BSL-style:** Core is source-available, commercial use requires a license after some threshold (employees, revenue, or deployment count). HashiCorp's original model before the community backlash -- careful with this one.
+- **MIT core + paid features:** Core engine stays MIT forever, advanced features (hosted dashboard, enterprise SSO, multi-tenant credential vault, audit logs) are paid. Keeps the community trust, monetizes the enterprise layer.
+
+**The corporate self-hosted market is often the most lucrative.** Enterprises pay well for "runs in our VPC, vendor can't see our code." GitLab, Grafana, Jira -- all built significant businesses on self-hosted enterprise licenses before or alongside their cloud offerings.
+
+**What NOT to do:** Don't charge for the workflow library or the core MCP protocol. Those are the commons that make WorkRail valuable. Charge for the infrastructure layer, not the knowledge layer.
+
+**Priority:** Don't worry about this until there are users. Get the product right first.
