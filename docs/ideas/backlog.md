@@ -286,6 +286,20 @@ WorkRail autonomous sessions can spawn subagents for parallel work:
 
 ## Feature ideas
 
+### Console interactivity and liveliness
+
+- **Status**: idea
+- **Summary**: Make the console feel more alive and interactive -- currently it is largely a static visualization layer. Key areas: DAG node hover effects, micro-animations, click-to-inspect affordances, and overall responsiveness to user input.
+- **Concrete starting points**:
+  - **DAG node hover effects** -- nodes in `RunLineageDag` should have visible hover states: border brightens, subtle background glow, cursor changes to pointer. Currently nodes are clickable but give no visual feedback until clicked. This is the single highest-impact item.
+  - **Node selection highlight** -- the selected node should pulse or glow in a way that draws the eye, rather than just a static border change.
+  - **Transition animations** -- when the node detail panel slides in, the selected node in the DAG should subtly indicate the connection (e.g. a brief highlight flash).
+  - **Live session pulse** -- sessions with `status: in_progress` could have a subtle periodic animation (not just a static badge) to reinforce that something is actively running.
+  - **Tooltip polish** -- the current tooltip (delayed 300ms, no animation) could fade in/out rather than appearing instantly.
+- **Design constraint**: the console already has a strong aesthetic (dark navy, amber accent, cyberpunk adjacent). Interactivity additions should reinforce this language, not contradict it. See `docs/design/console-cyberpunk-ui-discovery.md` for the ranked visual language list.
+- **Where to start**: DAG node hover is in `console/src/components/RunLineageDag.tsx`. ReactFlow nodes use custom node type components -- hover state can be managed via React state or CSS. The tooltip pattern (`handleNodeMouseEnter`/`handleNodeMouseLeave`) already exists; a hover glow is a natural peer addition.
+- **Related**: `docs/design/console-cyberpunk-ui-discovery.md` (ranked list of visual polish items), `docs/design/console-ui-backlog.md`
+
 ### Autonomous background agent platform ⭐ HIGH PRIORITY
 
 - **Status**: idea -- high priority, not yet designed
@@ -1118,3 +1132,61 @@ events from session store (stronger than hook-based, no subprocess reliability c
 ```
 
 In-process evidence gate is architecturally superior for daemon mode -- direct session store reads, no subprocess IPC.
+
+**OpenClaw final findings (deepest agent, 15+ source files):**
+
+**`KeyedAsyncQueue` is FIRST prerequisite -- build before daemon runner.** Prevents token corruption when multiple triggers fire concurrently. 30-80 LOC to reimplement from `src/acp/control-plane/session-actor-queue.ts`.
+
+**`TriggerPlugin<TConfig, TCredentials>` interface:** Phase 1 MVP -- typed interface + `TRIGGER_REGISTRY = new Map<TriggerId, TriggerPlugin>` + factory credential resolution. ~300 LOC. DI injection deferred to Phase 2 when test coverage needed. Use branded `TriggerId` string type (not closed union) -- extensible without recompile.
+
+**`deliveryContext` persistence (~20 LOC):** Store routing info (MR iid, Jira key, Slack thread) at session creation in session store. Crash recovery: on restart, `DeliveryRouter.resolve(deliveryContext)` knows where to post results.
+
+**`TaskNotifyPolicy` enum:** `done_only` / `state_changes` / `silent` -- 5 LOC, adopt verbatim for trigger notification behavior config.
+
+**`DaemonRegistry.snapshot()`:** `RuntimeCache` equivalent (~50 LOC) feeding console live view API. `snapshot()` returns current running sessions; `collectIdleCandidates()` for GC.
+
+**Pre-implementation checklist before any trigger code:**
+1. `KeyedAsyncQueue` (prerequisite, ~50 LOC)
+2. Branded `TriggerId` type
+3. `never` branch in startup switch over `TriggerInboundAdapter.kind`
+4. `deliveryContext` stored at session start
+
+---
+
+## Ultimate MVP -- non-blocking build order
+
+Everything researched. Build order that ships fastest without blocking future:
+
+**Step 1 ✅ DONE:** `LocalSessionLockV2` workerId + instanceId fix (merged to main)
+
+**Step 2: `KeyedAsyncQueue` (~50 LOC)**
+Concurrent session serialization. Prerequisite for daemon safety. Prevents token corruption. Re-implement from OpenClaw pattern, don't import.
+
+**Step 3: `src/daemon/workflow-runner.ts` (~150 LOC)**
+- `runWorkflow(trigger, apiKey)` calls engine directly (in-process, shared DI)
+- `@mariozechner/pi-agent-core` `Agent` class as the loop
+- `agent.steer()` for step injection after each tool batch (NOT `followUp()`)
+- Persist `continueToken` + `checkpointToken` to `~/.workrail/daemon-state.json` atomically before each step
+- `isComplete=true` → stop calling `steer()` → agent exits naturally
+- Register `start_workflow`, `continue_workflow`, `Bash`, `Read`, `Write` as `AgentTool<T>` with TypeBox schemas
+- Inject `<workrail_session_state>` XML block in system prompt (last 3 step note summaries, ~200 tokens each)
+
+**Step 4: Trigger webhook server (~300 LOC)**
+- `TriggerPlugin<TConfig, TCredentials>` interface + `TRIGGER_REGISTRY` Map
+- `POST /webhook/generic` -- accepts any JSON payload on port 3200
+- `triggers.yml` config: `workflowId`, optional `contextMapping` (JSONPath payload → context)
+- HMAC signature verification, async queue, 202 response
+- Feature flag: `wr.features.triggers`
+- Generic provider works for ALL integrations out of the box
+
+**Step 5: Console live view (~3 files, no new routes)**
+- `context_set(is_autonomous: true)` event at session start
+- Ephemeral `DaemonRegistry` with `lastHeartbeatMs`
+- `[ LIVE ]` pulsing badge in session list
+
+**What stays non-blocking:**
+- In-process daemon → cloud HTTP client is a transport swap, not a rewrite
+- `TriggerSourcePortV2` has `poll()` interface → worker polling for cloud is config, not code
+- Per-org session paths (`~/.workrail/sessions/default/`) → adding orgId prefix later is migration
+- Feature flags on everything → merge incrementally
+- Generic webhook → all integrations (GitLab, Jira, Slack) via config, zero code per integration
