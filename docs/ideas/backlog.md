@@ -1007,3 +1007,24 @@ Full tool registration TypeScript in design doc.
 **`nextAction` in every tool response:** mcp-graph appends `_lifecycle.nextAction` to every MCP response. WorkRail: add typed `nextAction` field to `continue_workflow` responses (parsed step summary, suggested tool, context keys) -- complement to HMAC enforcement.
 
 **mcp-graph-workflow vs WorkRail honest comparison:** mcp-graph has SQLite persistence, lifecycle phases, gate checks, multi-agent task claiming, RAG, knowledge store. It's in "durable + advisory enforcement" quadrant. WorkRail's moat: cryptographic enforcement (mcp-graph is advisory -- agents CAN call tools out of sequence), checkpoint/resume tokens, workflow composition DSL, DAG visualization. Not marginal differences.
+
+**Temporal/Prefect/Dagster additional findings (full discovery agent):**
+
+**Central insight -- Temporal's replay model is NOT applicable to WorkRail.** Temporal's event-sourcing depends on deterministic code. AI agent tool calls are inherently non-deterministic. WorkRail's checkpoint token + append-only session store is already the right architecture. "Temporal for AI agent process governance" is valid as an analogy -- take Temporal's invariants, not its mechanisms.
+
+**Workflow versioning is already solved.** `PinnedWorkflowStorePortV2` + `workflowHash` verified in `src/mcp/handlers/v2-advance-core/outcome-success.ts` (line 57) and `src/mcp/handlers/v2-workflow.ts` (lines 460-463). Deploy-safe in-flight sessions are fully handled. No new code needed.
+
+**Trigger system from Dagster sensor cursor model (~200 LOC):** `TriggerSourcePortV2<TEvent, TCursor>` port + `TriggerCursorStore` + `CronTrigger` + `GitLabMRTrigger`. Trigger event ID used as workflowId for idempotency (Dagster's `run_key` pattern -- prevents double-fire after daemon restarts). Prefect's lookahead pre-insertion: `CronTrigger.poll()` computes all missed ticks since last cursor and fires them as separate sessions.
+
+**Human approval gates (post-daemon-MVP, ~200 LOC + schema):** Three new typed domain events (`step_approval_pending/received/timeout`) + REST endpoint with HMAC-signed approval token. Requires workflow schema change. Build after autonomous daemon is proven.
+
+**Daemon crash recovery (~80 LOC, build first):** `DaemonStateStore` port -- atomic write of `{ sessionId, continueToken, stepIndex, approvalGate? }` to `~/.workrail/daemon-state.json` before every `continue_workflow`. Follows existing temp→fsync→rename pattern from session store. Out-of-band from session lock by design.
+
+**Temporal-to-WorkRail mapping confirmed:**
+- Event history → append-only session event log ✅ (exists)
+- Workflow task token → `ct_`/`st_` checkpoint token ✅ (exists)
+- `condition(fn, timeout)` human gate → `approvalGate` step + REST resume (to design)
+- Activity heartbeat → `requiredEvidence` field (to implement)
+- Deployment versioning → `PinnedWorkflowStorePortV2` + `workflowHash` ✅ (verified)
+- Namespace → `orgId` prefix in `dataDir` + credential vault (cloud tier)
+- Worker long-polling → direct in-process engine calls ✅ (daemon model)

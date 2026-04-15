@@ -516,6 +516,115 @@ describe('Bug #4: Lock File Atomic Operations', () => {
 });
 
 // ============================================================================
+// Bug #6: Cross-Project Lock Guard (firebender / multi-worktree)
+// ============================================================================
+
+describe('Bug #6: Cross-Project Lock Guard', () => {
+  const CURRENT_VERSION = '3.22.0';
+  const MY_PROJECT_ID = 'abc123';
+
+  interface DashboardLock {
+    pid: number;
+    port: number;
+    startedAt: string;
+    lastHeartbeat: string;
+    version?: string;
+    projectId?: string;
+  }
+
+  // Inline reimplementation of shouldReclaimLock including the cross-project guard.
+  // This mirrors the logic in HttpServer.shouldReclaimLock() and serves as a
+  // specification test for the invariant.
+  const shouldReclaimLock = (lockData: DashboardLock, currentPid = process.pid): { reclaim: boolean; reason: string } => {
+    if (!lockData.pid || !lockData.port || !lockData.startedAt) {
+      return { reclaim: true, reason: 'invalid lock structure' };
+    }
+    // Cross-project guard: yield to a live process from a different project.
+    if (lockData.projectId && lockData.projectId !== MY_PROJECT_ID) {
+      try {
+        process.kill(lockData.pid, 0);
+        return { reclaim: false, reason: `different project, primary alive (lock=${lockData.projectId})` };
+      } catch {
+        // Dead process — fall through to normal reclaim logic.
+      }
+    }
+    if (lockData.version !== CURRENT_VERSION) {
+      return { reclaim: true, reason: `version mismatch (lock=${lockData.version}, current=${CURRENT_VERSION})` };
+    }
+    const lastHeartbeat = new Date(lockData.lastHeartbeat || lockData.startedAt);
+    const ageMinutes = (Date.now() - lastHeartbeat.getTime()) / 60000;
+    if (ageMinutes > 2) {
+      return { reclaim: true, reason: `stale (${ageMinutes.toFixed(1)}min old)` };
+    }
+    try {
+      process.kill(lockData.pid, 0);
+    } catch {
+      return { reclaim: true, reason: `PID ${lockData.pid} dead` };
+    }
+    return { reclaim: false, reason: 'valid' };
+  };
+
+  it('does NOT reclaim a live lock from a different project even on version mismatch', () => {
+    // Scenario: firebender starts workrail 3.16.0 in a worktree; our primary
+    // is 3.22.0 on the same machine. The firebender instance must yield.
+    const primaryLock: DashboardLock = {
+      pid: process.pid, // alive — use current process as a live PID stand-in
+      port: 3456,
+      startedAt: new Date().toISOString(),
+      lastHeartbeat: new Date().toISOString(),
+      version: '3.16.0', // different version
+      projectId: 'zzz999-different-project', // different project
+    };
+    const result = shouldReclaimLock(primaryLock);
+    expect(result.reclaim).toBe(false);
+    expect(result.reason).toContain('different project');
+  });
+
+  it('still reclaims a lock from a different project when that process is dead', () => {
+    const deadCrossProjectLock: DashboardLock = {
+      pid: 999999999, // non-existent PID
+      port: 3456,
+      startedAt: new Date().toISOString(),
+      lastHeartbeat: new Date().toISOString(),
+      version: '3.16.0',
+      projectId: 'zzz999-different-project',
+    };
+    const result = shouldReclaimLock(deadCrossProjectLock);
+    // Dead process — should reclaim regardless of project mismatch.
+    expect(result.reclaim).toBe(true);
+  });
+
+  it('still reclaims on version mismatch for the SAME project', () => {
+    const sameProjectOldVersion: DashboardLock = {
+      pid: 999999999, // dead PID so version check fires
+      port: 3456,
+      startedAt: new Date().toISOString(),
+      lastHeartbeat: new Date().toISOString(),
+      version: '3.16.0',
+      projectId: MY_PROJECT_ID, // same project
+    };
+    const result = shouldReclaimLock(sameProjectOldVersion);
+    expect(result.reclaim).toBe(true);
+    expect(result.reason).toContain('version mismatch');
+  });
+
+  it('falls through to normal logic when lock has no projectId (old format)', () => {
+    const oldFormatLock: DashboardLock = {
+      pid: 999999999,
+      port: 3456,
+      startedAt: new Date().toISOString(),
+      lastHeartbeat: new Date().toISOString(),
+      version: '1.0.0',
+      // no projectId
+    };
+    const result = shouldReclaimLock(oldFormatLock);
+    // No projectId → skip cross-project guard → version mismatch fires
+    expect(result.reclaim).toBe(true);
+    expect(result.reason).toContain('version mismatch');
+  });
+});
+
+// ============================================================================
 // Bug #5: Process Signal Handler Tests
 // ============================================================================
 
