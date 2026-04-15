@@ -6,6 +6,39 @@ Workflow and feature ideas that are worth capturing but not yet planned or desig
 
 ## Research Notes: Autonomous Platform Vision (Apr 14, 2026)
 
+### Core architectural principle: WorkRail drives itself
+
+**The daemon doesn't bypass WorkRail -- it IS WorkRail.**
+
+The autonomous engine uses WorkRail's own MCP tools (`start_workflow`, `continue_workflow`) internally, from inside the same process. When running as MCP server, Claude Code calls these tools over the wire. When running as daemon, WorkRail calls them itself. The session engine, token protocol, step sequencer, and workflow registry are shared -- identical in both modes.
+
+**The workflow is the interface between the two modes.** A workflow has no knowledge of whether it's being driven by a human through Claude Code or by WorkRail's autonomous daemon. Zero changes to existing workflows required -- every workflow in the library today runs in autonomous mode tomorrow.
+
+```
+WorkRail Core (shared)
+├── Session engine (durable store, HMAC token protocol, step sequencer)
+├── Workflow registry (bundled + user + managed sources)
+└── Console (DAG visualization, live session view)
+
+WorkRail MCP Server (existing entry point)
+└── Claude Code / Cursor / Firebender call start_workflow, continue_workflow externally
+
+WorkRail Daemon (new entry point -- same core, different driver)
+├── Trigger listener (webhooks, cron, CLI, REST)
+├── Agent loop (pi-mono's agentLoop calling WorkRail's own MCP tools internally)
+└── Tool execution (Bash, Read, Write -- same tools Claude Code uses)
+```
+
+**Why this matters:**
+- No duplicate session logic, no duplicate workflow format, no duplicate enforcement
+- WorkRail can autonomously improve itself -- the daemon runs `workflow-for-workflows` to author new workflows, which then run in both modes
+- Users who start with Claude Code MCP get autonomous mode for free -- same config, same workflows, second entry point
+- The enforcement guarantee is identical: whether a human or the daemon is driving, the agent cannot skip steps
+
+**The single-process model:** The daemon entry point is a new `src/daemon/` module that imports and calls the same handlers as the MCP server -- `executeStartWorkflow`, `executeContinueWorkflow` -- directly, without HTTP overhead. The session store, pinned workflow store, and all other ports are shared DI singletons. MCP server and daemon can run simultaneously in the same process.
+
+---
+
 ### The four reference architectures: synthesis
 
 **The vision:** WorkRail as the next evolution -- open source, freestanding autonomous agent platform with cryptographic workflow enforcement, durable sessions, full observability, and first-class Anthropic API integration.
