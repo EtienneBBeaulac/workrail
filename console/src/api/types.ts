@@ -170,6 +170,7 @@ export interface ConsoleDagRun {
   readonly hasUnresolvedCriticalGaps: boolean;
   // Reserved: consumed by ExecutionTrace panel (not yet implemented)
   readonly executionTraceSummary: ConsoleExecutionTraceSummary | null;
+  readonly skippedSteps: readonly ConsoleGhostStep[];
 }
 
 export interface ConsoleSessionDetail {
@@ -293,4 +294,10 @@ export interface ApiResponse<T> {
   readonly success: boolean;
   readonly data?: T;
   readonly error?: string;
+}
+
+// Layer 3b: ghost step type (appended)
+export interface ConsoleGhostStep {
+  readonly stepId: string;
+  readonly stepLabel: string | null;
 }

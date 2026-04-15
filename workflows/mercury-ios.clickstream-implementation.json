@@ -1,0 +1,193 @@
+{
+  "id": "mercury-ios.clickstream-implementation",
+  "name": "Mercury iOS: Implement Feature Tracking",
+  "version": "0.2.0",
+  "description": "Guides an engineer through implementing clickstream analytics and/or telemetry for a mercury-ios ZillowMap feature. Conditionally handles either or both: discovers clickstream events, defines IlluminateEvents cases and telemetry signal keys, wires tracking into the ViewModel, and writes tests.",
+  "validatedAgainstSpecVersion": 3,
+  "about": "## Mercury iOS: Implement Feature Tracking\n\nThis workflow handles clickstream analytics, operational telemetry, or both — using `runCondition` to skip steps that don't apply.\n\n### What it does\n\n1. Identifies which tracking types are needed (clickstream, telemetry, or both)\n2. Discovers the clickstream event spec from Glean or user input (clickstream only)\n3. Defines `IlluminateEvents+[Feature].swift` extension cases (clickstream only)\n4. Defines telemetry signal keys or TKMonitor types (telemetry only)\n5. Wires the `IlluminateAnalyticsTrackable` mixin and `ZIMContextualBlock` updates (clickstream only)\n6. Integrates tracking calls into the ViewModel\n7. Writes tests and runs a final verification barrier\n\n### Reference implementations\n\n- Clickstream: `Modules/Messaging/Sources/Messaging/Analytics/IlluminateEvents/ZIM/IlluminateEvents+ZIM.swift`\n- Telemetry: `Modules/IlluminateTelemetry/Sources/IlluminateTelemetry/TelemetryMonitorImpl.swift`\n\n### When to use it\n\nUse this workflow when adding any combination of clickstream events or telemetry instrumentation to a ZillowMap feature module.\n\n### What it produces\n\n**Clickstream:** `IlluminateEvents+[Feature].swift`, `IlluminateSemanticEventName.[Feature]`, optional `ZIMContextualBlock` updates, `IlluminateAnalyticsTrackable` conformance, `MockAnalyticsAgent` tests\n\n**Telemetry:** `[Feature]TelemetryKeys.swift` constants or `TKMonitor` conformance, `ZGMonitoring` injection, mock monitor tests",
+  "examples": [
+    "Add clickstream tracking to the new listing alert feature",
+    "Add telemetry error tracking and transaction timing to the connection flow",
+    "Instrument the buyer connection request flow with both analytics and telemetry",
+    "Wire telemetry transaction timing for the conversation load operation on iOS"
+  ],
+  "recommendedPreferences": {
+    "recommendedAutonomy": "guided",
+    "recommendedRiskPolicy": "balanced"
+  },
+  "preconditions": [
+    "The feature module exists and the ViewModel is already implemented.",
+    "Agent has read access to the ZillowMap codebase.",
+    "Glean MCP is available for clickstream event spec discovery (falls back to user input if not found)."
+  ],
+  "metaGuidance": [
+    "USE EXISTING PATTERN: extend IlluminateEvents with a nested feature enum. Each case has `var event: IlluminateEvent` with hardcoded integer ID and typed enum fields. Do not create new tracker protocols or classes.",
+    "TRACKABLE MIXIN: ViewModel conforms to IlluminateAnalyticsTrackable and calls trackEvent(_:using:and:) passing messagingRepo (IlluminateAnalyticsTracker) and clickstreamTracker (IlluminateEventsManager).",
+    "CONTEXT ENRICHMENT: ZIMContextualBlock in MessagingRepositoryImpl enriches every event. Add new fields with an immutable updateWith*() method. Never reach into the contextual block from the ViewModel directly.",
+    "NO USE CASE PATH: do not use TrackAnalyticsEventUseCase or MessagingAnalyticsRepositoryImpl.getAnalyticsContext() — the context impl returns an empty stub and silently delivers empty analytics context.",
+    "KILL SWITCH: zillow_ios_zim_analytics_refactor is currently disabled. Always use trackEvent(_:using:and:) with both parameters. Do not adopt the single-parameter path until the kill switch is enabled.",
+    "TEST WITH MockAnalyticsAgent (already in MessagingMocks): it records trackedEvents:[IlluminateEvent]. Assert on exact event equality. Use .fixture() extension methods for test data.",
+    "EVENT IDS: integer event IDs cannot be inferred from code. They must come from the Glean event spec or user input. Hardcode them directly inside the IlluminateEvent init in each case.",
+    "TELEMETRY: use TKMonitorProviding with a feature-specific DI key. Define typed EventType/ErrorType/TransactionType enums. Call monitor?.send(event:)/send(error:)/begin(transaction:)/end(transaction:). Reference: CallScheduler pattern."
+  ],
+  "assessments": [
+    {
+      "id": "build-correctness-gate",
+      "purpose": "The implementation compiles and all tests pass.",
+      "dimensions": [
+        {
+          "id": "build_correctness",
+          "purpose": "Build succeeds and tests pass. No compilation errors or failing assertions.",
+          "levels": ["low", "high"]
+        }
+      ]
+    },
+    {
+      "id": "invariant-preservation-gate",
+      "purpose": "Invariants captured in the understand step still hold in the implemented code.",
+      "dimensions": [
+        {
+          "id": "invariant_preservation",
+          "purpose": "Each named invariant has been verified in the implementation.",
+          "levels": ["low", "high"]
+        }
+      ]
+    },
+    {
+      "id": "implementation-gaps-gate",
+      "purpose": "A deliberate scan for gaps surfaced during implementation has been completed.",
+      "dimensions": [
+        {
+          "id": "implementation_gaps",
+          "purpose": "Active scan completed: gaps are fixed inline, filed as follow-up tickets, or explicitly deferred.",
+          "levels": ["low", "high"]
+        }
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "id": "understand-feature",
+      "title": "Understand the Feature",
+      "prompt": "Read the feature module you are adding tracking to.\n\nFind:\n- The ViewModel: does it already conform to `IlluminateAnalyticsTrackable`? Does it already inject `messagingRepo` and `clickstreamTracker` via `@LazyInjected`?\n- Any existing `IlluminateEvents+[Feature].swift` file in the feature module\n- Existing `trackEvent` or `IlluminateEvents` references in the module\n\nAlso read the canonical clickstream reference now:\n`Modules/Messaging/Sources/Messaging/Analytics/IlluminateEvents/ZIM/IlluminateEvents+ZIM.swift`\n\nIdentify which user actions (taps, page loads, impressions) should generate clickstream events. Also identify whether any operations need operational telemetry: error paths worth tracking in Datadog, performance-critical operations worth timing as transactions, or key milestones worth logging.\n\nNote: clickstream is for product analytics (user behavior); telemetry is for operational health (errors, performance, Datadog).\n\nCapture:\n- `hasExistingEventsExtension`: true if an `IlluminateEvents+[Feature].swift` already exists\n- `hasTrackableMixin`: true if the ViewModel already conforms to `IlluminateAnalyticsTrackable`\n- `featureModulePath`: path to the feature's Swift module source\n- `actionsToTrack`: list of action names needing clickstream events (e.g. [\"userOpenedScreen\", \"userTappedSend\"])\n- `invariants`: correctness rules that must hold (e.g. [\"Every actionsToTrack action has one IlluminateEvents case\", \"All IlluminateEvent fields use typed enum values\", \"trackEvent called with both messagingRepo and clickstreamTracker\"])\n- `acceptanceCriteria`: what done looks like (e.g. [\"All events in events[] fire when user acts\", \"MockAnalyticsAgent records exact IlluminateEvent equality for each action\"])\n- `needsClickstream`: true if product analytics events are needed\n- `needsTelemetry`: true if operational telemetry is needed (errors, timings, transactions)\n- `telemetryEventsNeeded`: list of telemetry signals (e.g. [\"renderDuration transaction\", \"loadError error\", \"submitSuccess event\"])"
+    },
+    {
+      "id": "discover-events",
+      "title": "Discover Clickstream Event Definitions",
+      "runCondition": { "var": "needsClickstream", "equals": true },
+      "prompt": "Find the analytics event spec for this feature.\n\nSearch Glean for event definitions. Try these queries in order until you find something useful:\n1. The ticket number (ACEI/ICEI) — check the session goal or `git log` for a reference\n2. \"[feature name] clickstream events\"\n3. \"[feature name] analytics event type\"\n4. \"[feature name] tracking spec\"\n\nA useful spec defines per event:\n- Event type ID (an integer, e.g. 5526)\n- Semantic event name string (e.g. \"sendMessageComplete\")\n- Template ID (e.g. 337)\n- Trigger type: interaction / pageView / impression\n- Source (`MessagingSources` enum value)\n- Trigger object (`MessagingTriggerObject` enum value, optional)\n- Trigger location (`MessagingLocation` enum value)\n\nIf Glean returns a document with these values, extract them for each action in `actionsToTrack`.\n\nIf no spec is found in Glean, tell the user:\n\n\"I could not find an analytics event spec for this feature in Glean. For each of the following actions [list actionsToTrack], please provide: (1) integer event ID, (2) semantic event name string, (3) template ID, (4) trigger type (interaction/pageView/impression), (5) source, (6) trigger object (optional), (7) trigger location.\"\n\nCapture:\n- `events`: array of {name, eventId, semanticEventName, templateId, triggerType, source, triggerObject, triggerLocation}\n- `eventsSource`: \"glean\" or \"user_provided\"",
+      "requireConfirmation": true
+    },
+    {
+      "id": "define-events",
+      "title": "Define IlluminateEvents Extension",
+      "runCondition": { "var": "needsClickstream", "equals": true },
+      "prompt": "Write the `IlluminateEvents+[Feature].swift` extension for this feature.\n\nFor each entry in `events`, write a corresponding case. Follow the pattern in `IlluminateEvents+ZIM.swift` exactly:\n\n```swift\nextension IlluminateEvents {\n    enum [Feature]: CaseIterable {\n        case userOpenedScreen\n        case userTappedSend\n        // ...\n\n        var event: IlluminateEvent {\n            switch self {\n            case .userOpenedScreen:\n                return IlluminateEvent(\n                    id: <eventId>,\n                    semanticEventName: IlluminateSemanticEventName.[Feature].openedScreen,\n                    templateId: <templateId>, templateVersionId: 1, versionId: 1,\n                    triggerType: .pageView,\n                    source: .<MessagingSources case>,\n                    triggerObject: .<MessagingTriggerObject case>,\n                    triggerLocation: .<MessagingLocation case>\n                )\n            }\n        }\n    }\n}\n```\n\nAlso extend `IlluminateSemanticEventName` with a nested enum for the feature's semantic name strings:\n\n```swift\nextension IlluminateSemanticEventName {\n    enum [Feature] {\n        static let openedScreen = \"[feature_opened_screen]\"\n        // ...\n    }\n}\n```\n\nNever use raw integer literals outside the `IlluminateEvent` init. No separate constants files needed.",
+      "promptFragments": [
+        {
+          "id": "has-existing-extension",
+          "when": { "var": "hasExistingEventsExtension", "equals": true },
+          "text": "An IlluminateEvents extension already exists for this feature. Add the new cases to the existing enum rather than creating a new file. Match the naming style already in use."
+        }
+      ]
+    },
+    {
+      "id": "define-telemetry-events",
+      "title": "Define Telemetry Signal Keys",
+      "runCondition": { "var": "needsTelemetry", "equals": true },
+      "prompt": "Define the telemetry types for this feature using the `TKMonitorProviding` pattern.\n\nThe canonical pattern in ZillowMap uses `TKMonitorProviding` with a feature-specific DI key. Reference: `Modules/Touring/Sources/TourScheduling/AnalyticMonitoring/SessionMonitor.swift`.\n\n**Step 1 — Define the monitor provider** in a new `[Feature]Monitor.swift`:\n\n```swift\nstruct [Feature]Monitor: TKMonitorProviding {}\n\nextension [Feature]Monitor {\n    enum EventType: TKMonitorEvent {\n        case renderCompleted\n        case submitSucceeded\n        // one case per event-type signal in telemetryEventsNeeded\n        var name: String { switch self { case .renderCompleted: return \"[feature]_render_completed\"; ... } }\n        var action: TKMonitorAction { .custom }\n        var attributes: [String: Encodable] { [:] }\n    }\n    enum ErrorType: TKMonitorErrors {\n        case loadFailed(Error)\n        // one case per error-type signal\n        var errors: [TKMonitorError] { switch self { case .loadFailed(let e): return [TKMonitorError(error: e, attributes: [:])] } }\n    }\n    enum TransactionType: TKMonitorTransaction {\n        case loadOperation(TKTransactionType)\n        var id: String { \"[feature]_load_operation\" }\n        var attributes: [String: Encodable] { [:] }\n        var action: TKMonitorAction { .custom }\n        var type: TKTransactionType { switch self { case .loadOperation(let t): return t } }\n    }\n}\n```\n\nOnly add `ErrorType` if `telemetryEventsNeeded` includes error signals. Only add `TransactionType` if there are transaction signals.\n\n**Step 2 — Register in DI** (add to the feature's `Container` extension):\n\n```swift\nprotocol [Feature]MonitorSupporting: TKMonitorTracking, TKMonitorSupporting\n    where MonitorProvider == [Feature]Monitor {}\nextension TKMonitor<[Feature]Monitor>: [Feature]MonitorSupporting {}\n\nextension Container {\n    static let [feature]Monitor = DIFactory<(any [Feature]MonitorSupporting)?>(scope: .cached) { nil }\n}\n```\n\nRegister the real implementation at app startup or in the feature's DI setup: `Container.[feature]Monitor.register { TKMonitor<[Feature]Monitor>(...) }`.\n\nCapture:\n- `telemetryDIKey`: the Container key name (e.g. \"[feature]Monitor\")"
+    },
+    {
+      "id": "wire-tracking",
+      "title": "Wire Tracking into the ViewModel",
+      "runCondition": { "var": "needsClickstream", "equals": true },
+      "prompt": "Wire clickstream tracking into the ViewModel. Two checks first.\n\n**1. Context check:** Do any events in `events` need data not currently in `ZIMContextualBlock` (a new listing ID, a custom count, etc.)?\n\nIf yes — add the field and update method:\n- Add a `let` property with a default value to `ZIMContextualBlock`\n- Add an immutable `updateWith[FieldName](_ value: Type) -> ZIMContextualBlock` method following the existing pattern in `IlluminateEventsContextualBlock.swift`\n- Call it from `MessagingRepositoryImpl` at the point where the data becomes available\n\nIf no — proceed directly to step 2.\n\n**2. ViewModel wiring:**\n\nConform to `IlluminateAnalyticsTrackable` and inject dependencies:\n\n```swift\nclass [Feature]ViewModel: ObservableObject, IlluminateAnalyticsTrackable {\n    @LazyInjected(Container.Messaging.messagingRepo) var messagingRepo\n    @LazyInjected(Container.IlluminateAnalytics.analytics) var clickstreamTracker\n\n    func onUserTappedSend() {\n        trackEvent(IlluminateEvents.[Feature].userTappedSend.event,\n                   using: messagingRepo,\n                   and: clickstreamTracker)\n    }\n}\n```\n\nFor page view events, call from a ViewModel lifecycle method invoked by the view's `.onAppear`.\n\nCapture:\n- `addedContextualFields`: true if new `ZIMContextualBlock` fields were added; false otherwise",
+      "promptFragments": [
+        {
+          "id": "has-mixin",
+          "when": { "var": "hasTrackableMixin", "equals": true },
+          "text": "The ViewModel already conforms to IlluminateAnalyticsTrackable. Skip the conformance declaration and only add the new trackEvent() call sites."
+        }
+      ]
+    },
+    {
+      "id": "integrate-viewmodel",
+      "title": "Integrate Telemetry into the ViewModel",
+      "runCondition": { "var": "needsTelemetry", "equals": true },
+      "prompt": "Inject the feature telemetry monitor into the ViewModel and wire it up for each signal in `telemetryEventsNeeded`.\n\nInject via `@LazyInjected` using the feature-specific DI key defined in `define-telemetry-events`:\n\n```swift\n@LazyInjected(Container.[feature]Monitor)\nprivate var monitor: (any [Feature]MonitorSupporting)?\n```\n\nFor each signal:\n- events: `monitor?.send(event: [Feature]Monitor.EventType.renderCompleted)`\n- errors: `monitor?.send(error: [Feature]Monitor.ErrorType.loadFailed(error))`\n- transaction start: `monitor?.begin(transaction: [Feature]Monitor.TransactionType.loadOperation(.begin))`\n- transaction end (success): `monitor?.end(transaction: [Feature]Monitor.TransactionType.loadOperation(.success))`\n- transaction end (failure): `monitor?.end(transaction: [Feature]Monitor.TransactionType.loadOperation(.failure))`\n\nReference call sites: `Modules/CallScheduler/Sources/CallScheduler/CallSchedulerFlowView.ViewModel.swift` lines 109, 169, 232-243."
+    },
+    {
+      "id": "write-tests",
+      "title": "Write Tests",
+      "prompt": "Write tests for all instrumented tracking.",
+      "promptFragments": [
+        {
+          "id": "clickstream-tests",
+          "when": { "var": "needsClickstream", "equals": true },
+          "text": "`MockAnalyticsAgent` is already in `MessagingMocks` — use it directly:\n\n```swift\nfunc testUserTappedSendFiresEvent() {\n    let mockAgent = MockAnalyticsAgent()\n    withTestContainer { Container.someAnalyticsAgent.register { mockAgent } }\n    sut.onUserTappedSend()\n    XCTAssertEqual(mockAgent.trackedEvents.count, 1)\n    XCTAssertEqual(mockAgent.trackedEvents.first,\n                   IlluminateEvents.[Feature].userTappedSend.event)\n}\n```\n\n`IlluminateEvent` conforms to `Equatable` — assert on exact event equality. Use `.fixture()` extension methods for test data. Write one test per action in `actionsToTrack`."
+        },
+        {
+          "id": "telemetry-tests",
+          "when": { "var": "needsTelemetry", "equals": true },
+          "text": "Telemetry tests: use `MockMonitor` from `Modules/IlluminateTelemetry/Sources/IlluminateTelemetryMocks/MockMonitor.swift` — it implements `ZGMonitoring` and records calls via closures (`didAddEvent`, `didBeginTransaction`, `didEndTransaction`, `didAddError`). Register it in the test container: `Container.monitor.register { mockMonitor }`. Alternatively, use `MockZGMonitoring` from `Modules/HomeLoansMonitoring/Tests/HomeLoansMonitoringTests/Mocks/MockZGMonitoring.swift` which accumulates calls in arrays for easier assertion. For `TKMonitor`-level testing, assert on the typed `EventType`/`ErrorType` values rather than the underlying `ZGMonitoring` calls."
+        }
+      ]
+    },
+    {
+      "id": "final-verification",
+      "type": "loop",
+      "title": "Final Verification",
+      "loop": {
+        "type": "while",
+        "conditionSource": {
+          "kind": "artifact_contract",
+          "contractRef": "wr.contracts.loop_control",
+          "loopId": "final_verification_loop"
+        },
+        "maxIterations": 2
+      },
+      "body": [
+        {
+          "id": "final-verify-core",
+          "title": "Run Final Verification",
+          "templateCall": {
+            "templateId": "wr.templates.routine.final-verification",
+            "args": {
+              "deliverableName": "final-verification-findings.md"
+            }
+          },
+          "requireConfirmation": false
+        },
+        {
+          "id": "final-verify-synthesize",
+          "title": "Synthesize, Fix, and Re-Verify",
+          "prompt": "Read `final-verification-findings.md` and decide what actually needs fixing.\n\nUse `invariants` and `acceptanceCriteria` from the understand step as the verification anchors. The verifier checks all instrumented signals: event coverage, kill switch compliance, contextual block completeness, telemetry call sites, and test quality.\n\nDon't rubber-stamp the findings. For any finding that changes final acceptance, classify it:\n- `Confirmed`: checked against code, tests/build, or direct workflow context\n- `Plausible`: interesting but not verified enough yet\n- `Rejected`: contradicted by fuller context or evidence\n\nFix what needs fixing. Re-run affected tests or build to prove fixes worked.\n\nCapture:\n- `integrationFindings`\n- `integrationPassed`\n- `regressionDetected`",
+          "assessmentRefs": [
+            "build-correctness-gate",
+            "invariant-preservation-gate",
+            "implementation-gaps-gate"
+          ],
+          "assessmentConsequences": [
+            {
+              "when": { "anyEqualsLevel": "low" },
+              "effect": {
+                "kind": "require_followup",
+                "guidance": "Address whichever gate scored low: build_correctness — fix compilation errors or failing tests. invariant_preservation — one or more invariants from the understand step are violated; fix the implementation. implementation_gaps — the gap scan was not completed or found unaddressed gaps; resolve or defer them explicitly."
+              }
+            }
+          ],
+          "requireConfirmation": false
+        },
+        {
+          "id": "final-verify-decision",
+          "title": "Final Verification Loop Decision",
+          "prompt": "Decide whether verification needs another pass.\n\n- Issues found and fixed: keep going so fixes get re-verified.\n- Implementation clean or issues resolved: stop.\n- Limit reached: stop and record what remains.\n\nWhen stopping, include: event and telemetry coverage status, test results, kill switch compliance, and any accepted follow-ups.\n\nEmit the loop-control artifact (`decision` must be `continue` or `stop`):\n```json\n{\n  \"artifacts\": [{\"kind\": \"wr.loop_control\", \"decision\": \"stop\"}]\n}\n```",
+          "requireConfirmation": true,
+          "outputContract": {
+            "contractRef": "wr.contracts.loop_control"
+          }
+        }
+      ]
+    }
+  ]
+}

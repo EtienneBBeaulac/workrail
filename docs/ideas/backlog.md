@@ -1028,3 +1028,50 @@ Full tool registration TypeScript in design doc.
 - Deployment versioning → `PinnedWorkflowStorePortV2` + `workflowHash` ✅ (verified)
 - Namespace → `orgId` prefix in `dataDir` + credential vault (cloud tier)
 - Worker long-polling → direct in-process engine calls ✅ (daemon model)
+
+**Temporal additional findings (third agent, deepest source read):**
+
+**WorkRail's JSON model eliminates Temporal's entire determinism complexity class.** Temporal's VM isolation, `DeterminismViolationError`, `patched()`, and replay machinery exist because Temporal workflows are user TypeScript code. WorkRail workflows are JSON interpreted by the engine -- no determinism problem. Genuine architectural advantage, not a gap.
+
+**Minimum additions to WorkRail schema:**
+- `versioningBehavior: "PINNED" | "AUTO_UPGRADE"` -- PINNED keeps in-flight sessions on current workflow version; AUTO_UPGRADE migrates to latest on next continue_workflow
+- `orgId` in session store paths: `~/.workrail/sessions/<orgId>/` with startup migration (needed for multi-tenancy from day one)
+
+**Human-in-loop signal pattern:** Temporal's `setHandler(signal, handler)` + `condition(fn)` is the right mental model for WorkRail's approval gates. Buffer incoming signals (approval/rejection), `condition()` unblocks when buffer has a matching signal. Translate to WorkRail: daemon emits `step_approval_pending` event, REST endpoint receives approval, emits `step_approval_received`, daemon's `condition()` equivalent unblocks `continue_workflow`.
+
+**Triggers in workflow schema (dedicated sprint):** `triggers: DeploymentTrigger[]` inline in workflow JSON with `posture: "reactive" | "proactive"` + optional `schedule_after` delay. Prefect's `automations.py` deployment trigger pattern. Not MVP.
+
+**Worker polling seam:** Design the trigger port with `poll()` interface now even though self-hosted uses webhooks. Cloud deployment uses long-poll task queue without architectural changes.
+
+**AutoGPT + mcp-graph-workflow CORRECTION (deepest agent, read actual source):**
+
+**mcp-graph-workflow is NOT a close WorkRail analog.** Earlier characterization was wrong. It's a local-first SQLite-backed MCP server that converts PRD docs into execution graphs with a fixed 9-phase lifecycle. Its gates are advisory and bypassable (`force:true` parameter). WorkRail's HMAC tokens are cryptographic and unbypassable. Different quadrants, different trust models.
+
+**mcp-graph does better that's worth watching:** Local RAG context compression (70-85% via BM25 + ONNX embeddings, zero cloud) -- relevant to WorkRail's future context survival. AST code intelligence (out of scope but useful for coding-task workflows).
+
+**Concrete WorkRail Auto trigger system design (from AutoGPT + validation):**
+
+Three-layer model: declare → register → execute.
+
+```typescript
+interface TriggerDefinition {
+  id: string;
+  provider: string;           // "github" | "gitlab" | "jira" | "cron" | "generic"
+  triggerType: string;        // provider-specific
+  resourceTemplate: string;  // "{owner}/{repo}"
+  eventFilter: Record<string, boolean>;
+  credentialRef?: string;     // keyring named ref -- never plaintext
+  workflowId: string;
+  contextMapping?: ContextMapping;  // optional JSONPath payload → workflow context
+}
+```
+
+**The generic provider alone is a complete MVP.** Any system that can send HTTP POST can trigger a WorkRail workflow. GitLab, Jira, Slack, PagerDuty all work without provider-specific code. Auto-registration is post-MVP.
+
+**Port:** 3200 (separate from MCP 3100). **Feature flag:** `wr.features.triggers`.
+
+**MVP build order:** `trigger-store.ts` → `trigger-listener.ts` → `trigger-router.ts` → `providers/generic.ts` → `providers/cron.ts` → MCP CRUD tools.
+
+**Credential model:** keyring-based named refs. Two backends: OS keychain (dev) + encrypted env-file (Docker/CI/headless). Never plaintext in trigger definitions.
+
+Full design at: `docs/design/workrail-auto-trigger-system.md`

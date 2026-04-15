@@ -1,0 +1,205 @@
+{
+  "id": "mercury-android.clickstream-implementation",
+  "name": "Mercury Android: Implement Feature Tracking",
+  "version": "0.2.0",
+  "description": "Guides an engineer through implementing clickstream analytics and/or telemetry for a mercury-android feature. Conditionally handles either or both: discovers clickstream events, defines taxonomy and telemetry types, wires MonitoringBus and ZgIlluminateTelemetryContract, and writes tests.",
+  "validatedAgainstSpecVersion": 3,
+  "about": "## Mercury Android: Implement Feature Tracking\n\nThis workflow handles clickstream analytics, operational telemetry, or both — using `runCondition` to skip steps that don't apply.\n\n### What it does\n\n1. Identifies which tracking types are needed (clickstream, telemetry, or both)\n2. Discovers the clickstream event spec from Glean or user input (clickstream only)\n3. Defines taxonomy constants and sealed event catalog (clickstream only)\n4. Defines telemetry event and error types (telemetry only)\n5. Wires the MonitoringBus — Variant A (clickstream only)\n6. Integrates tracking calls into the ViewModel\n7. Writes tests and runs a final verification barrier\n\n### Reference implementations\n\n- Clickstream: `features/messaging/modules/conversation-actions/impl/src/.../monitoring/`\n- Telemetry: `features/messaging/impl/src/.../telemetry/MessagingTelemetry.kt`\n\n### When to use it\n\nUse this workflow when adding any combination of clickstream events or telemetry instrumentation to a feature module.\n\n### What it produces\n\n**Clickstream:** taxonomy enum constants, sealed event catalog, MonitoringBus, MonitoringPublisher, AnalyticsObserver, DI module, FakeMonitoringPublisher tests\n\n**Telemetry:** `[Feature]Telemetry.kt` sealed types, `[Feature]TelemetryEventType` and `[Feature]TelemetryErrorType` enums, ZgIlluminateTelemetryContract injection and tests",
+  "examples": [
+    "Add clickstream tracking to the new listing alert feature",
+    "Add telemetry error tracking and transaction timing to the connection flow",
+    "Instrument the buyer connection request flow with both analytics and telemetry",
+    "Wire telemetry transaction timing for the conversation load operation"
+  ],
+  "recommendedPreferences": {
+    "recommendedAutonomy": "guided",
+    "recommendedRiskPolicy": "balanced"
+  },
+  "preconditions": [
+    "The feature module exists and the ViewModel is already implemented.",
+    "Agent has read access to the codebase.",
+    "Glean MCP is available for clickstream event spec discovery (falls back to user input if not found)."
+  ],
+  "metaGuidance": [
+    "REFERENCE IMPL: read features/messaging/modules/conversation-actions/impl/src/.../monitoring/ before writing any MonitoringBus code. Follow that structure.",
+    "PREFERRED PATTERN: Variant A — observers implement EventObserver<T> directly, bound via @Binds @IntoSet in @Module @ContributesTo. Use Variant B (Dagger marker interface) only when cross-module @ContributesMultibinding is genuinely required.",
+    "ANALYTICS BRIDGE: events needing clickstream implement AnalyticsCapable with a non-null analyticsModel. Analytics-silent events must NOT implement it. The AnalyticsObserver casts to AnalyticsCapable? — null is the correct silent path.",
+    "NO SILENT DROPS: never write 'as? [Type] ?: return' without a log statement. A silently dropped event has no observable symptom and will not surface in tests.",
+    "REDUCER PATTERN: prefer returning a [Feature]Action.TrackEvent([Feature]MonitoringEvent.X) from reduceActions() over imperative publish() calls. Pure reducer output is testable without coroutines or mocks.",
+    "TEST WITH FAKES: create a FakeMonitoringPublisher that accumulates published events in a list. Do not use mockk for this — fakes are more realistic and less brittle.",
+    "LAYER OWNERSHIP: the ViewModel injects MonitoringPublisher and calls publish(). Use cases and repositories do not own the MonitoringBus. They may use ZgIlluminateTelemetryContract directly for data-layer errors.",
+    "DI COMPLETENESS: every observer must have a @Binds @IntoSet binding in the feature's DI module. An unbound observer is silently ignored at runtime with no compile error.",
+    "TELEMETRY: inject ZgIlluminateTelemetryContract into the ViewModel or Repository. Call logEvent() for milestones, logException() for errors, transactionStart/Stop() for timing. Define types in [Feature]Telemetry.kt."
+  ],
+  "assessments": [
+    {
+      "id": "build-correctness-gate",
+      "purpose": "The implementation compiles and all tests pass.",
+      "dimensions": [
+        {
+          "id": "build_correctness",
+          "purpose": "Build succeeds and tests pass. No compilation errors or failing assertions.",
+          "levels": ["low", "high"]
+        }
+      ]
+    },
+    {
+      "id": "invariant-preservation-gate",
+      "purpose": "Invariants captured in the understand step still hold in the implemented code.",
+      "dimensions": [
+        {
+          "id": "invariant_preservation",
+          "purpose": "Each named invariant has been verified in the implementation.",
+          "levels": ["low", "high"]
+        }
+      ]
+    },
+    {
+      "id": "implementation-gaps-gate",
+      "purpose": "A deliberate scan for gaps surfaced during implementation has been completed.",
+      "dimensions": [
+        {
+          "id": "implementation_gaps",
+          "purpose": "Active scan completed: gaps are fixed inline, filed as follow-up tickets, or explicitly deferred.",
+          "levels": ["low", "high"]
+        }
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "id": "understand-feature",
+      "title": "Understand the Feature",
+      "prompt": "Read the feature module you are adding tracking to.\n\nFind:\n- The ViewModel and Reducer or EventProcessor: what user events exist that should generate analytics?\n- Any existing `monitoring/` directory: does a MonitoringBus already exist (`*MonitoringBus.kt`)?\n- Any existing `analytics/` directory: are taxonomy enum constants already defined (`*AnalyticsConstants.kt`)?\n- The feature's public module for any existing analytics event interfaces\n\nAlso read the reference implementation now — you will follow this pattern:\n`features/messaging/modules/conversation-actions/impl/src/main/java/.../monitoring/`\n\nIdentify which user actions (taps, page loads, impressions) should generate clickstream events. Also identify whether any operations need operational telemetry: error paths worth tracking in Datadog, performance-critical operations worth timing as transactions, or key milestones worth logging.\n\nNote: clickstream is for product analytics (user behavior); telemetry is for operational health (errors, performance, Datadog).\n\nCapture:\n- `hasExistingMonitoringBus`: true if a `*MonitoringBus.kt` already exists in this feature\n- `hasExistingAnalyticsConstants`: true if taxonomy enum constants already exist for this feature\n- `featureModulePath`: root source directory for the feature impl\n- `featureBasePackage`: Java package for new files\n- `actionsToTrack`: list of action names needing clickstream events (e.g. [\"UserOpenedScreen\", \"UserTappedSendButton\"])\n- `invariants`: correctness rules that must hold (e.g. [\"Every actionsToTrack action maps to one MonitoringEvent subtype\", \"Every AnalyticsCapable event has non-null analyticsModel\", \"Every observer has @Binds @IntoSet\"])\n- `acceptanceCriteria`: what done looks like (e.g. [\"All events fire correctly when user acts\", \"FakeMonitoringPublisher test passes for each event\", \"DI module compiles clean\"])\n- `needsClickstream`: true if product analytics events are needed\n- `needsTelemetry`: true if operational telemetry is needed (errors, timings, transactions)\n- `telemetryEventsNeeded`: list of telemetry signals (e.g. [\"renderDuration transaction\", \"loadError error\", \"submitSuccess event\"])"
+    },
+    {
+      "id": "discover-events",
+      "title": "Discover Clickstream Event Definitions",
+      "runCondition": { "var": "needsClickstream", "equals": true },
+      "prompt": "Find the analytics event spec for this feature.\n\nSearch Glean for event definitions. Try these queries in order until you find something useful:\n1. The ticket number (ACEI/ICEI) — check the session goal or `git log` for a reference\n2. \"[feature name] clickstream events\"\n3. \"[feature name] analytics event type\"\n4. \"[feature name] tracking spec\"\n\nA useful spec defines per event:\n- Event type ID (a 4-digit number, e.g. 5527)\n- Trigger location string (e.g. MESSAGING_INBOX)\n- Trigger source string (e.g. USER_ACTION)\n- Trigger object string (e.g. CONVERSATION_ITEM)\n- Semantic event string (e.g. CLICK, VIEW, IMPRESSION)\n- Template ID — one of: 186, 171, 211, 237, 247, 337 (from CommonTemplateId)\n- Category: page_view / interaction / impression\n\nIf Glean returns a document with these values, extract them for each action in `actionsToTrack`.\n\nIf no spec is found in Glean, tell the user:\n\n\"I could not find an analytics event spec for this feature in Glean. For each of the following actions [list actionsToTrack], please provide: (1) event type ID, (2) trigger location string, (3) trigger source string, (4) trigger object string, (5) semantic event string, (6) template ID (186/171/211/237/247/337), (7) category (page_view/interaction/impression).\"\n\nCapture:\n- `events`: array of {name, eventTypeId, triggerLocation, triggerSource, triggerObject, semanticEvent, templateId, category}\n- `eventsSource`: \"glean\" or \"user_provided\"",
+      "requireConfirmation": true
+    },
+    {
+      "id": "define-events",
+      "title": "Define Taxonomy Constants and Event Catalog",
+      "runCondition": { "var": "needsClickstream", "equals": true },
+      "prompt": "Write the taxonomy enum constants and sealed event catalog for this feature.\n\nTaxonomy constants — follow the pattern in `MessagingAnalyticsConstants.kt`. Each enum implements the corresponding illuminate interface:\n\n```kotlin\nenum class [Feature]EventType(override val value: String) : EventType { /* one value per event */ }\nenum class [Feature]TriggerLocation(override val value: String) : TriggerLocation { ... }\nenum class [Feature]TriggerSource(override val value: String) : TriggerSource { ... }\nenum class [Feature]TriggerObject(override val value: String) : TriggerObject { ... }\nenum class [Feature]SemanticEvent(override val value: String) : SemanticEvent { ... }\n```\n\nSealed event catalog — each `data object` carries a pre-built `ZgIlluminateAnalyticsModel` using the enum constants above:\n\n```kotlin\nsealed interface [Feature]AnalyticsEvents {\n    val analytics: ZgIlluminateAnalyticsModel\n    sealed interface PageView : [Feature]AnalyticsEvents { ... }\n    sealed interface Interaction : [Feature]AnalyticsEvents { ... }\n    sealed interface Impression : [Feature]AnalyticsEvents { ... }\n}\n```\n\nIf events require contextual data beyond the base model (conversation ID, unread count, etc.), create `[Feature]ContextualData` implementing `ZgIlluminateContextualData` with the required fields.\n\nFor each entry in `events`, write a corresponding enum value in `[Feature]EventType`. Never use raw string literals for event type IDs — always go through the enum constants.",
+      "promptFragments": [
+        {
+          "id": "has-existing-constants",
+          "when": { "var": "hasExistingAnalyticsConstants", "equals": true },
+          "text": "Taxonomy constants already exist for this feature. Add new enum values to the existing files rather than creating new ones. Match the naming style already in use."
+        }
+      ]
+    },
+    {
+      "id": "define-telemetry-events",
+      "title": "Define Telemetry Types",
+      "runCondition": { "var": "needsTelemetry", "equals": true },
+      "prompt": "Define the telemetry event and error types for this feature.\n\nCreate `[Feature]Telemetry.kt` following the pattern in `features/messaging/impl/src/main/java/com/zillow/android/messaging/impl/telemetry/MessagingTelemetry.kt`.\n\nThe structure is an `object` containing nested sealed interfaces that extend `ZgIlluminateTelemetryType`:\n\n```kotlin\nobject [Feature]Telemetry {\n    sealed interface Event : ZgIlluminateTelemetryType.Event {\n        // No-arg milestone events use data object\n        data object RenderCompleted : Event\n        // Events with context use data class\n        data class SubmitAttempted(val itemCount: Int) : Event\n    }\n    sealed interface Error : ZgIlluminateTelemetryType.Error {\n        // Error subtypes must provide throwable\n        data class LoadFailed(override val throwable: Throwable) : Error\n    }\n}\n```\n\nOnly add an `Error` block if `telemetryEventsNeeded` includes error-type signals. Only add `Event` subtypes for event/transaction signals.\n\nIf Datadog attribution keys are needed (for dashboard filtering), also create:\n- `[Feature]TelemetryEventType.kt` — `enum class ... (override val value: String) : ZgIlluminateTelemetryEventType`\n- `[Feature]TelemetryErrorType.kt` — `enum class ... (override val value: String) : ZgIlluminateTelemetryErrorType`\n\nFollowing `MessagingTelemetryEventType.kt` and `MessagingTelemetryErrorType.kt` in the same telemetry directory. These are optional unless the team requires them for Datadog filtering."
+    },
+    {
+      "id": "wire-monitoring-bus",
+      "title": "Wire the MonitoringBus",
+      "runCondition": { "var": "needsClickstream", "equals": true },
+      "prompt": "Wire the MonitoringBus for this feature using Variant A.\n\nVariant A: each observer implements `EventObserver<[Feature]MonitoringEvent>` directly and is bound via `@Binds @IntoSet` in the feature's DI module. Do not introduce a Dagger marker interface unless cross-module observer contribution from another Gradle module is explicitly required.\n\n**Files to create:**\n\n`[Feature]MonitoringEvent.kt` — `sealed interface : MonitoringEvent`\n- One subtype per action in `actionsToTrack`\n- Events needing clickstream: `data class ... : [Feature]MonitoringEvent, AnalyticsCapable { override val analyticsModel = [Feature]AnalyticsEvents.X.analytics }`\n- Analytics-silent events: do not implement `AnalyticsCapable`\n\n`[Feature]MonitoringBus.kt` — `@Singleton`, holds a `Set<EventObserver<[Feature]MonitoringEvent>>`; delegates to `FeatureMonitoringBusImpl` (inject `FeatureMonitoringBusFactory`)\n\n`[Feature]MonitoringPublisher.kt` — interface `fun publish(event: [Feature]MonitoringEvent)` + `Real[Feature]MonitoringPublisher` with `@Singleton @ContributesBinding(AppScope::class)`\n\n`[Feature]AnalyticsObserver.kt` — `EventObserver<[Feature]MonitoringEvent>`: cast to `AnalyticsCapable?`, skip if null (correct for analytics-silent events), forward `analyticsModel` to `SimpleAnalyticsTracker`\n\n`[Feature]MonitoringDebugObserver.kt` — `EventObserver<[Feature]MonitoringEvent>`: exhaustive `when` on all event types, logging each one. Bound `@Binds @IntoSet` in the module.\n\n`[Feature]MonitoringModule.kt` — `@Module @ContributesTo(AppScope::class)`: `@Binds` the bus and publisher; `@Binds @IntoSet` each observer",
+      "promptFragments": [
+        {
+          "id": "has-existing-bus",
+          "when": { "var": "hasExistingMonitoringBus", "equals": true },
+          "text": "A MonitoringBus already exists for this feature. Add the new MonitoringEvent subtypes to the existing sealed interface and register any new observers with @Binds @IntoSet in the existing module. Do not create a second bus."
+        }
+      ]
+    },
+    {
+      "id": "integrate-viewmodel",
+      "title": "Integrate Tracking into the ViewModel",
+      "prompt": "Integrate the tracking calls into the ViewModel.",
+      "promptFragments": [
+        {
+          "id": "clickstream-integration",
+          "when": { "var": "needsClickstream", "equals": true },
+          "text": "Inject `[Feature]MonitoringPublisher` via `@VMInject constructor` and call `publish()` for each tracked user action.\n\nPreferred: return a `[Feature]Action.TrackEvent([Feature]MonitoringEvent.X)` from `reduceActions()`. The imperative shell calls `monitoringPublisher.publish(action.event)`.\n\nIf the ViewModel does not use the reducer-action pattern, call `monitoringPublisher.publish()` in the relevant private handler function.\n\nFor one-time impressions, use `TriggerOnceImpressionHandler` from `libraries/illuminate/impression-tracker`.\n\nDo not call `publish()` from Use Cases, Repositories, or UI composables.\n\nCapture `usedReducerActionPattern`: true if you returned a TrackEvent action from reduceActions(); false if imperative."
+        },
+        {
+          "id": "telemetry-integration",
+          "when": { "var": "needsTelemetry", "equals": true },
+          "text": "Also inject `ZgIlluminateTelemetryContract` into the ViewModel:\n```kotlin\n@VMInject constructor(\n    ...,\n    private val telemetryContract: ZgIlluminateTelemetryContract\n)\n```\nFor each signal in `telemetryEventsNeeded`:\n- milestone / info events: `telemetryContract.logEvent([Feature]Telemetry.Event.RenderCompleted)`\n- errors: `telemetryContract.logException([Feature]Telemetry.Error.LoadFailed(throwable))`\n- timed operations: `telemetryContract.transactionStart(\"[feature]_load\")` before / `.transactionStop(\"[feature]_load\", success = true)` after\n\nRepositories and Use Cases may also inject `ZgIlluminateTelemetryContract` directly for data-layer errors. Reference call sites: `InboxViewModel.kt` lines 183, 198, 224."
+        }
+      ]
+    },
+    {
+      "id": "write-tests",
+      "title": "Write Tests",
+      "prompt": "Write tests for all instrumented tracking.",
+      "promptFragments": [
+        {
+          "id": "clickstream-tests",
+          "when": { "var": "needsClickstream", "equals": true },
+          "text": "**Reducer test** (when `usedReducerActionPattern` is true):\n```kotlin\nval result = reducer.reduceActions(state, newState, [Feature]Event.UserTappedX)\nassertTrue(result.any { it is [Feature]Action.TrackEvent && it.event is [Feature]MonitoringEvent.UserTappedX })\n```\nNo coroutines or mocks needed.\n\n**ViewModel / integration test** using a fake publisher:\n- Create `Fake[Feature]MonitoringPublisher` with `val published = mutableListOf<[Feature]MonitoringEvent>()`\n- Call `onEvent()` for each tracked user action\n- Assert `fake.published` contains the correct event subtypes\n\nWrite one test per action in `actionsToTrack`."
+        },
+        {
+          "id": "telemetry-tests",
+          "when": { "var": "needsTelemetry", "equals": true },
+          "text": "**Telemetry tests:** create a `Fake[Feature]TelemetryContract : ZgIlluminateTelemetryContract` that accumulates calls in mutable lists. Reference the existing `FakeTelemetryContract` at `features/messaging/impl/src/test/java/com/zillow/android/messaging/impl/fakes/FakeTelemetryContract.kt` — there is no shared library fake, each feature creates its own. Assert that `loggedEvents`, `loggedErrors`, or `startedTransactions` contain the expected entries for each signal in `telemetryEventsNeeded`."
+        }
+      ]
+    },
+    {
+      "id": "final-verification",
+      "type": "loop",
+      "title": "Final Verification",
+      "loop": {
+        "type": "while",
+        "conditionSource": {
+          "kind": "artifact_contract",
+          "contractRef": "wr.contracts.loop_control",
+          "loopId": "final_verification_loop"
+        },
+        "maxIterations": 2
+      },
+      "body": [
+        {
+          "id": "final-verify-core",
+          "title": "Run Final Verification",
+          "templateCall": {
+            "templateId": "wr.templates.routine.final-verification",
+            "args": {
+              "deliverableName": "final-verification-findings.md"
+            }
+          },
+          "requireConfirmation": false
+        },
+        {
+          "id": "final-verify-synthesize",
+          "title": "Synthesize, Fix, and Re-Verify",
+          "prompt": "Read `final-verification-findings.md` and decide what actually needs fixing.\n\nUse `invariants` and `acceptanceCriteria` from the understand step as the verification anchors. The verifier checks all instrumented signals: event coverage, DI completeness, telemetry call sites, silent drop risks, and test quality.\n\nDon't rubber-stamp the findings. For any finding that changes final acceptance, classify it:\n- `Confirmed`: checked against code, tests/build, or direct workflow context\n- `Plausible`: interesting but not verified enough yet\n- `Rejected`: contradicted by fuller context or evidence\n\nFix what needs fixing. Re-run affected tests or build to prove fixes worked.\n\nCapture:\n- `integrationFindings`\n- `integrationPassed`\n- `regressionDetected`",
+          "assessmentRefs": [
+            "build-correctness-gate",
+            "invariant-preservation-gate",
+            "implementation-gaps-gate"
+          ],
+          "assessmentConsequences": [
+            {
+              "when": { "anyEqualsLevel": "low" },
+              "effect": {
+                "kind": "require_followup",
+                "guidance": "Address whichever gate scored low: build_correctness — fix compilation errors or failing tests. invariant_preservation — one or more invariants from the understand step are violated; fix the implementation. implementation_gaps — the gap scan was not completed or found unaddressed gaps; resolve or defer them explicitly."
+              }
+            }
+          ],
+          "requireConfirmation": false
+        },
+        {
+          "id": "final-verify-decision",
+          "title": "Final Verification Loop Decision",
+          "prompt": "Decide whether verification needs another pass.\n\n- Issues found and fixed: keep going so fixes get re-verified.\n- Implementation clean or issues resolved: stop.\n- Limit reached: stop and record what remains.\n\nWhen stopping, include: event and telemetry coverage status, test results, DI completeness, and any accepted follow-ups.\n\nEmit the loop-control artifact (`decision` must be `continue` or `stop`):\n```json\n{\n  \"artifacts\": [{\"kind\": \"wr.loop_control\", \"decision\": \"stop\"}]\n}\n```",
+          "requireConfirmation": true,
+          "outputContract": {
+            "contractRef": "wr.contracts.loop_control"
+          }
+        }
+      ]
+    }
+  ]
+}

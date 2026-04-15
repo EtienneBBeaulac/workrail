@@ -48,6 +48,7 @@ function makeRun(nodes: ConsoleDagNode[], preferredTipNodeId: string | null = nu
     status: 'complete',
     hasUnresolvedCriticalGaps: false,
     executionTraceSummary: null,
+    skippedSteps: [],
   };
 }
 

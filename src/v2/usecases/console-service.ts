@@ -41,6 +41,7 @@ import type {
   ConsoleDagRun,
   ConsoleDagNode,
   ConsoleDagEdge,
+  ConsoleGhostStep,
   ConsoleRunStatus,
   ConsoleSessionStatus,
   ConsoleSessionHealth,
@@ -446,6 +447,83 @@ function resolveWorkflowNames(
   });
 }
 
+// ---------------------------------------------------------------------------
+// Skipped step resolution (I/O boundary)
+// ---------------------------------------------------------------------------
+
+type SkippedStepsMap = Readonly<Record<string, readonly ConsoleGhostStep[]>>;
+
+function resolveSkippedSteps(
+  dag: RunDagProjectionV2,
+  events: readonly DomainEventV1[],
+  pinnedWorkflowStore: PinnedWorkflowStorePortV2,
+): ResultAsync<SkippedStepsMap, never> {
+  const traceRes = projectRunExecutionTraceV2(events);
+  if (traceRes.isErr()) return okAsync({});
+
+  const skippedByRunId: Record<string, { stepId: string; recordedAtEventIndex: number }[]> = {};
+  for (const [runId, traceSummary] of Object.entries(traceRes.value.byRunId)) {
+    for (const item of traceSummary.items) {
+      if (item.kind !== 'evaluated_condition') continue;
+      if (!item.summary.startsWith('SKIP:')) continue;
+      const stepRef = item.refs.find((r) => r.kind === 'step_id');
+      if (!stepRef) continue;
+      const existing = skippedByRunId[runId] ?? [];
+      existing.push({ stepId: stepRef.value, recordedAtEventIndex: item.recordedAtEventIndex });
+      skippedByRunId[runId] = existing;
+    }
+  }
+
+  if (Object.keys(skippedByRunId).length === 0) return okAsync({});
+
+  const hashSet = new Set<string>();
+  for (const run of Object.values(dag.runsById)) {
+    if (run.workflow.kind === 'with_workflow') {
+      hashSet.add(run.workflow.workflowHash);
+    }
+  }
+
+  if (hashSet.size === 0) {
+    const result: Record<string, readonly ConsoleGhostStep[]> = {};
+    for (const [runId, items] of Object.entries(skippedByRunId)) {
+      const seen = new Set<string>();
+      const steps: ConsoleGhostStep[] = [];
+      for (const { stepId } of [...items].sort((a, b) => a.recordedAtEventIndex - b.recordedAtEventIndex)) {
+        if (!seen.has(stepId)) { seen.add(stepId); steps.push({ stepId, stepLabel: null }); }
+      }
+      result[runId] = steps;
+    }
+    return okAsync(result);
+  }
+
+  const workflowTasks = [...hashSet].map((hash) =>
+    pinnedWorkflowStore
+      .get(asWorkflowHash(asSha256Digest(hash)))
+      .map((compiled): [string, ReadonlyMap<string, string>] => [
+        hash,
+        compiled ? extractStepTitlesFromCompiled(compiled) : new Map(),
+      ])
+      .orElse(() => okAsync([hash, new Map<string, string>()] as [string, ReadonlyMap<string, string>]))
+  );
+
+  return RA.combine(workflowTasks).map((workflowEntries) => {
+    const titlesByHash = new Map(workflowEntries);
+    const result: Record<string, readonly ConsoleGhostStep[]> = {};
+    for (const [runId, items] of Object.entries(skippedByRunId)) {
+      const run = dag.runsById[runId];
+      const wfHash = run?.workflow.kind === 'with_workflow' ? run.workflow.workflowHash : null;
+      const titles = wfHash ? titlesByHash.get(wfHash) : undefined;
+      const seen = new Set<string>();
+      const steps: ConsoleGhostStep[] = [];
+      for (const { stepId } of [...items].sort((a, b) => a.recordedAtEventIndex - b.recordedAtEventIndex)) {
+        if (!seen.has(stepId)) { seen.add(stepId); steps.push({ stepId, stepLabel: titles?.get(stepId) ?? null }); }
+      }
+      result[runId] = steps;
+    }
+    return result;
+  });
+}
+
 /** Extract the stepId from an execution snapshot's pending state. */
 function extractPendingStepId(snapshot: ExecutionSnapshotFileV1): string | null {
   const state = snapshot.enginePayload.engineState;
@@ -730,6 +808,7 @@ function projectSessionDetail(
   completionByRunId: RunCompletionMap,
   stepLabels: StepLabelMap,
   workflowNames: WorkflowNameMap,
+  skippedStepsMap: SkippedStepsMap = {},
 ): ConsoleSessionDetail {
   const { events } = truth;
   const health = projectSessionHealthV2(truth);
@@ -826,6 +905,7 @@ function projectSessionDetail(
       executionTraceSummary: executionTraceRes.isOk()
         ? (executionTraceRes.value.byRunId[run.runId] ?? null)
         : null,
+      skippedSteps: skippedStepsMap[run.runId] ?? [],
     };
   });
 

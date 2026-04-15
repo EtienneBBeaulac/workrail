@@ -1,4 +1,4 @@
-import type { ConsoleDagEdge, ConsoleDagNode, ConsoleDagRun } from '../api/types';
+import type { ConsoleDagEdge, ConsoleDagNode, ConsoleDagRun, ConsoleGhostStep } from '../api/types';
 
 export const LINEAGE_COLUMN_WIDTH = 268;
 export const LINEAGE_ROW_HEIGHT = 112;
@@ -378,4 +378,49 @@ function buildVisibleDepthMap(
   }
 
   return visibleDepthById;
+}
+
+// ---------------------------------------------------------------------------
+// Ghost node positioning (Layer 3b)
+// ---------------------------------------------------------------------------
+
+export interface PositionedGhostNode {
+  readonly stepId: string;
+  readonly stepLabel: string | null;
+  readonly x: number;
+  readonly y: number;
+}
+
+export interface GhostNodeLayout {
+  readonly nodes: readonly PositionedGhostNode[];
+  readonly requiredWidth: number;
+}
+
+export function positionGhostNodes(
+  skippedSteps: readonly ConsoleGhostStep[],
+  model: LineageDagModel,
+): GhostNodeLayout {
+  if (skippedSteps.length === 0) {
+    return { nodes: [], requiredWidth: 0 };
+  }
+
+  const activeNodes = model.nodes.filter((n) => n.isActiveLineage);
+  if (activeNodes.length === 0) {
+    return { nodes: [], requiredWidth: 0 };
+  }
+
+  const maxActiveDepth = activeNodes.reduce((max, n) => Math.max(max, n.depth), 0);
+  const ghostDepth = maxActiveDepth + 1;
+  const ghostX = LINEAGE_SCROLL_OVERHANG + LINEAGE_PADDING + ghostDepth * LINEAGE_COLUMN_WIDTH;
+
+  const nodes: PositionedGhostNode[] = skippedSteps.map((step, index) => ({
+    stepId: step.stepId,
+    stepLabel: step.stepLabel,
+    x: ghostX,
+    y: LINEAGE_PADDING + index * LINEAGE_ROW_HEIGHT,
+  }));
+
+  const requiredWidth = ghostX + ACTIVE_NODE_WIDTH + LINEAGE_SCROLL_OVERHANG;
+
+  return { nodes, requiredWidth };
 }
