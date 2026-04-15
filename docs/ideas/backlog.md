@@ -835,3 +835,38 @@ Three tiers:
 **What NOT to do:** Don't charge for the workflow library or the core MCP protocol. Those are the commons that make WorkRail valuable. Charge for the infrastructure layer, not the knowledge layer.
 
 **Priority:** Don't worry about this until there are users. Get the product right first.
+
+---
+
+### Competitive landscape findings (Apr 14, 2026)
+
+**WorkRail occupies a nearly empty quadrant:** durable session state + cryptographic step enforcement + MCP-native. No other tool currently has all three.
+
+```
+                   ENFORCEMENT STRENGTH
+                   Weak (Prompt)         Strong (Structural)
+                ┌─────────────────────┬──────────────────────────┐
+          Yes   │  nexus-core          │  WorkRail ← HERE         │
+DURABLE         │  LangGraph+LangSmith │  Temporal.io (not MCP)   │
+STATE           │  CIAME contracts     │  mcp-graph (closest)     │
+                ├─────────────────────┼──────────────────────────┤
+          No    │  CLAUDE.md files     │  CrewAI, AutoGen         │
+                │  maestro, ADbS       │  LangGraph (standalone)  │
+                └─────────────────────┴──────────────────────────┘
+```
+
+**Key findings:**
+
+- **mcp-graph** (DiegoNogueiraDev) -- SQLite-backed MCP server with graph-based step locking. Closest external analog. Not cryptographic enforcement but worth watching.
+- **LangGraph + LangSmith** -- Durable (thread-IDs + Postgres) but prompt-based enforcement. Top-left quadrant, not top-right. **Watch condition:** if LangGraph adds MCP-server exposure, the MCP-native moat shrinks. Response: lean harder on JSON-authored + token-gated.
+- **Temporal.io** -- Different domain (code-defined workflows, Go), different users. Low competitive concern but high architectural learning value for event-sourcing and crash recovery. Study it.
+- **CrewAI / AutoGen / nexus-core** -- No durability, no structural enforcement. Not in the same quadrant.
+
+**Internal finding -- most actionable:**
+The **CIAME team** (Samuel Pérez, `samuelpe@`) is building WorkRail's exact problem manually in markdown (`rs-sdk-agent-execution-contract.md` -- execution contracts for AI agents). Most concrete internal adoption candidate. Direct cold share hook: "you're building this by hand, here's the tool."
+
+**Positioning anchor:** "If you know Temporal.io, WorkRail is Temporal for AI agent process governance via MCP."
+
+**Two immediate internal actions:**
+1. List WorkRail in the Zodiac AI Marketplace + ZG AI Tools Catalog
+2. DM Samuel Pérez (CIAME team) -- strongest cold share candidate alongside Peter Yao
