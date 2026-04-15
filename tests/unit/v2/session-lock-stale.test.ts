@@ -158,6 +158,29 @@ describe('LocalSessionLockV2 stale lock detection', () => {
     expect(process.kill).not.toHaveBeenCalled();
   });
 
+  it('does NOT clear a lock from a different worker sharing the same PID', async () => {
+    const fs = new InMemoryFileSystem();
+    const clock = new FakeTimeClockV2();
+    // This instance is the 'mcp-server' worker
+    const lock = new LocalSessionLockV2(fakeDataDir, fs, clock, 'mcp-server');
+
+    const sharedPid = clock.getPid(); // 12345 (same PID as the lock below)
+    // process.kill(pid, 0) returns true -- the process is alive
+    vi.spyOn(process, 'kill').mockReturnValue(true);
+
+    // Plant a lock file with the SAME PID but a DIFFERENT workerId ('daemon')
+    await fs.mkdirp(SESSION_DIR);
+    await fs.writeFileBytes(
+      LOCK_PATH,
+      new TextEncoder().encode(
+        JSON.stringify({ v: 1, sessionId: SESSION_ID, pid: sharedPid, workerId: 'daemon', startedAtMs: Date.now() })
+      )
+    );
+
+    // Acquire should fail -- a different worker in this same process holds the lock
+    await acquireExpectBusy(lock);
+  });
+
   it('release removes the lock file', async () => {
     const fs = new InMemoryFileSystem();
     const clock = new FakeTimeClockV2();
