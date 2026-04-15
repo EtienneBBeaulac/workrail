@@ -22,10 +22,9 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
-import { Agent } from '@mariozechner/pi-agent-core';
-import { Type, getModel } from '@mariozechner/pi-ai';
-import type { Static, TSchema } from '@mariozechner/pi-ai';
-import type { AgentTool, AgentToolResult, AgentEvent } from '@mariozechner/pi-agent-core';
+import { loadPiAi, loadPiAgentCore } from "./pi-mono-loader.js";
+import type { Agent, AgentTool, AgentToolResult, AgentEvent } from "./pi-mono-loader.js";
+import type { TSchema } from "./pi-mono-loader.js";
 import type { UserMessage } from '@mariozechner/pi-ai';
 import type { V2ToolContext } from '../mcp/types.js';
 import { executeStartWorkflow } from '../mcp/handlers/v2-execution/start.js';
@@ -105,64 +104,74 @@ async function persistTokens(
 }
 
 // ---------------------------------------------------------------------------
-// Tool parameter schemas (TypeBox -- imported via @mariozechner/pi-ai)
+// Tool parameter schemas (TypeBox -- built lazily via loadPiAi() for ESM compat)
 // ---------------------------------------------------------------------------
 
-const StartWorkflowParams = Type.Object({
-  workflowId: Type.String({ description: 'Workflow ID to start (e.g. coding-task-workflow-agentic)' }),
-  workspacePath: Type.String({ description: 'Absolute path to the workspace directory' }),
-  goal: Type.String({ description: 'Short description of what you are trying to accomplish' }),
-  context: Type.Optional(Type.Record(Type.String(), Type.Unknown(), {
-    description: 'Initial workflow context variables',
-  })),
-});
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _schemas: Record<string, any> | null = null;
 
-const ContinueWorkflowParams = Type.Object({
-  continueToken: Type.String({
-    description: 'The continueToken from the previous start_workflow or continue_workflow call. Round-trip exactly as received.',
-  }),
-  intent: Type.Optional(Type.Union([Type.Literal('advance'), Type.Literal('rehydrate')], {
-    description: 'advance: I completed this step. rehydrate: remind me what the current step is.',
-  })),
-  notesMarkdown: Type.Optional(Type.String({
-    description: 'Notes on what you did in this step (10-30 lines, markdown).',
-  })),
-  context: Type.Optional(Type.Record(Type.String(), Type.Unknown(), {
-    description: 'Updated context variables (only changed values).',
-  })),
-});
-
-const BashParams = Type.Object({
-  command: Type.String({ description: 'Shell command to execute' }),
-  cwd: Type.Optional(Type.String({ description: 'Working directory for the command' })),
-});
-
-const ReadParams = Type.Object({
-  filePath: Type.String({ description: 'Absolute path to the file to read' }),
-});
-
-const WriteParams = Type.Object({
-  filePath: Type.String({ description: 'Absolute path to the file to write' }),
-  content: Type.String({ description: 'Content to write to the file' }),
-});
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function getSchemas(): Promise<Record<string, any>> {
+  if (_schemas) return _schemas;
+  const { Type } = await loadPiAi();
+  _schemas = {
+    StartWorkflowParams: Type.Object({
+      workflowId: Type.String({ description: 'Workflow ID to start (e.g. coding-task-workflow-agentic)' }),
+      workspacePath: Type.String({ description: 'Absolute path to the workspace directory' }),
+      goal: Type.String({ description: 'Short description of what you are trying to accomplish' }),
+      context: Type.Optional(Type.Record(Type.String(), Type.Unknown(), {
+        description: 'Initial workflow context variables',
+      })),
+    }),
+    ContinueWorkflowParams: Type.Object({
+      continueToken: Type.String({
+        description: 'The continueToken from the previous start_workflow or continue_workflow call. Round-trip exactly as received.',
+      }),
+      intent: Type.Optional(Type.Union([Type.Literal('advance'), Type.Literal('rehydrate')], {
+        description: 'advance: I completed this step. rehydrate: remind me what the current step is.',
+      })),
+      notesMarkdown: Type.Optional(Type.String({
+        description: 'Notes on what you did in this step (10-30 lines, markdown).',
+      })),
+      context: Type.Optional(Type.Record(Type.String(), Type.Unknown(), {
+        description: 'Updated context variables (only changed values).',
+      })),
+    }),
+    BashParams: Type.Object({
+      command: Type.String({ description: 'Shell command to execute' }),
+      cwd: Type.Optional(Type.String({ description: 'Working directory for the command' })),
+    }),
+    ReadParams: Type.Object({
+      filePath: Type.String({ description: 'Absolute path to the file to read' }),
+    }),
+    WriteParams: Type.Object({
+      filePath: Type.String({ description: 'Absolute path to the file to write' }),
+      content: Type.String({ description: 'Content to write to the file' }),
+    }),
+  };
+  return _schemas;
+}
 
 // ---------------------------------------------------------------------------
 // Tool factories
 // ---------------------------------------------------------------------------
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function makeStartWorkflowTool(
   ctx: V2ToolContext,
   onComplete: (notes: string) => void,
-): AgentTool<typeof StartWorkflowParams> {
+  schemas: Record<string, any>,
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+): AgentTool<any> {
   return {
     name: 'start_workflow',
     description: 'Start a WorkRail workflow session. Call this first to get the initial step.',
-    parameters: StartWorkflowParams,
+    parameters: schemas['StartWorkflowParams'],
     label: 'Start Workflow',
 
     execute: async (
       _toolCallId: string,
-      params: Static<typeof StartWorkflowParams>,
+      params: any,
     ): Promise<AgentToolResult<unknown>> => {
       const result = await executeStartWorkflow(
         {
@@ -214,18 +223,21 @@ function makeContinueWorkflowTool(
   ctx: V2ToolContext,
   onAdvance: (nextStepText: string, continueToken: string) => void,
   onComplete: (notes: string) => void,
-): AgentTool<typeof ContinueWorkflowParams> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  schemas: Record<string, any>,
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+): AgentTool<any> {
   return {
     name: 'continue_workflow',
     description:
       'Advance the WorkRail workflow to the next step. Call this after completing all work ' +
       'required by the current step. Include your notes in notesMarkdown.',
-    parameters: ContinueWorkflowParams,
+    parameters: schemas['ContinueWorkflowParams'],
     label: 'Continue Workflow',
 
     execute: async (
       _toolCallId: string,
-      params: Static<typeof ContinueWorkflowParams>,
+      params: any,
     ): Promise<AgentToolResult<unknown>> => {
       const result = await executeContinueWorkflow(
         {
@@ -275,18 +287,20 @@ function makeContinueWorkflowTool(
   };
 }
 
-function makeBashTool(workspacePath: string): AgentTool<typeof BashParams> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function makeBashTool(workspacePath: string, schemas: Record<string, any>// eslint-disable-next-line @typescript-eslint/no-explicit-any
+): AgentTool<any> {
   return {
     name: 'Bash',
     description:
       'Execute a shell command. Throws on non-zero exit code. ' +
       `Maximum execution time: ${BASH_TIMEOUT_MS / 1000}s.`,
-    parameters: BashParams,
+    parameters: schemas['BashParams'],
     label: 'Bash',
 
     execute: async (
       _toolCallId: string,
-      params: Static<typeof BashParams>,
+      params: any,
     ): Promise<AgentToolResult<unknown>> => {
       const cwd = params.cwd ?? workspacePath;
       const { stdout, stderr } = await execAsync(params.command, {
@@ -302,16 +316,18 @@ function makeBashTool(workspacePath: string): AgentTool<typeof BashParams> {
   };
 }
 
-function makeReadTool(): AgentTool<typeof ReadParams> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function makeReadTool(schemas: Record<string, any>// eslint-disable-next-line @typescript-eslint/no-explicit-any
+): AgentTool<any> {
   return {
     name: 'Read',
     description: 'Read the contents of a file at the given absolute path.',
-    parameters: ReadParams,
+    parameters: schemas['ReadParams'],
     label: 'Read',
 
     execute: async (
       _toolCallId: string,
-      params: Static<typeof ReadParams>,
+      params: any,
     ): Promise<AgentToolResult<unknown>> => {
       const content = await fs.readFile(params.filePath, 'utf8');
       return {
@@ -322,16 +338,18 @@ function makeReadTool(): AgentTool<typeof ReadParams> {
   };
 }
 
-function makeWriteTool(): AgentTool<typeof WriteParams> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function makeWriteTool(schemas: Record<string, any>// eslint-disable-next-line @typescript-eslint/no-explicit-any
+): AgentTool<any> {
   return {
     name: 'Write',
     description: 'Write content to a file at the given absolute path. Creates parent directories if needed.',
-    parameters: WriteParams,
+    parameters: schemas['WriteParams'],
     label: 'Write',
 
     execute: async (
       _toolCallId: string,
-      params: Static<typeof WriteParams>,
+      params: any,
     ): Promise<AgentToolResult<unknown>> => {
       await fs.mkdir(path.dirname(params.filePath), { recursive: true });
       await fs.writeFile(params.filePath, params.content, 'utf8');
@@ -405,6 +423,7 @@ export async function runWorkflow(
   // ---- Model setup ----
   let model;
   try {
+    const { getModel } = await loadPiAi();
     model = getModel('anthropic', 'claude-sonnet-4-5');
   } catch (err) {
     return {
@@ -431,18 +450,22 @@ export async function runWorkflow(
     isComplete = true;
   };
 
+  // ---- Schemas (lazy ESM load) ----
+  const schemas = await getSchemas();
+
   // ---- Tools ----
   // Cast through unknown to satisfy AgentTool<TSchema> -- each tool factory
   // produces a concrete TypeBox schema type; the agent loop accepts the base type.
   const tools: AgentTool<TSchema>[] = [
-    makeStartWorkflowTool(ctx, onComplete) as unknown as AgentTool<TSchema>,
-    makeContinueWorkflowTool(ctx, onAdvance, onComplete) as unknown as AgentTool<TSchema>,
-    makeBashTool(trigger.workspacePath) as unknown as AgentTool<TSchema>,
-    makeReadTool() as unknown as AgentTool<TSchema>,
-    makeWriteTool() as unknown as AgentTool<TSchema>,
+    makeStartWorkflowTool(ctx, onComplete, schemas) as unknown as AgentTool<TSchema>,
+    makeContinueWorkflowTool(ctx, onAdvance, onComplete, schemas) as unknown as AgentTool<TSchema>,
+    makeBashTool(trigger.workspacePath, schemas) as unknown as AgentTool<TSchema>,
+    makeReadTool(schemas) as unknown as AgentTool<TSchema>,
+    makeWriteTool(schemas) as unknown as AgentTool<TSchema>,
   ];
 
   // ---- Agent (one per runWorkflow() call, not reused) ----
+  const { Agent } = await loadPiAgentCore();
   const agent = new Agent({
     initialState: {
       systemPrompt: buildSystemPrompt(trigger, ''),

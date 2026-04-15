@@ -56,6 +56,8 @@ const FAKE_REPO_READY = {
       gitBranch: 'feature/auth-fix',
       repoRoot: '/repos/myapp',
       lastModifiedMs: Date.now() - 1000,
+      isAutonomous: false,
+      isLive: false,
     },
   ],
   worktreeRepos: [
