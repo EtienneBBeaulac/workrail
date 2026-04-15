@@ -13,6 +13,7 @@ import {
   ACTIVE_NODE_HEIGHT,
   ACTIVE_NODE_WIDTH,
   buildLineageDagModel,
+  positionGhostNodes,
   LINEAGE_SCROLL_OVERHANG,
   shortNodeId,
   SIDE_NODE_HEIGHT,
@@ -331,6 +332,18 @@ export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props
       .filter((b): b is NonNullable<typeof b> => b !== null);
   }, [model.nodes, nodeById, run.executionTraceSummary]);
 
+  // ---------------------------------------------------------------------------
+  // Overlay data: ghost nodes for skipped steps (sub-feature D)
+  // FM2 mitigation: run.skippedSteps ?? [] handles old backend without the field.
+  // ---------------------------------------------------------------------------
+
+  const ghostNodeLayout = useMemo(() => {
+    if (!run.executionTraceSummary) return null;
+    const skippedSteps = run.skippedSteps ?? [];
+    if (skippedSteps.length === 0) return null;
+    return positionGhostNodes(skippedSteps, model);
+  }, [model, run.executionTraceSummary, run.skippedSteps]);
+
   const handleNodeClick: NodeMouseHandler = useCallback(
     (_event, node) => {
       onNodeClick?.(node.id);
@@ -447,7 +460,7 @@ export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props
       >
         <div
           style={{
-            width: Math.max(model.graphWidth, 960),
+            width: Math.max(model.graphWidth, ghostNodeLayout?.requiredWidth ?? 0, 960),
             // Add CAUSE footer extension if any blocked_attempt nodes have cause items,
             // otherwise the footer is clipped on bottommost nodes.
             // Add CAUSE footer extension if any blocked_attempt nodes have cause items,
@@ -496,6 +509,18 @@ export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props
               bottomY={bracket.bottomY}
               gutterX={bracket.gutterX}
               iterationCount={bracket.iterationCount}
+            />
+          ))}
+
+          {/* Sub-feature D: Ghost nodes for skipped steps */}
+          {ghostNodeLayout && ghostNodeLayout.nodes.map((ghostNode) => (
+            <GhostNodeOverlay
+              key={ghostNode.stepId}
+              x={ghostNode.x}
+              y={ghostNode.y}
+              stepLabel={ghostNode.stepLabel ?? ghostNode.stepId}
+              onMouseEnter={handleDiamondMouseEnter}
+              onMouseLeave={handleDiamondMouseLeave}
             />
           ))}
         </div>
@@ -1058,6 +1083,70 @@ function EdgeCauseDiamond({
       >
         {cfg.char}
       </span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// GhostNodeOverlay (sub-feature D)
+// ---------------------------------------------------------------------------
+
+function GhostNodeOverlay({
+  x,
+  y,
+  stepLabel,
+  onMouseEnter,
+  onMouseLeave,
+}: {
+  x: number;
+  y: number;
+  stepLabel: string;
+  onMouseEnter: (event: React.MouseEvent<HTMLDivElement>, summary: string) => void;
+  onMouseLeave: () => void;
+}) {
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: x,
+        top: y,
+        width: ACTIVE_NODE_WIDTH,
+        height: ACTIVE_NODE_HEIGHT,
+        opacity: 0.25,
+        pointerEvents: 'auto',
+        cursor: 'default',
+        border: '1px dashed rgba(123, 141, 167, 0.55)',
+        background: 'rgba(24, 28, 39, 0.60)',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        zIndex: 0,
+      }}
+      onMouseEnter={(e) => onMouseEnter(e, stepLabel)}
+      onMouseLeave={onMouseLeave}
+    >
+      <div className="flex items-center justify-between gap-2 px-3 pt-3">
+        <MonoLabel color="rgba(123, 141, 167, 0.70)">Skipped</MonoLabel>
+        <MonoLabel color="rgba(123, 141, 167, 0.55)" className="text-[9px]">[ SKIPPED ]</MonoLabel>
+      </div>
+      <div
+        className="grow px-3 pt-2 text-sm leading-snug"
+        style={{
+          color: 'rgba(186, 197, 219, 0.65)',
+          display: '-webkit-box',
+          WebkitLineClamp: 4,
+          WebkitBoxOrient: 'vertical',
+          overflow: 'hidden',
+        }}
+      >
+        {stepLabel}
+      </div>
+      <div
+        className="flex items-center border-t px-3 py-2"
+        style={{ borderColor: 'rgba(255,255,255,0.04)', background: 'rgba(0,0,0,0.12)' }}
+      >
+        <MonoLabel color="rgba(123, 141, 167, 0.45)" className="text-[11px]">not executed</MonoLabel>
+      </div>
     </div>
   );
 }

@@ -1,0 +1,258 @@
+{
+  "id": "rich-object-contribution",
+  "name": "Rich Object Contribution Workflow",
+  "version": "1.0.0",
+  "description": "Technical Consultant for ZIM Rich Object contributions. Interviews the team, triages whether and what type of custom RO is needed, reads the codebase for current patterns, and guides a complete contribution on iOS or Android.",
+  "about": "## Rich Object Contribution Workflow\n\nThis workflow acts as a Technical Consultant for teams contributing a new Rich Object (RO) type to the ZIM messaging platform.\n\n### What it does\n\n1. **Interview** — gathers requirements and classifies the RO type (display_only, fetch_based, interactive)\n2. **Triage** — evaluates whether the built-in Card RO already covers the use case\n3. **Context gathering** — reads the Tour Rich Object implementation to understand current platform contracts\n4. **Design** — confirms contribution pattern, file locations, class naming, system message handling\n5. **Implement** — builds all required artifacts following the patterns found in the codebase\n6. **Pitfall verification** — checks for the known failure modes that caused rework in past contributions; the engine enforces all applicable checks are explicitly addressed before the step can complete\n\n### Why it exists\n\nPast contributions (Tour RO, Copilot ROs) required multiple rounds of Mercury review to fix the same recurring mistakes. This workflow bakes those checks in so teams can self-serve.\n\n### How to get good results\n\nThe workflow reads the codebase for platform contracts rather than hardcoding them, so it works correctly across both v1 and v2 of the contribution model. No external docs needed.",
+  "examples": [
+    "Contribute a Tour Itinerary Rich Object for tour confirmation messages in ZIM",
+    "Add a Pre-Approval Status RO with a refresh button to Home Loans conversations",
+    "Determine whether a Closing Milestone Update needs a custom RO or can use Card RO",
+    "Contribute a Rate Lock Notification RO for ZIM conversations on Android"
+  ],
+  "validatedAgainstSpecVersion": 3,
+  "recommendedPreferences": {
+    "recommendedAutonomy": "guided",
+    "recommendedRiskPolicy": "conservative"
+  },
+  "metaGuidance": [
+    "ROLE: Technical Consultant for ZIM Rich Object contributions. Guide the team to a correct, complete contribution on their platform without requiring Mercury team review.",
+    "TRIAGE FIRST: Card RO is sufficient when all data is in the message payload, UI is title+body+image+link only, single tap to navigate, no live updates. Build custom only when Card cannot cut it.",
+    "RO TYPES after triage: display_only (payload data, custom layout, no fetch), fetch_based (API fetch on impression, no model mutations), interactive (API fetch + user-triggered model mutations).",
+    "INTERACTIVE vs FETCH: interactive means the user can trigger mutations that update the cached model (refresh, save/unsave). Tap-to-navigate alone is NOT interactive — it is fetch_based at most.",
+    "CODEBASE IS THE CONTRACT: do not guess at platform interfaces or DI patterns. Read the Tour Rich Object implementation first. The patterns there are authoritative for the current contribution model.",
+    "ANALYTICS AT RENDER TIME: analytics context must come from the render-time wrapper, not the cached model. Same cached model can appear in multiple messages — reading from it misattributes events.",
+    "PITFALLS: converter/registry entry present; provider correctly registered in DI; fallback on fetch failure; fallback on flag off; analytics context on every model."
+  ],
+  "steps": [
+    {
+      "id": "phase-0-requirements",
+      "title": "Phase 0: Requirements Interview",
+      "prompt": "Interview the contributing team to understand what they need. These requirements cannot be found in the codebase — the RO does not exist yet. Keep questions focused; you need enough to make an accurate triage and classification.\n\nCover all of the following:\n\n1. **Platform** — iOS or Android?\n2. **What it is** — what product concept does this RO represent? What does the user see in the conversation?\n3. **Data source** — is all display data available in the message at send time, or must the RO fetch additional data from an API when the user views it?\n4. **Domain identifier** — if fetching, which field in the message payload is the lookup key? What is its type?\n5. **GraphQL typename** — what will the backend send as `__typename`? (e.g., `ZIMPreApprovalRichObject`)\n6. **UI content** — what fields does the RO display? List them with types.\n7. **Interactions** — what can the user do beyond viewing and tapping the card to navigate? Specifically: are there controls that fetch fresh data or mutate the displayed state (refresh button, save/unsave toggle)? Or only tap-to-navigate?\n8. **Navigation** — what happens when the user taps? Which navigation interface does the team own?\n9. **Analytics** — beyond impression and click, any domain-specific events?\n10. **Feature flag** — is there a feature flag controlling this RO? If yes, what is its name?\n11. **Fallback** — what should the user see if the fetch fails or the feature is disabled?\n12. **Module ownership** — which module (Gradle module on Android, Swift package on iOS) does the contributing team own?\n\nCapture:\n- `platform` (ios or android)\n- `roDisplayName`\n- `roTypeName`\n- `domainIdentifierField`\n- `domainIdentifierType`\n- `dataSource` (message_payload or api_fetch)\n- `uiDescription`\n- `interactions`\n- `navigationTarget`\n- `analyticsEvents`\n- `hasFeatureFlag` (true or false)\n- `featureFlagName` (only if hasFeatureFlag is true)\n- `fallbackBehavior`\n- `ownerModule`",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-1-triage",
+      "title": "Phase 1: Triage and Classify",
+      "prompt": "Based on the requirements, make two decisions: whether a custom RO is needed, and if so, which type.\n\n**Decision 1: Card RO or Custom RO?**\n\nCard RO is sufficient when ALL of the following hold:\n- All data is in the message payload at send time\n- UI is title + body/subheading + optional image + single tap-to-link\n- No interactions beyond tap-to-navigate\n- Content does not need to update after initial load\n\nCustom RO is needed if ANY of the following hold:\n- Data must be fetched from an API using a message identifier\n- UI requires domain-specific layout the Card cannot provide\n- There are user interactions beyond single tap-to-navigate\n- Content must reflect live state when the user returns\n\nFor borderline cases, lean toward Card RO. A custom RO is weeks of work; Card RO is a backend change.\n\n**Decision 2: What type of custom RO? (only if needsCustomRO is true)**\n\n- `display_only` — data is in the message payload but needs custom layout the Card RO cannot provide. No API fetch. No stateful mutations.\n- `fetch_based` — an API call is needed on impression to hydrate the view. User interactions are view-only or tap-to-navigate. No controls that update the displayed model.\n- `interactive` — fetch_based PLUS the user can trigger mutations that update the cached model: a refresh button that re-fetches and updates displayed data, a save/unsave toggle, or similar. Tap-to-navigate alone does NOT qualify as interactive.\n\nPresent both decisions with clear reasoning. For Card RO: show how each requirement maps to a Card field. For custom RO: name the criteria that drove the type classification.\n\nCapture:\n- `needsCustomRO` (true or false)\n- `roType` (display_only / fetch_based / interactive — only if needsCustomRO is true)\n- `triageRationale`",
+      "requireConfirmation": true
+    },
+    {
+      "id": "phase-2a-card-ro-guidance",
+      "title": "Phase 2a: Card RO Configuration",
+      "runCondition": {
+        "var": "needsCustomRO",
+        "equals": false
+      },
+      "prompt": "Walk the team through configuring the Card RO for their use case.\n\nThe Card RO requires no client-side code — it is driven entirely by what the backend sends in the `fallback` block of the RO entry in the GraphQL response.\n\n**Field mapping** — map each requirement to a Card field:\n- `title`: primary label\n- `body`: secondary detail\n- `subheading`: tertiary label or status\n- `imageUrl`: thumbnail image URL (optional)\n- `url`: deep link for tap-to-navigate\n\n**Tags (Android)** — Android's Card RO supports tag pills for status indicators. If the team needs a colored status badge, explain how to send tags in the fallback block.\n\n**Typename** — the backend should send `CardRichObject` as the typename, or any unrecognized typename (which falls through to card parsing).\n\n**What they do not need to build** — no provider, no models, no converter entry, no DI wiring. The platform handles all of it.\n\nShow the expected GraphQL response shape using their actual field values.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-2b-context-gathering",
+      "title": "Phase 2b: Context Gathering",
+      "runCondition": {
+        "var": "needsCustomRO",
+        "equals": true
+      },
+      "prompt": "Find and read the Tour Rich Object implementation. It is the canonical cross-module contribution example and your authoritative reference for current platform contracts — interfaces, registration patterns, model structure, DI wiring, and analytics flow.\n\nFor each reference you read, identify:\n- The provider contract: which interface does it implement, what are the method signatures, what do they return?\n- The model structure: how does the initial model relate to the full model? What fields does each carry?\n- Registration: how is the provider discovered by the framework at startup?\n- Converter/registry entry: how does a typename string get routed to an initial model constructor?\n- Fallback: how does the provider return fallback on failure and on feature-flag-off?\n- Analytics: how is analytics context attached at parse time, and how does it flow to render time?\n\nThe patterns you find are authoritative. They reflect the current contribution model — v1 or v2 — as it actually exists in the codebase.\n\nCapture:\n- `referenceImplementation` (which files you read)\n- `patternSummary` (provider interface, model shape, registration mechanism, analytics flow)",
+      "promptFragments": [
+        {
+          "id": "context-platform-ios",
+          "when": {
+            "var": "platform",
+            "equals": "ios"
+          },
+          "text": "On iOS: the Tour Rich Object lives in the Tour Swift package. Pay attention to (1) the protocol methods and their exact signatures, (2) how the provider is registered via the Container DI system, (3) `AnyMessagingRichObjectProvider` type erasure if present, and (4) how the message model initializers in `ZIMStandardMessage`, `ZIMSystemMessage`, and `ZIMSystemBannerMessage` each route the typename to an initial model — all three files have their own switch chain."
+        },
+        {
+          "id": "context-platform-android",
+          "when": {
+            "var": "platform",
+            "equals": "android"
+          },
+          "text": "On Android: find the Tour Rich Object provider and `RichObjectConverters.kt`. Pay attention to (1) the `@ContributesMultibinding` annotation on the provider, (2) the `recoverCatching` fallback pattern in `fetchRenderable`, (3) how `RichObjectTypeName.fromString(__typename)` routes typenames in the converter, and (4) the `MessagingRichObjectContent` wrapper — note specifically why analytics come from it rather than from the cached model."
+        },
+        {
+          "id": "context-type-display-only",
+          "when": {
+            "var": "roType",
+            "equals": "display_only"
+          },
+          "text": "Also find the Card/Fallback provider. It is the closest reference for a display_only RO — its fetch method is a no-op, returning the base model unchanged, which is exactly what display_only providers do."
+        },
+        {
+          "id": "context-type-interactive",
+          "when": {
+            "var": "roType",
+            "equals": "interactive"
+          },
+          "text": "Also find the Property Rich Object implementation. It has the save/unsave mutation pattern — look specifically at how the onUpdate callback (Android) or RichObjectUpdater (iOS) is used to update the cached model and trigger a re-render without a full re-fetch."
+        }
+      ],
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-3-design",
+      "title": "Phase 3: Contribution Design",
+      "runCondition": {
+        "var": "needsCustomRO",
+        "equals": true
+      },
+      "prompt": "Confirm the contribution design before writing any code.\n\n**Contribution pattern** — recommend cross-module unless the team owns the messaging module:\n- Cross-module (recommended default): provider, models, views, and data layer live in the owning team's module. The messaging module only needs the initial model and the converter entry.\n- In-module: provider lives in the messaging module. Only appropriate when the team owns that module.\n\n**File locations** — based on `ownerModule` and `contributionPattern`, identify where each artifact goes. Use your context-gathering findings as the reference for exact module paths.\n\n**Class naming** — derive from `roDisplayName`:\n- Initial model: `<Name>RichObjectModel` (or equivalent per platform convention)\n- Full model: `Full<Name>RichObjectModel` (fetch_based and interactive only)\n- Provider: `<Name>RichObjectProvider`\n\n**Typename** — verify `roTypeName` exactly matches what the backend will send. A single character difference means the converter never matches and the RO silently never triggers.\n\n**System messages** — decide whether this RO should appear in system/confirmation/banner messages, or only in standard messages. Default is standard messages only. Document the decision — it affects which converter paths you add.\n\nPresent the design as a concrete summary: pattern, file paths, class names, typename, system message decision. This is what you will implement.\n\nCapture:\n- `contributionPattern`\n- `fileLocations`\n- `classNames`\n- `appearsInSystemMessages`",
+      "promptFragments": [
+        {
+          "id": "design-platform-ios",
+          "when": {
+            "var": "platform",
+            "equals": "ios"
+          },
+          "text": "On iOS: DI registration uses the Container scope system. The provider is exposed through a scope factory in the owning module and registered at app startup. `AnyMessagingRichObjectProvider` type erasure wraps the concrete provider at registration time — confirm whether the existing registration pattern requires this."
+        },
+        {
+          "id": "design-platform-android",
+          "when": {
+            "var": "platform",
+            "equals": "android"
+          },
+          "text": "On Android: Anvil `@ContributesMultibinding(AppScope::class)` on the provider class handles automatic registration — no manual wiring needed. If the provider is in a module not yet wired into the app component graph, identify what needs to be added."
+        }
+      ],
+      "requireConfirmation": true
+    },
+    {
+      "id": "phase-4-implement",
+      "title": "Phase 4: Implement",
+      "runCondition": {
+        "var": "needsCustomRO",
+        "equals": true
+      },
+      "prompt": "Implement the contribution.\n\nBefore writing any code, declare your scope: list every file you will create or modify. Confirm the list covers all required artifacts and nothing outside them. If you discover during implementation that you need to touch something outside your declared scope, stop and update the declaration first.\n\nFollow the patterns from your context-gathering step. If the codebase shows a pattern that differs from your expectations, the codebase is right. Do not invent interfaces, annotations, or registration mechanisms.\n\nBuild and verify incrementally: after each new file, confirm it compiles. Run the relevant tests when implementation is complete.",
+      "promptFragments": [
+        {
+          "id": "impl-type-display-only",
+          "when": {
+            "var": "roType",
+            "equals": "display_only"
+          },
+          "text": "Your provider's fetch method is a no-op — return the base model unchanged. You do not need a separate full model; the initial model is the renderable model. Keep the provider minimal: canHandle, a no-op fetch, and a render that produces the view directly from the initial model's fields."
+        },
+        {
+          "id": "impl-type-fetch-or-interactive",
+          "when": {
+            "var": "roType",
+            "in": ["fetch_based", "interactive"]
+          },
+          "text": "Your provider needs two model types: a thin initial model (parsed from the message payload — domain identifier, fallback, and analytics context only) and a full model (hydrated from the API — all domain fields, plus fallback and analytics context explicitly copied from the initial model). The analytics context is not in the API response; it must be carried over from the initial model."
+        },
+        {
+          "id": "impl-type-interactive",
+          "when": {
+            "var": "roType",
+            "equals": "interactive"
+          },
+          "text": "Additionally: implement the mutation pattern (onUpdate callback or platform equivalent) for user-triggered interactions. Keep two failure modes separate — initial fetch failure means the RO has never loaded, so show the fallback card; interaction failure (e.g., refresh failed) means the RO is already displayed, so preserve the last loaded state and show an inline error indicator. Do not fall back to the card on interaction failure."
+        }
+      ],
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-5-pitfall-check",
+      "title": "Phase 5: Pitfall Check",
+      "runCondition": {
+        "var": "needsCustomRO",
+        "equals": true
+      },
+      "prompt": "Run through the known RO contribution pitfalls. Check each one explicitly against what you built. For any FAIL, fix it inline and re-state the check as PASS before completing.\n\n**Check 1: Converter/registry entry present**\nIs there an entry that routes `roTypeName` to the initial model constructor? This is the most commonly missed step. Without it the framework never creates the initial model and the RO silently never triggers — no error, no crash, nothing.\n\n**Check 2: Provider correctly registered in DI**\nIs the provider registered in the framework's provider registry using the correct registration type? Wrong type (e.g., single binding instead of multibinding) means the provider is never discovered.\n\n**Check 3: Fallback on fetch failure** (fetch_based and interactive only)\nDoes the provider return the fallback when the API call throws? A provider that propagates the exception leaves the framework with nothing to show.\n\n**Check 4: Fallback on feature flag off** (only if hasFeatureFlag)\nIs the feature flag checked before any network call? Does a disabled flag return the fallback immediately?\n\n**Check 5: Analytics context on every model**\nIs analytics context (at minimum: messageId) present on every model the provider can return? Without it, events fire with no message attribution and break funnel analysis.\n\nFor each applicable check, state PASS or FAIL.",
+      "promptFragments": [
+        {
+          "id": "pitfall-platform-ios",
+          "when": {
+            "var": "platform",
+            "equals": "ios"
+          },
+          "text": "Check 1 (iOS): the converter entry lives in message model initializers. `ZIMStandardMessage` always needs it. If `appearsInSystemMessages` is true, `ZIMSystemMessage` and `ZIMSystemBannerMessage` also need it — each has its own switch chain. Updating only one file is the common mistake.\nCheck 2 (iOS): verify the provider is exposed through the correct Container scope factory and the factory is invoked at app startup."
+        },
+        {
+          "id": "pitfall-platform-android",
+          "when": {
+            "var": "platform",
+            "equals": "android"
+          },
+          "text": "Check 1 (Android): two things must be present — a new value in the `RichObjectTypeName` enum matching `roTypeName`, and a corresponding branch in the `convert()` when block. Missing either one is silent.\nCheck 2 (Android): the annotation must be `@ContributesMultibinding(AppScope::class)`, not `@ContributesBinding`. The provider compiles and runs with the wrong annotation — it just never appears in the registry."
+        },
+        {
+          "id": "pitfall-analytics-fetch",
+          "when": {
+            "var": "roType",
+            "in": ["fetch_based", "interactive"]
+          },
+          "text": "Check 5 (fetch_based/interactive — two sub-checks): first, verify analytics context is explicitly copied from the initial model to the full model — it is not in the API response. Second, verify that at render time analytics are read from the render-time wrapper passed into the render method, not from the cached full model. The same cached model can be rendered for multiple messages; reading analytics from it causes all those messages to report the same messageId."
+        },
+        {
+          "id": "pitfall-analytics-display-only",
+          "when": {
+            "var": "roType",
+            "equals": "display_only"
+          },
+          "text": "Check 5 (display_only): verify that analytics context is populated on the initial model at parse time. Since there is no full model, the initial model carries analytics context all the way to render time."
+        },
+        {
+          "id": "pitfall-interactive-extra",
+          "when": {
+            "var": "roType",
+            "equals": "interactive"
+          },
+          "text": "Check 6: mutations use the onUpdate callback (or platform equivalent) to update the cached model — they do not trigger a full re-fetch.\nCheck 7: interaction failure and initial fetch failure are handled differently. Initial fetch failure → show the fallback card. Interaction failure (refresh, save) → preserve last loaded state and show an inline error. Do not fall back to the card on interaction failure."
+        }
+      ],
+      "hasValidation": true,
+      "validationCriteria": [
+        {
+          "type": "contains",
+          "value": "Check 1",
+          "message": "Response must address the converter/registry entry check (Check 1)"
+        },
+        {
+          "type": "contains",
+          "value": "Check 2",
+          "message": "Response must address the DI registration check (Check 2)"
+        },
+        {
+          "type": "contains",
+          "value": "Check 3",
+          "condition": {
+            "or": [
+              { "var": "roType", "equals": "fetch_based" },
+              { "var": "roType", "equals": "interactive" }
+            ]
+          },
+          "message": "Fetch/interactive ROs must address the fallback-on-failure check (Check 3)"
+        },
+        {
+          "type": "contains",
+          "value": "Check 4",
+          "condition": { "var": "hasFeatureFlag", "equals": true },
+          "message": "Feature-flagged ROs must address the flag-off fallback check (Check 4)"
+        },
+        {
+          "type": "contains",
+          "value": "Check 5",
+          "message": "Response must address the analytics context check (Check 5)"
+        },
+        {
+          "type": "contains",
+          "value": "Check 6",
+          "condition": { "var": "roType", "equals": "interactive" },
+          "message": "Interactive ROs must address the onUpdate mutation check (Check 6)"
+        },
+        {
+          "type": "contains",
+          "value": "Check 7",
+          "condition": { "var": "roType", "equals": "interactive" },
+          "message": "Interactive ROs must address the interaction failure semantics check (Check 7)"
+        }
+      ],
+      "requireConfirmation": false
+    }
+  ]
+}

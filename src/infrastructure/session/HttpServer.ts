@@ -587,6 +587,27 @@ export class HttpServer {
       return { reclaim: true, reason: 'invalid lock structure' };
     }
 
+    // Cross-project guard: never reclaim from a live process that belongs to a
+    // different project. Different IDEs, worktrees, and integrations (e.g. firebender)
+    // may each spawn their own workrail instance with their own cwd/projectId. A
+    // different-project instance must never kill the primary server — it should yield
+    // regardless of version differences or port preferences.
+    //
+    // We only apply this check when the lock carries a projectId (written by
+    // 3.22.0+). Locks without a projectId fall through to the original logic.
+    if (lockData.projectId) {
+      const currentProjectId = this.sessionManager.getProjectId();
+      if (lockData.projectId !== currentProjectId) {
+        try {
+          process.kill(lockData.pid, 0); // signal 0 = existence check only
+          // Different project AND process is alive: yield unconditionally.
+          return { reclaim: false, reason: `different project, primary alive (lock=${lockData.projectId}, current=${currentProjectId})` };
+        } catch {
+          // Process is dead — reclaim regardless of project difference.
+        }
+      }
+    }
+
     // Version mismatch: a different version holds the lock. We reclaim atomically
     // so the new version's lock metadata is current. If the old process still holds
     // the port, startAsPrimary() will EADDRINUSE and fall back to legacy mode --

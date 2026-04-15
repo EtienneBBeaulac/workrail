@@ -26,6 +26,7 @@ const FAKE_SESSION: ConsoleSessionDetail = {
       status: 'complete',
       hasUnresolvedCriticalGaps: false,
       executionTraceSummary: null,
+      skippedSteps: [],
       nodes: [{ nodeId: 'node-001', nodeKind: 'step', parentNodeId: null, createdAtEventIndex: 0, isPreferredTip: true, isTip: true, stepLabel: null, hasRecap: false, hasFailedValidations: false, hasGaps: false, hasArtifacts: false }],
       edges: [],
       tipNodeIds: ['node-001'],

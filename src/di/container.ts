@@ -401,7 +401,7 @@ async function registerV2Services(): Promise<void> {
       const dataDir = c.resolve<any>(DI.V2.DataDir);
       const fs = c.resolve<any>(DI.V2.FileSystem);
       const clock = c.resolve<any>(DI.V2.TimeClock);
-      return new LocalSessionLockV2(dataDir, fs, clock);
+      return new LocalSessionLockV2(dataDir, fs, clock, 'mcp-server');
     }),
   });
 
