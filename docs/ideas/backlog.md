@@ -870,3 +870,140 @@ The **CIAME team** (Samuel Pérez, `samuelpe@`) is building WorkRail's exact pro
 **Two immediate internal actions:**
 1. List WorkRail in the Zodiac AI Marketplace + ZG AI Tools Catalog
 2. DM Samuel Pérez (CIAME team) -- strongest cold share candidate alongside Peter Yao
+
+---
+
+### Deep dive findings: all reference architectures (Apr 14-15, 2026)
+
+Research complete on all reference projects. Design docs written to `docs/design/` and `docs/ideas/`. Key findings per source:
+
+---
+
+#### OpenClaw findings (design-openclaw-deep-dive.md)
+
+**Channel abstraction:** `ChannelPlugin<ResolvedAccount>` -- one TypeScript interface, ~25 optional adapter slots, lazily loaded. WorkRail equivalent: `WorkRailIntegration<TConfig>`. Integration-agnostic daemon core.
+
+**Skills:** Not a separate primitive -- `agentTools` slot on ChannelPlugin injects pi-mono typed tools at session start. **WorkRail workflows ARE the skill layer.** No separate skill system needed.
+
+**Session persistence:** `AcpSessionStore` confirmed in-memory only (LRU, 5k sessions, 24h TTL, vanishes on crash). WorkRail's disk-persisted append-only store is strictly better.
+
+**Delivery binding:** Bind the delivery target (MR iid, Jira key, Slack thread) at spawn time, not completion time. `DeliveryRouter.resolve(triggerSource)` at completion. WorkRail: store `TriggerSource` when session starts.
+
+**Credential model:** `$secret` refs with `file:path`, `exec:command` (enables 1Password CLI, Bitwarden, Keychain), env var. Adopt nearly verbatim.
+
+**DaemonRegistry shape:** `RuntimeCache` (`Map<actorKey, {runtime, handle, lastTouchedAt}>`) + `RunStateMachine` for heartbeat. Extend with `continueToken` + `checkpointToken` + `persistTokens()` for WorkRail.
+
+---
+
+#### nexus-core findings
+
+**Org profile system:** `configs/profiles/zillow.yaml` declares CLI tool bindings (glab vs gh, acli vs jira-cli). WorkRail: `workrail profile apply <org>` writes `~/.workrail/config.json` with active integration bindings.
+
+**Skill loading:** Three-mirror layout (`.claude/skills/`, `skills/`, `.agents/skills/`) with symlink-based plugin discovery. Core always wins. WorkRail: `~/.workrail/plugins/` with `workrail-plugin.yaml` manifest.
+
+**SOUL.md:** Behavioral principles injected into agent system prompts. WorkRail Auto should ship a `SOUL.md` equivalent in daemon session system prompts -- agent character beyond workflow steps. "Evidence before assertion" = WorkRail's enforcement principle as a behavioral norm.
+
+**Session lifecycle hooks:** JSON stdin/stdout protocol (`{session_id, reason, transcript_path}`). Maps to WorkRail daemon: init (inject ancestry, register in DaemonRegistry, acquire lock) → end (write checkpointToken atomically, release lock, post results to trigger source).
+
+**Knowledge injection:** `inject-knowledge.sh` -- before Claude API call, inject: ancestry recap + `~/.workrail/knowledge/` + repo-specific `.workrail/context.md`. Cap at N lines (200 default). SHORT_NAME matching for repo-relevant selection.
+
+**Skill-as-git-history:** Each skill evolves through atomic commits traceable to session context. WorkRail: session notes improve workflows via `workflow-for-workflows`.
+
+---
+
+#### pi-mono findings (docs/design/pi-mono-integration-discovery.md)
+
+**`agent.state` returns a snapshot, not live reference.** Must reassign: `agent.state.messages = [...agent.state.messages, newMsg]`.
+
+**Tools must throw on failure** -- never encode errors in content. LLM sees and can retry.
+
+**`agent.followUp()` is the termination pattern** -- `continue_workflow` tool calls `agent.followUp(buildStepPrompt(result.step, continueToken))`. `isComplete` captured in closure drives `getFollowUpMessages` returning `[]` to exit naturally.
+
+**Token persistence via `afterToolCall`** -- write `continueToken` + `checkpointToken` to `~/.workrail/daemon-state.json` atomically before returning tool result.
+
+**Console streaming:** Subscribe to `message_update` events where `assistantMessageEvent.type === "text_delta"`. Push over SSE/WebSocket. `tool_execution_start/end` drive tool progress indicators.
+
+**`mom` dispatch model:** One `Agent` instance per session (not per trigger). `ChannelQueue` (KeyedAsyncQueue) serializes messages per channel. WorkRail: one `Agent` per daemon session, reconstructed from WorkRail event log on each run.
+
+Full tool registration TypeScript in design doc.
+
+---
+
+#### LangGraph findings (docs/ideas/langgraph-discovery.md)
+
+**Time-travel checkpointing:** `CheckpointMetadata.source = "fork"` enables re-invoking from any historical `checkpoint_id`. This is the implementation pattern for WorkRail's "workflow rewind" backlog feature. WorkRail's event log already stores enough -- what's missing is branch-from-earlier-point API.
+
+**`interrupt()` is a function, not middleware** -- raises `GraphInterrupt`, node re-runs from scratch on resume (requires idempotency). WorkRail's design is cleaner -- step advances, doesn't re-execute. WorkRail's HMAC token can't be faked; LangGraph's interrupt can be bypassed.
+
+**Streaming is a `(namespace, mode, data)` triple** -- includes subgraph namespace path. Right format for WorkRail Auto's console SSE events. pi-mono's `agent.subscribe()` is the direct equivalent.
+
+**Multi-tenancy is soft** -- metadata-filter-based, no per-tenant schema isolation. A bug in an auth handler leaks cross-tenant data. **WorkRail's opportunity: structural per-org storage roots from day one.**
+
+**`Workflow + Session + Run` hierarchy confirmed at scale** -- right entity model for WorkRail Auto cloud.
+
+---
+
+#### Temporal.io findings
+
+**Event-sourcing model:** Temporal workflows replay event history deterministically on each activation. `DeterminismViolationError` when code changes break replay compatibility. WorkRail already has this pattern in its event log + `replay.ts`. Key addition: Temporal's `Worker.runReplayHistories()` for batch testing workflow code changes against production history before deploying.
+
+**Activity/workflow separation:** Workflows = deterministic orchestration (no side effects, must be pure). Activities = side-effectful work (API calls, file I/O, non-deterministic ops). WorkRail's current design conflates these -- workflow steps can have side effects. For WorkRail Auto, this distinction matters: the daemon's `runWorkflow()` loop is the "workflow" (deterministic step sequencer), and each tool execution is an "activity" (side-effectful). Not a blocking design change, but a useful mental model.
+
+**Worker polling vs webhook push:** Temporal workers poll a task queue; WorkRail uses webhook push. Both are valid. Worker polling is better for cloud/multi-tenant (workers can scale independently, no direct webhook routing needed). WorkRail Auto local: webhooks are simpler. WorkRail Auto cloud: task queue model worth adopting.
+
+**Workflow versioning:** `patched()` / `deprecatePatch()` pattern for evolving running workflows. WorkRail has no equivalent. Minimal needed: workflow definition hash pinning (already done via `workflowHash`), plus a mechanism to continue old sessions on old workflow versions while new sessions use new versions. Not MVP but important for production.
+
+**Namespace isolation:** Per-org Temporal namespaces with separate history and quota. WorkRail Auto cloud: per-org data dirs (`~/.workrail/orgs/<orgId>/`) from day one. No shared state between orgs.
+
+**Schedule client:** Temporal's `ScheduleClient` has `ScheduleOverlapPolicy` (SKIP, BUFFER_ONE, BUFFER_ALL, CANCEL_OTHER, ALLOW_ALL). WorkRail's cron trigger needs the same overlap policy -- what happens if a scheduled run is still running when the next one fires?
+
+---
+
+#### AutoGPT findings
+
+**Block abstraction:** `BlockType` enum includes `WEBHOOK`, `HUMAN_IN_THE_LOOP`, `MCP_TOOL`, `AGENT`, `AI`. Each block has typed `Input`/`Output` schemas (Pydantic). `BlockWebhookConfig` for trigger blocks. This is the right abstraction for WorkRail Auto's integration layer -- every integration (GitHub trigger, Jira action, Slack message) is a typed `WorkRailBlock<TInput, TOutput>`.
+
+**`HUMAN_IN_THE_LOOP` block type:** AutoGPT has this as a first-class concept. Directly maps to WorkRail Auto's approval-gate feature -- workflow steps that pause for human confirmation before proceeding.
+
+**mcp-graph:** Repo not found at `DiegoNogueiraDev/mcp-graph` -- may have been deleted or renamed. The competitive scan agent may have surfaced a different project. Not a concern -- WorkRail has no close competitors in its quadrant.
+
+---
+
+#### Key synthesis: what to build vs import
+
+| Component | Decision | Source |
+|-----------|----------|--------|
+| Agent loop | Import `@mariozechner/pi-agent-core` | pi-mono |
+| LLM providers | Import `@mariozechner/pi-ai` | pi-mono |
+| Channel abstraction | Build `WorkRailIntegration<TConfig>` | OpenClaw pattern |
+| Credential system | Build `$secret` resolver | OpenClaw pattern |
+| Delivery binding | Build `TriggerSource` + `DeliveryRouter` | OpenClaw pattern |
+| DaemonRegistry | Build `RuntimeCache` shape | OpenClaw pattern |
+| Session lifecycle | Build `session-init` / `session-end` hooks | nexus-core pattern |
+| Knowledge injection | Build `buildDaemonSystemPrompt()` | nexus-core pattern |
+| SOUL.md | Build daemon behavioral principles | nexus-core pattern |
+| Console streaming | Build SSE with `(namespace, mode, data)` triple | LangGraph pattern |
+| Approval gates | Build `HUMAN_IN_THE_LOOP` block type | AutoGPT pattern |
+| Overlap policy | Build cron trigger overlap config | Temporal pattern |
+| Namespace isolation | Build per-org storage roots | Temporal + LangGraph |
+| Workflow versioning | Defer -- hash pinning sufficient for MVP | Temporal insight |
+| Activity/workflow split | Defer -- useful mental model, not blocking | Temporal insight |
+| Time-travel rewind | Defer -- fork-from-checkpoint API | LangGraph insight |
+
+**AutoGPT + mcp-graph-workflow additional findings (from design agent):**
+
+**AutoGPT trigger declaration pattern:** Three-layer design: block declares schema + `webhook_config`; `WebhooksManager` handles registration + payload validation; payload flows in as hidden `Input.payload` field. Distinction between auto-register (`BlockWebhookConfig`) and user-configured (`BlockManualWebhookConfig`) is exactly the pattern WorkRail's trigger system needs.
+
+**Fernet credential encryption:** `encrypt(data: dict) -> str` / `decrypt(str) -> dict` using symmetric key. 40 lines. WorkRail's `CredentialStore` should be a direct port.
+
+**Acquire-at-execution injection:** Credentials fetched just before step execution, injected as typed objects, held under lock for duration, released in `finally`. Acquire-inject-release contract for WorkRail's step runner.
+
+**`SecretStr` type enforcement:** Wrap secrets in an opaque type (branded type or `class Secret<T>` in TypeScript) that prevents accidental logging.
+
+**mcp-graph-workflow `resource_locks` SQLite table:** `leaseToken + agentId + expiresAt + TTL auto-expiry`. Upgrade `LocalSessionLockV2` from PID-file to SQLite lock table. Adds multi-process safety without Redis. Directly addresses the workerId bug already fixed on `feat/session-lock-worker-id`.
+
+**`leaseToken` for subagent step claiming:** `start_task` returns `leaseToken`; `finish_task` requires it. WorkRail subagent delegation: coordinator passes leaseToken, subagent includes in `continue_workflow` context, engine validates.
+
+**`nextAction` in every tool response:** mcp-graph appends `_lifecycle.nextAction` to every MCP response. WorkRail: add typed `nextAction` field to `continue_workflow` responses (parsed step summary, suggested tool, context keys) -- complement to HMAC enforcement.
+
+**mcp-graph-workflow vs WorkRail honest comparison:** mcp-graph has SQLite persistence, lifecycle phases, gate checks, multi-agent task claiming, RAG, knowledge store. It's in "durable + advisory enforcement" quadrant. WorkRail's moat: cryptographic enforcement (mcp-graph is advisory -- agents CAN call tools out of sequence), checkpoint/resume tokens, workflow composition DSL, DAG visualization. Not marginal differences.
