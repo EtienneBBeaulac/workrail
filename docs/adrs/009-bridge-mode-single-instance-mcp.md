@@ -158,10 +158,11 @@ prevents spawn stampede when multiple bridges exhaust simultaneously. The jitter
 bounded (0–300ms) and documented. Tests work around it by mocking `fetch` to resolve
 immediately regardless of jitter timing.
 
-**The initial `connectionState` is `'reconnecting'`** before the first connection attempt
-completes. It is immediately overwritten to `'connected'` on success, and the
-`reconnecting` state is only used for message routing — never observed externally during
-initial startup. A dedicated `'connecting'` variant would be more precise but is YAGNI.
+**`buildConnectedTransport` owns the `connected` state transition.** It calls
+`setConnectionState({ kind: 'connected' })` atomically after `t.start()` resolves,
+before returning the transport object. This ensures `t.onclose` always observes the
+correct state. The initial state is `'connecting'` (not `'reconnecting'`) to accurately
+represent the period before any successful connection has been established.
 
 **Multiple bridges may spawn concurrently** if jitter doesn't fully prevent stampede.
 Only one will win the lock election; others go to legacy mode (port 3457+). Harmless but

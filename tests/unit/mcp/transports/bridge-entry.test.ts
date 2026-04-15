@@ -133,14 +133,19 @@ describe('handleReconnectOutcome', () => {
     kind: 'reconnecting', attempt: 0, maxAttempts: 8, respawnBudget,
   });
 
-  it('transitions to connected on reconnected', async () => {
+  // Note: handleReconnectOutcome no longer sets state for the 'reconnected' case —
+  // that transition is owned by buildConnectedTransport for atomicity.
+
+  it('does not set state on reconnected — buildConnectedTransport owns that transition', async () => {
     const setConnectionState = vi.fn();
     await handleReconnectOutcome(
       { kind: 'reconnected', transport: fakeTransport },
       reconnecting(3),
       { setConnectionState, performShutdown: vi.fn(), startReconnectLoop: vi.fn(), triggerSpawn: vi.fn().mockResolvedValue(undefined), config: cfg },
     );
-    expect(setConnectionState).toHaveBeenCalledWith({ kind: 'connected', transport: fakeTransport });
+    // State was already set atomically inside buildConnectedTransport.
+    // handleReconnectOutcome must not duplicate the transition.
+    expect(setConnectionState).not.toHaveBeenCalled();
   });
 
   it('is a no-op on aborted', async () => {
@@ -296,13 +301,23 @@ describe('ConnectionState dispatch', () => {
     const state: ConnectionState = { kind: 'reconnecting', attempt: 0, maxAttempts: 8, respawnBudget: 3 };
     dispatch(state, req, async (m) => { sentToIde.push(m); });
     await new Promise((r) => setTimeout(r, 0));
-    expect(sentToIde).toHaveLength(1);
     const resp = sentToIde[0] as { id: number; error: { code: number } };
     expect(resp.id).toBe(42);
     expect(resp.error.code).toBe(-32603);
   });
 
-  it('does not respond to notifications while reconnecting', async () => {
+  it('returns JSON-RPC error immediately when connecting (initial handshake)', async () => {
+    // 'connecting' and 'reconnecting' both mean "no primary available right now"
+    // and should both return an error so agents don't hang.
+    const sentToIde: JSONRPCMessage[] = [];
+    dispatch({ kind: 'connecting' }, req, async (m) => { sentToIde.push(m); });
+    await new Promise((r) => setTimeout(r, 0));
+    const resp = sentToIde[0] as { id: number; error: { code: number } };
+    expect(resp.id).toBe(42);
+    expect(resp.error.code).toBe(-32603);
+  });
+
+  it('does not respond to notifications when unavailable', async () => {
     const sentToIde: JSONRPCMessage[] = [];
     const state: ConnectionState = { kind: 'reconnecting', attempt: 0, maxAttempts: 8, respawnBudget: 3 };
     dispatch(state, notification, async (m) => { sentToIde.push(m); });
@@ -322,30 +337,32 @@ describe('ConnectionState dispatch', () => {
 // ---------------------------------------------------------------------------
 
 describe('t.onclose idempotency', () => {
-  it('does not start a second reconnect loop when already reconnecting', () => {
+  it('does not start a loop when already reconnecting', () => {
     let loopStartCount = 0;
-    const startReconnectLoop = () => { loopStartCount++; };
-
-    // Simulate onclose when state is already 'reconnecting'.
     const onclose = simulateOnClose(
       { kind: 'reconnecting', attempt: 0, maxAttempts: 8, respawnBudget: 3 },
-      startReconnectLoop,
+      () => { loopStartCount++; },
     );
-
     onclose();
-    onclose(); // second call should be a no-op
-    expect(loopStartCount).toBe(0); // loop was already running — neither call starts a new one
+    onclose();
+    expect(loopStartCount).toBe(0);
   });
 
-  it('starts the loop when state transitions from connected to reconnecting', () => {
+  it('does not start a loop when still in connecting state (initial handshake)', () => {
+    // 'connecting' means no prior connection — t.onclose during init should not
+    // start the reconnect loop; the caller will see buildConnectedTransport return null.
     let loopStartCount = 0;
-    const startReconnectLoop = () => { loopStartCount++; };
+    const onclose = simulateOnClose({ kind: 'connecting' }, () => { loopStartCount++; });
+    onclose();
+    expect(loopStartCount).toBe(0);
+  });
 
+  it('starts the loop when state is connected (primary died)', () => {
+    let loopStartCount = 0;
     const onclose = simulateOnClose(
       { kind: 'connected', transport: fakeTransport },
-      startReconnectLoop,
+      () => { loopStartCount++; },
     );
-
     onclose();
     expect(loopStartCount).toBe(1);
   });
@@ -364,6 +381,9 @@ function dispatch(
     case 'connected':
       void state.transport.send(msg);
       return;
+    case 'connecting':
+    // falls through — same behavior as reconnecting
+    // eslint-disable-next-line no-fallthrough
     case 'reconnecting':
       if ('id' in msg && msg.id != null && sendToIde) {
         void sendToIde({
@@ -384,7 +404,7 @@ function simulateOnClose(
 ): () => void {
   // Mirrors the t.onclose logic in startBridgeServer.
   return () => {
-    if (currentState.kind === 'reconnecting') return; // idempotent guard
+    if (currentState.kind === 'connecting' || currentState.kind === 'reconnecting') return;
     startReconnectLoop();
   };
 }

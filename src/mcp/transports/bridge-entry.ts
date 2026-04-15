@@ -86,6 +86,7 @@ type HttpBridgeTransport = {
  * reconnects are exhausted, the state transitions to closed.
  */
 export type ConnectionState =
+  | { readonly kind: 'connecting' }
   | { readonly kind: 'connected'; readonly transport: HttpBridgeTransport }
   | {
       readonly kind: 'reconnecting';
@@ -272,7 +273,8 @@ export async function handleReconnectOutcome(
 ): Promise<void> {
   switch (outcome.kind) {
     case 'reconnected':
-      deps.setConnectionState({ kind: 'connected', transport: outcome.transport });
+      // State was set to 'connected' atomically inside buildConnectedTransport
+      // when t.start() resolved. Single owner; no duplicate set here.
       console.error('[Bridge] Reconnected to primary');
       return;
 
@@ -329,20 +331,11 @@ export async function startBridgeServer(
 
   const stdioTransport = new StdioServerTransport();
 
-  // Single explicitly managed mutable variable.
-  // Note: the initial state is 'reconnecting' even before the first connection
-  // attempt. This is a pragmatic modeling choice — the state is immediately
-  // overwritten to 'connected' on successful initial connection, and the
-  // reconnecting state is only used for message routing AFTER initialization.
-  // A dedicated 'connecting' variant would be more precise but is YAGNI here
-  // since the initial path is synchronous and the state is never observed
-  // externally in the 'reconnecting' shape before the first connection succeeds.
-  let connectionState: ConnectionState = {
-    kind: 'reconnecting',
-    attempt: 0,
-    maxAttempts: config.reconnectMaxAttempts,
-    respawnBudget: config.maxRespawnAttempts,
-  };
+  // Single explicitly managed mutable variable. All transitions go through
+  // setConnectionState(). The 'connecting' state represents the period before
+  // any successful connection has been established, distinguishing it from
+  // 'reconnecting' (a prior connection existed and was lost).
+  let connectionState: ConnectionState = { kind: 'connecting' };
 
   const setConnectionState = (next: ConnectionState): void => {
     connectionState = next;
@@ -380,10 +373,12 @@ export async function startBridgeServer(
       });
     };
 
-    // Primary close triggers reconnect — idempotent: no-op if already reconnecting.
+    // Primary close triggers reconnect.
+    // Idempotent: no-op if connecting/reconnecting (loop already in progress).
     t.onclose = () => {
       if (shutdownSignal.aborted) return;
-      if (connectionState.kind === 'reconnecting') return; // loop already running
+      const current = connectionState;
+      if (current.kind === 'connecting' || current.kind === 'reconnecting') return;
       console.error('[Bridge] Primary connection lost — reconnecting');
       setConnectionState({
         kind: 'reconnecting',
@@ -396,7 +391,13 @@ export async function startBridgeServer(
 
     try {
       await t.start();
-      return { send: (msg) => t.send(msg), close: () => t.close() };
+      // Transition to 'connected' atomically with the transport becoming live.
+      // Single owner of this transition: buildConnectedTransport.
+      // This closes the gap between t.start() resolving and the caller setting
+      // state — any t.onclose firing after this point sees 'connected'.
+      const transport: HttpBridgeTransport = { send: (msg) => t.send(msg), close: () => t.close() };
+      setConnectionState({ kind: 'connected', transport });
+      return transport;
     } catch {
       return null;
     }
@@ -463,6 +464,13 @@ export async function startBridgeServer(
         return;
       }
 
+      case 'connecting':
+        // Same behavior as reconnecting: return an immediate error so the
+        // agent doesn't hang. Reaching this state means the bridge is still
+        // establishing its first connection — rare but possible if the IDE
+        // sends a message before the initial handshake completes.
+        // Falls through intentionally to the reconnecting case.
+        // eslint-disable-next-line no-fallthrough
       case 'reconnecting': {
         // Notifications have no id — only requests need a response.
         if ('id' in msg && msg.id != null) {
@@ -496,11 +504,11 @@ export async function startBridgeServer(
   // Initial connection
   // ---------------------------------------------------------------------------
 
+  // buildConnectedTransport sets state to 'connected' atomically on success.
   const initialTransport = await buildConnectedTransport();
   if (initialTransport == null) {
     throw new Error(`[Bridge] Failed to connect to primary on port ${primaryPort}`);
   }
-  setConnectionState({ kind: 'connected', transport: initialTransport });
   console.error('[Bridge] Connected to primary');
 
   process.stdout.on('error', (err) => {
