@@ -195,6 +195,10 @@ export function buildInitialEvents(args: {
    * initial context_set event so sessionTitle is non-null from session creation,
    * without waiting for the first checkpoint recap. */
   readonly goal: string;
+  /** Optional extra key-value pairs to include in the initial context_set event.
+   * Used by the autonomous daemon to set is_autonomous: 'true' without changing
+   * the public V2StartWorkflowInput schema. */
+  readonly extraContext?: Readonly<Record<string, string>>;
 }): readonly DomainEventV1[] {
   const {
     sessionId,
@@ -208,6 +212,7 @@ export function buildInitialEvents(args: {
     observations,
     idFactory,
     goal,
+    extraContext,
   } = args;
 
   const evtSessionCreated = idFactory.mintEventId();
@@ -298,7 +303,7 @@ export function buildInitialEvents(args: {
       scope: { runId: String(runId) },
       data: {
         contextId,
-        context: { goal } as Record<string, string>,
+        context: { goal, ...extraContext } as Record<string, string>,
         source: 'initial' as const,
       },
     } as DomainEventV1);
@@ -364,7 +369,11 @@ export function mintStartTokens(args: {
 
 export function executeStartWorkflow(
   input: import('../../v2/tools.js').V2StartWorkflowInput,
-  ctx: V2ToolContext
+  ctx: V2ToolContext,
+  /** Internal-only context to inject into the initial context_set event.
+   * NOT exposed via V2StartWorkflowInput (public MCP schema stays unchanged).
+   * Used by the autonomous daemon to set is_autonomous: 'true'. */
+  internalContext?: Readonly<Record<string, string>>,
 ): RA<StartWorkflowResult, StartWorkflowError> {
   const { gate, sessionStore, snapshotStore, pinnedStore, crypto, tokenCodecPorts, idFactory, validationPipelineDeps, tokenAliasStore, entropy } = ctx.v2;
   const shouldUseRequestReader =
@@ -470,6 +479,7 @@ export function executeStartWorkflow(
               observations,
               idFactory,
               goal: input.goal,
+              extraContext: internalContext,
             });
 
             // New session: truth is known to be empty at this point (session just created).

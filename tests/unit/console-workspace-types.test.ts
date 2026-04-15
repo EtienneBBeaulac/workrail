@@ -51,6 +51,8 @@ function makeSession(overrides: Partial<ConsoleSessionSummary> = {}): ConsoleSes
     gitBranch: 'feature/foo',
     repoRoot: null,
     lastModifiedMs: NOW_MS - DAY_MS,
+    isAutonomous: false,
+    isLive: false,
     ...overrides,
   };
 }

@@ -46,6 +46,8 @@ function makeSession(overrides: Partial<ConsoleSessionSummary> = {}): ConsoleSes
     gitBranch: `feature/branch-${idCounter}`,
     repoRoot: '/repo',
     lastModifiedMs: idCounter * 1000,
+    isAutonomous: false,
+    isLive: false,
     ...overrides,
   };
 }

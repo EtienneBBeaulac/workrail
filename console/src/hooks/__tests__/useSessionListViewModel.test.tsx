@@ -31,6 +31,8 @@ function makeSession(overrides: Partial<ConsoleSessionSummary> = {}): ConsoleSes
     gitBranch: 'main',
     repoRoot: '/repos/myapp',
     lastModifiedMs: Date.now(),
+    isAutonomous: false,
+    isLive: false,
     ...overrides,
   };
 }

@@ -171,6 +171,9 @@ function makeStartWorkflowTool(
           goal: params.goal,
         },
         ctx,
+        // Mark this session as autonomous. The daemon sets this at session creation
+        // so isAutonomous is derivable from the event log even after restart.
+        { is_autonomous: 'true' },
       );
 
       if (result.isErr()) {

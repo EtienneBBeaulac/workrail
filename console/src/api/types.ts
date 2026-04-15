@@ -94,6 +94,12 @@ export interface ConsoleSessionSummary {
   /** Repo root path from the session record. Used as fallback when worktree data is unavailable. */
   readonly repoRoot: string | null;
   readonly lastModifiedMs: number;
+  /** True when the session was started by the WorkRail autonomous daemon.
+   * Durable: derived from context_set event with is_autonomous: 'true'. */
+  readonly isAutonomous: boolean;
+  /** True when the session is currently registered in DaemonRegistry with a recent heartbeat.
+   * Ephemeral: always false when daemon is not running. */
+  readonly isLive: boolean;
 }
 
 export interface ConsoleSessionListResponse {

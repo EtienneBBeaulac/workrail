@@ -38,6 +38,13 @@ export interface ConsoleSessionSummary {
   readonly gitBranch: string | null;
   /** Filesystem mtime of the session directory (epoch ms). */
   readonly lastModifiedMs: number;
+  /** True when the session was started by the WorkRail autonomous daemon.
+   * Durable: derived from context_set event with is_autonomous: 'true'. */
+  readonly isAutonomous: boolean;
+  /** True when the session is currently registered in DaemonRegistry with a recent
+   * heartbeat (within AUTONOMOUS_HEARTBEAT_THRESHOLD_MS). Ephemeral: cleared on
+   * process restart. False when no DaemonRegistry is injected into ConsoleService. */
+  readonly isLive: boolean;
 }
 
 export interface ConsoleSessionListResponse {

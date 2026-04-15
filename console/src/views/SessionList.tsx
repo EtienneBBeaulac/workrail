@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { StatusBadge } from '../components/StatusBadge';
 import { HealthBadge } from '../components/HealthBadge';
+import { BracketBadge } from '../components/BracketBadge';
 import { MetaChip } from '../components/MetaChip';
 import { ConsoleCard } from '../components/ConsoleCard';
 import type { ConsoleSessionSummary } from '../api/types';
@@ -362,6 +363,14 @@ function SessionCard({
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <span className="text-[10px] text-[var(--text-muted)] tabular-nums">{timeAgo}</span>
+          {session.isAutonomous && session.isLive && (
+            <BracketBadge
+              label="LIVE"
+              pulse={true}
+              color="#f4c430"
+              aria-label="Autonomous session actively running"
+            />
+          )}
           <HealthBadge health={session.health} />
           <StatusBadge status={session.status} />
         </div>

@@ -19,6 +19,7 @@ import type { DataDirPortV2 } from '../ports/data-dir.port.js';
 import type { SessionEventLogReadonlyStorePortV2 } from '../ports/session-event-log-store.port.js';
 import type { SnapshotStorePortV2 } from '../ports/snapshot-store.port.js';
 import type { PinnedWorkflowStorePortV2 } from '../ports/pinned-workflow-store.port.js';
+import type { DaemonRegistry } from '../infra/in-memory/daemon-registry/index.js';
 import type { CompiledWorkflowSnapshot } from '../durable-core/schemas/compiled-workflow/index.js';
 import type { ExecutionSnapshotFileV1 } from '../durable-core/schemas/execution-snapshot/index.js';
 import { enumerateSessionsByRecency } from './enumerate-sessions.js';
@@ -68,6 +69,9 @@ export interface ConsoleServicePorts {
   readonly sessionStore: SessionEventLogReadonlyStorePortV2;
   readonly snapshotStore: SnapshotStorePortV2;
   readonly pinnedWorkflowStore: PinnedWorkflowStorePortV2;
+  /** Optional: when provided, isLive is computed from the registry's snapshot.
+   * When absent, isLive is always false (safe default for MCP-only mode). */
+  readonly daemonRegistry?: DaemonRegistry;
 }
 
 // ---------------------------------------------------------------------------
@@ -86,6 +90,16 @@ const DORMANCY_THRESHOLD_MS = (() => {
   const override = parseInt(process.env['WORKRAIL_DORMANCY_THRESHOLD_MS'] ?? '', 10);
   return Number.isFinite(override) && override > 0 ? override : 60 * 60 * 1000;
 })();
+
+/** Autonomous sessions are considered "live" only when the DaemonRegistry has a recent
+ * heartbeat for the session. If the daemon crashes, the heartbeat stops advancing and
+ * the LIVE badge disappears after this threshold.
+ *
+ * 10 minutes is intentionally generous: coding workflow steps can include long Bash
+ * commands and multi-file reads. A timer-based heartbeat (within a step) will tighten
+ * this in a future daemon iteration; for MVP, heartbeats fire at continue_workflow advances.
+ */
+const AUTONOMOUS_HEARTBEAT_THRESHOLD_MS = 10 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // Run completion map — keyed by runId, true when preferred tip snapshot
@@ -264,12 +278,19 @@ export class ConsoleService {
           ? resolveRunCompletionFromDag(dagRes.value, this.ports.snapshotStore)
           : okAsync({} as RunCompletionMap);
 
+        // Compute isLive synchronously from the registry snapshot (no I/O).
+        // The registry is read here (at the I/O assembly boundary) and passed
+        // as a plain boolean to the pure projectSessionSummary() function.
+        const registryEntry = this.ports.daemonRegistry?.snapshot().get(sessionId);
+        const isLive = registryEntry !== undefined
+          && (nowMs - registryEntry.lastHeartbeatMs) < AUTONOMOUS_HEARTBEAT_THRESHOLD_MS;
+
         return RA.combine([
           completionRA,
           workflowNamesRA,
         ] as const).map(([completionMap, workflowNames]) => {
           const dag = dagRes.isOk() ? dagRes.value : undefined;
-          return projectSessionSummary(sessionId, truth, completionMap, workflowNames, lastModifiedMs, nowMs, dag);
+          return projectSessionSummary(sessionId, truth, completionMap, workflowNames, lastModifiedMs, nowMs, dag, isLive);
         });
       })
       .map((summary) => {
@@ -698,6 +719,7 @@ function projectSessionSummary(
   lastModifiedMs: number,
   nowMs: number,
   precomputedDag?: RunDagProjectionV2,
+  isLive = false,
 ): ConsoleSessionSummary | null {
   const { events } = truth;
   const health = projectSessionHealthV2(truth);
@@ -726,6 +748,17 @@ function projectSessionSummary(
   const sessionTitle = sortedEventsRes.isOk() ? deriveSessionTitle(sortedEventsRes.value) : null;
   const gitBranch = extractGitBranch(events);
 
+  // Derive isAutonomous from context_set events. Checks all runs; true if any run has
+  // is_autonomous: 'true' in its context. Gracefully degrades to false on projection error.
+  const isAutonomous = (() => {
+    if (!sortedEventsRes.isOk()) return false;
+    const contextRes = projectRunContextV2(sortedEventsRes.value);
+    if (contextRes.isErr()) return false;
+    return Object.values(contextRes.value.byRunId).some(
+      (runCtx) => runCtx.context['is_autonomous'] === 'true',
+    );
+  })();
+
   const runs = Object.values(dag.runsById);
   const run = runs[0];
   if (!run) {
@@ -747,6 +780,8 @@ function projectSessionSummary(
       recapSnippet: null,
       gitBranch,
       lastModifiedMs,
+      isAutonomous,
+      isLive,
     };
   }
 
@@ -799,6 +834,8 @@ function projectSessionSummary(
     recapSnippet,
     gitBranch,
     lastModifiedMs,
+    isAutonomous,
+    isLive,
   };
 }
 
