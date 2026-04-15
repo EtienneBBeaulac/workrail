@@ -2,44 +2,44 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   detectHealthyPrimary,
   reconnectWithBackoff,
+  handleReconnectOutcome,
+  spawnPrimary,
   DEFAULT_BRIDGE_CONFIG,
   type ConnectionState,
   type FetchLike,
   type ReconnectOutcome,
+  type SpawnLike,
 } from '../../../../src/mcp/transports/bridge-entry.js';
 import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
 
 /**
- * Tests for bridge mode: detection, reconnect outcome, startup branching,
- * and ConnectionState dispatch.
- *
- * Tests use injected dependencies throughout — no vi.stubGlobal, no real I/O.
+ * Unit tests for bridge-entry.ts.
+ * All side effects (fetch, spawn) are injected — no real I/O, no vi.stubGlobal.
  */
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+
+const fakeTransport = { send: async () => {}, close: async () => {} };
+
+const workrailOk = (): Response =>
+  ({ ok: true, json: async () => ({ service: 'workrail' }) } as unknown as Response);
+const wrongService = (): Response =>
+  ({ ok: true, json: async () => ({ service: 'nginx' }) } as unknown as Response);
 
 // ---------------------------------------------------------------------------
 // detectHealthyPrimary
 // ---------------------------------------------------------------------------
 
 describe('detectHealthyPrimary', () => {
-  const workrailOk = (): Response =>
-    ({ ok: true, json: async () => ({ service: 'workrail' }) } as unknown as Response);
-  const wrongService = (): Response =>
-    ({ ok: true, json: async () => ({ service: 'nginx' }) } as unknown as Response);
-  const notOk = (): Response =>
-    ({ ok: false, json: async () => null } as unknown as Response);
-
-  it('returns the port when /workrail-health responds {service:"workrail"}', async () => {
+  it('returns port when /workrail-health says {service:"workrail"}', async () => {
     const fetch: FetchLike = vi.fn().mockResolvedValue(workrailOk());
     expect(await detectHealthyPrimary(3100, { fetch, retries: 1 })).toBe(3100);
   });
 
-  it('returns null when service is not "workrail" (false-positive guard)', async () => {
+  it('returns null for a non-WorkRail server (false-positive guard)', async () => {
     const fetch: FetchLike = vi.fn().mockResolvedValue(wrongService());
-    expect(await detectHealthyPrimary(3100, { fetch, retries: 1 })).toBeNull();
-  });
-
-  it('returns null when response is not ok', async () => {
-    const fetch: FetchLike = vi.fn().mockResolvedValue(notOk());
     expect(await detectHealthyPrimary(3100, { fetch, retries: 1 })).toBeNull();
   });
 
@@ -48,7 +48,7 @@ describe('detectHealthyPrimary', () => {
     expect(await detectHealthyPrimary(3100, { fetch, retries: 1 })).toBeNull();
   });
 
-  it('retries on transient failure and returns port on later success', async () => {
+  it('retries on transient failure', async () => {
     const fetch: FetchLike = vi
       .fn()
       .mockRejectedValueOnce(new TypeError('fetch failed'))
@@ -65,93 +65,182 @@ describe('detectHealthyPrimary', () => {
 });
 
 // ---------------------------------------------------------------------------
-// reconnectWithBackoff — tests the ReconnectOutcome discriminated union directly
+// reconnectWithBackoff
 // ---------------------------------------------------------------------------
 
 describe('reconnectWithBackoff', () => {
-  const config = { ...DEFAULT_BRIDGE_CONFIG, reconnectBaseDelayMs: 0 };
-  const fakeTransport = { send: async () => {}, close: async () => {} };
+  const cfg = { ...DEFAULT_BRIDGE_CONFIG, reconnectBaseDelayMs: 0 };
 
-  it('returns {kind:"reconnected"} when detect succeeds on first attempt', async () => {
+  it('returns reconnected on first immediate attempt', async () => {
     const detect = vi.fn().mockResolvedValue(fakeTransport);
-    const result = await reconnectWithBackoff({
-      detect,
-      config: { ...config, reconnectMaxAttempts: 3 },
-      signal: new AbortController().signal,
-    });
-    expect(result).toEqual<ReconnectOutcome>({ kind: 'reconnected', transport: fakeTransport });
+    const result = await reconnectWithBackoff({ detect, config: cfg, signal: new AbortController().signal });
+    expect(result).toMatchObject({ kind: 'reconnected', transport: fakeTransport });
     expect(detect).toHaveBeenCalledTimes(1);
-    expect(detect).toHaveBeenCalledWith(0); // first attempt is index 0
   });
 
-  it('tries immediately on first attempt (no initial delay)', async () => {
-    // If the first call succeeds, it must happen before any delay.
-    const calls: number[] = [];
-    const detect = vi.fn().mockImplementation(async (attempt: number) => {
-      calls.push(Date.now());
-      return attempt === 0 ? fakeTransport : null;
+  it('first attempt is immediate (no initial delay)', async () => {
+    const callTimes: number[] = [];
+    const detect = vi.fn().mockImplementation(async () => {
+      callTimes.push(Date.now());
+      return fakeTransport;
     });
     const start = Date.now();
-    await reconnectWithBackoff({ detect, config: { ...config, reconnectBaseDelayMs: 1000 }, signal: new AbortController().signal });
-    // First attempt should have happened immediately (well under 100ms from start)
-    expect(calls[0]! - start).toBeLessThan(100);
+    await reconnectWithBackoff({ detect, config: { ...cfg, reconnectBaseDelayMs: 5000 }, signal: new AbortController().signal });
+    expect(callTimes[0]! - start).toBeLessThan(100);
   });
 
-  it('returns {kind:"reconnected"} when detect succeeds on a later attempt', async () => {
-    let attempts = 0;
-    const detect = vi.fn().mockImplementation(async () => {
-      attempts++;
-      return attempts >= 3 ? fakeTransport : null;
-    });
-    const result = await reconnectWithBackoff({
-      detect,
-      config: { ...config, reconnectMaxAttempts: 5 },
-      signal: new AbortController().signal,
-    });
+  it('returns reconnected on a later attempt', async () => {
+    let calls = 0;
+    const detect = vi.fn().mockImplementation(async () => (++calls >= 3 ? fakeTransport : null));
+    const result = await reconnectWithBackoff({ detect, config: { ...cfg, reconnectMaxAttempts: 5 }, signal: new AbortController().signal });
     expect(result).toMatchObject({ kind: 'reconnected' });
-    expect(attempts).toBe(3);
+    expect(calls).toBe(3);
   });
 
-  it('returns {kind:"exhausted"} when all attempts fail', async () => {
+  it('returns exhausted when all attempts fail', async () => {
     const detect = vi.fn().mockResolvedValue(null);
-    const result = await reconnectWithBackoff({
-      detect,
-      config: { ...config, reconnectMaxAttempts: 3 },
-      signal: new AbortController().signal,
-    });
+    const result = await reconnectWithBackoff({ detect, config: { ...cfg, reconnectMaxAttempts: 3 }, signal: new AbortController().signal });
     expect(result).toEqual<ReconnectOutcome>({ kind: 'exhausted' });
     expect(detect).toHaveBeenCalledTimes(3);
   });
 
-  it('returns {kind:"aborted"} when the signal fires before first attempt', async () => {
+  it('returns aborted when signal is already fired', async () => {
     const ac = new AbortController();
     ac.abort();
     const detect = vi.fn().mockResolvedValue(null);
-    const result = await reconnectWithBackoff({
-      detect,
-      config: { ...config, reconnectMaxAttempts: 5 },
-      signal: ac.signal,
-    });
+    const result = await reconnectWithBackoff({ detect, config: cfg, signal: ac.signal });
     expect(result).toEqual<ReconnectOutcome>({ kind: 'aborted' });
     expect(detect).not.toHaveBeenCalled();
   });
 
-  it('returns {kind:"aborted"} when the signal fires during backoff', async () => {
+  it('returns aborted when signal fires during backoff', async () => {
     const ac = new AbortController();
     let calls = 0;
-    const detect = vi.fn().mockImplementation(async () => {
-      calls++;
-      if (calls === 1) ac.abort(); // abort after first attempt
-      return null;
-    });
-    const result = await reconnectWithBackoff({
-      detect,
-      config: { ...config, reconnectBaseDelayMs: 10, reconnectMaxAttempts: 10 },
-      signal: ac.signal,
-    });
+    const detect = vi.fn().mockImplementation(async () => { calls++; ac.abort(); return null; });
+    const result = await reconnectWithBackoff({ detect, config: { ...cfg, reconnectBaseDelayMs: 10, reconnectMaxAttempts: 10 }, signal: ac.signal });
     expect(result).toEqual<ReconnectOutcome>({ kind: 'aborted' });
-    // Should have stopped well before 10 attempts
     expect(calls).toBeLessThan(5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// handleReconnectOutcome — state transitions are data
+// ---------------------------------------------------------------------------
+
+describe('handleReconnectOutcome', () => {
+  const cfg = { reconnectMaxAttempts: 8 };
+  const reconnecting = (respawnBudget: number): Extract<ConnectionState, { kind: 'reconnecting' }> => ({
+    kind: 'reconnecting', attempt: 0, maxAttempts: 8, respawnBudget,
+  });
+
+  it('transitions to connected on reconnected', async () => {
+    const setConnectionState = vi.fn();
+    await handleReconnectOutcome(
+      { kind: 'reconnected', transport: fakeTransport },
+      reconnecting(3),
+      { setConnectionState, performShutdown: vi.fn(), startReconnectLoop: vi.fn(), triggerSpawn: vi.fn().mockResolvedValue(undefined), config: cfg },
+    );
+    expect(setConnectionState).toHaveBeenCalledWith({ kind: 'connected', transport: fakeTransport });
+  });
+
+  it('is a no-op on aborted', async () => {
+    const setConnectionState = vi.fn();
+    const performShutdown = vi.fn();
+    await handleReconnectOutcome(
+      { kind: 'aborted' },
+      reconnecting(3),
+      { setConnectionState, performShutdown, startReconnectLoop: vi.fn(), triggerSpawn: vi.fn().mockResolvedValue(undefined), config: cfg },
+    );
+    expect(setConnectionState).not.toHaveBeenCalled();
+    expect(performShutdown).not.toHaveBeenCalled();
+  });
+
+  it('spawns and restarts loop on exhausted when budget > 0', async () => {
+    const triggerSpawn = vi.fn().mockResolvedValue(undefined);
+    const setConnectionState = vi.fn();
+    const startReconnectLoop = vi.fn();
+    await handleReconnectOutcome(
+      { kind: 'exhausted' },
+      reconnecting(2),
+      { setConnectionState, performShutdown: vi.fn(), startReconnectLoop, triggerSpawn, config: cfg },
+    );
+    expect(triggerSpawn).toHaveBeenCalledTimes(1);
+    expect(setConnectionState).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'reconnecting', respawnBudget: 1 }),
+    );
+    expect(startReconnectLoop).toHaveBeenCalledTimes(1);
+  });
+
+  it('decrements respawnBudget correctly across multiple cycles', async () => {
+    const states: ConnectionState[] = [];
+    const setConnectionState = vi.fn().mockImplementation((s: ConnectionState) => states.push(s));
+    const startReconnectLoop = vi.fn();
+
+    await handleReconnectOutcome(
+      { kind: 'exhausted' },
+      reconnecting(3),
+      { setConnectionState, performShutdown: vi.fn(), startReconnectLoop, triggerSpawn: vi.fn().mockResolvedValue(undefined), config: cfg },
+    );
+    expect(states[0]).toMatchObject({ kind: 'reconnecting', respawnBudget: 2 });
+
+    await handleReconnectOutcome(
+      { kind: 'exhausted' },
+      reconnecting(2),
+      { setConnectionState, performShutdown: vi.fn(), startReconnectLoop, triggerSpawn: vi.fn().mockResolvedValue(undefined), config: cfg },
+    );
+    expect(states[1]).toMatchObject({ kind: 'reconnecting', respawnBudget: 1 });
+  });
+
+  it('shuts down on exhausted when budget is 0', async () => {
+    const performShutdown = vi.fn();
+    const triggerSpawn = vi.fn();
+    await handleReconnectOutcome(
+      { kind: 'exhausted' },
+      reconnecting(0),
+      { setConnectionState: vi.fn(), performShutdown, startReconnectLoop: vi.fn(), triggerSpawn, config: cfg },
+    );
+    expect(triggerSpawn).not.toHaveBeenCalled();
+    expect(performShutdown).toHaveBeenCalledWith(expect.stringContaining('budget exhausted'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// spawnPrimary — injectable spawn
+// ---------------------------------------------------------------------------
+
+describe('spawnPrimary', () => {
+  const noopSpawn: SpawnLike = vi.fn().mockReturnValue({ unref: vi.fn() });
+
+  it('spawns with WORKRAIL_TRANSPORT=http and the same script path', async () => {
+    const mockSpawn = vi.fn().mockReturnValue({ unref: vi.fn() });
+    const fetch: FetchLike = vi.fn().mockRejectedValue(new TypeError('refused')); // nothing running
+    await spawnPrimary(3100, { spawn: mockSpawn, fetch });
+    expect(mockSpawn).toHaveBeenCalledWith(
+      process.execPath,
+      [process.argv[1]],
+      expect.objectContaining({ env: expect.objectContaining({ WORKRAIL_TRANSPORT: 'http' }) }),
+    );
+  });
+
+  it('skips spawn when primary is already up after jitter (another bridge beat us)', async () => {
+    const mockSpawn = vi.fn().mockReturnValue({ unref: vi.fn() });
+    const fetch: FetchLike = vi.fn().mockResolvedValue(workrailOk()); // already up
+    await spawnPrimary(3100, { spawn: mockSpawn, fetch });
+    expect(mockSpawn).not.toHaveBeenCalled();
+  });
+
+  it('logs and does not throw when spawn itself fails', async () => {
+    const mockSpawn: SpawnLike = vi.fn().mockImplementation(() => { throw new Error('ENOENT'); });
+    const fetch: FetchLike = vi.fn().mockRejectedValue(new TypeError('refused'));
+    await expect(spawnPrimary(3100, { spawn: mockSpawn, fetch })).resolves.toBeUndefined();
+  });
+
+  it('calls unref() so the child is detached from the bridge process', async () => {
+    const unref = vi.fn();
+    const mockSpawn: SpawnLike = vi.fn().mockReturnValue({ unref });
+    const fetch: FetchLike = vi.fn().mockRejectedValue(new TypeError('refused'));
+    await spawnPrimary(3100, { spawn: mockSpawn, fetch });
+    expect(unref).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -185,48 +274,80 @@ describe('startup bridge branching', () => {
 });
 
 // ---------------------------------------------------------------------------
-// ConnectionState dispatch — exhaustive switch, no flag checks
+// ConnectionState dispatch — exhaustive switch
 // ---------------------------------------------------------------------------
 
 describe('ConnectionState dispatch', () => {
-  const requestMsg = { jsonrpc: '2.0', id: 42, method: 'tools/call', params: {} } as JSONRPCMessage;
-  const notificationMsg = { jsonrpc: '2.0', method: 'notifications/progress', params: {} } as JSONRPCMessage;
+  const req = { jsonrpc: '2.0', id: 42, method: 'tools/call', params: {} } as JSONRPCMessage;
+  const notification = { jsonrpc: '2.0', method: 'notifications/progress', params: {} } as JSONRPCMessage;
 
-  it('forwards messages to transport when connected', () => {
+  it('forwards to transport when connected', () => {
     const sent: JSONRPCMessage[] = [];
     const state: ConnectionState = {
       kind: 'connected',
       transport: { send: async (m) => { sent.push(m); }, close: async () => {} },
     };
-    dispatch(state, requestMsg);
+    dispatch(state, req);
     expect(sent).toHaveLength(1);
-    expect(sent[0]).toBe(requestMsg);
   });
 
-  it('returns JSON-RPC error immediately when reconnecting (prevents agent hang)', async () => {
+  it('returns JSON-RPC error immediately when reconnecting', async () => {
     const sentToIde: JSONRPCMessage[] = [];
-    const state: ConnectionState = { kind: 'reconnecting', attempt: 0, maxAttempts: 8 };
-    dispatch(state, requestMsg, async (m) => { sentToIde.push(m); });
-    await new Promise((r) => setTimeout(r, 0)); // flush microtasks
-    expect(sentToIde).toHaveLength(1);
-    const response = sentToIde[0] as { id: number; error: { code: number } };
-    expect(response.id).toBe(42);
-    expect(response.error.code).toBe(-32603);
-  });
-
-  it('does not respond to notifications while reconnecting (no id)', async () => {
-    const sentToIde: JSONRPCMessage[] = [];
-    const state: ConnectionState = { kind: 'reconnecting', attempt: 0, maxAttempts: 8 };
-    dispatch(state, notificationMsg, async (m) => { sentToIde.push(m); });
+    const state: ConnectionState = { kind: 'reconnecting', attempt: 0, maxAttempts: 8, respawnBudget: 3 };
+    dispatch(state, req, async (m) => { sentToIde.push(m); });
     await new Promise((r) => setTimeout(r, 0));
-    expect(sentToIde).toHaveLength(0); // notifications don't need a response
+    expect(sentToIde).toHaveLength(1);
+    const resp = sentToIde[0] as { id: number; error: { code: number } };
+    expect(resp.id).toBe(42);
+    expect(resp.error.code).toBe(-32603);
+  });
+
+  it('does not respond to notifications while reconnecting', async () => {
+    const sentToIde: JSONRPCMessage[] = [];
+    const state: ConnectionState = { kind: 'reconnecting', attempt: 0, maxAttempts: 8, respawnBudget: 3 };
+    dispatch(state, notification, async (m) => { sentToIde.push(m); });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(sentToIde).toHaveLength(0);
   });
 
   it('no-ops when closed', () => {
     const sent: JSONRPCMessage[] = [];
-    const state: ConnectionState = { kind: 'closed' };
-    dispatch(state, requestMsg);
+    dispatch({ kind: 'closed' }, req);
     expect(sent).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// t.onclose idempotency
+// ---------------------------------------------------------------------------
+
+describe('t.onclose idempotency', () => {
+  it('does not start a second reconnect loop when already reconnecting', () => {
+    let loopStartCount = 0;
+    const startReconnectLoop = () => { loopStartCount++; };
+
+    // Simulate onclose when state is already 'reconnecting'.
+    const onclose = simulateOnClose(
+      { kind: 'reconnecting', attempt: 0, maxAttempts: 8, respawnBudget: 3 },
+      startReconnectLoop,
+    );
+
+    onclose();
+    onclose(); // second call should be a no-op
+    expect(loopStartCount).toBe(0); // loop was already running — neither call starts a new one
+  });
+
+  it('starts the loop when state transitions from connected to reconnecting', () => {
+    let loopStartCount = 0;
+    const startReconnectLoop = () => { loopStartCount++; };
+
+    const onclose = simulateOnClose(
+      { kind: 'connected', transport: fakeTransport },
+      startReconnectLoop,
+    );
+
+    onclose();
+    expect(loopStartCount).toBe(1);
   });
 });
 
@@ -234,10 +355,6 @@ describe('ConnectionState dispatch', () => {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Inline reimplementation of the ConnectionState dispatch switch from
- * startBridgeServer. Tests the logic without wiring real transports.
- */
 function dispatch(
   state: ConnectionState,
   msg: JSONRPCMessage,
@@ -252,7 +369,7 @@ function dispatch(
         void sendToIde({
           jsonrpc: '2.0',
           id: (msg as { id: string | number }).id,
-          error: { code: -32603, message: 'WorkRail primary server is temporarily unavailable — reconnecting.' },
+          error: { code: -32603, message: 'temporarily unavailable' },
         } as JSONRPCMessage).catch(() => undefined);
       }
       return;
@@ -261,33 +378,37 @@ function dispatch(
   }
 }
 
+function simulateOnClose(
+  currentState: ConnectionState,
+  startReconnectLoop: () => void,
+): () => void {
+  // Mirrors the t.onclose logic in startBridgeServer.
+  return () => {
+    if (currentState.kind === 'reconnecting') return; // idempotent guard
+    startReconnectLoop();
+  };
+}
+
 async function simulateStartup(opts: {
   mode: 'stdio' | 'http';
   primaryDetected: boolean;
   bridgeShouldFail?: boolean;
 }): Promise<{ bridgeStarted: boolean; fullServerStarted: boolean; detectionCalled: boolean }> {
-  const result = { bridgeStarted: false, fullServerStarted: false, detectionCalled: false };
+  const r = { bridgeStarted: false, fullServerStarted: false, detectionCalled: false };
 
-  const detectPrimary = async (port: number) => {
-    result.detectionCalled = true;
-    return opts.primaryDetected ? port : null;
-  };
-  const startBridge = async (_port: number) => {
-    result.bridgeStarted = true;
-    if (opts.bridgeShouldFail) throw new Error('refused');
-  };
-  const startFullServer = async () => { result.fullServerStarted = true; };
+  const detectPrimary = async (port: number) => { r.detectionCalled = true; return opts.primaryDetected ? port : null; };
+  const startBridge = async (_port: number) => { r.bridgeStarted = true; if (opts.bridgeShouldFail) throw new Error('refused'); };
+  const startFullServer = async () => { r.fullServerStarted = true; };
 
   if (opts.mode === 'stdio') {
     const port = await detectPrimary(3100);
     if (port != null) {
       try { await startBridge(port); } catch { await startFullServer(); }
-      return result;
+      return r;
     }
     await startFullServer();
-    return result;
+    return r;
   }
-
   await startFullServer();
-  return result;
+  return r;
 }

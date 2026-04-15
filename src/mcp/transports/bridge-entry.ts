@@ -8,22 +8,26 @@
  *   IDE/firebender (stdio) ←→ WorkRail bridge ←→ primary WorkRail (:3100)
  *
  * PRIMARY DEATH + AUTOMATIC RESPAWN
- * On primary close, the bridge reconnects with exponential backoff. When all
- * reconnect attempts are exhausted, it shuts down cleanly (exit 0). The IDE
- * client auto-restarts the MCP command; the restarted process either bridges
- * to a new primary or wins the lock election and starts the full server +
- * dashboard.
+ * When the reconnect loop exhausts, the bridge spawns a new primary as a
+ * detached child process (same binary, HTTP transport) and restarts the
+ * reconnect loop. The stdio connection stays alive — the IDE client never
+ * disconnects. Respawning is bounded by `maxRespawnAttempts`; after the
+ * budget is spent the bridge shuts down cleanly.
  *
  * TOOL CALLS DURING RECONNECT
- * Rather than silently dropping messages (causing agent hangs), the bridge
- * returns an immediate, human-readable JSON-RPC error while reconnecting.
+ * Rather than silently dropping messages (agent hangs), the bridge returns
+ * an immediate human-readable JSON-RPC error while reconnecting.
  *
  * DESIGN NOTES
  * - ConnectionState is a sealed discriminated union — no boolean flags.
- * - Shutdown is an AbortSignal, not a mutable boolean.
- * - reconnectWithBackoff returns a ReconnectOutcome (errors are data, not
- *   callbacks). The caller switches exhaustively on the result.
- * - detectHealthyPrimary takes a fetch dependency for testability.
+ *   The reconnecting variant carries its own respawnBudget so state is
+ *   self-contained and transitions are explicit.
+ * - Shutdown uses AbortController, not a mutable boolean.
+ * - t.onclose is idempotent: if a reconnect loop is already running,
+ *   a second close event is a no-op. Prevents concurrent loops.
+ * - handleReconnectOutcome is a named, testable function that drives all
+ *   state transitions after reconnectWithBackoff returns.
+ * - SpawnLike and FetchLike are injected for testability.
  * - All shutdown paths go through a single performShutdown() function.
  */
 
@@ -36,16 +40,23 @@ import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
 export interface BridgeConfig {
   /** Base delay (ms) for exponential backoff between reconnect attempts. */
   readonly reconnectBaseDelayMs: number;
-  /** Maximum reconnect attempts before giving up and exiting. */
+  /** Maximum reconnect attempts per cycle before triggering a primary respawn. */
   readonly reconnectMaxAttempts: number;
   /** Timeout (ms) before logging a warning about a slow primary response. */
   readonly forwardTimeoutMs: number;
+  /**
+   * How many times the bridge may spawn a new primary before giving up.
+   * Each spawn cycle is followed by a fresh reconnect loop. Prevents
+   * infinite respawn loops when the primary is repeatedly crashing.
+   */
+  readonly maxRespawnAttempts: number;
 }
 
 export const DEFAULT_BRIDGE_CONFIG: BridgeConfig = {
   reconnectBaseDelayMs: 250,
   reconnectMaxAttempts: 8,
   forwardTimeoutMs: 30_000,
+  maxRespawnAttempts: 3,
 };
 
 // ---------------------------------------------------------------------------
@@ -58,20 +69,27 @@ type HttpBridgeTransport = {
 };
 
 /**
- * The connection state between this bridge and the primary WorkRail server.
- * Exported for use in tests and diagnostics.
+ * Connection state between this bridge and the primary WorkRail server.
  *
- * Invariant: `reconnecting.attempt < reconnecting.maxAttempts` always holds —
- * once `attempt` reaches `maxAttempts`, the state transitions to `closed`.
+ * The reconnecting variant carries its own respawnBudget so all relevant
+ * state travels together — no separate mutable variable needed.
+ *
+ * Invariant: reconnecting.respawnBudget >= 0. When budget reaches 0 and
+ * reconnects are exhausted, the state transitions to closed.
  */
 export type ConnectionState =
   | { readonly kind: 'connected'; readonly transport: HttpBridgeTransport }
-  | { readonly kind: 'reconnecting'; readonly attempt: number; readonly maxAttempts: number }
+  | {
+      readonly kind: 'reconnecting';
+      readonly attempt: number;
+      readonly maxAttempts: number;
+      readonly respawnBudget: number;
+    }
   | { readonly kind: 'closed' };
 
 /**
- * Outcome of a reconnect attempt sequence. Errors are data — the caller
- * switches exhaustively rather than receiving side-effectful callbacks.
+ * Outcome of a reconnect attempt sequence — errors are data, not callbacks.
+ * The caller switches exhaustively on the result via handleReconnectOutcome.
  */
 export type ReconnectOutcome =
   | { readonly kind: 'reconnected'; readonly transport: HttpBridgeTransport }
@@ -79,17 +97,29 @@ export type ReconnectOutcome =
   | { readonly kind: 'aborted' };
 
 // ---------------------------------------------------------------------------
-// Detection
+// Injectable side-effect types
 // ---------------------------------------------------------------------------
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
+
+export type SpawnLike = (
+  command: string,
+  args: ReadonlyArray<string>,
+  opts: {
+    readonly env: NodeJS.ProcessEnv;
+    readonly detached: boolean;
+    readonly stdio: 'ignore';
+  },
+) => { unref: () => void };
+
+// ---------------------------------------------------------------------------
+// Detection
+// ---------------------------------------------------------------------------
 
 /**
  * Check whether a healthy WorkRail MCP server is accepting connections on the
  * given port. Uses /workrail-health to distinguish WorkRail from any other
  * HTTP server on the same port.
- *
- * Returns the port number if healthy, null otherwise.
  */
 export async function detectHealthyPrimary(
   port: number,
@@ -113,10 +143,63 @@ export async function detectHealthyPrimary(
       // Connection refused or timeout — not available yet.
     }
     if (attempt < retries - 1) {
-      await sleep(baseDelayMs * (attempt + 1)); // linear: 200ms, 400ms, 600ms
+      await sleep(baseDelayMs * (attempt + 1));
     }
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Primary respawn
+// ---------------------------------------------------------------------------
+
+/**
+ * Spawn a new WorkRail primary process as a detached child.
+ *
+ * Uses the same binary (process.argv[1]) with WORKRAIL_TRANSPORT=http so it
+ * starts as the HTTP primary. Jitter + pre-spawn detection check reduces
+ * stampede when multiple bridges exhaust simultaneously.
+ *
+ * Spawn errors are caught and logged — the caller handles failure via the
+ * reconnect loop's exhaustion path.
+ */
+export async function spawnPrimary(
+  port: number,
+  deps: { spawn: SpawnLike; fetch?: FetchLike },
+): Promise<void> {
+  // Jitter: reduces stampede when multiple bridges exhaust at the same time.
+  await sleep(Math.random() * 300);
+
+  // Post-jitter check: another bridge may have already spawned the primary.
+  const alreadyUp = await detectHealthyPrimary(port, { retries: 1, fetch: deps.fetch });
+  if (alreadyUp != null) {
+    console.error('[Bridge] Primary already available after jitter — skipping spawn');
+    return;
+  }
+
+  const scriptPath = process.argv[1];
+  if (scriptPath == null) {
+    console.error('[Bridge] Cannot spawn primary: process.argv[1] is undefined');
+    return;
+  }
+
+  console.error('[Bridge] Spawning new WorkRail primary process');
+  try {
+    const child = deps.spawn(process.execPath, [scriptPath], {
+      env: {
+        ...process.env,
+        WORKRAIL_TRANSPORT: 'http',
+        WORKRAIL_HTTP_PORT: String(port),
+      },
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.unref();
+  } catch (err) {
+    console.error('[Bridge] Failed to spawn primary:', err);
+    // Reconnect loop will continue polling; if spawn genuinely failed the
+    // budget will eventually drain and the bridge will shut down.
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -131,9 +214,8 @@ type ReconnectDeps = {
 
 /**
  * Attempt to reconnect to the primary with exponential backoff.
- *
- * Tries immediately on the first attempt, then backs off between subsequent
- * attempts. Returns a ReconnectOutcome — the caller switches exhaustively.
+ * Returns a ReconnectOutcome — caller switches exhaustively.
+ * First attempt is immediate; backoff applies between subsequent attempts.
  */
 export async function reconnectWithBackoff(deps: ReconnectDeps): Promise<ReconnectOutcome> {
   const { detect, config, signal } = deps;
@@ -145,9 +227,8 @@ export async function reconnectWithBackoff(deps: ReconnectDeps): Promise<Reconne
     const transport = await detect(attempt);
     if (transport != null) return { kind: 'reconnected', transport };
 
-    // Only sleep before the next attempt, not after the last.
     if (attempt < reconnectMaxAttempts - 1) {
-      const delay = reconnectBaseDelayMs * Math.pow(2, attempt); // 250 500 1000...
+      const delay = reconnectBaseDelayMs * Math.pow(2, attempt);
       await sleep(delay);
       if (signal.aborted) return { kind: 'aborted' };
     }
@@ -157,12 +238,68 @@ export async function reconnectWithBackoff(deps: ReconnectDeps): Promise<Reconne
 }
 
 // ---------------------------------------------------------------------------
+// Reconnect outcome handler
+// ---------------------------------------------------------------------------
+
+type OutcomeHandlerDeps = {
+  readonly setConnectionState: (state: ConnectionState) => void;
+  readonly performShutdown: (reason: string) => void;
+  readonly startReconnectLoop: () => void;
+  /** Triggers a primary spawn. Async; errors are logged inside. */
+  readonly triggerSpawn: () => Promise<void>;
+  readonly config: Pick<BridgeConfig, 'reconnectMaxAttempts'>;
+};
+
+/**
+ * Drive state transitions after reconnectWithBackoff resolves.
+ *
+ * Takes the reconnect outcome and the state that was active when the loop
+ * started (carries the respawnBudget). All state transitions are explicit
+ * and exhaustive. Extracted as a named function for independent testability.
+ */
+export async function handleReconnectOutcome(
+  outcome: ReconnectOutcome,
+  reconnectingState: Extract<ConnectionState, { kind: 'reconnecting' }>,
+  deps: OutcomeHandlerDeps,
+): Promise<void> {
+  switch (outcome.kind) {
+    case 'reconnected':
+      deps.setConnectionState({ kind: 'connected', transport: outcome.transport });
+      console.error('[Bridge] Reconnected to primary');
+      return;
+
+    case 'aborted':
+      // Shutdown already in progress via performShutdown — no action needed.
+      return;
+
+    case 'exhausted':
+      if (reconnectingState.respawnBudget > 0) {
+        await deps.triggerSpawn();
+        // Restart with decremented budget — carries the invariant forward.
+        deps.setConnectionState({
+          kind: 'reconnecting',
+          attempt: 0,
+          maxAttempts: deps.config.reconnectMaxAttempts,
+          respawnBudget: reconnectingState.respawnBudget - 1,
+        });
+        deps.startReconnectLoop();
+      } else {
+        deps.setConnectionState({ kind: 'closed' });
+        deps.performShutdown('respawn budget exhausted — primary repeatedly unavailable');
+      }
+      return;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Bridge server
 // ---------------------------------------------------------------------------
 
 export async function startBridgeServer(
   primaryPort: number,
   config: BridgeConfig = DEFAULT_BRIDGE_CONFIG,
+  // Injectable side effects for testability. Production callers use defaults.
+  deps: { spawn?: SpawnLike; fetch?: FetchLike } = {},
 ): Promise<void> {
   console.error(`[Bridge] Forwarding stdio → http://localhost:${primaryPort}/mcp`);
 
@@ -171,17 +308,26 @@ export async function startBridgeServer(
     '@modelcontextprotocol/sdk/client/streamableHttp.js'
   );
 
+  const spawnFn: SpawnLike =
+    deps.spawn ??
+    ((...args) => {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { spawn } = require('child_process') as typeof import('child_process');
+      return spawn(...(args as Parameters<typeof spawn>)) as ReturnType<typeof spawn>;
+    });
+
   // AbortController for shutdown — platform-native, not a mutable boolean.
   const shutdownController = new AbortController();
   const { signal: shutdownSignal } = shutdownController;
 
   const stdioTransport = new StdioServerTransport();
 
-  // Single explicitly managed mutable variable — all writes via setConnectionState.
+  // Single explicitly managed mutable variable.
   let connectionState: ConnectionState = {
     kind: 'reconnecting',
     attempt: 0,
     maxAttempts: config.reconnectMaxAttempts,
+    respawnBudget: config.maxRespawnAttempts,
   };
 
   const setConnectionState = (next: ConnectionState): void => {
@@ -189,11 +335,11 @@ export async function startBridgeServer(
   };
 
   // ---------------------------------------------------------------------------
-  // Single shutdown path — all shutdown triggers funnel here.
+  // Single shutdown path
   // ---------------------------------------------------------------------------
 
   const performShutdown = (reason: string): void => {
-    if (shutdownSignal.aborted) return; // guard against double-invocation
+    if (shutdownSignal.aborted) return;
     shutdownController.abort();
     console.error(`[Bridge] Shutting down: ${reason}`);
     const state = connectionState;
@@ -203,7 +349,7 @@ export async function startBridgeServer(
   };
 
   // ---------------------------------------------------------------------------
-  // Transport factory + reconnect loop
+  // Transport factory
   // ---------------------------------------------------------------------------
 
   const buildConnectedTransport = async (): Promise<HttpBridgeTransport | null> => {
@@ -220,11 +366,17 @@ export async function startBridgeServer(
       });
     };
 
-    // Primary close triggers reconnect loop.
+    // Primary close triggers reconnect — idempotent: no-op if already reconnecting.
     t.onclose = () => {
       if (shutdownSignal.aborted) return;
+      if (connectionState.kind === 'reconnecting') return; // loop already running
       console.error('[Bridge] Primary connection lost — reconnecting');
-      setConnectionState({ kind: 'reconnecting', attempt: 0, maxAttempts: config.reconnectMaxAttempts });
+      setConnectionState({
+        kind: 'reconnecting',
+        attempt: 0,
+        maxAttempts: config.reconnectMaxAttempts,
+        respawnBudget: config.maxRespawnAttempts,
+      });
       startReconnectLoop();
     };
 
@@ -236,30 +388,35 @@ export async function startBridgeServer(
     }
   };
 
+  // ---------------------------------------------------------------------------
+  // Reconnect loop
+  // ---------------------------------------------------------------------------
+
   const startReconnectLoop = (): void => {
+    // Snapshot current state — must be reconnecting to proceed.
+    const stateAtStart = connectionState;
+    if (stateAtStart.kind !== 'reconnecting') return; // idempotent guard
+
     void reconnectWithBackoff({
       signal: shutdownSignal,
       config,
       detect: async (attempt) => {
         console.error(`[Bridge] Reconnect attempt ${attempt + 1}/${config.reconnectMaxAttempts}`);
-        const detected = await detectHealthyPrimary(primaryPort, { retries: 1 });
+        const detected = await detectHealthyPrimary(primaryPort, { retries: 1, fetch: deps.fetch });
         if (detected == null) return null;
         return buildConnectedTransport();
       },
     }).then((outcome) => {
-      switch (outcome.kind) {
-        case 'reconnected':
-          setConnectionState({ kind: 'connected', transport: outcome.transport });
-          console.error('[Bridge] Reconnected to primary');
-          return;
-        case 'exhausted':
-          setConnectionState({ kind: 'closed' });
-          performShutdown('primary unresponsive after all retries — IDE will respawn');
-          return;
-        case 'aborted':
-          // Shutdown already in progress via performShutdown — no action needed.
-          return;
-      }
+      // Snapshot again at outcome time — state may have changed (e.g. shutdown).
+      const stateAtOutcome = connectionState;
+      if (stateAtOutcome.kind !== 'reconnecting') return; // race: already handled
+      return handleReconnectOutcome(outcome, stateAtOutcome, {
+        setConnectionState,
+        performShutdown,
+        startReconnectLoop,
+        triggerSpawn: () => spawnPrimary(primaryPort, { spawn: spawnFn, fetch: deps.fetch }),
+        config,
+      });
     });
   };
 
@@ -269,7 +426,7 @@ export async function startBridgeServer(
   // ---------------------------------------------------------------------------
 
   stdioTransport.onmessage = (msg: JSONRPCMessage) => {
-    const state = connectionState; // snapshot to avoid TOCTOU on the mutable ref
+    const state = connectionState; // snapshot to avoid TOCTOU
 
     switch (state.kind) {
       case 'connected': {
@@ -284,7 +441,6 @@ export async function startBridgeServer(
       }
 
       case 'reconnecting': {
-        // Return an immediate error so the agent doesn't hang on MCP timeout.
         // Notifications have no id — only requests need a response.
         if ('id' in msg && msg.id != null) {
           void stdioTransport
@@ -307,7 +463,7 @@ export async function startBridgeServer(
       }
 
       case 'closed':
-        return; // Bridge is shutting down — no-op.
+        return;
     }
   };
 
@@ -324,7 +480,6 @@ export async function startBridgeServer(
   setConnectionState({ kind: 'connected', transport: initialTransport });
   console.error('[Bridge] Connected to primary');
 
-  // Guard stdout before wiring stdio (same rationale as stdio-entry.ts).
   process.stdout.on('error', (err) => {
     const code = (err as NodeJS.ErrnoException).code;
     const reason =
