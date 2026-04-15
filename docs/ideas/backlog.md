@@ -707,3 +707,54 @@ Also add `isHeldByMe(sessionId)` to the lock port for clean "pause after current
 6. Console live view: `DaemonRegistry` + `[ LIVE ]` badge
 
 **Reference for loop implementation:** pi-mono `agentLoop` vs OpenClaw `session-actor-queue` -- comparison agent running, results pending.
+
+---
+
+### Agent loop decision: pi-mono wins (Apr 14, 2026)
+
+**Use `@mariozechner/pi-agent-core` (pi-mono) as the daemon loop foundation.** Pinned at 0.67.2, MIT, 246kB, 1 dependency, published on npm.
+
+**Key finding:** OpenClaw's runner wraps pi-mono's `Agent` class internally (`src/agents/pi-embedded-runner/run/attempt.ts` imports `@mariozechner/pi-agent-core` directly). OpenClaw adds auth rotation, provider failover, and preemptive compaction -- none needed at MVP. Comparison was always pi-mono vs "pi-mono + 80 internal modules." Easy call.
+
+**What to take from pi-mono:**
+- `Agent` class -- the multi-turn LLM + tool call loop
+- `AgentTool<TParameters>` with TypeBox schemas -- define `start_workflow`, `continue_workflow`, `Bash`, `Read`, `Write`
+- `getFollowUpMessages` -- termination hook: return `[]` when `isComplete=true` from `continue_workflow`
+- `agent.abort()` -- cancellation threaded through every async boundary
+- `agent.subscribe()` -- observability without modifying the loop
+
+**What to reimplement from OpenClaw (not import):**
+- `KeyedAsyncQueue` pattern (~30 lines) -- serializes concurrent runs against same session ID
+- Retry wrapper with backoff on `stopReason === 'error'`
+
+**Non-obvious implementation detail:** pi-mono terminates structurally (no tool calls + no follow-ups), not semantically. Bridge `isComplete` from `continue_workflow` into `getFollowUpMessages` returning `[]`. Use `createDaemonLoopConfig()` factory per run -- no shared state across concurrent sessions.
+
+**Typed discriminant for continue_workflow result:**
+```typescript
+type WorkflowContinueResult =
+  | { _tag: 'advance'; step: PendingStep; continueToken: string }
+  | { _tag: 'complete'; finalNotes: string }
+  | { _tag: 'error'; message: string };
+```
+
+**Pre-production (not MVP blocking):** Add `agent.abort()` after wall-clock limit + max-turn counter via `getSteeringMessages`. No built-in timeout in pi-mono's loop.
+
+---
+
+### Mobile monitoring + control (post-MVP) ⭐
+
+**Goal:** Control and monitor autonomous WorkRail sessions from a phone.
+
+**What's needed:**
+
+1. **Mobile-responsive console** -- existing React console needs touch-friendly layout, readable on small screens, tap to pause/resume/cancel sessions. The DAG is probably too complex for mobile; a linear step-by-step log view is better for quick checks.
+
+2. **Push notifications** -- phone notified when a session completes, fails, or hits a human-approval gate. Simplest path: Slack/Telegram notification via configured channel (OpenClaw's channel system is the reference). No native app required for MVP of this feature.
+
+3. **Human-in-the-loop approval on mobile** -- workflow steps that require sign-off before proceeding ("about to merge this MR, confirm?") send a push notification with Approve/Reject. Maps to REST control plane: `POST /api/v2/sessions/:id/resume` from a mobile tap.
+
+4. **Session log view** -- scroll through what the daemon did while you were away. Linear timeline, not DAG.
+
+**Simplest implementation path:** Make console responsive + add Slack/Telegram notification on session completion/failure/approval-needed. OpenClaw's 20+ channel integrations are the reference -- WorkRail doesn't need to build a native app, just configure an output channel.
+
+**Priority:** Post-MVP, but design the REST control plane with mobile in mind from the start (clean JSON responses, no server-side rendering assumptions).
