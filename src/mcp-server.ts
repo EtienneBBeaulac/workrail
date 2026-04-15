@@ -49,28 +49,35 @@ const DEFAULT_MCP_PORT = 3100;
 const STDIO_CLIENT_PROBE_MS = 150;
 
 /**
- * Wait up to `timeoutMs` for stdin to become readable without consuming data.
+ * Wait up to `timeoutMs` for `stdin` to become readable without consuming data.
  *
  * Uses the `readable` event so the stream stays paused — bytes remain in the
  * buffer for the MCP transport to read once it starts. Returns true if data
  * arrives within the window, false on timeout.
+ *
+ * `timeoutMs` and `stdin` are explicit parameters (not hardcoded globals) so
+ * tests can pass 0ms and a fake stream without real-time delays or process
+ * coupling. Production callers use STDIO_CLIENT_PROBE_MS and process.stdin.
  */
-function waitForStdinReadable(timeoutMs: number): Promise<boolean> {
+export function waitForStdinReadable(
+  timeoutMs: number,
+  stdin: NodeJS.ReadableStream = process.stdin,
+): Promise<boolean> {
   return new Promise((resolve) => {
-    process.stdin.pause(); // prevent accidental drain while probing
+    stdin.pause(); // prevent accidental drain while probing
 
     const timer = setTimeout(() => {
-      process.stdin.removeListener('readable', onReadable);
+      stdin.removeListener('readable', onReadable);
       resolve(false);
     }, timeoutMs);
 
     const onReadable = () => {
       clearTimeout(timer);
-      process.stdin.removeListener('readable', onReadable);
+      stdin.removeListener('readable', onReadable);
       resolve(true);
     };
 
-    process.stdin.once('readable', onReadable);
+    stdin.once('readable', onReadable);
   });
 }
 
@@ -87,7 +94,7 @@ async function main(): Promise<void> {
       // immediately. An HTTP-type `command` helper never writes to stdin.
       // Without this check, N command helpers become N idle bridges and
       // overload the primary.
-      const hasClient = await waitForStdinReadable(STDIO_CLIENT_PROBE_MS);
+      const hasClient = await waitForStdinReadable(STDIO_CLIENT_PROBE_MS, process.stdin);
       if (!hasClient) {
         console.error(
           `[Startup] Primary on :${primaryPort}, no stdio client within ${STDIO_CLIENT_PROBE_MS}ms — exiting`,
