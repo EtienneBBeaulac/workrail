@@ -52,6 +52,12 @@ export async function startHttpServer(port: number): Promise<void> {
   listener.app.get('/mcp', (req, res) => transport.handleRequest(req, res));
   listener.app.delete('/mcp', (req, res) => transport.handleRequest(req, res));
 
+  // Health endpoint for bridge detection. Bridges use this to confirm a
+  // responder on the port is actually WorkRail, not an unrelated HTTP server.
+  listener.app.get('/workrail-health', (_req, res) => {
+    res.json({ service: 'workrail' });
+  });
+
   await server.connect(transport);
 
   const boundPort = listener.getBoundPort();
