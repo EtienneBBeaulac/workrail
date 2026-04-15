@@ -265,10 +265,13 @@ program
     console.log('Waiting for webhook triggers...');
 
     // Keep alive
-    process.on('SIGINT', () => {
-      handle.stop();
+    const shutdown = async () => {
+      console.log('\nShutting down daemon...');
+      await handle.stop();
       process.exit(0);
-    });
+    };
+    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown);
   });
 
 // ═══════════════════════════════════════════════════════════════════════════

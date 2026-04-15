@@ -194,7 +194,11 @@ export async function startTriggerListener(
       return { _kind: 'err', error: configResult.error };
     }
   } else {
-    triggerIndex = buildTriggerIndex(configResult.value);
+    const indexResult = buildTriggerIndex(configResult.value);
+    if (indexResult.kind === 'err') {
+      return { _kind: 'err', error: indexResult.error };
+    }
+    triggerIndex = indexResult.value;
     console.log(
       `[TriggerListener] Loaded ${configResult.value.triggers.length} trigger(s) from triggers.yml`,
     );

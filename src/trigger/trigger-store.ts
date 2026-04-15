@@ -50,7 +50,8 @@ export type TriggerStoreError =
   | { readonly kind: 'missing_field'; readonly field: string; readonly triggerId: string }
   | { readonly kind: 'unknown_provider'; readonly provider: string; readonly triggerId: string }
   | { readonly kind: 'file_not_found'; readonly filePath: string }
-  | { readonly kind: 'io_error'; readonly message: string };
+  | { readonly kind: 'io_error'; readonly message: string }
+  | { readonly kind: 'duplicate_id'; readonly triggerId: string };
 
 // ---------------------------------------------------------------------------
 // Supported providers (extensible: add post-MVP providers here)
@@ -409,14 +410,28 @@ export function loadTriggerConfig(
   const parsedResult = parseTriggersYaml(yamlContent);
   if (parsedResult.kind === 'err') return parsedResult;
 
-  const triggers: TriggerDefinition[] = [];
+  // Collect all errors rather than fail-fast: one bad trigger should not block
+  // valid triggers from loading. Invalid entries are logged as warnings and skipped.
+  const validTriggers: TriggerDefinition[] = [];
+  const validationErrors: TriggerStoreError[] = [];
   for (const rawTrigger of parsedResult.value) {
     const triggerResult = validateAndResolveTrigger(rawTrigger, env);
-    if (triggerResult.kind === 'err') return triggerResult;
-    triggers.push(triggerResult.value);
+    if (triggerResult.kind === 'err') {
+      console.warn(`[TriggerStore] Skipping invalid trigger: ${JSON.stringify(triggerResult.error)}`);
+      validationErrors.push(triggerResult.error);
+      continue;
+    }
+    validTriggers.push(triggerResult.value);
   }
 
-  return ok({ triggers });
+  if (validationErrors.length > 0) {
+    console.warn(
+      `[TriggerStore] Loaded ${validTriggers.length} valid trigger(s), ` +
+      `skipped ${validationErrors.length} invalid trigger(s).`,
+    );
+  }
+
+  return ok({ triggers: validTriggers });
 }
 
 /**
@@ -450,13 +465,20 @@ export async function loadTriggerConfigFromFile(
 
 /**
  * Build a lookup map from TriggerId to TriggerDefinition for O(1) routing.
+ *
+ * Returns err({ kind: 'duplicate_id' }) if two triggers share the same ID.
+ * Duplicate IDs would silently clobber one another in the routing table, so
+ * the entire index is rejected rather than silently hiding the misconfiguration.
  */
 export function buildTriggerIndex(
   config: TriggerConfig,
-): Map<string, TriggerDefinition> {
+): Result<Map<string, TriggerDefinition>, TriggerStoreError> {
   const index = new Map<string, TriggerDefinition>();
   for (const trigger of config.triggers) {
+    if (index.has(trigger.id)) {
+      return err({ kind: 'duplicate_id', triggerId: trigger.id });
+    }
     index.set(trigger.id, trigger);
   }
-  return index;
+  return ok(index);
 }
