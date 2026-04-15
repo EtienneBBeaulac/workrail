@@ -245,9 +245,18 @@ program
     }
     const ctx = v2Guard.ctx;
 
+    // Use AWS Bedrock when AWS_PROFILE is set (Zillow corp account).
+    // Otherwise require ANTHROPIC_API_KEY for direct Anthropic access.
+    const usesBedrock = !!process.env['AWS_PROFILE'] || !!process.env['AWS_ACCESS_KEY_ID'];
+    const apiKey = process.env['ANTHROPIC_API_KEY'];
+    if (!usesBedrock && !apiKey) {
+      console.error('No LLM credentials found. Set AWS_PROFILE (for Bedrock) or ANTHROPIC_API_KEY (for direct Anthropic).');
+      process.exit(1);
+    }
+
     const handle = await startTriggerListener(ctx, {
       workspacePath: options.workspace,
-      apiKey: process.env['ANTHROPIC_API_KEY'],
+      apiKey: apiKey,
       env: process.env,
     });
 

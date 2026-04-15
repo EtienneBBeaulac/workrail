@@ -35,13 +35,34 @@ const esmImport = new Function('specifier', 'return import(specifier)') as (spec
 
 let _piAi: AnyModule | null = null;
 let _piAgentCore: AnyModule | null = null;
+let _bedrockRegistered = false;
 
 /**
  * Load @mariozechner/pi-ai via dynamic import (ESM interop).
+ * Also registers the Bedrock provider module so Bedrock models are available.
  * Cached after first call.
  */
 export async function loadPiAi(): Promise<AnyModule> {
-  if (!_piAi) _piAi = await esmImport('@mariozechner/pi-ai');
+  if (!_piAi) {
+    _piAi = await esmImport('@mariozechner/pi-ai');
+    // Register Bedrock provider if not already registered.
+    // The bedrock-provider module is loaded via its dist path since pi-ai
+    // doesn't export it as a named subpath.
+    if (!_bedrockRegistered) {
+      try {
+        // Resolve path relative to this file's location at runtime
+        const path = await import('node:path');
+        const bedrockPath = path.resolve(__dirname, '..', '..', 'node_modules', '@mariozechner', 'pi-ai', 'dist', 'bedrock-provider.js');
+        const bedrockMod = await esmImport(`file://${bedrockPath}`).catch(() => null);
+        if (bedrockMod?.bedrockProviderModule && _piAi.setBedrockProviderModule) {
+          _piAi.setBedrockProviderModule(bedrockMod.bedrockProviderModule);
+          _bedrockRegistered = true;
+        }
+      } catch {
+        // Bedrock registration is best-effort -- Anthropic direct API still works
+      }
+    }
+  }
   return _piAi;
 }
 

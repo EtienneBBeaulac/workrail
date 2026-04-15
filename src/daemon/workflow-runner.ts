@@ -482,10 +482,17 @@ export async function runWorkflow(
   daemonRegistry?.register(sessionId, trigger.workflowId);
 
   // ---- Model setup ----
+  // Use Bedrock when AWS_PROFILE is set (Zillow's corp account), otherwise
+  // fall back to direct Anthropic API. This avoids personal API key charges.
   let model;
   try {
     const { getModel } = await loadPiAi();
-    model = getModel('anthropic', 'claude-sonnet-4-5');
+    const usesBedrock = !!process.env['AWS_PROFILE'] || !!process.env['AWS_ACCESS_KEY_ID'];
+    if (usesBedrock) {
+      model = getModel('bedrock-converse-stream', 'us.anthropic.claude-sonnet-4-6');
+    } else {
+      model = getModel('anthropic', 'claude-sonnet-4-5');
+    }
   } catch (err) {
     daemonRegistry?.unregister(sessionId, 'failed');
     return {
@@ -536,7 +543,9 @@ export async function runWorkflow(
       model,
       tools,
     },
-    getApiKey: async (_provider: string) => apiKey,
+    // Bedrock uses AWS credentials from env (AWS_PROFILE etc.) -- no API key needed.
+    // For direct Anthropic, pass the provided key.
+    getApiKey: async (_provider: string) => apiKey ?? '',
 
     // Sequential execution: continue_workflow must complete before Bash begins
     // on the next step. Workflow tools have ordering requirements.
