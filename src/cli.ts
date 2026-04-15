@@ -227,6 +227,80 @@ program
     interpretCliResult(result, terminator);
   });
 
+program
+  .command('daemon')
+  .description('Start the autonomous WorkRail daemon (trigger webhook server on port 3200)')
+  .option('-w, --workspace <path>', 'Path to workspace containing triggers.yml', process.cwd())
+  .action(async (options: { workspace: string }) => {
+    const { startTriggerListener } = await import('./trigger/trigger-listener.js');
+
+    await initializeContainer({ runtimeMode: { kind: 'cli' } });
+    const { createToolContext } = await import('./mcp/server.js');
+    const { requireV2Context } = await import('./mcp/types.js');
+    const rawCtx = await createToolContext();
+    const v2Guard = requireV2Context(rawCtx);
+    if (!v2Guard.ok) {
+      console.error('v2 engine not available -- ensure WorkRail is fully initialized');
+      process.exit(1);
+    }
+    const ctx = v2Guard.ctx;
+
+    const handle = await startTriggerListener(ctx, {
+      workspacePath: options.workspace,
+      apiKey: process.env['ANTHROPIC_API_KEY'],
+      env: process.env,
+    });
+
+    if (handle === null) {
+      console.error('Daemon is disabled. Set WORKRAIL_TRIGGERS_ENABLED=true to enable.');
+      process.exit(1);
+    }
+    if ('_kind' in handle) {
+      console.error('Failed to start daemon:', handle.error);
+      process.exit(1);
+    }
+
+    console.log(`WorkRail daemon running on port ${handle.port}`);
+    console.log(`Workspace: ${options.workspace}`);
+    console.log('Waiting for webhook triggers...');
+
+    // ---- Crash recovery: log any orphaned sessions from a previous daemon crash ----
+    // Sessions that were in-flight when the daemon last crashed leave state files in
+    // DAEMON_SESSIONS_DIR. We log their IDs here so operators can investigate.
+    // Full resume is a follow-up -- the important invariant is that state is per-session
+    // and not clobbered by concurrent or new sessions.
+    try {
+      const { readdir } = await import('node:fs/promises');
+      const { DAEMON_SESSIONS_DIR } = await import('./daemon/workflow-runner.js');
+      const entries = await readdir(DAEMON_SESSIONS_DIR).catch((err: NodeJS.ErrnoException) => {
+        if (err.code === 'ENOENT') return [] as string[];
+        throw err;
+      });
+      const orphanIds = entries
+        .filter((f) => f.endsWith('.json') && !f.endsWith('.tmp'))
+        .map((f) => f.slice(0, -5)); // strip .json
+      if (orphanIds.length > 0) {
+        console.log(
+          `[Daemon] Found ${orphanIds.length} orphaned session(s) from previous run:`,
+          orphanIds,
+        );
+        console.log('[Daemon] Full session resume is not yet implemented. These sessions did not complete.');
+      }
+    } catch (err) {
+      // Non-fatal: crash recovery scan failure should not prevent the daemon from starting.
+      console.warn('[Daemon] Could not scan for orphaned sessions:', err);
+    }
+
+    // Keep alive
+    const shutdown = async () => {
+      console.log('\nShutting down daemon...');
+      await handle.stop();
+      process.exit(0);
+    };
+    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown);
+  });
+
 // ═══════════════════════════════════════════════════════════════════════════
 // ENTRY POINT
 // ═══════════════════════════════════════════════════════════════════════════

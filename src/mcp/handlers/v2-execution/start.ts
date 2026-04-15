@@ -303,7 +303,9 @@ export function buildInitialEvents(args: {
       scope: { runId: String(runId) },
       data: {
         contextId,
-        context: { goal, ...extraContext } as Record<string, string>,
+        // extraContext spreads first so `goal` always wins -- prevents caller-supplied
+        // context from silently overwriting the workflow's own goal value.
+        context: { ...extraContext, goal } as Record<string, string>,
         source: 'initial' as const,
       },
     } as DomainEventV1);

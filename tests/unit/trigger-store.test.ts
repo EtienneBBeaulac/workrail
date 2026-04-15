@@ -158,7 +158,7 @@ describe('loadTriggerConfig', () => {
   });
 
   describe('validation errors', () => {
-    it('rejects trigger with missing id field', () => {
+    it('skips trigger with missing id field (collect-all-errors)', () => {
       const yaml = `
 triggers:
   - provider: generic
@@ -167,14 +167,13 @@ triggers:
     goal: Run workflow
 `;
       const result = loadTriggerConfig(yaml, {});
-      expect(result.kind).toBe('err');
-      if (result.kind !== 'err') return;
-      expect(result.error.kind).toBe('missing_field');
-      if (result.error.kind !== 'missing_field') return;
-      expect(result.error.field).toBe('id');
+      // Invalid trigger is skipped; valid subset (empty here) is returned
+      expect(result.kind).toBe('ok');
+      if (result.kind !== 'ok') return;
+      expect(result.value.triggers).toHaveLength(0);
     });
 
-    it('rejects trigger with missing workflowId', () => {
+    it('skips trigger with missing workflowId (collect-all-errors)', () => {
       const yaml = `
 triggers:
   - id: my-trigger
@@ -183,14 +182,13 @@ triggers:
     goal: Run workflow
 `;
       const result = loadTriggerConfig(yaml, {});
-      expect(result.kind).toBe('err');
-      if (result.kind !== 'err') return;
-      expect(result.error.kind).toBe('missing_field');
-      if (result.error.kind !== 'missing_field') return;
-      expect(result.error.field).toBe('workflowId');
+      // Invalid trigger is skipped; valid subset (empty here) is returned
+      expect(result.kind).toBe('ok');
+      if (result.kind !== 'ok') return;
+      expect(result.value.triggers).toHaveLength(0);
     });
 
-    it('rejects trigger with unknown provider', () => {
+    it('skips trigger with unknown provider (collect-all-errors)', () => {
       const yaml = `
 triggers:
   - id: my-trigger
@@ -200,20 +198,18 @@ triggers:
     goal: Run workflow
 `;
       const result = loadTriggerConfig(yaml, {});
-      expect(result.kind).toBe('err');
-      if (result.kind !== 'err') return;
-      expect(result.error.kind).toBe('unknown_provider');
-      if (result.error.kind !== 'unknown_provider') return;
-      expect(result.error.provider).toBe('slack');
+      // Invalid trigger is skipped; valid subset (empty here) is returned
+      expect(result.kind).toBe('ok');
+      if (result.kind !== 'ok') return;
+      expect(result.value.triggers).toHaveLength(0);
     });
 
-    it('rejects trigger when $SECRET_NAME env var is missing', () => {
+    it('skips trigger when $SECRET_NAME env var is missing (collect-all-errors)', () => {
       const result = loadTriggerConfig(WITH_HMAC_YAML, {}); // no env vars
-      expect(result.kind).toBe('err');
-      if (result.kind !== 'err') return;
-      expect(result.error.kind).toBe('missing_secret');
-      if (result.error.kind !== 'missing_secret') return;
-      expect(result.error.envVarName).toBe('MY_HMAC_SECRET');
+      // Invalid trigger is skipped; valid subset (empty here) is returned
+      expect(result.kind).toBe('ok');
+      if (result.kind !== 'ok') return;
+      expect(result.value.triggers).toHaveLength(0);
     });
 
     it('rejects config without "triggers:" root key', () => {
