@@ -642,3 +642,68 @@ WorkRail autonomous sessions can spawn subagents for parallel work:
   - this is related to assessment-driven routing, but it is a different product concern
 - **Open question**:
   - should note scaffolding live as a separate execution-contract feature, or share any underlying primitives with assessment gates?
+
+---
+
+### Daemon architecture decision -- findings and direction (Apr 14, 2026)
+
+**Status:** Research complete, direction chosen, not yet implemented.
+
+**The question:** Should the autonomous daemon be (A) same-process calling the engine directly, (B) a separate process connecting to WorkRail's MCP server as an HTTP client, or (C) a composite same-process model with direct engine calls + REST control plane?
+
+**What the research found:**
+
+Two discovery agents independently reached opposite conclusions:
+
+- Agent 1 (correctness focus): **Option B** -- separate process. Two hard bugs in same-process: (1) `LocalSessionLockV2.clearIfStaleLock()` uses `process.kill(pid, 0)` -- same PID for daemon + MCP server means a crashed daemon permanently locks sessions with no recovery; (2) `engineActive` guard in `engine-factory.ts` explicitly blocks a second engine instance per process.
+
+- Agent 2 (vision focus): **Option C** composite -- same process, direct engine calls, REST control plane. `V2Dependencies` is already concurrent-safe (stateless, per-session locking). `engineActive` guard is about DI initialization, not concurrent handler safety. Self-referential workflows (coordinator spawning sub-workflows) work immediately via existing delegation.
+
+**Settling the disagreement -- the lock code:**
+
+Read `src/v2/infra/local/session-lock/index.ts` directly. Line 45 confirms Agent 1's bug is real: `process.kill(pid, 0)` -- if daemon + MCP server share a PID and the daemon crashes mid-step, the lock file's PID check returns "process alive" forever. The session is permanently locked until the process restarts. No recovery path. Hard bug.
+
+**Direction: Option C (in-process composite) -- but fix the lock first.**
+
+Option C is the right 12-month architecture:
+- No transport overhead (MCP HTTP adds ~1ms+ per step, meaningless in human sessions, significant in tight autonomous loops)
+- Shared session store, DI, keyring -- no sync issues
+- Self-referential workflows work immediately -- coordinator spawns sub-workflows via existing delegation
+- REST control plane on existing Express server -- 4 routes, no new process
+- MCP + daemon in same binary, same deployment, same config
+
+**The prerequisite: fix `LocalSessionLockV2`**
+
+Replace PID-only staleness with PID + workerId:
+```json
+{ "pid": 1234, "workerId": "mcp-server", "sessionId": "sess_abc" }
+```
+
+Staleness logic:
+- Same PID + same workerId → I own this, proceed
+- Same PID + different workerId → not stale, return SESSION_LOCK_BUSY
+- Different PID, process alive → SESSION_LOCK_BUSY
+- Different PID, process dead → stale, clear it
+
+`workerId` injected at construction: `new LocalSessionLockV2(dataDir, fs, clock, workerId)`. MCP server passes `"mcp-server"`, daemon passes `"daemon"`. ~50-60 lines across `session-lock/index.ts` + `session-lock.port.ts`. Zero behavior change for existing single-process case.
+
+Also add `isHeldByMe(sessionId)` to the lock port for clean "pause after current step" support.
+
+**Other architecture decisions from the 5 MVP discovery agents:**
+
+- **Context survival**: 3-line deletion in `prompt-renderer.ts` -- remove the `rehydrateOnly` guard that blocks ancestry injection on non-rehydrate paths. Already works, just gated off.
+- **Evidence gate**: `requiredEvidence` field + `record_evidence` MCP tool + gate check in `detectBlockingReasonsV1`. MVP = assertion gate; push-hook upgrade = zero schema changes later.
+- **Trigger system**: Standalone `src/trigger/` process (~600 LOC). GitLab MR webhook → `start_workflow` → loop `continue_workflow` → post MR comment.
+- **Console live view**: `is_autonomous: true` context_set event + ephemeral `DaemonRegistry` for heartbeat + `[ LIVE ]` badge. Session lock held during steps prevents timer-based heartbeats -- hybrid model required.
+- **Token persistence**: Daemon must write `continueToken` + `checkpointToken` to `~/.workrail/daemon-state.json` (atomic write) before each step. Crash without this = unrecoverable sessions.
+
+**Build order (tentative):**
+
+1. Fix `LocalSessionLockV2` with workerId (prerequisite for in-process model)
+2. Context survival fix (3-line deletion -- ship immediately, it's almost free)
+3. Daemon runtime: `src/daemon/` with `runWorkflow()` calling engine directly
+4. Evidence gate: `requiredEvidence` + `record_evidence` tool
+5. Trigger system: `src/trigger/` webhook server
+6. Console live view: `DaemonRegistry` + `[ LIVE ]` badge
+
+**Reference for loop implementation:** pi-mono `agentLoop` vs OpenClaw `session-actor-queue` -- comparison agent running, results pending.
