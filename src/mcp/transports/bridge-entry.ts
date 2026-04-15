@@ -3,62 +3,94 @@
  *
  * When a healthy primary WorkRail server is already running on the MCP HTTP
  * port, secondary instances (firebender worktrees, additional Claude Code
- * sessions, any other IDE integration) start in bridge mode rather than
- * spinning up a full second server.
+ * sessions) start in bridge mode rather than spinning up a full second server.
  *
- * The bridge is a thin, stateless stdio↔HTTP proxy:
  *   IDE/firebender (stdio) ←→ WorkRail bridge ←→ primary WorkRail (:3100)
  *
  * PRIMARY DEATH + AUTOMATIC RESPAWN
- * When the primary dies, all bridges detect the closure simultaneously via
- * httpTransport.onclose. Each bridge:
- *   1. Tries to reconnect with exponential backoff.
- *   2. If reconnection fails, exits cleanly.
+ * On primary close, the bridge reconnects with exponential backoff. When all
+ * reconnect attempts are exhausted, it exits cleanly (exit 0). The IDE client
+ * auto-restarts the MCP command; the restarted process either bridges to a new
+ * primary or wins the lock election and starts the full server + dashboard.
  *
- * The IDE client (Claude Code, firebender) automatically restarts the MCP
- * command on exit. The restarted process calls detectHealthyPrimary():
- *   - If another bridge already became primary: it bridges to it.
- *   - If no primary exists yet: it starts as the full primary (server +
- *     dashboard) and wins the lock election.
+ * TOOL CALLS DURING RECONNECT
+ * Rather than silently dropping messages (causing agent hangs), the bridge
+ * returns an immediate, human-readable JSON-RPC error while reconnecting.
  *
- * The existing lock mechanism in HttpServer handles the multi-bridge election
- * race atomically — no coordination between bridges is needed.
- *
- * DETECTION
- * Uses /workrail-health (added to http-entry.ts) rather than a generic
- * HTTP check, so a non-WorkRail server on port 3100 is never mistaken for
- * a primary.
+ * DESIGN NOTES
+ * - ConnectionState is a sealed discriminated union — no boolean flags.
+ * - Shutdown is an AbortSignal, not a mutable boolean.
+ * - detectHealthyPrimary takes a fetch dependency for testability.
+ * - The reconnect loop is a named pure-ish function with explicit params.
+ * - All state transitions are explicit; no shared mutable state between closures.
  */
 
 import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
 
-/** Max reconnect attempts before giving up and exiting. */
-const RECONNECT_MAX_ATTEMPTS = 8;
-/** Base delay (ms) for exponential backoff. Doubles each attempt: 250 500 1000 2000 4000... */
-const RECONNECT_BASE_DELAY_MS = 250;
-/** Warning threshold for slow primary responses (ms). */
-const FORWARD_TIMEOUT_MS = 30_000;
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
 
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+export interface BridgeConfig {
+  /** Base delay (ms) for exponential backoff between reconnect attempts. */
+  readonly reconnectBaseDelayMs: number;
+  /** Maximum reconnect attempts before giving up and exiting. */
+  readonly reconnectMaxAttempts: number;
+  /** Timeout (ms) before logging a warning about a slow primary response. */
+  readonly forwardTimeoutMs: number;
+}
+
+export const DEFAULT_BRIDGE_CONFIG: BridgeConfig = {
+  reconnectBaseDelayMs: 250,
+  reconnectMaxAttempts: 8,
+  forwardTimeoutMs: 30_000,
+};
+
+// ---------------------------------------------------------------------------
+// Connection state — sealed discriminated union, no boolean flags
+// ---------------------------------------------------------------------------
+
+type HttpBridgeTransport = {
+  readonly send: (msg: JSONRPCMessage) => Promise<void>;
+  readonly close: () => Promise<void>;
+};
 
 /**
- * Check whether a healthy WorkRail MCP server is accepting connections on
- * the given port. Uses the /workrail-health endpoint so an unrelated HTTP
- * server on the same port is never mistaken for a WorkRail primary.
+ * The connection state between this bridge and the primary WorkRail server.
+ * All state is immutable; transitions produce a new ConnectionState value.
  *
- * @param retries  Number of attempts (default 3). Attempts use linear backoff.
- * @param baseDelayMs  Base delay between attempts (default 200ms).
+ * Invariant: `reconnecting.attempt < reconnecting.maxAttempts` is always true
+ * — once attempt reaches maxAttempts, the state transitions to `closed`.
+ */
+type ConnectionState =
+  | { readonly kind: 'connected'; readonly transport: HttpBridgeTransport }
+  | { readonly kind: 'reconnecting'; readonly attempt: number; readonly maxAttempts: number }
+  | { readonly kind: 'closed' };
+
+// ---------------------------------------------------------------------------
+// Detection
+// ---------------------------------------------------------------------------
+
+export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
+
+/**
+ * Check whether a healthy WorkRail MCP server is accepting connections on the
+ * given port. Uses /workrail-health to distinguish WorkRail from any other
+ * HTTP server on the same port.
+ *
+ * Returns the port number if healthy, null otherwise.
  */
 export async function detectHealthyPrimary(
   port: number,
-  opts: { retries?: number; baseDelayMs?: number } = {},
+  opts: { retries?: number; baseDelayMs?: number; fetch?: FetchLike } = {},
 ): Promise<number | null> {
   const retries = opts.retries ?? 3;
   const baseDelayMs = opts.baseDelayMs ?? 200;
+  const fetchFn = opts.fetch ?? globalThis.fetch;
 
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
-      const response = await fetch(`http://localhost:${port}/workrail-health`, {
+      const response = await fetchFn(`http://localhost:${port}/workrail-health`, {
         method: 'GET',
         signal: AbortSignal.timeout(500),
       });
@@ -69,7 +101,7 @@ export async function detectHealthyPrimary(
         }
       }
     } catch {
-      // Connection refused or timeout — primary not available yet.
+      // Connection refused or timeout — not available yet.
     }
     if (attempt < retries - 1) {
       await sleep(baseDelayMs * (attempt + 1)); // linear: 200ms, 400ms, 600ms
@@ -78,7 +110,52 @@ export async function detectHealthyPrimary(
   return null;
 }
 
-export async function startBridgeServer(primaryPort: number): Promise<void> {
+// ---------------------------------------------------------------------------
+// Reconnect loop — named pure-ish function with explicit dependencies
+// ---------------------------------------------------------------------------
+
+type ReconnectDeps = {
+  readonly detect: (attempt: number) => Promise<HttpBridgeTransport | null>;
+  readonly onReconnected: (transport: HttpBridgeTransport) => void;
+  readonly onExhausted: () => void;
+  readonly config: Pick<BridgeConfig, 'reconnectBaseDelayMs' | 'reconnectMaxAttempts'>;
+  readonly signal: AbortSignal;
+};
+
+/**
+ * Reconnect to the primary with exponential backoff.
+ *
+ * Drives state transitions: reconnecting(n) → connected | reconnecting(n+1) | closed.
+ * Calls onReconnected or onExhausted exactly once. Stops early on abort.
+ */
+async function reconnectWithBackoff(deps: ReconnectDeps): Promise<void> {
+  const { detect, onReconnected, onExhausted, config, signal } = deps;
+  const { reconnectBaseDelayMs, reconnectMaxAttempts } = config;
+
+  for (let attempt = 0; attempt < reconnectMaxAttempts; attempt++) {
+    const delay = reconnectBaseDelayMs * Math.pow(2, attempt);
+    await sleep(delay);
+
+    if (signal.aborted) return;
+
+    const transport = await detect(attempt);
+    if (transport != null) {
+      onReconnected(transport);
+      return;
+    }
+  }
+
+  onExhausted();
+}
+
+// ---------------------------------------------------------------------------
+// Bridge server
+// ---------------------------------------------------------------------------
+
+export async function startBridgeServer(
+  primaryPort: number,
+  config: BridgeConfig = DEFAULT_BRIDGE_CONFIG,
+): Promise<void> {
   console.error(`[Bridge] Forwarding stdio → http://localhost:${primaryPort}/mcp`);
 
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
@@ -86,18 +163,30 @@ export async function startBridgeServer(primaryPort: number): Promise<void> {
     '@modelcontextprotocol/sdk/client/streamableHttp.js'
   );
 
+  // AbortController for shutdown — platform-native, not a mutable boolean flag.
+  const shutdownController = new AbortController();
+  const { signal: shutdownSignal } = shutdownController;
+
   const stdioTransport = new StdioServerTransport();
-  let shuttingDown = false;
-  let isReconnecting = false;
 
-  // Build a fresh HTTP transport and wire it to the stdio side.
-  // Called on initial connect and on every successful reconnect.
-  const buildHttpTransport = () => {
-    const t = new StreamableHTTPClientTransport(
-      new URL(`http://localhost:${primaryPort}/mcp`),
-    );
+  // Mutable connection state — the single explicitly managed mutable variable.
+  // All writes go through setConnectionState() to keep transitions traceable.
+  let connectionState: ConnectionState = {
+    kind: 'reconnecting',
+    attempt: 0,
+    maxAttempts: config.reconnectMaxAttempts,
+  };
 
-    t.onerror = (err) => console.error('[Bridge] HTTP error:', err);
+  const setConnectionState = (next: ConnectionState): void => {
+    connectionState = next;
+  };
+
+  // Build a connected HttpBridgeTransport. Returns null on failure.
+  const buildConnectedTransport = async (): Promise<HttpBridgeTransport | null> => {
+    const url = new URL(`http://localhost:${primaryPort}/mcp`);
+    const t = new StreamableHTTPClientTransport(url);
+
+    t.onerror = (err) => console.error('[Bridge] HTTP transport error:', err);
 
     // Primary → IDE
     t.onmessage = (msg: JSONRPCMessage) => {
@@ -106,133 +195,166 @@ export async function startBridgeServer(primaryPort: number): Promise<void> {
       });
     };
 
-    return t;
+    // Primary close triggers reconnect loop.
+    t.onclose = () => {
+      if (shutdownSignal.aborted) return;
+      console.error('[Bridge] Primary connection lost — reconnecting');
+      setConnectionState({
+        kind: 'reconnecting',
+        attempt: 0,
+        maxAttempts: config.reconnectMaxAttempts,
+      });
+      startReconnectLoop();
+    };
+
+    try {
+      await t.start();
+      return { send: (msg) => t.send(msg), close: () => t.close() };
+    } catch {
+      return null;
+    }
   };
 
-  // ---- Reconnect loop --------------------------------------------------------
-
-  let httpTransport = buildHttpTransport();
-
-  const handlePrimaryClose = () => {
-    if (shuttingDown) return;
-    isReconnecting = true;
-    console.error('[Bridge] Primary connection lost — reconnecting with backoff');
-
-    void (async () => {
-      for (let attempt = 0; attempt < RECONNECT_MAX_ATTEMPTS; attempt++) {
-        const delay = RECONNECT_BASE_DELAY_MS * Math.pow(2, attempt);
-        await sleep(delay); // 250 500 1000 2000 4000 8000 16000 32000ms
-        if (shuttingDown) return;
-
+  // Reconnect loop — called whenever primary connection drops.
+  const startReconnectLoop = (): void => {
+    void reconnectWithBackoff({
+      signal: shutdownSignal,
+      config,
+      detect: async (attempt) => {
+        if (shutdownSignal.aborted) return null;
+        console.error(`[Bridge] Reconnect attempt ${attempt + 1}/${config.reconnectMaxAttempts}`);
         const detected = await detectHealthyPrimary(primaryPort, { retries: 1 });
-        if (detected != null) {
-          try {
-            httpTransport = buildHttpTransport();
-            httpTransport.onclose = handlePrimaryClose;
-            await httpTransport.start();
-            isReconnecting = false;
-            console.error(`[Bridge] Reconnected to primary (attempt ${attempt + 1})`);
-            return;
-          } catch {
-            // New transport failed to connect; keep retrying.
-          }
-        }
-      }
-
-      // All reconnect attempts exhausted. Exit cleanly so the IDE client
-      // restarts the command — the restarted process will either bridge to a
-      // new primary (if another bridge elected itself) or become the primary.
-      console.error('[Bridge] Primary unresponsive after all retries — exiting for IDE respawn');
-      process.exit(0);
-    })();
+        if (detected == null) return null;
+        return buildConnectedTransport();
+      },
+      onReconnected: (transport) => {
+        setConnectionState({ kind: 'connected', transport });
+        console.error('[Bridge] Reconnected to primary');
+      },
+      onExhausted: () => {
+        setConnectionState({ kind: 'closed' });
+        console.error(
+          '[Bridge] Primary unresponsive after all retries — exiting for IDE respawn',
+        );
+        process.exit(0);
+      },
+    });
   };
 
-  httpTransport.onclose = handlePrimaryClose;
-
-  // ---- Initial connection ----------------------------------------------------
-
-  await httpTransport.start();
-  console.error('[Bridge] Connected to primary');
-
-  // ---- Message routing: IDE → primary ----------------------------------------
+  // ---------------------------------------------------------------------------
+  // Message routing: IDE → primary
+  // Control flow is driven by the connection state discriminated union.
+  // ---------------------------------------------------------------------------
 
   stdioTransport.onmessage = (msg: JSONRPCMessage) => {
-    const currentTransport = httpTransport;
+    const state = connectionState; // snapshot — avoid TOCTOU on mutable ref
 
-    // If the primary is down and we are in the reconnect window, reply with a
-    // clear JSON-RPC error immediately so the agent doesn't hang waiting for a
-    // timeout. The message includes actionable instructions for both the agent
-    // and the human user.
-    //
-    // Detection: httpTransport.onclose sets a reconnecting flag. We check it
-    // via a simple module-level variable. Using the transport reference works
-    // too but the flag is more explicit.
-    if (isReconnecting) {
-      const req = msg as { id?: string | number };
-      if (req.id != null) {
-        void stdioTransport
-          .send({
-            jsonrpc: '2.0',
-            id: req.id,
-            error: {
-              code: -32603,
-              message:
-                'WorkRail primary server is temporarily unavailable — reconnecting. ' +
-                'Wait a few seconds and retry your tool call. ' +
-                'If this persists, please tell the user: ' +
-                '"WorkRail disconnected. Check the terminal running workrail for the error message, ' +
-                'then run /mcp in Claude to reconnect."',
-            },
-          } as JSONRPCMessage)
-          .catch(() => undefined);
+    switch (state.kind) {
+      case 'connected': {
+        const timer = setTimeout(() => {
+          console.error(
+            '[Bridge] Warning: no response from primary after',
+            config.forwardTimeoutMs,
+            'ms',
+          );
+        }, config.forwardTimeoutMs);
+        void state.transport
+          .send(msg)
+          .catch((err) => console.error('[Bridge] Forward to primary failed:', err))
+          .finally(() => clearTimeout(timer));
+        return;
       }
-      return;
+
+      case 'reconnecting': {
+        // Return an immediate error so the agent doesn't hang on MCP timeout.
+        const req = msg as { id?: string | number };
+        if (req.id != null) {
+          void stdioTransport
+            .send({
+              jsonrpc: '2.0',
+              id: req.id,
+              error: {
+                code: -32603,
+                message:
+                  'WorkRail primary server is temporarily unavailable — reconnecting. ' +
+                  'Wait a few seconds and retry your tool call. ' +
+                  'If this persists, tell the user: ' +
+                  '"WorkRail disconnected. Check the terminal running workrail for the ' +
+                  'error message, then run /mcp in Claude to reconnect."',
+              },
+            } as JSONRPCMessage)
+            .catch(() => undefined);
+        }
+        return;
+      }
+
+      case 'closed':
+        // Bridge is shutting down — no-op.
+        return;
     }
-
-    const timer = setTimeout(() => {
-      console.error('[Bridge] Warning: no response from primary after', FORWARD_TIMEOUT_MS, 'ms');
-    }, FORWARD_TIMEOUT_MS);
-
-    void currentTransport
-      .send(msg)
-      .catch((err) => console.error('[Bridge] Forward to primary failed:', err))
-      .finally(() => clearTimeout(timer));
   };
 
   stdioTransport.onerror = (err) => console.error('[Bridge] Stdio error:', err);
 
-  // ---- Stdout guard (same rationale as stdio-entry.ts) -----------------------
+  // ---------------------------------------------------------------------------
+  // Initial connection
+  // ---------------------------------------------------------------------------
 
+  const initialTransport = await buildConnectedTransport();
+  if (initialTransport == null) {
+    throw new Error(`[Bridge] Failed to connect to primary on port ${primaryPort}`);
+  }
+  setConnectionState({ kind: 'connected', transport: initialTransport });
+  console.error('[Bridge] Connected to primary');
+
+  // Guard stdout before wiring stdio (same rationale as stdio-entry.ts).
   process.stdout.on('error', (err) => {
     const code = (err as NodeJS.ErrnoException).code;
-    if (code === 'EPIPE' || code === 'ERR_STREAM_DESTROYED') {
-      console.error('[Bridge] stdout pipe broken, shutting down');
-    } else {
-      console.error('[Bridge] stdout error:', err);
-    }
-    shuttingDown = true;
-    void httpTransport.close().finally(() => process.exit(0));
+    console.error(
+      code === 'EPIPE' || code === 'ERR_STREAM_DESTROYED'
+        ? '[Bridge] stdout pipe broken, shutting down'
+        : `[Bridge] stdout error: ${String(err)}`,
+    );
+    shutdownController.abort();
+    const state = connectionState;
+    void (state.kind === 'connected' ? state.transport.close() : Promise.resolve()).finally(
+      () => process.exit(0),
+    );
   });
 
   await stdioTransport.start();
   console.error('[Bridge] WorkRail MCP bridge running on stdio');
 
-  // ---- Shutdown hooks --------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // Shutdown hooks — AbortController, not mutable flags
+  // ---------------------------------------------------------------------------
 
   process.stdin.once('end', () => {
     console.error('[Bridge] stdin closed, shutting down');
-    shuttingDown = true;
-    void httpTransport.close().finally(() => process.exit(0));
+    shutdownController.abort();
+    const state = connectionState;
+    void (state.kind === 'connected' ? state.transport.close() : Promise.resolve()).finally(
+      () => process.exit(0),
+    );
   });
 
   const shutdown = (signal: string) => {
-    if (shuttingDown) return;
-    shuttingDown = true;
+    if (shutdownSignal.aborted) return;
+    shutdownController.abort();
     console.error(`[Bridge] Received ${signal}, shutting down`);
-    void httpTransport.close().finally(() => process.exit(0));
+    const state = connectionState;
+    void (state.kind === 'connected' ? state.transport.close() : Promise.resolve()).finally(
+      () => process.exit(0),
+    );
   };
 
   process.once('SIGINT', () => shutdown('SIGINT'));
   process.once('SIGTERM', () => shutdown('SIGTERM'));
   process.once('SIGHUP', () => shutdown('SIGHUP'));
 }
+
+// ---------------------------------------------------------------------------
+// Utilities
+// ---------------------------------------------------------------------------
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
