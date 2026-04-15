@@ -18,42 +18,20 @@
 import { resolveTransportMode } from './mcp/transports/transport-mode.js';
 import { startStdioServer } from './mcp/transports/stdio-entry.js';
 import { startHttpServer } from './mcp/transports/http-entry.js';
-import { startBridgeServer } from './mcp/transports/bridge-entry.js';
+import {
+  startBridgeServer,
+  detectHealthyPrimary,
+} from './mcp/transports/bridge-entry.js';
 import { assertNever } from './runtime/assert-never.js';
 
 // Public API: transport entry points
 export { startStdioServer } from './mcp/transports/stdio-entry.js';
 export { startHttpServer } from './mcp/transports/http-entry.js';
-export { startBridgeServer } from './mcp/transports/bridge-entry.js';
+export { startBridgeServer, detectHealthyPrimary } from './mcp/transports/bridge-entry.js';
 export { composeServer } from './mcp/server.js';
 
 /** Default MCP HTTP transport port. */
 const DEFAULT_MCP_PORT = 3100;
-
-/**
- * Check whether a healthy WorkRail MCP server is already accepting connections
- * on the given port. Returns the port if healthy, null otherwise.
- *
- * Uses a short-lived GET to /mcp — the StreamableHTTPServerTransport handles
- * GET requests (SSE stream setup), so a successful response with any HTTP
- * status code (including 4xx) confirms WorkRail is listening. Connection
- * refused or a network error means nothing is there.
- */
-async function detectHealthyPrimary(port: number): Promise<number | null> {
-  try {
-    const response = await fetch(`http://localhost:${port}/mcp`, {
-      method: 'GET',
-      signal: AbortSignal.timeout(500),
-      headers: { Accept: 'application/json, text/event-stream' },
-    });
-    // Cancel any SSE stream immediately — we only needed the response headers.
-    await response.body?.cancel().catch(() => undefined);
-    // Any HTTP response means a server is listening on this port.
-    return port;
-  } catch {
-    return null;
-  }
-}
 
 async function main(): Promise<void> {
   const mode = resolveTransportMode(process.env);
