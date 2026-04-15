@@ -691,7 +691,7 @@ Also add `isHeldByMe(sessionId)` to the lock port for clean "pause after current
 
 **Other architecture decisions from the 5 MVP discovery agents:**
 
-- **Context survival**: 3-line deletion in `prompt-renderer.ts` -- remove the `rehydrateOnly` guard that blocks ancestry injection on non-rehydrate paths. Already works, just gated off.
+- **Context survival**: ~~3-line deletion in `prompt-renderer.ts`~~ **CORRECTED** -- injecting ancestry recap on every normal step advance is wrong. The agent completing step 4 already has steps 1-4 in context -- injecting the recap would be noise and token waste. The correct approach: the **daemon** injects the ancestry recap into the system prompt when initializing a fresh Claude API session via pi-mono's `Agent`. Engine code untouched. The existing `intent: "rehydrate"` path is already correct for human-driven sessions. This is a daemon feature, not a prompt-renderer change.
 - **Evidence gate**: `requiredEvidence` field + `record_evidence` MCP tool + gate check in `detectBlockingReasonsV1`. MVP = assertion gate; push-hook upgrade = zero schema changes later.
 - **Trigger system**: Standalone `src/trigger/` process (~600 LOC). GitLab MR webhook → `start_workflow` → loop `continue_workflow` → post MR comment.
 - **Console live view**: `is_autonomous: true` context_set event + ephemeral `DaemonRegistry` for heartbeat + `[ LIVE ]` badge. Session lock held during steps prevents timer-based heartbeats -- hybrid model required.
