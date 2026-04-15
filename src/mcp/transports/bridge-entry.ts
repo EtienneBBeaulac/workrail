@@ -100,8 +100,16 @@ export type ConnectionState =
  * Outcome of a reconnect attempt sequence — errors are data, not callbacks.
  * The caller switches exhaustively on the result via handleReconnectOutcome.
  */
+/**
+ * Outcome of a reconnect attempt sequence — errors are data, not callbacks.
+ * The caller switches exhaustively on the result via handleReconnectOutcome.
+ *
+ * Note: 'reconnected' carries no transport. buildConnectedTransport owns the
+ * connected state transition; detect() is responsible for both connecting and
+ * signalling success as a boolean. reconnectWithBackoff is transport-agnostic.
+ */
 export type ReconnectOutcome =
-  | { readonly kind: 'reconnected'; readonly transport: HttpBridgeTransport }
+  | { readonly kind: 'reconnected' }
   | { readonly kind: 'exhausted' }
   | { readonly kind: 'aborted' };
 
@@ -216,7 +224,13 @@ export async function spawnPrimary(
 // ---------------------------------------------------------------------------
 
 type ReconnectDeps = {
-  readonly detect: (attempt: number) => Promise<HttpBridgeTransport | null>;
+  /**
+   * Returns true when the primary is reachable and a transport has been
+   * connected (with state set atomically inside the callback). Returns false
+   * if not yet available. Transport ownership and state transitions are
+   * entirely the responsibility of the detect implementation.
+   */
+  readonly detect: (attempt: number) => Promise<boolean>;
   readonly config: Pick<BridgeConfig, 'reconnectBaseDelayMs' | 'reconnectMaxAttempts'>;
   readonly signal: AbortSignal;
 };
@@ -233,8 +247,8 @@ export async function reconnectWithBackoff(deps: ReconnectDeps): Promise<Reconne
   for (let attempt = 0; attempt < reconnectMaxAttempts; attempt++) {
     if (signal.aborted) return { kind: 'aborted' };
 
-    const transport = await detect(attempt);
-    if (transport != null) return { kind: 'reconnected', transport };
+    const succeeded = await detect(attempt);
+    if (succeeded) return { kind: 'reconnected' };
 
     if (attempt < reconnectMaxAttempts - 1) {
       const delay = reconnectBaseDelayMs * Math.pow(2, attempt);
@@ -418,8 +432,11 @@ export async function startBridgeServer(
       detect: async (attempt) => {
         console.error(`[Bridge] Reconnect attempt ${attempt + 1}/${config.reconnectMaxAttempts}`);
         const detected = await detectHealthyPrimary(primaryPort, { retries: 1, fetch: deps.fetch });
-        if (detected == null) return null;
-        return buildConnectedTransport();
+        if (detected == null) return false;
+        // buildConnectedTransport sets connectionState to 'connected' atomically
+        // on success. Discard the return value — the side effect is what matters.
+        const transport = await buildConnectedTransport();
+        return transport != null;
       },
     })
       .then((outcome) => {
@@ -465,33 +482,12 @@ export async function startBridgeServer(
       }
 
       case 'connecting':
-        // Same behavior as reconnecting: return an immediate error so the
-        // agent doesn't hang. Reaching this state means the bridge is still
-        // establishing its first connection — rare but possible if the IDE
-        // sends a message before the initial handshake completes.
-        // Falls through intentionally to the reconnecting case.
-        // eslint-disable-next-line no-fallthrough
-      case 'reconnecting': {
-        // Notifications have no id — only requests need a response.
-        if ('id' in msg && msg.id != null) {
-          void stdioTransport
-            .send({
-              jsonrpc: '2.0',
-              id: msg.id,
-              error: {
-                code: -32603,
-                message:
-                  'WorkRail primary server is temporarily unavailable — reconnecting. ' +
-                  'Wait a few seconds and retry your tool call. ' +
-                  'If this persists, tell the user: ' +
-                  '"WorkRail disconnected. Check the terminal running workrail for the ' +
-                  'error message, then run /mcp in Claude to reconnect."',
-              },
-            } as JSONRPCMessage)
-            .catch(() => undefined);
-        }
+      case 'reconnecting':
+        // Both states mean "no primary available right now."
+        // 'connecting' = initial handshake in progress.
+        // 'reconnecting' = prior connection lost, loop running.
+        sendUnavailableError(msg, (m) => stdioTransport.send(m));
         return;
-      }
 
       case 'closed':
         return;
@@ -538,3 +534,29 @@ export async function startBridgeServer(
 // ---------------------------------------------------------------------------
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Send a JSON-RPC error response to the IDE for requests that arrive while
+ * no primary is available (connecting or reconnecting states).
+ *
+ * Notifications have no id — they never get a response. Only requests do.
+ */
+function sendUnavailableError(
+  msg: JSONRPCMessage,
+  send: (m: JSONRPCMessage) => Promise<void>,
+): void {
+  if (!('id' in msg) || msg.id == null) return; // notifications need no response
+  void send({
+    jsonrpc: '2.0',
+    id: msg.id,
+    error: {
+      code: -32603,
+      message:
+        'WorkRail primary server is temporarily unavailable — reconnecting. ' +
+        'Wait a few seconds and retry your tool call. ' +
+        'If this persists, tell the user: ' +
+        '"WorkRail disconnected. Check the terminal running workrail for the ' +
+        'error message, then run /mcp in Claude to reconnect."',
+    },
+  } as JSONRPCMessage).catch(() => undefined);
+}

@@ -72,18 +72,16 @@ describe('reconnectWithBackoff', () => {
   const cfg = { ...DEFAULT_BRIDGE_CONFIG, reconnectBaseDelayMs: 0 };
 
   it('returns reconnected on first immediate attempt', async () => {
-    const detect = vi.fn().mockResolvedValue(fakeTransport);
+    // detect returns boolean — transport ownership is inside detect's implementation
+    const detect = vi.fn().mockResolvedValue(true);
     const result = await reconnectWithBackoff({ detect, config: cfg, signal: new AbortController().signal });
-    expect(result).toMatchObject({ kind: 'reconnected', transport: fakeTransport });
+    expect(result).toEqual<ReconnectOutcome>({ kind: 'reconnected' });
     expect(detect).toHaveBeenCalledTimes(1);
   });
 
   it('first attempt is immediate (no initial delay)', async () => {
     const callTimes: number[] = [];
-    const detect = vi.fn().mockImplementation(async () => {
-      callTimes.push(Date.now());
-      return fakeTransport;
-    });
+    const detect = vi.fn().mockImplementation(async () => { callTimes.push(Date.now()); return true; });
     const start = Date.now();
     await reconnectWithBackoff({ detect, config: { ...cfg, reconnectBaseDelayMs: 5000 }, signal: new AbortController().signal });
     expect(callTimes[0]! - start).toBeLessThan(100);
@@ -91,14 +89,14 @@ describe('reconnectWithBackoff', () => {
 
   it('returns reconnected on a later attempt', async () => {
     let calls = 0;
-    const detect = vi.fn().mockImplementation(async () => (++calls >= 3 ? fakeTransport : null));
+    const detect = vi.fn().mockImplementation(async () => ++calls >= 3);
     const result = await reconnectWithBackoff({ detect, config: { ...cfg, reconnectMaxAttempts: 5 }, signal: new AbortController().signal });
-    expect(result).toMatchObject({ kind: 'reconnected' });
+    expect(result).toEqual<ReconnectOutcome>({ kind: 'reconnected' });
     expect(calls).toBe(3);
   });
 
   it('returns exhausted when all attempts fail', async () => {
-    const detect = vi.fn().mockResolvedValue(null);
+    const detect = vi.fn().mockResolvedValue(false);
     const result = await reconnectWithBackoff({ detect, config: { ...cfg, reconnectMaxAttempts: 3 }, signal: new AbortController().signal });
     expect(result).toEqual<ReconnectOutcome>({ kind: 'exhausted' });
     expect(detect).toHaveBeenCalledTimes(3);
@@ -107,7 +105,7 @@ describe('reconnectWithBackoff', () => {
   it('returns aborted when signal is already fired', async () => {
     const ac = new AbortController();
     ac.abort();
-    const detect = vi.fn().mockResolvedValue(null);
+    const detect = vi.fn().mockResolvedValue(false);
     const result = await reconnectWithBackoff({ detect, config: cfg, signal: ac.signal });
     expect(result).toEqual<ReconnectOutcome>({ kind: 'aborted' });
     expect(detect).not.toHaveBeenCalled();
@@ -116,7 +114,7 @@ describe('reconnectWithBackoff', () => {
   it('returns aborted when signal fires during backoff', async () => {
     const ac = new AbortController();
     let calls = 0;
-    const detect = vi.fn().mockImplementation(async () => { calls++; ac.abort(); return null; });
+    const detect = vi.fn().mockImplementation(async () => { calls++; ac.abort(); return false; });
     const result = await reconnectWithBackoff({ detect, config: { ...cfg, reconnectBaseDelayMs: 10, reconnectMaxAttempts: 10 }, signal: ac.signal });
     expect(result).toEqual<ReconnectOutcome>({ kind: 'aborted' });
     expect(calls).toBeLessThan(5);
@@ -138,13 +136,12 @@ describe('handleReconnectOutcome', () => {
 
   it('does not set state on reconnected — buildConnectedTransport owns that transition', async () => {
     const setConnectionState = vi.fn();
+    // reconnected carries no transport — detect() owns the side effects
     await handleReconnectOutcome(
-      { kind: 'reconnected', transport: fakeTransport },
+      { kind: 'reconnected' },
       reconnecting(3),
       { setConnectionState, performShutdown: vi.fn(), startReconnectLoop: vi.fn(), triggerSpawn: vi.fn().mockResolvedValue(undefined), config: cfg },
     );
-    // State was already set atomically inside buildConnectedTransport.
-    // handleReconnectOutcome must not duplicate the transition.
     expect(setConnectionState).not.toHaveBeenCalled();
   });
 
