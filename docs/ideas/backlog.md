@@ -1075,3 +1075,46 @@ interface TriggerDefinition {
 **Credential model:** keyring-based named refs. Two backends: OS keychain (dev) + encrypted env-file (Docker/CI/headless). Never plaintext in trigger definitions.
 
 Full design at: `docs/design/workrail-auto-trigger-system.md`
+
+**CORRECTION: pi-mono termination bridge (third agent, deepest read):**
+
+**`getFollowUpMessages()` is the WRONG termination bridge.** Earlier finding was incorrect. Correct approach:
+
+- Use `agent.steer()` for step injection -- fires after each tool batch, inside the inner loop
+- `followUp()` only fires when agent would otherwise stop -- adds an unnecessary extra LLM turn per workflow step
+- **Termination:** simply don't call `steer()` when workflow is complete. Agent stops naturally.
+
+**Correct daemon runner pattern (from mom's `createRunner()`):**
+- Subscribe to agent once at daemon session creation
+- Mutable `runState` reset per run (in closure)
+- `agent.steer()` injects next step after each tool batch
+- When `isComplete=true` from `continue_workflow`, stop calling `steer()` -- agent exits cleanly
+
+**`abort()` is best-effort** for synchronous engine operations (SQLite/HMAC can't be interrupted). Don't rely on it for immediate cancellation.
+
+**Claude Code deep dive -- THREE CORRECTIONS to backlog (deepest source read, 11 files):**
+
+**Correction 1: Session memory injection does NOT work for daemon mode.** The session memory file is Claude Code-internal, at a path only Claude Code controls. WorkRail's daemon calls Anthropic API directly via pi-mono -- there is no Claude Code session memory file. **Daemon mode must use system prompt injection:** prepend `<workrail_session_state>` XML block to system prompt before each `agentLoop()` call (last 3 step note summaries, ~200 tokens each).
+
+**Correction 2: PreCompact hooks do NOT fire for Tier 1 (Session Memory Compaction).** `trySessionMemoryCompaction()` runs before hooks are invoked. When Tier 1 succeeds, PreCompact hooks are never called. Hooks only cover Tier 2 (legacy/reactive) compaction.
+
+**Correction 3: `sessionRunner.ts` is NOT the daemon pattern.** It's Claude.ai web UI's bridge for controlling a local Claude CLI subprocess. WorkRail's daemon calls Anthropic API directly.
+
+**Correct integration architecture:**
+
+For **human-driven sessions (Claude Code + WorkRail MCP):**
+```
+PreCompact hook → output step notes as custom compaction instructions
+PostToolUse hook (Bash|Write|Edit) → log tool calls to evidence NDJSON file
+PreToolUse hook (continue_workflow) → check evidence log; deny if required evidence missing
+```
+Evidence gate is fail-open when log missing.
+
+For **daemon mode (WorkRail daemon + pi-mono):**
+```
+Before each agentLoop() call: prepend <workrail_session_state> XML to system prompt
+Evidence gate: in-process check before executeContinueWorkflow() -- reads tool_call_observed
+events from session store (stronger than hook-based, no subprocess reliability concern)
+```
+
+In-process evidence gate is architecturally superior for daemon mode -- direct session store reads, no subprocess IPC.
