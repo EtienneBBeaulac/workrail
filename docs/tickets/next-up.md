@@ -4,36 +4,27 @@ Groomed near-term tickets. Check `docs/roadmap/now-next-later.md` first for the 
 
 ---
 
-## Ticket 1: Open PR for fix-multi-instance-gaps
+## Ticket 1: Execution trace Layer 3b -- ghost nodes (backend required)
 
-Branch `fix/etienneb/multi-instance-gaps` has a committed + pushed fix: `fix(mcp): resolve three multi-instance safety gaps` (HttpServer.ts, http-entry.ts, tests). Needs a PR opened and merged.
+### What it is
 
----
+Skipped steps shown in the DAG at 0.25 opacity with a `[ SKIPPED ]` badge and dashed border, so users immediately see the scale of what was bypassed without any interaction.
 
-## Ticket 2: Execution trace Layer 3a (no backend)
+### Blocked on
 
-### What to build
+`ConsoleDagNode` has no `stepId` field. The backend needs to either:
+- Emit a step_id-to-position mapping in `executionTraceSummary`
+- Or emit synthetic `skipped_step` entries as DAG nodes
 
-Three independent DAG annotations, all using existing trace data:
+Confirm whether `selected_next_step` trace refs already include skipped step IDs (check `src/v2/durable-core/domain/decision-trace-builder.ts`).
 
-- **Edge cause diamonds** -- 10×10px rotated square at each edge midpoint, character code (C/F/D/>) + color indicating trace item kind. Hover shows the trace item summary.
-- **Loop bracket in gutter** -- amber vertical line spanning looped nodes, `[ LOOP ]` top cap + `[ // Nx ]` bottom cap. Suppressed for single-iteration loops.
-- **`[ CAUSE ]` footer on blocked_attempt nodes** -- expandable footer showing the blocker summary from the trace.
+### Design reference
 
-### Files
-
-- `console/src/components/RunLineageDag.tsx`
-- `console/src/components/NodeDetailSection.tsx` (CAUSE footer section)
-
-### Notes
-
-- `run.executionTraceSummary` is already available in `RunLineageDag` (used for contextFacts chips). No new props needed.
-- Layer 3b (ghost nodes for skipped steps) requires backend confirmation that skipped step IDs are emitted in trace refs -- keep separate.
-- See `docs/design/console-execution-trace-discovery.md` for the full design.
+`docs/design/console-execution-trace-discovery.md` -- section on ghost nodes
 
 ---
 
-## Ticket 3: Legacy workflow modernization -- exploration-workflow.json
+## Ticket 2: Legacy workflow modernization -- exploration-workflow.json
 
 ### Goal
 
@@ -54,7 +45,7 @@ Modernize `workflows/exploration-workflow.json` to current v2/lean authoring pat
 
 ---
 
-## Ticket 4: Design console execution-trace explainability (Layer 3b -- ghost nodes)
+## Ticket 3: Design console execution-trace explainability (Layer 3b -- ghost nodes)
 
 ### Status
 
@@ -69,6 +60,8 @@ Blocked on backend confirmation. `ConsoleDagNode` has no `stepId` field. The bac
 
 ## Recently completed
 
+- ~~**Ticket: Execution trace Layer 3a**~~ (done -- edge cause diamonds, loop bracket, CAUSE footer on blocked_attempt nodes, #347)
+- ~~**Ticket: fix-multi-instance-gaps**~~ (done -- three multi-instance HttpServer safety gaps, #346)
 - ~~**Ticket: Console execution trace Layer 1 + 2**~~ (done -- `[ TRACE ]` tab, NodeDetailSection routing sections, condition tracing, #340)
 - ~~**Ticket: Top-level runCondition tracing**~~ (done -- `formatConditionTrace`, `traceStepRunConditionSkipped/Passed`, `nextTopLevel` emits evaluated_condition entries)
 - ~~**Ticket: Filter chips cross-contamination**~~ (done -- `sourceFilteredWorkflows`/`tagFilteredWorkflows` in ViewModel)
