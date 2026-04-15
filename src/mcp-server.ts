@@ -13,6 +13,14 @@
  * bridge mode instead of spinning up a full second server. The bridge forwards
  * JSON-RPC between the IDE's stdio connection and the primary's HTTP endpoint,
  * giving true single-instance semantics across all clients and integrations.
+ *
+ * Zombie-bridge guard: when an MCP client uses `type: http` with a `command`
+ * field, Claude Code spawns the command to auto-start the server but then
+ * communicates via HTTP — stdin of the command process stays empty. Without
+ * the guard, those processes would start in bridge mode and hold idle HTTP
+ * sessions against the primary, overloading it with N concurrent sessions.
+ * The guard probes stdin briefly before committing to bridge mode: processes
+ * that receive no MCP data exit cleanly instead of becoming zombie bridges.
  */
 
 import { resolveTransportMode } from './mcp/transports/transport-mode.js';
@@ -33,6 +41,46 @@ export { composeServer } from './mcp/server.js';
 /** Default MCP HTTP transport port. */
 const DEFAULT_MCP_PORT = 3100;
 
+/**
+ * How long to wait for stdin data before concluding there is no real MCP
+ * client connected to this process (ms). A real stdio MCP client sends its
+ * `initialize` request within ~50ms; 150ms gives comfortable margin.
+ */
+const STDIO_CLIENT_PROBE_MS = 150;
+
+/**
+ * Wait up to `timeoutMs` for `stdin` to become readable without consuming data.
+ *
+ * Uses the `readable` event so the stream stays paused — bytes remain in the
+ * buffer for the MCP transport to read once it starts. Returns true if data
+ * arrives within the window, false on timeout.
+ *
+ * `timeoutMs` and `stdin` are explicit parameters (not hardcoded globals) so
+ * tests can pass 0ms and a fake stream without real-time delays or process
+ * coupling. Production callers use STDIO_CLIENT_PROBE_MS and process.stdin.
+ */
+export function waitForStdinReadable(
+  timeoutMs: number,
+  stdin: NodeJS.ReadableStream = process.stdin,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    stdin.pause(); // prevent accidental drain while probing
+
+    const timer = setTimeout(() => {
+      stdin.removeListener('readable', onReadable);
+      resolve(false);
+    }, timeoutMs);
+
+    const onReadable = () => {
+      clearTimeout(timer);
+      stdin.removeListener('readable', onReadable);
+      resolve(true);
+    };
+
+    stdin.once('readable', onReadable);
+  });
+}
+
 async function main(): Promise<void> {
   const mode = resolveTransportMode(process.env);
 
@@ -41,6 +89,19 @@ async function main(): Promise<void> {
   if (mode.kind === 'stdio') {
     const primaryPort = await detectHealthyPrimary(DEFAULT_MCP_PORT);
     if (primaryPort != null) {
+      // Zombie-bridge guard: probe stdin before starting the bridge.
+      // A real stdio client (Claude Code stdio, firebender) sends MCP data
+      // immediately. An HTTP-type `command` helper never writes to stdin.
+      // Without this check, N command helpers become N idle bridges and
+      // overload the primary.
+      const hasClient = await waitForStdinReadable(STDIO_CLIENT_PROBE_MS, process.stdin);
+      if (!hasClient) {
+        console.error(
+          `[Startup] Primary on :${primaryPort}, no stdio client within ${STDIO_CLIENT_PROBE_MS}ms — exiting`,
+        );
+        process.exit(0);
+      }
+
       console.error(`[Startup] Primary detected on :${primaryPort} — starting in bridge mode`);
       try {
         await startBridgeServer(primaryPort);
