@@ -20,7 +20,8 @@
   "preconditions": [
     "User has a recurring task or problem a workflow should solve, or an existing workflow that should be modernized.",
     "Agent has access to file creation, editing, and terminal tools.",
-    "Agent can run workflow validators such as `npm run validate:registry` or equivalent."
+    "Agent can run workflow validators such as `npm run validate:registry` or equivalent.",
+    "Write output workflow JSON to ~/.workrail/workflows/<name>.json by default. Only write to a repo's workflows/ dir when the user explicitly asks to contribute a bundled workflow."
   ],
   "metaGuidance": [
     "REFERENCE HIERARCHY: treat workflow-schema as legal truth for structure. Treat authoring-spec as canonical current guidance for what makes a workflow good. Treat authoring-provenance as optional maintainer context only.",
@@ -37,7 +38,8 @@
     "ANTI-PATTERNS TO AVOID IN AUTHORED WORKFLOWS: no pseudo-function metaGuidance, no learning-path branching, no satisfaction-score loops, no heavy clarification batteries, no regex-as-primary-validation, no celebration phases.",
     "MODERNIZATION DISTINCTION: remove format problems (pseudo-DSL, regex, A/B phases). Preserve or equivalently replace behavioral mechanisms (forcing functions, hard gates, domain knowledge). Never silently drop a mechanism that prevents a real failure mode.",
     "EQUIVALENT REPLACEMENT: a replacement only qualifies if it prevents the same failure mode with similar enforcement strength. A rubric suggestion is not equivalent to a hard gate. Document the tradeoff explicitly when the replacement is weaker.",
-    "NEVER COMMIT MARKDOWN FILES UNLESS USER EXPLICITLY ASKS."
+    "NEVER COMMIT MARKDOWN FILES UNLESS USER EXPLICITLY ASKS.",
+    "OUTPUT LOCATION: write workflow JSON to ~/.workrail/workflows/<name>.json unless user asks to contribute a bundled workflow. Never write to a repo's workflows/ dir by default -- it may be public."
   ],
   "references": [
     {
