@@ -12,8 +12,10 @@
  *   The daemon must not call createWorkRailEngine() -- engineActive guard blocks reuse.
  * - Tools THROW on failure (pi-mono contract). runWorkflow() catches and returns
  *   a WorkflowRunResult discriminated union (errors-as-data at the outer boundary).
- * - continueToken + checkpointToken are persisted atomically to daemon-state.json
- *   BEFORE returning from each continue_workflow tool call. Crash recovery invariant.
+ * - continueToken + checkpointToken are persisted atomically to
+ *   ~/.workrail/daemon-sessions/<sessionId>.json BEFORE returning from each
+ *   continue_workflow tool call. Each concurrent session has its own file --
+ *   they never clobber each other. Crash recovery invariant.
  */
 
 import 'reflect-metadata';
@@ -22,6 +24,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
+import { randomUUID } from 'node:crypto';
 import { loadPiAi, loadPiAgentCore } from "./pi-mono-loader.js";
 import type { Agent, AgentTool, AgentToolResult, AgentEvent } from "./pi-mono-loader.js";
 import type { TSchema } from "./pi-mono-loader.js";
@@ -29,6 +32,7 @@ import type { UserMessage } from '@mariozechner/pi-ai';
 import type { V2ToolContext } from '../mcp/types.js';
 import { executeStartWorkflow } from '../mcp/handlers/v2-execution/start.js';
 import { executeContinueWorkflow } from '../mcp/handlers/v2-execution/index.js';
+import type { DaemonRegistry } from '../v2/infra/in-memory/daemon-registry/index.js';
 
 const execAsync = promisify(exec);
 
@@ -39,8 +43,23 @@ const execAsync = promisify(exec);
 /** Maximum wall-clock time allowed for a single Bash tool invocation. */
 const BASH_TIMEOUT_MS = 5 * 60 * 1000;
 
-/** Path to the daemon crash-recovery state file. */
-const DAEMON_STATE_PATH = path.join(os.homedir(), '.workrail', 'daemon-state.json');
+/**
+ * Maximum wall-clock time allowed for a single workflow run (30 minutes).
+ * If the agent loop does not complete within this window, runWorkflow() aborts
+ * the agent and returns { _tag: 'error', message: 'Workflow timed out' }.
+ */
+const WORKFLOW_TIMEOUT_MS = 30 * 60 * 1000;
+
+/**
+ * Directory that holds per-session crash-recovery state files.
+ * Each concurrent runWorkflow() call writes to its own <sessionId>.json file,
+ * so concurrent sessions never clobber each other.
+ *
+ * Note: sessionId is a process-local UUID generated at runWorkflow() entry --
+ * it is NOT the WorkRail server session ID. The server continueToken is stored
+ * as a value inside the file, so crash-resume can retrieve it by reading the file.
+ */
+export const DAEMON_SESSIONS_DIR = path.join(os.homedir(), '.workrail', 'daemon-sessions');
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -85,22 +104,47 @@ export type WorkflowRunResult = WorkflowRunSuccess | WorkflowRunError;
 // ---------------------------------------------------------------------------
 
 /**
- * Atomically persist the current session tokens to ~/.workrail/daemon-state.json.
+ * Atomically persist the current session tokens to ~/.workrail/daemon-sessions/<sessionId>.json.
  *
  * Uses the temp-file-then-rename pattern so a crash mid-write never leaves a
  * corrupt state file. A previous checkpoint token survives if the rename fails.
+ *
+ * @param sessionId - Process-local UUID generated at runWorkflow() entry. Keys the file.
  */
 async function persistTokens(
+  sessionId: string,
   continueToken: string,
   checkpointToken: string | null,
 ): Promise<void> {
-  const dir = path.dirname(DAEMON_STATE_PATH);
-  await fs.mkdir(dir, { recursive: true });
+  await fs.mkdir(DAEMON_SESSIONS_DIR, { recursive: true });
 
+  const sessionPath = path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`);
   const state = JSON.stringify({ continueToken, checkpointToken, ts: Date.now() }, null, 2);
-  const tmp = `${DAEMON_STATE_PATH}.tmp`;
+  const tmp = `${sessionPath}.tmp`;
   await fs.writeFile(tmp, state, 'utf8');
-  await fs.rename(tmp, DAEMON_STATE_PATH);
+  await fs.rename(tmp, sessionPath);
+}
+
+/**
+ * Read a previously persisted session state from ~/.workrail/daemon-sessions/<sessionId>.json.
+ *
+ * Returns null if the file does not exist (first run, or already cleaned up after success).
+ * The continueToken can be used to resume the session with executeContinueWorkflow().
+ *
+ * @param sessionId - The process-local UUID that was used when the session was started.
+ */
+export async function readDaemonSessionState(
+  sessionId: string,
+): Promise<{ continueToken: string; checkpointToken: string | null } | null> {
+  const sessionPath = path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`);
+  try {
+    const raw = await fs.readFile(sessionPath, 'utf8');
+    const parsed = JSON.parse(raw) as { continueToken: string; checkpointToken: string | null };
+    return { continueToken: parsed.continueToken, checkpointToken: parsed.checkpointToken };
+  } catch {
+    // ENOENT or parse error -- treat as no persisted state
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -158,6 +202,7 @@ async function getSchemas(): Promise<Record<string, any>> {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function makeStartWorkflowTool(
+  sessionId: string,
   ctx: V2ToolContext,
   onComplete: (notes: string) => void,
   schemas: Record<string, any>,
@@ -195,7 +240,7 @@ function makeStartWorkflowTool(
       const continueToken = out.continueToken ?? '';
       const checkpointToken = out.checkpointToken ?? null;
       if (continueToken) {
-        await persistTokens(continueToken, checkpointToken);
+        await persistTokens(sessionId, continueToken, checkpointToken);
       }
 
       if (out.isComplete) {
@@ -220,6 +265,7 @@ function makeStartWorkflowTool(
 }
 
 function makeContinueWorkflowTool(
+  sessionId: string,
   ctx: V2ToolContext,
   onAdvance: (nextStepText: string, continueToken: string) => void,
   onComplete: (notes: string) => void,
@@ -261,7 +307,7 @@ function makeContinueWorkflowTool(
       const continueToken = out.continueToken ?? '';
       const checkpointToken = out.checkpointToken ?? null;
       if (continueToken) {
-        await persistTokens(continueToken, checkpointToken);
+        await persistTokens(sessionId, continueToken, checkpointToken);
       }
 
       if (out.isComplete) {
@@ -413,19 +459,35 @@ function buildUserMessage(text: string): UserMessage {
  * @param trigger - The workflow to run and its context.
  * @param ctx - The V2ToolContext from the shared DI container.
  * @param apiKey - Anthropic API key for the Claude model.
+ * @param daemonRegistry - Optional registry for tracking live daemon sessions.
+ *   When provided, register/heartbeat/unregister are called at the appropriate
+ *   lifecycle points. When omitted, registry operations are skipped.
  * @returns WorkflowRunResult discriminated union. Never throws.
  */
 export async function runWorkflow(
   trigger: WorkflowTrigger,
   ctx: V2ToolContext,
   apiKey: string,
+  daemonRegistry?: DaemonRegistry,
 ): Promise<WorkflowRunResult> {
+  // ---- Session ID (process-local, crash safety) ----
+  // Each runWorkflow() call generates a unique UUID that keys the per-session
+  // state file in DAEMON_SESSIONS_DIR. This UUID is NOT the WorkRail server
+  // session ID -- it is a process-local identifier. The server continueToken
+  // is stored as a value inside the file, so crash-resume can retrieve it.
+  const sessionId = randomUUID();
+  console.log(`[WorkflowRunner] Session started: sessionId=${sessionId} workflowId=${trigger.workflowId}`);
+
+  // ---- DaemonRegistry: register session ----
+  daemonRegistry?.register(sessionId, trigger.workflowId);
+
   // ---- Model setup ----
   let model;
   try {
     const { getModel } = await loadPiAi();
     model = getModel('anthropic', 'claude-sonnet-4-5');
   } catch (err) {
+    daemonRegistry?.unregister(sessionId, 'failed');
     return {
       _tag: 'error',
       workflowId: trigger.workflowId,
@@ -444,6 +506,8 @@ export async function runWorkflow(
 
   const onAdvance = (stepText: string, _continueToken: string): void => {
     pendingSteerText = stepText;
+    // Heartbeat on each step advance -- the session is alive and making progress.
+    daemonRegistry?.heartbeat(sessionId);
   };
 
   const onComplete = (_notes: string): void => {
@@ -457,8 +521,8 @@ export async function runWorkflow(
   // Cast through unknown to satisfy AgentTool<TSchema> -- each tool factory
   // produces a concrete TypeBox schema type; the agent loop accepts the base type.
   const tools: AgentTool<TSchema>[] = [
-    makeStartWorkflowTool(ctx, onComplete, schemas) as unknown as AgentTool<TSchema>,
-    makeContinueWorkflowTool(ctx, onAdvance, onComplete, schemas) as unknown as AgentTool<TSchema>,
+    makeStartWorkflowTool(sessionId, ctx, onComplete, schemas) as unknown as AgentTool<TSchema>,
+    makeContinueWorkflowTool(sessionId, ctx, onAdvance, onComplete, schemas) as unknown as AgentTool<TSchema>,
     makeBashTool(trigger.workspacePath, schemas) as unknown as AgentTool<TSchema>,
     makeReadTool(schemas) as unknown as AgentTool<TSchema>,
     makeWriteTool(schemas) as unknown as AgentTool<TSchema>,
@@ -511,7 +575,18 @@ export async function runWorkflow(
   let errorMessage: string | undefined;
 
   try {
-    await agent.prompt(buildUserMessage(initialPrompt));
+    // ---- Whole-workflow timeout ----
+    // If the agent loop does not complete within WORKFLOW_TIMEOUT_MS, abort the
+    // agent and propagate a timeout error through the existing error-handling path.
+    // agent.abort() is idempotent (optional-chained on activeRun in pi-agent-core).
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Workflow timed out')), WORKFLOW_TIMEOUT_MS),
+    );
+    await Promise.race([agent.prompt(buildUserMessage(initialPrompt)), timeoutPromise])
+      .catch((err: unknown) => {
+        agent.abort();
+        throw err;
+      });
 
     // Extract stop reason from the last assistant message.
     // Note: findLast is ES2023; use a reverse-scan loop for ES2020 compat.
@@ -535,6 +610,7 @@ export async function runWorkflow(
   }
 
   if (stopReason === 'error' || errorMessage) {
+    daemonRegistry?.unregister(sessionId, 'failed');
     return {
       _tag: 'error',
       workflowId: trigger.workflowId,
@@ -542,6 +618,15 @@ export async function runWorkflow(
       stopReason,
     };
   }
+
+  // ---- Clean up state file on success ----
+  // The state file is evidence of an in-flight session. Delete it on clean completion
+  // so the CLI crash-recovery scan only surfaces genuinely orphaned sessions.
+  await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`)).catch(() => {
+    // Best-effort: ignore ENOENT (session never persisted tokens) and other errors.
+  });
+
+  daemonRegistry?.unregister(sessionId, 'completed');
 
   return {
     _tag: 'success',
