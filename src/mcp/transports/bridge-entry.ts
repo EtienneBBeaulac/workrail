@@ -45,9 +45,17 @@ export interface BridgeConfig {
   /** Timeout (ms) before logging a warning about a slow primary response. */
   readonly forwardTimeoutMs: number;
   /**
-   * How many times the bridge may spawn a new primary before giving up.
-   * Each spawn cycle is followed by a fresh reconnect loop. Prevents
-   * infinite respawn loops when the primary is repeatedly crashing.
+   * How many times the bridge may spawn a new primary per connection-failure
+   * cycle before giving up and shutting down.
+   *
+   * This is a per-death-cycle budget, not a lifetime budget. Each time the
+   * primary closes the connection, t.onclose reseeds the budget to this
+   * value. So a bridge that survives multiple primary crashes over hours will
+   * get `maxRespawnAttempts` spawn attempts for each crash, not total.
+   *
+   * Rationale: a long-running bridge should not permanently give up after
+   * hitting a quota set at startup hours ago. The budget exists to prevent
+   * rapid-crash loops, not to cap total lifetime spawn activity.
    */
   readonly maxRespawnAttempts: number;
 }
@@ -308,13 +316,12 @@ export async function startBridgeServer(
     '@modelcontextprotocol/sdk/client/streamableHttp.js'
   );
 
+  // Dynamic import — must be async-compatible and works in both ESM and CJS.
+  // Do NOT use require('child_process') here; this module compiles to ESM where
+  // require is not defined. Dynamic import is the correct cross-format approach.
+  const { spawn: nodeSpawn } = await import('child_process');
   const spawnFn: SpawnLike =
-    deps.spawn ??
-    ((...args) => {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { spawn } = require('child_process') as typeof import('child_process');
-      return spawn(...(args as Parameters<typeof spawn>)) as ReturnType<typeof spawn>;
-    });
+    deps.spawn ?? ((command, args, opts) => nodeSpawn(command, args as string[], opts));
 
   // AbortController for shutdown — platform-native, not a mutable boolean.
   const shutdownController = new AbortController();
@@ -323,6 +330,13 @@ export async function startBridgeServer(
   const stdioTransport = new StdioServerTransport();
 
   // Single explicitly managed mutable variable.
+  // Note: the initial state is 'reconnecting' even before the first connection
+  // attempt. This is a pragmatic modeling choice — the state is immediately
+  // overwritten to 'connected' on successful initial connection, and the
+  // reconnecting state is only used for message routing AFTER initialization.
+  // A dedicated 'connecting' variant would be more precise but is YAGNI here
+  // since the initial path is synchronous and the state is never observed
+  // externally in the 'reconnecting' shape before the first connection succeeds.
   let connectionState: ConnectionState = {
     kind: 'reconnecting',
     attempt: 0,
@@ -406,18 +420,27 @@ export async function startBridgeServer(
         if (detected == null) return null;
         return buildConnectedTransport();
       },
-    }).then((outcome) => {
-      // Snapshot again at outcome time — state may have changed (e.g. shutdown).
-      const stateAtOutcome = connectionState;
-      if (stateAtOutcome.kind !== 'reconnecting') return; // race: already handled
-      return handleReconnectOutcome(outcome, stateAtOutcome, {
-        setConnectionState,
-        performShutdown,
-        startReconnectLoop,
-        triggerSpawn: () => spawnPrimary(primaryPort, { spawn: spawnFn, fetch: deps.fetch }),
-        config,
+    })
+      .then((outcome) => {
+        // Snapshot again at outcome time — state may have changed (e.g. shutdown).
+        const stateAtOutcome = connectionState;
+        if (stateAtOutcome.kind !== 'reconnecting') return; // race: already handled
+        return handleReconnectOutcome(outcome, stateAtOutcome, {
+          setConnectionState,
+          performShutdown,
+          startReconnectLoop,
+          triggerSpawn: () => spawnPrimary(primaryPort, { spawn: spawnFn, fetch: deps.fetch }),
+          config,
+        });
+      })
+      .catch((err) => {
+        // An unexpected error in the reconnect loop or outcome handler — log it
+        // so it is visible (Observability as a constraint) rather than silently
+        // swallowed by the void discard. The loop is dead at this point; if the
+        // primary is still alive the bridge will continue forwarding; if not, the
+        // next t.onclose will start a fresh loop.
+        console.error('[Bridge] Unexpected error in reconnect loop:', err);
       });
-    });
   };
 
   // ---------------------------------------------------------------------------
