@@ -778,3 +778,37 @@ type WorkflowContinueResult =
 **VPN note:** Tailscale handles most corporate VPN conflicts. `workrail tunnel` sidesteps VPN entirely since it's outbound-only from the laptop. Either approach is better than trying to punch through corporate firewalls.
 
 **Priority:** Post-MVP. Design the REST control plane and console with this in mind -- clean JSON API, no server-side rendering assumptions, authentication token model that works over tunnels.
+
+---
+
+### WorkRail Auto: cloud-hosted autonomous platform (long-term vision) ⭐⭐
+
+**Goal:** WorkRail Auto runs on a server 24/7, connected to your engineering ecosystem, working autonomously without a laptop open.
+
+**What this enables:**
+- GitLab opens an MR → WorkRail reviews it, posts comment, done. Laptop closed.
+- Jira ticket moves to In Progress → WorkRail starts coding task, pushes branch, opens draft MR. Review it in the morning.
+- PagerDuty fires → WorkRail runs incident investigation workflow, posts findings to Slack.
+- Scheduled: nightly test suite run, auto-filed bugs for new failures.
+- Docs updated → WorkRail triggers documentation review workflow.
+
+**Integrations needed (not exhaustive):**
+- **Triggers:** GitLab/GitHub webhooks, Jira webhooks, Linear, PagerDuty, Slack slash commands, cron
+- **Actions:** GitLab/GitHub API (MR comments, branch creation, commits), Jira (transition tickets, add comments), Slack (post messages, threads), Confluence/Notion (read docs), email
+- **Auth:** Per-org credential vault (Jira token, GitLab token, Slack token, etc.)
+
+**Architecture implications for hosted:**
+- Multi-tenancy: multiple users/orgs, isolated session stores, isolated credential vaults
+- The tunnel problem disappears -- server has a public IP, webhooks just work
+- Credential vaulting: secrets stored encrypted per org, injected at session start
+- Horizontal scaling: multiple daemon instances consuming from a shared trigger queue
+- Rate limiting per org, per integration
+
+**Relationship to self-hosted:**
+- Self-hosted (local) is always free, always open source, always works offline
+- Hosted WorkRail Auto is the natural SaaS layer -- same engine, same workflows, managed infrastructure
+- Workflows written for self-hosted run unchanged on hosted (this is the portability guarantee)
+
+**Priority:** Long-term. Design the local daemon with multi-tenancy seams in mind from the start (don't hardcode single-user assumptions), but don't build the hosted layer until the local daemon is proven.
+
+**Reference:** OpenClaw's channel/extension architecture is the best existing model for multi-integration connectivity. AutoGPT's block/trigger system is the best model for declarative integration configuration.
