@@ -2,7 +2,7 @@
 
 Lightweight cross-cutting roadmap. **This is the single entry point** -- check here first before digging into tickets or plan docs.
 
-*Last updated: 2026-04-14*
+*Last updated: 2026-04-15*
 
 ---
 
@@ -16,11 +16,7 @@ Lightweight cross-cutting roadmap. **This is the single entry point** -- check h
 
 *(groomed, roughly ordered by value -- ready to execute)*
 
-1. **Execution trace Layer 3** -- edge cause diamonds on DAG edges, loop bracket in gutter, `[ CAUSE ]` expandable footer on `blocked_attempt` nodes. No backend changes needed. One data dependency for ghost nodes (skipped steps) -- needs backend confirmation before that sub-feature. See `docs/design/console-execution-trace-discovery.md`.
-
-2. **`fix-multi-instance-gaps` PR** -- branch `fix/etienneb/multi-instance-gaps` has 1 committed, pushed, unpushed-to-PR change: `fix(mcp): resolve three multi-instance safety gaps` (HttpServer.ts, http-entry.ts, tests). Needs a PR opened and merged.
-
-3. **Legacy workflow modernization** -- `exploration-workflow.json` is the highest-priority candidate. `mr-review-workflow.json` and `bug-investigation.json` are next. See `docs/roadmap/open-work-inventory.md` for the full prioritized list and what "modernization" means.
+1. **Legacy workflow modernization** -- `exploration-workflow.json` is the highest-priority candidate. `mr-review-workflow.json` and `bug-investigation.json` are next. See `docs/roadmap/open-work-inventory.md` for the full prioritized list and what "modernization" means.
 
 ---
 
@@ -28,7 +24,7 @@ Lightweight cross-cutting roadmap. **This is the single entry point** -- check h
 
 *(not yet groomed; rough priority order)*
 
-- **Console engine-trace UX -- Layer 3b (ghost nodes)** -- skipped steps shown at 0.25 opacity with `[ SKIPPED ]` badge; requires backend to emit skipped step IDs in trace refs
+- **Execution trace Layer 3b (ghost nodes)** -- skipped steps shown at 0.25 opacity with `[ SKIPPED ]` badge; requires backend to emit skipped step IDs in trace refs -- needs design + backend confirmation first
 - **Dashboard artifacts** -- replace file-based docs with session-scoped structured outputs rendered in the console; design exists in `workflow-execution-contract.md`
 - **Evict stale repo roots** -- `remembered-roots-store` accumulates forever; stale repos inflate worktree counts. Add TTL eviction. See #241.
 - **Typed SSE events + server-side `.git/` watchers** -- true live worktree updates without polling. See #242.
@@ -54,6 +50,8 @@ Lightweight cross-cutting roadmap. **This is the single entry point** -- check h
 
 *(moved here to keep Now/Next clean)*
 
+- ~~**Execution trace Layer 3a**~~ -- edge cause diamonds on DAG edges, loop bracket in gutter, `[ CAUSE ]` expandable footer on blocked_attempt nodes (#347)
+- ~~**`fix-multi-instance-gaps`**~~ -- three multi-instance HttpServer safety gaps resolved (#346)
 - ~~**GitHub branch protection + pre-push hook**~~ -- server-side rule blocks direct pushes; `.git-hooks/pre-push` added (was missing despite `core.hooksPath` local override); Claude hook updated to catch `:main` refspec syntax (#344)
 - ~~**Console execution trace explainability -- Layers 1 + 2**~~ -- `[ TRACE ]` tab on each RunCard renders chronological decision log; NodeDetailSection routing sections show `[ WHY SELECTED ]`, `[ CONDITIONS EVALUATED ]` with `[ PASS ]`/`[ SKIP ]` badges; contextFacts chip strip in DAG header (#340)
 - ~~**Top-level runCondition tracing**~~ -- `nextTopLevel()` now emits `evaluated_condition` trace entries for each step, explaining why sparse DAGs jump from phase 0 to phase 6; `formatConditionTrace()` produces `SKIP: taskComplexity (equals)` / `PASS: taskComplexity=Medium (not_equals: Small)`
