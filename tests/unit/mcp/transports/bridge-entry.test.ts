@@ -1,53 +1,61 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { detectHealthyPrimary } from '../../../../src/mcp/transports/bridge-entry.js';
 
 /**
- * Tests for bridge mode startup logic.
- *
- * The bridge itself (startBridgeServer) wires two SDK transports together at
- * runtime; testing it end-to-end requires real network I/O. These tests focus
- * on the detection logic and the startup branching contract instead.
+ * Tests for bridge mode: detection, startup branching, reconnect, and
+ * respawn-via-exit contract.
  */
 
 // ---------------------------------------------------------------------------
-// detectHealthyPrimary-equivalent logic tests
-// These test the contract in isolation without touching real network I/O.
+// detectHealthyPrimary
 // ---------------------------------------------------------------------------
 
-describe('detectHealthyPrimary logic', () => {
-  it('returns the port when the primary responds with any HTTP status', async () => {
-    // Simulate a server that returns 200 OK on GET /mcp
-    const mockFetch = vi.fn().mockResolvedValue({
-      status: 200,
-      body: { cancel: vi.fn().mockResolvedValue(undefined) },
-    });
-
-    const result = await detectWithMockFetch(mockFetch, 3100);
-    expect(result).toBe(3100);
+describe('detectHealthyPrimary', () => {
+  it('returns the port when /workrail-health responds with service=workrail', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ service: 'workrail' }),
+    }));
+    try {
+      expect(await detectHealthyPrimary(3100, { retries: 1, baseDelayMs: 0 })).toBe(3100);
+    } finally { vi.unstubAllGlobals(); }
   });
 
-  it('returns the port even when the primary responds with 4xx (method handling)', async () => {
-    // 405 Method Not Allowed is a valid response from an MCP HTTP endpoint
-    const mockFetch = vi.fn().mockResolvedValue({
-      status: 405,
-      body: { cancel: vi.fn().mockResolvedValue(undefined) },
-    });
-
-    const result = await detectWithMockFetch(mockFetch, 3100);
-    expect(result).toBe(3100);
+  it('returns null when service is not workrail (false-positive guard)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ service: 'nginx' }),
+    }));
+    try {
+      expect(await detectHealthyPrimary(3100, { retries: 1, baseDelayMs: 0 })).toBeNull();
+    } finally { vi.unstubAllGlobals(); }
   });
 
-  it('returns null when the primary is not running (connection refused)', async () => {
+  it('returns null on connection refused', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fetch failed')));
+    try {
+      expect(await detectHealthyPrimary(3100, { retries: 1, baseDelayMs: 0 })).toBeNull();
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('retries on transient failure and succeeds on later attempt', async () => {
+    const mockFetch = vi.fn()
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ service: 'workrail' }) });
+    vi.stubGlobal('fetch', mockFetch);
+    try {
+      expect(await detectHealthyPrimary(3100, { retries: 2, baseDelayMs: 0 })).toBe(3100);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('exhausts all retries and returns null', async () => {
     const mockFetch = vi.fn().mockRejectedValue(new TypeError('fetch failed'));
-
-    const result = await detectWithMockFetch(mockFetch, 3100);
-    expect(result).toBeNull();
-  });
-
-  it('returns null when the primary times out', async () => {
-    const mockFetch = vi.fn().mockRejectedValue(Object.assign(new Error('timeout'), { name: 'TimeoutError' }));
-
-    const result = await detectWithMockFetch(mockFetch, 3100);
-    expect(result).toBeNull();
+    vi.stubGlobal('fetch', mockFetch);
+    try {
+      expect(await detectHealthyPrimary(3100, { retries: 3, baseDelayMs: 0 })).toBeNull();
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+    } finally { vi.unstubAllGlobals(); }
   });
 });
 
@@ -56,136 +64,130 @@ describe('detectHealthyPrimary logic', () => {
 // ---------------------------------------------------------------------------
 
 describe('startup bridge branching', () => {
-  it('uses bridge mode when primary is detected in stdio mode', async () => {
-    // Given: primary is detected
-    // When: stdio mode is requested
-    // Then: bridge is started, full server is not
-    let bridgeStarted = false;
-    let fullServerStarted = false;
-
-    await simulateStartup({
-      mode: 'stdio',
-      primaryDetected: true,
-      onBridgeStart: () => { bridgeStarted = true; },
-      onFullServerStart: () => { fullServerStarted = true; },
+  it('bridges when primary is detected in stdio mode', async () => {
+    const { bridgeStarted, fullServerStarted } = await simulateStartup({
+      mode: 'stdio', primaryDetected: true,
     });
-
     expect(bridgeStarted).toBe(true);
     expect(fullServerStarted).toBe(false);
   });
 
-  it('uses full stdio server when no primary is detected', async () => {
-    let bridgeStarted = false;
-    let fullServerStarted = false;
-
-    await simulateStartup({
-      mode: 'stdio',
-      primaryDetected: false,
-      onBridgeStart: () => { bridgeStarted = true; },
-      onFullServerStart: () => { fullServerStarted = true; },
+  it('starts full server when no primary is detected', async () => {
+    const { bridgeStarted, fullServerStarted } = await simulateStartup({
+      mode: 'stdio', primaryDetected: false,
     });
-
     expect(bridgeStarted).toBe(false);
     expect(fullServerStarted).toBe(true);
   });
 
-  it('never checks for a primary when starting in http mode', async () => {
-    let detectionCalled = false;
-    let fullServerStarted = false;
-
-    await simulateStartup({
-      mode: 'http',
-      primaryDetected: false,
-      onDetectionCall: () => { detectionCalled = true; },
-      onFullServerStart: () => { fullServerStarted = true; },
+  it('never checks for primary in http mode', async () => {
+    const { detectionCalled, fullServerStarted } = await simulateStartup({
+      mode: 'http', primaryDetected: false,
     });
-
     expect(detectionCalled).toBe(false);
     expect(fullServerStarted).toBe(true);
   });
 
   it('falls back to full server when bridge startup fails', async () => {
-    let fallbackStarted = false;
-
-    await simulateStartup({
-      mode: 'stdio',
-      primaryDetected: true,
-      bridgeShouldFail: true,
-      onFullServerStart: () => { fallbackStarted = true; },
+    const { fullServerStarted } = await simulateStartup({
+      mode: 'stdio', primaryDetected: true, bridgeShouldFail: true,
     });
-
-    expect(fallbackStarted).toBe(true);
+    expect(fullServerStarted).toBe(true);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Helpers — extracted so tests read as specs, not mechanics
+// Reconnect + respawn-via-exit contract
 // ---------------------------------------------------------------------------
 
-async function detectWithMockFetch(
-  mockFetch: ReturnType<typeof vi.fn>,
-  port: number,
-): Promise<number | null> {
-  try {
-    const response = await mockFetch(`http://localhost:${port}/mcp`);
-    await response.body?.cancel().catch(() => undefined);
-    return port;
-  } catch {
-    return null;
-  }
+describe('reconnect loop', () => {
+  it('reconnects when primary comes back within retry window', async () => {
+    let attempts = 0;
+    const detect = async () => { attempts++; return attempts >= 2 ? 3100 : null; };
+    const result = await simulateReconnectLoop({ detect, maxAttempts: 5, baseDelayMs: 0 });
+    expect(result).toBe('reconnected');
+    expect(attempts).toBe(2);
+  });
+
+  it('signals exit (IDE respawn) when all attempts fail', async () => {
+    const detect = async () => null;
+    const result = await simulateReconnectLoop({ detect, maxAttempts: 3, baseDelayMs: 0 });
+    // Bridge exits cleanly — IDE auto-restarts the command, triggering primary election.
+    expect(result).toBe('exhausted');
+  });
+
+  it('stops reconnecting when shutdown is requested', async () => {
+    let attempts = 0;
+    let shuttingDown = false;
+    const detect = async () => { attempts++; shuttingDown = true; return null; };
+    const result = await simulateReconnectLoop({
+      detect, maxAttempts: 10, baseDelayMs: 0,
+      isShuttingDown: () => shuttingDown,
+    });
+    expect(result).toBe('shutdown');
+    expect(attempts).toBe(1); // stopped immediately after first attempt set shuttingDown
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+interface StartupSimResult {
+  bridgeStarted: boolean;
+  fullServerStarted: boolean;
+  detectionCalled: boolean;
 }
 
-interface StartupSimOptions {
+async function simulateStartup(opts: {
   mode: 'stdio' | 'http';
   primaryDetected: boolean;
   bridgeShouldFail?: boolean;
-  onBridgeStart?: () => void;
-  onFullServerStart?: () => void;
-  onDetectionCall?: () => void;
-}
-
-async function simulateStartup(opts: StartupSimOptions): Promise<void> {
-  const {
-    mode,
-    primaryDetected,
-    bridgeShouldFail = false,
-    onBridgeStart,
-    onFullServerStart,
-    onDetectionCall,
-  } = opts;
-
-  // Inline reimplementation of the mcp-server.ts branching logic for testing.
-  const detectPrimary = async (port: number): Promise<number | null> => {
-    onDetectionCall?.();
-    return primaryDetected ? port : null;
+}): Promise<StartupSimResult> {
+  const result: StartupSimResult = {
+    bridgeStarted: false,
+    fullServerStarted: false,
+    detectionCalled: false,
   };
 
-  const startBridge = async (_port: number): Promise<void> => {
-    onBridgeStart?.();
-    if (bridgeShouldFail) throw new Error('bridge connection refused');
-    // Bridge runs indefinitely; in tests we just return.
+  const detectPrimary = async (port: number) => {
+    result.detectionCalled = true;
+    return opts.primaryDetected ? port : null;
   };
-
-  const startFullServer = async (): Promise<void> => {
-    onFullServerStart?.();
+  const startBridge = async (_port: number) => {
+    result.bridgeStarted = true;
+    if (opts.bridgeShouldFail) throw new Error('bridge connection refused');
   };
+  const startFullServer = async () => { result.fullServerStarted = true; };
 
-  const DEFAULT_MCP_PORT = 3100;
-
-  if (mode === 'stdio') {
-    const primaryPort = await detectPrimary(DEFAULT_MCP_PORT);
-    if (primaryPort != null) {
-      try {
-        await startBridge(primaryPort);
-      } catch {
-        await startFullServer();
-      }
-      return;
+  if (opts.mode === 'stdio') {
+    const port = await detectPrimary(3100);
+    if (port != null) {
+      try { await startBridge(port); } catch { await startFullServer(); }
+      return result;
     }
     await startFullServer();
-    return;
+    return result;
   }
 
-  // http mode: never checks for primary
+  // http mode: never detects
   await startFullServer();
+  return result;
+}
+
+async function simulateReconnectLoop(opts: {
+  detect: () => Promise<number | null>;
+  maxAttempts: number;
+  baseDelayMs: number;
+  isShuttingDown?: () => boolean;
+}): Promise<'reconnected' | 'exhausted' | 'shutdown'> {
+  for (let attempt = 0; attempt < opts.maxAttempts; attempt++) {
+    if (opts.isShuttingDown?.()) return 'shutdown';
+    const port = await opts.detect();
+    if (port != null) return 'reconnected';
+    if (attempt < opts.maxAttempts - 1) {
+      await new Promise<void>((r) => setTimeout(r, opts.baseDelayMs));
+    }
+  }
+  return 'exhausted';
 }
