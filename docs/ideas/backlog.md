@@ -6,6 +6,69 @@ Workflow and feature ideas that are worth capturing but not yet planned or desig
 
 ## Research Notes: Autonomous Platform Vision (Apr 14, 2026)
 
+### The four reference architectures: synthesis
+
+**The vision:** WorkRail as the next evolution -- open source, freestanding autonomous agent platform with cryptographic workflow enforcement, durable sessions, full observability, and first-class Anthropic API integration.
+
+| Source | Stars | What to take | What WorkRail already does better |
+|--------|-------|-------------|----------------------------------|
+| **OpenClaw** | 357k | ACP session store pattern, task flow chaining, policy system, spawn interface, freestanding daemon architecture | Durable disk sessions, cryptographic enforcement, checkpoint/resume tokens, DAG visualization |
+| **Claude Code** (leaked) | - | Compaction hooks (inject WorkRail notes into session memory before compaction), session runner pattern for programmatic Claude API calls, coordinator/subagent model, `PreToolUse`/`PostToolUse` hooks for evidence collection | Everything -- WorkRail is the enforcement layer above Claude Code |
+| **nexus-core** | 11 (internal) | Org profile system concept, skills-as-slash-commands UX, per-repo context injection, multi-model routing hints | Structural enforcement (nexus: advisory prompts; WorkRail: HMAC-gated tokens), cross-session durability, portability |
+| **pi-mono** | 35k | `@mariozechner/pi-ai` unified multi-provider LLM API (OpenAI, Anthropic, Google, etc.), `agentLoop`/`agentLoopContinue` pattern, `ToolExecutionMode` (sequential/parallel), `BeforeToolCallResult`/`AfterToolCallResult` hooks, `EventStream<AgentEvent>` for streaming agent events, `mom` (Slack bot) as the simplest possible channel integration reference | N/A -- pi-mono is libraries, not a workflow engine |
+
+**pi-mono specifically:** 35k stars, MIT, TypeScript monorepo by Mario Zechner (badlogic). The most architecturally clean of the four:
+- `packages/ai` -- `streamSimple`, `complete`, `stream` over a unified `Model<TApi>` abstraction covering OpenAI, Anthropic, Google, Bedrock. This is WorkRail's LLM call layer for autonomous mode.
+- `packages/agent` -- `agentLoop(prompts, context, config, signal?)` returns `EventStream<AgentEvent, AgentMessage[]>`. Clean separation: the loop manages tool calls and context; the caller manages state. `ToolExecutionMode`: "sequential" vs "parallel" tool execution. `BeforeToolCallResult` (can block a tool call with a reason) + `AfterToolCallResult` (can override tool result content). These are the hooks WorkRail needs to observe and gate tool calls.
+- `packages/mom` -- Slack bot that runs an agent per channel, persists MEMORY.md per workspace, loads skills from directory. The simplest reference for "daemon receives message → runs agent → responds." WorkRail's daemon follows this exact pattern.
+- `packages/coding-agent` -- `SessionManager`, `AgentSession`, skill loading from directory. Session/skill abstractions WorkRail's daemon needs.
+
+**The synthesis -- what WorkRail becomes:**
+
+```
+WorkRail Autonomous Platform
+├── Workflow Engine (existing -- keep as-is)
+│   ├── Durable session store (append-only event log)
+│   ├── HMAC token protocol (cryptographic enforcement)
+│   ├── Workflow format (JSON, loops, conditionals, routines)
+│   └── Console + DAG visualization
+│
+├── Daemon (new -- build from pi-mono + OpenClaw patterns)
+│   ├── Trigger system (GitLab/GitHub webhooks, Jira, cron, CLI)
+│   │   └── Pattern: OpenClaw's block/trigger architecture
+│   ├── LLM call layer (pi-mono's pi-ai unified API)
+│   ├── Agent loop (pi-mono's agentLoop/agentLoopContinue)
+│   ├── Session management (OpenClaw's AcpSessionStore pattern)
+│   ├── Task flow chaining (OpenClaw's task-flow-registry pattern)
+│   └── Tool observation (Claude Code's PreToolUse hooks → evidence gating)
+│
+├── Context survival (new -- from Claude Code compaction research)
+│   ├── WorkRail step notes injected into session memory pre-compaction
+│   ├── Session notes survive context resets as structured memory
+│   └── WorkRail session store = ground truth across all compactions
+│
+└── Integration layer (optional extensions)
+    ├── Slack bot (pi-mono's mom pattern)
+    ├── OpenClaw skill (optional, not a dependency)
+    └── REST API / CLI triggers
+```
+
+**Build order for MVP:**
+1. `pi-ai` integration -- WorkRail daemon calls Claude API directly via pi-mono's unified API
+2. `agentLoop` wrapper -- WorkRail drives agent steps using pi-mono's loop, advancing its own session
+3. Single trigger: GitLab MR webhook → `coding-task-workflow` → autonomous execution
+4. Evidence collection: `BeforeToolCallResult` hook intercepts tool calls, WorkRail gates continue token on required evidence
+5. Console live view: active daemon sessions visible in existing console
+6. Task flow chaining: completed workflow A triggers workflow B
+
+**What this surpasses:**
+- nexus-core: autonomous (not human-initiated), durable, enforced, observable
+- OpenClaw: workflow-enforced (not just skill-prompted), cryptographically gated, full audit trail
+- ruflo/oh-my-claudecode: not a black box -- every step is visible, pauseable, resumeable
+- Devin/GitHub Copilot Workspace: open source, self-hosted, works with any LLM, enforcement-first
+
+---
+
 ### Claude Code source reference
 
 The leaked Claude Code source is at `https://github.com/Archie818/Claude-Code` (also mirrored at `ai-tpstudio/claude-code-haha`). Key files to study before designing WorkRail's autonomous mode:
