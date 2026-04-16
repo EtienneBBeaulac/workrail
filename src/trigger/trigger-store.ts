@@ -644,6 +644,12 @@ function validateAndResolveTrigger(
           `[TriggerStore] Unknown polling event type '${event}' for trigger '${rawId}' -- ` +
           `will match all open MRs as fallback`,
         );
+      } else if (event === 'merge_request.merged' || event === 'merge_request.closed') {
+        console.warn(
+          `[TriggerStore] Event type '${event}' for trigger '${rawId}' cannot be observed ` +
+          `with state=opened polling (GitLab only returns open MRs). ` +
+          `Use a webhook trigger for merge/close events.`,
+        );
       }
     }
 
