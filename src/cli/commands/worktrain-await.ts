@@ -68,8 +68,20 @@ export interface WorktrainAwaitCommandOpts {
 // RESULT TYPES
 // ═══════════════════════════════════════════════════════════════════════════
 
-/** Outcome of a single awaited session. */
-export type SessionOutcome = 'success' | 'failed' | 'timeout' | 'not_found';
+/**
+ * Outcome of a single awaited session.
+ *
+ * - 'success'     -- session reached a terminal success state (complete / complete_with_gaps)
+ * - 'failed'      -- session reached a terminal failure state (blocked)
+ * - 'timeout'     -- wall-clock timeout elapsed while session was still running, OR session
+ *                    status is 'dormant' (no activity for an extended period)
+ * - 'not_found'   -- no session with this handle exists on the server (404)
+ * - 'not_awaited' -- session was still running when --mode any fired because another session
+ *                    succeeded; we stopped waiting before this session reached a terminal state.
+ *                    NOT the same as 'timeout': the session was not stuck or slow, we simply
+ *                    no longer needed it.
+ */
+export type SessionOutcome = 'success' | 'failed' | 'timeout' | 'not_found' | 'not_awaited';
 
 export interface SessionResult {
   readonly handle: string;
@@ -359,11 +371,13 @@ export async function executeWorktrainAwaitCommand(
 
         // For --mode any: if first success found, mark remaining as not yet complete
         if (mode === 'any' && pollResult.outcome === 'success') {
-          // Fill remaining pending with timeout (caller wanted any, got one)
+          // Fill remaining pending with 'not_awaited' -- they were still running when we
+          // stopped waiting, not timed out. Using 'timeout' here would conflate "session was
+          // still running when we decided to stop" with "session actually hit the time limit".
           for (const remaining of pending) {
             results.set(remaining, {
               handle: remaining,
-              outcome: 'timeout',
+              outcome: 'not_awaited',
               status: null,
               durationMs: deps.now() - startMs,
             });

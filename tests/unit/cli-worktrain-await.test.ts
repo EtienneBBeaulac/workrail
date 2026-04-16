@@ -173,6 +173,10 @@ describe('executeWorktrainAwaitCommand', () => {
     expect(parsed.allSucceeded).toBe(true);
     const s1 = parsed.results.find((r) => r.handle === 'sess1');
     expect(s1?.outcome).toBe('success');
+    // sess2 was still running when mode=any fired -- must be 'not_awaited', NOT 'timeout'.
+    // A coordinator filtering r.outcome === 'timeout' must not see abandoned-by-mode-any sessions.
+    const s2 = parsed.results.find((r) => r.handle === 'sess2');
+    expect(s2?.outcome).toBe('not_awaited');
   });
 
   it('maps 404 response to not_found outcome', async () => {
