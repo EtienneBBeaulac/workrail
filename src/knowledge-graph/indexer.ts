@@ -78,7 +78,7 @@ export async function runIndexer(
         const resolvedPath = resolvedFile.getFilePath();
 
         // Skip if the resolved file is outside srcDir (e.g. resolves into node_modules types)
-        if (!resolvedPath.startsWith(srcDir)) {
+        if (!resolvedPath.startsWith(srcDir + path.sep)) {
           skippedExternalImports++;
           continue;
         }

@@ -3,6 +3,9 @@
  *
  * This is the only file that should be imported from outside src/knowledge-graph/.
  * Internal modules (db.ts, indexer.ts, queries.ts, types.ts) are implementation details.
+ *
+ * TODO before wiring to a production MCP tool:
+ * ts-morph is in devDependencies; move ts-morph and @duckdb/node-api to dependencies before wiring to a production MCP tool.
  */
 
 import * as path from 'path';
