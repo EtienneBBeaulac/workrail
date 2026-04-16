@@ -3883,3 +3883,27 @@ WorkTrain uses the user's git identity and GitHub account (via user's token) to 
 **Why useful:** normal PR approval flows, no bot account permissions needed, personal git history stays personal even for WorkTrain-authored work.
 
 **Trust guardrails:** `actAsUser: true` explicit opt-in, only for commits/PRs (never emails or Slack without additional permission), PR description always notes "Created by WorkTrain," full audit log in `~/.workrail/actions-as-user.jsonl`.
+
+---
+
+### Console session detail: more than the DAG when running standalone (Apr 16, 2026)
+
+**The gap:** the session DAG shows structure (steps, edges, progress) but not meaning. When you're watching a session run in the console without being in Claude Code, you want to know what the agent is *actually doing* -- not just which step it's on.
+
+**What's missing from the current DAG view:**
+- The latest step output note, rendered inline and updating as it streams (not hidden behind a click)
+- A plain-English summary of what the agent is doing right now ("Analyzing the diff for shell injection risks")
+- Current step prompt visible on demand (so you know what the agent was asked to do)
+- Token count and cost estimate for the session so far
+- Time elapsed + estimated time remaining based on step history
+- A live feed of tool calls as they happen ("Reading trigger-router.ts", "Running npm test")
+
+**The streaming step output** is the most valuable addition. Right now the DAG shows a step as "in progress" with a spinner. It should show the last few lines of the step's output note as it's being written, similar to how a terminal streams command output.
+
+**Build order:**
+1. Inline latest step output in the session detail panel (read from session store, poll every 2s)
+2. Live tool call feed alongside the DAG (SSE from the daemon, log each tool call as it fires)
+3. Token/cost counter (daemon tracks tokens per session, expose via GET /api/v2/sessions/:id)
+4. Plain-English status line ("Step 3/8: analyzing diff" vs just a spinner)
+
+This makes the console genuinely useful as a standalone monitoring surface -- not just for developers who understand the DAG topology, but for anyone who wants to know if WorkTrain is doing useful work or spinning.
