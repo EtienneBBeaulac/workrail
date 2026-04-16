@@ -48,7 +48,6 @@ export type TriggerStoreError =
   | { readonly kind: 'parse_error'; readonly message: string; readonly lineNumber?: number }
   | { readonly kind: 'missing_secret'; readonly envVarName: string; readonly triggerId: string }
   | { readonly kind: 'missing_field'; readonly field: string; readonly triggerId: string }
-  | { readonly kind: 'invalid_field_value'; readonly field: string; readonly triggerId: string }
   | { readonly kind: 'unknown_provider'; readonly provider: string; readonly triggerId: string }
   | { readonly kind: 'file_not_found'; readonly filePath: string }
   | { readonly kind: 'io_error'; readonly message: string }
@@ -90,8 +89,6 @@ interface ParsedTriggerRaw {
   contextMapping?: { [key: string]: string };
   goalTemplate?: string;
   referenceUrls?: string;   // space-separated scalar in YAML; split at assemble time
-  concurrencyMode?: string; // validated as 'serial' | 'parallel' at assemble time
-  callbackUrl?: string;
   // Note: maxSessionMinutes and maxTurns are stored as raw strings here because
   // the YAML parser returns all scalars as strings. Numeric conversion and
   // validation happen in validateAndResolveTrigger at the boundary.
@@ -380,16 +377,14 @@ function parseTriggersYaml(
  */
 function setTriggerField(trigger: ParsedTriggerRaw, key: string, value: string): void {
   switch (key) {
-    case 'id':               trigger.id = value; break;
-    case 'provider':         trigger.provider = value; break;
-    case 'workflowId':       trigger.workflowId = value; break;
-    case 'workspacePath':    trigger.workspacePath = value; break;
-    case 'goal':             trigger.goal = value; break;
-    case 'hmacSecret':       trigger.hmacSecret = value; break;
-    case 'goalTemplate':     trigger.goalTemplate = value; break;
-    case 'referenceUrls':    trigger.referenceUrls = value; break;
-    case 'concurrencyMode':  trigger.concurrencyMode = value; break;
-    case 'callbackUrl':      trigger.callbackUrl = value; break;
+    case 'id':            trigger.id = value; break;
+    case 'provider':      trigger.provider = value; break;
+    case 'workflowId':    trigger.workflowId = value; break;
+    case 'workspacePath': trigger.workspacePath = value; break;
+    case 'goal':          trigger.goal = value; break;
+    case 'hmacSecret':    trigger.hmacSecret = value; break;
+    case 'goalTemplate':  trigger.goalTemplate = value; break;
+    case 'referenceUrls': trigger.referenceUrls = value; break;
     // contextMapping, agentConfig, onComplete handled as sub-object blocks
     default:
       // Unknown fields silently ignored for forward compatibility
@@ -487,29 +482,12 @@ function validateAndResolveTrigger(
       try {
         const parsed = new URL(url);
         if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-          return err({ kind: 'invalid_field_value', field: `referenceUrls (non-HTTP URL rejected: ${url})`, triggerId: raw.id ?? '?' });
+          return err({ kind: 'missing_field', field: `referenceUrls (non-HTTP URL rejected: ${url})`, triggerId: raw.id ?? '?' });
         }
       } catch {
-        return err({ kind: 'invalid_field_value', field: `referenceUrls (invalid URL: ${url})`, triggerId: raw.id ?? '?' });
+        return err({ kind: 'missing_field', field: `referenceUrls (invalid URL: ${url})`, triggerId: raw.id ?? '?' });
       }
     }
-  }
-
-  // callbackUrl: validate as a static http(s) URL if present.
-  // WHY: fail-fast at load time (same pattern as referenceUrls validation).
-  // $ENV_VAR_NAME resolution is not supported for callbackUrl in MVP.
-  let callbackUrl: string | undefined;
-  if (raw.callbackUrl?.trim()) {
-    const rawCb = raw.callbackUrl.trim();
-    try {
-      const parsedCb = new URL(rawCb);
-      if (parsedCb.protocol !== 'https:' && parsedCb.protocol !== 'http:') {
-        return err({ kind: 'invalid_field_value', field: `callbackUrl (non-HTTP URL rejected: ${rawCb})`, triggerId: rawId });
-      }
-    } catch {
-      return err({ kind: 'invalid_field_value', field: `callbackUrl (invalid URL: ${rawCb})`, triggerId: rawId });
-    }
-    callbackUrl = rawCb;
   }
 
   // agentConfig: only include if at least one sub-field is present.
@@ -560,20 +538,6 @@ function validateAndResolveTrigger(
     }
   }
 
-  // concurrencyMode: validate and default to 'serial' at parse time (not at use time).
-  // Why: the default must be explicit in the TriggerDefinition so the router never
-  // needs a runtime fallback. See trigger-router.ts queue.enqueue() for the product
-  // decision this protects.
-  const rawConcurrencyMode = raw.concurrencyMode?.trim();
-  if (rawConcurrencyMode !== undefined && rawConcurrencyMode !== 'serial' && rawConcurrencyMode !== 'parallel') {
-    return err({
-      kind: 'invalid_field_value',
-      field: `concurrencyMode (invalid value: "${rawConcurrencyMode}"; must be "serial" or "parallel")`,
-      triggerId: rawId,
-    });
-  }
-  const concurrencyMode: 'serial' | 'parallel' = rawConcurrencyMode === 'parallel' ? 'parallel' : 'serial';
-
   // onComplete: emit load-time warning for unsupported runOn values.
   // Why: runOn !== 'success' is parsed and stored but NOT executed in the MVP.
   // The warning ensures users know the field is not active yet.
@@ -602,7 +566,6 @@ function validateAndResolveTrigger(
     workflowId: raw.workflowId!.trim(),
     workspacePath: raw.workspacePath!.trim(),
     goal: raw.goal!.trim(),
-    concurrencyMode,
     ...(hmacSecret !== undefined ? { hmacSecret } : {}),
     ...(raw.contextMapping !== undefined
       ? { contextMapping: assembleContextMapping(raw.contextMapping) }
@@ -610,7 +573,6 @@ function validateAndResolveTrigger(
     ...(goalTemplate ? { goalTemplate } : {}),
     ...(referenceUrls !== undefined && referenceUrls.length > 0 ? { referenceUrls } : {}),
     ...(agentConfig !== undefined ? { agentConfig } : {}),
-    ...(callbackUrl !== undefined ? { callbackUrl } : {}),
     ...(onComplete !== undefined ? { onComplete } : {}),
   };
 
