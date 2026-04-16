@@ -1777,4 +1777,66 @@ No PR merges without passing all required gates for its classification. The coor
 
 **Why this matters:**
 Right now, "has this been reviewed and audited?" is a question that requires reading through PRs and session notes. With proof records, it's a query: `SELECT * FROM proof_records WHERE module='src/trigger/' AND kind='production_audit' AND outcome='pass' AND timestamp > NOW()-30days`. The knowledge graph stores these records. The watchdog checks them on a schedule. The coordinator gates on them before merging. Verification becomes infrastructure, not process.
+---
+
+### Dynamic model selection: right model for the right task (Apr 15, 2026)
+
+**The principle:** not every task needs Sonnet 4.6. Not every task should be locked to Anthropic. The coordinator and the task classifier should be able to select the model dynamically based on what the task actually needs.
+
+**Why this matters:**
+- **Cost**: classification, simple routing decisions, and status checks don't need a frontier model. A fast cheap model (Haiku) costs ~20x less and is fast enough for deterministic tasks.
+- **Quality ceiling**: some tasks (complex architecture decisions, multi-file refactors) benefit from the best available model regardless of cost.
+- **Provider flexibility**: Anthropic goes down, pricing changes, a new provider releases a better model. Being locked to one provider is an operational risk and a competitive disadvantage.
+- **Specialization**: some models are better at specific tasks -- code generation, reasoning, multimodal (if designs/screenshots are involved).
+
+**Model selection in triggers.yml:**
+```yaml
+triggers:
+  - id: mr-review
+    workflowId: mr-review-workflow.agentic.v2
+    agentConfig:
+      model: claude-sonnet-4-6          # explicit override
+      provider: anthropic               # or: amazon-bedrock, openai, gemini
+
+  - id: classify-task
+    workflowId: classify-task-workflow
+    agentConfig:
+      model: claude-haiku-4-5           # fast + cheap for classification
+      provider: amazon-bedrock
+
+  - id: architecture-design
+    workflowId: architecture-scalability-audit
+    agentConfig:
+      model: claude-opus-4-6            # best available for high-stakes design
+      provider: anthropic
+```
+
+**Model selection in the classifier output:**
+The classify-task-workflow can output a `recommendedModel` var alongside the pipeline:
+- `Small + Low` → Haiku (fast, cheap)
+- `Medium + Medium` → Sonnet (balanced)
+- `Large + High` or `touchesArchitecture=true` → Opus (best quality)
+
+The coordinator script reads `recommendedModel` from the classifier and passes it as `agentConfig` when spawning child sessions.
+
+**Provider abstraction (already partially built):**
+The Bedrock integration (`src/daemon/pi-mono-loader.ts` / first-party agent loop in progress) already handles Anthropic vs Bedrock. The abstraction needs to extend to:
+- **OpenAI** -- GPT-4o, o3 (useful for reasoning-heavy tasks)
+- **Google Gemini** -- Gemini 1.5 Pro (strong at long-context, multimodal)
+- **Ollama** -- local models (air-gapped environments, cost-zero for classification tasks)
+- **Any OpenAI-compatible API** -- covers most new providers automatically
+
+**Implementation path:**
+The first-party agent loop (in progress, PR TBD) is the right place to implement the provider abstraction. Instead of hardcoding the Anthropic SDK, it accepts a provider client that conforms to the Anthropic messages API format (which most providers support via compatibility layers). The `agentConfig.provider` and `agentConfig.model` fields are already in `TriggerDefinition` (added in GAP-8 / PR #397) -- the loop just needs to instantiate the right client.
+
+**Cost optimization opportunity:**
+With model routing, a full development pipeline becomes significantly cheaper:
+- classify-task: Haiku (~$0.002)
+- discovery: Sonnet (~$0.05)
+- coding: Sonnet (~$0.20)
+- mr-review: Sonnet (~$0.10)
+- production-audit: Sonnet (~$0.08)
+- architecture (if needed): Opus (~$0.50)
+
+vs today where everything runs on Sonnet by default. For a typical Medium task, model routing saves ~60% cost with no quality loss on the lightweight phases.
 
