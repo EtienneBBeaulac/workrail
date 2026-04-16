@@ -26,18 +26,24 @@ export async function startStdioServer(): Promise<void> {
   // terminates. Without these, crashes are silent (exit code 1, no message).
   // Note: wireStdoutShutdown() handles the primary EPIPE crash path;
   // these handlers catch anything else that slips through.
-  process.on('uncaughtException', (err) => {
-    console.error('[MCP] Uncaught exception -- process will exit:', err);
-    // Do not call process.exit() here: let the default Node.js behavior
-    // handle termination so the exit code is correct.
-  });
-  process.on('unhandledRejection', (reason) => {
-    console.error('[MCP] Unhandled promise rejection:', reason);
-    // Node.js v15+: registering this handler suppresses the runtime's default
-    // exit-on-unhandled-rejection behavior. Explicitly exit so the process
-    // does not silently continue in an undefined state.
+  // Re-entrancy guard: if the error handler itself throws, we must not loop.
+  // Uses process.stderr.write instead of console.error — the inspector hooks
+  // console.error which can itself throw or re-enter, causing an infinite loop
+  // that pegs the process at 100% CPU instead of exiting.
+  let fatalHandlerActive = false;
+  const fatalExit = (label: string, reason: unknown): void => {
+    if (fatalHandlerActive) return; // prevent re-entrant loop
+    fatalHandlerActive = true;
+    try {
+      process.stderr.write(`[MCP] ${label}: ${String(reason)}\n`);
+    } catch {
+      // stderr itself failed — nothing we can do, just exit
+    }
     process.exit(1);
-  });
+  };
+
+  process.on('uncaughtException', (err) => fatalExit('Uncaught exception', err));
+  process.on('unhandledRejection', (reason) => fatalExit('Unhandled promise rejection', reason));
 
   const { server, ctx, rootsManager } = await composeServer();
 
