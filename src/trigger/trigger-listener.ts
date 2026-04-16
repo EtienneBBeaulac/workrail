@@ -231,7 +231,7 @@ export async function startTriggerListener(
       }
     });
 
-    server.listen(port, () => {
+    server.listen(port, '127.0.0.1', () => {
       // Use the actual assigned port (important when port=0 lets the OS pick)
       const addr = server.address();
       const actualPort = (addr && typeof addr === 'object') ? addr.port : port;

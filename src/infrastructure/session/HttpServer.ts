@@ -820,7 +820,7 @@ export class HttpServer {
       });
       
       const listenPort = this.port;
-      this.server.listen(listenPort, () => {
+      this.server.listen(listenPort, '127.0.0.1', () => {
         this.baseUrl = `http://localhost:${listenPort}`;
         this.printBanner();
         resolve();
@@ -847,7 +847,7 @@ export class HttpServer {
             }
           });
           
-          this.server.listen(this.port, () => {
+          this.server.listen(this.port, '127.0.0.1', () => {
             resolve();
           });
         });
